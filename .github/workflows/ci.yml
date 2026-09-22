@@ -24,6 +24,13 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      - name: TEX i18n catalogs complete (en, tr, de, ru, ro, pl)
+        run: npm run i18n:tex
+        working-directory: frontend
+      - name: Verify TEX guest booking bundle and widget
+        run: |
+          grep -q "/assets/kamra/frontend/assets/" kamra/public/frontend/booking.html
+          test -s kamra/public/tex/tex-widget.js
       - name: Verify production serve base
         # The served SPA must reference its assets under /assets/kamra/frontend/;
         # a wrong base here silently breaks the /kamra install.
