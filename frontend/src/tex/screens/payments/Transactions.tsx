@@ -229,7 +229,7 @@ export default function Transactions() {
                       align: "right",
                       sortValue: (r) => r.currency,
                       cell: (r) => (
-                        <span className={r.txn_type === "Refund" ? "text-rose-700" : undefined}>
+                        <span className={r.txn_type === "Refund" ? "whitespace-nowrap text-rose-700" : "whitespace-nowrap"}>
                           {r.txn_type === "Refund" && <span aria-hidden>− </span>}
                           <Money amount={r.amount} currency={r.currency} />
                         </span>

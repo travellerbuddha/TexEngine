@@ -6,6 +6,7 @@ import { useProperty, useSession } from "../../lib/session"
 import { dateTime } from "../../lib/format"
 import { useTexT } from "../../i18n"
 import { Button, Card, ConfirmDialog, DataTable, EmptyState, ErrorState, Field, Input, Money, PageHeader, Select, Toolbar, useToast } from "../../ui"
+import { cn } from "../../../lib/utils"
 import { bookingHref, LinkStatusBadge, PaymentsNav } from "./components/common"
 import { isZero, linkStatusKey, useEvent } from "./lib"
 import { CreateLinkDialog, LinkUrlDialog, ReissueDialog } from "./links/LinkDialogs"
@@ -66,6 +67,26 @@ export default function Links() {
         emailFailed: Boolean(emailTo) && r.emailed === false,
       })
     else if (r.replay) toast.info(t("payments.links.replay_hint"))
+  }
+
+  // URLs are bearer secrets shown once: the list offers a fresh one (reissue) instead of a stored copy
+  const linkActions = (r: PayLink, className: string) => {
+    const open = r.status === "Active" || r.status === "Partially Paid"
+    if (!open && r.status !== "Draft") return null
+    return (
+      <div className={cn("flex flex-wrap gap-1", className)}>
+        {open && (
+          <Button variant="secondary" size="sm" icon={<RotateCw className="size-3.5" aria-hidden />} aria-label={`${t("payments.links.reissue")} · ${r.name}`} onClick={() => setReissue(r)}>
+            {t("payments.links.reissue")}
+          </Button>
+        )}
+        {(r.status === "Active" || r.status === "Draft") && (
+          <Button variant="ghost" size="sm" icon={<Ban className="size-3.5" aria-hidden />} aria-label={`${t("payments.links.cancel")} · ${r.name}`} onClick={() => setCancel(r)}>
+            {t("payments.links.cancel")}
+          </Button>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -144,7 +165,7 @@ export default function Links() {
                     key: "desc",
                     header: t("payments.links.col.link"),
                     cell: (r) => (
-                      <div className="max-w-72 min-w-0">
+                      <div className="max-w-[16rem] min-w-0 sm:max-w-72">
                         <p className="truncate text-sm font-medium text-zinc-900" title={r.description ?? undefined}>
                           {r.description || r.name}
                         </p>
@@ -153,6 +174,11 @@ export default function Links() {
                           {r.guest_name || r.guest_email ? ` · ${[r.guest_name, r.guest_email].filter(Boolean).join(" · ")}` : ""}
                         </p>
                         <p className="text-xs text-zinc-500 sm:hidden">{dateTime(r.creation)}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 sm:hidden">
+                          <LinkStatusBadge status={r.status} />
+                          <Money amount={r.amount} currency={r.currency} className="text-sm" />
+                        </div>
+                        {canLink && linkActions(r, "mt-1.5 sm:hidden")}
                       </div>
                     ),
                   },
@@ -171,11 +197,12 @@ export default function Links() {
                   },
                   { key: "created", header: t("payments.links.col.created"), hideBelow: "md", sortValue: (r) => r.creation, cell: (r) => <span className="text-xs whitespace-nowrap">{dateTime(r.creation)}</span> },
                   { key: "expires", header: t("payments.links.col.expires"), hideBelow: "md", sortValue: (r) => r.expires_at ?? "", cell: (r) => <span className="text-xs whitespace-nowrap">{dateTime(r.expires_at)}</span> },
-                  { key: "status", header: t("core.label.status"), cell: (r) => <LinkStatusBadge status={r.status} /> },
+                  { key: "status", header: t("core.label.status"), hideBelow: "sm", cell: (r) => <LinkStatusBadge status={r.status} /> },
                   {
                     key: "amount",
                     header: t("payments.tx.col.amount"),
                     align: "right",
+                    hideBelow: "sm",
                     cell: (r) => (
                       <div>
                         <Money amount={r.amount} currency={r.currency} />
@@ -193,24 +220,8 @@ export default function Links() {
                           key: "actions",
                           header: <span className="sr-only">{t("payments.links.col.actions")}</span>,
                           align: "right" as const,
-                          cell: (r: PayLink) => {
-                            const open = r.status === "Active" || r.status === "Partially Paid"
-                            return (
-                              <div className="ml-auto flex max-w-56 flex-wrap justify-end gap-1">
-                                {/* URLs are bearer secrets shown once; the list offers a fresh one instead of a stored copy */}
-                                {open && (
-                                  <Button variant="secondary" size="sm" icon={<RotateCw className="size-3.5" aria-hidden />} aria-label={`${t("payments.links.reissue")} · ${r.name}`} onClick={() => setReissue(r)}>
-                                    {t("payments.links.reissue")}
-                                  </Button>
-                                )}
-                                {(r.status === "Active" || r.status === "Draft") && (
-                                  <Button variant="ghost" size="sm" icon={<Ban className="size-3.5" aria-hidden />} aria-label={`${t("payments.links.cancel")} · ${r.name}`} onClick={() => setCancel(r)}>
-                                    {t("payments.links.cancel")}
-                                  </Button>
-                                )}
-                              </div>
-                            )
-                          },
+                          hideBelow: "sm" as const,
+                          cell: (r: PayLink) => linkActions(r, "ml-auto max-w-56 justify-end"),
                         },
                       ]
                     : []),

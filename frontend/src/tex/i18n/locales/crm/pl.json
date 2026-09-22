@@ -188,6 +188,7 @@
   "many": "Wyeksportowano {count} wierszy",
   "other": "Wyeksportowano {count} wiersza"
  },
+ "crm.export.stale": "liczba członków jest nieaktualna, policz ponownie",
  "crm.export.subtitle": "Listy marketingowe (CSV) według kanału",
  "crm.export.title": "Eksport",
  "crm.export.why_counts_differ": "Eksport obejmuje tylko członków segmentu, którzy wyrazili zgodę marketingową na dany kanał i nie są na czarnej liście. Dlatego kanał może pokazywać mniej gości niż segment.",

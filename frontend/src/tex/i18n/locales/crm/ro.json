@@ -183,6 +183,7 @@
   "few": "{count} rânduri exportate",
   "other": "{count} de rânduri exportate"
  },
+ "crm.export.stale": "numărul de membri nu mai este actual, numărați din nou",
  "crm.export.subtitle": "Liste de marketing (CSV) pe canal",
  "crm.export.title": "Export",
  "crm.export.why_counts_differ": "Exporturile conțin doar membrii segmentului care și-au dat consimțământul pentru marketing pe acel canal și nu sunt pe lista neagră. De aceea, un canal poate arăta mai puțini oaspeți decât segmentul.",

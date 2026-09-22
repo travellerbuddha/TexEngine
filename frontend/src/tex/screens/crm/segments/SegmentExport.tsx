@@ -69,8 +69,11 @@ function ChannelRow({
                 <Skeleton className="mt-1 h-3 w-40" />
               ) : q.error ? (
                 t("crm.export.count_failed")
-              ) : members !== null ? (
+              ) : members !== null && (consented ?? 0) <= members ? (
                 t("crm.export.consented_of", { consented: num(consented ?? 0), members: num(members) })
+              ) : members !== null ? (
+                // the stored member count predates newer guests: do not show "5 of 3"
+                `${t("crm.export.consented", { consented: num(consented ?? 0) })} · ${t("crm.export.stale")}`
               ) : (
                 t("crm.export.consented", { consented: num(consented ?? 0) })
               )}

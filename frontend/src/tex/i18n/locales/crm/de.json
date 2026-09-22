@@ -178,6 +178,7 @@
   "one": "{count} Zeile exportiert",
   "other": "{count} Zeilen exportiert"
  },
+ "crm.export.stale": "Mitgliederzahl ist veraltet, bitte neu zählen",
  "crm.export.subtitle": "Marketinglisten (CSV) je Kanal",
  "crm.export.title": "Export",
  "crm.export.why_counts_differ": "Exporte enthalten nur Segmentmitglieder, die für diesen Kanal in Marketing eingewilligt haben und nicht gesperrt sind. Deshalb kann ein Kanal weniger Gäste zeigen als das Segment.",

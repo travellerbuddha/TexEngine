@@ -178,6 +178,7 @@
   "one": "{count} satır dışa aktarıldı",
   "other": "{count} satır dışa aktarıldı"
  },
+ "crm.export.stale": "üye sayısı güncel değil, üyeleri yeniden sayın",
  "crm.export.subtitle": "Kanal bazında pazarlama listeleri (CSV)",
  "crm.export.title": "Dışa aktar",
  "crm.export.why_counts_differ": "Dışa aktarıma yalnızca o kanalda pazarlama onayı veren ve kara listede olmayan segment üyeleri girer. Bu yüzden her kanal, segmentten daha az misafir gösterebilir.",
@@ -368,7 +369,7 @@
  "crm.seg.op.gt": "büyüktür",
  "crm.seg.op.gte": "en az",
  "crm.seg.op.in": "şunlardan biri",
- "crm.seg.op.is": "şudur",
+ "crm.seg.op.is": "eşittir",
  "crm.seg.op.lt": "küçüktür",
  "crm.seg.op.lte": "en fazla",
  "crm.seg.op.ne": "eşit değildir",

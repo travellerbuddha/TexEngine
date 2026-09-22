@@ -178,6 +178,7 @@
   "one": "{count} row exported",
   "other": "{count} rows exported"
  },
+ "crm.export.stale": "member count is out of date, count members again",
  "crm.export.subtitle": "Marketing lists (CSV) per channel",
  "crm.export.title": "Export",
  "crm.export.why_counts_differ": "Exports contain only segment members who consented to marketing on that channel and are not blacklisted. That is why each channel can show fewer guests than the segment has.",

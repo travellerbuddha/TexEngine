@@ -217,7 +217,7 @@ export default function TransactionDetail() {
 
           {charge && (
             <div className="grid items-start gap-5 xl:grid-cols-2">
-              <Card>
+              <Card className="min-w-0">
                 <CardHeader title={t("payments.detail.allocations")} description={t("payments.detail.allocations_hint")} />
                 <DataTable<Allocation>
                   caption={t("payments.detail.allocations")}
@@ -235,7 +235,7 @@ export default function TransactionDetail() {
                       header: t("payments.tx.col.amount"),
                       align: "right",
                       cell: (a) => (
-                        <span className={a.allocation_type === "Allocate" ? undefined : "text-rose-700"}>
+                        <span className={a.allocation_type === "Allocate" ? "whitespace-nowrap" : "whitespace-nowrap text-rose-700"}>
                           {a.allocation_type !== "Allocate" && <span aria-hidden>− </span>}
                           <Money amount={a.amount} currency={a.currency} />
                         </span>
@@ -244,7 +244,7 @@ export default function TransactionDetail() {
                   ]}
                 />
               </Card>
-              <Card>
+              <Card className="min-w-0">
                 <CardHeader title={t("payments.detail.refunds")} />
                 <DataTable<Txn>
                   caption={t("payments.detail.refunds")}

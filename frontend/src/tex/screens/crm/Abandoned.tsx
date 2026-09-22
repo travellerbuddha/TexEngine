@@ -80,6 +80,23 @@ export default function Abandoned() {
     return c
   }, [q.data])
 
+  // status workflow buttons (in their own column on wide screens, inside the first cell on phones)
+  const actions = (r: AbandonedRow, className: string) => (
+    <div className={cn("flex flex-wrap gap-1", className)}>
+      {NEXT[r.status].map((to) => (
+        <Button
+          key={to}
+          variant={to === "Dismissed" || to === "Open" ? "ghost" : "secondary"}
+          size="sm"
+          aria-label={`${t(actionKey(to))} · ${t(stageKey(r.stage_reached))} · ${dateTime(r.last_event_at)}`}
+          onClick={() => setTarget({ row: r, to })}
+        >
+          {t(actionKey(to))}
+        </Button>
+      ))}
+    </div>
+  )
+
   const set = (k: string, v: string) => {
     const next = new URLSearchParams(params)
     if (v) next.set(k, v)
@@ -174,6 +191,7 @@ export default function Abandoned() {
                             </Badge>
                           )}
                         </div>
+                        {canEdit && actions(r, "pt-1 sm:hidden")}
                       </div>
                     ),
                   },
@@ -254,21 +272,8 @@ export default function Abandoned() {
                           key: "actions",
                           header: <span className="sr-only">{t("crm.ab.col.actions")}</span>,
                           align: "right" as const,
-                          cell: (r: AbandonedRow) => (
-                            <div className="ml-auto flex max-w-60 flex-wrap justify-end gap-1">
-                              {NEXT[r.status].map((to) => (
-                                <Button
-                                  key={to}
-                                  variant={to === "Dismissed" || to === "Open" ? "ghost" : "secondary"}
-                                  size="sm"
-                                  aria-label={`${t(actionKey(to))} · ${t(stageKey(r.stage_reached))} · ${dateTime(r.last_event_at)}`}
-                                  onClick={() => setTarget({ row: r, to })}
-                                >
-                                  {t(actionKey(to))}
-                                </Button>
-                              ))}
-                            </div>
-                          ),
+                          hideBelow: "sm" as const,
+                          cell: (r: AbandonedRow) => actions(r, "ml-auto max-w-60 justify-end"),
                         },
                       ]
                     : []),
