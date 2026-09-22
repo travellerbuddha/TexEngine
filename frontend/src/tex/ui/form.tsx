@@ -214,7 +214,7 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex rounded-lg border border-zinc-300 bg-zinc-50 p-0.5"
+      className="inline-flex max-w-full overflow-x-auto rounded-lg border border-zinc-300 bg-zinc-50 p-0.5"
       onKeyDown={(e) => {
         if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
         e.preventDefault()
@@ -232,7 +232,7 @@ export function Segmented<T extends string>({
           tabIndex={o.value === value ? 0 : -1}
           onClick={() => onChange(o.value)}
           className={cn(
-            "rounded-md font-medium transition-colors",
+            "shrink-0 rounded-md font-medium whitespace-nowrap transition-colors",
             size === "sm" ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm",
             o.value === value ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-600 hover:text-zinc-900",
           )}

@@ -164,7 +164,7 @@ export default function Dashboard() {
             )}
           </section>
 
-          <div className="grid gap-5 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader title={t("dash.by_channel")} description={t("dash.by_channel_hint")} />
               <DataTable<ProdRow>
@@ -184,7 +184,7 @@ export default function Dashboard() {
               />
             </Card>
 
-            <div className="space-y-5">
+            <div className="min-w-0 space-y-5">
               <Card>
                 <CardHeader title={t("dash.today")} />
                 <CardBody className="grid grid-cols-2 gap-3">

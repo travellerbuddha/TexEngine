@@ -26,13 +26,13 @@ function HotelSwitcher() {
       </div>
     )
   return (
-    <label className="flex min-w-0 items-center gap-2">
+    <label className="flex min-w-0 flex-1 items-center gap-2">
       <Building2 className="size-4 shrink-0 text-zinc-500" aria-hidden />
       <span className="sr-only">{t("core.shell.hotel")}</span>
       <select
         value={property?.name ?? ""}
         onChange={(e) => setProperty(e.target.value)}
-        className="h-9 max-w-[16rem] truncate rounded-lg border border-zinc-300 bg-white pr-8 pl-2 text-sm font-medium text-zinc-900 focus:border-tex-500 focus:ring-2 focus:ring-tex-500/30 focus:outline-none"
+        className="h-9 w-full max-w-[16rem] min-w-0 truncate rounded-lg border border-zinc-300 bg-white pr-8 pl-2 text-sm font-medium text-zinc-900 focus:border-tex-500 focus:ring-2 focus:ring-tex-500/30 focus:outline-none"
       >
         {boot.properties.map((p) => (
           <option key={p.name} value={p.name}>
@@ -223,19 +223,19 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   )
 }
 
-function UserMenu() {
-  const { boot } = useSession()
-  const { signOut } = useAuth()
+/** Language + theme. In the header from `sm` up; inside the mobile drawer below. */
+function Preferences({ idSuffix, className }: { idSuffix: string; className?: string }) {
   const { t, lang } = useTexT()
   const [theme, setThemeState] = useState(getTheme())
   const dark = theme === "dark" || (theme === "system" && document.documentElement.classList.contains("dark"))
+  const id = `tex-lang-${idSuffix}`
   return (
-    <div className="flex items-center gap-1">
-      <label className="sr-only" htmlFor="tex-lang">
+    <div className={cn("flex items-center gap-1", className)}>
+      <label className="sr-only" htmlFor={id}>
         {t("core.shell.language")}
       </label>
       <select
-        id="tex-lang"
+        id={id}
         value={lang}
         onChange={(e) => setTexLang(e.target.value as TexLang)}
         className="h-9 rounded-lg border border-transparent bg-transparent pr-7 pl-2 text-sm text-zinc-700 hover:border-zinc-200 focus:border-tex-500 focus:outline-none"
@@ -255,6 +255,17 @@ function UserMenu() {
           setThemeState(next)
         }}
       />
+    </div>
+  )
+}
+
+function UserMenu() {
+  const { boot } = useSession()
+  const { signOut } = useAuth()
+  const { t } = useTexT()
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <Preferences idSuffix="header" className="hidden sm:flex" />
       <span className="mx-1 hidden max-w-[10rem] truncate text-sm text-zinc-600 lg:inline" title={boot.user.name}>
         {boot.user.full_name}
       </span>
@@ -299,11 +310,16 @@ export function TexShell({ children }: { children: ReactNode }) {
             <div className="absolute top-3 right-3">
               <IconButton label={t("core.action.close")} icon={<X className="size-4" />} onClick={() => setMobileNav(false)} />
             </div>
-            <Sidebar onNavigate={() => setMobileNav(false)} />
+            <div className="flex h-full flex-col">
+              <div className="min-h-0 flex-1">
+                <Sidebar onNavigate={() => setMobileNav(false)} />
+              </div>
+              <Preferences idSuffix="drawer" className="border-t border-zinc-200 px-3 py-3" />
+            </div>
           </aside>
         </div>
       )}
-      <div className="lg:pl-60">
+      <div className="min-w-0 lg:pl-60">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-zinc-200 bg-white/90 px-3 backdrop-blur sm:px-5">
           <IconButton className="lg:hidden" label={t("core.shell.open_nav")} icon={<Menu className="size-5" />} onClick={() => setMobileNav(true)} />
           <div className="min-w-0 flex-1">
@@ -321,7 +337,7 @@ export function TexShell({ children }: { children: ReactNode }) {
           <IconButton className="md:hidden" label={t("core.cmd.open")} icon={<Search className="size-4" />} onClick={() => setPalette(true)} />
           <UserMenu />
         </header>
-        <main id="tex-main" tabIndex={-1} className="mx-auto w-full max-w-[1400px] px-3 py-5 outline-none sm:px-6 sm:py-6">
+        <main id="tex-main" tabIndex={-1} className="mx-auto w-full max-w-[1400px] min-w-0 overflow-x-clip px-3 py-5 outline-none sm:px-6 sm:py-6">
           {children}
         </main>
       </div>

@@ -17,10 +17,10 @@ test("TEX shell: spec navigation, PMS hidden, hotel scope, language switch", asy
   expect(hotels.join("|")).toContain("Aurora Beach Resort")
   expect(hotels.every((h) => h.startsWith("Aurora"))).toBeTruthy()
   // language switch re-renders the shell
-  await page.getByLabel("Language").selectOption("tr")
+  await page.locator("#tex-lang-header").selectOption("tr")
   const navTr = page.getByRole("navigation", { name: "Ana menü" })
   await expect(navTr.getByRole("link", { name: "Rezervasyonlar" })).toBeVisible()
-  await page.getByLabel("Dil").selectOption("en")
+  await page.locator("#tex-lang-header").selectOption("en")
   // command palette
   await page.keyboard.press("Control+k")
   await page.getByRole("combobox", { name: "Command palette" }).fill("reserv")

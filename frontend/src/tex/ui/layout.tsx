@@ -7,7 +7,7 @@ import { TexApiError } from "../lib/api"
 import { useTexT } from "../i18n"
 
 export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("rounded-(--radius-tex) border border-zinc-200 bg-white shadow-tex-card", className)} {...rest} />
+  return <div className={cn("min-w-0 rounded-(--radius-tex) border border-zinc-200 bg-white shadow-tex-card", className)} {...rest} />
 }
 
 export function CardHeader({
@@ -81,7 +81,7 @@ export function PageHeader({
           {subtitle && <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>}
           {meta && <div className="mt-2 flex flex-wrap items-center gap-2">{meta}</div>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
     </header>
   )
