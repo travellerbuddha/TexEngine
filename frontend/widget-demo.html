@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TEX widget — dev demo</title>
+    <!-- Dev-only test page (not built): `vite` serves it at /widget-demo.html. The host
+         styles below are deliberately hostile to prove the widget's Shadow DOM isolation. -->
+    <style>
+      * { font-family: "Comic Sans MS", cursive !important; letter-spacing: 0.08em; }
+      body { margin: 0; background: #fdf6e3; color: #7a1f1f; }
+      button, input, select { background: lime !important; border: 4px dashed red !important; font-size: 30px !important; }
+      label { text-transform: uppercase; color: magenta; }
+      dialog { background: yellow; }
+      .hero { padding: 48px 24px; background: linear-gradient(120deg, #264653, #2a9d8f); color: white; }
+      .hero h1 { margin: 0 0 8px; font-size: 32px; }
+      .wrap { max-width: 1040px; margin: -32px auto 40px; padding: 0 16px; }
+      .transformed { transform: translateZ(0); overflow: hidden; }
+      section { margin: 32px auto; max-width: 1040px; padding: 0 16px; }
+      code { background: #fff3; padding: 2px 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="hero">
+      <h1>Aurora Riviera — hotel website</h1>
+      <p>Host page with hostile CSS. The widget below must look unaffected.</p>
+    </div>
+    <div class="wrap transformed">
+      <tex-booking-widget id="w1" site="aurora" api="" lang="en" mode="search"></tex-booking-widget>
+    </div>
+    <section>
+      <h2>Redirect mode (Turkish)</h2>
+      <tex-booking-widget site="aurora" api="" lang="tr" mode="redirect" hotel="Aurora Beach Resort"></tex-booking-widget>
+    </section>
+    <section>
+      <h2>Button mode (German)</h2>
+      <tex-booking-widget site="aurora" api="" lang="de" mode="button" label="Zimmer buchen"></tex-booking-widget>
+    </section>
+    <p id="log" style="margin: 16px; font-size: 14px">Events: <code></code></p>
+    <script type="module">
+      import "/src/widget/index.ts"
+      document.addEventListener("tex-booking:search", (e) => {
+        document.querySelector("#log code").textContent = JSON.stringify(e.detail)
+      })
+    </script>
+  </body>
+</html>

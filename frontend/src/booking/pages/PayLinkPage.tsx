@@ -1,0 +1,198 @@
+import { CheckCircle2, Clock, CreditCard, Lock, ShieldCheck, XCircle } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { useI18n } from "../i18n"
+import { ApiError, pub } from "../lib/api"
+import { isPositive, isZero } from "../lib/format"
+import { rememberPayment } from "../lib/storage"
+import { continuePayment } from "../flow/payment"
+import type { PaymentLinkInfo, PaymentStart } from "../types"
+import { Button } from "../ui/controls"
+import { Alert, EmptyState, Spinner } from "../ui/feedback"
+import { PlainShell } from "./SiteError"
+
+export default function PayLinkPage() {
+  const { t, money, dateTime } = useI18n()
+  const { token = "" } = useParams()
+  const [sp] = useSearchParams()
+  const navigate = useNavigate()
+  const status = sp.get("status")
+  const [link, setLink] = useState<PaymentLinkInfo | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
+  const [paying, setPaying] = useState(false)
+  const [payError, setPayError] = useState<string | null>(null)
+  const [account, setAccount] = useState<string | null>(null)
+  const polls = useRef(0)
+  const heading = useRef<HTMLHeadingElement>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setLink(await pub<PaymentLinkInfo>("payment_link", { token }))
+      setError(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError("", 0, "", "network"))
+    }
+  }, [token])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    if (link) heading.current?.focus({ preventScroll: true })
+  }, [link?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // gateway result may land a moment after the guest returns
+  useEffect(() => {
+    if (!link || status !== "succeeded" || link.status === "Paid" || polls.current >= 5) return
+    const h = setTimeout(() => {
+      polls.current++
+      void load()
+    }, 2500)
+    return () => clearTimeout(h)
+  }, [link, status, load])
+
+  const pay = async () => {
+    if (!link) return
+    setPaying(true)
+    setPayError(null)
+    try {
+      // the server picks the hotel's gateway; the guest only chooses when it asks (several card gateways)
+      const p = await pub<PaymentStart>("pay_link", { token, provider_account: account ?? undefined })
+      rememberPayment(p, { amount: isZero(link.paid) ? link.amount : undefined, currency: link.currency, hotel: link.hotel ?? undefined })
+      const out = continuePayment(p, navigate)
+      if (out === "none" || out === "blocked") setPaying(false)
+    } catch (e) {
+      setPaying(false)
+      if (!account && link.methods.length > 1 && e instanceof ApiError && e.kind === "invalid") {
+        setAccount(link.methods[0].provider_account)
+        return
+      }
+      setPayError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))
+    }
+  }
+
+  const shellTitle = link?.hotel ? `${t("paylink.title")} · ${link.hotel}` : t("paylink.title")
+  const badge = (
+    <>
+      <Lock className="size-4 text-ok" aria-hidden />
+      {link?.hotel ?? t("paylink.secure")}
+    </>
+  )
+
+  if (error)
+    return (
+      <PlainShell title={t("paylink.title")} badge={badge}>
+        <h1 className="sr-only">{t("paylink.title")}</h1>
+        <EmptyState icon={<XCircle className="size-8" aria-hidden />} title={error.kind === "not_found" ? t("paylink.invalidTitle") : t("confirm.loadError")} actions={error.kind !== "not_found" && <Button onClick={() => void load()}>{t("common.retry")}</Button>}>
+          {error.kind === "not_found" ? t("paylink.invalidBody") : error.message || t("errors.network")}
+        </EmptyState>
+      </PlainShell>
+    )
+  if (!link)
+    return (
+      <PlainShell title={t("paylink.title")} badge={badge}>
+        <Spinner label={t("common.loading")} className="py-10" />
+      </PlainShell>
+    )
+
+  const payable = link.status === "Active" || link.status === "Partially Paid"
+  const paid = link.status === "Paid"
+  let head = t("paylink.heading")
+  let Icon = CreditCard
+  let tone = "text-brand-ink"
+  if (paid) {
+    head = t("paylink.paidTitle")
+    Icon = CheckCircle2
+    tone = "text-ok"
+  } else if (!payable) {
+    head = link.status === "Expired" ? t("paylink.expiredTitle") : t("paylink.closedTitle")
+    Icon = Clock
+    tone = "text-warn"
+  }
+
+  return (
+    <PlainShell title={shellTitle} badge={badge}>
+      <section className="bk-card p-5 sm:p-8" aria-labelledby="bk-pl-h">
+        <div className="text-center">
+          <Icon className={`mx-auto size-11 ${tone}`} aria-hidden />
+          <h1 id="bk-pl-h" ref={heading} tabIndex={-1} className="mt-3 text-2xl outline-none">
+            {head}
+          </h1>
+          {link.hotel && <p className="mt-1 text-soft">{link.hotel}</p>}
+        </div>
+        {status === "failed" && payable && (
+          <Alert tone="bad" className="mt-5" title={t("confirm.failedTitle")}>
+            {t("confirm.failedBody")}
+          </Alert>
+        )}
+        {(status === "pending" || status === "unverified" || (status === "succeeded" && !paid)) && (
+          <Alert tone="warn" className="mt-5" title={t("confirm.verifyingTitle")}>
+            {t("confirm.verifyingBody")}
+          </Alert>
+        )}
+        {payError && (
+          <Alert tone="bad" className="mt-5" title={t("confirm.retryFailed")}>
+            {payError}
+          </Alert>
+        )}
+        <dl className="mt-6 divide-y divide-line rounded-ui border border-line text-sm">
+          {link.description && (
+            <div className="flex justify-between gap-4 p-3">
+              <dt className="text-soft">{t("paylink.for")}</dt>
+              <dd className="text-right font-medium">{link.description}</dd>
+            </div>
+          )}
+          {link.guest_name && (
+            <div className="flex justify-between gap-4 p-3">
+              <dt className="text-soft">{t("paylink.guest")}</dt>
+              <dd className="text-right font-medium">{link.guest_name}</dd>
+            </div>
+          )}
+          <div className="flex justify-between gap-4 p-3">
+            <dt className="text-soft">{t("paylink.amount")}</dt>
+            <dd className="text-right text-lg font-bold tabular-nums">{money(link.amount, link.currency)}</dd>
+          </div>
+          {isPositive(link.paid) && (
+            <div className="flex justify-between gap-4 p-3">
+              <dt className="text-soft">{t("booking.paid")}</dt>
+              <dd className="text-right font-medium tabular-nums text-ok">{money(link.paid, link.currency)}</dd>
+            </div>
+          )}
+          {payable && link.expires_at && link.expires_at !== "None" && (
+            <div className="flex justify-between gap-4 p-3">
+              <dt className="text-soft">{t("paylink.expires")}</dt>
+              <dd className="text-right">{dateTime(link.expires_at)}</dd>
+            </div>
+          )}
+        </dl>
+        {payable && account && (
+          <fieldset className="mt-6">
+            <legend className="mb-2 text-sm font-semibold">{t("paylink.chooseGateway")}</legend>
+            <div className="space-y-2">
+              {link.methods.map((m) => (
+                <label key={m.provider_account} className={`flex cursor-pointer items-center gap-3 rounded-ui border p-3 ${account === m.provider_account ? "border-brand-ink bg-brand/5" : "border-line"}`}>
+                  <input type="radio" className="bk-check" name="bk-gateway" checked={account === m.provider_account} onChange={() => setAccount(m.provider_account)} />
+                  <span className="font-medium">{m.label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        {payable && (
+          <div className="mt-6">
+            <Button size="lg" block onClick={pay} busy={paying}>
+              <Lock className="size-4" aria-hidden />
+              {isZero(link.paid) ? t("paylink.payAmount", { amount: money(link.amount, link.currency) }) : t("paylink.payRest")}
+            </Button>
+            <p className="mt-3 flex items-start justify-center gap-2 text-center text-sm text-soft">
+              <ShieldCheck className="mt-0.5 size-4 flex-none text-ok" aria-hidden />
+              {t("payment.cardSecurity")}
+            </p>
+          </div>
+        )}
+        {!payable && !paid && <p className="mt-5 text-center text-sm text-soft">{t("paylink.closedBody")}</p>}
+      </section>
+    </PlainShell>
+  )
+}
