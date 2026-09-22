@@ -164,6 +164,23 @@ class TestTax(unittest.TestCase):
 		self.assertEqual(by["CITY"], D("15.00"))
 		self.assertFalse(next(t for t in lines if t.code == "CITY").included)
 
+	def test_slab_rate_by_nightly_tariff(self):
+		gst = (TaxRule("GST", "GST", rate=D("5"), slabs=((D("7500"), D("5")), (None, D("18")))),)
+		low, _ = tax.compute_taxes(gst, {"ACCOMMODATION": D("21000")}, inclusive=False, currency="INR",
+		                           persons=2, nights=3)                      # 7000 / night
+		high, _ = tax.compute_taxes(gst, {"ACCOMMODATION": D("24000")}, inclusive=False, currency="INR",
+		                            persons=2, nights=3)                     # 8000 / night
+		self.assertEqual((low[0].rate, low[0].amount), (D("5"), D("1050.00")))
+		self.assertEqual((high[0].rate, high[0].amount), (D("18"), D("4320.00")))
+
+	def test_turkish_compound_kdv_on_accommodation_tax(self):
+		rules = (TaxRule("KV", "Konaklama Vergisi", rate=D("2"), order=1),
+		         TaxRule("KDV", "KDV", rate=D("10"), compound=True, order=2))
+		lines, nets = tax.compute_taxes(rules, {"ACCOMMODATION": D("1122.00")}, inclusive=True, currency="TRY",
+		                                persons=2, nights=1)
+		self.assertEqual(nets["ACCOMMODATION"], D("1000.00"))
+		self.assertEqual([t.amount for t in lines], [D("20.00"), D("102.00")])
+
 	def test_no_rules_no_tax(self):
 		lines, nets = tax.compute_taxes((), {"ACCOMMODATION": D("10")}, inclusive=True, currency="EUR",
 		                                persons=1, nights=1)

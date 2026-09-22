@@ -313,6 +313,8 @@ class TaxRule:
 	applies_to: frozenset[str] = frozenset({"ACCOMMODATION"})  # ACCOMMODATION, EXTRA:<cat>, EXTRA:*
 	compound: bool = False            # computed on base + previous taxes
 	order: int = 0
+	# optional rate slabs by nightly tariff: ((threshold or None=∞, rate), …), first match wins
+	slabs: tuple[tuple[Decimal | None, Decimal], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

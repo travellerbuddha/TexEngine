@@ -46,12 +46,22 @@ def _percent_rules(rules: tuple[TaxRule, ...], category: str) -> list[TaxRule]:
 	              key=lambda r: (r.order, r.code))
 
 
-def _stack(rules: list[TaxRule], net: Decimal) -> list[tuple[TaxRule, Decimal]]:
+def rate_for(rule: TaxRule, nightly: Decimal | None) -> Decimal:
+	"""The rule's rate; slabbed rules pick the rate by the nightly tariff."""
+	if not rule.slabs or nightly is None:
+		return D(rule.rate)
+	for threshold, rate in rule.slabs:
+		if threshold is None or nightly <= D(threshold):
+			return D(rate)
+	return D(rule.slabs[-1][1])
+
+
+def _stack(rules: list[TaxRule], net: Decimal, nightly: Decimal | None = None) -> list[tuple[TaxRule, Decimal]]:
 	out: list[tuple[TaxRule, Decimal]] = []
 	running = ZERO
 	for r in rules:
 		base = net + running if r.compound else net
-		t = base * D(r.rate) / HUNDRED
+		t = base * rate_for(r, nightly) / HUNDRED
 		out.append((r, t))
 		running += t
 	return out
@@ -69,17 +79,18 @@ def compute_taxes(rules: tuple[TaxRule, ...], categories: dict[str, Decimal], *,
 		if not prules:
 			nets[category] = amount
 			continue
+		nightly = amount / max(nights, 1) if category == "ACCOMMODATION" else None
 		if inclusive:
-			factor = ONE + sum((t for _, t in _stack(prules, ONE)), ZERO)
+			factor = ONE + sum((t for _, t in _stack(prules, ONE, nightly)), ZERO)
 			net_exact = amount / factor
-			taxes = [(r, quantize(t, currency)) for r, t in _stack(prules, net_exact)]
+			taxes = [(r, quantize(t, currency)) for r, t in _stack(prules, net_exact, nightly)]
 			net = amount - sum((t for _, t in taxes), ZERO)
 		else:
 			net = amount
-			taxes = [(r, quantize(t, currency)) for r, t in _stack(prules, net)]
+			taxes = [(r, quantize(t, currency)) for r, t in _stack(prules, net, nightly)]
 		nets[category] = net
 		for r, t in taxes:
-			lines.append(TaxLine(r.code, r.name, category, net, D(r.rate), t, inclusive))
+			lines.append(TaxLine(r.code, r.name, category, net, rate_for(r, nightly), t, inclusive))
 
 	accommodation = "ACCOMMODATION" in categories
 	for r in sorted((r for r in rules if r.kind != TaxKind.PERCENT), key=lambda r: (r.order, r.code)):
