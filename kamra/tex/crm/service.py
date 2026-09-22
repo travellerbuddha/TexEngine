@@ -240,7 +240,7 @@ def _segment_rules(segment: str) -> dict:
 	try:
 		return seg.validate(json.loads(raw or "{}"))
 	except (seg.SegmentError, ValueError) as e:
-		frappe.throw(_("Segment rules are invalid: {0}").format(e))
+		frappe.throw(_("Segment rules are invalid: {0}").format(str(e)))
 
 
 def save_segment(data: dict) -> str:

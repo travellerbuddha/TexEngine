@@ -73,6 +73,11 @@ def setup():
 				"enabled": 1, "user_type": "System User",
 				"send_welcome_email": 0, "roles": [{"role": role}],
 			}).insert(ignore_permissions=True)
+	# TEX strict tenancy: an unscoped user sees no hotel, so the personas get an
+	# explicit all-hotels scope (their roles still gate every action)
+	from kamra.tex.setup import ensure_all_hotels_scope
+	for email in ("agent@kamra.local", "frontdesk@kamra.local", "hk@kamra.local"):
+		ensure_all_hotels_scope(email)
 	if not frappe.db.exists("Property", P):
 		frappe.get_doc({
 			"doctype": "Property", "property_name": P, "city": "Testville",

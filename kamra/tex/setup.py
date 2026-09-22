@@ -129,6 +129,18 @@ def migrate_legacy_access() -> dict:
 	return {"grants": created}
 
 
+def ensure_all_hotels_scope(user: str) -> None:
+	"""Platform-wide hotel scope with no extra capabilities (the user's roles still
+	decide what they may do). For service / test accounts that work across every
+	hotel, e.g. the eval personas."""
+	if frappe.db.exists("TEX Access Grant", {"user": user, "scope_level": "Platform", "disabled": 0}):
+		return
+	ensure_profiles()
+	g = frappe.get_doc({"doctype": "TEX Access Grant", "user": user, "scope_level": "Platform",
+	                    "permission_profile": "Scope Only", "notes": "All hotels (service account)"})
+	g.insert(ignore_permissions=True)
+
+
 def default_legacy_pms_visibility() -> None:
 	"""Upgraded sites that run the PMS keep seeing it; fresh TEX sites don't."""
 	in_use = frappe.db.exists("Reservation", {"status": ("in", ["Checked In", "Checked Out"])}) or \

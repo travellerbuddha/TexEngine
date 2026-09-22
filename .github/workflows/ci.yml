@@ -110,6 +110,20 @@ jobs:
             2>&1 | tee banquet.out
           grep -qE "^OK$" banquet.out
 
+      - name: Run TEX pure unit tests (pricing, gateways, FX, segments)
+        run: |
+          cd frappe-bench
+          ./env/bin/python -m unittest discover -s apps/kamra/kamra/tex/tests/unit -t apps/kamra 2>&1 | tee tex_unit.out
+          grep -qE "^OK$" tex_unit.out
+
+      - name: Run TEX integration tests (journey, concurrency, commercial flows)
+        run: |
+          cd frappe-bench
+          for m in test_critical_journey test_concurrency test_commercial_flows; do
+            bench --site test.localhost run-tests --module kamra.tex.tests.integration.$m 2>&1 | tee tex_$m.out
+            grep -qE "^OK$" tex_$m.out
+          done
+
       - name: Run front-desk persona journey
         run: |
           cd frappe-bench

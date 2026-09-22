@@ -69,6 +69,9 @@ def setup():
 			"last_name": "FrontDesk", "send_welcome_email": 0,
 			"roles": [{"role": "Front Desk"}],
 		}).insert(ignore_permissions=True)
+	# TEX strict tenancy: explicit all-hotels scope for the persona
+	from kamra.tex.setup import ensure_all_hotels_scope
+	ensure_all_hotels_scope(FD_USER)
 	return rt, room, room2.name
 
 

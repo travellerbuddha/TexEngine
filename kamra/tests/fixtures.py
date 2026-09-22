@@ -54,6 +54,11 @@ def ensure_roles_and_users():
 			"send_welcome_email": 0,
 			"roles": [{"role": r} for r in roles],
 		}).insert(ignore_permissions=True)
+	# TEX strict tenancy: personas need an explicit hotel scope; their roles
+	# still decide every action the access tests probe
+	from kamra.tex.setup import ensure_all_hotels_scope
+	for email in USERS:
+		ensure_all_hotels_scope(email)
 
 
 def build() -> dict:

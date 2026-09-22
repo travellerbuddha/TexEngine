@@ -2,6 +2,7 @@
 paths, but raw-SQL reads and db.set_value writes sail past them. Every
 whitelisted Kamra endpoint therefore declares who may call it."""
 
+import inspect
 from functools import wraps
 
 import frappe
@@ -31,9 +32,38 @@ def require_it_admin(fn):
 	return guarded
 
 
+# TEX tenancy (ADR-011): arguments that pin an endpoint to one hotel. A role alone
+# is not enough - the hotel behind the argument must be in the caller's scope.
+SCOPED_ARGS = (("property", None), ("reservation", "Reservation"), ("folio", "Folio"),
+               ("room", "Room"), ("room_type", "Room Type"), ("group_booking", "Group Booking"))
+
+
+def assert_scope(sig, args, kwargs):
+	"""Refuse a call whose property / reservation / folio / room / room type / group
+	booking argument belongs to a hotel outside the user's TEX scope."""
+	try:
+		bound = sig.bind_partial(*args, **kwargs).arguments if sig else kwargs
+	except TypeError:
+		bound = kwargs
+	if not any(isinstance(bound.get(a), str) and bound.get(a) for a, _dt in SCOPED_ARGS):
+		return
+	from kamra.tex.security import scope
+	if scope.is_platform_admin():
+		return
+	permitted = scope.permitted_properties()
+	for arg, doctype in SCOPED_ARGS:
+		value = bound.get(arg)
+		if not value or not isinstance(value, str):
+			continue
+		prop = value if doctype is None else frappe.db.get_value(doctype, value, "property")
+		if prop and prop not in permitted:
+			frappe.throw(f"You don't have access to {prop}.", frappe.PermissionError)
+
+
 def require_roles(*roles):
-	"""Allow the listed roles (plus admins). Usage - below the
-	whitelist decorator so the registered function is the guarded one:
+	"""Allow the listed roles (plus admins), at hotels in the caller's scope.
+	Usage - below the whitelist decorator so the registered function is the
+	guarded one:
 
 	    @frappe.whitelist()
 	    @require_roles("Front Desk", "Kamra Agent")
@@ -42,12 +72,18 @@ def require_roles(*roles):
 	allowed = set(roles) | set(ADMIN)
 
 	def deco(fn):
+		try:
+			sig = inspect.signature(fn)
+		except (TypeError, ValueError):
+			sig = None
+
 		@wraps(fn)
 		def guarded(*args, **kwargs):
 			if not allowed & set(frappe.get_roles()):
 				frappe.throw(
 					f"Not permitted - needs one of: {', '.join(sorted(roles))}.",
 					frappe.PermissionError)
+			assert_scope(sig, args, kwargs)
 			return fn(*args, **kwargs)
 		# introspectable RBAC: Kamra Agent filters its tool list by this
 		guarded._kamra_roles = allowed

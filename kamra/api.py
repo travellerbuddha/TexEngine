@@ -2026,11 +2026,13 @@ def guest_journey(guest: str):
 
 @frappe.whitelist()
 def my_properties():
-	"""Properties the current user may work with. frappe.get_list applies
-	User Permissions, so a property-restricted user sees only theirs."""
-	return frappe.get_list(
+	"""Properties the current user may work with: the TEX tenancy scope
+	(User Permissions + TEX Access Grants; strict tenancy by default)."""
+	from kamra.tex.security import scope
+	allowed = sorted(scope.permitted_properties())
+	return frappe.get_all(
 		"Property",
-		filters={"disabled": 0},
+		filters={"disabled": 0, "name": ("in", allowed or [""])},
 		fields=["name", "property_name", "city"],
 		order_by="property_name asc",
 	)
@@ -2049,6 +2051,13 @@ def front_desk_snapshot(property: str | None = None, date: str | None = None):
 	if property:
 		for flt in (res_filters, dep_filters, inh_filters, room_filters):
 			flt["property"] = property
+	else:
+		# no hotel chosen: only the hotels in the caller's TEX scope
+		from kamra.tex.security import scope
+		if not scope.is_platform_admin():
+			allowed = sorted(scope.permitted_properties()) or [""]
+			for flt in (res_filters, dep_filters, inh_filters, room_filters):
+				flt["property"] = ("in", allowed)
 
 	res_fields = [
 		"name", "guest_name", "room_type", "room", "status", "source",

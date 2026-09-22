@@ -329,3 +329,30 @@ class TestTenantIsolation(TexTestCase):
 		site.save(ignore_permissions=True)
 		self.assertEqual(site.domains[0].verified, 0)
 		self.assertTrue(site.domains[0].verification_token)
+
+	def test_legacy_endpoints_and_desk_lists_respect_tenancy(self):
+		b = guest_books(session="sess-leg")
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- give the agent a legacy role
+		frappe.get_doc("User", self.user).add_roles("Front Desk")
+		frappe.set_user(self.user)  # nosemgrep: frappe-setuser -- foreign-hotel agent
+		scope.clear_cache()
+		from kamra import api, crs
+
+		self.assertEqual(crs.permitted_properties(), {self.other})
+		self.assertEqual([p["name"] for p in api.my_properties()], [self.other])
+		with self.assertRaises(frappe.PermissionError):             # property argument
+			api.front_desk_snapshot(property=fx.PROPERTY)
+		snap = api.front_desk_snapshot()                             # no argument → own hotels only
+		self.assertNotIn(res, [r["name"] for r in snap.get("arrivals", [])])
+		# Desk / get_list: row-level filter and document-level check
+		self.assertNotIn(res, frappe.get_list("Reservation", pluck="name"))
+		self.assertFalse(frappe.has_permission("Reservation", "read", doc=frappe.get_doc("Reservation", res)))
+		self.assertEqual(frappe.get_list("Property", pluck="name"), [self.other])
+
+	def test_permission_hooks_cover_every_scoped_doctype(self):
+		from kamra import hooks
+		from kamra.tex.security import perm
+
+		self.assertEqual(set(hooks._TEX_SCOPED), set(perm.PROPERTY_DOCTYPES))
+

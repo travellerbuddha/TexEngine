@@ -18,15 +18,15 @@ from kamra.authz import require_roles
 
 
 def permitted_properties() -> set[str]:
-	"""The set of property names the current user may work with (native
-	Frappe User Permissions decide this via my_properties)."""
-	from kamra.api import my_properties
-	return {p["name"] for p in my_properties()}
+	"""The set of property names the current user may work with - the TEX
+	tenancy scope (User Permissions + TEX Access Grants, strict by default)."""
+	from kamra.tex.security import scope
+	return scope.permitted_properties()
 
 
 def assert_property_access(property: str):
 	"""Guard: refuse an action aimed at a property the user isn't permitted
-	for. A no-op for users with no property restriction (they see all)."""
+	for (under TEX strict tenancy an unscoped user is permitted none)."""
 	if property and property not in permitted_properties():
 		frappe.throw(
 			_("You don't have access to {0}.").format(property),

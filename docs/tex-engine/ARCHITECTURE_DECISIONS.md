@@ -155,3 +155,27 @@ auto-refund unless the property policy explicitly allows it; they create a pendi
 ## ADR-018 Test environment
 **Decision.** Development/CI bench: Frappe v16.25.0, Python 3.14, Node 24, MariaDB, Redis, apps
 `payments` + `kamra`. Pure tests run without a bench. See `DEV_ENVIRONMENT.md`.
+
+## ADR-019 Legacy endpoints inherit TEX tenancy
+**Decision.** `kamra.authz.require_roles` (used by ~300 legacy endpoints) now also resolves the
+`property`, `reservation`, `folio`, `room`, `room_type` and `group_booking` arguments to a hotel
+and refuses hotels outside the caller's TEX scope. `kamra.crs.permitted_properties` and
+`kamra.api.my_properties` delegate to `kamra.tex.security.scope`. Frappe
+`permission_query_conditions` / `has_permission` hooks (`kamra.tex.security.perm`) filter the
+hotel-bound DocTypes, so under strict tenancy an unscoped user sees no hotel data in Desk either.
+**Consequence.** Service/test accounts that work across all hotels need an explicit scope
+(`ensure_all_hotels_scope`); upstream fixtures were updated accordingly, assertions unchanged.
+
+## ADR-020 Guest actions are authorised by token, not by impersonation
+**Decision.** Self-service endpoints verify the manage token and its ownership of the target
+reservation, then call the service with `_guest_authorized=True`. Services skip the staff
+capability check only under that flag and refuse staff-only options (fee waiver, price override).
+`frappe.set_user("Administrator")` is never used to run guest actions.
+
+## ADR-021 Payment callbacks and redirects
+**Decision.** Gateways return to `kamra.tex.api.payments.callback`, which verifies the outcome
+through the adapter (signature or server-to-server status query), commits, then redirects to the
+transaction's stored `return_url`. Return URLs supplied by the browser are accepted only for the
+TEX host or a DNS-verified domain of the booking site (no open redirects). A forged callback
+leaves the transaction unchanged; an unreachable gateway leaves it Pending for staff `reverify`.
+

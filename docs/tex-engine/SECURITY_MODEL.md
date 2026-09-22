@@ -26,8 +26,12 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 - Sources: default profile per Frappe role + `TEX Access Grant` (user × scope × profile).
 - `require_capability(cap, property)` on every TEX endpoint; list endpoints filter by
   `permitted_properties()`; document endpoints resolve the document's property first.
-- Legacy `require_roles` upgraded to resolve `property` / `reservation` / `folio` / `group_booking` /
-  `guest`-style arguments to a property and call `assert_property_access`.
+- Legacy `require_roles` resolves `property` / `reservation` / `folio` / `room` / `room_type` /
+  `group_booking` arguments to a hotel and refuses hotels outside the caller's scope (ADR-019).
+- `permission_query_conditions` + `has_permission` on every hotel-bound DocType
+  (`kamra/tex/security/perm.py`) — Desk lists, reports and `frappe.get_list` follow TEX scope.
+- Guest self-service is authorised by the manage token and ownership check, never by
+  impersonating a staff user (ADR-020).
 - `strict_tenancy` (default on): a non-admin user without any scope sees nothing.
 - Grants sync Frappe `User Permission` (Property, apply to all doctypes) so Desk lists and
   `frappe.get_list` are isolated too.
@@ -52,6 +56,9 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Embedding abuse (clickjacking) | Booking iframe allowed only for `allowed_embed_origins` via CSP `frame-ancestors` |
 | Uploads | Existing Frappe file handling; TEX branding images restricted to image MIME types and size |
 | PII over-exposure | `crm.view` / `guest.export` capabilities; masked ID numbers (existing `_mask_id`); exports audited |
+| Open redirect through payment return URLs | Browser-supplied return URLs accepted only for the TEX host or a DNS-verified booking domain (ADR-021) |
+| Custom-domain takeover | `verified` set only by the DNS TXT check; editing a row resets it; a domain can belong to one site only |
+| Group-level records edited from one hotel | Booking sites serving a hotel group need the capability at every hotel of the group |
 | Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with consent or legitimate transactional basis |
 
 ## 5. Logging rules
@@ -59,6 +66,12 @@ Never log passwords, CVV, PAN, secrets or raw tokens. `kamra.tex.security.redact
 known keys (`password`, `secret`, `token`, `card`, `cvv`, `pan`, `authorization`) before any
 `frappe.log_error`/audit payload.
 
-## 6. Known legacy gaps (tracked)
-See GAP_ANALYSIS §1: legacy PMS endpoints historically lacked property checks. Hardening
-status is tracked in IMPLEMENTATION_STATUS (R-53).
+## 6. Known gaps (tracked)
+- Legacy PMS endpoints whose hotel is only reachable through module-specific arguments
+  (`order`, `outlet`, `task`, `venue`, generic `name`) are not yet resolved by the scope guard.
+  These modules (POS, laundry, housekeeping, banquet) are hidden from TEX navigation
+  (ADR-014, DECOUPLE LATER); the Frappe permission hooks do not cover their DocTypes yet.
+- iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
+  production-verified**; enabling a Production account requires the provider's sandbox
+  certification with real merchant credentials.
+- Legacy Kamra endpoints use `frappe.throw` text without `_()` in places (upstream style).
