@@ -8,7 +8,6 @@ import { useTexT } from "../../i18n"
 import { Badge, Button, Checkbox, DescriptionList, Dialog, Field, FormGrid, InlineError, Input, Notice, useToast } from "../../ui"
 import { WeekdayNumbers } from "../rates/components/pickers"
 import { decText, isoWeekday, versionLabel } from "../rates/lib/util"
-import { PublishDialog } from "../rates/contracts/VersionActions"
 import { ChangeForm, changesFromCell, describeChanges, emptyChanges, hasChanges, toPayload, type Changes } from "./ChangeForm"
 import type { BulkResult, Grid, GridCell, Scope } from "./types"
 
@@ -52,10 +51,9 @@ function usePerms() {
 }
 
 /** Result of a bulk/cell update, incl. the draft created by a rate change. */
-function ResultView({ result, contract, contractCode }: { result: BulkResult; contract: string; contractCode?: string }) {
+function ResultView({ result, contract, onPublish }: { result: BulkResult; contract: string; onPublish: (draft: string) => void }) {
   const { t } = useTexT()
   const { canPublish } = usePerms()
-  const [publishing, setPublishing] = useState(false)
   const draftUrl = result.rate ? `/tex/rates/contracts/${encodeURIComponent(contract)}/versions/${encodeURIComponent(result.rate.draft)}` : ""
   return (
     <div className="space-y-3" role="status">
@@ -71,20 +69,16 @@ function ResultView({ result, contract, contractCode }: { result: BulkResult; co
       {result.rate && (
         <Notice tone="warning" title={t("inventory.result.draft_title", { v: versionLabel(result.rate.draft) })}>
           <p>{t("inventory.result.draft_body")}</p>
-          <p className="mt-1 text-xs opacity-80">{result.rate.note}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Link to={draftUrl} className="inline-flex h-8 items-center rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50">
               {t("inventory.result.open_draft")}
             </Link>
             {canPublish && (
-              <Button size="sm" onClick={() => setPublishing(true)}>
+              <Button size="sm" onClick={() => onPublish(result.rate!.draft)}>
                 {t("rates.version.publish")}
               </Button>
             )}
           </div>
-          {publishing && (
-            <PublishDialog open onClose={() => setPublishing(false)} version={{ name: result.rate.draft, version_no: 0 }} contractCode={contractCode ?? contract} onDone={() => undefined} />
-          )}
         </Notice>
       )}
     </div>
@@ -98,18 +92,18 @@ export function CellDialog({
   cell,
   scope,
   scopeLabel,
-  contractCode,
   onClose,
   onApplied,
+  onPublish,
 }: {
   grid: Grid
   room: { room_type: string; name: string }
   cell: GridCell
   scope: Scope
   scopeLabel: string
-  contractCode?: string
   onClose: () => void
   onApplied: () => void
+  onPublish: (draft: string) => void
 }) {
   const { t } = useTexT()
   const toast = useToast()
@@ -161,7 +155,7 @@ export function CellDialog({
       }
     >
       {result ? (
-        <ResultView result={result} contract={scope.contract} contractCode={contractCode} />
+        <ResultView result={result} contract={scope.contract} onPublish={onPublish} />
       ) : (
         <div className="space-y-5">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
@@ -220,16 +214,16 @@ export function BulkDialog({
   grid,
   scope,
   scopeLabel,
-  contractCode,
   onClose,
   onApplied,
+  onPublish,
 }: {
   grid: Grid
   scope: Scope
   scopeLabel: string
-  contractCode?: string
   onClose: () => void
   onApplied: () => void
+  onPublish: (draft: string) => void
 }) {
   const { t } = useTexT()
   const toast = useToast()
@@ -302,7 +296,7 @@ export function BulkDialog({
       }
     >
       {result ? (
-        <ResultView result={result} contract={scope.contract} contractCode={contractCode} />
+        <ResultView result={result} contract={scope.contract} onPublish={onPublish} />
       ) : step === "edit" ? (
         <div className="space-y-5">
           <FormGrid cols={2}>

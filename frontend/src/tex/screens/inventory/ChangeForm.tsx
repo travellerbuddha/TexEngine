@@ -123,7 +123,7 @@ export function valueText(t: T, f: FieldKey, v: string): string {
 export function describeChanges(t: T, c: Changes, ccy: string | null): string[] {
   const out: string[] = []
   for (const f of [...R_FIELDS, ...I_FIELDS]) if (c.on[f]) out.push(`${t(`inventory.f.${f}`)}: ${valueText(t, f, c.v[f])}`)
-  if (c.rateOn && c.rateValue !== "") out.push(`${t("inventory.f.rate")}: ${t(`inventory.rateop.${c.rateOp}`)} ${c.rateValue}${c.rateOp === "ADJUST_PERCENT" ? " %" : ccy ? ` ${ccy}` : ""}`)
+  if (c.rateOn && c.rateValue !== "") out.push(`${t("inventory.f.rate")}: ${t(`inventory.ratedesc.${c.rateOp}`, { v: c.rateValue, ccy: ccy ?? "" })}`)
   return out
 }
 

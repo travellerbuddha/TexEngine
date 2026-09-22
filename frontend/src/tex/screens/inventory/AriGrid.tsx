@@ -8,6 +8,7 @@ import { addDays, date as fmtDate, isoDay } from "../../lib/format"
 import { getTexLang, intlLocale, useTexT } from "../../i18n"
 import { Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Notice, PageHeader, Segmented, Select, Skeleton, Toolbar } from "../../ui"
 import { decText, isoWeekday, useLookups, versionLabel, weekdayName } from "../rates/lib/util"
+import { PublishDialog } from "../rates/contracts/VersionActions"
 import { BulkDialog, CellDialog, scopeText } from "./Dialogs"
 import { Legend } from "./Legend"
 import { METRICS, type Grid, type GridCell, type GridRow, type Metric, type Scope } from "./types"
@@ -43,6 +44,7 @@ export default function AriGrid() {
   const [start, setStart] = useState(() => isoDay(new Date()))
   const [cellEdit, setCellEdit] = useState<{ row: GridRow; cell: GridCell } | null>(null)
   const [bulk, setBulk] = useState(false)
+  const [publishDraft, setPublishDraft] = useState<string | null>(null)
   useEffect(() => setPrefs(loadPrefs(property)), [property])
   useEffect(() => {
     try {
@@ -176,12 +178,30 @@ export default function AriGrid() {
           cell={cellEdit.cell}
           scope={scope}
           scopeLabel={scopeLabel}
-          contractCode={contract?.contract_code}
           onClose={() => setCellEdit(null)}
           onApplied={q.reload}
+          onPublish={(d) => {
+            setCellEdit(null)
+            setPublishDraft(d)
+          }}
         />
       )}
-      {grid && bulk && <BulkDialog grid={grid} scope={scope} scopeLabel={scopeLabel} contractCode={contract?.contract_code} onClose={() => setBulk(false)} onApplied={q.reload} />}
+      {grid && bulk && (
+        <BulkDialog
+          grid={grid}
+          scope={scope}
+          scopeLabel={scopeLabel}
+          onClose={() => setBulk(false)}
+          onApplied={q.reload}
+          onPublish={(d) => {
+            setBulk(false)
+            setPublishDraft(d)
+          }}
+        />
+      )}
+      {publishDraft && (
+        <PublishDialog open onClose={() => setPublishDraft(null)} version={{ name: publishDraft, version_no: 0 }} contractCode={contract?.contract_code ?? scope.contract} onDone={q.reload} />
+      )}
     </>
   )
 }
@@ -308,7 +328,7 @@ function GridTable({
                       mi === metrics.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
                     )}
                   >
-                    {mi === 0 && <span className="block truncate text-[13px] font-semibold text-zinc-900" title={row.name}>{row.name}</span>}
+                    {mi === 0 && <span className="block max-w-24 truncate text-[13px] font-semibold text-zinc-900 sm:max-w-40" title={row.name}>{row.name}</span>}
                     <span className="block text-[11px] text-zinc-500">
                       {t(`inventory.metric.${metric}`)}
                       {metric === "rate" && ccy && <span className="text-zinc-400"> · {ccy}</span>}
