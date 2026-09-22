@@ -3,7 +3,7 @@
 * ``lookups`` — the pickers every commercial editor needs for one hotel (room types,
   rate plans, contracts, cancellation / payment policies). Read-only.
 * ``archive_record`` — archive a live selling-policy revision *with the reason* in the
-  audit trail (``policies.archive`` takes no reason).
+  audit trail (thin alias of ``policies.archive``).
 
 Every call re-checks TEX capabilities on the server; the UI only hides actions.
 """
@@ -11,13 +11,8 @@ Every call re-checks TEX capabilities on the server; the UI only hides actions.
 from __future__ import annotations
 
 import frappe
-from frappe import _
 
-from kamra.tex.api._util import text
-from kamra.tex.api.policies import POLICY, _audit_prop, _check, _prop_of
-from kamra.tex.commercial import revisions
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
 
 
 @frappe.whitelist()
@@ -47,16 +42,7 @@ def lookups(property: str):
 
 @frappe.whitelist(methods=["POST"])
 def archive_record(doctype: str, name: str, reason: str):
-	"""Archive a selling-policy revision; the reason is stored in the audit event."""
-	reason = text(reason, 500)
-	if not reason or len(reason) < 3:
-		frappe.throw(_("A reason is required."))
-	if doctype not in revisions.REVISIONED or doctype not in POLICY:
-		frappe.throw(_("{0} has no revisions.").format(doctype))
-	doc = frappe.get_doc(doctype, name)
-	# same authority as policies.archive: the doctype's edit capability at the record's hotel
-	_check(doctype, _prop_of(doctype, doc), write=True)
-	revisions.archive(doctype, name)
-	audit(f"{doctype.lower().replace(' ', '_')}.archive", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc), reason=reason)
-	return {"ok": True}
+	"""Archive a selling-policy revision with a reason (same checks as policies.archive)."""
+	from kamra.tex.api import policies
+
+	return policies.archive(doctype, name, reason)

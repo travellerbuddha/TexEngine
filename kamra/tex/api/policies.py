@@ -175,11 +175,15 @@ def revise(doctype: str, name: str):
 
 
 @frappe.whitelist(methods=["POST"])
-def archive(doctype: str, name: str):
+def archive(doctype: str, name: str, reason: str | None = None):
+	"""Take a live revision out of sale; the reason is kept in the audit trail."""
+	reason = text(reason, 500)
+	if not reason or len(reason) < 3:
+		frappe.throw(_("A reason is required."))
 	doc = _rev_doc(doctype, name)
 	revisions.archive(doctype, name)
 	audit(f"{doctype.lower().replace(' ', '_')}.archive", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc))
+	      property=_audit_prop(doctype, doc), reason=reason)
 	return {"ok": True}
 
 
