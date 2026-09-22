@@ -9,7 +9,20 @@ import { defineConfig } from "vite"
 // (see the router basename in main.tsx and website_route_rules in hooks.py).
 export default defineConfig(({ command }) => ({
   base: command === "build" ? "/assets/kamra/frontend/" : "/",
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    {
+      // dev only: /book/* is the guest booking bundle (production: kamra/www/book.py)
+      name: "tex-booking-dev-fallback",
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url && /^\/book(\/|\?|$)/.test(req.url) && !/\.[a-z0-9]+(\?|$)/i.test(req.url)) req.url = "/booking.html"
+          next()
+        })
+      },
+    },
+  ],
   build: {
     outDir: "../kamra/public/frontend",
     emptyOutDir: true,
