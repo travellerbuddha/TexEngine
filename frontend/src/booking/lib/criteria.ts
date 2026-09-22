@@ -1,9 +1,9 @@
 // Search criteria <-> URL. The URL is the source of truth for a search so that
 // links from the widget, back/forward and reloads all land on the same results.
 //
-//   ?checkin=2026-12-10&checkout=2026-12-13&rooms=2-5.8,1&promo=EARLY10&currency=EUR&hotel=…
+//   ?checkin=2026-12-10&checkout=2026-12-13&rooms=2-5_8,1&promo=EARLY10&currency=EUR&hotel=…
 //
-// `rooms` lists each room as "<adults>" or "<adults>-<age>.<age>…" (child ages in
+// `rooms` lists each room as "<adults>" or "<adults>-<age>_<age>…" (child ages in
 // whole years). `adults` + `children` (comma-separated ages) are accepted as a
 // single-room shorthand.
 import { isValidDay } from "./dates"
@@ -33,7 +33,7 @@ function clampInt(v: string | undefined, lo: number, hi: number, dflt: number) {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt
 }
 
-function parseAges(s: string, sep: string) {
+function parseAges(s: string, sep: string | RegExp) {
   return s
     .split(sep)
     .filter((x) => x !== "")
@@ -48,13 +48,13 @@ export function parseRooms(raw: string | null): Party[] | null {
     .slice(0, MAX_ROOMS)
     .map((r) => {
       const [a, kids = ""] = r.split("-")
-      return { adults: clampInt(a, 1, MAX_ADULTS, 2), ages: parseAges(kids, ".") }
+      return { adults: clampInt(a, 1, MAX_ADULTS, 2), ages: parseAges(kids, /[._]/) }
     })
   return rooms.length ? rooms : null
 }
 
 export function roomsParam(rooms: Party[]) {
-  return rooms.map((r) => (r.ages.length ? `${r.adults}-${r.ages.map((a) => (a === null ? "x" : a)).join(".")}` : `${r.adults}`)).join(",")
+  return rooms.map((r) => (r.ages.length ? `${r.adults}-${r.ages.map((a) => (a === null ? "x" : a)).join("_")}` : `${r.adults}`)).join(",")
 }
 
 export function parseCriteria(sp: URLSearchParams): Criteria {

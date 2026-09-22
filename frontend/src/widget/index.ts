@@ -311,7 +311,7 @@ export class TexBookingWidget extends HTMLElement {
         er.textContent = this.t("errAges")
         return setOpen(true)
       }
-      const rooms = this.ages.length ? `${this.adults}-${this.ages.join(".")}` : `${this.adults}`
+      const rooms = this.ages.length ? `${this.adults}-${this.ages.join("_")}` : `${this.adults}`
       this.dispatchEvent(
         new CustomEvent("tex-booking:search", { bubbles: true, composed: true, detail: { checkIn: ci.value, checkOut: co.value, adults: this.adults, children: this.ages.slice() } }),
       )

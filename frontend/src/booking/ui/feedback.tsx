@@ -63,7 +63,7 @@ export const ErrorSummary = forwardRef<HTMLDivElement, { title: string; errors: 
           <li key={e.id}>
             <a
               href={`#${e.id}`}
-              className="text-bad underline underline-offset-2"
+              className="inline-block min-h-6 py-0.5 text-bad underline underline-offset-2"
               onClick={(ev) => {
                 ev.preventDefault()
                 const el = document.getElementById(e.id)

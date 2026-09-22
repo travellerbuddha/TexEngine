@@ -509,7 +509,9 @@ export default function Results() {
       )
   }
 
-  const showSummary = !!data && (!site.group || !!criteria.hotel || site.hotels.length === 1)
+  const shownHotel = data ? (site.group ? criteria.hotel : data.properties[0]?.property) : null
+  const hasOffers = !!data?.properties.find((p) => p.property === shownHotel)?.offers.length
+  const showSummary = !!data && hasOffers && (!site.group || !!criteria.hotel || site.hotels.length === 1)
   const sel0 = flow.selections[0]
   const n = criteria.rooms.length
   const chosen = flow.selections.filter(Boolean).length

@@ -80,12 +80,14 @@ function SearchSummaryBar({ onEdit }: { onEdit: () => void }) {
             {hotelName}
           </p>
         )}
-        <p className="flex items-center gap-1.5 truncate">
-          <CalendarDays className="size-4 flex-none text-muted" aria-hidden />
-          {range(criteria.checkIn!, criteria.checkOut!)} · {t("dates.nights", { count: nights })}
+        <p className="flex items-start gap-1.5">
+          <CalendarDays className="mt-0.5 size-4 flex-none text-muted" aria-hidden />
+          <span>
+            {range(criteria.checkIn!, criteria.checkOut!)} · {t("dates.nights", { count: nights })}
+          </span>
         </p>
-        <p className="flex items-center gap-1.5 truncate text-muted">
-          <Users className="size-4 flex-none" aria-hidden />
+        <p className="flex items-start gap-1.5 text-muted">
+          <Users className="mt-0.5 size-4 flex-none" aria-hidden />
           {guestsSummary(t, criteria.rooms)}
         </p>
       </div>

@@ -38,8 +38,7 @@ export function Photo({
         background:
           "radial-gradient(120% 90% at 15% 10%, color-mix(in oklab, var(--bk-accent) 26%, white) 0%, transparent 60%), linear-gradient(150deg, color-mix(in oklab, var(--bk-primary) 22%, white), color-mix(in oklab, var(--bk-primary) 42%, white))",
       }}
-      role="img"
-      aria-label={alt}
+      {...(alt ? { role: "img", "aria-label": alt } : { "aria-hidden": true })}
     >
       <svg className="absolute inset-0 size-full opacity-[0.18]" aria-hidden>
         <defs>
