@@ -30,7 +30,8 @@ dump.rdb
 
 # agent worktrees (local only)
 .claude/worktrees/
-frontend/../e2e-report/
+# Playwright E2E output
 /e2e-report/
 /e2e-results/
+frontend/e2e-report/
 frontend/test-results/
