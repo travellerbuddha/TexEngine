@@ -1,6 +1,9 @@
 {
  "crs.age.infant": "1 yaş altı",
  "crs.age.infant_short": "<1",
+ "crs.approval.approved": "Onaylandı",
+ "crs.approval.pending": "Onay bekliyor",
+ "crs.approval.rejected": "Reddedildi",
  "crs.basis.current": "Güncel fiyatlar",
  "crs.basis.historical_sale_date": "Seçilen satış tarihi",
  "crs.basis.manual": "Manuel fiyat",
@@ -292,9 +295,11 @@
  "crs.quote.amount": "Tutar",
  "crs.quote.announce_ready": "Teklif hazır",
  "crs.quote.avg_night": "Gecelik ortalama",
+ "crs.quote.calculated_total": "Hesaplanan toplam",
  "crs.quote.discounts": "İndirimler",
  "crs.quote.extra_failed": "{name} eklenmedi: {reason}",
  "crs.quote.failed": "Teklif oluşturulamadı",
+ "crs.quote.final_manual": "Son fiyat (elle belirlendi)",
  "crs.quote.get": "Teklif al",
  "crs.quote.night": "Gece",
  "crs.quote.nightly": "Gecelik fiyatlar ({count})",
@@ -371,6 +376,11 @@
  "crs.search.rooms": "Odalar ve misafirler",
  "crs.search.submit": "Ara",
  "crs.search.title": "Arama",
+ "crs.source.api": "API",
+ "crs.source.call_center": "Çağrı merkezi",
+ "crs.source.desk": "Ofis",
+ "crs.source.guest": "Misafir (kendi işlemi)",
+ "crs.source.system": "Sistem",
  "crs.status.active": "Aktif",
  "crs.status.cancelled": "İptal edildi",
  "crs.status.checked_in": "Giriş yaptı",
@@ -410,5 +420,8 @@
  "crs.text.due_now": "şimdi {method} ile {amount}",
  "crs.text.extras": "Ek hizmetler",
  "crs.text.total": "Toplam",
- "crs.text.valid_until": "Bu teklif {time} tarihine kadar geçerlidir."
+ "crs.text.valid_until": "Bu teklif {time} tarihine kadar geçerlidir.",
+ "crs.txn.charge": "Tahsilat",
+ "crs.txn.refund": "İade",
+ "crs.txn.void": "İptal (void)"
 }

@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Link2 } from "lucide-react"
 import { useTexQuery } from "../../../lib/api"
-import { dateTime } from "../../../lib/format"
+import { date, dateTime } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, CardHeader, ErrorState, Money, Skeleton, statusTone } from "../../../ui"
@@ -9,7 +9,7 @@ import { cn } from "../../../../lib/utils"
 import { Row } from "../../crs/components/controls"
 import { PaymentLinkDialog, ReissueLinkDialog } from "../../crs/components/PaymentLinkDialog"
 import { useLabels } from "../../crs/lib/labels"
-import { isPositive, isZero } from "../../crs/lib/party"
+import { isPositive, isZero, shortCode } from "../../crs/lib/party"
 import type { BookingSummary } from "../../crs/lib/types"
 import type { Revision } from "../lib/types"
 
@@ -35,9 +35,19 @@ function show(v: unknown): string {
 }
 
 /** Revision history (R-23): who changed what, old → new amount, basis and reason. */
-export function RevisionTimeline({ revisions }: { revisions: Revision[] }) {
+const DATE_FIELDS = new Set(["check_in_date", "check_out_date"])
+
+export function RevisionTimeline({ revisions, property }: { revisions: Revision[]; property?: string }) {
   const { t } = useTexT()
   const L = useLabels()
+  const fmt = (k: string, v: unknown) => {
+    const x = show(v)
+    if (x === "—") return x
+    if (DATE_FIELDS.has(k)) return date(x.slice(0, 10))
+    if (k === "tex_board") return L.board(x)
+    if (k === "room_type" || k === "rate_plan") return shortCode(x, property)
+    return x
+  }
   if (!revisions.length) return <p className="text-sm text-zinc-500">{t("res.rev.none")}</p>
   const ordered = [...revisions].sort((a, b) => b.revision_no - a.revision_no)
   return (
@@ -65,9 +75,9 @@ export function RevisionTimeline({ revisions }: { revisions: Revision[] }) {
             </div>
             <p className="text-xs text-zinc-500">
               {r.actor}
-              {r.source ? ` · ${r.source}` : ""}
+              {r.source ? ` · ${L.source(r.source)}` : ""}
               {r.pricing_basis && r.pricing_basis !== "NONE" ? ` · ${L.basis(r.pricing_basis)}` : ""}
-              {r.approval_status && r.approval_status !== "Not Required" ? ` · ${r.approval_status}` : ""}
+              {r.approval_status && r.approval_status !== "Not Required" ? ` · ${L.approval(r.approval_status)}` : ""}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               {original ? (
@@ -103,7 +113,7 @@ export function RevisionTimeline({ revisions }: { revisions: Revision[] }) {
                         </>
                       ) : (
                         <>
-                          <span className="line-through decoration-zinc-400">{show(a)}</span> → <span className="text-zinc-900">{show(b)}</span>
+                          <span className="line-through decoration-zinc-400">{fmt(k, a)}</span> → <span className="text-zinc-900">{fmt(k, b)}</span>
                         </>
                       )}
                     </li>
@@ -133,15 +143,18 @@ export function PaymentSummaryCard({
   guestEmail,
   guestLanguage,
   reservation,
+  version,
 }: {
   booking: string
   guestName?: string
   guestEmail?: string
   guestLanguage?: string
   reservation?: string
+  /** Changes whenever the reservation changes (revision / status), to refetch the booking. */
+  version?: string
 }) {
   const { t } = useTexT()
-  const q = useTexQuery<BookingSummary>("crs", "booking", { name: booking }, [booking])
+  const q = useTexQuery<BookingSummary>("crs", "booking", { name: booking }, [booking, version])
   return (
     <Card>
       <CardHeader title={t("res.pay.title")} description={booking} />
@@ -207,7 +220,7 @@ export function PaymentSummaryBody({
             {b.transactions.map((x) => (
               <li key={x.name} className="flex items-baseline justify-between gap-2">
                 <span className="min-w-0">
-                  {L.method(x.method)} · {x.txn_type}
+                  {L.method(x.method)} · {L.txn(x.txn_type)}
                   {x.card_last4 ? ` ·••${x.card_last4}` : ""}
                   <span className="block text-xs text-zinc-500">{dateTime(x.completed_at || x.creation)}</span>
                 </span>
@@ -228,7 +241,7 @@ export function PaymentSummaryBody({
           <ul className="mt-1 space-y-1 text-sm">
             {b.payment_links.map((l) => (
               <li key={l.name} className="flex items-baseline justify-between gap-2">
-                <span className="min-w-0 truncate">
+                <span className="min-w-0">
                   {l.public_url ? (
                     <a href={l.public_url} target="_blank" rel="noreferrer noopener" className="text-tex-700 hover:underline">
                       {l.name}
@@ -239,7 +252,8 @@ export function PaymentSummaryBody({
                   {l.expires_at && <span className="block text-xs text-zinc-500">{t("res.pay.expires", { time: dateTime(l.expires_at) })}</span>}
                 </span>
                 <span className="text-right">
-                  <Money amount={l.amount} currency={l.currency} />
+                  {/* crs.booking returns link amounts as raw DB numbers (reported): display only */}
+                  <Money amount={String(l.amount)} currency={l.currency} />
                   <Badge tone={statusTone(l.status)} className="ml-1">
                     {L.status(l.status)}
                   </Badge>

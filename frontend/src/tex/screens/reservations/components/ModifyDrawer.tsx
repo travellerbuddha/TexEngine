@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ArrowRight, Calculator, RotateCcw } from "lucide-react"
 import { useTexQuery, type TexApiError } from "../../../lib/api"
 import { addDays, date, dateTime, isDecimal, nightsBetween } from "../../../lib/format"
@@ -126,6 +126,12 @@ export function ModifyDrawer({
   const [reason, setReason] = useState("")
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<TexApiError>()
+  const errorRef = useRef<HTMLDivElement>(null)
+  const resultRef = useRef<HTMLElement>(null)
+  // server answers land below the form: bring them into view
+  useEffect(() => {
+    if (applyError) errorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [applyError])
 
   useEffect(() => {
     if (!open) return
@@ -198,6 +204,7 @@ export function ModifyDrawer({
       setProposal(p)
       setProposedSig(sig)
       setOverrideAmount("")
+      window.setTimeout(() => resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 50)
     } catch (e) {
       setProposeError(asApiError(e))
       setProposal(undefined)
@@ -299,7 +306,7 @@ export function ModifyDrawer({
             </Field>
           </FormGrid>
           {version.error && <p className="text-xs text-amber-800">{t("res.mod.options_limited")}</p>}
-          <PartyEditor rooms={[form.party]} onChange={(r) => set({ party: r[0] })} errors={errors} idPrefix="mod-party" />
+          <PartyEditor rooms={[form.party]} onChange={(r) => set({ party: r[0] })} errors={errors} idPrefix="mod-party" maxRooms={1} />
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <p className="mb-1 text-sm font-medium text-zinc-800">{t("crs.extras.title")}</p>
@@ -329,7 +336,7 @@ export function ModifyDrawer({
 
         <BasisPicker basis={basis} onBasis={setBasis} basisAt={basisAt} onBasisAt={setBasisAt} canOverride={canOverride} error={errors.basis_at} res={res} />
 
-        <section aria-labelledby="mod-result" aria-live="polite" className="space-y-4">
+        <section ref={resultRef} aria-labelledby="mod-result" aria-live="polite" className="scroll-mt-4 space-y-4">
           <h3 id="mod-result" className="text-sm font-semibold text-zinc-900">
             {t("res.mod.result")}
           </h3>
@@ -372,6 +379,7 @@ export function ModifyDrawer({
               <Textarea id="mod-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
             {applyError && (
+              <div ref={errorRef}>
               <Notice tone="danger" title={applyError.isPermission ? t("core.error.permission") : t("res.mod.apply_failed")}>
                 <p>{applyError.message}</p>
                 {!applyError.isPermission && (
@@ -383,6 +391,7 @@ export function ModifyDrawer({
                   </>
                 )}
               </Notice>
+              </div>
             )}
           </section>
         )}
@@ -528,7 +537,12 @@ function Comparison({
         </div>
       </div>
       <p className="text-xs text-zinc-600">
-        {t("res.cmp.basis", { basis: L.basis(p.basis), detail: p.basis_detail, at: dateTime(p.pricing_sale_at) })}
+        {t("res.cmp.basis", {
+          basis: L.basis(p.basis),
+          // the server's detail ends with a raw timestamp; the formatted one follows in {at}
+          detail: p.basis_detail.replace(/\s+(at|on sale at)\s+\d{4}-\d{2}-\d{2}[ T][\d:.]+$/, "").replace(/ on sale$/, ""),
+          at: dateTime(p.pricing_sale_at),
+        })}
       </p>
       {p.currency_changed && <Notice tone="warning">{t("res.cmp.currency_changed", { old: p.old.currency, neu: p.proposed.currency })}</Notice>}
       {p.warnings.length > 0 && (
@@ -550,7 +564,33 @@ function Comparison({
         </Notice>
       )}
 
-      <div className="overflow-x-auto">
+      <dl className="divide-y divide-zinc-100 border-y border-zinc-100 text-sm sm:hidden">
+        {facts.map((f) => (
+          <div key={f.label} className="py-1.5">
+            <dt className="text-xs font-medium text-zinc-500">
+              {f.label}
+              {f.changed && (
+                <Badge tone="brand" className="ml-1.5">
+                  {t("res.cmp.changed")}
+                </Badge>
+              )}
+            </dt>
+            <dd className="text-zinc-800">
+              {f.changed ? (
+                <>
+                  <span className="text-zinc-500 line-through decoration-zinc-400">{f.old}</span>
+                  <span className="sr-only"> {t("res.rev.to")} </span>
+                  <span aria-hidden> → </span>
+                  <span className="font-semibold text-zinc-950">{f.neu}</span>
+                </>
+              ) : (
+                f.neu
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="hidden overflow-x-auto sm:block">
         <table className="w-full min-w-[32rem] text-sm">
           <caption className="sr-only">{t("res.cmp.caption")}</caption>
           <thead>

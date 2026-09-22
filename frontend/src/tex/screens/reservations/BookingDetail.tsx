@@ -7,6 +7,7 @@ import { Badge, Card, CardHeader, DataTable, DescriptionList, CardBody, ErrorSta
 import { useLabels } from "../crs/lib/labels"
 import { shortCode } from "../crs/lib/party"
 import type { BookingRoom, BookingSummary } from "../crs/lib/types"
+import type { ReservationRow } from "./lib/types"
 import { PaymentSummaryBody } from "./components/DetailParts"
 
 /** Multi-room booking: the parent of reservations A/B/C (R-29) with its payments. */
@@ -18,6 +19,9 @@ export default function BookingDetail() {
   const { can } = useSession()
   const q = useTexQuery<BookingSummary>("crs", "booking", { name }, [name])
   const b = q.data
+  // names, board and guest of each room (the booking summary only carries codes)
+  const rows = useTexQuery<ReservationRow[]>("crs", "reservations", { q: name, limit: 50 }, [name], Boolean(b))
+  const byName = new Map((rows.data ?? []).filter((r) => r.tex_booking === name).map((r) => [r.name, r]))
   const crumbs = [{ label: t("core.nav.reservations"), to: "/tex/reservations" }, { label: name }]
   if (q.error)
     return (
@@ -71,9 +75,29 @@ export default function BookingDetail() {
                 {
                   key: "reservation",
                   header: t("res.col.reservation"),
-                  cell: (r) => <span className="font-medium text-zinc-900">{r.reservation}</span>,
+                  cell: (r) => (
+                    <span className="block whitespace-nowrap">
+                      <span className="font-medium text-zinc-900">{r.reservation}</span>
+                      {byName.get(r.reservation)?.guest_name && (
+                        <span className="block text-xs text-zinc-500">{byName.get(r.reservation)?.guest_name}</span>
+                      )}
+                    </span>
+                  ),
                 },
-                { key: "room_type", header: t("res.col.room"), hideBelow: "sm", cell: (r) => shortCode(r.room_type, b.property) },
+                {
+                  key: "room_type",
+                  header: t("res.col.room"),
+                  hideBelow: "sm",
+                  cell: (r) => {
+                    const row = byName.get(r.reservation)
+                    return (
+                      <span className="block">
+                        {row?.room_type_name || shortCode(r.room_type, b.property)}
+                        {row?.tex_board && <span className="block text-xs text-zinc-500">{L.board(row.tex_board)}</span>}
+                      </span>
+                    )
+                  },
+                },
                 {
                   key: "stay",
                   header: t("res.col.stay"),

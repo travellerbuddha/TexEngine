@@ -43,7 +43,10 @@ export function PriceBreakdown({
   canCost,
   className,
   showNightly = true,
+  finalTotal,
 }: {
+  /** A manual final price (price override) that replaces the calculated total. */
+  finalTotal?: string | null
   quote: Pick<QuoteDict, "lines" | "taxes" | "totals" | "currency" | "promotions" | "extras"> & { nights?: QuoteDict["nights"] }
   /** Overrides quote.nights (e.g. ui_crs.reservation's rounded nightly list). */
   nightly?: { date: string; amount: string }[]
@@ -91,7 +94,14 @@ export function PriceBreakdown({
         {tot.discounts && isPositive(tot.discounts) && (
           <Row label={t("crs.quote.discounts")} value={<Money amount={`-${tot.discounts}`} currency={ccy} signed />} />
         )}
-        <Row strong label={t("crs.quote.total")} value={<Money amount={tot.total} currency={ccy} />} />
+        {finalTotal ? (
+          <>
+            <Row label={t("crs.quote.calculated_total")} value={<Money amount={tot.total} currency={ccy} className="text-zinc-500 line-through" />} />
+            <Row strong label={t("crs.quote.final_manual")} value={<Money amount={finalTotal} currency={ccy} />} />
+          </>
+        ) : (
+          <Row strong label={t("crs.quote.total")} value={<Money amount={tot.total} currency={ccy} />} />
+        )}
         {canCost && tot.cost !== undefined && (
           <div className="mt-1 rounded-md border border-dashed border-zinc-300 px-2 py-1">
             <p className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">{t("crs.cost.internal")}</p>

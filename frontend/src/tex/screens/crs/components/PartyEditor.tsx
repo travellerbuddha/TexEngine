@@ -13,12 +13,15 @@ export function PartyEditor({
   errors = {},
   dense,
   idPrefix = "party",
+  maxRooms = MAX_ROOMS,
 }: {
   rooms: PartyForm[]
   onChange: (rooms: PartyForm[]) => void
   errors?: FieldErrors
   dense?: boolean
   idPrefix?: string
+  /** 1 for a single reservation (no add / remove room). */
+  maxRooms?: number
 }) {
   const { t } = useTexT()
   const set = (i: number, p: PartyForm) => onChange(rooms.map((r, j) => (j === i ? p : r)))
@@ -93,7 +96,7 @@ export function PartyEditor({
           </li>
         ))}
       </ol>
-      {rooms.length < MAX_ROOMS && (
+      {rooms.length < maxRooms && (
         <Button
           variant="ghost"
           size="sm"

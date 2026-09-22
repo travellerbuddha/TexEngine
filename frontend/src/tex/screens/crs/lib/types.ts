@@ -314,7 +314,8 @@ export interface PaymentTxn {
 export interface PaymentLinkRow {
   name: string
   status: string
-  amount: string
+  /** crs.booking currently returns the raw DB value (a number), not a decimal string. */
+  amount: string | number
   currency: string
   public_url: string | null
   expires_at: string | null

@@ -1,6 +1,9 @@
 {
  "crs.age.infant": "Unter 1",
  "crs.age.infant_short": "<1",
+ "crs.approval.approved": "Freigegeben",
+ "crs.approval.pending": "Freigabe ausstehend",
+ "crs.approval.rejected": "Abgelehnt",
  "crs.basis.current": "Aktuelle Preise",
  "crs.basis.historical_sale_date": "Gewähltes Verkaufsdatum",
  "crs.basis.manual": "Manueller Preis",
@@ -292,9 +295,11 @@
  "crs.quote.amount": "Betrag",
  "crs.quote.announce_ready": "Angebot bereit",
  "crs.quote.avg_night": "Durchschnitt pro Nacht",
+ "crs.quote.calculated_total": "Berechnete Summe",
  "crs.quote.discounts": "Rabatte",
  "crs.quote.extra_failed": "{name} nicht hinzugefügt: {reason}",
  "crs.quote.failed": "Das Angebot konnte nicht erstellt werden",
+ "crs.quote.final_manual": "Endpreis (manuell festgelegt)",
  "crs.quote.get": "Angebot berechnen",
  "crs.quote.night": "Nacht",
  "crs.quote.nightly": "Preise pro Nacht ({count})",
@@ -371,6 +376,11 @@
  "crs.search.rooms": "Zimmer und Gäste",
  "crs.search.submit": "Suchen",
  "crs.search.title": "Suche",
+ "crs.source.api": "API",
+ "crs.source.call_center": "Callcenter",
+ "crs.source.desk": "Rezeption",
+ "crs.source.guest": "Gast (Self-Service)",
+ "crs.source.system": "System",
  "crs.status.active": "Aktiv",
  "crs.status.cancelled": "Storniert",
  "crs.status.checked_in": "Eingecheckt",
@@ -410,5 +420,8 @@
  "crs.text.due_now": "jetzt fällig {amount} per {method}",
  "crs.text.extras": "Zusatzleistungen",
  "crs.text.total": "Gesamt",
- "crs.text.valid_until": "Dieses Angebot gilt bis {time}."
+ "crs.text.valid_until": "Dieses Angebot gilt bis {time}.",
+ "crs.txn.charge": "Belastung",
+ "crs.txn.refund": "Erstattung",
+ "crs.txn.void": "Storno"
 }

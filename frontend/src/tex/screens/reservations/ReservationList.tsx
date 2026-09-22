@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
-import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Lock, Plus, Search, X } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { date, num } from "../../lib/format"
 import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
-import { Badge, Button, Card, Checkbox, DataTable, EmptyState, ErrorState, Field, Input, Money, PageHeader, Select, statusTone, Toolbar } from "../../ui"
+import { Badge, Button, Card, Checkbox, DataTable, EmptyState, ErrorState, Field, Input, Money, PageHeader, Select, Skeleton, statusTone, Toolbar } from "../../ui"
 import { useLabels } from "../crs/lib/labels"
 import type { ReservationRow } from "./lib/types"
 
@@ -65,6 +65,16 @@ export default function ReservationList() {
   const rows = list.data?.slice(0, PAGE)
   const hasNext = (list.data?.length ?? 0) > PAGE
   const filtered = Boolean(q || status || property || from || to || pending)
+
+  if (!canAnywhere("reservation.view"))
+    return (
+      <>
+        <PageHeader title={t("core.nav.reservations")} />
+        <Card>
+          <EmptyState icon={<Lock className="size-5" />} title={t("core.error.permission")} description={t("res.list.no_access")} />
+        </Card>
+      </>
+    )
 
   return (
     <>
@@ -152,6 +162,9 @@ export default function ReservationList() {
           <ErrorState error={list.error} onRetry={list.reload} />
         ) : (
           <>
+            {/* phones: one card per reservation; wider screens: the sortable table */}
+            <MobileList rows={rows} loading={list.loading} hotels={hotels} canPrice={(p) => can("price.view", p)} empty={pending ? t("res.list.no_changes") : filtered ? t("res.list.none_filtered") : t("res.list.none")} />
+            <div className="hidden sm:block">
             <DataTable<ReservationRow>
               caption={t("res.list.caption")}
               rows={rows}
@@ -170,7 +183,7 @@ export default function ReservationList() {
                   header: t("res.col.reservation"),
                   sortValue: (r) => r.name,
                   cell: (r) => (
-                    <span className="block">
+                    <span className="block whitespace-nowrap">
                       <span className="font-medium text-zinc-900">{r.name}</span>
                       {r.tex_booking && <span className="block text-xs text-zinc-500">{r.tex_booking}</span>}
                     </span>
@@ -182,12 +195,14 @@ export default function ReservationList() {
                   sortValue: (r) => r.guest_name ?? "",
                   cell: (r) => (
                     <span className="block min-w-0">
-                      <span className="block max-w-[12rem] truncate">{r.guest_name || "—"}</span>
-                      <span className="block text-xs text-zinc-500 md:hidden">{hotelName(hotels, r.property)}</span>
+                      <span className="block max-w-[14rem] truncate">{r.guest_name || "—"}</span>
+                      <span className="block max-w-[14rem] truncate text-xs text-zinc-500">
+                        {hotelName(hotels, r.property)}
+                        {r.tex_sales_channel ? ` · ${L.channel(r.tex_sales_channel)}` : ""}
+                      </span>
                     </span>
                   ),
                 },
-                { key: "property", header: t("core.shell.hotel"), hideBelow: "md", sortValue: (r) => r.property, cell: (r) => hotelName(hotels, r.property) },
                 {
                   key: "stay",
                   header: t("res.col.stay"),
@@ -204,9 +219,9 @@ export default function ReservationList() {
                   header: t("res.col.room"),
                   hideBelow: "lg",
                   cell: (r) => (
-                    <span className="block">
-                      {r.room_type_name || r.room_type}
-                      <span className="block text-xs text-zinc-500">{L.board(r.tex_board)}</span>
+                    <span className="block max-w-[12rem]">
+                      <span className="block truncate">{r.room_type_name || r.room_type}</span>
+                      <span className="block truncate text-xs text-zinc-500">{L.board(r.tex_board)}</span>
                     </span>
                   ),
                 },
@@ -217,7 +232,6 @@ export default function ReservationList() {
                   align: "right",
                   cell: (r) => `${num(r.adults)} + ${num(r.children)}`,
                 },
-                { key: "channel", header: t("res.col.channel"), hideBelow: "lg", cell: (r) => L.channel(r.tex_sales_channel) },
                 {
                   key: "status",
                   header: t("core.label.status"),
@@ -237,6 +251,7 @@ export default function ReservationList() {
                 },
               ]}
             />
+            </div>
             {(page > 0 || hasNext) && (
               <nav aria-label={t("res.list.paging")} className="flex items-center justify-between gap-3 border-t border-zinc-100 px-4 py-3 text-sm">
                 <span className="text-zinc-600">{t("res.list.showing", { from: page * PAGE + 1, to: page * PAGE + (rows?.length ?? 0) })}</span>
@@ -261,6 +276,60 @@ export default function ReservationList() {
         )}
       </Card>
     </>
+  )
+}
+
+function MobileList({
+  rows,
+  loading,
+  hotels,
+  canPrice,
+  empty,
+}: {
+  rows: ReservationRow[] | undefined
+  loading: boolean
+  hotels: { name: string; property_name: string }[]
+  canPrice: (property: string) => boolean
+  empty: string
+}) {
+  const { t } = useTexT()
+  const L = useLabels()
+  if (loading && !rows)
+    return (
+      <div className="space-y-2 p-3 sm:hidden" aria-busy="true">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 w-full" />
+        ))}
+      </div>
+    )
+  if (!rows?.length) return <div className="sm:hidden">{!loading && <EmptyState title={empty} />}</div>
+  return (
+    <ul className="divide-y divide-zinc-100 sm:hidden" aria-label={t("res.list.caption")}>
+      {rows.map((r) => (
+        <li key={r.name}>
+          <Link to={`/tex/reservations/${encodeURIComponent(r.name)}`} className="block px-4 py-3 hover:bg-zinc-50 focus-visible:bg-tex-50">
+            <span className="flex items-start justify-between gap-2">
+              <span className="min-w-0">
+                <span className="block font-medium text-zinc-900">{r.guest_name || "—"}</span>
+                <span className="block text-xs text-zinc-500">
+                  {r.name} · {hotelName(hotels, r.property)}
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                {canPrice(r.property) && <Money amount={r.total} currency={r.tex_currency} className="block text-sm font-medium" />}
+              </span>
+            </span>
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-600">
+              <span>
+                {date(r.check_in_date, "short")} – {date(r.check_out_date, "short")} · {t("core.label.nights", { count: r.nights })}
+              </span>
+              <Badge tone={statusTone(r.status)}>{L.status(r.status)}</Badge>
+              {r.tex_guest_change_pending ? <Badge tone="warning">{t("res.badge.guest_change")}</Badge> : null}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }
 

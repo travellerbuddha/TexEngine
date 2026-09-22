@@ -212,7 +212,7 @@ function DetailView({
             <CardBody className="space-y-4">
               {texPriced ? (
                 <>
-                  <PriceBreakdown quote={snap} nightly={d.nightly} canCost={canCost} />
+                  <PriceBreakdown quote={snap} nightly={d.nightly} canCost={canCost} finalTotal={snap.override_amount} />
                   {snap.override_amount && (
                     <Notice tone="warning">
                       {t("res.snap.override")} <Money amount={snap.override_amount} currency={d.currency} className="font-semibold" />
@@ -278,7 +278,7 @@ function DetailView({
           <Card>
             <CardHeader title={t("res.rev.title")} description={t("res.rev.subtitle")} />
             <CardBody>
-              <RevisionTimeline revisions={d.revisions} />
+              <RevisionTimeline revisions={d.revisions} property={d.property} />
             </CardBody>
           </Card>
         </div>
@@ -306,6 +306,7 @@ function DetailView({
           {d.booking && caps.has("price.view") && (
             <PaymentSummaryCard
               booking={d.booking}
+              version={`${d.revision_no ?? 0}:${d.status}`}
               reservation={d.name}
               guestName={d.guest?.full_name}
               guestEmail={d.guest?.email ?? undefined}

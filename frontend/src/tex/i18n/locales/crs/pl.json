@@ -1,6 +1,9 @@
 {
  "crs.age.infant": "Poniżej 1 roku",
  "crs.age.infant_short": "<1",
+ "crs.approval.approved": "Zaakceptowano",
+ "crs.approval.pending": "Oczekuje na akceptację",
+ "crs.approval.rejected": "Odrzucono",
  "crs.basis.current": "Aktualne ceny",
  "crs.basis.historical_sale_date": "Wybrana data sprzedaży",
  "crs.basis.manual": "Cena ręczna",
@@ -312,9 +315,11 @@
  "crs.quote.amount": "Kwota",
  "crs.quote.announce_ready": "Wycena gotowa",
  "crs.quote.avg_night": "Średnio za noc",
+ "crs.quote.calculated_total": "Suma wyliczona",
  "crs.quote.discounts": "Rabaty",
  "crs.quote.extra_failed": "Nie dodano {name}: {reason}",
  "crs.quote.failed": "Nie udało się przygotować wyceny",
+ "crs.quote.final_manual": "Cena końcowa (ustawiona ręcznie)",
  "crs.quote.get": "Wyceń",
  "crs.quote.night": "Noc",
  "crs.quote.nightly": "Ceny za noc ({count})",
@@ -397,6 +402,11 @@
  "crs.search.rooms": "Pokoje i goście",
  "crs.search.submit": "Szukaj",
  "crs.search.title": "Wyszukiwanie",
+ "crs.source.api": "API",
+ "crs.source.call_center": "Call center",
+ "crs.source.desk": "Recepcja",
+ "crs.source.guest": "Gość (samoobsługa)",
+ "crs.source.system": "System",
  "crs.status.active": "Aktywny",
  "crs.status.cancelled": "Anulowana",
  "crs.status.checked_in": "Zameldowany",
@@ -436,5 +446,8 @@
  "crs.text.due_now": "teraz do zapłaty {amount} ({method})",
  "crs.text.extras": "Usługi dodatkowe",
  "crs.text.total": "Razem",
- "crs.text.valid_until": "Wycena jest ważna do {time}."
+ "crs.text.valid_until": "Wycena jest ważna do {time}.",
+ "crs.txn.charge": "Obciążenie",
+ "crs.txn.refund": "Zwrot",
+ "crs.txn.void": "Unieważnienie"
 }

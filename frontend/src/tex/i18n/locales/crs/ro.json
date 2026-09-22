@@ -1,6 +1,9 @@
 {
  "crs.age.infant": "Sub 1 an",
  "crs.age.infant_short": "<1",
+ "crs.approval.approved": "Aprobat",
+ "crs.approval.pending": "Aprobare în așteptare",
+ "crs.approval.rejected": "Respins",
  "crs.basis.current": "Prețuri actuale",
  "crs.basis.historical_sale_date": "Dată de vânzare aleasă",
  "crs.basis.manual": "Preț manual",
@@ -302,9 +305,11 @@
  "crs.quote.amount": "Sumă",
  "crs.quote.announce_ready": "Oferta este gata",
  "crs.quote.avg_night": "Medie pe noapte",
+ "crs.quote.calculated_total": "Total calculat",
  "crs.quote.discounts": "Reduceri",
  "crs.quote.extra_failed": "{name} nu a fost adăugat: {reason}",
  "crs.quote.failed": "Oferta nu a putut fi generată",
+ "crs.quote.final_manual": "Preț final (setat manual)",
  "crs.quote.get": "Obține oferta",
  "crs.quote.night": "Noapte",
  "crs.quote.nightly": "Prețuri pe noapte ({count})",
@@ -384,6 +389,11 @@
  "crs.search.rooms": "Camere și oaspeți",
  "crs.search.submit": "Caută",
  "crs.search.title": "Căutare",
+ "crs.source.api": "API",
+ "crs.source.call_center": "Call center",
+ "crs.source.desk": "Recepție",
+ "crs.source.guest": "Oaspete (autoservire)",
+ "crs.source.system": "Sistem",
  "crs.status.active": "Activ",
  "crs.status.cancelled": "Anulată",
  "crs.status.checked_in": "Cazat",
@@ -423,5 +433,8 @@
  "crs.text.due_now": "{amount} de plată acum prin {method}",
  "crs.text.extras": "Servicii suplimentare",
  "crs.text.total": "Total",
- "crs.text.valid_until": "Această ofertă este valabilă până la {time}."
+ "crs.text.valid_until": "Această ofertă este valabilă până la {time}.",
+ "crs.txn.charge": "Încasare",
+ "crs.txn.refund": "Rambursare",
+ "crs.txn.void": "Anulare"
 }

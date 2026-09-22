@@ -1,6 +1,9 @@
 {
  "crs.age.infant": "Under 1",
  "crs.age.infant_short": "<1",
+ "crs.approval.approved": "Approved",
+ "crs.approval.pending": "Approval pending",
+ "crs.approval.rejected": "Rejected",
  "crs.basis.current": "Current prices",
  "crs.basis.historical_sale_date": "Chosen sale date",
  "crs.basis.manual": "Manual price",
@@ -292,9 +295,11 @@
  "crs.quote.amount": "Amount",
  "crs.quote.announce_ready": "Quote ready",
  "crs.quote.avg_night": "Average per night",
+ "crs.quote.calculated_total": "Calculated total",
  "crs.quote.discounts": "Discounts",
  "crs.quote.extra_failed": "{name} not added: {reason}",
  "crs.quote.failed": "The quote could not be made",
+ "crs.quote.final_manual": "Final price (set manually)",
  "crs.quote.get": "Get quote",
  "crs.quote.night": "Night",
  "crs.quote.nightly": "Nightly prices ({count})",
@@ -371,6 +376,11 @@
  "crs.search.rooms": "Rooms and guests",
  "crs.search.submit": "Search",
  "crs.search.title": "Search",
+ "crs.source.api": "API",
+ "crs.source.call_center": "Call center",
+ "crs.source.desk": "Desk",
+ "crs.source.guest": "Guest (self-service)",
+ "crs.source.system": "System",
  "crs.status.active": "Active",
  "crs.status.cancelled": "Cancelled",
  "crs.status.checked_in": "Checked in",
@@ -410,5 +420,8 @@
  "crs.text.due_now": "{amount} due now by {method}",
  "crs.text.extras": "Extras",
  "crs.text.total": "Total",
- "crs.text.valid_until": "This quote is valid until {time}."
+ "crs.text.valid_until": "This quote is valid until {time}.",
+ "crs.txn.charge": "Charge",
+ "crs.txn.refund": "Refund",
+ "crs.txn.void": "Void"
 }

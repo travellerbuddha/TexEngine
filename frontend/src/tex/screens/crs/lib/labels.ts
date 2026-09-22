@@ -35,6 +35,9 @@ export function useLabels() {
       method: (m: string | null | undefined) => lookup("crs.method", m),
       changeType: (c: string | null | undefined) => lookup("crs.change", c),
       basis: (b: string | null | undefined) => lookup("crs.basis", b),
+      txn: (x: string | null | undefined) => lookup("crs.txn", x),
+      source: (x: string | null | undefined) => lookup("crs.source", x),
+      approval: (x: string | null | undefined) => lookup("crs.approval", x),
     }),
     [t, lookup],
   )

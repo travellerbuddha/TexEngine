@@ -1,6 +1,9 @@
 {
  "crs.age.infant": "До 1 года",
  "crs.age.infant_short": "<1",
+ "crs.approval.approved": "Одобрено",
+ "crs.approval.pending": "Ожидает одобрения",
+ "crs.approval.rejected": "Отклонено",
  "crs.basis.current": "Текущие цены",
  "crs.basis.historical_sale_date": "Выбранная дата продажи",
  "crs.basis.manual": "Цена вручную",
@@ -312,9 +315,11 @@
  "crs.quote.amount": "Сумма",
  "crs.quote.announce_ready": "Расчёт готов",
  "crs.quote.avg_night": "В среднем за ночь",
+ "crs.quote.calculated_total": "Расчётный итог",
  "crs.quote.discounts": "Скидки",
  "crs.quote.extra_failed": "{name} не добавлено: {reason}",
  "crs.quote.failed": "Не удалось выполнить расчёт",
+ "crs.quote.final_manual": "Итоговая цена (задана вручную)",
  "crs.quote.get": "Рассчитать",
  "crs.quote.night": "Ночь",
  "crs.quote.nightly": "Цены по ночам ({count})",
@@ -397,6 +402,11 @@
  "crs.search.rooms": "Номера и гости",
  "crs.search.submit": "Найти",
  "crs.search.title": "Поиск",
+ "crs.source.api": "API",
+ "crs.source.call_center": "Колл-центр",
+ "crs.source.desk": "Стойка",
+ "crs.source.guest": "Гость (самообслуживание)",
+ "crs.source.system": "Система",
  "crs.status.active": "Активна",
  "crs.status.cancelled": "Отменено",
  "crs.status.checked_in": "Заселён",
@@ -436,5 +446,8 @@
  "crs.text.due_now": "сейчас к оплате {amount} ({method})",
  "crs.text.extras": "Доп. услуги",
  "crs.text.total": "Итого",
- "crs.text.valid_until": "Расчёт действителен до {time}."
+ "crs.text.valid_until": "Расчёт действителен до {time}.",
+ "crs.txn.charge": "Списание",
+ "crs.txn.refund": "Возврат",
+ "crs.txn.void": "Аннулирование"
 }

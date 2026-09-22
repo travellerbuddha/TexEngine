@@ -64,7 +64,7 @@ export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean
           }}
         >
           <Field label={t("res.sim.sale_at")} hint={t("res.basis.sale_at_hint")}>
-            <Input id="sim-at" type="datetime-local" value={at} max={`${isoDay(new Date())}T23:59`} onChange={(e) => setAt(e.target.value)} data-autofocus />
+            <Input id="sim-at" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} data-autofocus />
           </Field>
           <Button type="submit" loading={busy} disabled={!at} icon={<History className="size-4" aria-hidden />}>
             {t("res.sim.run")}
