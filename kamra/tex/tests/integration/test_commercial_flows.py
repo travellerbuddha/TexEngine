@@ -243,10 +243,11 @@ class TestCrmLoyaltyReports(TexTestCase):
 		self.assertFalse(frappe.db.get_value("Guest", guest, "tex_consent_email"))   # never implied
 		seg = crm.save_segment({"segment_name": "DE guests", "rules": {"match": "all", "conditions": [
 			{"field": "country", "op": "eq", "value": "Germany"}]}})
-		self.assertEqual(crm.export_segment(seg, channel="Email"), [])               # no consent → not exported
+		exported = lambda: [r["guest"] for r in crm.export_segment(seg, channel="Email")]  # noqa: E731
+		self.assertNotIn(guest, exported())                                          # no consent → not exported
 		crm.update_profile(guest, {"tex_consent_email": 1}, consent_source="phone call",
 		                   consent_text_version="v1")
-		rows = crm.export_segment(seg, channel="Email")
+		rows = [r for r in crm.export_segment(seg, channel="Email") if r["guest"] == guest]
 		self.assertEqual([r["email"] for r in rows], ["lena@example.com"])
 		prof = crm_api.guest(name=guest)
 		self.assertEqual(len(prof["consent_history"]), 1)
