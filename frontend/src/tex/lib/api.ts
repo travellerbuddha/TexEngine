@@ -13,6 +13,8 @@ export type TexModule =
   | "crm"
   | "reports"
   | "admin"
+  // area helper modules (kamra/tex/api/ui_<area>.py)
+  | `ui_${string}`
 
 export class TexApiError extends Error {
   status: number

@@ -40,6 +40,9 @@ function detect(): TexLang {
 }
 
 let current: TexLang = detect()
+// <html lang> drives hyphenation, screen readers and locale-aware text-transform
+// (Turkish uppercase: "Tarih" → "TARİH", not "TARIH")
+if (typeof document !== "undefined") document.documentElement.setAttribute("lang", current)
 
 export function getTexLang(): TexLang {
   return current

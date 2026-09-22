@@ -10,7 +10,7 @@ import { isInteger, useEvent, useIntentKey } from "../lib"
 import type { Guest, LoyaltyAccount, LoyaltyEntry, LoyaltyProgramInfo, Stay } from "../types"
 
 /** Our optional helper module (kamra/tex/api/ui_backoffice_crm_payments.py). */
-export const UI_MODULE = "ui_backoffice_crm_payments" as TexModule
+export const UI_MODULE: TexModule = "ui_backoffice_crm_payments"
 
 const entryKey = (e: string) => `crm.loyalty.entry.${e.toLowerCase()}`
 const statusKey = (s: string) => `crm.loyalty.status.${s.toLowerCase()}`

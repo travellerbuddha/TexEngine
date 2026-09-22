@@ -13,6 +13,10 @@ const FOCUSABLE =
 /** Focus trap + Esc + restore focus on close (WAI-ARIA dialog pattern). */
 function useModal(open: boolean, onClose: () => void) {
   const panel = useRef<HTMLDivElement>(null)
+  // keep the latest close handler without re-running the effect: re-running would
+  // steal focus back to the first field whenever a parent re-renders
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   useEffect(() => {
     if (!open) return
     const previous = document.activeElement as HTMLElement | null
@@ -22,7 +26,7 @@ function useModal(open: boolean, onClose: () => void) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation()
-        onClose()
+        closeRef.current()
       }
       if (e.key !== "Tab" || !el) return
       const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((n) => n.offsetParent !== null)
@@ -45,7 +49,7 @@ function useModal(open: boolean, onClose: () => void) {
       document.body.style.overflow = overflow
       previous?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
   return panel
 }
 
