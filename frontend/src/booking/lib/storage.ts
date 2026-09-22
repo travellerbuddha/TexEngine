@@ -147,7 +147,16 @@ export function instructionsFor(booking: string) {
   return getJSON<Record<string, string | null>>(`tex.instructions.${booking}`)
 }
 
+/** Running inside the widget's modal iframe (?embed=1 on the first page, remembered
+ * for the rest of the flow). Never true for a top-level page. */
 export function isEmbedded() {
+  let framed = true
+  try {
+    framed = window.self !== window.top
+  } catch {
+    /* cross-origin parent: framed */
+  }
+  if (!framed) return false
   if (getItem("tex.embed") === "1") return true
   try {
     if (new URLSearchParams(window.location.search).get("embed") === "1") {
