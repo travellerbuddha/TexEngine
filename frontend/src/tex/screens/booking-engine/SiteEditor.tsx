@@ -210,7 +210,7 @@ export default function SiteEditor({ isNew = false }: { isNew?: boolean }) {
 
       <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-end gap-2 rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 shadow-tex-card backdrop-blur">
         <span className="mr-auto text-xs font-medium" aria-live="polite">
-          {dirty ? <span className="text-amber-800">{t("be.unsaved")}</span> : !isNew ? <span className="text-zinc-500">{t("be.all_saved")}</span> : null}
+          {dirty ? <span className="text-amber-800">{t("be.unsaved")}</span> : !isNew ? <span className="hidden text-zinc-500 sm:inline">{t("be.all_saved")}</span> : null}
         </span>
         {isNew ? (
           <Button variant="secondary" onClick={() => navigate("/tex/booking-engine")}>

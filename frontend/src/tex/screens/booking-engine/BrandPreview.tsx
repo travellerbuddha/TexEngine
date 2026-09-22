@@ -123,7 +123,7 @@ export function BrandPreview({ site }: { site: Site }) {
             <div className={cn("relative overflow-hidden", mobile ? "h-40" : "h-44")} style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}>
               {hero && <img src={hero} alt="" className="absolute inset-0 size-full object-cover" />}
               <div className="absolute inset-0 bg-black/30" aria-hidden />
-              <div className={cn("relative flex h-full flex-col justify-center px-5 text-white", site.header_layout === "center" && "items-center text-center")}>
+              <div className={cn("relative flex h-full flex-col justify-center px-5 text-[#ffffff]", site.header_layout === "center" && "items-center text-center")}>
                 <p className={cn("leading-tight font-semibold", mobile ? "text-[17px]" : "text-[22px]")}>{headline}</p>
                 <p className="mt-1 text-[12px] opacity-90">{tagline}</p>
               </div>
