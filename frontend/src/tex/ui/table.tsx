@@ -31,7 +31,8 @@ export interface DataTableProps<T> {
   rowClassName?: (row: T) => string | undefined
 }
 
-const HIDE = { sm: "hidden sm:table-cell", md: "hidden md:table-cell", lg: "hidden lg:table-cell" }
+/** Responsive visibility classes of `Column.hideBelow` (reuse them in footer rows). */
+export const HIDE = { sm: "hidden sm:table-cell", md: "hidden md:table-cell", lg: "hidden lg:table-cell" }
 
 /** Accessible, sortable table. Rows with onRowClick are keyboard reachable
  * (Enter/Space open them) and announce as buttons. */

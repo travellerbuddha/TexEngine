@@ -87,6 +87,14 @@ export function dateTime(v: string | Date | null | undefined, locale = intlLocal
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(d)
 }
 
+/** "2026-10" or a date → "Oct 2026" (locale aware). */
+export function month(v: string | Date | null | undefined, locale = intlLocale(getTexLang())) {
+  if (!v) return "—"
+  const d = typeof v === "string" && /^\d{4}-\d{2}$/.test(v) ? toDate(`${v}-01`) : toDate(v as string | Date)
+  if (Number.isNaN(d.getTime())) return "—"
+  return new Intl.DateTimeFormat(locale, { month: "short", year: "numeric" }).format(d)
+}
+
 export function weekday(v: string, locale = intlLocale(getTexLang())) {
   return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(toDate(v))
 }

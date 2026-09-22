@@ -172,3 +172,15 @@ class TestRestBypass(TexTestCase):
 		scope.clear_cache()
 		with self.assertRaises(frappe.PermissionError):
 			policy_api.add_manual_rate("EUR", "TRY", "48.10", frappe.utils.nowdate())
+
+	def test_group_sites_listed_only_for_their_group(self):
+		grp = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
+		site = frappe.get_doc({"doctype": "TEX Booking Site", "site_name": "Group site", "site_slug": "sec-group-site",
+		                       "enabled": 1, "hotel_group": grp}).insert(ignore_permissions=True)
+		frappe.set_user(self.gm)  # nosemgrep: frappe-setuser -- admin of a hotel outside the group
+		scope.clear_cache()
+		names = [r["name"] for r in policy_api.list_records(doctype="TEX Booking Site", property=OTHER)]
+		self.assertNotIn(site.name, names)
+		frappe.set_user(self.agent)  # nosemgrep: frappe-setuser -- a user of the group's hotel sees it
+		scope.clear_cache()
+		self.assertIn(site.name, [r["name"] for r in policy_api.list_records(doctype="TEX Booking Site")])

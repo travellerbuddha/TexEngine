@@ -32,12 +32,15 @@ export function Field({ label, hint, error, required, className, children, inlin
   const id = useId()
   const hintId = hint ? `${id}-hint` : undefined
   const errId = error ? `${id}-err` : undefined
+  const own = isValidElement(children) ? children.props : {}
   const control = isValidElement(children)
     ? cloneElement(children, {
-        id: (children.props.id as string | undefined) ?? id,
-        "aria-describedby": [hintId, errId].filter(Boolean).join(" ") || undefined,
-        "aria-invalid": error ? true : undefined,
-        "aria-required": required || undefined,
+        id: (own.id as string | undefined) ?? id,
+        // merge with the control's own ARIA instead of overwriting it
+        "aria-describedby":
+          [own["aria-describedby"] as string | undefined, hintId, errId].filter(Boolean).join(" ") || undefined,
+        "aria-invalid": error ? true : (own["aria-invalid"] as boolean | undefined),
+        "aria-required": required || (own["aria-required"] as boolean | undefined),
       })
     : children
   const controlId = (isValidElement(children) && (children.props.id as string | undefined)) || id

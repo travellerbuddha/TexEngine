@@ -40,11 +40,15 @@ export default defineConfig(({ command }) => ({
     // (e.g. KAMRA_DEV_PORT=5174 KAMRA_API_TARGET=http://localhost:8080
     // KAMRA_API_HOST=test.localhost).
     port: Number(process.env.KAMRA_DEV_PORT) || 5173,
-    proxy: {
-      "/api": {
-        target: process.env.KAMRA_API_TARGET || "http://localhost:8000",
-        headers: { Host: process.env.KAMRA_API_HOST || "kamra.localhost" },
-      },
-    },
+    proxy: Object.fromEntries(
+      // API calls and uploaded files come from the bench
+      ["/api", "/files", "/private/files"].map((path) => [
+        path,
+        {
+          target: process.env.KAMRA_API_TARGET || "http://localhost:8000",
+          headers: { Host: process.env.KAMRA_API_HOST || "kamra.localhost" },
+        },
+      ]),
+    ),
   },
 }))

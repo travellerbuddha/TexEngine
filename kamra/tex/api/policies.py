@@ -81,10 +81,22 @@ def list_records(doctype: str, property: str | None = None, include_archived: in
 	fields = ["name", "modified"] + [df.fieldname for df in meta.fields
 	                                 if df.in_list_view or df.fieldname in ("property", "tex_status", "revision_no",
 	                                                                        "revision_of", "active_from", "active_to")]
+	if meta.has_field("hotel_group"):
+		fields.append("hotel_group")
 	rows = frappe.get_all(doctype, filters=filters, fields=list(dict.fromkeys(fields)), order_by="modified desc",
 	                      limit=500)
 	allowed = scope.permitted_properties()
-	return [r for r in rows if not r.get("property") or r.property in allowed]
+	groups = {g for g in frappe.get_all("Property", filters={"name": ("in", list(allowed) or [""])},
+	                                    pluck="tex_hotel_group") if g}
+
+	def visible(r) -> bool:
+		if r.get("property"):
+			return r.property in allowed
+		if r.get("hotel_group"):          # group-level record: only for users of that group
+			return r.hotel_group in groups or scope.is_platform_admin()
+		return True
+
+	return [r for r in rows if visible(r)]
 
 
 @frappe.whitelist()
