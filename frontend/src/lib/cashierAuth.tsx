@@ -53,6 +53,8 @@ export function CashierAuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    // TEX screens have no cashier till; the status is fetched on demand there
+    if (/\/tex(\/|$)/.test(window.location.pathname)) return
     void refresh()
   }, [refresh])
 

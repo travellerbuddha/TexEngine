@@ -1,0 +1,38 @@
+{
+ "dash.abandoned": "Açık terk edilmiş rezervasyonlar",
+ "dash.adr": "ADR",
+ "dash.arrivals": "Girişler",
+ "dash.attention": "İlgilenilmesi gerekenler",
+ "dash.bookings_created": "Oluşturulan rezervasyonlar",
+ "dash.by_channel": "Kanala göre üretim",
+ "dash.by_channel_hint": "Dönem içindeki konaklama geceleri, oransal.",
+ "dash.cancellations": {
+  "other": "{count} iptal ({rate})"
+ },
+ "dash.col.bookings": "Rezervasyon",
+ "dash.col.channel": "Kanal",
+ "dash.col.revenue": "Gelir",
+ "dash.col.room_nights": "Oda gecesi",
+ "dash.conversion": "Rezervasyon motoru dönüşümü",
+ "dash.departures": "Çıkışlar",
+ "dash.guest_changes": "İncelenecek misafir değişiklikleri",
+ "dash.kpis": "Temel göstergeler",
+ "dash.no_pickup": "Bu dönemde satış yok",
+ "dash.no_reports": "Rolünüzün ticari rakamlara erişimi yok.",
+ "dash.no_stays": "Bu dönemde henüz konaklama yok",
+ "dash.on_the_books": "Konaklama tarihine göre kesinleşen",
+ "dash.open_balance": "Açık bakiyeler",
+ "dash.period": "{from} – {to}",
+ "dash.pickup": "Satış tarihine göre pick-up",
+ "dash.pickup_hint": "Dönemde günlük satılan oda geceleri.",
+ "dash.range": "Dönem",
+ "dash.range.next_30": "Önümüzdeki 30 gün",
+ "dash.range.next_90": "Önümüzdeki 90 gün",
+ "dash.range.this_month": "Bu ay",
+ "dash.revenue": "Oda geliri",
+ "dash.room_nights": "Oda geceleri",
+ "dash.searches": {
+  "other": "{count} arama oturumu"
+ },
+ "dash.today": "Bugün"
+}

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build -c vite.widget.config.ts",
     "preview": "vite preview",
     "i18n:extract": "node scripts/i18n-extract.mjs",
     "i18n:import": "node scripts/i18n-import.mjs"

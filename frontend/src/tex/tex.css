@@ -1,0 +1,51 @@
+/* TEX design system tokens (ADR-012/R-34). Utilities: bg-tex-600, text-tex-700 …
+   Surfaces reuse the app's zinc scale, which index.css remaps for dark mode. */
+@theme {
+  --color-tex-50: #eef4ff;
+  --color-tex-100: #dbe7ff;
+  --color-tex-200: #bcd2ff;
+  --color-tex-300: #8db2fb;
+  --color-tex-400: #5a8af5;
+  --color-tex-500: #3667ea;
+  --color-tex-600: #2250d1;
+  --color-tex-700: #1c3fa8;
+  --color-tex-800: #1b3584;
+  --color-tex-900: #1a2f69;
+  --color-tex-950: #111c3d;
+  --radius-tex: 0.625rem;
+  --shadow-tex-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 1px 3px rgb(16 24 40 / 0.06);
+  --shadow-tex-pop: 0 12px 32px -8px rgb(16 24 40 / 0.22), 0 4px 8px -4px rgb(16 24 40 / 0.1);
+}
+
+.dark {
+  --color-tex-50: #121d3a;
+  --color-tex-100: #17264d;
+  --color-tex-200: #1f3468;
+  --color-tex-300: #2c4a93;
+  --color-tex-400: #4f78e0;
+  --color-tex-500: #6d91f0;
+  --color-tex-600: #7fa0f5;
+  --color-tex-700: #a9c1fa;
+  --color-tex-800: #c9d8fc;
+  --color-tex-900: #e3ebff;
+  --color-tex-950: #f2f6ff;
+}
+
+/* Visible, consistent keyboard focus for every TEX control (WCAG 2.4.7 / 2.4.11). */
+.tex-root :focus-visible {
+  outline: 2px solid var(--color-tex-500);
+  outline-offset: 2px;
+}
+
+.tex-root {
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tex-root *,
+  .tex-root *::before,
+  .tex-root *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

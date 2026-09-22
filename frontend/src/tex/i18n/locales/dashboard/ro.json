@@ -1,0 +1,42 @@
+{
+ "dash.abandoned": "Rezervări abandonate deschise",
+ "dash.adr": "ADR",
+ "dash.arrivals": "Sosiri",
+ "dash.attention": "Necesită atenție",
+ "dash.bookings_created": "Rezervări create",
+ "dash.by_channel": "Producție pe canale",
+ "dash.by_channel_hint": "Nopți de sejur în perioadă, proporțional.",
+ "dash.cancellations": {
+  "few": "{count} anulări ({rate})",
+  "one": "{count} anulare ({rate})",
+  "other": "{count} de anulări ({rate})"
+ },
+ "dash.col.bookings": "Rezervări",
+ "dash.col.channel": "Canal",
+ "dash.col.revenue": "Venit",
+ "dash.col.room_nights": "Nopți-cameră",
+ "dash.conversion": "Conversie motor rezervări",
+ "dash.departures": "Plecări",
+ "dash.guest_changes": "Modificări ale oaspeților de verificat",
+ "dash.kpis": "Indicatori cheie",
+ "dash.no_pickup": "Nicio vânzare în această perioadă",
+ "dash.no_reports": "Rolul dvs. nu are acces la cifrele comerciale.",
+ "dash.no_stays": "Încă nu există sejururi în această perioadă",
+ "dash.on_the_books": "Rezervat, după data sejurului",
+ "dash.open_balance": "Solduri deschise",
+ "dash.period": "{from} – {to}",
+ "dash.pickup": "Pick-up după data rezervării",
+ "dash.pickup_hint": "Nopți-cameră vândute pe zi în perioadă.",
+ "dash.range": "Perioadă",
+ "dash.range.next_30": "Următoarele 30 de zile",
+ "dash.range.next_90": "Următoarele 90 de zile",
+ "dash.range.this_month": "Luna aceasta",
+ "dash.revenue": "Venit cazare",
+ "dash.room_nights": "Nopți-cameră",
+ "dash.searches": {
+  "few": "{count} sesiuni de căutare",
+  "one": "{count} sesiune de căutare",
+  "other": "{count} de sesiuni de căutare"
+ },
+ "dash.today": "Astăzi"
+}

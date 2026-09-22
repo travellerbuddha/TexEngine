@@ -255,7 +255,7 @@ export default function AppShell() {
       <NavLink
         key={item.to}
         to={item.to!}
-        end={item.to === "/"}
+        end={item.to === "/" || item.to === "/today"}
         className={({ isActive }) =>
           cn(
             "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium",

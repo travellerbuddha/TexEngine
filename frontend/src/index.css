@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./tex/tex.css";
 
 @theme {
   /* Kamra brand: deep hotel green, warm neutrals */

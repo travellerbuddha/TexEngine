@@ -1,0 +1,40 @@
+{
+ "dash.abandoned": "Offene abgebrochene Buchungen",
+ "dash.adr": "ADR",
+ "dash.arrivals": "Anreisen",
+ "dash.attention": "Handlungsbedarf",
+ "dash.bookings_created": "Erstellte Reservierungen",
+ "dash.by_channel": "Produktion nach Kanal",
+ "dash.by_channel_hint": "Aufenthaltsnächte im Zeitraum, anteilig.",
+ "dash.cancellations": {
+  "one": "{count} Stornierung ({rate})",
+  "other": "{count} Stornierungen ({rate})"
+ },
+ "dash.col.bookings": "Buchungen",
+ "dash.col.channel": "Kanal",
+ "dash.col.revenue": "Umsatz",
+ "dash.col.room_nights": "Zimmernächte",
+ "dash.conversion": "Conversion Buchungsmaschine",
+ "dash.departures": "Abreisen",
+ "dash.guest_changes": "Zu prüfende Gästeänderungen",
+ "dash.kpis": "Kennzahlen",
+ "dash.no_pickup": "Keine Verkäufe in diesem Zeitraum",
+ "dash.no_reports": "Ihre Rolle hat keinen Zugriff auf Kennzahlen.",
+ "dash.no_stays": "Noch keine Aufenthalte in diesem Zeitraum",
+ "dash.on_the_books": "Gebucht, nach Aufenthaltsdatum",
+ "dash.open_balance": "Offene Salden",
+ "dash.period": "{from} – {to}",
+ "dash.pickup": "Pick-up nach Buchungsdatum",
+ "dash.pickup_hint": "Pro Tag verkaufte Zimmernächte im Zeitraum.",
+ "dash.range": "Zeitraum",
+ "dash.range.next_30": "Nächste 30 Tage",
+ "dash.range.next_90": "Nächste 90 Tage",
+ "dash.range.this_month": "Dieser Monat",
+ "dash.revenue": "Logisumsatz",
+ "dash.room_nights": "Zimmernächte",
+ "dash.searches": {
+  "one": "{count} Suchsitzung",
+  "other": "{count} Suchsitzungen"
+ },
+ "dash.today": "Heute"
+}

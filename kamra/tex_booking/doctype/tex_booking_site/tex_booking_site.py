@@ -17,6 +17,8 @@ class TEXBookingSite(Document):
 		self.site_slug = re.sub(r"[^a-z0-9-]+", "-", (self.site_slug or "").lower()).strip("-")
 		if not self.site_slug:
 			frappe.throw(_("Slug is required."))
+		if self.site_slug in ("pay", "api", "assets", "manage", "widget"):
+			frappe.throw(_("{0} is reserved; choose another slug.").format(self.site_slug))
 		if not self.property and not self.hotel_group:
 			frappe.throw(_("A booking site serves a hotel or a hotel group."))
 		for f in ("primary_color", "accent_color", "background_color"):

@@ -81,12 +81,12 @@ kamra_localization = {
 # injected; every deep link falls through to it so browser refresh works.
 website_route_rules = [
 	{"from_route": "/kamra/<path:app_path>", "to_route": "kamra"},
+	# TEX guest booking engine (separate bundle, ADR-012)
+	{"from_route": "/book/<path:app_path>", "to_route": "book"},
 ]
 
 # Clean, shareable guest URLs redirect into the SPA's routes.
 website_redirects = [
-	{"source": r"/book$", "target": "/kamra/book"},
-	{"source": r"/book/(.*)", "target": r"/kamra/book/\1"},
 	{"source": r"/stay$", "target": "/kamra/stay"},
 	{"source": r"/stay/(.*)", "target": r"/kamra/stay/\1"},
 	{"source": r"/hk$", "target": "/kamra/hk"},

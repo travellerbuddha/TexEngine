@@ -101,7 +101,7 @@ export const APPS: AppDef[] = [
     description: "Arrivals, departures, bookings and guests - the day's work.",
     roles: ["Front Desk", "Hotel Admin", "System Manager", "Administrator"],
     items: [
-      { to: "/", label: "Today", icon: Home },
+      { to: "/today", label: "Today", icon: Home },
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { to: "/assistant", label: "Kamra Agent", icon: Sparkles },
       { to: "/reservations", label: "Reservations", icon: ClipboardList },

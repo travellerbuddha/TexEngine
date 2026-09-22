@@ -10,6 +10,7 @@ import {
 } from "react-router-dom"
 import AppShell, { type ShellContext } from "./AppShell"
 const Login = lazy(() => import("./screens/Login"))
+const TexApp = lazy(() => import("./tex/TexApp"))
 import { useAuth } from "./lib/auth"
 import { t, useT } from "./lib/i18n"
 import { toFullPath } from "./lib/routing"
@@ -210,8 +211,12 @@ export default function App() {
         {/* dedicated login route so signing out changes the URL */}
         <Route path="login" element={<LoginPage />} />
         <Route element={<RequireAuth />}>
+          {/* TEX Engine: the default workspace (its own shell and navigation) */}
+          <Route path="tex/*" element={<TexApp />} />
+          <Route index element={<Navigate to="/tex" replace />} />
           <Route element={<AppShell />}>
-          <Route index element={<Today />} />
+          {/* legacy PMS front desk, reachable when the site keeps PMS modules */}
+          <Route path="today" element={<Today />} />
           <Route path="apps" element={<AppLauncher />} />
           <Route path="marketplace" element={<Marketplace />} />
           <Route path="agents" element={<Agents />} />

@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+import { resolve } from "node:path"
 import { defineConfig } from "vite"
 
 // Dev (`vite`): served at / on :5173, proxying /api to the Frappe bench.
@@ -13,15 +14,23 @@ export default defineConfig(({ command }) => ({
     outDir: "../kamra/public/frontend",
     emptyOutDir: true,
     sourcemap: false,
+    rollupOptions: {
+      // admin SPA (/kamra, /kamra/tex) + guest booking engine (/book, ADR-012)
+      input: {
+        index: resolve(__dirname, "index.html"),
+        booking: resolve(__dirname, "booking.html"),
+      },
+    },
   },
   server: {
     // Defaults preserved; override with env when the standard ports are taken
-    // (e.g. KAMRA_DEV_PORT=5174 KAMRA_API_TARGET=http://localhost:8080).
+    // (e.g. KAMRA_DEV_PORT=5174 KAMRA_API_TARGET=http://localhost:8080
+    // KAMRA_API_HOST=test.localhost).
     port: Number(process.env.KAMRA_DEV_PORT) || 5173,
     proxy: {
       "/api": {
         target: process.env.KAMRA_API_TARGET || "http://localhost:8000",
-        headers: { Host: "kamra.localhost" },
+        headers: { Host: process.env.KAMRA_API_HOST || "kamra.localhost" },
       },
     },
   },

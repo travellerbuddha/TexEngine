@@ -1,0 +1,40 @@
+{
+ "dash.abandoned": "Open abandoned bookings",
+ "dash.adr": "ADR",
+ "dash.arrivals": "Arrivals",
+ "dash.attention": "Needs attention",
+ "dash.bookings_created": "Reservations created",
+ "dash.by_channel": "Production by channel",
+ "dash.by_channel_hint": "Stay nights inside the period, prorated.",
+ "dash.cancellations": {
+  "one": "{count} cancellation ({rate})",
+  "other": "{count} cancellations ({rate})"
+ },
+ "dash.col.bookings": "Bookings",
+ "dash.col.channel": "Channel",
+ "dash.col.revenue": "Revenue",
+ "dash.col.room_nights": "Room nights",
+ "dash.conversion": "Booking engine conversion",
+ "dash.departures": "Departures",
+ "dash.guest_changes": "Guest changes to review",
+ "dash.kpis": "Key figures",
+ "dash.no_pickup": "No sales in this period",
+ "dash.no_reports": "Your role has no access to commercial figures.",
+ "dash.no_stays": "No stays in this period yet",
+ "dash.on_the_books": "On the books, by stay date",
+ "dash.open_balance": "Open balances",
+ "dash.period": "{from} – {to}",
+ "dash.pickup": "Pick-up by booking date",
+ "dash.pickup_hint": "Room nights sold per day in the period.",
+ "dash.range": "Period",
+ "dash.range.next_30": "Next 30 days",
+ "dash.range.next_90": "Next 90 days",
+ "dash.range.this_month": "This month",
+ "dash.revenue": "Room revenue",
+ "dash.room_nights": "Room nights",
+ "dash.searches": {
+  "one": "{count} search session",
+  "other": "{count} search sessions"
+ },
+ "dash.today": "Today"
+}
