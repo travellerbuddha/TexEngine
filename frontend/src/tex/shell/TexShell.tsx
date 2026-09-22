@@ -140,7 +140,19 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase()
     if (!term) return commands
-    return commands.filter((c) => c.id === "find" || `${c.label} ${c.hint ?? ""}`.toLowerCase().includes(term))
+    // label prefix > label contains > keyword match; "find reservation" stays last
+    const rank = (c: Command) => {
+      const label = c.label.toLowerCase()
+      if (c.id === "find") return 3
+      if (label.startsWith(term)) return 0
+      if (label.includes(term)) return 1
+      return (c.hint ?? "").toLowerCase().includes(term) ? 2 : -1
+    }
+    return commands
+      .map((c) => ({ c, r: rank(c) }))
+      .filter((x) => x.r >= 0)
+      .sort((a, b) => a.r - b.r)
+      .map((x) => x.c)
   }, [commands, q])
 
   useEffect(() => {
@@ -167,6 +179,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
           <input
             ref={input}
             role="combobox"
+            aria-label={t("core.cmd.title")}
             aria-expanded="true"
             aria-controls="tex-cmd-list"
             aria-activedescendant={filtered[active] ? `tex-cmd-${filtered[active].id}` : undefined}

@@ -30,3 +30,7 @@ dump.rdb
 
 # agent worktrees (local only)
 .claude/worktrees/
+frontend/../e2e-report/
+/e2e-report/
+/e2e-results/
+frontend/test-results/
