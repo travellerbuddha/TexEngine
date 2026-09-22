@@ -1,9 +1,10 @@
-import { forwardRef, type FormEvent } from "react"
+import { forwardRef, useRef, type FormEvent } from "react"
 import { Search } from "lucide-react"
 import { useSession } from "../../../lib/session"
 import { addDays, isoDay, nightsBetween } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, Field, Input, Select } from "../../../ui"
+import { useLabels } from "../lib/labels"
 import { CodeChips } from "./controls"
 import { PartyEditor } from "./PartyEditor"
 import type { FieldErrors, SearchFormState } from "../lib/useBookingFlow"
@@ -30,6 +31,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
 ) {
   const { t } = useTexT()
   const { boot } = useSession()
+  const L = useLabels()
   const set = (patch: Partial<SearchFormState>) => onChange({ ...form, ...patch })
   const today = isoDay(new Date())
   const nights = form.check_in && form.check_out && form.check_out > form.check_in ? nightsBetween(form.check_in, form.check_out) : 0
@@ -39,6 +41,9 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
     onSubmit()
   }
   const allHotels = form.properties.length === hotels.length
+  // Stay length the agent chose (only check-out edits change it). Moving check-in keeps it,
+  // also while a date is typed segment by segment (intermediate values are not choices).
+  const stayNights = useRef(nights || 1)
   return (
     <form onSubmit={submit} noValidate aria-label={t("crs.search.title")} className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -51,8 +56,8 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
             value={form.check_in}
             onChange={(e) => {
               const ci = e.target.value
-              const keep = form.check_in && form.check_out > form.check_in ? nightsBetween(form.check_in, form.check_out) : 1
-              set({ check_in: ci, check_out: ci && (!form.check_out || form.check_out <= ci) ? addDays(ci, keep) : form.check_out })
+              // shift check-out only once the year is complete (typing "2026" passes 0002, 0020…)
+                  set({ check_in: ci, check_out: /^[1-9]\d{3}-\d{2}-\d{2}$/.test(ci) ? addDays(ci, stayNights.current) : form.check_out })
             }}
           />
         </Field>
@@ -67,7 +72,11 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
             type="date"
             min={form.check_in ? addDays(form.check_in, 1) : today}
             value={form.check_out}
-            onChange={(e) => set({ check_out: e.target.value })}
+            onChange={(e) => {
+              const co = e.target.value
+              if (co && form.check_in && co > form.check_in) stayNights.current = Math.min(90, nightsBetween(form.check_in, co))
+              set({ check_out: co })
+            }}
           />
         </Field>
         <Field
@@ -89,7 +98,10 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
           <Select
             id={`${idPrefix}-channel`}
             value={form.channel}
-            options={boot.channels.map((c) => ({ value: c.name, label: c.channel_name || c.name }))}
+            options={boot.channels.map((c) => {
+              const known = L.channel(c.name)
+              return { value: c.name, label: known !== c.name ? known : c.channel_name || c.name }
+            })}
             onChange={(e) => set({ channel: e.target.value })}
           />
         </Field>

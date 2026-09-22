@@ -232,6 +232,11 @@ export function ModifyDrawer({
 
   const set = (patch: Partial<ModForm>) => setForm((f) => ({ ...f, ...patch }))
   const nights = form.check_out > form.check_in ? nightsBetween(form.check_in, form.check_out) : 0
+  // moving check-in keeps the stay length; only check-out edits change it
+  const stayNights = useRef(nightsBetween(initial.check_in, initial.check_out) || 1)
+  useEffect(() => {
+    if (open) stayNights.current = nightsBetween(initial.check_in, initial.check_out) || 1
+  }, [open, initial])
 
   return (
     <Drawer
@@ -274,13 +279,23 @@ export function ModifyDrawer({
                 value={form.check_in}
                 onChange={(e) => {
                   const ci = e.target.value
-                  const keep = nights || 1
-                  set({ check_in: ci, check_out: ci && form.check_out <= ci ? addDays(ci, keep) : form.check_out })
+                  // shift check-out only once the year is complete (typing "2026" passes 0002, 0020…)
+                  set({ check_in: ci, check_out: /^[1-9]\d{3}-\d{2}-\d{2}$/.test(ci) ? addDays(ci, stayNights.current) : form.check_out })
                 }}
               />
             </Field>
             <Field label={t("crs.search.check_out")} error={errors.check_out} hint={nights ? t("core.label.nights", { count: nights }) : undefined}>
-              <Input id="mod-co" type="date" min={form.check_in ? addDays(form.check_in, 1) : undefined} value={form.check_out} onChange={(e) => set({ check_out: e.target.value })} />
+              <Input
+                id="mod-co"
+                type="date"
+                min={form.check_in ? addDays(form.check_in, 1) : undefined}
+                value={form.check_out}
+                onChange={(e) => {
+                  const co = e.target.value
+                  if (co && form.check_in && co > form.check_in) stayNights.current = Math.min(90, nightsBetween(form.check_in, co))
+                  set({ check_out: co })
+                }}
+              />
             </Field>
             <Field label={t("crs.search.market")} hint={t("res.mod.market_hint")}>
               <Select

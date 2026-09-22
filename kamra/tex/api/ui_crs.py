@@ -72,6 +72,8 @@ def quote_summary(quote_ids, payment_method: str | None = None):
 	"""Server totals for the room quotes of one booking: grand total, amount due now for
 	``payment_method`` (deposit rules of each rate plan) and whether every quote can
 	still be booked."""
+	# no quote is even looked up for users who cannot book anywhere
+	scope.require("reservation.create", None)
 	ids = [str(q) for q in (parse(quote_ids, []) or [])]
 	if not ids or len(ids) > quoting.MAX_ROOMS:
 		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
@@ -141,6 +143,7 @@ def book(quote_ids, guest, booker=None, payment_method: str | None = None, confi
          notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
 	"""``crs.book`` with an optional ``booker`` ({name, email, phone}) — the person on the
 	phone when they are not the staying guest (an assistant, a travel agent)."""
+	scope.require("reservation.create", None)
 	ids = parse(quote_ids, [])
 	if not ids:
 		frappe.throw(_("Select at least one room."))

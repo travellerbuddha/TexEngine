@@ -123,7 +123,8 @@ export function PolicySummary({ rp, currency, className }: { rp: RatePlanInfo | 
           <dt className="text-xs font-medium text-zinc-500">{t("crs.policy.payment")}</dt>
           <dd className="text-zinc-800">
             {pp.name || L.deposit(pp.deposit_type)}
-            {pp.deposit_type && (
+            {/* the policy name usually says it all ("30% deposit"); spell it out only without one */}
+            {!pp.name && pp.deposit_type && (
               <span className="text-zinc-600">
                 {" "}
                 · {L.deposit(pp.deposit_type)}
