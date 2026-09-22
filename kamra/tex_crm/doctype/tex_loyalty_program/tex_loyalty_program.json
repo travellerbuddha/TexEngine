@@ -1,0 +1,184 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "program_name",
+  "property",
+  "hotel_group",
+  "enabled",
+  "column_95",
+  "currency",
+  "point_value",
+  "min_redeem_points",
+  "max_redeem_percent",
+  "pending_days",
+  "expiry_months",
+  "section_96",
+  "earn_rules",
+  "tiers",
+  "section_97",
+  "blackouts"
+ ],
+ "fields": [
+  {
+   "fieldname": "program_name",
+   "fieldtype": "Data",
+   "label": "Program",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property"
+  },
+  {
+   "fieldname": "hotel_group",
+   "fieldtype": "Link",
+   "label": "Hotel group",
+   "options": "TEX Hotel Group"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_95",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "point_value",
+   "fieldtype": "Float",
+   "label": "Value of 1 point (burn)",
+   "precision": "6"
+  },
+  {
+   "fieldname": "min_redeem_points",
+   "fieldtype": "Int",
+   "label": "Min points to redeem"
+  },
+  {
+   "fieldname": "max_redeem_percent",
+   "fieldtype": "Percent",
+   "label": "Max % of stay payable with points"
+  },
+  {
+   "fieldname": "pending_days",
+   "fieldtype": "Int",
+   "label": "Points available N days after checkout",
+   "default": "1"
+  },
+  {
+   "fieldname": "expiry_months",
+   "fieldtype": "Int",
+   "label": "Points expire after (months)",
+   "default": "24"
+  },
+  {
+   "fieldname": "section_96",
+   "fieldtype": "Section Break",
+   "label": "Earning"
+  },
+  {
+   "fieldname": "earn_rules",
+   "fieldtype": "Table",
+   "label": "Earn rules",
+   "options": "TEX Loyalty Earn Rule"
+  },
+  {
+   "fieldname": "tiers",
+   "fieldtype": "Table",
+   "label": "Tiers",
+   "options": "TEX Loyalty Tier"
+  },
+  {
+   "fieldname": "section_97",
+   "fieldtype": "Section Break",
+   "label": "Blackouts"
+  },
+  {
+   "fieldname": "blackouts",
+   "fieldtype": "Table",
+   "label": "Redemption blackouts",
+   "options": "TEX Loyalty Blackout"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX CRM",
+ "name": "TEX Loyalty Program",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "field:program_name",
+ "naming_rule": "By fieldname",
+ "track_changes": 1
+}

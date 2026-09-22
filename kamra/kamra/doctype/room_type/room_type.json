@@ -53,7 +53,13 @@
   "sb_media",
   "media",
   "disabled",
-  "overbooking_pct"
+  "overbooking_pct",
+  "tex_section_0",
+  "tex_inventory_pool",
+  "tex_sellable_inventory",
+  "tex_column_3",
+  "tex_size_sqm",
+  "tex_beds"
  ],
  "fields": [
   {
@@ -333,12 +339,44 @@
    "fieldtype": "Percent",
    "label": "Overbooking Allowance %",
    "description": "Overrides the property-wide allowance when set."
+  },
+  {
+   "fieldname": "tex_section_0",
+   "fieldtype": "Section Break",
+   "label": "TEX inventory & content"
+  },
+  {
+   "fieldname": "tex_inventory_pool",
+   "fieldtype": "Data",
+   "label": "Shared inventory pool",
+   "description": "Room types with the same pool key share inventory. Blank = own pool."
+  },
+  {
+   "fieldname": "tex_sellable_inventory",
+   "fieldtype": "Int",
+   "label": "Sellable inventory",
+   "description": "Used when the hotel's inventory source is 'Configured'."
+  },
+  {
+   "fieldname": "tex_column_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tex_size_sqm",
+   "fieldtype": "Float",
+   "label": "Size (m²)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "tex_beds",
+   "fieldtype": "Data",
+   "label": "Beds (e.g. 1 King or 2 Twin)"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-04 19:26:35.766617",
+ "modified": "2026-09-22 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Room Type",

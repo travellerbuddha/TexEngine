@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "target",
+  "position",
+  "age_band",
+  "combination",
+  "room_type",
+  "period_code",
+  "op",
+  "value",
+  "is_override",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "target",
+   "fieldtype": "Select",
+   "label": "Applies to",
+   "options": "ADULT\nCHILD\nCOMBINATION",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "position",
+   "fieldtype": "Int",
+   "label": "Position",
+   "in_list_view": 1,
+   "description": "0 = any position"
+  },
+  {
+   "fieldname": "age_band",
+   "fieldtype": "Data",
+   "label": "Age band",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "combination",
+   "fieldtype": "Data",
+   "label": "Combination",
+   "in_list_view": 1,
+   "description": "adults+children, e.g. 2+1, 1+0, 2+* ; blank = any"
+  },
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Link",
+   "label": "Room type",
+   "options": "Room Type"
+  },
+  {
+   "fieldname": "period_code",
+   "fieldtype": "Data",
+   "label": "Period"
+  },
+  {
+   "fieldname": "op",
+   "fieldtype": "Select",
+   "label": "Rule",
+   "options": "MULTIPLY\nPERCENT_OF\nFIXED\nABSOLUTE\nADJUST_PERCENT\nADD\nSUBTRACT\nINHERIT",
+   "default": "MULTIPLY",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "in_list_view": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "is_override",
+   "fieldtype": "Check",
+   "label": "Specific override"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Data",
+   "label": "Note"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Occupancy Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

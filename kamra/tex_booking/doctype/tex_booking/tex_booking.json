@@ -1,0 +1,325 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "status",
+  "sales_channel",
+  "market",
+  "created_via",
+  "sale_at",
+  "column_58",
+  "booker_guest",
+  "booker_name",
+  "booker_email",
+  "booker_phone",
+  "language",
+  "section_59",
+  "currency",
+  "total_amount",
+  "paid_amount",
+  "balance_amount",
+  "column_60",
+  "payment_status",
+  "payment_method",
+  "amount_due_now",
+  "section_61",
+  "rooms",
+  "section_62",
+  "guest_change_pending",
+  "notes",
+  "source",
+  "column_63",
+  "confirmation_sent_at",
+  "idempotency_key",
+  "manage_token_hash",
+  "manage_token_expires",
+  "booking_site"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nHeld\nPending Payment\nConfirmed\nPartially Cancelled\nCancelled",
+   "default": "Draft",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "sales_channel",
+   "fieldtype": "Link",
+   "label": "Sales channel",
+   "options": "TEX Sales Channel",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "created_via",
+   "fieldtype": "Select",
+   "label": "Created via",
+   "options": "Booking Engine\nCall Center\nAPI\nDesk\nSelf Service",
+   "default": "Desk"
+  },
+  {
+   "fieldname": "sale_at",
+   "fieldtype": "Datetime",
+   "label": "Sold at"
+  },
+  {
+   "fieldname": "column_58",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "booker_guest",
+   "fieldtype": "Link",
+   "label": "Booker",
+   "options": "Guest"
+  },
+  {
+   "fieldname": "booker_name",
+   "fieldtype": "Data",
+   "label": "Booker name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "booker_email",
+   "fieldtype": "Data",
+   "label": "Booker email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "booker_phone",
+   "fieldtype": "Data",
+   "label": "Booker phone"
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Language"
+  },
+  {
+   "fieldname": "section_59",
+   "fieldtype": "Section Break",
+   "label": "Money"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Total",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency",
+   "label": "Paid",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "balance_amount",
+   "fieldtype": "Currency",
+   "label": "Balance",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_60",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "label": "Payment status",
+   "options": "Unpaid\nPartially Paid\nPaid\nRefunded\nPay at Hotel",
+   "default": "Unpaid",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "payment_method",
+   "fieldtype": "Data",
+   "label": "Payment method"
+  },
+  {
+   "fieldname": "amount_due_now",
+   "fieldtype": "Currency",
+   "label": "Due now",
+   "options": "currency"
+  },
+  {
+   "fieldname": "section_61",
+   "fieldtype": "Section Break",
+   "label": "Rooms"
+  },
+  {
+   "fieldname": "rooms",
+   "fieldtype": "Table",
+   "label": "Rooms",
+   "options": "TEX Booking Room"
+  },
+  {
+   "fieldname": "section_62",
+   "fieldtype": "Section Break",
+   "label": "Service"
+  },
+  {
+   "fieldname": "guest_change_pending",
+   "fieldtype": "Check",
+   "label": "Guest change awaiting staff",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "label": "Source / campaign"
+  },
+  {
+   "fieldname": "column_63",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "confirmation_sent_at",
+   "fieldtype": "Datetime",
+   "label": "Confirmation sent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "idempotency_key",
+   "fieldtype": "Data",
+   "label": "Idempotency key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "manage_token_hash",
+   "fieldtype": "Data",
+   "label": "Manage token (hash)",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "manage_token_expires",
+   "fieldtype": "Datetime",
+   "label": "Manage link expires",
+   "read_only": 1
+  },
+  {
+   "fieldname": "booking_site",
+   "fieldtype": "Link",
+   "label": "Booking site",
+   "options": "TEX Booking Site"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Booking",
+ "name": "TEX Booking",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Kamra Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "TEX-.YYYY.-.#####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "booker_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1,
+ "search_fields": "booker_name,booker_email,property,status"
+}

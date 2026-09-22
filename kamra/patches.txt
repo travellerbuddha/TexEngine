@@ -15,3 +15,7 @@ kamra.patches.v30.ensure_turnover_profiles
 kamra.patches.v31.backfill_listing_slugs
 kamra.patches.v32.seed_cashier_ledger
 kamra.patches.v33.seed_banquet_checklists
+kamra.patches.tex.p01_foundation
+kamra.patches.tex.p02_access_grants
+kamra.patches.tex.p03_indexes
+kamra.patches.tex.p04_lock_legacy_prices

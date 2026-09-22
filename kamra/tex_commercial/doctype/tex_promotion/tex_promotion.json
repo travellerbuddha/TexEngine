@@ -1,0 +1,441 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "promotion_name",
+  "property",
+  "hotel_group",
+  "kind",
+  "trigger",
+  "code",
+  "column_34",
+  "value_type",
+  "value",
+  "currency",
+  "stage",
+  "applies_to",
+  "value_added",
+  "section_35",
+  "sale_from",
+  "sale_to",
+  "min_lead_days",
+  "max_lead_days",
+  "column_36",
+  "stay_from",
+  "stay_to",
+  "stay_match",
+  "min_nights",
+  "max_nights",
+  "section_37",
+  "markets",
+  "channels",
+  "room_types",
+  "column_38",
+  "boards",
+  "rate_plans",
+  "contracts",
+  "requires_extras",
+  "member_only",
+  "min_basket",
+  "section_39",
+  "stackable",
+  "exclusive",
+  "priority",
+  "promo_group",
+  "column_40",
+  "free_nights_stay",
+  "free_nights_pay",
+  "usage_limit",
+  "per_guest_limit",
+  "times_redeemed",
+  "legacy_voucher",
+  "section_41",
+  "tex_status",
+  "active_from",
+  "active_to",
+  "column_42",
+  "revision_no",
+  "revision_of"
+ ],
+ "fields": [
+  {
+   "fieldname": "promotion_name",
+   "fieldtype": "Data",
+   "label": "Promotion",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "in_standard_filter": 1,
+   "description": "Blank = every hotel of the hotel group."
+  },
+  {
+   "fieldname": "hotel_group",
+   "fieldtype": "Link",
+   "label": "Hotel group",
+   "options": "TEX Hotel Group"
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Kind",
+   "options": "EARLY_BOOKING\nLAST_MINUTE\nLONG_STAY\nMEMBER\nPROMO_CODE\nMARKET\nROOM\nPACKAGE\nBOOKING_DATE\nSTAY_DATE\nARRIVAL\nDEPARTURE\nSPECIAL_OFFER",
+   "default": "SPECIAL_OFFER",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "trigger",
+   "fieldtype": "Select",
+   "label": "Trigger",
+   "options": "Automatic\nCode",
+   "default": "Automatic",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "code",
+   "fieldtype": "Data",
+   "label": "Code / coupon",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_34",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "value_type",
+   "fieldtype": "Select",
+   "label": "Value type",
+   "options": "PERCENT\nFIXED_STAY\nFIXED_NIGHT\nMULTIPLIER\nFREE_NIGHTS\nVALUE_ADDED",
+   "default": "PERCENT"
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "precision": "6"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency (fixed amounts)",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "stage",
+   "fieldtype": "Select",
+   "label": "Applies to price",
+   "options": "SELL\nCOST",
+   "default": "SELL"
+  },
+  {
+   "fieldname": "applies_to",
+   "fieldtype": "Select",
+   "label": "Applies to",
+   "options": "ACCOMMODATION\nEXTRAS\nTOTAL",
+   "default": "ACCOMMODATION"
+  },
+  {
+   "fieldname": "value_added",
+   "fieldtype": "Data",
+   "label": "Value-added inclusion"
+  },
+  {
+   "fieldname": "section_35",
+   "fieldtype": "Section Break",
+   "label": "Dates"
+  },
+  {
+   "fieldname": "sale_from",
+   "fieldtype": "Date",
+   "label": "Sale from"
+  },
+  {
+   "fieldname": "sale_to",
+   "fieldtype": "Date",
+   "label": "Sale to"
+  },
+  {
+   "fieldname": "min_lead_days",
+   "fieldtype": "Int",
+   "label": "Min days before arrival"
+  },
+  {
+   "fieldname": "max_lead_days",
+   "fieldtype": "Int",
+   "label": "Max days before arrival"
+  },
+  {
+   "fieldname": "column_36",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stay_from",
+   "fieldtype": "Date",
+   "label": "Stay from"
+  },
+  {
+   "fieldname": "stay_to",
+   "fieldtype": "Date",
+   "label": "Stay to"
+  },
+  {
+   "fieldname": "stay_match",
+   "fieldtype": "Select",
+   "label": "Stay match",
+   "options": "ANY_NIGHT\nALL_NIGHTS\nARRIVAL\nDEPARTURE",
+   "default": "ANY_NIGHT"
+  },
+  {
+   "fieldname": "min_nights",
+   "fieldtype": "Int",
+   "label": "Min nights"
+  },
+  {
+   "fieldname": "max_nights",
+   "fieldtype": "Int",
+   "label": "Max nights"
+  },
+  {
+   "fieldname": "section_37",
+   "fieldtype": "Section Break",
+   "label": "Eligibility"
+  },
+  {
+   "fieldname": "markets",
+   "fieldtype": "Small Text",
+   "label": "Markets"
+  },
+  {
+   "fieldname": "channels",
+   "fieldtype": "Small Text",
+   "label": "Sales channels"
+  },
+  {
+   "fieldname": "room_types",
+   "fieldtype": "Small Text",
+   "label": "Room types"
+  },
+  {
+   "fieldname": "column_38",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "boards",
+   "fieldtype": "Small Text",
+   "label": "Boards"
+  },
+  {
+   "fieldname": "rate_plans",
+   "fieldtype": "Small Text",
+   "label": "Rate plans"
+  },
+  {
+   "fieldname": "contracts",
+   "fieldtype": "Small Text",
+   "label": "Contracts"
+  },
+  {
+   "fieldname": "requires_extras",
+   "fieldtype": "Small Text",
+   "label": "Required extras (package)"
+  },
+  {
+   "fieldname": "member_only",
+   "fieldtype": "Check",
+   "label": "Members only"
+  },
+  {
+   "fieldname": "min_basket",
+   "fieldtype": "Currency",
+   "label": "Minimum basket"
+  },
+  {
+   "fieldname": "section_39",
+   "fieldtype": "Section Break",
+   "label": "Combination & limits"
+  },
+  {
+   "fieldname": "stackable",
+   "fieldtype": "Check",
+   "label": "Stackable",
+   "default": "1"
+  },
+  {
+   "fieldname": "exclusive",
+   "fieldtype": "Check",
+   "label": "Exclusive"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  },
+  {
+   "fieldname": "promo_group",
+   "fieldtype": "Data",
+   "label": "Incompatible group"
+  },
+  {
+   "fieldname": "column_40",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "free_nights_stay",
+   "fieldtype": "Int",
+   "label": "Stay X"
+  },
+  {
+   "fieldname": "free_nights_pay",
+   "fieldtype": "Int",
+   "label": "Pay Y"
+  },
+  {
+   "fieldname": "usage_limit",
+   "fieldtype": "Int",
+   "label": "Usage limit"
+  },
+  {
+   "fieldname": "per_guest_limit",
+   "fieldtype": "Int",
+   "label": "Per-guest limit"
+  },
+  {
+   "fieldname": "times_redeemed",
+   "fieldtype": "Int",
+   "label": "Times redeemed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "legacy_voucher",
+   "fieldtype": "Link",
+   "label": "Legacy voucher",
+   "options": "Discount Voucher",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_41",
+   "fieldtype": "Section Break",
+   "label": "Revision",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "tex_status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nActive\nSuperseded\nArchived",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "active_from",
+   "fieldtype": "Datetime",
+   "label": "Active From",
+   "read_only": 1
+  },
+  {
+   "fieldname": "active_to",
+   "fieldtype": "Datetime",
+   "label": "Active To",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_42",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "revision_no",
+   "fieldtype": "Int",
+   "label": "Revision",
+   "read_only": 1,
+   "default": "1"
+  },
+  {
+   "fieldname": "revision_of",
+   "fieldtype": "Link",
+   "label": "Revision Of",
+   "options": "TEX Promotion",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Promotion",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "PRM-.#####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "promotion_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1,
+ "search_fields": "promotion_name,code,property"
+}

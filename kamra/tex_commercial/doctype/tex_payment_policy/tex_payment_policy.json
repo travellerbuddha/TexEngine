@@ -1,0 +1,137 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "policy_name",
+  "property",
+  "deposit_type",
+  "deposit_value",
+  "column_53",
+  "balance_due_days",
+  "allow_pay_at_hotel",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "policy_name",
+   "fieldtype": "Data",
+   "label": "Policy",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "deposit_type",
+   "fieldtype": "Select",
+   "label": "Pay now",
+   "options": "NONE\nPERCENT\nNIGHTS\nFULL\nFIXED",
+   "default": "FULL",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "deposit_value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "precision": "6"
+  },
+  {
+   "fieldname": "column_53",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "balance_due_days",
+   "fieldtype": "Int",
+   "label": "Balance due (days before arrival)"
+  },
+  {
+   "fieldname": "allow_pay_at_hotel",
+   "fieldtype": "Check",
+   "label": "Balance payable at hotel"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Guest-facing text"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Payment Policy",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "PAYP-.#####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "policy_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

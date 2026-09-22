@@ -16,7 +16,14 @@
   "modifier_value",
   "cancellation_policy",
   "is_default",
-  "disabled"
+  "disabled",
+  "tex_section_0",
+  "tex_refundable",
+  "tex_cancellation_policy",
+  "tex_payment_policy",
+  "tex_column_4",
+  "tex_inclusions",
+  "tex_description"
  ],
  "fields": [
   {
@@ -73,12 +80,49 @@
    "fieldname": "disabled",
    "fieldtype": "Check",
    "label": "Disabled"
+  },
+  {
+   "fieldname": "tex_section_0",
+   "fieldtype": "Section Break",
+   "label": "TEX policies"
+  },
+  {
+   "fieldname": "tex_refundable",
+   "fieldtype": "Check",
+   "label": "Refundable",
+   "default": "1"
+  },
+  {
+   "fieldname": "tex_cancellation_policy",
+   "fieldtype": "Link",
+   "label": "Cancellation policy",
+   "options": "TEX Cancellation Policy"
+  },
+  {
+   "fieldname": "tex_payment_policy",
+   "fieldtype": "Link",
+   "label": "Payment policy",
+   "options": "TEX Payment Policy"
+  },
+  {
+   "fieldname": "tex_column_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tex_inclusions",
+   "fieldtype": "Small Text",
+   "label": "Inclusions"
+  },
+  {
+   "fieldname": "tex_description",
+   "fieldtype": "Small Text",
+   "label": "Guest-facing description"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-04 13:57:41.944631",
+ "modified": "2026-09-22 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Rate Plan",

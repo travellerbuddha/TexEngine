@@ -1,1 +1,7 @@
 Kamra
+TEX Booking
+TEX CRM
+TEX Commercial
+TEX Connect
+TEX Payments
+TEX Platform

@@ -234,6 +234,15 @@ doc_events["Reservation"] = {
 	"on_trash": "kamra.realtime.notify",
 }
 
+# TEX Engine: price-lock guard + outbox for integrations (ADR-010, ADR-015),
+# hotel-group/enterprise propagation on Property.
+doc_events["Reservation"]["validate"] = "kamra.tex.hooks.reservation_validate"
+doc_events["Reservation"]["on_update"].append("kamra.tex.hooks.reservation_on_update")
+doc_events["Property"] = {
+	"validate": "kamra.tex.hooks.property_validate",
+	"on_update": "kamra.tex.hooks.property_on_update",
+}
+
 # Scheduled Tasks
 # ---------------
 

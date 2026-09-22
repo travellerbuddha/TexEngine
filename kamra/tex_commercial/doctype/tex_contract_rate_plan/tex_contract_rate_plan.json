@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "rate_plan",
+  "op",
+  "value",
+  "refundable",
+  "boards",
+  "cancellation_policy",
+  "payment_policy"
+ ],
+ "fields": [
+  {
+   "fieldname": "rate_plan",
+   "fieldtype": "Link",
+   "label": "Rate plan",
+   "options": "Rate Plan",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "op",
+   "fieldtype": "Select",
+   "label": "Adjustment",
+   "options": "\nADJUST_PERCENT\nMULTIPLY\nADD\nSUBTRACT",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "in_list_view": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "refundable",
+   "fieldtype": "Check",
+   "label": "Refundable",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "boards",
+   "fieldtype": "Data",
+   "label": "Boards",
+   "description": "Blank = all boards; e.g. AI,UAI"
+  },
+  {
+   "fieldname": "cancellation_policy",
+   "fieldtype": "Link",
+   "label": "Cancellation policy",
+   "options": "TEX Cancellation Policy"
+  },
+  {
+   "fieldname": "payment_policy",
+   "fieldtype": "Link",
+   "label": "Payment policy",
+   "options": "TEX Payment Policy"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Contract Rate Plan",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

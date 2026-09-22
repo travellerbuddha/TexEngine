@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "band_code",
+  "label",
+  "from_age",
+  "to_age",
+  "is_infant"
+ ],
+ "fields": [
+  {
+   "fieldname": "band_code",
+   "fieldtype": "Data",
+   "label": "Code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "Label",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "from_age",
+   "fieldtype": "Float",
+   "label": "From age",
+   "in_list_view": 1,
+   "precision": "2"
+  },
+  {
+   "fieldname": "to_age",
+   "fieldtype": "Float",
+   "label": "To age",
+   "in_list_view": 1,
+   "precision": "2",
+   "description": "2.99 or 3 both mean 'until the 3rd birthday'"
+  },
+  {
+   "fieldname": "is_infant",
+   "fieldtype": "Check",
+   "label": "Infant",
+   "in_list_view": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Child Age Band",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

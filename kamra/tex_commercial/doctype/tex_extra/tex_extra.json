@@ -1,0 +1,319 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "extra_code",
+  "extra_name",
+  "category",
+  "description",
+  "image",
+  "column_54",
+  "pricing_mode",
+  "currency",
+  "amount",
+  "child_pricing",
+  "child_amount",
+  "infant_pricing",
+  "infant_amount",
+  "tax_category",
+  "section_55",
+  "is_mandatory",
+  "bookable_online",
+  "bookable_after_booking",
+  "max_quantity",
+  "inventory_tracked",
+  "daily_capacity",
+  "column_56",
+  "sale_from",
+  "sale_to",
+  "service_from",
+  "service_to",
+  "markets",
+  "channels",
+  "room_types",
+  "disabled",
+  "section_57",
+  "price_rules",
+  "legacy_experience"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "extra_code",
+   "fieldtype": "Data",
+   "label": "Code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "extra_name",
+   "fieldtype": "Data",
+   "label": "Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "label": "Category",
+   "options": "Transfer\nDining\nSpa\nRoom\nPackage\nCelebration\nExcursion\nService\nOther",
+   "default": "Service",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "image",
+   "fieldtype": "Attach Image",
+   "label": "Image"
+  },
+  {
+   "fieldname": "column_54",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pricing_mode",
+   "fieldtype": "Select",
+   "label": "Pricing mode",
+   "options": "RESERVATION\nROOM\nSTAY\nPERSON\nADULT\nCHILD\nINFANT\nNIGHT\nPERSON_NIGHT\nSERVICE_DATE\nUNIT\nUSAGE",
+   "default": "UNIT",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Price (adult / unit)",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "child_pricing",
+   "fieldtype": "Select",
+   "label": "Child price",
+   "options": "SAME_AS_ADULT\nCUSTOM",
+   "default": "SAME_AS_ADULT"
+  },
+  {
+   "fieldname": "child_amount",
+   "fieldtype": "Currency",
+   "label": "Child price",
+   "options": "currency",
+   "depends_on": "eval:doc.child_pricing=='CUSTOM'"
+  },
+  {
+   "fieldname": "infant_pricing",
+   "fieldtype": "Select",
+   "label": "Infant price",
+   "options": "SAME_AS_CHILD\nFREE\nCUSTOM",
+   "default": "FREE"
+  },
+  {
+   "fieldname": "infant_amount",
+   "fieldtype": "Currency",
+   "label": "Infant price",
+   "options": "currency",
+   "depends_on": "eval:doc.infant_pricing=='CUSTOM'"
+  },
+  {
+   "fieldname": "tax_category",
+   "fieldtype": "Select",
+   "label": "Tax category",
+   "options": "SERVICE\nFOOD\nTRANSFER\nACCOMMODATION",
+   "default": "SERVICE"
+  },
+  {
+   "fieldname": "section_55",
+   "fieldtype": "Section Break",
+   "label": "Availability"
+  },
+  {
+   "fieldname": "is_mandatory",
+   "fieldtype": "Check",
+   "label": "Mandatory"
+  },
+  {
+   "fieldname": "bookable_online",
+   "fieldtype": "Check",
+   "label": "Bookable online",
+   "default": "1"
+  },
+  {
+   "fieldname": "bookable_after_booking",
+   "fieldtype": "Check",
+   "label": "Bookable after booking",
+   "default": "1"
+  },
+  {
+   "fieldname": "max_quantity",
+   "fieldtype": "Int",
+   "label": "Max quantity"
+  },
+  {
+   "fieldname": "inventory_tracked",
+   "fieldtype": "Check",
+   "label": "Limited inventory"
+  },
+  {
+   "fieldname": "daily_capacity",
+   "fieldtype": "Int",
+   "label": "Daily capacity",
+   "depends_on": "eval:doc.inventory_tracked"
+  },
+  {
+   "fieldname": "column_56",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sale_from",
+   "fieldtype": "Date",
+   "label": "Sale from"
+  },
+  {
+   "fieldname": "sale_to",
+   "fieldtype": "Date",
+   "label": "Sale to"
+  },
+  {
+   "fieldname": "service_from",
+   "fieldtype": "Date",
+   "label": "Service from"
+  },
+  {
+   "fieldname": "service_to",
+   "fieldtype": "Date",
+   "label": "Service to"
+  },
+  {
+   "fieldname": "markets",
+   "fieldtype": "Small Text",
+   "label": "Markets"
+  },
+  {
+   "fieldname": "channels",
+   "fieldtype": "Small Text",
+   "label": "Sales channels"
+  },
+  {
+   "fieldname": "room_types",
+   "fieldtype": "Small Text",
+   "label": "Room types"
+  },
+  {
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "section_57",
+   "fieldtype": "Section Break",
+   "label": "Price rules"
+  },
+  {
+   "fieldname": "price_rules",
+   "fieldtype": "Table",
+   "label": "Price rules",
+   "options": "TEX Extra Price Rule"
+  },
+  {
+   "fieldname": "legacy_experience",
+   "fieldtype": "Link",
+   "label": "Legacy experience",
+   "options": "Experience",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Extra",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "EXT-.#####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "extra_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1,
+ "search_fields": "extra_code,extra_name,property"
+}

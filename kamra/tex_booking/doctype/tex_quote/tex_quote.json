@@ -1,0 +1,164 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "status",
+  "sales_channel",
+  "market",
+  "currency",
+  "total_amount",
+  "column_64",
+  "contract_version",
+  "payload_hash",
+  "expires_at",
+  "booking",
+  "session_hash",
+  "offer_hash",
+  "section_65",
+  "request_json",
+  "result_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Open\nUsed\nExpired",
+   "default": "Open",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sales_channel",
+   "fieldtype": "Link",
+   "label": "Sales channel",
+   "options": "TEX Sales Channel"
+  },
+  {
+   "fieldname": "market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Total",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_64",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "contract_version",
+   "fieldtype": "Link",
+   "label": "Contract version",
+   "options": "TEX Contract Version"
+  },
+  {
+   "fieldname": "payload_hash",
+   "fieldtype": "Data",
+   "label": "Payload hash"
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Expires",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "booking",
+   "fieldtype": "Link",
+   "label": "Booking",
+   "options": "TEX Booking"
+  },
+  {
+   "fieldname": "session_hash",
+   "fieldtype": "Data",
+   "label": "Session (hash)"
+  },
+  {
+   "fieldname": "offer_hash",
+   "fieldtype": "Data",
+   "label": "Offer (hash)"
+  },
+  {
+   "fieldname": "section_65",
+   "fieldtype": "Section Break",
+   "label": "Content"
+  },
+  {
+   "fieldname": "request_json",
+   "fieldtype": "Code",
+   "label": "Request",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "result_json",
+   "fieldtype": "Long Text",
+   "label": "Result"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Booking",
+ "name": "TEX Quote",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "hash",
+ "in_create": 1
+}

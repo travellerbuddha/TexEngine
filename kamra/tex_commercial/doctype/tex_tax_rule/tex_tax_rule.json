@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "code",
+  "tax_name",
+  "kind",
+  "rate",
+  "amount",
+  "applies_to",
+  "compound",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "code",
+   "fieldtype": "Data",
+   "label": "Code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "tax_name",
+   "fieldtype": "Data",
+   "label": "Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Kind",
+   "options": "PERCENT\nPER_PERSON_NIGHT\nPER_ROOM_NIGHT",
+   "default": "PERCENT",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Float",
+   "label": "Rate %",
+   "in_list_view": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Fixed amount"
+  },
+  {
+   "fieldname": "applies_to",
+   "fieldtype": "Data",
+   "label": "Applies to",
+   "default": "ACCOMMODATION",
+   "description": "ACCOMMODATION, EXTRA:*, EXTRA:FOOD … comma separated"
+  },
+  {
+   "fieldname": "compound",
+   "fieldtype": "Check",
+   "label": "Compound"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Order"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Tax Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

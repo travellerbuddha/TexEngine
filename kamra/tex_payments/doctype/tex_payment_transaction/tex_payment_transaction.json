@@ -1,0 +1,226 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "txn_type",
+  "status",
+  "method",
+  "amount",
+  "currency",
+  "column_85",
+  "provider_account",
+  "provider",
+  "provider_ref",
+  "idempotency_key",
+  "parent_transaction",
+  "section_86",
+  "payment_link",
+  "booking",
+  "reservation",
+  "column_87",
+  "card_brand",
+  "card_last4",
+  "actor",
+  "completed_at",
+  "section_88",
+  "raw_status",
+  "error_code",
+  "error_message",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "txn_type",
+   "fieldtype": "Select",
+   "label": "Type",
+   "options": "Charge\nRefund\nVoid",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nSucceeded\nFailed\nCancelled",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "method",
+   "fieldtype": "Select",
+   "label": "Method",
+   "options": "Card\nBank Transfer\nPay at Hotel\nPayment Link\nManual"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "column_85",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "provider_account",
+   "fieldtype": "Link",
+   "label": "Provider account",
+   "options": "TEX Payment Provider Account"
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider"
+  },
+  {
+   "fieldname": "provider_ref",
+   "fieldtype": "Data",
+   "label": "Provider reference"
+  },
+  {
+   "fieldname": "idempotency_key",
+   "fieldtype": "Data",
+   "label": "Idempotency key",
+   "unique": 1
+  },
+  {
+   "fieldname": "parent_transaction",
+   "fieldtype": "Link",
+   "label": "Original transaction",
+   "options": "TEX Payment Transaction"
+  },
+  {
+   "fieldname": "section_86",
+   "fieldtype": "Section Break",
+   "label": "Links"
+  },
+  {
+   "fieldname": "payment_link",
+   "fieldtype": "Link",
+   "label": "Payment link",
+   "options": "TEX Payment Link"
+  },
+  {
+   "fieldname": "booking",
+   "fieldtype": "Link",
+   "label": "Booking",
+   "options": "TEX Booking"
+  },
+  {
+   "fieldname": "reservation",
+   "fieldtype": "Link",
+   "label": "Reservation",
+   "options": "Reservation"
+  },
+  {
+   "fieldname": "column_87",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "card_brand",
+   "fieldtype": "Data",
+   "label": "Card brand"
+  },
+  {
+   "fieldname": "card_last4",
+   "fieldtype": "Data",
+   "label": "Card last 4",
+   "length": 4
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Link",
+   "label": "Actor",
+   "options": "User"
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed at"
+  },
+  {
+   "fieldname": "section_88",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "raw_status",
+   "fieldtype": "Data",
+   "label": "Provider status"
+  },
+  {
+   "fieldname": "error_code",
+   "fieldtype": "Data",
+   "label": "Error code"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Payments",
+ "name": "TEX Payment Transaction",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "PTX-.YYYY.-.######",
+ "naming_rule": "Expression (old style)",
+ "track_changes": 1,
+ "in_create": 1
+}

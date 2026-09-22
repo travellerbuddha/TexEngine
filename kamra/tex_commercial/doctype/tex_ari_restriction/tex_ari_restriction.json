@@ -1,0 +1,213 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "restriction_date",
+  "room_type",
+  "contract",
+  "market",
+  "rate_plan",
+  "sales_channel",
+  "column_48",
+  "stop_sell",
+  "stop_sell_mode",
+  "min_los",
+  "max_los",
+  "cta",
+  "ctd",
+  "release_days",
+  "min_advance",
+  "max_advance",
+  "scope_key",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Property",
+   "options": "Property",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "restriction_date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Link",
+   "label": "Room type",
+   "options": "Room Type",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "contract",
+   "fieldtype": "Link",
+   "label": "Contract",
+   "options": "TEX Contract"
+  },
+  {
+   "fieldname": "market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market"
+  },
+  {
+   "fieldname": "rate_plan",
+   "fieldtype": "Link",
+   "label": "Rate plan",
+   "options": "Rate Plan"
+  },
+  {
+   "fieldname": "sales_channel",
+   "fieldtype": "Link",
+   "label": "Sales channel",
+   "options": "TEX Sales Channel"
+  },
+  {
+   "fieldname": "column_48",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stop_sell",
+   "fieldtype": "Select",
+   "label": "Stop sell",
+   "options": "\nSTOP\nOPEN",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "stop_sell_mode",
+   "fieldtype": "Select",
+   "label": "Stop sell mode",
+   "options": "\nSTAY_THROUGH\nARRIVAL\nDEPARTURE"
+  },
+  {
+   "fieldname": "min_los",
+   "fieldtype": "Int",
+   "label": "Min LOS",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "max_los",
+   "fieldtype": "Int",
+   "label": "Max LOS"
+  },
+  {
+   "fieldname": "cta",
+   "fieldtype": "Select",
+   "label": "Closed to arrival",
+   "options": "\nYes\nNo"
+  },
+  {
+   "fieldname": "ctd",
+   "fieldtype": "Select",
+   "label": "Closed to departure",
+   "options": "\nYes\nNo"
+  },
+  {
+   "fieldname": "release_days",
+   "fieldtype": "Int",
+   "label": "Release days"
+  },
+  {
+   "fieldname": "min_advance",
+   "fieldtype": "Int",
+   "label": "Min advance days"
+  },
+  {
+   "fieldname": "max_advance",
+   "fieldtype": "Int",
+   "label": "Max advance days"
+  },
+  {
+   "fieldname": "scope_key",
+   "fieldtype": "Data",
+   "label": "Scope key",
+   "read_only": 1,
+   "unique": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Data",
+   "label": "Note"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX ARI Restriction",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "restriction_date",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "hash",
+ "track_changes": 1
+}

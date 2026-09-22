@@ -1,0 +1,338 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "contract",
+  "version_no",
+  "status",
+  "change_note",
+  "column_19",
+  "effective_from",
+  "published_at",
+  "published_by",
+  "active_to",
+  "based_on",
+  "tab_20",
+  "child_ordering",
+  "age_basis",
+  "children_over_max_as_adults",
+  "infants_count_as_occupants",
+  "column_21",
+  "prices_include_tax",
+  "stacking",
+  "room_basis_extra_unit",
+  "room_basis_children_fill_included",
+  "tab_22",
+  "rooms",
+  "periods",
+  "period_rates",
+  "tab_23",
+  "age_bands",
+  "occupancy_rules",
+  "tab_24",
+  "boards",
+  "rate_plans",
+  "tab_25",
+  "offers",
+  "tab_26",
+  "payload_hash",
+  "payload",
+  "validation_report"
+ ],
+ "fields": [
+  {
+   "fieldname": "contract",
+   "fieldtype": "Link",
+   "label": "Contract",
+   "options": "TEX Contract",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "version_no",
+   "fieldtype": "Int",
+   "label": "Version",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nPublished\nSuperseded\nWithdrawn",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "change_note",
+   "fieldtype": "Small Text",
+   "label": "Change note"
+  },
+  {
+   "fieldname": "column_19",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "effective_from",
+   "fieldtype": "Datetime",
+   "label": "Sell from (effective)",
+   "description": "Sale time from which this version is active. Blank = when published."
+  },
+  {
+   "fieldname": "published_at",
+   "fieldtype": "Datetime",
+   "label": "Published at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "published_by",
+   "fieldtype": "Link",
+   "label": "Published by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "active_to",
+   "fieldtype": "Datetime",
+   "label": "Active until",
+   "read_only": 1
+  },
+  {
+   "fieldname": "based_on",
+   "fieldtype": "Link",
+   "label": "Based on",
+   "options": "TEX Contract Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tab_20",
+   "fieldtype": "Tab Break",
+   "label": "Settings"
+  },
+  {
+   "fieldname": "child_ordering",
+   "fieldtype": "Select",
+   "label": "Child order",
+   "options": "OLDEST_FIRST\nYOUNGEST_FIRST\nAS_ENTERED",
+   "default": "OLDEST_FIRST"
+  },
+  {
+   "fieldname": "age_basis",
+   "fieldtype": "Select",
+   "label": "Age evaluated on",
+   "options": "ARRIVAL\nBOOKING_DATE",
+   "default": "ARRIVAL"
+  },
+  {
+   "fieldname": "children_over_max_as_adults",
+   "fieldtype": "Check",
+   "label": "Children above top band count as adults",
+   "default": "1"
+  },
+  {
+   "fieldname": "infants_count_as_occupants",
+   "fieldtype": "Check",
+   "label": "Infants count towards capacity",
+   "default": "1"
+  },
+  {
+   "fieldname": "column_21",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "prices_include_tax",
+   "fieldtype": "Check",
+   "label": "Prices include tax",
+   "default": "1"
+  },
+  {
+   "fieldname": "stacking",
+   "fieldtype": "Select",
+   "label": "Promotion stacking",
+   "options": "SEQUENTIAL\nADDITIVE",
+   "default": "SEQUENTIAL"
+  },
+  {
+   "fieldname": "room_basis_extra_unit",
+   "fieldtype": "Select",
+   "label": "Room basis: extra person unit",
+   "options": "PER_PERSON_SHARE\nROOM_PRICE",
+   "default": "PER_PERSON_SHARE"
+  },
+  {
+   "fieldname": "room_basis_children_fill_included",
+   "fieldtype": "Check",
+   "label": "Room basis: children fill unused included places"
+  },
+  {
+   "fieldname": "tab_22",
+   "fieldtype": "Tab Break",
+   "label": "Rooms & periods"
+  },
+  {
+   "fieldname": "rooms",
+   "fieldtype": "Table",
+   "label": "Rooms",
+   "options": "TEX Contract Room"
+  },
+  {
+   "fieldname": "periods",
+   "fieldtype": "Table",
+   "label": "Stay periods",
+   "options": "TEX Price Period"
+  },
+  {
+   "fieldname": "period_rates",
+   "fieldtype": "Table",
+   "label": "Room prices",
+   "options": "TEX Period Rate"
+  },
+  {
+   "fieldname": "tab_23",
+   "fieldtype": "Tab Break",
+   "label": "Occupancy"
+  },
+  {
+   "fieldname": "age_bands",
+   "fieldtype": "Table",
+   "label": "Child age bands",
+   "options": "TEX Child Age Band",
+   "description": "Blank = inherited from the hotel/market pricing policy at publish time."
+  },
+  {
+   "fieldname": "occupancy_rules",
+   "fieldtype": "Table",
+   "label": "Occupancy rules",
+   "options": "TEX Occupancy Rule"
+  },
+  {
+   "fieldname": "tab_24",
+   "fieldtype": "Tab Break",
+   "label": "Boards & rate plans"
+  },
+  {
+   "fieldname": "boards",
+   "fieldtype": "Table",
+   "label": "Boards",
+   "options": "TEX Board Rule"
+  },
+  {
+   "fieldname": "rate_plans",
+   "fieldtype": "Table",
+   "label": "Rate plans",
+   "options": "TEX Contract Rate Plan"
+  },
+  {
+   "fieldname": "tab_25",
+   "fieldtype": "Tab Break",
+   "label": "Offers"
+  },
+  {
+   "fieldname": "offers",
+   "fieldtype": "Table",
+   "label": "Contract offers",
+   "options": "TEX Contract Offer"
+  },
+  {
+   "fieldname": "tab_26",
+   "fieldtype": "Tab Break",
+   "label": "Published payload"
+  },
+  {
+   "fieldname": "payload_hash",
+   "fieldtype": "Data",
+   "label": "Payload hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payload",
+   "fieldtype": "Code",
+   "label": "Frozen payload",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "validation_report",
+   "fieldtype": "Code",
+   "label": "Validation report",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Contract Version",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "hash",
+ "title_field": "contract",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

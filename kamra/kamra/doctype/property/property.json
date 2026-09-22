@@ -84,7 +84,18 @@
   "meta_description",
   "og_image",
   "page_slug",
-  "overbooking_pct"
+  "overbooking_pct",
+  "tex_tab_0",
+  "tex_enterprise",
+  "tex_hotel_group",
+  "tex_default_market",
+  "tex_self_service",
+  "tex_column_5",
+  "tex_inventory_mode",
+  "tex_lower_price_refund",
+  "tex_tax_profile",
+  "tex_section_9",
+  "tex_tax_rules"
  ],
  "fields": [
   {
@@ -308,7 +319,7 @@
    "default": "7500",
    "fieldname": "gst_slab_threshold",
    "fieldtype": "Currency",
-   "label": "Slab Threshold (\u20b9/night)"
+   "label": "Slab Threshold (₹/night)"
   },
   {
    "default": "5",
@@ -394,7 +405,7 @@
    "fieldname": "hero_image",
    "fieldtype": "Attach Image",
    "label": "Hero Image",
-   "description": "1920\u00d71080px (16:9 landscape), JPG or WebP under 2 MB. The big photo at the top of the booking page."
+   "description": "1920×1080px (16:9 landscape), JPG or WebP under 2 MB. The big photo at the top of the booking page."
   },
   {
    "fieldname": "star_category",
@@ -419,7 +430,7 @@
    "label": "Property Amenities (public)"
   },
   {
-   "description": "Square, 512\u00d7512px. PNG or SVG with a transparent background. Shown on the booking page and invoices.",
+   "description": "Square, 512×512px. PNG or SVG with a transparent background. Shown on the booking page and invoices.",
    "fieldname": "logo_url",
    "fieldtype": "Attach Image",
    "label": "Logo"
@@ -534,7 +545,7 @@
    "fieldname": "og_image",
    "fieldtype": "Attach Image",
    "label": "OG Image",
-   "description": "Exactly 1200\u00d7630px, JPG or PNG. What WhatsApp, Google and social previews show when the booking page is shared."
+   "description": "Exactly 1200×630px, JPG or PNG. What WhatsApp, Google and social previews show when the booking page is shared."
   },
   {
    "fieldname": "page_slug",
@@ -546,12 +557,79 @@
    "fieldtype": "Percent",
    "label": "Overbooking Allowance %",
    "description": "Sell unassigned bookings above physical capacity by this much (0 = never overbook). Room types can override."
+  },
+  {
+   "fieldname": "tex_tab_0",
+   "fieldtype": "Tab Break",
+   "label": "TEX"
+  },
+  {
+   "fieldname": "tex_enterprise",
+   "fieldtype": "Link",
+   "label": "Enterprise",
+   "options": "TEX Enterprise",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_hotel_group",
+   "fieldtype": "Link",
+   "label": "Hotel group",
+   "options": "TEX Hotel Group"
+  },
+  {
+   "fieldname": "tex_default_market",
+   "fieldtype": "Link",
+   "label": "Default market",
+   "options": "TEX Market"
+  },
+  {
+   "fieldname": "tex_self_service",
+   "fieldtype": "Check",
+   "label": "Guest self-service",
+   "default": "1"
+  },
+  {
+   "fieldname": "tex_column_5",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tex_inventory_mode",
+   "fieldtype": "Select",
+   "label": "Inventory source",
+   "options": "Physical rooms\nConfigured",
+   "default": "Physical rooms"
+  },
+  {
+   "fieldname": "tex_lower_price_refund",
+   "fieldtype": "Select",
+   "label": "When a guest change costs less",
+   "options": "Staff approval\nRefund automatically\nKeep as credit",
+   "default": "Staff approval"
+  },
+  {
+   "fieldname": "tex_tax_profile",
+   "fieldtype": "Select",
+   "label": "Tax profile",
+   "options": "Localization pack\nCustom",
+   "default": "Localization pack"
+  },
+  {
+   "fieldname": "tex_section_9",
+   "fieldtype": "Section Break",
+   "label": "TEX tax rules",
+   "depends_on": "eval:doc.tex_tax_profile=='Custom'"
+  },
+  {
+   "fieldname": "tex_tax_rules",
+   "fieldtype": "Table",
+   "label": "Tax rules",
+   "options": "TEX Tax Rule"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-01 09:00:00.000000",
+ "modified": "2026-09-22 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Property",

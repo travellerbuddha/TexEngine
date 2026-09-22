@@ -1,0 +1,369 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "site_name",
+  "site_slug",
+  "enabled",
+  "property",
+  "hotel_group",
+  "column_70",
+  "default_language",
+  "languages",
+  "default_currency",
+  "currencies",
+  "default_market",
+  "sales_channel",
+  "self_service_enabled",
+  "tab_71",
+  "logo",
+  "primary_color",
+  "accent_color",
+  "background_color",
+  "font_family",
+  "column_72",
+  "radius",
+  "card_radius",
+  "button_style",
+  "header_layout",
+  "search_style",
+  "hero_image",
+  "tab_73",
+  "contact_phone",
+  "contact_email",
+  "whatsapp",
+  "address",
+  "column_74",
+  "custom_texts",
+  "policies",
+  "tab_75",
+  "allowed_embed_origins",
+  "widget_mode",
+  "domains",
+  "tab_76",
+  "ga4_measurement_id",
+  "gtm_container_id",
+  "meta_pixel_id",
+  "consent_banner"
+ ],
+ "fields": [
+  {
+   "fieldname": "site_name",
+   "fieldtype": "Data",
+   "label": "Site name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "site_slug",
+   "fieldtype": "Data",
+   "label": "Slug",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "description": "Single-hotel site"
+  },
+  {
+   "fieldname": "hotel_group",
+   "fieldtype": "Link",
+   "label": "Hotel group",
+   "options": "TEX Hotel Group",
+   "description": "Group site (multi-hotel search)"
+  },
+  {
+   "fieldname": "column_70",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_language",
+   "fieldtype": "Data",
+   "label": "Default language",
+   "default": "en"
+  },
+  {
+   "fieldname": "languages",
+   "fieldtype": "Small Text",
+   "label": "Languages",
+   "default": "en,tr,de,ru,ro,pl"
+  },
+  {
+   "fieldname": "default_currency",
+   "fieldtype": "Link",
+   "label": "Default currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "currencies",
+   "fieldtype": "Small Text",
+   "label": "Currencies"
+  },
+  {
+   "fieldname": "default_market",
+   "fieldtype": "Link",
+   "label": "Default market",
+   "options": "TEX Market"
+  },
+  {
+   "fieldname": "sales_channel",
+   "fieldtype": "Link",
+   "label": "Sales channel",
+   "options": "TEX Sales Channel"
+  },
+  {
+   "fieldname": "self_service_enabled",
+   "fieldtype": "Check",
+   "label": "Guest self-service",
+   "default": "1"
+  },
+  {
+   "fieldname": "tab_71",
+   "fieldtype": "Tab Break",
+   "label": "Branding"
+  },
+  {
+   "fieldname": "logo",
+   "fieldtype": "Attach Image",
+   "label": "Logo"
+  },
+  {
+   "fieldname": "primary_color",
+   "fieldtype": "Data",
+   "label": "Primary colour",
+   "default": "#0B3B5B"
+  },
+  {
+   "fieldname": "accent_color",
+   "fieldtype": "Data",
+   "label": "Accent colour",
+   "default": "#C8963E"
+  },
+  {
+   "fieldname": "background_color",
+   "fieldtype": "Data",
+   "label": "Background",
+   "default": "#F7F7F5"
+  },
+  {
+   "fieldname": "font_family",
+   "fieldtype": "Select",
+   "label": "Font",
+   "options": "Inter\nDM Sans\nNunito Sans\nSource Sans 3\nLora\nPlayfair Display\nSystem",
+   "default": "Inter"
+  },
+  {
+   "fieldname": "column_72",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "radius",
+   "fieldtype": "Select",
+   "label": "Corner radius",
+   "options": "none\nsm\nmd\nlg\nxl",
+   "default": "md"
+  },
+  {
+   "fieldname": "card_radius",
+   "fieldtype": "Select",
+   "label": "Card radius",
+   "options": "none\nsm\nmd\nlg\nxl",
+   "default": "lg"
+  },
+  {
+   "fieldname": "button_style",
+   "fieldtype": "Select",
+   "label": "Buttons",
+   "options": "solid\noutline\npill",
+   "default": "solid"
+  },
+  {
+   "fieldname": "header_layout",
+   "fieldtype": "Select",
+   "label": "Header",
+   "options": "left\ncenter\nsplit",
+   "default": "left"
+  },
+  {
+   "fieldname": "search_style",
+   "fieldtype": "Select",
+   "label": "Search bar",
+   "options": "inline\ncard\noverlay",
+   "default": "card"
+  },
+  {
+   "fieldname": "hero_image",
+   "fieldtype": "Attach Image",
+   "label": "Hero image"
+  },
+  {
+   "fieldname": "tab_73",
+   "fieldtype": "Tab Break",
+   "label": "Content"
+  },
+  {
+   "fieldname": "contact_phone",
+   "fieldtype": "Data",
+   "label": "Phone"
+  },
+  {
+   "fieldname": "contact_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "whatsapp",
+   "fieldtype": "Data",
+   "label": "WhatsApp"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address"
+  },
+  {
+   "fieldname": "column_74",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "custom_texts",
+   "fieldtype": "Code",
+   "label": "Custom texts (per language)",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "policies",
+   "fieldtype": "Text",
+   "label": "Policies"
+  },
+  {
+   "fieldname": "tab_75",
+   "fieldtype": "Tab Break",
+   "label": "Embed & domains"
+  },
+  {
+   "fieldname": "allowed_embed_origins",
+   "fieldtype": "Small Text",
+   "label": "Allowed embed origins",
+   "description": "One origin per line, e.g. https://www.hotel.com"
+  },
+  {
+   "fieldname": "widget_mode",
+   "fieldtype": "Select",
+   "label": "Widget default",
+   "options": "search\nbutton\nmodal\nredirect",
+   "default": "search"
+  },
+  {
+   "fieldname": "domains",
+   "fieldtype": "Table",
+   "label": "Custom domains",
+   "options": "TEX Booking Domain"
+  },
+  {
+   "fieldname": "tab_76",
+   "fieldtype": "Tab Break",
+   "label": "Analytics"
+  },
+  {
+   "fieldname": "ga4_measurement_id",
+   "fieldtype": "Data",
+   "label": "GA4 measurement id"
+  },
+  {
+   "fieldname": "gtm_container_id",
+   "fieldtype": "Data",
+   "label": "GTM container id"
+  },
+  {
+   "fieldname": "meta_pixel_id",
+   "fieldtype": "Data",
+   "label": "Meta pixel id"
+  },
+  {
+   "fieldname": "consent_banner",
+   "fieldtype": "Check",
+   "label": "Show consent banner",
+   "default": "1"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Booking",
+ "name": "TEX Booking Site",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "field:site_slug",
+ "naming_rule": "By fieldname",
+ "title_field": "site_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

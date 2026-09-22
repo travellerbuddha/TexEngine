@@ -3,6 +3,9 @@ import frappe
 
 def after_install():
 	set_site_home_and_favicon()
+	from kamra.tex.setup import after_install as tex_after_install
+
+	tex_after_install()
 	# NOTE: the governed agent user (agent@kamra.local) is deliberately NOT
 	# created here. seed_rbac_v2.ensure_agent_user() writes custom DocPerms,
 	# and in Frappe ANY custom perm on a doctype replaces ALL its standard

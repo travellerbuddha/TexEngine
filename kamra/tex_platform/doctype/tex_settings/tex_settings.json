@@ -1,0 +1,156 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_1",
+  "strict_tenancy",
+  "show_legacy_pms",
+  "brand_name",
+  "support_email",
+  "column_2",
+  "default_market",
+  "default_sales_channel",
+  "section_3",
+  "offer_ttl_minutes",
+  "quote_ttl_minutes",
+  "column_4",
+  "hold_minutes",
+  "manage_link_days",
+  "section_5",
+  "fx_provider_default",
+  "fx_max_age_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Tenancy & navigation"
+  },
+  {
+   "fieldname": "strict_tenancy",
+   "fieldtype": "Check",
+   "label": "Strict tenancy",
+   "default": "1",
+   "description": "Users without an explicit property scope see no properties (recommended)."
+  },
+  {
+   "fieldname": "show_legacy_pms",
+   "fieldtype": "Check",
+   "label": "Show legacy PMS modules",
+   "description": "Housekeeping, POS, laundry, banquet, night audit… hidden from TEX navigation unless on."
+  },
+  {
+   "fieldname": "brand_name",
+   "fieldtype": "Data",
+   "label": "Product name",
+   "default": "TEX Engine"
+  },
+  {
+   "fieldname": "support_email",
+   "fieldtype": "Data",
+   "label": "Support email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_market",
+   "fieldtype": "Link",
+   "label": "Default market",
+   "options": "TEX Market"
+  },
+  {
+   "fieldname": "default_sales_channel",
+   "fieldtype": "Link",
+   "label": "Default sales channel",
+   "options": "TEX Sales Channel"
+  },
+  {
+   "fieldname": "section_3",
+   "fieldtype": "Section Break",
+   "label": "Quotes & holds"
+  },
+  {
+   "fieldname": "offer_ttl_minutes",
+   "fieldtype": "Int",
+   "label": "Offer validity (minutes)",
+   "default": "20"
+  },
+  {
+   "fieldname": "quote_ttl_minutes",
+   "fieldtype": "Int",
+   "label": "Quote validity (minutes)",
+   "default": "30"
+  },
+  {
+   "fieldname": "column_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "hold_minutes",
+   "fieldtype": "Int",
+   "label": "Hold duration (minutes)",
+   "default": "20"
+  },
+  {
+   "fieldname": "manage_link_days",
+   "fieldtype": "Int",
+   "label": "Manage-booking link validity (days)",
+   "default": "365"
+  },
+  {
+   "fieldname": "section_5",
+   "fieldtype": "Section Break",
+   "label": "Currency"
+  },
+  {
+   "fieldname": "fx_provider_default",
+   "fieldtype": "Select",
+   "label": "Default FX provider",
+   "options": "TCMB\nECB\nMANUAL",
+   "default": "TCMB"
+  },
+  {
+   "fieldname": "fx_max_age_days",
+   "fieldtype": "Int",
+   "label": "Max FX rate age (days)",
+   "default": "4"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Platform",
+ "name": "TEX Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "issingle": 1,
+ "track_changes": 1
+}

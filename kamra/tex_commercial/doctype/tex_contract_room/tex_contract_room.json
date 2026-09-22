@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "room_type",
+  "is_base",
+  "max_adults",
+  "max_children",
+  "max_occupants",
+  "min_adults",
+  "included_adults"
+ ],
+ "fields": [
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Link",
+   "label": "Room type",
+   "options": "Room Type",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "is_base",
+   "fieldtype": "Check",
+   "label": "Base room",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "max_adults",
+   "fieldtype": "Int",
+   "label": "Max adults",
+   "in_list_view": 1,
+   "description": "0 = room type setting"
+  },
+  {
+   "fieldname": "max_children",
+   "fieldtype": "Int",
+   "label": "Max children",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "max_occupants",
+   "fieldtype": "Int",
+   "label": "Max occupants",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "min_adults",
+   "fieldtype": "Int",
+   "label": "Min adults"
+  },
+  {
+   "fieldname": "included_adults",
+   "fieldtype": "Int",
+   "label": "Included adults (room basis)"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Contract Room",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

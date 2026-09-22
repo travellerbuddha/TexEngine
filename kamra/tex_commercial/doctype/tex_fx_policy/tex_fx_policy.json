@@ -1,0 +1,211 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "from_currency",
+  "to_currency",
+  "column_45",
+  "mode",
+  "provider",
+  "rate_type",
+  "manual_rate",
+  "adjustment",
+  "max_age_days",
+  "section_46",
+  "tex_status",
+  "active_from",
+  "active_to",
+  "column_47",
+  "revision_no",
+  "revision_of"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "description": "Blank = global default."
+  },
+  {
+   "fieldname": "from_currency",
+   "fieldtype": "Link",
+   "label": "From",
+   "options": "Currency",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "to_currency",
+   "fieldtype": "Link",
+   "label": "To",
+   "options": "Currency",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_45",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Mode",
+   "options": "PROVIDER_PERCENT\nPROVIDER\nPROVIDER_FIXED\nMANUAL",
+   "default": "PROVIDER",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "label": "Provider",
+   "options": "TCMB\nECB",
+   "default": "TCMB"
+  },
+  {
+   "fieldname": "rate_type",
+   "fieldtype": "Select",
+   "label": "Rate type",
+   "options": "FOREX_SELLING\nFOREX_BUYING\nBANKNOTE_SELLING\nBANKNOTE_BUYING\nREFERENCE",
+   "default": "FOREX_SELLING"
+  },
+  {
+   "fieldname": "manual_rate",
+   "fieldtype": "Float",
+   "label": "Manual rate",
+   "precision": "9"
+  },
+  {
+   "fieldname": "adjustment",
+   "fieldtype": "Float",
+   "label": "Adjustment (% or fixed)",
+   "precision": "6"
+  },
+  {
+   "fieldname": "max_age_days",
+   "fieldtype": "Int",
+   "label": "Max rate age (days)",
+   "default": "4"
+  },
+  {
+   "fieldname": "section_46",
+   "fieldtype": "Section Break",
+   "label": "Revision",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "tex_status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nActive\nSuperseded\nArchived",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "active_from",
+   "fieldtype": "Datetime",
+   "label": "Active From",
+   "read_only": 1
+  },
+  {
+   "fieldname": "active_to",
+   "fieldtype": "Datetime",
+   "label": "Active To",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_47",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "revision_no",
+   "fieldtype": "Int",
+   "label": "Revision",
+   "read_only": 1,
+   "default": "1"
+  },
+  {
+   "fieldname": "revision_of",
+   "fieldtype": "Link",
+   "label": "Revision Of",
+   "options": "TEX FX Policy",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX FX Policy",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "FXP-.#####",
+ "naming_rule": "Expression (old style)",
+ "track_changes": 1
+}

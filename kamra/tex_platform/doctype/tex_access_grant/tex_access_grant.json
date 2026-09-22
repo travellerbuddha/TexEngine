@@ -1,0 +1,124 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "scope_level",
+  "property",
+  "hotel_group",
+  "enterprise",
+  "column_9",
+  "permission_profile",
+  "valid_until",
+  "disabled",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "scope_level",
+   "fieldtype": "Select",
+   "label": "Scope",
+   "options": "Hotel\nHotel Group\nEnterprise\nPlatform",
+   "reqd": 1,
+   "default": "Hotel",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "depends_on": "eval:doc.scope_level=='Hotel'",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "hotel_group",
+   "fieldtype": "Link",
+   "label": "Hotel group",
+   "options": "TEX Hotel Group",
+   "depends_on": "eval:doc.scope_level=='Hotel Group'"
+  },
+  {
+   "fieldname": "enterprise",
+   "fieldtype": "Link",
+   "label": "Enterprise",
+   "options": "TEX Enterprise",
+   "depends_on": "eval:doc.scope_level=='Enterprise'"
+  },
+  {
+   "fieldname": "column_9",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "permission_profile",
+   "fieldtype": "Link",
+   "label": "Permission profile",
+   "options": "TEX Permission Profile",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "valid_until",
+   "fieldtype": "Date",
+   "label": "Valid until"
+  },
+  {
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Platform",
+ "name": "TEX Access Grant",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "GRANT-.#####",
+ "naming_rule": "Expression (old style)",
+ "track_changes": 1
+}

@@ -29,7 +29,26 @@
   "city",
   "guest_notes",
   "id_file",
-  "address_proof_file"
+  "address_proof_file",
+  "tex_section_0",
+  "tex_enterprise",
+  "tex_language",
+  "tex_country",
+  "tex_market",
+  "tex_tags",
+  "tex_preferences",
+  "tex_column_7",
+  "tex_consent_email",
+  "tex_consent_sms",
+  "tex_consent_whatsapp",
+  "tex_consent_updated_at",
+  "tex_consent_source",
+  "tex_consent_text_version",
+  "tex_section_14",
+  "tex_stays",
+  "tex_lifetime_value",
+  "tex_last_stay",
+  "tex_loyalty_points"
  ],
  "fields": [
   {
@@ -161,12 +180,117 @@
    "fieldtype": "Select",
    "label": "Gender",
    "options": "\nMale\nFemale\nOther\nPrefer not to say"
+  },
+  {
+   "fieldname": "tex_section_0",
+   "fieldtype": "Section Break",
+   "label": "TEX CRM"
+  },
+  {
+   "fieldname": "tex_enterprise",
+   "fieldtype": "Link",
+   "label": "Enterprise",
+   "options": "TEX Enterprise"
+  },
+  {
+   "fieldname": "tex_language",
+   "fieldtype": "Data",
+   "label": "Language"
+  },
+  {
+   "fieldname": "tex_country",
+   "fieldtype": "Link",
+   "label": "Country of residence",
+   "options": "Country"
+  },
+  {
+   "fieldname": "tex_market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market"
+  },
+  {
+   "fieldname": "tex_tags",
+   "fieldtype": "Small Text",
+   "label": "Tags"
+  },
+  {
+   "fieldname": "tex_preferences",
+   "fieldtype": "Small Text",
+   "label": "Preferences"
+  },
+  {
+   "fieldname": "tex_column_7",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tex_consent_email",
+   "fieldtype": "Check",
+   "label": "Marketing e-mail consent"
+  },
+  {
+   "fieldname": "tex_consent_sms",
+   "fieldtype": "Check",
+   "label": "Marketing SMS consent"
+  },
+  {
+   "fieldname": "tex_consent_whatsapp",
+   "fieldtype": "Check",
+   "label": "Marketing WhatsApp consent"
+  },
+  {
+   "fieldname": "tex_consent_updated_at",
+   "fieldtype": "Datetime",
+   "label": "Consent updated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_consent_source",
+   "fieldtype": "Data",
+   "label": "Consent source",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_consent_text_version",
+   "fieldtype": "Data",
+   "label": "Consent text version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_section_14",
+   "fieldtype": "Section Break",
+   "label": "TEX stats",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "tex_stays",
+   "fieldtype": "Int",
+   "label": "Stays",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_lifetime_value",
+   "fieldtype": "Currency",
+   "label": "Lifetime value",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_last_stay",
+   "fieldtype": "Date",
+   "label": "Last stay",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_loyalty_points",
+   "fieldtype": "Int",
+   "label": "Loyalty points",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-04 20:02:58.739313",
+ "modified": "2026-09-22 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Guest",

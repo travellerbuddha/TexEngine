@@ -1,0 +1,114 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "market",
+  "room_type",
+  "sales_channel",
+  "stay_from",
+  "stay_to",
+  "sale_from",
+  "sale_to",
+  "service_from",
+  "service_to",
+  "amount",
+  "custom_child_amounts",
+  "child_amount",
+  "infant_amount",
+  "priority"
+ ],
+ "fields": [
+  {
+   "fieldname": "market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Link",
+   "label": "Room type",
+   "options": "Room Type"
+  },
+  {
+   "fieldname": "sales_channel",
+   "fieldtype": "Link",
+   "label": "Channel",
+   "options": "TEX Sales Channel"
+  },
+  {
+   "fieldname": "stay_from",
+   "fieldtype": "Date",
+   "label": "Stay from"
+  },
+  {
+   "fieldname": "stay_to",
+   "fieldtype": "Date",
+   "label": "Stay to"
+  },
+  {
+   "fieldname": "sale_from",
+   "fieldtype": "Date",
+   "label": "Sale from"
+  },
+  {
+   "fieldname": "sale_to",
+   "fieldtype": "Date",
+   "label": "Sale to"
+  },
+  {
+   "fieldname": "service_from",
+   "fieldtype": "Date",
+   "label": "Service from",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "service_to",
+   "fieldtype": "Date",
+   "label": "Service to",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "custom_child_amounts",
+   "fieldtype": "Check",
+   "label": "Custom child/infant amounts"
+  },
+  {
+   "fieldname": "child_amount",
+   "fieldtype": "Currency",
+   "label": "Child amount"
+  },
+  {
+   "fieldname": "infant_amount",
+   "fieldtype": "Currency",
+   "label": "Infant amount"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Extra Price Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

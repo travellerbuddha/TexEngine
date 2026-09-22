@@ -1,0 +1,48 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "days_before_arrival",
+  "penalty_type",
+  "penalty_value"
+ ],
+ "fields": [
+  {
+   "fieldname": "days_before_arrival",
+   "fieldtype": "Int",
+   "label": "Days before arrival",
+   "in_list_view": 1,
+   "description": "Penalty applies when cancelling fewer than this many days before arrival"
+  },
+  {
+   "fieldname": "penalty_type",
+   "fieldtype": "Select",
+   "label": "Penalty",
+   "options": "PERCENT\nNIGHTS\nFIXED",
+   "default": "PERCENT",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "penalty_value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "in_list_view": 1,
+   "precision": "6"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Cancellation Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}

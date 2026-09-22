@@ -1,0 +1,253 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "contract_code",
+  "contract_name",
+  "market",
+  "column_13",
+  "status",
+  "pricing_basis",
+  "contract_currency",
+  "sell_currency",
+  "priority",
+  "is_bar",
+  "section_14",
+  "sale_from",
+  "sale_to",
+  "column_15",
+  "stay_from",
+  "stay_to",
+  "section_16",
+  "channels",
+  "section_17",
+  "active_version",
+  "latest_version_no",
+  "column_18",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "contract_code",
+   "fieldtype": "Data",
+   "label": "Contract code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "contract_name",
+   "fieldtype": "Data",
+   "label": "Contract name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_13",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nActive\nSuspended\nArchived",
+   "default": "Draft",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "pricing_basis",
+   "fieldtype": "Select",
+   "label": "Pricing basis",
+   "options": "PERSON\nROOM",
+   "default": "PERSON",
+   "reqd": 1
+  },
+  {
+   "fieldname": "contract_currency",
+   "fieldtype": "Link",
+   "label": "Contract currency",
+   "options": "Currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sell_currency",
+   "fieldtype": "Link",
+   "label": "Default sell currency",
+   "options": "Currency",
+   "description": "Blank = contract currency."
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority",
+   "description": "Higher wins when several contracts could sell the stay."
+  },
+  {
+   "fieldname": "is_bar",
+   "fieldtype": "Check",
+   "label": "Best Available Rate (direct contract)"
+  },
+  {
+   "fieldname": "section_14",
+   "fieldtype": "Section Break",
+   "label": "Validity"
+  },
+  {
+   "fieldname": "sale_from",
+   "fieldtype": "Date",
+   "label": "Sale from"
+  },
+  {
+   "fieldname": "sale_to",
+   "fieldtype": "Date",
+   "label": "Sale to"
+  },
+  {
+   "fieldname": "column_15",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stay_from",
+   "fieldtype": "Date",
+   "label": "Stay from"
+  },
+  {
+   "fieldname": "stay_to",
+   "fieldtype": "Date",
+   "label": "Stay to"
+  },
+  {
+   "fieldname": "section_16",
+   "fieldtype": "Section Break",
+   "label": "Channels"
+  },
+  {
+   "fieldname": "channels",
+   "fieldtype": "Table MultiSelect",
+   "label": "Sales channels",
+   "options": "TEX Contract Channel",
+   "description": "Blank = every channel."
+  },
+  {
+   "fieldname": "section_17",
+   "fieldtype": "Section Break",
+   "label": "Versions"
+  },
+  {
+   "fieldname": "active_version",
+   "fieldtype": "Link",
+   "label": "Active version",
+   "options": "TEX Contract Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "latest_version_no",
+   "fieldtype": "Int",
+   "label": "Latest version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_18",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Contract",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "CTR-.#####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "contract_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1,
+ "search_fields": "contract_code,contract_name,property,market"
+}

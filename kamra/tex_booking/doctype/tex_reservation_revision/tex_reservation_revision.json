@@ -1,0 +1,228 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "reservation",
+  "booking",
+  "revision_no",
+  "change_type",
+  "source",
+  "column_66",
+  "actor",
+  "actor_roles",
+  "approval_status",
+  "approved_by",
+  "approved_at",
+  "section_67",
+  "currency",
+  "old_amount",
+  "new_amount",
+  "difference",
+  "column_68",
+  "pricing_basis",
+  "basis_sale_at",
+  "override_amount",
+  "reason",
+  "section_69",
+  "changes_json",
+  "snapshot_before",
+  "snapshot_after"
+ ],
+ "fields": [
+  {
+   "fieldname": "reservation",
+   "fieldtype": "Link",
+   "label": "Reservation",
+   "options": "Reservation",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "booking",
+   "fieldtype": "Link",
+   "label": "Booking",
+   "options": "TEX Booking"
+  },
+  {
+   "fieldname": "revision_no",
+   "fieldtype": "Int",
+   "label": "Revision",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "change_type",
+   "fieldtype": "Select",
+   "label": "Change",
+   "options": "Original\nDates\nRoom\nOccupancy\nBoard\nMarket\nExtras\nDiscount\nPrice Override\nSale Date\nCancellation\nGuest Request\nMultiple",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Source",
+   "options": "Desk\nCall Center\nGuest\nAPI\nSystem"
+  },
+  {
+   "fieldname": "column_66",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Link",
+   "label": "Actor",
+   "options": "User",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "actor_roles",
+   "fieldtype": "Small Text",
+   "label": "Actor roles"
+  },
+  {
+   "fieldname": "approval_status",
+   "fieldtype": "Select",
+   "label": "Approval",
+   "options": "Not Required\nPending\nApproved\nRejected",
+   "default": "Not Required"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved by",
+   "options": "User"
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved at"
+  },
+  {
+   "fieldname": "section_67",
+   "fieldtype": "Section Break",
+   "label": "Money"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "old_amount",
+   "fieldtype": "Currency",
+   "label": "Old amount",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "new_amount",
+   "fieldtype": "Currency",
+   "label": "New amount",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "difference",
+   "fieldtype": "Currency",
+   "label": "Difference",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_68",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pricing_basis",
+   "fieldtype": "Select",
+   "label": "Pricing basis",
+   "options": "ORIGINAL_VERSION\nORIGINAL_SALE_DATE\nHISTORICAL_SALE_DATE\nCURRENT\nMANUAL\nNONE"
+  },
+  {
+   "fieldname": "basis_sale_at",
+   "fieldtype": "Datetime",
+   "label": "Basis sale time"
+  },
+  {
+   "fieldname": "override_amount",
+   "fieldtype": "Currency",
+   "label": "Manual override",
+   "options": "currency"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  },
+  {
+   "fieldname": "section_69",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "fieldname": "changes_json",
+   "fieldtype": "Code",
+   "label": "Field changes",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "snapshot_before",
+   "fieldtype": "Long Text",
+   "label": "Pricing before"
+  },
+  {
+   "fieldname": "snapshot_after",
+   "fieldtype": "Long Text",
+   "label": "Pricing after"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Booking",
+ "name": "TEX Reservation Revision",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Revenue Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Front Desk",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Call Center Agent",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "REV-.######",
+ "naming_rule": "Expression (old style)",
+ "in_create": 1
+}

@@ -1,0 +1,202 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "label",
+  "property",
+  "provider",
+  "environment",
+  "enabled",
+  "currencies",
+  "section_78",
+  "api_key",
+  "secret_key",
+  "merchant_key",
+  "column_79",
+  "terminal_id",
+  "store_key",
+  "bank_code",
+  "gateway_url",
+  "webhook_secret",
+  "section_80",
+  "bank_name",
+  "iban",
+  "account_holder",
+  "transfer_instructions"
+ ],
+ "fields": [
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "Label",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "label": "Provider",
+   "options": "Mock\niyzico\nSipay\nVirtual POS\nBank Transfer\nPay at Hotel",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "environment",
+   "fieldtype": "Select",
+   "label": "Environment",
+   "options": "Sandbox\nProduction",
+   "default": "Sandbox",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "currencies",
+   "fieldtype": "Small Text",
+   "label": "Currencies",
+   "description": "Blank = any"
+  },
+  {
+   "fieldname": "section_78",
+   "fieldtype": "Section Break",
+   "label": "Credentials",
+   "depends_on": "eval:!['Bank Transfer','Pay at Hotel','Mock'].includes(doc.provider)"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Data",
+   "label": "API key / merchant id"
+  },
+  {
+   "fieldname": "secret_key",
+   "fieldtype": "Password",
+   "label": "Secret key"
+  },
+  {
+   "fieldname": "merchant_key",
+   "fieldtype": "Password",
+   "label": "Merchant key"
+  },
+  {
+   "fieldname": "column_79",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "terminal_id",
+   "fieldtype": "Data",
+   "label": "Terminal / client id"
+  },
+  {
+   "fieldname": "store_key",
+   "fieldtype": "Password",
+   "label": "3D store key"
+  },
+  {
+   "fieldname": "bank_code",
+   "fieldtype": "Select",
+   "label": "Virtual POS bank / platform",
+   "options": "\nNestPay\nGaranti\nYKB PosNet\nVakif\nKuveyt"
+  },
+  {
+   "fieldname": "gateway_url",
+   "fieldtype": "Data",
+   "label": "Gateway URL override"
+  },
+  {
+   "fieldname": "webhook_secret",
+   "fieldtype": "Password",
+   "label": "Webhook secret"
+  },
+  {
+   "fieldname": "section_80",
+   "fieldtype": "Section Break",
+   "label": "Bank transfer",
+   "depends_on": "eval:doc.provider=='Bank Transfer'"
+  },
+  {
+   "fieldname": "bank_name",
+   "fieldtype": "Data",
+   "label": "Bank"
+  },
+  {
+   "fieldname": "iban",
+   "fieldtype": "Data",
+   "label": "IBAN"
+  },
+  {
+   "fieldname": "account_holder",
+   "fieldtype": "Data",
+   "label": "Account holder"
+  },
+  {
+   "fieldname": "transfer_instructions",
+   "fieldtype": "Small Text",
+   "label": "Instructions"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Payments",
+ "name": "TEX Payment Provider Account",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Finance",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "PPA-.####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "label",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

@@ -222,11 +222,30 @@ class Reservation(Document):
 				title=_("Blacklisted guest"),
 			)
 
+	# pricing inputs of the legacy engine; any other edit must not re-price
+	_LEGACY_PRICING_INPUTS = ("check_in_date", "check_out_date", "room_type", "adults", "children",
+	                          "meal_plan", "rate_plan", "voucher", "travel_agent", "occupants", "infants")
+
 	def apply_pricing(self):
-		"""Recompute money from the pricing engine while auto_price is on.
-		Turn auto_price off to hold manually negotiated amounts."""
+		"""Recompute money from the legacy pricing engine while auto_price is on.
+		Turn auto_price off to hold manually negotiated amounts.
+
+		TEX Engine (ADR-010): reservations priced by TEX or price-locked are never
+		re-priced here - their commercial terms change only through the TEX
+		modification flow. Legacy reservations re-price only on insert or when a
+		pricing input changes, never silently on unrelated edits."""
 		if not getattr(self, "auto_price", 0) or not self.room_type:
 			return
+		if self.get("tex_pricing_source") == "TEX" or self.get("tex_price_locked"):
+			return
+		if not self.is_new():
+			before = self.get_doc_before_save()
+			ages = lambda d: [str(o.get("age") or "") for o in (d.get("occupants") or [])]  # noqa: E731
+			if before and ages(before) == ages(self) and not any(
+				str(before.get(f) or "") != str(self.get(f) or "")
+				for f in self._LEGACY_PRICING_INPUTS if f != "occupants"
+			):
+				return
 		from kamra.pricing import quote
 
 		voucher_code = None

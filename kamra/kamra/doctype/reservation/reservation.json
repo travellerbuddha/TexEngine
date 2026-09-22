@@ -109,7 +109,39 @@
   "payment_policy",
   "quote_snapshot",
   "access_released",
-  "access_released_on"
+  "access_released_on",
+  "tex_tab_0",
+  "tex_booking",
+  "tex_room_index",
+  "tex_contract",
+  "tex_contract_version",
+  "tex_payload_hash",
+  "tex_market",
+  "tex_sales_channel",
+  "tex_board",
+  "tex_child_ages",
+  "tex_column_10",
+  "tex_pricing_source",
+  "tex_price_locked",
+  "tex_locked_at",
+  "tex_sale_at",
+  "tex_accepted_at",
+  "tex_quote",
+  "tex_revision_no",
+  "tex_section_18",
+  "tex_currency",
+  "tex_fx_rate",
+  "tex_total_amount",
+  "tex_extras_amount",
+  "tex_column_23",
+  "tex_cost_amount",
+  "tex_margin_amount",
+  "tex_promotions",
+  "tex_section_27",
+  "tex_guest_change_pending",
+  "tex_guest_change_note",
+  "tex_section_30",
+  "tex_pricing_snapshot"
  ],
  "fields": [
   {
@@ -529,14 +561,14 @@
    "label": "Occupants"
   },
   {
-   "description": "Everyone staying in the room \u2014 the legal hotel register. Printed on the GRC.",
+   "description": "Everyone staying in the room — the legal hotel register. Printed on the GRC.",
    "fieldname": "occupants",
    "fieldtype": "Table",
    "label": "Occupants",
    "options": "Stay Occupant"
   },
   {
-   "description": "Extras chosen at booking \u2014 posted to the guest folio when it opens.",
+   "description": "Extras chosen at booking — posted to the guest folio when it opens.",
    "fieldname": "addons",
    "fieldtype": "Table",
    "label": "Add-ons",
@@ -728,12 +760,204 @@
    "fieldtype": "Table",
    "label": "Special Instructions",
    "options": "Stay Instruction"
+  },
+  {
+   "fieldname": "tex_tab_0",
+   "fieldtype": "Tab Break",
+   "label": "TEX Commercial"
+  },
+  {
+   "fieldname": "tex_booking",
+   "fieldtype": "Link",
+   "label": "TEX booking",
+   "options": "TEX Booking",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "tex_room_index",
+   "fieldtype": "Int",
+   "label": "Room # in booking"
+  },
+  {
+   "fieldname": "tex_contract",
+   "fieldtype": "Link",
+   "label": "Contract",
+   "options": "TEX Contract"
+  },
+  {
+   "fieldname": "tex_contract_version",
+   "fieldtype": "Link",
+   "label": "Contract version",
+   "options": "TEX Contract Version"
+  },
+  {
+   "fieldname": "tex_payload_hash",
+   "fieldtype": "Data",
+   "label": "Contract payload hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "tex_sales_channel",
+   "fieldtype": "Link",
+   "label": "Sales channel",
+   "options": "TEX Sales Channel",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "tex_board",
+   "fieldtype": "Data",
+   "label": "Board"
+  },
+  {
+   "fieldname": "tex_child_ages",
+   "fieldtype": "Data",
+   "label": "Child ages (JSON)"
+  },
+  {
+   "fieldname": "tex_column_10",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tex_pricing_source",
+   "fieldtype": "Select",
+   "label": "Pricing source",
+   "options": "\nTEX\nLegacy\nManual",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_price_locked",
+   "fieldtype": "Check",
+   "label": "Price locked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_locked_at",
+   "fieldtype": "Datetime",
+   "label": "Locked at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_sale_at",
+   "fieldtype": "Datetime",
+   "label": "Sold at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_accepted_at",
+   "fieldtype": "Datetime",
+   "label": "Accepted at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_quote",
+   "fieldtype": "Link",
+   "label": "Quote",
+   "options": "TEX Quote",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_revision_no",
+   "fieldtype": "Int",
+   "label": "Revision",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_section_18",
+   "fieldtype": "Section Break",
+   "label": "TEX money"
+  },
+  {
+   "fieldname": "tex_currency",
+   "fieldtype": "Link",
+   "label": "Sell currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_fx_rate",
+   "fieldtype": "Float",
+   "label": "FX rate applied",
+   "read_only": 1,
+   "precision": "9"
+  },
+  {
+   "fieldname": "tex_total_amount",
+   "fieldtype": "Currency",
+   "label": "Total (sell currency)",
+   "options": "tex_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_extras_amount",
+   "fieldtype": "Currency",
+   "label": "Extras",
+   "options": "tex_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_column_23",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tex_cost_amount",
+   "fieldtype": "Currency",
+   "label": "Contract cost (sell ccy)",
+   "options": "tex_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_margin_amount",
+   "fieldtype": "Currency",
+   "label": "Margin",
+   "options": "tex_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_promotions",
+   "fieldtype": "Small Text",
+   "label": "Promotions applied",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tex_section_27",
+   "fieldtype": "Section Break",
+   "label": "Guest change"
+  },
+  {
+   "fieldname": "tex_guest_change_pending",
+   "fieldtype": "Check",
+   "label": "Guest change awaiting staff",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "tex_guest_change_note",
+   "fieldtype": "Small Text",
+   "label": "Guest change note"
+  },
+  {
+   "fieldname": "tex_section_30",
+   "fieldtype": "Section Break",
+   "label": "Pricing snapshot",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "tex_pricing_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Pricing snapshot (JSON)",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-04 21:10:50.146134",
+ "modified": "2026-09-22 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Reservation",

@@ -1,0 +1,177 @@
+{
+ "actions": [],
+ "creation": "2026-09-22 21:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "offer_code",
+  "offer_name",
+  "kind",
+  "value_type",
+  "value",
+  "stage",
+  "sale_from",
+  "sale_to",
+  "stay_from",
+  "stay_to",
+  "stay_match",
+  "min_nights",
+  "max_nights",
+  "min_lead_days",
+  "max_lead_days",
+  "room_types",
+  "boards",
+  "stackable",
+  "exclusive",
+  "priority",
+  "offer_group",
+  "free_nights_stay",
+  "free_nights_pay"
+ ],
+ "fields": [
+  {
+   "fieldname": "offer_code",
+   "fieldtype": "Data",
+   "label": "Code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "offer_name",
+   "fieldtype": "Data",
+   "label": "Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Kind",
+   "options": "EARLY_BOOKING\nLAST_MINUTE\nLONG_STAY\nMEMBER\nPROMO_CODE\nMARKET\nROOM\nPACKAGE\nBOOKING_DATE\nSTAY_DATE\nARRIVAL\nDEPARTURE\nSPECIAL_OFFER",
+   "default": "EARLY_BOOKING"
+  },
+  {
+   "fieldname": "value_type",
+   "fieldtype": "Select",
+   "label": "Value type",
+   "options": "PERCENT\nFIXED_STAY\nFIXED_NIGHT\nMULTIPLIER\nFREE_NIGHTS\nVALUE_ADDED",
+   "default": "PERCENT",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Float",
+   "label": "Value",
+   "in_list_view": 1,
+   "precision": "6"
+  },
+  {
+   "fieldname": "stage",
+   "fieldtype": "Select",
+   "label": "Applies to",
+   "options": "SELL\nCOST",
+   "default": "SELL"
+  },
+  {
+   "fieldname": "sale_from",
+   "fieldtype": "Date",
+   "label": "Sale from"
+  },
+  {
+   "fieldname": "sale_to",
+   "fieldtype": "Date",
+   "label": "Sale to"
+  },
+  {
+   "fieldname": "stay_from",
+   "fieldtype": "Date",
+   "label": "Stay from"
+  },
+  {
+   "fieldname": "stay_to",
+   "fieldtype": "Date",
+   "label": "Stay to"
+  },
+  {
+   "fieldname": "stay_match",
+   "fieldtype": "Select",
+   "label": "Stay match",
+   "options": "ANY_NIGHT\nALL_NIGHTS\nARRIVAL\nDEPARTURE",
+   "default": "ANY_NIGHT"
+  },
+  {
+   "fieldname": "min_nights",
+   "fieldtype": "Int",
+   "label": "Min nights"
+  },
+  {
+   "fieldname": "max_nights",
+   "fieldtype": "Int",
+   "label": "Max nights"
+  },
+  {
+   "fieldname": "min_lead_days",
+   "fieldtype": "Int",
+   "label": "Min days before arrival"
+  },
+  {
+   "fieldname": "max_lead_days",
+   "fieldtype": "Int",
+   "label": "Max days before arrival"
+  },
+  {
+   "fieldname": "room_types",
+   "fieldtype": "Data",
+   "label": "Room types",
+   "description": "Comma list; blank = all"
+  },
+  {
+   "fieldname": "boards",
+   "fieldtype": "Data",
+   "label": "Boards"
+  },
+  {
+   "fieldname": "stackable",
+   "fieldtype": "Check",
+   "label": "Stackable",
+   "default": "1"
+  },
+  {
+   "fieldname": "exclusive",
+   "fieldtype": "Check",
+   "label": "Exclusive"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  },
+  {
+   "fieldname": "offer_group",
+   "fieldtype": "Data",
+   "label": "Incompatible group"
+  },
+  {
+   "fieldname": "free_nights_stay",
+   "fieldtype": "Int",
+   "label": "Stay X"
+  },
+  {
+   "fieldname": "free_nights_pay",
+   "fieldtype": "Int",
+   "label": "Pay Y"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-22 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Contract Offer",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "istable": 1
+}
