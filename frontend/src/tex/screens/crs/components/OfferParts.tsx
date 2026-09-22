@@ -45,13 +45,13 @@ export function AvailabilityBadge({ available, rooms }: { available: number; roo
   return <Badge tone={available <= 3 ? "warning" : "neutral"}>{t("crs.offer.left", { count: available })}</Badge>
 }
 
-export function OfferBadges({ offer, rooms }: { offer: Offer; rooms: number }) {
+export function OfferBadges({ offer, rooms, showAvailability = true }: { offer: Offer; rooms: number; showAvailability?: boolean }) {
   const { t } = useTexT()
   const applied = offer.rooms[0]?.quote.promotions.filter((p) => p.applied) ?? []
   return (
     <div className="flex flex-wrap items-center gap-1">
       <RefundBadge refundable={offer.refundable ?? offer.rate_plan_info?.refundable} />
-      <AvailabilityBadge available={offer.available} rooms={rooms} />
+      {showAvailability && <AvailabilityBadge available={offer.available} rooms={rooms} />}
       {applied.map((p) => (
         <Badge key={p.promo_id} tone="brand">
           {p.code ? t("crs.offer.promo_code", { code: p.code }) : p.name}
@@ -167,8 +167,6 @@ export function OfferDetails({
   const content = prop?.rooms?.[offer.room_type]
   const facts = content
     ? [
-        content.max_adults ? t("crs.offer.max_adults", { count: content.max_adults }) : null,
-        content.max_children ? t("crs.offer.max_children", { count: content.max_children }) : null,
         content.size_sqm ? `${content.size_sqm} m²` : null,
         content.bed_type || content.beds || null,
         content.view || null,

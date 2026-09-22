@@ -138,7 +138,9 @@ export function PaymentPicker({
           {t("crs.pay.method")}
           {methods && methods.length > 0 && <span className="ml-0.5 text-rose-600" aria-hidden>*</span>}
         </legend>
-        {methodsError ? (
+        {!flow.selection ? (
+          <p className="text-sm text-zinc-500">{t("crs.pay.after_offer")}</p>
+        ) : methodsError ? (
           <Notice tone="danger">{methodsError.message}</Notice>
         ) : !methods ? (
           <Skeleton className="h-16 w-full" />
@@ -197,6 +199,8 @@ export function PaymentPicker({
           <p className="text-sm text-rose-700" role="alert">
             {summaryError.message}
           </p>
+        ) : !flow.quotesOk || flow.quoteStale ? (
+          <p className="py-1 text-sm text-zinc-500">{t("crs.pay.after_quote")}</p>
         ) : !summary || summaryLoading ? (
           <div className="space-y-1.5 py-1">
             <Skeleton className="h-4 w-full" />

@@ -94,8 +94,24 @@ export interface PaymentLinkArgs {
   guest_name?: string
   guest_email?: string
   idempotency_key: string
+  /** 1 = the server e-mails the link to guest_email (transactional). */
+  send_email?: 0 | 1
+  language?: string
+}
+
+/** The URL carries a bearer token: the server returns it once and never stores it. */
+export interface PaymentLinkResult {
+  link: string
+  url?: string
+  emailed?: boolean
+  replay?: boolean
 }
 
 export function createPaymentLink(args: PaymentLinkArgs) {
-  return tex<{ link: string; url?: string; replay?: boolean }>("payments", "create_link", { ...args }, { post: true })
+  return tex<PaymentLinkResult>("payments", "create_link", { ...args }, { post: true })
+}
+
+/** New token for an open link; the previous URL stops working. */
+export function reissuePaymentLink(name: string, send_email: 0 | 1, language?: string) {
+  return tex<PaymentLinkResult>("payments", "reissue_link", { name, send_email, language }, { post: true })
 }

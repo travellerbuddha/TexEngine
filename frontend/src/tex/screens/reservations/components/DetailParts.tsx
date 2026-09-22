@@ -7,7 +7,7 @@ import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, CardHeader, ErrorState, Money, Skeleton, statusTone } from "../../../ui"
 import { cn } from "../../../../lib/utils"
 import { Row } from "../../crs/components/controls"
-import { PaymentLinkDialog } from "../../crs/components/PaymentLinkDialog"
+import { PaymentLinkDialog, ReissueLinkDialog } from "../../crs/components/PaymentLinkDialog"
 import { useLabels } from "../../crs/lib/labels"
 import { isPositive, isZero } from "../../crs/lib/party"
 import type { BookingSummary } from "../../crs/lib/types"
@@ -131,11 +131,13 @@ export function PaymentSummaryCard({
   booking,
   guestName,
   guestEmail,
+  guestLanguage,
   reservation,
 }: {
   booking: string
   guestName?: string
   guestEmail?: string
+  guestLanguage?: string
   reservation?: string
 }) {
   const { t } = useTexT()
@@ -151,7 +153,14 @@ export function PaymentSummaryCard({
           <Skeleton className="h-4 w-2/3" />
         </CardBody>
       ) : (
-        <PaymentSummaryBody b={q.data} guestName={guestName} guestEmail={guestEmail} reservation={reservation} onChanged={q.reload} />
+        <PaymentSummaryBody
+          b={q.data}
+          guestName={guestName}
+          guestEmail={guestEmail}
+          guestLanguage={guestLanguage}
+          reservation={reservation}
+          onChanged={q.reload}
+        />
       )}
     </Card>
   )
@@ -161,12 +170,14 @@ export function PaymentSummaryBody({
   b,
   guestName,
   guestEmail,
+  guestLanguage,
   reservation,
   onChanged,
 }: {
   b: BookingSummary
   guestName?: string
   guestEmail?: string
+  guestLanguage?: string
   reservation?: string
   onChanged?: () => void
 }) {
@@ -174,7 +185,9 @@ export function PaymentSummaryBody({
   const L = useLabels()
   const { can } = useSession()
   const [open, setOpen] = useState(false)
-  const canLink = can("payment.link", b.property) && isPositive(b.balance) && b.status !== "Cancelled"
+  const [reissue, setReissue] = useState<string | null>(null)
+  const mayLink = can("payment.link", b.property)
+  const canLink = mayLink && isPositive(b.balance) && b.status !== "Cancelled"
   return (
     <CardBody className="space-y-3">
       <div className="flex flex-wrap gap-1">
@@ -230,6 +243,16 @@ export function PaymentSummaryBody({
                   <Badge tone={statusTone(l.status)} className="ml-1">
                     {L.status(l.status)}
                   </Badge>
+                  {mayLink && (l.status === "Active" || l.status === "Partially Paid") && (
+                    <button
+                      type="button"
+                      className="ml-2 text-xs font-medium text-tex-700 hover:underline"
+                      aria-label={t("crs.link.reissue_title", { name: l.name })}
+                      onClick={() => setReissue(l.name)}
+                    >
+                      {t("crs.link.reissue_short")}
+                    </button>
+                  )}
                 </span>
               </li>
             ))}
@@ -254,9 +277,20 @@ export function PaymentSummaryBody({
             reservation={reservation}
             guestName={guestName ?? b.booker_name}
             guestEmail={guestEmail}
+            guestLanguage={guestLanguage}
           />
         </>
       )}
+      <ReissueLinkDialog
+        open={reissue !== null}
+        link={reissue}
+        onClose={() => {
+          setReissue(null)
+          onChanged?.()
+        }}
+        guestEmail={guestEmail}
+        guestLanguage={guestLanguage}
+      />
     </CardBody>
   )
 }

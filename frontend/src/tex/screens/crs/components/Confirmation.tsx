@@ -18,6 +18,7 @@ export function Confirmation({
   prop,
   guestName,
   guestEmail,
+  guestLanguage,
   onNew,
   newShortcut,
   compact,
@@ -26,6 +27,7 @@ export function Confirmation({
   prop?: PropertyResult
   guestName?: string
   guestEmail?: string
+  guestLanguage?: string
   onNew: () => void
   newShortcut?: string
   compact?: boolean
@@ -71,7 +73,7 @@ export function Confirmation({
             <Badge tone={statusTone(booking.payment_status)}>{L.status(booking.payment_status)}</Badge>
           </span>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className={compact ? "grid gap-4" : "grid gap-4 sm:grid-cols-2"}>
           <div>
             <Row strong label={t("crs.quote.total")} value={<Money amount={booking.total} currency={booking.currency} />} />
             <Row label={t("crs.pay.due_now")} value={<Money amount={booking.due_now} currency={booking.currency} />} />
@@ -80,7 +82,7 @@ export function Confirmation({
           </div>
           <ul className="space-y-1 text-sm">
             {booking.rooms.map((r, i) => (
-              <li key={r.reservation} className="flex flex-wrap items-baseline justify-between gap-2">
+              <li key={r.reservation} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
                 <span className="min-w-0">
                   <Link to={`/tex/reservations/${encodeURIComponent(r.reservation)}`} className="font-medium text-tex-700 hover:underline">
                     {r.reservation}
@@ -120,6 +122,7 @@ export function Confirmation({
         booking={booking.booking}
         guestName={guestName}
         guestEmail={guestEmail}
+        guestLanguage={guestLanguage}
       />
     </Card>
   )

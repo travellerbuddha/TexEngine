@@ -304,7 +304,13 @@ function DetailView({
             </CardBody>
           </Card>
           {d.booking && caps.has("price.view") && (
-            <PaymentSummaryCard booking={d.booking} reservation={d.name} guestName={d.guest?.full_name} guestEmail={d.guest?.email ?? undefined} />
+            <PaymentSummaryCard
+              booking={d.booking}
+              reservation={d.name}
+              guestName={d.guest?.full_name}
+              guestEmail={d.guest?.email ?? undefined}
+              guestLanguage={d.guest?.tex_language ?? undefined}
+            />
           )}
         </div>
       </div>

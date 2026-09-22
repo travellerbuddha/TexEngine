@@ -4,7 +4,6 @@ import { useSession } from "../../../lib/session"
 import { addDays, isoDay, nightsBetween } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, Field, Input, Select } from "../../../ui"
-import { cn } from "../../../../lib/utils"
 import { CodeChips } from "./controls"
 import { PartyEditor } from "./PartyEditor"
 import type { FieldErrors, SearchFormState } from "../lib/useBookingFlow"
@@ -42,7 +41,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
   const allHotels = form.properties.length === hotels.length
   return (
     <form onSubmit={submit} noValidate aria-label={t("crs.search.title")} className="space-y-4">
-      <div className={cn("grid grid-cols-2 gap-3", compact ? "lg:grid-cols-4" : "md:grid-cols-4 xl:grid-cols-6")}>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Field label={t("crs.search.check_in")} error={errors.check_in} required>
           <Input
             ref={firstRef}
@@ -72,9 +71,10 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
           />
         </Field>
         <Field
+          className="col-span-2 md:col-span-1"
           label={t("crs.search.market")}
           error={errors.market}
-          hint={!errors.market && !marketHint ? t("crs.search.market_hint") : undefined}
+          hint={!errors.market && !marketHint && !compact ? t("crs.search.market_hint") : undefined}
           required
         >
           <Select
@@ -101,7 +101,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
             onChange={(e) => set({ currency: e.target.value })}
           />
         </Field>
-        <Field label={t("crs.search.promo")} hint={compact ? undefined : t("crs.search.promo_hint")}>
+        <Field className="col-span-2 md:col-span-3" label={t("crs.search.promo")} hint={compact ? undefined : t("crs.search.promo_hint")}>
           <CodeChips
             id={`${idPrefix}-promo`}
             value={form.promo}

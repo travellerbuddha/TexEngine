@@ -108,7 +108,7 @@
  "res.mod.applied": "Zaktualizowano rezerwację — {rev}",
  "res.mod.apply": "Zastosuj zmianę",
  "res.mod.apply_failed": "Zmiana nie została zastosowana",
- "res.mod.apply_failed_hint": "Od wyliczenia zmieniła się cena lub rezerwacja. Sprawdź nową propozycję i zastosuj ponownie.",
+ "res.mod.apply_failed_hint": "Propozycja wygasła (30 minut) albo od wyliczenia zmieniła się cena lub rezerwacja. Sprawdź nową propozycję i zastosuj ponownie.",
  "res.mod.button": "Zmień",
  "res.mod.calculate": "Wylicz nową cenę",
  "res.mod.changed_n": {
@@ -119,6 +119,7 @@
  },
  "res.mod.confirm": "Zastosuj zmianę",
  "res.mod.err_basis_at": "Wybierz datę i godzinę sprzedaży.",
+ "res.mod.expires_hint": "Wyliczenie jest ważne 30 minut.",
  "res.mod.intro": "Cena jest zablokowana. Zmiana jest przeliczana według wybranej podstawy, pokazywana obok obecnej ceny i stosowana tylko z uzasadnieniem. Do tego czasu nic się nie zmienia.",
  "res.mod.market_hint": "Zmiana rynku może zmienić umowę.",
  "res.mod.options_limited": "Nie udało się wczytać opcji pokoi i stawek; nadal możesz zmienić daty, gości i usługi.",

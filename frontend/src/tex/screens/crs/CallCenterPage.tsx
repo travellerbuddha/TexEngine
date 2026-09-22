@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { ClipboardCopy, Keyboard, NotebookPen, PhoneCall, RefreshCw, Star, UserRound, X } from "lucide-react"
-import { date, dateTime, isoDay } from "../../lib/format"
+import { date, dateTime, isoDay, money } from "../../lib/format"
 import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
 import {
@@ -40,7 +40,7 @@ import { guestProfile, logCall } from "./lib/api"
 import { useLabels } from "./lib/labels"
 import { copyText, offerId } from "./lib/party"
 import { quoteText } from "./lib/quoteText"
-import { asApiError, useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
+import { asApiError, focusFirstInvalid, useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
 import type { GuestProfile, GuestRow, Offer, PropertyResult } from "./lib/types"
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
@@ -141,7 +141,10 @@ export default function CallCenterPage() {
   // ── actions ──
   const doSearch = useCallback(async () => {
     const res = await flow.runSearch()
-    if (!res) return
+    if (!res) {
+      focusFirstInvalid()
+      return
+    }
     const count = res.properties.reduce((n, p) => n + p.offers.length, 0)
     setAnnounce(t("crs.results.announce", { count }))
     log(
@@ -169,7 +172,7 @@ export default function CallCenterPage() {
         const p = flow.propertyResult(sel.property)
         const desc = res
           .map((q) =>
-            q.quote ? `${roomName(p, q.quote.request.room_type)} ${L.board(q.quote.request.board)} ${q.quote.totals.total} ${q.quote.currency}` : "",
+            q.quote ? `${roomName(p, q.quote.request.room_type)}, ${L.board(q.quote.request.board)} ${money(q.quote.totals.total, q.quote.currency)}` : "",
           )
           .join(" + ")
         setAnnounce(t("crs.quote.announce_ready"))
@@ -218,7 +221,7 @@ export default function CallCenterPage() {
       setAnnounce(t("crs.done.announce", { ref: b.booking }))
       log(t("crs.cc.ev.booked", { ref: b.booking, status: L.status(b.status) }))
       window.setTimeout(() => document.getElementById("crs-confirmation-title")?.focus(), 0)
-    } else if (Object.keys(flow.guestErrors).length) window.setTimeout(() => guestRef.current?.focus(), 0)
+    } else focusFirstInvalid()
   }, [flow, t, log, L])
 
   const newCall = useCallback(() => {
@@ -327,10 +330,11 @@ export default function CallCenterPage() {
       <LiveRegion message={announce} />
       <ShortcutStrip />
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)_25rem]">
-        {/* ── column 1: caller + notes ── */}
-        <div className="min-w-0 space-y-4">
-          <CallerPanel caller={caller} onPick={pickCaller} onClear={() => setCaller(null)} inputRef={callerRef} />
+      {/* row 1: who is calling + the running call log; row 2: search/offers + quote/guest/book.
+          DOM order = visual order = tab order (caller → notes → search → offers → quote → guest → book). */}
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start">
+        <CallerPanel caller={caller} onPick={pickCaller} onClear={() => setCaller(null)} inputRef={callerRef} />
+        <div className="min-w-0">
           <Card>
             <CardHeader
               title={
@@ -358,8 +362,10 @@ export default function CallCenterPage() {
             </CardBody>
           </Card>
         </div>
+      </div>
 
-        {/* ── column 2: search + results ── */}
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_26rem]">
+        {/* ── search + offers ── */}
         <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader
@@ -438,7 +444,7 @@ export default function CallCenterPage() {
           </Card>
         </div>
 
-        {/* ── column 3: quote, guest, payment, book ── */}
+        {/* ── quote, guest, payment, book ── */}
         <div className="min-w-0 space-y-4">
           <QuotePanel flow={flow} headingRef={quoteRef} canCost={canCost} quoteCopy={quoteCopy} onCopy={() => void copyQuote()} />
           {flow.booking ? (
@@ -448,6 +454,7 @@ export default function CallCenterPage() {
               prop={selectedProp}
               guestName={`${flow.guest.first_name} ${flow.guest.last_name}`.trim()}
               guestEmail={flow.guest.email || undefined}
+              guestLanguage={flow.guest.language}
               onNew={newCall}
               newShortcut={`${ALT}N`}
             />
@@ -559,7 +566,7 @@ function CallerPanel({
           </span>
         }
       />
-      <CardBody className="space-y-3">
+      <CardBody className="grid gap-4 md:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
         {canCrm ? (
           <GuestLookup
             ref={inputRef}
@@ -572,8 +579,9 @@ function CallerPanel({
         ) : (
           <p className="text-sm text-zinc-500">{t("crs.guest.lookup_denied")}</p>
         )}
+        {!caller && canCrm && <p className="hidden self-center text-sm text-zinc-500 md:block">{t("crs.cc.caller_empty")}</p>}
         {caller && (
-          <div className="space-y-3 rounded-lg border border-zinc-200 p-3">
+          <div className="min-w-0 space-y-3 rounded-lg border border-zinc-200 p-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 font-semibold text-zinc-900">
@@ -595,8 +603,10 @@ function CallerPanel({
               <Skeleton className="h-16 w-full" />
             ) : profile ? (
               <>
-                <StayList title={t("crs.cc.open_bookings", { count: open.length })} stays={open} empty={t("crs.cc.no_open")} highlight L={L} />
-                <StayList title={t("crs.cc.history")} stays={past} empty={t("crs.cc.no_history")} L={L} />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <StayList title={t("crs.cc.open_bookings", { count: open.length })} stays={open} empty={t("crs.cc.no_open")} highlight L={L} />
+                  <StayList title={t("crs.cc.history")} stays={past} empty={t("crs.cc.no_history")} L={L} />
+                </div>
                 {profile.guest.guest_notes ? (
                   <p className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">{profile.guest.guest_notes}</p>
                 ) : null}
@@ -916,7 +926,7 @@ function QuotePanel({
                         <PriceBreakdown quote={q.quote} canCost={canCost} />
                       </>
                     )}
-                    <Disclosure summary={t("crs.extras.title_count", { count: Object.keys(flow.extras[i] ?? {}).length })}>
+                    {!flow.booking && <Disclosure summary={t("crs.extras.title_count", { count: Object.keys(flow.extras[i] ?? {}).length })}>
                       <ExtrasPicker
                         extras={extras.data}
                         value={flow.extras[i] ?? {}}
@@ -924,11 +934,11 @@ function QuotePanel({
                         roomLabel={t("crs.room_n", { n: i + 1 })}
                         idPrefix={`cc-q${i}`}
                       />
-                    </Disclosure>
+                    </Disclosure>}
                   </section>
                 )
               })}
-            <PromoAndRequote flow={flow} />
+            {!flow.booking && <PromoAndRequote flow={flow} />}
             {quoteCopy && (
               <div className="space-y-1.5 border-t border-zinc-100 pt-3">
                 <div className="flex items-center justify-between gap-2">

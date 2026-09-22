@@ -106,7 +106,7 @@
  "res.mod.applied": "Rezervare actualizată — {rev}",
  "res.mod.apply": "Aplică modificarea",
  "res.mod.apply_failed": "Modificarea nu a fost aplicată",
- "res.mod.apply_failed_hint": "Prețul sau rezervarea s-au schimbat de la calcul. Verificați noua propunere și aplicați din nou.",
+ "res.mod.apply_failed_hint": "Propunerea a expirat (30 de minute) sau prețul ori rezervarea s-au schimbat de la calcul. Verificați noua propunere și aplicați din nou.",
  "res.mod.button": "Modifică",
  "res.mod.calculate": "Calculează prețul nou",
  "res.mod.changed_n": {
@@ -116,6 +116,7 @@
  },
  "res.mod.confirm": "Aplicați modificarea",
  "res.mod.err_basis_at": "Alegeți data și ora vânzării.",
+ "res.mod.expires_hint": "Un calcul este valabil 30 de minute.",
  "res.mod.intro": "Prețul este blocat. O modificare este recalculată pe baza aleasă, afișată lângă prețul actual și aplicată doar cu un motiv. Nimic nu se schimbă până nu aplicați.",
  "res.mod.market_hint": "Schimbarea pieței poate schimba contractul.",
  "res.mod.options_limited": "Opțiunile de cameră și tarif nu au putut fi încărcate; puteți schimba totuși datele, oaspeții și serviciile.",

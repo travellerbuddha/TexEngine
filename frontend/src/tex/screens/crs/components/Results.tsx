@@ -10,7 +10,7 @@ import { BOARDS, cmpDecimal, offerId } from "../lib/party"
 import type { BookingFlow } from "../lib/useBookingFlow"
 import type { Offer, PropertyResult } from "../lib/types"
 import { Disclosure } from "./controls"
-import { OfferBadges, OfferDetails, OfferPrice, OfferTitle, ratePlanName, roomName } from "./OfferParts"
+import { AvailabilityBadge, OfferBadges, OfferDetails, OfferPrice, OfferTitle, ratePlanName, roomName } from "./OfferParts"
 import { usePartyText } from "./PartyEditor"
 
 /** CRS results grouped by hotel (R-24). Unsellable offers keep their restriction messages. */
@@ -99,6 +99,7 @@ function HotelResults({
   const { t } = useTexT()
   const r = flow.result!
   const rooms = r.rooms.length
+  const L = useLabels()
   const selectedHere = flow.selection?.property === p.property
   return (
     <Card>
@@ -131,42 +132,64 @@ function HotelResults({
       {offers.length === 0 ? (
         <p className="px-4 py-6 text-center text-sm text-zinc-500">{p.offers.length ? t("crs.results.filtered_out") : t("crs.results.none_here")}</p>
       ) : (
-        <ul className="divide-y divide-zinc-100">
-          {offers.map((o) => {
-            const id = offerId(o)
-            const picked = selectedHere && flow.selection!.picks.includes(id)
+        <ul className="divide-y divide-zinc-200">
+          {groupByRoom(offers).map(([roomType, group]) => {
+            const content = p.rooms?.[roomType]
             return (
-              <li key={id} className={cn("flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start", picked && "bg-tex-50/60")}>
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <OfferTitle offer={o} prop={p} />
-                  <OfferBadges offer={o} rooms={rooms} />
-                  {rooms > 1 && (
-                    <p className="text-xs text-zinc-500">
-                      {o.rooms.map((x) => `${t("crs.room_n", { n: x.room_index + 1 })} ${money(x.quote.totals.total, x.quote.currency)}`).join(" · ")}
-                    </p>
-                  )}
-                  <Disclosure summary={t("crs.results.details")}>
-                    <OfferDetails offer={o} prop={p} parties={r.rooms} canCost={canCost} />
-                  </Disclosure>
+              <li key={roomType} aria-labelledby={`rt-${cssKey(p.property)}-${cssKey(roomType)}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-zinc-50/70 px-4 py-2">
+                  <h3 id={`rt-${cssKey(p.property)}-${cssKey(roomType)}`} className="text-sm font-semibold text-zinc-900">
+                    {roomName(p, roomType)}
+                    {content?.max_adults ? (
+                      <span className="ml-2 text-xs font-normal text-zinc-500">
+                        {t("crs.offer.max_adults", { count: content.max_adults })}
+                        {content.max_children ? ` · ${t("crs.offer.max_children", { count: content.max_children })}` : ""}
+                      </span>
+                    ) : null}
+                  </h3>
+                  <AvailabilityBadge available={group[0].available} rooms={rooms} />
                 </div>
-                <div className="flex items-center justify-between gap-4 sm:flex-col sm:items-end">
-                  <OfferPrice offer={o} nights={r.nights} rooms={rooms} />
-                  {canCreate && (
-                    <Button
-                      size="sm"
-                      variant={picked ? "secondary" : "primary"}
-                      icon={picked ? <Check className="size-4" aria-hidden /> : undefined}
-                      onClick={() => onSelect(p.property, o)}
-                      aria-label={t("crs.results.select_aria", {
-                        room: roomName(p, o.room_type),
-                        board: o.board,
-                        plan: ratePlanName({ ...o, property: p.property }) ?? "",
-                      })}
-                    >
-                      {picked ? t("crs.results.selected") : rooms > 1 ? t("crs.results.select_all") : t("crs.results.select")}
-                    </Button>
-                  )}
-                </div>
+                <ul className="divide-y divide-zinc-100">
+                  {group.map((o) => {
+                    const id = offerId(o)
+                    const picked = selectedHere && flow.selection!.picks.includes(id)
+                    const plan = ratePlanName({ ...o, property: p.property })
+                    return (
+                      <li key={id} className={cn("grid gap-2 px-4 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start", picked && "bg-tex-50/60")}>
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm text-zinc-900">
+                            <span className="font-medium">{L.board(o.board)}</span>
+                            {plan ? <span className="text-zinc-600"> · {plan}</span> : null}
+                          </p>
+                          <OfferBadges offer={o} rooms={rooms} showAvailability={false} />
+                          {rooms > 1 && (
+                            <p className="text-xs text-zinc-500">
+                              {o.rooms.map((x) => `${t("crs.room_n", { n: x.room_index + 1 })} ${money(x.quote.totals.total, x.quote.currency)}`).join(" · ")}
+                            </p>
+                          )}
+                          <Disclosure summary={t("crs.results.details")}>
+                            <OfferDetails offer={o} prop={p} parties={r.rooms} canCost={canCost} />
+                          </Disclosure>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 sm:justify-end">
+                          <OfferPrice offer={o} nights={r.nights} rooms={rooms} />
+                          {canCreate && (
+                            <Button
+                              size="sm"
+                              className="min-w-24"
+                              variant={picked ? "secondary" : "primary"}
+                              icon={picked ? <Check className="size-4" aria-hidden /> : undefined}
+                              onClick={() => onSelect(p.property, o)}
+                              aria-label={t("crs.results.select_aria", { room: roomName(p, o.room_type), board: L.board(o.board), plan: plan ?? "" })}
+                            >
+                              {picked ? t("crs.results.selected") : rooms > 1 ? t("crs.results.select_all") : t("crs.results.select")}
+                            </Button>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
               </li>
             )
           })}
@@ -198,6 +221,21 @@ function HotelResults({
       )}
     </Card>
   )
+}
+
+function groupByRoom(offers: Offer[]): [string, Offer[]][] {
+  // the server sorts offers by total: the first offer of each room type is its cheapest
+  const m = new Map<string, Offer[]>()
+  for (const o of offers) {
+    const g = m.get(o.room_type)
+    if (g) g.push(o)
+    else m.set(o.room_type, [o])
+  }
+  return [...m.entries()]
+}
+
+function cssKey(s: string) {
+  return s.replace(/[^A-Za-z0-9_-]/g, "_")
 }
 
 /** Room builder: one offer per room of the party, all at the same hotel (R-29). */

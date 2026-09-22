@@ -14,7 +14,8 @@ import { usePartyText } from "./components/PartyEditor"
 import { QuoteControls, QuoteRoom, useExtras } from "./components/QuoteParts"
 import { Results, RoomBuilder } from "./components/Results"
 import { SearchForm } from "./components/SearchForm"
-import { useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
+import { focusFirstInvalid, useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
+import { useLabels } from "./lib/labels"
 import type { Offer } from "./lib/types"
 
 type Step = "search" | "quote" | "checkout" | "done"
@@ -41,6 +42,7 @@ export default function CrsPage() {
   const onSearch = async () => {
     const r = await flow.runSearch()
     if (r) setAnnounce(t("crs.results.announce", { count: r.properties.reduce((n, p) => n + p.offers.length, 0) }))
+    else focusFirstInvalid()
   }
 
   const onSelect = async (property: string, offer: Offer) => {
@@ -57,7 +59,7 @@ export default function CrsPage() {
     if (b) {
       go("done")
       setAnnounce(t("crs.done.announce", { ref: b.booking }))
-    }
+    } else focusFirstInvalid()
   }
 
   // Ctrl/Cmd+Enter books from anywhere on the checkout step
@@ -168,6 +170,7 @@ export default function CrsPage() {
               prop={prop}
               guestName={`${flow.guest.first_name} ${flow.guest.last_name}`.trim()}
               guestEmail={flow.guest.email || undefined}
+              guestLanguage={flow.guest.language}
               onNew={() => {
                 flow.resetAll(true)
                 go("search")
@@ -287,6 +290,7 @@ export function BookErrors({ flow, onRequote, onSearchAgain }: { flow: BookingFl
 
 function SummaryCard({ flow, step, onGo, onBook }: { flow: BookingFlow; step: Step; onGo: (s: Step) => void; onBook: () => void }) {
   const { t } = useTexT()
+  const L = useLabels()
   const partyText = usePartyText()
   const r = flow.result
   const sel = flow.selection
@@ -304,7 +308,7 @@ function SummaryCard({ flow, step, onGo, onBook }: { flow: BookingFlow; step: St
               {date(r.check_in)} – {date(r.check_out)}
             </p>
             <p className="text-xs text-zinc-500">
-              {t("core.label.nights", { count: r.nights })} · {r.market} · {r.channel}
+              {t("core.label.nights", { count: r.nights })} · {r.market} · {L.channel(r.channel)}
             </p>
           </div>
         )}

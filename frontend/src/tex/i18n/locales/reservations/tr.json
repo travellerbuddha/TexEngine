@@ -104,7 +104,7 @@
  "res.mod.applied": "Rezervasyon güncellendi — {rev}",
  "res.mod.apply": "Değişikliği uygula",
  "res.mod.apply_failed": "Değişiklik uygulanmadı",
- "res.mod.apply_failed_hint": "Hesapladığınızdan bu yana fiyat veya rezervasyon değişti. Yeni öneriyi inceleyip tekrar uygulayın.",
+ "res.mod.apply_failed_hint": "Öneri süresi doldu (30 dakika) ya da hesapladığınızdan bu yana fiyat veya rezervasyon değişti. Yeni öneriyi inceleyip tekrar uygulayın.",
  "res.mod.button": "Değiştir",
  "res.mod.calculate": "Yeni fiyatı hesapla",
  "res.mod.changed_n": {
@@ -113,6 +113,7 @@
  },
  "res.mod.confirm": "Değişikliği uygula",
  "res.mod.err_basis_at": "Satış tarihini ve saatini seçin.",
+ "res.mod.expires_hint": "Hesaplama 30 dakika geçerlidir.",
  "res.mod.intro": "Fiyat kilitli. Değişiklik seçtiğiniz esasa göre yeniden fiyatlanır, mevcut fiyatın yanında gösterilir ve yalnızca gerekçeyle uygulanır. Siz uygulayana kadar hiçbir şey değişmez.",
  "res.mod.market_hint": "Pazarı değiştirmek kontratı değiştirebilir.",
  "res.mod.options_limited": "Oda ve fiyat seçenekleri yüklenemedi; tarihleri, misafirleri ve ek hizmetleri yine de değiştirebilirsiniz.",

@@ -104,7 +104,7 @@
  "res.mod.applied": "Reservierung aktualisiert — {rev}",
  "res.mod.apply": "Änderung übernehmen",
  "res.mod.apply_failed": "Die Änderung wurde nicht übernommen",
- "res.mod.apply_failed_hint": "Preis oder Reservierung haben sich seit der Berechnung geändert. Prüfen Sie den neuen Vorschlag und übernehmen Sie erneut.",
+ "res.mod.apply_failed_hint": "Der Vorschlag ist abgelaufen (30 Minuten) oder Preis bzw. Reservierung haben sich seit der Berechnung geändert. Prüfen Sie den neuen Vorschlag und übernehmen Sie erneut.",
  "res.mod.button": "Ändern",
  "res.mod.calculate": "Neuen Preis berechnen",
  "res.mod.changed_n": {
@@ -113,6 +113,7 @@
  },
  "res.mod.confirm": "Änderung übernehmen",
  "res.mod.err_basis_at": "Verkaufsdatum und -zeit wählen.",
+ "res.mod.expires_hint": "Eine Berechnung gilt 30 Minuten.",
  "res.mod.intro": "Der Preis ist festgeschrieben. Eine Änderung wird nach der gewählten Grundlage neu berechnet, neben dem aktuellen Preis gezeigt und nur mit Begründung übernommen. Bis dahin ändert sich nichts.",
  "res.mod.market_hint": "Ein anderer Markt kann den Vertrag ändern.",
  "res.mod.options_limited": "Zimmer- und Ratenoptionen konnten nicht geladen werden; Daten, Gäste und Zusatzleistungen lassen sich trotzdem ändern.",

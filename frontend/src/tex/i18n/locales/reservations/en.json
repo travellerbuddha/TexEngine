@@ -104,7 +104,7 @@
  "res.mod.applied": "Reservation updated — {rev}",
  "res.mod.apply": "Apply change",
  "res.mod.apply_failed": "The change was not applied",
- "res.mod.apply_failed_hint": "The price or the reservation moved since you calculated. Review the new proposal and apply again.",
+ "res.mod.apply_failed_hint": "The proposal expired (30 minutes), or the price or the reservation moved since you calculated. Review the new proposal and apply again.",
  "res.mod.button": "Modify",
  "res.mod.calculate": "Calculate new price",
  "res.mod.changed_n": {
@@ -113,6 +113,7 @@
  },
  "res.mod.confirm": "Apply the change",
  "res.mod.err_basis_at": "Choose the sale date and time.",
+ "res.mod.expires_hint": "A calculation is valid for 30 minutes.",
  "res.mod.intro": "The price is locked. A change is re-priced on the basis you choose, shown next to the current price, and applied only with a reason. Nothing changes until you apply.",
  "res.mod.market_hint": "Changing the market can change the contract.",
  "res.mod.options_limited": "Room and rate options could not be loaded; you can still change dates, guests and extras.",

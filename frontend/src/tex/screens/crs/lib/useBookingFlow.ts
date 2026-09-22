@@ -74,6 +74,11 @@ export function asApiError(e: unknown): TexApiError {
   return e instanceof TexApiError ? e : new TexApiError(String((e as Error)?.message ?? e), 0, "Error")
 }
 
+/** After a failed validation, move keyboard focus to the first invalid control. */
+export function focusFirstInvalid(root: ParentNode = document) {
+  window.setTimeout(() => root.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(), 0)
+}
+
 function today() {
   return isoDay(new Date())
 }

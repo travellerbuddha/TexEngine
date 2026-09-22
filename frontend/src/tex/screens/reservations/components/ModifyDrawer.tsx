@@ -352,9 +352,12 @@ export function ModifyDrawer({
 
         {proposal && !stale && proposal.sellable && (
           <section aria-labelledby="mod-apply" className="space-y-3 rounded-lg border border-zinc-200 p-4">
-            <h3 id="mod-apply" className="text-sm font-semibold text-zinc-900">
-              {t("res.mod.confirm")}
-            </h3>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 id="mod-apply" className="text-sm font-semibold text-zinc-900">
+                {t("res.mod.confirm")}
+              </h3>
+              <p className="text-xs text-zinc-500">{t("res.mod.expires_hint")}</p>
+            </div>
             {canOverride && (
               <div className="space-y-2">
                 <Checkbox label={t("res.mod.override")} checked={override} onChange={(e) => setOverride(e.target.checked)} />
