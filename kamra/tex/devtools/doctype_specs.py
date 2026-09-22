@@ -901,6 +901,7 @@ PAYMENT_SPECS = [
 		F("error_code", "Data", "Error code"),
 		F("error_message", "Small Text", "Error"),
 		F("reason", "Small Text", "Reason"),
+		F("return_url", "Small Text", "Return URL", read_only=1),
 	], perms=[perm("System Manager", "readonly"), perm("Hotel Admin", "readonly"), perm("Finance", "readonly"),
 	          perm("Front Desk", "readonly"), perm("Call Center Agent", "readonly")],
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),

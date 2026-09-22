@@ -28,12 +28,22 @@ class TEXBookingSite(Document):
 			frappe.throw(_("Embed origins must be https origins: {0}").format(", ".join(bad)))
 		self.allowed_embed_origins = "\n".join(origins)
 		primaries = 0
+		before = self.get_doc_before_save()
+		verified_before = {(d.domain, d.verification_token) for d in (before.domains if before else []) if d.verified}
 		for d in self.domains:
 			d.domain = d.domain.strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
 			if not DOMAIN.match(d.domain):
 				frappe.throw(_("Invalid domain {0}").format(d.domain))
 			if not d.verification_token:
 				d.verification_token = frappe.generate_hash(length=24)
+			# "verified" is set only by the DNS check (kamra.tex.services.sites), never by an edit
+			if d.verified and (d.domain, d.verification_token) not in verified_before \
+					and not self.flags.tex_domain_verified:
+				d.verified = 0
+			taken = frappe.db.get_value("TEX Booking Domain", {"domain": d.domain, "parent": ("!=", self.name)},
+			                            "parent")
+			if taken:
+				frappe.throw(_("{0} is already used by booking site {1}.").format(d.domain, taken))
 			primaries += int(d.is_primary or 0)
 		if primaries > 1:
 			frappe.throw(_("Only one primary domain."))

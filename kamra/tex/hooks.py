@@ -35,14 +35,17 @@ def reservation_validate(doc, method=None):
 
 
 def reservation_on_update(doc, method=None):
+	if doc.guest:
+		from kamra.tex.crm import service as crm
+
+		crm.refresh_guest_stats(doc.guest)
 	if not doc.get("tex_booking"):
 		return
-	try:
-		from kamra.tex.connect import outbox
+	from kamra.tex.connect import outbox
+	from kamra.tex.crm import loyalty
 
-		outbox.on_reservation_change(doc)
-	except ImportError:
-		pass
+	outbox.on_reservation_change(doc)
+	loyalty.on_reservation_change(doc)
 
 
 def property_validate(doc, method=None):

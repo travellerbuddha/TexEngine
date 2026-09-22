@@ -1,0 +1,57 @@
+"""Shared helpers for TEX API endpoints."""
+
+from __future__ import annotations
+
+import json
+
+import frappe
+from frappe import _
+
+
+def parse(value, default=None):
+	"""Accept JSON strings (form posts) or already-parsed values."""
+	if value is None or value == "":
+		return default
+	if isinstance(value, str):
+		try:
+			return json.loads(value)
+		except json.JSONDecodeError:
+			frappe.throw(_("Invalid JSON payload."))
+	return value
+
+
+def text(value, max_len: int = 200) -> str | None:
+	if value is None:
+		return None
+	v = str(value).strip()
+	return v[:max_len] or None
+
+
+def as_int(value, default=0, *, lo=None, hi=None) -> int:
+	try:
+		v = int(value)
+	except (TypeError, ValueError):
+		v = default
+	if lo is not None:
+		v = max(lo, v)
+	if hi is not None:
+		v = min(hi, v)
+	return v
+
+
+def rows(doc, table: str) -> list[dict]:
+	return [{k: v for k, v in r.as_dict().items()
+	         if k not in ("owner", "creation", "modified", "modified_by", "parent", "parentfield", "parenttype",
+	                      "docstatus", "doctype")} for r in (doc.get(table) or [])]
+
+
+def doc_dict(doc, exclude=()) -> dict:
+	d = doc.as_dict(no_default_fields=False)
+	for k in ("owner", "docstatus", "doctype", "idx", "_user_tags", "_comments", "_assign", "_liked_by", *exclude):
+		d.pop(k, None)
+	for df in doc.meta.fields:
+		if df.fieldtype == "Password":
+			d.pop(df.fieldname, None)
+		if df.fieldtype in ("Table", "Table MultiSelect"):
+			d[df.fieldname] = rows(doc, df.fieldname)
+	return d

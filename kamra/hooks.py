@@ -36,9 +36,11 @@ scheduler_events = {
 		"0 9 * * *": ["kamra.prearrival.run_prearrival_outreach"],
 		# every 15 min - escalate overdue housekeeping tasks up the ladder;
 		# also release expired Held / Pending Payment reservations (ADR-006)
+		# (+ TEX contract-version roll-over and abandoned-booking detection)
 		"*/15 * * * *": [
 			"kamra.housekeeping.escalate_overdue_tasks",
 			"kamra.reservation_state.expire_holds",
+			"kamra.tex.scheduler.every_15_minutes",
 		],
 		# 08:30 - the banquet team's morning list: follow-ups gone quiet,
 		# tentative holds about to lapse, payments due, event orders missing
@@ -46,6 +48,11 @@ scheduler_events = {
 		# 04:15 - wipe the public demo so it cannot be used as a live PMS
 		# (no-op unless kamra_demo_mode is on and the site is a playground)
 		"15 4 * * *": ["kamra.scripts.reset_demo.scheduled"],
+		# TEX Engine: integration outbox, expired payment holds and links (5 min);
+		# FX after TCMB's 15:30 publication; loyalty maturation/expiry (02:30)
+		"*/5 * * * *": ["kamra.tex.scheduler.every_5_minutes"],
+		"45 15,17 * * *": ["kamra.tex.scheduler.fx_daily"],
+		"30 2 * * *": ["kamra.tex.scheduler.daily"],
 	},
 }
 

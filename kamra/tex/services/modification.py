@@ -164,10 +164,17 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	}
 
 
-def apply(proposal_token: str, *, reason: str, override_amount=None, source: str = "Desk") -> dict:
+def apply(proposal_token: str, *, reason: str, override_amount=None, source: str = "Desk",
+          _guest_authorized: bool = False) -> dict:
+	"""``_guest_authorized``: set only by the self-service API after verifying the
+	guest's manage token owns the proposal's reservation. Guests can never override."""
 	p = quoting.verify(proposal_token)
 	res = frappe.get_doc("Reservation", p["reservation"])
-	scope.require("reservation.modify", res.property)
+	if _guest_authorized:
+		if override_amount not in (None, ""):
+			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)
+	else:
+		scope.require("reservation.modify", res.property)
 	if str(res.modified) != p["modified"]:
 		frappe.throw(_("The reservation changed since this proposal was made — review it again."))
 	if not (reason or "").strip():

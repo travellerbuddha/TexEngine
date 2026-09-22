@@ -1,0 +1,262 @@
+"""TEX CRS, Call Center and Reservations API (R-24, R-25, R-21–R-23, R-46)."""
+
+from __future__ import annotations
+
+import json
+
+import frappe
+from frappe import _
+from frappe.utils import getdate
+
+from kamra.tex.api._util import as_int, parse, text
+from kamra.tex.commercial import grid as grid_svc
+from kamra.tex.money import from_db, to_str
+from kamra.tex.security import scope
+from kamra.tex.services import booking as booking_svc
+from kamra.tex.services import modification, quoting
+
+INTERNAL_CHANNELS = ("CALL_CENTER", "B2B", "API", "DIRECT_WEB", "META", "OTA")
+
+
+# ─── search / quote / book ───────────────────────────────────────────────
+
+
+@frappe.whitelist()
+def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CALL_CENTER",
+           properties=None, hotel_group: str | None = None, destination: str | None = None,
+           currency: str | None = None, promo_codes=None):
+	"""Group search across every hotel the agent may sell (R-24)."""
+	if channel not in INTERNAL_CHANNELS:
+		frappe.throw(_("Unknown channel."))
+	allowed = scope.permitted_properties()
+	props = parse(properties, None) or sorted(allowed)
+	props = [p for p in props if p in allowed and scope.has_capability("price.view", p)]
+	if hotel_group:
+		props = [p for p in props if frappe.db.get_value("Property", p, "tex_hotel_group") == hotel_group]
+	if destination:
+		dest = destination.strip().lower()
+		props = [p for p in props if dest in (frappe.db.get_value("Property", p, "city") or "").lower()
+		         or dest in p.lower()]
+	if not props:
+		frappe.throw(_("No hotel matches your access and filters."), frappe.PermissionError)
+	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=market,
+	                     channel=channel, currency=currency, promo_codes=parse(promo_codes, []) or (),
+	                     internal=True)
+	for p in res["properties"]:
+		if not scope.has_capability("price.view_cost", p["property"]):
+			for group in ("offers", "unavailable"):
+				for o in p[group]:
+					for r in o["rooms"]:
+						r["quote"].pop("explanation", None)
+						r["quote"].pop("nights", None)
+						for k in ("cost", "margin", "margin_percent", "cost_contract_currency"):
+							r["quote"]["totals"].pop(k, None)
+	return res
+
+
+@frappe.whitelist(methods=["POST"])
+def quote(offer_key: str, extras=None, promo_codes=None):
+	offer = quoting.verify(offer_key)
+	scope.require("reservation.create", offer["property"])
+	return quoting.create_quote(offer_key, extras=parse(extras, []), promo_codes=parse(promo_codes, None))
+
+
+@frappe.whitelist(methods=["POST"])
+def book(quote_ids, guest, payment_method: str | None = None, confirm_without_payment: int = 0,
+         notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
+	ids = parse(quote_ids, [])
+	if not ids:
+		frappe.throw(_("Select at least one room."))
+	prop = frappe.db.get_value("TEX Quote", ids[0], "property")
+	scope.require("reservation.create", prop)
+	return booking_svc.create_booking(quote_ids=ids, guest=parse(guest, {}), payment_method=payment_method,
+	                                  confirm_without_payment=bool(int(confirm_without_payment or 0)),
+	                                  notes=text(notes, 2000), idempotency_key=text(idempotency_key, 140),
+	                                  language=text(language, 10))
+
+
+@frappe.whitelist()
+def payment_methods(property: str, market: str | None = None, currency: str | None = None,
+                    channel: str = "CALL_CENTER"):
+	scope.require("price.view", property)
+	from kamra.tex.payments import service as pay
+
+	return pay.payment_methods(property, market=market, currency=currency, channel=channel)
+
+
+@frappe.whitelist()
+def extras_for(property: str):
+	scope.require("price.view", property)
+	return frappe.get_all("TEX Extra", filters={"property": property, "disabled": 0},
+	                      fields=["extra_code", "extra_name", "category", "pricing_mode", "currency", "amount",
+	                              "is_mandatory", "description", "max_quantity"], order_by="category, extra_name")
+
+
+# ─── reservations & bookings ─────────────────────────────────────────────
+
+
+@frappe.whitelist()
+def reservations(property: str | None = None, q: str | None = None, status: str | None = None,
+                 arrival_from: str | None = None, arrival_to: str | None = None, pending_only: int = 0,
+                 limit: int = 50, start: int = 0):
+	props = [property] if property else sorted(scope.permitted_properties())
+	props = [p for p in props if scope.has_capability("reservation.view", p)]
+	if not props:
+		return []
+	cond = ["r.property IN %(props)s"]
+	vals = {"props": tuple(props), "limit": as_int(limit, 50, lo=1, hi=200), "start": as_int(start, 0, lo=0)}
+	if status:
+		cond.append("r.status = %(status)s")
+		vals["status"] = status
+	if arrival_from:
+		cond.append("r.check_in_date >= %(af)s")
+		vals["af"] = getdate(arrival_from)
+	if arrival_to:
+		cond.append("r.check_in_date <= %(at)s")
+		vals["at"] = getdate(arrival_to)
+	if int(pending_only or 0):
+		cond.append("r.tex_guest_change_pending = 1")
+	if q:
+		cond.append("(r.name LIKE %(q)s OR r.guest_name LIKE %(q)s OR r.tex_booking LIKE %(q)s "
+		            "OR g.email LIKE %(q)s OR g.phone LIKE %(q)s)")
+		vals["q"] = f"%{q.strip()[:60]}%"
+	rows = frappe.db.sql(f"""
+		SELECT r.name, r.property, r.status, r.guest, r.guest_name, r.room_type, rt.room_type_name, r.room,
+		       r.check_in_date, r.check_out_date, r.nights, r.adults, r.children, r.tex_booking, r.tex_market,
+		       r.tex_sales_channel, r.tex_board, r.tex_currency, r.tex_total_amount, r.amount_after_tax,
+		       r.tex_guest_change_pending, r.tex_revision_no, r.creation
+		FROM `tabReservation` r
+		LEFT JOIN `tabGuest` g ON g.name = r.guest
+		LEFT JOIN `tabRoom Type` rt ON rt.name = r.room_type
+		WHERE {' AND '.join(cond)}
+		ORDER BY r.creation DESC LIMIT %(start)s, %(limit)s""", vals, as_dict=True)  # nosemgrep -- static conditions, values bound
+	for r in rows:
+		ccy = r.tex_currency or "EUR"
+		r["total"] = to_str(from_db(r.tex_total_amount or r.amount_after_tax, ccy))
+		r.pop("tex_total_amount")
+		r.pop("amount_after_tax")
+	return rows
+
+
+@frappe.whitelist()
+def reservation(name: str):
+	res = frappe.get_doc("Reservation", name)
+	scope.require("reservation.view", res.property)
+	internal = scope.has_capability("price.view_cost", res.property)
+	snap = json.loads(res.tex_pricing_snapshot or "{}")
+	if not internal:
+		snap.pop("explanation", None)
+		snap.pop("nights", None)
+		for k in ("cost", "margin", "margin_percent", "cost_contract_currency"):
+			(snap.get("totals") or {}).pop(k, None)
+	guest = frappe.db.get_value("Guest", res.guest, ["name", "full_name", "email", "phone", "tex_language",
+	                                                "tex_country", "vip", "tex_tags"], as_dict=True) \
+		if scope.has_capability("crm.view", res.property) else None
+	ccy = res.tex_currency or "EUR"
+	return {
+		"name": res.name, "status": res.status, "property": res.property, "booking": res.tex_booking,
+		"room_type": res.room_type, "room_type_name": frappe.db.get_value("Room Type", res.room_type, "room_type_name"),
+		"room": res.room, "check_in": str(res.check_in_date), "check_out": str(res.check_out_date),
+		"nights": res.nights, "adults": res.adults, "children": res.children,
+		"child_ages": json.loads(res.tex_child_ages or "[]"), "board": res.tex_board, "rate_plan": res.rate_plan,
+		"market": res.tex_market, "channel": res.tex_sales_channel, "currency": ccy,
+		"total": to_str(from_db(res.tex_total_amount or res.amount_after_tax, ccy)),
+		"cancellation_fee": to_str(from_db(res.cancellation_fee, ccy)) if res.cancellation_fee else None,
+		"price_locked": bool(res.tex_price_locked), "pricing_source": res.tex_pricing_source,
+		"contract": res.tex_contract, "contract_version": res.tex_contract_version, "sale_at": str(res.tex_sale_at),
+		"revision_no": res.tex_revision_no, "guest_change_pending": bool(res.tex_guest_change_pending),
+		"guest_change_note": res.tex_guest_change_note, "special_requests": res.special_requests,
+		"guest": guest, "pricing": snap,
+		"revisions": modification.revisions(res.name),
+		"capabilities": sorted(scope.capabilities(res.property)),
+	}
+
+
+@frappe.whitelist()
+def booking(name: str):
+	b = frappe.get_doc("TEX Booking", name)
+	scope.require("reservation.view", b.property)
+	out = booking_svc.booking_summary(name)
+	if scope.has_capability("payment.view", b.property):
+		out["transactions"] = frappe.get_all(
+			"TEX Payment Transaction", filters={"booking": name},
+			fields=["name", "txn_type", "status", "method", "amount", "currency", "provider", "card_brand",
+			        "card_last4", "completed_at", "creation"], order_by="creation asc")
+		for t in out["transactions"]:
+			t["amount"] = to_str(from_db(t["amount"], t["currency"] or "EUR"))
+		out["payment_links"] = frappe.get_all("TEX Payment Link", filters={"booking": name},
+		                                      fields=["name", "status", "amount", "currency", "public_url",
+		                                              "expires_at"])
+	return out
+
+
+# ─── modification / simulation / cancel ──────────────────────────────────
+
+
+@frappe.whitelist(methods=["POST"])
+def propose_modification(reservation: str, changes, basis: str = "CURRENT", basis_sale_at: str | None = None):
+	return modification.propose(reservation, parse(changes, {}), basis=basis, basis_sale_at=basis_sale_at)
+
+
+@frappe.whitelist(methods=["POST"])
+def apply_modification(proposal_token: str, reason: str, override_amount: str | None = None):
+	return modification.apply(proposal_token, reason=text(reason, 500), override_amount=override_amount or None)
+
+
+@frappe.whitelist()
+def simulate(reservation: str, sale_at: str):
+	return modification.simulate(reservation, sale_at)
+
+
+@frappe.whitelist()
+def cancellation_preview(reservation: str):
+	res = frappe.get_doc("Reservation", reservation)
+	scope.require("reservation.cancel", res.property)
+	penalty, basis = booking_svc.cancellation_penalty(res)
+	return {"penalty": to_str(penalty), "currency": res.tex_currency, "basis": basis}
+
+
+@frappe.whitelist(methods=["POST"])
+def cancel(reservation: str, reason: str, waive_penalty: int = 0):
+	return booking_svc.cancel_reservation(reservation, reason=text(reason, 500),
+	                                      waive_penalty=bool(int(waive_penalty or 0)))
+
+
+@frappe.whitelist(methods=["POST"])
+def acknowledge_guest_change(reservation: str, note: str | None = None):
+	res = frappe.get_doc("Reservation", reservation)
+	scope.require("reservation.modify", res.property)
+	res.flags.tex_modification = True
+	res.tex_guest_change_pending = 0
+	res.tex_guest_change_note = ((res.tex_guest_change_note or "") + f"\n[ack {frappe.session.user}] {note or ''}")[
+		-1000:]
+	res.save(ignore_permissions=True)
+	if res.tex_booking and not frappe.db.exists("Reservation", {"tex_booking": res.tex_booking,
+	                                                             "tex_guest_change_pending": 1}):
+		frappe.db.set_value("TEX Booking", res.tex_booking, "guest_change_pending", 0)
+	from kamra.tex.security.audit import audit
+
+	audit("reservation.guest_change_ack", reference_doctype="Reservation", reference_name=reservation,
+	      property=res.property, reason=note)
+	return {"ok": True}
+
+
+# ─── grid ────────────────────────────────────────────────────────────────
+
+
+@frappe.whitelist()
+def ari_grid(property: str, start: str, days: int = 14, contract: str | None = None, market: str | None = None,
+             channel: str | None = None, rate_plan: str | None = None):
+	return grid_svc.grid(property, start, days, contract or None, market or None, channel or None, rate_plan or None)
+
+
+@frappe.whitelist(methods=["POST"])
+def ari_bulk_update(property: str, start: str, end: str, room_types, weekdays=None, contract: str | None = None,
+                    market: str | None = None, channel: str | None = None, rate_plan: str | None = None,
+                    restrictions=None, inventory=None, rate=None):
+	scope.assert_property(property)
+	return grid_svc.bulk_update(property, start, end, room_types=parse(room_types, []),
+	                            weekdays=parse(weekdays, None) or None, contract=contract or None,
+	                            market=market or None, channel=channel or None, rate_plan=rate_plan or None,
+	                            restrictions=parse(restrictions, None), inventory=parse(inventory, None),
+	                            rate=parse(rate, None))

@@ -1,0 +1,467 @@
+"""Guest-facing TEX Booking API (R-26–R-33, R-38, R-42). The only allow_guest surface
+of TEX besides payment callbacks.
+
+Every endpoint: resolves the booking site (and so the hotels it may sell), is rate
+limited, validates input server-side and returns guest-safe data only (no cost,
+margin or rule explanation). Prices always come from the server.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+
+import frappe
+from frappe import _
+from frappe.rate_limiter import rate_limit
+from frappe.utils import getdate, now_datetime
+
+from kamra.tex.api._util import parse, text
+from kamra.tex.money import D, from_db, to_str
+from kamra.tex.pricing import versions
+from kamra.tex.services import booking as booking_svc
+from kamra.tex.services import modification, quoting
+
+SEARCH_LIMIT = {"limit": 60, "seconds": 60}
+WRITE_LIMIT = {"limit": 20, "seconds": 600}
+
+
+# ─── site ────────────────────────────────────────────────────────────────
+
+
+def _site(slug: str | None = None, domain: str | None = None):
+	name = None
+	if slug:
+		name = frappe.db.get_value("TEX Booking Site", {"site_slug": slug.strip().lower(), "enabled": 1})
+	elif domain:
+		d = domain.strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
+		name = frappe.db.get_value("TEX Booking Domain", {"domain": d, "verified": 1}, "parent")
+	if not name:
+		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
+	site = frappe.get_cached_doc("TEX Booking Site", name)
+	if not site.enabled:
+		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
+	return site
+
+
+def _site_properties(site) -> list[str]:
+	if site.property:
+		return [site.property]
+	return frappe.get_all("Property", filters={"tex_hotel_group": site.hotel_group, "disabled": 0}, pluck="name",
+	                      order_by="property_name asc")
+
+
+def _channel(site) -> str:
+	return site.sales_channel or "DIRECT_WEB"
+
+
+def _csv(v) -> list[str]:
+	return [x.strip() for x in (v or "").replace("\n", ",").split(",") if x.strip()]
+
+
+def _safe_return_url(site, url: str | None) -> str | None:
+	"""Only redirect back to this TEX host or one of the site's verified domains
+	(no open redirects through the payment flow)."""
+	if not url:
+		return None
+	from urllib.parse import urlparse
+
+	u = urlparse(url)
+	if u.scheme != "https" and not (u.scheme == "http" and frappe.conf.get("developer_mode")):
+		return None
+	allowed = {urlparse(frappe.utils.get_url()).hostname}
+	allowed |= set(frappe.get_all("TEX Booking Domain", filters={"parent": site.name, "verified": 1},
+	                              pluck="domain"))
+	return url if u.hostname in allowed else None
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(**SEARCH_LIMIT)
+def site(slug: str | None = None, domain: str | None = None):
+	s = _site(slug, domain)
+	props = _site_properties(s)
+	hotels = []
+	for p in props:
+		d = frappe.db.get_value("Property", p, ["property_name", "city", "star_category", "address_line", "phone",
+		                                        "email", "checkin_time", "checkout_time", "hero_image", "logo_url",
+		                                        "showcase_description", "latitude", "longitude", "currency"],
+		                        as_dict=True)
+		gallery = frappe.get_all("Property Photo", filters={"parent": p, "parenttype": "Property"},
+		                         fields=["url", "caption"], order_by="idx asc", limit=12)
+		hotels.append({"name": p, **{k: (str(v) if k.endswith("_time") and v else v) for k, v in d.items()},
+		               "gallery": gallery})
+	texts = json.loads(s.custom_texts) if s.custom_texts else {}
+	return {
+		"slug": s.site_slug, "name": s.site_name, "hotels": hotels, "group": bool(s.hotel_group and not s.property),
+		"default_language": s.default_language or "en", "languages": _csv(s.languages) or ["en"],
+		"default_currency": s.default_currency, "currencies": _csv(s.currencies),
+		"default_market": s.default_market,
+		"branding": {"logo": s.logo, "primary": s.primary_color, "accent": s.accent_color,
+		             "background": s.background_color, "font": s.font_family, "radius": s.radius,
+		             "card_radius": s.card_radius, "button_style": s.button_style, "header": s.header_layout,
+		             "search_style": s.search_style, "hero_image": s.hero_image},
+		"contact": {"phone": s.contact_phone, "email": s.contact_email, "whatsapp": s.whatsapp,
+		            "address": s.address},
+		"texts": texts, "policies": s.policies, "self_service": bool(s.self_service_enabled),
+		"analytics": {"ga4": s.ga4_measurement_id, "gtm": s.gtm_container_id, "meta_pixel": s.meta_pixel_id,
+		              "consent_banner": bool(s.consent_banner)},
+		"extras": _public_extras(props),
+	}
+
+
+def _public_extras(props: list[str]) -> dict:
+	out = {}
+	for p in props:
+		out[p] = frappe.get_all("TEX Extra", filters={"property": p, "disabled": 0, "bookable_online": 1},
+		                        fields=["extra_code", "extra_name", "category", "description", "image", "pricing_mode",
+		                                "currency", "amount", "max_quantity", "is_mandatory", "service_from",
+		                                "service_to"], order_by="category asc, extra_name asc")
+		for e in out[p]:
+			e["amount"] = to_str(from_db(e["amount"], e["currency"]))
+	return out
+
+
+def _market(site, market: str | None, country: str | None) -> str:
+	markets = [versions.MarketDef(m.name, frozenset(_csv(m.countries)), bool(m.is_global), bool(m.disabled))
+	           for m in frappe.get_all("TEX Market", fields=["name", "countries", "is_global", "disabled"])]
+	code, _how = versions.resolve_market(explicit=market, country=country, markets=markets,
+	                                     default=site.default_market)
+	return code
+
+
+# ─── search / quote / book ───────────────────────────────────────────────
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(**SEARCH_LIMIT)
+def search(site: str, check_in: str, check_out: str, rooms, currency: str | None = None,
+           promo_code: str | None = None, market: str | None = None, country: str | None = None,
+           hotel: str | None = None, session_id: str | None = None):
+	s = _site(site)
+	props = _site_properties(s)
+	if hotel:
+		if hotel not in props:
+			frappe.throw(_("Hotel not found."))
+		props = [hotel]
+	allowed_ccy = _csv(s.currencies)
+	if currency and allowed_ccy and currency not in allowed_ccy:
+		frappe.throw(_("Currency not offered."))
+	mkt = _market(s, market, country)
+	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
+	                     channel=_channel(s), currency=currency or s.default_currency or None,
+	                     promo_codes=[promo_code] if promo_code else (), internal=False)
+	for p in res["properties"]:
+		p.pop("messages", None)
+		for o in p["unavailable"]:
+			o.pop("contract", None)
+			o.pop("version", None)
+		for o in p["offers"]:
+			o.pop("contract", None)
+			o.pop("version", None)
+	res["market"] = mkt
+	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out, "rooms": parse(rooms, []),
+	                                  "market": mkt})
+	return res
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None, session_id: str | None = None):
+	s = _site(site)
+	offer = quoting.verify(offer_key)
+	if offer["property"] not in _site_properties(s) or offer["channel"] != _channel(s):
+		frappe.throw(_("Invalid offer."))
+	online = {e.extra_code for e in frappe.get_all("TEX Extra", filters={"property": offer["property"],
+	                                                                      "disabled": 0, "bookable_online": 1},
+	                                               fields=["extra_code"])}
+	requested = parse(extras, []) or []
+	if any(str(e.get("code", "")).upper() not in online for e in requested):
+		frappe.throw(_("This extra cannot be booked online."))
+	out = quoting.create_quote(offer_key, extras=requested,
+	                           promo_codes=[promo_code] if promo_code else None, session_id=session_id)
+	if out.get("ok"):
+		_track(s, session_id, "quote", {"quote": out["quote_id"], "total": out["quote"]["totals"]["total"],
+		                                "currency": out["quote"]["currency"]})
+	return out
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def book(site: str, quote_ids, guest, payment_method: str | None = None, provider_account: str | None = None,
+         idempotency_key: str | None = None, language: str | None = None, session_id: str | None = None,
+         return_url: str | None = None):
+	s = _site(site)
+	ids = parse(quote_ids, [])
+	props = set(_site_properties(s))
+	session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:32] if session_id else None
+	for qid in ids:
+		row = frappe.db.get_value("TEX Quote", qid, ["property", "session_hash", "sales_channel"], as_dict=True)
+		if not row or row.property not in props or row.sales_channel != _channel(s):
+			frappe.throw(_("Invalid quote."))
+		if row.session_hash and row.session_hash != session_hash:
+			frappe.throw(_("Invalid quote."))
+	g = parse(guest, {})
+	guest_clean = {k: text(g.get(k), 140) for k in ("first_name", "last_name", "email", "phone", "country",
+	                                                 "nationality", "special_requests")}
+	guest_clean.update({k: bool(g.get(k)) for k in ("consent_email", "consent_sms", "consent_whatsapp")})
+	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=bool(g.get("consent_email")))
+	method = payment_method or "Card"
+	result = booking_svc.create_booking(quote_ids=ids, guest=guest_clean, payment_method=method,
+	                                    idempotency_key=text(idempotency_key, 140), language=text(language, 10),
+	                                    booking_site=s.name, session_id=session_id)
+	due = D(result["due_now"])
+	result["payment"] = None
+	if due > 0 and not result.get("idempotent_replay"):
+		from kamra.tex.payments import service as pay
+
+		methods = pay.payment_methods(result["property"], market=result["market"], currency=result["currency"],
+		                              channel=_channel(s))
+		chosen = next((m for m in methods if m["method"] == method and (not provider_account or
+		                                                                 m["provider_account"] == provider_account)),
+		              None)
+		if not chosen or not chosen["provider_account"]:
+			frappe.throw(_("This payment method is not available."))
+		_track(s, session_id, "payment_started", {"booking": result["booking"]})
+		result["payment"] = pay.start_payment(
+			property=result["property"], amount=due, currency=result["currency"],
+			provider_account=chosen["provider_account"], booking=result["booking"],
+			description=_("Booking {0}").format(result["booking"]), locale=language or "en",
+			customer={"name": f"{guest_clean['first_name']} {guest_clean['last_name']}",
+			          "email": guest_clean.get("email"), "phone": guest_clean.get("phone"),
+			          "country": guest_clean.get("country"), "ip": getattr(frappe.local, "request_ip", None)},
+			return_url=_safe_return_url(s, return_url) or frappe.utils.get_url(
+				f"/book/{s.site_slug}/confirmation/{result['booking']}"),
+			idempotency_key=f"book:{result['booking']}:{to_str(due)}", method=method)
+	else:
+		_track(s, session_id, "booked", {"booking": result["booking"], "total": result["total"]})
+	return result
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(**SEARCH_LIMIT)
+def booking_status(token: str):
+	"""Confirmation page / manage link: guest view of a booking by its manage token."""
+	b = _booking_by_token(token)
+	return _guest_booking(b)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def pay_booking(token: str, payment_method: str = "Card", provider_account: str | None = None,
+                return_url: str | None = None):
+	"""Start (or retry after a failed attempt) the payment still due on a booking,
+	authorised by the guest's manage token."""
+	from kamra.tex.payments import service as pay
+
+	b = _booking_by_token(token)
+	ccy = b.currency
+	paid = from_db(b.paid_amount, ccy)
+	due = (from_db(b.amount_due_now, ccy) if b.status in ("Pending Payment", "Held") else from_db(b.total_amount, ccy))
+	due -= paid
+	if due <= 0:
+		frappe.throw(_("Nothing is due on this booking."))
+	if b.status == "Cancelled":
+		frappe.throw(_("This booking is cancelled."))
+	methods = pay.payment_methods(b.property, market=b.market, currency=ccy, channel=b.sales_channel)
+	chosen = next((m for m in methods if m["method"] == payment_method and m["provider_account"]
+	               and (not provider_account or m["provider_account"] == provider_account)), None)
+	if not chosen:
+		frappe.throw(_("This payment method is not available."))
+	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
+	default_return = frappe.utils.get_url(f"/book/{site.site_slug}/manage" if site else "/book")
+	attempt = frappe.db.count("TEX Payment Transaction", {"booking": b.name, "txn_type": "Charge"}) + 1
+	return pay.start_payment(
+		property=b.property, amount=due, currency=ccy, provider_account=chosen["provider_account"], booking=b.name,
+		description=_("Booking {0}").format(b.name), locale=b.language or "en",
+		customer={"name": b.booker_name, "email": b.booker_email, "phone": b.booker_phone,
+		          "ip": getattr(frappe.local, "request_ip", None)},
+		return_url=(_safe_return_url(site, return_url) if site else None) or default_return,
+		idempotency_key=f"book:{b.name}:{to_str(due)}:{attempt}", method=payment_method)
+
+
+# ─── payment callbacks & links ───────────────────────────────────────────
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=30, seconds=60)
+def mock_pay(transaction: str, outcome: str, sig: str):
+	"""Sandbox payment page action (only Mock provider accounts reach this)."""
+	from kamra.tex.payments import service as pay
+
+	if frappe.db.get_value("TEX Payment Transaction", transaction, "provider") != "Mock":
+		frappe.throw(_("Not a sandbox payment."))
+	out = pay.complete(transaction, params={"outcome": outcome, "sig": sig})
+	txn = frappe.db.get_value("TEX Payment Transaction", transaction, ["booking", "payment_link", "return_url"],
+	                          as_dict=True)
+	return {**out, "booking": txn.booking, "return_url": txn.return_url}
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(**SEARCH_LIMIT)
+def payment_link(token: str):
+	from kamra.tex.payments import service as pay
+
+	link = pay.link_by_token(token)
+	methods = pay.payment_methods(link.property, market=None, currency=link.currency, channel="DIRECT_WEB")
+	return {"description": link.description, "amount": to_str(from_db(link.amount, link.currency)),
+	        "paid": to_str(from_db(link.paid_amount, link.currency)), "currency": link.currency,
+	        "status": link.status, "expires_at": str(link.expires_at), "guest_name": link.guest_name,
+	        "hotel": frappe.db.get_value("Property", link.property, "property_name"),
+	        "methods": [m for m in methods if m["method"] == "Card"]}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def pay_link(token: str, provider_account: str | None = None):
+	from kamra.tex.payments import service as pay
+
+	link = pay.link_by_token(token)
+	if link.status not in ("Active", "Partially Paid"):
+		frappe.throw(_("This payment link is {0}.").format(link.status.lower()))
+	due = from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency)
+	account = provider_account or link.provider_account
+	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
+	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
+	if not account or (not link.provider_account and account not in methods):
+		frappe.throw(_("No card payment is configured for this link."))
+	return pay.start_payment(property=link.property, amount=due, currency=link.currency, provider_account=account,
+	                         payment_link=link.name, booking=None, description=link.description or link.name,
+	                         customer={"name": link.guest_name, "email": link.guest_email,
+	                                   "ip": getattr(frappe.local, "request_ip", None)},
+	                         return_url=frappe.utils.get_url(f"/book/pay/{token}"),
+	                         idempotency_key=f"link:{link.name}:{to_str(due)}:{frappe.generate_hash(length=6)}")
+
+
+# ─── funnel ──────────────────────────────────────────────────────────────
+
+
+def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
+	if not session_id:
+		return
+	email = (payload or {}).pop("email", None) if isinstance(payload, dict) else None
+	try:
+		frappe.get_doc({
+			"doctype": "TEX Funnel Event", "event": event, "occurred_at": now_datetime(), "site": site.name,
+			"property": site.property, "session_id": text(session_id, 64),
+			"email_hash": hashlib.sha256(email.strip().lower().encode()).hexdigest() if email else None,
+			"consent_marketing": 1 if consent else 0,
+			"payload": json.dumps(payload or {}, default=str)[:4000]}).insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(title="TEX funnel event")
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=120, seconds=60)
+def track(site: str, session_id: str, event: str, payload=None):
+	if event not in ("room_view", "abandoned"):
+		frappe.throw(_("Unknown event."))
+	_track(_site(site), session_id, event, parse(payload, {}) or {})
+	return {"ok": True}
+
+
+# ─── self-service (R-42) ─────────────────────────────────────────────────
+
+
+def _booking_by_token(token: str):
+	if not token or len(token) < 20:
+		frappe.throw(_("Invalid link."), frappe.PermissionError)
+	name = frappe.db.get_value("TEX Booking", {"manage_token_hash": booking_svc.token_hash(token)})
+	if not name:
+		frappe.throw(_("Invalid link."), frappe.PermissionError)
+	b = frappe.get_doc("TEX Booking", name)
+	if b.manage_token_expires and getdate(b.manage_token_expires) < getdate(now_datetime()):
+		frappe.throw(_("This link has expired."), frappe.PermissionError)
+	return b
+
+
+def _self_service_allowed(b) -> bool:
+	site_ok = not b.booking_site or bool(frappe.db.get_value("TEX Booking Site", b.booking_site,
+	                                                          "self_service_enabled"))
+	return site_ok and bool(frappe.db.get_value("Property", b.property, "tex_self_service"))
+
+
+def _guest_booking(b) -> dict:
+	summary = booking_svc.booking_summary(b.name)
+	rooms = []
+	for r in summary["rooms"]:
+		res = frappe.get_doc("Reservation", r["reservation"])
+		snap = json.loads(res.tex_pricing_snapshot or "{}")
+		penalty, _basis = booking_svc.cancellation_penalty(res) if res.status not in ("Cancelled",) else (D(0), {})
+		rooms.append({**r, "room_type_name": frappe.db.get_value("Room Type", res.room_type, "room_type_name"),
+		              "board": res.tex_board, "child_ages": json.loads(res.tex_child_ages or "[]"),
+		              "rate_plan": (snap.get("rate_plan") or {}).get("name"),
+		              "refundable": (snap.get("rate_plan") or {}).get("refundable", True),
+		              "lines": snap.get("lines"), "extras": [e for e in snap.get("extras") or [] if e.get("ok")],
+		              "cancellation_fee_now": to_str(penalty), "pending_change": bool(res.tex_guest_change_pending)})
+	return {**summary, "rooms": rooms, "hotel": frappe.db.get_value("Property", b.property, "property_name"),
+	        "self_service": _self_service_allowed(b)}
+
+
+def _own_reservation(b, reservation: str) -> None:
+	if reservation not in [r.reservation for r in b.rooms]:
+		frappe.throw(_("Invalid reservation."), frappe.PermissionError)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def manage_cancel(token: str, reservation: str, reason: str | None = None):
+	b = _booking_by_token(token)
+	_own_reservation(b, reservation)
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to cancel."))
+	frappe.flags.tex_source = "Guest"
+	out = booking_svc.cancel_reservation(reservation, reason=text(reason, 300) or "Cancelled by guest online",
+	                                     source="Guest", _guest_authorized=True)
+	frappe.db.set_value("Reservation", reservation, {"tex_guest_change_pending": 1,
+	                                                  "tex_guest_change_note": "Guest cancelled online"})
+	frappe.db.set_value("TEX Booking", b.name, "guest_change_pending", 1)
+	return out
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def manage_propose(token: str, reservation: str, changes):
+	b = _booking_by_token(token)
+	_own_reservation(b, reservation)
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to change your booking."))
+	allowed = {"check_in", "check_out", "adults", "children", "extras", "board"}
+	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}
+	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False)
+	return {"sellable": p["sellable"], "old_total": p["old"]["total"], "new_total": p["proposed"]["totals"].get(
+		"total"), "difference": p["difference"], "currency": p["proposed"]["currency"], "warnings": p["warnings"],
+	        "lines": p["proposed"].get("lines"), "proposal_token": p["proposal_token"]}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def manage_apply(token: str, proposal_token: str, note: str | None = None):
+	"""Guest accepts a proposal. Higher price → applied, difference collected; lower
+	price → per hotel policy: staff approval (default, NOT applied until staff act),
+	credit, or automatic refund. Every guest change is flagged for staff attention."""
+	b = _booking_by_token(token)
+	p = quoting.verify(proposal_token)
+	_own_reservation(b, p["reservation"])
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to change your booking."))
+	res = frappe.get_doc("Reservation", p["reservation"])
+	old = from_db(res.tex_total_amount, res.tex_currency or "EUR")
+	new = D(p["new_total"] or 0)
+	policy = frappe.db.get_value("Property", b.property, "tex_lower_price_refund") or "Staff approval"
+	frappe.flags.tex_source = "Guest"
+	if new < old and policy == "Staff approval":
+		res.flags.tex_modification = True
+		res.tex_guest_change_pending = 1
+		res.tex_guest_change_note = (f"Guest requests change (−{to_str(old - new)} {res.tex_currency}); "
+		                             f"proposal: {json.dumps(p['changes'], default=str)} {text(note, 300) or ''}")
+		res.save(ignore_permissions=True)
+		frappe.db.set_value("TEX Booking", b.name, "guest_change_pending", 1)
+		return {"status": "requested", "message": _("Your request was sent to the hotel for approval.")}
+	out = modification.apply(proposal_token, reason=text(note, 300) or "Guest self-service change", source="Guest",
+	                         _guest_authorized=True)
+	frappe.db.set_value("Reservation", p["reservation"], {"tex_guest_change_pending": 1,
+	                                                       "tex_guest_change_note": "Guest changed online"})
+	frappe.db.set_value("TEX Booking", b.name, "guest_change_pending", 1)
+	summary = booking_svc.booking_summary(b.name)
+	return {"status": "applied", **out, "balance": summary["balance"]}
+

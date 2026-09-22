@@ -413,10 +413,14 @@ def cancellation_penalty(reservation, today=None) -> tuple[D, dict]:
 
 
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
-                       source: str = "Desk") -> dict:
+                       source: str = "Desk", _guest_authorized: bool = False) -> dict:
+	"""``_guest_authorized`` is set only by the self-service API after it verified the
+	guest's manage token for this exact reservation; staff calls always check scope."""
 	res = frappe.get_doc("Reservation", reservation)
-	if frappe.session.user != "Guest":
+	if not _guest_authorized:
 		scope.require("reservation.cancel", res.property)
+	elif waive_penalty:
+		frappe.throw(_("Guests cannot waive cancellation fees."), frappe.PermissionError)
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status))
 	if not (reason or "").strip():

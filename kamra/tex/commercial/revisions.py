@@ -40,9 +40,24 @@ def _changed_fields(doc, ignore=()) -> list[str]:
 			if strip(a) != strip(b):
 				changed.append(df.fieldname)
 			continue
-		if str(before.get(df.fieldname) or "") != str(doc.get(df.fieldname) or ""):
+		if not _same(df.fieldtype, before.get(df.fieldname), doc.get(df.fieldname)):
 			changed.append(df.fieldname)
 	return changed
+
+
+NUMERIC = ("Currency", "Float", "Int", "Percent", "Check", "Rating")
+
+
+def _same(fieldtype: str, a, b) -> bool:
+	"""Value equality as stored: numbers compare numerically (DB 100.0 == Decimal 100.00)."""
+	if fieldtype in NUMERIC:
+		from kamra.tex.money import D
+
+		try:
+			return D(a or 0) == D(b or 0)
+		except (ValueError, TypeError):
+			pass
+	return str(a or "") == str(b or "")
 
 
 def guard_revisioned(doc) -> None:

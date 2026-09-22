@@ -1,0 +1,77 @@
+"""Payment provider interface (ADR-016).
+
+Providers never receive or return full card numbers or CVV: checkout happens on
+the provider's hosted page / 3D form; TEX stores at most brand + last 4.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from decimal import Decimal
+
+
+@dataclass(frozen=True)
+class Intent:
+	transaction: str          # TEX Payment Transaction name (also the merchant order id)
+	amount: Decimal
+	currency: str
+	description: str
+	return_url: str           # where the guest lands after the provider
+	callback_url: str         # server-to-server / redirect callback
+	customer: dict = field(default_factory=dict)   # name, email, phone, ip, country (no card data)
+	locale: str = "en"
+
+
+@dataclass(frozen=True)
+class Checkout:
+	kind: str                 # "redirect" | "form_post" | "instructions" | "none"
+	url: str | None = None
+	fields: dict = field(default_factory=dict)
+	provider_ref: str | None = None
+	instructions: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Outcome:
+	status: str               # "Succeeded" | "Failed" | "Pending" | "Cancelled"
+	provider_ref: str | None = None
+	amount: Decimal | None = None
+	currency: str | None = None
+	card_brand: str | None = None
+	card_last4: str | None = None
+	raw_status: str | None = None
+	error_code: str | None = None
+	error_message: str | None = None
+
+
+class ProviderError(Exception):
+	pass
+
+
+class PaymentProvider(ABC):
+	name: str = "base"
+	supports_refund: bool = False
+	production_verified: bool = False   # True only after certification against the live gateway
+
+	def __init__(self, account):
+		self.account = account
+
+	@property
+	def sandbox(self) -> bool:
+		return (self.account.get("environment") or "Sandbox") == "Sandbox"
+
+	@abstractmethod
+	def create_checkout(self, intent: Intent) -> Checkout: ...
+
+	@abstractmethod
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome: ...
+
+	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
+		raise ProviderError(f"{self.name} does not support refunds through TEX")
+
+	def secret(self, field_name: str) -> str | None:
+		try:
+			return self.account.get_password(field_name, raise_exception=False)
+		except Exception:
+			return None
