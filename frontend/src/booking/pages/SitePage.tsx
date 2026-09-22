@@ -1,7 +1,7 @@
 import { CalendarDays, MapPin, Pencil, Users } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
-import { localText, useI18n } from "../i18n"
+import { useI18n } from "../i18n"
 import { safeImage } from "../lib/branding"
 import { isComplete } from "../lib/criteria"
 import { nightsBetween } from "../lib/dates"
@@ -11,7 +11,7 @@ import { guestsSummary } from "../search/GuestsPicker"
 import { useWide } from "../search/DateRangePicker"
 import { SearchForm } from "../search/SearchForm"
 import { Shell } from "../site/Layout"
-import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
+import { siteText, SiteProvider, useSite, useSiteData } from "../site/SiteContext"
 import { Button } from "../ui/controls"
 import { Spinner } from "../ui/feedback"
 import { Photo } from "../ui/Photo"
@@ -33,8 +33,8 @@ function Hero({ compact }: { compact: boolean }) {
   const { site, theme } = useSite()
   const { t, lang } = useI18n()
   const hero = safeImage(site.branding?.hero_image) ?? safeImage(site.hotels[0]?.hero_image) ?? safeImage(site.hotels[0]?.gallery?.[0]?.url)
-  const title = localText(site.texts?.hero_title, lang, site.name)!
-  const subtitle = localText(site.texts?.hero_subtitle, lang, site.group ? t("home.subtitleGroup", { count: site.hotels.length }) : t("home.subtitle"))
+  const title = siteText(site, lang, "headline") ?? site.name
+  const subtitle = siteText(site, lang, "tagline") ?? (site.group ? t("home.subtitleGroup", { count: site.hotels.length }) : t("home.subtitle"))
   if (compact || theme.searchStyle === "inline") {
     return (
       <div className="mx-auto max-w-6xl px-4 pt-6 sm:px-6">

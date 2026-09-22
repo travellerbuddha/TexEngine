@@ -8,6 +8,7 @@ import { useBooking, type Step } from "../flow/BookingContext"
 import { continuePayment } from "../flow/payment"
 import { Summary } from "../flow/Summary"
 import { FlowErrorAlert, PriceChangeNotice, useContinue } from "../flow/useContinue"
+import { rememberReturn } from "../lib/storage"
 import { useSite } from "../site/SiteContext"
 import type { PaymentMethod, PaymentStart, SiteExtra } from "../types"
 import { Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
@@ -433,6 +434,7 @@ function PaymentStep() {
     const confirmation = `/${site.slug}/confirmation/${encodeURIComponent(booking.booking)}`
     const p = res.payment
     if (p && (p.kind === "redirect" || p.kind === "form_post")) {
+      rememberReturn(p.transaction, confirmation)
       setRedirecting(p)
       const outcome = continuePayment(p, navigate)
       if (outcome === "blocked") setBlocked(true)

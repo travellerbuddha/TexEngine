@@ -3,7 +3,7 @@ import { useEffect, useId, useState, type FormEvent } from "react"
 import { useI18n } from "../i18n"
 import { MAX_NIGHTS, type Criteria } from "../lib/criteria"
 import { nightsBetween, today } from "../lib/dates"
-import { useSite } from "../site/SiteContext"
+import { siteText, useSite } from "../site/SiteContext"
 import { Button, Field, Input, Select } from "../ui/controls"
 import { DateRangePicker } from "./DateRangePicker"
 import { GuestsPicker } from "./GuestsPicker"
@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function SearchForm({ value, onSearch, busy, variant = "card" }: Props) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { site } = useSite()
   const [draft, setDraft] = useState<Criteria>(value)
   const [errors, setErrors] = useState<{ dates?: string; guests?: string }>({})
@@ -91,7 +91,7 @@ export function SearchForm({ value, onSearch, busy, variant = "card" }: Props) {
         <div className="flex items-end">
           <Button type="submit" size="lg" block busy={busy} className="md:min-h-12 md:min-w-36">
             <Search className="size-4" aria-hidden />
-            {t("search.submit")}
+            {siteText(site, lang, "search_button") ?? t("search.submit")}
           </Button>
         </div>
       </div>

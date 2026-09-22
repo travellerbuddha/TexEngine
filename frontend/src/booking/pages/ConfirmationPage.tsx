@@ -4,10 +4,10 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
-import { instructionsFor, manageToken, rememberPayment } from "../lib/storage"
+import { instructionsFor, manageToken, rememberPayment, rememberReturn } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import { Shell } from "../site/Layout"
-import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
+import { siteText, SiteProvider, useSite, useSiteData } from "../site/SiteContext"
 import type { BookingSummary, PaymentStart } from "../types"
 import { Button } from "../ui/controls"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -51,7 +51,7 @@ function Instructions({ data, currency }: { data: Record<string, string | null>;
 }
 
 function Confirmation({ booking }: { booking: string }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { site } = useSite()
   const navigate = useNavigate()
   const [sp] = useSearchParams()
@@ -112,6 +112,7 @@ function Confirmation({ booking }: { booking: string }) {
         return_url: `${window.location.origin}/book/${site.slug}/confirmation/${encodeURIComponent(booking)}`,
       })
       rememberPayment(p, { amount: isZero(data.paid) ? data.due_now : undefined, currency: data.currency, hotel: data.hotel })
+      rememberReturn(p.transaction, `/${site.slug}/confirmation/${encodeURIComponent(booking)}`)
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {
@@ -170,6 +171,7 @@ function Confirmation({ booking }: { booking: string }) {
     title = t("confirm.payTitle")
     body = t("confirm.payBody")
   }
+  const note = siteText(site, lang, "confirmation_note")
   const manageHref = `/${site.slug}/manage#token=${encodeURIComponent(token)}`
   const canPay = pending && !bank && !payAtHotel && isPositive(data.due_now)
 
@@ -181,6 +183,7 @@ function Confirmation({ booking }: { booking: string }) {
           {title}
         </h1>
         <p className="mx-auto mt-2 max-w-lg text-soft">{body}</p>
+        {note && data.status !== "Cancelled" && <p className="mx-auto mt-3 max-w-lg whitespace-pre-line text-sm text-soft">{note}</p>}
         <div className="mt-4 inline-flex flex-wrap items-center justify-center gap-2 rounded-ui bg-sunken px-4 py-2">
           <span className="text-sm text-soft">{t("confirm.reference")}</span>
           <span className="font-mono text-lg font-bold tracking-wide">{data.booking}</span>
@@ -221,7 +224,7 @@ function Confirmation({ booking }: { booking: string }) {
         {data.booker_name && <p className="text-sm text-muted">{t("confirm.bookedBy", { name: data.booker_name })}</p>}
         <ul className="mt-4 divide-y divide-line">
           {data.rooms.map((r, i) => (
-            <RoomBlock key={r.reservation} room={r} index={i} count={data.rooms.length} currency={data.currency} />
+            <RoomBlock key={r.reservation} room={r} index={i} count={data.rooms.length} currency={data.currency} bookingStatus={data.status} />
           ))}
         </ul>
         <div className="mt-4 border-t border-line pt-4">

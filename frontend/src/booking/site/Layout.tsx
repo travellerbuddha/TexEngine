@@ -1,12 +1,12 @@
 import { Globe, Mail, MapPin, MessageCircle, Phone } from "lucide-react"
 import { useId, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
-import { isLang, LANGS, localText, useI18n, type Lang } from "../i18n"
+import { isLang, LANGS, useI18n, type Lang } from "../i18n"
 import { safeImage } from "../lib/branding"
 import { isEmbedded } from "../lib/storage"
 import { Button } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
-import { useSite } from "./SiteContext"
+import { siteText, useSite } from "./SiteContext"
 
 function LanguageSelect() {
   const { t, lang, setLang } = useI18n()
@@ -96,7 +96,10 @@ export function Header({ home }: { home?: string }) {
   const { t } = useI18n()
   const embedded = isEmbedded()
   const phone = site.contact?.phone
-  const brand = home ? (
+  // inside the widget's modal the host frame already shows the site name
+  const brand = embedded ? (
+    <span />
+  ) : home ? (
     <a href={home} className="inline-flex min-h-10 items-center rounded-ui" aria-label={t("header.home", { name: site.name })}>
       <Brand compact={embedded} />
     </a>
@@ -148,7 +151,7 @@ export function Footer() {
   const [policies, setPolicies] = useState(false)
   const c = site.contact || {}
   const wa = c.whatsapp?.replace(/[^\d]/g, "")
-  const note = localText(site.texts?.footer_note, lang)
+  const note = siteText(site, lang, "footer_note")
   const hasTrackers = !!(site.analytics?.ga4 || site.analytics?.gtm || site.analytics?.meta_pixel)
   return (
     <footer className="mt-16 border-t border-line bg-surface">

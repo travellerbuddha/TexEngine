@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
-import { forgetPayment, storedPayment } from "../lib/storage"
+import { forgetPayment, returnPathFor, storedPayment } from "../lib/storage"
 import { appPath } from "../flow/payment"
 import { Button } from "../ui/controls"
 import { Alert, EmptyState } from "../ui/feedback"
@@ -40,9 +40,12 @@ export default function MockPayPage() {
       const r = await pub<MockResult>("mock_pay", { transaction: txn, outcome, sig })
       forgetPayment(txn)
       const status = (r.status || "").toLowerCase()
+      const query = `payment=${encodeURIComponent(r.transaction)}&status=${encodeURIComponent(status)}`
+      // the page this tab started the payment from wins over the server's default return URL
+      const own = returnPathFor(txn)
+      if (own) return navigate(`${own}${own.includes("?") ? "&" : "?"}${query}`, { replace: true })
       const target = r.return_url || "/book"
-      const sep = target.includes("?") ? "&" : "?"
-      const url = `${target}${sep}payment=${encodeURIComponent(r.transaction)}&status=${encodeURIComponent(status)}`
+      const url = `${target}${target.includes("?") ? "&" : "?"}${query}`
       const inApp = appPath(url)
       if (inApp) navigate(inApp, { replace: true })
       else window.location.assign(url)

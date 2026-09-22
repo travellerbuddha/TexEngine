@@ -435,7 +435,7 @@ function RoomList({ property }: { property: PropertyResult }) {
         </ul>
       ) : (
         <EmptyState icon={<SearchX className="size-8" aria-hidden />} title={property.offers.length ? t("results.noMatchFilter") : t("results.noneTitle")}>
-          {property.offers.length ? null : t("results.noneBody")}
+          {property.offers.length ? null : t(multi ? "results.noneBodyMulti" : "results.noneBody")}
         </EmptyState>
       )}
       {unavailable.length > 0 && (
@@ -445,7 +445,7 @@ function RoomList({ property }: { property: PropertyResult }) {
             {unavailable.map((o) => (
               <li key={o.room_type} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
                 <span className="font-medium text-soft">{property.rooms[o.room_type]?.name ?? o.room_type}</span>
-                <span className="text-muted">{reasonText(t, o.reasons)}</span>
+                <span className="text-muted">{reasonText(t, o.reasons, multi)}</span>
               </li>
             ))}
           </ul>

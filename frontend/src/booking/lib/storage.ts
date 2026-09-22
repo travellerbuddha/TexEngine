@@ -119,6 +119,18 @@ export function rememberPayment(p: PaymentStart, extra: Omit<StoredPayment, "tra
   }
 }
 
+/** In-app page (without /book) the guest should come back to after this payment.
+ * Used when the server falls back to its default return URL (e.g. a dev host or a
+ * domain it does not know yet). */
+export function rememberReturn(txn: string, path: string) {
+  setItem(`tex.return.${txn}`, path)
+}
+
+export function returnPathFor(txn: string) {
+  const p = getItem(`tex.return.${txn}`)
+  return p && p.startsWith("/") && !p.startsWith("//") ? p : null
+}
+
 export function storedPayment(txn: string) {
   return getJSON<StoredPayment>(`tex.pay.${txn}`)
 }

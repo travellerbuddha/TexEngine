@@ -101,3 +101,26 @@ export function useSite(): SiteCtx {
 export function useOptionalSite(): SiteCtx | null {
   return useContext(Ctx)
 }
+
+export type SiteTextKey = "headline" | "tagline" | "search_button" | "confirmation_note" | "footer_note"
+
+/** Hotel-authored text from site().texts ({ "<lang>": { headline, … } }): the current
+ * language, then the site's default language, else null (the caller's built-in
+ * default). Always plain text — rendered as React text, never as HTML. */
+export function siteText(site: Site, lang: string, key: SiteTextKey): string | null {
+  const texts = (site.texts ?? {}) as Record<string, unknown>
+  for (const l of [lang, site.default_language]) {
+    const block = l ? texts[l] : null
+    if (block && typeof block === "object") {
+      const v = (block as Record<string, unknown>)[key]
+      if (typeof v === "string" && v.trim()) return v.trim()
+    }
+  }
+  return null
+}
+
+export function useSiteText() {
+  const { site } = useSite()
+  const { lang } = useI18n()
+  return (key: SiteTextKey) => siteText(site, lang, key)
+}

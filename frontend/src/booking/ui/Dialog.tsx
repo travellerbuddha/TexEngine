@@ -93,11 +93,15 @@ export function Dialog({ open, onClose, title, closeLabel, children, footer, var
       aria-labelledby={titleId}
       aria-describedby={description ? descId : undefined}
       style={width ? { width } : undefined}
+      // React propagates these through the component tree: ignore a nested dialog's events
       onCancel={(e) => {
+        if (e.target !== e.currentTarget) return
         e.preventDefault()
         onClose()
       }}
-      onClose={onNativeClose}
+      onClose={(e) => {
+        if (e.target === e.currentTarget) onNativeClose()
+      }}
       onClick={(e) => {
         // a click on the backdrop lands on the <dialog> element itself
         if (e.target === ref.current) {

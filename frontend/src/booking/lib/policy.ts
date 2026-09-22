@@ -68,9 +68,11 @@ const REASONS: Record<string, MessageKey> = {
   MIN_ADULTS: "reason.occupancy",
 }
 
-export function reasonText(t: I18n["t"], reasons: Reason[] | undefined) {
+export function reasonText(t: I18n["t"], reasons: Reason[] | undefined, multiRoom = false) {
   const r = reasons?.[0]
   if (!r) return t("reason.unavailable")
   const k = REASONS[r.code]
+  // with several rooms, a room type is offered only when it fits every room's guests
+  if (k === "reason.occupancy" && multiRoom) return t("reason.occupancyMulti")
   return k ? t(k) : t("reason.unavailable")
 }

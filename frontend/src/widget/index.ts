@@ -91,6 +91,7 @@ function contrastText(hex: string) {
 interface SiteInfo {
   name?: string
   default_language?: string
+  texts?: Record<string, unknown>
   branding?: { primary?: string; font?: string; radius?: string; button_style?: string }
 }
 
@@ -177,6 +178,11 @@ export class TexBookingWidget extends HTMLElement {
     if (b.button_style === "outline") w.dataset.btn = "outline"
     const title = this.root.querySelector(".mt")
     if (title) title.textContent = this.siteName || this.t("booking")
+    // hotel-authored button label (plain text): widget language, then the site default
+    const texts = (s.texts ?? {}) as Record<string, Record<string, unknown> | undefined>
+    const label = [this.uiLang, s.default_language].map((l) => (l ? texts[l]?.search_button : null)).find((v) => typeof v === "string" && v.trim())
+    const go = this.root.querySelector(".go")
+    if (go && typeof label === "string") go.textContent = label.trim()
   }
 
   private url(params: Record<string, string>, embed: boolean) {

@@ -148,13 +148,3 @@ export function useI18n(): I18n {
   return v
 }
 
-/** Pick a site-provided text ({ "en": …, "tr": … } or a plain string). */
-export function localText(v: unknown, lang: Lang, fallback?: string | null): string | null {
-  if (typeof v === "string") return v || fallback || null
-  if (v && typeof v === "object") {
-    const o = v as Record<string, unknown>
-    const s = o[lang] ?? o.en ?? Object.values(o)[0]
-    return typeof s === "string" && s ? s : fallback || null
-  }
-  return fallback || null
-}

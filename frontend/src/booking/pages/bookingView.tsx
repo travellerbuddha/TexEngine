@@ -63,7 +63,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
-export function RoomBlock({ room, index, count, currency, actions }: { room: BookingRoom; index: number; count: number; currency: string; actions?: ReactNode }) {
+export function RoomBlock({ room, index, count, currency, actions, bookingStatus }: { room: BookingRoom; index: number; count: number; currency: string; actions?: ReactNode; bookingStatus?: string }) {
   const { t, range, money } = useI18n()
   const [open, setOpen] = useState(false)
   const nights = nightsBetween(room.check_in, room.check_out)
@@ -77,8 +77,16 @@ export function RoomBlock({ room, index, count, currency, actions }: { room: Boo
           <p className="text-sm text-soft">{[boardLabel(t, room.board), room.rate_plan].filter(Boolean).join(" · ")}</p>
         </div>
         <div className="flex items-center gap-2">
-          {room.status !== "Confirmed" && <StatusBadge status={room.status} />}
-          <span className="font-semibold tabular-nums">{money(room.amount, currency)}</span>
+          {room.status !== (bookingStatus ?? "Confirmed") && <StatusBadge status={room.status} />}
+          {/* for a cancelled room the server's amount is the cancellation fee */}
+          {room.status === "Cancelled" ? (
+            <span className="text-right text-sm">
+              <span className="block text-xs text-muted">{t("manage.feeLabel")}</span>
+              <span className="font-semibold tabular-nums">{money(room.amount, currency)}</span>
+            </span>
+          ) : (
+            <span className="font-semibold tabular-nums">{money(room.amount, currency)}</span>
+          )}
         </div>
       </div>
       <p className="mt-1 flex items-center gap-1.5 text-sm text-soft">

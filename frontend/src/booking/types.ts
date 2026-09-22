@@ -54,8 +54,6 @@ export interface SiteExtra {
   service_to?: string | null
 }
 
-export type LocalText = string | Record<string, string>
-
 export interface Site {
   slug: string
   name: string
@@ -68,7 +66,8 @@ export interface Site {
   default_market?: string | null
   branding: Branding
   contact: { phone?: string | null; email?: string | null; whatsapp?: string | null; address?: string | null }
-  texts: Record<string, LocalText>
+  /** { "<lang>": { headline, tagline, search_button, confirmation_note, footer_note, … } } */
+  texts: Record<string, Record<string, string> | string>
   policies?: string | null
   self_service: boolean
   analytics: { ga4?: string | null; gtm?: string | null; meta_pixel?: string | null; consent_banner: boolean }

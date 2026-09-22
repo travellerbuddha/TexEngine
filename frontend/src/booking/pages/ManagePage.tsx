@@ -5,7 +5,7 @@ import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { MAX_ADULTS, MAX_CHILDREN, type Party } from "../lib/criteria"
 import { isNegative, isPositive, isZero } from "../lib/format"
-import { rememberPayment, setItem, siteManageToken } from "../lib/storage"
+import { rememberPayment, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor } from "../search/GuestsPicker"
@@ -20,21 +20,30 @@ import { SiteError } from "./SiteError"
 
 /** Take the magic-link token from the URL fragment (never sent to the server or
  * written to logs), keep it for this tab and remove it from the address bar. */
+function takeFragmentToken(slug: string): string | null {
+  const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash)
+  if (!m) return null
+  const tok = decodeURIComponent(m[1])
+  setItem(`tex.manage.site.${slug}`, tok)
+  try {
+    window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search)
+  } catch {
+    /* ignore */
+  }
+  return tok
+}
+
 function useFragmentToken(slug: string) {
-  const [token] = useState<string | null>(() => {
-    const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash)
-    if (m) {
-      const tok = decodeURIComponent(m[1])
-      setItem(`tex.manage.site.${slug}`, tok)
-      try {
-        window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search)
-      } catch {
-        /* ignore */
-      }
-      return tok
+  const [token, setToken] = useState<string | null>(() => takeFragmentToken(slug) ?? siteManageToken(slug))
+  // another magic link opened in the same tab only changes the fragment
+  useEffect(() => {
+    const on = () => {
+      const tok = takeFragmentToken(slug)
+      if (tok) setToken(tok)
     }
-    return siteManageToken(slug)
-  })
+    window.addEventListener("hashchange", on)
+    return () => window.removeEventListener("hashchange", on)
+  }, [slug])
   return token
 }
 
@@ -264,7 +273,7 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
 }
 
 function Manage({ token }: { token: string | null }) {
-  const { t } = useI18n()
+  const { t, money } = useI18n()
   const { site } = useSite()
   const navigate = useNavigate()
   const [sp] = useSearchParams()
@@ -290,6 +299,12 @@ function Manage({ token }: { token: string | null }) {
   useEffect(() => {
     void load()
   }, [load])
+  // a gateway that fell back to the server's default return page: continue where this tab started
+  useEffect(() => {
+    const txn = sp.get("payment")
+    const own = txn ? returnPathFor(txn) : null
+    if (own && !own.startsWith(`/${site.slug}/manage`)) navigate(`${own}${own.includes("?") ? "&" : "?"}${sp.toString()}`, { replace: true })
+  }, [sp, site.slug, navigate])
   useEffect(() => {
     document.title = `${t("manage.title")} · ${site.name}`
   }, [t, site.name])
@@ -363,16 +378,16 @@ function Manage({ token }: { token: string | null }) {
       )}
       {owes && (
         <Alert
-          tone="warn"
-          title={t("manage.paymentDue")}
+          tone={data.status === "Pending Payment" ? "warn" : "info"}
+          title={data.status === "Pending Payment" ? t("manage.paymentDue") : t("manage.balanceTitle")}
           actions={
-            <Button onClick={pay} busy={paying}>
+            <Button onClick={pay} busy={paying} variant={data.status === "Pending Payment" ? "primary" : "secondary"}>
               <CreditCard className="size-4" aria-hidden />
               {t("confirm.payNow")}
             </Button>
           }
         >
-          {t("manage.paymentDueBody")}
+          {data.status === "Pending Payment" ? t("manage.paymentDueBody") : t("manage.balanceBody", { amount: money(data.balance, data.currency) })}
         </Alert>
       )}
       <section className="bk-card p-4 sm:p-6" aria-labelledby="bk-manage-hotel">
@@ -387,6 +402,7 @@ function Manage({ token }: { token: string | null }) {
               index={i}
               count={data.rooms.length}
               currency={data.currency}
+              bookingStatus={data.status}
               actions={
                 data.self_service && active(r) ? (
                   <>
