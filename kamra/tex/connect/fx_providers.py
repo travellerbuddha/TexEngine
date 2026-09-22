@@ -89,10 +89,10 @@ def fetch(provider: str = "TCMB") -> dict:
 
 def daily_fetch() -> None:
 	"""Scheduler entry: fetch both providers; failures are logged, never raised."""
-	import frappe
+	from kamra.tex.security.audit import log_exception
 
 	for provider in ("TCMB", "ECB"):
 		try:
 			fetch(provider)
 		except Exception:
-			frappe.log_error(title=f"TEX FX fetch {provider}")
+			log_exception(f"TEX FX fetch {provider}")

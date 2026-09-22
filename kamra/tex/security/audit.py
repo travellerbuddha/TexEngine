@@ -76,3 +76,24 @@ def diff(before: dict | None, after: dict | None, fields) -> dict:
 		if str(a if a is not None else "") != str(b if b is not None else ""):
 			out[f] = [a, b]
 	return out
+
+
+def log_exception(title: str) -> None:
+	"""Log the current exception WITHOUT frame variables (Frappe's default traceback
+	includes locals, which can hold guest data, callback headers or link tokens)."""
+	import sys
+	import traceback
+
+	exc = sys.exc_info()[1]
+	lines = traceback.format_exception(type(exc), exc, exc.__traceback__) if exc else []
+	frappe.log_error(title=title[:140], message=redact_text("".join(lines))[-8000:])
+
+
+def redact_text(text: str) -> str:
+	"""Mask token-like values that could appear in exception messages."""
+	import re
+
+	text = re.sub(r"(token|sig|secret|password|pwd|authorization)([\"'=:\s]+)[^\s\"'&,]+", r"\1\2********", text,
+	              flags=re.IGNORECASE)
+	return re.sub(r"\b\d{13,19}\b", "****************", text)
+

@@ -32,6 +32,11 @@ def get_context(context):
 		html = f.read()
 	path = (frappe.form_dict.get("app_path") or "").strip("/")
 	slug = path.split("/", 1)[0] if path else None
+	if not slug:
+		# bare /book: the only TEX booking site, or the legacy Kamra page when none exists
+		sites = frappe.get_all("TEX Booking Site", filters={"enabled": 1}, pluck="site_slug", limit=2)
+		frappe.local.flags.redirect_location = f"/book/{sites[0]}" if len(sites) == 1 else "/kamra/book"
+		raise frappe.Redirect(302)
 	frappe.local.response_headers["Content-Security-Policy"] = f"frame-ancestors {_frame_ancestors(slug)}"
 	frappe.local.response_headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 	context.spa_html = html

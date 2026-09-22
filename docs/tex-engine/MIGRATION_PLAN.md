@@ -15,6 +15,14 @@ preserve IDs, keep compatibility, test the migration path, never casually delete
 
 ## 2. Ordered patches
 
+Implemented as: `p01_foundation` (T1–T3), `p02_access_grants` (T4), `p03_indexes` (T10),
+`p04_lock_legacy_prices` (T9), `p05_vouchers_to_promotions` (T6), `p06_experiences_to_extras`
+(T7), `p07_forget_payment_link_urls` (security clean-up). T8 is the opt-in API
+`kamra.tex.api.contracts.legacy_draft` (`kamra/tex/commercial/legacy.py`). T5 is not needed:
+TEX boards are contract-level codes (RO/BB/HB/FB/AI/UAI), independent of legacy Meal Plans.
+Tests: `kamra/tex/tests/integration/test_migrations_notify.py`.
+
+
 | # | Patch | What it does | Reversible? |
 |---|---|---|---|
 | T1 | `tex.p01_settings_and_roles` | Creates `TEX Settings` singleton defaults (strict tenancy on, legacy PMS nav hidden), roles `Call Center Agent`, default `TEX Permission Profile`s | Yes (records only) |

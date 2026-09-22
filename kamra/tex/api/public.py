@@ -19,6 +19,7 @@ from frappe.utils import getdate, now_datetime
 from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import versions
+from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import modification, quoting
 
@@ -347,7 +348,7 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 			"consent_marketing": 1 if consent else 0,
 			"payload": json.dumps(payload or {}, default=str)[:4000]}).insert(ignore_permissions=True)
 	except Exception:
-		frappe.log_error(title="TEX funnel event")
+		log_exception("TEX funnel event")
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])

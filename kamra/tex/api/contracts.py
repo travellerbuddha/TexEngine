@@ -228,3 +228,12 @@ def price_matrix(version: str, adults: int = 2):
 		out.append(row)
 	return {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
 	                    for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency}
+
+
+@frappe.whitelist(methods=["POST"])
+def legacy_draft(property: str, market: str = "GLOBAL", contract_code: str = "LEGACY-BAR"):
+	"""MIGRATION T8 (opt-in): draft a contract from the hotel's legacy Kamra prices."""
+	from kamra.tex.commercial import legacy
+
+	return legacy.draft_from_legacy(property, market=market, contract_code=(contract_code or "LEGACY-BAR")[:40])
+

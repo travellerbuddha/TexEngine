@@ -3,6 +3,11 @@
 
 from frappe.model.document import Document
 
+from kamra.tex.commercial.revisions import guard_immutable
+
 
 class TEXPaymentLink(Document):
-	pass
+	def validate(self):
+		# what the guest is asked to pay never changes after the link exists
+		guard_immutable(self, allowed=("status", "paid_amount", "allocated_amount", "token_hash", "public_url",
+		                               "expires_at"))

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import frappe
 
+from kamra.tex.security.audit import log_exception
+
 
 def _run(path: str) -> None:
 	try:
@@ -12,7 +14,7 @@ def _run(path: str) -> None:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- scheduler job boundary
 	except Exception:
 		frappe.db.rollback()
-		frappe.log_error(title=f"TEX job {path}")
+		log_exception(f"TEX job {path}")
 
 
 def every_5_minutes() -> None:

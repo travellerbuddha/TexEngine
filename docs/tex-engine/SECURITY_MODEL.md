@@ -64,7 +64,15 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 ## 5. Logging rules
 Never log passwords, CVV, PAN, secrets or raw tokens. `kamra.tex.security.redact()` scrubs
 known keys (`password`, `secret`, `token`, `card`, `cvv`, `pan`, `authorization`) before any
-`frappe.log_error`/audit payload.
+audit payload. TEX code logs exceptions only through `audit.log_exception()`, which writes the
+traceback **without frame variables** (Frappe's default traceback includes locals, which can
+hold guest data, callback headers or magic-link URLs) and masks token-like values; a test
+asserts that a failed booking e-mail leaves no token in the Error Log.
+
+Bearer links: manage-booking and payment-link tokens are stored only as sha256 hashes. The
+clear URL exists in the API response that created it and in the outgoing e-mail; Frappe's
+Email Queue keeps the rendered message until its retention purge (System Manager access only).
+Staff who lose a payment link reissue it (new token; the old URL stops working).
 
 ## 6. Known gaps (tracked)
 - Legacy PMS endpoints whose hotel is only reachable through module-specific arguments

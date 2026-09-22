@@ -19,6 +19,7 @@ from kamra.tex.money import from_db, to_str
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.security import scope
+from kamra.tex.security.audit import log_exception
 from kamra.tex.security.scope import require_capability
 
 GATEWAYS = ("iyzico", "Sipay", "Virtual POS")
@@ -53,12 +54,12 @@ def callback(txn: str | None = None, **_ignored):
 	except ProviderError:
 		# forged or garbled callback: the transaction stays as it was
 		frappe.db.rollback()
-		frappe.log_error(title=f"TEX payment callback rejected {row.name}")
+		log_exception(f"TEX payment callback rejected {row.name}")
 		status = "Unverified"
 	except Exception:
 		# gateway unreachable while re-querying: stays Pending, staff can re-verify
 		frappe.db.rollback()
-		frappe.log_error(title=f"TEX payment callback error {row.name}")
+		log_exception(f"TEX payment callback error {row.name}")
 		status = "Pending"
 	# Sipay returns via GET, which Frappe does not auto-commit; the verified outcome must persist.
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- verified payment outcome must be durable before redirect
@@ -179,7 +180,8 @@ def methods(property: str, market: str | None = None, currency: str | None = Non
 @frappe.whitelist(methods=["POST"])
 def create_link(property: str, amount, currency: str, description: str, expires_hours=72,
                 provider_account: str | None = None, booking: str | None = None, reservation: str | None = None,
-                guest_name: str | None = None, guest_email: str | None = None, idempotency_key: str | None = None):
+                guest_name: str | None = None, guest_email: str | None = None, idempotency_key: str | None = None,
+                send_email=0, language: str | None = None):
 	if provider_account and frappe.db.get_value("TEX Payment Provider Account", provider_account,
 	                                            "property") not in (None, property):
 		frappe.throw(_("That payment account belongs to another hotel."))
@@ -187,7 +189,13 @@ def create_link(property: str, amount, currency: str, description: str, expires_
 	                       expires_hours=as_int(expires_hours, 72, lo=1, hi=24 * 60),
 	                       provider_account=provider_account, booking=booking, reservation=reservation,
 	                       guest_name=text(guest_name, 140), guest_email=text(guest_email, 140),
-	                       idempotency_key=text(idempotency_key, 140))
+	                       idempotency_key=text(idempotency_key, 140), send_email=bool(as_int(send_email, 0)),
+	                       language=text(language, 5) or "en")
+
+
+@frappe.whitelist(methods=["POST"])
+def reissue_link(name: str, send_email=0, language: str | None = None):
+	return pay.reissue_link(name, send_email=bool(as_int(send_email, 0)), language=text(language, 5) or "en")
 
 
 @frappe.whitelist()

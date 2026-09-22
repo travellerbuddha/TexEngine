@@ -303,6 +303,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	           "channel": channel})
 	out = booking_summary(booking.name)
 	out["manage_token"] = token
+	from kamra.tex.services import notify
+
+	notify.booking_created(booking.name, token)
 	return out
 
 
@@ -366,6 +369,9 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 	b.save(ignore_permissions=True)
 	audit("booking.confirm", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      reason=reason)
+	from kamra.tex.services import notify
+
+	notify.booking_confirmed(booking)
 
 
 def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict:

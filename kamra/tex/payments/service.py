@@ -19,7 +19,7 @@ from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.payments.providers import simple, turkey
 from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, log_exception
 
 
 def _mock_secret() -> str:
@@ -108,7 +108,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn.error_message = str(e)[:500]
 		txn.completed_at = now_datetime()
 		txn.save(ignore_permissions=True)
-		frappe.log_error(title=f"TEX payment start failed {txn.name}")
+		log_exception(f"TEX payment start failed {txn.name}")
 		frappe.throw(_("The payment could not be started. Please try another method."))
 	if checkout.provider_ref:
 		txn.provider_ref = checkout.provider_ref
@@ -337,7 +337,7 @@ def link_token_hash(token: str) -> str:
 def create_link(*, property: str, amount, currency: str, description: str, expires_hours: int = 72,
                 provider_account: str | None = None, booking: str | None = None, reservation: str | None = None,
                 guest_name: str | None = None, guest_email: str | None = None,
-                idempotency_key: str | None = None) -> dict:
+                idempotency_key: str | None = None, send_email: bool = False, language: str = "en") -> dict:
 	scope.require("payment.link", property)
 	if booking and frappe.db.get_value("TEX Booking", booking, "property") != property:
 		frappe.throw(_("The booking belongs to another hotel."))
@@ -357,12 +357,40 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		"expires_at": add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60))),
 		"provider_account": provider_account, "booking": booking, "reservation": reservation,
 		"guest_name": guest_name, "guest_email": guest_email, "token_hash": link_token_hash(token),
-		"idempotency_key": idempotency_key, "public_url": get_url(f"/book/pay/{token}"),
+		# the URL embeds the bearer token: returned once, never stored (only its hash is)
+		"idempotency_key": idempotency_key, "public_url": None,
 	})
 	doc.insert(ignore_permissions=True)
+	url = get_url(f"/book/pay/{token}")
+	emailed = False
+	if send_email:
+		from kamra.tex.services import notify
+
+		emailed = notify.payment_link(doc.name, url, language)
 	audit("payment_link.create", reference_doctype="TEX Payment Link", reference_name=doc.name, property=property,
-	      new={"amount": to_str(amount), "currency": currency, "booking": booking})
-	return {"link": doc.name, "url": doc.public_url, "token": token}
+	      new={"amount": to_str(amount), "currency": currency, "booking": booking, "emailed": emailed})
+	return {"link": doc.name, "url": url, "token": token, "emailed": emailed}
+
+
+def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -> dict:
+	"""New token for an open link (the old URL stops working) — staff lost or resend."""
+	link = frappe.get_doc("TEX Payment Link", name)
+	scope.require("payment.link", link.property)
+	if link.status not in ("Active", "Partially Paid"):
+		frappe.throw(_("Only open links can be reissued."))
+	token = secrets.token_urlsafe(24)
+	link.flags.tex_system_update = True
+	link.token_hash = link_token_hash(token)
+	link.save(ignore_permissions=True)
+	url = get_url(f"/book/pay/{token}")
+	emailed = False
+	if send_email:
+		from kamra.tex.services import notify
+
+		emailed = notify.payment_link(link.name, url, language)
+	audit("payment_link.reissue", reference_doctype="TEX Payment Link", reference_name=name, property=link.property,
+	      new={"emailed": emailed})
+	return {"link": link.name, "url": url, "token": token, "emailed": emailed}
 
 
 def link_by_token(token: str):
