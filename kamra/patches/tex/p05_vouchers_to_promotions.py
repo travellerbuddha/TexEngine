@@ -22,9 +22,10 @@ def execute():
 			"value_type": "PERCENT" if percent else "FIXED_STAY", "value": v.value or 0,
 			"currency": None if percent else currency, "sale_from": v.valid_from, "sale_to": v.valid_to,
 			"min_nights": v.min_nights or None, "usage_limit": v.max_uses or None,
-			"times_redeemed": v.times_used or 0, "stackable": 0, "legacy_voucher": v.name,
+			"times_redeemed": v.times_used or 0, "stackable": 0, "legacy_voucher": v.name, "tex_status": "Draft",
 		})
 		doc.flags.ignore_permissions = True
+		doc.flags.tex_revision_transition = True     # trusted migration: keep the usage count
 		try:
 			doc.insert(ignore_permissions=True)
 		except frappe.ValidationError:

@@ -89,14 +89,23 @@ class IyzicoProvider(PaymentProvider):
 			raise ProviderError(res.get("errorMessage") or "iyzico checkout initialisation failed")
 		return Checkout(kind="redirect", url=res.get("paymentPageUrl"), provider_ref=res.get("token"))
 
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome:
+	FINAL_FAILURE = ("FAILURE",)
+
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
 		token = params.get("token")
-		if not token:
-			return Outcome(status="Failed", error_code="NO_TOKEN")
+		# the checkout-form token we stored at initialisation is the only one accepted
+		if not token or not provider_ref or not hmac.compare_digest(str(token), str(provider_ref).split("|")[0]):
+			raise ProviderError("iyzico callback token does not match this payment")
 		res = self._post(self.DETAIL, {"locale": "en", "conversationId": transaction, "token": token})
+		if res.get("conversationId") not in (None, transaction):
+			raise ProviderError("iyzico result belongs to another order")
 		if res.get("status") != "success" or res.get("paymentStatus") != "SUCCESS":
-			return Outcome(status="Failed", raw_status=res.get("paymentStatus"), error_code=res.get("errorCode"),
-			               error_message=res.get("errorMessage"))
+			if res.get("paymentStatus") in self.FINAL_FAILURE:
+				return Outcome(status="Failed", raw_status=res.get("paymentStatus"), error_code=res.get("errorCode"),
+				               error_message=res.get("errorMessage"))
+			# not final yet (or the query itself failed): leave the payment pending
+			return Outcome(status="Pending", raw_status=res.get("paymentStatus") or res.get("status"))
 		if res.get("basketId") not in (None, transaction):
 			raise ProviderError("iyzico result belongs to another order")
 		items = res.get("itemTransactions") or [{}]
@@ -205,7 +214,10 @@ class SipayProvider(PaymentProvider):
 			raise ProviderError(data.get("message") or "Sipay link creation failed")
 		return Checkout(kind="redirect", url=data.get("link"), provider_ref=intent.transaction)
 
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome:
+	FINAL_FAILURE = ("failed", "declined", "cancelled", "canceled", "rejected")
+
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
 		_app_id, app_secret, merchant_key = self._creds()
 		# check-status hash: 'invoice_id|merchant_key' (verify during sandbox certification;
 		# a wrong hash fails closed — the transaction stays unpaid, never falsely paid)
@@ -215,10 +227,13 @@ class SipayProvider(PaymentProvider):
 		                  headers={"Authorization": f"Bearer {self._token()}"}, timeout=TIMEOUT)
 		r.raise_for_status()
 		data = r.json()
-		ok = int(data.get("status_code") or 0) == 100 and str(data.get("transaction_status")).lower() == "completed"
+		state = str(data.get("transaction_status") or "").lower()
+		ok = int(data.get("status_code") or 0) == 100 and state == "completed"
 		if not ok:
-			return Outcome(status="Failed", raw_status=str(data.get("transaction_status")),
-			               error_message=data.get("status_description"))
+			if state in self.FINAL_FAILURE:
+				return Outcome(status="Failed", raw_status=state, error_message=data.get("status_description"))
+			# unknown / still processing: never fail a payment on an unconfirmed answer
+			return Outcome(status="Pending", raw_status=state or str(data.get("status_code")))
 		return Outcome(status="Succeeded", provider_ref=str(data.get("order_no") or transaction),
 		               amount=Decimal(str(data.get("amount") or "0")), currency=data.get("currency_code"),
 		               raw_status="completed")
@@ -266,7 +281,8 @@ class NestPayProvider(PaymentProvider):
 		fields["hash"] = nestpay_hash_v3(fields, store_key)
 		return Checkout(kind="form_post", url=self.gateway, fields=fields, provider_ref=intent.transaction)
 
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome:
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
 		store_key = self.secret("store_key")
 		given = params.get("HASH") or params.get("hash") or ""
 		check = {k: v for k, v in params.items() if k not in ("cmd",)}

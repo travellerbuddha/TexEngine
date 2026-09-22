@@ -65,7 +65,12 @@ class PaymentProvider(ABC):
 	def create_checkout(self, intent: Intent) -> Checkout: ...
 
 	@abstractmethod
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome: ...
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
+		"""Return the outcome the gateway AUTHENTICATED for this transaction.
+		Raise ProviderError when the request cannot be verified; return status
+		"Pending" while the gateway has no final answer. Never return Failed for an
+		unverified request — that would let anyone fail someone else's payment."""
 
 	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
 		raise ProviderError(f"{self.name} does not support refunds through TEX")

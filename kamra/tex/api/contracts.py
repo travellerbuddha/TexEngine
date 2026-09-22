@@ -79,7 +79,7 @@ def save_contract(data):
 			doc.set(f, data[f])
 	if "channels" in data:
 		doc.set("channels", [{"sales_channel": c} for c in (data.get("channels") or [])])
-	doc.save()
+	doc.save(ignore_permissions=True)
 	audit("contract.save", reference_doctype="TEX Contract", reference_name=doc.name, property=prop,
 	      old=before if not doc.is_new() else None, new={f: doc.get(f) for f in CONTRACT_FIELDS})
 	if not frappe.db.exists("TEX Contract Version", {"contract": doc.name}):
@@ -99,7 +99,7 @@ def duplicate_contract(name: str, contract_code: str, contract_name: str | None 
 	new.status = "Draft"
 	new.active_version = None
 	new.latest_version_no = 0
-	new.insert()
+	new.insert(ignore_permissions=True)
 	latest = frappe.db.get_value("TEX Contract Version", {"contract": name}, "name", order_by="version_no desc")
 	if latest:
 		v = frappe.copy_doc(frappe.get_doc("TEX Contract Version", latest))
@@ -108,7 +108,7 @@ def duplicate_contract(name: str, contract_code: str, contract_name: str | None 
 			v.set(f, None)
 		v.contract = new.name
 		v.status = "Draft"
-		v.insert()
+		v.insert(ignore_permissions=True)
 	audit("contract.duplicate", reference_doctype="TEX Contract", reference_name=new.name, property=src.property,
 	      new={"from": name})
 	return get_contract(new.name)
@@ -154,7 +154,7 @@ def save_version(name: str, data):
 				        "owner", "modified_by", "docstatus")}
 				clean.append(row)
 			v.set(t, clean)
-	v.save()
+	v.save(ignore_permissions=True)
 	return get_version(name)
 
 

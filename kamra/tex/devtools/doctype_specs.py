@@ -2,21 +2,25 @@
 
 from kamra.tex.devtools.doctype_gen import CB, SB, TAB, F, dt, perm
 
-# ─── permission sets ──────────────────────────────────────────────────────
+# ─── permission sets (ADR-022) ─────────────────────────────────────────────
+# TEX records are written ONLY through the TEX services/API, which check capability
+# and hotel scope. DocType permissions therefore give business roles no write access:
+# System Manager keeps platform operations, Hotel Admin reads (hotel-scoped by the
+# permission hooks), master data stays readable. Generic Desk/REST writes cannot
+# bypass capabilities, revision lifecycles or immutability.
 SM = perm("System Manager", "full")
 HA = perm("Hotel Admin", "full")
-COMMERCIAL = [SM, HA, perm("Revenue Manager", "write"), perm("Front Desk"), perm("Call Center Agent"),
-              perm("Finance")]
-MASTER = [SM, HA, perm("Revenue Manager"), perm("Front Desk"), perm("Call Center Agent"), perm("Finance")]
-BOOKING = [SM, HA, perm("Front Desk", "write"), perm("Call Center Agent", "write"), perm("Revenue Manager"),
-           perm("Finance"), perm("Kamra Agent", "write")]
-PAYMENTS = [SM, HA, perm("Finance", "write"), perm("Front Desk"), perm("Call Center Agent")]
-CRM = [SM, HA, perm("Front Desk", "write"), perm("Call Center Agent", "write"), perm("Revenue Manager")]
-PLATFORM = [SM, perm("Hotel Admin", "write")]
+HA_RO = perm("Hotel Admin", "readonly")
+COMMERCIAL = [SM, HA_RO]
+MASTER = [SM, HA_RO, perm("Revenue Manager", "readonly"), perm("Front Desk", "readonly"),
+          perm("Call Center Agent", "readonly"), perm("Finance", "readonly")]
+BOOKING = [SM, HA_RO]
+PAYMENTS = [SM, HA_RO]
+CRM = [SM, HA_RO]
+PLATFORM = [SM, HA_RO]
+GRANTS = [SM, HA]           # anti-escalation is enforced in the TEX Access Grant controller
 READONLY_AUDIT = [perm("System Manager", "readonly"), perm("Hotel Admin", "readonly")]
-IMMUTABLE_LOG = [perm("System Manager", "readonly"), perm("Hotel Admin", "readonly"),
-                 perm("Revenue Manager", "readonly"), perm("Front Desk", "readonly"),
-                 perm("Call Center Agent", "readonly"), perm("Finance", "readonly")]
+IMMUTABLE_LOG = [perm("System Manager", "readonly"), HA_RO]
 
 BOARDS = ["RO", "BB", "HB", "FB", "AI", "UAI"]
 OPS_ROOM = ["ABSOLUTE", "MULTIPLY", "ADJUST_PERCENT", "PERCENT_OF", "ADD", "SUBTRACT", "INHERIT"]
@@ -128,7 +132,7 @@ PLATFORM_SPECS = [
 		F("valid_until", "Date", "Valid until"),
 		F("disabled", "Check", "Disabled"),
 		F("notes", "Small Text", "Notes"),
-	], perms=PLATFORM, autoname="GRANT-.#####", naming_rule="Expression (old style)"),
+	], perms=GRANTS, autoname="GRANT-.#####", naming_rule="Expression (old style)"),
 
 	dt("TEX Audit Event", P, [
 		F("event_time", "Datetime", "Time", in_list_view=1),
@@ -785,7 +789,7 @@ BOOKING_SPECS = [
 		F("gtm_container_id", "Data", "GTM container id"),
 		F("meta_pixel_id", "Data", "Meta pixel id"),
 		F("consent_banner", "Check", "Show consent banner", default="1"),
-	], perms=[SM, HA, perm("Revenue Manager", "write"), perm("Front Desk"), perm("Call Center Agent")],
+	], perms=[SM, HA_RO],
 	   autoname="field:site_slug", naming_rule="By fieldname", title_field="site_name"),
 
 	dt("TEX Funnel Event", B, [
@@ -802,7 +806,7 @@ BOOKING_SPECS = [
 		F("value", "Currency", "Value", options="currency"),
 		F("currency", "Link", "Currency", "Currency"),
 		F("payload", "Code", "Payload", "JSON"),
-	], perms=[*READONLY_AUDIT, perm("Revenue Manager", "readonly")], autoname="hash", track_changes=False,
+	], perms=READONLY_AUDIT, autoname="hash", track_changes=False,
 	   sort_field="creation", in_create=True),
 ]
 
@@ -833,7 +837,7 @@ PAYMENT_SPECS = [
 		F("iban", "Data", "IBAN"),
 		F("account_holder", "Data", "Account holder"),
 		F("transfer_instructions", "Small Text", "Instructions"),
-	], perms=[SM, HA, perm("Finance", "write")], autoname="PPA-.####", naming_rule="Expression (old style)",
+	], perms=[SM, HA_RO], autoname="PPA-.####", naming_rule="Expression (old style)",
 	   title_field="label"),
 
 	dt("TEX Payment Method Rule", PM, [
@@ -846,7 +850,7 @@ PAYMENT_SPECS = [
 		F("sales_channel", "Link", "Sales channel", "TEX Sales Channel"),
 		F("priority", "Int", "Priority"),
 		F("disabled", "Check", "Disabled"),
-	], perms=[SM, HA, perm("Finance", "write"), perm("Front Desk"), perm("Call Center Agent")],
+	], perms=[SM, HA_RO],
 	   autoname="PMR-.#####", naming_rule="Expression (old style)"),
 
 	dt("TEX Payment Link", PM, [
@@ -870,7 +874,7 @@ PAYMENT_SPECS = [
 		CB(),
 		F("token_hash", "Data", "Token (hash)", read_only=1, hidden=1),
 		F("idempotency_key", "Data", "Idempotency key", read_only=1),
-	], perms=[SM, HA, perm("Finance", "write"), perm("Front Desk", "write"), perm("Call Center Agent", "write")],
+	], perms=[SM, HA_RO],
 	   autoname="PL-.YYYY.-.#####", naming_rule="Expression (old style)", title_field="guest_name"),
 
 	dt("TEX Payment Transaction", PM, [
@@ -902,8 +906,7 @@ PAYMENT_SPECS = [
 		F("error_message", "Small Text", "Error"),
 		F("reason", "Small Text", "Reason"),
 		F("return_url", "Small Text", "Return URL", read_only=1),
-	], perms=[perm("System Manager", "readonly"), perm("Hotel Admin", "readonly"), perm("Finance", "readonly"),
-	          perm("Front Desk", "readonly"), perm("Call Center Agent", "readonly")],
+	], perms=READONLY_AUDIT,
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
 
 	dt("TEX Payment Allocation", PM, [
@@ -918,7 +921,7 @@ PAYMENT_SPECS = [
 		F("payment_link", "Link", "Payment link", "TEX Payment Link"),
 		F("reason", "Small Text", "Reason"),
 		F("actor", "Link", "Actor", "User"),
-	], perms=[perm("System Manager", "readonly"), perm("Hotel Admin", "readonly"), perm("Finance", "readonly")],
+	], perms=READONLY_AUDIT,
 	   autoname="PAL-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
 ]
 
@@ -1033,8 +1036,7 @@ CRM_SPECS = [
 		F("reservation", "Link", "Reservation", "Reservation"),
 		F("reason", "Small Text", "Reason"),
 		F("actor", "Link", "Actor", "User"),
-	], perms=[perm("System Manager", "readonly"), perm("Hotel Admin", "readonly"), perm("Front Desk", "readonly"),
-	          perm("Call Center Agent", "readonly")],
+	], perms=READONLY_AUDIT,
 	   autoname="LYL-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
 ]
 
@@ -1058,7 +1060,7 @@ CONNECT_SPECS = [
 		F("last_sync_at", "Datetime", "Last sync", read_only=1),
 		F("last_status", "Data", "Last status", read_only=1),
 		F("last_error", "Small Text", "Last error", read_only=1),
-	], perms=[SM, HA], autoname="CON-.####", naming_rule="Expression (old style)", title_field="label"),
+	], perms=[SM, HA_RO], autoname="CON-.####", naming_rule="Expression (old style)", title_field="label"),
 
 	dt("TEX Integration Outbox", X, [
 		F("connection", "Link", "Connection", "TEX Integration Connection", in_list_view=1),

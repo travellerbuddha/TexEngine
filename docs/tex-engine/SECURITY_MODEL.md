@@ -32,6 +32,9 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   (`kamra/tex/security/perm.py`) — Desk lists, reports and `frappe.get_list` follow TEX scope.
 - Guest self-service is authorised by the manage token and ownership check, never by
   impersonating a staff user (ADR-020).
+- TEX DocTypes are written only through TEX services; business roles have no generic
+  Desk/REST write access, and every hotel-bound TEX DocType (incl. parent-scoped ones and
+  `Guest`) is read-scoped (ADR-022).
 - `strict_tenancy` (default on): a non-admin user without any scope sees nothing.
 - Grants sync Frappe `User Permission` (Property, apply to all doctypes) so Desk lists and
   `frappe.get_list` are isolated too.
@@ -43,8 +46,9 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Price tampering from client | Server prices from signed offer inputs; client totals ignored; HMAC offer keys with expiry; quotes persisted server-side |
 | Promotion/coupon abuse | Server-side eligibility; usage limits enforced with row locks; per-guest limits keyed by normalised email hash; rate limit on code checks |
 | Inventory race / double sell | `TEX Inventory Day` row locks + recount under lock; idempotency keys |
-| Replay / duplicate payments | Unique `idempotency_key` on transactions; webhook event ids stored; state machine on links |
-| Forged webhooks | HMAC signature verification (provider-specific), constant-time compare, reject when secret missing in production mode |
+| Replay / duplicate payments | Caller-namespaced idempotency keys (no cross-caller replay); `FOR UPDATE` on transactions and bookings |
+| Forged webhooks / callbacks | Signed callback URL; provider verification (HMAC hash, stored checkout token, server-to-server status); unverifiable → unchanged, non-final → Pending (ADR-023) |
+| Gateway substitution | Payments only through a provider account of the same hotel; payment links keep their fixed gateway |
 | Card data exposure | Hosted/tokenised checkout only; never receive PAN/CVV; store brand + last4 only; log scrubber |
 | Token theft (manage booking, payment links) | 32-byte random tokens, only sha256 stored, expiry, rate limits, rotation for sensitive actions |
 | XSS | React escaping; no `dangerouslySetInnerHTML` for user/admin content in TEX screens; branding restricted to tokens (validated colours/fonts/radii); CSP for booking pages |
@@ -74,7 +78,14 @@ clear URL exists in the API response that created it and in the outgoing e-mail;
 Email Queue keeps the rendered message until its retention purge (System Manager access only).
 Staff who lose a payment link reissue it (new token; the old URL stops working).
 
-## 6. Known gaps (tracked)
+## 6. Review log
+- 2026-09-22 adversarial review: 4 High, 7 Medium, 5 Low findings — all fixed with regression
+  tests in `kamra/tex/tests/integration/test_security_regressions.py` (ADR-022, ADR-023).
+  Accepted as designed: audit trail of one reservation readable with `reservation.view`;
+  loyalty redemption gated by `payment.link` (bounded to the booking's own guests and the
+  program's max-% cap).
+
+## 7. Known gaps (tracked)
 - Legacy PMS endpoints whose hotel is only reachable through module-specific arguments
   (`order`, `outlet`, `task`, `venue`, generic `name`) are not yet resolved by the scope guard.
   These modules (POS, laundry, housekeeping, banquet) are hidden from TEX navigation

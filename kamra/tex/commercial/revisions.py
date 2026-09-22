@@ -64,6 +64,16 @@ def guard_revisioned(doc) -> None:
 	"""Controller hook (validate): live revisions are immutable except their lifecycle
 	fields, which only the revision service changes (flag ``tex_revision_transition``)."""
 	if doc.is_new():
+		# a new record is always a Draft: going live is Activate's job, whatever the
+		# payload says (no mass-assigned live rows through generic REST inserts)
+		if not doc.flags.tex_revision_transition:
+			doc.tex_status = "Draft"
+			doc.active_from = None
+			doc.active_to = None
+			doc.revision_of = None
+			doc.revision_no = 1
+			if doc.meta.has_field("times_redeemed"):
+				doc.times_redeemed = 0
 		if not doc.get("tex_status"):
 			doc.tex_status = "Draft"
 		if not doc.get("revision_no"):
@@ -114,7 +124,7 @@ def revise(doctype: str, name: str) -> str:
 	new.revision_of = root
 	new.revision_no = int(max_no) + 1
 	new.flags.tex_revision_transition = True
-	new.insert()
+	new.insert(ignore_permissions=True)
 	return new.name
 
 
@@ -131,12 +141,12 @@ def activate(doctype: str, name: str, at=None) -> None:
 			p.tex_status = "Superseded"
 			p.active_to = at
 			p.flags.tex_revision_transition = True
-			p.save()
+			p.save(ignore_permissions=True)
 	doc.tex_status = "Active"
 	doc.active_from = at
 	doc.active_to = None
 	doc.flags.tex_revision_transition = True
-	doc.save()
+	doc.save(ignore_permissions=True)
 
 
 def archive(doctype: str, name: str, at=None) -> None:
@@ -149,7 +159,7 @@ def archive(doctype: str, name: str, at=None) -> None:
 		doc.active_to = get_datetime(at) if at else now_datetime()
 	doc.tex_status = "Archived"
 	doc.flags.tex_revision_transition = True
-	doc.save()
+	doc.save(ignore_permissions=True)
 
 
 def as_of(doctype: str, at, filters: dict | None = None, fields=("name",)) -> list[dict]:

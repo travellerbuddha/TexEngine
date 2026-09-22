@@ -354,5 +354,5 @@ class TestTenantIsolation(TexTestCase):
 		from kamra import hooks
 		from kamra.tex.security import perm
 
-		self.assertEqual(set(hooks._TEX_SCOPED), set(perm.PROPERTY_DOCTYPES))
+		self.assertEqual(set(hooks._TEX_SCOPED), set(perm.SCOPED_DOCTYPES))
 

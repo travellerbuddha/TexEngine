@@ -46,7 +46,9 @@ def sign(payload: dict) -> str:
 		base64.urlsafe_b64encode(mac).decode().rstrip("=")
 
 
-def verify(token: str) -> dict:
+def verify(token: str, kind: str = "offer") -> dict:
+	"""Check signature, expiry and token kind (an offer key can never be replayed as a
+	modification proposal or the other way round)."""
 	try:
 		body_b64, mac_b64 = token.split(".", 1)
 		pad = lambda s: s + "=" * (-len(s) % 4)  # noqa: E731
@@ -57,6 +59,8 @@ def verify(token: str) -> dict:
 	if not hmac.compare_digest(hmac.new(_secret(), body, hashlib.sha256).digest(), mac):
 		frappe.throw(_("Invalid offer."), frappe.ValidationError)
 	data = json.loads(body)
+	if (data.get("kind") or "offer") != kind:
+		frappe.throw(_("Invalid offer."), frappe.ValidationError)
 	if data.get("exp") and get_datetime(data["exp"]) < now_datetime():
 		frappe.throw(_("This offer has expired — please search again."), frappe.ValidationError)
 	return data
@@ -369,3 +373,23 @@ def quote_is_usable(row) -> str | None:
 
 def default_sale_window(check_in: date) -> timedelta:
 	return timedelta(days=max(0, (check_in - getdate(now_datetime())).days))
+
+
+INTERNAL_TOTALS = ("cost", "margin", "margin_percent", "cost_contract_currency")
+
+
+def strip_internal(q: dict | None) -> dict | None:
+	"""Remove cost, margin, per-night cost and the rule explanation from a quote dict
+	(for users without price.view_cost and for guests)."""
+	if not q:
+		return q
+	q.pop("explanation", None)
+	q.pop("fx", None)
+	if isinstance(q.get("nights"), list):
+		q["nights"] = [{"date": n.get("date"), "amount": n.get("amount") or n.get("final")} for n in q["nights"]
+		               if isinstance(n, dict)]
+	for k in INTERNAL_TOTALS:
+		(q.get("totals") or {}).pop(k, None)
+	q["promotions"] = [pr for pr in q.get("promotions") or [] if pr.get("applied")]
+	return q
+

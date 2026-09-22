@@ -32,12 +32,13 @@ class MockProvider(PaymentProvider):
 		                fields={"success_sig": mock_signature(self._secret, intent.transaction, "success"),
 		                        "fail_sig": mock_signature(self._secret, intent.transaction, "fail")})
 
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome:
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
 		outcome = params.get("outcome")
 		if outcome not in ("success", "fail"):
-			return Outcome(status="Failed", error_code="BAD_OUTCOME")
+			raise ProviderError("unknown mock outcome")
 		expected = mock_signature(self._secret, transaction, outcome)
-		if not hmac.compare_digest(expected, params.get("sig") or ""):
+		if not hmac.compare_digest(expected, str(params.get("sig") or "")):
 			raise ProviderError("invalid mock signature")
 		if outcome == "fail":
 			return Outcome(status="Failed", provider_ref=f"MOCK-{transaction}", raw_status="DECLINED",
@@ -60,7 +61,8 @@ class BankTransferProvider(PaymentProvider):
 			"reference": intent.transaction, "amount": str(intent.amount), "currency": intent.currency,
 			"note": a.get("transfer_instructions") or ""})
 
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome:
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
 		raise ProviderError("Bank transfers are confirmed by staff, not by a callback.")
 
 
@@ -70,5 +72,6 @@ class PayAtHotelProvider(PaymentProvider):
 	def create_checkout(self, intent: Intent) -> Checkout:
 		return Checkout(kind="none")
 
-	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes) -> Outcome:
+	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
+	                    provider_ref: str | None = None) -> Outcome:
 		raise ProviderError("Pay at hotel has no callback.")

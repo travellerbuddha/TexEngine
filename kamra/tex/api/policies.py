@@ -202,8 +202,9 @@ def fx_rates(provider: str = "TCMB", days: int = 14, base: str | None = None):
 
 @frappe.whitelist(methods=["POST"])
 def fetch_fx(provider: str = "TCMB"):
-	if not (scope.is_platform_admin() or scope.has_capability("fx.edit", None)):
-		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	# FX rates are shared by every hotel: platform administrators only
+	if not scope.is_platform_admin():
+		frappe.throw(_("Only platform administrators manage shared FX rates."), frappe.PermissionError)
 	from kamra.tex.connect import fx_providers
 
 	return fx_providers.fetch(provider)
@@ -211,8 +212,8 @@ def fetch_fx(provider: str = "TCMB"):
 
 @frappe.whitelist(methods=["POST"])
 def add_manual_rate(base_currency: str, quote_currency: str, rate: str, rate_date: str):
-	if not (scope.is_platform_admin() or scope.has_capability("fx.edit", None)):
-		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	if not scope.is_platform_admin():
+		frappe.throw(_("Only platform administrators manage shared FX rates."), frappe.PermissionError)
 	from kamra.tex.money import D_or_none
 
 	value = D_or_none(str(rate))

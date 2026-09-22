@@ -21,7 +21,7 @@ from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, getdate, now_datetime
+from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
@@ -109,9 +109,16 @@ def _resolve(res, snap, req, basis: str, basis_sale_at) -> tuple[str, datetime, 
 	return pick[1], at, f"contract {pick[0].contract_code} on sale at {at}"
 
 
+PROPOSAL_TTL_MINUTES = 30
+
+
 def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURRENT", basis_sale_at=None,
-            _check_permission: bool = True, _locked: bool = False) -> dict:
+            _check_permission: bool = True, _locked: bool = False, internal: bool | None = None) -> dict:
+	"""``internal`` (cost, margin, explanation) defaults to the caller's price.view_cost;
+	guest calls (``_check_permission=False``) never get it unless the service asks."""
 	res = frappe.get_doc("Reservation", reservation)
+	if internal is None:
+		internal = _check_permission and scope.has_capability("price.view_cost", res.property)
 	if _check_permission:
 		scope.require("reservation.modify", res.property)
 		if basis == "HISTORICAL_SALE_DATE":
@@ -144,6 +151,11 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 			warnings.append(v.to_dict())
 
 	new = quote.to_dict(internal=True)
+	old_totals = dict(snap.get("totals") or {})
+	if not internal:
+		quoting.strip_internal(new)
+		for k in quoting.INTERNAL_TOTALS:
+			old_totals.pop(k, None)
 	diff = (quote.total - old_total) if quote.sellable and quote.currency == old_ccy else None
 	proposal = {
 		"reservation": res.name, "modified": str(res.modified), "changes": changes, "basis": basis,
@@ -154,13 +166,14 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		"reservation": res.name,
 		"basis": basis, "basis_detail": how, "pricing_sale_at": str(at),
 		"old": {"total": to_str(old_total), "currency": old_ccy, "request": snap["request"],
-		        "contract": snap.get("contract"), "lines": snap.get("lines"), "totals": snap.get("totals")},
+		        "contract": snap.get("contract"), "lines": snap.get("lines"), "totals": old_totals},
 		"proposed": new,
 		"sellable": quote.sellable and not any(w.get("code") == "SOLD_OUT" for w in warnings),
 		"difference": to_str(diff) if diff is not None else None,
 		"currency_changed": quote.currency != old_ccy,
 		"warnings": warnings,
-		"proposal_token": quoting.sign({**proposal, "exp": None}),
+		"proposal_token": quoting.sign({**proposal, "kind": "proposal",
+		                                "exp": add_to_date(now, minutes=PROPOSAL_TTL_MINUTES).isoformat()}),
 	}
 
 
@@ -168,7 +181,7 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
           _guest_authorized: bool = False) -> dict:
 	"""``_guest_authorized``: set only by the self-service API after verifying the
 	guest's manage token owns the proposal's reservation. Guests can never override."""
-	p = quoting.verify(proposal_token)
+	p = quoting.verify(proposal_token, kind="proposal")
 	res = frappe.get_doc("Reservation", p["reservation"])
 	if _guest_authorized:
 		if override_amount not in (None, ""):
@@ -191,7 +204,7 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 	rt = changes.get("room_type") or req0["room_type"]
 	avail.lock_nights(res.property, [(rt, ci, co)])
 	result = propose(res.name, changes, basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
-	                 _check_permission=False, _locked=True)
+	                 _check_permission=False, _locked=True, internal=True)
 	if not result["sellable"]:
 		frappe.throw(_("The modified stay cannot be sold: {0}").format(
 			"; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")))

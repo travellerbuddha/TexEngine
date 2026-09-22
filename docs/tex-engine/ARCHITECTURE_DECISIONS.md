@@ -179,3 +179,30 @@ transaction's stored `return_url`. Return URLs supplied by the browser are accep
 TEX host or a DNS-verified domain of the booking site (no open redirects). A forged callback
 leaves the transaction unchanged; an unreachable gateway leaves it Pending for staff `reverify`.
 
+## ADR-022 TEX records are written only through TEX services
+**Context.** An adversarial review showed Frappe's generic Desk/REST endpoints
+(`/api/resource`, `frappe.client`, `desk.form.load`) bypassed TEX capability checks,
+revision lifecycles and cost hiding for DocTypes whose role permissions allowed it.
+**Decision.** DocType permissions give business roles no write/create/delete on TEX
+DocTypes: System Manager keeps platform operations, Hotel Admin reads, master data (markets,
+channels, FX rates) stays readable. Every hotel-bound TEX DocType — including those whose
+hotel is known through a parent (revisions, contract versions, loyalty ledger) — plus `Guest`
+has `permission_query_conditions` + `has_permission` (`kamra/tex/security/perm.py`);
+platform-level audit rows are visible to platform admins only. New revisioned rows are always
+Drafts. The TEX API writes with `ignore_permissions` after its own capability + scope check.
+**Consequences.** Desk list views of TEX records are read-only for hotel admins; uploads for
+TEX records go through public files + TEX API. A test asserts the hook list covers every
+scoped DocType.
+
+## ADR-023 Payment callbacks fail closed; secrets and replays are caller-bound
+**Decision.** Providers return the outcome the gateway authenticated for *this* transaction:
+an unverifiable callback raises (transaction unchanged), a non-final gateway answer stays
+Pending; only authenticated failures mark Failed. Gateway return URLs carry an HMAC of the
+transaction id. Staff can re-verify Pending **and** Failed charges. A payment is started
+only through a provider account of the same hotel, and only with a return URL on the TEX host
+or a DNS-verified booking domain. Idempotency keys are namespaced (booking: staff user or
+guest site+session; payments: hotel + purpose), so a replay can never return another
+caller's record. Offer keys and modification proposals are distinct signed token kinds;
+proposals expire after 30 minutes. Cost, margin and rule explanations are stripped from
+proposals and simulations unless the caller holds `price.view_cost`.
+

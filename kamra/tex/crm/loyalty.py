@@ -241,6 +241,11 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	prog = frappe.get_doc("TEX Loyalty Program", program)
 	if prog.currency and prog.currency != b.currency:
 		frappe.throw(_("Points can only be redeemed on {0} bookings.").format(prog.currency))
+	from kamra.tex.payments.service import ns_key
+
+	idempotency_key = ns_key(b.property, idempotency_key, "loyalty")
+	if not idempotency_key:
+		frappe.throw(_("Idempotency key required."))
 	done = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key}, "name")
 	if done:
 		return {"transaction": done, "replay": True}

@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-22 23:00:00.000000",
+ "creation": "2026-09-23 01:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -126,7 +126,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-22 23:00:00.000000",
+ "modified": "2026-09-23 01:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Abandoned Booking",
@@ -147,39 +147,7 @@
   {
    "role": "Hotel Admin",
    "read": 1,
-   "report": 1,
-   "print": 1,
-   "email": 1,
-   "write": 1,
-   "create": 1,
-   "delete": 1,
-   "export": 1,
-   "share": 1
-  },
-  {
-   "role": "Front Desk",
-   "read": 1,
-   "report": 1,
-   "print": 1,
-   "email": 1,
-   "write": 1,
-   "create": 1
-  },
-  {
-   "role": "Call Center Agent",
-   "read": 1,
-   "report": 1,
-   "print": 1,
-   "email": 1,
-   "write": 1,
-   "create": 1
-  },
-  {
-   "role": "Revenue Manager",
-   "read": 1,
-   "report": 1,
-   "print": 1,
-   "email": 1
+   "report": 1
   }
  ],
  "sort_field": "modified",

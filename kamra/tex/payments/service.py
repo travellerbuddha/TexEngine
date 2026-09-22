@@ -9,6 +9,7 @@ provider adapter; completing the same transaction twice is a no-op.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 
 import frappe
@@ -25,6 +26,45 @@ from kamra.tex.security.audit import audit, log_exception
 def _mock_secret() -> str:
 	key = frappe.local.conf.get("encryption_key") or frappe.local.site
 	return hashlib.sha256(("tex-mock-pay:" + str(key)).encode()).hexdigest()
+
+
+def ns_key(property: str, raw: str | None, kind: str) -> str | None:
+	"""Staff-supplied idempotency keys are namespaced per hotel and purpose, so a key
+	reused elsewhere can neither collide nor replay another hotel's record."""
+	raw = (raw or "").strip()[:140]
+	if not raw:
+		return None
+	return hashlib.sha256(f"{kind}|{property}|{raw}".encode()).hexdigest()
+
+
+def callback_signature(transaction: str) -> str:
+	"""Signs the gateway return URL so arbitrary transaction ids cannot be poked."""
+	key = frappe.local.conf.get("encryption_key") or frappe.local.site
+	return hmac.new(("tex-callback:" + str(key)).encode(), transaction.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def allowed_return_hosts(property: str) -> set[str]:
+	from urllib.parse import urlparse
+
+	hosts = {urlparse(get_url()).hostname}
+	group = frappe.db.get_value("Property", property, "tex_hotel_group")
+	sites = frappe.get_all("TEX Booking Site", or_filters={"property": property, "hotel_group": group or "__none__"},
+	                       pluck="name")
+	if sites:
+		hosts |= set(frappe.get_all("TEX Booking Domain", filters={"parent": ("in", sites), "verified": 1},
+		                            pluck="domain"))
+	return hosts
+
+
+def check_return_url(property: str, url: str) -> str:
+	"""Open-redirect guard for every payment flow (ADR-021)."""
+	from urllib.parse import urlparse
+
+	u = urlparse(url or "")
+	if u.scheme not in ("https", "http") or (u.scheme == "http" and not frappe.conf.get("developer_mode")) \
+			or u.hostname not in allowed_return_hosts(property):
+		frappe.throw(_("Invalid return address."), frappe.ValidationError)
+	return url
 
 
 def provider_for(account_name: str):
@@ -89,6 +129,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Nothing to pay."))
+	acc_property = frappe.db.get_value("TEX Payment Provider Account", provider_account, "property")
+	if acc_property != property:
+		# a guest must never route a hotel's payment through another hotel's gateway
+		frappe.throw(_("This payment method is not available."), frappe.PermissionError)
+	check_return_url(property, return_url)
+	idempotency_key = ns_key(property, idempotency_key, "charge")
 	existing = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key},
 	                               ["name", "status"], as_dict=True)
 	if existing and existing.status != "Pending":
@@ -98,7 +144,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
 		booking=booking, payment_link=payment_link, return_url=return_url)
-	callback = get_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}")
+	callback = get_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}&cb={callback_signature(txn.name)}")
 	try:
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
 		                                           description=description, return_url=return_url,
@@ -117,18 +163,29 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	        "instructions": checkout.instructions, "sandbox": provider.sandbox}
 
 
-def complete(transaction: str, *, params: dict, headers: dict | None = None, body: bytes = b"") -> dict:
-	"""Provider callback → verified outcome → transaction final + allocation. Idempotent."""
+def complete(transaction: str, *, params: dict, headers: dict | None = None, body: bytes = b"",
+             allow_failed: bool = False) -> dict:
+	"""Provider callback → verified outcome → transaction final + allocation. Idempotent.
+
+	Only an outcome the gateway authenticated for THIS transaction changes it; an
+	unverifiable or not-yet-final result raises ProviderError / stays Pending, so a
+	forged request can never fail a payment the guest is completing (ADR-021).
+	``allow_failed``: staff re-verification may turn a Failed charge into Succeeded."""
 	frappe.db.sql("SELECT name FROM `tabTEX Payment Transaction` WHERE name=%s FOR UPDATE", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
-	if txn.status != "Pending":
+	if txn.status != "Pending" and not (allow_failed and txn.status == "Failed"):
 		return {"transaction": txn.name, "status": txn.status, "replay": True}
 	provider = provider_for(txn.provider_account)
-	outcome = provider.handle_callback(txn.name, params, headers or {}, body)
+	outcome = provider.handle_callback(txn.name, params, headers or {}, body, provider_ref=txn.provider_ref)
+	if outcome.status == "Pending":
+		return {"transaction": txn.name, "status": txn.status, "pending": True}
+	if allow_failed and txn.status == "Failed" and outcome.status != "Succeeded":
+		return {"transaction": txn.name, "status": txn.status}
 	if outcome.amount and quantize(outcome.amount, txn.currency) != from_db(txn.amount, txn.currency):
 		outcome = Outcome(status="Failed", provider_ref=outcome.provider_ref, raw_status=outcome.raw_status,
 		                  error_code="AMOUNT_MISMATCH", error_message="provider amount differs")
 	txn.status = outcome.status if outcome.status in ("Succeeded", "Failed", "Cancelled") else "Pending"
+	txn.flags.tex_system_update = True
 	txn.provider_ref = outcome.provider_ref or txn.provider_ref
 	txn.raw_status = outcome.raw_status
 	txn.error_code = outcome.error_code
@@ -245,6 +302,9 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 		frappe.throw(_("A refund reason is required."))
 	if booking and frappe.db.get_value("TEX Booking", booking, "property") != txn.property:
 		frappe.throw(_("The booking belongs to another hotel."))
+	idempotency_key = ns_key(txn.property, idempotency_key, "refund")
+	if not idempotency_key:
+		frappe.throw(_("Idempotency key required."))
 	done = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key}, "name")
 	if done:
 		return {"refund": done, "replay": True}
@@ -307,6 +367,9 @@ def record_manual(*, booking: str, amount, method: str, reference: str, reason: 
 	scope.require("payment.refund", b.property)
 	if not (reference or "").strip():
 		frappe.throw(_("A payment reference is required."))
+	idempotency_key = ns_key(b.property, idempotency_key, "manual")
+	if not idempotency_key:
+		frappe.throw(_("Idempotency key required."))
 	done = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key}, "name")
 	if done:
 		return {"transaction": done, "replay": True}
@@ -346,10 +409,14 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Amount must be positive."))
+	idempotency_key = ns_key(property, idempotency_key, "link")
 	if idempotency_key:
 		existing = frappe.db.get_value("TEX Payment Link", {"idempotency_key": idempotency_key}, "name")
 		if existing:
 			return {"link": existing, "replay": True}
+	if provider_account and frappe.db.get_value("TEX Payment Provider Account", provider_account,
+	                                            "property") != property:
+		frappe.throw(_("That payment account belongs to another hotel."))
 	token = secrets.token_urlsafe(24)
 	doc = frappe.get_doc({
 		"doctype": "TEX Payment Link", "property": property, "status": "Active", "amount": amount,

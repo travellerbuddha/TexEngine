@@ -295,7 +295,7 @@ def new_draft(contract: str, based_on: str | None = None) -> str:
 		doc = frappe.new_doc("TEX Contract Version")
 		doc.contract = contract
 	doc.status = "Draft"
-	doc.insert()
+	doc.insert(ignore_permissions=True)
 	audit("contract.version.draft", reference_doctype="TEX Contract Version", reference_name=doc.name,
 	      property=prop, new={"based_on": based_on})
 	return doc.name

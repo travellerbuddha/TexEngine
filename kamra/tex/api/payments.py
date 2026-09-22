@@ -39,12 +39,18 @@ def _forward(url: str | None, **params) -> None:
 @rate_limit(limit=60, seconds=60)
 def callback(txn: str | None = None, **_ignored):
 	"""Gateway return / notification. Idempotent: a replay returns the stored result."""
+	import hmac
+
 	name = text(txn or frappe.form_dict.get("txn"), 40)
+	cb = str(frappe.form_dict.get("cb") or "")
+	# the return URL we gave the gateway is signed: unknown or unsigned ids go nowhere
+	if not name or not hmac.compare_digest(pay.callback_signature(name), cb):
+		frappe.throw(_("Unknown payment."), frappe.DoesNotExistError)
 	row = frappe.db.get_value("TEX Payment Transaction", name, ["name", "provider", "return_url", "booking"],
-	                          as_dict=True) if name else None
+	                          as_dict=True)
 	if not row or row.provider not in GATEWAYS:
 		frappe.throw(_("Unknown payment."), frappe.DoesNotExistError)
-	params = {k: v for k, v in frappe.form_dict.items() if k not in ("cmd", "txn")}
+	params = {k: v for k, v in frappe.form_dict.items() if k not in ("cmd", "txn", "cb")}
 	req = getattr(frappe.local, "request", None)
 	headers = {k: v for k, v in req.headers.items()} if req is not None else {}
 	body = req.get_data(cache=True) if req is not None else b""
@@ -122,30 +128,34 @@ def transaction(name: str):
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.view", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def reverify(transaction: str):
-	"""Ask the gateway again for a Pending charge (iyzico / Sipay support a status query)."""
+	"""Ask the gateway again for a Pending or Failed charge (iyzico / Sipay support a
+	status query): a charge the gateway did capture is recovered, never lost."""
 	row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref", "status"],
 	                          as_dict=True)
-	if row.status != "Pending" or row.provider not in ("iyzico", "Sipay"):
-		frappe.throw(_("Only pending iyzico or Sipay payments can be re-verified."))
-	params = {"token": row.provider_ref} if row.provider == "iyzico" else {}
+	if row.status not in ("Pending", "Failed") or row.provider not in ("iyzico", "Sipay"):
+		frappe.throw(_("Only pending or failed iyzico / Sipay payments can be re-verified."))
+	params = {"token": (row.provider_ref or "").split("|")[0]} if row.provider == "iyzico" else {}
 	try:
-		return pay.complete(transaction, params=params)
+		return pay.complete(transaction, params=params, allow_failed=True)
 	except ProviderError as e:
 		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(e)[:200]))
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def refund(transaction: str, amount, reason: str, idempotency_key: str, booking: str | None = None):
 	return pay.refund(transaction, amount=amount, reason=text(reason, 500) or "", booking=booking,
 	                  idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")))
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def allocate(transaction: str, booking: str, amount, reason: str):
 	return {"allocation": pay.allocate(transaction, booking=booking, amount=amount, reason=text(reason, 300) or "")}
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def transfer(transaction: str, from_booking: str, to_booking: str, amount, reason: str):
 	if not text(reason, 300):
 		frappe.throw(_("A reason is required."))
@@ -154,6 +164,7 @@ def transfer(transaction: str, from_booking: str, to_booking: str, amount, reaso
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def mark_transfer_received(transaction: str, reference: str):
 	if not text(reference, 140):
 		frappe.throw(_("The bank reference is required."))
@@ -161,6 +172,7 @@ def mark_transfer_received(transaction: str, reference: str):
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("booking", "TEX Booking"))
 def record_manual(booking: str, amount, method: str, reference: str, idempotency_key: str,
                   reason: str | None = None):
 	return pay.record_manual(booking=booking, amount=amount, method=text(method, 40) or "Other",
@@ -178,6 +190,7 @@ def methods(property: str, market: str | None = None, currency: str | None = Non
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.link")
 def create_link(property: str, amount, currency: str, description: str, expires_hours=72,
                 provider_account: str | None = None, booking: str | None = None, reservation: str | None = None,
                 guest_name: str | None = None, guest_email: str | None = None, idempotency_key: str | None = None,
@@ -194,6 +207,7 @@ def create_link(property: str, amount, currency: str, description: str, expires_
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.link", property_arg=None, doc_arg=("name", "TEX Payment Link"))
 def reissue_link(name: str, send_email=0, language: str | None = None):
 	return pay.reissue_link(name, send_email=bool(as_int(send_email, 0)), language=text(language, 5) or "en")
 
@@ -219,6 +233,7 @@ def links(property: str, status: str | None = None, booking: str | None = None, 
 
 
 @frappe.whitelist(methods=["POST"])
+@require_capability("payment.link", property_arg=None, doc_arg=("name", "TEX Payment Link"))
 def cancel_link(name: str, reason: str):
 	if not text(reason, 300):
 		frappe.throw(_("A reason is required."))

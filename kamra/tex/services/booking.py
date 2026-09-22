@@ -34,6 +34,21 @@ CREATED_VIA = {"DIRECT_WEB": "Booking Engine", "META": "Booking Engine", "CALL_C
 # ─── helpers ─────────────────────────────────────────────────────────────
 
 
+def scoped_idempotency_key(raw: str | None, *, staff: bool, booking_site: str | None,
+                           session_id: str | None) -> str | None:
+	"""Idempotency keys are namespaced by who retries: a staff user, or a guest's
+	booking-site session. A replay can therefore only ever return the caller's own
+	booking — never a stranger's that happens to share the key."""
+	raw = (raw or "").strip()[:140]
+	if not raw:
+		return None
+	if staff:
+		ns = f"user:{frappe.session.user}"
+	else:
+		ns = f"site:{booking_site or ''}:{hashlib.sha256((session_id or 'anon').encode()).hexdigest()[:24]}"
+	return hashlib.sha256(f"{ns}|{raw}".encode()).hexdigest()
+
+
 def token_hash(token: str) -> str:
 	return hashlib.sha256(("tex-manage:" + token).encode()).hexdigest()
 
@@ -161,11 +176,14 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
                    idempotency_key: str | None = None, notes: str | None = None, language: str | None = None,
                    booking_site: str | None = None, confirm_without_payment: bool = False,
                    session_id: str | None = None, source_tag: str | None = None) -> dict:
-	key = (idempotency_key or "").strip()[:140] or None
+	staff = frappe.session.user != "Guest"
+	key = scoped_idempotency_key(idempotency_key, staff=staff, booking_site=booking_site, session_id=session_id)
 	if key:
-		done = frappe.db.get_value("TEX Booking", {"idempotency_key": key}, "name")
+		done = frappe.db.get_value("TEX Booking", {"idempotency_key": key}, ["name", "property"], as_dict=True)
 		if done:
-			return booking_summary(done, replay=True)
+			if staff:
+				scope.require("reservation.view", done.property)
+			return booking_summary(done.name, replay=True)
 	if not quote_ids:
 		frappe.throw(_("Select at least one room."))
 	if len(quote_ids) > quoting.MAX_ROOMS:
@@ -191,7 +209,6 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		frappe.throw(_("All rooms must share currency, market and channel."))
 	currency, market, channel = currencies.pop(), markets.pop(), channels.pop()
 
-	staff = frappe.session.user != "Guest"
 	if staff:
 		scope.require("reservation.create", property)
 	elif channel not in ("DIRECT_WEB", "META"):
@@ -375,7 +392,9 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 
 
 def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict:
-	"""Record money received against a booking (called by the payments service)."""
+	"""Record money received against a booking (called by the payments service).
+	The booking row is locked so concurrent allocations never lose an update."""
+	frappe.db.sql("SELECT name FROM `tabTEX Booking` WHERE name=%s FOR UPDATE", booking)
 	b = frappe.get_doc("TEX Booking", booking)
 	amount = D(amount)
 	paid = from_db(b.paid_amount, b.currency) + amount

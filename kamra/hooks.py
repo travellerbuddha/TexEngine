@@ -213,14 +213,18 @@ after_install = "kamra.install.after_install"
 # 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
 # }
 
-# TEX tenancy (ADR-011): hotel-bound DocTypes are filtered to the user's scope, so
-# under strict tenancy an unscoped user sees no hotel data anywhere in Desk either.
-# Keep in sync with kamra.tex.security.perm.PROPERTY_DOCTYPES (a test checks it).
+# TEX tenancy (ADR-011/022): every hotel-bound DocType — including those whose hotel
+# is known through a parent, and guests — is filtered to the user's scope in Desk and
+# REST. Keep in sync with kamra.tex.security.perm.SCOPED_DOCTYPES (a test checks it).
 _TEX_SCOPED = (
 	"Reservation", "Folio", "Room", "Room Type", "Rate Plan", "Group Booking", "TEX Booking", "TEX Contract",
 	"TEX Payment Transaction", "TEX Payment Link", "TEX Payment Allocation", "TEX Quote", "TEX Allotment",
 	"TEX ARI Restriction", "TEX Extra", "TEX Abandoned Booking", "TEX Integration Connection",
 	"TEX Integration Outbox", "TEX Payment Provider Account", "TEX Payment Method Rule",
+	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
+	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
+	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Reservation Revision",
+	"TEX Contract Version", "TEX Loyalty Ledger", "Guest",
 )
 permission_query_conditions = {dt: "kamra.tex.security.perm.query_conditions" for dt in _TEX_SCOPED}
 permission_query_conditions["Property"] = "kamra.tex.security.perm.property_query_conditions"
@@ -260,6 +264,8 @@ doc_events["Property"] = {
 	"validate": "kamra.tex.hooks.property_validate",
 	"on_update": "kamra.tex.hooks.property_on_update",
 }
+# a guest created by a single-tenant user belongs to that enterprise (tenancy)
+doc_events.setdefault("Guest", {})["before_insert"] = "kamra.tex.security.perm.stamp_guest_enterprise"
 
 # Scheduled Tasks
 # ---------------

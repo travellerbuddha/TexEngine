@@ -14,7 +14,7 @@ import json
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import getdate, now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
@@ -207,8 +207,10 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 	guest_clean.update({k: bool(g.get(k)) for k in ("consent_email", "consent_sms", "consent_whatsapp")})
 	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=bool(g.get("consent_email")))
 	method = payment_method or "Card"
+	# a retry key only counts within the visitor's own session (no cross-visitor replay)
 	result = booking_svc.create_booking(quote_ids=ids, guest=guest_clean, payment_method=method,
-	                                    idempotency_key=text(idempotency_key, 140), language=text(language, 10),
+	                                    idempotency_key=text(idempotency_key, 140) if session_id else None,
+	                                    language=text(language, 10),
 	                                    booking_site=s.name, session_id=session_id)
 	due = D(result["due_now"])
 	result["payment"] = None
@@ -320,11 +322,17 @@ def pay_link(token: str, provider_account: str | None = None):
 	if link.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("This payment link is {0}.").format(link.status.lower()))
 	due = from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency)
-	account = provider_account or link.provider_account
 	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
 	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
-	if not account or (not link.provider_account and account not in methods):
-		frappe.throw(_("No card payment is configured for this link."))
+	if link.provider_account:
+		# the hotel fixed the gateway for this link; the guest cannot choose another
+		if provider_account and provider_account != link.provider_account:
+			frappe.throw(_("This payment method is not available."))
+		account = link.provider_account
+	else:
+		account = provider_account or (sorted(methods)[0] if len(methods) == 1 else None)
+		if not account or account not in methods:
+			frappe.throw(_("No card payment is configured for this link."))
 	return pay.start_payment(property=link.property, amount=due, currency=link.currency, provider_account=account,
 	                         payment_link=link.name, booking=None, description=link.description or link.name,
 	                         customer={"name": link.guest_name, "email": link.guest_email,
@@ -370,7 +378,7 @@ def _booking_by_token(token: str):
 	if not name:
 		frappe.throw(_("Invalid link."), frappe.PermissionError)
 	b = frappe.get_doc("TEX Booking", name)
-	if b.manage_token_expires and getdate(b.manage_token_expires) < getdate(now_datetime()):
+	if b.manage_token_expires and get_datetime(b.manage_token_expires) < now_datetime():
 		frappe.throw(_("This link has expired."), frappe.PermissionError)
 	return b
 
@@ -441,7 +449,7 @@ def manage_apply(token: str, proposal_token: str, note: str | None = None):
 	price → per hotel policy: staff approval (default, NOT applied until staff act),
 	credit, or automatic refund. Every guest change is flagged for staff attention."""
 	b = _booking_by_token(token)
-	p = quoting.verify(proposal_token)
+	p = quoting.verify(proposal_token, kind="proposal")
 	_own_reservation(b, p["reservation"])
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to change your booking."))
