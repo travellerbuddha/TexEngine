@@ -26,12 +26,13 @@ type Provider = "TCMB" | "ECB" | "MANUAL"
 export default function FxRates() {
   const { t } = useTexT()
   const toast = useToast()
-  const { boot, canAnywhere } = useSession()
+  const { boot } = useSession()
   const [provider, setProvider] = useState<Provider>("TCMB")
   const [days, setDays] = useState("14")
   const [base, setBase] = useState("")
   const q = useTexQuery<FxRate[]>("policies", "fx_rates", { provider, days: Number(days), base: base || undefined }, [provider, days, base])
-  const canEdit = boot.user.platform_admin || canAnywhere("fx.edit")
+  // provider/manual rates are shared by every hotel: platform administrators only
+  const canEdit = boot.user.platform_admin
   const [fetching, setFetching] = useState<string | null>(null)
   const [fetchErr, setFetchErr] = useState<TexApiError>()
   const [fetchResult, setFetchResult] = useState<string>()
@@ -95,7 +96,7 @@ export default function FxRates() {
                 { value: "MANUAL", label: t("rates.fx_provider.MANUAL") },
               ]}
             />
-            <Field label={t("rates.fx.days")} className="w-32">
+            <Field label={t("rates.fx.days")} className="w-40">
               <Select value={days} onChange={(e) => setDays(e.target.value)} options={["7", "14", "30", "90"].map((d) => ({ value: d, label: t("rates.fx.last_days", { count: Number(d) }) }))} />
             </Field>
             <Field label={t("rates.fx.base")} className="w-32">
@@ -125,7 +126,9 @@ export default function FxRates() {
             )}
           </Card>
         </div>
-        {canEdit ? <ManualRate onSaved={() => (provider === "MANUAL" ? q.reload() : setProvider("MANUAL"))} /> : <Notice tone="info">{t("rates.fx.read_only")}</Notice>}
+        <div className="self-start">
+          {canEdit ? <ManualRate onSaved={() => (provider === "MANUAL" ? q.reload() : setProvider("MANUAL"))} /> : <Notice tone="info">{t("rates.fx.read_only")}</Notice>}
+        </div>
       </div>
     </>
   )

@@ -43,6 +43,15 @@ export default function VersionEditor() {
   const [publishing, setPublishing] = useState(false)
   const [drafting, setDrafting] = useState(false)
 
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.slice(1) as TabId
+      if (TABS.includes(h)) setTab(h)
+    }
+    window.addEventListener("hashchange", onHash)
+    return () => window.removeEventListener("hashchange", onHash)
+  }, [])
+
   const load = useCallback((d: VersionDoc) => {
     const s = stateFromDoc(d)
     setDoc(d)

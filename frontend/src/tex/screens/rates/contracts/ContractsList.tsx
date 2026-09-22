@@ -94,7 +94,12 @@ export default function ContractsList() {
                 sortValue: (r) => r.contract_code,
                 cell: (r) => (
                   <div className="min-w-0">
-                    <p className="font-medium text-zinc-900">{r.contract_code}</p>
+                    <p className="font-medium text-zinc-900">
+                      {r.contract_code}
+                      <span className="ml-1.5 sm:hidden">
+                        <Badge tone="brand">{r.market}</Badge>
+                      </span>
+                    </p>
                     <p className="max-w-64 truncate text-xs text-zinc-500">{r.contract_name}</p>
                   </div>
                 ),
@@ -102,6 +107,7 @@ export default function ContractsList() {
               {
                 key: "market",
                 header: t("rates.f.market"),
+                hideBelow: "sm",
                 sortValue: (r) => r.market,
                 cell: (r) => (
                   <span title={marketName(r.market)}>

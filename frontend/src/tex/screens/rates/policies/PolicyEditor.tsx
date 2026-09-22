@@ -297,8 +297,8 @@ export default function PolicyEditor() {
       {header}
       {doc && kind.revisioned && !isNew && status !== "Draft" && (
         <div className="mb-4">
-          <Notice tone="info" title={t("rates.policy.live_title")}>
-            {status === "Archived" ? t("rates.policy.archived_body") : t("rates.policy.live_body")}
+          <Notice tone="info" title={t(status === "Archived" ? "rates.policy.archived_title" : status === "Superseded" ? "rates.policy.superseded_title" : "rates.policy.live_title")}>
+            {t(status === "Archived" ? "rates.policy.archived_body" : status === "Superseded" ? "rates.policy.superseded_body" : "rates.policy.live_body")}
           </Notice>
         </div>
       )}
