@@ -27,3 +27,6 @@ docs-site/.vitepress/cache/
 
 graphify-out/
 dump.rdb
+
+# agent worktrees (local only)
+.claude/worktrees/
