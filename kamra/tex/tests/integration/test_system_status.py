@@ -19,7 +19,7 @@ from frappe.utils import add_days, add_to_date, now_datetime, nowdate
 
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
-from kamra.tex.tests.integration.test_commercial_flows import guest_books, setup_site_and_payments
+from kamra.tex.tests.integration.test_commercial_flows import SLUG, guest_books, setup_site_and_payments
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 from kamra.tex.tests.integration.test_crm_segments import OTHER, agent, other_tenant
 from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
@@ -270,6 +270,25 @@ class TestMailDeliveryStatus(TexTestCase):
 		mail = check(system_api().status(property=fx.PROPERTY), "mail.delivery")
 		self.assertIn(mail["status"], ("warn", "fail"))
 		self.assertGreaterEqual(mail["count"], 1)
+
+	def test_guest_mail_is_sent_in_the_hotels_name_from_the_sites_account(self):
+		import email as email_lib
+		from email.utils import parseaddr
+
+		account = frappe.db.get_value("Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "email_id")
+		frappe.db.set_value("Property", fx.PROPERTY, "email", "reservations@tex-test-resort.example")
+		_b, _comm, queue = self.booked_mail("mail-sender")
+		q = frappe.get_doc("Email Queue", queue)
+		name, address = parseaddr(q.sender)
+		self.assertEqual((name, address), (fx.PROPERTY, account))            # the hotel's name, our own address
+		msg = email_lib.message_from_string(q.message)
+		self.assertEqual(parseaddr(msg["From"])[1], account)                # never the hotel's domain
+		self.assertEqual(parseaddr(msg["Reply-To"])[1], "reservations@tex-test-resort.example")
+		frappe.db.set_value("Property", fx.PROPERTY, "email", "not an address")
+		frappe.db.set_value("TEX Booking Site", {"site_slug": SLUG}, "contact_email", None)
+		_b, _comm, queue = self.booked_mail("mail-no-reply-to")
+		msg = email_lib.message_from_string(frappe.db.get_value("Email Queue", queue, "message"))
+		self.assertEqual(parseaddr(msg["Reply-To"])[1], account)           # Frappe's default: the sender
 
 	def test_resend_reports_queued_never_sent(self):
 		from kamra.tex.api import crs

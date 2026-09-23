@@ -9,12 +9,19 @@ Sending is best-effort: a mail problem never fails the booking or the payment.
 communication keeps the queue entry (``email_queue``) and ``services.mail_status`` moves it
 to Sent or Failed when the queue does (ADR-047). A message the queue refused (no outgoing
 account) is recorded as Failed with the reason, so staff see the attempt.
+
+A guest mail is sent in the hotel's name: the From display name is the hotel, the From
+address is always the site's own default outgoing account (never an address of the hotel's
+domain, which would be spoofing through this mail server), and Reply-To is the hotel's
+e-mail (else its booking site's contact e-mail) when that is a valid address.
 """
 
 from __future__ import annotations
 
+from email.utils import formataddr
+
 import frappe
-from frappe.utils import escape_html
+from frappe.utils import escape_html, validate_email_address
 
 from kamra.tex.lib_text import render
 from kamra.tex.money import from_db, to_str
@@ -49,22 +56,41 @@ def _log(guest: str | None, property: str, subject: str, template: str, *, booki
 		"delivery_error": None if email_queue else (error or "NotQueued")[:140]}).insert(ignore_permissions=True).name
 
 
-def _send(to: str, subject: str, html: str, *, reference: tuple[str, str]) -> str | None:
+def hotel_sender(property: str, booking_site: str | None = None) -> tuple[str | None, str | None]:
+	"""(From, Reply-To) of a hotel's guest mail. From: the hotel's name with the default
+	outgoing account's own address (None without an account: Frappe then reports the missing
+	account). Reply-To: the hotel's e-mail, else its booking site's contact e-mail, if valid."""
+	from kamra.tex.services import sites
+
+	account = frappe.db.get_value("Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "email_id")
+	hotel = frappe.db.get_value("Property", property, ["property_name", "email"], as_dict=True) or {}
+	name = " ".join(str(hotel.get("property_name") or property or "").split())[:80]
+	sender = formataddr((name, account)) if account and name else None
+	site = sites.site_for(property, booking_site)
+	candidates = [hotel.get("email"), frappe.db.get_value("TEX Booking Site", site, "contact_email") if site else None]
+	reply_to = next((e.strip() for e in candidates if e and validate_email_address(e.strip())), None)
+	return sender, reply_to
+
+
+def _send(to: str, subject: str, html: str, *, reference: tuple[str, str], property: str | None = None,
+          booking_site: str | None = None) -> str | None:
 	"""Queue the mail; the Email Queue name, or None when the queue took nothing (e.g. every
 	recipient unsubscribed)."""
+	sender, reply_to = hotel_sender(property, booking_site) if property else (None, None)
 	q = frappe.sendmail(recipients=[to], subject=subject, message=html, reference_doctype=reference[0],
-	                    reference_name=reference[1], delayed=True)
+	                    reference_name=reference[1], delayed=True, sender=sender, reply_to=reply_to)
 	return getattr(q, "name", None) or None
 
 
 def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], guest: str | None, property: str,
-             template: str, booking: str | None, log_title: str) -> dict:
+             template: str, booking: str | None, log_title: str, booking_site: str | None = None) -> dict:
 	"""Queue one guest e-mail and record what happened. Never raises for a mail problem:
 	{"queued": bool, "status": "Queued" | "Failed", "communication": name | None}."""
 	messages = getattr(frappe.local, "message_log", None)
 	seen = len(messages) if isinstance(messages, list) else 0
 	try:
-		queue, error = _send(to, subject, html, reference=reference), None
+		queue, error = _send(to, subject, html, reference=reference, property=property,
+		                     booking_site=booking_site), None
 	except Exception as e:
 		log_exception(log_title)
 		if isinstance(messages, list):
@@ -101,7 +127,8 @@ def booking_mail(booking: str, manage_token: str) -> dict:
 		log_exception(f"TEX booking e-mail {booking}")
 		return {"queued": False, "status": "Failed", "communication": None}
 	return _deliver(b.booker_email, subject, body, reference=("TEX Booking", b.name), guest=b.booker_guest,
-	                property=b.property, template=key, booking=b.name, log_title=f"TEX booking e-mail {booking}")
+	                property=b.property, template=key, booking=b.name, log_title=f"TEX booking e-mail {booking}",
+	                booking_site=b.booking_site)
 
 
 def booking_confirmed(booking: str) -> None:
@@ -121,7 +148,7 @@ def booking_confirmed(booking: str) -> None:
 		return
 	_deliver(b.booker_email, subject, body, reference=("TEX Booking", b.name), guest=b.booker_guest,
 	         property=b.property, template="payment_received", booking=b.name,
-	         log_title=f"TEX confirmation e-mail {booking}")
+	         log_title=f"TEX confirmation e-mail {booking}", booking_site=b.booking_site)
 
 
 def payment_link(link_name: str, url: str, lang: str = "en") -> bool:
