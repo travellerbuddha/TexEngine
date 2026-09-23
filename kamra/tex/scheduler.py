@@ -17,23 +17,30 @@ def _run(path: str) -> None:
 		log_exception(f"TEX job {path}")
 
 
+# Channel distribution (G-69): inbound bookings first, then ARI pushes.
+EVERY_MINUTE = ("kamra.tex.distribution.repository.process_inbound",
+                "kamra.tex.distribution.repository.deliver_ari")
+# e-mail delivery status follows Frappe's e-mail queue (ADR-047)
+EVERY_5_MINUTES = ("kamra.tex.connect.outbox.deliver_pending",
+                   "kamra.tex.services.booking.expire_pending_bookings",
+                   "kamra.tex.payments.service.expire_links",
+                   "kamra.tex.services.mail_status.sync")
+EVERY_15_MINUTES = ("kamra.tex.commercial.contracts.roll_version_statuses",
+                    "kamra.tex.crm.service.detect_abandoned")
+
+
 def every_minute() -> None:
-	"""Channel distribution (G-69): inbound bookings first, then ARI pushes."""
-	for job in ("kamra.tex.distribution.repository.process_inbound",
-	            "kamra.tex.distribution.repository.deliver_ari"):
+	for job in EVERY_MINUTE:
 		_run(job)
 
 
 def every_5_minutes() -> None:
-	for job in ("kamra.tex.connect.outbox.deliver_pending",
-	            "kamra.tex.services.booking.expire_pending_bookings",
-	            "kamra.tex.payments.service.expire_links"):
+	for job in EVERY_5_MINUTES:
 		_run(job)
 
 
 def every_15_minutes() -> None:
-	for job in ("kamra.tex.commercial.contracts.roll_version_statuses",
-	            "kamra.tex.crm.service.detect_abandoned"):
+	for job in EVERY_15_MINUTES:
 		_run(job)
 
 

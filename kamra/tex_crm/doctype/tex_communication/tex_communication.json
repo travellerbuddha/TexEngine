@@ -17,6 +17,8 @@
   "template",
   "sent_at",
   "actor",
+  "email_queue",
+  "delivery_error",
   "section_100",
   "subject",
   "body"
@@ -96,6 +98,19 @@
    "fieldtype": "Link",
    "label": "Actor",
    "options": "User"
+  },
+  {
+   "fieldname": "email_queue",
+   "fieldtype": "Data",
+   "label": "E-mail queue entry",
+   "read_only": 1,
+   "description": "The Email Queue row of this message; its status is synced every 5 minutes (ADR-047)."
+  },
+  {
+   "fieldname": "delivery_error",
+   "fieldtype": "Data",
+   "label": "Delivery error",
+   "read_only": 1
   },
   {
    "fieldname": "section_100",

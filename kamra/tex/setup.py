@@ -169,6 +169,8 @@ def ensure_indexes() -> None:
 		("TEX Channel Inbound", ["status", "next_attempt_at"], "tex_inbound_due"),
 		("TEX Integration Outbox", ["kind", "status", "next_attempt_at"], "tex_outbox_due"),
 		("TEX Booking", ["channel_connection", "external_ref"], "tex_booking_channel_ref"),
+		("TEX Communication", ["status", "creation"], "tex_comm_status_created"),          # ADR-047
+		("TEX Communication", ["email_queue"], "tex_comm_email_queue"),
 	):
 		try:
 			frappe.db.add_index(dt, fields, name)
