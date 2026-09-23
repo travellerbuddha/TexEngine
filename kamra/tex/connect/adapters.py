@@ -24,6 +24,7 @@ class Adapter:
 	key = "base"
 	label = "Base adapter"
 	certified = False                     # may run in Production (see the connection's validation)
+	requires_secret = False               # signs what it sends with the connection's secret
 
 	def __init__(self, connection):
 		self.connection = connection
@@ -59,6 +60,7 @@ class WebhookPMS(Adapter):
 	key = "webhook"
 	label = "Generic PMS webhook (signed JSON)"
 	certified = True                      # the hotel's own endpoint: no third-party certification involved
+	requires_secret = True
 
 	def test(self) -> dict:
 		self._post("ping", {"ping": True}, "ping")
@@ -70,11 +72,15 @@ class WebhookPMS(Adapter):
 
 		url = self.connection.endpoint_url
 		if not url or not url.startswith("https://"):
-			raise ValueError("webhook PMS needs an https endpoint")
-		body = json.dumps({"event": event, "data": payload}, sort_keys=True, default=str).encode()
+			raise AdapterRefused("webhook PMS needs an https endpoint: nothing was sent")
+		# fail closed (G-83): never an unsigned or empty-key delivery, in any environment. The
+		# refusal is final (no retry can help) and on record without the secret; once a secret
+		# is set, the Connect screen retries the event
 		secret = self.connection.get_password("secret", raise_exception=False) or ""
 		if not secret:
-			raise ValueError("webhook PMS needs a signing secret")      # never sign with an empty key
+			raise AdapterRefused("webhook PMS has no signing secret: nothing was sent. Set the connection's "
+			                     "secret, then retry the delivery.")
+		body = json.dumps({"event": event, "data": payload}, sort_keys=True, default=str).encode()
 		sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 		r = requests.post(url, data=body, timeout=15, headers={
 			"Content-Type": "application/json", "X-TEX-Signature": f"sha256={sig}",

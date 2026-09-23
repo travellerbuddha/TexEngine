@@ -8,6 +8,8 @@
 - a payment provider's API key is a write-only encrypted secret.
 """
 
+import hashlib
+import hmac
 import io
 import json
 import os
@@ -15,6 +17,7 @@ from unittest import mock
 
 import frappe
 from frappe.utils import add_to_date, now_datetime
+from frappe.utils.password import remove_encrypted_password
 from werkzeug.test import EnvironBuilder
 from werkzeug.wrappers import Request
 
@@ -238,3 +241,45 @@ class TestSecurityHygieneG83(TexTestCase):
 		# an existing link keeps working: the page reads its token and posts it
 		self.as_user("Guest")
 		self.assertEqual(public.payment_link(token=again["token"])["status"], "Active")
+
+	# ── 5. PMS webhook signing ────────────────────────────────────────────
+
+	def test_g83_a_pms_webhook_is_never_sent_unsigned(self):
+		from kamra.tex.connect import outbox
+		from kamra.tex.distribution import repository as dist
+
+		self.as_user("Administrator")
+		base = {"doctype": "TEX Integration Connection", "label": "PMS hook", "property": fx.PROPERTY,
+		        "category": "PMS", "adapter": "webhook", "environment": "Production", "enabled": 1,
+		        "endpoint_url": "https://pms.example.com/tex"}
+		for env in ("Production", "Sandbox"):
+			with self.assertRaises(frappe.ValidationError, msg=env):          # no signing secret: refused on save
+				frappe.get_doc({**base, "environment": env}).insert(ignore_permissions=True)
+		frappe.get_doc({**base, "enabled": 0, "label": "draft"}).insert(ignore_permissions=True)   # a draft may wait
+		secret = "g83-signing-secret-0123456789"
+		conn = frappe.get_doc({**base, "secret": secret}).insert(ignore_permissions=True)
+		guest_books(session="g83-pms")
+		self.as_user("Administrator")
+		queued = frappe.get_all("TEX Integration Outbox", filters={"connection": conn.name}, pluck="name")
+		self.assertEqual(len(queued), 1)
+		with mock.patch("kamra.tex.connect.adapters.requests.post") as post:
+			dist._each(dist.claim("Reservation", 50, connection=conn.name), outbox._deliver, outbox._failed)
+		sent = post.call_args.kwargs
+		self.assertEqual(sent["headers"]["X-TEX-Signature"],
+		                 "sha256=" + hmac.new(secret.encode(), sent["data"], hashlib.sha256).hexdigest())
+		# the secret removed behind the controller's back: nothing leaves, the event is dead at once
+		remove_encrypted_password("TEX Integration Connection", conn.name, "secret")
+		frappe.db.set_value("TEX Integration Connection", conn.name, "secret", "")
+		frappe.db.set_value("TEX Integration Outbox", queued[0], {"status": "Pending", "attempts": 0,
+		                                                         "next_attempt_at": now_datetime()})
+		with mock.patch("kamra.tex.connect.adapters.requests.post") as post:
+			dist._each(dist.claim("Reservation", 50, connection=conn.name), outbox._deliver, outbox._failed)
+		post.assert_not_called()
+		row = frappe.db.get_value("TEX Integration Outbox", queued[0], ["status", "attempts", "last_error"],
+		                          as_dict=True)
+		self.assertEqual((row.status, row.attempts), ("Dead", 1), row)
+		self.assertIn("signing secret", row.last_error)
+		refused = frappe.get_all("TEX Audit Event", filters={"action": "connect.delivery_refused",
+		                                                     "reference_name": queued[0]}, pluck="new_value")
+		self.assertEqual(len(refused), 1)
+		self.assertNotIn(secret, refused[0])

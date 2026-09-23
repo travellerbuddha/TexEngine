@@ -91,6 +91,14 @@ def _failed(name: str, e: Exception) -> None:
 		"next_attempt_at": add_to_date(now_datetime(), minutes=min(2 ** attempts, 720))}, update_modified=False)
 	frappe.db.set_value("TEX Integration Connection", item.connection, {
 		"last_sync_at": now_datetime(), "last_status": status, "last_error": err}, update_modified=False)
+	if not getattr(e, "retryable", True):
+		from kamra.tex.security.audit import audit
+
+		# a refused delivery (no signing secret, uncertified in Production …) is on the audit
+		# trail, with the reason only: never the payload or a secret (G-83)
+		audit("connect.delivery_refused", reference_doctype="TEX Integration Outbox", reference_name=name,
+		      property=frappe.db.get_value("TEX Integration Outbox", name, "property"),
+		      new={"connection": item.connection, "status": status}, reason=err, source="System")
 
 
 def deliver_pending(limit: int = 50) -> dict:
