@@ -1,21 +1,22 @@
 import { useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowLeft, ArrowRight, Headphones, RotateCcw } from "lucide-react"
-import { date, dateTime } from "../../lib/format"
+import { date } from "../../lib/format"
 import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
-import { Button, Card, CardBody, CardHeader, ErrorState, Money, Notice, PageHeader } from "../../ui"
+import { Button, Card, CardBody, CardHeader, ErrorState, Money, Notice, PageHeader, useToast } from "../../ui"
 import { cn } from "../../../lib/utils"
 import { GuestForm, PaymentPicker } from "./components/CheckoutParts"
 import { Confirmation } from "./components/Confirmation"
 import { LiveRegion, Row } from "./components/controls"
 import { OfferTitle } from "./components/OfferParts"
 import { usePartyText } from "./components/PartyEditor"
-import { QuoteControls, QuoteRoom, useExtras } from "./components/QuoteParts"
+import { QuoteControls, QuoteExpiry, QuoteRoom, useExtras } from "./components/QuoteParts"
 import { Results, RoomBuilder } from "./components/Results"
 import { SearchForm } from "./components/SearchForm"
 import { focusFirstInvalid, useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
 import { useLabels } from "./lib/labels"
+import { selectMessage } from "./lib/selectText"
 import type { Offer } from "./lib/types"
 
 type Step = "search" | "quote" | "checkout" | "done"
@@ -25,6 +26,7 @@ const STEPS: Step[] = ["search", "quote", "checkout", "done"]
 export default function CrsPage() {
   const { t } = useTexT()
   const { can } = useSession()
+  const toast = useToast()
   const flow = useBookingFlow({ channel: "CALL_CENTER" })
   const [step, setStep] = useState<Step>("search")
   const [announce, setAnnounce] = useState("")
@@ -46,11 +48,20 @@ export default function CrsPage() {
   }
 
   const onSelect = async (property: string, offer: Offer) => {
-    const sel = flow.selectOffer(property, offer)
-    if (sel.picks.every(Boolean)) {
+    const res = flow.selectOffer(property, offer)
+    const sel = res.selection
+    if (sel && sel.property === property && sel.picks.every(Boolean)) {
       go("quote")
-      const res = await flow.requestQuotes(sel)
-      if (res) setAnnounce(res.every((q) => q.ok) ? t("crs.quote.announce_ready") : t("crs.quote.not_sellable"))
+      const q = await flow.requestQuotes(sel)
+      if (q) setAnnounce(q.every((x) => x.ok) ? t("crs.quote.announce_ready") : t("crs.quote.not_sellable"))
+      return
+    }
+    // a multi-room party with rooms still open: say which; the summary's room builder takes it from here
+    const msg = selectMessage(t, res, offer, flow.result?.rooms.length ?? 1)
+    if (msg) {
+      setAnnounce(msg.text)
+      if (msg.tone === "warning") toast.error(msg.text)
+      else toast.info(msg.text)
     }
   }
 
@@ -157,7 +168,7 @@ export default function CrsPage() {
               <Card>
                 <CardHeader title={t("crs.pay.title")} />
                 <CardBody>
-                  <PaymentPicker flow={flow} canConfirmUnpaid={can("reservation.create", flow.selection?.property)} />
+                  <PaymentPicker flow={flow} canConfirmUnpaid={can("reservation.confirm_unpaid", flow.selection?.property)} />
                 </CardBody>
               </Card>
               <BookErrors flow={flow} onRequote={() => void flow.requestQuotes()} onSearchAgain={() => { void flow.runSearch(undefined, true); go("search") }} />
@@ -340,7 +351,7 @@ function SummaryCard({ flow, step, onGo, onBook }: { flow: BookingFlow; step: St
               {flow.summary.due_now !== null && flow.method && (
                 <Row label={t("crs.pay.due_now")} value={<Money amount={flow.summary.due_now} currency={flow.summary.currency} />} />
               )}
-              <p className="mt-1 text-xs text-zinc-500">{t("crs.quote.valid_until", { time: dateTime(flow.summary.expires_at) })}</p>
+              <QuoteExpiry className="mt-1" expiresAt={flow.summary.expires_at} onRequote={flow.booking ? undefined : () => void flow.requestQuotes()} />
             </>
           ) : single?.total ? (
             <Row label={t("crs.summary.search_total")} value={<Money amount={single.total} currency={single.currency} />} />

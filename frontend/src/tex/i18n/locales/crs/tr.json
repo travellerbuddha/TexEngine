@@ -26,6 +26,8 @@
  "crs.booker.title": "Rezervasyonu yapan",
  "crs.builder.choose": "Bir teklif seçin",
  "crs.builder.hint": "Her oda ayrı fiyatlanır. Seç tüm odaları doldurur; tek tek odaları burada değiştirin.",
+ "crs.builder.no_fit": "Bu oteldeki hiçbir teklif bu odaya uymuyor. Misafirleri değiştirin veya yeniden arayın.",
+ "crs.builder.none_left": "kalmadı",
  "crs.builder.title": "Oda bazında seçim",
  "crs.cc.assign_room": "odaya ata",
  "crs.cc.attach_notes": "Çağrı notlarını rezervasyona ekle (dahili)",
@@ -44,6 +46,7 @@
  "crs.cc.guest_from_caller": "Arayan bilgilerinden dolduruldu — başka biri konaklayacaksa değiştirin.",
  "crs.cc.history": "Son konaklamalar",
  "crs.cc.in_rooms": "Oda {rooms}",
+ "crs.cc.key.assign_fitting": "Uyduğu odalara ata",
  "crs.cc.key.book": "Rezervasyon yap",
  "crs.cc.key.caller": "Arayanı bul",
  "crs.cc.key.copy": "Teklif metnini kopyala",
@@ -74,7 +77,6 @@
   "one": "Açık rezervasyonlar ({count})",
   "other": "Açık rezervasyonlar ({count})"
  },
- "crs.cc.pick_more": "Teklif almak için her odaya bir teklif seçin.",
  "crs.cc.quote_copied": "Teklif metni kopyalandı",
  "crs.cc.quote_empty": "Listeden bir teklif seçip Enter'a basın.",
  "crs.cc.quote_text": "Okunacak teklif",
@@ -228,6 +230,10 @@
  "crs.mode.usage": "kullanım başına",
  "crs.offer.codes_available": "Kullanılabilir kodlar",
  "crs.offer.contract": "Kontrat {code} · {version}",
+ "crs.offer.fits": {
+  "one": "Yalnızca oda {rooms} için uygun",
+  "other": "Oda {rooms} için uygun"
+ },
  "crs.offer.for_rooms": {
   "one": "{nights} · {count} oda",
   "other": "{nights} · {count} oda"
@@ -246,11 +252,16 @@
  },
  "crs.offer.nightly_stock": "Gece bazında boş oda",
  "crs.offer.non_refundable": "İade edilemez",
+ "crs.offer.not_for_room": "Oda {n} için uygun değil: {reason}",
  "crs.offer.per_night": "gecelik ort. {amount}",
  "crs.offer.promo_code": "Kod {code}",
  "crs.offer.refundable": "İade edilebilir",
  "crs.offer.rooms_priced": "Oda başına fiyat",
  "crs.offer.sold_out": "Tükendi",
+ "crs.offer.stock_short": {
+  "one": "Bu tipte yalnızca {count} oda kaldı; uyduğu tüm odalara yetmiyor.",
+  "other": "Bu tipte yalnızca {count} oda kaldı; uyduğu tüm odalara yetmiyor."
+ },
  "crs.page.no_access": "Satış için bir otelde fiyat görme ve rezervasyon oluşturma yetkisi gerekir.",
  "crs.page.start_over": "Baştan başla",
  "crs.page.subtitle": "Sattığınız tüm otellerde arayın, teklif verin ve rezervasyon yapın.",
@@ -276,6 +287,7 @@
  "crs.pay.notes_hint": "Yalnızca personel görür.",
  "crs.pay.pah_not_allowed": "Bu fiyat otelde ödenemez.",
  "crs.pay.paid": "Ödenen",
+ "crs.pay.pending_until_paid": "Ödeme şimdi alınmalı. Ödeme olmadan rezervasyon ödeme bekliyor olarak tutulur ve süresi dolabilir; misafire bir ödeme bağlantısı gönderin.",
  "crs.pay.sandbox": "Test modu",
  "crs.pay.title": "Ödeme",
  "crs.policy.cancellation": "İptal koşulları",
@@ -297,6 +309,7 @@
  "crs.quote.avg_night": "Gecelik ortalama",
  "crs.quote.calculated_total": "Hesaplanan toplam",
  "crs.quote.discounts": "İndirimler",
+ "crs.quote.expired": "Teklifin süresi {time} itibarıyla doldu. Rezervasyondan önce güncelleyin.",
  "crs.quote.extra_failed": "{name} eklenmedi: {reason}",
  "crs.quote.failed": "Teklif oluşturulamadı",
  "crs.quote.final_manual": "Son fiyat (elle belirlendi)",
@@ -315,6 +328,7 @@
  "crs.quote.subtotal": "Ara toplam",
  "crs.quote.tax_added": "Vergiler",
  "crs.quote.tax_included": "dahil",
+ "crs.quote.time_left": "{left} kaldı",
  "crs.quote.title": "Teklif",
  "crs.quote.total": "Toplam",
  "crs.quote.update": "Teklifi güncelle",
@@ -327,6 +341,7 @@
  "crs.results.details": "Ayrıntılar",
  "crs.results.filtered_out": "Filtrelere uyan teklif yok.",
  "crs.results.from": "en düşük {amount}",
+ "crs.results.from_all": "tüm odalar en düşük {amount}",
  "crs.results.none": "Bu arama için müsaitlik yok",
  "crs.results.none_here": "Bu otelde rezerve edilebilir teklif yok.",
  "crs.results.offer_count": {
@@ -337,6 +352,10 @@
  "crs.results.select": "Seç",
  "crs.results.select_all": "Tüm odalar için seç",
  "crs.results.select_aria": "Seç: {room}, {board}, {plan}",
+ "crs.results.select_rooms": {
+  "one": "Oda {rooms} için seç",
+  "other": "Oda {rooms} için seç"
+ },
  "crs.results.selected": "Seçildi",
  "crs.results.selected_hotel": "Seçili otel",
  "crs.results.summary": "{from} – {to} · {nights} · pazar {market}",
@@ -346,6 +365,18 @@
   "other": "{count} teklif rezerve edilemez"
  },
  "crs.results.unavailable_multi": "Grubun yalnızca bazı odalarına uyan teklifler oda bazında seçimde yine de seçilebilir.",
+ "crs.results.unplaced": {
+  "one": "Bu otelde {rooms} numaralı odaya uyan oda tipi yok",
+  "other": "Bu otelde {rooms} numaralı odalara uyan oda tipi yok"
+ },
+ "crs.results.unplaced_hint": {
+  "one": "{rooms} numaralı odadaki misafirleri değiştirin veya odayı kaldırıp yeniden arayın: burada rezervasyon için her odaya bir teklif gerekir.",
+  "other": "{rooms} numaralı odalardaki misafirleri değiştirin veya odaları kaldırıp yeniden arayın: burada rezervasyon için her odaya bir teklif gerekir."
+ },
+ "crs.results.unplaced_short": {
+  "one": "{rooms} numaralı odaya uygun oda yok",
+  "other": "{rooms} numaralı odalara uygun oda yok"
+ },
  "crs.results.view_only": "Bu otelde fiyatları görebilirsiniz ancak rezervasyon yapamazsınız.",
  "crs.room_n": "Oda {n}",
  "crs.search.add_room": "Oda ekle",
@@ -376,6 +407,26 @@
  "crs.search.rooms": "Odalar ve misafirler",
  "crs.search.submit": "Ara",
  "crs.search.title": "Arama",
+ "crs.sel.assigned": {
+  "one": "{rooms} numaralı odaya atandı.",
+  "other": "{rooms} numaralı odalara atandı."
+ },
+ "crs.sel.missing": {
+  "one": "{rooms} numaralı oda için bir teklif seçin.",
+  "other": "{rooms} numaralı odalar için teklif seçin."
+ },
+ "crs.sel.no_stock": {
+  "one": "{rooms} numaralı oda için bu tipte yeterli oda kalmadı.",
+  "other": "{rooms} numaralı odalar için bu tipte yeterli oda kalmadı."
+ },
+ "crs.sel.no_stock_rest": {
+  "one": "Bu tipte yalnızca {count} oda müsait.",
+  "other": "Bu tipte yalnızca {count} oda müsait."
+ },
+ "crs.sel.unfit": {
+  "one": "Bu teklif {rooms} numaralı odaya uymuyor: {reason}",
+  "other": "Bu teklif {rooms} numaralı odalara uymuyor: {reason}"
+ },
  "crs.source.api": "API",
  "crs.source.call_center": "Çağrı merkezi",
  "crs.source.desk": "Ofis",

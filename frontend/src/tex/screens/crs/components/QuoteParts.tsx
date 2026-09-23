@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
+import { cn } from "../../../../lib/utils"
+import { clock as countdown, useServerClock } from "../lib/serverClock"
 import { AlertTriangle, RefreshCw } from "lucide-react"
-import { dateTime, money } from "../../../lib/format"
+import { money } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Money, Notice, Skeleton } from "../../../ui"
 import { extrasFor } from "../lib/api"
@@ -112,6 +114,7 @@ export function QuoteRoom({
   showExtras?: boolean
 }) {
   const { t } = useTexT()
+  const clock = useServerClock()
   const partyText = usePartyText()
   const offer = flow.selectedOffers[index]
   const party = flow.result?.rooms[index]
@@ -162,7 +165,7 @@ export function QuoteRoom({
           )}
           <PriceBreakdown quote={q.quote} canCost={canCost} />
           <p className="text-xs text-zinc-500">
-            {t("crs.quote.ref", { id: q.quote_id ?? "" })} · {t("crs.quote.valid_until", { time: dateTime(q.expires_at) })}
+            {t("crs.quote.ref", { id: q.quote_id ?? "" })} · {t("crs.quote.valid_until", { time: clock.label(q.expires_at) })}
           </p>
         </>
       )}
@@ -209,5 +212,43 @@ export function QuoteControls({ flow, shortcut, compact }: { flow: BookingFlow; 
         {flow.quotes.length ? t("crs.quote.update") : t("crs.quote.get")}
       </Button>
     </div>
+  )
+}
+
+/**
+ * Quote validity on the server clock (bootstrap offset), with a countdown. Expiry is the
+ * server's `expires_at`; once past, the agent is asked to re-quote rather than book.
+ */
+export function QuoteExpiry({ expiresAt, onRequote, className }: { expiresAt?: string | null; onRequote?: () => void; className?: string }) {
+  const { t } = useTexT()
+  const clock = useServerClock()
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!expiresAt) return
+    const id = window.setInterval(() => tick((n) => n + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [expiresAt])
+  if (!expiresAt) return null
+  const ms = clock.msUntil(expiresAt)
+  const until = clock.label(expiresAt)
+  if (Number.isNaN(ms)) return <p className={cn("text-xs text-zinc-500", className)}>{t("crs.quote.valid_until", { time: until })}</p>
+  if (ms <= 0)
+    return (
+      <div role="alert" className={cn("flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-rose-700", className)}>
+        <span>{t("crs.quote.expired", { time: until })}</span>
+        {onRequote && (
+          <Button size="sm" variant="secondary" icon={<RefreshCw className="size-4" aria-hidden />} onClick={onRequote}>
+            {t("crs.quote.update")}
+          </Button>
+        )}
+      </div>
+    )
+  return (
+    <p className={cn("text-xs", ms < 120_000 ? "font-medium text-amber-800" : "text-zinc-500", className)}>
+      {t("crs.quote.valid_until", { time: until })}
+      {" · "}
+      {/* the ticking figure is not a live region: re-announcing it every second would drown the page */}
+      <span className="tabular-nums">{t("crs.quote.time_left", { left: countdown(ms) })}</span>
+    </p>
   )
 }

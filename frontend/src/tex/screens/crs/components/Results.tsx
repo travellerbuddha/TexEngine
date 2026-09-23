@@ -10,7 +10,8 @@ import { BOARDS, cmpDecimal, offerId } from "../lib/party"
 import type { BookingFlow } from "../lib/useBookingFlow"
 import type { Offer, PropertyResult } from "../lib/types"
 import { Disclosure } from "./controls"
-import { AvailabilityBadge, OfferBadges, OfferDetails, OfferPrice, OfferTitle, ratePlanName, roomName } from "./OfferParts"
+import { assignableRooms, AvailabilityBadge, OfferBadges, OfferDetails, OfferPrice, OfferTitle, ratePlanName, RoomFitNotes, roomName } from "./OfferParts"
+import { roomList } from "../lib/selectText"
 import { usePartyText } from "./PartyEditor"
 
 /** CRS results grouped by hotel (R-24). Unsellable offers keep their restriction messages. */
@@ -101,6 +102,13 @@ function HotelResults({
   const rooms = r.rooms.length
   const L = useLabels()
   const selectedHere = flow.selection?.property === p.property
+  const unplaced = p.unplaced_rooms ?? []
+  const selectLabel = (o: Offer) => {
+    if (rooms <= 1) return t("crs.results.select")
+    const can = assignableRooms(o)
+    if (can.length === rooms) return t("crs.results.select_all")
+    return t("crs.results.select_rooms", { count: can.length, rooms: roomList(can) })
+  }
   return (
     <Card>
       <CardHeader
@@ -113,17 +121,30 @@ function HotelResults({
         description={[
           p.city,
           t("crs.results.offer_count", { count: p.offers.length }),
-          p.from_total ? t("crs.results.from", { amount: money(p.from_total, p.offers[0]?.currency) }) : null,
+          // the cheapest way to place every room (room types may differ)
+          p.from_total
+            ? rooms > 1
+              ? t("crs.results.from_all", { amount: money(p.from_total, p.from_currency ?? p.offers[0]?.currency) })
+              : t("crs.results.from", { amount: money(p.from_total, p.from_currency ?? p.offers[0]?.currency) })
+            : null,
         ]
           .filter(Boolean)
           .join(" · ")}
         actions={selectedHere ? <Badge tone="brand">{t("crs.results.selected_hotel")}</Badge> : undefined}
       />
-      {p.messages.map((m, i) => (
+      {/* the server appends its own (English) "fits nowhere" line last; ours is translated */}
+      {(unplaced.length ? p.messages.slice(0, -1) : p.messages).map((m, i) => (
         <div key={i} className="px-4 pt-3">
           <Notice tone="warning">{m}</Notice>
         </div>
       ))}
+      {unplaced.length > 0 && (
+        <div className="px-4 pt-3">
+          <Notice tone="warning" title={t("crs.results.unplaced", { count: unplaced.length, rooms: roomList(unplaced) })}>
+            {t("crs.results.unplaced_hint", { count: unplaced.length, rooms: roomList(unplaced) })}
+          </Notice>
+        </div>
+      )}
       {!canCreate && p.offers.length > 0 && (
         <div className="px-4 pt-3">
           <Notice tone="info">{t("crs.results.view_only")}</Notice>
@@ -147,7 +168,7 @@ function HotelResults({
                       </span>
                     ) : null}
                   </h3>
-                  <AvailabilityBadge available={group[0].available} rooms={rooms} />
+                  <AvailabilityBadge available={group[0].available} needed={group[0].room_indexes?.length ?? rooms} />
                 </div>
                 <ul className="divide-y divide-zinc-100">
                   {group.map((o) => {
@@ -162,11 +183,12 @@ function HotelResults({
                             {plan ? <span className="text-zinc-600"> · {plan}</span> : null}
                           </p>
                           <OfferBadges offer={o} rooms={rooms} showAvailability={false} />
-                          {rooms > 1 && (
+                          {rooms > 1 && o.complete && (
                             <p className="text-xs text-zinc-500">
                               {o.rooms.map((x) => `${t("crs.room_n", { n: x.room_index + 1 })} ${money(x.quote.totals.total, x.quote.currency)}`).join(" · ")}
                             </p>
                           )}
+                          {rooms > 1 && <RoomFitNotes offer={o} />}
                           <Disclosure summary={t("crs.results.details")}>
                             <OfferDetails offer={o} prop={p} parties={r.rooms} canCost={canCost} />
                           </Disclosure>
@@ -182,7 +204,7 @@ function HotelResults({
                               onClick={() => onSelect(p.property, o)}
                               aria-label={t("crs.results.select_aria", { room: roomName(p, o.room_type), board: L.board(o.board), plan: plan ?? "" })}
                             >
-                              {picked ? t("crs.results.selected") : rooms > 1 ? t("crs.results.select_all") : t("crs.results.select")}
+                              {picked ? t("crs.results.selected") : selectLabel(o)}
                             </Button>
                           )}
                         </div>
@@ -251,21 +273,37 @@ export function RoomBuilder({ flow, idPrefix = "rb" }: { flow: BookingFlow; idPr
     <div className="space-y-3">
       {r.rooms.map((party, i) => {
         const cands = flow
-          .roomCandidates(sel.property, i)
+          .roomCandidates(sel.property, i, sel.picks)
           .sort((a, b) => cmpDecimal(a.room.quote.totals.total, b.room.quote.totals.total))
+        const label = `${t("crs.room_n", { n: i + 1 })} · ${partyText(party.adults, party.children.map((c) => c.age))}`
+        if (!cands.length)
+          return (
+            <div key={i}>
+              <p className="text-sm font-medium text-zinc-800">{label}</p>
+              <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+                {t("crs.builder.no_fit")}
+              </p>
+            </div>
+          )
         return (
-          <Field key={i} label={`${t("crs.room_n", { n: i + 1 })} · ${partyText(party.adults, party.children.map((c) => c.age))}`}>
+          <Field key={i} label={label}>
             <Select
               id={`${idPrefix}-room-${i}`}
               value={sel.picks[i] ?? ""}
               placeholder={t("crs.builder.choose")}
               onChange={(e) => flow.setRoomPick(i, e.target.value || null)}
-              options={cands.map(({ offer, room }) => ({
-                value: offerId(offer),
-                label: `${roomName(prop, offer.room_type)} · ${L.board(offer.board)}${
-                  ratePlanName({ ...offer, property: sel.property }) ? ` · ${ratePlanName({ ...offer, property: sel.property })}` : ""
-                } — ${money(room.quote.totals.total, room.quote.currency)}`,
-              }))}
+              options={cands.map(({ offer, room, left }) => {
+                const id = offerId(offer)
+                const none = left < 1 && sel.picks[i] !== id
+                return {
+                  value: id,
+                  // a room type whose last rooms the other picks already take cannot be chosen again
+                  disabled: none,
+                  label: `${roomName(prop, offer.room_type)} · ${L.board(offer.board)}${
+                    ratePlanName({ ...offer, property: sel.property }) ? ` · ${ratePlanName({ ...offer, property: sel.property })}` : ""
+                  } — ${money(room.quote.totals.total, room.quote.currency)}${none ? ` (${t("crs.builder.none_left")})` : ""}`,
+                }
+              })}
             />
           </Field>
         )

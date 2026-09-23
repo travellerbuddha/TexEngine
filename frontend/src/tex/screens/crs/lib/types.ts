@@ -183,13 +183,21 @@ export interface Offer {
   available: number
   availability: DayAvailability[] | null
   restrictions: Reason[]
+  /** Only the rooms of the party this room type fits (R-29: each room priced on its own). */
   rooms: OfferRoom[]
+  room_indexes: number[]
+  /** The room type takes every room of the party. */
+  complete: boolean
+  /** Why it does not fit the other rooms. */
+  room_reasons?: (Reason & { room_index: number })[]
+  /** Grand total, only when `complete`. */
   total?: string
   per_night?: string | null
   refundable?: boolean
   rate_plan_info?: RatePlanInfo | null
+  /** At least one room fits, no restriction, `available > 0`. */
   bookable: boolean
-  reasons?: Reason[]
+  reasons?: (Reason & { room_index?: number })[]
 }
 
 export interface RoomContent {
@@ -214,7 +222,11 @@ export interface PropertyResult {
   unavailable: Offer[]
   messages: string[]
   rooms: Record<string, RoomContent>
-  from_total?: string
+  /** Cheapest placement of every room (room types may differ). */
+  from_total?: string | null
+  from_currency?: string | null
+  /** Rooms of the party no available room type fits. */
+  unplaced_rooms?: number[]
 }
 
 export interface SearchResult {
@@ -255,6 +267,8 @@ export interface QuoteSummaryRoom {
 export interface QuoteSummary {
   property: string
   currency: string
+  market?: string
+  channel?: string
   payment_method: string | null
   total: string
   due_now: string | null
@@ -314,11 +328,11 @@ export interface PaymentTxn {
 export interface PaymentLinkRow {
   name: string
   status: string
-  /** crs.booking currently returns the raw DB value (a number), not a decimal string. */
-  amount: string | number
+  amount: string
+  paid_amount: string
   currency: string
-  public_url: string | null
   expires_at: string | null
+  creation?: string
 }
 
 export interface BookingSummary {

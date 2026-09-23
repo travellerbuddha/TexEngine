@@ -26,6 +26,8 @@
  "crs.booker.title": "Persoana care rezervă",
  "crs.builder.choose": "Alegeți o ofertă",
  "crs.builder.hint": "Fiecare cameră are prețul ei. Selectează completează toate camerele; schimbați camerele individual aici.",
+ "crs.builder.no_fit": "Nicio ofertă a acestui hotel nu se potrivește acestei camere. Modificați oaspeții sau căutați din nou.",
+ "crs.builder.none_left": "epuizat",
  "crs.builder.title": "Alegere pe camere",
  "crs.cc.assign_room": "atribuie camerei",
  "crs.cc.attach_notes": "Adaugă notițele apelului la rezervare (intern)",
@@ -44,6 +46,7 @@
  "crs.cc.guest_from_caller": "Completat din datele apelantului — modificați dacă se cazează altcineva.",
  "crs.cc.history": "Sejururi recente",
  "crs.cc.in_rooms": "Camera {rooms}",
+ "crs.cc.key.assign_fitting": "Atribuie camerelor potrivite",
  "crs.cc.key.book": "Rezervă",
  "crs.cc.key.caller": "Caută apelantul",
  "crs.cc.key.copy": "Copiază textul ofertei",
@@ -75,7 +78,6 @@
   "other": "Rezervări deschise ({count})",
   "few": "Rezervări deschise ({count})"
  },
- "crs.cc.pick_more": "Alegeți o ofertă pentru fiecare cameră pentru a obține prețul.",
  "crs.cc.quote_copied": "Textul ofertei a fost copiat",
  "crs.cc.quote_empty": "Alegeți o ofertă din listă și apăsați Enter.",
  "crs.cc.quote_text": "Oferta de citit",
@@ -231,6 +233,11 @@
  "crs.mode.usage": "per utilizare",
  "crs.offer.codes_available": "Coduri disponibile",
  "crs.offer.contract": "Contract {code} · {version}",
+ "crs.offer.fits": {
+  "one": "Doar pentru camera {rooms}",
+  "other": "Pentru camerele {rooms}",
+  "few": "Pentru camerele {rooms}"
+ },
  "crs.offer.for_rooms": {
   "one": "{nights} · {count} cameră",
   "other": "{nights} · {count} de camere",
@@ -253,11 +260,17 @@
  },
  "crs.offer.nightly_stock": "Camere libere pe noapte",
  "crs.offer.non_refundable": "Nerambursabil",
+ "crs.offer.not_for_room": "Nu pentru camera {n}: {reason}",
  "crs.offer.per_night": "în medie {amount} / noapte",
  "crs.offer.promo_code": "Cod {code}",
  "crs.offer.refundable": "Rambursabil",
  "crs.offer.rooms_priced": "Preț pe cameră",
  "crs.offer.sold_out": "Epuizat",
+ "crs.offer.stock_short": {
+  "one": "A mai rămas doar {count} cameră de acest tip – nu ajunge pentru toate camerele potrivite.",
+  "other": "Au mai rămas doar {count} de camere de acest tip – nu ajung pentru toate camerele potrivite.",
+  "few": "Au mai rămas doar {count} camere de acest tip – nu ajung pentru toate camerele potrivite."
+ },
  "crs.page.no_access": "Pentru vânzare sunt necesare drepturile de vizualizare a prețurilor și de creare a rezervărilor la un hotel.",
  "crs.page.start_over": "Ia-o de la capăt",
  "crs.page.subtitle": "Căutați în toate hotelurile pe care le vindeți, ofertați și rezervați.",
@@ -285,6 +298,7 @@
  "crs.pay.notes_hint": "Vizibilă doar pentru personal.",
  "crs.pay.pah_not_allowed": "Acest tarif nu poate fi plătit la hotel.",
  "crs.pay.paid": "Plătit",
+ "crs.pay.pending_until_paid": "Plata este datorată acum. Fără ea, rezervarea este reținută în așteptarea plății și poate expira; trimiteți oaspetelui un link de plată.",
  "crs.pay.sandbox": "Mod de test",
  "crs.pay.title": "Plată",
  "crs.policy.cancellation": "Anulare",
@@ -307,6 +321,7 @@
  "crs.quote.avg_night": "Medie pe noapte",
  "crs.quote.calculated_total": "Total calculat",
  "crs.quote.discounts": "Reduceri",
+ "crs.quote.expired": "Oferta a expirat la {time}. Actualizați-o înainte de rezervare.",
  "crs.quote.extra_failed": "{name} nu a fost adăugat: {reason}",
  "crs.quote.failed": "Oferta nu a putut fi generată",
  "crs.quote.final_manual": "Preț final (setat manual)",
@@ -325,6 +340,7 @@
  "crs.quote.subtotal": "Subtotal",
  "crs.quote.tax_added": "Taxe",
  "crs.quote.tax_included": "inclus",
+ "crs.quote.time_left": "mai sunt {left}",
  "crs.quote.title": "Ofertă",
  "crs.quote.total": "Total",
  "crs.quote.update": "Actualizează oferta",
@@ -338,6 +354,7 @@
  "crs.results.details": "Detalii",
  "crs.results.filtered_out": "Nicio ofertă nu corespunde filtrelor.",
  "crs.results.from": "de la {amount}",
+ "crs.results.from_all": "toate camerele de la {amount}",
  "crs.results.none": "Nimic disponibil pentru această căutare",
  "crs.results.none_here": "Nicio ofertă disponibilă la acest hotel.",
  "crs.results.offer_count": {
@@ -349,6 +366,11 @@
  "crs.results.select": "Selectează",
  "crs.results.select_all": "Selectează pentru toate camerele",
  "crs.results.select_aria": "Selectează {room}, {board}, {plan}",
+ "crs.results.select_rooms": {
+  "one": "Selectează pentru camera {rooms}",
+  "other": "Selectează pentru camerele {rooms}",
+  "few": "Selectează pentru camerele {rooms}"
+ },
  "crs.results.selected": "Selectat",
  "crs.results.selected_hotel": "Hotel selectat",
  "crs.results.summary": "{from} – {to} · {nights} · piața {market}",
@@ -359,6 +381,21 @@
   "few": "{count} oferte indisponibile"
  },
  "crs.results.unavailable_multi": "Ofertele potrivite doar pentru unele camere pot fi alese pe cameră în alegerea pe camere.",
+ "crs.results.unplaced": {
+  "one": "Niciun tip de cameră de aici nu se potrivește camerei {rooms}",
+  "other": "Niciun tip de cameră de aici nu se potrivește camerelor {rooms}",
+  "few": "Niciun tip de cameră de aici nu se potrivește camerelor {rooms}"
+ },
+ "crs.results.unplaced_hint": {
+  "one": "Modificați oaspeții camerei {rooms} sau eliminați-o și căutați din nou: aici o rezervare necesită o ofertă pentru fiecare cameră.",
+  "other": "Modificați oaspeții camerelor {rooms} sau eliminați-le și căutați din nou: aici o rezervare necesită o ofertă pentru fiecare cameră.",
+  "few": "Modificați oaspeții camerelor {rooms} sau eliminați-le și căutați din nou: aici o rezervare necesită o ofertă pentru fiecare cameră."
+ },
+ "crs.results.unplaced_short": {
+  "one": "Nimic pentru camera {rooms}",
+  "other": "Nimic pentru camerele {rooms}",
+  "few": "Nimic pentru camerele {rooms}"
+ },
  "crs.results.view_only": "Vedeți prețurile, dar nu puteți rezerva la acest hotel.",
  "crs.room_n": "Camera {n}",
  "crs.search.add_room": "Adaugă cameră",
@@ -389,6 +426,31 @@
  "crs.search.rooms": "Camere și oaspeți",
  "crs.search.submit": "Caută",
  "crs.search.title": "Căutare",
+ "crs.sel.assigned": {
+  "one": "Atribuită camerei {rooms}.",
+  "other": "Atribuită camerelor {rooms}.",
+  "few": "Atribuită camerelor {rooms}."
+ },
+ "crs.sel.missing": {
+  "one": "Alegeți o ofertă pentru camera {rooms}.",
+  "other": "Alegeți oferte pentru camerele {rooms}.",
+  "few": "Alegeți oferte pentru camerele {rooms}."
+ },
+ "crs.sel.no_stock": {
+  "one": "Pentru camera {rooms} nu mai sunt destule camere de acest tip.",
+  "other": "Pentru camerele {rooms} nu mai sunt destule camere de acest tip.",
+  "few": "Pentru camerele {rooms} nu mai sunt destule camere de acest tip."
+ },
+ "crs.sel.no_stock_rest": {
+  "one": "Este disponibilă doar {count} cameră de acest tip.",
+  "other": "Sunt disponibile doar {count} de camere de acest tip.",
+  "few": "Sunt disponibile doar {count} camere de acest tip."
+ },
+ "crs.sel.unfit": {
+  "one": "Această ofertă nu se potrivește camerei {rooms}: {reason}",
+  "other": "Această ofertă nu se potrivește camerelor {rooms}: {reason}",
+  "few": "Această ofertă nu se potrivește camerelor {rooms}: {reason}"
+ },
  "crs.source.api": "API",
  "crs.source.call_center": "Call center",
  "crs.source.desk": "Recepție",

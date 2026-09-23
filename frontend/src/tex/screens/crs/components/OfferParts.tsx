@@ -5,7 +5,7 @@ import { Badge, Money } from "../../../ui"
 import { cn } from "../../../../lib/utils"
 import { useLabels } from "../lib/labels"
 import { shortCode } from "../lib/party"
-import type { Offer, PropertyResult, RatePlanInfo } from "../lib/types"
+import type { NightLine, Offer, PropertyResult, RatePlanInfo } from "../lib/types"
 import { Row } from "./controls"
 import { usePartyText } from "./PartyEditor"
 
@@ -38,20 +38,32 @@ export function RefundBadge({ refundable }: { refundable: boolean | undefined })
   return <Badge tone={refundable ? "success" : "warning"}>{refundable ? t("crs.offer.refundable") : t("crs.offer.non_refundable")}</Badge>
 }
 
-/** Truthful scarcity: the server's own count, shown plainly. */
-export function AvailabilityBadge({ available, rooms }: { available: number; rooms: number }) {
+/** Truthful scarcity: the server's own count, shown plainly. `needed` is how many rooms of
+ * the party this room type would take; fewer left than that is a warning, not an error. */
+export function AvailabilityBadge({ available, needed = 1 }: { available: number; needed?: number }) {
   const { t } = useTexT()
-  if (available < rooms) return <Badge tone="danger">{t("crs.offer.sold_out")}</Badge>
-  return <Badge tone={available <= 3 ? "warning" : "neutral"}>{t("crs.offer.left", { count: available })}</Badge>
+  if (available < 1) return <Badge tone="danger">{t("crs.offer.sold_out")}</Badge>
+  return <Badge tone={available <= 3 || available < needed ? "warning" : "neutral"}>{t("crs.offer.left", { count: available })}</Badge>
+}
+
+/** Rooms of a multi-room party an offer can actually be assigned to: the rooms it fits,
+ * at most as many as its room type has left. */
+export function assignableRooms(offer: Offer): number[] {
+  const fitting = offer.room_indexes ?? offer.rooms.map((r) => r.room_index)
+  return fitting.slice(0, Math.max(0, offer.available))
 }
 
 export function OfferBadges({ offer, rooms, showAvailability = true }: { offer: Offer; rooms: number; showAvailability?: boolean }) {
   const { t } = useTexT()
   const applied = offer.rooms[0]?.quote.promotions.filter((p) => p.applied) ?? []
+  const fitting = offer.room_indexes ?? offer.rooms.map((r) => r.room_index)
   return (
     <div className="flex flex-wrap items-center gap-1">
       <RefundBadge refundable={offer.refundable ?? offer.rate_plan_info?.refundable} />
-      {showAvailability && <AvailabilityBadge available={offer.available} rooms={rooms} />}
+      {showAvailability && <AvailabilityBadge available={offer.available} needed={fitting.length} />}
+      {rooms > 1 && offer.complete === false && fitting.length > 0 && (
+        <Badge tone="info">{t("crs.offer.fits", { count: fitting.length, rooms: fitting.map((i) => i + 1).join(", ") })}</Badge>
+      )}
       {applied.map((p) => (
         <Badge key={p.promo_id} tone="brand">
           {p.code ? t("crs.offer.promo_code", { code: p.code }) : p.name}
@@ -61,10 +73,47 @@ export function OfferBadges({ offer, rooms, showAvailability = true }: { offer: 
   )
 }
 
-/** Server total for the stay and the server's average per night. */
+/** Neutral notes on a multi-room offer: which rooms it does not fit (and why), and a room
+ * type with fewer rooms left than the party rooms it fits. */
+export function RoomFitNotes({ offer, className }: { offer: Offer; className?: string }) {
+  const { t } = useTexT()
+  const fitting = offer.room_indexes ?? offer.rooms.map((r) => r.room_index)
+  const reasons = offer.room_reasons ?? []
+  const short = fitting.length > 1 && offer.available < fitting.length
+  if (!reasons.length && !short) return null
+  return (
+    <ul className={cn("space-y-0.5 text-xs text-zinc-600", className)}>
+      {reasons.map((r, i) => (
+        <li key={i}>{t("crs.offer.not_for_room", { n: r.room_index + 1, reason: r.message })}</li>
+      ))}
+      {short && <li>{t("crs.offer.stock_short", { count: offer.available })}</li>}
+    </ul>
+  )
+}
+
+/** Server total for the stay and the server's average per night. A multi-room offer that
+ * does not take every room shows the server's price of each room it fits instead. */
 export function OfferPrice({ offer, nights, rooms, align = "right" }: { offer: Offer; nights: number; rooms: number; align?: "left" | "right" }) {
   const { t } = useTexT()
-  if (!offer.total) return null
+  if (!offer.total) {
+    if (!offer.rooms.length) return null
+    return (
+      <div className={align === "right" ? "text-right" : "text-left"}>
+        {offer.rooms.map((r) => (
+          <p key={r.room_index} className="leading-tight">
+            <span className="text-xs text-zinc-500">{t("crs.room_n", { n: r.room_index + 1 })} </span>
+            <Money amount={r.quote.totals.total} currency={r.quote.currency} className="text-base font-semibold text-zinc-950" />
+          </p>
+        ))}
+        <p className="text-xs text-zinc-500">
+          {offer.rooms.length === 1 && offer.rooms[0].per_night
+            ? `${t("crs.offer.per_night", { amount: money(offer.rooms[0].per_night, offer.currency) })} · `
+            : ""}
+          {t("core.label.nights", { count: nights })}
+        </p>
+      </div>
+    )
+  }
   return (
     <div className={align === "right" ? "text-right" : "text-left"}>
       <p className="text-lg leading-tight font-semibold text-zinc-950">
@@ -209,9 +258,11 @@ export function OfferDetails({
                   </>
                 )}
                 {!r.quote.sellable && r.quote.reasons.map((x, i) => <p key={i} className="text-xs text-rose-700">{x.message}</p>)}
+                <GuestNights nights={r.quote.nights} currency={r.quote.currency} />
               </div>
             )
           })}
+          <RoomFitNotes offer={offer} className="pt-1.5" />
         </section>
         {offer.availability && offer.availability.length > 0 && (
           <section>
@@ -249,6 +300,20 @@ export function OfferDetails({
         {explanation && explanation.length > 0 && <ExplanationList steps={explanation} />}
       </div>
     </div>
+  )
+}
+
+/** Rounded guest-facing night prices ({date, amount}); internal nights (cost viewers) carry
+ * unrounded factors and are explained by the rule list instead. */
+function GuestNights({ nights, currency }: { nights: NightLine[] | undefined; currency: string }) {
+  const { t } = useTexT()
+  const rows = (nights ?? []).filter((n): n is { date: string; amount: string } => typeof n.amount === "string")
+  if (!rows.length) return null
+  return (
+    <p className="text-xs text-zinc-500">
+      <span className="sr-only">{t("crs.quote.nightly", { count: rows.length })}: </span>
+      {rows.map((n) => `${weekday(n.date)} ${money(n.amount, currency)}`).join(" · ")}
+    </p>
   )
 }
 

@@ -1,13 +1,16 @@
+import { useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { MailCheck } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { date, num } from "../../lib/format"
 import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
-import { Badge, Card, CardHeader, DataTable, DescriptionList, CardBody, ErrorState, Money, Notice, PageHeader, Skeleton, statusTone } from "../../ui"
+import { Badge, Button, Card, CardHeader, DataTable, DescriptionList, CardBody, ErrorState, Money, Notice, PageHeader, Skeleton, statusTone } from "../../ui"
 import { useLabels } from "../crs/lib/labels"
 import { shortCode } from "../crs/lib/party"
 import type { BookingRoom, BookingSummary } from "../crs/lib/types"
 import type { ReservationRow } from "./lib/types"
+import { ResendConfirmationDialog } from "./components/ActionDialogs"
 import { PaymentSummaryBody } from "./components/DetailParts"
 
 /** Multi-room booking: the parent of reservations A/B/C (R-29) with its payments. */
@@ -17,6 +20,7 @@ export default function BookingDetail() {
   const L = useLabels()
   const navigate = useNavigate()
   const { can } = useSession()
+  const [resend, setResend] = useState(false)
   const q = useTexQuery<BookingSummary>("crs", "booking", { name }, [name])
   const b = q.data
   // names, board and guest of each room (the booking summary only carries codes)
@@ -43,6 +47,7 @@ export default function BookingDetail() {
       </>
     )
   const showMoney = can("price.view", b.property)
+  const canResend = can("reservation.modify", b.property) && b.status !== "Cancelled"
   return (
     <>
       <PageHeader
@@ -56,7 +61,15 @@ export default function BookingDetail() {
             {b.guest_change_pending && <Badge tone="warning">{t("res.badge.guest_change")}</Badge>}
           </>
         }
+        actions={
+          canResend ? (
+            <Button variant="secondary" icon={<MailCheck className="size-4" aria-hidden />} onClick={() => setResend(true)}>
+              {t("res.resend.button")}
+            </Button>
+          ) : undefined
+        }
       />
+      {canResend && <ResendConfirmationDialog open={resend} onClose={() => setResend(false)} booking={b.booking} />}
       {b.guest_change_pending && (
         <div className="mb-5">
           <Notice tone="warning">{t("res.booking.guest_change")}</Notice>
@@ -101,13 +114,16 @@ export default function BookingDetail() {
                 {
                   key: "stay",
                   header: t("res.col.stay"),
+                  // guests under the dates: the card is two thirds wide, a separate column clipped the total
                   cell: (r) => (
-                    <span className="whitespace-nowrap">
+                    <span className="block whitespace-nowrap">
                       {date(r.check_in, "short")} – {date(r.check_out, "short")}
+                      <span className="block text-xs text-zinc-500">
+                        {t("res.col.pax")}: {num(r.adults)} + {num(r.children)}
+                      </span>
                     </span>
                   ),
                 },
-                { key: "pax", header: t("res.col.pax"), hideBelow: "md", align: "right", cell: (r) => `${num(r.adults)} + ${num(r.children)}` },
                 { key: "status", header: t("core.label.status"), cell: (r) => <Badge tone={statusTone(r.status)}>{L.status(r.status)}</Badge> },
                 {
                   key: "amount",

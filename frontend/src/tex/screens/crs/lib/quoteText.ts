@@ -17,8 +17,10 @@ export function quoteText(opts: {
   summary: QuoteSummary | undefined
   paymentMethod: string
   partyText: (adults: number, ages: (number | null)[]) => string
+  /** server datetime → text (labelled with the server time zone) */
+  time?: (v: string) => string
 }): string {
-  const { t, board, result, prop, quotes, summary, paymentMethod, partyText } = opts
+  const { t, board, result, prop, quotes, summary, paymentMethod, partyText, time = dateTime } = opts
   const lines: string[] = []
   lines.push(
     `${prop?.property_name ?? quotes[0]?.quote?.request.property ?? ""} · ${date(result.check_in)} – ${date(result.check_out)} (${t("core.label.nights", {
@@ -49,7 +51,7 @@ export function quoteText(opts: {
         ? ` · ${t("crs.text.due_now", { amount: money(summary.due_now, summary.currency), method: opts.method(paymentMethod) })}`
         : ""
     lines.push(`${t("crs.text.total")}: ${money(summary.total, summary.currency)}${due}`)
-    lines.push(t("crs.text.valid_until", { time: dateTime(summary.expires_at) }))
+    lines.push(t("crs.text.valid_until", { time: time(summary.expires_at) }))
   }
   return lines.join("\n")
 }

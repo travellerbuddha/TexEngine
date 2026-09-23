@@ -70,6 +70,16 @@ export interface Selection {
 
 export type FieldErrors = Record<string, string>
 
+export interface SelectResult {
+  /** The selection after the call (unchanged when nothing could be assigned). */
+  selection: Selection | null
+  assigned: number[]
+  /** Rooms the offer fits but its room type has no stock left for. */
+  noStock: number[]
+  /** Rooms the offer does not fit (capacity, age rules). */
+  unfit: number[]
+}
+
 export function asApiError(e: unknown): TexApiError {
   return e instanceof TexApiError ? e : new TexApiError(String((e as Error)?.message ?? e), 0, "Error")
 }
@@ -183,15 +193,20 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     },
     [propertyResult],
   )
-  /** Offers that can take room `idx` of the party: priced for that room, not restricted, in stock. */
+  /** Offers that can take room `idx` of the party: priced for that room, not restricted, in
+   * stock. `left` is the stock of the room type once the other rooms' picks are counted. */
   const roomCandidates = useCallback(
-    (prop: string, idx: number): { offer: Offer; room: OfferRoom }[] => {
+    (prop: string, idx: number, picks: (string | null)[] = []): { offer: Offer; room: OfferRoom; left: number }[] => {
       const p = propertyResult(prop)
       if (!p) return []
-      const out: { offer: Offer; room: OfferRoom }[] = []
-      for (const o of [...p.offers, ...p.unavailable]) {
+      const all = [...p.offers, ...p.unavailable]
+      const typeOf = new Map(all.map((o) => [offerId(o), o.room_type]))
+      const out: { offer: Offer; room: OfferRoom; left: number }[] = []
+      for (const o of all) {
         const room = o.rooms.find((r) => r.room_index === idx)
-        if (room && room.quote.sellable && !o.restrictions.length && o.available >= 1) out.push({ offer: o, room })
+        if (!room || !room.quote.sellable || o.restrictions.length || o.available < 1) continue
+        const usedByOthers = picks.filter((id, j) => j !== idx && id && typeOf.get(id) === o.room_type).length
+        out.push({ offer: o, room, left: o.available - usedByOthers })
       }
       return out
     },
@@ -312,31 +327,51 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   )
 
   // ── room builder ──
-  /** Assign `offer` to every room it can take (or only to `roomIndex`). Returns the new
-   * selection so a caller can quote it straight away. */
+  /** Assign `offer` to every room of the party it fits (or only to `roomIndex`), never to
+   * more rooms than its room type has left. The caller learns which rooms got it, which
+   * it fits but are out of stock, and which it does not fit, and can quote straight away. */
   const selectOffer = useCallback(
-    (prop: string, offer: Offer, roomIndex?: number): Selection => {
+    (prop: string, offer: Offer, roomIndex?: number): SelectResult => {
       const n = result?.rooms.length ?? 1
       const id = offerId(offer)
       const prev = selection
       const picks: (string | null)[] =
         prev && prev.property === prop && prev.picks.length === n ? [...prev.picks] : Array(n).fill(null)
-      if (roomIndex === undefined) {
-        for (let i = 0; i < n; i++) if (offer.rooms.some((r) => r.room_index === i && r.quote.sellable)) picks[i] = id
-      } else picks[roomIndex] = id
-      const next = { property: prop, picks }
-      setSelection(next)
-      if (!prev || prev.property !== prop) {
-        setExtras({})
-        setMethods(undefined)
-        setMethod("")
-        setQuotes([])
-        setSummary(undefined)
+      const p = propertyResult(prop)
+      const typeOf = new Map([...(p?.offers ?? []), ...(p?.unavailable ?? [])].map((o) => [offerId(o), o.room_type]))
+      const fits = (i: number) => offer.rooms.some((r) => r.room_index === i && r.quote.sellable)
+      const targets = roomIndex === undefined ? [...Array(n).keys()] : [roomIndex]
+      const unfit = targets.filter((i) => !fits(i))
+      const wanted = targets.filter(fits)
+      // stock of this room type already used by rooms that keep their pick
+      let left = offer.available - picks.filter((pid, j) => pid && !wanted.includes(j) && typeOf.get(pid) === offer.room_type).length
+      const assigned: number[] = []
+      const noStock: number[] = []
+      for (const i of wanted) {
+        if (left > 0) {
+          picks[i] = id
+          assigned.push(i)
+          left--
+        } else {
+          noStock.push(i)
+          if (picks[i] && typeOf.get(picks[i]!) === offer.room_type) picks[i] = null
+        }
       }
-      setBooking(undefined)
-      return next
+      const next = { property: prop, picks }
+      if (assigned.length) {
+        setSelection(next)
+        if (!prev || prev.property !== prop) {
+          setExtras({})
+          setMethods(undefined)
+          setMethod("")
+          setQuotes([])
+          setSummary(undefined)
+        }
+        setBooking(undefined)
+      }
+      return { selection: assigned.length ? next : prev, assigned, noStock, unfit }
     },
-    [result, selection],
+    [result, selection, propertyResult],
   )
 
   const setRoomPick = useCallback(

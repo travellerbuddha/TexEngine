@@ -59,3 +59,15 @@ export function acknowledgeGuestChange(reservation: string, note?: string) {
 export function contractVersion(name: string) {
   return tex<ContractVersionInfo>("contracts", "get_version", { name })
 }
+
+export interface ResendResult {
+  booking: string
+  /** false when no e-mail went out (e.g. no outgoing mail account); the new link replaced the old one anyway */
+  sent: boolean
+  email: string
+}
+
+/** Re-send the booking e-mail with a NEW manage link; the old link stops working. */
+export function resendConfirmation(booking: string) {
+  return tex<ResendResult>("crs", "resend_confirmation", { booking }, { post: true })
+}
