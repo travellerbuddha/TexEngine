@@ -22,6 +22,7 @@ from kamra.tex.pricing import versions
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, modification, quoting
+from kamra.tex.services.txn import retry_on_deadlock
 
 
 def _limit(default: int, key: str):
@@ -291,6 +292,7 @@ def basket(site: str, quote_ids, session_id: str | None = None):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def book(site: str, quote_ids, guest, payment_method: str | None = None, provider_account: str | None = None,
          idempotency_key: str | None = None, language: str | None = None, session_id: str | None = None,
          return_url: str | None = None):
@@ -603,6 +605,7 @@ def manage_propose(token: str, reservation: str, changes):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def manage_apply(token: str, proposal_token: str, note: str | None = None):
 	"""Guest accepts a proposal. Higher price → applied, difference collected; lower
 	price → per hotel policy: staff approval (default, NOT applied until staff act),

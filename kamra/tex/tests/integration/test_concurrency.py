@@ -7,6 +7,7 @@ transaction) and removed again in tearDownClass.
 """
 
 import threading
+import traceback
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -178,3 +179,180 @@ def _cleanup_payments():
 	for dt in ("TEX Payment Allocation", "TEX Payment Transaction"):
 		frappe.db.sql(f"DELETE FROM `tab{dt}` WHERE property=%s", fx.PROPERTY)  # constant table list
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+
+
+def _cleanup_codes():
+	frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test cleanup
+	frappe.db.sql("DELETE FROM `tabTEX Promotion` WHERE property=%s AND code='CONCONE'", fx.PROPERTY)
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+
+
+class TestConcurrentCouponLimit(IntegrationTestCase):
+	"""G-07 under real concurrency: a code that may be used once, two guests book with it at
+	the same instant. Exactly one booking gets it; the other is told it is used up."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_codes()
+		cls.f = fx.base_setup()
+		fx.create_contract(cls.f, code="CONC")
+		from kamra.tex.commercial import revisions
+
+		promo = frappe.get_doc({"doctype": "TEX Promotion", "promotion_name": "Once only", "property": fx.PROPERTY,
+		                        "trigger": "Code", "code": "CONCONE", "value_type": "PERCENT", "value": 10,
+		                        "applies_to": "ACCOMMODATION", "usage_limit": 1}).insert(ignore_permissions=True)
+		revisions.activate("TEX Promotion", promo.name, at="2020-01-01 00:00:00", backdate=True)
+		cls.promo = promo.name
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		ci, co = fx.d(8, 20), fx.d(8, 22)
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=ci, check_out=co, rooms=[{"adults": 2}],
+		                      market="DE", channel="DIRECT_WEB", currency="EUR", promo_codes=["CONCONE"])
+		offers = prop["properties"][0]["offers"]
+		cls.racers = []
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		offer = next(o for o in offers if o["room_type"] == rt and o["board"] == "AI")
+		for _ in range(2):              # plenty of Standard rooms: only the code is contended
+			q = quoting.create_quote(offer["rooms"][0]["offer_key"])
+			assert any(p["promo_id"] == promo.name and p["applied"] for p in q["quote"]["promotions"]), q
+			cls.racers.append(q["quote_id"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup()
+		_cleanup_codes()
+		super().tearDownClass()
+
+	def test_a_code_used_once_is_used_once(self):
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		barrier = threading.Barrier(2)
+		results: dict[str, str] = {}
+
+		def race(quote_id: str, who: str):
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+				barrier.wait(timeout=10)
+				booking.create_booking(quote_ids=[quote_id], guest={"first_name": who, "last_name": "Coupon",
+				                                                    "email": f"{who}.coupon@example.com"},
+				                       payment_method="Card")
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each racer is its own request
+				results[who] = "booked"
+			except frappe.ValidationError as e:
+				frappe.db.rollback()
+				results[who] = f"refused: {e}"
+			finally:
+				frappe.destroy()
+
+		threads = [threading.Thread(target=race, args=(q, w)) for q, w in zip(self.racers, ("carol", "dave"),
+		                                                                        strict=True)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join(timeout=60)
+		self.assertEqual(sorted(v.split(":")[0] for v in results.values()), ["booked", "refused"], results)
+		self.assertTrue(any("fully redeemed" in v for v in results.values()), results)
+		frappe.db.rollback()
+		self.assertEqual(frappe.db.count("TEX Promotion Redemption", {
+			"promotion": self.promo, "status": ("in", ["Reserved", "Committed"])}), 1)
+
+
+class TestConcurrentRoomTypes(IntegrationTestCase):
+	"""Two agents book two different room types of one hotel at the same instant. Nothing is
+	contended, so both bookings go through: neither guest sees a database deadlock."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		cls.f = fx.base_setup()
+		fx.create_contract(cls.f, code="CONC")
+		ci, co = fx.d(8, 20), fx.d(8, 22)
+		offers = quoting.search(properties=[fx.PROPERTY], check_in=ci, check_out=co, rooms=[{"adults": 2}],
+		                        market="DE", channel="CALL_CENTER", currency="EUR")["properties"][0]["offers"]
+		flex = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		cls.offer_keys = []
+		for code in ("STD", "DLX"):
+			rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": code})
+			offer = next(o for o in offers if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == flex)
+			cls.offer_keys.append(offer["rooms"][0]["offer_key"])
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup()
+		super().tearDownClass()
+
+	def test_different_room_types_book_side_by_side(self):
+		from kamra.tex.api import crs as crs_api
+
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		results: dict[str, str] = {}
+		for attempt in range(6):          # a deadlock depends on timing: race several times
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agents' quotes
+			# free the rooms of the previous race (2 Deluxe rooms only)
+			frappe.db.sql("UPDATE `tabReservation` SET status='Cancelled' WHERE property=%s", fx.PROPERTY)
+			racers = [quoting.create_quote(k)["quote_id"] for k in self.offer_keys]
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+			barrier = threading.Barrier(2)
+
+			def race(quote_id: str, who: str, barrier=barrier):
+				frappe.init(site=site, sites_path=sites_path)
+				frappe.connect()
+				try:
+					frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a call-centre agent
+					barrier.wait(timeout=10)
+					crs_api.book(quote_ids=[quote_id], guest={"first_name": who, "last_name": "Side",
+					                                          "email": f"{who}.side@example.com"},
+					             payment_method="Pay at Hotel", confirm_without_payment=1)
+					frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each agent is its own request
+					results[who] = "booked"
+				except Exception as e:
+					traceback.print_exc()           # shown with the failure
+					frappe.db.rollback()
+					results[who] = f"{type(e).__name__}: {e}"
+				finally:
+					frappe.destroy()
+
+			threads = [threading.Thread(target=race, args=(q, f"{w}{attempt}"))
+			           for q, w in zip(racers, ("erin", "frank"), strict=True)]
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join(timeout=60)
+			self.assertEqual([results.get(f"{w}{attempt}") for w in ("erin", "frank")], ["booked", "booked"],
+			                 results)
+			frappe.db.rollback()
+
+	def test_a_deadlock_victim_is_booked_on_the_retry(self):
+		from unittest import mock
+
+		from kamra.tex.api import crs as crs_api
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a call-centre agent
+		frappe.db.sql("UPDATE `tabReservation` SET status='Cancelled' WHERE property=%s", fx.PROPERTY)
+		quote = quoting.create_quote(self.offer_keys[0])["quote_id"]
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the quote outlives the rolled-back attempt
+		real, calls = booking.create_booking, []
+
+		def victim_once(**kw):
+			out = real(**kw)
+			calls.append(out["booking"])
+			if len(calls) == 1:           # chosen as the victim after writing: all of it is undone
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock (simulated)")
+			return out
+
+		with mock.patch.object(booking, "create_booking", side_effect=victim_once):
+			out = crs_api.book(quote_ids=[quote], guest={"first_name": "Grace", "last_name": "Retry",
+			                                             "email": "grace.retry@example.com"},
+			                   payment_method="Pay at Hotel", confirm_without_payment=1)
+		self.assertEqual(len(calls), 2)               # the rolled-back attempt left nothing behind:
+		self.assertEqual(frappe.db.count("TEX Booking", {"booker_email": "grace.retry@example.com"}), 1)
+		self.assertEqual(frappe.db.count("Reservation", {"tex_booking": out["booking"]}), 1)
+		frappe.db.rollback()

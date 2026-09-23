@@ -413,3 +413,26 @@ back-date it and so rewrite what `as_of` reports for the past.
   not affected (the legacy folio still reads it).
 - Extras capacity (G-19) must key on the extra's code or root, never on a revision name.
 
+## ADR-032 Locked rows are re-read by primary key; a deadlock victim is run again
+**Context.** Two problems showed up in threaded tests (G-07 regression, G-85).
+- The coupon limit was checked under the promotion's row lock with a plain count. Under
+  REPEATABLE READ that count sees the transaction's earlier snapshot, so two simultaneous
+  bookings could both use a code limited to one.
+- Two bookings of different room types at the same instant deadlocked. The availability
+  recount after `lock_nights` read `TEX Inventory Day` with a `LOCK IN SHARE MODE` range.
+  Its next-key locks reach into the neighbouring pool's rows, which the other booking holds.
+**Decision.**
+- After taking a lock, a count that decides a limit is a locking (current) read. A plain
+  read is never used for that decision.
+- Rows the transaction already holds are re-read by primary key (`name IN …`), which takes
+  no gap locks.
+- Write endpoints whose whole work is one request transaction run again when MariaDB
+  chooses them as a deadlock victim: a clean rollback, then up to 3 attempts with jitter
+  (`kamra.tex.services.txn.retry_on_deadlock`). They are `public.book`, `manage_apply`,
+  `crs.book`, `ui_crs.book` and `crs.apply_modification`.
+- Idempotency keys and the rolled-back naming series make the rerun write everything
+  exactly once.
+**Consequences.** Other locking range reads (the reservation recount) can still meet
+another booking's insert under rare index layouts; the retry absorbs that. MariaDB ≥ 11.6
+(`innodb_snapshot_isolation`) reports changed-row conflicts as deadlocks too, and they are
+retried the same way. A new write endpoint that locks inventory must use the decorator.

@@ -475,17 +475,26 @@ def _check_redemption_limits(root: str, name: str, gkey: str | None, *, exclude_
 	"""Under a row lock on the promotion (concurrent bookings cannot exceed a limit): the
 	total usage limit and the per-guest limit (G-07). Redemptions of ``exclude_booking``
 	(a booking being modified) are not counted against it."""
-	frappe.db.sql("SELECT name FROM `tabTEX Promotion` WHERE name=%s FOR UPDATE", root)
-	limit, per_guest = frappe.db.get_value("TEX Promotion", root, ["usage_limit", "per_guest_limit"])
-	live = {"promotion": root, "status": ("in", ["Reserved", "Committed"])}
-	if exclude_booking:
-		live["booking"] = ("!=", exclude_booking)
-	if limit and frappe.db.count("TEX Promotion Redemption", live) >= int(limit):
+	limit, per_guest = frappe.db.sql("""SELECT usage_limit, per_guest_limit FROM `tabTEX Promotion`
+	                                     WHERE name=%s FOR UPDATE""", root)[0]
+
+	def used(guest_key: str | None = None) -> int:
+		# a locking read: under REPEATABLE READ a plain count still sees this transaction's
+		# snapshot, taken before a competing booking committed its redemption, and the limit
+		# would be exceeded (two simultaneous bookings both used a code limited to one)
+		return int(frappe.db.sql(
+			"""SELECT COUNT(*) FROM `tabTEX Promotion Redemption`
+			   WHERE promotion=%(p)s AND status IN ('Reserved', 'Committed')"""
+			+ (" AND IFNULL(booking, '') != %(ex)s" if exclude_booking else "")
+			+ (" AND guest_key=%(g)s" if guest_key else "") + " LOCK IN SHARE MODE",
+			{"p": root, "ex": exclude_booking, "g": guest_key})[0][0])
+
+	if limit and used() >= int(limit):
 		frappe.throw(_("Promotion {0} has just been fully redeemed.").format(name))
 	if per_guest:
 		if not gkey:
 			frappe.throw(_("Promotion {0} needs the guest's e-mail address or phone number.").format(name))
-		if frappe.db.count("TEX Promotion Redemption", {**live, "guest_key": gkey}) >= int(per_guest):
+		if used(gkey) >= int(per_guest):
 			frappe.throw(_("Promotion {0} has already been used by this guest.").format(name))
 
 

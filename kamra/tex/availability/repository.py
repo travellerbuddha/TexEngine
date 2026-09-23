@@ -76,10 +76,19 @@ def _sold(room_types: list[str], days: list[date], exclude: list[str] | None = N
 
 
 def _inventory_rows(pool_key: str, days: list[date], *, locking: bool = False) -> dict[date, dict]:
-	rows = frappe.db.sql(
-		"""SELECT inventory_date, base_inventory, manual_adjustment, oversell_limit, closed
-		   FROM `tabTEX Inventory Day` WHERE room_type=%(p)s AND inventory_date BETWEEN %(a)s AND %(b)s"""
-		+ (" LOCK IN SHARE MODE" if locking else ""), {"p": pool_key, "a": days[0], "b": days[-1]}, as_dict=True)
+	cols = "inventory_date, base_inventory, manual_adjustment, oversell_limit, closed"
+	if locking:
+		# after lock_nights: the rows this transaction already holds, read by primary key.
+		# A range read would take next-key (gap) locks reaching into other pools' rows, and
+		# two bookings of different room types then deadlock
+		from kamra.tex_commercial.doctype.tex_inventory_day.tex_inventory_day import inventory_day_name
+
+		rows = frappe.db.sql(f"SELECT {cols} FROM `tabTEX Inventory Day` WHERE name IN %(n)s FOR UPDATE",
+		                     {"n": tuple(inventory_day_name(pool_key, d) for d in days)}, as_dict=True)
+	else:
+		rows = frappe.db.sql(f"""SELECT {cols} FROM `tabTEX Inventory Day`
+		                         WHERE room_type=%(p)s AND inventory_date BETWEEN %(a)s AND %(b)s""",
+		                     {"p": pool_key, "a": days[0], "b": days[-1]}, as_dict=True)
 	return {getdate(r.inventory_date): r for r in rows}
 
 

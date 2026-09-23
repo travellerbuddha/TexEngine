@@ -31,6 +31,7 @@ from kamra.tex.money import D, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import quoting
+from kamra.tex.services.txn import retry_on_deadlock
 
 
 def _per_night(total, nights: int, currency: str) -> str | None:
@@ -94,6 +95,7 @@ def _booker(raw) -> dict | None:
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def book(quote_ids, guest, booker=None, payment_method: str | None = None, confirm_without_payment: int = 0,
          notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
 	"""``crs.book`` with an optional ``booker`` ({name, email, phone}) — the person on the

@@ -14,6 +14,7 @@ from kamra.tex.money import from_db, to_str
 from kamra.tex.security import scope
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import modification, quoting
+from kamra.tex.services.txn import retry_on_deadlock
 
 INTERNAL_CHANNELS = ("CALL_CENTER", "B2B", "API", "DIRECT_WEB", "META", "OTA")
 
@@ -59,6 +60,7 @@ def quote(offer_key: str, extras=None, promo_codes=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def book(quote_ids, guest, payment_method: str | None = None, confirm_without_payment: int = 0,
          notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
 	ids = parse(quote_ids, [])
@@ -213,6 +215,7 @@ def propose_modification(reservation: str, changes, basis: str = "CURRENT", basi
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def apply_modification(proposal_token: str, reason: str, override_amount: str | None = None):
 	return modification.apply(proposal_token, reason=text(reason, 500), override_amount=override_amount or None)
 
