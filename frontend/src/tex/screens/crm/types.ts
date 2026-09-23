@@ -153,7 +153,8 @@ export interface GuestProfile {
   guest: Guest
   stays: Stay[]
   communications: Communication[]
-  segments: string[]
+  /** segments this guest is in, among the viewer's (presets and their enterprise's) */
+  segments: { name: string; segment_name: string; system_key?: string | null }[]
   loyalty: LoyaltyAccount[]
   consent_history: ConsentEvent[]
   hotels: string[]

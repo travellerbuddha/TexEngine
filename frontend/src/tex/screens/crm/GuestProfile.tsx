@@ -230,8 +230,8 @@ export default function GuestProfile() {
                   {d.segments.length ? (
                     <ul className="flex flex-wrap gap-1.5">
                       {d.segments.map((s) => (
-                        <li key={s}>
-                          <Badge tone="brand">{s}</Badge>
+                        <li key={s.name}>
+                          <Badge tone="brand">{s.segment_name}</Badge>
                         </li>
                       ))}
                     </ul>

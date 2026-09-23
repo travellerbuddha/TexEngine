@@ -993,17 +993,19 @@ PAYMENT_SPECS = [
 R = "TEX CRM"
 CRM_SPECS = [
 	dt("TEX Guest Segment", R, [
-		F("segment_name", "Data", "Segment", reqd=1, unique=1, in_list_view=1),
-		F("system_key", "Data", "System key", read_only=1),
+		F("segment_name", "Data", "Segment", reqd=1, in_list_view=1,
+		  description="Unique within its enterprise"),
+		F("system_key", "Data", "System key", read_only=1, description="Preset shared by every tenant (read-only)"),
 		F("description", "Small Text", "Description"),
 		F("is_dynamic", "Check", "Dynamic", default="1"),
 		CB(),
-		F("enterprise", "Link", "Enterprise", "TEX Enterprise"),
+		F("enterprise", "Link", "Enterprise", "TEX Enterprise", in_standard_filter=1,
+		  description="The tenant that owns this segment; empty for presets"),
 		F("member_count", "Int", "Members", read_only=1, in_list_view=1),
 		F("last_evaluated", "Datetime", "Last evaluated", read_only=1),
 		SB("Rules"),
 		F("rules_json", "Code", "Rules", "JSON"),
-	], perms=CRM, autoname="field:segment_name", naming_rule="By fieldname"),
+	], perms=CRM, autoname="hash", naming_rule="Random"),
 
 	dt("TEX Communication", R, [
 		F("guest", "Link", "Guest", "Guest", in_list_view=1, in_standard_filter=1),

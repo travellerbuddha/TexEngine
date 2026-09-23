@@ -90,26 +90,58 @@ def list_guests(*, q: str | None = None, segment: str | None = None, vip: bool |
 	cols = ", ".join(f"g.`{f}`" for f in LIST_FIELDS)
 	sql = f"SELECT {cols} FROM `tabGuest` g WHERE {' AND '.join(where)} ORDER BY g.modified DESC"  # nosemgrep
 	rows = frappe.db.sql(sql, params, as_dict=True)
+	today = getdate(nowdate())
 	if segment:
-		rules = _segment_rules(segment)
-		today = getdate(nowdate())
-		upcoming = _upcoming_guests([r.name for r in rows], props)
-		rows = [r for r in rows if seg.matches(seg.guest_facts(r, today, r.name in upcoming), rules, today)]
+		rules = _segment_rules(_segment(segment, "crm.view", props))
+		facts = facts_for(rows, props, today)
+		rows = [r for r in rows if seg.matches(facts[r.name], rules, today)]
 	total = len(rows)
 	page = rows[start:start + limit]
+	facts = facts_for(page, props, today)
 	for r in page:
-		r["tex_lifetime_value"] = to_str(from_db(r.get("tex_lifetime_value") or 0, r.get("tex_lifetime_currency") or "EUR"))
-		r["tex_last_stay"] = str(r["tex_last_stay"]) if r.get("tex_last_stay") else None
+		_stats(r, facts[r.name], today)
 	return {"total": total, "rows": page}
 
 
-def _upcoming_guests(guests: list[str], props: set[str]) -> set[str]:
-	if not guests or not props:
-		return set()
-	return set(frappe.get_all("Reservation", filters={"guest": ("in", guests), "property": ("in", list(props)),
-	                                                  "check_in_date": (">=", nowdate()),
-	                                                  "status": ("not in", ["Cancelled", "No Show"])},
-	                          pluck="guest", distinct=True))
+def _stats(row: dict, f: dict, today) -> None:
+	"""The guest's stays and value at the viewer's hotels only (never another tenant's)."""
+	ccy = f["lifetime_currency"]
+	row["tex_stays"] = f["stays"]
+	row["tex_lifetime_currency"] = ccy
+	row["tex_lifetime_value"] = to_str(from_db(f["lifetime_value"].get(ccy, ZERO), ccy)) if ccy else "0"
+	row["tex_last_stay"] = str(today - timedelta(days=f["last_stay_days_ago"])) \
+		if f["last_stay_days_ago"] is not None else None
+
+
+def facts_for(rows: list[dict], props: set[str], today) -> dict[str, dict]:
+	"""Segment facts of each guest, from reservations and abandoned bookings at ``props``."""
+	names = [r["name"] for r in rows]
+	stays: dict[str, list] = {n: [] for n in names}
+	gave_up: dict[str, list] = {n: [] for n in names}
+	if names and props:
+		for chunk in (names[i:i + 500] for i in range(0, len(names), 500)):
+			for r in frappe.db.sql(
+				"""SELECT guest, status, check_in_date, check_out_date, children, tex_sale_at, creation, cancelled_on,
+				          tex_total_amount, amount_after_tax, tex_currency
+				   FROM `tabReservation` WHERE guest IN %(g)s AND property IN %(p)s""",
+					{"g": tuple(chunk), "p": tuple(props)}, as_dict=True):
+				if not (r.check_in_date and r.check_out_date):
+					continue
+				ccy = r.tex_currency or None
+				stays[r.guest].append(seg.StayFact(
+					r.status, getdate(r.check_in_date), getdate(r.check_out_date), int(r.children or 0),
+					getdate(r.tex_sale_at or r.creation), getdate(r.cancelled_on) if r.cancelled_on else None,
+					from_db(r.tex_total_amount or r.amount_after_tax or 0, ccy or "EUR"), ccy))
+			for a in frappe.get_all("TEX Abandoned Booking", filters={"guest": ("in", chunk),
+			                                                          "property": ("in", list(props))},
+			                        fields=["guest", "last_event_at"]):
+				gave_up[a.guest].append(a.last_event_at)
+	# the birthday fact needs the date of birth, which the guest list itself does not send
+	need = [r["name"] for r in rows if "date_of_birth" not in r]
+	dobs = dict(frappe.db.sql("SELECT name, date_of_birth FROM `tabGuest` WHERE name IN %(g)s",
+	                          {"g": tuple(need)})) if need else {}
+	return {r["name"]: seg.derive_facts({**r, "date_of_birth": r.get("date_of_birth", dobs.get(r["name"]))},
+	                                    stays[r["name"]], gave_up[r["name"]], today) for r in rows}
 
 
 def profile(guest: str) -> dict:
@@ -120,7 +152,9 @@ def profile(guest: str) -> dict:
 	                          "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points", "tex_enterprise")}
 	for k in ("date_of_birth", "tex_last_stay", "tex_consent_updated_at"):
 		d[k] = str(d[k]) if d.get(k) else None
-	d["tex_lifetime_value"] = to_str(from_db(d.get("tex_lifetime_value") or 0, d.get("tex_lifetime_currency") or "EUR"))
+	today = getdate(nowdate())
+	facts = facts_for([g.as_dict()], via, today)[guest]
+	_stats(d, facts, today)                                    # this tenant's stays only (G-26)
 	if not any(scope.has_capability("guest.export", p) for p in via):
 		d.pop("id_number", None)
 	stays = frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via))},
@@ -140,11 +174,8 @@ def profile(guest: str) -> dict:
 		c["creation"] = str(c["creation"])
 	from kamra.tex.crm import loyalty
 
-	today = getdate(nowdate())
-	facts = seg.guest_facts(g.as_dict(), today, bool(_upcoming_guests([guest], via)))
-	member_of = [s.segment_name for s in frappe.get_all("TEX Guest Segment", fields=["name", "segment_name",
-	                                                                                  "rules_json"])
-	             if s.rules_json and _safe_match(facts, s.rules_json, today)]
+	member_of = [{"name": s.name, "segment_name": s.segment_name, "system_key": s.system_key}
+	             for s in visible_segments(via) if s.rules_json and _safe_match(facts, s.rules_json, today)]
 	consent_log = frappe.get_all("TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": guest,
 	                                                         "action": "guest.consent"},
 	                             fields=["event_time", "actor", "new_value", "reason", "source"],
@@ -247,40 +278,102 @@ def refresh_recent_checkouts(days: int = 2) -> int:
 # ─── segments ────────────────────────────────────────────────────────────
 
 
-def _segment_rules(segment: str) -> dict:
-	raw = frappe.db.get_value("TEX Guest Segment", segment, "rules_json")
-	if raw is None:
+def visible_segments(props: set[str]) -> list:
+	"""Presets and the segments of the viewer's enterprises, never another tenant's."""
+	ents = sorted(_enterprises(props))
+	filters = [["system_key", "is", "set"]]
+	rows = frappe.get_all("TEX Guest Segment", filters=filters, fields=SEGMENT_FIELDS, order_by="segment_name asc")
+	if ents:
+		rows += frappe.get_all("TEX Guest Segment", filters={"enterprise": ("in", ents), "system_key": ("is", "not set")},
+		                       fields=SEGMENT_FIELDS, order_by="segment_name asc")
+	if scope.is_platform_admin():
+		rows += frappe.get_all("TEX Guest Segment", filters={"enterprise": ("is", "not set"),
+		                                                     "system_key": ("is", "not set")},
+		                       fields=SEGMENT_FIELDS, order_by="segment_name asc")
+	return rows
+
+
+SEGMENT_FIELDS = ["name", "segment_name", "system_key", "description", "enterprise", "member_count",
+                  "last_evaluated", "rules_json"]
+
+
+def _cap_props(cap: str) -> set[str]:
+	return {p for p in scope.permitted_properties() if scope.has_capability(cap, p)}
+
+
+def _segment(segment: str, cap: str, props: set[str] | None = None):
+	"""A segment the user may use with ``cap`` (a preset, or one of their enterprise's)."""
+	row = frappe.db.get_value("TEX Guest Segment", segment, SEGMENT_FIELDS, as_dict=True)
+	props = _cap_props(cap) if props is None else props
+	if not props and not scope.is_platform_admin():
+		frappe.throw(_("Not permitted: {0}.").format(cap), frappe.PermissionError)
+	if not row:
 		frappe.throw(_("Segment not found."), frappe.DoesNotExistError)
+	if row.system_key or scope.is_platform_admin():
+		return row
+	if not row.enterprise or row.enterprise not in _enterprises(props):
+		frappe.throw(_("Segment not found."), frappe.DoesNotExistError)       # another tenant's: not even its name
+	return row
+
+
+def _segment_rules(row) -> dict:
 	try:
-		return seg.validate(json.loads(raw or "{}"))
+		return seg.validate(json.loads(row.rules_json or "{}"))
 	except (seg.SegmentError, ValueError) as e:
 		frappe.throw(_("Segment rules are invalid: {0}").format(str(e)))
 
 
 def save_segment(data: dict) -> str:
-	if not any(scope.has_capability("crm.edit", p) for p in scope.permitted_properties()):
+	props = _cap_props("crm.edit")
+	if not props:
 		frappe.throw(_("Not permitted: {0}.").format("crm.edit"), frappe.PermissionError)
 	try:
-		rules = seg.validate(data.get("rules") or {})
+		rules = seg.validate(data.get("rules") or {}, strict=True)
 	except seg.SegmentError as e:
 		frappe.throw(str(e))
-	doc = frappe.get_doc("TEX Guest Segment", data["name"]) if data.get("name") else frappe.new_doc(
-		"TEX Guest Segment")
-	if doc.get("system_key") and data.get("name"):
-		frappe.throw(_("System segments cannot be edited."))
+	ents = _enterprises(props)
+	if data.get("name"):
+		row = _segment(data["name"], "crm.edit", props)
+		if row.system_key:
+			frappe.throw(_("Presets cannot be edited; save a copy instead."))
+		doc = frappe.get_doc("TEX Guest Segment", row.name)
+		old = {"segment_name": doc.segment_name, "rules": json.loads(doc.rules_json or "{}")}
+	else:
+		ent = data.get("enterprise") or (next(iter(ents)) if len(ents) == 1 else None)
+		# a platform administrator may keep a segment at platform level (seen by platform admins only)
+		if (ent or not scope.is_platform_admin()) and ent not in ents:
+			frappe.throw(_("Choose the enterprise this segment belongs to."))
+		doc = frappe.new_doc("TEX Guest Segment")
+		doc.enterprise = ent
+		old = None
 	doc.segment_name = (data.get("segment_name") or "").strip()[:140] or frappe.throw(_("Name is required."))
 	doc.description = (data.get("description") or "")[:500]
 	doc.rules_json = json.dumps(rules, sort_keys=True)
 	doc.is_dynamic = 1
 	doc.save(ignore_permissions=True)
+	audit("guest_segment.save", reference_doctype="TEX Guest Segment", reference_name=doc.name, old=old,
+	      new={"segment_name": doc.segment_name, "enterprise": doc.enterprise, "rules": rules})
 	return doc.name
 
 
+def delete_segment(segment: str) -> None:
+	row = _segment(segment, "crm.edit")
+	if row.system_key:
+		frappe.throw(_("Presets cannot be deleted."))
+	frappe.delete_doc("TEX Guest Segment", row.name, ignore_permissions=True)
+	audit("guest_segment.delete", reference_doctype="TEX Guest Segment", reference_name=row.name,
+	      old={"segment_name": row.segment_name, "enterprise": row.enterprise})
+
+
 def evaluate_segment(segment: str, *, property: str | None = None) -> dict:
-	res = list_guests(segment=segment, property=property, limit=0)
-	frappe.db.set_value("TEX Guest Segment", segment, {"member_count": res["total"],
-	                                                  "last_evaluated": now_datetime()}, update_modified=False)
-	return {"segment": segment, "members": res["total"]}
+	"""How many of the viewer's guests are in it now. A preset's count depends on who
+	looks, so only a tenant's own segment keeps its count."""
+	row = _segment(segment, "crm.view")
+	res = list_guests(segment=row.name, property=property, limit=0)
+	if not row.system_key and not property:
+		frappe.db.set_value("TEX Guest Segment", row.name, {"member_count": res["total"],
+		                                                   "last_evaluated": now_datetime()}, update_modified=False)
+	return {"segment": row.name, "members": res["total"]}
 
 
 def export_segment(segment: str, *, channel: str, property: str | None = None) -> list[dict]:
@@ -288,27 +381,31 @@ def export_segment(segment: str, *, channel: str, property: str | None = None) -
 	props = [property] if property else sorted(scope.permitted_properties())
 	if not props or not all(scope.has_capability("guest.export", p) for p in props):
 		frappe.throw(_("Not permitted: {0}.").format("guest.export"), frappe.PermissionError)
+	row = _segment(segment, "guest.export", set(props))
 	field = {"Email": "tex_consent_email", "SMS": "tex_consent_sms", "WhatsApp": "tex_consent_whatsapp"}.get(channel)
 	if not field:
 		frappe.throw(_("Unknown channel."))
-	res = list_guests(segment=segment, property=property, consent=field, limit=100000)
+	res = list_guests(segment=row.name, property=property, consent=field, limit=100000)
 	rows = [{"guest": r["name"], "first_name": r["first_name"], "last_name": r["last_name"],
 	         "email": r["email"] if channel == "Email" else None,
 	         "phone": r["phone"] if channel != "Email" else None, "language": r["tex_language"],
 	         "country": r["tex_country"]} for r in res["rows"] if not r.get("blacklisted")]
-	audit("guest.export", reference_doctype="TEX Guest Segment", reference_name=segment, property=property,
+	audit("guest.export", reference_doctype="TEX Guest Segment", reference_name=row.name, property=property,
 	      new={"channel": channel, "rows": len(rows)})
 	return rows
 
 
 def ensure_system_segments() -> None:
+	"""The presets every tenant sees; kept equal to ``segments.SYSTEM_SEGMENTS``."""
 	for key, (label, rules) in seg.SYSTEM_SEGMENTS.items():
-		if frappe.db.exists("TEX Guest Segment", {"system_key": key}):
-			continue
-		if frappe.db.exists("TEX Guest Segment", label):
+		payload = json.dumps(seg.validate(rules, strict=True), sort_keys=True)
+		name = frappe.db.get_value("TEX Guest Segment", {"system_key": key})
+		if name:
+			frappe.db.set_value("TEX Guest Segment", name, {"segment_name": label, "rules_json": payload,
+			                                                "enterprise": None}, update_modified=False)
 			continue
 		frappe.get_doc({"doctype": "TEX Guest Segment", "segment_name": label, "system_key": key, "is_dynamic": 1,
-		                "rules_json": json.dumps(rules, sort_keys=True)}).insert(ignore_permissions=True)
+		                "rules_json": payload}).insert(ignore_permissions=True)
 
 
 # ─── abandoned bookings (R-38) ───────────────────────────────────────────

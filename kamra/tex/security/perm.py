@@ -34,7 +34,10 @@ VIA_PARENT = {
 	"TEX Contract Version": ("contract", "TEX Contract"),
 	"TEX Loyalty Ledger": ("program", "TEX Loyalty Program"),
 }
-SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, "Guest")
+# belongs to an enterprise; presets (``system_key``) are shared by every tenant
+ENTERPRISE_DOCTYPES = ("TEX Guest Segment",)
+SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, "Guest",
+                   *ENTERPRISE_DOCTYPES)
 
 
 def _sql_list(values) -> str:
@@ -77,6 +80,9 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	if doctype in VIA_PARENT:
 		field, parent = VIA_PARENT[doctype]
 		return f"{t}.`{field}` in (select name from `tab{parent}` where {_owner_condition(parent, props)})"
+	if doctype in ENTERPRISE_DOCTYPES:
+		return (f"(ifnull({t}.`system_key`, '') != '' or "
+		        f"{t}.`enterprise` in ({_sql_list(_enterprises(props))}))")
 	if doctype == "Guest":
 		ents = _enterprises(props)
 		return (f"({t}.name in (select r.guest from `tabReservation` r where r.property in ({_sql_list(props)}))"
@@ -133,6 +139,9 @@ def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
 		return _guest_visible(doc, user)
 	if doc.doctype == "Property" and doc.is_new():
 		return True
+	if doc.doctype in ENTERPRISE_DOCTYPES:
+		return bool(doc.get("system_key")) or (bool(doc.get("enterprise"))
+		                                        and doc.enterprise in _enterprises(scope.permitted_properties(user)))
 	props, platform_level = _doc_properties(doc)
 	if platform_level:
 		return False

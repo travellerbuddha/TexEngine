@@ -580,3 +580,42 @@ accepted although TEX cannot serve a path on a hotel's own web server.
 **Consequences.**
 - A site without a verified host behaves exactly as before.
 - Staff log in on the platform host; a hotel's booking host only serves its engine.
+
+## ADR-036 Guest segments are per tenant; facts come from the viewer's hotels
+**Context.** R-37 names segments TEX could not express: families, last-minute bookers,
+cancellations, abandoned bookings, birthdays (G-23). Segment facts were global per guest (a
+guest's stays at another enterprise's hotels counted), money was compared without a
+currency, values were not typed, segments had one global namespace and any user could
+list, count or edit another tenant's segment (G-26).
+**Decision.**
+- *Facts* (`segments.derive_facts`, pure) are derived from the reservations and abandoned
+  bookings at the hotels the viewer may see (`crm.view`), never from other tenants' data.
+  The guest list and profile show those same in-scope stays and value.
+- New facts:
+  - `has_children`;
+  - `last_lead_days`: arrival minus sale day of the latest sale;
+  - `cancellations` and `last_cancel_days_ago`;
+  - `abandoned_days_ago`;
+  - `days_to_birthday`, where 29 February counts on 28 February in other years.
+
+  "Upcoming" means Confirmed, Pending Payment, Held, Requested or Checked In; an inquiry is
+  not a stay.
+- *Money* is per currency. A lifetime-value condition names its currency and is compared
+  with the guest's value in that currency. A legacy condition without one matches nobody
+  until edited (p16 reports it).
+- *Typing*: saving validates every value (integers, decimals, yes/no, text, 3-letter
+  currency). An unknown fact never equals anything (`ne` is true).
+- *Presets* (`SYSTEM_SEGMENTS`, seeded by install and p16, kept in sync by key) are shared
+  and read-only: Repeat, VIP, Email opt-in, No stay in 12 months, Families, Last-minute,
+  Cancelled in 90 days, Abandoned in 30 days, Birthday in 30 days. Their counts depend on
+  who looks, so none is stored.
+- *Tenancy*:
+  - A custom segment belongs to an enterprise; its name is unique there.
+  - Listing, counting, exporting, editing and deleting check it.
+  - Another tenant's segment is "not found".
+  - Desk/REST follow the same rule (`perm.ENTERPRISE_DOCTYPES`).
+  - Counting needs `crm.view`; saves and deletes are audited.
+  - A platform administrator may keep a segment at platform level.
+**Consequences.**
+- Segment evaluation reads the tenant's reservations per guest list: indexed on
+  (guest, property). Very large lists will need a stored fact table later.

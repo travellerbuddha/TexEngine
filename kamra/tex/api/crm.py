@@ -39,22 +39,36 @@ def log_communication(guest: str, channel: str, direction: str = "Outbound", sub
 
 @frappe.whitelist()
 def segments():
+	"""Presets and this tenant's segments, the rule vocabulary, and the currencies and
+	enterprises a new segment can use (G-23)."""
 	from kamra.tex.crm import segments as seg
 	from kamra.tex.security import scope
 
 	scope.require("crm.view", None)
-
-	rows = frappe.get_all("TEX Guest Segment", fields=["name", "segment_name", "system_key", "description",
-	                                                    "member_count", "last_evaluated", "rules_json"],
-	                      order_by="segment_name asc")
+	props = {p for p in scope.permitted_properties() if scope.has_capability("crm.view", p)}
+	rows = crm.visible_segments(props)
 	for r in rows:
 		r["last_evaluated"] = str(r["last_evaluated"]) if r["last_evaluated"] else None
-	return {"segments": rows, "fields": seg.FIELDS, "ops": {k: sorted(v) for k, v in seg.OPS.items()}}
+		if r.get("system_key"):
+			r["member_count"] = None                       # a preset's count depends on who looks
+	ents = sorted(crm._enterprises({p for p in props if scope.has_capability("crm.edit", p)}))
+	currencies = sorted({c for c in frappe.get_all("Property", filters={"name": ("in", list(props) or [""])},
+	                                               pluck="currency") if c} | {"EUR"})
+	return {"segments": rows, "fields": seg.FIELDS, "ops": {k: sorted(v) for k, v in seg.OPS.items()},
+	        "currencies": currencies,
+	        "enterprises": [{"name": e, "label": frappe.db.get_value("TEX Enterprise", e, "enterprise_name") or e}
+	                        for e in ents]}
 
 
 @frappe.whitelist(methods=["POST"])
 def save_segment(data):
 	return {"name": crm.save_segment(parse(data, {}) or {})}
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_segment(segment: str):
+	crm.delete_segment(segment)
+	return {"ok": True}
 
 
 @frappe.whitelist(methods=["POST"])

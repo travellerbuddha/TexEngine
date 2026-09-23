@@ -225,7 +225,7 @@ _TEX_SCOPED = (
 	"TEX Tax Policy", "TEX Extra Inventory Day", "TEX Extra Allocation",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
 	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Reservation Revision",
-	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation",
+	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation", "TEX Guest Segment",
 )
 permission_query_conditions = {dt: "kamra.tex.security.perm.query_conditions" for dt in _TEX_SCOPED}
 permission_query_conditions["Property"] = "kamra.tex.security.perm.property_query_conditions"

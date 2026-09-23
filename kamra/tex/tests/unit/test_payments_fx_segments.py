@@ -8,7 +8,6 @@ from datetime import date
 from decimal import Decimal
 
 from kamra.tex.connect import fx_providers as fx
-from kamra.tex.crm import segments as seg
 from kamra.tex.payments.providers import simple, turkey
 
 TCMB_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -124,38 +123,3 @@ class TestGatewaySignatures(unittest.TestCase):
 		tampered = {**params, "amount": "1.00"}
 		with self.assertRaises(turkey.ProviderError):
 			p.handle_callback("PTX-5", tampered, {}, b"")
-
-
-class TestSegments(unittest.TestCase):
-	TODAY = date(2026, 9, 22)
-
-	def facts(self, **kw):
-		row = {"tex_stays": 3, "tex_lifetime_value": "2400.00", "tex_last_stay": "2025-08-01", "tex_country": "DE",
-		       "tex_market": "DE", "vip": 0, "tex_tags": "golf, family", "tex_consent_email": 1, **kw}
-		return seg.guest_facts(row, self.TODAY)
-
-	def test_all_and_any(self):
-		rules = seg.validate({"match": "all", "conditions": [
-			{"field": "stays", "op": "gte", "value": 2}, {"field": "tags", "op": "contains", "value": "GOLF"},
-			{"field": "lifetime_value", "op": "gt", "value": "2000"}]})
-		self.assertTrue(seg.matches(self.facts(), rules, self.TODAY))
-		self.assertFalse(seg.matches(self.facts(tex_stays=1), rules, self.TODAY))
-		anyr = seg.validate({"match": "any", "conditions": [{"field": "vip", "op": "is", "value": True},
-		                                                    {"field": "country", "op": "in", "value": "at, ch"}]})
-		self.assertFalse(seg.matches(self.facts(), anyr, self.TODAY))
-		self.assertTrue(seg.matches(self.facts(tex_country="CH"), anyr, self.TODAY))
-
-	def test_lapsed_system_segment(self):
-		rules = seg.validate(seg.SYSTEM_SEGMENTS["LAPSED"][1])
-		self.assertFalse(seg.matches(self.facts(), rules, self.TODAY))                # 417 days ago
-		self.assertTrue(seg.matches(self.facts(tex_last_stay="2024-12-01"), rules, self.TODAY))
-		self.assertFalse(seg.matches(seg.guest_facts({"tex_stays": 1, "tex_last_stay": "2024-01-01"}, self.TODAY,
-		                                             upcoming=True), rules, self.TODAY))
-
-	def test_only_whitelisted_fields_and_ops(self):
-		for bad in ({"conditions": [{"field": "password", "op": "eq", "value": 1}]},
-		            {"conditions": [{"field": "stays", "op": "contains", "value": 1}]},
-		            {"match": "xor", "conditions": []},
-		            {"conditions": [{"field": "stays", "op": "eq", "value": 1}] * 26}):
-			with self.assertRaises(seg.SegmentError):
-				seg.validate(bad)

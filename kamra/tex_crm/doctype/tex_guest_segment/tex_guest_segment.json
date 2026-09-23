@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 22:00:00.000000",
+ "creation": "2026-09-23 23:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -22,14 +22,15 @@
    "fieldtype": "Data",
    "label": "Segment",
    "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Unique within its enterprise"
   },
   {
    "fieldname": "system_key",
    "fieldtype": "Data",
    "label": "System key",
-   "read_only": 1
+   "read_only": 1,
+   "description": "Preset shared by every tenant (read-only)"
   },
   {
    "fieldname": "description",
@@ -50,7 +51,9 @@
    "fieldname": "enterprise",
    "fieldtype": "Link",
    "label": "Enterprise",
-   "options": "TEX Enterprise"
+   "options": "TEX Enterprise",
+   "in_standard_filter": 1,
+   "description": "The tenant that owns this segment; empty for presets"
   },
   {
    "fieldname": "member_count",
@@ -78,7 +81,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 22:00:00.000000",
+ "modified": "2026-09-23 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Guest Segment",
@@ -106,7 +109,7 @@
  "sort_order": "DESC",
  "states": [],
  "row_format": "Dynamic",
- "autoname": "field:segment_name",
- "naming_rule": "By fieldname",
+ "autoname": "hash",
+ "naming_rule": "Random",
  "track_changes": 1
 }

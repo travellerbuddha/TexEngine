@@ -162,6 +162,8 @@ def ensure_indexes() -> None:
 		("TEX Extra Allocation", ["reservation"], "tex_xalloc_res"),
 		("TEX Extra Allocation", ["property", "extra_code", "service_date"], "tex_xalloc_day"),
 		("TEX Extra Inventory Day", ["property", "extra_code", "service_date"], "tex_xday_lookup"),
+		("Reservation", ["guest", "property"], "tex_res_guest_prop"),              # CRM facts (G-23)
+		("TEX Abandoned Booking", ["guest", "property"], "tex_abandoned_guest"),
 	):
 		try:
 			frappe.db.add_index(dt, fields, name)
@@ -175,5 +177,8 @@ def after_install() -> None:
 	ensure_masters()
 	ensure_enterprise()
 	ensure_indexes()
+	from kamra.tex.crm.service import ensure_system_segments
+
+	ensure_system_segments()                     # the CRM presets (G-23)
 	frappe.db.set_single_value("TEX Settings", "strict_tenancy", 1)
 	frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 0)

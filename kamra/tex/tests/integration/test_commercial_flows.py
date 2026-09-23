@@ -279,7 +279,7 @@ class TestCrmLoyaltyReports(TexTestCase):
 		self.assertEqual([r["email"] for r in rows], ["lena@example.com"])
 		prof = crm_api.guest(name=guest)
 		self.assertEqual(len(prof["consent_history"]), 1)
-		self.assertIn("DE guests", prof["segments"])
+		self.assertIn("DE guests", [s["segment_name"] for s in prof["segments"]])
 		with self.assertRaises(frappe.ValidationError):
 			crm.save_segment({"segment_name": "bad", "rules": {"conditions": [{"field": "password", "op": "eq"}]}})
 
