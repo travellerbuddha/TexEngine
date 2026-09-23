@@ -40,7 +40,7 @@ export const NAV: NavItem[] = [
   { id: "crm", to: "/tex/crm", label: "core.nav.crm", icon: Users, anyOf: ["crm.view"], group: "guests", keywords: "guests segments loyalty abandoned" },
   { id: "payments", to: "/tex/payments", label: "core.nav.payments", icon: CreditCard, anyOf: ["payment.view"], group: "guests", keywords: "links refunds transactions" },
   { id: "reports", to: "/tex/reports", label: "core.nav.reports", icon: BarChart3, anyOf: ["report.view"], group: "insights", keywords: "production pace" },
-  { id: "connect", to: "/tex/connect", label: "core.nav.connect", icon: PlugZap, anyOf: ["connect.admin"], group: "system", keywords: "integrations pms channel manager" },
+  { id: "connect", to: "/tex/connect", label: "core.nav.connect", icon: PlugZap, anyOf: ["connect.admin", "channel.view"], group: "system", keywords: "integrations pms channel manager distribution ari ota" },
   { id: "settings", to: "/tex/settings", label: "core.nav.settings", icon: Settings, anyOf: ["settings.admin", "user.admin"], group: "system", keywords: "users access audit" },
 ]
 
