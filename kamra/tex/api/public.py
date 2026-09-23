@@ -21,7 +21,7 @@ from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import versions
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import modification, quoting
+from kamra.tex.services import content, modification, quoting
 
 SEARCH_LIMIT = {"limit": 60, "seconds": 60}
 WRITE_LIMIT = {"limit": 20, "seconds": 600}
@@ -93,6 +93,7 @@ def site(slug: str | None = None, domain: str | None = None):
 	if origins:
 		frappe.local.allow_cors = origins
 	props = _site_properties(s)
+	loc = content.Localizer(content.guest_language())
 	hotels = []
 	for p in props:
 		d = frappe.db.get_value("Property", p, ["property_name", "city", "star_category", "address_line", "phone",
@@ -101,8 +102,8 @@ def site(slug: str | None = None, domain: str | None = None):
 		                        as_dict=True)
 		gallery = frappe.get_all("Property Photo", filters={"parent": p, "parenttype": "Property"},
 		                         fields=["url", "caption"], order_by="idx asc", limit=12)
-		hotels.append({"name": p, **{k: (str(v) if k.endswith("_time") and v else v) for k, v in d.items()},
-		               "gallery": gallery})
+		hotels.append(loc.hotel(p, {"name": p, **{k: (str(v) if k.endswith("_time") and v else v)
+		                                           for k, v in d.items()}, "gallery": gallery}))
 	texts = json.loads(s.custom_texts) if s.custom_texts else {}
 	return {
 		"slug": s.site_slug, "name": s.site_name, "hotels": hotels, "group": bool(s.hotel_group and not s.property),
@@ -118,7 +119,7 @@ def site(slug: str | None = None, domain: str | None = None):
 		"texts": texts, "policies": s.policies, "self_service": bool(s.self_service_enabled),
 		"analytics": {"ga4": s.ga4_measurement_id, "gtm": s.gtm_container_id, "meta_pixel": s.meta_pixel_id,
 		              "consent_banner": bool(s.consent_banner)},
-		"extras": _public_extras(props),
+		"extras": _strip_names({p: loc.extras(p, rows) for p, rows in _public_extras(props).items()}),
 	}
 
 
@@ -126,12 +127,19 @@ def _public_extras(props: list[str]) -> dict:
 	out = {}
 	for p in props:
 		out[p] = frappe.get_all("TEX Extra", filters={"property": p, "disabled": 0, "bookable_online": 1},
-		                        fields=["extra_code", "extra_name", "category", "description", "image", "pricing_mode",
+		                        fields=["name", "extra_code", "extra_name", "category", "description", "image", "pricing_mode",
 		                                "currency", "amount", "max_quantity", "is_mandatory", "service_from",
 		                                "service_to"], order_by="category asc, extra_name asc")
 		for e in out[p]:
 			e["amount"] = to_str(from_db(e["amount"], e["currency"]))
 	return out
+
+
+def _strip_names(rows: dict) -> dict:
+	for extras in rows.values():
+		for e in extras:
+			e.pop("name", None)   # internal record id, used only to find translations
+	return rows
 
 
 def _market(site, market: str | None, country: str | None) -> str:
@@ -172,6 +180,7 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 			o.pop("contract", None)
 			o.pop("version", None)
 	res["market"] = mkt
+	content.Localizer(content.guest_language()).search(res)
 	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out, "rooms": parse(rooms, []),
 	                                  "market": mkt})
 	return res
@@ -192,6 +201,8 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 		frappe.throw(_("This extra cannot be booked online."))
 	out = quoting.create_quote(offer_key, extras=requested,
 	                           promo_codes=[promo_code] if promo_code else None, session_id=session_id)
+	if out.get("quote"):
+		content.Localizer(content.guest_language()).quote(offer["property"], out["quote"])
 	if out.get("ok"):
 		_track(s, session_id, "quote", {"quote": out["quote_id"], "total": out["quote"]["totals"]["total"],
 		                                "currency": out["quote"]["currency"]})
@@ -511,12 +522,14 @@ def _self_service_allowed(b) -> bool:
 
 def _guest_booking(b) -> dict:
 	summary = booking_svc.booking_summary(b.name)
+	loc = content.Localizer(content.guest_language() or content.guest_language(b.language))
 	rooms = []
 	for r in summary["rooms"]:
 		res = frappe.get_doc("Reservation", r["reservation"])
-		snap = json.loads(res.tex_pricing_snapshot or "{}")
+		snap = loc.quote(b.property, json.loads(res.tex_pricing_snapshot or "{}")) or {}
 		penalty, _basis = booking_svc.cancellation_penalty(res) if res.status not in ("Cancelled",) else (D(0), {})
-		rooms.append({**r, "room_type_name": frappe.db.get_value("Room Type", res.room_type, "room_type_name"),
+		rooms.append({**r, "room_type_name": loc.room_type_name(
+			b.property, res.room_type, frappe.db.get_value("Room Type", res.room_type, "room_type_name")),
 		              "board": res.tex_board, "child_ages": json.loads(res.tex_child_ages or "[]"),
 		              "rate_plan": (snap.get("rate_plan") or {}).get("name"),
 		              "refundable": (snap.get("rate_plan") or {}).get("refundable", True),

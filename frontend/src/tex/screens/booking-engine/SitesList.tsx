@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { ExternalLink, Globe, Plus } from "lucide-react"
+import { ExternalLink, Globe, Languages, Plus } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { dateTime } from "../../lib/format"
@@ -28,9 +28,14 @@ export default function SitesList() {
         title={t("core.nav.booking_engine")}
         subtitle={t("be.list.subtitle")}
         actions={
-          <Button icon={<Plus className="size-4" aria-hidden />} onClick={() => navigate("/tex/booking-engine/new")}>
-            {t("be.new")}
-          </Button>
+          <>
+            <Button variant="secondary" icon={<Languages className="size-4" aria-hidden />} onClick={() => navigate("/tex/booking-engine/content")}>
+              {t("be.content.title")}
+            </Button>
+            <Button icon={<Plus className="size-4" aria-hidden />} onClick={() => navigate("/tex/booking-engine/new")}>
+              {t("be.new")}
+            </Button>
+          </>
         }
       />
       <Card>
