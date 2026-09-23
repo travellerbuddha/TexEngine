@@ -33,7 +33,7 @@ several critical defects with probes and scratch tests that the suite does not c
 **CI.** `.github/workflows/ci.yml` runs all of the above including Playwright. It has never
 run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
-**Paused (2026-09-23, owner request).** G-30/G-31 (occupancy precedence v2) and G-45 (self-service money flows) were in progress; their snapshots and designs are in [`wip/`](wip/README.md), not applied.
+**Resumed (2026-09-23).** G-30/G-31 (occupancy precedence v2) and G-45 (self-service money flows) are being finished on their own branches (snapshots and designs in [`wip/`](wip/README.md) until merged); G-50 and G-83 are in progress. Root `SECURITY.md` rewritten for TEX (security contact still an owner input).
 
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
