@@ -84,6 +84,11 @@ class TestProgramRules(LoyaltyCase):
 		             lambda: loyalty_api.save_program({**CLUB, "property": fx.PROPERTY, "program_name": "Mine"})):
 			with self.assertRaises((frappe.DoesNotExistError, frappe.PermissionError)):
 				call()
+		frappe.set_user(self.rm)  # nosemgrep: frappe-setuser -- its editor deletes it (no members yet)
+		loyalty_api.delete_program(name)
+		self.assertFalse(frappe.db.exists("TEX Loyalty Program", name))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "loyalty.program_delete",
+		                                                     "reference_name": name}))
 
 	def test_a_program_with_points_neither_moves_nor_disappears(self):
 		name = self.create()

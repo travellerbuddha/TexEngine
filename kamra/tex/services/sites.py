@@ -196,8 +196,10 @@ def verify_domain(site_name: str, domain: str) -> dict:
 	if ok:
 		audit("booking_site.domain_verified", reference_doctype="TEX Booking Site", reference_name=site.name,
 		      property=site.property, new={"domain": row.domain})
-	return {"domain": row.domain, "verified": bool(row.verified), "record": record, "expected": row.verification_token,
-	        "found": values[:5]}
+	# ``present``: this check found the record; ``verified`` is the domain's state, which a
+	# missing record changes only after UNVERIFY_AFTER daily checks
+	return {"domain": row.domain, "verified": bool(row.verified), "present": ok, "record": record,
+	        "expected": row.verification_token, "found": values[:5]}
 
 
 def recheck_domains() -> list[dict]:

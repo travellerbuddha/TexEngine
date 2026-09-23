@@ -113,6 +113,14 @@ def ari_source_changed(doc, method=None):
 	                reason=doc.doctype.removeprefix("TEX ").lower())
 
 
+def mapping_changed(doc, method=None):
+	"""A channel mapping was saved: its own horizon is compared again — a disabled one sends
+	its close-out, so the channel stops selling what TEX no longer updates (G-69)."""
+	from kamra.tex.distribution import repository as dist
+
+	dist.queue_mapping(doc)
+
+
 def contract_version_changed(doc, method=None):
 	"""A version was published, withdrawn or went live: prices may have changed (G-69)."""
 	before = None if doc.flags.get("in_insert") else doc.get_doc_before_save()

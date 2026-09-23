@@ -108,6 +108,8 @@ def build_days(mapping, start: date, end: date) -> list[AriDay]:
 	days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
 	if not days:
 		return []
+	if not m.enabled:
+		return [closed_day(m, d) for d in days]
 	now = now_datetime()
 	contract, version = _contract_version(m, now)
 	pdays, allot = avail.pool_days(m.property, m.room_type, days)
@@ -134,6 +136,23 @@ def build_days(mapping, start: date, end: date) -> list[AriDay]:
 		out.append(AriDay(p.day, max(0, a.available), closed, bool(e and e.cta), bool(e and e.ctd),
 		                  e.min_los if e else None, e.max_los if e else None, tuple(rates), m.sell_currency))
 	return out
+
+
+def closed_day(m, day: date) -> AriDay:
+	"""What a disabled mapping sends: nothing left to sell (the close-out, G-69)."""
+	return AriDay(day, 0, True, currency=m.sell_currency)
+
+
+def closed_out(m) -> bool:
+	"""Has the channel accepted the close-out of every day TEX ever sent it for this mapping?"""
+	return all(fp == closed_day(m, d).fingerprint() for d, fp in pushed_state(m.name, date.min, date.max).items())
+
+
+def queue_mapping(m, reason: str = "mapping") -> None:
+	"""A mapping was created, changed, enabled or disabled: compare its whole horizon again."""
+	if frappe.db.get_value("TEX Integration Connection", m.connection, "enabled"):
+		lo, hi = _horizon(m)
+		_queue(m, lo, hi, reason)
 
 
 def _horizon(m) -> tuple[date, date]:

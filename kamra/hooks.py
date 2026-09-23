@@ -273,9 +273,10 @@ doc_events.setdefault("Guest", {})["before_insert"] = "kamra.tex.security.perm.s
 # a room type's tax % no longer prices a TEX hotel once its tax policy began (G-20): say so
 doc_events.setdefault("Room Type", {})["validate"] = "kamra.tex.hooks.room_type_validate"
 # what channels may sell changed: queue an ARI sync (G-69, ADR-039)
-for _dt in ("TEX Inventory Day", "TEX ARI Restriction", "TEX Allotment", "TEX Channel Mapping"):
+for _dt in ("TEX Inventory Day", "TEX ARI Restriction", "TEX Allotment"):
 	doc_events.setdefault(_dt, {}).update({"on_update": "kamra.tex.hooks.ari_source_changed",
 	                                       "on_trash": "kamra.tex.hooks.ari_source_changed"})
+doc_events.setdefault("TEX Channel Mapping", {})["on_update"] = "kamra.tex.hooks.mapping_changed"
 doc_events.setdefault("TEX Contract Version", {})["on_update"] = "kamra.tex.hooks.contract_version_changed"
 
 # Scheduled Tasks

@@ -82,6 +82,10 @@ class TestCustomDomains(DomainCase):
 		doc.save(ignore_permissions=True)
 		row = frappe.get_doc("TEX Booking Site", SLUG).domains[0]
 		self.assertEqual((row.verified, row.check_failures, bool(row.verified_at)), (1, 0, True))
+		self.assertTrue(out["present"])
+		with mock.patch.object(sites, "txt_records", return_value=["other"]):      # the record was removed
+			again = sites.verify_domain(SLUG, HOST)
+		self.assertEqual((again["verified"], again["present"]), (True, False))    # still verified, but not found
 
 	def test_one_site_holds_a_verified_host(self):
 		self.add(SLUG, HOST)

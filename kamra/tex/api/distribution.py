@@ -131,9 +131,19 @@ def save_mapping(data):
 
 @frappe.whitelist(methods=["POST"])
 def delete_mapping(name: str):
+	"""Only a disabled mapping whose close-out the channel accepted: otherwise the channel
+	would keep selling the last availability TEX sent for it."""
 	doc = frappe.get_doc("TEX Channel Mapping", name)
 	_conn(doc.connection, "channel.manage")
+	if doc.enabled:
+		frappe.throw(_("Disable the mapping first: TEX then closes this room and rate on the channel."))
+	if not dist.closed_out(doc):
+		frappe.throw(_("The channel has not accepted the close-out yet. Send it (Send now) and delete the "
+		               "mapping once it is accepted."))
+	# its pushed-day state and its ARI jobs mean nothing without it (the audit keeps the record)
 	frappe.db.delete("TEX Channel ARI Day", {"mapping": name})
+	frappe.db.delete("TEX Integration Outbox", {"kind": "ARI", "reference_doctype": "TEX Channel Mapping",
+	                                            "reference_name": name})
 	frappe.delete_doc("TEX Channel Mapping", name, ignore_permissions=True)
 	audit("channel.mapping_delete", reference_doctype="TEX Channel Mapping", reference_name=name,
 	      property=doc.property, old={"room": doc.external_room_code, "rate": doc.external_rate_code})

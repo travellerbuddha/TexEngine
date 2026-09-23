@@ -143,6 +143,10 @@ class TestSegmentTenancy(SegmentCase):
 			frappe.get_doc("TEX Guest Segment", name).check_permission("read")
 		theirs = crm_api.save_segment({"segment_name": "Golfers", "rules": {"conditions": []}})["name"]
 		self.assertEqual(frappe.db.get_value("TEX Guest Segment", theirs, "enterprise"), self.other_ent)
+		frappe.set_user(self.here)  # nosemgrep: frappe-setuser -- its owner deletes it
+		crm_api.delete_segment(name)
+		self.assertFalse(frappe.db.exists("TEX Guest Segment", name))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "guest_segment.delete", "reference_name": name}))
 
 	def test_presets_are_shared_read_only_and_keep_no_tenant_count(self):
 		preset = frappe.db.get_value("TEX Guest Segment", {"system_key": "FAMILY"})

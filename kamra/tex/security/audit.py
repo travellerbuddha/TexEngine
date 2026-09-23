@@ -63,6 +63,7 @@ def audit(action: str, *, reference_doctype: str | None = None, reference_name: 
 		"request_id": getattr(frappe.local, "request_id", None) or frappe.flags.get("request_id"),
 	})
 	doc.flags.ignore_permissions = True
+	doc.flags.ignore_links = True          # history may name a record that was just deleted
 	doc.insert(ignore_permissions=True)
 	return doc.name
 

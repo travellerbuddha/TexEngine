@@ -306,6 +306,27 @@ class TestReconcileAndTenancy(DistributionCase):
 		self.assertNotIn(self.mapping.name, frappe.get_list("TEX Channel Mapping", pluck="name"))
 		self.assertEqual(dist_api.overview(OTHER)["connections"], [])
 
+	def test_a_mapping_is_closed_out_before_it_goes(self):
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		self.mapping.db_set("horizon_days", 3)
+		dist.mark_dirty(fx.PROPERTY, [self.std])
+		dist.deliver_ari()
+		self.assertEqual(frappe.db.count("TEX Channel ARI Day", {"mapping": self.mapping.name}), 3)
+		with self.assertRaisesRegex(frappe.ValidationError, "Disable"):             # still selling
+			dist_api.delete_mapping(self.mapping.name)
+		dist_api.save_mapping({"name": self.mapping.name, "connection": self.conn.name, "enabled": 0})
+		with self.assertRaisesRegex(frappe.ValidationError, "close-out"):           # not sent yet
+			dist_api.delete_mapping(self.mapping.name)
+		self.assertEqual(dist.deliver_ari()["pushed"], 1)
+		m = frappe.get_doc("TEX Channel Mapping", self.mapping.name)
+		self.assertTrue(all(fp == dist.closed_day(m, d).fingerprint()                # nothing left on sale
+		                    for d, fp in dist.pushed_state(m.name, getdate(), getdate() + timedelta(days=2)).items()))
+		dist_api.delete_mapping(self.mapping.name)
+		self.assertFalse(frappe.db.exists("TEX Channel Mapping", self.mapping.name))
+		self.assertFalse(frappe.db.exists("TEX Channel ARI Day", {"mapping": self.mapping.name}))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.mapping_delete",
+		                                                     "reference_name": self.mapping.name}))
+
 	def test_connections_are_checked(self):
 		look = dist_api.lookups(self.conn.name)
 		self.assertTrue("AI" in look["boards"] and look["adapter"]["sandbox"] and look["room_types"])
