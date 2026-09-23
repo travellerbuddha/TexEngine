@@ -690,9 +690,10 @@ class TestContractHeaderLockReview(TexTestCase):
 
 		broken = fx.create_contract(self.f, code="LOCKR-BROKEN")
 		b2 = schedule(broken["contract"], broken["version"])
-		# legacy data: two contracts of the hotel share a code, so this header no longer saves
-		frappe.db.set_value("TEX Contract", broken["contract"], "contract_code", "LOCKR")
 		v2 = schedule(self.name, self.c["version"], {"channels": ["OTA"], "priority": 4})
+		# legacy data: two contracts of the hotel share a code, so this header no longer saves
+		fx.create_contract(self.f, code="LOCKR-TWIN", publish=False)
+		frappe.db.set_value("TEX Contract", broken["contract"], "contract_code", "LOCKR-TWIN")
 		contracts.roll_version_statuses()                               # does not raise
 		header = frappe.get_doc("TEX Contract", self.name)
 		self.assertEqual((header.active_version, header.priority, [c.sales_channel for c in header.channels]),
