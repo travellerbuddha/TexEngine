@@ -221,3 +221,118 @@ class TestInfantPrecedence(PolicyCase):
 			contracts.publish(c["version"])
 		codes = [i["code"] for i in contracts.validate_version(c["version"])["issues"] if i["level"] == "ERROR"]
 		self.assertEqual(codes, ["OCC_AMBIGUOUS"])
+
+
+class TestPolicyChecks(PolicyCase):
+	"""A pricing policy reaches every contract in its scope, so the policy is checked on its
+	own: rows that could never be published are refused on save, and rule sets that tie on
+	activation (review of ADR-042)."""
+
+	def test_rules_that_can_never_publish_are_refused(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "adult rule cannot name an age band"):
+			policy("PP adult band", market="DE", live=False,
+			       rules=[{"target": "ADULT", "age_band": "INF", "op": "MULTIPLY", "value": 0.5}])
+		with self.assertRaisesRegex(frappe.ValidationError, "needs a combination"):
+			policy("PP any combination", market="DE", live=False,
+			       rules=[{"target": "COMBINATION", "op": "MULTIPLY", "value": 0.9}])
+		# rules that tie are refused when the policy goes live (a draft may be saved half-done)
+		twins = policy("PP twins", market="DE", live=False,
+		               rules=[child("CHB", "PERCENT_OF", 30), child("CHB", "PERCENT_OF", 35)])
+		with self.assertRaisesRegex(frappe.ValidationError, "same scope"):
+			revisions.activate(POLICY, twins)
+		tie = [{"target": "CHILD", "position": 1, "combination": "2+*", "op": "PERCENT_OF", "value": 60},
+		       {"target": "CHILD", "position": 1, "combination": "*+2", "op": "PERCENT_OF", "value": 40}]
+		partial = policy("PP partial", property=fx.PROPERTY, live=False, rules=tie)
+		with self.assertRaisesRegex(frappe.ValidationError, "both price child 1"):
+			revisions.activate(POLICY, partial)
+		self.assertEqual(frappe.db.get_value(POLICY, partial, "tex_status"), "Draft")
+		# an exact 2+2 rule settles the tie
+		settled = policy("PP settled", live=False, rules=[
+			*tie, {"target": "CHILD", "position": 1, "combination": "2+2", "op": "PERCENT_OF", "value": 50}])
+		revisions.activate(POLICY, settled)
+		self.assertEqual(frappe.db.get_value(POLICY, settled, "tex_status"), "Active")
+
+	def test_an_activation_locks_the_pricing_policies_before_its_own_row(self):
+		# Document.save locks the record it saves; the one-live-per-scope check then reads every
+		# policy with a locking read. Two activations at the same instant would each hold their own
+		# row and wait for the other's (a deadlock) unless every activation first takes one common
+		# lock, before any row lock of its own.
+		from unittest.mock import patch
+
+		draft = policy("PP DE", market="DE", live=False, rules=[child("CHB", "PERCENT_OF", 40)])
+		db = frappe.local.db
+		real, seen = db.sql, []
+
+		def spy(query, *args, **kwargs):
+			seen.append(" ".join(str(query).split()).upper())
+			return real(query, *args, **kwargs)
+
+		with patch.object(db, "sql", spy):
+			revisions.activate(POLICY, draft)
+		locking = [q for q in seen if "FOR UPDATE" in q]
+		self.assertTrue(locking)
+		self.assertIn("`TABDOCTYPE`", locking[0])
+		self.assertEqual(frappe.db.get_value(POLICY, draft, "tex_status"), "Active")
+
+	def test_a_policy_can_name_the_bands_of_the_policies_it_cascades_with(self):
+		# a hotel (+ market) policy usually has no bands of its own: it names the market's (HM-CHB)
+		from kamra.tex.api import policies as api
+
+		p = self.four_policies()
+
+		def codes(**kw):
+			return {b["code"]: sorted(b["policies"]) for b in api.pricing_policy_bands(**kw)}
+
+		self.assertEqual(codes(property=fx.PROPERTY, market="DE"),
+		                 {"INF": ["PP DE", "PP Global"], "CHD": ["PP Global"], "CHA": ["PP DE"], "CHB": ["PP DE"]})
+		# a UK policy never cascades with the DE one
+		self.assertEqual(codes(market="UK"), {"INF": ["PP Global"], "CHD": ["PP Global"]})
+		# the policy being revised is not its own source
+		self.assertEqual(codes(market="DE", exclude=p["market"]), {"INF": ["PP Global"], "CHD": ["PP Global"]})
+		infant = next(b for b in api.pricing_policy_bands(market="DE") if b["code"] == "INF")
+		self.assertTrue(infant["is_infant"])
+
+
+class TestPrecedenceReport(PolicyCase):
+	"""devtools.precedence_report run against the site (read-only)."""
+
+	def run_report(self, **kw) -> dict:
+		from kamra.tex.devtools import precedence_report
+
+		return precedence_report.run(property=fx.PROPERTY, **kw)
+
+	def test_lists_a_version_whose_republish_would_be_refused(self):
+		c = fx.create_contract(self.f, code="RPT")
+		g = policy("PP Global", rules=[child("CHB", "PERCENT_OF", 30)])
+		# a row the policy checks refuse today, from a policy activated before them
+		row = frappe.get_all("TEX Occupancy Rule", filters={"parent": g, "parenttype": POLICY}, pluck="name")[0]
+		frappe.db.set_value("TEX Occupancy Rule", row, {"target": "COMBINATION", "age_band": None})
+		found = [r for r in self.run_report()["cannot_rebuild"] if r["version"] == c["version"]]
+		self.assertEqual(len(found), 1)
+		self.assertIn("needs adults/children", found[0]["reason"])
+
+	def test_lists_a_scope_with_a_second_policy_scheduled(self):
+		first = policy("PP DE", market="DE", rules=[child("CHB", "PERCENT_OF", 40)])
+		second = policy("PP DE later", market="DE", live=False, rules=[child("CHB", "PERCENT_OF", 45)])
+		# written around the activation guard, as a site from before it may have them
+		frappe.db.set_value(POLICY, second, {"tex_status": "Active",
+		                                     "active_from": add_to_date(now_datetime(), days=1)})
+		scopes = self.run_report(rebuild=False)["ambiguous_policy_scopes"]
+		self.assertIn({"property": None, "market": "DE", "policies": sorted([first, second])}, scopes)
+
+	def test_a_scheduled_version_is_rebuilt_as_of_its_start(self):
+		p = policy("PP DE", market="DE", bands=DE_BANDS, rules=[
+			child("INF", "MULTIPLY", 0), child("CHA", "PERCENT_OF", 25), child("CHB", "PERCENT_OF", 40)])
+		# the market policy changes tomorrow (Child B 45 %); a contract version starts the day after
+		draft = frappe.get_doc(POLICY, revisions.revise(POLICY, p))
+		for r in draft.occupancy_rules:
+			if r.age_band == "CHB":
+				r.value = 45
+		draft.save(ignore_permissions=True)
+		revisions.activate(POLICY, draft.name, at=add_to_date(now_datetime(), days=1))
+		c = fx.create_contract(self.f, code="SCHED", age_bands=[], occupancy_rules=[], publish=False)
+		contracts.publish(c["version"], effective_from=str(add_to_date(now_datetime(), days=2)))
+		self.assertIn(f"policy:{draft.name}/r2/market", {r["source"] for r in self.payload(c["version"])["occupancy_rules"]})
+		report = self.run_report()
+		self.assertNotIn(c["version"], {r["version"] for r in report["rebuild"]})
+		self.assertNotIn(c["version"], {r["version"] for r in report["cannot_rebuild"]})

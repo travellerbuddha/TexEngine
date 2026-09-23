@@ -205,6 +205,37 @@ def history(doctype: str, name: str):
 	                              "modified"], order_by="revision_no asc")
 
 
+@frappe.whitelist()
+def pricing_policy_bands(property: str | None = None, market: str | None = None, exclude: str | None = None):
+	"""Age bands a pricing policy of this scope (hotel, market; blank = any) can name: those of
+	every live pricing policy it cascades with into some contract (rules cascade by band code,
+	ADR-042), so a hotel policy without bands can name the market policy's. ``exclude``: the
+	policy being edited (its revision chain is not its own source)."""
+	doctype = "TEX Pricing Policy"
+	property, market = (property or None), (market or None)
+	_check(doctype, property, write=False)
+	allowed = scope.permitted_properties()
+	root = (frappe.db.get_value(doctype, exclude, "revision_of") or exclude) if exclude else None
+	out: dict[str, dict] = {}
+	for r in revisions.as_of(doctype, frappe.utils.now_datetime(),
+	                         fields=("name", "policy_name", "property", "market", "revision_of")):
+		if r.property and (r.property not in allowed or (property and r.property != property)):
+			continue   # another hotel's policy never meets this one in a contract
+		if r.market and market and r.market != market:
+			continue
+		if root and (r.revision_of or r.name) == root:
+			continue
+		for b in frappe.get_all("TEX Child Age Band", filters={"parenttype": doctype, "parent": r.name},
+		                        fields=["band_code", "label", "is_infant"], order_by="idx asc"):
+			code = (b.band_code or "").strip().upper()
+			if not code:
+				continue
+			entry = out.setdefault(code, {"code": code, "label": b.label or code, "is_infant": bool(b.is_infant),
+			                              "policies": []})
+			entry["policies"].append(r.policy_name or r.name)
+	return list(out.values())
+
+
 # ─── FX ──────────────────────────────────────────────────────────────────
 
 

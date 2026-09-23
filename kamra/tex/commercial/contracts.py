@@ -110,8 +110,8 @@ def _policy_layers(property: str, market: str, at: datetime) -> list[inherit.Pol
 		doc = frappe.get_doc("TEX Pricing Policy", r.name)
 		layer = inherit.PolicyLayer(policy_id=r.name, revision=int(r.revision_no or 1),
 		                            property=r.property or None, market=r.market or None, bands=age_bands_of(doc.age_bands))
-		layers.append(replace(layer, rules=_occ_rules(doc.occupancy_rules, base_level=layer.level,
-		                                              source=layer.source, scope_weight=layer.weight)))
+		layers.append(replace(layer, rules=occupancy_rules_of(doc.occupancy_rules, base_level=layer.level,
+		                                                      source=layer.source, scope_weight=layer.weight)))
 	return layers
 
 
@@ -124,7 +124,9 @@ def age_bands_of(rows) -> tuple[AgeBand, ...]:
 		for r in rows)
 
 
-def _occ_rules(rows, *, base_level: Level, source: str, scope_weight: int = 0) -> tuple[OccupancyRule, ...]:
+def occupancy_rules_of(rows, *, base_level: Level, source: str,
+                       scope_weight: int = 0) -> tuple[OccupancyRule, ...]:
+	"""Occupancy rules from TEX Occupancy Rule rows, stamped with their origin."""
 	out = []
 	for r in rows:
 		adults, children = parse_combination(r.combination)
@@ -200,7 +202,7 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 	# the version's own bands and rules, then every applicable pricing policy's (G-30, ADR-042)
 	try:
 		bands, occ = inherit.cascade(age_bands_of(version.age_bands),
-		                             _occ_rules(version.occupancy_rules, base_level=Level.VERSION, source="version"),
+		                             occupancy_rules_of(version.occupancy_rules, base_level=Level.VERSION, source="version"),
 		                             _policy_layers(contract.property, contract.market, at))
 	except inherit.PolicyAmbiguous as e:   # never ranked by guesswork (PRICING_POLICY_AMBIGUOUS)
 		frappe.throw(_("Pricing policies cannot be combined: {0}.").format(e), title=_("Pricing policy ambiguous"))

@@ -17,6 +17,9 @@ from frappe.utils import get_datetime, now_datetime
 REVISION_META = ("tex_status", "active_from", "active_to", "revision_no", "revision_of")
 REVISIONED = frozenset({"TEX Markup Rule", "TEX Promotion", "TEX FX Policy", "TEX Pricing Policy", "TEX Extra",
                         "TEX Tax Policy"})
+# activations checked against every live record of the DocType (one live pricing policy per
+# scope): they run one at a time (``_serialise_activations``)
+SERIAL_ACTIVATION = frozenset({"TEX Pricing Policy"})
 
 
 def _check_doctype(doctype: str) -> None:
@@ -162,6 +165,8 @@ def activate(doctype: str, name: str, at=None, *, backdate: bool = False) -> Non
 	so a revision cannot go live in the past, nor before a revision already scheduled.
 	Only trusted code (migrations, test fixtures) passes ``backdate`` (G-20)."""
 	_check_doctype(doctype)
+	if doctype in SERIAL_ACTIVATION:
+		_serialise_activations(doctype)
 	doc = frappe.get_doc(doctype, name)
 	if doc.tex_status != "Draft":
 		frappe.throw(_("Only drafts can be activated."))
@@ -194,6 +199,19 @@ def activate(doctype: str, name: str, at=None, *, backdate: bool = False) -> Non
 	doc.active_to = None
 	doc.flags.tex_revision_transition = True
 	doc.save(ignore_permissions=True)
+
+
+def _serialise_activations(doctype: str) -> None:
+	"""One activation of ``doctype`` at a time, until its transaction ends.
+
+	``Document.save`` locks the row it saves before ``validate`` runs, and the one-live-per-
+	scope check then reads every record with a locking read (to see what another activation
+	committed meanwhile). Two activations at the same instant would each hold their own row
+	and wait for the other's: a deadlock, and one of them rolled back with a database error
+	instead of the check's message. Every activation therefore takes this one lock (the
+	DocType's own row) first, before any row of its own: the second waits, and its check
+	then sees the first's record."""
+	frappe.db.sql("SELECT name FROM `tabDocType` WHERE name=%s FOR UPDATE", doctype)
 
 
 def archive(doctype: str, name: str) -> None:
@@ -240,8 +258,8 @@ def live_or_scheduled_roots(doctype: str, filters: dict, *, exclude_root: str | 
 
 	A None filter value matches a blank field, as in ``as_of`` (a global pricing policy has
 	no hotel and no market). ``for_update`` makes it a locking read: it sees what another
-	transaction committed meanwhile and holds the rows until commit, so two activations of
-	one scope run one after the other."""
+	transaction committed meanwhile. Without an index on the filters it locks every row, so
+	callers serialise first (``activate`` does for ``SERIAL_ACTIVATION``)."""
 	_check_doctype(doctype)
 	conds, params = [], {"now": now_datetime(), "ex": exclude_root or ""}
 	for i, (k, v) in enumerate(filters.items()):
