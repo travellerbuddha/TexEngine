@@ -335,6 +335,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 
 	if staff:
 		scope.require("reservation.create", property)
+		if not booking_site:
+			# staff sell on their own channels only; a booking site sells on its own (ADR-050)
+			scope.require_channel(channel, property)
 	elif channel not in ("DIRECT_WEB", "META"):
 		frappe.throw(_("Not permitted."), frappe.PermissionError)
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared

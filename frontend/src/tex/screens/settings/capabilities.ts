@@ -2,7 +2,7 @@
 // from the server (admin.profiles → capabilities); unknown codes land in "other".
 
 export const CAP_GROUPS: { id: string; caps: string[] }[] = [
-  { id: "pricing", caps: ["price.view", "price.view_cost", "price.override", "contract.edit", "contract.publish", "promotion.edit", "markup.edit", "fx.edit", "tax.edit"] },
+  { id: "pricing", caps: ["price.view", "price.view_cost", "price.override", "price.any_channel", "contract.edit", "contract.publish", "promotion.edit", "markup.edit", "fx.edit", "tax.edit"] },
   { id: "inventory", caps: ["inventory.edit", "restriction.edit"] },
   { id: "reservations", caps: ["reservation.view", "reservation.create", "reservation.modify", "reservation.cancel"] },
   { id: "payments", caps: ["payment.view", "payment.link", "payment.refund"] },
@@ -11,10 +11,26 @@ export const CAP_GROUPS: { id: string; caps: string[] }[] = [
   { id: "admin", caps: ["settings.admin", "user.admin", "system.monitor"] },
 ]
 
+/** Prices and books on every sales channel, whatever the profile's channel list (ADR-050). */
+export const ANY_CHANNEL = "price.any_channel"
+
+/** Where a profile's holders price and book (ADR-050): every channel with price.any_channel,
+ * else its channel list, else the call centre. `label` translates a channel code. */
+export function channelSummary(
+  t: (k: string) => string,
+  label: (code: string) => string,
+  p: { capabilities: string[]; sales_channels?: string[] },
+) {
+  if (p.capabilities.includes(ANY_CHANNEL)) return t("settings.profiles.channels_all")
+  if (p.sales_channels?.length) return p.sales_channels.map(label).join(", ")
+  return t("settings.profiles.channels_default")
+}
+
 /** Capabilities that expose secrets, money movements or other people's access. */
 export const SENSITIVE = new Set([
   "price.view_cost",
   "price.override",
+  "price.any_channel",
   "contract.publish",
   "payment.refund",
   "guest.export",

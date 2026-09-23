@@ -9,7 +9,9 @@
   "description",
   "is_system",
   "section_8",
-  "capabilities"
+  "capabilities",
+  "section_sales_channels",
+  "sales_channels"
  ],
  "fields": [
   {
@@ -41,6 +43,18 @@
    "fieldtype": "Table",
    "label": "Capabilities",
    "options": "TEX Profile Capability"
+  },
+  {
+   "fieldname": "section_sales_channels",
+   "fieldtype": "Section Break",
+   "label": "Sales channels"
+  },
+  {
+   "fieldname": "sales_channels",
+   "fieldtype": "Table MultiSelect",
+   "label": "Sales channels",
+   "options": "TEX Profile Channel",
+   "description": "Channels this profile prices and books on. Blank = the call centre only. The capability price.any_channel admits every channel (ADR-050)."
   }
  ],
  "links": [],

@@ -72,11 +72,11 @@ def quote_summary(quote_ids, payment_method: str | None = None):
 	ids = [str(q) for q in (parse(quote_ids, []) or [])]
 	if not ids or len(ids) > quoting.MAX_ROOMS:
 		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
+	crs.require_quotes_sellable(ids)             # hotel and channel of every quote (ADR-050)
 	loaded = [quoting.load_quote(qid) for qid in ids]
 	props = {row.property for row, _req, _res in loaded}
 	if len(props) != 1:
 		frappe.throw(_("All rooms of a booking must be at the same hotel."))
-	scope.require("reservation.create", next(iter(props)))
 	return booking_svc.quotes_summary(loaded, text(payment_method, 40))
 
 
@@ -104,8 +104,7 @@ def book(quote_ids, guest, booker=None, payment_method: str | None = None, confi
 	ids = parse(quote_ids, [])
 	if not ids:
 		frappe.throw(_("Select at least one room."))
-	prop = frappe.db.get_value("TEX Quote", ids[0], "property")
-	scope.require("reservation.create", prop)
+	crs.require_quotes_sellable(ids)
 	out = booking_svc.create_booking(quote_ids=ids, guest=parse(guest, {}), booker=_booker(booker),
 	                                 payment_method=text(payment_method, 40),
 	                                 confirm_without_payment=bool(int(confirm_without_payment or 0)),
