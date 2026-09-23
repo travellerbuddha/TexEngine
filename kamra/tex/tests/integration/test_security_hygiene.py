@@ -530,3 +530,33 @@ class TestSecurityHygieneG83Review(G83Setup):
 			      new={"tex_consent_sms": True, "booking": ref}, reason="booking")
 		self.as_user(self.agent)
 		self.assertEqual([h["booking"] for h in crm.profile(ada.name)["consent_history"]], ["TEX-MINE-G83"])
+
+	# ── test gap: a group site's image needs every hotel of the group ─────
+
+	def test_r9_a_group_sites_image_needs_every_hotel_of_the_group(self):
+		self.as_user("Administrator")
+		group = frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "G83 Group",
+		                        "enterprise": self.f["enterprise"]}).insert(ignore_permissions=True).name
+
+		def hotel(name):
+			frappe.get_doc({"doctype": "Property", "property_name": name, "city": "Kas", "country": "Turkey",
+			                "currency": "EUR", "tex_hotel_group": group}).insert(ignore_permissions=True)
+			return name
+
+		first = hotel("G83 Group Hotel 1")
+		fx.ensure("TEX Access Grant", {"user": self.editor, "property": first},
+		          {"user": self.editor, "scope_level": "Hotel", "property": first,
+		           "permission_profile": "Revenue Manager"})
+		self.as_user(self.editor)
+		self.assertTrue(self.upload("group.png", png_bytes(), hotel_group=group)["file_url"].startswith("/files/"))
+		self.as_user("Administrator")
+		hotel("G83 Group Hotel 2")                      # a hotel of the group the editor does not hold
+		self.as_user(self.editor)
+		with self.assertRaises(frappe.PermissionError):
+			self.upload("group.png", png_bytes(), hotel_group=group)
+		self.as_user("Administrator")
+		empty = frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "G83 Empty Group",
+		                        "enterprise": self.f["enterprise"]}).insert(ignore_permissions=True).name
+		self.as_user(self.editor)
+		with self.assertRaises(frappe.PermissionError):
+			self.upload("group.png", png_bytes(), hotel_group=empty)
