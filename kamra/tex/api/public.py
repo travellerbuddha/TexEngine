@@ -618,12 +618,19 @@ def _guest_booking(b) -> dict:
 		              "refundable": (snap.get("rate_plan") or {}).get("refundable", True),
 		              "lines": snap.get("lines"), "extras": [e for e in snap.get("extras") or [] if e.get("ok")],
 		              "cancellation_fee_now": to_str(penalty), "pending_change": _pending_change(res),
+		              # the guest may change this room online (confirmed, not arrived yet)
+		              "can_change": guest_changes.room_changeable(res),
 		              "last_change": guest_changes.guest_outcome(last) if (last := guest_changes.last_request(res))
 		              else None})
+	credit, refund_due = guest_changes.guest_credit(b.name)
+	blocked = ("PAYMENT_PENDING" if b.status in ("Pending Payment", "Held")
+	           else "REFUND_PENDING" if guest_changes.refund_pending(b.name) else None)
 	return {**summary, "rooms": rooms, "hotel": frappe.db.get_value("Property", b.property, "property_name"),
 	        "self_service": _self_service_allowed(b),
-	        # the booking's own payment comes first: no change until it is complete (G-45)
-	        "changes_blocked": "PAYMENT_PENDING" if b.status in ("Pending Payment", "Held") else None,
+	        # credit the guest may use; money set aside for a refund is not theirs to spend (G-45)
+	        "credit": to_str(credit), "refund_due": to_str(refund_due),
+	        # the booking's own payment, or a refund of an earlier change, comes first (G-45)
+	        "changes_blocked": blocked,
 	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
 	        "can_pay_online": bool(guest_changes.card_account(b))}
 
@@ -640,6 +647,10 @@ def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to cancel."))
+	if frappe.db.get_value("Reservation", reservation, "status") not in ("Confirmed", "Pending Payment", "Held"):
+		# arrived (or already closed): the hotel handles it at the desk
+		frappe.throw(_("This room can no longer be changed online. Please contact the hotel."),
+		             guest_changes.ChangeRefused)
 	frappe.flags.tex_source = "Guest"
 	out = booking_svc.cancel_reservation(reservation, reason=text(reason, 300) or "Cancelled by guest online",
 	                                     source="Guest", _guest_authorized=True)
@@ -659,6 +670,7 @@ def manage_propose(token: str, reservation: str, changes):
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to change your booking."))
 	guest_changes.guard(b)
+	guest_changes.guard_room(frappe.get_doc("Reservation", reservation))
 	# extras are added through manage_extras_* (priced on their own; the stay stays price-locked)
 	allowed = {"check_in", "check_out", "adults", "children"}
 	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}

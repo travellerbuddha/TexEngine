@@ -660,8 +660,14 @@ def cancellation_penalty(reservation, today=None) -> tuple[D, dict]:
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
                        source: str = "Desk", _guest_authorized: bool = False) -> dict:
 	"""``_guest_authorized`` is set only by the self-service API after it verified the
-	guest's manage token for this exact reservation; staff calls always check scope."""
+	guest's manage token for this exact reservation; staff calls always check scope.
+
+	Locks the booking, then the reservation (then the guest's change requests): the order every
+	change to a TEX booking takes (review of ADR-044)."""
 	res = frappe.get_doc("Reservation", reservation)
+	if res.tex_booking:
+		frappe.db.get_value("TEX Booking", res.tex_booking, "name", for_update=True)
+		res = frappe.get_doc("Reservation", reservation, for_update=True)
 	if not _guest_authorized:
 		scope.require("reservation.cancel", res.property)
 	elif waive_penalty:
