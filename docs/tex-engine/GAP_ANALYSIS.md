@@ -1,5 +1,9 @@
 # TEX Engine — Gap Analysis (Phase 0 audit)
 
+> **Historical document.** This is the Phase 0 comparison of upstream Kamra with the spec.
+> The current state is in `IMPLEMENTATION_STATUS.md` and the open gaps are in
+> `FINAL_GAP_AUDIT.md`. Nothing below describes the current code.
+
 Audit of Kamra PMS `develop` @ `418ed1a` against `PRODUCT_SPEC.md`. Every claim below
 was verified in code (file:line references), not taken from README text.
 

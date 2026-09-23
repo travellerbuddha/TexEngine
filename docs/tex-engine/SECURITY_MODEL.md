@@ -90,6 +90,10 @@ the guest's manage token.
   program's max-% cap).
 
 ## 7. Known gaps (tracked)
+
+The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). Security-relevant open items
+are G-01, G-02 and G-03 (Critical), and G-10 to G-16 (High), plus G-26 and G-83. The notes below
+predate that audit.
 - Legacy PMS endpoints whose hotel is only reachable through module-specific arguments
   (`order`, `outlet`, `task`, `venue`, generic `name`) are not yet resolved by the scope guard.
   These modules (POS, laundry, housekeeping, banquet) are hidden from TEX navigation
