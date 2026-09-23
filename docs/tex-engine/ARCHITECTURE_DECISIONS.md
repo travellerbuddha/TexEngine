@@ -1490,6 +1490,11 @@ sends:
 - Bounces after the mail server accepted a message are not tracked.
 
 ## ADR-048 A TEX hotel's rooms are TEX inventory, whoever writes the reservation; an allotment's release and cutoff are separate
+*Amended by the G-49 review follow-up: a change is checked only on the nights it newly takes; a
+cutoff also gives the rooms back; a reservation books only its own hotel's room types; a service
+flag covers one save; deadlocks of desk writes, channel bookings and imports; channels hear
+allotment deadlines at the site's midnight.*
+
 **Context.** G-49 (R-17).
 - The legacy `Reservation.validate_type_capacity` (physical rooms of the room type times the
   overbooking allowance) ran on every save, TEX's own stays included. It refused what TEX had
@@ -1527,6 +1532,21 @@ sends:
   to it.
 - *Saves that take no room are never refused* (a note, a room assignment, check-in, a payment,
   cancellation), so an oversold stay stays editable.
+- *A change is checked only on the nights it newly takes* (review H1, M1). The nights a stay
+  already holds in the pool (`repository.held_nights`) are its own: a cutoff, a closure or a
+  full house on them never refuses a change. Leaving early, a room type of the same pool, or an
+  extension is checked only on its new nights; a change that takes none is never refused. A
+  move to another pool (or hotel) takes every night again. This applies to TEX modifications
+  (`modification.propose`, staff and guest self-service alike) and to writes outside TEX (the
+  guard locks and recounts only the new nights). A night held under one contract and kept after
+  repricing under another is not re-checked against the new contract's allotment.
+- *A reservation books only its own hotel's room types* (review M3). `Reservation.validate`
+  refuses another hotel's room type (without naming that hotel), for every hotel, TEX or not;
+  it is checked when the stay is written or its hotel or room type changes, so legacy rows are
+  never blocked. The guard and the lock before naming work on the room type's own hotel, so no
+  inventory row of one hotel is created under another and no figure leaks.
+- *A service's flag covers one save* (review L3). The guard pops `tex_inventory_checked`, so a
+  later save of the same document object is checked again.
 - *We chose to take the lock rather than refuse.* The model cannot tell a Desk sale from a
   migration import or a legacy PMS action (an extension, a waitlist confirmation). ADR-028 keeps
   imports. Refusing would strand the existing stays of a hotel that joins TEX. With the lock, no
@@ -1538,15 +1558,26 @@ sends:
     general sale;
   - cutoff (`cutoff_days`, new): the partner's side, the contract's booking deadline. From then on
     the contract sells nothing more for that night, from its allotment or from general sale.
-    Other sales are unaffected, and a guaranteed allotment stays withheld until its release. 0 =
-    no cutoff.
+    Other sales are unaffected. 0 = no cutoff.
+  - *The cutoff also gives the rooms back* (review L2). Once the contract can no longer book its
+    rooms, nobody could, so they return to general sale at the cutoff at the latest: the
+    effective release is `max(release, cutoff)`. We chose this over letting privileged staff book
+    under the contract after its cutoff: that would need a new capability and an audited
+    override in the booking service, while the rooms simply went unsold. A rooming list for rooms
+    already booked needs no inventory.
 
-  Either order is valid. Release 7 / cutoff 2: the partner books from general sale between
-  them. Cutoff 10 / release 3: the hotel keeps the rooms for the rooming list, then sells them.
+  Release 7 / cutoff 2: the rooms return 7 days out and the partner books from general sale until
+  2 days out. Cutoff 10 / release 3: the partner stops 10 days out and the rooms return then.
   The pure `inventory_math` reports a cut-off night as `cutoff`. Search, quotes, bookings,
-  modifications, the ARI grid and channel ARI all read it, and the daily channel resync already
-  re-sends time-based changes. The controller keeps both within 0 to 365 days. The allotment
-  editor (Rates → Allotments) sets both.
+  modifications, the ARI grid and channel ARI all read it. Both deadlines count days on the
+  site's day (System Settings time zone), not a hotel's own time zone.
+- *Channels hear a deadline when it starts* (review L4). A job just after the site's midnight
+  (`distribution.repository.allotment_boundaries`, cron `1 0 * * *`, which Frappe evaluates on
+  the site's clock) queues an ARI push for the nights whose release or cutoff starts that day.
+  The 02:30 daily resync remains the safety net.
+- The controller keeps both within 0 to 365 days. A disabled allotment always saves, so one
+  whose release is above 365 (possible before p27) can be switched off; to edit it otherwise,
+  bring the value into range. The allotment editor (Rates → Allotments) sets both.
 - *Patch p27.* Every existing allotment gets cutoff 0 and sells exactly as before. A negative
   release behaved like 0 and becomes 0. A release above 365 days is printed for review.
 - The ARI restriction field `release_days` (R-16) is a separate thing: a booking-window rule
@@ -1558,12 +1589,32 @@ sends:
   bookings of the same nights, and may be refused where the legacy rule accepted it. A TEX
   hotel's reservations are sold through TEX. To sell above capacity, staff set a manual
   adjustment or an oversell limit in Inventory.
-- Generic Desk/REST writes cannot be wrapped in the deadlock retry of ADR-032. A rare deadlock
-  there surfaces as an error to retry: an edit of an existing stay holds its own row
-  (`check_if_latest`) before the inventory days, and a multi-row import holds the naming series
-  from its first row on.
+- *Deadlocks* (review M2, L1). Lock orders that can still meet:
+  - `modification.apply` locks the booking, then the reservation (`FOR UPDATE`), then the
+    nights (G-45 order, kept). Every recount (`create_booking`, the guard, a channel booking)
+    locks the nights, then reads the pool's live reservations `LOCK IN SHARE MODE`. That read
+    locks every live reservation of the pool arriving before the stay ends, not only the
+    overlapping ones: the index is `(room_type, status, check_in_date)`, and a
+    `check_out_date > start` condition would only filter rows after they are locked. A lower
+    bound on arrival would need a maximum stay length, which neither TEX nor the legacy PMS
+    enforces, so the read is left as it is. An `apply` holding its reservation and a recount
+    holding the nights can therefore deadlock; one of them is the victim.
+  - Every TEX endpoint into a booking or a change re-runs a victim (`retry_on_deadlock`:
+    `public.book`, `manage_apply`, `manage_change_pay`, `crs.book`, `crs.apply_modification`,
+    `crs.resolve_guest_change`, `ui_crs.book`; a test keeps the list complete). Payment-driven
+    guest changes retry from their job.
+  - A desk or REST write cannot be re-run for its user. When it is the victim it is refused with
+    "please try again" (`InventoryBusy`, a `ValidationError` that is also a
+    `QueryDeadlockError`): nothing of it was saved.
+  - Imports (`import_bookings`, `run_import`) stop on a deadlock instead of reporting the rows
+    InnoDB has already undone as created.
+  - A channel booking takes every room's nights before its guest, booking or rooms take a name,
+    in the order of a TEX booking and of a desk write.
+  - Remaining risk: an edit of an existing desk stay holds its own row (`check_if_latest`)
+    before the nights, and a multi-row import holds the naming series from its first row on.
+    These are rare and end as "please try again".
 - A Desk/REST insert at a TEX hotel still prices through the legacy auto-price. It is not a TEX
-  sale and carries no TEX price lock. Only its inventory is governed here.
+  sale and carries no TEX price lock. Only its inventory is governed here (G-92, open).
 - Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
   bypass this guard, as they bypass every other rule.
 - An allotment's cutoff is per contract. Allotments still have no channel dimension (G-41).
