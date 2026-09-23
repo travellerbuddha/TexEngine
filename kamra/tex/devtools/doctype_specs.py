@@ -792,6 +792,19 @@ BOOKING_SPECS = [
 	], perms=[SM, HA_RO],
 	   autoname="field:site_slug", naming_rule="By fieldname", title_field="site_name"),
 
+	dt("TEX Content Translation", B, [
+		F("property", "Link", "Hotel", "Property", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("ref_doctype", "Select", "Record type", ["Room Type", "Rate Plan", "TEX Extra", "Property",
+		                                            "TEX Cancellation Policy", "TEX Payment Policy"],
+		  reqd=1, in_list_view=1, in_standard_filter=1),
+		F("ref_name", "Dynamic Link", "Record", "ref_doctype", reqd=1, in_list_view=1),
+		F("field", "Data", "Field", reqd=1, in_list_view=1),
+		F("language", "Select", "Language", ["tr", "en", "de", "ru", "ro", "pl"], reqd=1, in_list_view=1,
+		  in_standard_filter=1),
+		F("text", "Text", "Text", reqd=1),
+	], perms=BOOKING, autoname="hash", title_field="ref_name",
+	   description="Guest-facing text of a hotel record in one language (written through the TEX API)."),
+
 	dt("TEX Funnel Event", B, [
 		F("event", "Select", "Event", ["search", "room_view", "quote", "guest_details", "payment_started",
 		                               "abandoned", "booked"], reqd=1, in_list_view=1, in_standard_filter=1),

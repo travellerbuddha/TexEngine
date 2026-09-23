@@ -128,7 +128,7 @@ export default function GuestProfile() {
         <div className="space-y-5">
           <section aria-label={t("crm.profile.kpis")} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label={t("crm.col.stays")} value={num(g.tex_stays ?? 0)} hint={t("crm.profile.stays_hint", { count: activeStays })} />
-            <Stat label={t("crm.col.ltv")} value={money(g.tex_lifetime_value)} hint={t("crm.profile.ltv_hint")} />
+            <Stat label={t("crm.col.ltv")} value={g.tex_lifetime_currency ? money(g.tex_lifetime_value, g.tex_lifetime_currency) : "—"} hint={t("crm.profile.ltv_hint")} />
             <Stat label={t("crm.col.last_stay")} value={date(g.tex_last_stay)} />
             <Stat label={t("crm.loyalty.available")} value={num(loyaltyAvailable)} hint={t("crm.profile.points_hint")} />
           </section>

@@ -13,6 +13,7 @@ export type TexModule =
   | "crm"
   | "reports"
   | "admin"
+  | "content"
   // area helper modules (kamra/tex/api/ui_<area>.py)
   | `ui_${string}`
 

@@ -1,7 +1,7 @@
 // Small building blocks shared by the back-office admin areas (Settings, Connect,
 // Booking Engine, Reports). Candidates for promotion to tex/ui by the integrator.
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { NavLink } from "react-router-dom"
+import { NavLink, useLocation } from "react-router-dom"
 import { Check, Copy } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
@@ -15,9 +15,18 @@ export interface SubNavItem {
 
 /** Route-level sub-navigation for an area (links, not ARIA tabs: each entry is a page). */
 export function SubNav({ items, label }: { items: SubNavItem[]; label: string }) {
+  const ref = useRef<HTMLElement>(null)
+  const { pathname } = useLocation()
+  // on narrow screens the list scrolls sideways: centre the current page's tab
+  // (only the nav scrolls, never the page)
+  useEffect(() => {
+    const nav = ref.current
+    const a = nav?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (nav && a && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = a.offsetLeft - (nav.clientWidth - a.clientWidth) / 2
+  }, [pathname])
   if (items.length < 2) return null
   return (
-    <nav aria-label={label} className="-mt-1 mb-5 flex gap-1 overflow-x-auto border-b border-zinc-200">
+    <nav ref={ref} aria-label={label} className="relative -mt-1 mb-5 flex gap-1 overflow-x-auto border-b border-zinc-200">
       {items.map((i) => (
         <NavLink
           key={i.to}

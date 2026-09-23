@@ -174,6 +174,10 @@ export default function Transactions() {
                         <div className="min-w-0">
                           <p className="text-sm whitespace-nowrap">{dateTime(r.created)}</p>
                           <p className="font-mono text-xs text-zinc-500">{r.name}</p>
+                          {/* phones: the status column is hidden to keep the amount visible */}
+                          <p className="mt-1 sm:hidden">
+                            <TxnStatusBadge status={r.status} />
+                          </p>
                         </div>
                       ),
                     },
@@ -196,7 +200,7 @@ export default function Transactions() {
                         </div>
                       ),
                     },
-                    { key: "status", header: t("core.label.status"), cell: (r) => <TxnStatusBadge status={r.status} /> },
+                    { key: "status", header: t("core.label.status"), hideBelow: "sm", cell: (r) => <TxnStatusBadge status={r.status} /> },
                     ...(q.data?.some(reverifiable)
                       ? [
                           {

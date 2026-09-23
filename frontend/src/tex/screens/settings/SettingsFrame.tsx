@@ -9,6 +9,7 @@ export interface SettingsAccess {
   profiles: boolean
   tex: boolean
   audit: boolean
+  markets: boolean
 }
 
 /** Which settings pages the user may open (the server re-checks every call). */
@@ -17,7 +18,13 @@ export function useSettingsAccess(): SettingsAccess {
   const platform = boot.user.platform_admin
   const users = platform || canAnywhere("user.admin")
   const settingsAdmin = platform || canAnywhere("settings.admin")
-  return { users, profiles: users || settingsAdmin, tex: platform, audit: settingsAdmin }
+  return {
+    users,
+    profiles: users || settingsAdmin,
+    tex: platform,
+    audit: settingsAdmin,
+    markets: platform || canAnywhere("price.view"),
+  }
 }
 
 export function SettingsFrame({ subtitle, actions, children }: { subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }) {
@@ -26,6 +33,7 @@ export function SettingsFrame({ subtitle, actions, children }: { subtitle?: Reac
   const items: SubNavItem[] = []
   if (access.users) items.push({ to: "/tex/settings/users", label: t("settings.nav.users") })
   if (access.profiles) items.push({ to: "/tex/settings/profiles", label: t("settings.nav.profiles") })
+  if (access.markets) items.push({ to: "/tex/settings/markets", label: t("settings.nav.markets") })
   if (access.tex) items.push({ to: "/tex/settings/platform", label: t("settings.nav.tex") })
   if (access.audit) items.push({ to: "/tex/settings/audit", label: t("settings.nav.audit") })
   return (

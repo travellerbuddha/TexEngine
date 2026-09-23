@@ -231,3 +231,108 @@ class TestStaffBookingControls(TexTestCase):
 		self.assertEqual(out["payment_links"][-1]["amount"], "12.50")
 		self.assertEqual(out["payment_links"][-1]["paid_amount"], "0.00")
 		self.assertNotIn("public_url", out["payment_links"][-1])
+
+
+class TestGuestStats(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def test_upcoming_bookings_are_not_stays_yet(self):
+		from kamra.tex.crm import service as crm_svc
+
+		b = guest_books(session="sess-stats", guest={**GUEST, "email": "stats.guest@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- stats check
+		res = b["rooms"][0]["reservation"]
+		guest = frappe.db.get_value("Reservation", res, "guest")
+		g = frappe.db.get_value("Guest", guest, ["tex_stays", "tex_last_stay", "tex_lifetime_currency"], as_dict=True)
+		self.assertEqual((g.tex_stays, g.tex_last_stay, g.tex_lifetime_currency), (0, None, None))
+		# the stay happened: check-out in the past (moved directly; the price lock guards the form)
+		frappe.db.set_value("Reservation", res, {"check_in_date": frappe.utils.add_days(frappe.utils.nowdate(), -3),
+		                                         "check_out_date": frappe.utils.add_days(frappe.utils.nowdate(), -1)})
+		self.assertGreaterEqual(crm_svc.refresh_recent_checkouts(), 1)
+		g = frappe.db.get_value("Guest", guest, ["tex_stays", "tex_lifetime_value", "tex_lifetime_currency"],
+		                        as_dict=True)
+		self.assertEqual(g.tex_stays, 1)
+		self.assertEqual(g.tex_lifetime_currency, "EUR")
+		self.assertEqual(D(g.tex_lifetime_value), D(b["total"]))
+		row = next(r for r in crm_svc.list_guests(q="stats.guest@example.com")["rows"] if r["name"] == guest)
+		self.assertEqual(row["tex_lifetime_value"], b["total"])
+
+
+class TestContentTranslation(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def tearDown(self):
+		frappe.local.lang = "en"
+		super().tearDown()
+
+	def test_guest_sees_hotel_texts_in_their_language(self):
+		from kamra.tex.api import content as content_api
+		from kamra.tex.services import content
+
+		std = self.f["room_types"]["STD"]
+		flex = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		trf = frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "TRF"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- hotel content editor
+		out = content_api.save(fx.PROPERTY, [
+			{"ref_doctype": "Room Type", "ref_name": std, "field": "room_type_name", "language": "de",
+			 "text": "Standardzimmer"},
+			{"ref_doctype": "Rate Plan", "ref_name": flex, "field": "rate_plan_name", "language": "de",
+			 "text": "Flexibel"},
+			{"ref_doctype": "TEX Extra", "ref_name": trf, "field": "extra_name", "language": "de",
+			 "text": "Flughafentransfer"},
+		])
+		self.assertEqual(out["created"], 3)
+		items = {(i["ref_doctype"], i["ref_name"]): i for i in content_api.items(fx.PROPERTY)["items"]}
+		self.assertEqual(items[("Room Type", std)]["translations"]["de"]["room_type_name"], "Standardzimmer")
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous visitor
+		frappe.local.lang = "de"
+		prop = _search([{"adults": 2, "children": []}], session="sess-de")
+		self.assertEqual(prop["rooms"][std]["name"], "Standardzimmer")
+		offer = next(o for o in prop["offers"] if o["room_type"] == std and o["rate_plan"] == flex)
+		self.assertEqual(offer["rate_plan_info"]["name"], "Flexibel")
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=[{"code": "TRF", "quantity": 1}],
+		                 session_id="sess-de")
+		accom = next(ln for ln in q["quote"]["lines"] if ln["kind"] == "ACCOMMODATION")
+		self.assertTrue(accom["description"].startswith("Standardzimmer · "), accom["description"])
+		self.assertTrue(accom["description"].endswith("3 Nächte"), accom["description"])
+		self.assertIn("Flughafentransfer", [ln["description"] for ln in q["quote"]["lines"] if ln["kind"] == "EXTRA"])
+		site = public.site(slug=SLUG)
+		self.assertIn("Flughafentransfer", [e["extra_name"] for e in site["extras"][fx.PROPERTY]])
+		self.assertNotIn("name", site["extras"][fx.PROPERTY][0])
+
+		# other languages (and the cached contract terms) keep the hotel's own texts
+		frappe.local.lang = "en"
+		prop = _search([{"adults": 2, "children": []}], session="sess-en")
+		offer = next(o for o in prop["offers"] if o["room_type"] == std and o["rate_plan"] == flex)
+		self.assertNotEqual(prop["rooms"][std]["name"], "Standardzimmer")
+		self.assertNotEqual(offer["rate_plan_info"]["name"], "Flexibel")
+		self.assertEqual(content.nights_label(2, "ru"), "2 ночи")
+		self.assertEqual(content.nights_label(5, "pl"), "5 nocy")
+
+	def test_translations_are_bound_to_the_hotel(self):
+		from kamra.tex.api import content as content_api
+
+		other = "TEX Content Other Hotel"
+		if not frappe.db.exists("Property", other):
+			frappe.get_doc({"doctype": "Property", "property_name": other, "city": "Side", "country": "Turkey",
+			                "currency": "EUR"}).insert(ignore_permissions=True)
+		std = self.f["room_types"]["STD"]
+		with self.assertRaises(frappe.PermissionError):
+			content_api.save(other, [{"ref_doctype": "Room Type", "ref_name": std, "field": "room_type_name",
+			                          "language": "de", "text": "x"}])
+		with self.assertRaises(frappe.ValidationError):
+			content_api.save(fx.PROPERTY, [{"ref_doctype": "Room Type", "ref_name": std, "field": "base_price",
+			                                "language": "de", "text": "1"}])
+		agent = fx.ensure_user("content-agent@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": agent, "property": fx.PROPERTY},
+		          {"user": agent, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+		frappe.set_user(agent)  # nosemgrep: frappe-setuser -- no booking_site.edit
+		with self.assertRaises(frappe.PermissionError):
+			content_api.items(fx.PROPERTY)

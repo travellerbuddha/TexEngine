@@ -35,6 +35,13 @@ export default defineConfig(({ command }) => ({
         index: resolve(__dirname, "index.html"),
         booking: resolve(__dirname, "booking.html"),
       },
+      output: {
+        // one chunk per admin language (all areas), loaded when that language is chosen
+        manualChunks(id) {
+          const m = /\/src\/tex\/i18n\/locales\/[^/]+\/([a-z]{2})\.json$/.exec(id)
+          return m && m[1] !== "en" ? `tex-i18n-${m[1]}` : undefined
+        },
+      },
     },
   },
   server: {

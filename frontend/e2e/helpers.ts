@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type Page } from "@playwright/test"
+import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test"
 
 export const PASSWORD = process.env.TEX_E2E_PASSWORD || ""
 export const ADMIN_PASSWORD = process.env.TEX_E2E_ADMIN_PASSWORD || "admin"
@@ -32,4 +32,43 @@ export function trackErrors(page: Page) {
   const errors: string[] = []
   page.on("pageerror", (e) => errors.push(e.message))
   return () => expect(errors, errors.join("\n")).toEqual([])
+}
+
+// ─── shared by the flows (contracts, booking, reservations) ─────────────────
+
+const BASE = process.env.TEX_E2E_BASE || "http://test.localhost:8000"
+/** The admin SPA lives under /kamra on the bench and at / on a Vite dev server (51xx). */
+export const APP_PREFIX = process.env.TEX_E2E_APP_PREFIX ?? (/:51\d\d(\/|$)/.test(BASE) ? "" : "/kamra")
+export const texPath = (path: string) => `${APP_PREFIX}${path}`
+
+/** Upper-case id unique per run (base-36 time + 2 random chars), e.g. "MFX3K2QA7Z". */
+export function uniqueRunId(): string {
+  const rnd = Math.floor(Math.random() * 1296)
+    .toString(36)
+    .padStart(2, "0")
+  return `${Date.now().toString(36)}${rnd}`.toUpperCase()
+}
+
+/** Local calendar date `offsetDays` from today as YYYY-MM-DD (what date inputs take). */
+export function isoDate(offsetDays: number, from = new Date()): string {
+  const d = new Date(from)
+  d.setDate(d.getDate() + offsetDays)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+export const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** Control by its label; required fields show "Label*", so an optional marker is accepted. */
+export const byLabel = (scope: Page | Locator, label: string) => scope.getByLabel(new RegExp(`^${esc(label)}\\s*\\*?$`))
+
+/** API call in the page's session (assertions and clean-up only). Once the bench has
+ * rendered the SPA the session holds a CSRF token, which POSTs must echo. */
+export async function pageApi<T = unknown>(page: Page, method: string, args: Record<string, unknown> = {}) {
+  const csrf = await page.evaluate(() => (window as unknown as { csrf_token?: string }).csrf_token).catch(() => undefined)
+  const r = await page.request.post(`/api/method/${method}`, {
+    data: args,
+    headers: csrf ? { "X-Frappe-CSRF-Token": csrf } : {},
+  })
+  const body = (await r.json().catch(() => ({}))) as { message?: T }
+  return { ok: r.ok(), status: r.status(), body, message: body.message as T }
 }

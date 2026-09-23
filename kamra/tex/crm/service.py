@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, getdate, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, getdate, now_datetime, nowdate
 
 from kamra.tex.crm import segments as seg
 from kamra.tex.money import ZERO, D, from_db, to_str
@@ -27,7 +27,7 @@ EDITABLE = ("first_name", "last_name", "phone", "email", "nationality", "date_of
 CONSENT = ("tex_consent_email", "tex_consent_sms", "tex_consent_whatsapp")
 LIST_FIELDS = ["name", "full_name", "first_name", "last_name", "email", "phone", "vip", "blacklisted", "nationality",
                "tex_country", "tex_market", "tex_language", "tex_tags", "tex_stays", "tex_lifetime_value",
-               "tex_last_stay", "tex_loyalty_points", "tex_consent_email", "tex_consent_sms",
+               "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points", "tex_consent_email", "tex_consent_sms",
                "tex_consent_whatsapp", "tex_enterprise"]
 ABANDON_AFTER_MINUTES = 45
 
@@ -98,7 +98,7 @@ def list_guests(*, q: str | None = None, segment: str | None = None, vip: bool |
 	total = len(rows)
 	page = rows[start:start + limit]
 	for r in page:
-		r["tex_lifetime_value"] = to_str(D(r.get("tex_lifetime_value") or 0))
+		r["tex_lifetime_value"] = to_str(from_db(r.get("tex_lifetime_value") or 0, r.get("tex_lifetime_currency") or "EUR"))
 		r["tex_last_stay"] = str(r["tex_last_stay"]) if r.get("tex_last_stay") else None
 	return {"total": total, "rows": page}
 
@@ -117,10 +117,10 @@ def profile(guest: str) -> dict:
 	g = frappe.get_doc("Guest", guest)
 	d = {f: g.get(f) for f in ("name", "full_name", *EDITABLE, *CONSENT, "tex_consent_updated_at",
 	                          "tex_consent_source", "tex_consent_text_version", "tex_stays", "tex_lifetime_value",
-	                          "tex_last_stay", "tex_loyalty_points", "tex_enterprise")}
+	                          "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points", "tex_enterprise")}
 	for k in ("date_of_birth", "tex_last_stay", "tex_consent_updated_at"):
 		d[k] = str(d[k]) if d.get(k) else None
-	d["tex_lifetime_value"] = to_str(D(d.get("tex_lifetime_value") or 0))
+	d["tex_lifetime_value"] = to_str(from_db(d.get("tex_lifetime_value") or 0, d.get("tex_lifetime_currency") or "EUR"))
 	if not any(scope.has_capability("guest.export", p) for p in via):
 		d.pop("id_number", None)
 	stays = frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via))},
@@ -214,20 +214,34 @@ def log_communication(guest: str, *, channel: str, direction: str, subject: str 
 
 
 def refresh_guest_stats(guest: str) -> None:
-	"""Stays / lifetime value / last stay from non-cancelled reservations. Money is
-	never summed across currencies: lifetime value is the total in the guest's most
-	used booking currency (ties → alphabetical)."""
-	rows = frappe.get_all("Reservation", filters={"guest": guest, "status": ("not in", ["Cancelled", "No Show"])},
-	                      fields=["check_out_date", "tex_total_amount", "amount_after_tax", "tex_currency"])
-	stays = len(rows)
+	"""Completed stays, their value and the last stay, from reservations that were not
+	cancelled or no-shows and whose check-out has passed (upcoming bookings are not
+	stays yet). Money is never summed across currencies: lifetime value is the total in
+	the guest's most used currency (ties → alphabetical), stored with that currency."""
+	today = getdate(nowdate())
+	rows = [r for r in frappe.get_all("Reservation",
+	                                  filters={"guest": guest, "status": ("not in", ["Cancelled", "No Show"])},
+	                                  fields=["check_out_date", "tex_total_amount", "amount_after_tax", "tex_currency"])
+	        if r.check_out_date and getdate(r.check_out_date) <= today]
 	by_ccy: dict[str, list] = {}
 	for r in rows:
 		by_ccy.setdefault(r.tex_currency or "EUR", []).append(r)
 	main = min(by_ccy, key=lambda c: (-len(by_ccy[c]), c)) if by_ccy else None
 	value = sum((from_db(r.tex_total_amount or r.amount_after_tax or 0, main) for r in by_ccy.get(main, [])), ZERO)
-	past = [r.check_out_date for r in rows if r.check_out_date and getdate(r.check_out_date) <= getdate(nowdate())]
-	frappe.db.set_value("Guest", guest, {"tex_stays": stays, "tex_lifetime_value": value,
-	                                     "tex_last_stay": max(past) if past else None}, update_modified=False)
+	frappe.db.set_value("Guest", guest, {"tex_stays": len(rows), "tex_lifetime_value": value,
+	                                     "tex_lifetime_currency": main,
+	                                     "tex_last_stay": max(r.check_out_date for r in rows) if rows else None},
+	                    update_modified=False)
+
+
+def refresh_recent_checkouts(days: int = 2) -> int:
+	"""Scheduler (daily): a booking becomes a stay when its check-out passes."""
+	since = add_days(nowdate(), -days)
+	guests = frappe.get_all("Reservation", filters={"check_out_date": ("between", [since, nowdate()]),
+	                                                "guest": ("is", "set")}, pluck="guest", distinct=True)
+	for g in guests:
+		refresh_guest_stats(g)
+	return len(guests)
 
 
 # ─── segments ────────────────────────────────────────────────────────────

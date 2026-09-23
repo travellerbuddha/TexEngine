@@ -21,6 +21,7 @@ PROPERTY_DOCTYPES = (
 	"TEX Integration Outbox", "TEX Payment Provider Account", "TEX Payment Method Rule",
 	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event",
+	"TEX Content Translation",
 )
 # belongs to a hotel or to a whole hotel group
 GROUP_DOCTYPES = ("TEX Promotion", "TEX Loyalty Program", "TEX Booking Site")

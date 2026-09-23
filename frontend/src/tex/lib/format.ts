@@ -87,6 +87,17 @@ export function dateTime(v: string | Date | null | undefined, locale = intlLocal
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(d)
 }
 
+/** Time of day ("14:30" / "2:30 PM", locale aware); accepts "HH:MM[:SS]" or a datetime. */
+export function time(v: string | Date | null | undefined, locale = intlLocale(getTexLang())) {
+  if (!v) return "—"
+  let d: Date
+  const m = typeof v === "string" ? /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(v) : null
+  if (m && typeof v === "string" && !v.includes("-")) d = new Date(2000, 0, 1, Number(m[1]), Number(m[2]), Number(m[3] ?? 0))
+  else d = toDate(v)
+  if (Number.isNaN(d.getTime())) return "—"
+  return new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(d)
+}
+
 /** "2026-10" or a date → "Oct 2026" (locale aware). */
 export function month(v: string | Date | null | undefined, locale = intlLocale(getTexLang())) {
   if (!v) return "—"
@@ -101,7 +112,7 @@ export function weekday(v: string, locale = intlLocale(getTexLang())) {
 
 /** ISO yyyy-mm-dd for a local calendar day. */
 export function isoDay(d: Date) {
-  const y = d.getFullYear()
+  const y = String(d.getFullYear()).padStart(4, "0")
   const m = String(d.getMonth() + 1).padStart(2, "0")
   const day = String(d.getDate()).padStart(2, "0")
   return `${y}-${m}-${day}`

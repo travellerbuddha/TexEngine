@@ -11,7 +11,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 FIELDS: dict[str, str] = {
-	"stays": "int", "lifetime_value": "money", "last_stay_days_ago": "int", "country": "str", "market": "str",
+	"stays": "int", "lifetime_value": "money", "lifetime_currency": "str", "last_stay_days_ago": "int", "country": "str", "market": "str",
 	"language": "str", "vip": "bool", "tags": "list", "consent_email": "bool", "consent_sms": "bool",
 	"consent_whatsapp": "bool", "loyalty_points": "int", "nationality": "str", "blacklisted": "bool",
 	"has_upcoming_stay": "bool",
@@ -109,6 +109,7 @@ def guest_facts(row: dict, today: date, upcoming: bool = False) -> dict:
 		last = date.fromisoformat(last[:10])
 	return {
 		"stays": int(row.get("tex_stays") or 0), "lifetime_value": row.get("tex_lifetime_value") or 0,
+		"lifetime_currency": row.get("tex_lifetime_currency"),
 		"last_stay_days_ago": (today - last).days if last else None, "country": row.get("tex_country"),
 		"market": row.get("tex_market"), "language": row.get("tex_language"), "vip": row.get("vip"),
 		"tags": row.get("tex_tags"), "consent_email": row.get("tex_consent_email"),
