@@ -177,11 +177,14 @@ def profile(guest: str) -> dict:
 	member_of = [{"name": s.name, "segment_name": s.segment_name, "system_key": s.system_key}
 	             for s in visible_segments(via) if s.rules_json and _safe_match(facts, s.rules_json, today)]
 	# changes, and requests from online bookings that were not applied (ADR-046) for the hotel to confirm
-	consent_log = frappe.get_all("TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": guest,
-	                                                         "action": ("in", ["guest.consent",
-	                                                                           "guest.consent_requested"])},
-	                             fields=["event_time", "action", "actor", "new_value", "reason", "source"],
-	                             order_by="event_time desc", limit=50)
+	# a profile is shared inside an enterprise (ADR-040), its bookings and staff are not: entries
+	# made at another hotel (a booking there, its staff) stay with that hotel; profile-level
+	# changes (CRM, no hotel) are the consent record everyone sharing the profile relies on
+	consent_log = [c for c in frappe.get_all(
+		"TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": guest,
+		                            "action": ("in", ["guest.consent", "guest.consent_requested"])},
+		fields=["event_time", "action", "actor", "new_value", "reason", "source", "property"],
+		order_by="event_time desc", limit=200) if not c.property or c.property in via][:50]
 	for c in consent_log:
 		c["event_time"] = str(c["event_time"])
 		change = json.loads(c["new_value"] or "{}")

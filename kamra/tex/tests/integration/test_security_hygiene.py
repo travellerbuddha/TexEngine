@@ -495,3 +495,38 @@ class TestSecurityHygieneG83Review(G83Setup):
 			whole = image_bytes(fmt)
 			with self.assertRaises(frappe.ValidationError, msg=name):          # the header alone is not an image
 				self.upload(name, whole[: len(whole) * 2 // 3], site=SLUG)
+
+	# ── R7. consent needs crm.edit; the consent history stays in my hotels ──
+
+	def test_r7_staff_consent_needs_crm_edit_and_the_history_stays_in_my_hotels(self):
+		from kamra.tex.security.audit import audit
+		from kamra.tex.services import booking as booking_svc
+
+		self.as_user("Administrator")
+		if not frappe.db.exists("TEX Permission Profile", "G83 Sales without CRM"):
+			frappe.get_doc({"doctype": "TEX Permission Profile", "profile_name": "G83 Sales without CRM",
+			                "capabilities": [{"capability": c} for c in ("price.view", "reservation.view",
+			                                                             "reservation.create")]}
+			               ).insert(ignore_permissions=True)
+		seller = fx.ensure_user("g83-seller@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": seller, "property": fx.PROPERTY},
+		          {"user": seller, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "G83 Sales without CRM"})
+		ada = frappe.get_doc({"doctype": "Guest", "first_name": "Ada", "last_name": "Known",
+		                      "email": "g83-known@example.com", "tex_enterprise": self.f["enterprise"]}
+		                     ).insert(ignore_permissions=True)
+		guest = {**GUEST, "email": "g83-known@example.com", "consent_email": True}
+		self.as_user(seller)                            # may sell, may not edit guest profiles
+		self.assertEqual(booking_svc.resolve_guest(guest, property=fx.PROPERTY, market="DE", language="en", staff=True),
+		                 (ada.name, [], ["tex_consent_email"]))
+		self.assertEqual(frappe.db.get_value("Guest", ada.name, "tex_consent_email"), 0)
+		self.as_user(self.agent)                        # crm.edit here: recorded
+		self.assertEqual(booking_svc.resolve_guest(guest, property=fx.PROPERTY, market="DE", language="en", staff=True),
+		                 (ada.name, ["tex_consent_email"], []))
+		# the consent history shows this hotel's requests, never another hotel's bookings or staff
+		self.as_user("Administrator")
+		for hotel, ref in ((OTHER, "TEX-OTHER-G83"), (fx.PROPERTY, "TEX-MINE-G83")):
+			audit("guest.consent_requested", reference_doctype="Guest", reference_name=ada.name, property=hotel,
+			      new={"tex_consent_sms": True, "booking": ref}, reason="booking")
+		self.as_user(self.agent)
+		self.assertEqual([h["booking"] for h in crm.profile(ada.name)["consent_history"]], ["TEX-MINE-G83"])
