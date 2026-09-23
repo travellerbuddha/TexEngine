@@ -107,7 +107,27 @@ def base_setup() -> dict:
 	return {"enterprise": ent, "group": grp, "property": PROPERTY, "room_types": rts, "rate_plans": rps}
 
 
-def create_contract(f: dict, *, code="DE-TEST", market="DE", base=100, publish=True) -> dict:
+def default_age_bands() -> list[dict]:
+	return [{"band_code": "INF", "label": "Infant", "from_age": 0, "to_age": 2.99, "is_infant": 1},
+	        {"band_code": "CHA", "label": "Child A", "from_age": 3, "to_age": 6.99},
+	        {"band_code": "CHB", "label": "Child B", "from_age": 7, "to_age": 11.99}]
+
+
+def default_occupancy_rules() -> list[dict]:
+	return [
+		{"target": "ADULT", "position": 3, "op": "MULTIPLY", "value": 0.7},
+		{"target": "CHILD", "age_band": "INF", "op": "MULTIPLY", "value": 0},
+		{"target": "CHILD", "age_band": "CHA", "op": "PERCENT_OF", "value": 25},
+		{"target": "CHILD", "age_band": "CHB", "op": "PERCENT_OF", "value": 50},
+		{"target": "CHILD", "position": 1, "age_band": "CHB", "combination": "1+1", "op": "PERCENT_OF",
+		 "value": 100},
+	]
+
+
+def create_contract(f: dict, *, code="DE-TEST", market="DE", base=100, publish=True, age_bands=None,
+                    occupancy_rules=None) -> dict:
+	"""``age_bands`` / ``occupancy_rules``: None → the defaults above; [] → none (the contract
+	inherits them from the pricing policies)."""
 	from kamra.tex.commercial import contracts
 
 	std, dlx = f["room_types"]["STD"], f["room_types"]["DLX"]
@@ -124,17 +144,8 @@ def create_contract(f: dict, *, code="DE-TEST", market="DE", base=100, publish=T
 		"period_rates": [{"room_type": std, "period_code": "LOW", "op": "ABSOLUTE", "value": base},
 		                 {"room_type": std, "period_code": "HIGH", "op": "ABSOLUTE", "value": base + 20},
 		                 {"room_type": dlx, "op": "MULTIPLY", "value": 1.35, "base_room_type": std}],
-		"age_bands": [{"band_code": "INF", "label": "Infant", "from_age": 0, "to_age": 2.99, "is_infant": 1},
-		              {"band_code": "CHA", "label": "Child A", "from_age": 3, "to_age": 6.99},
-		              {"band_code": "CHB", "label": "Child B", "from_age": 7, "to_age": 11.99}],
-		"occupancy_rules": [
-			{"target": "ADULT", "position": 3, "op": "MULTIPLY", "value": 0.7},
-			{"target": "CHILD", "age_band": "INF", "op": "MULTIPLY", "value": 0},
-			{"target": "CHILD", "age_band": "CHA", "op": "PERCENT_OF", "value": 25},
-			{"target": "CHILD", "age_band": "CHB", "op": "PERCENT_OF", "value": 50},
-			{"target": "CHILD", "position": 1, "age_band": "CHB", "combination": "1+1", "op": "PERCENT_OF",
-			 "value": 100},
-		],
+		"age_bands": default_age_bands() if age_bands is None else age_bands,
+		"occupancy_rules": default_occupancy_rules() if occupancy_rules is None else occupancy_rules,
 		"boards": [{"board": "AI", "is_base": 1}, {"board": "UAI", "op": "ADD", "adult_amount": 20,
 		                                          "child_percent": 50}],
 		"rate_plans": [{"rate_plan": f["rate_plans"]["FLEX"], "refundable": 1},

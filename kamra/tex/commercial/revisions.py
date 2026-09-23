@@ -233,20 +233,30 @@ def archive(doctype: str, name: str) -> None:
 	doc.save(ignore_permissions=True)
 
 
-def live_or_scheduled_roots(doctype: str, filters: dict, *, exclude_root: str | None = None) -> list[str]:
+def live_or_scheduled_roots(doctype: str, filters: dict, *, exclude_root: str | None = None,
+                            for_update: bool = False) -> list[str]:
 	"""Roots of ``doctype`` records matching ``filters`` with a revision live now or later
-	(by window, not by status: a superseded revision stays live until its successor starts)."""
+	(by window, not by status: a superseded revision stays live until its successor starts).
+
+	A None filter value matches a blank field, as in ``as_of`` (a global pricing policy has
+	no hotel and no market). ``for_update`` makes it a locking read: it sees what another
+	transaction committed meanwhile and holds the rows until commit, so two activations of
+	one scope run one after the other."""
 	_check_doctype(doctype)
 	conds, params = [], {"now": now_datetime(), "ex": exclude_root or ""}
 	for i, (k, v) in enumerate(filters.items()):
 		if not k.isidentifier():
 			raise ValueError("invalid field name")
-		conds.append(f"`{k}` = %(f{i})s")
-		params[f"f{i}"] = v
+		if v is None:
+			conds.append(f"IFNULL(`{k}`, '') = ''")
+		else:
+			conds.append(f"`{k}` = %(f{i})s")
+			params[f"f{i}"] = v
 	return frappe.db.sql_list(
 		f"""SELECT DISTINCT IFNULL(revision_of, name) FROM `tab{doctype}`
 		    WHERE {' AND '.join(conds) or '1=1'} AND tex_status IN ('Active','Superseded')
-		      AND (active_to IS NULL OR active_to > %(now)s) AND IFNULL(revision_of, name) != %(ex)s""", params)
+		      AND (active_to IS NULL OR active_to > %(now)s) AND IFNULL(revision_of, name) != %(ex)s
+		    {'FOR UPDATE' if for_update else ''}""", params)
 
 
 def as_of(doctype: str, at, filters: dict | None = None, fields=("name",)) -> list[dict]:
