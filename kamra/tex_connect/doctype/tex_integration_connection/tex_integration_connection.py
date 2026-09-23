@@ -29,6 +29,10 @@ class TEXIntegrationConnection(Document):
 			if self.environment == "Production" and not getattr(cls, "certified", False):
 				frappe.throw(_("{0} is not certified for production: use the Sandbox environment.").format(
 					getattr(cls, "label", self.adapter)))
+			if self.enabled and getattr(cls, "requires_secret", False) and not self.get("secret"):
+				# it signs every delivery; it never sends unsigned or with an empty key (G-83)
+				frappe.throw(_("{0} signs what it sends: set a signing secret before enabling it.").format(
+					getattr(cls, "label", self.adapter)))
 		if self.category == "Channel Manager" and not self.property:
 			frappe.throw(_("A channel connection belongs to one hotel."))
 		if self.endpoint_url and not self.endpoint_url.startswith("https://"):

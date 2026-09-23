@@ -292,6 +292,44 @@ def embed_snippet(site: str):
 	}
 
 
+@frappe.whitelist(methods=["POST"])
+def upload_site_image(site: str | None = None, property: str | None = None, hotel_group: str | None = None):
+	"""A booking site's logo or hero image, checked on the server (G-83): the bytes must be a
+	PNG, JPEG, GIF or WebP image of at most 2 MB (``kamra.tex.security.uploads``). It is public,
+	since the site shows it to anonymous guests. ``site`` names a saved site; a site being
+	created names the hotel or hotel group it will serve. Needs ``booking_site.edit`` there."""
+	from kamra.tex.security import uploads
+	from kamra.tex.security.filetypes import MAX_IMAGE_BYTES
+	from kamra.tex.services import sites
+
+	site, property, hotel_group = text(site, 140), text(property, 140), text(hotel_group, 140)
+	if site:
+		hotels = sites.site_properties(sites.require_site(site))
+	elif property:
+		scope.require("booking_site.edit", property)
+		hotels = [property]
+	elif hotel_group:
+		hotels = frappe.get_all("Property", filters={"tex_hotel_group": hotel_group}, pluck="name")
+		if not hotels and not scope.is_platform_admin():
+			frappe.throw(_("Not permitted."), frappe.PermissionError)
+		for p in hotels:
+			scope.require("booking_site.edit", p)
+	else:
+		if not scope.is_platform_admin():
+			frappe.throw(_("Name the booking site, hotel or hotel group the image is for."), frappe.PermissionError)
+		hotels = []
+	upload = (getattr(frappe.request, "files", None) or {}).get("file") if frappe.request else None
+	if not upload:
+		frappe.throw(_("No file was uploaded."))
+	content = upload.stream.read(MAX_IMAGE_BYTES + 1)            # never more than the limit into memory
+	out = uploads.save_public_image(upload.filename, content,
+	                                attached_to=("TEX Booking Site", site) if site else None)
+	audit("booking_site.image_upload", reference_doctype="TEX Booking Site" if site else "File",
+	      reference_name=site or out["name"], property=hotels[0] if len(hotels) == 1 else None,
+	      new={"file_url": out["file_url"], "bytes": len(content)})
+	return {"file_url": out["file_url"], "file_name": out["file_name"]}
+
+
 # ─── integrations ────────────────────────────────────────────────────────
 
 

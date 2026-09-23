@@ -81,12 +81,15 @@ def _platform_url(uri: str) -> str:
 
 
 def _link_url(property: str, booking: str | None, token: str) -> str:
-	"""A payment link opens on the hotel's booking host when it has one (G-21)."""
+	"""A payment link opens on the hotel's booking host when it has one (G-21). The token is in
+	the URL fragment, which browsers never send to a server, so it reaches no access log or
+	Referer header (G-83); the page posts it to the API. Links sent before as ``pay/<token>``
+	still open (the page moves the token out of the path) until they expire."""
 	from kamra.tex.services import sites as sites_svc
 
 	site = sites_svc.site_for(property, frappe.db.get_value("TEX Booking", booking, "booking_site") if booking
 	                          else None)
-	return sites_svc.guest_url(site, f"pay/{token}", site_scoped=False)
+	return sites_svc.guest_url(site, f"pay#token={token}", site_scoped=False)
 
 
 def check_return_url(property: str, url: str) -> str:

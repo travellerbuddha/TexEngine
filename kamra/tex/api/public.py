@@ -416,7 +416,7 @@ def resume_token(booking: str) -> str:
 	                     "exp": add_to_date(now_datetime(), hours=RESUME_TTL_HOURS).isoformat()})
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
 def booking_status(token: str):
 	"""Confirmation page / manage link: guest view of a booking by its manage token."""
@@ -483,7 +483,7 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 	return {**out, "booking": txn.booking, "return_url": txn.return_url}
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
 def payment_link(token: str):
 	from kamra.tex.payments import service as pay
@@ -678,7 +678,7 @@ def manage_propose(token: str, reservation: str, changes):
 		"settlement": guest_changes.settlement_dict(settlement, b.currency), "proposal_token": proposal_token})
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
 def manage_extras(token: str, reservation: str):
 	"""Extras the guest can still add to a room of their booking (G-22)."""

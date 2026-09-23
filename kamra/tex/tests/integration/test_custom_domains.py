@@ -173,7 +173,7 @@ class TestCustomDomains(DomainCase):
 		self.verify(SLUG, HOST)
 		self.assertEqual(notify.manage_url(fx.PROPERTY, SLUG, "t"), f"https://{HOST}/manage#token=t")
 		link = pay.create_link(property=fx.PROPERTY, amount="10", currency="EUR", description="x")
-		self.assertTrue(link["url"].startswith(f"https://{HOST}/pay/"), link["url"])
+		self.assertTrue(link["url"].startswith(f"https://{HOST}/pay#token="), link["url"])   # token in the fragment (G-83)
 		self.assertIn(HOST, pay.allowed_return_hosts(fx.PROPERTY))
 		self.assertEqual(public._safe_return_url(self.site, f"https://{HOST}/confirmation/{{booking}}", "B-1"),
 		                 f"https://{HOST}/confirmation/B-1")

@@ -118,6 +118,8 @@
   "many": "Zapisz {count} zmian…",
   "other": "Zapisz {count} zmiany…"
  },
+ "crm.consent.requested": "prośba, nie zastosowano",
+ "crm.consent.requested_hint": "Zaznaczone w rezerwacji online z e-mailem lub telefonem tego gościa. Nie zastosowano: zapisz zgodę, gdy gość potwierdzi ją zweryfikowanym kanałem.",
  "crm.consent.saved": "Zgoda zapisana",
  "crm.consent.source": "Źródło",
  "crm.consent.source.booking": "Silnik rezerwacji",

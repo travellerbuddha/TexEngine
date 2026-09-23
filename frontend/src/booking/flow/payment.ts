@@ -22,7 +22,10 @@ export function appPath(url: string): string | null {
 /** Continue on a page of this engine (absolute path or URL) with a payment result query
  * appended: inside the app when it is one of ours, else a full page load. */
 export function resumeAt(target: string, query: string, navigate: NavigateFunction) {
-  const url = `${target}${target.includes("?") ? "&" : "?"}${query}`
+  // the query goes before a fragment ("…/pay#token=…" keeps its token out of the request)
+  const hash = target.indexOf("#")
+  const [path, frag] = hash < 0 ? [target, ""] : [target.slice(0, hash), target.slice(hash)]
+  const url = `${path}${path.includes("?") ? "&" : "?"}${query}${frag}`
   const inApp = appPath(url)
   if (inApp) navigate(inApp, { replace: true })
   else window.location.assign(url)

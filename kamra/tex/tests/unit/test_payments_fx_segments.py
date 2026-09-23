@@ -204,7 +204,7 @@ class TestProviderRegistry(unittest.TestCase):
 		self.assertEqual(p.handle_callback("PTX-7", odd, {}, b"").currency, "999")   # never mistaken for ours
 
 	def test_iyzico_takes_one_checkout_per_charge(self):
-		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk"}, environment="Sandbox", api_key="ak"))
+		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk", "api_key": "ak"}, environment="Sandbox"))
 		self.assertTrue(p.can_add_checkout(None))
 		self.assertFalse(p.can_add_checkout("tok-a"))          # another tab supersedes the charge (G-68)
 		self.assertTrue(simple.MockProvider(_Acc(environment="Sandbox"), "s").can_add_checkout("MOCK-1"))
@@ -227,7 +227,7 @@ class TestProviderRegistry(unittest.TestCase):
 			p.refund("tok-a", Decimal("10"), "EUR")                                    # no captured payment
 
 	def test_iyzico_counts_the_basket_price_not_the_instalment_interest(self):
-		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk"}, environment="Sandbox", api_key="ak"))
+		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk", "api_key": "ak"}, environment="Sandbox"))
 		base = {"status": "success", "paymentStatus": "SUCCESS", "conversationId": "PTX-2", "basketId": "PTX-2",
 		        "currency": "EUR", "paymentId": "P2", "itemTransactions": [{"paymentTransactionId": "I2"}]}
 		for answer, amount in (({"price": "80.00", "paidPrice": "83.20"}, Decimal("80.00")),   # interest on top
@@ -243,8 +243,9 @@ class TestProviderRegistry(unittest.TestCase):
 		"""The answer shape follows Sipay's public documentation; it is not yet a recorded
 		sandbox answer (certification is BLOCKED on merchant credentials), so a success
 		without an amount is accepted and a stated amount is checked by ``complete``."""
-		p = turkey.SipayProvider(_Acc(secrets={"secret_key": "app-secret", "merchant_key": "MK"},
-		                              environment="Sandbox", api_key="app-id"))
+		# the app id is an encrypted secret (G-83): the column only ever holds its mask
+		p = turkey.SipayProvider(_Acc(secrets={"secret_key": "app-secret", "merchant_key": "MK", "api_key": "app-id"},
+		                              environment="Sandbox", api_key="******"))
 
 		def answer(status):
 			def post(url, json=None, headers=None, timeout=None):
@@ -263,6 +264,7 @@ class TestProviderRegistry(unittest.TestCase):
 			out = p.handle_callback("PTX-9", {}, {}, b"")
 		self.assertEqual((out.status, out.provider_ref, out.amount, out.currency),
 		                 ("Succeeded", "O9", Decimal("842.50"), "EUR"))
+		self.assertEqual(ok.calls[0][1]["app_id"], "app-id")                  # decrypted, never the mask
 		url, body = ok.calls[-1]
 		self.assertTrue(url.startswith("https://provisioning.sipay.com.tr/ccpayment/api/checkstatus"))
 		self.assertEqual((body["invoice_id"], body["merchant_key"]), ("PTX-9", "MK"))

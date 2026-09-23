@@ -58,12 +58,13 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Secret leakage | Frappe `Password` fields (encrypted at rest); never returned by APIs; never logged |
 | Audit tampering | `TEX Audit Event` has no write/delete permission for any role; inserted only by server code |
 | Embedding abuse (clickjacking) | Booking iframe allowed only for `allowed_embed_origins` via CSP `frame-ancestors` |
-| Uploads | Existing Frappe file handling; TEX branding images restricted to image MIME types and size |
+| Uploads | Checked on the server (ADR-046): TEX branding images by their bytes (PNG/JPEG/GIF/WebP, decoded, 2 MB) through `admin.upload_site_image`; no path stores HTML, SVG, XML or script as a public file (File controller extension) |
+| Bearer tokens in URLs | Guest links carry tokens in the URL fragment (never sent to a server); token endpoints take POST bodies only; payment pages send no Referer (ADR-046); only token hashes are stored |
 | PII over-exposure | `crm.view` / `guest.export` capabilities; masked ID numbers (existing `_mask_id`); exports audited |
 | Open redirect through payment return URLs | Browser-supplied return URLs accepted only for the TEX host or a DNS-verified booking domain (ADR-021) |
 | Custom-domain takeover | `verified` set only by the DNS TXT check; editing a row resets it; a domain can belong to one site only |
 | Group-level records edited from one hotel | Booking sites serving a hotel group need the capability at every hotel of the group |
-| Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with consent or legitimate transactional basis |
+| Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with the profile's own consent; an anonymous booking never grants consent on an existing profile, it is recorded as a request (ADR-046) |
 
 ## 5. Logging rules
 Never log passwords, CVV, PAN, secrets or raw tokens. `kamra.tex.security.redact()` scrubs
@@ -91,9 +92,11 @@ the guest's manage token.
 
 ## 7. Known gaps (tracked)
 
-The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). Security-relevant open items
-are G-26 and G-83 (Medium/Low); the Critical G-01…G-03 and the High G-10…G-16 are fixed. The
-notes below predate that audit.
+The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). The security-relevant items
+G-26 and G-83 are fixed (ADR-040, ADR-046), as are the Critical G-01…G-03 and the High
+G-10…G-16. From G-83, two owner decisions remain: a double opt-in e-mail for consent asked for
+on a known profile (needs SMTP), and payment links e-mailed before 2026-09-23 keep their token
+in the path until they expire. The notes below predate that audit.
 - Legacy PMS endpoints resolve every record argument (`order`, `outlet`, `task`, `function`,
   `guest`, generic `name` ...) to its hotel through `kamra.authz.RECORD_ARGS` (ADR-027). On Desk
   and REST, legacy DocTypes with a Property link (POS, laundry, housekeeping, banquet) are

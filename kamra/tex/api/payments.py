@@ -275,10 +275,11 @@ def cancel_link(name: str, reason: str):
 
 # ─── staff: provider accounts & method rules (secrets are write-only) ────
 
-_ACCOUNT_FIELDS = ["name", "label", "property", "provider", "environment", "enabled", "currencies", "api_key",
+_ACCOUNT_FIELDS = ["name", "label", "property", "provider", "environment", "enabled", "currencies",
                    "terminal_id", "bank_code", "gateway_url", "bank_name", "iban", "account_holder",
                    "transfer_instructions"]
-_SECRETS = ("secret_key", "merchant_key", "store_key", "webhook_secret")
+# stored encrypted, never returned: the API key is a credential too (G-83)
+_SECRETS = ("api_key", "secret_key", "merchant_key", "store_key", "webhook_secret")
 
 
 @frappe.whitelist()

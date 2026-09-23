@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react"
-import { Route, Routes } from "react-router-dom"
-import { PINNED } from "./lib/mount"
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom"
+import { PINNED, payLinkRoute } from "./lib/mount"
 import { isEmbedded } from "./lib/storage"
 import { NotFound } from "./pages/SiteError"
 import SitePage from "./pages/SitePage"
@@ -27,6 +27,15 @@ function useEmbedBridge() {
   }, [])
 }
 
+/** An in-app visit to an old-style payment link (…/pay/<token>): the same page, with the
+ * token moved into the fragment (G-83). */
+function LegacyPayLink() {
+  const { token = "" } = useParams()
+  const { search } = useLocation()
+  const [path, frag] = payLinkRoute(token).split("#")
+  return <Navigate to={`${path}${search}#${frag}`} replace />
+}
+
 /** Guest booking engine routes.
  *  On the platform (basename /book):
  *  /:site                         search → rooms → extras → details → payment
@@ -35,7 +44,8 @@ function useEmbedBridge() {
  *  On a hotel's own host, pinned to its site (basename /, ADR-035) the same pages
  *  without the :site prefix: /, /confirmation/:booking, /manage.
  *  Both:
- *  /pay/:token                    payment link
+ *  /pay#token=…                   payment link (the token never reaches a server log, G-83);
+ *                                 an old /pay/:token link moves its token into the fragment
  *  /pay/return                    gateway return of a payment link (no token)
  *  /pay/mock/:txn                 sandbox gateway (Mock provider)
  *  The pages read the site with useSiteSlug() (lib/mount). */
@@ -46,7 +56,8 @@ export default function BookingApp() {
       <Routes>
         <Route path="/pay/mock/:txn" element={<MockPayPage />} />
         <Route path="/pay/return" element={<PayReturnPage />} />
-        <Route path="/pay/:token" element={<PayLinkPage />} />
+        <Route path="/pay" element={<PayLinkPage />} />
+        <Route path="/pay/:token" element={<LegacyPayLink />} />
         {PINNED ? (
           <>
             <Route path="/confirmation/:booking" element={<ConfirmationPage />} />

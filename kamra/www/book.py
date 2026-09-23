@@ -9,7 +9,7 @@ The page may be framed only by the booking site's allowed embed origins
 
 import frappe
 
-from kamra.tex.booking_host import booking_html, frame_ancestors
+from kamra.tex.booking_host import booking_html, frame_ancestors, referrer_policy, with_referrer_policy
 from kamra.tex.services import sites
 
 no_cache = 1
@@ -30,7 +30,9 @@ def get_context(context):
 		frappe.local.flags.redirect_location = f"/book/{sites_[0]}" if len(sites_) == 1 else "/kamra/book"
 		raise frappe.Redirect(302)
 	frappe.local.response_headers["Content-Security-Policy"] = f"frame-ancestors {frame_ancestors(slug)}"
-	frappe.local.response_headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-	context.spa_html = html
+	# payment pages send no Referer (an old /book/pay/<token> link must not leak its token, G-83)
+	policy = referrer_policy(path)
+	frappe.local.response_headers["Referrer-Policy"] = policy
+	context.spa_html = with_referrer_policy(html, policy)
 	context.no_cache = 1
 	return context

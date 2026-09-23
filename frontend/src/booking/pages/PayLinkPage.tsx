@@ -1,20 +1,39 @@
 import { CheckCircle2, Clock, CreditCard, Lock, ShieldCheck, XCircle } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
-import { rememberPayment, rememberReturn } from "../lib/storage"
+import { getItem, rememberPayment, rememberReturn, setItem } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
-import { payPath } from "../lib/mount"
+import { payLinkPath } from "../lib/mount"
 import type { PaymentLinkInfo, PaymentStart } from "../types"
 import { Button } from "../ui/controls"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
 import { PlainShell } from "./SiteError"
 
+const LINK_TOKEN = "tex.paylink.token"
+
+/** Take the link's token from the URL fragment (never sent to a server, G-83), keep it for
+ * this tab and remove it from the address bar, like the manage page's magic link. */
+function takeLinkToken(): string | null {
+  const m = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash)
+  if (!m) return getItem(LINK_TOKEN)
+  const tok = decodeURIComponent(m[1])
+  setItem(LINK_TOKEN, tok)
+  try {
+    window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search)
+  } catch {
+    /* ignore */
+  }
+  return tok
+}
+
 export default function PayLinkPage() {
   const { t, money, dateTime } = useI18n()
-  const { token = "" } = useParams()
+  const { hash } = useLocation()
+  // a link opened again in this tab (only its fragment changes) brings a new token
+  const token = useMemo(() => takeLinkToken() ?? "", [hash]) // eslint-disable-line react-hooks/exhaustive-deps
   const [sp] = useSearchParams()
   const navigate = useNavigate()
   const status = sp.get("status")
@@ -62,7 +81,7 @@ export default function PayLinkPage() {
       const p = await pub<PaymentStart>("pay_link", { token, provider_account: account ?? undefined })
       rememberPayment(p, { amount: isZero(link.paid) ? link.amount : undefined, currency: link.currency, hotel: link.hotel ?? undefined })
       // the gateway returns to /pay/return (the token is never sent to it); come back here
-      rememberReturn(p.transaction, payPath(encodeURIComponent(token)))
+      rememberReturn(p.transaction, payLinkPath(token))
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {

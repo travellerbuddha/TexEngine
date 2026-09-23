@@ -143,10 +143,14 @@ export interface LoyaltyProgramInfo {
 
 export interface ConsentEvent {
   event_time: string
+  /** guest.consent: a change; guest.consent_requested: asked for in an online booking on a known
+   * profile and NOT applied until the guest confirms on a verified channel (ADR-046) */
+  action: "guest.consent" | "guest.consent_requested"
   actor: string | null
   new_value: string | null
   reason: string | null
   source: string | null
+  booking?: string | null
 }
 
 export interface GuestProfile {
