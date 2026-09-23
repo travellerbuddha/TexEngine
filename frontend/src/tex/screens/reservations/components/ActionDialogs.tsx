@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { History } from "lucide-react"
 import type { TexApiError } from "../../../lib/api"
-import { date, dateTime, isoDay } from "../../../lib/format"
+import { date, isoDay } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, Dialog, Field, InlineError, Input, Money, Notice, Skeleton, Textarea, useToast } from "../../../ui"
 import { cn } from "../../../../lib/utils"
@@ -9,14 +9,16 @@ import { Row } from "../../crs/components/controls"
 import { penaltyText } from "../../crs/components/OfferParts"
 import { PriceBreakdown } from "../../crs/components/PriceBreakdown"
 import { cmpDecimal, isZero } from "../../crs/lib/party"
+import { useServerClock } from "../../crs/lib/serverClock"
 import { asApiError } from "../../crs/lib/useBookingFlow"
-import { acknowledgeGuestChange, cancelReservation, cancellationPreview, simulate } from "../lib/api"
+import { acknowledgeGuestChange, cancelReservation, cancellationPreview, resendConfirmation, simulate, type ResendResult } from "../lib/api"
 import type { CancelPreview, CancelResult, ReservationDetail, Simulation } from "../lib/types"
 import { localToServer } from "./ModifyDrawer"
 
 /** "What would this stay have cost if sold on …?" — read-only (R-22). */
 export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean; onClose: () => void; res: ReservationDetail; canCost: boolean }) {
   const { t } = useTexT()
+  const clock = useServerClock()
   const [at, setAt] = useState("")
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<Simulation>()
@@ -26,11 +28,11 @@ export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean
     setResult(undefined)
     setError(undefined)
     // start one month before the original sale: a typical "sold earlier" question
-    const base = res.sale_at ? res.sale_at.slice(0, 10) : isoDay(new Date())
+    const base = res.sale_at ? res.sale_at.slice(0, 10) : clock.today()
     const d = new Date(`${base}T12:00:00`)
     d.setMonth(d.getMonth() - 1)
     setAt(`${isoDay(d)}T12:00`)
-  }, [open, res.sale_at])
+  }, [open, res.sale_at, clock])
   const run = async () => {
     if (!at) return
     setBusy(true)
@@ -63,7 +65,7 @@ export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean
             void run()
           }}
         >
-          <Field label={t("res.sim.sale_at")} hint={t("res.basis.sale_at_hint")}>
+          <Field label={t("res.sim.sale_at")} hint={t("res.basis.sale_at_hint", { tz: clock.tz ?? "—" })}>
             <Input id="sim-at" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} data-autofocus />
           </Field>
           <Button type="submit" loading={busy} disabled={!at} icon={<History className="size-4" aria-hidden />}>
@@ -80,14 +82,14 @@ export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean
           <div className="space-y-3" aria-live="polite">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-zinc-200 p-3">
-                <p className="text-xs text-zinc-500">{t("res.sim.actual", { date: dateTime(s.actual.sale_at) })}</p>
+                <p className="text-xs text-zinc-500">{t("res.sim.actual", { date: clock.label(s.actual.sale_at) })}</p>
                 <p className="text-lg font-semibold">
                   <Money amount={s.actual.total} currency={s.actual.currency} />
                 </p>
                 <p className="text-xs text-zinc-500">{s.actual.version}</p>
               </div>
               <div className="rounded-lg border border-tex-200 bg-tex-50/40 p-3">
-                <p className="text-xs text-zinc-500">{t("res.sim.simulated", { date: dateTime(s.simulated_sale_at) })}</p>
+                <p className="text-xs text-zinc-500">{t("res.sim.simulated", { date: clock.label(s.simulated_sale_at) })}</p>
                 <p className="text-lg font-semibold">
                   {s.simulated.sellable ? <Money amount={s.simulated.totals.total} currency={s.simulated.currency} /> : t("res.sim.not_sellable")}
                 </p>
@@ -308,6 +310,82 @@ export function AcknowledgeDialog({ open, onClose, res, onDone }: { open: boolea
         </Field>
         <InlineError error={error} />
       </div>
+    </Dialog>
+  )
+}
+
+/**
+ * Re-send the booking e-mail (crs.resend_confirmation). Only a hash of the guest's manage
+ * link is stored, so the e-mail carries a NEW link and the old one stops working — the
+ * agent is told before confirming. `sent: false` is shown as it is: the link was replaced
+ * but no e-mail went out.
+ */
+export function ResendConfirmationDialog({ open, onClose, booking }: { open: boolean; onClose: () => void; booking: string }) {
+  const { t } = useTexT()
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<TexApiError>()
+  const [result, setResult] = useState<ResendResult>()
+  useEffect(() => {
+    if (open) {
+      setError(undefined)
+      setResult(undefined)
+    }
+  }, [open])
+  return (
+    <Dialog
+      open={open}
+      onClose={busy ? () => undefined : onClose}
+      size="sm"
+      title={t("res.resend.title")}
+      description={booking}
+      footer={
+        result ? (
+          <Button onClick={onClose}>{t("core.action.close")}</Button>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose} disabled={busy}>
+              {t("core.action.cancel")}
+            </Button>
+            <Button
+              loading={busy}
+              onClick={async () => {
+                setBusy(true)
+                setError(undefined)
+                try {
+                  const r = await resendConfirmation(booking)
+                  setResult(r)
+                  if (r.sent) toast.success(t("res.resend.sent", { email: r.email }))
+                } catch (e) {
+                  setError(asApiError(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              {t("res.resend.confirm")}
+            </Button>
+          </>
+        )
+      }
+    >
+      {result ? (
+        result.sent ? (
+          <Notice tone="success" title={t("res.resend.sent", { email: result.email })}>
+            {t("res.resend.old_dead")}
+          </Notice>
+        ) : (
+          <Notice tone="warning" title={t("res.resend.not_sent_title")}>
+            {t("res.resend.not_sent", { email: result.email })}
+          </Notice>
+        )
+      ) : (
+        <div className="space-y-3 text-sm text-zinc-700">
+          <p>{t("res.resend.body")}</p>
+          <Notice tone="warning">{t("res.resend.warning")}</Notice>
+          <InlineError error={error} />
+        </div>
+      )}
     </Dialog>
   )
 }

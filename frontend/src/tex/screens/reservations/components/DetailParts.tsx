@@ -9,6 +9,7 @@ import { cn } from "../../../../lib/utils"
 import { Row } from "../../crs/components/controls"
 import { PaymentLinkDialog, ReissueLinkDialog } from "../../crs/components/PaymentLinkDialog"
 import { useLabels } from "../../crs/lib/labels"
+import { useServerClock } from "../../crs/lib/serverClock"
 import { isPositive, isZero, shortCode } from "../../crs/lib/party"
 import type { BookingSummary } from "../../crs/lib/types"
 import type { Revision } from "../lib/types"
@@ -51,13 +52,22 @@ export function RevisionTimeline({ revisions, property }: { revisions: Revision[
   if (!revisions.length) return <p className="text-sm text-zinc-500">{t("res.rev.none")}</p>
   const ordered = [...revisions].sort((a, b) => b.revision_no - a.revision_no)
   return (
-    <ol className="relative space-y-4 border-l border-zinc-200 pl-5">
+    <ol aria-label={t("res.rev.title")} className="relative space-y-4 border-l border-zinc-200 pl-5">
       {ordered.map((r) => {
         const fields = Object.entries(r.changes ?? {}).filter(([k, v]) => k !== "requested" && k !== "policy" && Array.isArray(v))
         const original = r.change_type === "Original"
         const override = r.pricing_basis === "MANUAL" && r.override_amount && !isZero(r.override_amount)
         return (
-          <li key={r.name} className="relative">
+          <li
+            key={r.name}
+            className="relative"
+            // raw figures for tools and tests (the text shows them formatted)
+            data-revision={r.revision_no}
+            data-change-type={r.change_type}
+            data-old-amount={r.old_amount ?? ""}
+            data-new-amount={r.new_amount ?? ""}
+            data-currency={r.currency ?? ""}
+          >
             <span
               aria-hidden
               className={cn(
@@ -197,6 +207,7 @@ export function PaymentSummaryBody({
   const { t } = useTexT()
   const L = useLabels()
   const { can } = useSession()
+  const clock = useServerClock()
   const [open, setOpen] = useState(false)
   const [reissue, setReissue] = useState<string | null>(null)
   const mayLink = can("payment.link", b.property)
@@ -242,18 +253,18 @@ export function PaymentSummaryBody({
             {b.payment_links.map((l) => (
               <li key={l.name} className="flex items-baseline justify-between gap-2">
                 <span className="min-w-0">
-                  {l.public_url ? (
-                    <a href={l.public_url} target="_blank" rel="noreferrer noopener" className="text-tex-700 hover:underline">
-                      {l.name}
-                    </a>
-                  ) : (
-                    l.name
+                  {l.name}
+                  {l.expires_at && (
+                    <span className="block text-xs text-zinc-500">{t("res.pay.expires", { time: clock.label(l.expires_at) })}</span>
                   )}
-                  {l.expires_at && <span className="block text-xs text-zinc-500">{t("res.pay.expires", { time: dateTime(l.expires_at) })}</span>}
+                  {isPositive(l.paid_amount) && (
+                    <span className="block text-xs text-zinc-500">
+                      {t("res.pay.link_paid")} <Money amount={l.paid_amount} currency={l.currency} />
+                    </span>
+                  )}
                 </span>
                 <span className="text-right">
-                  {/* crs.booking returns link amounts as raw DB numbers (reported): display only */}
-                  <Money amount={String(l.amount)} currency={l.currency} />
+                  <Money amount={l.amount} currency={l.currency} />
                   <Badge tone={statusTone(l.status)} className="ml-1">
                     {L.status(l.status)}
                   </Badge>

@@ -1,8 +1,8 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { Ban, Copy, History, Lock, PencilLine, Star } from "lucide-react"
+import { Ban, Copy, History, Lock, MailCheck, PencilLine, Star } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
-import { date, dateTime } from "../../lib/format"
+import { date } from "../../lib/format"
 import { useTexT } from "../../i18n"
 import {
   Badge,
@@ -21,24 +21,26 @@ import {
   useToast,
 } from "../../ui"
 import { UI_CRS } from "../crs/lib/api"
+import { useServerClock } from "../crs/lib/serverClock"
 import { ExplanationList, PolicySummary } from "../crs/components/OfferParts"
 import { usePartyText } from "../crs/components/PartyEditor"
 import { PriceBreakdown } from "../crs/components/PriceBreakdown"
 import { useLabels } from "../crs/lib/labels"
 import { copyText, shortCode } from "../crs/lib/party"
-import { AcknowledgeDialog, CancelDialog, SimulatorDialog } from "./components/ActionDialogs"
+import { AcknowledgeDialog, CancelDialog, ResendConfirmationDialog, SimulatorDialog } from "./components/ActionDialogs"
 import { PaymentSummaryCard, RevisionTimeline } from "./components/DetailParts"
 import { ModifyDrawer } from "./components/ModifyDrawer"
 import type { ReservationDetail as Detail } from "./lib/types"
 
 const TERMINAL = ["Cancelled", "No Show", "Checked Out"]
+type Dlg = "modify" | "simulate" | "cancel" | "ack" | "resend" | null
 
 /** Reservation detail: stay, guest, locked price snapshot, revisions, payments (R-21–R-23, R-46). */
 export default function ReservationDetail() {
   const { name = "" } = useParams()
   const { t } = useTexT()
   const q = useTexQuery<Detail>(UI_CRS, "reservation", { name }, [name])
-  const [dialog, setDialog] = useState<"modify" | "simulate" | "cancel" | "ack" | null>(null)
+  const [dialog, setDialog] = useState<Dlg>(null)
   const d = q.data
 
   if (q.error)
@@ -77,14 +79,15 @@ function DetailView({
   reload,
 }: {
   d: Detail
-  dialog: "modify" | "simulate" | "cancel" | "ack" | null
-  setDialog: (v: "modify" | "simulate" | "cancel" | "ack" | null) => void
+  dialog: Dlg
+  setDialog: (v: Dlg) => void
   reload: () => void
 }) {
   const { t } = useTexT()
   const L = useLabels()
   const toast = useToast()
   const partyText = usePartyText()
+  const clock = useServerClock()
   const caps = new Set(d.capabilities)
   const terminal = TERMINAL.includes(d.status)
   const texPriced = Boolean(d.pricing?.request)
@@ -92,6 +95,8 @@ function DetailView({
   const canCancel = caps.has("reservation.cancel") && !terminal
   const canSimulate = caps.has("price.view") && texPriced
   const canCost = caps.has("price.view_cost")
+  // new manage link by e-mail: booking-level, not once everything is cancelled
+  const canResend = Boolean(d.booking) && caps.has("reservation.modify") && d.status !== "Cancelled"
   const snap = d.pricing
   const childAges = (d.child_ages ?? []).map((c) => c.age)
   const ratePlanName = snap?.rate_plan?.name ?? (d.rate_plan ? shortCode(d.rate_plan, d.property) : null)
@@ -126,6 +131,11 @@ function DetailView({
         }
         actions={
           <>
+            {canResend && (
+              <Button variant="ghost" icon={<MailCheck className="size-4" aria-hidden />} onClick={() => setDialog("resend")}>
+                {t("res.resend.button")}
+              </Button>
+            )}
             {canSimulate && (
               <Button variant="ghost" icon={<History className="size-4" aria-hidden />} onClick={() => setDialog("simulate")}>
                 {t("res.sim.button")}
@@ -195,7 +205,7 @@ function DetailView({
                   { label: t("res.cmp.party"), value: partyText(d.adults, childAges.length ? childAges : Array(d.children).fill(null)) },
                   { label: t("crs.search.market"), value: d.market ?? "—" },
                   { label: t("crs.search.channel"), value: L.channel(d.channel) },
-                  { label: t("res.detail.sold_at"), value: dateTime(d.sale_at) },
+                  { label: t("res.detail.sold_at"), value: clock.label(d.sale_at) },
                   { label: t("res.detail.room"), value: d.room ?? t("res.detail.unassigned") },
                   { label: t("crs.guest.requests"), value: d.special_requests || "—" },
                 ]}
@@ -203,11 +213,16 @@ function DetailView({
             </CardBody>
           </Card>
 
-          <Card>
+          <Card role="region" aria-label={t("res.snap.title")}>
             <CardHeader
               title={t("res.snap.title")}
-              description={snap?.accepted_at ? t("res.snap.accepted", { time: dateTime(snap.accepted_at) }) : undefined}
-              actions={<Money amount={d.total} currency={d.currency} className="text-lg font-semibold text-zinc-950" />}
+              description={snap?.accepted_at ? t("res.snap.accepted", { time: clock.label(snap.accepted_at) }) : undefined}
+              actions={
+                // the stored (locked) total; <data> carries the raw decimal for tools and tests
+                <data value={d.total}>
+                  <Money amount={d.total} currency={d.currency} className="text-lg font-semibold text-zinc-950" />
+                </data>
+              }
             />
             <CardBody className="space-y-4">
               {texPriced ? (
@@ -275,7 +290,7 @@ function DetailView({
             </CardBody>
           </Card>
 
-          <Card>
+          <Card role="region" aria-label={t("res.rev.title")}>
             <CardHeader title={t("res.rev.title")} description={t("res.rev.subtitle")} />
             <CardBody>
               <RevisionTimeline revisions={d.revisions} property={d.property} />
@@ -339,6 +354,9 @@ function DetailView({
             reload()
           }}
         />
+      )}
+      {canResend && d.booking && (
+        <ResendConfirmationDialog open={dialog === "resend"} onClose={() => setDialog(null)} booking={d.booking} />
       )}
       <AcknowledgeDialog
         open={dialog === "ack"}

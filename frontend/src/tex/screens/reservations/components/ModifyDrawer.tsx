@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { ArrowRight, Calculator, RotateCcw } from "lucide-react"
 import { useTexQuery, type TexApiError } from "../../../lib/api"
-import { addDays, date, dateTime, isDecimal, nightsBetween } from "../../../lib/format"
+import { addDays, date, isDecimal, nightsBetween } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
 import {
@@ -28,6 +28,7 @@ import { PartyEditor, usePartyText } from "../../crs/components/PartyEditor"
 import { PriceBreakdown } from "../../crs/components/PriceBreakdown"
 import { ExtrasPicker, useExtras } from "../../crs/components/QuoteParts"
 import { useLabels } from "../../crs/lib/labels"
+import { useServerClock } from "../../crs/lib/serverClock"
 import { BOARDS, cmpDecimal, isZero, shortCode, type PartyForm } from "../../crs/lib/party"
 import { asApiError } from "../../crs/lib/useBookingFlow"
 import type { StayRequest } from "../../crs/lib/types"
@@ -89,7 +90,7 @@ function changesOf(a: ModForm, b: ModForm): Record<string, unknown> {
   return c
 }
 
-/** "2026-08-01T10:00" → "2026-08-01 10:00:00" (hotel system time). */
+/** "2026-08-01T10:00" → "2026-08-01 10:00:00" (server wall clock, bootstrap server.time_zone). */
 export function localToServer(v: string) {
   return v ? `${v.replace("T", " ")}${v.length === 16 ? ":00" : ""}` : ""
 }
@@ -433,6 +434,7 @@ function BasisPicker({
   res: ReservationDetail
 }) {
   const { t } = useTexT()
+  const clock = useServerClock()
   return (
     <fieldset className="space-y-2">
       <legend className="text-sm font-semibold text-zinc-900">{t("res.basis.title")}</legend>
@@ -455,7 +457,7 @@ function BasisPicker({
               <span>
                 <span className="block font-medium text-zinc-900">{t(`crs.basis.${b.toLowerCase()}`)}</span>
                 <span className="block text-xs text-zinc-600">
-                  {t(`res.basis.${b.toLowerCase()}_help`, { sale: res.sale_at ? dateTime(res.sale_at) : "—", version: res.contract_version ?? "—" })}
+                  {t(`res.basis.${b.toLowerCase()}_help`, { sale: clock.label(res.sale_at), version: res.contract_version ?? "—" })}
                 </span>
                 {locked && <span className="block text-xs text-zinc-500">{t("res.basis.needs_override")}</span>}
               </span>
@@ -464,7 +466,7 @@ function BasisPicker({
         })}
       </div>
       {basis === "HISTORICAL_SALE_DATE" && (
-        <Field label={t("res.basis.sale_at")} hint={t("res.basis.sale_at_hint")} error={error} required>
+        <Field label={t("res.basis.sale_at")} hint={t("res.basis.sale_at_hint", { tz: clock.tz ?? "—" })} error={error} required>
           <Input id="mod-basis-at" type="datetime-local" className="max-w-64" value={basisAt} onChange={(e) => onBasisAt(e.target.value)} />
         </Field>
       )}
@@ -485,6 +487,8 @@ function Comparison({
   planName: (id: string | null | undefined) => string
 }) {
   const { t } = useTexT()
+  const clock = useServerClock()
+  const ids = useId()
   const L = useLabels()
   const partyText = usePartyText()
   const a = p.old.request
@@ -528,26 +532,49 @@ function Comparison({
   ]
   return (
     <div className="space-y-4">
+      {/* OLD (locked) → PROPOSED and the server's difference: each figure is a group named by
+          its caption, carrying the raw decimal in <data value> (screen readers and tests) */}
       <div
         className={cn(
-          "flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3",
+          "flex flex-wrap items-end gap-x-3 gap-y-2 rounded-lg border px-4 py-3",
           dir > 0 ? "border-amber-200 bg-amber-50" : dir < 0 ? "border-emerald-200 bg-emerald-50" : "border-zinc-200 bg-zinc-50",
         )}
       >
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Money amount={p.old.total} currency={p.old.currency} className="text-zinc-600" />
-          <ArrowRight className="size-4 text-zinc-400" aria-hidden />
-          <span className="sr-only">{t("res.rev.to")}</span>
-          {p.proposed.sellable ? (
-            <Money amount={p.proposed.totals.total} currency={p.proposed.currency} className="text-lg font-semibold text-zinc-950" />
-          ) : (
-            <span className="font-medium text-rose-700">{t("res.cmp.not_sellable")}</span>
-          )}
+        <div role="group" aria-labelledby={`${ids}-old`}>
+          <p id={`${ids}-old`} className="text-xs text-zinc-500">
+            {t("res.cmp.current")}
+          </p>
+          <p className="text-sm text-zinc-600">
+            <data value={p.old.total}>
+              <Money amount={p.old.total} currency={p.old.currency} />
+            </data>
+          </p>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-zinc-500">{t("res.cmp.difference")}</p>
+        <div role="group" aria-labelledby={`${ids}-new`}>
+          <p id={`${ids}-new`} className="text-xs text-zinc-500">
+            {t("res.cmp.proposed")}
+          </p>
+          <p className="flex items-center gap-1.5 text-lg font-semibold text-zinc-950">
+            <ArrowRight className="size-4 text-zinc-400" aria-hidden />
+            {p.proposed.sellable ? (
+              <data value={p.proposed.totals.total}>
+                <Money amount={p.proposed.totals.total} currency={p.proposed.currency} />
+              </data>
+            ) : (
+              <span className="text-base font-medium text-rose-700">{t("res.cmp.not_sellable")}</span>
+            )}
+          </p>
+        </div>
+        <div role="group" aria-labelledby={`${ids}-diff`} className="ml-auto text-right">
+          <p id={`${ids}-diff`} className="text-xs text-zinc-500">
+            {t("res.cmp.difference")}
+          </p>
           <p className="text-lg font-semibold">
-            {diff === null ? "—" : isZero(diff) ? t("res.cmp.no_change") : <Money amount={diff} currency={p.proposed.currency} signed />}
+            {diff === null ? (
+              "—"
+            ) : (
+              <data value={diff}>{isZero(diff) ? t("res.cmp.no_change") : <Money amount={diff} currency={p.proposed.currency} signed />}</data>
+            )}
           </p>
         </div>
       </div>
@@ -556,7 +583,7 @@ function Comparison({
           basis: L.basis(p.basis),
           // the server's detail ends with a raw timestamp; the formatted one follows in {at}
           detail: p.basis_detail.replace(/\s+(at|on sale at)\s+\d{4}-\d{2}-\d{2}[ T][\d:.]+$/, "").replace(/ on sale$/, ""),
-          at: dateTime(p.pricing_sale_at),
+          at: clock.label(p.pricing_sale_at),
         })}
       </p>
       {p.currency_changed && <Notice tone="warning">{t("res.cmp.currency_changed", { old: p.old.currency, neu: p.proposed.currency })}</Notice>}
