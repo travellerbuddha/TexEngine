@@ -419,6 +419,8 @@
   "manage.extras.ownPrice": "Ekstralar bugünkü fiyatlarla hesaplanır. Oda fiyatınız değişmez; rezervasyon indirimleri ekstralara uygulanmaz.",
   "manage.extras.confirm": "Rezervasyonuma ekle",
   "manage.extras.applyFailed": "Ekstralar eklenemedi",
+  "manage.extras.applyUnknownTitle": "Ekstraların eklendiğini doğrulayamadık",
+  "manage.extras.applyUnknownBody": "Lütfen tekrar deneyin: aynı ekstralar asla iki kez eklenmez.",
   "manage.extras.refreshedBody": "Önceki fiyat kontrolünün süresi doldu ya da bu arada bir şey değişti. Lütfen gözden geçirip yeniden onaylayın.",
   "manage.extras.addedTitle": "Ekstralar eklendi",
   "manage.extras.addedBody": "Artık rezervasyonunuzun bir parçası.",

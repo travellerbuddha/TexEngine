@@ -419,6 +419,8 @@
   "manage.extras.ownPrice": "Dodatki są wyceniane według dzisiejszych cen. Cena pokoju się nie zmienia, a rabaty z rezerwacji nie obejmują dodatków.",
   "manage.extras.confirm": "Dodaj do mojej rezerwacji",
   "manage.extras.applyFailed": "Nie udało się dodać dodatków",
+  "manage.extras.applyUnknownTitle": "Nie udało się potwierdzić, że dodatki zostały dodane",
+  "manage.extras.applyUnknownBody": "Spróbuj ponownie: te same dodatki nigdy nie zostaną dodane dwa razy.",
   "manage.extras.refreshedBody": "Poprzednie sprawdzenie ceny wygasło lub w międzyczasie coś się zmieniło. Sprawdź i potwierdź ponownie.",
   "manage.extras.addedTitle": "Dodatki dodane",
   "manage.extras.addedBody": "Są teraz częścią Twojej rezerwacji.",

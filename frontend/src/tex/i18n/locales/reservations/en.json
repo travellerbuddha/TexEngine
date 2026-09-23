@@ -71,6 +71,7 @@
  "res.addon.too_late": "Too late to add for this stay",
  "res.addon.total_after": "With the extras",
  "res.addon.total_now": "Reservation total now",
+ "res.addon.unknown": "It is not known whether the extras were added",
  "res.badge.guest_change": "Guest change",
  "res.basis.current_help": "Today's contracts, promotions and exchange rates.",
  "res.basis.hint": "Which prices should the changed stay be calculated with?",

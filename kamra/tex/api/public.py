@@ -672,7 +672,7 @@ def manage_extras_propose(token: str, reservation: str, extras):
 @retry_on_deadlock
 def manage_extras_apply(token: str, proposal_token: str):
 	b = _booking_by_token(token)
-	p = quoting.verify(proposal_token, kind="addon")
+	p = quoting.verify(proposal_token, kind="addon", allow_expired=True)       # the service checks freshness
 	_own_reservation(b, p["reservation"])
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to change your booking."))

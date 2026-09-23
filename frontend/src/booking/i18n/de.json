@@ -419,6 +419,8 @@
   "manage.extras.ownPrice": "Extras werden zu heutigen Preisen berechnet. Ihr Zimmerpreis bleibt unverändert, und Buchungsrabatte gelten nicht für Extras.",
   "manage.extras.confirm": "Zu meiner Buchung hinzufügen",
   "manage.extras.applyFailed": "Die Extras konnten nicht hinzugefügt werden",
+  "manage.extras.applyUnknownTitle": "Wir konnten nicht bestätigen, dass Ihre Extras hinzugefügt wurden",
+  "manage.extras.applyUnknownBody": "Bitte versuchen Sie es erneut: Dieselben Extras werden nie doppelt hinzugefügt.",
   "manage.extras.refreshedBody": "Die vorherige Preisprüfung war abgelaufen oder zwischenzeitlich hat sich etwas geändert. Bitte prüfen Sie alles und bestätigen Sie erneut.",
   "manage.extras.addedTitle": "Extras hinzugefügt",
   "manage.extras.addedBody": "Sie sind jetzt Teil Ihrer Buchung.",

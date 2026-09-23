@@ -37,6 +37,18 @@ import { AddonBreakdown } from "./AddonParts"
 const PROPOSAL_TTL_MS = 30 * 60 * 1000 - 15_000
 const SHORTCUT = "Ctrl ↵"
 
+/** No answer, the server failed or was too busy: the extras may or may not have been added.
+ * The proposal and its token are kept; adding it again is replayed, never added twice. */
+function outcomeUnknown(e: TexApiError) {
+  return e.status === 0 || e.status === 429 || e.status >= 500
+}
+
+/** The server refused the proposal, so nothing was added: it expired, the price moved, the
+ * reservation changed or a limited extra ran out (ValidationError, HTTP 417). */
+function refused(e: TexApiError) {
+  return !e.isPermission && !outcomeUnknown(e) && (e.status === 417 || e.type === "ValidationError" || e.type === "ExtraSoldOut")
+}
+
 /**
  * Add extras to a booked stay (G-22, ADR-034). The stay stays price-locked: the extras are
  * priced on their own (the extra revision on sale now, no promotions) by crs.addon_propose,
@@ -130,6 +142,8 @@ export function AddExtrasDialog({
   const count = request.length
   const missingDays = extras.filter((x) => isServiceDateMode(x.pricing_mode) && (choices[x.code]?.quantity ?? 0) > 0 && !choices[x.code].service_dates.length)
   const fresh = Boolean(proposal && !stale && proposal.ok && proposal.proposal_token)
+  /** the last "Add" may or may not have gone through */
+  const unknown = Boolean(applyError && outcomeUnknown(applyError))
   const canApply = fresh && !applying && !proposing
 
   /** The first day an extra can still be ordered for (server clock and the extra's cut-off). */
@@ -147,6 +161,8 @@ export function AddExtrasDialog({
       document.getElementById(`${ids}-x-${missingDays[0].code}-days`)?.querySelector<HTMLInputElement>("input:not([disabled])")?.focus()
       return
     }
+    // after an "Add" without an answer the extras may be in the reservation already: show what it has
+    if (unknown) setLoadTick((n) => n + 1)
     setProposing(true)
     setProposeError(undefined)
     setApplyError(after?.error)
@@ -170,7 +186,8 @@ export function AddExtrasDialog({
 
   const apply = async () => {
     if (!proposal?.proposal_token || !canApply) return
-    if (Date.now() - proposedAt > PROPOSAL_TTL_MS) {
+    // after an unknown outcome the same token is sent again (the server replays it), never re-priced
+    if (!unknown && Date.now() - proposedAt > PROPOSAL_TTL_MS) {
       // the signed price is about to expire: price again and let the agent confirm again
       void propose({ expired: true })
       return
@@ -188,13 +205,15 @@ export function AddExtrasDialog({
       onApplied(r)
     } catch (e) {
       const err = asApiError(e)
-      if (err.isPermission || err.status === 0) {
-        // no answer (network) or no right: keep the proposal — applying it again never adds twice
-        setApplyError(err)
-      } else {
-        // expired, the price moved or the reservation changed: price again, confirm again
+      if (refused(err)) {
+        // expired, the price moved, the reservation changed or sold out: nothing was added —
+        // price again (with fresh availability) and let the agent confirm again
         setLoadTick((n) => n + 1)
         void propose(/expired/i.test(err.message) ? { expired: true } : { error: err })
+      } else {
+        // no answer, a server failure or busy (the outcome is unknown), no right, or another
+        // error: keep the proposal and its token — applying it again never adds twice
+        setApplyError(err)
       }
     } finally {
       setApplying(false)
@@ -314,11 +333,9 @@ export function AddExtrasDialog({
           </h3>
           {expired && <Notice tone="warning">{t("res.addon.expired")}</Notice>}
           {applyError && (
-            <Notice tone="danger" title={applyError.isPermission ? t("core.error.permission") : t("res.addon.failed")}>
+            <Notice tone="danger" title={applyError.isPermission ? t("core.error.permission") : unknown ? t("res.addon.unknown") : t("res.addon.failed")}>
               <p className="whitespace-pre-line">{applyError.message}</p>
-              {!applyError.isPermission && (
-                <p className="mt-1 text-xs">{applyError.status === 0 ? t("res.addon.network_hint") : t("res.addon.repriced")}</p>
-              )}
+              {(unknown || refused(applyError)) && <p className="mt-1 text-xs">{unknown ? t("res.addon.network_hint") : t("res.addon.repriced")}</p>}
             </Notice>
           )}
           {proposeError && (

@@ -2,6 +2,8 @@
 are priced on their own; the stay stays price-locked; the balance grows; limited extras keep
 their capacity; a later date change carries them over."""
 
+from unittest import mock
+
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
@@ -121,6 +123,14 @@ class TestPostBookingExtras(AddonCase):
 		first = public.manage_extras_apply(token=b["manage_token"], proposal_token=p["proposal_token"])
 		again = public.manage_extras_apply(token=b["manage_token"], proposal_token=p["proposal_token"])
 		self.assertEqual((again["replay"], again["total"]), (True, first["total"]))
+		later = add_to_date(now_datetime(), minutes=45)                  # the retry comes after the token expired
+		with mock.patch("kamra.tex.services.quoting.now_datetime", return_value=later):
+			late = public.manage_extras_apply(token=b["manage_token"], proposal_token=p["proposal_token"])
+		self.assertEqual((late["replay"], late["total"]), (True, first["total"]))
+		p_old = public.manage_extras_propose(token=b["manage_token"], reservation=res, extras=[{"code": "MASSAGE"}])
+		with mock.patch("kamra.tex.services.quoting.now_datetime", return_value=later):
+			with self.assertRaisesRegex(frappe.ValidationError, "expired"):   # a fresh one is still refused
+				public.manage_extras_apply(token=b["manage_token"], proposal_token=p_old["proposal_token"])
 		self.assertEqual(frappe.db.count("TEX Reservation Revision", {"reservation": res, "pricing_basis": "ADD_ON"}), 1)
 		with self.assertRaises(frappe.ValidationError):              # an add-on is not a date change
 			public.manage_apply(token=b["manage_token"], proposal_token=p["proposal_token"])

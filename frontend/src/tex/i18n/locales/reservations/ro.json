@@ -76,6 +76,7 @@
  "res.addon.too_late": "Prea târziu pentru acest sejur",
  "res.addon.total_after": "Cu serviciile suplimentare",
  "res.addon.total_now": "Totalul rezervării acum",
+ "res.addon.unknown": "Nu se știe dacă serviciile suplimentare au fost adăugate",
  "res.badge.guest_change": "Modificare oaspete",
  "res.basis.current_help": "Contractele, promoțiile și cursurile de schimb de azi.",
  "res.basis.hint": "Cu ce prețuri să fie calculat sejurul modificat?",

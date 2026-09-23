@@ -3,9 +3,10 @@
 // pick → check the price (manage_extras_propose) → add (manage_extras_apply). The
 // booking's balance grows by them and is paid like any balance: Pay now, or at the hotel.
 import { CheckCircle2, Clock, Sparkles } from "lucide-react"
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { useI18n, type I18n, type MessageKey } from "../i18n"
 import { ApiError, pub, type ErrorKind } from "../lib/api"
+import { addDays } from "../lib/dates"
 import { addonRefusalText, earliestOrderDay, stayDays } from "../lib/extras"
 import { isPositive } from "../lib/format"
 import type { AddonApplied, AddonOption, AddonOptions, AddonProposal, AddonRequest, BookingRoom } from "../types"
@@ -28,6 +29,13 @@ const DEFAULT_MAX = 9
  * expired, the price moved, the reservation changed or a limited extra ran out */
 const RECHECK = new Set<ErrorKind>(["expired", "invalid", "sold_out", "extra_sold_out"])
 
+/** apply failures after which the extras may or may not have been added: no answer, the server
+ * failed or was too busy, or its answer could not be read. The proposal and its token are kept:
+ * the server replays the same proposal and never adds it twice. */
+function outcomeUnknown(e: unknown) {
+  return !(e instanceof ApiError) || e.kind === "network" || e.status === 429 || e.status >= 500 || e.type === "ParseError"
+}
+
 type DayState = "open" | "low" | "gone" | "late"
 
 interface Plan {
@@ -49,6 +57,7 @@ interface Plan {
 }
 
 function planFor(x: AddonOption, stay: string[], now: Date): Plan {
+  // a day of slack for the time zones: the boundary day is offered and the server decides
   const earliest = earliestOrderDay(x.cutoff_hours, now)
   const state = (d: string): DayState => {
     if (d < earliest) return "late"
@@ -73,7 +82,9 @@ function planFor(x: AddonOption, stay: string[], now: Date): Plan {
     state,
     shown: used.filter((_, i) => states[i] !== "late"),
     defaultDay,
-    pickDay: kind === "day" && !blocked && stay.length > 1 && (x.limited || defaultDay !== stay[0]),
+    // also when arrival may be too late in the hotel's time (the day after the slack): the
+    // guest can then move the extra to a later day when the server refuses arrival
+    pickDay: kind === "day" && !blocked && stay.length > 1 && (x.limited || defaultDay !== stay[0] || stay[0] <= addDays(earliest, 1)),
     low: kind === "nightly" && states.includes("low"),
   }
 }
@@ -88,11 +99,18 @@ interface Choice {
 
 const NONE: Choice = { quantity: 0, dates: [], day: null }
 
+// days chosen before the list was reloaded may now be too late (not shown any more): left out
+const datesOf = (plan: Plan, c: Choice) => c.dates.filter((d) => plan.state(d) !== "late")
+const dayOf = (plan: Plan, c: Choice) => (c.day && plan.state(c.day) !== "late" ? c.day : plan.defaultDay)
+
 function toRequest(x: AddonOption, plan: Plan, c: Choice | undefined): AddonRequest | null {
   if (!c || plan.blocked) return null
-  if (plan.kind === "dates") return c.dates.length ? { code: x.code, quantity: 1, service_dates: [...c.dates].sort() } : null
+  if (plan.kind === "dates") {
+    const dates = datesOf(plan, c)
+    return dates.length ? { code: x.code, quantity: 1, service_dates: dates.sort() } : null
+  }
   if (c.quantity < 1) return null
-  const day = plan.pickDay ? (c.day ?? plan.defaultDay) : null
+  const day = plan.pickDay ? dayOf(plan, c) : null
   return { code: x.code, quantity: Math.min(c.quantity, plan.left), ...(day ? { service_dates: [day] } : {}) }
 }
 
@@ -110,8 +128,8 @@ function ExtraCard({ x, plan, choice, onChange }: { x: AddonOption; plan: Plan; 
   const id = useId()
   const cur = choice ?? NONE
   const modeKey = `extra.mode.${x.pricing_mode}` as MessageKey
-  const chosen = plan.kind === "dates" ? cur.dates.length > 0 : cur.quantity > 0
-  const usedDay = plan.kind === "day" ? (cur.day ?? plan.defaultDay) : null
+  const chosen = plan.kind === "dates" ? datesOf(plan, cur).length > 0 : cur.quantity > 0
+  const usedDay = plan.kind === "day" ? dayOf(plan, cur) : null
   const low = !plan.blocked && (plan.kind === "nightly" ? plan.low : !!usedDay && plan.state(usedDay) === "low")
   const cutoff = Math.floor(Number(x.cutoff_hours) || 0)
   const counted = COUNTED.has(x.pricing_mode) || (x.max_quantity ?? 0) > 1
@@ -183,7 +201,7 @@ function ExtraCard({ x, plan, choice, onChange }: { x: AddonOption; plan: Plan; 
     )
 
   return (
-    <li className={`bk-card flex gap-4 p-4 ${chosen ? "ring-2 ring-brand-ink" : ""}`}>
+    <li className={`bk-card flex gap-4 p-4 ${chosen ? "ring-2 ring-brand-ink" : ""}`} data-chosen={chosen || undefined}>
       <Photo src={x.image} alt="" className="hidden size-20 flex-none rounded-ui sm:grid" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
@@ -251,14 +269,25 @@ function ExtraCard({ x, plan, choice, onChange }: { x: AddonOption; plan: Plan; 
   )
 }
 
-function Review({ p, asked, byCode }: { p: AddonProposal; asked: AddonRequest[]; byCode: Map<string, AddonOption> }) {
+function Review({
+  p,
+  asked,
+  byCode,
+  focusRef,
+}: {
+  p: AddonProposal
+  asked: AddonRequest[]
+  byCode: Map<string, AddonOption>
+  /** gets the review's heading, or why the extras can't be added (focused when it appears) */
+  focusRef: (el: HTMLElement | null) => void
+}) {
   const i18n = useI18n()
   const { t, money, day } = i18n
   const hid = useId()
   if (!p.ok) {
     const names = asked.map((a) => ({ code: a.code, name: byCode.get(a.code)?.name ?? a.code, cutoff_hours: byCode.get(a.code)?.cutoff_hours }))
     return (
-      <Alert tone="bad" title={t("manage.extras.notPossibleTitle")}>
+      <Alert ref={focusRef} tone="bad" title={t("manage.extras.notPossibleTitle")}>
         {!!p.reasons?.length && (
           <ul className="space-y-1">
             {p.reasons.map((r, i) => (
@@ -275,7 +304,7 @@ function Review({ p, asked, byCode }: { p: AddonProposal; asked: AddonRequest[];
   return (
     <>
       <section aria-labelledby={hid}>
-        <h3 id={hid} className="text-base font-semibold">
+        <h3 id={hid} ref={focusRef} tabIndex={-1} className="text-base font-semibold outline-none">
           {t("manage.extras.yourExtras")}
         </h3>
         <dl className="mt-2 divide-y divide-line rounded-ui border border-line text-sm">
@@ -349,16 +378,19 @@ export function AddExtrasDialog({
   const [error, setError] = useState<string | null>(null)
   const [nothing, setNothing] = useState(false)
   const [refreshed, setRefreshed] = useState(false)
+  /** the last "Add" got no answer (or the server failed): the extras may already be added */
+  const [unsure, setUnsure] = useState(false)
 
   const load = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, quiet = false) => {
       setLoadError(null)
       try {
         const o = await pub<AddonOptions>("manage_extras", { token, reservation: room.reservation }, signal)
         setOptions({ ...o, extras: o?.extras ?? [] })
       } catch (e) {
         if ((e as Error).name === "AbortError") return
-        setLoadError(errorText(t, e))
+        // a reload keeps the list as it was: the server decides on the next price check
+        if (!quiet) setLoadError(errorText(t, e))
       }
     },
     [token, room.reservation, t],
@@ -368,6 +400,42 @@ export function AddExtrasDialog({
     void load(ctl.signal)
     return () => ctl.abort()
   }, [load])
+
+  // after the server refused, load what can be added again (day flags, cut-offs, what the
+  // room already has); the guest's choices are kept
+  const reloading = useRef<AbortController | null>(null)
+  useEffect(() => () => reloading.current?.abort(), [])
+  const refresh = () => {
+    reloading.current?.abort()
+    const ctl = new AbortController()
+    reloading.current = ctl
+    void load(ctl.signal, true)
+  }
+
+  // keyboard and screen-reader users follow the view (focus stays inside the dialog): to the
+  // review when it appears (that the price was checked again, why the extras can't be added,
+  // or its heading), back to the guest's choice when they change it
+  const focusNext = useRef<"review" | "list" | null>(null)
+  const reviewTop = useRef<HTMLElement | null>(null)
+  const setReviewTop = useCallback((el: HTMLElement | null) => {
+    reviewTop.current = el
+  }, [])
+  const refreshedRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    const to = focusNext.current
+    focusNext.current = null
+    if (to === "review") {
+      const top = proposal?.ok && refreshedRef.current ? refreshedRef.current : reviewTop.current
+      top?.focus()
+    } else if (to === "list") {
+      // the first control of an extra the guest chose, else of the list, else the list
+      const list = listRef.current
+      const control = ":is(input, select, button):not(:disabled)"
+      const first = list?.querySelector<HTMLElement>(`[data-chosen] ${control}`) ?? list?.querySelector<HTMLElement>(control) ?? list
+      first?.focus()
+    }
+  }, [proposal])
 
   const stay = useMemo(() => stayDays(options?.check_in, options?.check_out), [options])
   const plans = useMemo(() => {
@@ -382,12 +450,14 @@ export function AddExtrasDialog({
 
   const check = async (reqs: AddonRequest[], again = false) => {
     setError(null)
+    setUnsure(false)
     if (!reqs.length) return setNothing(true)
     setBusy(true)
     try {
       const p = await pub<AddonProposal>("manage_extras_propose", { token, reservation: room.reservation, extras: reqs })
       setAsked(reqs)
       setRefreshed(again)
+      focusNext.current = "review"
       setProposal(p)
     } catch (e) {
       setError(errorText(t, e))
@@ -399,6 +469,7 @@ export function AddExtrasDialog({
     if (!proposal?.proposal_token) return
     setBusy(true)
     setError(null)
+    setUnsure(false)
     try {
       const r = await pub<AddonApplied>("manage_extras_apply", { token, proposal_token: proposal.proposal_token })
       const owed = r.balance && isPositive(r.balance) ? money(r.balance, currency) : null
@@ -413,13 +484,17 @@ export function AddExtrasDialog({
       })
     } catch (e) {
       setBusy(false)
-      if (e instanceof ApiError && RECHECK.has(e.kind)) {
-        // proposals last 30 minutes and are bound to the price and the reservation as they
-        // were: price the same extras again and let the guest confirm (as ChangeDialog does)
+      if (e instanceof ApiError && !outcomeUnknown(e) && RECHECK.has(e.kind)) {
+        // the server refused, so nothing was added: proposals last 30 minutes and are bound to
+        // the price and the reservation as they were. Price the same extras again (and reload
+        // the list) and let the guest confirm (as ChangeDialog does)
         setProposal(null)
+        refresh()
         await check(asked, true)
         return
       }
+      // the proposal and its token stay: "Add" again is replayed by the server, never added twice
+      setUnsure(outcomeUnknown(e))
       setError(errorText(t, e))
     }
   }
@@ -429,8 +504,12 @@ export function AddExtrasDialog({
     setChoices((all) => ({ ...all, [code]: c }))
   }
   const editAgain = () => {
+    // after a refusal (or an "Add" without an answer) what can be added may have changed
+    if (!proposal?.ok || unsure) refresh()
+    focusNext.current = "list"
     setProposal(null)
     setError(null)
+    setUnsure(false)
     setRefreshed(false)
   }
 
@@ -463,14 +542,15 @@ export function AddExtrasDialog({
     body = (
       <div className="space-y-4">
         {refreshed && (
-          <Alert tone="warn" title={t("manage.refreshedTitle")}>
+          <Alert ref={refreshedRef} tone="warn" title={t("manage.refreshedTitle")}>
             {t("manage.extras.refreshedBody")}
           </Alert>
         )}
-        <Review p={proposal} asked={asked} byCode={byCode} />
+        <Review p={proposal} asked={asked} byCode={byCode} focusRef={setReviewTop} />
         {error && (
-          <Alert tone="bad" title={t("manage.extras.applyFailed")}>
+          <Alert tone="bad" title={unsure ? t("manage.extras.applyUnknownTitle") : t("manage.extras.applyFailed")}>
             {error}
+            {unsure && <p className="mt-1">{t("manage.extras.applyUnknownBody")}</p>}
           </Alert>
         )}
       </div>
@@ -479,7 +559,7 @@ export function AddExtrasDialog({
     body = (
       <div className="space-y-4">
         <p className="text-sm text-soft">{t("manage.extras.intro")}</p>
-        <ul className="space-y-3">
+        <ul ref={listRef} tabIndex={-1} className="space-y-3 outline-none">
           {options.extras.map((x) => (
             <ExtraCard key={x.code} x={x} plan={plans.get(x.code)!} choice={choices[x.code]} onChange={(c) => choose(x.code, c)} />
           ))}

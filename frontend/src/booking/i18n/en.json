@@ -419,6 +419,8 @@
   "manage.extras.ownPrice": "Extras are priced at today's rates. Your room price stays the same, and booking discounts don't apply to extras.",
   "manage.extras.confirm": "Add to my booking",
   "manage.extras.applyFailed": "The extras could not be added",
+  "manage.extras.applyUnknownTitle": "We couldn't confirm that your extras were added",
+  "manage.extras.applyUnknownBody": "Please try again: the same extras are never added twice.",
   "manage.extras.refreshedBody": "The previous price check had expired or something changed in the meantime. Please review and confirm again.",
   "manage.extras.addedTitle": "Extras added",
   "manage.extras.addedBody": "They are now part of your booking.",

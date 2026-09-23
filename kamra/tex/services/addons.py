@@ -152,7 +152,9 @@ def propose(reservation: str, raw_requests, *, guest: bool) -> dict:
 def apply(proposal_token: str, *, source: str, reason: str | None = None, guest: bool) -> dict:
 	"""Add the proposed extras: re-priced under the reservation's lock and the extras' day
 	locks, the price must not have moved; applying the same proposal twice adds them once."""
-	p = quoting.verify(proposal_token, kind="addon")
+	# an expired token is still recognised as the add-on it already made (a lost response,
+	# retried late): the replay is answered before freshness is required
+	p = quoting.verify(proposal_token, kind="addon", allow_expired=True)
 	if bool(p.get("guest")) != guest:
 		frappe.throw(_("Invalid proposal."))
 	addon_id = "ADD-" + hashlib.sha256(proposal_token.encode()).hexdigest()[:12]
@@ -161,6 +163,7 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 	snap = _snapshot(res)
 	if any(a.get("id") == addon_id for a in snap.get("addons") or []):
 		return _result(res, addon_id, replay=True)                 # the first response was lost
+	quoting.require_fresh(p)
 	_open(res)
 	if str(res.modified) != p["modified"]:
 		frappe.throw(_("The reservation changed since these extras were priced — please check them again."))

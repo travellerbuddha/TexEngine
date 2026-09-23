@@ -419,6 +419,8 @@
   "manage.extras.ownPrice": "Serviciile extra au prețurile de astăzi. Prețul camerei nu se schimbă, iar reducerile rezervării nu se aplică serviciilor extra.",
   "manage.extras.confirm": "Adaugă la rezervarea mea",
   "manage.extras.applyFailed": "Serviciile extra nu au putut fi adăugate",
+  "manage.extras.applyUnknownTitle": "Nu am putut confirma că serviciile extra au fost adăugate",
+  "manage.extras.applyUnknownBody": "Încercați din nou: aceleași servicii extra nu sunt adăugate niciodată de două ori.",
   "manage.extras.refreshedBody": "Verificarea anterioară a prețului expirase sau ceva s-a schimbat între timp. Verificați și confirmați din nou.",
   "manage.extras.addedTitle": "Servicii extra adăugate",
   "manage.extras.addedBody": "Acum fac parte din rezervarea dvs.",

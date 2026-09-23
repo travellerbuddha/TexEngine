@@ -46,9 +46,10 @@ def sign(payload: dict) -> str:
 		base64.urlsafe_b64encode(mac).decode().rstrip("=")
 
 
-def verify(token: str, kind: str = "offer") -> dict:
+def verify(token: str, kind: str = "offer", *, allow_expired: bool = False) -> dict:
 	"""Check signature, expiry and token kind (an offer key can never be replayed as a
-	modification proposal or the other way round)."""
+	modification proposal or the other way round). ``allow_expired``: the caller checks
+	``require_fresh`` itself, after recognising a replay of what the token already did."""
 	try:
 		body_b64, mac_b64 = token.split(".", 1)
 		pad = lambda s: s + "=" * (-len(s) % 4)  # noqa: E731
@@ -61,9 +62,14 @@ def verify(token: str, kind: str = "offer") -> dict:
 	data = json.loads(body)
 	if (data.get("kind") or "offer") != kind:
 		frappe.throw(_("Invalid offer."), frappe.ValidationError)
+	if not allow_expired:
+		require_fresh(data)
+	return data
+
+
+def require_fresh(data: dict) -> None:
 	if data.get("exp") and get_datetime(data["exp"]) < now_datetime():
 		frappe.throw(_("This offer has expired — please search again."), frappe.ValidationError)
-	return data
 
 
 # ─── request helpers ─────────────────────────────────────────────────────

@@ -367,7 +367,7 @@ def addon_propose(reservation: str, extras):
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def addon_apply(proposal_token: str, reason: str | None = None):
-	p = quoting.verify(proposal_token, kind="addon")
+	p = quoting.verify(proposal_token, kind="addon", allow_expired=True)       # the service checks freshness
 	scope.require("reservation.modify", frappe.db.get_value("Reservation", p["reservation"], "property"))
 	from kamra.tex.services import addons as addon_svc
 

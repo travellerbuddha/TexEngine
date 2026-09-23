@@ -71,6 +71,7 @@
  "res.addon.too_late": "Bu konaklamaya eklemek için çok geç",
  "res.addon.total_after": "Ek hizmetlerle birlikte",
  "res.addon.total_now": "Şu anki rezervasyon toplamı",
+ "res.addon.unknown": "Ek hizmetlerin eklenip eklenmediği bilinmiyor",
  "res.badge.guest_change": "Misafir değişikliği",
  "res.basis.current_help": "Bugünün kontratları, promosyonları ve kurları.",
  "res.basis.hint": "Değişen konaklama hangi fiyatlarla hesaplansın?",

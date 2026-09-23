@@ -104,12 +104,15 @@ export function refusalText(i18n: Pick<I18n, "t" | "day">, reason: string | null
 
 // ─── extras added to a booked stay (G-22, ADR-034) ───────────────────────
 
-/** The first day an extra added after booking can still be used on: today, or later when
- * the hotel needs `cutoffHours` of notice. A hint in the guest's calendar: the server
- * decides (in the hotel's time) and refuses with ADDON_TOO_LATE. */
+/** The first day an extra added after booking may still be used on, as a hint in the guest's
+ * calendar: today, or later when the hotel needs `cutoffHours` of notice, minus one day of
+ * slack because the guest's clock may be in another time zone than the hotel's. So it is
+ * never stricter than the server, which decides in the hotel's time (max(today, (now +
+ * cut-off).date())) and refuses with ADDON_TOO_LATE: this day and the next may still be too
+ * late there, and the guest then sees why. */
 export function earliestOrderDay(cutoffHours: number | null | undefined, now: Date = new Date()): string {
   const h = Math.max(0, Math.floor(Number(cutoffHours) || 0))
-  return isoDay(new Date(now.getTime() + h * 3_600_000))
+  return addDays(isoDay(new Date(now.getTime() + h * 3_600_000)), -1)
 }
 
 /** What the guest knows about the extras they asked for (names in their language). */

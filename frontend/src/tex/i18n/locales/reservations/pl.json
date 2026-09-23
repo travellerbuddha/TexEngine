@@ -81,6 +81,7 @@
  "res.addon.too_late": "Za późno na dodanie do tego pobytu",
  "res.addon.total_after": "Z usługami dodatkowymi",
  "res.addon.total_now": "Obecna suma rezerwacji",
+ "res.addon.unknown": "Nie wiadomo, czy usługi dodatkowe zostały dodane",
  "res.badge.guest_change": "Zmiana gościa",
  "res.basis.current_help": "Dzisiejsze umowy, promocje i kursy walut.",
  "res.basis.hint": "Według jakich cen przeliczyć zmieniony pobyt?",
