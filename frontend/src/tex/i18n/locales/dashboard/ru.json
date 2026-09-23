@@ -26,6 +26,135 @@
  "dash.on_the_books": "Забронировано, по дате проживания",
  "dash.open_balance": "Открытые остатки",
  "dash.period": "{from} – {to}",
+ "dash.pf.alert.all_rooms": "Все типы номеров",
+ "dash.pf.alert.channel": "Канал: {channel}",
+ "dash.pf.alert.left": {
+  "few": "осталось {count} из {capacity}",
+  "many": "осталось {count} из {capacity}",
+  "one": "остался {count} из {capacity}",
+  "other": "осталось {count} из {capacity}"
+ },
+ "dash.pf.alert.market": "Рынок: {market}",
+ "dash.pf.alert.over": {
+  "few": "{count} номера сверх вместимости",
+  "many": "{count} номеров сверх вместимости",
+  "one": "{count} номер сверх вместимости",
+  "other": "{count} номера сверх вместимости"
+ },
+ "dash.pf.alerts": "Предупреждения по инвентарю и ограничениям",
+ "dash.pf.alerts_capped": {
+  "few": "Показаны первые {shown} из {count} предупреждений.",
+  "many": "Показаны первые {shown} из {count} предупреждений.",
+  "one": "Показаны первые {shown} из {count} предупреждения.",
+  "other": "Показаны первые {shown} из {count} предупреждения."
+ },
+ "dash.pf.alerts_hint": {
+  "few": "Ближайшие {count} дня, начиная с сегодня",
+  "many": "Ближайшие {count} дней, начиная с сегодня",
+  "one": "Ближайший {count} день, начиная с сегодня",
+  "other": "Ближайшие {count} дня, начиная с сегодня"
+ },
+ "dash.pf.col.abandoned": "Брошенные",
+ "dash.pf.col.alerts": "Предупреждения",
+ "dash.pf.col.booking_value": "Стоимость бронирований",
+ "dash.pf.col.call_centre": "Колл-центр",
+ "dash.pf.col.cancellations": "Отменено",
+ "dash.pf.col.direct": "Прямые",
+ "dash.pf.col.hotel": "Отель",
+ "dash.pf.col.market": "Рынок",
+ "dash.pf.col.open_balances": "Открытые остатки",
+ "dash.pf.col.pending_payment": "Ожидают оплаты",
+ "dash.pf.col.room_type": "Тип номера",
+ "dash.pf.col.sold": "Продано",
+ "dash.pf.fix_period": "Выберите корректный период продаж, чтобы увидеть показатели.",
+ "dash.pf.footnote": "Бронирования учитываются в день продажи, отмены — в день отмены. «Сегодня» — дата сервера ({date}).",
+ "dash.pf.hotels": "Отели",
+ "dash.pf.hotels_hint": "Продажи за период по отелям. Откройте отель, чтобы увидеть его собственную панель.",
+ "dash.pf.kind.closed": "Закрыто",
+ "dash.pf.kind.closed_to_arrival": "Закрыто на заезд",
+ "dash.pf.kind.closed_to_departure": "Закрыто на выезд",
+ "dash.pf.kind.few_left": "Мало номеров",
+ "dash.pf.kind.oversold": "Овербукинг",
+ "dash.pf.kind.sold_out": "Нет мест",
+ "dash.pf.kind.stop_sell": "Стоп-продажа",
+ "dash.pf.kpi.abandoned": "Брошенные возможности",
+ "dash.pf.kpi.abandoned_hint": {
+  "few": "открытые, за последние {count} дня",
+  "many": "открытые, за последние {count} дней",
+  "one": "открытые, за последний {count} день",
+  "other": "открытые, за последние {count} дня"
+ },
+ "dash.pf.kpi.booking_value": "Стоимость бронирований",
+ "dash.pf.kpi.call_centre": "Доход колл-центра",
+ "dash.pf.kpi.call_centre_hint": "Продано колл-центром",
+ "dash.pf.kpi.cancellations": "Отмены",
+ "dash.pf.kpi.direct": "Прямой доход",
+ "dash.pf.kpi.direct_hint": "Продано на ваших сайтах бронирования",
+ "dash.pf.kpi.open_balances": "Открытые остатки",
+ "dash.pf.kpi.pending_payment": "Ожидают оплаты",
+ "dash.pf.kpi.today": "Продажи сегодня",
+ "dash.pf.kpi.today_outside": "Сегодня ({date}) вне периода",
+ "dash.pf.markets": "Результаты по рынкам",
+ "dash.pf.markets_hint": "Топ-{count} рынков по бронированиям, проданным за период.",
+ "dash.pf.n_bookings": {
+  "few": "{count} бронирования",
+  "many": "{count} бронирований",
+  "one": "{count} бронирование",
+  "other": "{count} бронирования"
+ },
+ "dash.pf.n_cancellations": {
+  "few": "{count} отмены",
+  "many": "{count} отмен",
+  "one": "{count} отмена",
+  "other": "{count} отмены"
+ },
+ "dash.pf.n_inventory_alerts": {
+  "few": "{count} предупреждения по инвентарю",
+  "many": "{count} предупреждений по инвентарю",
+  "one": "{count} предупреждение по инвентарю",
+  "other": "{count} предупреждения по инвентарю"
+ },
+ "dash.pf.n_opportunities": {
+  "few": "{count} возможности",
+  "many": "{count} возможностей",
+  "one": "{count} возможность",
+  "other": "{count} возможности"
+ },
+ "dash.pf.n_restriction_alerts": {
+  "few": "{count} ограничения",
+  "many": "{count} ограничений",
+  "one": "{count} ограничение",
+  "other": "{count} ограничения"
+ },
+ "dash.pf.n_today": "{count} сегодня",
+ "dash.pf.no_alerts": "Предупреждений нет",
+ "dash.pf.no_alerts_hint": {
+  "few": "В ближайшие {count} дня нет закрытых, распроданных, почти заполненных или ограниченных дат.",
+  "many": "В ближайшие {count} дней нет закрытых, распроданных, почти заполненных или ограниченных дат.",
+  "one": "В ближайший {count} день нет закрытых, распроданных, почти заполненных или ограниченных дат.",
+  "other": "В ближайшие {count} дня нет закрытых, распроданных, почти заполненных или ограниченных дат."
+ },
+ "dash.pf.no_hotels": "В этом охвате нет отелей",
+ "dash.pf.no_market": "Без рынка",
+ "dash.pf.no_sales": "Нет продаж в этом периоде",
+ "dash.pf.open_dashboard": "открыть его панель",
+ "dash.pf.open_inventory": "Открыть инвентарь",
+ "dash.pf.per_currency": "Суммы показаны по валютам и никогда не складываются между разными валютами.",
+ "dash.pf.rooms": "Результаты по номерам",
+ "dash.pf.rooms_hint": "Топ-{count} типов номеров по номеро-ночам, проданным за период.",
+ "dash.pf.sale_period": "Период продаж",
+ "dash.pf.scope": "Охват",
+ "dash.pf.scope.all": "Все мои отели ({count})",
+ "dash.pf.scope.enterprises": "Предприятия",
+ "dash.pf.scope.groups": "Гостиничные группы",
+ "dash.pf.scope.hotels": "Отели",
+ "dash.pf.sort_currency": "Сортировать суммы в",
+ "dash.pf.subtitle": {
+  "few": "{count} отеля · продажи {from} – {to}",
+  "many": "{count} отелей · продажи {from} – {to}",
+  "one": "{count} отель · продажи {from} – {to}",
+  "other": "{count} отеля · продажи {from} – {to}"
+ },
  "dash.pickup": "Пикап по дате бронирования",
  "dash.pickup_hint": "Номеро-ночи, проданные за день в периоде.",
  "dash.range": "Период",
@@ -40,5 +169,8 @@
   "one": "{count} сеанс поиска",
   "other": "{count} сеанса поиска"
  },
- "dash.today": "Сегодня"
+ "dash.today": "Сегодня",
+ "dash.view": "Вид панели",
+ "dash.view.hotel": "Этот отель",
+ "dash.view.portfolio": "Портфель"
 }

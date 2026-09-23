@@ -23,6 +23,99 @@
  "dash.on_the_books": "Konaklama tarihine göre kesinleşen",
  "dash.open_balance": "Açık bakiyeler",
  "dash.period": "{from} – {to}",
+ "dash.pf.alert.all_rooms": "Tüm oda tipleri",
+ "dash.pf.alert.channel": "Kanal: {channel}",
+ "dash.pf.alert.left": {
+  "other": "{capacity} odadan {count} kaldı"
+ },
+ "dash.pf.alert.market": "Pazar: {market}",
+ "dash.pf.alert.over": {
+  "other": "kapasitenin {count} oda üzerinde"
+ },
+ "dash.pf.alerts": "Envanter ve kısıtlama uyarıları",
+ "dash.pf.alerts_capped": {
+  "other": "{count} uyarının ilk {shown} tanesi gösteriliyor."
+ },
+ "dash.pf.alerts_hint": {
+  "other": "Bugünden itibaren sonraki {count} gün"
+ },
+ "dash.pf.col.abandoned": "Terk edilen",
+ "dash.pf.col.alerts": "Uyarılar",
+ "dash.pf.col.booking_value": "Rezervasyon değeri",
+ "dash.pf.col.call_centre": "Çağrı merkezi",
+ "dash.pf.col.cancellations": "İptal edilen",
+ "dash.pf.col.direct": "Direkt",
+ "dash.pf.col.hotel": "Otel",
+ "dash.pf.col.market": "Pazar",
+ "dash.pf.col.open_balances": "Açık bakiyeler",
+ "dash.pf.col.pending_payment": "Ödeme bekleyen",
+ "dash.pf.col.room_type": "Oda tipi",
+ "dash.pf.col.sold": "Satılan",
+ "dash.pf.fix_period": "Rakamları görmek için geçerli bir satış dönemi seçin.",
+ "dash.pf.footnote": "Rezervasyonlar satıldıkları gün, iptaller iptal edildikleri gün sayılır. “Bugün” sunucu tarihidir ({date}).",
+ "dash.pf.hotels": "Oteller",
+ "dash.pf.hotels_hint": "Dönemde otel bazında satılanlar. Kendi panosunu görmek için bir otel açın.",
+ "dash.pf.kind.closed": "Satışa kapalı",
+ "dash.pf.kind.closed_to_arrival": "Girişe kapalı",
+ "dash.pf.kind.closed_to_departure": "Çıkışa kapalı",
+ "dash.pf.kind.few_left": "Az oda kaldı",
+ "dash.pf.kind.oversold": "Fazla satış",
+ "dash.pf.kind.sold_out": "Dolu",
+ "dash.pf.kind.stop_sell": "Satış durdurma",
+ "dash.pf.kpi.abandoned": "Terk edilen fırsatlar",
+ "dash.pf.kpi.abandoned_hint": {
+  "other": "açık, son {count} gün"
+ },
+ "dash.pf.kpi.booking_value": "Rezervasyon değeri",
+ "dash.pf.kpi.call_centre": "Çağrı merkezi geliri",
+ "dash.pf.kpi.call_centre_hint": "Çağrı merkezinin sattığı",
+ "dash.pf.kpi.cancellations": "İptaller",
+ "dash.pf.kpi.direct": "Direkt gelir",
+ "dash.pf.kpi.direct_hint": "Rezervasyon sitelerinizde satılan",
+ "dash.pf.kpi.open_balances": "Açık bakiyeler",
+ "dash.pf.kpi.pending_payment": "Ödeme bekleyen",
+ "dash.pf.kpi.today": "Bugünkü satışlar",
+ "dash.pf.kpi.today_outside": "Bugün ({date}) dönemin dışında",
+ "dash.pf.markets": "Pazar performansı",
+ "dash.pf.markets_hint": "Dönemde satılan rezervasyonlara göre ilk {count} pazar.",
+ "dash.pf.n_bookings": {
+  "other": "{count} rezervasyon"
+ },
+ "dash.pf.n_cancellations": {
+  "other": "{count} iptal"
+ },
+ "dash.pf.n_inventory_alerts": {
+  "other": "{count} envanter uyarısı"
+ },
+ "dash.pf.n_opportunities": {
+  "other": "{count} fırsat"
+ },
+ "dash.pf.n_restriction_alerts": {
+  "other": "{count} kısıtlama"
+ },
+ "dash.pf.n_today": "bugün {count}",
+ "dash.pf.no_alerts": "Uyarı yok",
+ "dash.pf.no_alerts_hint": {
+  "other": "Sonraki {count} günde kapalı, dolu, dolmak üzere veya kısıtlı bir tarih yok."
+ },
+ "dash.pf.no_hotels": "Bu kapsamda otel yok",
+ "dash.pf.no_market": "Pazar yok",
+ "dash.pf.no_sales": "Bu dönemde satış yok",
+ "dash.pf.open_dashboard": "panosunu aç",
+ "dash.pf.open_inventory": "Envanteri aç",
+ "dash.pf.per_currency": "Tutarlar para birimi başına gösterilir; farklı para birimleri asla toplanmaz.",
+ "dash.pf.rooms": "Oda performansı",
+ "dash.pf.rooms_hint": "Dönemde satılan oda gecelerine göre ilk {count} oda tipi.",
+ "dash.pf.sale_period": "Satış dönemi",
+ "dash.pf.scope": "Kapsam",
+ "dash.pf.scope.all": "Tüm otellerim ({count})",
+ "dash.pf.scope.enterprises": "Şirketler",
+ "dash.pf.scope.groups": "Otel grupları",
+ "dash.pf.scope.hotels": "Oteller",
+ "dash.pf.sort_currency": "Sıralama para birimi",
+ "dash.pf.subtitle": {
+  "other": "{count} otel · {from} – {to} satışları"
+ },
  "dash.pickup": "Satış tarihine göre pick-up",
  "dash.pickup_hint": "Dönemde günlük satılan oda geceleri.",
  "dash.range": "Dönem",
@@ -34,5 +127,8 @@
  "dash.searches": {
   "other": "{count} arama oturumu"
  },
- "dash.today": "Bugün"
+ "dash.today": "Bugün",
+ "dash.view": "Pano görünümü",
+ "dash.view.hotel": "Bu otel",
+ "dash.view.portfolio": "Portföy"
 }

@@ -24,6 +24,111 @@
  "dash.on_the_books": "Gebucht, nach Aufenthaltsdatum",
  "dash.open_balance": "Offene Salden",
  "dash.period": "{from} – {to}",
+ "dash.pf.alert.all_rooms": "Alle Zimmertypen",
+ "dash.pf.alert.channel": "Kanal: {channel}",
+ "dash.pf.alert.left": {
+  "one": "{count} von {capacity} frei",
+  "other": "{count} von {capacity} frei"
+ },
+ "dash.pf.alert.market": "Markt: {market}",
+ "dash.pf.alert.over": {
+  "one": "{count} Zimmer über der Kapazität",
+  "other": "{count} Zimmer über der Kapazität"
+ },
+ "dash.pf.alerts": "Kontingent- und Restriktionswarnungen",
+ "dash.pf.alerts_capped": {
+  "one": "Die ersten {shown} von {count} Warnung werden angezeigt.",
+  "other": "Die ersten {shown} von {count} Warnungen werden angezeigt."
+ },
+ "dash.pf.alerts_hint": {
+  "one": "Nächster {count} Tag ab heute",
+  "other": "Nächste {count} Tage ab heute"
+ },
+ "dash.pf.col.abandoned": "Abgebrochen",
+ "dash.pf.col.alerts": "Warnungen",
+ "dash.pf.col.booking_value": "Buchungswert",
+ "dash.pf.col.call_centre": "Callcenter",
+ "dash.pf.col.cancellations": "Storniert",
+ "dash.pf.col.direct": "Direkt",
+ "dash.pf.col.hotel": "Hotel",
+ "dash.pf.col.market": "Markt",
+ "dash.pf.col.open_balances": "Offene Salden",
+ "dash.pf.col.pending_payment": "Zahlung ausstehend",
+ "dash.pf.col.room_type": "Zimmertyp",
+ "dash.pf.col.sold": "Verkauft",
+ "dash.pf.fix_period": "Wählen Sie einen gültigen Verkaufszeitraum, um die Zahlen zu sehen.",
+ "dash.pf.footnote": "Buchungen zählen am Verkaufstag, Stornierungen am Tag der Stornierung. „Heute“ ist das Serverdatum ({date}).",
+ "dash.pf.hotels": "Hotels",
+ "dash.pf.hotels_hint": "Im Zeitraum verkauft, je Hotel. Öffnen Sie ein Hotel, um sein eigenes Dashboard zu sehen.",
+ "dash.pf.kind.closed": "Geschlossen",
+ "dash.pf.kind.closed_to_arrival": "Keine Anreise",
+ "dash.pf.kind.closed_to_departure": "Keine Abreise",
+ "dash.pf.kind.few_left": "Wenige frei",
+ "dash.pf.kind.oversold": "Überbucht",
+ "dash.pf.kind.sold_out": "Ausgebucht",
+ "dash.pf.kind.stop_sell": "Verkaufsstopp",
+ "dash.pf.kpi.abandoned": "Abgebrochene Chancen",
+ "dash.pf.kpi.abandoned_hint": {
+  "one": "offen, letzter {count} Tag",
+  "other": "offen, letzte {count} Tage"
+ },
+ "dash.pf.kpi.booking_value": "Buchungswert",
+ "dash.pf.kpi.call_centre": "Callcenter-Umsatz",
+ "dash.pf.kpi.call_centre_hint": "Vom Callcenter verkauft",
+ "dash.pf.kpi.cancellations": "Stornierungen",
+ "dash.pf.kpi.direct": "Direktumsatz",
+ "dash.pf.kpi.direct_hint": "Über Ihre Buchungsseiten verkauft",
+ "dash.pf.kpi.open_balances": "Offene Salden",
+ "dash.pf.kpi.pending_payment": "Warten auf Zahlung",
+ "dash.pf.kpi.today": "Verkäufe heute",
+ "dash.pf.kpi.today_outside": "Heute ({date}) liegt außerhalb des Zeitraums",
+ "dash.pf.markets": "Leistung nach Markt",
+ "dash.pf.markets_hint": "Top {count} Märkte nach im Zeitraum verkauften Buchungen.",
+ "dash.pf.n_bookings": {
+  "one": "{count} Buchung",
+  "other": "{count} Buchungen"
+ },
+ "dash.pf.n_cancellations": {
+  "one": "{count} Stornierung",
+  "other": "{count} Stornierungen"
+ },
+ "dash.pf.n_inventory_alerts": {
+  "one": "{count} Kontingentwarnung",
+  "other": "{count} Kontingentwarnungen"
+ },
+ "dash.pf.n_opportunities": {
+  "one": "{count} Chance",
+  "other": "{count} Chancen"
+ },
+ "dash.pf.n_restriction_alerts": {
+  "one": "{count} Restriktion",
+  "other": "{count} Restriktionen"
+ },
+ "dash.pf.n_today": "{count} heute",
+ "dash.pf.no_alerts": "Keine Warnungen",
+ "dash.pf.no_alerts_hint": {
+  "one": "Am nächsten {count} Tag ist nichts geschlossen, ausgebucht, fast voll oder eingeschränkt.",
+  "other": "In den nächsten {count} Tagen ist nichts geschlossen, ausgebucht, fast voll oder eingeschränkt."
+ },
+ "dash.pf.no_hotels": "Keine Hotels in dieser Auswahl",
+ "dash.pf.no_market": "Kein Markt",
+ "dash.pf.no_sales": "Keine Verkäufe in diesem Zeitraum",
+ "dash.pf.open_dashboard": "sein Dashboard öffnen",
+ "dash.pf.open_inventory": "Kontingent öffnen",
+ "dash.pf.per_currency": "Beträge werden je Währung gezeigt und nie über Währungen hinweg addiert.",
+ "dash.pf.rooms": "Leistung nach Zimmertyp",
+ "dash.pf.rooms_hint": "Top {count} Zimmertypen nach im Zeitraum verkauften Zimmernächten.",
+ "dash.pf.sale_period": "Verkaufszeitraum",
+ "dash.pf.scope": "Auswertung für",
+ "dash.pf.scope.all": "Alle meine Hotels ({count})",
+ "dash.pf.scope.enterprises": "Unternehmen",
+ "dash.pf.scope.groups": "Hotelgruppen",
+ "dash.pf.scope.hotels": "Hotels",
+ "dash.pf.sort_currency": "Beträge sortieren in",
+ "dash.pf.subtitle": {
+  "one": "{count} Hotel · verkauft {from} – {to}",
+  "other": "{count} Hotels · verkauft {from} – {to}"
+ },
  "dash.pickup": "Pick-up nach Buchungsdatum",
  "dash.pickup_hint": "Pro Tag verkaufte Zimmernächte im Zeitraum.",
  "dash.range": "Zeitraum",
@@ -36,5 +141,8 @@
   "one": "{count} Suchsitzung",
   "other": "{count} Suchsitzungen"
  },
- "dash.today": "Heute"
+ "dash.today": "Heute",
+ "dash.view": "Dashboard-Ansicht",
+ "dash.view.hotel": "Dieses Hotel",
+ "dash.view.portfolio": "Portfolio"
 }

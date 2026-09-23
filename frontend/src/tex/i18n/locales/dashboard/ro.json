@@ -25,6 +25,123 @@
  "dash.on_the_books": "Rezervat, după data sejurului",
  "dash.open_balance": "Solduri deschise",
  "dash.period": "{from} – {to}",
+ "dash.pf.alert.all_rooms": "Toate tipurile de camere",
+ "dash.pf.alert.channel": "Canal: {channel}",
+ "dash.pf.alert.left": {
+  "few": "au rămas {count} din {capacity}",
+  "one": "a rămas {count} din {capacity}",
+  "other": "au rămas {count} din {capacity}"
+ },
+ "dash.pf.alert.market": "Piață: {market}",
+ "dash.pf.alert.over": {
+  "few": "{count} camere peste capacitate",
+  "one": "{count} cameră peste capacitate",
+  "other": "{count} de camere peste capacitate"
+ },
+ "dash.pf.alerts": "Alerte de inventar și restricții",
+ "dash.pf.alerts_capped": {
+  "few": "Se afișează primele {shown} din {count} alerte.",
+  "one": "Se afișează primele {shown} din {count} alertă.",
+  "other": "Se afișează primele {shown} din {count} de alerte."
+ },
+ "dash.pf.alerts_hint": {
+  "few": "Următoarele {count} zile, de azi",
+  "one": "Următoarea {count} zi, de azi",
+  "other": "Următoarele {count} de zile, de azi"
+ },
+ "dash.pf.col.abandoned": "Abandonate",
+ "dash.pf.col.alerts": "Alerte",
+ "dash.pf.col.booking_value": "Valoarea rezervărilor",
+ "dash.pf.col.call_centre": "Call center",
+ "dash.pf.col.cancellations": "Anulate",
+ "dash.pf.col.direct": "Direct",
+ "dash.pf.col.hotel": "Hotel",
+ "dash.pf.col.market": "Piață",
+ "dash.pf.col.open_balances": "Solduri deschise",
+ "dash.pf.col.pending_payment": "Așteaptă plata",
+ "dash.pf.col.room_type": "Tip de cameră",
+ "dash.pf.col.sold": "Vândute",
+ "dash.pf.fix_period": "Alegeți o perioadă de vânzare validă pentru a vedea cifrele.",
+ "dash.pf.footnote": "Rezervările se numără în ziua vânzării, anulările în ziua anulării. „Azi” este data serverului ({date}).",
+ "dash.pf.hotels": "Hoteluri",
+ "dash.pf.hotels_hint": "Vândut în perioadă, pe hotel. Deschideți un hotel pentru a vedea panoul lui.",
+ "dash.pf.kind.closed": "Închis",
+ "dash.pf.kind.closed_to_arrival": "Închis la sosire",
+ "dash.pf.kind.closed_to_departure": "Închis la plecare",
+ "dash.pf.kind.few_left": "Puține rămase",
+ "dash.pf.kind.oversold": "Suprarezervat",
+ "dash.pf.kind.sold_out": "Epuizat",
+ "dash.pf.kind.stop_sell": "Stop vânzare",
+ "dash.pf.kpi.abandoned": "Oportunități abandonate",
+ "dash.pf.kpi.abandoned_hint": {
+  "few": "deschise, ultimele {count} zile",
+  "one": "deschise, ultima {count} zi",
+  "other": "deschise, ultimele {count} de zile"
+ },
+ "dash.pf.kpi.booking_value": "Valoarea rezervărilor",
+ "dash.pf.kpi.call_centre": "Venit call center",
+ "dash.pf.kpi.call_centre_hint": "Vândut de call center",
+ "dash.pf.kpi.cancellations": "Anulări",
+ "dash.pf.kpi.direct": "Venit direct",
+ "dash.pf.kpi.direct_hint": "Vândut pe site-urile dvs. de rezervare",
+ "dash.pf.kpi.open_balances": "Solduri deschise",
+ "dash.pf.kpi.pending_payment": "În așteptarea plății",
+ "dash.pf.kpi.today": "Vânzări azi",
+ "dash.pf.kpi.today_outside": "Azi ({date}) este în afara perioadei",
+ "dash.pf.markets": "Performanța pe piețe",
+ "dash.pf.markets_hint": "Primele {count} de piețe după rezervările vândute în perioadă.",
+ "dash.pf.n_bookings": {
+  "few": "{count} rezervări",
+  "one": "{count} rezervare",
+  "other": "{count} de rezervări"
+ },
+ "dash.pf.n_cancellations": {
+  "few": "{count} anulări",
+  "one": "{count} anulare",
+  "other": "{count} de anulări"
+ },
+ "dash.pf.n_inventory_alerts": {
+  "few": "{count} alerte de inventar",
+  "one": "{count} alertă de inventar",
+  "other": "{count} de alerte de inventar"
+ },
+ "dash.pf.n_opportunities": {
+  "few": "{count} oportunități",
+  "one": "{count} oportunitate",
+  "other": "{count} de oportunități"
+ },
+ "dash.pf.n_restriction_alerts": {
+  "few": "{count} restricții",
+  "one": "{count} restricție",
+  "other": "{count} de restricții"
+ },
+ "dash.pf.n_today": "{count} azi",
+ "dash.pf.no_alerts": "Nicio alertă",
+ "dash.pf.no_alerts_hint": {
+  "few": "Nimic nu este închis, epuizat, aproape plin sau restricționat în următoarele {count} zile.",
+  "one": "Nimic nu este închis, epuizat, aproape plin sau restricționat în următoarea {count} zi.",
+  "other": "Nimic nu este închis, epuizat, aproape plin sau restricționat în următoarele {count} de zile."
+ },
+ "dash.pf.no_hotels": "Niciun hotel în acest domeniu",
+ "dash.pf.no_market": "Fără piață",
+ "dash.pf.no_sales": "Nicio vânzare în această perioadă",
+ "dash.pf.open_dashboard": "deschide panoul lui",
+ "dash.pf.open_inventory": "Deschide inventarul",
+ "dash.pf.per_currency": "Sumele sunt afișate pe monedă și nu se adună niciodată între monede diferite.",
+ "dash.pf.rooms": "Performanța pe camere",
+ "dash.pf.rooms_hint": "Primele {count} de tipuri de camere după nopțile-cameră vândute în perioadă.",
+ "dash.pf.sale_period": "Perioada vânzării",
+ "dash.pf.scope": "Raport pentru",
+ "dash.pf.scope.all": "Toate hotelurile mele ({count})",
+ "dash.pf.scope.enterprises": "Întreprinderi",
+ "dash.pf.scope.groups": "Grupuri hoteliere",
+ "dash.pf.scope.hotels": "Hoteluri",
+ "dash.pf.sort_currency": "Sortează sumele în",
+ "dash.pf.subtitle": {
+  "few": "{count} hoteluri · vânzări {from} – {to}",
+  "one": "{count} hotel · vânzări {from} – {to}",
+  "other": "{count} de hoteluri · vânzări {from} – {to}"
+ },
  "dash.pickup": "Pick-up după data rezervării",
  "dash.pickup_hint": "Nopți-cameră vândute pe zi în perioadă.",
  "dash.range": "Perioadă",
@@ -38,5 +155,8 @@
   "one": "{count} sesiune de căutare",
   "other": "{count} de sesiuni de căutare"
  },
- "dash.today": "Astăzi"
+ "dash.today": "Astăzi",
+ "dash.view": "Vizualizare panou",
+ "dash.view.hotel": "Acest hotel",
+ "dash.view.portfolio": "Portofoliu"
 }

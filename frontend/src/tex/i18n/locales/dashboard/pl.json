@@ -26,6 +26,135 @@
  "dash.on_the_books": "Zarezerwowane, wg daty pobytu",
  "dash.open_balance": "Otwarte salda",
  "dash.period": "{from} – {to}",
+ "dash.pf.alert.all_rooms": "Wszystkie typy pokoi",
+ "dash.pf.alert.channel": "Kanał: {channel}",
+ "dash.pf.alert.left": {
+  "few": "zostały {count} z {capacity}",
+  "many": "zostało {count} z {capacity}",
+  "one": "został {count} z {capacity}",
+  "other": "zostało {count} z {capacity}"
+ },
+ "dash.pf.alert.market": "Rynek: {market}",
+ "dash.pf.alert.over": {
+  "few": "{count} pokoje ponad pojemność",
+  "many": "{count} pokoi ponad pojemność",
+  "one": "{count} pokój ponad pojemność",
+  "other": "{count} pokoju ponad pojemność"
+ },
+ "dash.pf.alerts": "Alerty dostępności i ograniczeń",
+ "dash.pf.alerts_capped": {
+  "few": "Wyświetlono pierwsze {shown} z {count} alertów.",
+  "many": "Wyświetlono pierwsze {shown} z {count} alertów.",
+  "one": "Wyświetlono pierwsze {shown} z {count} alertu.",
+  "other": "Wyświetlono pierwsze {shown} z {count} alertu."
+ },
+ "dash.pf.alerts_hint": {
+  "few": "Następne {count} dni od dziś",
+  "many": "Następne {count} dni od dziś",
+  "one": "Następny {count} dzień od dziś",
+  "other": "Następne {count} dnia od dziś"
+ },
+ "dash.pf.col.abandoned": "Porzucone",
+ "dash.pf.col.alerts": "Alerty",
+ "dash.pf.col.booking_value": "Wartość rezerwacji",
+ "dash.pf.col.call_centre": "Call center",
+ "dash.pf.col.cancellations": "Anulowane",
+ "dash.pf.col.direct": "Bezpośrednie",
+ "dash.pf.col.hotel": "Hotel",
+ "dash.pf.col.market": "Rynek",
+ "dash.pf.col.open_balances": "Otwarte salda",
+ "dash.pf.col.pending_payment": "Czeka na płatność",
+ "dash.pf.col.room_type": "Typ pokoju",
+ "dash.pf.col.sold": "Sprzedane",
+ "dash.pf.fix_period": "Wybierz prawidłowy okres sprzedaży, aby zobaczyć dane.",
+ "dash.pf.footnote": "Rezerwacje liczą się w dniu sprzedaży, anulacje w dniu anulowania. „Dziś” to data serwera ({date}).",
+ "dash.pf.hotels": "Hotele",
+ "dash.pf.hotels_hint": "Sprzedaż w okresie według hotelu. Otwórz hotel, aby zobaczyć jego własny pulpit.",
+ "dash.pf.kind.closed": "Zamknięte",
+ "dash.pf.kind.closed_to_arrival": "Zamknięte dla przyjazdów",
+ "dash.pf.kind.closed_to_departure": "Zamknięte dla wyjazdów",
+ "dash.pf.kind.few_left": "Mało wolnych",
+ "dash.pf.kind.oversold": "Nadsprzedane",
+ "dash.pf.kind.sold_out": "Wyprzedane",
+ "dash.pf.kind.stop_sell": "Wstrzymanie sprzedaży",
+ "dash.pf.kpi.abandoned": "Porzucone okazje",
+ "dash.pf.kpi.abandoned_hint": {
+  "few": "otwarte, ostatnie {count} dni",
+  "many": "otwarte, ostatnie {count} dni",
+  "one": "otwarte, ostatni {count} dzień",
+  "other": "otwarte, ostatnie {count} dnia"
+ },
+ "dash.pf.kpi.booking_value": "Wartość rezerwacji",
+ "dash.pf.kpi.call_centre": "Przychód call center",
+ "dash.pf.kpi.call_centre_hint": "Sprzedane przez call center",
+ "dash.pf.kpi.cancellations": "Anulacje",
+ "dash.pf.kpi.direct": "Przychód bezpośredni",
+ "dash.pf.kpi.direct_hint": "Sprzedane w Twoich serwisach rezerwacyjnych",
+ "dash.pf.kpi.open_balances": "Otwarte salda",
+ "dash.pf.kpi.pending_payment": "Oczekujące na płatność",
+ "dash.pf.kpi.today": "Sprzedaż dziś",
+ "dash.pf.kpi.today_outside": "Dziś ({date}) jest poza okresem",
+ "dash.pf.markets": "Wyniki według rynku",
+ "dash.pf.markets_hint": "{count} najlepszych rynków według rezerwacji sprzedanych w okresie.",
+ "dash.pf.n_bookings": {
+  "few": "{count} rezerwacje",
+  "many": "{count} rezerwacji",
+  "one": "{count} rezerwacja",
+  "other": "{count} rezerwacji"
+ },
+ "dash.pf.n_cancellations": {
+  "few": "{count} anulacje",
+  "many": "{count} anulacji",
+  "one": "{count} anulacja",
+  "other": "{count} anulacji"
+ },
+ "dash.pf.n_inventory_alerts": {
+  "few": "{count} alerty dostępności",
+  "many": "{count} alertów dostępności",
+  "one": "{count} alert dostępności",
+  "other": "{count} alertu dostępności"
+ },
+ "dash.pf.n_opportunities": {
+  "few": "{count} okazje",
+  "many": "{count} okazji",
+  "one": "{count} okazja",
+  "other": "{count} okazji"
+ },
+ "dash.pf.n_restriction_alerts": {
+  "few": "{count} ograniczenia",
+  "many": "{count} ograniczeń",
+  "one": "{count} ograniczenie",
+  "other": "{count} ograniczenia"
+ },
+ "dash.pf.n_today": "{count} dziś",
+ "dash.pf.no_alerts": "Brak alertów",
+ "dash.pf.no_alerts_hint": {
+  "few": "W ciągu następnych {count} dni nic nie jest zamknięte, wyprzedane, prawie pełne ani ograniczone.",
+  "many": "W ciągu następnych {count} dni nic nie jest zamknięte, wyprzedane, prawie pełne ani ograniczone.",
+  "one": "W ciągu następnego {count} dnia nic nie jest zamknięte, wyprzedane, prawie pełne ani ograniczone.",
+  "other": "W ciągu następnych {count} dnia nic nie jest zamknięte, wyprzedane, prawie pełne ani ograniczone."
+ },
+ "dash.pf.no_hotels": "Brak hoteli w tym zakresie",
+ "dash.pf.no_market": "Bez rynku",
+ "dash.pf.no_sales": "Brak sprzedaży w tym okresie",
+ "dash.pf.open_dashboard": "otwórz jego pulpit",
+ "dash.pf.open_inventory": "Otwórz dostępność",
+ "dash.pf.per_currency": "Kwoty są pokazywane osobno dla każdej waluty i nigdy nie są sumowane między walutami.",
+ "dash.pf.rooms": "Wyniki według pokoju",
+ "dash.pf.rooms_hint": "{count} najlepszych typów pokoi według pokojonocy sprzedanych w okresie.",
+ "dash.pf.sale_period": "Okres sprzedaży",
+ "dash.pf.scope": "Zakres",
+ "dash.pf.scope.all": "Wszystkie moje hotele ({count})",
+ "dash.pf.scope.enterprises": "Przedsiębiorstwa",
+ "dash.pf.scope.groups": "Grupy hotelowe",
+ "dash.pf.scope.hotels": "Hotele",
+ "dash.pf.sort_currency": "Sortuj kwoty w",
+ "dash.pf.subtitle": {
+  "few": "{count} hotele · sprzedaż {from} – {to}",
+  "many": "{count} hoteli · sprzedaż {from} – {to}",
+  "one": "{count} hotel · sprzedaż {from} – {to}",
+  "other": "{count} hotelu · sprzedaż {from} – {to}"
+ },
  "dash.pickup": "Pick-up wg daty rezerwacji",
  "dash.pickup_hint": "Pokojonoce sprzedane dziennie w okresie.",
  "dash.range": "Okres",
@@ -40,5 +169,8 @@
   "one": "{count} sesja wyszukiwania",
   "other": "{count} sesji wyszukiwania"
  },
- "dash.today": "Dziś"
+ "dash.today": "Dziś",
+ "dash.view": "Widok pulpitu",
+ "dash.view.hotel": "Ten hotel",
+ "dash.view.portfolio": "Portfel"
 }

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useMemo, useState, type ReactNode } from "react"
+import { Link, useSearchParams } from "react-router-dom"
 import { ArrowRight } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
@@ -20,6 +20,7 @@ import {
   Skeleton,
   Stat,
 } from "../../ui"
+import PortfolioDashboard from "./PortfolioDashboard"
 
 interface ProdRow {
   key: string
@@ -62,10 +63,65 @@ function rangeDates(r: Range): [string, string] {
   return [start, addDays(start, r === "next_30" ? 29 : 89)]
 }
 
+type View = "hotel" | "portfolio"
+const VIEW_KEY = "tex-dashboard-view"
+
+function storedView(): View | null {
+  try {
+    const v = localStorage.getItem(VIEW_KEY)
+    return v === "portfolio" || v === "hotel" ? v : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Dashboard: the selected hotel, or — for users who report on two or more hotels —
+ * the portfolio of every hotel they may see (G-25, ADR-038). `?view=` wins over the
+ * remembered choice, so links into one hotel always land on its own dashboard.
+ */
 export default function Dashboard() {
   const { t } = useTexT()
+  const { boot, can } = useSession()
+  const [params, setParams] = useSearchParams()
+  const portfolioOk = useMemo(() => boot.properties.filter((p) => can("report.view", p.name)).length >= 2, [boot, can])
+  const asked = params.get("view")
+  const view: View =
+    portfolioOk && (asked === "portfolio" || (asked !== "hotel" && storedView() === "portfolio")) ? "portfolio" : "hotel"
+  const setView = (v: View) => {
+    try {
+      localStorage.setItem(VIEW_KEY, v)
+    } catch {
+      /* storage blocked: the URL still carries the view */
+    }
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set("view", v)
+        return next
+      },
+      { replace: true },
+    )
+  }
+  const viewSwitch = portfolioOk ? (
+    <Segmented<View>
+      label={t("dash.view")}
+      value={view}
+      onChange={setView}
+      options={[
+        { value: "hotel", label: t("dash.view.hotel") },
+        { value: "portfolio", label: t("dash.view.portfolio") },
+      ]}
+    />
+  ) : undefined
+  return view === "portfolio" ? <PortfolioDashboard viewSwitch={viewSwitch} /> : <HotelDashboard viewSwitch={viewSwitch} />
+}
+
+/** The selected hotel's dashboard (R-45). */
+function HotelDashboard({ viewSwitch }: { viewSwitch?: ReactNode }) {
+  const { t } = useTexT()
   const property = useProperty()
-  const { can } = useSession()
+  const { can, property: hotel } = useSession()
   const [range, setRange] = useState<Range>("this_month")
   const [from, to] = useMemo(() => rangeDates(range), [range])
   const canReports = can("report.view")
@@ -87,7 +143,14 @@ export default function Dashboard() {
     <>
       <PageHeader
         title={t("core.nav.dashboard")}
-        subtitle={d ? t("dash.period", { from: date(d.from), to: date(d.to) }) : undefined}
+        subtitle={
+          viewSwitch
+            ? [hotel?.property_name, d ? t("dash.period", { from: date(d.from), to: date(d.to) }) : null].filter(Boolean).join(" · ")
+            : d
+              ? t("dash.period", { from: date(d.from), to: date(d.to) })
+              : undefined
+        }
+        meta={viewSwitch}
         actions={
           <Segmented<Range>
             label={t("dash.range")}

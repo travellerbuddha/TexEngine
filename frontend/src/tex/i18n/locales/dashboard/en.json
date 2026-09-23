@@ -24,6 +24,111 @@
  "dash.on_the_books": "On the books, by stay date",
  "dash.open_balance": "Open balances",
  "dash.period": "{from} – {to}",
+ "dash.pf.alert.all_rooms": "All room types",
+ "dash.pf.alert.channel": "Channel: {channel}",
+ "dash.pf.alert.left": {
+  "one": "{count} of {capacity} left",
+  "other": "{count} of {capacity} left"
+ },
+ "dash.pf.alert.market": "Market: {market}",
+ "dash.pf.alert.over": {
+  "one": "{count} room over capacity",
+  "other": "{count} rooms over capacity"
+ },
+ "dash.pf.alerts": "Inventory and restriction alerts",
+ "dash.pf.alerts_capped": {
+  "one": "Showing the first {shown} of {count} alert.",
+  "other": "Showing the first {shown} of {count} alerts."
+ },
+ "dash.pf.alerts_hint": {
+  "one": "Next {count} day, from today",
+  "other": "Next {count} days, from today"
+ },
+ "dash.pf.col.abandoned": "Abandoned",
+ "dash.pf.col.alerts": "Alerts",
+ "dash.pf.col.booking_value": "Booking value",
+ "dash.pf.col.call_centre": "Call centre",
+ "dash.pf.col.cancellations": "Cancelled",
+ "dash.pf.col.direct": "Direct",
+ "dash.pf.col.hotel": "Hotel",
+ "dash.pf.col.market": "Market",
+ "dash.pf.col.open_balances": "Open balances",
+ "dash.pf.col.pending_payment": "Awaiting payment",
+ "dash.pf.col.room_type": "Room type",
+ "dash.pf.col.sold": "Sold",
+ "dash.pf.fix_period": "Choose a valid sale period to see the figures.",
+ "dash.pf.footnote": "Bookings count on the day they were sold, cancellations on the day they were cancelled. “Today” is the server date ({date}).",
+ "dash.pf.hotels": "Hotels",
+ "dash.pf.hotels_hint": "Sold in the period, per hotel. Open a hotel to see its own dashboard.",
+ "dash.pf.kind.closed": "Closed",
+ "dash.pf.kind.closed_to_arrival": "Closed to arrival",
+ "dash.pf.kind.closed_to_departure": "Closed to departure",
+ "dash.pf.kind.few_left": "Few left",
+ "dash.pf.kind.oversold": "Oversold",
+ "dash.pf.kind.sold_out": "Sold out",
+ "dash.pf.kind.stop_sell": "Stop sell",
+ "dash.pf.kpi.abandoned": "Abandoned opportunities",
+ "dash.pf.kpi.abandoned_hint": {
+  "one": "open, last {count} day",
+  "other": "open, last {count} days"
+ },
+ "dash.pf.kpi.booking_value": "Booking value",
+ "dash.pf.kpi.call_centre": "Call-centre revenue",
+ "dash.pf.kpi.call_centre_hint": "Sold by the call centre",
+ "dash.pf.kpi.cancellations": "Cancellations",
+ "dash.pf.kpi.direct": "Direct revenue",
+ "dash.pf.kpi.direct_hint": "Sold on your booking sites",
+ "dash.pf.kpi.open_balances": "Open balances",
+ "dash.pf.kpi.pending_payment": "Waiting for payment",
+ "dash.pf.kpi.today": "Sales today",
+ "dash.pf.kpi.today_outside": "Today ({date}) is outside the period",
+ "dash.pf.markets": "Market performance",
+ "dash.pf.markets_hint": "Top {count} markets by bookings sold in the period.",
+ "dash.pf.n_bookings": {
+  "one": "{count} booking",
+  "other": "{count} bookings"
+ },
+ "dash.pf.n_cancellations": {
+  "one": "{count} cancellation",
+  "other": "{count} cancellations"
+ },
+ "dash.pf.n_inventory_alerts": {
+  "one": "{count} inventory alert",
+  "other": "{count} inventory alerts"
+ },
+ "dash.pf.n_opportunities": {
+  "one": "{count} opportunity",
+  "other": "{count} opportunities"
+ },
+ "dash.pf.n_restriction_alerts": {
+  "one": "{count} restriction",
+  "other": "{count} restrictions"
+ },
+ "dash.pf.n_today": "{count} today",
+ "dash.pf.no_alerts": "No alerts",
+ "dash.pf.no_alerts_hint": {
+  "one": "Nothing is closed, sold out, nearly full or restricted in the next {count} day.",
+  "other": "Nothing is closed, sold out, nearly full or restricted in the next {count} days."
+ },
+ "dash.pf.no_hotels": "No hotels in this scope",
+ "dash.pf.no_market": "No market",
+ "dash.pf.no_sales": "No sales in this period",
+ "dash.pf.open_dashboard": "open its dashboard",
+ "dash.pf.open_inventory": "Open inventory",
+ "dash.pf.per_currency": "Amounts are shown per currency and never added across currencies.",
+ "dash.pf.rooms": "Room performance",
+ "dash.pf.rooms_hint": "Top {count} room types by room nights sold in the period.",
+ "dash.pf.sale_period": "Sale period",
+ "dash.pf.scope": "Report on",
+ "dash.pf.scope.all": "All my hotels ({count})",
+ "dash.pf.scope.enterprises": "Enterprises",
+ "dash.pf.scope.groups": "Hotel groups",
+ "dash.pf.scope.hotels": "Hotels",
+ "dash.pf.sort_currency": "Sort amounts in",
+ "dash.pf.subtitle": {
+  "one": "{count} hotel · sold {from} – {to}",
+  "other": "{count} hotels · sold {from} – {to}"
+ },
  "dash.pickup": "Pick-up by booking date",
  "dash.pickup_hint": "Room nights sold per day in the period.",
  "dash.range": "Period",
@@ -36,5 +141,8 @@
   "one": "{count} search session",
   "other": "{count} search sessions"
  },
- "dash.today": "Today"
+ "dash.today": "Today",
+ "dash.view": "Dashboard view",
+ "dash.view.hotel": "This hotel",
+ "dash.view.portfolio": "Portfolio"
 }
