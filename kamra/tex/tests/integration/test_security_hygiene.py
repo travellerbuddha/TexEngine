@@ -436,6 +436,55 @@ class TestSecurityHygieneG83Review(G83Setup):
 			with self.assertRaises(frappe.ValidationError, msg=bad):
 				site.save(ignore_permissions=True)
 
+	def test_r3_p24_privatises_public_html_reports_the_rest_and_masks_versioned_keys(self):
+		from kamra.patches.tex import p24_g83_review as p24
+
+		self.as_user("Administrator")
+
+		def public_file(name: str, content: bytes) -> str:
+			"""A public file stored before the guard existed: on disk and on record, no hooks run."""
+			path = frappe.get_site_path("public", "files", name)
+			with open(path, "wb") as fh:
+				fh.write(content)
+			self.addCleanup(self.site_files, name)          # after tearDown's rollback has moved it back
+			f = frappe.new_doc("File")
+			f.update({"name": frappe.generate_hash(length=10), "file_name": name, "file_url": f"/files/{name}",
+			          "is_private": 0, "folder": "Home", "file_size": len(content)})
+			f.db_insert()
+			return f.name
+
+		page = public_file("g83-legacy-page.html", HTML)
+		logo = public_file("g83-legacy-logo.svg", SVG)
+		frappe.db.set_value("TEX Booking Site", SLUG, "logo", "/files/g83-legacy-logo.svg")
+		acc = frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "g83 versioned",
+		                      "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox",
+		                      "enabled": 0}).insert(ignore_permissions=True).name
+		ver = frappe.get_doc({"doctype": "Version", "ref_doctype": "TEX Payment Provider Account", "docname": acc,
+		                      "data": json.dumps({"changed": [["api_key", "old-plain-g83", "new-plain-g83"],
+		                                                      ["label", "a", "b"]]})}).insert(ignore_permissions=True)
+		with mock.patch("builtins.print") as printed:
+			p24.execute()
+			p24.execute()                                       # idempotent
+		out = str(printed.call_args_list)
+		f = frappe.db.get_value("File", page, ["is_private", "file_url"], as_dict=True)
+		self.assertEqual(f.is_private, 1)                       # HTML/script: made private
+		self.assertTrue(os.path.exists(frappe.get_site_path("private", "files", f.file_url.rsplit("/", 1)[-1])))
+		self.assertEqual(frappe.db.get_value("File", logo, "is_private"), 0)   # an SVG in use: reported only
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "file.public_active_content",
+		                                                     "reference_name": logo}))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking_site.invalid_image",
+		                                                     "reference_name": SLUG}))
+		data = json.loads(frappe.db.get_value("Version", ver.name, "data"))
+		self.assertEqual(data["changed"], [["api_key", "*****", "*****"], ["label", "a", "b"]])
+		self.assertNotIn("plain-g83", out)
+		# a key saved from now on never reaches the change history in clear
+		doc = frappe.get_doc("TEX Payment Provider Account", acc)
+		doc.api_key = "live-key-g83-review"
+		doc.save(ignore_permissions=True)
+		for v in frappe.get_all("Version", filters={"ref_doctype": "TEX Payment Provider Account", "docname": acc},
+		                        pluck="data"):
+			self.assertNotIn("live-key-g83-review", v)
+
 	# ── R4. images are decoded whole; iPhone JPEGs (MPO) pass ─────────────
 
 	def test_r4_images_are_decoded_whole_and_iphone_jpegs_pass(self):
