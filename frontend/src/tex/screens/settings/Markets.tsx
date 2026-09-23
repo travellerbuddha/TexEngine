@@ -101,7 +101,7 @@ function OverlapText({ overlaps }: { overlaps: Overlap[] }) {
 /** Markets (R-13): platform master data every contract, markup and payment rule refers to. */
 export default function Markets() {
   const { t } = useTexT()
-  const { boot } = useSession()
+  const { boot, reload: reloadSession } = useSession()
   const platform = boot.user.platform_admin
   const q = useTexQuery<MarketRow[]>("admin", "markets", {}, [])
   const [editing, setEditing] = useState<Draft | null>(null)
@@ -233,6 +233,8 @@ export default function Markets() {
         onSaved={() => {
           setEditing(null)
           q.reload()
+          // contract, markup and search pickers read markets from the session
+          void reloadSession()
         }}
       />
     </SettingsFrame>
