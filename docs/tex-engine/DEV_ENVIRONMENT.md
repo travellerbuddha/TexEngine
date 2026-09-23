@@ -53,6 +53,11 @@ bench serve --port 8000        # test.localhost must resolve to 127.0.0.1
 cd frontend && TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD='TexDemo#2026' \
   PW_CHROMIUM=/opt/pw-browsers/chromium npx playwright test -c e2e
 ```
+Repeated runs book real inventory at the demo hotels; free it between series of runs with
+`bench --site test.localhost execute kamra.tex.devtools.demo_seed.release_test_bookings`
+(cancels future test-run stays, keeps demo-seed bookings; refuses on production sites).
+CI starts from a fresh database each run.
+
 Specs: `shell`, `contract-admin`, `booking` (desktop + 390 px), `crs` (call centre, reservation
 change) and `critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
 (contracts, booking, reservations) and `e2e/helpers.ts`. The dev bench's System Settings

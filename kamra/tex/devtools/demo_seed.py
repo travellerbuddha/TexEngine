@@ -291,8 +291,39 @@ def _demo_bookings(n: int) -> int:
 			continue
 		b = booking.create_booking(quote_ids=[q["quote_id"]], guest={
 			"first_name": first, "last_name": last, "email": f"{first.lower()}.{last.lower()}@example.com",
-			"country": None}, payment_method="Pay at Hotel", idempotency_key=f"demo-{i}", booking_site=SITE)
+			"country": None}, payment_method="Pay at Hotel", idempotency_key=f"demo-{i}", booking_site=SITE,
+			source_tag="demo")
 		if b.get("status") != "Confirmed":
 			booking.confirm_booking(b["booking"], reason="demo data")
 		made += 1
 	return made
+
+
+def release_test_bookings() -> dict:
+	"""Dev/test benches only: cancel the future stays that test runs (Playwright, scratch
+	scripts) booked at the demo hotels, so repeated runs don't sell the demo inventory out.
+	Demo-seed bookings (source "demo") are kept. Refuses on production sites."""
+	if frappe.conf.get("tex_production"):
+		frappe.throw("release_test_bookings refuses to run on a site flagged tex_production")
+	from kamra.tex.services import booking
+
+	ent = frappe.db.get_value("TEX Enterprise", {"enterprise_name": ENTERPRISE})
+	props = frappe.get_all("Property", filters={"tex_enterprise": ent}, pluck="name") if ent else []
+	if not props:
+		return {"cancelled": 0}
+	rows = frappe.db.sql("""
+		SELECT r.name FROM `tabReservation` r
+		JOIN `tabTEX Booking` b ON b.name = r.tex_booking
+		WHERE r.property IN %(props)s AND r.check_out_date > %(today)s
+		  AND r.status NOT IN ('Cancelled', 'No Show', 'Checked Out')
+		  AND IFNULL(b.source, '') != 'demo' AND IFNULL(b.booker_email, '') LIKE '%%@example.com'
+	""", {"props": tuple(props), "today": nowdate()}, pluck=True)
+	done = 0
+	for name in rows:
+		try:
+			booking.cancel_reservation(name, reason="test clean-up", waive_penalty=True, source="System")
+			done += 1
+		except Exception:
+			frappe.clear_messages()
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- bench execute dev script boundary
+	return {"cancelled": done, "candidates": len(rows)}

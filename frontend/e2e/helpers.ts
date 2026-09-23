@@ -16,10 +16,11 @@ export async function api<T>(req: APIRequestContext, method: string, args: Recor
   return (body as { message: T }).message
 }
 
-/** A future stay window that never collides between runs. */
+/** A future stay window, spread at random over ~4 months per call so repeated runs on the
+ * same bench don't sell the demo hotel out (demo contracts run to the end of next year). */
 export function stayDates(offsetDays: number, nights: number) {
   const base = new Date()
-  base.setDate(base.getDate() + offsetDays + (Math.floor(Date.now() / 86400000) % 20))
+  base.setDate(base.getDate() + offsetDays + Math.floor(Math.random() * 120))
   const ci = new Date(base)
   const co = new Date(base)
   co.setDate(co.getDate() + nights)
