@@ -22,6 +22,7 @@ from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
+from kamra.tex.commercial import contracts
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -334,6 +335,12 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		scope.require("reservation.create", property)
 	elif channel not in ("DIRECT_WEB", "META"):
 		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
+	# row lock makes a suspend wait for bookings in flight, and every booking after it see it
+	for contract in sorted({r[2]["contract"]["contract"] for r in rows}):
+		stopped = contracts.not_on_sale(contract, lock=True)
+		if stopped:
+			frappe.throw(str(stopped), stopped)
 
 	# ── concurrency: lock every night of every room, then re-check under the lock ──
 	avail.lock_nights(property, [(r[1]["room_type"], getdate(r[1]["check_in"]), getdate(r[1]["check_out"]))

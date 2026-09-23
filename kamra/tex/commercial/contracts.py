@@ -663,6 +663,30 @@ def candidate_contracts(property: str, market: str, channel: str, at: datetime) 
 	return out
 
 
+class ContractNotOnSale(frappe.ValidationError):
+	"""An offer or quote of a contract that stopped selling after it was made (ADR-045)."""
+	code = "CONTRACT_NOT_ON_SALE"
+
+
+class ContractSuspended(ContractNotOnSale):
+	code = "CONTRACT_SUSPENDED"
+
+
+def not_on_sale(contract: str, *, lock: bool = False) -> ContractNotOnSale | None:
+	"""Why a contract's offers and quotes no longer sell (it is not Active), or None. ``lock``
+	reads the status under a shared row lock, so a suspend waits for bookings in flight and every
+	booking after it sees it."""
+	if lock:
+		row = frappe.db.sql("SELECT status FROM `tabTEX Contract` WHERE name=%s LOCK IN SHARE MODE", contract)
+		status = row[0][0] if row else None
+	else:
+		status = frappe.db.get_value("TEX Contract", contract, "status")
+	if status == "Active":
+		return None
+	cls = ContractSuspended if status == "Suspended" else ContractNotOnSale
+	return cls(_("This rate is no longer on sale. Please search again."))
+
+
 # ─── status (G-50, ADR-045) ──────────────────────────────────────────────
 
 # action → (statuses it applies to, new status); a status never changes through a header edit

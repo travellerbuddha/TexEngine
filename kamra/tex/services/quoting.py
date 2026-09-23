@@ -399,6 +399,9 @@ def create_quote(offer_key: str, *, extras=None, promo_codes=None, guest_email: 
 	live = contracts.active_version_header(offer["contract"], now)
 	if not live:
 		frappe.throw(_("This rate is no longer on sale — please search again."))
+	stopped = contracts.not_on_sale(offer["contract"])        # suspended since the search (ADR-045)
+	if stopped:
+		return {"ok": False, "reasons": [{"code": stopped.code, "message": str(stopped)}]}
 	q, terms = price_request(live.version_id, req, gkey=gkey)
 	if not q.sellable:
 		return {"ok": False, "reasons": q.reasons}

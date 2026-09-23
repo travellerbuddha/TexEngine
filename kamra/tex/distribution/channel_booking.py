@@ -73,6 +73,23 @@ def _lock_and_check(property: str, room_type: str, ci, co, exclude: list[str]) -
 	return None if count >= 1 else f"{room_type} {ci}→{co}: accepted from the channel although TEX shows no room left"
 
 
+def _contract_warning(m, now) -> str | None:
+	"""A stay the channel sold on a contract TEX no longer sells (suspended, archived, or closed for
+	this market and channel before the closed ARI reached the channel) is accepted like an
+	overbooking: the guest holds the channel's confirmation (ADR-045)."""
+	from kamra.tex.commercial import contracts
+
+	if m.contract:
+		if contracts.not_on_sale(m.contract):
+			status = frappe.db.get_value("TEX Contract", m.contract, "status")
+			return (f"{m.room_type}: accepted from the channel although its contract {m.contract} is "
+			        f"{(status or 'not active').lower()} in TEX")
+		return None
+	if not contracts.candidate_contracts(m.property, m.market, m.sales_channel, now):
+		return f"{m.room_type}: accepted from the channel although no TEX contract sells {m.market} on {m.sales_channel}"
+	return None
+
+
 def _reservation_values(room: dict, m, conn: str, ref: str, ccy: str) -> dict:
 	total = quantize(D(room["total"]), ccy)
 	kids = list(room.get("children_ages") or [])
@@ -134,6 +151,9 @@ def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, 
 		w = _lock_and_check(prop, m.room_type, ci, co, [])
 		if w:
 			warnings.append(w)
+		w = _contract_warning(m, now)
+		if w:
+			warnings.append(w)
 		res = frappe.get_doc({"doctype": "Reservation", "property": prop, "guest": guest, "status": "Confirmed",
 		                      "source": "OTA", "channel": m.sales_channel, "auto_price": 0, "tex_booking": booking.name,
 		                      "tex_room_index": idx + 1, "tex_sale_at": now, "tex_locked_at": now, "tex_accepted_at": now,
@@ -173,6 +193,9 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 		values = _reservation_values(room, m, conn, ref, ccy)
 		if name is None:
 			w = _lock_and_check(prop, m.room_type, ci, co, [])
+			stopped = _contract_warning(m, now)
+			if stopped:
+				warnings.append(stopped)
 			res = frappe.get_doc({"doctype": "Reservation", "property": prop, "guest": b.booker_guest,
 			                      "status": "Confirmed", "source": "OTA", "channel": m.sales_channel, "auto_price": 0,
 			                      "tex_booking": b.name, "tex_room_index": len(b.rooms) + 1, "tex_sale_at": now,
