@@ -132,7 +132,9 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	req, snap = build_changed_request(res, changes, placeholder_at)
 	version, at, how = _resolve(res, snap, req, basis, basis_sale_at)
 	req, _s = build_changed_request(res, changes, at)
-	quote, terms = quoting.price_request(version, req)
+	# the booking's own coupon uses never count against it when it is repriced (G-09)
+	quote, terms = quoting.price_request(version, req, exclude_booking=res.tex_booking,
+	                                     gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest))
 	old_ccy = res.tex_currency or snap.get("currency")
 	old_total = from_db(res.tex_total_amount or res.amount_after_tax, old_ccy or "EUR")
 
@@ -267,6 +269,7 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 		before=snap, after=json.loads(res.tex_pricing_snapshot), source=source,
 		override=final_total if override_amount not in (None, "") else None)
 	if res.tex_booking:
+		booking_svc.sync_redemptions(res.tex_booking)
 		booking_svc._refresh_booking_after_change(res.tex_booking)
 	audit("reservation.modify", reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	      old={"total": to_str(old_total), **{k: v[0] for k, v in changed_fields.items()}},
@@ -288,7 +291,8 @@ def simulate(reservation: str, sale_at) -> dict:
 		return {"sellable": False, "reasons": [{"code": "NO_CONTRACT",
 		                                        "message": _("No contract was on sale at that time.")}]}
 	pick = next((c for c in cands if c[0].name == snap["contract"]["contract"]), cands[0])
-	quote, _terms = quoting.price_request(pick[1], req)
+	quote, _terms = quoting.price_request(pick[1], req, exclude_booking=res.tex_booking,
+	                                      gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest))
 	internal = scope.has_capability("price.view_cost", res.property)
 	actual = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")
 	return {

@@ -121,15 +121,18 @@ def promotions(property: str, at: datetime) -> tuple[Promotion, ...]:
 	return tuple(promotion_from_row(r) for r in rows)
 
 
-def coupon_usage(promos: tuple[Promotion, ...], gkey: str | None) -> dict[str, tuple[int, int]]:
+def coupon_usage(promos: tuple[Promotion, ...], gkey: str | None,
+                 exclude_booking: str | None = None) -> dict[str, tuple[int, int]]:
+	"""(uses, uses by this guest) per limited promotion. Repricing a booking does not count
+	the booking's own redemptions against it (G-09)."""
 	limited = [p.promo_id for p in promos if p.usage_limit or p.per_guest_limit]
 	out = {}
 	for pid in limited:
-		total = frappe.db.count("TEX Promotion Redemption",
-		                        {"promotion": pid, "status": ("in", ["Reserved", "Committed"])})
-		mine = frappe.db.count("TEX Promotion Redemption",
-		                       {"promotion": pid, "guest_key": gkey, "status": ("in", ["Reserved", "Committed"])}) \
-			if gkey else 0
+		live = {"promotion": pid, "status": ("in", ["Reserved", "Committed"])}
+		if exclude_booking:
+			live["booking"] = ("!=", exclude_booking)
+		total = frappe.db.count("TEX Promotion Redemption", live)
+		mine = frappe.db.count("TEX Promotion Redemption", {**live, "guest_key": gkey}) if gkey else 0
 		out[pid] = (total, mine)
 	return out
 
@@ -249,7 +252,7 @@ def extras_catalog(property: str, *, online_only: bool = False, after_booking: b
 
 
 def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = None,
-                  extras: dict[str, ExtraDef] | None = None) -> PricingContext:
+                  extras: dict[str, ExtraDef] | None = None, exclude_booking: str | None = None) -> PricingContext:
 	at = req.sale_at
 	sell = req.sell_currency.upper()
 	promos = promotions(req.property, at)
@@ -276,5 +279,5 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 		extras=catalog,
 		extra_fx=extra_fx,
 		promo_fx=promo_fx,
-		coupon_usage=coupon_usage(promos, gkey),
+		coupon_usage=coupon_usage(promos, gkey, exclude_booking),
 	)

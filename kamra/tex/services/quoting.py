@@ -338,9 +338,10 @@ def request_from_offer(offer: dict, *, sale_at: datetime, extras=(), promo_codes
 	                     member=bool(offer.get("member")), extras=extras, room_index=int(offer.get("room_index") or 0))
 
 
-def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None):
+def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None,
+                  exclude_booking: str | None = None):
 	terms = contracts.load_terms(version)
-	ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog)
+	ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog, exclude_booking=exclude_booking)
 	return engine.price_stay(ctx, req), terms
 
 

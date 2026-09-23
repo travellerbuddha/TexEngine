@@ -397,6 +397,18 @@ def _record_redemptions(rooms: list[tuple[dict, str]], booking: str, property: s
 	gkey = ctxmod.guest_key(guest_ident if guest_ident and "@" in guest_ident else None,
 	                        guest_ident if guest_ident and "@" not in guest_ident else None)
 	currency = rooms[0][0]["currency"] if rooms else None
+	used = _promotions_used(rooms)
+	for root in sorted(used):
+		if not frappe.db.exists("TEX Promotion", root):
+			continue
+		_check_redemption_limits(root, used[root]["promo"]["name"], gkey)
+		_insert_redemption(root, used[root], booking=booking, property=property, gkey=gkey, currency=currency,
+		                   committed=committed)
+
+
+def _promotions_used(rooms: list[tuple[dict, str]]) -> dict[str, dict]:
+	"""promotion → {promo, reservation (first room it applied to), discount over all rooms}:
+	the limited promotions (codes and managed promotions) a booking's rooms carry."""
 	used: dict[str, dict] = {}
 	for result, reservation in rooms:
 		for p in result.get("promotions") or []:
@@ -404,25 +416,77 @@ def _record_redemptions(rooms: list[tuple[dict, str]], booking: str, property: s
 				continue
 			entry = used.setdefault(p["promo_id"], {"promo": p, "reservation": reservation, "discount": ZERO})
 			entry["discount"] += D(p.get("discount") or 0)
+	return used
+
+
+def _insert_redemption(root: str, entry: dict, *, booking: str, property: str, gkey: str | None, currency,
+                       committed: bool) -> None:
+	frappe.get_doc({"doctype": "TEX Promotion Redemption", "promotion": root, "code": entry["promo"].get("code"),
+	                "property": property, "status": "Committed" if committed else "Reserved",
+	                "booking": booking, "reservation": entry["reservation"], "guest_key": gkey,
+	                "amount": entry["discount"], "currency": currency}).insert(ignore_permissions=True)
+	frappe.db.sql("UPDATE `tabTEX Promotion` SET times_redeemed = IFNULL(times_redeemed, 0) + 1 WHERE name=%s", root)
+
+
+def booking_guest_key(booking: str | None, guest: str | None = None) -> str | None:
+	"""The per-guest coupon key of a booking: the one its redemptions carry, else its guest's."""
+	if booking:
+		key = frappe.db.get_value("TEX Promotion Redemption", {"booking": booking, "guest_key": ("is", "set")},
+		                          "guest_key")
+		if key:
+			return key
+	if not guest:
+		return None
+	email, phone = frappe.db.get_value("Guest", guest, ["email", "phone"]) or (None, None)
+	return ctxmod.guest_key(email or None, None if email else phone)
+
+
+def sync_redemptions(booking: str) -> None:
+	"""After a modification (G-09): the booking's redemptions follow the promotions its live
+	rooms now carry — a promotion added is recorded under its limits, one dropped is released."""
+	b = frappe.get_doc("TEX Booking", booking)
+	rooms = []
+	for row in b.rooms:
+		r = frappe.db.get_value("Reservation", row.reservation, ["status", "tex_pricing_snapshot"], as_dict=True)
+		if r and r.status not in ("Cancelled", "No Show") and r.tex_pricing_snapshot:
+			rooms.append((json.loads(r.tex_pricing_snapshot), row.reservation))
+	used = _promotions_used(rooms)
+	existing = {r.promotion: r for r in frappe.get_all(
+		"TEX Promotion Redemption", filters={"booking": booking, "status": ("in", ["Reserved", "Committed"])},
+		fields=["name", "promotion"])}
+	gkey = booking_guest_key(booking, b.booker_guest)
 	for root in sorted(used):
-		p, reservation, discount = used[root]["promo"], used[root]["reservation"], used[root]["discount"]
+		if root in existing:
+			frappe.db.set_value("TEX Promotion Redemption", existing[root].name, "amount", used[root]["discount"])
+			continue
 		if not frappe.db.exists("TEX Promotion", root):
 			continue
-		# row-lock the promotion so concurrent redemptions cannot exceed a usage limit
-		frappe.db.sql("SELECT name FROM `tabTEX Promotion` WHERE name=%s FOR UPDATE", root)
-		limit = frappe.db.get_value("TEX Promotion", root, "usage_limit")
-		if limit:
-			taken = frappe.db.count("TEX Promotion Redemption",
-			                        {"promotion": root, "status": ("in", ["Reserved", "Committed"])})
-			if taken >= int(limit):
-				frappe.throw(_("Promotion {0} has just been fully redeemed.").format(p["name"]))
-		frappe.get_doc({"doctype": "TEX Promotion Redemption", "promotion": root, "code": p.get("code"),
-		                "property": property, "status": "Committed" if committed else "Reserved",
-		                "booking": booking, "reservation": reservation, "guest_key": gkey,
-		                "amount": discount, "currency": currency}).insert(
-			ignore_permissions=True)
-		frappe.db.sql("UPDATE `tabTEX Promotion` SET times_redeemed = IFNULL(times_redeemed, 0) + 1 WHERE name=%s",
-		              root)
+		_check_redemption_limits(root, used[root]["promo"]["name"], gkey, exclude_booking=booking)
+		_insert_redemption(root, used[root], booking=booking, property=b.property, gkey=gkey, currency=b.currency,
+		                   committed=b.status not in ("Pending Payment", "Held"))
+	for root, red in existing.items():
+		if root not in used:
+			doc = frappe.get_doc("TEX Promotion Redemption", red.name)
+			doc.status = "Released"
+			doc.save(ignore_permissions=True)
+
+
+def _check_redemption_limits(root: str, name: str, gkey: str | None, *, exclude_booking: str | None = None) -> None:
+	"""Under a row lock on the promotion (concurrent bookings cannot exceed a limit): the
+	total usage limit and the per-guest limit (G-07). Redemptions of ``exclude_booking``
+	(a booking being modified) are not counted against it."""
+	frappe.db.sql("SELECT name FROM `tabTEX Promotion` WHERE name=%s FOR UPDATE", root)
+	limit, per_guest = frappe.db.get_value("TEX Promotion", root, ["usage_limit", "per_guest_limit"])
+	live = {"promotion": root, "status": ("in", ["Reserved", "Committed"])}
+	if exclude_booking:
+		live["booking"] = ("!=", exclude_booking)
+	if limit and frappe.db.count("TEX Promotion Redemption", live) >= int(limit):
+		frappe.throw(_("Promotion {0} has just been fully redeemed.").format(name))
+	if per_guest:
+		if not gkey:
+			frappe.throw(_("Promotion {0} needs the guest's e-mail address or phone number.").format(name))
+		if frappe.db.count("TEX Promotion Redemption", {**live, "guest_key": gkey}) >= int(per_guest):
+			frappe.throw(_("Promotion {0} has already been used by this guest.").format(name))
 
 
 # ─── confirm / payments ──────────────────────────────────────────────────

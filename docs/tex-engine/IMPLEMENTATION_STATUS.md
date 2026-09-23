@@ -20,7 +20,7 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 | Check | Command | Result |
 |---|---|---|
 | TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **147 passed** |
-| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **76 OK**: admin_markets 3, commercial_flows 19, concurrency 1, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 22 |
+| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **79 OK**: admin_markets 3, commercial_flows 22, concurrency 1, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 22 |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **13 passed**: critical-journey (R-58, 19 steps), contract-admin, crs ×2, shell, booking ×4 desktop + ×4 mobile (Pixel 7) |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** |
 | TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean; the rebuild is identical to the committed bundles |
@@ -42,8 +42,8 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), channel-manager / SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20), enterprise dashboard (R-47) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 2 Critical, 16 High, 36 Medium, 7 Low (+3 blocked items). G-01 to G-06
-and G-08 were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
+**Open gaps by severity:** 0 Critical, 16 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
+gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 ## 3. Phases (derived from the requirement rows below)
@@ -53,7 +53,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | 0 Audit + docs | COMPLETE | spec, architecture, ADR-001…026, this audit |
 | 1 Foundation (shell, nav, design system, hide PMS) | PARTIAL | TEX shell and design system work; the legacy booking engine no longer sells TEX hotels (G-03 fixed); the legacy night audit leaves TEX-sold stays alone (G-04 fixed); the legacy PMS SPA is still reachable for TEX users (G-16) |
 | 2 Commercial data model | PARTIAL | 59 DocTypes + patches p01–p09; extras/taxes are not versioned (G-20) |
-| 3 Pricing engine | PARTIAL | pure engine correct on every spec example; booking-level extras and fixed coupons priced once per booking, min basket in the sell currency (G-05, G-06, G-08 fixed); per-guest coupon limits and modification redemptions still open (G-07, G-09); min basket per room (G-84) |
+| 3 Pricing engine | PARTIAL | pure engine correct on every spec example; booking-level extras and fixed coupons priced once per booking, min basket in the sell currency (G-05, G-06, G-08 fixed); per-guest limits enforced at booking and modifications keep redemptions right (G-07, G-09 fixed); min basket per room (G-84) |
 | 4 Contract admin | PARTIAL | editor, publish, price check work (E2E); an unsellable contract can hide others (G-17); cost is visible to agents (G-11) |
 | 5 Rate/inventory grid | PARTIAL | grid + bulk edit exist; no backend/E2E tests, no copy period, rows are room types only (G-47) |
 | 6 CRS | PARTIAL | works incl. multi-room; no destination/group inputs (G-40) |
@@ -63,7 +63,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | 10 CRM | PARTIAL | guests, consent, segments, abandoned; 5 named segments not expressible (G-23), no loyalty admin UI (G-24) |
 | 11 Self-service | PARTIAL | view/pay/change/cancel; no extras after booking (G-22), credit/refund policies do nothing (G-45) |
 | 12 Reports | PARTIAL | production report; missing views/filters, margin does not reconcile (G-46) |
-| 13 Hardening | PARTIAL | this audit; the Critical/High items in FINAL_GAP_AUDIT are open |
+| 13 Hardening | PARTIAL | this audit; all Critical items fixed with regression tests; the High items in FINAL_GAP_AUDIT are open |
 
 ## 4. Requirements
 
@@ -88,8 +88,8 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-17 | Inventory | PARTIAL | pools, allotments, oversell limit, manual adjustment, row locks · `test_concurrency` | Legacy `validate_type_capacity` blocks TEX oversell/pools; non-TEX reservations skip TEX locks; allotment/oversell untested (G-49). |
 | R-18 | Promotions | PARTIAL | all kinds/values/combination rules, reason per rejection · `test_promotions_extras.py` | Values not validated (multiplier > 1 raises price as a "discount") (G-18). `min_basket` ignores currency (G-08). Member discount unreachable (G-57). |
 | R-19 | Extras | PARTIAL | 12 pricing modes, service dates, mandatory · `TestExtras` | Inventory/daily capacity offered in UI but not implemented (G-19). No bundles; not effective-dated (G-20, G-58). |
-| R-20 | Coupons | PARTIAL | code promotions, scopes, usage limit under row lock | Per-guest limit never enforced (G-07). `min_basket` is evaluated per room on multi-room bookings (G-84). Modification self-counts/skips redemptions (G-09). No package scope; no redemption integration test (G-58). |
-| R-21 | Modification & repricing | PARTIAL | OLD vs PROPOSED, 4 bases, signed proposals, override needs permission + reason (`modification.py`, `ModifyDrawer.tsx`) · e2e crs + critical-journey | Coupon self-count (G-09). `sale_at` accepted but ignored; ORIGINAL_SALE_DATE/HISTORICAL bases and override untested (G-51). |
+| R-20 | Coupons | PARTIAL | code promotions, scopes, usage limit under row lock | `min_basket` is evaluated per room on multi-room bookings (G-84). No package scope (G-58). (Fixed: per-guest limit at booking G-07, min-basket currency G-08, modification redemptions G-09; redemption tests `TestBookingLevelTerms`, `TestCouponLimits`.) |
+| R-21 | Modification & repricing | PARTIAL | OLD vs PROPOSED, 4 bases, signed proposals, override needs permission + reason (`modification.py`, `ModifyDrawer.tsx`); repricing ignores the booking's own coupon use and redemptions follow the modification (G-09 fixed) · e2e crs + critical-journey, `TestCouponLimits` | `sale_at` accepted but ignored; ORIGINAL_SALE_DATE/HISTORICAL bases and override untested (G-51). |
 | R-22 | Historical simulator | PARTIAL | as-of markups/promotions/FX, version by effective date · `TestHistoricalSimulator` (version only) | Reads live contract status/market/channels, taxes, extras catalog, coupon usage → not deterministic (G-20, G-51). |
 | R-23 | Revision history | PARTIAL | actor, time, change, old/new values and amounts, reason, snapshots, immutable · e2e step 19 | Approval never recorded (`approval_status` always "Not Required"); guest lower-price requests stored as notes, not pending revisions (G-59). |
 | R-24 | TEX CRS | PARTIAL | `api/crs.py`, `ui_crs.py`, `screens/crs/*`; multi-hotel search, per-room placement | No destination/hotel-group inputs in UI; group search untested (G-40). |
@@ -130,4 +130,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-59 | Visual QA | PARTIAL | manual QA at 320–1920 in tr/en/de | Contrast, 320 px clipping, blank `/`, Kamra login, English system segment names; no visual regression tests (G-80). |
 | R-60 | Implementation order | **COMPLETE** (process) | phases followed pricing-first | — |
 | R-61 | Process rules | **COMPLETE** (process) | docs + ADRs + this single-state status | — |
-| R-62 | Definition of done | PARTIAL | — | Priority 1 (pricing correctness) and 9 (security) still have open Critical items; not done until FINAL_GAP_AUDIT §1 is closed. |
+| R-62 | Definition of done | PARTIAL | — | FINAL_GAP_AUDIT §1 (Critical) is closed; priorities 1 (pricing) and 9 (security) still have High items open (§2), so not done. |

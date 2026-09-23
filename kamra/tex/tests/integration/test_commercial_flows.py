@@ -16,7 +16,7 @@ from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
-from kamra.tex.services import booking
+from kamra.tex.services import booking, modification
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 
@@ -432,3 +432,62 @@ class TestBookingLevelTerms(TexTestCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "one search"):
 			public.book(site=SLUG, quote_ids=ids, guest=GUEST, payment_method="Pay at Hotel", session_id="blt-mix",
 			            idempotency_key="idem-blt-mix")
+
+
+class TestCouponLimits(TexTestCase):
+	"""G-07: the per-guest limit is enforced when the booking is made (the guest is known
+	only then). G-09: repricing a booking never counts its own coupon use, and a
+	modification records a code it adds and releases one it drops."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def _code(self, code: str, **kw) -> str:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager sets up the code
+		doc = policy_api.save_record("TEX Promotion", {
+			"promotion_name": f"Code {code}", "property": fx.PROPERTY, "trigger": "Code", "code": code,
+			"value_type": "PERCENT", "value": 10, "applies_to": "ACCOMMODATION", **kw})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		return doc["name"]
+
+	def _live(self, promo: str, booking: str | None = None) -> list:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read the ledger
+		f = {"promotion": promo, "status": ("in", ["Reserved", "Committed"])}
+		if booking:
+			f["booking"] = booking
+		return frappe.get_all("TEX Promotion Redemption", filters=f, fields=["name", "amount", "booking"])
+
+	def test_per_guest_limit_is_enforced_at_booking(self):
+		promo = self._code("ONCE", per_guest_limit=1)
+		two_rooms_book("g07-a", code="ONCE")
+		with self.assertRaisesRegex(frappe.ValidationError, "already been used by this guest"):
+			two_rooms_book("g07-b", code="ONCE")
+		two_rooms_book("g07-c", code="ONCE", guest={**GUEST, "email": "someone.else@example.com"})
+		self.assertEqual(len(self._live(promo)), 2)
+
+	def test_repricing_does_not_count_the_bookings_own_use(self):
+		promo = self._code("LAST1", usage_limit=1)
+		_quotes, b = two_rooms_book("g09-own", code="LAST1")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent extends the stay
+		res = b["rooms"][0]["reservation"]
+		p = modification.propose(res, {"check_out": str(fx.d(6, 14))})
+		code = next(x for x in p["proposed"]["promotions"] if x["promo_id"] == promo)
+		self.assertTrue(code["applied"], code["reason"])            # not "usage limit reached"
+		modification.apply(p["proposal_token"], reason="one more night")
+		self.assertEqual(len(self._live(promo, b["booking"])), 1)  # still one use, now for the longer stay
+
+	def test_modification_records_and_releases_codes(self):
+		promo = self._code("ADDME", usage_limit=5)
+		_quotes, b = two_rooms_book("g09-add")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent adds the guest's code
+		res = b["rooms"][0]["reservation"]
+		p = modification.propose(res, {"promo_codes": ["ADDME"]})
+		modification.apply(p["proposal_token"], reason="guest had a code")
+		live = self._live(promo, b["booking"])
+		self.assertEqual(len(live), 1)
+		self.assertGreater(D(live[0].amount), 0)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the code is removed again
+		p = modification.propose(res, {"promo_codes": []})
+		modification.apply(p["proposal_token"], reason="code not valid for this guest")
+		self.assertEqual(self._live(promo, b["booking"]), [])
