@@ -228,6 +228,7 @@ def execute(password: str | None = None, bookings: int = 6) -> dict:
 		_ensure("TEX Access Grant", filters, payload)
 
 	_content()
+	demo_host()
 	made = _demo_bookings(bookings) if bookings else 0
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- bench execute seed script boundary
 	return {"enterprise": ent, "group": grp, "hotels": list(HOTELS), "site": SITE, "bookings": made}
@@ -254,6 +255,29 @@ CONTENT = {
 		"ru": ("Вилла в саду", "Отдельная вилла в саду с террасой."),
 	},
 }
+
+
+DEMO_HOST = "book.aurora.test"
+
+
+def demo_host() -> None:
+	"""Demo/CI only (never on a production site): the booking site's own host, marked
+	verified without DNS (".test" is reserved and can never resolve publicly), so the
+	custom-domain flow can be tried against a dev server (G-21)."""
+	if frappe.conf.get("tex_production"):
+		return
+	site = frappe.get_doc("TEX Booking Site", SITE)
+	if not any(d.domain == DEMO_HOST for d in site.domains):
+		site.append("domains", {"domain": DEMO_HOST, "is_primary": 0})
+	for d in site.domains:
+		if d.domain == DEMO_HOST:
+			d.verified = 1
+			d.verified_at = d.verified_at or frappe.utils.now_datetime()
+	site.flags.tex_domain_verified = True
+	site.save(ignore_permissions=True)
+	from kamra.tex.services import sites
+
+	sites.clear_host_cache()
 
 
 def _content() -> None:
