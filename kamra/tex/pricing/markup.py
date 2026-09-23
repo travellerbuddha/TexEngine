@@ -126,4 +126,7 @@ def apply_markup(rules: tuple[MarkupRule, ...], scope: MarkupScope, night: date,
 		if explain is not None:
 			explain.add("markup", "MARKUP_STACK", "stacked {label}: {cost} → {sell}", night=night,
 			            before=before, after=amount, rule=ref(r), label=ref(r).label, cost=before, sell=amount)
+	if (winner is not None or stack) and amount <= 0 < cost:
+		# a markup never sells a priced night for nothing (G-18)
+		raise Unsellable("MARKUP_NO_PRICE", f"markup leaves no selling price on {night.isoformat()}")
 	return amount

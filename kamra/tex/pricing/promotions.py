@@ -86,8 +86,24 @@ def eligible_nights(p: Promotion, ctx: PromoContext) -> tuple[date, ...]:
 	return ()
 
 
+def invalid_value(p: Promotion) -> str | None:
+	"""A promotion only ever lowers the price (G-18): a multiplier above 1 or a negative
+	fixed amount would be a surcharge shown as a discount."""
+	v = D(p.value)
+	if p.value_type == PromoValueType.PERCENT and not (ZERO < v <= HUNDRED):
+		return "invalid value: a percentage must be above 0 and at most 100"
+	if p.value_type == PromoValueType.MULTIPLIER and not (ZERO < v <= ONE):
+		return "invalid value: a multiplier must be above 0 and at most 1"
+	if p.value_type in (PromoValueType.FIXED_STAY, PromoValueType.FIXED_NIGHT) and v <= ZERO:
+		return "invalid value: a fixed discount must be positive"
+	return None
+
+
 def check_eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None = None) -> str | None:
 	"""None when eligible, else the rejection reason."""
+	bad = invalid_value(p)
+	if bad:
+		return bad
 	if p.code and p.code.upper() not in ctx.codes:
 		return "code not entered"
 	if p.sale_from and ctx.sale_date < p.sale_from:

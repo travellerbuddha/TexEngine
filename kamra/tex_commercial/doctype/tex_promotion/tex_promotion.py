@@ -5,6 +5,7 @@ import frappe
 from frappe.model.document import Document
 
 from kamra.tex.commercial.revisions import block_delete, guard_revisioned
+from kamra.tex.money import D
 
 
 class TEXPromotion(Document):
@@ -16,8 +17,14 @@ class TEXPromotion(Document):
 				frappe.throw("A code promotion needs a code.")
 		else:
 			self.code = None
-		if self.value_type == "PERCENT" and not (0 < float(self.value or 0) <= 100):
+		value = D(self.value or 0)
+		if self.value_type == "PERCENT" and not (0 < value <= 100):
 			frappe.throw("A percentage must be between 0 and 100.")
+		# a promotion only ever lowers the price (G-18)
+		if self.value_type == "MULTIPLIER" and not (0 < value <= 1):
+			frappe.throw("A multiplier must be above 0 and at most 1 (0.9 = 10 % off).")
+		if self.value_type in ("FIXED_STAY", "FIXED_NIGHT") and value <= 0:
+			frappe.throw("A fixed discount must be a positive amount.")
 		if self.value_type == "FREE_NIGHTS" and not (
 				int(self.free_nights_stay or 0) > int(self.free_nights_pay or 0) >= 0 and self.free_nights_stay):
 			frappe.throw("Stay X pay Y needs X greater than Y.")

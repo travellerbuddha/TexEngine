@@ -73,3 +73,21 @@ class TestGrantVisibility(TexTestCase):
 		self.assertNotIn(other, g["manage_refusal"] or "")
 		with self.assertRaises(frappe.PermissionError):
 			admin.delete_grant(g["name"])
+
+
+class TestCommercialValues(TexTestCase):
+	"""G-18: promotion and markup values that would raise a price or sell for nothing are
+	refused when saved (the engine refuses them too)."""
+
+	def test_bad_values_are_refused_on_save(self):
+		for bad in ({"value_type": "MULTIPLIER", "value": 1.2}, {"value_type": "FIXED_STAY", "value": -30,
+		                                                         "currency": "EUR"}):
+			with self.assertRaises(frappe.ValidationError):
+				frappe.get_doc({"doctype": "TEX Promotion", "promotion_name": "bad", "property": fx.PROPERTY,
+				                **bad}).insert(ignore_permissions=True)
+		with self.assertRaises(frappe.ValidationError):
+			frappe.get_doc({"doctype": "TEX Markup Rule", "label": "bad", "property": fx.PROPERTY,
+			                "op": "ADJUST_PERCENT", "value": -100}).insert(ignore_permissions=True)
+		ok = frappe.get_doc({"doctype": "TEX Promotion", "promotion_name": "ok", "property": fx.PROPERTY,
+		                     "value_type": "MULTIPLIER", "value": 0.9}).insert(ignore_permissions=True)
+		self.assertTrue(ok.name)
