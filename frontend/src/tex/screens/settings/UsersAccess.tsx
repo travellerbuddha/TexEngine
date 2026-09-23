@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react"
 import { Pencil, Plus, Power, PowerOff, Search, Trash2, UserPlus } from "lucide-react"
 import { tex, useTexMutation, useTexQuery, type TexApiError } from "../../lib/api"
 import { useSession } from "../../lib/session"
-import { date, dateTime, isoDay } from "../../lib/format"
+import { date, dateTime } from "../../lib/format"
+import { useSiteToday } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
 import {
   Badge,
@@ -90,7 +91,8 @@ export default function UsersAccess() {
   const [inviting, setInviting] = useState(false)
   const [removing, setRemoving] = useState<Grant | null>(null)
   const [busyGrant, setBusyGrant] = useState<string | null>(null)
-  const today = isoDay(new Date())
+  // a grant is expired after its last day on the site's calendar, as the server counts it (G-91)
+  const today = useSiteToday()
   const me = boot.user.name
   const platform = boot.user.platform_admin
 

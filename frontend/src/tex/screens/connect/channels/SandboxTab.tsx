@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { FlaskConical, Plus, PlayCircle, Send, Shuffle } from "lucide-react"
 import { tex, TexApiError, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
-import { addDays, isDecimal, isoDay } from "../../../lib/format"
+import { addDays, isDecimal } from "../../../lib/format"
+import { useSiteClock } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Button, CardBody, Field, FormGrid, InlineError, Input, Notice, Segmented, useToast } from "../../../ui"
 import { SandboxRoomFields, type RoomErrors, type RoomForm } from "./SandboxRoomFields"
@@ -29,8 +30,9 @@ function randomRef() {
   return `SBX-${Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).join("").toUpperCase().slice(0, 7)}`
 }
 
-function newRoom(m: Mapping | undefined, currency: string, n: number): RoomForm {
-  const arrive = addDays(isoDay(new Date()), 30)
+/** A room arriving 30 days after the site's today (G-91). */
+function newRoom(m: Mapping | undefined, currency: string, n: number, today: string): RoomForm {
+  const arrive = addDays(today, 30)
   return {
     id: ++seq,
     room_code: m?.external_room_code ?? "",
@@ -55,6 +57,7 @@ export function SandboxTab({ connection, conn, lookups, mappings, onChanged, goT
   const { t } = useTexT()
   const toast = useToast()
   const { boot } = useSession()
+  const clock = useSiteClock()
   const uid = useId()
   const rows = useMemo(() => (mappings.data ?? []).filter((m) => m.enabled), [mappings.data])
   const hotelCurrency = lookups.data?.currency ?? ""
@@ -65,7 +68,7 @@ export function SandboxTab({ connection, conn, lookups, mappings, onChanged, goT
     first_name: "",
     last_name: "",
     email: "",
-    rooms: [newRoom(rows[0], hotelCurrency, 1)],
+    rooms: [newRoom(rows[0], hotelCurrency, 1, clock.today())],
     next_line: 2,
   }))
   const [touched, setTouched] = useState(false)
@@ -283,7 +286,7 @@ export function SandboxTab({ connection, conn, lookups, mappings, onChanged, goT
                 variant="secondary"
                 size="sm"
                 icon={<Plus className="size-3.5" aria-hidden />}
-                onClick={() => setForm({ ...form, rooms: [...form.rooms, newRoom(rows[0], hotelCurrency, form.next_line)], next_line: form.next_line + 1 })}
+                onClick={() => setForm({ ...form, rooms: [...form.rooms, newRoom(rows[0], hotelCurrency, form.next_line, clock.today())], next_line: form.next_line + 1 })}
               >
                 {t("connect.channels.sandbox.add_room")}
               </Button>

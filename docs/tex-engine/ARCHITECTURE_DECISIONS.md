@@ -1488,3 +1488,39 @@ sends:
 - A per-hotel sending address (the hotel's own domain) needs an outgoing account per domain
   with SPF/DKIM. That is an owner input and is not built.
 - Bounces after the mail server accepted a message are not tracked.
+
+## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
+**Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day
+(`isoDay(new Date())`). The hotel's day is the server's day in the System Settings time zone:
+the server refuses a past arrival on it (`quoting._dates`), expires grants on it
+(`scope._grants`), dates FX rates and reports with it. Just after the site's midnight a browser
+in an earlier zone was still on yesterday (a grid starting yesterday, a refused arrival, a
+transactions list closed a day early); one in a later zone was already on tomorrow and refused
+the site's today as "in the past". The channel ARI preview had been fixed alone by asking the
+server for its first day.
+**Decision.**
+- `session.bootstrap` returns `server: {time_zone, now, today}` read from one instant, last,
+  just before the response leaves.
+- `frontend/src/tex/lib/siteDay.ts` is the only source of a business "today" in the staff app:
+  `useSiteToday()` for what is shown (re-renders at the site's midnight), `useSiteClock()`
+  (`today()`, `dayAfter(ms)`) for handlers and resets; `serverClock.today` delegates to it.
+- The site's wall clock is `Intl.DateTimeFormat({ timeZone: server.time_zone })` of the
+  browser clock plus a skew measured once: `server.now` minus that zone's wall clock read in
+  the browser when the bootstrap arrived. Chosen over "server day + elapsed time" alone because
+  Intl follows the site's own DST changes while a tab stays open for days, and over Intl alone
+  because the skew cancels a browser clock that is off (and zone data that disagrees with the
+  server's by a fixed offset). A browser that does not know the zone counts the time elapsed
+  since `server.now`. The result is never before `server.today`.
+- A default that should follow the day while the page stays open is kept as `null` = "site's
+  today" in state (inventory grids, FX rate date), not copied into state at mount.
+- The browser's clock stays in use only for what means "now, here": durations and timers
+  (countdown TTLs, call timer), instants shown in the viewer's zone (call log, "checked at"),
+  and a datetime-local value that is sent as an absolute instant.
+- Endpoints never need the client to supply "today": an open-ended date filter is open
+  (`payments.transactions` filters on either bound alone).
+**Consequences.**
+- New staff screens take "today" from `lib/siteDay`; `isoDay(new Date())` in `screens/**` is a
+  defect. The public booking engine is guest-facing and out of this decision.
+- `presetRange(preset, today)` and `defaultSearchForm(today, …)` take the day as an argument.
+- Tests: `TestSessionSiteDay`, `test_transactions_filter_on_either_date_bound`, e2e `site-day`
+  (browser in Pacific/Honolulu pinned just after the site's midnight).

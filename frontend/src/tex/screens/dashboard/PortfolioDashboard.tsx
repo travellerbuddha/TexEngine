@@ -4,6 +4,7 @@ import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { date } from "../../lib/format"
+import { useSiteToday } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
 import { Card, EmptyState, ErrorState, Field, InlineError, PageHeader, Select, Spinner, Toolbar } from "../../ui"
 import { RangeFilter } from "../reports/components/RangeFilter"
@@ -62,12 +63,13 @@ export default function PortfolioDashboard({ viewSwitch }: { viewSwitch?: ReactN
   // --- sale window (sale dates, not stay dates)
   const rawPeriod = params.get("period")
   const preset: RangePreset = rawPeriod === "custom" ? "custom" : isPreset(rawPeriod) ? rawPeriod : "this_month"
+  const today = useSiteToday()
   const [from, to] = useMemo<[string, string]>(() => {
-    if (preset !== "custom") return presetRange(preset)
+    if (preset !== "custom") return presetRange(preset, today)
     // a cleared date stays empty (and is reported), it does not snap back
-    const [a, b] = presetRange("this_month")
+    const [a, b] = presetRange("this_month", today)
     return [params.get("from") ?? a, params.get("to") ?? b]
-  }, [preset, params])
+  }, [preset, params, today])
   const problem = saleRangeProblem(from, to)
 
   const q = useTexQuery<PortfolioData>(

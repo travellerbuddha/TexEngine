@@ -3,7 +3,8 @@ import { Calculator, CheckCircle2, Minus, Plus, XCircle } from "lucide-react"
 import { cn } from "../../../../../lib/utils"
 import { tex, TexApiError, useTexQuery } from "../../../../lib/api"
 import { useSession } from "../../../../lib/session"
-import { addDays, date as fmtDate, isoDay, money, nightsBetween, weekday } from "../../../../lib/format"
+import { addDays, date as fmtDate, money, nightsBetween, weekday } from "../../../../lib/format"
+import { useSiteClock } from "../../../../lib/siteDay"
 import { useTexT } from "../../../../i18n"
 import {
   Badge,
@@ -46,8 +47,8 @@ export function PreviewTab(props: TabProps) {
   )
 }
 
-function defaultDates(stayFrom?: string | null): [string, string] {
-  const today = isoDay(new Date())
+/** Two weeks after the site's today (G-91), or the contract's first stay day when later. */
+function defaultDates(today: string, stayFrom?: string | null): [string, string] {
   let a = addDays(today, 14)
   if (stayFrom && stayFrom > a) a = stayFrom
   return [a, addDays(a, 3)]
@@ -56,11 +57,12 @@ function defaultDates(stayFrom?: string | null): [string, string] {
 function Calculator_({ doc, state }: TabProps) {
   const { t } = useTexT()
   const { boot, can } = useSession()
+  const clock = useSiteClock()
   const rooms = contractRoomOptions(doc, state)
   const boardCodes = Array.from(new Set(state.tables.boards.map((b) => String(b.board)).filter(Boolean)))
   const baseBoard = String(state.tables.boards.find((b) => b.is_base)?.board ?? boardCodes[0] ?? "BB")
   const plans = state.tables.rate_plans.map((r) => String(r.rate_plan)).filter(Boolean)
-  const [ci0, co0] = defaultDates(null)
+  const [ci0, co0] = defaultDates(clock.today(), null)
   const [f, setF] = useState({
     room_type: rooms[0]?.value ?? "",
     board: baseBoard,

@@ -3,6 +3,7 @@ idempotency, refunds, transfers, payment links, guest self-service, CRM consent,
 loyalty, abandoned-booking detection, reports and tenant isolation."""
 
 import json
+from datetime import timedelta
 
 import frappe
 from frappe.utils import add_to_date, get_datetime, now_datetime
@@ -98,6 +99,23 @@ class TestGuestPayment(TexTestCase):
 		self.assertTrue(again.get("replay"))
 		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "paid_amount")), D("252.75"))
 		self.assertEqual(frappe.db.count("TEX Payment Allocation", {"transaction": txn}), 1)
+
+	def test_transactions_filter_on_either_date_bound(self):
+		# G-91: an open-ended range filters on the bound it has; it is never widened to every
+		# transaction, so the screen need not close it with a "today" of its own
+		txn = guest_books(session="sess-range")["payment"]["transaction"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance lists transactions
+		day = get_datetime(frappe.db.get_value("TEX Payment Transaction", txn, "creation")).date()
+
+		def listed(**kw):
+			return txn in {r["name"] for r in pay_api.transactions(property=fx.PROPERTY, **kw)}
+
+		self.assertTrue(listed(date_from=str(day)))
+		self.assertFalse(listed(date_from=str(day + timedelta(days=1))))
+		self.assertTrue(listed(date_to=str(day)))
+		self.assertFalse(listed(date_to=str(day - timedelta(days=1))))
+		self.assertTrue(listed(date_from=str(day), date_to=str(day)))
+		self.assertFalse(listed(date_from=str(day + timedelta(days=1)), date_to=str(day + timedelta(days=2))))
 
 	def test_failed_payment_can_be_retried_with_manage_token(self):
 		b = guest_books(session="sess-fail")

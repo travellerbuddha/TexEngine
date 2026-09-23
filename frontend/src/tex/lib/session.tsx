@@ -23,8 +23,9 @@ export interface Bootstrap {
   markets: { name: string; market_name: string; is_global: number; default_currency?: string; countries?: string }[]
   channels: { name: string; channel_name: string; channel_group?: string }[]
   currencies: string[]
-  /** Server wall clock: datetimes from the API are naive times in `time_zone`. */
-  server?: { time_zone: string; now: string }
+  /** Server wall clock: datetimes from the API are naive times in `time_zone`; `today` is the
+   * site's calendar day when `now` was read (staff "today" comes from it: lib/siteDay). */
+  server?: { time_zone: string; now: string; today: string }
   /** Browser clock (ms) when this bootstrap arrived: server offset = server.now − receivedAt. */
   receivedAt?: number
 }

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { ArrowRight, Calculator, PackagePlus } from "lucide-react"
 import type { TexApiError } from "../../../lib/api"
-import { date, isoDay, money } from "../../../lib/format"
+import { date, money } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Drawer, EmptyState, ErrorState, Field, Money, Notice, Select, Skeleton, Textarea, useToast } from "../../../ui"
 import { cn } from "../../../../lib/utils"
@@ -150,7 +150,7 @@ export function AddExtrasDialog({
   const earliest = (hours: number) => {
     const today = clock.today()
     if (!hours) return today
-    const d = isoDay(new Date(clock.now().getTime() + hours * 3_600_000))
+    const d = clock.dayAfter(hours * 3_600_000)
     return d > today ? d : today
   }
 

@@ -3,7 +3,8 @@
 H1 forged callbacks cannot fail a payment · H2 a guest cannot route a payment link
 through another gateway · H3 idempotency replays never return a stranger's booking ·
 H4 Desk/REST cannot bypass capabilities, scope, revision lifecycle or cost hiding ·
-M2 guests of other tenants stay invisible · L4 shared FX rates are platform-only.
+M2 guests of other tenants stay invisible · L4 shared FX rates are platform-only ·
+G-91 the session carries the site's day and time zone.
 """
 
 import hashlib
@@ -1366,3 +1367,27 @@ class TestGoLivePaymentsReview(TexTestCase):
 			gw.answers["tok-9"] = requests.ConnectionError("gateway unreachable")
 			gw.answers["tok-2"] = lambda t: gw.paid(t, "P4")
 			self.assertEqual(pay_api.reverify(second)["status"], "Succeeded")
+
+
+class TestSessionSiteDay(TexTestCase):
+	"""G-91: staff date pickers start on the site's day, not the browser's. The session
+	bootstrap carries that day (and the site's time zone) for the whole staff app."""
+
+	def test_g91_the_session_carries_the_sites_day_and_zone(self):
+		from datetime import datetime
+
+		from frappe.utils import get_system_timezone, getdate
+
+		from kamra.tex.api import session
+
+		before = str(getdate())
+		server = session.bootstrap()["server"]
+		self.assertIn(server["today"], {before, str(getdate())})
+		self.assertEqual(server["time_zone"], get_system_timezone())
+		self.assertEqual(server["now"][:10], server["today"])          # one instant: day and clock agree
+		# the day is the date on the site's wall clock, not UTC's or the server process's
+		just_after_midnight = datetime(2026, 3, 10, 0, 0, 30)
+		with mock.patch.object(session, "now_datetime", return_value=just_after_midnight):
+			server = session.bootstrap()["server"]
+		self.assertEqual(server["today"], "2026-03-10")
+		self.assertEqual(server["now"], "2026-03-10T00:00:30")

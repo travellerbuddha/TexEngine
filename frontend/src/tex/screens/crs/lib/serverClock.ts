@@ -1,12 +1,14 @@
-// The server clock (session.bootstrap → server: {time_zone, now}). API datetimes are naive
-// wall-clock times in `time_zone`; the browser may sit in another zone and its clock may be
-// off, so quote countdowns and "today" are measured on the server clock:
+// The server clock (session.bootstrap → server: {time_zone, now, today}). API datetimes are
+// naive wall-clock times in `time_zone`; the browser may sit in another zone and its clock may
+// be off, so quote countdowns are measured on the server clock:
 //   offset = server now − browser time when the bootstrap response arrived.
 // Naive strings are read with the same (browser-local) parser on both sides of that
 // subtraction, so the zone cancels out and only the wall-clock digits matter.
+// "today" is the site's calendar day from lib/siteDay (G-91).
 import { useMemo } from "react"
-import { dateTime, isoDay } from "../../../lib/format"
+import { dateTime } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
+import { useSiteClock } from "../../../lib/siteDay"
 
 const wall = (v: string) => new Date(v.replace(" ", "T")).getTime()
 
@@ -33,8 +35,10 @@ export interface ServerClock {
   tz?: string
   /** A Date whose local fields read the server wall clock now. */
   now: () => Date
-  /** Server-side calendar day (the server rejects arrivals before it). */
+  /** The site's calendar day (the server rejects arrivals before it). */
   today: () => string
+  /** The site's calendar day `ms` from now, on its wall clock (extras cut-offs). */
+  dayAfter: (ms: number) => string
   /** Milliseconds from server-now until a naive server datetime (negative once past). */
   msUntil: (v?: string | null) => number
   /** A server datetime for display, labelled with the server time zone. */
@@ -46,17 +50,19 @@ export function useServerClock(): ServerClock {
   const tz = boot.server?.time_zone
   const now = boot.server?.now
   const arrived = boot.receivedAt
+  const site = useSiteClock()
   return useMemo(() => {
     const offset = now ? wall(now) - (arrived ?? receivedAt(now)) : 0
     const serverNow = () => new Date(Date.now() + offset)
     return {
       tz,
       now: serverNow,
-      today: () => isoDay(serverNow()),
+      today: site.today,
+      dayAfter: site.dayAfter,
       msUntil: (v) => (v ? wall(v) - serverNow().getTime() : Number.NaN),
       label: (v) => (!v ? "—" : tz ? `${dateTime(v)} (${tz})` : dateTime(v)),
     }
-  }, [tz, now, arrived])
+  }, [tz, now, arrived, site])
 }
 
 /** "4:59" / "1:02:03" for a countdown; "0:00" once expired. */
