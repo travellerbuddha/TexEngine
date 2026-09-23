@@ -1,4 +1,4 @@
-"""OccupancyResolver — the adult/child formula engine (R-07, R-09, ADR-006, ADR-007, ADR-042).
+"""OccupancyResolver — the adult/child formula engine (R-07, R-09, ADR-006, ADR-007, ADR-043).
 
 "Occupancy" here means the PEOPLE in the room, not hotel occupancy %.
 

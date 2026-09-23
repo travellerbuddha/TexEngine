@@ -247,6 +247,9 @@ class TestInbound(DistributionCase):
 		self.assertEqual(dist_api.send_now(self.conn.name)["pushed"], 1)
 		self.assertEqual(frappe.db.get_all("TEX Integration Outbox", filters={"connection": other.name, "kind": "ARI"},
 		                                   pluck="status"), ["Pending"])                # the other one waits
+		frappe.db.delete("TEX Integration Outbox", {"kind": "ARI"})
+		self.assertEqual(dist_api.push_now(self.conn.name)["queued"], 1)              # this connection's mapping only
+		self.assertFalse(frappe.db.exists("TEX Integration Outbox", {"connection": other.name, "kind": "ARI"}))
 
 	def test_the_pms_hears_a_new_stay_as_created(self):
 		pms = frappe.get_doc({"doctype": "TEX Integration Connection", "label": "PMS log", "property": fx.PROPERTY,
@@ -364,3 +367,32 @@ class TestReconcileAndTenancy(DistributionCase):
 			with self.assertRaises(frappe.PermissionError):                         # a replayed old request
 				dist.receive(self.conn.name, {"X-TEX-Timestamp": str(ts),
 				                              "X-TEX-Signature": signing.sign(SECRET, ts, body)}, body)
+
+
+class TestPmsDelivery(TexTestCase):
+	"""G-90: the PMS outbox never delivers through an uncertified adapter to a Production
+	connection, even one whose environment was changed behind the controller's back."""
+
+	def test_an_uncertified_adapter_never_delivers_in_production(self):
+		from kamra.tex.connect import adapters, outbox
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		setup_site_and_payments(self.f)
+		pms = frappe.get_doc({"doctype": "TEX Integration Connection", "label": "PMS log", "property": fx.PROPERTY,
+		                      "category": "PMS", "adapter": "log", "environment": "Sandbox", "enabled": 1}
+		                     ).insert(ignore_permissions=True)
+		pms.db_set("environment", "Production")                 # e.g. changed in SQL: the controller never saw it
+		booked = guest_books(session="g90-pms")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
+		queued = frappe.get_all("TEX Integration Outbox", filters={"connection": pms.name, "kind": "Reservation"},
+		                        pluck="name")
+		self.assertTrue(queued)
+		adapters.LogOnlyPMS.delivered.clear()
+		dist._each(dist.claim("Reservation", 50, connection=pms.name), outbox._deliver, outbox._failed)
+		for name in queued:
+			row = frappe.db.get_value("TEX Integration Outbox", name, ["status", "last_error", "attempts"], as_dict=True)
+			self.assertEqual((row.status, row.attempts), ("Dead", 1), row)          # no retry would ever help
+			self.assertIn("not certified for production", row.last_error)
+		reservations = {r for _e, r in adapters.LogOnlyPMS.delivered}
+		self.assertFalse(reservations & {x["reservation"] for x in booked["rooms"]})  # nothing was delivered
+		self.assertEqual(frappe.db.get_value("TEX Integration Connection", pms.name, "last_status"), "Dead")

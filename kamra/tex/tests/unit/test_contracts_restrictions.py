@@ -61,7 +61,7 @@ class TestPayload(unittest.TestCase):
 		self.assertEqual(back.occupancy_rules[-1].scope_weight, 3)
 
 	def test_payload_without_precedence_is_priced_as_sold(self):
-		# a payload frozen before occupancy precedence v2 keeps its sold semantics (ADR-042)
+		# a payload frozen before occupancy precedence v2 keeps its sold semantics (ADR-043)
 		payload = serialize.normalise_payload(serialize.terms_to_payload(fx.terms()))
 		payload["settings"].pop("occupancy_precedence", None)
 		for r in payload["occupancy_rules"]:

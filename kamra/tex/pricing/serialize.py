@@ -293,7 +293,7 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		stacking=StackingMode(s.get("stacking") or "SEQUENTIAL"),
 		room_basis_extra_unit=RoomBasisExtraUnit(s.get("room_basis_extra_unit") or "PER_PERSON_SHARE"),
 		room_basis_children_fill_included=bool(s.get("room_basis_children_fill_included")),
-		# frozen before occupancy precedence v2 → priced as sold (ADR-042)
+		# frozen before occupancy precedence v2 → priced as sold (ADR-043)
 		occupancy_precedence=int(s.get("occupancy_precedence") or 1),
 	)
 

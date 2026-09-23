@@ -4,7 +4,7 @@ A version can only be published with zero ERRORs. WARNINGs (e.g. an occupancy
 combination with no child rule, which will simply be unsellable) are shown to the
 contract manager before publishing.
 
-Occupancy rules (ADR-042): two rules that tie for a slot - same precedence, different
+Occupancy rules (ADR-043): two rules that tie for a slot - same precedence, different
 values - are an ERROR (``OCC_AMBIGUOUS``; the offer would be unsellable) wherever the
 tie decides a price: a slot that a higher-ranked rule prices is no tie. A rule the
 contract's own version names wrongly (unknown band, room or period, an adult rule with

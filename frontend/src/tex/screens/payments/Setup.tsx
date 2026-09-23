@@ -45,6 +45,11 @@ function AccountCard({ a, onEdit }: { a: Account; onEdit: () => void }) {
         )}
         {a.currencies && <Badge tone="neutral">{a.currencies}</Badge>}
       </div>
+      {a.problem && (
+        <Notice tone="danger" title={t("payments.acc.problem_title")}>
+          {t(`payments.acc.problem.${a.problem}`)}
+        </Notice>
+      )}
       {a.provider === "Bank Transfer" && (a.bank_name || a.iban) && (
         <p className="text-xs text-zinc-600">
           {a.bank_name} {a.iban && <span className="font-mono">· {a.iban}</span>}

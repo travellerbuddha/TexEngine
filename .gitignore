@@ -6,6 +6,8 @@ __pycache__/
 
 # Node / frontend
 node_modules/
+# a worktree's frontend/node_modules is a symlink, which "node_modules/" does not match
+/frontend/node_modules
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
 

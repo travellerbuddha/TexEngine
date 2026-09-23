@@ -84,7 +84,8 @@ def _failed(name: str, e: Exception) -> None:
 	item = frappe.db.get_value("TEX Integration Outbox", name, ["attempts", "connection"], as_dict=True)
 	attempts = int(item.attempts or 0) + 1
 	err = redact_text(str(e))[:500]
-	status = "Dead" if attempts >= MAX_ATTEMPTS else "Failed"
+	# a refusal (e.g. an uncertified adapter in Production, G-90) is final: no retry can help
+	status = "Dead" if (attempts >= MAX_ATTEMPTS or not getattr(e, "retryable", True)) else "Failed"
 	frappe.db.set_value("TEX Integration Outbox", name, {
 		"attempts": attempts, "last_error": err, "status": status, "claim_token": None, "claimed_until": None,
 		"next_attempt_at": add_to_date(now_datetime(), minutes=min(2 ** attempts, 720))}, update_modified=False)

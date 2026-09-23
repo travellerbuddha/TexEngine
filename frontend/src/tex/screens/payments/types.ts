@@ -46,7 +46,11 @@ export interface TxnDetail extends Txn {
   allocations: Allocation[]
   refunds: Txn[]
   unallocated: string
+  /** In `refund_currency`: a successful charge, or a capture TEX refused to count (G-67). */
   refundable: string
+  refund_currency: string
+  /** Bookings holding part of this payment now, and how much (G-68). */
+  booking_nets: Record<string, string>
 }
 
 export type LinkStatus = "Draft" | "Active" | "Partially Paid" | "Paid" | "Expired" | "Cancelled"
@@ -110,6 +114,8 @@ export interface Account {
   transfer_instructions: string | null
   secrets_set: Record<SecretField, boolean>
   production_verified: boolean
+  /** Why the account cannot take new payments now (ADR-042); its open payments still settle. */
+  problem: "unknown" | "mock" | "uncertified" | "gateway_url" | "sandbox_host" | "sandbox_live_site" | null
 }
 
 export interface Rule {

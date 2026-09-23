@@ -13,6 +13,12 @@ from typing import ClassVar
 import requests
 
 
+class AdapterRefused(ValueError):
+	"""The connection may not use this adapter at all; retrying cannot help."""
+
+	retryable = False
+
+
 class Adapter:
 	category = "PMS"
 	key = "base"
@@ -106,7 +112,13 @@ REGISTRY = {cls.key: cls for cls in (WebhookPMS, LogOnlyPMS)}
 
 
 def get(connection) -> Adapter:
+	"""The adapter for a connection. An uncertified adapter never runs for a Production
+	connection (G-90): the controller refuses that on save, and this refuses it at run time
+	for a connection changed behind the controller's back."""
 	cls = REGISTRY.get(connection.adapter)
 	if cls is None:
 		raise ValueError(f"no adapter '{connection.adapter}' is installed")
+	if (getattr(connection, "environment", None) or "Sandbox") != "Sandbox" and not cls.certified:
+		raise AdapterRefused(f"{cls.label} is not certified for production: nothing was sent. Switch the "
+		                     f"connection to Sandbox or use a certified adapter.")
 	return cls(connection)

@@ -27,6 +27,7 @@ from kamra.tex.commercial import contracts
 from kamra.tex.money import D, quantize, to_str
 from kamra.tex.pricing import engine, serialize
 from kamra.tex.pricing.model import ChildSpec, ExtraRequest, PricingError, StayRequest, Unsellable
+from kamra.tex.security.keys import site_secret
 
 MAX_ROOMS = 8
 
@@ -35,8 +36,8 @@ MAX_ROOMS = 8
 
 
 def _secret() -> bytes:
-	key = frappe.local.conf.get("encryption_key") or frappe.local.site
-	return hashlib.sha256(("tex-offer:" + str(key)).encode()).digest()
+	# the site key, never the public site name (G-89): same value as before for a keyed site
+	return hashlib.sha256(site_secret("tex-offer").encode()).digest()
 
 
 def sign(payload: dict) -> str:

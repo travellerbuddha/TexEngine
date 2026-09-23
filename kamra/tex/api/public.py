@@ -387,14 +387,21 @@ def _start_booking_payment(s, result: dict, *, due, method: str, provider_accoun
 		                             {"idempotency_key": pay.ns_key(result["property"], key, "charge")}, "status")
 		if status and status != "Pending":
 			return None
-	return pay.start_payment(
-		property=result["property"], amount=due, currency=result["currency"],
-		provider_account=chosen["provider_account"], booking=result["booking"],
-		description=_("Booking {0}").format(result["booking"]), locale=language or "en",
-		customer={**customer, "ip": getattr(frappe.local, "request_ip", None)},
-		return_url=_safe_return_url(s, return_url, result["booking"]) or sites.guest_url(
-			s, f"confirmation/{result['booking']}"),
-		idempotency_key=key, method=method)
+	try:
+		return pay.start_payment(
+			property=result["property"], amount=due, currency=result["currency"],
+			provider_account=chosen["provider_account"], booking=result["booking"],
+			description=_("Booking {0}").format(result["booking"]), locale=language or "en",
+			customer={**customer, "ip": getattr(frappe.local, "request_ip", None)},
+			return_url=_safe_return_url(s, return_url, result["booking"]) or sites.guest_url(
+				s, f"confirmation/{result['booking']}"),
+			idempotency_key=key, method=method)
+	except pay.ChargeSuperseded:
+		if not replay:
+			raise
+		# the open attempt could not take another checkout and was cancelled (G-68): the
+		# confirmation page offers pay_booking, which starts a new charge
+		return None
 
 
 RESUME_TTL_HOURS = 24
@@ -496,9 +503,13 @@ def pay_link(token: str, provider_account: str | None = None):
 	from kamra.tex.payments import service as pay
 
 	link = pay.link_by_token(token)
-	if link.status not in ("Active", "Partially Paid"):
-		frappe.throw(_("This payment link is {0}.").format(link.status.lower()))
-	due = from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency)
+	# one start at a time per link (G-68): a second, simultaneous start is told at once that a
+	# payment is being started, rather than waiting behind the first one's gateway call; a
+	# later start sees the link as it is now (paid, or with a charge to reuse)
+	now = pay.lock_link(link.name, nowait=True)
+	if now.status not in ("Active", "Partially Paid"):
+		frappe.throw(_("This payment link is {0}.").format(now.status.lower()))
+	due = from_db(now.amount, now.currency) - from_db(now.paid_amount, now.currency)
 	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
 	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
 	if link.provider_account:
@@ -510,14 +521,22 @@ def pay_link(token: str, provider_account: str | None = None):
 		account = provider_account or (sorted(methods)[0] if len(methods) == 1 else None)
 		if not account or account not in methods:
 			frappe.throw(_("No card payment is configured for this link."))
-	return pay.start_payment(property=link.property, amount=due, currency=link.currency, provider_account=account,
-	                         payment_link=link.name, booking=None, description=link.description or link.name,
-	                         customer={"name": link.guest_name, "email": link.guest_email,
-	                                   "ip": getattr(frappe.local, "request_ip", None)},
-	                         # never the link's bearer token: the guest's tab remembers its link page (G-10)
-	                         return_url=sites.guest_url(sites.site_for(link.property), "pay/return",
-	                                                    site_scoped=False),
-	                         idempotency_key=f"link:{link.name}:{to_str(due)}:{frappe.generate_hash(length=6)}")
+	for attempt in (1, 2):
+		try:
+			return pay.start_payment(
+				property=link.property, amount=due, currency=link.currency, provider_account=account,
+				payment_link=link.name, booking=None, description=link.description or link.name,
+				customer={"name": link.guest_name, "email": link.guest_email,
+				          "ip": getattr(frappe.local, "request_ip", None)},
+				# never the link's bearer token: the guest's tab remembers its link page (G-10)
+				return_url=sites.guest_url(sites.site_for(link.property), "pay/return", site_scoped=False),
+				# deterministic: the same Pending charge for every tab, a new one after a failure
+				idempotency_key=pay.link_charge_key(link.name, due, account, link.property))
+		except pay.ChargeSuperseded:
+			# the Pending charge could not take another checkout and was cancelled: the next
+			# key is a new charge (its late payment, if any, is still recorded and flagged)
+			if attempt == 2:
+				raise
 
 
 # ─── funnel ──────────────────────────────────────────────────────────────

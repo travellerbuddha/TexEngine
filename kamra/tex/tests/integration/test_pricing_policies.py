@@ -1,4 +1,4 @@
-"""Occupancy precedence v2 (G-30, G-31, ADR-042) through publish and pricing.
+"""Occupancy precedence v2 (G-30, G-31, ADR-043) through publish and pricing.
 
 G-30: every live pricing policy that applies to a contract (global, hotel, market,
 hotel + market) cascades into it, rule by rule, frozen at publish; a contract rule
@@ -226,7 +226,7 @@ class TestInfantPrecedence(PolicyCase):
 class TestPolicyChecks(PolicyCase):
 	"""A pricing policy reaches every contract in its scope, so the policy is checked on its
 	own: rows that could never be published are refused on save, and rule sets that tie on
-	activation (review of ADR-042)."""
+	activation (review of ADR-043)."""
 
 	def test_rules_that_can_never_publish_are_refused(self):
 		with self.assertRaisesRegex(frappe.ValidationError, "adult rule cannot name an age band"):

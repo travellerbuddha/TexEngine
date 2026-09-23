@@ -209,7 +209,7 @@ def history(doctype: str, name: str):
 def pricing_policy_bands(property: str | None = None, market: str | None = None, exclude: str | None = None):
 	"""Age bands a pricing policy of this scope (hotel, market; blank = any) can name: those of
 	every live pricing policy it cascades with into some contract (rules cascade by band code,
-	ADR-042), so a hotel policy without bands can name the market policy's. ``exclude``: the
+	ADR-043), so a hotel policy without bands can name the market policy's. ``exclude``: the
 	policy being edited (its revision chain is not its own source)."""
 	doctype = "TEX Pricing Policy"
 	property, market = (property or None), (market or None)

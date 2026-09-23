@@ -1,4 +1,4 @@
-"""Pricing-policy cascade (G-30, ADR-042). Pure: no frappe.
+"""Pricing-policy cascade (G-30, ADR-043). Pure: no frappe.
 
 A contract version inherits from EVERY live pricing policy that applies to its hotel
 and market, not only the most specific one:

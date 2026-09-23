@@ -244,7 +244,7 @@ def _without(t, *ids):
 
 
 class TestPrecedenceV2(unittest.TestCase):
-	"""Occupancy precedence v2 (G-30, G-31, ADR-042): the rule's origin ranks before its
+	"""Occupancy precedence v2 (G-30, G-31, ADR-043): the rule's origin ranks before its
 	qualifiers, and an infant is priced by a rule naming its band before any band-less rule."""
 
 	def setUp(self):

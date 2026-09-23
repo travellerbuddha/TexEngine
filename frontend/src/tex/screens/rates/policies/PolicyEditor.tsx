@@ -93,7 +93,7 @@ interface InheritedBand {
 }
 
 /** The policy's own bands, then the band codes of the live policies it cascades with, so a
- * hotel (+ market) policy without bands can name the market policy's (ADR-042). */
+ * hotel (+ market) policy without bands can name the market policy's (ADR-043). */
 function bandOptions(t: T, doc: Doc, inherited: InheritedBand[] | undefined): Option[] {
   const own = ((doc.age_bands as Row[]) ?? []).map((b) => String(b.band_code ?? "").trim().toUpperCase()).filter(Boolean)
   const out: Option[] = own.map((code) => ({ value: code, label: code }))

@@ -1,4 +1,4 @@
-"""Occupancy precedence v2 rollout report (G-30, G-31, ADR-042). Read-only.
+"""Occupancy precedence v2 rollout report (G-30, G-31, ADR-043). Read-only.
 
     bench --site <site> execute kamra.tex.devtools.precedence_report.run
     bench --site <site> execute kamra.tex.devtools.precedence_report.run \

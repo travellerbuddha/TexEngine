@@ -2,7 +2,7 @@
 
 Draft versions are edited through their child tables. ``publish`` validates the
 draft, resolves everything it inherits (every applicable pricing policy - global,
-hotel, market, hotel + market, ADR-042 - room capacities, rate-plan policies) and
+hotel, market, hotel + market, ADR-043 - room capacities, rate-plan policies) and
 freezes the canonical payload + sha256 hash. Pricing always runs on that frozen
 payload: a policy change reaches a contract only when it is republished.
 """
@@ -199,7 +199,7 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		         value=None if r.op == "INHERIT" else D(r.value), base_room_type=r.base_room_type or None)
 		for r in version.period_rates)
 
-	# the version's own bands and rules, then every applicable pricing policy's (G-30, ADR-042)
+	# the version's own bands and rules, then every applicable pricing policy's (G-30, ADR-043)
 	try:
 		bands, occ = inherit.cascade(age_bands_of(version.age_bands),
 		                             occupancy_rules_of(version.occupancy_rules, base_level=Level.VERSION, source="version"),

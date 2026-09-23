@@ -53,6 +53,10 @@ class MockProvider(PaymentProvider):
 
 class BankTransferProvider(PaymentProvider):
 	name = "Bank Transfer"
+	# no gateway: TEX only shows the hotel's bank details and staff confirm the money
+	# received, so there is nothing to certify before Production
+	production_verified = True
+	gateway = False
 
 	def create_checkout(self, intent: Intent) -> Checkout:
 		a = self.account
@@ -68,6 +72,8 @@ class BankTransferProvider(PaymentProvider):
 
 class PayAtHotelProvider(PaymentProvider):
 	name = "Pay at Hotel"
+	production_verified = True          # no gateway and no money moves through TEX
+	gateway = False
 
 	def create_checkout(self, intent: Intent) -> Checkout:
 		return Checkout(kind="none")

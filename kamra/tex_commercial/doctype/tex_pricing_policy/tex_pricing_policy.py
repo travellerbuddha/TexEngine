@@ -11,7 +11,7 @@ from kamra.tex.pricing.model import PricingError
 
 
 class TEXPricingPolicy(Document):
-	"""Default age bands and occupancy rules that contracts inherit (G-30, ADR-042).
+	"""Default age bands and occupancy rules that contracts inherit (G-30, ADR-043).
 
 	Every live policy that applies to a contract (global, hotel, market, hotel + market)
 	cascades into it when the contract is published; a contract rule beats every policy

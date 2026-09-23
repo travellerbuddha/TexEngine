@@ -1,4 +1,4 @@
-"""Pricing-policy cascade (G-30, ADR-042).
+"""Pricing-policy cascade (G-30, ADR-043).
 
 Every live pricing policy that applies to a contract contributes its occupancy rules;
 a rule keeps its origin (global < hotel < market < hotel + market < contract version)
@@ -256,7 +256,7 @@ class TestInheritedRuleChecks(unittest.TestCase):
 
 
 class TestPolicyOverride(unittest.TestCase):
-	"""A pricing-policy "specific override" no longer beats a contract's own rule (ADR-042):
+	"""A pricing-policy "specific override" no longer beats a contract's own rule (ADR-043):
 	publishing says so where that changes a price."""
 
 	OVR = inherit.PolicyLayer("POL-H", 1, "HOTEL-A", None, rules=(
