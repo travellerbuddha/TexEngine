@@ -1,6 +1,10 @@
 import { tex } from "../../../lib/api"
 import { UI_CRS } from "../../crs/lib/api"
 import type {
+  AddonApplyResult,
+  AddonOptions,
+  AddonProposal,
+  AddonRequest,
   ApplyResult,
   CancelPreview,
   CancelResult,
@@ -70,4 +74,21 @@ export interface ResendResult {
 /** Re-send the booking e-mail with a NEW manage link; the old link stops working. */
 export function resendConfirmation(booking: string) {
   return tex<ResendResult>("crs", "resend_confirmation", { booking }, { post: true })
+}
+
+// ─── extras added after booking (G-22, ADR-034) ─────────────────────────
+
+/** What can be added to the reservation now, with what is left of limited extras per day. */
+export function addonOptions(reservation: string, signal?: AbortSignal) {
+  return tex<AddonOptions>("crs", "addon_options", { reservation }, { signal })
+}
+
+/** Price extras on their own (the stay stays price-locked); a signed 30-minute proposal. */
+export function addonPropose(reservation: string, extras: AddonRequest[]) {
+  return tex<AddonProposal>("crs", "addon_propose", { reservation, extras }, { post: true })
+}
+
+/** Add the proposed extras; the booking's balance grows by their total. */
+export function addonApply(proposal_token: string, reason?: string) {
+  return tex<AddonApplyResult>("crs", "addon_apply", { proposal_token, reason }, { post: true })
 }

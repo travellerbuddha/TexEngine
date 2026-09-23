@@ -4,6 +4,7 @@
  "crs.approval.approved": "Freigegeben",
  "crs.approval.pending": "Freigabe ausstehend",
  "crs.approval.rejected": "Abgelehnt",
+ "crs.basis.add_on": "Nachbuchung (Aufenthalt nicht neu berechnet)",
  "crs.basis.current": "Aktuelle Preise",
  "crs.basis.historical_sale_date": "Gewähltes Verkaufsdatum",
  "crs.basis.manual": "Manueller Preis",

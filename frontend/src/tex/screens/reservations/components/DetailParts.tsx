@@ -8,11 +8,12 @@ import { Badge, Button, Card, CardBody, CardHeader, ErrorState, Money, Skeleton,
 import { cn } from "../../../../lib/utils"
 import { Row } from "../../crs/components/controls"
 import { PaymentLinkDialog, ReissueLinkDialog } from "../../crs/components/PaymentLinkDialog"
+import { shortDay } from "../../crs/lib/extrasStock"
 import { useLabels } from "../../crs/lib/labels"
 import { useServerClock } from "../../crs/lib/serverClock"
 import { isPositive, isZero, shortCode } from "../../crs/lib/party"
 import type { BookingSummary } from "../../crs/lib/types"
-import type { Revision } from "../lib/types"
+import type { AddonRequest, Revision } from "../lib/types"
 
 const FIELD_KEYS: Record<string, string> = {
   check_in_date: "res.field.check_in",
@@ -38,7 +39,28 @@ function show(v: unknown): string {
 /** Revision history (R-23): who changed what, old → new amount, basis and reason. */
 const DATE_FIELDS = new Set(["check_in_date", "check_out_date"])
 
-export function RevisionTimeline({ revisions, property }: { revisions: Revision[]; property?: string }) {
+/** Extras a revision added after booking (G-22): `changes.added` of an ADD_ON revision. */
+function addedExtras(r: Revision): AddonRequest[] {
+  const v = r.changes?.added
+  return Array.isArray(v) ? (v as AddonRequest[]).filter((x) => x && typeof x.code === "string") : []
+}
+
+/** Add-ons removed by a modification (`changes.requested.drop_addons`). */
+function droppedAddons(r: Revision): number {
+  const req = r.changes?.requested as { drop_addons?: unknown } | undefined
+  return Array.isArray(req?.drop_addons) ? req.drop_addons.length : 0
+}
+
+export function RevisionTimeline({
+  revisions,
+  property,
+  extraNames,
+}: {
+  revisions: Revision[]
+  property?: string
+  /** Extra code → name, for the revisions that added extras. */
+  extraNames?: Record<string, string>
+}) {
   const { t } = useTexT()
   const L = useLabels()
   const fmt = (k: string, v: unknown) => {
@@ -54,7 +76,9 @@ export function RevisionTimeline({ revisions, property }: { revisions: Revision[
   return (
     <ol aria-label={t("res.rev.title")} className="relative space-y-4 border-l border-zinc-200 pl-5">
       {ordered.map((r) => {
-        const fields = Object.entries(r.changes ?? {}).filter(([k, v]) => k !== "requested" && k !== "policy" && Array.isArray(v))
+        const fields = Object.entries(r.changes ?? {}).filter(([k, v]) => k !== "requested" && k !== "policy" && k !== "added" && Array.isArray(v))
+        const added = addedExtras(r)
+        const dropped = droppedAddons(r)
         const original = r.change_type === "Original"
         const override = r.pricing_basis === "MANUAL" && r.override_amount && !isZero(r.override_amount)
         return (
@@ -131,6 +155,18 @@ export function RevisionTimeline({ revisions, property }: { revisions: Revision[
                 })}
               </ul>
             )}
+            {added.length > 0 && (
+              <p className="mt-1 text-xs text-zinc-600">
+                <span className="font-medium text-zinc-700">{t("res.rev.added")}:</span>{" "}
+                {added
+                  .map(
+                    (x) =>
+                      `${extraNames?.[x.code] ?? x.code} × ${x.quantity}${x.service_dates?.length ? ` (${x.service_dates.map((d) => shortDay(d)).join(", ")})` : ""}`,
+                  )
+                  .join(", ")}
+              </p>
+            )}
+            {dropped > 0 && <p className="mt-1 text-xs text-zinc-600">{t("res.rev.addons_removed", { count: dropped })}</p>}
             {r.change_type === "Cancellation" && typeof r.changes?.penalty === "string" && (
               <p className="mt-1 text-xs text-zinc-600">
                 {t("res.field.penalty")}: <Money amount={r.changes.penalty as string} currency={r.currency} />

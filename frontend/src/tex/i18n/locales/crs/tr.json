@@ -4,6 +4,7 @@
  "crs.approval.approved": "Onaylandı",
  "crs.approval.pending": "Onay bekliyor",
  "crs.approval.rejected": "Reddedildi",
+ "crs.basis.add_on": "Sonradan ekleme (konaklama yeniden fiyatlanmadı)",
  "crs.basis.current": "Güncel fiyatlar",
  "crs.basis.historical_sale_date": "Seçilen satış tarihi",
  "crs.basis.manual": "Manuel fiyat",

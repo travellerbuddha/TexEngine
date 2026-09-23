@@ -1,6 +1,18 @@
 // Shapes of crs.reservations / ui_crs.reservation / crs.propose_modification /
-// crs.apply_modification / crs.simulate / crs.cancellation_preview / crs.cancel.
-import type { CancellationRule, ChildSpec, ContractRef, QuoteDict, QuoteLine, Reason, StayRequest } from "../../crs/lib/types"
+// crs.apply_modification / crs.simulate / crs.cancellation_preview / crs.cancel /
+// crs.addon_options / crs.addon_propose / crs.addon_apply.
+import type {
+  CancellationRule,
+  ChildSpec,
+  ContractRef,
+  ExplanationStep,
+  ExtraOutcome,
+  QuoteDict,
+  QuoteLine,
+  Reason,
+  StayRequest,
+  TaxLine,
+} from "../../crs/lib/types"
 
 export interface ReservationRow {
   name: string
@@ -50,6 +62,96 @@ export type Snapshot = QuoteDict & {
   quote_id?: string
   basis?: string
   override_amount?: string | null
+  /** Extras added after booking (G-22), each priced on its own; already in lines and totals. */
+  addons?: AddonEntry[]
+}
+
+// ─── extras added after booking (G-22, ADR-034) ─────────────────────────
+
+/** What was asked for: code, how many and the service day(s). */
+export interface AddonRequest {
+  code: string
+  quantity: number
+  service_dates?: string[]
+}
+
+/** An add-on priced on its own (pricing.addons.AddonQuote.to_dict). Money is a string. */
+export interface AddonQuote {
+  ok: boolean
+  currency: string
+  extras: ExtraOutcome[]
+  lines: QuoteLine[]
+  taxes: TaxLine[]
+  /** extras, subtotal, tax, tax_added, total */
+  totals: Record<string, string>
+  reasons: Reason[]
+  /** Only for price.view_cost. */
+  explanation?: ExplanationStep[]
+}
+
+/** One add-on in the reservation's snapshot (pricing.addons[]). */
+export interface AddonEntry {
+  id: string
+  /** Server wall-clock time it was added. */
+  at: string
+  quote: AddonQuote
+  requests?: AddonRequest[]
+  /** Guest, Desk, … */
+  source?: string | null
+}
+
+/** One extra that can be added now (crs.addon_options). */
+export interface AddonOption {
+  code: string
+  name: string
+  category: string | null
+  description: string | null
+  image: string | null
+  pricing_mode: string
+  currency: string
+  /** List price in the extra's currency (a guide; the proposal prices it). */
+  amount: string
+  /** null = no maximum per stay. */
+  max_quantity: number | null
+  /** Already on the reservation (its booking and earlier add-ons). */
+  booked: number
+  /** Must be ordered at least this many hours before the day it is used. */
+  cutoff_hours: number
+  limited: boolean
+  /** Limited extras: what is left per day of the stay (check-in..check-out inclusive). */
+  days: Record<string, { remaining: number; closed: boolean }> | null
+}
+
+export interface AddonOptions {
+  reservation: string
+  check_in: string
+  check_out: string
+  currency: string
+  extras: AddonOption[]
+}
+
+export interface AddonProposal {
+  reservation: string
+  ok: boolean
+  reasons: Reason[]
+  addon: AddonQuote
+  currency: string
+  old_total: string
+  new_total: string | null
+  /** null when the extras cannot be added (reasons say why). */
+  proposal_token: string | null
+}
+
+export interface AddonApplyResult {
+  reservation: string
+  addon: string
+  total: string
+  currency: string
+  /** The same proposal was applied before: nothing was added twice. */
+  replay: boolean
+  booking?: string
+  balance?: string
+  payment_status?: string | null
 }
 
 export interface ReservationDetail {
@@ -112,7 +214,8 @@ export interface Proposal {
     lines: QuoteLine[] | null
     totals: Record<string, string> | null
   }
-  proposed: QuoteDict
+  /** `addons`: the earlier add-ons carried over (those not dropped). */
+  proposed: QuoteDict & { addons?: AddonEntry[] }
   sellable: boolean
   difference: string | null
   currency_changed: boolean

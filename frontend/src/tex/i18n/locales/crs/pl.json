@@ -4,6 +4,7 @@
  "crs.approval.approved": "Zaakceptowano",
  "crs.approval.pending": "Oczekuje na akceptację",
  "crs.approval.rejected": "Odrzucono",
+ "crs.basis.add_on": "Dokupienie (pobyt bez ponownej wyceny)",
  "crs.basis.current": "Aktualne ceny",
  "crs.basis.historical_sale_date": "Wybrana data sprzedaży",
  "crs.basis.manual": "Cena ręczna",

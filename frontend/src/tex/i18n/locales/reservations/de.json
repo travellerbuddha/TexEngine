@@ -6,6 +6,71 @@
  "res.ack.done": "Gaständerung bestätigt",
  "res.ack.note": "Notiz (optional)",
  "res.ack.title": "Änderung des Gastes bestätigen",
+ "res.addon.added": "Hinzugefügt",
+ "res.addon.added_at": "Hinzugefügt",
+ "res.addon.addon_total": "Summe Zusatzleistungen",
+ "res.addon.balance_note": "Der offene Betrag der Buchung steigt um diesen Betrag; der Gast kann ihn online auf der Buchungsseite oder im Hotel zahlen.",
+ "res.addon.booked": {
+  "one": "{count} bereits gebucht",
+  "other": "{count} bereits gebucht"
+ },
+ "res.addon.button": "Zusatzleistungen hinzufügen",
+ "res.addon.card_hint": "Beim Hinzufügen separat berechnet; bereits im festgeschriebenen Preis oben enthalten.",
+ "res.addon.card_title": "Nach der Buchung hinzugefügt",
+ "res.addon.choose": "Zusatzleistungen wählen",
+ "res.addon.confirm": "Zur Reservierung hinzufügen",
+ "res.addon.confirm_title": "Zusatzleistungen hinzufügen",
+ "res.addon.cutoff": {
+  "one": "{count} Stunde im Voraus bestellen",
+  "other": "{count} Stunden im Voraus bestellen"
+ },
+ "res.addon.day_too_late": "zu spät",
+ "res.addon.done": "Zusatzleistungen zu {name} hinzugefügt. Neue Summe {total}.",
+ "res.addon.done_balance": "Zusatzleistungen zu {name} hinzugefügt. Neue Summe {total}, offener Betrag {balance}.",
+ "res.addon.expired": "Der Preis war abgelaufen (30 Minuten), daher wurden die Zusatzleistungen neu berechnet. Prüfen Sie den Preis und fügen Sie sie erneut hinzu.",
+ "res.addon.failed": "Die Zusatzleistungen wurden nicht hinzugefügt",
+ "res.addon.intro": "Der Preis des Aufenthalts bleibt festgeschrieben. Zusatzleistungen werden separat zu den heutigen Preisen berechnet, ohne Aktionen oder Gutscheine, und zur Summe der Reservierung addiert. Der offene Betrag der Buchung steigt um denselben Betrag; der Gast zahlt ihn online oder im Hotel.",
+ "res.addon.max": {
+  "one": "höchstens {count} pro Aufenthalt",
+  "other": "höchstens {count} pro Aufenthalt"
+ },
+ "res.addon.max_reached": "Höchstmenge pro Aufenthalt erreicht",
+ "res.addon.network_hint": "Wenn Sie nicht sicher sind, ob sie hinzugefügt wurden, fügen Sie sie erneut hinzu: Derselbe Preis wird nie zweimal hinzugefügt.",
+ "res.addon.no_promotions": "Für nach der Buchung hinzugefügte Zusatzleistungen gelten keine Aktionen oder Gutscheine.",
+ "res.addon.none": "Derzeit können keine Zusatzleistungen hinzugefügt werden",
+ "res.addon.none_hint": "Das Hotel verkauft im Moment keine Zusatzleistungen, die dieser Reservierung hinzugefügt werden können.",
+ "res.addon.none_left": "An keinem Tag dieses Aufenthalts ist genug frei",
+ "res.addon.note": "Notiz (optional)",
+ "res.addon.note_hint": "Wird in der Änderungshistorie und im Audit-Protokoll gespeichert.",
+ "res.addon.price": "Preis berechnen",
+ "res.addon.price_failed": "Die Zusatzleistungen konnten nicht berechnet werden",
+ "res.addon.priced": "Hinzuzufügende Zusatzleistungen",
+ "res.addon.reason.empty": "Wählen Sie mindestens eine Zusatzleistung.",
+ "res.addon.reason.first_room": "{name}: wird einmal pro Buchung berechnet und kann daher nur dem ersten Zimmer der Buchung hinzugefügt werden.",
+ "res.addon.reason.included": "{name}: ist vom Hotel bereits inbegriffen.",
+ "res.addon.reason.not_available": "{name}: kann dieser Reservierung nicht hinzugefügt werden.",
+ "res.addon.reason.quantity": {
+  "one": "{name}: höchstens {count} pro Aufenthalt, einschließlich der bereits gebuchten.",
+  "other": "{name}: höchstens {count} pro Aufenthalt, einschließlich der bereits gebuchten."
+ },
+ "res.addon.reason.too_late": "{name}: kann für {date} nicht mehr hinzugefügt werden.",
+ "res.addon.refused": "Diese Zusatzleistungen können nicht hinzugefügt werden",
+ "res.addon.replayed": "Diese Zusatzleistungen waren {name} bereits hinzugefügt.",
+ "res.addon.reprice": "Neu berechnen",
+ "res.addon.repriced": "Die Zusatzleistungen wurden unten neu berechnet. Prüfen Sie den Preis und fügen Sie sie erneut hinzu.",
+ "res.addon.result": "Preis der Zusatzleistungen",
+ "res.addon.result_hint": "Wählen Sie Zusatzleistungen und berechnen Sie den Preis. Erst mit Ihrer Bestätigung wird etwas hinzugefügt.",
+ "res.addon.selected": {
+  "one": "{count} gewählt",
+  "other": "{count} gewählt"
+ },
+ "res.addon.source": "Hinzugefügt von",
+ "res.addon.stale": "Die Auswahl hat sich nach der Berechnung geändert.",
+ "res.addon.stay": "Aufenthalt {from} – {to}",
+ "res.addon.title": "Zusatzleistungen zu {name} hinzufügen",
+ "res.addon.too_late": "Für diesen Aufenthalt zu spät",
+ "res.addon.total_after": "Mit den Zusatzleistungen",
+ "res.addon.total_now": "Reservierungssumme jetzt",
  "res.badge.guest_change": "Gaständerung",
  "res.basis.current_help": "Heutige Verträge, Aktionen und Wechselkurse.",
  "res.basis.hint": "Mit welchen Preisen soll der geänderte Aufenthalt berechnet werden?",
@@ -41,6 +106,12 @@
  "res.cancel.total": "Reservierungssumme",
  "res.cancel.waive": "Stornogebühr erlassen",
  "res.cancel.waive_hint": "Preisüberschreibung — wird mit Ihrer Begründung im Audit-Protokoll gespeichert.",
+ "res.cmp.addons": "Nach der Buchung hinzugefügt",
+ "res.cmp.addons_removed": {
+  "one": "{count} Nachbuchung wird entfernt",
+  "other": "{count} Nachbuchungen werden entfernt"
+ },
+ "res.cmp.addons_removed_hint": "Diese Zusatzleistungen werden aus der Reservierung genommen und nicht mehr berechnet; die vorgeschlagene Summe enthält sie nicht mehr.",
  "res.cmp.basis": "Berechnet nach {basis}: {detail} (Stand {at}).",
  "res.cmp.caption": "Aktueller und vorgeschlagener Aufenthalt",
  "res.cmp.changed": "geändert",
@@ -108,6 +179,10 @@
  "res.mod.apply_drops": "Mit dieser Änderung entfällt: {extras}.",
  "res.mod.apply_failed": "Die Änderung wurde nicht übernommen",
  "res.mod.apply_failed_hint": "Der Vorschlag ist abgelaufen (30 Minuten) oder Preis bzw. Reservierung haben sich seit der Berechnung geändert. Prüfen Sie den neuen Vorschlag und übernehmen Sie erneut.",
+ "res.mod.apply_removes_addons": {
+  "one": "Mit dieser Änderung wird die Nachbuchung entfernt: {extras}.",
+  "other": "Mit dieser Änderung werden {count} Nachbuchungen entfernt: {extras}."
+ },
  "res.mod.button": "Ändern",
  "res.mod.calculate": "Neuen Preis berechnen",
  "res.mod.changed_n": {
@@ -115,6 +190,9 @@
   "other": "{count} Änderungen"
  },
  "res.mod.confirm": "Änderung übernehmen",
+ "res.mod.drop_added": "Hinzugefügt {time}",
+ "res.mod.drop_hint": "Sie behalten den Preis, zu dem sie hinzugefügt wurden. Markieren Sie eine Nachbuchung, um sie mit dieser Änderung zu entfernen; der Aufenthalt selbst wird auf der unten gewählten Preisbasis neu berechnet (eine ursprüngliche Basis behält den Verkaufspreis).",
+ "res.mod.drop_title": "Nach der Buchung hinzugefügte Zusatzleistungen entfernen",
  "res.mod.err_basis_at": "Verkaufsdatum und -zeit wählen.",
  "res.mod.expires_hint": "Eine Berechnung gilt 30 Minuten.",
  "res.mod.intro": "Der Preis ist festgeschrieben. Eine Änderung wird nach der gewählten Grundlage neu berechnet, neben dem aktuellen Preis gezeigt und nur mit Begründung übernommen. Bis dahin ändert sich nichts.",
@@ -146,6 +224,11 @@
  "res.resend.sent": "Bestätigung an {email} gesendet",
  "res.resend.title": "Bestätigungs-E-Mail erneut senden?",
  "res.resend.warning": "Der bisherige Verwaltungslink funktioniert sofort nicht mehr. Nur der Link in dieser neuen E-Mail gilt.",
+ "res.rev.added": "Hinzugefügt",
+ "res.rev.addons_removed": {
+  "one": "{count} Nachbuchung entfernt",
+  "other": "{count} Nachbuchungen entfernt"
+ },
  "res.rev.n": "Revision {n}",
  "res.rev.none": "Keine Revisionen.",
  "res.rev.override": "Manueller Preis",

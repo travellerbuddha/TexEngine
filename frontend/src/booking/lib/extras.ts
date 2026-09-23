@@ -3,7 +3,7 @@
 // (never how many); these helpers work out what that means for one extra of this stay,
 // and turn the quote's English refusal reasons into the guest's language.
 import type { I18n } from "../i18n"
-import { addDays, nightsBetween } from "./dates"
+import { addDays, isoDay, nightsBetween } from "./dates"
 
 export interface DayAvailability {
   available: boolean
@@ -100,6 +100,66 @@ export function refusalText(i18n: Pick<I18n, "t" | "day">, reason: string | null
   if (r.kind === "few_left") return i18n.t("extras.reasonFewLeft", { date: i18n.day(r.date) })
   if (r.kind === "closed") return i18n.t("extras.reasonClosed", { date: i18n.day(r.date) })
   return i18n.t("extras.reasonOther")
+}
+
+// ─── extras added to a booked stay (G-22, ADR-034) ───────────────────────
+
+/** The first day an extra added after booking can still be used on: today, or later when
+ * the hotel needs `cutoffHours` of notice. A hint in the guest's calendar: the server
+ * decides (in the hotel's time) and refuses with ADDON_TOO_LATE. */
+export function earliestOrderDay(cutoffHours: number | null | undefined, now: Date = new Date()): string {
+  const h = Math.max(0, Math.floor(Number(cutoffHours) || 0))
+  return isoDay(new Date(now.getTime() + h * 3_600_000))
+}
+
+/** What the guest knows about the extras they asked for (names in their language). */
+export interface AddonAsked {
+  code: string
+  name: string
+  cutoff_hours?: number | null
+}
+
+// pricing/addons.py refusal messages: "<extra name or code>: <why>"
+const TOO_LATE_FOR = /can no longer be added for (\d{4}-\d{2}-\d{2})$/i
+const AT_MOST = /at most (\d+) per stay$/i
+const ONCE_PER_BOOKING = /once per booking/i
+
+/**
+ * Why manage_extras_propose refused the extras (ADDON_* codes), in the guest's words and
+ * language: the extra's name, then the reason; never how many are left. `asked` are the
+ * extras of the request (the server names them by their catalogue name or code).
+ */
+export function addonRefusalText(i18n: Pick<I18n, "t" | "day">, reason: { code: string; message: string }, asked: AddonAsked[]): string {
+  const { t } = i18n
+  const msg = (reason.message ?? "").trim()
+  const at = msg.lastIndexOf(": ")
+  const who = at > 0 ? msg.slice(0, at) : ""
+  const why = at > 0 ? msg.slice(at + 2) : msg
+  const x = who ? asked.find((a) => a.code === who || a.name === who) ?? (asked.length === 1 ? asked[0] : undefined) : undefined
+  const named = (text: string) => (who ? `${x?.name ?? who}: ${text}` : text)
+  switch (reason.code) {
+    case "ADDON_EMPTY":
+      return t("manage.extras.chooseFirst")
+    case "ADDON_PARTY":
+      return t("manage.extras.refuseParty")
+    case "ADDON_SOLD_OUT":
+      return named(refusalText(i18n, why))
+    case "ADDON_QUANTITY": {
+      const m = AT_MOST.exec(why)
+      return named(m ? t("manage.extras.refuseQuantity", { count: Number(m[1]) }) : t("extras.reasonOther"))
+    }
+    case "ADDON_TOO_LATE": {
+      const m = TOO_LATE_FOR.exec(why)
+      if (!m) return named(t("manage.extras.tooLate"))
+      const date = i18n.day(m[1])
+      const hours = Math.floor(Number(x?.cutoff_hours) || 0)
+      return named(hours > 0 ? t("manage.extras.refuseTooLateCutoff", { date, count: hours }) : t("manage.extras.refuseTooLate", { date }))
+    }
+    case "ADDON_NOT_AVAILABLE":
+      return named(ONCE_PER_BOOKING.test(why) ? t("manage.extras.refuseFirstRoom") : t("extras.reasonOther"))
+    default:
+      return t("manage.extras.refuseOther")
+  }
 }
 
 /** Element id of an extra's card on the extras step (the notice scrolls to it). */

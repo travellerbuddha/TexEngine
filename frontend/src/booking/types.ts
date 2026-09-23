@@ -126,6 +126,8 @@ export interface ExtraOutcome {
   service_dates?: string[]
   /** days (and units on each) it takes from a limited extra's daily capacity */
   usage?: { date: string; units: number }[]
+  /** set when the extra was added after booking (the add-on's id, ADR-034) */
+  addon?: string
 }
 
 export interface Promotion {
@@ -345,6 +347,79 @@ export interface Proposal {
   warnings: Reason[]
   lines?: QuoteLine[]
   proposal_token: string
+}
+
+// ─── extras added to a booked stay (G-22, ADR-034) ───────────────────────
+
+/** public.manage_extras: an extra the guest can still add to a booked room. Only what
+ * the hotel sells online after booking; never a remaining count (available / few left). */
+export interface AddonOption {
+  code: string
+  /** in the guest's language */
+  name: string
+  category?: string | null
+  description?: string | null
+  image?: string | null
+  pricing_mode: string
+  currency: string
+  /** the catalogue price (the exact price comes from manage_extras_propose) */
+  amount: Money
+  max_quantity?: number | null
+  /** how many this room already has (its booking and earlier add-ons) */
+  booked: number
+  /** hours of notice the hotel needs before the day it is used */
+  cutoff_hours?: number | null
+  /** the hotel limits it per day (spa slots, transfers…, G-19) */
+  limited: boolean
+  /** per day of the stay (arrival to departure) for a limited extra, else null */
+  days: Record<string, { available: boolean; low: boolean }> | null
+}
+
+export interface AddonOptions {
+  reservation: string
+  check_in: string
+  check_out: string
+  currency: string
+  extras: AddonOption[]
+}
+
+/** One extra asked for in manage_extras_propose. */
+export interface AddonRequest {
+  code: string
+  quantity: number
+  service_dates?: string[]
+}
+
+/** public.manage_extras_propose: the extras priced on their own (the stay stays price-locked).
+ * Refusal codes: ADDON_EMPTY, ADDON_PARTY, ADDON_NOT_AVAILABLE, ADDON_QUANTITY,
+ * ADDON_TOO_LATE, ADDON_SOLD_OUT ("Spa: sold out on yyyy-mm-dd", never a count). */
+export interface AddonProposal {
+  ok: boolean
+  reasons: Reason[]
+  currency: string
+  /** the room's total now, and with the extras (null when refused) */
+  old_total: Money
+  new_total: Money | null
+  /** signed, valid 30 minutes; null when refused */
+  proposal_token: string | null
+  /** EXTRA lines, then the extras' own TAX lines */
+  lines: QuoteLine[]
+  extras: ExtraOutcome[]
+  totals: Record<string, Money>
+}
+
+/** public.manage_extras_apply: the booking's balance grows by the add-on (paid online or at the hotel). */
+export interface AddonApplied {
+  reservation: string
+  addon: string
+  /** the room's new total */
+  total: Money
+  currency: string
+  /** the same proposal was applied before (a retried request) */
+  replay: boolean
+  booking?: string
+  balance?: Money
+  payment_status?: string
 }
 
 export type PaymentMethod = "Card" | "Bank Transfer" | "Pay at Hotel"

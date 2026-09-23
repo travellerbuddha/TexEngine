@@ -6,6 +6,71 @@
  "res.ack.done": "Misafir değişikliği onaylandı",
  "res.ack.note": "Not (isteğe bağlı)",
  "res.ack.title": "Misafirin değişikliğini onayla",
+ "res.addon.added": "Eklenen",
+ "res.addon.added_at": "Eklenme zamanı",
+ "res.addon.addon_total": "Ek hizmet toplamı",
+ "res.addon.balance_note": "Rezervasyonun bakiyesi bu tutar kadar artar; misafir bunu rezervasyon sayfasından çevrim içi ya da otelde ödeyebilir.",
+ "res.addon.booked": {
+  "one": "{count} adet zaten rezervasyonda",
+  "other": "{count} adet zaten rezervasyonda"
+ },
+ "res.addon.button": "Ek hizmet ekle",
+ "res.addon.card_hint": "Eklendikleri anda ayrıca fiyatlandı; yukarıdaki kilitli fiyata zaten dahil.",
+ "res.addon.card_title": "Rezervasyondan sonra eklenenler",
+ "res.addon.choose": "Ek hizmetleri seçin",
+ "res.addon.confirm": "Rezervasyona ekle",
+ "res.addon.confirm_title": "Ek hizmetleri ekle",
+ "res.addon.cutoff": {
+  "one": "{count} saat önceden sipariş edilir",
+  "other": "{count} saat önceden sipariş edilir"
+ },
+ "res.addon.day_too_late": "çok geç",
+ "res.addon.done": "Ek hizmetler {name} rezervasyonuna eklendi. Yeni toplam {total}.",
+ "res.addon.done_balance": "Ek hizmetler {name} rezervasyonuna eklendi. Yeni toplam {total}, kalan bakiye {balance}.",
+ "res.addon.expired": "Fiyatın süresi dolmuştu (30 dakika), bu yüzden ek hizmetler yeniden fiyatlandı. Fiyatı kontrol edip tekrar ekleyin.",
+ "res.addon.failed": "Ek hizmetler eklenmedi",
+ "res.addon.intro": "Konaklamanın fiyatı kilitli kalır. Ek hizmetler bugünkü fiyatlarla, promosyon veya kupon uygulanmadan ayrıca fiyatlanır ve rezervasyon toplamına eklenir. Rezervasyonun bakiyesi aynı tutar kadar artar; misafir bunu çevrim içi ya da otelde öder.",
+ "res.addon.max": {
+  "one": "konaklama başına en fazla {count}",
+  "other": "konaklama başına en fazla {count}"
+ },
+ "res.addon.max_reached": "Konaklama başına üst sınıra ulaşıldı",
+ "res.addon.network_hint": "Eklenip eklenmediğinden emin değilseniz tekrar ekleyin: aynı fiyat asla iki kez eklenmez.",
+ "res.addon.no_promotions": "Rezervasyondan sonra eklenen ek hizmetlere promosyon veya kupon uygulanmaz.",
+ "res.addon.none": "Şu anda eklenebilecek ek hizmet yok",
+ "res.addon.none_hint": "Otel şu anda bu rezervasyona eklenebilecek bir ek hizmet satmıyor.",
+ "res.addon.none_left": "Bu konaklamanın hiçbir gününde yeterli yer kalmadı",
+ "res.addon.note": "Not (isteğe bağlı)",
+ "res.addon.note_hint": "Revizyon geçmişine ve denetim kaydına yazılır.",
+ "res.addon.price": "Ek hizmetleri fiyatla",
+ "res.addon.price_failed": "Ek hizmetler fiyatlanamadı",
+ "res.addon.priced": "Eklenecek ek hizmetler",
+ "res.addon.reason.empty": "En az bir ek hizmet seçin.",
+ "res.addon.reason.first_room": "{name}: rezervasyon başına bir kez ücretlendirilir, bu yüzden yalnızca rezervasyonun ilk odasına eklenebilir.",
+ "res.addon.reason.included": "{name}: otel tarafından zaten dahil ediliyor.",
+ "res.addon.reason.not_available": "{name}: bu rezervasyona eklenemez.",
+ "res.addon.reason.quantity": {
+  "one": "{name}: rezervasyonda olanlar dahil konaklama başına en fazla {count}.",
+  "other": "{name}: rezervasyonda olanlar dahil konaklama başına en fazla {count}."
+ },
+ "res.addon.reason.too_late": "{name}: {date} için eklemek artık çok geç.",
+ "res.addon.refused": "Bu ek hizmetler eklenemez",
+ "res.addon.replayed": "Bu ek hizmetler {name} rezervasyonuna zaten eklenmişti.",
+ "res.addon.reprice": "Yeniden fiyatla",
+ "res.addon.repriced": "Ek hizmetler aşağıda yeniden fiyatlandı. Fiyatı kontrol edip tekrar ekleyin.",
+ "res.addon.result": "Ek hizmetlerin fiyatı",
+ "res.addon.result_hint": "Ek hizmetleri seçip fiyatlayın. Siz onaylayana kadar hiçbir şey eklenmez.",
+ "res.addon.selected": {
+  "one": "{count} seçildi",
+  "other": "{count} seçildi"
+ },
+ "res.addon.source": "Ekleyen",
+ "res.addon.stale": "Fiyatlamadan sonra seçim değişti.",
+ "res.addon.stay": "Konaklama {from} – {to}",
+ "res.addon.title": "{name} için ek hizmet ekle",
+ "res.addon.too_late": "Bu konaklamaya eklemek için çok geç",
+ "res.addon.total_after": "Ek hizmetlerle birlikte",
+ "res.addon.total_now": "Şu anki rezervasyon toplamı",
  "res.badge.guest_change": "Misafir değişikliği",
  "res.basis.current_help": "Bugünün kontratları, promosyonları ve kurları.",
  "res.basis.hint": "Değişen konaklama hangi fiyatlarla hesaplansın?",
@@ -41,6 +106,12 @@
  "res.cancel.total": "Rezervasyon toplamı",
  "res.cancel.waive": "İptal cezasını kaldır",
  "res.cancel.waive_hint": "Fiyat müdahalesi — gerekçenizle denetim kaydına yazılır.",
+ "res.cmp.addons": "Rezervasyondan sonra eklenenler",
+ "res.cmp.addons_removed": {
+  "one": "{count} ekleme kaldırılıyor",
+  "other": "{count} ekleme kaldırılıyor"
+ },
+ "res.cmp.addons_removed_hint": "Bu ek hizmetler rezervasyondan çıkarılır ve artık ücretlendirilmez; önerilen toplam bunları içermez.",
  "res.cmp.basis": "Fiyatlandırma esası {basis}: {detail} ({at} itibarıyla).",
  "res.cmp.caption": "Mevcut ve önerilen konaklama",
  "res.cmp.changed": "değişti",
@@ -108,6 +179,10 @@
  "res.mod.apply_drops": "Bu değişiklik uygulanınca şunlar kaldırılır: {extras}.",
  "res.mod.apply_failed": "Değişiklik uygulanmadı",
  "res.mod.apply_failed_hint": "Öneri süresi doldu (30 dakika) ya da hesapladığınızdan bu yana fiyat veya rezervasyon değişti. Yeni öneriyi inceleyip tekrar uygulayın.",
+ "res.mod.apply_removes_addons": {
+  "one": "Bu değişiklik uygulanınca şu ekleme kaldırılır: {extras}.",
+  "other": "Bu değişiklik uygulanınca {count} ekleme kaldırılır: {extras}."
+ },
  "res.mod.button": "Değiştir",
  "res.mod.calculate": "Yeni fiyatı hesapla",
  "res.mod.changed_n": {
@@ -115,6 +190,9 @@
   "other": "{count} değişiklik"
  },
  "res.mod.confirm": "Değişikliği uygula",
+ "res.mod.drop_added": "{time} eklendi",
+ "res.mod.drop_hint": "Bunlar eklendikleri fiyatı korur. Bu değişiklikle kaldırmak istediğiniz eklemeyi işaretleyin; konaklamanın kendisi aşağıdaki fiyatlama esasına göre yeniden fiyatlanır (orijinal bir esas, satıldığı fiyatı korur).",
+ "res.mod.drop_title": "Rezervasyondan sonra eklenen hizmetleri kaldır",
  "res.mod.err_basis_at": "Satış tarihini ve saatini seçin.",
  "res.mod.expires_hint": "Hesaplama 30 dakika geçerlidir.",
  "res.mod.intro": "Fiyat kilitli. Değişiklik seçtiğiniz esasa göre yeniden fiyatlanır, mevcut fiyatın yanında gösterilir ve yalnızca gerekçeyle uygulanır. Siz uygulayana kadar hiçbir şey değişmez.",
@@ -146,6 +224,11 @@
  "res.resend.sent": "Onay {email} adresine gönderildi",
  "res.resend.title": "Onay e-postası yeniden gönderilsin mi?",
  "res.resend.warning": "Önceki yönetim bağlantısı hemen çalışmaz hale gelir. Yalnızca bu yeni e-postadaki bağlantı çalışır.",
+ "res.rev.added": "Eklenen",
+ "res.rev.addons_removed": {
+  "one": "{count} sonradan ekleme kaldırıldı",
+  "other": "{count} sonradan ekleme kaldırıldı"
+ },
  "res.rev.n": "Revizyon {n}",
  "res.rev.none": "Revizyon yok.",
  "res.rev.override": "Manuel fiyat",

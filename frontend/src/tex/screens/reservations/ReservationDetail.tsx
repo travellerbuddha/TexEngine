@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { Ban, Copy, History, Lock, MailCheck, PencilLine, Star } from "lucide-react"
+import { Ban, Copy, History, Lock, MailCheck, PackagePlus, PencilLine, Star } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { date } from "../../lib/format"
 import { useTexT } from "../../i18n"
@@ -28,12 +28,15 @@ import { PriceBreakdown } from "../crs/components/PriceBreakdown"
 import { useLabels } from "../crs/lib/labels"
 import { copyText, shortCode } from "../crs/lib/party"
 import { AcknowledgeDialog, CancelDialog, ResendConfirmationDialog, SimulatorDialog } from "./components/ActionDialogs"
+import { AddExtrasDialog } from "./components/AddExtrasDialog"
+import { AddedExtrasCard } from "./components/AddonParts"
 import { PaymentSummaryCard, RevisionTimeline } from "./components/DetailParts"
 import { ModifyDrawer } from "./components/ModifyDrawer"
+import { ADDON_STATUSES } from "./lib/addons"
 import type { ReservationDetail as Detail } from "./lib/types"
 
 const TERMINAL = ["Cancelled", "No Show", "Checked Out"]
-type Dlg = "modify" | "simulate" | "cancel" | "ack" | "resend" | null
+type Dlg = "modify" | "simulate" | "cancel" | "ack" | "resend" | "addon" | null
 
 /** Reservation detail: stay, guest, locked price snapshot, revisions, payments (R-21–R-23, R-46). */
 export default function ReservationDetail() {
@@ -92,6 +95,8 @@ function DetailView({
   const terminal = TERMINAL.includes(d.status)
   const texPriced = Boolean(d.pricing?.request)
   const canModify = caps.has("reservation.modify") && !terminal && texPriced
+  // extras added after booking (G-22): priced on their own, the stay stays price-locked
+  const canAddExtras = caps.has("reservation.modify") && ADDON_STATUSES.includes(d.status) && texPriced
   const canCancel = caps.has("reservation.cancel") && !terminal
   const canSimulate = caps.has("price.view") && texPriced
   const canCost = caps.has("price.view_cost")
@@ -101,6 +106,9 @@ function DetailView({
   const childAges = (d.child_ages ?? []).map((c) => c.age)
   const ratePlanName = snap?.rate_plan?.name ?? (d.rate_plan ? shortCode(d.rate_plan, d.property) : null)
   const hash = snap?.contract?.payload_hash
+  // extra code → name, for the revisions that added extras (they name codes only)
+  const extraNames: Record<string, string> = {}
+  for (const e of [...(snap?.extras ?? []), ...(snap?.addons ?? []).flatMap((a) => a.quote?.extras ?? [])]) if (e.name) extraNames[e.code] = e.name
   return (
     <>
       <PageHeader
@@ -144,6 +152,11 @@ function DetailView({
             {canCancel && (
               <Button variant="secondary" icon={<Ban className="size-4" aria-hidden />} onClick={() => setDialog("cancel")}>
                 {t("res.cancel.button")}
+              </Button>
+            )}
+            {canAddExtras && (
+              <Button variant="secondary" icon={<PackagePlus className="size-4" aria-hidden />} onClick={() => setDialog("addon")}>
+                {t("res.addon.button")}
               </Button>
             )}
             {canModify && (
@@ -290,10 +303,12 @@ function DetailView({
             </CardBody>
           </Card>
 
+          {texPriced && (snap.addons?.length ?? 0) > 0 && <AddedExtrasCard addons={snap.addons ?? []} />}
+
           <Card role="region" aria-label={t("res.rev.title")}>
             <CardHeader title={t("res.rev.title")} description={t("res.rev.subtitle")} />
             <CardBody>
-              <RevisionTimeline revisions={d.revisions} property={d.property} />
+              <RevisionTimeline revisions={d.revisions} property={d.property} extraNames={extraNames} />
             </CardBody>
           </Card>
         </div>
@@ -334,6 +349,17 @@ function DetailView({
       {canModify && (
         <ModifyDrawer
           open={dialog === "modify"}
+          onClose={() => setDialog(null)}
+          res={d}
+          onApplied={() => {
+            setDialog(null)
+            reload()
+          }}
+        />
+      )}
+      {canAddExtras && (
+        <AddExtrasDialog
+          open={dialog === "addon"}
           onClose={() => setDialog(null)}
           res={d}
           onApplied={() => {

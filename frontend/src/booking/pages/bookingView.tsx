@@ -1,4 +1,4 @@
-import { CalendarDays, Copy, Users } from "lucide-react"
+import { CalendarDays, Copy, Sparkles, Users } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { useI18n, type MessageKey } from "../i18n"
 import { nightsBetween } from "../lib/dates"
@@ -63,11 +63,30 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
+/** Price lines of an add-on (extras added after booking, ADR-034): their ref is its id. */
+const ADDON_REF = /^ADD-[0-9a-f]+$/i
+
+/** The extras chosen for the room (with it or added later; not those the hotel includes),
+ * once per extra with the days it is used on. */
+function extrasOf(room: BookingRoom) {
+  const out = new Map<string, { name: string; dates: string[] }>()
+  for (const e of room.extras ?? []) {
+    if (e.ok === false || e.mandatory) continue
+    const cur = out.get(e.code) ?? { name: e.name, dates: [] }
+    for (const d of e.service_dates ?? []) if (!cur.dates.includes(d)) cur.dates.push(d)
+    out.set(e.code, cur)
+  }
+  return [...out.values()].map((x) => ({ ...x, dates: x.dates.sort() }))
+}
+
 export function RoomBlock({ room, index, count, currency, actions, bookingStatus }: { room: BookingRoom; index: number; count: number; currency: string; actions?: ReactNode; bookingStatus?: string }) {
-  const { t, range, money } = useI18n()
+  const { t, range, money, day } = useI18n()
   const [open, setOpen] = useState(false)
   const nights = nightsBetween(room.check_in, room.check_out)
   const ages = (room.child_ages ?? []).map((c) => c.age)
+  const extras = extrasOf(room)
+  const stayLines = (room.lines ?? []).filter((l) => !ADDON_REF.test(l.ref ?? ""))
+  const addonLines = (room.lines ?? []).filter((l) => ADDON_REF.test(l.ref ?? ""))
   return (
     <li className="py-4 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -97,6 +116,21 @@ export function RoomBlock({ room, index, count, currency, actions, bookingStatus
         <Users className="size-4 text-muted" aria-hidden />
         {partyText(t, { adults: room.adults, ages: ages.length === room.children ? ages : undefined, children: room.children })}
       </p>
+      {extras.length > 0 && (
+        <div className="flex items-start gap-1.5 text-sm text-soft">
+          <Sparkles className="mt-0.5 size-4 flex-none text-muted" aria-hidden />
+          <p className="min-w-0">
+            <span className="sr-only">{t("booking.extras")}: </span>
+            {extras.map((x, i) => (
+              <span key={i}>
+                {i > 0 && ", "}
+                {x.name}
+                {x.dates.length > 0 && <span className="text-muted"> ({x.dates.map(day).join(" · ")})</span>}
+              </span>
+            ))}
+          </p>
+        </div>
+      )}
       {room.refundable === false && <p className="mt-1 text-xs text-muted">{t("policy.nonRefundable")}</p>}
       {room.pending_change && (
         <p className="mt-2">
@@ -110,7 +144,14 @@ export function RoomBlock({ room, index, count, currency, actions, bookingStatus
           </button>
           {open && (
             <div className="mt-2 rounded-ui bg-sunken p-3">
-              <PriceLines lines={room.lines} currency={currency} />
+              <PriceLines lines={stayLines} currency={currency} />
+              {/* extras added after booking: priced on their own, with their own taxes */}
+              {addonLines.length > 0 && (
+                <div className="mt-2 border-t border-line pt-2">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{t("booking.addedLater")}</p>
+                  <PriceLines lines={addonLines} currency={currency} />
+                </div>
+              )}
             </div>
           )}
         </>

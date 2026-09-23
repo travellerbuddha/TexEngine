@@ -4,6 +4,7 @@
  "crs.approval.approved": "Одобрено",
  "crs.approval.pending": "Ожидает одобрения",
  "crs.approval.rejected": "Отклонено",
+ "crs.basis.add_on": "Дозаказ (проживание не пересчитано)",
  "crs.basis.current": "Текущие цены",
  "crs.basis.historical_sale_date": "Выбранная дата продажи",
  "crs.basis.manual": "Цена вручную",

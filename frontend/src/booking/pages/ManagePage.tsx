@@ -1,4 +1,4 @@
-import { CalendarCog, CreditCard, KeyRound, Mail, Phone, XCircle } from "lucide-react"
+import { CalendarCog, CreditCard, KeyRound, Mail, Phone, Sparkles, XCircle } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
@@ -16,6 +16,7 @@ import type { BookingRoom, BookingSummary, PaymentStart, Proposal, Reason } from
 import { Button, Field, Textarea } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
+import { AddExtrasDialog } from "./AddExtrasDialog"
 import { RoomBlock, StatusBadge, Totals } from "./bookingView"
 import { SiteError } from "./SiteError"
 
@@ -49,6 +50,9 @@ function useFragmentToken(slug: string) {
 }
 
 type Notice = { tone: "ok" | "warn" | "bad" | "info"; title: string; body?: string } | null
+
+/** Reservation statuses extras can still be added to (services/addons.py OPEN_STATUSES). */
+const EXTRAS_OPEN = new Set(["Confirmed", "Pending Payment", "Held"])
 
 function CancelDialog({ room, currency, token, onClose, onDone }: { room: BookingRoom; currency: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
   const { t, money } = useI18n()
@@ -293,6 +297,7 @@ function Manage({ token }: { token: string | null }) {
   const [notice, setNotice] = useState<Notice>(null)
   const [cancel, setCancel] = useState<BookingRoom | null>(null)
   const [change, setChange] = useState<BookingRoom | null>(null)
+  const [addExtras, setAddExtras] = useState<BookingRoom | null>(null)
   const [paying, setPaying] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const payStatus = sp.get("status")
@@ -329,6 +334,7 @@ function Manage({ token }: { token: string | null }) {
   const done = (n: Notice) => {
     setCancel(null)
     setChange(null)
+    setAddExtras(null)
     setNotice(n)
     void load()
     requestAnimationFrame(() => heading.current?.focus())
@@ -422,6 +428,12 @@ function Manage({ token }: { token: string | null }) {
                       <CalendarCog className="size-4" aria-hidden />
                       {t("manage.change")}
                     </Button>
+                    {EXTRAS_OPEN.has(r.status) && (
+                      <Button variant="secondary" size="sm" onClick={() => setAddExtras(r)}>
+                        <Sparkles className="size-4" aria-hidden />
+                        {t("manage.addExtras")}
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={() => setCancel(r)} className="text-bad">
                       <XCircle className="size-4" aria-hidden />
                       {t("manage.cancel")}
@@ -455,6 +467,7 @@ function Manage({ token }: { token: string | null }) {
       )}
       {cancel && <CancelDialog room={cancel} currency={data.currency} token={token} onClose={() => setCancel(null)} onDone={done} />}
       {change && <ChangeDialog room={change} currency={data.currency} token={token} onClose={() => setChange(null)} onDone={done} />}
+      {addExtras && <AddExtrasDialog room={addExtras} currency={data.currency} token={token} onClose={() => setAddExtras(null)} onDone={done} />}
     </div>
   )
 }

@@ -43,7 +43,8 @@ import { BOARDS, cmpDecimal, isZero, shortCode, type PartyForm } from "../../crs
 import { asApiError } from "../../crs/lib/useBookingFlow"
 import type { StayRequest } from "../../crs/lib/types"
 import { applyModification, proposeModification, type Basis } from "../lib/api"
-import type { ApplyResult, ContractVersionInfo, Proposal, ReservationDetail } from "../lib/types"
+import { addonText } from "../lib/addons"
+import type { AddonEntry, ApplyResult, ContractVersionInfo, Proposal, ReservationDetail } from "../lib/types"
 
 interface ModForm {
   check_in: string
@@ -56,6 +57,8 @@ interface ModForm {
   /** Quantity and service days per extra code (days are kept when only the quantity changes). */
   extras: Record<string, ExtraChoice>
   promo: string[]
+  /** Extras added after booking (G-22) to remove: their add-on ids. */
+  drop: string[]
 }
 
 /** A modification warning: a limited extra has no capacity for the new stay (G-19). */
@@ -77,6 +80,7 @@ function formOf(req: StayRequest): ModForm {
       (req.extras ?? []).map((e) => [e.code, { quantity: e.quantity, service_dates: [...(e.service_dates ?? [])].sort() }]),
     ),
     promo: [...(req.promo_codes ?? [])],
+    drop: [],
   }
 }
 
@@ -108,6 +112,7 @@ function changesOf(a: ModForm, b: ModForm): Record<string, unknown> {
   const ex = choicesToRequest(b.extras)
   if (!sameChoices(choicesToRequest(a.extras), ex)) c.extras = ex
   if ([...b.promo].sort().join(",") !== [...a.promo].sort().join(",")) c.promo_codes = b.promo
+  if (b.drop.length) c.drop_addons = [...b.drop].sort()
   return c
 }
 
@@ -130,6 +135,7 @@ export function ModifyDrawer({
   const { t } = useTexT()
   const L = useLabels()
   const toast = useToast()
+  const clock = useServerClock()
   const { boot } = useSession()
   const caps = useMemo(() => new Set(res.capabilities), [res.capabilities])
   const canOverride = caps.has("price.override")
@@ -268,6 +274,9 @@ export function ModifyDrawer({
       ? { check_in: form.check_in, check_out: form.check_out }
       : undefined
   const droppedExtras = (proposal?.warnings ?? []).filter((w) => w.code === EXTRA_SOLD_OUT)
+  const addons = useMemo(() => res.pricing?.addons ?? [], [res.pricing])
+  // add-ons the proposal removes: not carried over into the proposed price
+  const removedAddons = proposal ? removedBy(proposal, addons) : []
 
   return (
     <Drawer
@@ -385,6 +394,32 @@ export function ModifyDrawer({
               <CodeChips id="mod-promo" value={form.promo} onChange={(promo) => set({ promo })} placeholder={t("crs.search.promo_placeholder")} />
             </Field>
           </div>
+          {addons.length > 0 && (
+            <fieldset className="space-y-2 rounded-lg border border-zinc-200 p-3">
+              <legend className="px-1 text-sm font-medium text-zinc-800">{t("res.mod.drop_title")}</legend>
+              <p className="text-xs text-zinc-500">{t("res.mod.drop_hint")}</p>
+              <ul className="space-y-1.5">
+                {addons.map((a) => (
+                  <li key={a.id}>
+                    <Checkbox
+                      className="items-start"
+                      checked={form.drop.includes(a.id)}
+                      onChange={(e) => set({ drop: e.target.checked ? [...new Set([...form.drop, a.id])] : form.drop.filter((x) => x !== a.id) })}
+                      label={
+                        <span className="min-w-0">
+                          <span className="block text-zinc-800">{addonText(a)}</span>
+                          <span className="block text-xs text-zinc-500">
+                            {t("res.mod.drop_added", { time: clock.label(a.at) })}
+                            {a.source ? ` · ${L.source(a.source)}` : ""}
+                          </span>
+                        </span>
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            </fieldset>
+          )}
           {changedCount > 0 && (
             <Button
               variant="ghost"
@@ -419,7 +454,7 @@ export function ModifyDrawer({
                   </button>
                 </Notice>
               )}
-              <Comparison p={proposal} canCost={canCost} roomName={roomName} planName={planName} />
+              <Comparison p={proposal} canCost={canCost} roomName={roomName} planName={planName} addons={addons} />
             </div>
           )}
         </section>
@@ -446,6 +481,12 @@ export function ModifyDrawer({
               <p className="flex items-start gap-1.5 text-sm font-medium text-amber-800">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
                 {t("res.mod.apply_drops", { extras: droppedExtras.map((w) => extraWarningName(w.message)).join(", ") })}
+              </p>
+            )}
+            {removedAddons.length > 0 && (
+              <p className="flex items-start gap-1.5 text-sm font-medium text-zinc-800">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700" aria-hidden />
+                {t("res.mod.apply_removes_addons", { count: removedAddons.length, extras: removedAddons.map(addonText).join("; ") })}
               </p>
             )}
             <Field label={t("core.field.reason")} hint={t("core.hint.reason_audited")} required>
@@ -531,17 +572,26 @@ function BasisPicker({
   )
 }
 
+/** The reservation's add-ons that a proposal no longer carries (removed with the change). */
+function removedBy(p: Proposal, addons: AddonEntry[]): AddonEntry[] {
+  const kept = new Set((p.proposed.addons ?? []).map((a) => a.id))
+  return addons.filter((a) => !kept.has(a.id))
+}
+
 /** OLD (price-locked) vs PROPOSED, side by side, with the server's difference (R-21). */
 function Comparison({
   p,
   canCost,
   roomName,
   planName,
+  addons,
 }: {
   p: Proposal
   canCost: boolean
   roomName: (id: string) => string
   planName: (id: string | null | undefined) => string
+  /** The reservation's extras added after booking (G-22). */
+  addons: AddonEntry[]
 }) {
   const { t } = useTexT()
   const clock = useServerClock()
@@ -555,6 +605,8 @@ function Comparison({
   // limited extras with no capacity for the new stay: dropped (not charged) if applied (G-19)
   const dropped = p.warnings.filter((w) => w.code === EXTRA_SOLD_OUT)
   const others = p.warnings.filter((w) => w.code !== EXTRA_SOLD_OUT)
+  const removed = removedBy(p, addons)
+  const keptAddons = addons.filter((a) => !removed.includes(a))
   const facts: { label: string; old: ReactNode; neu: ReactNode; changed: boolean }[] = [
     {
       label: t("res.cmp.stay"),
@@ -589,6 +641,16 @@ function Comparison({
       neu: (b.promo_codes ?? []).join(", ") || "—",
       changed: (a.promo_codes ?? []).join(",") !== (b.promo_codes ?? []).join(","),
     },
+    ...(addons.length
+      ? [
+          {
+            label: t("res.cmp.addons"),
+            old: addons.map(addonText).join("; "),
+            neu: keptAddons.map(addonText).join("; ") || "—",
+            changed: removed.length > 0,
+          },
+        ]
+      : []),
   ]
   return (
     <div className="space-y-4">
@@ -647,6 +709,18 @@ function Comparison({
         })}
       </p>
       {p.currency_changed && <Notice tone="warning">{t("res.cmp.currency_changed", { old: p.old.currency, neu: p.proposed.currency })}</Notice>}
+      {removed.length > 0 && (
+        <Notice tone="info" title={t("res.cmp.addons_removed", { count: removed.length })}>
+          <p>{t("res.cmp.addons_removed_hint")}</p>
+          <ul className="mt-1 list-disc pl-4 font-medium">
+            {removed.map((x) => (
+              <li key={x.id} data-addon={x.id} data-total={x.quote?.totals?.total ?? ""}>
+                {addonText(x)}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
       {dropped.length > 0 && (
         <Notice tone="warning" title={t("res.cmp.extras_dropped")}>
           <p>{t("res.cmp.extras_dropped_hint")}</p>

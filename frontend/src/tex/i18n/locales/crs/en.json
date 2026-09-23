@@ -4,6 +4,7 @@
  "crs.approval.approved": "Approved",
  "crs.approval.pending": "Approval pending",
  "crs.approval.rejected": "Rejected",
+ "crs.basis.add_on": "Add-on (stay not repriced)",
  "crs.basis.current": "Current prices",
  "crs.basis.historical_sale_date": "Chosen sale date",
  "crs.basis.manual": "Manual price",

@@ -6,6 +6,71 @@
  "res.ack.done": "Guest change acknowledged",
  "res.ack.note": "Note (optional)",
  "res.ack.title": "Acknowledge the guest's change",
+ "res.addon.added": "Added",
+ "res.addon.added_at": "Added",
+ "res.addon.addon_total": "Extras total",
+ "res.addon.balance_note": "The booking balance grows by this amount; the guest can pay it online from the booking page or at the hotel.",
+ "res.addon.booked": {
+  "one": "{count} already booked",
+  "other": "{count} already booked"
+ },
+ "res.addon.button": "Add extras",
+ "res.addon.card_hint": "Priced on their own when they were added; already included in the locked price above.",
+ "res.addon.card_title": "Added after booking",
+ "res.addon.choose": "Choose extras",
+ "res.addon.confirm": "Add to reservation",
+ "res.addon.confirm_title": "Add the extras",
+ "res.addon.cutoff": {
+  "one": "order {count} hour ahead",
+  "other": "order {count} hours ahead"
+ },
+ "res.addon.day_too_late": "too late",
+ "res.addon.done": "Extras added to {name}. New total {total}.",
+ "res.addon.done_balance": "Extras added to {name}. New total {total}, balance due {balance}.",
+ "res.addon.expired": "The price had expired (30 minutes), so the extras were priced again. Check the price and add them again.",
+ "res.addon.failed": "The extras were not added",
+ "res.addon.intro": "The stay stays price-locked. Extras are priced on their own at today's prices, without promotions or coupons, and added to the reservation's total. The booking balance grows by the same amount; the guest pays it online or at the hotel.",
+ "res.addon.max": {
+  "one": "at most {count} per stay",
+  "other": "at most {count} per stay"
+ },
+ "res.addon.max_reached": "Maximum per stay reached",
+ "res.addon.network_hint": "If you are not sure whether they were added, add them again: the same price is never added twice.",
+ "res.addon.no_promotions": "No promotion or coupon applies to extras added after booking.",
+ "res.addon.none": "No extras can be added now",
+ "res.addon.none_hint": "The hotel sells no extras that can be added to this reservation at the moment.",
+ "res.addon.none_left": "Not enough left on any day of this stay",
+ "res.addon.note": "Note (optional)",
+ "res.addon.note_hint": "Saved in the revision history and the audit trail.",
+ "res.addon.price": "Price extras",
+ "res.addon.price_failed": "The extras could not be priced",
+ "res.addon.priced": "Extras to add",
+ "res.addon.reason.empty": "Choose at least one extra.",
+ "res.addon.reason.first_room": "{name}: charged once per booking, so it can only be added to the booking's first room.",
+ "res.addon.reason.included": "{name}: already included by the hotel.",
+ "res.addon.reason.not_available": "{name}: cannot be added to this reservation.",
+ "res.addon.reason.quantity": {
+  "one": "{name}: at most {count} per stay, including what is already booked.",
+  "other": "{name}: at most {count} per stay, including what is already booked."
+ },
+ "res.addon.reason.too_late": "{name}: too late to add for {date}.",
+ "res.addon.refused": "These extras cannot be added",
+ "res.addon.replayed": "These extras had already been added to {name}.",
+ "res.addon.reprice": "Price again",
+ "res.addon.repriced": "The extras were priced again below. Check the price and add them again.",
+ "res.addon.result": "Price of the extras",
+ "res.addon.result_hint": "Choose extras and price them. Nothing is added until you confirm.",
+ "res.addon.selected": {
+  "one": "{count} selected",
+  "other": "{count} selected"
+ },
+ "res.addon.source": "Added by",
+ "res.addon.stale": "The selection changed after pricing.",
+ "res.addon.stay": "Stay {from} – {to}",
+ "res.addon.title": "Add extras to {name}",
+ "res.addon.too_late": "Too late to add for this stay",
+ "res.addon.total_after": "With the extras",
+ "res.addon.total_now": "Reservation total now",
  "res.badge.guest_change": "Guest change",
  "res.basis.current_help": "Today's contracts, promotions and exchange rates.",
  "res.basis.hint": "Which prices should the changed stay be calculated with?",
@@ -41,6 +106,12 @@
  "res.cancel.total": "Reservation total",
  "res.cancel.waive": "Waive the penalty",
  "res.cancel.waive_hint": "Price override — recorded in the audit trail with your reason.",
+ "res.cmp.addons": "Added after booking",
+ "res.cmp.addons_removed": {
+  "one": "{count} add-on removed",
+  "other": "{count} add-ons removed"
+ },
+ "res.cmp.addons_removed_hint": "These extras are taken off the reservation and no longer charged; the proposed total no longer includes them.",
  "res.cmp.basis": "Priced on {basis}: {detail} (as of {at}).",
  "res.cmp.caption": "Current and proposed stay",
  "res.cmp.changed": "changed",
@@ -108,6 +179,10 @@
  "res.mod.apply_drops": "Applying this change removes: {extras}.",
  "res.mod.apply_failed": "The change was not applied",
  "res.mod.apply_failed_hint": "The proposal expired (30 minutes), or the price or the reservation moved since you calculated. Review the new proposal and apply again.",
+ "res.mod.apply_removes_addons": {
+  "one": "Applying this change removes the add-on: {extras}.",
+  "other": "Applying this change removes {count} add-ons: {extras}."
+ },
  "res.mod.button": "Modify",
  "res.mod.calculate": "Calculate new price",
  "res.mod.changed_n": {
@@ -115,6 +190,9 @@
   "other": "{count} changes"
  },
  "res.mod.confirm": "Apply the change",
+ "res.mod.drop_added": "Added {time}",
+ "res.mod.drop_hint": "They keep the price they were added at. Tick an add-on to remove it with this change; the stay itself is re-priced on the pricing basis below (an original basis keeps the price it was sold at).",
+ "res.mod.drop_title": "Remove extras added after booking",
  "res.mod.err_basis_at": "Choose the sale date and time.",
  "res.mod.expires_hint": "A calculation is valid for 30 minutes.",
  "res.mod.intro": "The price is locked. A change is re-priced on the basis you choose, shown next to the current price, and applied only with a reason. Nothing changes until you apply.",
@@ -146,6 +224,11 @@
  "res.resend.sent": "Confirmation sent to {email}",
  "res.resend.title": "Re-send the confirmation e-mail?",
  "res.resend.warning": "The previous manage link stops working immediately. Only the link in this new e-mail will work.",
+ "res.rev.added": "Added",
+ "res.rev.addons_removed": {
+  "one": "{count} add-on removed",
+  "other": "{count} add-ons removed"
+ },
  "res.rev.n": "Revision {n}",
  "res.rev.none": "No revisions.",
  "res.rev.override": "Manual price",

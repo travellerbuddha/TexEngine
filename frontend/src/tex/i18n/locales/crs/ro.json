@@ -4,6 +4,7 @@
  "crs.approval.approved": "Aprobat",
  "crs.approval.pending": "Aprobare în așteptare",
  "crs.approval.rejected": "Respins",
+ "crs.basis.add_on": "Adăugare (sejurul nu a fost recalculat)",
  "crs.basis.current": "Prețuri actuale",
  "crs.basis.historical_sale_date": "Dată de vânzare aleasă",
  "crs.basis.manual": "Preț manual",
