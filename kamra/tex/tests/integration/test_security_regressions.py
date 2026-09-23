@@ -184,3 +184,70 @@ class TestRestBypass(TexTestCase):
 		frappe.set_user(self.agent)  # nosemgrep: frappe-setuser -- a user of the group's hotel sees it
 		scope.clear_cache()
 		self.assertIn(site.name, [r["name"] for r in policy_api.list_records(doctype="TEX Booking Site")])
+
+
+class TestPriceLock(TexTestCase):
+	"""G-01: a TEX-sold reservation cannot change commercially except through the TEX
+	modification / cancellation services — not by unlocking and editing in one save, not by
+	editing the snapshot, not alongside a status change."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		b = guest_books(session="sess-lock")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a Desk/REST writer with full rights
+		self.res = b["rooms"][0]["reservation"]
+
+	def _doc(self):
+		return frappe.get_doc("Reservation", self.res)
+
+	def test_unlock_and_edit_in_one_save_is_refused(self):
+		doc = self._doc()
+		doc.tex_price_locked = 0
+		doc.tex_pricing_source = "Manual"
+		doc.amount_after_tax = (doc.amount_after_tax or 0) + 100
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()
+		# unlocking alone is also a change of the commercial record
+		doc = self._doc()
+		doc.tex_price_locked = 0
+		doc.tex_pricing_source = "Manual"
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()
+
+	def test_snapshot_fx_and_cost_cannot_be_edited(self):
+		for field, value in (("tex_pricing_snapshot", '{"rate_plan": {"refundable": true}}'),
+		                     ("tex_currency", "TRY"), ("tex_fx_rate", 99), ("tex_cost_amount", 1),
+		                     ("tex_contract", None)):
+			doc = self._doc()
+			doc.set(field, value)
+			with self.assertRaises(frappe.ValidationError, msg=field):
+				doc.save()
+
+	def test_status_change_does_not_open_the_lock(self):
+		frappe.flags.kamra_status_transition = True   # as the legacy status flow does
+		try:
+			doc = self._doc()
+			doc.status = "No Show"
+			doc.amount_after_tax = 1
+			with self.assertRaises(frappe.ValidationError):
+				doc.save()
+			doc = self._doc()
+			doc.status = "Cancelled"
+			doc.cancellation_fee = 0   # a TEX stay takes its penalty only from the TEX service
+			before = frappe.db.get_value("Reservation", self.res, "cancellation_fee")
+			if (before or 0) != 0:
+				with self.assertRaises(frappe.ValidationError):
+					doc.save()
+		finally:
+			frappe.flags.kamra_status_transition = False
+
+	def test_non_commercial_edits_and_tex_services_still_work(self):
+		doc = self._doc()
+		doc.special_requests = "Quiet room, please"
+		doc.save()
+		self.assertEqual(frappe.db.get_value("Reservation", self.res, "special_requests"), "Quiet room, please")
+		# the TEX cancellation service applies the frozen policy
+		out = booking.cancel_reservation(self.res, reason="guest request")
+		self.assertEqual(frappe.db.get_value("Reservation", self.res, "status"), "Cancelled")
+		self.assertIn("penalty", out)
