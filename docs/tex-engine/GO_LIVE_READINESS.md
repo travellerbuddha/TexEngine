@@ -29,7 +29,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 | Channel distribution | **BLOCKED** (certification) · code PARTIAL | Provider-neutral layer (ADR-039): mappings, ARI computed from TEX and pushed as changes, signed idempotent inbound bookings applied in order, error queue, reconciliation, audit, sandbox adapter. `test_distribution` (17, every guard mutation-checked, per-connection send/apply included) | Staff UI done (Connect → Channels: mappings with close-out on switch-off, ARI preview, queue/send, inbound log with retry, reconciliation, sandbox; e2e `channels.spec.ts`); **no real provider adapter** (Channex, SiteMinder, RateGain, … all BLOCKED); `fetch_reservations` reconciliation needs a real provider | Channel-manager provider API credentials, commercial access, certification | A certified adapter for the chosen provider passes its certification and an end-to-end ARI + booking round trip |
 | PMS integration | PARTIAL | Transactional outbox (claims, back-off, dead-letter; PMS connections only); `WebhookPMS` signed, never unsigned (no secret or no https: final refusal, audited; cannot be enabled without a secret, G-83); G-88 created-event fix | No inbound PMS → TEX events (check-in/out, no-show); `fetch_availability` unused; no vendor adapter; no dedicated outbox delivery test; delivery to an uncertified Production adapter is being refused (payments hardening, G-90) | PMS vendor and its API | Vendor adapter + tests; inbound status events |
 | CRM | PARTIAL | Segments (G-23), loyalty administration (G-24), portfolio (G-25) backends with tests (`test_crm_segments`, `test_loyalty_admin`, `test_portfolio`) | Screens done (e2e `crm-admin.spec.ts`, `portfolio.spec.ts`); G-65 profile gaps; G-66 loyalty; G-81 e-mail hash stored without consent | — | UIs merged with e2e; G-81 fixed |
-| Security | PARTIAL · **security blocker** | Capability + property scope on every TEX endpoint; immutable audit trail; secret redaction; semgrep ERROR-level; `test_security_regressions` (58); signatures keyed only by `encryption_key` (G-89 fixed); root `SECURITY.md` rewritten for TEX (guest surfaces, severity areas, no PAN/CVV); G-83 hygiene fixed (ADR-046: links checked, consent needs a proven owner, server-side upload checks and no public active content, tokens only in fragments/POST bodies, no unsigned PMS webhook) · `test_security_hygiene` (7) | `SECURITY.md` names no security contact yet; no dependency/secret scanning in CI; no external penetration test | Security contact; pentest | Security contact named in SECURITY.md; pentest done |
+| Security | PARTIAL · **security blocker** | Capability + property scope on every TEX endpoint; immutable audit trail; secret redaction; semgrep ERROR-level; `test_security_regressions` (58); signatures keyed only by `encryption_key` (G-89 fixed); root `SECURITY.md` rewritten for TEX (guest surfaces, severity areas, no PAN/CVV); G-83 hygiene fixed and reviewed (ADR-046 and its review follow-up: links checked, consent needs a proven owner with `crm.edit`, server-side upload checks, the public folder serves an allow-list judged on the stored name, images decoded whole, tokens only in fragments/POST bodies, no unsigned PMS webhook, p24 cleans existing files and versioned keys) · `test_security_hygiene` (14), e2e `pay-link.spec.ts` (written, not yet run) | `SECURITY.md` names no security contact yet; no dependency/secret scanning in CI; no external penetration test; production nginx must not add its own Referrer-Policy on payment pages (§4); p24 lists public SVG/XML files and site images for the owner to replace | Security contact; pentest | Security contact named in SECURITY.md; pentest done |
 | Tenant isolation | PARTIAL | Enterprise → group → hotel grants; permission hooks on every scoped DocType (hooks ↔ perm sync test); legacy endpoint resolution (ADR-027); G-26 fixed (ADR-040). Tests: `TestTenantIsolation`, `TestRestBypass`, `TestLegacyTenancy`, `TestAdminDataTenancy`, distribution tenancy | No known open gap. Guest identity is shared inside an enterprise by design (ADR-040). Needs CI evidence and an external test | Pentest | CI green + pentest |
 | Custom domain | PARTIAL · infra **BLOCKED** | DNS TXT verification, daily recheck, host → site mapping, pinned public API, guest links on the hotel's host (ADR-035, `test_custom_domains` 9) | Engine served on the hotel's host (pinned SPA, e2e `custom-host.spec.ts`); only operations remain | Per host: `bench setup add-domain <host>`, regenerate nginx, one TLS certificate per host; production `host_name` in `site_config.json` | A verified host serves its engine over TLS on the production site |
 | Email | **BLOCKED** (SMTP) · code PARTIAL | Transactional mail in 6 languages through the e-mail queue (`TestNotifications`, `TestSecretsNeverLogged`). Delivery status synced every 5 min from Frappe's queue: each TEX Communication keeps its queue entry and becomes Sent or Failed with a short reason; a mail the queue refused is recorded as Failed; "resend" and the payment-link dialogs say "queued"; guest mail goes out in the hotel's name with the hotel's Reply-To, always from the site's own account (ADR-047). Tests: `test_system_status.TestMailDeliveryStatus` (3) | No SMTP account; SPF/DKIM; "Sent" means accepted by the mail server (bounces after that are not tracked); a per-hotel sending domain is not built | SMTP account, sender domain, SPF/DKIM records | Mail delivered on the production site; status synced (done in code) |
@@ -37,7 +37,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 | Backups | **BLOCKED** | — (only upstream docs mention `bench backup`) | No schedule, off-site copy, encryption, retention or restore rehearsal. `encryption_key` (site_config) must be kept with the backups: without it every Password field (payment and integration secrets) is lost | Backup storage, retention, RPO/RTO | Nightly encrypted off-site backups + a restore rehearsal within 30 days |
 | CI/CD | **BLOCKED** (owner: Actions minutes, registry) · code PARTIAL | `ci.yml`: ruff, frontend build + i18n parity, upstream suites, TEX unit tests and every integration module (discovered), Playwright (MariaDB 11.8); `workflow_dispatch` runs it on any branch; upstream release pipelines guarded to the upstream repository (G-61 fixed) | Never run on GitHub yet (dispatch it once from the Actions tab); no pip/npm audit or secret scanning; no TEX image, registry, staging or deploy pipeline | A base branch or a dispatched run; container registry; TEX release identity | CI green on GitHub for the release commit; a TEX image built and deployed to staging |
 | Production secrets | PARTIAL | Payment and integration secrets are Password fields, never returned; channel `api_key` encrypted (p18); payment provider `api_key` encrypted (G-83, p22); secret-like settings refused; redaction in audit and error logs; only token hashes stored | no rotation runbook; demo password in CI/dev docs (test only) | Secret store / rotation policy | Rotation runbook; production posture check |
-| Data migration | PARTIAL | Patches p01–p18 listed and idempotent; tested: p05, p06, p10, p12, p15, p16, p17, p21 (G-50), p22 (G-83) | Untested: p01–p04, p07–p09, p11, p13, p14, p18 (G-76); no end-to-end upgrade test; no TEX-native importer for future bookings/guests/contracts (the legacy CSV importer writes plain Reservations); `MIGRATION_PLAN.md` patch table is stale | Source data and a cut-over date | Upgrade test from a Kamra-shaped DB; importer for open bookings |
+| Data migration | PARTIAL | Patches p01–p18 listed and idempotent; tested: p05, p06, p10, p12, p15, p16, p17, p21 (G-50), p22 and p24 (G-83) | Untested: p01–p04, p07–p09, p11, p13, p14, p18 (G-76); no end-to-end upgrade test; no TEX-native importer for future bookings/guests/contracts (the legacy CSV importer writes plain Reservations); `MIGRATION_PLAN.md` patch table is stale | Source data and a cut-over date | Upgrade test from a Kamra-shaped DB; importer for open bookings |
 | Rollback plan | **BLOCKED** | Commercial rollback exists (new draft from an older version + publish; policy revise/activate/archive) | Patches are forward-only (p07, p10 scrub data; p04, p12, p15, p18 transform rows); `deploy/install.sh` migrates without a backup first; TEX has no release identity (still Kamra 2.6.2) | Staging environment | Rollback rehearsed once on staging (maintenance mode → restore pre-migrate backup → previous commit → build/restart) |
 
 ## 2. Launch blockers
@@ -107,6 +107,37 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 - **`encryption_key`** in `site_config.json` signs offers, payment callbacks and webhooks,
   and decrypts every Password field. Back it up separately from the database and never
   rotate it without a re-encryption plan.
+- **nginx and payment pages** (ADR-046, G-83 review). TEX answers `/book/pay…` (and `/pay…` on a
+  hotel's own host) with `Referrer-Policy: no-referrer`, so an old payment link's token never
+  leaves in a Referer. bench's nginx template adds `Referrer-Policy "same-origin,
+  strict-origin-when-cross-origin"` at server level, which nginx also adds to proxied
+  responses; browsers then use the last valid value. The page's own `<meta name="referrer">`
+  still wins, but production should not weaken the header. In the site's server block, before
+  `location /`, add (a location with its own `add_header` inherits none from the server, so the
+  other security headers are repeated; the upstream name is bench's `<bench>-frappe`):
+
+  ```nginx
+  # TEX payment pages: keep the app's Referrer-Policy (no-referrer); no server-level policy here
+  location ~ ^/(book/)?pay(/|$) {
+      add_header X-Frame-Options "SAMEORIGIN";
+      add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+      add_header X-Content-Type-Options nosniff;
+      proxy_http_version 1.1;
+      proxy_set_header X-Forwarded-For $remote_addr;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Frappe-Site-Name <site>;
+      proxy_set_header Host $host;
+      proxy_set_header X-Use-X-Accel-Redirect True;
+      proxy_read_timeout 120;
+      proxy_redirect off;
+      proxy_pass http://<bench>-frappe;
+  }
+  ```
+
+  Manage pages carry their token only in the fragment, so the server-level policy is harmless
+  there. Also keep the template's `location ~* ^/files/.*.(htm|html|svg|xml)` download rule;
+  TEX's File guard is what keeps such files out of the public folder in the first place
+  (bench serve, used by `deploy/tex-local`, forces no download at all).
 
 ## 5. Go-live gates
 
@@ -139,3 +170,4 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   queue, "resend" says queued, guest mail in the hotel's name with its Reply-To. Monitoring
   stays PARTIAL (uptime monitor and log shipping are owner infrastructure); Email stays BLOCKED
   on SMTP.
+- 2026-09-23: G-83 adversarial review fixed (ADR-046 review follow-up): the public-file guard judges the stored name against an allow-list (images, video, audio, PDF, office documents, fonts, zip) before anything is written; private-by-URL files accepted; inline public SVG refused with a reason; images decoded whole (MPO accepted); site images limited to /files/ images or https on other hosts, judged only when changed; staff consent needs `crm.edit`; the consent history stays in the viewer's hotels; p24 privatises public HTML/script, reports other public active content and invalid site images, masks API keys in the change history; nginx note for payment pages. Not production-ready.

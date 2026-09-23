@@ -1232,6 +1232,49 @@ sends:
   TEX never stores or logs the raw token itself.
 - An SVG logo can no longer be uploaded (TEX or legacy screens); an https URL still works.
 
+**Review follow-up (G-83 adversarial review, 2026-09-23).** Corrections to the decision above:
+- *The stored name decides, against an allow-list.* The guard judged the name a client sent:
+  `x.png?.html` was stored as `x.png_.html`, a `file_url` of `/files/e%2Ehtml` as `e.html`, and
+  XML types browsers render (`.rss`, `.atom`, `.rdf`, `.mml`, `.kml`, `.xsd`) were not on the
+  block list. It now judges every name File can store the bytes under (URL-decoded, then
+  Frappe's `[/\%?#] → _`): before File's own `before_insert`, again on the final name right
+  before the bytes are written (`save_file_on_filesystem`), and on the final URL when a file is
+  created, made public or moved. The public folder serves only an allow-list
+  (`filetypes.PUBLIC_EXTENSIONS`): images (png, jpg/jpeg, gif, webp, avif, bmp, ico, tif/tiff,
+  heic/heif), video (mp4, m4v, mov, webm, ogv, 3gp), audio (mp3, m4a, aac, oga/ogg, opus, wav,
+  weba), PDF and office documents (pdf, txt, csv, tsv, doc/docx, xls/xlsx, ppt/pptx, odt, ods,
+  odp, rtf), fonts (woff/woff2, ttf, otf, eot) and zip, and never a type whose MIME type is HTML,
+  XML or script. That is what upstream Kamra and TEX store publicly (room and housekeeping
+  photos and video, logos, brochures); anything else is stored private, where Frappe checks
+  access and forces a download. A file whose URL is under `/private/` is private without the
+  flag, as Frappe decides. With a storage hook (`write_file`, e.g. S3) the final-URL check
+  still refuses the record, after the upload.
+- *Inline images.* A public inline SVG (`extract_images_from_html`: Print Format HTML, doctypes
+  with public attachments) is refused with the reason, stopping the save visibly; it is not
+  stored private silently (a web page would then show a broken image). Use a PNG or WebP.
+- *Images decode whole.* `verify()` checks only PNG. Every frame is now decoded with
+  `LOAD_TRUNCATED_IMAGES` off (Frappe turns it on globally); an iPhone multi-picture JPEG (Pillow
+  reports `MPO`) is a JPEG.
+- *Site images.* A new logo or hero is a PNG/JPEG/GIF/WebP under `/files/` (no `..`, no
+  `/private/` or `/assets/`) or an https address on another host, never the platform's or a
+  booking domain (an image request carries the viewer's session to whatever path it names).
+  Only a changed image is judged, so a site with an older image stays savable; patch p24 lists
+  those sites.
+- *Existing data (p24).* Public HTML, XHTML and script files are made private; other public
+  files the allow-list no longer serves (SVG logos, XML) are reported one by one
+  (`file.public_active_content`), since a page may still show them. Plain API keys kept in the
+  change history (Version) of payment provider accounts before p22 are masked; a Password field
+  reaches the history only as asterisks.
+- *Consent needs `crm.edit`.* Staff who may only sell (`reservation.create`) record a request,
+  like an anonymous booker; only staff who may edit guest profiles at the hotel apply consent to
+  an existing profile. The CRM consent history shows entries of the viewer's hotels and
+  profile-level changes only, never another hotel's bookings or staff.
+- *Referrer-Policy behind nginx.* bench's nginx adds `Referrer-Policy: same-origin,
+  strict-origin-when-cross-origin` to every response, proxied ones included, and browsers use
+  the last valid value, which would weaken the payment pages' `no-referrer` header. The page's
+  `<meta name="referrer">` still wins, so the pages are safe; production nginx should not add
+  its own policy on `/book/pay`, `/pay` (GO_LIVE_READINESS §4 has the snippet).
+
 ## ADR-047 Operations: a scoped system status, a boolean guest ping, alerts on change; guest e-mail status follows Frappe's queue
 **Context.** GO_LIVE_READINESS listed two operations gaps.
 - *Monitoring.* TEX had no status endpoint. `kamra/health.py` is upstream Kamra diagnostics: it
