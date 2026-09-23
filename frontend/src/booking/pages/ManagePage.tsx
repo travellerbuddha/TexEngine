@@ -1,5 +1,5 @@
 import { CalendarCog, CreditCard, KeyRound, Mail, Phone, Sparkles, XCircle } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams, type NavigateFunction } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
@@ -448,8 +448,9 @@ function Manage({ token }: { token: string | null }) {
   const heading = useRef<HTMLHeadingElement>(null)
   const payStatus = sp.get("status")
   const payTxn = sp.get("payment")
-  // a change's payment started from this tab: the page says what came of the change
-  const changeRequest = payTxn ? getItem(changeKey(payTxn)) : null
+  // a change's payment started from this tab: the page says what came of the change (read once
+  // per return, the stored key is removed once the change is settled)
+  const changeRequest = useMemo(() => (payTxn ? getItem(changeKey(payTxn)) : null), [payTxn])
 
   const load = useCallback(async () => {
     if (!token) return
