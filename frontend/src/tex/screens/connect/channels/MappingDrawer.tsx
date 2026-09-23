@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
-import { Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
@@ -24,7 +23,16 @@ interface Form {
 
 const OCCUPANCIES = /^\s*[1-9]\s*(,\s*[1-9]\s*)*$/
 
-function toForm(m: Mapping | null, lookups: Lookups, defaults: { market?: string; channel?: string }): Form {
+/** A new mapping proposes a sales channel only when the hotel has exactly one OTA channel
+ * (with the default market); otherwise both stay empty so the user picks them, rather
+ * than a channel booking quietly selling with the direct-web prices and promotions. */
+function newDefaults(lookups: Lookups, market: string | undefined) {
+  const ota = lookups.channels.filter((c) => c.channel_group === "OTA")
+  if (ota.length !== 1) return { market: "", channel: "" }
+  return { market: market && lookups.markets.some((r) => r.name === market) ? market : "", channel: ota[0].name }
+}
+
+function toForm(m: Mapping | null, lookups: Lookups, defaults: { market: string; channel: string }): Form {
   if (m)
     return {
       enabled: !!m.enabled,
@@ -40,7 +48,6 @@ function toForm(m: Mapping | null, lookups: Lookups, defaults: { market?: string
       occupancies: m.occupancies || "2",
       horizon_days: String(m.horizon_days ?? 90),
     }
-  const has = <R extends { name: string }>(rows: R[], v?: string) => (v && rows.some((r) => r.name === v) ? v : "")
   return {
     enabled: true,
     room_type: "",
@@ -48,8 +55,8 @@ function toForm(m: Mapping | null, lookups: Lookups, defaults: { market?: string
     external_rate_code: "",
     board: "",
     rate_plan: "",
-    market: has(lookups.markets, defaults.market),
-    sales_channel: has(lookups.channels, defaults.channel),
+    market: defaults.market,
+    sales_channel: defaults.channel,
     contract: "",
     sell_currency: lookups.currency ?? "",
     occupancies: "2",
@@ -64,14 +71,12 @@ export function MappingDrawer({
   lookups,
   onClose,
   onSaved,
-  onDelete,
 }: {
   mapping: Mapping | "new" | null
   connection: string
   lookups: Lookups
   onClose: () => void
   onSaved: () => void
-  onDelete: (m: Mapping) => void
 }) {
   const { t } = useTexT()
   const toast = useToast()
@@ -79,9 +84,14 @@ export function MappingDrawer({
   const isNew = mapping === "new"
   const current = mapping && mapping !== "new" ? mapping : null
   const save = useTexMutation<{ data: MappingInput }, { name: string }>("distribution", "save_mapping")
-  const defaults = { market: boot.settings.default_market, channel: boot.settings.default_sales_channel }
+  const defaults = newDefaults(lookups, boot.settings.default_market)
   const [form, setForm] = useState<Form>(() => toForm(current, lookups, defaults))
   const [touched, setTouched] = useState(false)
+  const errorRef = useRef<HTMLDivElement>(null)
+  // the server's answer ("already mapped", …) sits above the fields: bring it into view
+  useEffect(() => {
+    if (save.error) errorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [save.error])
 
   useEffect(() => {
     if (!mapping) return
@@ -134,7 +144,7 @@ export function MappingDrawer({
     if (current) data.name = current.name
     try {
       await save.run({ data })
-      toast.success(t("connect.channels.mappings.saved"))
+      toast.success(data.enabled ? t("connect.channels.mappings.saved") : t("connect.channels.mappings.saved_off"))
       onSaved()
     } catch {
       /* shown inline */
@@ -152,11 +162,6 @@ export function MappingDrawer({
       title={isNew ? t("connect.channels.mappings.add") : t("connect.channels.mappings.edit_named", { codes: current ? mappingCodes(current) : "" })}
       footer={
         <>
-          {current && (
-            <Button variant="ghost" className="mr-auto text-rose-700" icon={<Trash2 className="size-4" aria-hidden />} onClick={() => onDelete(current)}>
-              {t("core.action.delete")}
-            </Button>
-          )}
           <Button variant="secondary" onClick={onClose}>
             {t("core.action.cancel")}
           </Button>
@@ -174,7 +179,9 @@ export function MappingDrawer({
           void submit()
         }}
       >
-        <InlineError error={save.error} />
+        <div ref={errorRef} className="scroll-mt-4 empty:hidden">
+          <InlineError error={save.error} />
+        </div>
         <fieldset className="space-y-3">
           <legend className="text-sm font-semibold text-zinc-900">{t("connect.channels.mapping.channel_side")}</legend>
           <p className="text-xs text-zinc-500">{t("connect.channels.mapping.channel_side_hint")}</p>

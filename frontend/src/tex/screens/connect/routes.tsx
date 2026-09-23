@@ -27,7 +27,8 @@ export default function AreaRoutes() {
   const { can } = useSession()
   const admin = can("connect.admin")
   const channels = can("channel.view")
-  if (!admin && !channels) return <NoAccess message="connect.no_access" />
+  // the area opens with either permission; each screen below names the one it needs
+  if (!admin && !channels) return <NoAccess message="connect.no_access_area" />
   const adminOnly = (el: ReactElement) => (admin ? el : <NoAccess message="connect.no_access" />)
   const channelsOnly = (el: ReactElement) => (channels ? el : <NoAccess message="connect.channels.no_access" />)
   // a channel-only user landing on the area goes to the screens they may open

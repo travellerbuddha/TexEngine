@@ -1,7 +1,7 @@
 // Small pieces shared by the channel distribution screens (G-69).
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
-import { ChevronLeft, ChevronRight, ShieldAlert } from "lucide-react"
+import { ArrowRight, ChevronLeft, ChevronRight, ShieldAlert } from "lucide-react"
 import { num } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
@@ -64,15 +64,31 @@ export function CountBadges({ label, counts, keyPrefix }: { label: string; count
   )
 }
 
-/** Queue + inbound counts of a connection, as two labelled rows. */
+/** Queue + inbound counts of a connection, as two labelled rows. Dead ARI jobs stay on
+ * record (the count never goes down); their errors and a retry are in the delivery
+ * monitor, which needs connect.admin, so everyone else learns how their days get resent. */
 export function ConnectionCounts({ conn }: { conn: ChannelConnection }) {
   const { t } = useTexT()
+  const { can } = useSession()
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="w-full text-xs font-medium text-zinc-500 sm:w-32">{t("connect.channels.queue")}</span>
         <CountBadges label={t("connect.channels.queue")} counts={conn.queue} keyPrefix="connect.channels.queue_status" />
       </div>
+      {conn.queue.Dead > 0 && (
+        <p className="text-xs text-zinc-600 sm:pl-34">
+          {t("connect.channels.queue_dead_hint")}
+          {can("connect.admin") && (
+            <>
+              {" "}
+              <Link to="/tex/connect/outbox" className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-tex-700 hover:underline">
+                {t("connect.channels.queue_dead_link")} <ArrowRight className="size-3.5" aria-hidden />
+              </Link>
+            </>
+          )}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="w-full text-xs font-medium text-zinc-500 sm:w-32">{t("connect.channels.inbound")}</span>
         <CountBadges label={t("connect.channels.inbound")} counts={conn.inbound} keyPrefix="connect.channels.inbound_status" />

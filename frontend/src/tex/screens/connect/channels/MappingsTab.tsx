@@ -1,20 +1,18 @@
 import { useState } from "react"
-import { Link2, Pencil, Plus, Trash2 } from "lucide-react"
-import { tex } from "../../../lib/api"
+import { Link2, Pencil, Plus } from "lucide-react"
 import { num } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, CardHeader, ConfirmDialog, DataTable, EmptyState, ErrorState, IconButton, useToast } from "../../../ui"
+import { Badge, Button, CardHeader, DataTable, EmptyState, ErrorState, IconButton } from "../../../ui"
 import { mappingCodes, useLookupNames } from "./common"
 import { MappingDrawer } from "./MappingDrawer"
 import type { Mapping, TabProps } from "./types"
 
-/** Channel room/rate codes ↔ what TEX sells under them. */
+/** Channel room/rate codes ↔ what TEX sells under them. A mapping is switched off rather
+ * than deleted: its ARI jobs and history keep pointing at it. */
 export function MappingsTab({ connection, lookups, mappings, canManage, onChanged }: TabProps) {
   const { t } = useTexT()
-  const toast = useToast()
   const names = useLookupNames(lookups.data)
   const [editing, setEditing] = useState<Mapping | "new" | null>(null)
-  const [deleting, setDeleting] = useState<Mapping | null>(null)
   const changed = () => {
     mappings.reload()
     onChanged()
@@ -25,6 +23,8 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
       {t("connect.channels.mappings.add")}
     </Button>
   ) : undefined
+
+  const enabledBadge = (m: Mapping) => (m.enabled ? <Badge tone="success">{t("connect.enabled")}</Badge> : <Badge tone="neutral">{t("connect.disabled")}</Badge>)
 
   return (
     <>
@@ -53,15 +53,24 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
               header: t("connect.channels.mapping.codes"),
               sortValue: (m) => mappingCodes(m),
               cell: (m) => (
-                <span>
-                  <span className="font-mono text-xs font-medium whitespace-nowrap text-zinc-900">{mappingCodes(m)}</span>
+                <span className="block min-w-0">
+                  <span className="font-mono text-xs font-medium break-all text-zinc-900 sm:break-normal sm:whitespace-nowrap">{mappingCodes(m)}</span>
                   <span className="block text-xs text-zinc-500">
                     → {names.roomType(m.room_type)}
+                    {/* phones: board and a switched-off state live here (their columns are hidden) */}
+                    <span className="sm:hidden"> · {m.board}</span>
                   </span>
+                  {!m.enabled && <span className="mt-1 block sm:hidden">{enabledBadge(m)}</span>}
                 </span>
               ),
             },
-            { key: "board", header: t("connect.channels.mapping.board"), sortValue: (m) => m.board, cell: (m) => <span className="font-mono text-xs">{m.board}</span> },
+            {
+              key: "board",
+              header: t("connect.channels.mapping.board"),
+              hideBelow: "sm",
+              sortValue: (m) => m.board,
+              cell: (m) => <span className="font-mono text-xs">{m.board}</span>,
+            },
             {
               key: "rate_plan",
               header: t("connect.channels.mapping.rate_plan"),
@@ -84,11 +93,7 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
               cell: (m) => <span className="whitespace-nowrap tabular-nums">{(m.occupancies || "2").split(",").join(", ")}</span>,
             },
             { key: "horizon", header: t("connect.channels.mapping.horizon"), align: "right", hideBelow: "md", sortValue: (m) => m.horizon_days ?? 0, cell: (m) => num(m.horizon_days ?? 90) },
-            {
-              key: "enabled",
-              header: t("connect.field.status"),
-              cell: (m) => (m.enabled ? <Badge tone="success">{t("connect.enabled")}</Badge> : <Badge tone="neutral">{t("connect.disabled")}</Badge>),
-            },
+            { key: "enabled", header: t("connect.field.status"), hideBelow: "sm", cell: enabledBadge },
             ...(canManage
               ? [
                   {
@@ -96,29 +101,16 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
                     header: <span className="sr-only">{t("connect.outbox.col.actions")}</span>,
                     align: "right" as const,
                     cell: (m: Mapping) => (
-                      <span className="inline-flex gap-1">
-                        <IconButton
-                          size="sm"
-                          label={t("connect.channels.mappings.edit_named", { codes: mappingCodes(m) })}
-                          icon={<Pencil className="size-4" />}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setEditing(m)
-                          }}
-                        />
-                        <IconButton
-                          size="sm"
-                          className="hover:bg-rose-50 hover:text-rose-700"
-                          label={t("connect.channels.mappings.delete_named", { codes: mappingCodes(m) })}
-                          icon={<Trash2 className="size-4" />}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setDeleting(m)
-                          }}
-                        />
-                      </span>
+                      <IconButton
+                        size="sm"
+                        label={t("connect.channels.mappings.edit_named", { codes: mappingCodes(m) })}
+                        icon={<Pencil className="size-4" />}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditing(m)
+                        }}
+                      />
                     ),
                   },
                 ]
@@ -136,26 +128,8 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
             setEditing(null)
             changed()
           }}
-          onDelete={(m) => {
-            setEditing(null)
-            setDeleting(m)
-          }}
         />
       )}
-      <ConfirmDialog
-        open={!!deleting}
-        onClose={() => setDeleting(null)}
-        tone="danger"
-        title={t("connect.channels.mappings.delete_title")}
-        body={t("connect.channels.mappings.delete_body", { codes: deleting ? mappingCodes(deleting) : "" })}
-        confirmLabel={t("core.action.delete")}
-        onConfirm={async () => {
-          if (!deleting) return
-          await tex("distribution", "delete_mapping", { name: deleting.name }, { post: true })
-          toast.success(t("connect.channels.mappings.deleted"))
-          changed()
-        }}
-      />
     </>
   )
 }

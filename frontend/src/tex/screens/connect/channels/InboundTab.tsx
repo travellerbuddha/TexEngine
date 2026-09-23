@@ -31,6 +31,7 @@ function RoomLine({ room }: { room: InboundRoom }) {
 }
 
 function Notes({ row }: { row: InboundRow }) {
+  const { t } = useTexT()
   if (!row.warning && !row.last_error) return <span className="text-zinc-500">—</span>
   return (
     <span className="flex max-w-xs flex-col gap-1">
@@ -42,7 +43,7 @@ function Notes({ row }: { row: InboundRow }) {
       )}
       {row.last_error && (
         <details>
-          <summary className="line-clamp-2 cursor-pointer text-xs break-words text-rose-800">{row.last_error}</summary>
+          <summary className="cursor-pointer text-xs font-medium text-rose-800">{t("connect.channels.inbound.show_error")}</summary>
           <p className="mt-1 text-xs break-words whitespace-pre-wrap text-zinc-700">{row.last_error}</p>
         </details>
       )}

@@ -49,7 +49,9 @@ function Rates({ day }: { day: AriDay }) {
   )
 }
 
-/** What TEX would send to the channel per day, next to what the channel last accepted. */
+/** What TEX would send to the channel per day, next to what the channel last accepted.
+ * On phones the date cell also carries availability, restrictions and the sync state
+ * (their columns are hidden), so the table is date + prices at 320px. */
 export function AriTable({ days, loading, caption }: { days: AriDay[] | undefined; loading: boolean; caption: string }) {
   const { t } = useTexT()
   return (
@@ -66,17 +68,24 @@ export function AriTable({ days, loading, caption }: { days: AriDay[] | undefine
           key: "date",
           header: t("connect.channels.ari.col.date"),
           cell: (d) => (
-            <span className="whitespace-nowrap">
-              <span className="mr-1.5 text-xs text-zinc-500">{weekday(d.date)}</span>
-              {date(d.date)}
+            <span className="block">
+              <span className="whitespace-nowrap">
+                <span className="mr-1.5 text-xs text-zinc-500">{weekday(d.date)}</span>
+                {date(d.date)}
+              </span>
+              <span className="mt-1 flex flex-col items-start gap-1 text-xs sm:hidden">
+                <SyncBadge day={d} />
+                <span className="text-zinc-600">{t("connect.channels.ari.available_n", { n: num(d.available) })}</span>
+                <Restrictions day={d} />
+              </span>
             </span>
           ),
         },
-        { key: "available", header: t("connect.channels.ari.col.available"), align: "right", cell: (d) => num(d.available) },
-        { key: "restrictions", header: t("connect.channels.ari.col.restrictions"), cell: (d) => <Restrictions day={d} /> },
+        { key: "available", header: t("connect.channels.ari.col.available"), align: "right", hideBelow: "sm", cell: (d) => num(d.available) },
+        { key: "restrictions", header: t("connect.channels.ari.col.restrictions"), hideBelow: "sm", cell: (d) => <Restrictions day={d} /> },
         { key: "stay", header: t("connect.channels.ari.col.stay"), hideBelow: "md", cell: (d) => <Stay day={d} /> },
         { key: "rates", header: t("connect.channels.ari.col.rates"), cell: (d) => <Rates day={d} /> },
-        { key: "sync", header: t("connect.channels.ari.col.sync"), cell: (d) => <SyncBadge day={d} /> },
+        { key: "sync", header: t("connect.channels.ari.col.sync"), hideBelow: "sm", cell: (d) => <SyncBadge day={d} /> },
       ]}
     />
   )

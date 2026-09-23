@@ -5,8 +5,10 @@
 // type, previews ARI (days with TEX's prices), queues and sends it, simulates a channel
 // booking, applies it and finds it Applied in the inbound log, then runs reconciliation.
 // Codes, the connection label and the booking id are unique per run. At the end the
-// channel booking is cancelled through the sandbox, the mapping deleted and the
-// connection disabled (a connection with history cannot be deleted), even when a step fails.
+// channel booking is cancelled through the sandbox, the mapping switched off (mappings
+// are not deleted: their ARI jobs keep pointing at them) and the connection disabled (a
+// connection with history cannot be deleted), even when a step fails. Each run therefore
+// leaves one more disabled "E2E channel …" card on the Channels list.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e channels
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { byLabel, esc, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
@@ -61,8 +63,9 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
   const ref = `SBX-E2E-${run}`
   const stay = stayDates(30, 2)
   let connection = ""
-  let mappingDeleted = false
+  let mappingOff = false
   let booked = false
+  let disabled: { ok: boolean; body: unknown } | undefined
 
   await english(page)
   await login(page, HOTEL_ADMIN)
@@ -133,12 +136,12 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
       await expect(table.getByText("2 adults", { exact: true }).first()).toBeVisible()
 
       await panel(page).getByRole("button", { name: "Queue changes" }).click()
-      await expect(toast(page, /^Changes queued for \d+ mappings?\.$/)).toBeVisible()
+      await expect(toast(page, /^Changes queued: \d+ mappings? checked across this hotel's channel connections\.$/)).toBeVisible()
       // Send now pushes this connection's due jobs; a job the scheduler holds at that moment
       // is sent by it instead, so send again until the channel has every previewed day
       await expect(async () => {
         await panel(page).getByRole("button", { name: "Send now" }).click()
-        await expect(toast(page, /^Sent \d+ · failed 0 · still waiting \d+$/)).toBeVisible({ timeout: 5_000 })
+        await expect(toast(page, /^Jobs processed \d+ · failed 0 · still waiting \d+$/)).toBeVisible({ timeout: 5_000 })
         await expect(table.getByRole("cell", { name: "Never sent", exact: true })).toHaveCount(0, { timeout: 5_000 })
       }).toPass({ timeout: 60_000 })
       await expect(table.getByRole("cell", { name: "In sync", exact: true })).toHaveCount(7)
@@ -201,7 +204,7 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
       await expect(panel(page).getByRole("button", { name: "Run again" })).toBeVisible()
     })
 
-    await test.step("the channel cancels the booking; the mapping is deleted", async () => {
+    await test.step("the channel cancels the booking; the mapping is switched off", async () => {
       const cancelled = await pageApi<{ received: number }>(page, "kamra.tex.api.distribution.sandbox_send", {
         connection,
         message: { provider_ref: ref, status: "cancelled", channel_name: "Sandbox OTA", rooms: [] },
@@ -211,16 +214,22 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
       booked = false
 
       await openTab(page, "Mappings")
-      await panel(page).getByRole("button", { name: `Delete mapping ${codes.room} / ${codes.rate}` }).click()
-      const confirm = page.getByRole("dialog", { name: "Delete this mapping?" })
-      await confirm.getByRole("button", { name: "Delete" }).click()
-      await expect(confirm).toBeHidden()
-      await expect(toast(page, "Mapping deleted.")).toBeVisible()
-      await expect(panel(page).getByText("No mappings yet")).toBeVisible()
-      mappingDeleted = true
+      await panel(page).getByRole("button", { name: `Edit mapping ${codes.room} / ${codes.rate}` }).click()
+      const dialog = page.getByRole("dialog", { name: `Edit mapping ${codes.room} / ${codes.rate}` })
+      const sending = dialog.getByRole("switch", { name: "Send to the channel" })
+      await expect(sending).toHaveAttribute("aria-checked", "true")
+      await sending.click()
+      await expect(sending).toHaveAttribute("aria-checked", "false")
+      await dialog.getByRole("button", { name: "Save", exact: true }).click()
+      await expect(dialog).toBeHidden()
+      await expect(toast(page, "Mapping saved. It is switched off, so nothing is sent for it.")).toBeVisible()
+      const row = panel(page).getByRole("row").filter({ hasText: `${codes.room} / ${codes.rate}` })
+      // the status column (phones repeat a switched-off state under the codes, hidden here)
+      await expect(row.getByRole("cell", { name: "Disabled", exact: true })).toBeVisible()
+      mappingOff = true
     })
   } finally {
-    // leave nothing selling or receiving: cancel the booking, drop the mapping, switch the connection off
+    // leave nothing selling or receiving: cancel the booking, switch the mapping and the connection off
     if (connection) {
       if (booked) {
         await pageApi(page, "kamra.tex.api.distribution.sandbox_send", {
@@ -229,17 +238,19 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
         }).catch(() => undefined)
         await pageApi(page, "kamra.tex.api.distribution.apply_now", { connection }).catch(() => undefined)
       }
-      if (!mappingDeleted) {
+      if (!mappingOff) {
         const maps = await pageApi<{ name: string }[]>(page, "kamra.tex.api.distribution.mappings", { connection }).catch(() => undefined)
-        for (const m of maps?.message ?? []) await pageApi(page, "kamra.tex.api.distribution.delete_mapping", { name: m.name }).catch(() => undefined)
+        for (const m of maps?.message ?? [])
+          await pageApi(page, "kamra.tex.api.distribution.save_mapping", { data: { name: m.name, connection, enabled: 0 } }).catch(() => undefined)
       }
-      const off = await pageApi(page, "kamra.tex.api.policies.save_record", {
+      disabled = await pageApi(page, "kamra.tex.api.policies.save_record", {
         doctype: "TEX Integration Connection",
         data: { name: connection, enabled: 0 },
-      })
-      expect(off.ok, `disable ${connection}: ${JSON.stringify(off.body).slice(0, 300)}`).toBeTruthy()
+      }).catch((e: unknown) => ({ ok: false, body: String(e) }))
     }
   }
+  // asserted after the finally block, so a failing step above keeps its own error
+  expect(disabled?.ok, `disable ${connection}: ${JSON.stringify(disabled?.body).slice(0, 300)}`).toBeTruthy()
 
   noErrors()
 })

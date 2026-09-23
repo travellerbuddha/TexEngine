@@ -4,6 +4,7 @@ import { useTexMutation } from "../../../lib/api"
 import { date, dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, CardBody, EmptyState, InlineError, Money, Notice, statusTone } from "../../../ui"
+import { useLabels } from "../../crs/lib/labels"
 import { BookingRef, EventBadge, InboundStatusBadge, mappingCodes } from "./common"
 import type { Mapping, Mismatch, MismatchKind, ReconcileResult, TabProps } from "./types"
 
@@ -11,12 +12,11 @@ import type { Mapping, Mismatch, MismatchKind, ReconcileResult, TabProps } from 
 const KINDS: MismatchKind[] = ["missing_in_tex", "status_differs", "total_differs", "missing_in_channel", "ari_drift"]
 const SHOWN = 10
 
+/** A TEX booking status ("Partially Cancelled", "Pending Payment", …) in the CRS's words. */
 function TexStatus({ status }: { status: string | null | undefined }) {
-  const { t } = useTexT()
+  const labels = useLabels()
   if (!status) return <span className="text-zinc-500">—</span>
-  const key = `connect.channels.tex_status.${status.toLowerCase().replace(/\s+/g, "_")}`
-  const label = t(key)
-  return <Badge tone={statusTone(status)}>{label === key ? status : label}</Badge>
+  return <Badge tone={statusTone(status)}>{labels.status(status)}</Badge>
 }
 
 function Line({ label, children }: { label: ReactNode; children: ReactNode }) {

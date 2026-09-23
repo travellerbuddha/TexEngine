@@ -6,13 +6,14 @@ import { useTexT } from "../../../i18n"
 import { Badge, Button, CardBody, ConfirmDialog, EmptyState, ErrorState, Field, Input, Segmented, Select, useToast } from "../../../ui"
 import { AriTable } from "./AriTable"
 import { mappingCodes, useLookupNames } from "./common"
-import type { AriPreview, PushResult, SendResult, TabProps } from "./types"
+import type { AriDay, AriPreview, PushResult, SendResult, TabProps } from "./types"
 
 type Span = "7" | "14" | "31"
 const ISO = /^\d{4}-\d{2}-\d{2}$/
+const NO_DAYS: AriDay[] = []
 
 /** ARI preview of one mapping, and the manual push controls. */
-export function AriTab({ connection, mappings, lookups, canManage, onChanged, goTo }: TabProps) {
+export function AriTab({ connection, conn, mappings, lookups, canManage, onChanged, goTo }: TabProps) {
   const { t } = useTexT()
   const toast = useToast()
   const names = useLookupNames(lookups.data)
@@ -28,14 +29,12 @@ export function AriTab({ connection, mappings, lookups, canManage, onChanged, go
     if (rows.length && !rows.some((m) => m.name === mapping)) setMapping((rows.find((m) => m.enabled) ?? rows[0]).name)
   }, [rows, mapping])
 
-  const q = useTexQuery<AriPreview>(
-    "distribution",
-    "ari_preview",
-    { mapping, date_from: from, days: Number(span) },
-    [mapping, from, span],
-    !!mapping && ISO.test(from),
-  )
-  const days = q.data?.mapping === mapping ? q.data.days : undefined
+  const validFrom = ISO.test(from)
+  const q = useTexQuery<AriPreview>("distribution", "ari_preview", { mapping, date_from: from, days: Number(span) }, [mapping, from, span], !!mapping && validFrom)
+  // a cleared or invalid date shows no days (not the last answer under the new date)
+  const days = !mapping ? undefined : !validFrom ? NO_DAYS : q.data?.mapping === mapping ? q.data.days : undefined
+  // a switched-off connection sends nothing: the server would queue 0 and mark jobs done unsent
+  const off = !conn.enabled
   const counts = useMemo(() => {
     const c = { in_sync: 0, changed: 0, never: 0 }
     for (const d of days ?? []) {
@@ -105,7 +104,7 @@ export function AriTab({ connection, mappings, lookups, canManage, onChanged, go
               }))}
             />
           </Field>
-          <Field label={t("connect.channels.ari.from")} className="w-full sm:w-auto" error={ISO.test(from) ? undefined : t("connect.channels.ari.err_date")}>
+          <Field label={t("connect.channels.ari.from")} className="w-full sm:w-auto" error={validFrom ? undefined : t("connect.channels.ari.err_date")}>
             <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>
           <div className="space-y-1.5">
@@ -126,19 +125,19 @@ export function AriTab({ connection, mappings, lookups, canManage, onChanged, go
         </div>
         {canManage && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button icon={<ListRestart className="size-4" aria-hidden />} loading={busy === "queue"} disabled={!!busy} onClick={queue}>
+            <Button icon={<ListRestart className="size-4" aria-hidden />} loading={busy === "queue"} disabled={!!busy || off} onClick={queue}>
               {t("connect.channels.ari.queue")}
             </Button>
-            <Button variant="secondary" icon={<Send className="size-4" aria-hidden />} loading={busy === "send"} disabled={!!busy} onClick={sendNow}>
+            <Button variant="secondary" icon={<Send className="size-4" aria-hidden />} loading={busy === "send"} disabled={!!busy || off} onClick={sendNow}>
               {t("connect.channels.ari.send_now")}
             </Button>
-            <Button variant="ghost" icon={<CloudUpload className="size-4" aria-hidden />} loading={busy === "full"} disabled={!!busy} onClick={() => setConfirmFull(true)}>
+            <Button variant="ghost" icon={<CloudUpload className="size-4" aria-hidden />} loading={busy === "full"} disabled={!!busy || off} onClick={() => setConfirmFull(true)}>
               {t("connect.channels.ari.resend")}
             </Button>
-            <p className="w-full text-xs text-zinc-500">{t("connect.channels.ari.actions_hint")}</p>
+            <p className="w-full text-xs text-zinc-500">{off ? t("connect.channels.ari.actions_off") : t("connect.channels.ari.actions_hint")}</p>
           </div>
         )}
-        {days && (
+        {days && validFrom && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs" aria-live="polite">
             {current && <span className="mr-1 text-zinc-500">{t("connect.channels.ari.summary", { codes: mappingCodes(current), currency: current.sell_currency })}</span>}
             <Badge tone="success">{t("connect.channels.ari.count_in_sync", { count: counts.in_sync })}</Badge>
@@ -147,10 +146,10 @@ export function AriTab({ connection, mappings, lookups, canManage, onChanged, go
           </div>
         )}
       </CardBody>
-      {q.error ? (
+      {q.error && validFrom ? (
         <ErrorState error={q.error} onRetry={q.reload} />
       ) : (
-        <AriTable days={days} loading={q.loading || !mapping} caption={t("connect.channels.ari.caption", { codes: current ? mappingCodes(current) : "" })} />
+        <AriTable days={days} loading={(q.loading && validFrom) || !mapping} caption={t("connect.channels.ari.caption", { codes: current ? mappingCodes(current) : "" })} />
       )}
       <ConfirmDialog
         open={confirmFull}

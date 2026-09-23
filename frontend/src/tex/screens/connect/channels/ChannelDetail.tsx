@@ -1,10 +1,10 @@
 import { Link, useParams, useSearchParams } from "react-router-dom"
-import { ArrowLeft, RadioTower, RefreshCw } from "lucide-react"
+import { ArrowLeft, ArrowRight, PowerOff, RadioTower, RefreshCw } from "lucide-react"
 import { useTexQuery } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, Card, CardBody, EmptyState, ErrorState, Skeleton, TabPanel, Tabs } from "../../../ui"
+import { Badge, Button, Card, CardBody, EmptyState, ErrorState, Notice, Skeleton, TabPanel, Tabs } from "../../../ui"
 import { CodeBlock } from "../../settings/components/common"
 import { ConnectFrame } from "../ConnectFrame"
 import { SyncStatus } from "./ChannelCard"
@@ -112,6 +112,7 @@ export default function ChannelDetail() {
       }
     >
       <div className="space-y-4">
+        {!conn.enabled && <SwitchedOffNotice />}
         {!conn.certified && <CertificationNotice />}
         <ConnectionSummary conn={conn} />
         <Card>
@@ -144,6 +145,33 @@ export default function ChannelDetail() {
         </Card>
       </div>
     </ConnectFrame>
+  )
+}
+
+/** A switched-off connection sends no ARI and its webhook refuses bookings (the sandbox
+ * too); messages already received are still applied by the queue. */
+function SwitchedOffNotice() {
+  const { t } = useTexT()
+  const { can } = useSession()
+  return (
+    <Notice
+      tone="warning"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          <PowerOff className="size-4 shrink-0" aria-hidden />
+          {t("connect.channels.off.title")}
+        </span>
+      }
+    >
+      <p>{t("connect.channels.off.body")}</p>
+      {can("connect.admin") ? (
+        <Link to="/tex/connect" className="mt-1 inline-flex items-center gap-1 font-medium text-amber-950 underline hover:no-underline">
+          {t("connect.channels.off.enable")} <ArrowRight className="size-4" aria-hidden />
+        </Link>
+      ) : (
+        <p className="mt-1">{t("connect.channels.off.ask")}</p>
+      )}
+    </Notice>
   )
 }
 

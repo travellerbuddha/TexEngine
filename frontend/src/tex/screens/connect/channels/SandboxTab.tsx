@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { FlaskConical, Plus, PlayCircle, Send, Shuffle } from "lucide-react"
 import { tex, TexApiError, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
@@ -16,6 +16,9 @@ interface MsgForm {
   last_name: string
   email: string
   rooms: RoomForm[]
+  /** next default line reference (L1, L2, …): only ever grows, so removing a room and
+   * adding another never repeats a reference (Modified messages match rooms by it) */
+  next_line: number
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/
@@ -41,9 +44,14 @@ function newRoom(m: Mapping | undefined, currency: string, n: number): RoomForm 
   }
 }
 
+/** The line reference a room is sent with (blank: its position, as the channel would). */
+function lineRef(r: RoomForm, i: number) {
+  return r.line_ref.trim() || `L${i + 1}`
+}
+
 /** Sandbox connections only: compose a booking message in TEX's neutral format and
  * receive it exactly as the channel's signed webhook would (no real channel involved). */
-export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: TabProps) {
+export function SandboxTab({ connection, conn, lookups, mappings, onChanged, goTo }: TabProps) {
   const { t } = useTexT()
   const toast = useToast()
   const { boot } = useSession()
@@ -58,11 +66,19 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
     last_name: "",
     email: "",
     rooms: [newRoom(rows[0], hotelCurrency, 1)],
+    next_line: 2,
   }))
   const [touched, setTouched] = useState(false)
   const [result, setResult] = useState<(SandboxResult & { ref: string; status: InboundEvent }) | null>(null)
   const [applying, setApplying] = useState(false)
   const send = useTexMutation<{ connection: string; message: SandboxMessage }, SandboxResult>("distribution", "sandbox_send")
+  // a switched-off connection refuses every message (the webhook's "unknown connection")
+  const off = !conn.enabled
+  const errorRef = useRef<HTMLDivElement>(null)
+  // the server's answer sits above the fields while Send is at the bottom: bring it into view
+  useEffect(() => {
+    if (send.error) errorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [send.error])
 
   // mappings may arrive after the form was opened: prefill the untouched first room
   useEffect(() => {
@@ -99,10 +115,13 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
     if (!cancelled && form.rooms.length === 0) top.rooms = t("connect.channels.sandbox.err_rooms")
     const ccys = new Set(form.rooms.map((r) => r.currency).filter(Boolean))
     if (!cancelled && ccys.size > 1) top.rooms = t("connect.channels.sandbox.err_currency_mix")
+    // two rooms with one line reference: a later "Modified" would update one and cancel the other
+    const refs = form.rooms.map((r, i) => lineRef(r, i))
     // a cancellation carries only the booking id: its rooms are neither checked nor sent
-    const rooms: RoomErrors[] = form.rooms.map((r) => {
+    const rooms: RoomErrors[] = form.rooms.map((r, i) => {
       if (cancelled) return {}
       const e: RoomErrors = {}
+      if (refs.indexOf(refs[i]) !== i) e.line_ref = t("connect.channels.sandbox.err_line_ref")
       if (!r.room_code.trim()) e.room_code = req
       if (!r.rate_code.trim()) e.rate_code = req
       if (!ISO.test(r.check_in)) e.check_in = req
@@ -137,7 +156,7 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
 
   const submit = async () => {
     setTouched(true)
-    if (!errors.ok) return
+    if (!errors.ok || off) return
     const message: SandboxMessage = {
       provider_ref: form.provider_ref.trim(),
       status: form.status,
@@ -152,7 +171,7 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
         children_ages: [],
         total: r.total.trim(),
         currency: r.currency,
-        line_ref: r.line_ref.trim() || `L${i + 1}`,
+        line_ref: lineRef(r, i),
       })),
       notes: "",
     }
@@ -206,7 +225,9 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
           void submit()
         }}
       >
-        <InlineError error={send.error} />
+        <div ref={errorRef} className="scroll-mt-4 empty:hidden">
+          <InlineError error={send.error} />
+        </div>
         <fieldset className="space-y-3">
           <legend className="text-sm font-semibold text-zinc-900">{t("connect.channels.sandbox.booking")}</legend>
           <FormGrid>
@@ -262,7 +283,7 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
                 variant="secondary"
                 size="sm"
                 icon={<Plus className="size-3.5" aria-hidden />}
-                onClick={() => setForm({ ...form, rooms: [...form.rooms, newRoom(rows[0], hotelCurrency, form.rooms.length + 1)] })}
+                onClick={() => setForm({ ...form, rooms: [...form.rooms, newRoom(rows[0], hotelCurrency, form.next_line)], next_line: form.next_line + 1 })}
               >
                 {t("connect.channels.sandbox.add_room")}
               </Button>
@@ -303,10 +324,10 @@ export function SandboxTab({ connection, lookups, mappings, onChanged, goTo }: T
         </section>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" icon={<Send className="size-4" aria-hidden />} loading={send.pending}>
+          <Button type="submit" icon={<Send className="size-4" aria-hidden />} loading={send.pending} disabled={off}>
             {t("connect.channels.sandbox.send")}
           </Button>
-          <p className="text-xs text-zinc-500">{t("connect.channels.sandbox.send_hint")}</p>
+          <p className="text-xs text-zinc-500">{off ? t("connect.channels.sandbox.send_off") : t("connect.channels.sandbox.send_hint")}</p>
         </div>
       </form>
 
