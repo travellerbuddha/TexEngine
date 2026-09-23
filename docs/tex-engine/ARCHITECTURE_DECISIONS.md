@@ -234,3 +234,16 @@ while it is still Pending. The emailed manage link stays the only long-lived sec
 re-send the confirmation with `crs.resend_confirmation`, which rotates the manage token (the
 old link stops working) and is audited. Confirming a booking before its deposit is paid is
 a credit decision guarded by `reservation.confirm_unpaid` (not held by agents by default).
+
+## ADR-026 Guest-facing hotel content is localised after pricing
+**Context.** Room, rate plan, extra and policy names came from the hotel's records in one
+language; German, Russian or Polish guests saw them untranslated (R-49).
+**Decision.** `TEX Content Translation` stores one text per (record, field, language),
+hotel-scoped and written only through `content.save` (`booking_site.edit`). Guest API
+responses (`public.site/search/quote`, manage view) are localised by
+`services/content.Localizer` from the request language, after pricing: codes, amounts and
+the frozen contract payload never change, and missing texts fall back to the hotel's own.
+Rate-plan and policy dicts are shared with cached contract terms, so the localiser works on
+copies. Translations are cached per hotel in Redis and invalidated on every change.
+**Consequences.** Staff screens keep the hotel's own texts; guest e-mails do not name rooms.
+Promotion names (group-level) are not yet translatable.
