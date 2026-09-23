@@ -33,7 +33,9 @@ def every_5_minutes() -> None:
 
 def every_15_minutes() -> None:
 	for job in ("kamra.tex.commercial.contracts.roll_version_statuses",
-	            "kamra.tex.crm.service.detect_abandoned"):
+	            "kamra.tex.crm.service.detect_abandoned",
+	            # guest changes whose payment never came expire; queued refunds that did not run retry
+	            "kamra.tex.services.guest_changes.expire_awaiting"):
 		_run(job)
 
 

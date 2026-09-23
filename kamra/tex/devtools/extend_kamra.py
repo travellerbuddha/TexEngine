@@ -60,7 +60,11 @@ EXT = {
 		F("tex_inventory_mode", "Select", "Inventory source", ["Physical rooms", "Configured"],
 		  default="Physical rooms"),
 		F("tex_lower_price_refund", "Select", "When a guest change costs less",
-		  ["Staff approval", "Refund automatically", "Keep as credit"], default="Staff approval"),
+		  ["Staff approval", "Refund automatically", "Keep as credit"], default="Staff approval",
+		  description="A guest change that costs less: Staff approval waits for the hotel; Refund automatically "
+		              "refunds what was paid above the new total to the card(s) it came from; Keep as credit "
+		              "keeps it as credit on the same booking (used by later changes and extras, not by other "
+		              "bookings)"),
 		F("tex_tax_profile", "Select", "Tax profile", ["Localization pack", "Custom"], default="Localization pack"),
 		SB("TEX tax rules", depends_on="eval:doc.tex_tax_profile=='Custom'"),
 		F("tex_tax_rules", "Table", "Tax rules", "TEX Tax Rule"),

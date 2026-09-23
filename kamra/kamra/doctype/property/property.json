@@ -604,7 +604,8 @@
    "fieldtype": "Select",
    "label": "When a guest change costs less",
    "options": "Staff approval\nRefund automatically\nKeep as credit",
-   "default": "Staff approval"
+   "default": "Staff approval",
+   "description": "A guest change that costs less: Staff approval waits for the hotel; Refund automatically refunds what was paid above the new total to the card(s) it came from; Keep as credit keeps it as credit on the same booking (used by later changes and extras, not by other bookings)"
   },
   {
    "fieldname": "tex_tax_profile",
@@ -629,7 +630,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-22 21:00:00.000000",
+ "modified": "2026-09-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Property",

@@ -243,11 +243,12 @@ def cancel(reservation: str, reason: str, waive_penalty: int = 0):
 def acknowledge_guest_change(reservation: str, note: str | None = None):
 	res = frappe.get_doc("Reservation", reservation)
 	scope.require("reservation.modify", res.property)
-	res.flags.tex_modification = True
-	res.tex_guest_change_pending = 0
-	res.tex_guest_change_note = ((res.tex_guest_change_note or "") + f"\n[ack {frappe.session.user}] {note or ''}")[
-		-1000:]
-	res.save(ignore_permissions=True)
+	# only the flag and its note: the reservation's modified stays, so a guest's change waiting
+	# for its payment or for approval still applies (G-45)
+	frappe.db.set_value("Reservation", reservation, {
+		"tex_guest_change_pending": 0,
+		"tex_guest_change_note": ((res.tex_guest_change_note or "") + f"\n[ack {frappe.session.user}] {note or ''}")[
+			-1000:]}, update_modified=False)
 	if res.tex_booking and not frappe.db.exists("Reservation", {"tex_booking": res.tex_booking,
 	                                                             "tex_guest_change_pending": 1}):
 		frappe.db.set_value("TEX Booking", res.tex_booking, "guest_change_pending", 0)
@@ -256,6 +257,38 @@ def acknowledge_guest_change(reservation: str, note: str | None = None):
 	audit("reservation.guest_change_ack", reference_doctype="Reservation", reference_name=reservation,
 	      property=res.property, reason=note)
 	return {"ok": True}
+
+
+# ─── guest change requests (G-45) ────────────────────────────────────────
+
+
+@frappe.whitelist()
+def guest_change_requests(property: str | None = None, status: str | None = None, reservation: str | None = None,
+                          booking: str | None = None, needs_staff: int = 0, limit: int = 50, start: int = 0):
+	"""Guest changes of the hotels the user may view reservations of: what the guest asked, its
+	money and how it was settled. ``needs_staff``: a request to decide, or money left to staff."""
+	from kamra.tex.services import guest_changes
+
+	props = [property] if property else sorted(scope.permitted_properties())
+	props = [p for p in props if scope.has_capability("reservation.view", p)]
+	if property and not props:
+		frappe.throw(_("Not permitted: {0}.").format("reservation.view"), frappe.PermissionError)
+	return guest_changes.staff_list(props, status=text(status, 40), reservation=text(reservation, 140),
+	                                booking=text(booking, 140), needs_staff=bool(as_int(needs_staff, 0)),
+	                                limit=as_int(limit, 50, lo=1, hi=200), start=as_int(start, 0, lo=0))
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def resolve_guest_change(request: str, action: str, reason: str, settlement: str | None = None):
+	"""Approve or reject a guest's request, or close money left to staff (reservation.modify;
+	a refund also needs payment.refund)."""
+	from kamra.tex.services import guest_changes
+
+	if settlement not in (None, "", "Refund", "Credit on booking"):
+		frappe.throw(_("Choose Refund or Credit on booking."))
+	return guest_changes.resolve(text(request, 140), text(action, 20), settlement=settlement or None,
+	                             reason=text(reason, 500))
 
 
 # ─── grid ────────────────────────────────────────────────────────────────

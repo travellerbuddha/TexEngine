@@ -145,6 +145,34 @@ def pay_at_hotel_allowed(result: dict) -> bool:
 	return bool(policy.get("allow_pay_at_hotel")) or policy.get("deposit_type") == "NONE"
 
 
+def required_now(booking, override: dict | None = None) -> D:
+	"""What the booking's payment terms require to be paid by now: each live room's
+	``amount_due_now`` (its frozen payment policy, the booking's payment method), with
+	``override`` ({reservation: priced result}) standing in for a room being changed, plus the
+	cancellation fee of each cancelled room. A room whose rate cannot be paid at the hotel
+	counts as paid by card (G-45)."""
+	b = frappe.get_doc("TEX Booking", booking) if isinstance(booking, str) else booking
+	ccy = b.currency or "EUR"
+	method = b.payment_method
+	total = ZERO
+	for row in b.rooms:
+		r = frappe.db.get_value("Reservation", row.reservation, ["status", "tex_pricing_snapshot", "cancellation_fee",
+		                                                         "tex_total_amount"], as_dict=True)
+		if not r:
+			continue
+		if r.status in ("Cancelled", "No Show"):
+			total += from_db(r.cancellation_fee, ccy)
+			continue
+		result = (override or {}).get(row.reservation) or json.loads(r.tex_pricing_snapshot or "{}")
+		if not (result.get("totals") or {}).get("total"):
+			total += from_db(r.tex_total_amount, ccy)       # not priced by TEX: all of it
+			continue
+		m = method if method != "Pay at Hotel" or pay_at_hotel_allowed(result) else "Card"
+		due, _kind = amount_due_now(result, m)
+		total += due
+	return quantize(total, ccy)
+
+
 def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
 	"""Grand total and amount due now for ``method`` of the room quotes of one booking,
 	with the same deposit rules ``create_booking`` applies. ``loaded`` is a list of
@@ -633,6 +661,11 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	                 source=source)
 	if res.tex_booking:
 		_refresh_booking_after_change(res.tex_booking)
+	# a guest's change still waiting for this room is void; a payment of it arriving later is
+	# refunded (G-45)
+	from kamra.tex.services import guest_changes
+
+	guest_changes.close_open(res.name, f"the room was cancelled ({source})")
 	audit("reservation.cancel", reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	      new={"penalty": to_str(penalty), "waived": bool(waive_penalty), "basis": basis}, reason=reason)
 	return {"reservation": res.name, "penalty": to_str(penalty), "currency": res.tex_currency, "basis": basis}
@@ -695,11 +728,14 @@ def resend_confirmation(booking: str) -> dict:
 
 def booking_summary(booking: str, *, replay: bool = False) -> dict:
 	b = frappe.get_doc("TEX Booking", booking)
+	ccy = b.currency or "EUR"
 	return {
 		"booking": b.name, "status": b.status, "property": b.property, "currency": b.currency,
-		"total": to_str(from_db(b.total_amount, b.currency or "EUR")),
-		"paid": to_str(from_db(b.paid_amount, b.currency or "EUR")),
-		"balance": to_str(from_db(b.balance_amount, b.currency or "EUR")),
+		"total": to_str(from_db(b.total_amount, ccy)),
+		"paid": to_str(from_db(b.paid_amount, ccy)),
+		"balance": to_str(from_db(b.balance_amount, ccy)),
+		# money held above the total (a guest change kept as credit, or not refunded yet, G-45)
+		"credit": to_str(quantize(max(ZERO, from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy)), ccy)),
 		"due_now": to_str(from_db(b.amount_due_now, b.currency or "EUR")),
 		"payment_status": b.payment_status, "market": b.market, "channel": b.sales_channel,
 		"booker_name": b.booker_name, "guest_change_pending": bool(b.guest_change_pending),

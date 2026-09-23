@@ -1,0 +1,19 @@
+# Copyright (c) 2026, TEX Engine contributors (derived from Kamra PMS, HeyKoala and contributors)
+# For license information, please see license.txt
+
+from frappe.model.document import Document
+
+from kamra.tex.commercial.revisions import block_delete, guard_immutable
+
+# what happens to a request after the guest made it; what the guest asked for, the totals and
+# the amount to pay first are never edited (G-45, ADR-044)
+OUTCOME = ("status", "payment_transaction", "attempt", "settlement", "settlement_amount", "refunded_amount",
+           "settle_pending", "revision", "error", "resolved_by", "resolved_at", "resolution")
+
+
+class TEXGuestChangeRequest(Document):
+	def validate(self):
+		guard_immutable(self, allowed=OUTCOME)
+
+	def on_trash(self):
+		block_delete(self)

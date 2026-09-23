@@ -104,13 +104,14 @@ def original_priced_at(res, snap) -> datetime:
 	return get_datetime(res.tex_sale_at or snap.get("accepted_at"))
 
 
-def _resolve(res, snap, req, basis: str, basis_sale_at) -> tuple[str, datetime, str]:
-	"""→ (contract version, effective sale time, how decided)."""
+def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[str, datetime, str]:
+	"""→ (contract version, effective sale time, how decided). ``sale_at`` pins CURRENT to the
+	moment a proposal was priced (a guest's paid change applies at the price they accepted)."""
 	original_sale = original_priced_at(res, snap)
 	if basis == "ORIGINAL_VERSION":
 		return snap["contract"]["version"], original_sale, "original contract version"
 	if basis == "CURRENT":
-		at = now_datetime()
+		at = get_datetime(sale_at) if sale_at else now_datetime()
 	elif basis == "ORIGINAL_SALE_DATE":
 		at = original_sale
 	elif basis == "HISTORICAL_SALE_DATE":
@@ -130,12 +131,22 @@ def _resolve(res, snap, req, basis: str, basis_sale_at) -> tuple[str, datetime, 
 
 
 PROPOSAL_TTL_MINUTES = 30
+# a guest's change that waits for its payment keeps the accepted price this long after the
+# proposal expired: the guest may still be on the gateway's page (G-45, ADR-044)
+PAYMENT_GRACE_MINUTES = 60
+
+
+def payment_deadline(p: dict) -> datetime:
+	"""Until when a payment for this proposal still applies it at the accepted price."""
+	return add_to_date(get_datetime(p["exp"]), minutes=PAYMENT_GRACE_MINUTES)
 
 
 def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURRENT", basis_sale_at=None,
-            _check_permission: bool = True, _locked: bool = False, internal: bool | None = None) -> dict:
+            _check_permission: bool = True, _locked: bool = False, internal: bool | None = None,
+            _sale_at=None) -> dict:
 	"""``internal`` (cost, margin, explanation) defaults to the caller's price.view_cost;
-	guest calls (``_check_permission=False``) never get it unless the service asks."""
+	guest calls (``_check_permission=False``) never get it unless the service asks.
+	``_sale_at`` (internal only) prices CURRENT as of that moment instead of now."""
 	res = frappe.get_doc("Reservation", reservation)
 	if internal is None:
 		internal = _check_permission and scope.has_capability("price.view_cost", res.property)
@@ -158,7 +169,7 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 			changes["drop_addons"] = ids
 	placeholder_at = now_datetime()
 	req, snap = build_changed_request(res, changes, placeholder_at)
-	version, at, how = _resolve(res, snap, req, basis, basis_sale_at)
+	version, at, how = _resolve(res, snap, req, basis, basis_sale_at, _sale_at)
 	req, _s = build_changed_request(res, changes, at)
 	# the booking's own coupon uses never count against it when it is repriced (G-09)
 	quote, terms = quoting.price_request(version, req, exclude_booking=res.tex_booking, exclude_reservation=res.name,
@@ -212,6 +223,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		"reservation": res.name, "modified": str(res.modified), "changes": changes, "basis": basis,
 		"basis_sale_at": str(basis_sale_at) if basis_sale_at else None, "version": version,
 		"new_total": to_str(new_total) if quote.sellable else None, "currency": quote.currency,
+		# the moment the price was computed: a paid guest change re-derives it as of then (G-45)
+		"pricing_sale_at": str(at),
 	}
 	return {
 		"reservation": res.name,
@@ -229,12 +242,30 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	}
 
 
-def apply(proposal_token: str, *, reason: str, override_amount=None, source: str = "Desk",
-          _guest_authorized: bool = False) -> dict:
+def apply(proposal_token: str | None, *, reason: str, override_amount=None, source: str = "Desk",
+          _guest_authorized: bool = False, _proposal: dict | None = None, _from_payment: bool = False) -> dict:
 	"""``_guest_authorized``: set only by the self-service API after verifying the
-	guest's manage token owns the proposal's reservation. Guests can never override."""
-	p = quoting.verify(proposal_token, kind="proposal")
-	res = frappe.get_doc("Reservation", p["reservation"])
+	guest's manage token owns the proposal's reservation. Guests can never override.
+
+	``_proposal``: a proposal the server verified and stored (a TEX Guest Change Request); it
+	is re-derived at the moment it was priced, so the price the guest accepted is the price
+	applied (G-45). ``_from_payment``: the guest paid for it; that holds until the proposal's
+	payment deadline (its expiry plus ``PAYMENT_GRACE_MINUTES``)."""
+	if _proposal is not None:
+		p = _proposal
+		if not p.get("pricing_sale_at") or p.get("kind") != "proposal":
+			frappe.throw(_("This change cannot be applied: its proposal carries no price time."))
+		if _from_payment and now_datetime() > payment_deadline(p):
+			frappe.throw(_("The payment arrived after the price of this change expired."))
+		pin = p["pricing_sale_at"] if p["basis"] == "CURRENT" else None
+	else:
+		if _from_payment:
+			frappe.throw(_("A paid change applies from its stored proposal."))
+		p = quoting.verify(proposal_token, kind="proposal")
+		pin = None
+	# a stored proposal is applied later (a payment callback, staff approval): the reservation
+	# as it is now, read with a lock, not the caller's snapshot of it
+	res = frappe.get_doc("Reservation", p["reservation"], for_update=_proposal is not None)
 	if _guest_authorized:
 		if override_amount not in (None, ""):
 			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)
@@ -256,7 +287,7 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 	rt = changes.get("room_type") or req0["room_type"]
 	avail.lock_nights(res.property, [(rt, ci, co)])
 	result = propose(res.name, changes, basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
-	                 _check_permission=False, _locked=True, internal=True)
+	                 _check_permission=False, _locked=True, internal=True, _sale_at=pin)
 	if not result["sellable"]:
 		why = "; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")
 		frappe.throw(_("The modified stay cannot be sold: {0}").format(

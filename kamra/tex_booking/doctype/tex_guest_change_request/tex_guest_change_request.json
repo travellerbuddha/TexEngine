@@ -1,0 +1,247 @@
+{
+ "actions": [],
+ "creation": "2026-09-24 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "property",
+  "booking",
+  "reservation",
+  "status",
+  "gcr_column_1",
+  "proposal_hash",
+  "proposal",
+  "note",
+  "expires_at",
+  "gcr_section_money",
+  "currency",
+  "old_total",
+  "new_total",
+  "difference",
+  "gcr_column_2",
+  "collect_amount",
+  "payment_transaction",
+  "attempt",
+  "gcr_section_settlement",
+  "settlement",
+  "settlement_amount",
+  "refunded_amount",
+  "settle_pending",
+  "gcr_column_3",
+  "revision",
+  "error",
+  "resolved_by",
+  "resolved_at",
+  "resolution"
+ ],
+ "fields": [
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "booking",
+   "fieldtype": "Link",
+   "label": "Booking",
+   "options": "TEX Booking",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reservation",
+   "fieldtype": "Link",
+   "label": "Reservation",
+   "options": "Reservation",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Awaiting Payment\nApplied\nRequested\nApproved\nRejected\nFailed\nExpired\nSuperseded",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "gcr_column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "proposal_hash",
+   "fieldtype": "Data",
+   "label": "Proposal (hash)",
+   "unique": 1,
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "proposal",
+   "fieldtype": "Long Text",
+   "label": "Proposal (JSON)",
+   "read_only": 1,
+   "description": "The signed proposal the guest accepted, with its pricing sale time"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Guest note"
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Payment deadline",
+   "read_only": 1,
+   "description": "The accepted price is honoured for a payment arriving until then"
+  },
+  {
+   "fieldname": "gcr_section_money",
+   "fieldtype": "Section Break",
+   "label": "Money"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "old_total",
+   "fieldtype": "Currency",
+   "label": "Booking total before",
+   "options": "currency"
+  },
+  {
+   "fieldname": "new_total",
+   "fieldtype": "Currency",
+   "label": "Booking total after",
+   "options": "currency"
+  },
+  {
+   "fieldname": "difference",
+   "fieldtype": "Currency",
+   "label": "Difference",
+   "options": "currency",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "gcr_column_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "collect_amount",
+   "fieldtype": "Currency",
+   "label": "To pay online first",
+   "options": "currency"
+  },
+  {
+   "fieldname": "payment_transaction",
+   "fieldtype": "Link",
+   "label": "Payment",
+   "options": "TEX Payment Transaction"
+  },
+  {
+   "fieldname": "attempt",
+   "fieldtype": "Int",
+   "label": "Payment attempts"
+  },
+  {
+   "fieldname": "gcr_section_settlement",
+   "fieldtype": "Section Break",
+   "label": "Settlement"
+  },
+  {
+   "fieldname": "settlement",
+   "fieldtype": "Select",
+   "label": "Settlement",
+   "options": "\nNone\nOnline payment\nPay at hotel\nBalance\nRefund\nCredit on booking\nStaff",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "settlement_amount",
+   "fieldtype": "Currency",
+   "label": "Settlement amount",
+   "options": "currency"
+  },
+  {
+   "fieldname": "refunded_amount",
+   "fieldtype": "Currency",
+   "label": "Refunded",
+   "options": "currency"
+  },
+  {
+   "fieldname": "settle_pending",
+   "fieldtype": "Check",
+   "label": "Refund queued",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gcr_column_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "revision",
+   "fieldtype": "Link",
+   "label": "Revision",
+   "options": "TEX Reservation Revision"
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Why it was not applied"
+  },
+  {
+   "fieldname": "resolved_by",
+   "fieldtype": "Link",
+   "label": "Resolved by",
+   "options": "User"
+  },
+  {
+   "fieldname": "resolved_at",
+   "fieldtype": "Datetime",
+   "label": "Resolved at"
+  },
+  {
+   "fieldname": "resolution",
+   "fieldtype": "Small Text",
+   "label": "Staff note"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Booking",
+ "name": "TEX Guest Change Request",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "GCR-.YYYY.-.#####",
+ "naming_rule": "Expression (old style)",
+ "track_changes": 1,
+ "in_create": 1
+}

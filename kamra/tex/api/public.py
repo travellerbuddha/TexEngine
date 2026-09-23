@@ -22,7 +22,7 @@ from kamra.tex.pricing import versions
 from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import content, modification, quoting, sites
+from kamra.tex.services import content, guest_changes, modification, quoting, sites
 from kamra.tex.services.txn import retry_on_deadlock
 
 
@@ -594,6 +594,15 @@ def _self_service_allowed(b) -> bool:
 	return site_ok and bool(frappe.db.get_value("Property", b.property, "tex_self_service"))
 
 
+def _pending_change(res) -> dict | None:
+	"""The guest's change of this room still waiting (for their payment, or for the hotel), or
+	``{"status": "noted"}`` for a change the hotel has not reviewed yet; None otherwise (G-45)."""
+	req = guest_changes.open_request(res)
+	if req:
+		return guest_changes.guest_view(req)
+	return {"status": "noted"} if res.tex_guest_change_pending else None
+
+
 def _guest_booking(b) -> dict:
 	summary = booking_svc.booking_summary(b.name)
 	loc = content.Localizer(content.guest_language() or content.guest_language(b.language))
@@ -608,9 +617,11 @@ def _guest_booking(b) -> dict:
 		              "rate_plan": (snap.get("rate_plan") or {}).get("name"),
 		              "refundable": (snap.get("rate_plan") or {}).get("refundable", True),
 		              "lines": snap.get("lines"), "extras": [e for e in snap.get("extras") or [] if e.get("ok")],
-		              "cancellation_fee_now": to_str(penalty), "pending_change": bool(res.tex_guest_change_pending)})
+		              "cancellation_fee_now": to_str(penalty), "pending_change": _pending_change(res)})
 	return {**summary, "rooms": rooms, "hotel": frappe.db.get_value("Property", b.property, "property_name"),
-	        "self_service": _self_service_allowed(b)}
+	        "self_service": _self_service_allowed(b),
+	        # the booking's own payment comes first: no change until it is complete (G-45)
+	        "changes_blocked": "PAYMENT_PENDING" if b.status in ("Pending Payment", "Held") else None}
 
 
 def _own_reservation(b, reservation: str) -> None:
@@ -637,17 +648,30 @@ def manage_cancel(token: str, reservation: str, reason: str | None = None):
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
 def manage_propose(token: str, reservation: str, changes):
+	"""The price of a change and how it would be settled (``settlement``: pay now, at the
+	hotel, balance, refund, credit, hotel approval), before the guest accepts it (G-45)."""
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to change your booking."))
+	guest_changes.guard(b)
 	# extras are added through manage_extras_* (priced on their own; the stay stays price-locked)
 	allowed = {"check_in", "check_out", "adults", "children"}
 	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}
 	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False)
-	return guest_safe({"sellable": p["sellable"], "old_total": p["old"]["total"], "new_total": p["proposed"][
+	res = frappe.get_doc("Reservation", reservation)
+	warnings, sellable, proposal_token = p["warnings"], p["sellable"], p["proposal_token"]
+	settlement = guest_changes.preview(b, res, p) if sellable else None
+	if p["currency_changed"] or (sellable and settlement is None):
+		# never compared across currencies: the guest is sent to the hotel
+		warnings = [*warnings, {"code": "CURRENCY_CHANGED",
+		                        "message": _("This change cannot be priced in the currency of your booking. "
+		                                     "Please contact the hotel.")}]
+		sellable, proposal_token, settlement = False, None, None
+	return guest_safe({"sellable": sellable, "old_total": p["old"]["total"], "new_total": p["proposed"][
 		"totals"].get("total"), "difference": p["difference"], "currency": p["proposed"]["currency"],
-		"warnings": p["warnings"], "lines": p["proposed"].get("lines"), "proposal_token": p["proposal_token"]})
+		"warnings": warnings, "lines": p["proposed"].get("lines"),
+		"settlement": guest_changes.settlement_dict(settlement, b.currency), "proposal_token": proposal_token})
 
 
 @frappe.whitelist(allow_guest=True)
@@ -704,33 +728,40 @@ def manage_extras_apply(token: str, proposal_token: str):
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
 @retry_on_deadlock
-def manage_apply(token: str, proposal_token: str, note: str | None = None):
-	"""Guest accepts a proposal. Higher price → applied, difference collected; lower
-	price → per hotel policy: staff approval (default, NOT applied until staff act),
-	credit, or automatic refund. Every guest change is flagged for staff attention."""
+def manage_apply(token: str, proposal_token: str, note: str | None = None, return_url: str | None = None):
+	"""Guest accepts a proposal (G-45, ADR-044). → ``status``:
+
+	- ``payment_required``: the change applies once ``payment`` (a card checkout of ``amount``)
+	  is paid; the gateway's confirmation applies it, never the browser's return;
+	- ``applied``: applied now, with its ``settlement`` (at the hotel, balance, refund on its
+	  way, credit on the booking);
+	- ``requested``: the hotel decides (a lower price under staff approval, or money due now
+	  without a card method);
+	- ``processing``: the same proposal is being handled (another tab, or its payment arrived).
+	The same proposal twice is one request. Every guest change is flagged for staff."""
 	b = _booking_by_token(token)
-	p = quoting.verify(proposal_token, kind="proposal")
+	p = quoting.verify(proposal_token, kind="proposal", allow_expired=True)       # the service checks freshness
 	_own_reservation(b, p["reservation"])
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to change your booking."))
-	res = frappe.get_doc("Reservation", p["reservation"])
-	old = from_db(res.tex_total_amount, res.tex_currency or "EUR")
-	new = D(p["new_total"] or 0)
-	policy = frappe.db.get_value("Property", b.property, "tex_lower_price_refund") or "Staff approval"
+	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
 	frappe.flags.tex_source = "Guest"
-	if new < old and policy == "Staff approval":
-		res.flags.tex_modification = True
-		res.tex_guest_change_pending = 1
-		res.tex_guest_change_note = (f"Guest requests change (−{to_str(old - new)} {res.tex_currency}); "
-		                             f"proposal: {json.dumps(p['changes'], default=str)} {text(note, 300) or ''}")
-		res.save(ignore_permissions=True)
-		frappe.db.set_value("TEX Booking", b.name, "guest_change_pending", 1)
-		return {"status": "requested", "message": _("Your request was sent to the hotel for approval.")}
-	out = modification.apply(proposal_token, reason=text(note, 300) or "Guest self-service change", source="Guest",
-	                         _guest_authorized=True)
-	frappe.db.set_value("Reservation", p["reservation"], {"tex_guest_change_pending": 1,
-	                                                       "tex_guest_change_note": "Guest changed online"})
-	frappe.db.set_value("TEX Booking", b.name, "guest_change_pending", 1)
-	summary = booking_svc.booking_summary(b.name)
-	return {"status": "applied", **out, "balance": summary["balance"]}
+	return guest_changes.submit(b, proposal_token, note=text(note, 300),
+	                            return_url=_safe_return_url(site, return_url, b.name) if site and return_url else None)
 
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
+def manage_change_pay(token: str, request: str, return_url: str | None = None):
+	"""Pay for the guest's change still waiting for its payment (``rooms[].pending_change``
+	with ``kind`` ``pay_now``), e.g. after a failed or abandoned checkout (G-45). → the same
+	answers as ``manage_apply``: ``payment_required`` (the open charge or a new one),
+	``applied`` or ``processing``. Once its proposal expired the guest makes the change again."""
+	b = _booking_by_token(token)
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to change your booking."))
+	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
+	frappe.flags.tex_source = "Guest"
+	return guest_changes.pay_again(b, text(request, 40),
+	                               _safe_return_url(site, return_url, b.name) if site and return_url else None)

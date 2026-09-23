@@ -211,14 +211,19 @@ class TestSelfService(TexTestCase):
 		up = public.manage_propose(token=token, reservation=res, changes={"check_out": str(fx.d(6, 14))})
 		self.assertTrue(up["sellable"])
 		self.assertGreater(D(up["difference"]), 0)
+		self.assertEqual(up["settlement"]["kind"], "pay_now")     # the deposit share of the new price (G-45)
 		done = public.manage_apply(token=token, proposal_token=up["proposal_token"])
-		self.assertEqual(done["status"], "applied")
+		self.assertEqual(done["status"], "payment_required")
+		self.assertEqual(str(frappe.db.get_value("Reservation", res, "check_out_date")), str(fx.d(6, 13)))
+		public.mock_pay(transaction=done["payment"]["transaction"], outcome="success",
+		                sig=done["payment"]["fields"]["success_sig"])     # paid: the gateway's word applies it
 		self.assertEqual(frappe.db.get_value("Reservation", res, "tex_guest_change_pending"), 1)
 		self.assertEqual(str(frappe.db.get_value("Reservation", res, "check_out_date")), str(fx.d(6, 14)))
 		total_after = D(frappe.db.get_value("Reservation", res, "tex_total_amount"))
 
 		down = public.manage_propose(token=token, reservation=res, changes={"check_out": str(fx.d(6, 12))})
 		self.assertLess(D(down["difference"]), 0)
+		self.assertEqual(down["settlement"]["kind"], "staff_approval")
 		req = public.manage_apply(token=token, proposal_token=down["proposal_token"])
 		self.assertEqual(req["status"], "requested")             # default policy: staff approval
 		self.assertEqual(D(frappe.db.get_value("Reservation", res, "tex_total_amount")), total_after)

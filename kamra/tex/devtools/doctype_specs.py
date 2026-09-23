@@ -783,6 +783,47 @@ BOOKING_SPECS = [
 	], perms=IMMUTABLE_LOG, autoname="REV-.######", naming_rule="Expression (old style)", track_changes=False,
 	   sort_field="creation", in_create=True),
 
+	# a guest's own change and how its money was settled (G-45, ADR-044): written only by
+	# services.guest_changes; the proposal, the totals and the amount to collect never change.
+	# Its layout breaks are named here, not numbered by SB()/CB(), so the generated names of
+	# every DocType after it stay as they were
+	dt("TEX Guest Change Request", B, [
+		F("property", "Link", "Hotel", "Property", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("booking", "Link", "Booking", "TEX Booking", reqd=1, in_list_view=1, search_index=1),
+		F("reservation", "Link", "Reservation", "Reservation", reqd=1, in_list_view=1, search_index=1),
+		F("status", "Select", "Status", ["Awaiting Payment", "Applied", "Requested", "Approved", "Rejected", "Failed",
+		                                 "Expired", "Superseded"], reqd=1, in_list_view=1, in_standard_filter=1, search_index=1),
+		F("gcr_column_1", "Column Break"),
+		F("proposal_hash", "Data", "Proposal (hash)", unique=1, read_only=1, hidden=1),
+		F("proposal", "Long Text", "Proposal (JSON)", read_only=1,
+		  description="The signed proposal the guest accepted, with its pricing sale time"),
+		F("note", "Small Text", "Guest note"),
+		F("expires_at", "Datetime", "Payment deadline", read_only=1,
+		  description="The accepted price is honoured for a payment arriving until then"),
+		F("gcr_section_money", "Section Break", "Money"),
+		F("currency", "Link", "Currency", "Currency"),
+		F("old_total", "Currency", "Booking total before", options="currency"),
+		F("new_total", "Currency", "Booking total after", options="currency"),
+		F("difference", "Currency", "Difference", options="currency", in_list_view=1),
+		F("gcr_column_2", "Column Break"),
+		F("collect_amount", "Currency", "To pay online first", options="currency"),
+		F("payment_transaction", "Link", "Payment", "TEX Payment Transaction"),
+		F("attempt", "Int", "Payment attempts"),
+		F("gcr_section_settlement", "Section Break", "Settlement"),
+		F("settlement", "Select", "Settlement", ["", "None", "Online payment", "Pay at hotel", "Balance", "Refund",
+		                                         "Credit on booking", "Staff"], in_list_view=1, in_standard_filter=1),
+		F("settlement_amount", "Currency", "Settlement amount", options="currency"),
+		F("refunded_amount", "Currency", "Refunded", options="currency"),
+		F("settle_pending", "Check", "Refund queued", read_only=1),
+		F("gcr_column_3", "Column Break"),
+		F("revision", "Link", "Revision", "TEX Reservation Revision"),
+		F("error", "Small Text", "Why it was not applied"),
+		F("resolved_by", "Link", "Resolved by", "User"),
+		F("resolved_at", "Datetime", "Resolved at"),
+		F("resolution", "Small Text", "Staff note"),
+	], perms=IMMUTABLE_LOG, autoname="GCR-.YYYY.-.#####", naming_rule="Expression (old style)",
+	   sort_field="creation", in_create=True),
+
 	dt("TEX Booking Domain", B, [
 		F("domain", "Data", "Domain", reqd=1, in_list_view=1,
 		  description="A host name such as book.hotel.com, pointed at TEX (ADR-035)"),

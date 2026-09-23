@@ -904,3 +904,82 @@ of them stranded money a gateway had already captured:
   allocating the same payment at the same moment could both pass the limit check. Locking them
   needs indexes on `transaction` / `parent_transaction` (a schema change, not made here).
 - Bookings paid in Sandbox on a site without `tex_production` carry no per-booking flag.
+
+## ADR-044 A guest's own change settles its money: pay, then apply; refund or credit what is over
+**Context.** G-45: on the manage page a higher price was applied at once and the difference was
+only "payable online afterwards" (the prompt was even hidden for pay-at-hotel bookings). The
+"Refund automatically" and "Keep as credit" policies both just applied the change: the booking
+kept a negative balance, nothing was refunded and no credit was recorded. A booking still waiting
+for its own payment could be changed, the currency of the new price was never compared, and
+the deposit due was never recomputed.
+**Decision.**
+- *Pure settlement.* `payments.settlement.settle(old, new, paid, required_now(new), …)` decides
+  for the booking as a whole:
+  - a higher price collects `max(0, min(difference, required_now(new) − paid))` before the change
+    applies. `required_now` is each room's frozen deposit rule on the new price (a whole prepayment
+    collects the whole difference, a 30 % deposit the deposit share not paid yet, pay at hotel
+    nothing). Arrears the booking already had are never charged by a change;
+  - nothing to collect: the change applies now and the guest is told what is due later
+    (`pay_at_hotel` or `balance`); a credit on the booking is used first;
+  - a lower price follows `Property.tex_lower_price_refund`: staff approval (default), a refund
+    of the true overpayment `paid − new total` (a deposit-only booking just owes less), or a
+    credit kept on the booking;
+  - money due now without a card method goes to staff.
+  `plan_refunds` takes a refund from the charges holding the booking's money, newest first, each
+  capped by its net allocation to this booking, skipping charges TEX cannot refund (manual
+  payments, bank transfers, a disabled or non-refunding account, a charge that also holds
+  unallocated money). The remainder stays as credit for staff.
+- *A request per change.* `TEX Guest Change Request` (schema p20) records what the guest accepted
+  (the verified proposal with its pricing time), the booking totals, what to collect, the payment
+  attempts, the settlement and its outcome. It is keyed by the proposal: a second submit answers
+  what the first did (`payment_required` with the same open charge, `applied`, `requested`, or
+  `processing` when another tab is on it). A new request supersedes an open one of the same
+  reservation; cancelling the room (guest or staff) voids it. Only outcome fields change after
+  insert; no delete.
+- *Pay, then apply, server-side.* The charge is started with the key `change:{request}:{attempt}`
+  and the reservation is left untouched. `payments.service._after_charge` (after the allocation)
+  calls `guest_changes.on_charge_succeeded`, which applies the change as of the proposal's
+  pricing time (`modification.apply(_proposal=…, _from_payment=True)`, reservation read with a
+  lock, a bounded window of the proposal's 30 minutes plus 60). A change that can no longer apply
+  (reservation changed, sold out, window passed) is Failed and its payment refunded; a payment for
+  a request that no longer waits (superseded, expired, already paid) is refunded. The hook runs in
+  a savepoint and never raises into `complete()`, except a deadlock (the transaction is gone).
+  `public.manage_change_pay` pays a waiting change again (the open charge, or a new attempt once
+  the still-fresh proposal was priced again at the accepted price); the manage page stops
+  offering it once the reservation changed. Staff acknowledging the guest-change flag no longer
+  saves the reservation (its `modified` is what a waiting proposal is checked against).
+- *Locks.* The booking, then the request, then the reservation: the guest's submit, the payment
+  callback (it holds the booking once the money is allocated), the refund job and staff all take
+  them in that order.
+- *Refunds after commit.* Refunds are made by `guest_changes.settle`, queued with
+  `enqueue_after_commit` (inline in tests), keyed per request, charge and step, each step
+  committed before the next, so a request retried after a deadlock never refunds twice.
+  `payments.service.refund(_system=True)` skips the capability check for this trusted caller
+  only and always names the booking. What cannot be refunded goes to staff (settlement "Staff",
+  audit `guest_change.refund_incomplete`, the booking flagged).
+- *Credit.* "Keep as credit" keeps `paid − total` on the booking (`booking_summary.credit`); later
+  changes use it automatically, because they collect against what is paid. There is no ledger
+  across stays.
+- *Guards.* No guest change while the booking is Pending Payment or Held (`PaymentPending`,
+  `changes_blocked`), and none priced in another currency (`CURRENCY_CHANGED`, `CurrencyChanged`).
+- *Staff.* `crs.guest_change_requests` (reservation.view) lists requests, with what approving a
+  lower price would leave paid above the new total (`overpaid_after`);
+  `crs.resolve_guest_change` approves one at the price the guest was shown (reservation.modify),
+  settling an overpayment as a refund (payment.refund) or as credit, rejects one
+  (reservation.modify), or closes money staff settled themselves (payment.refund). The reservation
+  screen lists the requests of the reservation with these actions. The scheduler expires requests
+  whose payment never came and retries refunds that were queued but did not run.
+- *Audit.* `guest_change.request`, `.applied`, `.credit`, `.failed`, `.late_payment`,
+  `.superseded`, `.expired`, `.refund_incomplete`, `.resolve`, besides the payment events.
+**Consequences.**
+- Inventory is not held while the guest pays: a change can fail after the payment and is then
+  refunded automatically.
+- The accepted price is honoured for up to 90 minutes after the proposal. Pricing as of that
+  moment is deterministic, except that coupon usage limits are counted as they are now.
+- The deposit share of the new total is one reading of "what is due now"; a per-hotel choice
+  (e.g. the whole difference) would be a later option.
+- A refund recorded at the gateway whose database commit then fails can still be repeated by a
+  retry (as for any refund); the per-step commits keep that window to one refund.
+- A credit belongs to its booking only: moving it to another stay is a staff transfer.
+- Any save of the reservation between the proposal and the payment (a staff change, a room
+  assignment) makes the paid change fail and its payment be refunded: the guest proposes again.

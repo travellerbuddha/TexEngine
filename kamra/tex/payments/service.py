@@ -232,7 +232,8 @@ def _new_txn(**kw) -> frappe.model.document.Document:
 
 def start_payment(*, property: str, amount, currency: str, provider_account: str, booking: str | None = None,
                   payment_link: str | None = None, description: str, customer: dict, return_url: str,
-                  idempotency_key: str, method: str = "Card", locale: str = "en") -> dict:
+                  idempotency_key: str, method: str = "Card", locale: str = "en",
+                  reservation: str | None = None) -> dict:
 	"""Start (or, with the same key, restart) a charge. A restart reuses the Pending charge;
 	when that charge cannot take another checkout, or its new checkout fails, it is superseded:
 	cancelled, with a late verified payment still recorded, and ``ChargeSuperseded`` raised so
@@ -270,7 +271,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	else:
 		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
-		               booking=booking, payment_link=payment_link, return_url=return_url)
+		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation)
 	# gateways call back to the platform host, never to a host taken from the request (G-21)
 	callback = _platform_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}"
 	                         f"&cb={callback_signature(txn.name)}")
@@ -512,6 +513,11 @@ def _after_charge(txn) -> None:
 			return
 	if txn.booking:
 		allocate(txn.name, booking=txn.booking, amount=amount, reason="booking payment", _system=True)
+		# a guest change waiting for this payment applies now, server-side (G-45); a failure there
+		# never fails the payment: the charge is recorded and, if the change cannot apply, refunded
+		from kamra.tex.services import guest_changes
+
+		guest_changes.on_charge_succeeded(txn)
 
 
 def allocated_of(transaction: str) -> D:
@@ -658,12 +664,58 @@ def _refund_source(txn, amount: D, booking: str | None) -> tuple[str | None, D]:
 	return target, rest
 
 
-def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None) -> dict:
+def auto_refundable(txn) -> bool:
+	"""Whether TEX may refund this charge by itself (G-45): a succeeded charge of an enabled
+	account whose provider refunds through TEX and may settle today. Manual payments, bank
+	transfers and pay at hotel are refunded by staff."""
+	if txn.txn_type != "Charge" or txn.status != "Succeeded" or not txn.provider_account:
+		return False
+	acc = frappe.db.get_value("TEX Payment Provider Account", txn.provider_account,
+	                          ["provider", "environment", "enabled", "gateway_url"], as_dict=True)
+	cls = REGISTRY.get((acc or {}).get("provider") or "")
+	return bool(acc and acc.enabled and cls and cls.supports_refund and not account_rule(acc, "settle"))
+
+
+def booking_charges(booking: str) -> list[dict]:
+	"""The succeeded charges holding this booking's money now (G-45): what each holds for it
+	(its net allocation, at most what is still refundable), whether TEX may refund it by itself
+	and when it was taken. A charge that also holds unallocated money is left to staff: a
+	refund of it takes that money first (ADR-042), not this booking's."""
+	out = []
+	for name in sorted(set(frappe.get_all("TEX Payment Allocation", filters={"booking": booking},
+	                                      pluck="transaction"))):
+		t = frappe.db.get_value("TEX Payment Transaction", name, ["name", "txn_type", "status", "amount", "currency",
+		                                                           "provider_account", "completed_at", "creation"],
+		                        as_dict=True)
+		if not t or t.txn_type != "Charge" or t.status != "Succeeded":
+			continue
+		held = booking_nets(name).get(booking, ZERO)
+		if held <= 0:
+			continue
+		refunded = refunded_of(name)
+		amount = from_db(t.amount, t.currency)
+		unallocated = amount - allocated_of(name) - refunded
+		out.append({"transaction": name, "available": min(held, amount - refunded),
+		            "supported": auto_refundable(t) and unallocated <= 0,
+		            "at": str(get_datetime(t.completed_at or t.creation))})
+	return sorted(out, key=lambda c: (c["at"], c["transaction"]), reverse=True)
+
+
+def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
+           _system: bool = False) -> dict:
 	"""Refund a successful charge, or money a gateway captured that TEX refused to count
 	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
-	stated, against the captured payment, and never touches a booking."""
+	stated, against the captured payment, and never touches a booking.
+
+	``_system``: a refund TEX makes by itself for a guest's own change (G-45: an overpayment
+	under the hotel's refund policy, or a payment for a change that could not apply). Only
+	``services.guest_changes`` passes it, always naming the booking; staff need payment.refund."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
-	scope.require("payment.refund", txn.property)
+	if _system:
+		if not booking:
+			frappe.throw(_("A refund TEX makes by itself names the booking it comes from."))
+	else:
+		scope.require("payment.refund", txn.property)
 	if not (reason or "").strip():
 		frappe.throw(_("A refund reason is required."))
 	if booking and frappe.db.get_value("TEX Booking", booking, "property") != txn.property:
