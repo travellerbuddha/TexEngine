@@ -12,7 +12,7 @@ from decimal import Decimal
 from kamra.tex.availability import inventory_math as inv
 from kamra.tex.availability import restrictions as rs
 from kamra.tex.pricing import engine, serialize, validate, versions
-from kamra.tex.pricing.enums import Level, OccTarget, Op
+from kamra.tex.pricing.enums import Level, OccTarget, Op, PricingBasis
 from kamra.tex.pricing.model import OccupancyRule, Period, RoomRule, Unsellable
 from kamra.tex.tests.unit import fixtures as fx
 from kamra.tex.tests.unit.test_engine import DE_MARKUP, EB, spec_request, spec_terms
@@ -182,6 +182,39 @@ class TestValidation(unittest.TestCase):
 			OccupancyRule("P-2C", OccTarget.CHILD, Op.PERCENT_OF, D("40"), position=1, children=2,
 			              room_type="STD")))
 		self.assertNotIn("OCC_AMBIGUOUS", self.codes(t))
+
+	def test_a_higher_ranked_rule_settles_a_partial_combination_tie(self):
+		# 2+* and *+2 meet only at 2A+2C, where the exact 2+2 rule prices child 1: the tie never
+		# decides a price, so it does not block publishing
+		t = fx.terms(occupancy_rules=(
+			*fx.occ_rules(),
+			OccupancyRule("P-2A", OccTarget.CHILD, Op.PERCENT_OF, D("60"), position=1, adults=2),
+			OccupancyRule("P-2C", OccTarget.CHILD, Op.PERCENT_OF, D("40"), position=1, children=2),
+			OccupancyRule("P-2A2C", OccTarget.CHILD, Op.PERCENT_OF, D("50"), position=1, adults=2, children=2)))
+		self.assertEqual(self.codes(t), [])
+
+	def test_a_tie_settled_in_one_period_only_is_still_an_error(self):
+		# the exact rule prices child 1 of 2A+2C in P1 only; in the other periods the tie decides
+		t = fx.terms(occupancy_rules=(
+			*fx.occ_rules(),
+			OccupancyRule("P-2A", OccTarget.CHILD, Op.PERCENT_OF, D("60"), position=1, adults=2),
+			OccupancyRule("P-2C", OccTarget.CHILD, Op.PERCENT_OF, D("40"), position=1, children=2),
+			OccupancyRule("P-2A2C", OccTarget.CHILD, Op.PERCENT_OF, D("50"), position=1, adults=2, children=2,
+			              period="P1")))
+		self.assertEqual(self.codes(t), ["OCC_AMBIGUOUS"])
+
+	def test_children_filling_included_places_never_tie(self):
+		# ROOM basis, 2 included places that children fill: the child of 1A+1C is free, so "child 1
+		# at 1+*" and "child 1 at *+1" (which meet only there) never price anyone
+		t = replace(fx.terms(), basis=PricingBasis.ROOM, room_basis_children_fill_included=True,
+		            rooms={k: replace(v, included_adults=2) for k, v in fx.rooms().items()})
+		t = replace(t, occupancy_rules=(
+			*(r for r in t.occupancy_rules if r.rule_id != "O-1A1C"),
+			OccupancyRule("V-1A", OccTarget.CHILD, Op.PERCENT_OF, D("60"), position=1, adults=1, age_band="CHB"),
+			OccupancyRule("V-1C", OccTarget.CHILD, Op.PERCENT_OF, D("40"), position=1, children=1, age_band="CHB")))
+		self.assertNotIn("OCC_AMBIGUOUS", self.codes(t))
+		# without the fill the child pays, and the two rules tie
+		self.assertIn("OCC_AMBIGUOUS", self.codes(replace(t, room_basis_children_fill_included=False)))
 
 	def test_sweep_reports_an_ambiguous_combination_as_an_error(self):
 		t = fx.terms(occupancy_rules=(

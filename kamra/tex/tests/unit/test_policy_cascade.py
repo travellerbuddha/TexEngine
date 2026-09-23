@@ -158,3 +158,121 @@ class TestPrecedenceReport(unittest.TestCase):
 		changed = {(d["room"], d["period"], d["party"]) for d in precedence_report.differences(frozen, rebuilt)}
 		self.assertIn(("STD", "P1", "1A"), changed)                   # hotel+market 1+0 ×0.90 now applies
 		self.assertIn(("STD", "P1", "2A+[INF,CHB]"), changed)
+
+	def test_a_version_frozen_without_age_bands_shows_its_child_cells(self):
+		# the G-30 cohort: no bands anywhere, so every child was sold as an adult; a republish
+		# takes a policy's bands. The grid must price children of either side's bands.
+		from kamra.tex.devtools import precedence_report
+
+		frozen = replace(fx.terms(age_bands=(), occupancy_rules=tuple(r for r in fx.occ_rules() if not r.age_band)),
+		                 occupancy_precedence=occupancy.LEGACY)
+		diff = precedence_report.differences(frozen, fx.terms())
+		self.assertIn({"room": "STD", "period": "P1", "party": "2A+[CHB]", "sold_as": "270.00", "now": "250.00"},
+		              diff)                                           # sold as a third adult (×0.70)
+		self.assertIn({"room": "STD", "period": "P1", "party": "2A+[INF]", "sold_as": "270.00", "now": "200.00"},
+		              diff)
+
+	def test_a_rebuild_the_publish_check_refuses_is_reported(self):
+		from kamra.tex.devtools import precedence_report
+
+		amb = inherit.PolicyLayer("POL-G", 1, None, None, rules=(
+			rule("G-2A", CHILD, Op.PERCENT_OF, "60", position=1, adults=2),
+			rule("G-2C", CHILD, Op.PERCENT_OF, "40", position=1, children=2)))
+		rebuilt = cascaded(fx.bands(), (), layers=(amb, MARKET))
+		errors = precedence_report.republish_errors(rebuilt)
+		self.assertTrue(errors)
+		self.assertTrue(all(e.startswith("OCC_AMBIGUOUS") for e in errors), errors)
+		self.assertEqual(precedence_report.republish_errors(fx.terms()), [])
+
+
+def errors(t):
+	return [i for i in validate.validate_terms(t) if i.level == "ERROR"]
+
+
+def warnings(t):
+	return [i.code for i in validate.validate_terms(t) if i.level == "WARNING"]
+
+
+class TestInheritedRuleChecks(unittest.TestCase):
+	"""A pricing policy reaches every contract in its scope: its rules block publishing only
+	where they would decide a price; the policy itself is checked on its own at activation."""
+
+	TIE = (rule("G-2A", CHILD, Op.PERCENT_OF, "60", position=1, adults=2),
+	       rule("G-2C", CHILD, Op.PERCENT_OF, "40", position=1, children=2))
+
+	def test_a_policy_tie_the_version_always_outranks_is_not_an_error(self):
+		# child 1 of 2A+2C: the version prices every band itself, and a version rule beats any policy rule
+		t = cascaded(fx.bands(), fx.occ_rules(), layers=(inherit.PolicyLayer("POL-G", 1, None, None, rules=self.TIE),))
+		self.assertEqual(errors(t), [])
+		self.assertEqual(occ(t, 2, 8, 5).total, D("275.00"))
+
+	def test_a_policy_tie_that_prices_a_slot_is_an_error(self):
+		# the version has no Child A rule: the policy tie decides child 1 (CHA) of 2A+2C
+		t = cascaded(fx.bands(), tuple(r for r in fx.occ_rules() if r.rule_id != "O-CHA"),
+		             layers=(inherit.PolicyLayer("POL-G", 1, None, None, rules=self.TIE),))
+		found = errors(t)
+		self.assertEqual([i.code for i in found], ["OCC_AMBIGUOUS"])
+		self.assertIn("CHA", found[0].message)
+
+	def test_policy_rows_the_contract_never_reaches_do_not_block_publishing(self):
+		g = inherit.PolicyLayer("POL-G", 1, None, None, rules=(
+			rule("G-A-INF", ADULT, Op.MULTIPLY, "0.5", age_band="INF"),     # an adult rule never has a band
+			rule("G-X1", CHILD, Op.PERCENT_OF, "30", age_band="CHB"),
+			rule("G-X2", CHILD, Op.PERCENT_OF, "35", age_band="CHB")))    # the version's own CHB rule wins
+		t = cascaded(fx.bands(), fx.occ_rules(), layers=(g,))
+		self.assertEqual(errors(t), [])
+		self.assertIn("OCC_INHERITED_ADULT_BAND_UNUSED", warnings(t))
+		# where the contract has no CHB rule of its own, the twin rules decide the price: an error
+		t = cascaded(fx.bands(), tuple(r for r in fx.occ_rules() if r.rule_id != "O-CHB"), layers=(g,))
+		found = errors(t)
+		self.assertEqual([i.code for i in found], ["OCC_AMBIGUOUS"])
+		self.assertIn("G-X1", found[0].message)
+		self.assertIn("G-X2", found[0].message)
+
+	def test_a_policy_combination_rule_without_a_combination_is_an_error(self):
+		# it would reprice every combination of every contract in scope (guard)
+		g = inherit.PolicyLayer("POL-G", 1, None, None, rules=(rule("G-COMBO", COMBINATION, Op.MULTIPLY, "0.9"),))
+		self.assertIn("OCC_COMBINATION_QUALIFIER", [i.code for i in errors(cascaded(fx.bands(), fx.occ_rules(),
+		                                                                           layers=(g,)))])
+
+	def test_a_policy_is_checked_on_its_own(self):
+		issues = validate.policy_issues((), (
+			rule("A-INF", ADULT, Op.MULTIPLY, "0.5", age_band="INF"),
+			rule("C-ANY", COMBINATION, Op.MULTIPLY, "0.9"),
+			rule("X1", CHILD, Op.PERCENT_OF, "30", age_band="CHB"),
+			rule("X2", CHILD, Op.PERCENT_OF, "35", age_band="CHB"),
+			*self.TIE))
+		self.assertEqual(sorted(i.code for i in issues if i.level == "ERROR"),
+		                 ["OCC_ADULT_BAND", "OCC_AMBIGUOUS", "OCC_COMBINATION_QUALIFIER", "OCC_DUPLICATE"])
+		tie = next(i for i in issues if i.code == "OCC_AMBIGUOUS")
+		self.assertIn("child 1", tie.message)
+		self.assertIn("2A+2C", tie.message)
+		# an exact 2+2 rule settles the tie for every band; partial rules that never meet are fine
+		settled = (*self.TIE, rule("G-2A2C", CHILD, Op.PERCENT_OF, "50", position=1, adults=2, children=2))
+		self.assertEqual(validate.policy_issues((), settled), [])
+		self.assertEqual(validate.policy_issues((), (rule("G-1A", CHILD, Op.PERCENT_OF, "60", position=1, adults=1),
+		                                             rule("G-2A", CHILD, Op.PERCENT_OF, "40", position=1, adults=2))),
+		                 [])
+
+
+class TestPolicyOverride(unittest.TestCase):
+	"""A pricing-policy "specific override" no longer beats a contract's own rule (ADR-042):
+	publishing says so where that changes a price."""
+
+	OVR = inherit.PolicyLayer("POL-H", 1, "HOTEL-A", None, rules=(
+		rule("H-INF-OVR", CHILD, Op.FIXED, "15", age_band="INF", is_override=True),))
+
+	def test_an_outranked_policy_override_warns(self):
+		t = cascaded(fx.bands(), fx.occ_rules(), layers=(self.OVR,))
+		self.assertEqual(occ(t, 2, 1).total, D("200"))              # the version's INF ×0 wins
+		self.assertEqual(occ(replace(t, occupancy_precedence=occupancy.LEGACY), 2, 1).total, D("215"))
+		found = [i for i in validate.validate_terms(t) if i.code == "OCC_POLICY_OVERRIDE_OUTRANKED"]
+		self.assertEqual(len(found), 1)
+		self.assertEqual(found[0].level, "WARNING")
+		self.assertIn("H-INF-OVR", found[0].message)
+		self.assertIn("O-INF", found[0].message)
+
+	def test_a_policy_override_that_still_applies_does_not_warn(self):
+		t = cascaded(fx.bands(), tuple(r for r in fx.occ_rules() if r.rule_id != "O-INF"), layers=(self.OVR,))
+		self.assertEqual(occ(t, 2, 1).total, D("215"))
+		self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", warnings(t))

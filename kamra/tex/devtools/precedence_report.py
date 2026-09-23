@@ -10,15 +10,21 @@ until the contract is republished. This report tells ops which versions to look 
 
 * ``precedence``: for every version on sale now or scheduled whose payload is still on
   the legacy ranking, a representative grid of parties (every room and period, every
-  adult count, every mix of the contract's age bands up to the room's child capacity)
-  is priced from the frozen payload under both rankings; cells that differ are listed
-  (e.g. an infant priced by a band-less "child 2 of 2A+2C" rule under the legacy one).
+  adult count, every mix of child ages up to the room's child capacity - one age at the
+  start of each age band of either side) is priced from the frozen payload under both
+  rankings; cells that differ are listed (e.g. an infant priced by a band-less "child 2
+  of 2A+2C" rule under the legacy one).
 * ``rebuild`` (default on): the same grid priced from the version rebuilt as a
-  republish would build it now - every applicable pricing policy cascaded (G-30) - so
-  policy changes that reach the contract only on republish show too. A version that
-  cannot be rebuilt says why (e.g. two live pricing policies of one scope).
-* ``ambiguous_policy_scopes``: (hotel, market) scopes with more than one live pricing
-  policy. No contract of such a scope can be published until one is archived.
+  republish would build it - every applicable pricing policy cascaded (G-30) as of the
+  version's start (now, or its scheduled ``effective_from``) - so policy changes that
+  reach the contract only on republish show too. A version frozen without age bands (its
+  children sold as adults) is compared on the rebuilt version's bands.
+* ``cannot_rebuild``: versions a republish would refuse, and why: the rebuild fails
+  (e.g. two live pricing policies of one scope) or the publish check reports an ERROR
+  (e.g. a pricing-policy row activated before the policy checks existed).
+* ``ambiguous_policy_scopes``: (hotel, market) scopes with more than one pricing policy
+  live now or scheduled. No contract of such a scope can be published until one is
+  archived.
 
 Nothing is written. The pure grid comparison (``differences``) has no frappe import.
 """
@@ -30,26 +36,37 @@ from decimal import Decimal
 from itertools import combinations_with_replacement
 
 from kamra.tex.money import display
-from kamra.tex.pricing import ages, occupancy, rooms
+from kamra.tex.pricing import ages, occupancy, rooms, validate
 from kamra.tex.pricing.model import ChildSpec, ContractTerms, PricingError, Unsellable
 
 
-def _grid(t: ContractTerms):
-	"""(room, period, adults, band mix) of every party a room can sell."""
-	bands = tuple(sorted(t.age_bands, key=lambda b: b.from_months))
-	for rt, spec in sorted(t.rooms.items()):
-		for p in t.periods:
+def _child_ages(before: ContractTerms, after: ContractTerms) -> tuple[int, ...]:
+	"""One child age (months) per age band of either side: its first month. A side without
+	bands prices these children as adults; the other side shows what they cost now."""
+	return tuple(sorted({b.from_months for b in (*before.age_bands, *after.age_bands)}))
+
+
+def _grid(before: ContractTerms, after: ContractTerms):
+	"""(room, period, adults, child ages) of every party a room of ``before`` can sell."""
+	sample = _child_ages(before, after)
+	for rt, spec in sorted(before.rooms.items()):
+		for p in before.periods:
 			for n_a in range(max(1, spec.min_adults), spec.max_adults + 1):
 				for n_c in range(0, spec.max_children + 1):
-					if n_c and not bands:
+					if n_c and not sample:
 						break
-					for mix in combinations_with_replacement(bands, n_c):
+					for mix in combinations_with_replacement(sample, n_c):
 						yield rt, p, n_a, mix
+
+
+def _child_label(months: int, before: ContractTerms, after: ContractTerms) -> str:
+	codes = [b.code for b in (ages.band_for(months, before.age_bands), ages.band_for(months, after.age_bands)) if b]
+	return "/".join(dict.fromkeys(codes)) or ages.format_months(months)
 
 
 def _price(t: ContractTerms, rt: str, period, adults: int, mix) -> Decimal | str:
 	"""The occupancy amount of one night, or the code of why it cannot be sold."""
-	kids = tuple(ChildSpec(age_months=b.from_months) for b in mix)
+	kids = tuple(ChildSpec(age_months=m) for m in mix)
 	try:
 		party = ages.classify_party(t, adults, kids, period.start, period.start)
 		spec = t.rooms[rt]
@@ -67,16 +84,21 @@ def differences(before: ContractTerms, after: ContractTerms | None = None) -> li
 	if after is None:
 		after = replace(before, occupancy_precedence=occupancy.CASCADE)
 	out = []
-	for rt, p, n_a, mix in _grid(before):
+	for rt, p, n_a, mix in _grid(before, after):
 		if rt not in after.rooms or p.code not in {x.code for x in after.periods}:
 			continue
 		a = _price(before, rt, p, n_a, mix)
 		b = _price(after, rt, p, n_a, mix)
 		if a != b:   # Decimals compare by value (250.00 == 250.0000)
-			out.append({"room": rt, "period": p.code,
-			            "party": f"{n_a}A" + (f"+[{','.join(x.code for x in mix)}]" if mix else ""),
+			kids = ",".join(_child_label(m, before, after) for m in mix)
+			out.append({"room": rt, "period": p.code, "party": f"{n_a}A" + (f"+[{kids}]" if mix else ""),
 			            "sold_as": display(a), "now": display(b)})
 	return out
+
+
+def republish_errors(rebuilt: ContractTerms) -> list[str]:
+	"""The ERRORs that would refuse publishing ``rebuilt`` ("CODE: message"). Pure."""
+	return [f"{i.code}: {i.message}" for i in validate.validate_terms(rebuilt) if i.level == "ERROR"]
 
 
 def _live_versions(property: str | None) -> list[dict]:
@@ -93,25 +115,32 @@ def _live_versions(property: str | None) -> list[dict]:
 
 
 def _ambiguous_policy_scopes() -> list[dict]:
+	"""Scopes with more than one pricing policy (root) live now or scheduled: the window the
+	activation guard (one live policy per scope) looks at."""
+	import frappe
 	from frappe.utils import now_datetime
 
-	from kamra.tex.commercial.revisions import as_of
-
-	scopes: dict[tuple, list[str]] = {}
-	for r in as_of("TEX Pricing Policy", now_datetime(), fields=("name", "property", "market")):
-		scopes.setdefault((r.property or "", r.market or ""), []).append(r.name)
-	return [{"property": k[0] or None, "market": k[1] or None, "policies": v}
+	scopes: dict[tuple, set[str]] = {}
+	for r in frappe.db.sql("""SELECT IFNULL(revision_of, name) AS root, IFNULL(property, '') AS property,
+	                                 IFNULL(market, '') AS market
+	                          FROM `tabTEX Pricing Policy`
+	                          WHERE tex_status IN ('Active','Superseded')
+	                            AND (active_to IS NULL OR active_to > %(now)s)""", {"now": now_datetime()},
+	                       as_dict=True):
+		scopes.setdefault((r.property, r.market), set()).add(r.root)
+	return [{"property": k[0] or None, "market": k[1] or None, "policies": sorted(v)}
 	        for k, v in sorted(scopes.items()) if len(v) > 1]
 
 
 def run(property: str | None = None, rebuild: bool = True, examples: int = 5) -> dict:
 	import frappe
-	from frappe.utils import now_datetime
+	from frappe.utils import get_datetime, now_datetime
 
 	from kamra.tex.commercial import contracts
 
 	report = {"checked": 0, "already_v2": 0, "precedence": [], "rebuild": [], "cannot_rebuild": [],
 	          "ambiguous_policy_scopes": _ambiguous_policy_scopes()}
+	now = now_datetime()
 	for v in _live_versions(property):
 		report["checked"] += 1
 		frozen = contracts.load_terms(v.name)
@@ -124,10 +153,17 @@ def run(property: str | None = None, rebuild: bool = True, examples: int = 5) ->
 			if diff:
 				report["precedence"].append({**head, "cells": len(diff), "examples": diff[:examples]})
 		if rebuild:
+			# as a republish would build it: the policies live when the version starts
+			at = max(now, get_datetime(v.effective_from)) if v.effective_from else now
 			try:
-				rebuilt = contracts.build_terms(frappe.get_doc("TEX Contract Version", v.name), at=now_datetime())
+				rebuilt = contracts.build_terms(frappe.get_doc("TEX Contract Version", v.name), at=at)
 			except frappe.ValidationError as e:
 				report["cannot_rebuild"].append({**head, "reason": str(e)})
+				continue
+			errors = republish_errors(rebuilt)
+			if errors:
+				report["cannot_rebuild"].append({**head, "reason": "publishing would be refused: "
+				                                 + "; ".join(errors[:examples])})
 				continue
 			diff = differences(frozen, rebuilt)
 			if diff:

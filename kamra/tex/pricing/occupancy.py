@@ -96,16 +96,32 @@ def rule_ref(rule: OccupancyRule) -> RuleRef:
 	return RuleRef("occupancy_rule", rule.rule_id, rule_level(rule), rule.source, " ".join(parts))
 
 
-def _qualifiers_match(rule: OccupancyRule, room_type: str, period: Period, party: Party) -> bool:
+def qualifiers_match(rule: OccupancyRule, room_type: str, period: str | None, adults: int, children: int) -> bool:
+	"""The rule's room, period and combination qualifiers hold for this room, period (code;
+	None: a period no period-specific rule names) and party size."""
 	if rule.room_type is not None and rule.room_type != room_type:
 		return False
-	if rule.period is not None and rule.period != period.code:
+	if rule.period is not None and rule.period != period:
 		return False
-	if rule.adults is not None and rule.adults != party.adults:
+	if rule.adults is not None and rule.adults != adults:
 		return False
-	if rule.children is not None and rule.children != party.child_count:
+	if rule.children is not None and rule.children != children:
 		return False
 	return True
+
+
+def slot_matches(rule: OccupancyRule, target: OccTarget, position: int | None, band: str | None) -> bool:
+	"""The rule prices this slot: adult ``position``, child ``position`` in age band ``band``,
+	or the whole combination (``position`` and ``band`` None). Qualifiers aside."""
+	if rule.target != target:
+		return False
+	if target == OccTarget.COMBINATION:
+		return True
+	if rule.position is not None and rule.position != position:
+		return False
+	if target == OccTarget.ADULT:
+		return rule.age_band is None
+	return rule.age_band is None or rule.age_band == band
 
 
 def _pick(candidates: list[OccupancyRule], what: str, key) -> tuple[OccupancyRule | None, tuple[RuleRef, ...]]:
@@ -171,7 +187,8 @@ def check_capacity(spec: RoomSpec, party: Party, infants_count: bool) -> None:
 def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decimal, party: Party,
                     *, night=None, explain: Explanation | None = None) -> OccupancyResult:
 	room_type = spec.room_type
-	rules = [r for r in terms.occupancy_rules if _qualifiers_match(r, room_type, period, party)]
+	rules = [r for r in terms.occupancy_rules
+	         if qualifiers_match(r, room_type, period.code, party.adults, party.child_count)]
 	slots: list[SlotPrice] = []
 	precedence = terms.occupancy_precedence
 
@@ -196,8 +213,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 		if pos <= included_adults:
 			slots.append(SlotPrice(SlotKind.ADULT, pos, f"Adult {pos}", ZERO, included=True))
 			continue
-		cands = [r for r in rules if r.target == OccTarget.ADULT and r.age_band is None
-		         and (r.position is None or r.position == pos)]
+		cands = [r for r in rules if slot_matches(r, OccTarget.ADULT, pos, None)]
 		winner, overridden = _pick(cands, f"adult {pos}", rank)
 		if winner is None:
 			winner, overridden = GLOBAL_ADULT_DEFAULT, overridden
@@ -222,9 +238,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 				explain.add("occupancy", "CHILD_INCLUDED", "{label} fills an included room place",
 				            night=night, label=label)
 			continue
-		cands = [r for r in rules if r.target == OccTarget.CHILD
-		         and (r.position is None or r.position == child.position)
-		         and (r.age_band is None or r.age_band == child.band.code)]
+		cands = [r for r in rules if slot_matches(r, OccTarget.CHILD, child.position, child.band.code)]
 		infant = child.band.is_infant
 		winner, overridden = _pick(cands, f"child {child.position} band {child.band.code}",
 		                           lambda r, infant=infant: specificity(r, precedence=precedence, infant_slot=infant))
@@ -244,7 +258,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 	total = base_total + sum((s.amount for s in slots), ZERO)
 
 	# ── whole-combination rules ──
-	combo_cands = [r for r in rules if r.target == OccTarget.COMBINATION]
+	combo_cands = [r for r in rules if slot_matches(r, OccTarget.COMBINATION, None, None)]
 	combo, overridden = _pick(combo_cands, f"combination {party.adults}A+{party.child_count}C", rank)
 	combo_ref = None
 	if combo is not None:
