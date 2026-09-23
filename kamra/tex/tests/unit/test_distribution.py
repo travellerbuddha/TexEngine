@@ -103,3 +103,19 @@ class TestSandbox(unittest.TestCase):
 	def test_only_honest_adapters_are_installed(self):
 		self.assertEqual(set(REGISTRY), {"sandbox_channel"})
 		self.assertFalse(any(cls.certified for cls in REGISTRY.values()))       # no production channel yet
+
+
+class TestPmsAdapters(unittest.TestCase):
+	"""G-90: an uncertified PMS adapter is refused for a Production connection at run time."""
+
+	def conn(self, adapter, environment):
+		return SimpleNamespace(adapter=adapter, environment=environment, settings_json=None, get=lambda k, d=None: d)
+
+	def test_uncertified_adapters_never_run_in_production(self):
+		from kamra.tex.connect import adapters as pms
+
+		self.assertIsInstance(pms.get(self.conn("log", "Sandbox")), pms.LogOnlyPMS)
+		self.assertIsInstance(pms.get(self.conn("webhook", "Production")), pms.WebhookPMS)   # certified
+		with self.assertRaisesRegex(pms.AdapterRefused, "not certified for production") as e:
+			pms.get(self.conn("log", "Production"))
+		self.assertFalse(e.exception.retryable)
