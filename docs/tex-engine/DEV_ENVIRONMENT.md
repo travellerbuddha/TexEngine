@@ -41,3 +41,19 @@ bench --site test.localhost run-tests --module kamra.tex.tests.integration.test_
 # frontend
 cd frontend && npm ci && npm run build
 ```
+
+## Demo data and browser E2E
+```bash
+# demo enterprise, hotels, contracts, users (revenue@, agent@, finance@, beach.gm@demo.tex)
+bench --site test.localhost execute kamra.tex.devtools.demo_seed.execute --kwargs "{'password': 'TexDemo#2026'}"
+# the public booking API is rate limited per IP; raise it on test benches only
+bench --site test.localhost set-config -p tex_public_write_limit 1000
+bench --site test.localhost set-config -p tex_public_search_limit 1000
+bench serve --port 8000        # test.localhost must resolve to 127.0.0.1
+cd frontend && TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD='TexDemo#2026' \
+  PW_CHROMIUM=/opt/pw-browsers/chromium npx playwright test -c e2e
+```
+Specs: `shell`, `contract-admin`, `booking` (desktop + 390 px), `crs` (call centre, reservation
+change) and `critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
+(contracts, booking, reservations) and `e2e/helpers.ts`. The dev bench's System Settings
+time zone is Europe/Istanbul (the demo hotels are in Türkiye).

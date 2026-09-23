@@ -25,6 +25,8 @@ export interface Bootstrap {
   currencies: string[]
   /** Server wall clock: datetimes from the API are naive times in `time_zone`. */
   server?: { time_zone: string; now: string }
+  /** Browser clock (ms) when this bootstrap arrived: server offset = server.now − receivedAt. */
+  receivedAt?: number
 }
 
 interface SessionValue {
@@ -74,7 +76,7 @@ export function TexSessionProvider({
   const load = useCallback(async () => {
     try {
       const b = await tex<Bootstrap>("session", "bootstrap")
-      setBoot(b)
+      setBoot({ ...b, receivedAt: Date.now() })
       setError(undefined)
     } catch (e) {
       setError(e instanceof TexApiError ? e : new TexApiError(String(e), 0, "Error"))

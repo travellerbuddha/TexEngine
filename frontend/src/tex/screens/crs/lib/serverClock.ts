@@ -45,8 +45,9 @@ export function useServerClock(): ServerClock {
   const { boot } = useSession()
   const tz = boot.server?.time_zone
   const now = boot.server?.now
+  const arrived = boot.receivedAt
   return useMemo(() => {
-    const offset = now ? wall(now) - receivedAt(now) : 0
+    const offset = now ? wall(now) - (arrived ?? receivedAt(now)) : 0
     const serverNow = () => new Date(Date.now() + offset)
     return {
       tz,
@@ -55,7 +56,7 @@ export function useServerClock(): ServerClock {
       msUntil: (v) => (v ? wall(v) - serverNow().getTime() : Number.NaN),
       label: (v) => (!v ? "—" : tz ? `${dateTime(v)} (${tz})` : dateTime(v)),
     }
-  }, [tz, now])
+  }, [tz, now, arrived])
 }
 
 /** "4:59" / "1:02:03" for a countdown; "0:00" once expired. */
