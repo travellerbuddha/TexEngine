@@ -20,7 +20,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 
 | Area | Status | Evidence (code · tests) | Open items (gap ids) | Owner input | Exit criterion |
 |---|---|---|---|---|---|
-| Pricing | PARTIAL · **money blocker** | Pure Decimal engine `kamra/tex/pricing` (no frappe import, `TestPurity`); 188 unit tests; G-01…G-09, G-17, G-18, G-20 fixed with fail-first tests | **G-30** policy cascade (hotel ranked above market, no cascade); **G-31** band-less occupancy rule outranks age bands; G-56 promotion FX not recorded; G-72 Float money fields; G-84 min-basket per room | — | G-30 and G-31 fixed with regression tests; G-72 migrated to Currency |
+| Pricing | PARTIAL · **money blocker** | Pure Decimal engine `kamra/tex/pricing` (no frappe import, `TestPurity`); 218 unit tests; G-01…G-09, G-17, G-18, G-20, G-30, G-31 fixed with fail-first tests (occupancy precedence v2, ADR-042) | G-56 promotion FX not recorded; G-72 Float money fields; G-84 min-basket per room; versions published before ADR-042 keep the legacy occupancy ranking until republished (`devtools/precedence_report` lists the ones that would change) | — | G-72 migrated to Currency |
 | Contracts | PARTIAL | Immutable published versions with a verified payload hash (`TestContractImmutability`); selection (`TestContractSelection`); e2e `contract-admin`, `policy-revisions` | G-50 header fields (market, channels, windows, priority) editable after publish while selection reads them; G-73 snapshot by reference; G-74 draft edits not audited | — | G-50 fixed; G-74 audited |
 | Inventory | PARTIAL | Row-locked inventory days (`TestConcurrentLastRoom`, `TestConcurrentRoomTypes`); extras capacity (G-19, `TestConcurrentLastExtra`); hold expiry (G-86) | G-49 legacy `validate_type_capacity` still applies to TEX oversell and pools (channel bookings excepted); G-41 no channel dimension on allotments; G-47, G-48 | — | G-49 fixed |
 | Booking Engine | PARTIAL · **money blocker** | `/book/<slug>` SPA, rate-limited public API, `test_public_booking` (17), e2e booking desktop + mobile, post-booking extras (G-22) | **G-45** a higher price after a guest change is applied without collecting the difference; refund and credit policies do nothing | — | G-45 fixed |
@@ -43,7 +43,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 ## 2. Launch blockers
 
 - **Money**:
-  - G-30 and G-31 (pricing precedence);
+  - ~~G-30 and G-31 (pricing precedence)~~ fixed (ADR-042); at deploy, run `precedence_report` and archive any second live pricing policy of a scope;
   - G-45 (guest change collects nothing);
   - G-67 and G-68 (payments; being fixed);
   - payment provider certification.

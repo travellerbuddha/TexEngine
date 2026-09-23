@@ -40,12 +40,12 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
 | Status | Count | Requirements |
 |---|---|---|
-| COMPLETE | 10 | R-06, R-10, R-26, R-38, R-45, R-46, R-57, R-58, R-60 (process), R-61 (process) |
-| PARTIAL | 52 | all others; the gaps are listed per row |
+| COMPLETE | 11 | R-06, R-07, R-10, R-26, R-38, R-45, R-46, R-57, R-58, R-60 (process), R-61 (process) |
+| PARTIAL | 51 | all others; the gaps are listed per row |
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 5 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
+**Open gaps by severity:** 0 Critical, 5 High, 34 Medium, 7 Low (+3 blocked items). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -78,9 +78,9 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `screens/rates/contracts/*` · e2e `contract-admin` | Header fields editable after publish (G-50). (Fixed: contract selection G-17, cost visibility G-11; `TestContractSelection`.) |
 | R-05 | Versioning & snapshot | PARTIAL | immutable versions, frozen payload + hash verified on load (`tex_contract_version.py`, `revisions.py`) · `TestContractImmutability`, `test_payload_integrity_is_checked`, e2e | Snapshot keeps periods/rules by reference only; no explicit quote timestamp (G-73). (The REST lock bypass G-01 is fixed, `TestPriceLock`.) |
 | R-06 | Base pricing modes | **COMPLETE** | `occupancy.py` PERSON/ROOM · `TestRoomBasis`, `TestPersonBasis`; basis select in `ContractDialogs.tsx` | — |
-| R-07 | Occupancy formula engine | PARTIAL | slot model, combinations not hardcoded (`occupancy.py`, `contracts.parse_combination`) · spec examples reproduced (270; 2A+1C 250 vs 1A+1C 200) | Global/hotel/market policy rules do not cascade (single `_policy_for`) (G-30). Band-less position/combination rules silently outrank band rules incl. infant ×0; no publish warning (G-31). |
+| R-07 | Occupancy formula engine | **COMPLETE** | slot model, combinations not hardcoded (`occupancy.py`, `contracts.parse_combination`); every live pricing policy (global, hotel, market, hotel + market) cascades into a contract at publish, rule origin ranked before qualifiers, an infant priced by its band rule first, ambiguous rules refused at publish, legacy payloads priced as sold (occupancy precedence v2, ADR-042, G-30/G-31 fixed); policy and contract occupancy editors (`screens/rates`) · spec examples reproduced (270; 2A+1C 250 vs 1A+1C 200), `TestPrecedenceV2`, `test_policy_cascade`, `test_pricing_policies` (8) | — |
 | R-08 | Child age engine | PARTIAL | integer months, DOB-at-arrival (`ages.py`) · `test_boundaries_in_months`, `TestChildrenAtBoundaries` (35/36, 83/84, 143/144 months) | Per-hotel/market bands untested; band gaps not detected at publish; no DOB input in UI (G-52). |
-| R-09 | Rule hierarchy | PARTIAL | `Level` precedence; winning + overridden rules in the price check (`PreviewTab.tsx`) · markup/occupancy precedence tests, e2e asserts explanation | Policy cascade (G-30). Same-scope markup ties resolved silently. Markup explanation level ignores channel (G-53). |
+| R-09 | Rule hierarchy | PARTIAL | `Level` precedence; occupancy rules rank origin (version > hotel + market > market > hotel > global) then level (ADR-042, G-30 fixed); one live pricing policy per scope; winning + overridden rules and the policy scope in the price check (`PreviewTab.tsx`) · markup/occupancy precedence tests, `test_policy_cascade`, `test_pricing_policies`, e2e asserts explanation | Same-scope markup ties resolved silently. Markup explanation level ignores channel (G-53). |
 | R-10 | Derived rooms | **COMPLETE** | `rooms.py` (derivation, cycle guard, absolute override) · `test_derived_rooms`, `test_base_change_propagates`, `test_absolute_override_wins_in_its_period`; `RatesTab.tsx` | — |
 | R-11 | Stay periods | PARTIAL | unlimited periods, weekday/priority, grid bulk rate change into a draft | No copy period; no bulk edit of occupancy/child/board across periods; `apply_rate_change` untested (G-47). |
 | R-12 | Sale vs stay date | PARTIAL | sale/stay windows, promotion booking-date/arrival/departure/LOS/through rules; extras and taxes effective-dated by sale time (G-20 fixed) · `test_sale_date_outside_eb_window`, `TestEligibility`, `TestEffectiveDatedExtrasAndTaxes` | Base rates/markups have no arrival/LOS/booking-date rules (G-54). |

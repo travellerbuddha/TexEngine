@@ -69,7 +69,9 @@ distinct pipeline steps, never hidden stacking. Scope levels (low→high):
 `GLOBAL, HOTEL, MARKET, CONTRACT, VERSION, ROOM, PERIOD, COMBINATION, OVERRIDE`; a rule's level is
 derived from which qualifiers it sets, and every explanation step records the winning rule, its
 level and the rules it overrode.
-**Consequences.** "Which rule won" is always answerable; tests pin precedence.
+**Consequences.** "Which rule won" is always answerable; tests pin precedence. Occupancy
+rules rank their origin (version, hotel + market, market, hotel, global policy) before these
+levels since ADR-042.
 
 ## ADR-007 Occupancy slot model and child ages in integer months
 **Decision.** Occupancy is priced as slots (adult positions 1..n, child positions 1..n ordered by
@@ -789,3 +791,72 @@ enterprise or group view (G-25).
   chain-wide CRM needs. Every profile change is audited, and nothing crosses enterprises.
 **Consequences.** A hotel-only CRM view, where one hotel cannot see another hotel's guests
 inside the same enterprise, would need a per-enterprise setting. It is not built.
+
+## ADR-042 Occupancy precedence v2: every pricing policy cascades; origin ranks first; an infant's band first
+(Numbered 042: ADR-041 is taken by the payments hardening branch.)
+
+**Context.** Two defects in how occupancy rules were ranked (R-07, R-09).
+- G-30: `contracts._policy_for` inherited ONE live pricing policy, ranked hotel + market >
+  hotel > market > global. So a hotel-only policy beat a market one (the spec says MARKET
+  above HOTEL), and nothing cascaded: a hotel+market policy without bands left the contract
+  without bands, and every child was then priced as an adult. A policy rule and a version
+  rule with the same qualifiers tied (`AMBIGUOUS_OCCUPANCY_RULES` at runtime, publish only
+  warned). Nothing stopped two live policies of one scope (the loader took the first by
+  name).
+- G-31: a band-less position/combination rule outranked a band rule, including the infant
+  ×0 rule: the reference fixture charged an infant 25 % as "child 2 of 2A+2C".
+Old payloads must keep their sold semantics: prices are computed from the frozen payload
+(ADR-004), and the ranking is part of how a payload is read.
+
+**Decision.**
+- *Cascade.* Publish loads EVERY pricing policy live at the version's effective time that
+  applies to the hotel and market (global, hotel, market, hotel + market) — pure
+  `pricing/inherit.py`, Frappe glue `contracts._policy_layers`. Each inherited rule keeps its
+  origin: `base_level` (GLOBAL/HOTEL/MARKET) and `scope_weight` (hotel 1 | market 2, as
+  `markup.weight`: global 0, hotel 1, market 2, hotel + market 3). The explanation source
+  names it, e.g. `policy:POL-00004/r2/hotel+market`.
+- *Ranking* (`occupancy.specificity`, v2 = `CASCADE`), for one slot:
+  1. infant slots only: a rule naming the infant's band beats every band-less rule, at any
+     origin or level (band-less rules still price an infant when no rule names its band);
+  2. origin: contract version > hotel + market > market > hotel > global;
+  3. level: OVERRIDE > COMBINATION > PERIOD > ROOM > none;
+  4. period > room > exact combination; 5. position + band > position > band > neither.
+  This reads R-09's chain in two dimensions: GLOBAL … CONTRACT VERSION say where a rule is
+  defined, ROOM … SPECIFIC OVERRIDE what it qualifies. Qualifiers rank within an origin, so
+  a policy's override or combination rule never beats a contract's own rule (policy rules
+  are defaults "overridden by any rule in a contract version", as the policy screen says).
+  Two matching rules with the same rank and different values stay unsellable at runtime.
+  INHERIT passes to the next rule in this order, so rules cascade by band code (an INHERIT
+  infant-band rule falls back to a less specific infant-band rule first).
+- *Bands are replaced, not merged*: the version's bands if any, else the band set of the most
+  specific policy that defines one. An inherited rule for a band, room or period the contract
+  lacks never applies: a WARNING (`OCC_INHERITED_*_UNUSED`), not an ERROR.
+- *One live policy per scope.* The `TEX Pricing Policy` controller refuses activating a second
+  live or scheduled policy with the same (hotel, market), under a locking read
+  (`revisions.live_or_scheduled_roots(for_update=True)`; its None filter now matches a blank
+  scope, so the global scope is a scope). If two exist anyway, the build fails
+  (`inherit.PolicyAmbiguous`, PRICING_POLICY_AMBIGUOUS): publish refuses, validate reports
+  BUILD. The controller also upper-cases band codes and checks them (`ages.validate_bands`),
+  refuses period codes (periods belong to contracts) and a room type of another hotel.
+- *Versioned precedence.* New payloads carry `settings.occupancy_precedence = 2` and
+  `scope_weight` per rule. A payload without the key reads as 1 (`LEGACY`) and uses exactly
+  the old ranking, so sold and live versions price as sold until republished. The payload
+  schema string stays `tex.contract.v1`: the keys are optional (no patch, no DocType change).
+- *Publish validation* (pure `pricing/validate.py`): `OCC_AMBIGUOUS` ERROR when two
+  non-INHERIT rules of equal rank can price the same slot in a sellable room/party (e.g.
+  "child 1 at 2+*" and "child 1 at *+2" meet at 2A+2C) with different values; the sweep's
+  `AMBIGUOUS_OCCUPANCY_RULES` is an ERROR; `OCC_INFANT_GENERIC` WARNING when an infant band is
+  priced only by band-less rules; `NO_AGE_BANDS` WARNING when a room takes children but no
+  bands exist; `scope_weight` joins the duplicate signature.
+
+**Consequences.**
+- A policy change reaches a contract only when it is republished (ADR-004); the simulator and
+  ORIGINAL_* repricing use the payload of the version on sale at the sale time.
+- Live versions keep v1 until republished. `devtools/precedence_report.py` (bench execute,
+  read-only) lists versions whose grid prices differ under v2, or when rebuilt now with every
+  live policy, versions that cannot be rebuilt, and scopes with two live policies (they cannot
+  publish until one is archived: list them at deploy).
+- `parent_market` chains are not walked: a policy for a parent market does not reach a
+  contract of a child market.
+- An infant still counts toward the child count and takes a position (YOUNGEST_FIRST pushes
+  the older child to position 2); changing that is a separate product decision.
