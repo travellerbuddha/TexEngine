@@ -619,3 +619,39 @@ list, count or edit another tenant's segment (G-26).
 **Consequences.**
 - Segment evaluation reads the tenant's reservations per guest list: indexed on
   (guest, property). Very large lists will need a stored fact table later.
+
+## ADR-037 Loyalty programs are administered in TEX; earnings are never rewritten by a rule change
+**Context.** Loyalty programs could only be edited in Desk by a System Manager, with no
+validation (G-24). Every save of a reservation recomputed its points with the current rules,
+so editing a rate rewrote past earnings (G-66). A 0 % redemption cap meant 100 %. Blackouts
+were labelled for redemption but applied to earning. A guest's summary showed every tenant's
+programs (G-65).
+**Decision.**
+- *Administration* (`kamra.tex.api.loyalty`):
+  - Reading needs `crm.view` at a hotel the program reaches. Changing it needs the new
+    `loyalty.edit` at every enabled hotel it reaches (Revenue Manager and admins; p17 adds it
+    to the default profiles).
+  - Another tenant's program is "not found".
+  - Every save, enable, disable and delete is audited with old and new values.
+  - Program statistics include members, available and pending points, and the liability
+    (available points × point value, program currency).
+- *Validation* (the controller, whoever saves):
+  - A program has exactly one hotel or one group.
+  - Its name is unique there, and only one program is enabled per scope.
+  - Values are non-negative, the redemption share is 0–100 %, and a currency is required
+    when points are earned on or worth money.
+  - Rules have a positive rate; a ROOM or EXTRA rule must reference its own hotels.
+  - Tier names and floors are unique, and multipliers are above zero.
+  - Blackouts must be ordered.
+  - A program with points cannot move to another hotel or group, or be deleted (disable it).
+- *Earnings are frozen*:
+  - An earning records its stay fingerprint (dates, room, value and currency, extras) and
+    its explanation.
+  - It is recomputed only when the stay itself changes, never because the rules changed.
+  - p17 fingerprints earlier earnings with their stay as it is.
+- *Redemption*:
+  - 0 % now means "cannot redeem"; p17 turns stored 0 into 100 to keep old behaviour.
+  - Blackouts have a purpose (Redemption, Earning or Both). Redemption refuses any stay night
+    in a redemption blackout. Old rows become Both.
+- A guest's summary lists only the viewer's programs.
+**Consequences.** Point value stays a 6-decimal Float read through Decimal (G-72 open).

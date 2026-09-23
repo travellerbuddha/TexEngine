@@ -14,7 +14,7 @@ import pathlib
 import re
 
 APP = pathlib.Path(__file__).resolve().parents[2]      # …/kamra (python package)
-TIMESTAMP = "2026-09-23 23:00:00.000000"
+TIMESTAMP = "2026-09-23 23:30:00.000000"
 
 LAYOUT = {"Section Break", "Column Break", "Tab Break"}
 

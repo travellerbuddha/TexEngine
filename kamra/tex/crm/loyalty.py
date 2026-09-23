@@ -9,8 +9,9 @@ values use Decimal and the program currency.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_FLOOR
 
 import frappe
@@ -25,14 +26,36 @@ FINAL = ("Available", "Used", "Expired")
 
 
 def program_for(property: str) -> str | None:
-	name = frappe.db.get_value("TEX Loyalty Program", {"property": property, "enabled": 1})
+	"""The hotel's enabled program, else its group's (at most one each: the controller)."""
+	name = frappe.db.get_value("TEX Loyalty Program", {"property": property, "enabled": 1}, order_by="creation asc")
 	if name:
 		return name
 	group = frappe.db.get_value("Property", property, "tex_hotel_group")
 	if group:
-		return frappe.db.get_value("TEX Loyalty Program", {"hotel_group": group, "enabled": 1, "property": ("is",
-		                                                                                                   "not set")})
+		return frappe.db.get_value("TEX Loyalty Program", {"hotel_group": group, "enabled": 1,
+		                                                   "property": ("is", "not set")}, order_by="creation asc")
 	return None
+
+
+def program_properties(prog) -> list[str]:
+	"""The (enabled) hotels a program reaches."""
+	if prog.get("property"):
+		return [prog.property]
+	if not prog.get("hotel_group"):
+		return []
+	return frappe.get_all("Property", filters={"tex_hotel_group": prog.hotel_group, "disabled": 0}, pluck="name",
+	                      order_by="name asc")
+
+
+def visible_programs(props: set[str]) -> set[str]:
+	"""Programs the viewer's hotels belong to (their own, or their group's)."""
+	if not props:
+		return set()
+	groups = {g for g in frappe.get_all("Property", filters={"name": ("in", list(props))}, pluck="tex_hotel_group")
+	          if g}
+	return set(frappe.get_all("TEX Loyalty Program", or_filters={"property": ("in", list(props)),
+	                                                            "hotel_group": ("in", list(groups) or [""])},
+	                          pluck="name"))
 
 
 def balances(guest: str, program: str) -> dict:
@@ -55,9 +78,20 @@ def tier_of(program_doc, lifetime_points: int):
 	return current
 
 
-def _in_blackout(program_doc, check_in: date) -> bool:
-	return any(getdate(b.date_from) <= check_in <= getdate(b.date_to) for b in program_doc.blackouts or []
-	           if b.date_from and b.date_to)
+def _in_blackout(program_doc, day: date, purpose: str) -> bool:
+	"""``purpose``: "Earning" or "Redemption"; a row without a purpose (before G-24) is both."""
+	return any(getdate(b.date_from) <= day <= getdate(b.date_to) for b in program_doc.blackouts or []
+	           if b.date_from and b.date_to and (b.get("applies_to") or "Both") in (purpose, "Both"))
+
+
+def stay_fingerprint(res) -> str:
+	"""What an earning depends on in the stay itself: dates, room, value and extras. A
+	change of the program's rules never changes it, so it never rewrites past earnings."""
+	snap = json.loads(res.tex_pricing_snapshot or "{}")
+	extras = sorted((e.get("code"), str(e.get("quantity"))) for e in snap.get("extras") or [] if e.get("ok"))
+	basis = [str(res.check_in_date), str(res.check_out_date), res.room_type, res.tex_currency,
+	         str(res.tex_total_amount or res.amount_after_tax or 0), extras]
+	return hashlib.sha256(json.dumps(basis, default=str).encode()).hexdigest()[:32]
 
 
 def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
@@ -66,7 +100,7 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 	nights = max(0, (co - ci).days)
 	ccy = res.tex_currency or program_doc.currency or "EUR"
 	amount = from_db(res.tex_total_amount or res.amount_after_tax or 0, ccy)
-	if _in_blackout(program_doc, ci):
+	if _in_blackout(program_doc, ci, "Earning"):
 		return 0, [{"rule": "BLACKOUT", "points": 0}]
 	total = D(0)
 	lines = []
@@ -102,8 +136,9 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 
 
 def on_reservation_change(doc) -> None:
-	"""doc_event (Reservation.on_update): earn when confirmed, reverse when cancelled,
-	re-earn when a modification changed the value."""
+	"""doc_event (Reservation.on_update): earn when confirmed, reverse when cancelled, and
+	earn again only when the stay itself changed (its fingerprint). Editing the program's
+	rules, tiers or points never rewrites earnings already made (G-24)."""
 	if not doc.get("tex_booking") or not doc.guest:
 		return
 	program = program_for(doc.property)
@@ -111,7 +146,7 @@ def on_reservation_change(doc) -> None:
 		return
 	existing = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": doc.name, "entry_type": "Earn",
 	                                                         "status": ("!=", "Reversed")},
-	                          fields=["name", "points", "status"])
+	                          fields=["name", "points", "status", "stay_fingerprint"])
 	if doc.status in ("Cancelled", "No Show"):
 		for e in existing:
 			_reverse(e, reason=f"reservation {doc.status.lower()}")
@@ -119,11 +154,12 @@ def on_reservation_change(doc) -> None:
 		return
 	if doc.status not in ("Confirmed", "Checked In", "Checked Out"):
 		return
+	fingerprint = stay_fingerprint(doc)
+	if existing and all(e.stay_fingerprint in (fingerprint, None, "") for e in existing):
+		return                  # the stay is unchanged (an earning made before G-24 is kept as it was)
 	prog = frappe.get_cached_doc("TEX Loyalty Program", program)
 	tier = tier_of(prog, balances(doc.guest, program)["lifetime_earned"])
-	points, _lines = points_for(prog, doc, tier.earn_multiplier if tier else 1)
-	if existing and sum(int(e.points) for e in existing) == points:
-		return
+	points, lines = points_for(prog, doc, tier.earn_multiplier if tier else 1)
 	for e in existing:
 		_reverse(e, reason="reservation modified")
 	if points <= 0:
@@ -136,6 +172,9 @@ def on_reservation_change(doc) -> None:
 		"expires_on": add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None,
 		"booking": doc.tex_booking, "reservation": doc.name,
 		"reason": f"stay {doc.check_in_date}→{doc.check_out_date}" + (f" · tier {tier.tier_name}" if tier else ""),
+		"stay_fingerprint": fingerprint,
+		"explanation": json.dumps({"lines": lines, "tier": tier.tier_name if tier else None,
+		                           "multiplier": str(tier.earn_multiplier) if tier else "1"}, default=str),
 		"actor": frappe.session.user}).insert(ignore_permissions=True)
 	_sync_guest(doc.guest)
 
@@ -188,9 +227,12 @@ def mature_and_expire(today: date | None = None) -> dict:
 	return {"matured": matured, "expired_points": expired}
 
 
-def summary(guest: str) -> list[dict]:
+def summary(guest: str, programs: set[str] | None = None) -> list[dict]:
+	"""``programs``: the ones the viewer may see (another tenant's program is never shown, G-65)."""
 	out = []
 	for p in frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest}, pluck="program", distinct=True):
+		if programs is not None and p not in programs:
+			continue
 		prog = frappe.get_cached_doc("TEX Loyalty Program", p)
 		b = balances(guest, p)
 		tier = tier_of(prog, b["lifetime_earned"])
@@ -241,6 +283,17 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	prog = frappe.get_doc("TEX Loyalty Program", program)
 	if prog.currency and prog.currency != b.currency:
 		frappe.throw(_("Points can only be redeemed on {0} bookings.").format(prog.currency))
+	pct = D(str(prog.max_redeem_percent if prog.max_redeem_percent is not None else 100))
+	if pct <= 0:
+		frappe.throw(_("Points cannot be redeemed in this program."))
+	for r in frappe.get_all("Reservation", filters={"tex_booking": booking, "status": ("not in", ["Cancelled",
+	                                                                                               "No Show"])},
+	                        fields=["check_in_date", "check_out_date"]):
+		ci, co = getdate(r.check_in_date), getdate(r.check_out_date)
+		blocked = next((ci + timedelta(days=i) for i in range(max((co - ci).days, 1))
+		                if _in_blackout(prog, ci + timedelta(days=i), "Redemption")), None)
+		if blocked:
+			frappe.throw(_("Points cannot be redeemed for stays on {0}.").format(frappe.format(blocked, "Date")))
 	from kamra.tex.payments.service import ns_key
 
 	idempotency_key = ns_key(b.property, idempotency_key, "loyalty")
@@ -256,7 +309,7 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	if balances(guest, program)["available"] < points:
 		frappe.throw(_("Not enough points."))
 	value = quantize(D(str(prog.point_value or 0)) * points, b.currency)
-	cap = quantize(from_db(b.total_amount, b.currency) * D(str(prog.max_redeem_percent or 100)) / 100, b.currency)
+	cap = quantize(from_db(b.total_amount, b.currency) * pct / 100, b.currency)
 	if value > cap:
 		frappe.throw(_("Points can cover at most {0} {1} of this booking.").format(to_str(cap), b.currency))
 	from kamra.tex.payments import service as pay

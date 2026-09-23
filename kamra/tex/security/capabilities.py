@@ -28,6 +28,7 @@ CAPABILITIES: dict[str, str] = {
 	"crm.view": "View guest profiles",
 	"crm.edit": "Edit guest profiles, notes, consent",
 	"guest.export": "Export guest data",
+	"loyalty.edit": "Edit loyalty programs: earn rules, tiers, point value, blackouts",
 	"report.view": "View commercial reports",
 	"booking_site.edit": "Configure booking engine sites and widgets",
 	"connect.admin": "Configure integrations",
@@ -45,7 +46,8 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
 	"Revenue Manager": frozenset({
 		"price.view", "price.view_cost", "price.override", "contract.edit", "contract.publish", "promotion.edit",
 		"markup.edit", "fx.edit", "inventory.edit", "restriction.edit", "reservation.view", "reservation.create",
-		"reservation.modify", "reservation.confirm_unpaid", "report.view", "booking_site.edit", "crm.view"}),
+		"reservation.modify", "reservation.confirm_unpaid", "report.view", "booking_site.edit", "crm.view",
+		"loyalty.edit"}),
 	"Front Desk": frozenset(_SALES),
 	"Call Center Agent": frozenset(_SALES),
 	# tax rules are a legal/finance setting: Finance and Hotel Admin, not revenue management

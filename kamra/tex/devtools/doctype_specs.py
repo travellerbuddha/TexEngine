@@ -1059,6 +1059,9 @@ CRM_SPECS = [
 		F("date_from", "Date", "From", reqd=1, in_list_view=1),
 		F("date_to", "Date", "To", reqd=1, in_list_view=1),
 		F("note", "Data", "Note", in_list_view=1),
+		F("applies_to", "Select", "Applies to", ["Redemption", "Earning", "Both"], default="Redemption",
+		  in_list_view=1, description="Redemption: points cannot pay for stays on these dates. "
+		                              "Earning: stays arriving on these dates earn nothing."),
 	], istable=True),
 
 	dt("TEX Loyalty Earn Rule", R, [
@@ -1071,7 +1074,8 @@ CRM_SPECS = [
 	], istable=True),
 
 	dt("TEX Loyalty Program", R, [
-		F("program_name", "Data", "Program", reqd=1, unique=1, in_list_view=1),
+		F("program_name", "Data", "Program", reqd=1, in_list_view=1,
+		  description="Unique for its hotel or hotel group"),
 		F("property", "Link", "Hotel", "Property"),
 		F("hotel_group", "Link", "Hotel group", "TEX Hotel Group"),
 		F("enabled", "Check", "Enabled", default="1", in_list_view=1),
@@ -1079,15 +1083,16 @@ CRM_SPECS = [
 		F("currency", "Link", "Currency", "Currency"),
 		F("point_value", "Float", "Value of 1 point (burn)", **V),
 		F("min_redeem_points", "Int", "Min points to redeem"),
-		F("max_redeem_percent", "Percent", "Max % of stay payable with points"),
+		F("max_redeem_percent", "Percent", "Max % of stay payable with points", default="100",
+		  description="0 = points cannot be redeemed"),
 		F("pending_days", "Int", "Points available N days after checkout", default="1"),
 		F("expiry_months", "Int", "Points expire after (months)", default="24"),
 		SB("Earning"),
 		F("earn_rules", "Table", "Earn rules", "TEX Loyalty Earn Rule"),
 		F("tiers", "Table", "Tiers", "TEX Loyalty Tier"),
 		SB("Blackouts"),
-		F("blackouts", "Table", "Redemption blackouts", "TEX Loyalty Blackout"),
-	], perms=CRM, autoname="field:program_name", naming_rule="By fieldname"),
+		F("blackouts", "Table", "Blackout dates", "TEX Loyalty Blackout"),
+	], perms=CRM, autoname="hash", naming_rule="Random"),
 
 	dt("TEX Loyalty Ledger", R, [
 		F("program", "Link", "Program", "TEX Loyalty Program", reqd=1),
@@ -1102,6 +1107,9 @@ CRM_SPECS = [
 		F("reservation", "Link", "Reservation", "Reservation"),
 		F("reason", "Small Text", "Reason"),
 		F("actor", "Link", "Actor", "User"),
+		F("stay_fingerprint", "Data", "Stay fingerprint", read_only=1,
+		  description="What the earning was computed from; a rule change never rewrites it (G-24)"),
+		F("explanation", "Code", "How the points were earned", "JSON", read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="LYL-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
 ]

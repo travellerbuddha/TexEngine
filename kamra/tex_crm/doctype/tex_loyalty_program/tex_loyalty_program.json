@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 23:00:00.000000",
+ "creation": "2026-09-23 23:30:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -28,8 +28,8 @@
    "fieldtype": "Data",
    "label": "Program",
    "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Unique for its hotel or hotel group"
   },
   {
    "fieldname": "property",
@@ -74,7 +74,9 @@
   {
    "fieldname": "max_redeem_percent",
    "fieldtype": "Percent",
-   "label": "Max % of stay payable with points"
+   "label": "Max % of stay payable with points",
+   "default": "100",
+   "description": "0 = points cannot be redeemed"
   },
   {
    "fieldname": "pending_days",
@@ -113,12 +115,12 @@
   {
    "fieldname": "blackouts",
    "fieldtype": "Table",
-   "label": "Redemption blackouts",
+   "label": "Blackout dates",
    "options": "TEX Loyalty Blackout"
   }
  ],
  "links": [],
- "modified": "2026-09-23 23:00:00.000000",
+ "modified": "2026-09-23 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Loyalty Program",
@@ -146,7 +148,7 @@
  "sort_order": "DESC",
  "states": [],
  "row_format": "Dynamic",
- "autoname": "field:program_name",
- "naming_rule": "By fieldname",
+ "autoname": "hash",
+ "naming_rule": "Random",
  "track_changes": 1
 }

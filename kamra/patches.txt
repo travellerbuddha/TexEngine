@@ -31,3 +31,4 @@ kamra.patches.tex.p13_extra_inventory
 kamra.patches.tex.p14_post_booking_extras
 kamra.patches.tex.p15_booking_hosts
 kamra.patches.tex.p16_crm_segments
+kamra.patches.tex.p17_loyalty_admin

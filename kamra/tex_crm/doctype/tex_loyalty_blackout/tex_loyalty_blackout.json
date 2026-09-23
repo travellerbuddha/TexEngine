@@ -1,13 +1,14 @@
 {
  "actions": [],
- "creation": "2026-09-23 23:00:00.000000",
+ "creation": "2026-09-23 23:30:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "date_from",
   "date_to",
-  "note"
+  "note",
+  "applies_to"
  ],
  "fields": [
   {
@@ -29,10 +30,19 @@
    "fieldtype": "Data",
    "label": "Note",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "applies_to",
+   "fieldtype": "Select",
+   "label": "Applies to",
+   "options": "Redemption\nEarning\nBoth",
+   "default": "Redemption",
+   "in_list_view": 1,
+   "description": "Redemption: points cannot pay for stays on these dates. Earning: stays arriving on these dates earn nothing."
   }
  ],
  "links": [],
- "modified": "2026-09-23 23:00:00.000000",
+ "modified": "2026-09-23 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Loyalty Blackout",
