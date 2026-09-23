@@ -32,8 +32,8 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 | Security | PARTIAL · **security blocker** | Capability + property scope on every TEX endpoint; immutable audit trail; secret redaction; semgrep ERROR-level; `test_security_regressions` (58); signatures keyed only by `encryption_key` (G-89 fixed); root `SECURITY.md` rewritten for TEX (guest surfaces, severity areas, no PAN/CVV) | G-83 hygiene (being fixed); `SECURITY.md` names no security contact yet; no dependency/secret scanning in CI; no external penetration test | Security contact; pentest | G-83 fixed; security contact named in SECURITY.md; pentest done |
 | Tenant isolation | PARTIAL | Enterprise → group → hotel grants; permission hooks on every scoped DocType (hooks ↔ perm sync test); legacy endpoint resolution (ADR-027); G-26 fixed (ADR-040). Tests: `TestTenantIsolation`, `TestRestBypass`, `TestLegacyTenancy`, `TestAdminDataTenancy`, distribution tenancy | No known open gap. Guest identity is shared inside an enterprise by design (ADR-040). Needs CI evidence and an external test | Pentest | CI green + pentest |
 | Custom domain | PARTIAL · infra **BLOCKED** | DNS TXT verification, daily recheck, host → site mapping, pinned public API, guest links on the hotel's host (ADR-035, `test_custom_domains` 9) | Engine served on the hotel's host (pinned SPA, e2e `custom-host.spec.ts`); only operations remain | Per host: `bench setup add-domain <host>`, regenerate nginx, one TLS certificate per host; production `host_name` in `site_config.json` | A verified host serves its engine over TLS on the production site |
-| Email | **BLOCKED** (SMTP) · code PARTIAL | Transactional mail in 6 languages through the e-mail queue (`TestNotifications`, `TestSecretsNeverLogged`) | No SMTP account; TEX Communication stays "Queued" (delivery status never synced); "resend" reports queued as sent; no per-hotel sender/reply-to; SPF/DKIM | SMTP account, sender domain, SPF/DKIM records | Mail delivered on the production site; status synced |
-| Monitoring | PARTIAL | Audit trail UI, outbox monitor, per-connection last status/error, TEX jobs logged to Error Log without frame locals | No TEX system-status endpoint; `kamra/health.py` is upstream-only (checks Kamra-PMS releases, refused to hotel users while the PMS is off); no alerting on Dead jobs, stale FX, mail errors or failed callbacks; no uptime/APM/log shipping | Monitoring stack (uptime, logs, alerts) | TEX status checks + alerts wired |
+| Email | **BLOCKED** (SMTP) · code PARTIAL | Transactional mail in 6 languages through the e-mail queue (`TestNotifications`, `TestSecretsNeverLogged`). Delivery status synced every 5 min from Frappe's queue: each TEX Communication keeps its queue entry and becomes Sent or Failed with a short reason; a mail the queue refused is recorded as Failed; "resend" and the payment-link dialogs say "queued"; guest mail goes out in the hotel's name with the hotel's Reply-To, always from the site's own account (ADR-047). Tests: `test_system_status.TestMailDeliveryStatus` (3) | No SMTP account; SPF/DKIM; "Sent" means accepted by the mail server (bounces after that are not tracked); a per-hotel sending domain is not built | SMTP account, sender domain, SPF/DKIM records | Mail delivered on the production site; status synced (done in code) |
+| Monitoring | PARTIAL | TEX system status (ADR-047): `kamra.tex.api.system.status` (`system.monitor`, hotel-scoped; platform checks for platform administrators) covers the scheduler and TEX job freshness, TEX job errors, workers and backlog, `encryption_key`, Dead/late PMS, ARI and inbound queues, connection errors, pending card charges, rejected callbacks and capture mismatches, FX staleness, the outgoing account and e-mail delivery. Guest liveness probe `kamra.tex.api.system.ping` (booleans only, HTTP 503 when down). Alerts every 15 min, once per worsening and once per recovery, to TEX Settings recipients, plus an Error Log entry and an audit event. UI: Settings → System status. Tests: `test_system_status` (12), unit `test_system_checks` (17); e2e `system-status.spec.ts` written, not yet run on a bench | No uptime monitor, APM or log shipping yet (owner infrastructure); alert e-mails need SMTP (until then: Error Log + audit trail + status page); `kamra/health.py` stays upstream-only | Uptime monitor on the ping; alert recipients; log shipping/APM | Uptime monitor polling the ping on the production site; a test alert received by the recipients |
 | Backups | **BLOCKED** | — (only upstream docs mention `bench backup`) | No schedule, off-site copy, encryption, retention or restore rehearsal. `encryption_key` (site_config) must be kept with the backups: without it every Password field (payment and integration secrets) is lost | Backup storage, retention, RPO/RTO | Nightly encrypted off-site backups + a restore rehearsal within 30 days |
 | CI/CD | **BLOCKED** (owner: Actions minutes, registry) · code PARTIAL | `ci.yml`: ruff, frontend build + i18n parity, upstream suites, TEX unit tests and every integration module (discovered), Playwright (MariaDB 11.8); `workflow_dispatch` runs it on any branch; upstream release pipelines guarded to the upstream repository (G-61 fixed) | Never run on GitHub yet (dispatch it once from the Actions tab); no pip/npm audit or secret scanning; no TEX image, registry, staging or deploy pipeline | A base branch or a dispatched run; container registry; TEX release identity | CI green on GitHub for the release commit; a TEX image built and deployed to staging |
 | Production secrets | PARTIAL | Payment and integration secrets are Password fields, never returned; channel `api_key` encrypted (p18); secret-like settings refused; redaction in audit and error logs; only token hashes stored | `TEX Payment Provider Account.api_key` is still a Data field (being fixed with G-83); no rotation runbook; demo password in CI/dev docs (test only) | Secret store / rotation policy | Rotation runbook; production posture check |
@@ -57,7 +57,8 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - a rollback rehearsal;
   - CI/CD on GitHub (base branch);
   - an SMTP account;
-  - monitoring and alerts;
+  - an uptime monitor on the TEX ping, alert recipients and log shipping (the status checks and
+    alerts exist, ADR-047);
   - TLS and add-domain for each custom host.
 
 ## 3. Owner inputs needed
@@ -74,6 +75,8 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 5. GitHub: a base branch (`main`) and Actions enabled, so CI can run and a PR can be opened.
 6. A container registry and a TEX release identity (G-61).
 7. A security contact for `SECURITY.md`, and an external penetration test.
+8. Monitoring: an uptime monitor for the ping, the alert recipients (TEX settings →
+   Monitoring), and a log-shipping/APM stack.
 
 ## 4. Platform notes
 
@@ -83,8 +86,22 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - No query needs `SKIP LOCKED`: queue claims are conditional `UPDATE … LIMIT` with a
     token and lease, and inbound messages are row-locked with a status re-check.
 - **Scheduler** must be enabled in production. TEX jobs run every minute (channel
-  distribution), every 5 and 15 minutes (outbox, holds, links, contract status,
-  abandonment), and daily (FX, DNS recheck, channel resync, loyalty maturation).
+  distribution), every 5 minutes (outbox, holds, links, e-mail delivery status), every 15
+  minutes (contract status, abandonment, system-status alerts), and daily (FX, DNS recheck,
+  channel resync, loyalty maturation).
+- **Monitoring** (ADR-047).
+  - Point an uptime monitor at `https://<site>/api/method/kamra.tex.api.system.ping` (GET, no
+    login). Expect HTTP 200 with `"ok":true` in the body. HTTP 503, or any other answer, means
+    the site cannot serve: its database or cache is down.
+  - A second keyword check on `"scheduler":true` catches a stopped scheduler: it turns false
+    when the every-minute TEX job has not run for 10 minutes.
+  - The probe answers booleans only. It is rate limited to 30 requests per minute per IP
+    (`tex_ping_limit` in site_config raises it), so poll once a minute.
+  - Staff see the checks in TEX → Settings → System status (`system.monitor`; platform checks
+    only for platform administrators).
+  - Alerts go to TEX settings → Monitoring → recipients, every 15 minutes and only on a change.
+    They need SMTP. Without it, each change is in the Error Log (`TEX status alert: …`) and in
+    the audit trail (`system.status_changed`).
 - **`encryption_key`** in `site_config.json` signs offers, payment callbacks and webhooks,
   and decrypts every Password field. Back it up separately from the database and never
   rotate it without a re-encryption plan.
@@ -95,10 +112,12 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 - [ ] No open Critical or High money, security or distribution gap.
 - [ ] Payment provider(s) certified; only certified providers enabled in Production.
 - [ ] Channel-manager provider certified, or the launch hotels do not need OTA connectivity.
-- [ ] SMTP delivering; delivery status visible to staff.
+- [ ] SMTP delivering; delivery status visible to staff. The delivery status is synced and
+      shown (ADR-047); SMTP remains.
 - [ ] Backup + restore rehearsal within the last 30 days; `encryption_key` escrowed.
 - [ ] Rollback rehearsed once on staging.
-- [ ] Monitoring and alerts live (uptime, TEX jobs, Dead queues, callbacks, mail).
+- [ ] Monitoring and alerts live (uptime, TEX jobs, Dead queues, callbacks, mail). The checks
+      and alerts exist (ADR-047); an uptime monitor on the ping and SMTP for the alerts remain.
 - [ ] Custom-domain TLS live for each hotel that uses one.
 - [x] SECURITY.md rewritten for TEX (2026-09-23).
 - [ ] Security contact named in SECURITY.md; external penetration test done.
@@ -109,3 +128,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   closed in code; payments hardening and the CRM, domain and channel screens are in progress.
 - 2026-09-23: CRM (segments, loyalty), portfolio, custom-domain and channel screens merged with e2e; a disabled channel mapping sends a close-out before it can be deleted.
 - 2026-09-23: payments hardening merged (G-67 code, G-68, G-89, G-90); root `SECURITY.md` rewritten for TEX (contact still an owner input); CI runs on demand (G-61). Open money/security work: G-30/G-31, G-45, G-50, G-83.
+- 2026-09-23: operations (ADR-047): TEX system status (hotel-scoped checks, platform checks for
+  platform administrators), a guest liveness ping for uptime monitors, alerts on a change every
+  15 minutes, Settings → System status; guest e-mail delivery status synced from the e-mail
+  queue, "resend" says queued, guest mail in the hotel's name with its Reply-To. Monitoring
+  stays PARTIAL (uptime monitor and log shipping are owner infrastructure); Email stays BLOCKED
+  on SMTP.

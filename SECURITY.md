@@ -59,6 +59,8 @@ without one is a bug:
 - `kamra/tex/api/payments.py` — payment provider callbacks (signature-checked);
 - `kamra/tex/api/distribution.py` — channel-distribution webhook (HMAC-signed, time window,
   replay-safe);
+- `kamra/tex/api/system.py` `ping` — liveness for uptime monitors (rate limited, read-only,
+  answers four booleans: `ok`, `db`, `cache`, `scheduler`; ADR-047);
 - legacy Kamra guest surfaces kept from upstream (`kamra/public_api.py`, self check-in, QR
   menu, legacy payment/channel callbacks). They refuse to sell or change TEX hotels
   (ADR-028).

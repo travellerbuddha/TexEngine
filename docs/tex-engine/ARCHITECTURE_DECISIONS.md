@@ -904,3 +904,117 @@ of them stranded money a gateway had already captured:
   allocating the same payment at the same moment could both pass the limit check. Locking them
   needs indexes on `transaction` / `parent_transaction` (a schema change, not made here).
 - Bookings paid in Sandbox on a site without `tex_production` carry no per-booking flag.
+
+## ADR-047 Operations: a scoped system status, a boolean guest ping, alerts on change; guest e-mail status follows Frappe's queue
+**Context.** GO_LIVE_READINESS listed two operations gaps.
+- *Monitoring.* TEX had no status endpoint. `kamra/health.py` is upstream Kamra diagnostics: it
+  checks Kamra-PMS releases and is refused to hotel users while the PMS is off. Nothing alerted
+  on dead jobs, stale FX, mail errors or failed callbacks, and an uptime monitor had nothing to
+  poll.
+- *E-mail.* A TEX Communication stayed "Queued" for ever: TEX never learnt what the e-mail queue
+  did. "Resend" reported a queued mail as sent. A mail the queue refused (no outgoing account)
+  left no record, and every guest mail carried the outgoing account's name.
+**Decision.**
+- *Status service.* The checks live in `kamra/tex/ops`:
+  - `checks.py` is pure (no frappe import). It holds the thresholds as named constants, the
+    verdicts, the transition rule and the alert text;
+  - `status.py` is the Frappe glue: counts and timestamps from the database, Redis and the site
+    config;
+  - a check is `{key, title, scope, status: ok|warn|fail, detail, count, since, issues:
+    [{reason, status, params}], properties?}`. `detail` is English for mails and logs; the UI
+    translates `reason` with `params`.
+- *Scopes.*
+  - Hotel checks count only the viewer's hotels and name the hotels with a problem:
+    `outbox.pms`, `outbox.channel`, `channel.inbound`, `connections`, `payments.pending`,
+    `payments.callbacks`, `fx.rates`, `mail.delivery`.
+  - `mail.account` (is there a default outgoing account) is shared configuration, shown to every
+    monitor.
+  - Platform checks go to platform administrators only: `scheduler`, `scheduler.jobs` (last run
+    of each TEX job from `Scheduled Job Type.last_execution`), `scheduler.errors` (Error Log
+    "TEX job …"), `workers` (RQ workers and backlog of this bench), `encryption_key`
+    (presence only) and `mail.queue` (the whole Email Queue).
+  - A probe that raises becomes a failed check (logged without frame locals). An unreachable
+    Redis is a finding (one connection attempt), never a crash.
+- *Thresholds* (`checks.py`):
+  - a TEX job is late after 10 / 20 / 45 min (every minute / 5 / 15 min) or 26 h (daily jobs),
+    and fails at 3× that;
+  - an outbox or inbound message is late after 30 min (fail at 4 h); any Dead message fails
+    (Dead ARI and PMS messages count only for enabled connections; a dead channel booking always
+    counts);
+  - a card charge still Pending after 60 min, started in the last 48 h, warns;
+  - a rejected or failed gateway callback in the last 24 h warns, and so does a link paid twice
+    in 7 days; a capture that did not match its charge in 7 days fails;
+  - FX: for each provider pair an active FX policy uses (hotel or global), the latest rate as
+    pricing would find it warns when older than 2 business days (weekends do not count, so a
+    Monday morning before the fetch is not an alarm) and fails past the policy's own
+    `max_age_days`, where pricing refuses it; a missing rate fails;
+  - guest e-mail: a failure in 24 h warns (fail from 5); an unsent mail after 30 min warns (fail
+    at 4 h); the queue backlog warns at 500 jobs (fail at 5000);
+  - things the owner must set up fail a live site and warn a developer one: the scheduler off
+    (live = `tex_production` or not `developer_mode`), no default outgoing e-mail account (fail
+    only with `tex_production`), no worker.
+- *Endpoints* (`kamra/tex/api/system.py`):
+  - `status(property?)` (GET) needs the new capability `system.monitor` (every admin profile;
+    p23 grants it to the seeded Hotel, Group and Enterprise Admin profiles). Without `property`
+    it covers every hotel where the caller holds it. The payload has counts, ages, job names,
+    currency pairs and hotel names: never a secret, token, guest data, connection error text or
+    stack trace. The overall status is the worst check.
+  - `ping` (guest, GET, 30 requests/min per IP, `tex_ping_limit` may raise it) answers
+    `{ok, db, cache, scheduler}` booleans only. It returns HTTP 503 when the database or the cache
+    cannot be reached. `scheduler` is true when the every-minute TEX job ran within 10 minutes.
+    There are no counts, versions, host or hotel names, so an uptime monitor can poll it without
+    a credential.
+- *Alerts.* `ops.alerts.evaluate` is the last job of `every_15_minutes` and sees what a platform
+  administrator sees.
+  - What is remembered is the status of every check that is not ok. It lives in the audit trail:
+    a `system.status_changed` event is written only when that state changes.
+  - A check that gets worse (ok→warn, ok→fail, warn→fail) writes an Error Log entry
+    (`TEX status alert: …`) and is mailed once to TEX Settings `status_alert_recipients` (at
+    most 20, validated) through the normal e-mail queue.
+  - A recovery to ok is mailed once. A check that stays bad, or improves from fail to warn,
+    sends nothing.
+  - All changes of a run go out in one message, so there is at most one mail per 15 minutes
+    and only when something changed.
+  - Other stores were rejected. Global defaults reach every Desk session's boot. Redis state is
+    lost on a restart, and every restart would re-alert. A field on TEX Settings could be
+    overwritten by a concurrent settings save.
+- *E-mail delivery status.*
+  - Every guest mail's TEX Communication keeps its Email Queue row (`email_queue`).
+    `services.mail_status.sync` runs every 5 minutes: one indexed join, batches of 500,
+    idempotent. It moves Queued to Sent (setting `sent_at` to when the queue sent it) or Failed
+    (Error; Expired on older Frappe).
+  - It is a scheduled job, not an Email Queue `on_update` hook, because Frappe changes the
+    queue's status with `set_value`: no document hook ever runs.
+  - "Sent" means the mail server accepted the message. TEX never claims "Delivered".
+    Not Sent, Sending and Partially Sent (a single-recipient TEX mail being retried) stay Queued.
+  - A failure keeps a short, address-free reason (`delivery_error`, e.g.
+    `SMTPRecipientsRefused (550)`).
+  - A mail the queue refused is recorded as Failed with the exception name, and its message no
+    longer reaches the response.
+  - `resend_confirmation` returns `queued` and `status` ("Queued" / "Failed") instead of
+    `sent`, and the UI says "queued". The payment-link dialogs say the same.
+  - p23 links older Queued communications to their queue row only where exactly one row fits
+    (same booking or payment link, queued up to 60 s before the log, unclaimed). The others stay
+    Queued and are never judged by the status check.
+  - `mail.delivery` reads these same rows.
+- *Hotel sender.* Guest mail goes out with the hotel's name as the From display name. The From
+  address is always the default outgoing account's own address: an address of the hotel's
+  domain would be spoofing through this mail server, and Frappe would send it through the
+  default account anyway. Reply-To is the hotel's e-mail, else its booking site's contact
+  e-mail, when valid. These fields exist already, so the design needs no new field.
+- *UI.* TEX → Settings → System status is shown to platform administrators and to anyone with
+  `system.monitor` at some hotel; the server re-checks. It groups the checks (Platform /
+  Operations) with badge, translated issues, hotels and since-time, and has a refresh button.
+  Platform administrators also get the ping address. The alert recipients are part of the TEX
+  settings.
+**Consequences.**
+- An abandoned card checkout looks like a lost callback: it shows as a `payments.pending`
+  warning for up to 48 hours. Telling the two apart needs a status query to the gateway.
+- Alerts need SMTP, which is an owner input. Without SMTP, every change is still in the Error
+  Log and the audit trail, and the status page shows it.
+- Nothing leaves the site: an external uptime monitor, log shipping and APM are owner
+  infrastructure. The ping is what the uptime monitor should poll.
+- `kamra/health.py` is unchanged and remains upstream diagnostics, not TEX monitoring.
+- A per-hotel sending address (the hotel's own domain) needs an outgoing account per domain
+  with SPF/DKIM. That is an owner input and is not built.
+- Bounces after the mail server accepted a message are not tracked.

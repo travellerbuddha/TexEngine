@@ -74,6 +74,20 @@ Patch p12 migrates extras, gives every TEX hotel a policy with its current taxes
 | **G-89** (new, security) Signatures fell back to the public site name | `5d6c130`, ADR-041: offer keys (`quoting._secret`), gateway return URLs (`callback_signature`) and the sandbox payment page (`_mock_secret`) were keyed by `frappe.local.site` when `site_config` had no `encryption_key`, so anyone could forge them on such a site. `kamra/tex/security/keys.site_secret(purpose)` derives the per-purpose key material from `encryption_key` only and raises a clear `ValidationError` (no secret, no site name) when it is missing. With a key the derived values are unchanged, so issued offers and callbacks stay valid | `test_g89_signatures_need_the_site_encryption_key` (fails first) |
 | **G-90** (new, Medium) PMS delivery through an uncertified adapter in Production | `6ffb948`: the connection controller refuses an uncertified adapter in Production on save, but the outbox delivered through `adapters.get` without checking the environment, so a connection changed behind the controller (SQL, `db_set`) sent reservations through a sandbox adapter. `adapters.get` now refuses it (`AdapterRefused`, not retryable; also covers the Connect test button) and the outbox parks the event as Dead with the redacted error | `test_distribution.TestPmsDelivery`, unit `TestPmsAdapters` (both fail first) |
 
+**Operations (no gap id; GO_LIVE_READINESS Monitoring and Email rows), resolved in code by
+ADR-047.**
+- System status: `kamra.tex.api.system.status` (`system.monitor`, hotel-scoped; platform checks
+  for platform administrators only). A guest liveness probe `kamra.tex.api.system.ping`
+  answers booleans only.
+- Alerts every 15 minutes, once on a worsening and once on a recovery. UI: Settings → System
+  status.
+- Guest e-mail: a TEX Communication follows its Email Queue row (Sent / Failed with reason);
+  "resend" reports "queued"; guest mail goes out in the hotel's name with its Reply-To.
+- Tests: `test_system_status` (12, the first 11 fail on the base commit), unit
+  `test_system_checks` (17).
+- Still open: SMTP (blocked, §5); an uptime monitor, log shipping and APM (owner
+  infrastructure); a per-hotel sending domain.
+
 The rows below keep the original findings for traceability.
 
 ---
@@ -174,7 +188,7 @@ See also [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md) for the per-area launch 
 | Item | Req | What is needed |
 |---|---|---|
 | Production certification of iyzico, Sipay and NestPay | R-40 | Merchant sandbox + production credentials. The code paths exist but are uncertified (`production_verified=False`), so a Production account for them is refused on save and at run time (ADR-041). |
-| Outgoing e-mail delivery | R-42, R-44 | An SMTP / e-mail account on the site. Booking e-mails are queued, and the UI reports `sent: false` honestly. |
+| Outgoing e-mail delivery | R-42, R-44 | An SMTP / e-mail account on the site, sender domain and SPF/DKIM. Booking e-mails are queued; each TEX Communication follows its queue entry (Sent / Failed with reason) and "resend" reports "queued" (ADR-047). |
 | Channel-manager provider certification (Channex, SiteMinder, RateGain, …) | R-44 | Provider API credentials, commercial access and their certification run. TEX has the provider-neutral layer and a sandbox adapter (`certified=False`, refused in Production); a real adapter is a subclass of `ChannelAdapter` (ADR-039). |
 | Pull request and CI on GitHub | R-61 | A base branch (e.g. `main`) in `travellerbuddha/texengine`; the repository has only the working branch. |
 
