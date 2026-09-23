@@ -115,11 +115,17 @@ export interface ExtraOutcome {
   code: string
   name: string
   ok: boolean
+  /** why it was not added (ok=false); a limited extra says "sold out on yyyy-mm-dd",
+   * "only N left on yyyy-mm-dd" or "closed on yyyy-mm-dd" (G-19) */
   reason?: string
   quantity: string
   amount: Money
   currency: string
   pricing_mode: string
+  mandatory?: boolean
+  service_dates?: string[]
+  /** days (and units on each) it takes from a limited extra's daily capacity */
+  usage?: { date: string; units: number }[]
 }
 
 export interface Promotion {

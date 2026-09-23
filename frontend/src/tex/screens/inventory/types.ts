@@ -68,3 +68,53 @@ export interface Scope {
   channel: string
   rate_plan: string
 }
+
+// Shapes of kamra/tex/availability/extras.py (limited extras, G-19).
+
+export interface ExtraGridCell {
+  date: string
+  capacity: number
+  /** Capacity set for this day (null = the extra's default daily capacity). */
+  override: number | null
+  closed: boolean
+  sold: number
+  held: number
+  confirmed: number
+  remaining: number
+  /** More units sold than the capacity (e.g. after lowering it). */
+  over: boolean
+  note: string | null
+}
+
+export interface ExtraGridRow {
+  code: string
+  name: string
+  pricing_mode: string
+  daily_capacity: number
+  cells: ExtraGridCell[]
+}
+
+export interface ExtrasGrid {
+  property: string
+  start: string
+  days: number
+  dates: string[]
+  extras: ExtraGridRow[]
+}
+
+export interface ExtrasBulkResult {
+  updated: number
+  over_capacity: { extra_code: string; date: string; sold: number; capacity: number }[]
+}
+
+export interface ExtraAllocation {
+  booking: string | null
+  reservation: string | null
+  units: number
+  status: "Held" | "Confirmed" | string
+  booker_name: string | null
+}
+
+export interface ExtrasDrift {
+  drift: { extra_code: string; date: string; was: number; now: number }[]
+}

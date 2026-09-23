@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
-import { ArrowRight, Calculator, RotateCcw } from "lucide-react"
+import { AlertTriangle, ArrowRight, Calculator, RotateCcw } from "lucide-react"
 import { useTexQuery, type TexApiError } from "../../../lib/api"
 import { addDays, date, isDecimal, nightsBetween } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
@@ -27,6 +27,16 @@ import { ExplanationList } from "../../crs/components/OfferParts"
 import { PartyEditor, usePartyText } from "../../crs/components/PartyEditor"
 import { PriceBreakdown } from "../../crs/components/PriceBreakdown"
 import { ExtrasPicker, useExtras } from "../../crs/components/QuoteParts"
+import {
+  choicesToRequest,
+  extraWarningName,
+  extraWarningText,
+  fitChoice,
+  sameChoices,
+  shortDay,
+  type ExtraChoice,
+  type StayDates,
+} from "../../crs/lib/extrasStock"
 import { useLabels } from "../../crs/lib/labels"
 import { useServerClock } from "../../crs/lib/serverClock"
 import { BOARDS, cmpDecimal, isZero, shortCode, type PartyForm } from "../../crs/lib/party"
@@ -43,9 +53,14 @@ interface ModForm {
   rate_plan: string
   market: string
   party: PartyForm
-  extras: Record<string, number>
+  /** Quantity and service days per extra code (days are kept when only the quantity changes). */
+  extras: Record<string, ExtraChoice>
   promo: string[]
 }
+
+/** A modification warning: a limited extra has no capacity for the new stay (G-19). */
+const EXTRA_SOLD_OUT = "EXTRA_SOLD_OUT"
+const FULL_DAY = /^[1-9]\d{3}-\d{2}-\d{2}$/
 
 export const BASES: Basis[] = ["CURRENT", "ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE"]
 
@@ -58,16 +73,24 @@ function formOf(req: StayRequest): ModForm {
     rate_plan: req.rate_plan ?? "",
     market: req.market,
     party: { adults: req.adults, children: (req.children ?? []).map((c) => (c.age === null || c.age === undefined ? null : c.age)) },
-    extras: Object.fromEntries((req.extras ?? []).map((e) => [e.code, e.quantity])),
+    extras: Object.fromEntries(
+      (req.extras ?? []).map((e) => [e.code, { quantity: e.quantity, service_dates: [...(e.service_dates ?? [])].sort() }]),
+    ),
     promo: [...(req.promo_codes ?? [])],
   }
 }
 
-function norm(x: Record<string, number>) {
-  return JSON.stringify(
-    Object.entries(x)
-      .filter(([, q]) => q > 0)
-      .sort(([a], [b]) => a.localeCompare(b)),
+/** Service days of every extra kept inside the stay; a moved check-in moves them along. */
+function fitExtras(extras: Record<string, ExtraChoice>, stay: StayDates, shiftDays = 0): Record<string, ExtraChoice> {
+  return Object.fromEntries(Object.entries(extras).map(([code, c]) => [code, fitChoice(c, stay, shiftDays)]))
+}
+
+/** The extras line of the comparison: code × quantity (service days). */
+function extrasText(xs: StayRequest["extras"] | undefined) {
+  return (
+    (xs ?? [])
+      .map((e) => `${e.code}×${e.quantity}${e.service_dates?.length ? ` (${e.service_dates.map((d) => shortDay(d)).join(", ")})` : ""}`)
+      .join(", ") || "—"
   )
 }
 
@@ -82,10 +105,8 @@ function changesOf(a: ModForm, b: ModForm): Record<string, unknown> {
   if (b.market !== a.market) c.market = b.market
   if (b.party.adults !== a.party.adults) c.adults = b.party.adults
   if (JSON.stringify(b.party.children) !== JSON.stringify(a.party.children)) c.children = b.party.children.map((age) => ({ age }))
-  if (norm(b.extras) !== norm(a.extras))
-    c.extras = Object.entries(b.extras)
-      .filter(([, q]) => q > 0)
-      .map(([code, quantity]) => ({ code, quantity }))
+  const ex = choicesToRequest(b.extras)
+  if (!sameChoices(choicesToRequest(a.extras), ex)) c.extras = ex
   if ([...b.promo].sort().join(",") !== [...a.promo].sort().join(",")) c.promo_codes = b.promo
   return c
 }
@@ -235,9 +256,18 @@ export function ModifyDrawer({
   const nights = form.check_out > form.check_in ? nightsBetween(form.check_in, form.check_out) : 0
   // moving check-in keeps the stay length; only check-out edits change it
   const stayNights = useRef(nightsBetween(initial.check_in, initial.check_out) || 1)
+  // the last complete check-in: extras' service days move by as many days as the stay does
+  const lastCheckIn = useRef(initial.check_in)
   useEffect(() => {
-    if (open) stayNights.current = nightsBetween(initial.check_in, initial.check_out) || 1
+    if (!open) return
+    stayNights.current = nightsBetween(initial.check_in, initial.check_out) || 1
+    lastCheckIn.current = initial.check_in
   }, [open, initial])
+  const stay: StayDates | undefined =
+    FULL_DAY.test(form.check_in) && FULL_DAY.test(form.check_out) && form.check_out > form.check_in
+      ? { check_in: form.check_in, check_out: form.check_out }
+      : undefined
+  const droppedExtras = (proposal?.warnings ?? []).filter((w) => w.code === EXTRA_SOLD_OUT)
 
   return (
     <Drawer
@@ -281,7 +311,14 @@ export function ModifyDrawer({
                 onChange={(e) => {
                   const ci = e.target.value
                   // shift check-out only once the year is complete (typing "2026" passes 0002, 0020…)
-                  set({ check_in: ci, check_out: /^[1-9]\d{3}-\d{2}-\d{2}$/.test(ci) ? addDays(ci, stayNights.current) : form.check_out })
+                  if (!FULL_DAY.test(ci)) {
+                    set({ check_in: ci })
+                    return
+                  }
+                  const co = addDays(ci, stayNights.current)
+                  const shift = nightsBetween(lastCheckIn.current, ci)
+                  lastCheckIn.current = ci
+                  set({ check_in: ci, check_out: co, extras: fitExtras(form.extras, { check_in: ci, check_out: co }, shift) })
                 }}
               />
             </Field>
@@ -294,7 +331,9 @@ export function ModifyDrawer({
                 onChange={(e) => {
                   const co = e.target.value
                   if (co && form.check_in && co > form.check_in) stayNights.current = Math.min(90, nightsBetween(form.check_in, co))
-                  set({ check_out: co })
+                  // a shorter stay drops the service days after the new check-out
+                  const fits = FULL_DAY.test(co) && FULL_DAY.test(form.check_in) && co > form.check_in
+                  set({ check_out: co, extras: fits ? fitExtras(form.extras, { check_in: form.check_in, check_out: co }) : form.extras })
                 }}
               />
             </Field>
@@ -326,14 +365,17 @@ export function ModifyDrawer({
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <p className="mb-1 text-sm font-medium text-zinc-800">{t("crs.extras.title")}</p>
+              {/* no remaining capacity here: this reservation's own units would count against it;
+                  the proposal checks the limited extras for the new stay (EXTRA_SOLD_OUT) */}
               <ExtrasPicker
                 extras={extras.data}
                 value={form.extras}
                 roomLabel={res.name}
                 idPrefix="mod"
-                onChange={(code, qty) => {
+                stay={stay}
+                onChange={(code, c) => {
                   const next = { ...form.extras }
-                  if (qty > 0) next[code] = qty
+                  if (c && c.quantity > 0) next[code] = { quantity: c.quantity, service_dates: [...new Set(c.service_dates)].sort() }
                   else delete next[code]
                   set({ extras: next })
                 }}
@@ -344,7 +386,16 @@ export function ModifyDrawer({
             </Field>
           </div>
           {changedCount > 0 && (
-            <Button variant="ghost" size="sm" icon={<RotateCcw className="size-4" aria-hidden />} onClick={() => setForm(initial)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RotateCcw className="size-4" aria-hidden />}
+              onClick={() => {
+                setForm(initial)
+                stayNights.current = nightsBetween(initial.check_in, initial.check_out) || 1
+                lastCheckIn.current = initial.check_in
+              }}
+            >
               {t("res.mod.reset")}
             </Button>
           )}
@@ -390,6 +441,12 @@ export function ModifyDrawer({
                   </Field>
                 )}
               </div>
+            )}
+            {droppedExtras.length > 0 && (
+              <p className="flex items-start gap-1.5 text-sm font-medium text-amber-800">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                {t("res.mod.apply_drops", { extras: droppedExtras.map((w) => extraWarningName(w.message)).join(", ") })}
+              </p>
             )}
             <Field label={t("core.field.reason")} hint={t("core.hint.reason_audited")} required>
               <Textarea id="mod-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -495,6 +552,9 @@ function Comparison({
   const b = p.proposed.request
   const diff = p.difference
   const dir = diff === null ? 0 : cmpDecimal(diff, "0")
+  // limited extras with no capacity for the new stay: dropped (not charged) if applied (G-19)
+  const dropped = p.warnings.filter((w) => w.code === EXTRA_SOLD_OUT)
+  const others = p.warnings.filter((w) => w.code !== EXTRA_SOLD_OUT)
   const facts: { label: string; old: ReactNode; neu: ReactNode; changed: boolean }[] = [
     {
       label: t("res.cmp.stay"),
@@ -519,9 +579,9 @@ function Comparison({
     { label: t("crs.search.market"), old: a.market, neu: b.market, changed: a.market !== b.market },
     {
       label: t("crs.extras.title"),
-      old: (a.extras ?? []).map((e) => `${e.code}×${e.quantity}`).join(", ") || "—",
-      neu: (b.extras ?? []).map((e) => `${e.code}×${e.quantity}`).join(", ") || "—",
-      changed: JSON.stringify(a.extras ?? []) !== JSON.stringify(b.extras ?? []),
+      old: extrasText(a.extras),
+      neu: extrasText(b.extras),
+      changed: !sameChoices(a.extras ?? [], b.extras ?? []),
     },
     {
       label: t("crs.quote.promo"),
@@ -587,10 +647,20 @@ function Comparison({
         })}
       </p>
       {p.currency_changed && <Notice tone="warning">{t("res.cmp.currency_changed", { old: p.old.currency, neu: p.proposed.currency })}</Notice>}
-      {p.warnings.length > 0 && (
+      {dropped.length > 0 && (
+        <Notice tone="warning" title={t("res.cmp.extras_dropped")}>
+          <p>{t("res.cmp.extras_dropped_hint")}</p>
+          <ul className="mt-1 list-disc pl-4 font-medium">
+            {dropped.map((w, i) => (
+              <li key={i}>{extraWarningText(t, w.message)}</li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+      {others.length > 0 && (
         <Notice tone={p.sellable ? "warning" : "danger"} title={t("res.cmp.warnings")}>
           <ul className="list-disc pl-4">
-            {p.warnings.map((w, i) => (
+            {others.map((w, i) => (
               <li key={i}>{w.message}</li>
             ))}
           </ul>

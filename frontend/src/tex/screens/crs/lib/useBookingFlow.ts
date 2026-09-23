@@ -8,12 +8,15 @@ import { useSession } from "../../../lib/session"
 import { TEX_LANGS, useTexT } from "../../../i18n"
 import {
   bookQuotes,
+  extrasAvailability as fetchExtrasAvailability,
   paymentMethods as fetchPaymentMethods,
   quoteOffer,
   quoteSummary,
   searchOffers,
+  type ExtraRequest,
   type SearchArgs,
 } from "./api"
+import { fitChoice, type ExtraChoice, type ExtrasAvailability, type StayDates } from "./extrasStock"
 import { offerId, partyComplete, partyToApi, type PartyForm } from "./party"
 import type {
   BookingSummary,
@@ -78,6 +81,19 @@ export interface SelectResult {
   noStock: number[]
   /** Rooms the offer does not fit (capacity, age rules). */
   unfit: number[]
+}
+
+/** Extras chosen per room of the booking (room index → extra code → choice). */
+export type RoomExtras = Record<number, Record<string, ExtraChoice>>
+
+/** Service days that still fall inside the stay (after a search with other dates). */
+function fitExtras(extras: RoomExtras, stay: StayDates): RoomExtras {
+  return Object.fromEntries(
+    Object.entries(extras).map(([room, choices]) => [
+      room,
+      Object.fromEntries(Object.entries(choices).map(([code, c]) => [code, fitChoice(c, stay)])),
+    ]),
+  )
 }
 
 export function asApiError(e: unknown): TexApiError {
@@ -155,7 +171,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   const [searchError, setSearchError] = useState<TexApiError>()
 
   const [selection, setSelection] = useState<Selection | null>(null)
-  const [extras, setExtras] = useState<Record<number, Record<string, number>>>({})
+  const [extras, setExtras] = useState<RoomExtras>({})
   const [quotePromo, setQuotePromo] = useState<string[]>([])
   const [quotes, setQuotes] = useState<QuoteResult[]>([])
   const [quotedSig, setQuotedSig] = useState("")
@@ -311,7 +327,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         setQuotePromo(f.promo)
         if (keep && prevSelection) {
           setSelection(prevSelection)
-          setExtras(oldExtras)
+          setExtras(fitExtras(oldExtras, { check_in: r.check_in, check_out: r.check_out }))
         }
         return r
       } catch (e) {
@@ -386,16 +402,44 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     [],
   )
 
-  const setExtra = useCallback((roomIndex: number, code: string, qty: number) => {
+  /** Add, change or (null / quantity 0) remove an extra of a room. */
+  const setExtra = useCallback((roomIndex: number, code: string, choice: ExtraChoice | null) => {
     setExtras((prev) => {
       const room = { ...(prev[roomIndex] ?? {}) }
-      if (qty > 0) room[code] = Math.min(99, Math.floor(qty))
+      if (choice && choice.quantity > 0)
+        room[code] = { quantity: Math.min(99, Math.floor(choice.quantity)), service_dates: [...new Set(choice.service_dates)].sort() }
       else delete room[code]
       const next = { ...prev, [roomIndex]: room }
       if (!Object.keys(room).length) delete next[roomIndex]
       return next
     })
   }, [])
+
+  // ── limited extras (G-19): what is left per day of the stay, for the extras picker ──
+  const [stock, setStock] = useState<{ key: string; data?: ExtrasAvailability; error?: TexApiError }>({ key: "" })
+  const stockSeq = useRef(0)
+  // crs.extras_availability needs price.view at the hotel (the server checks it too)
+  const stockKey =
+    selection && result && sellable.some((p) => p.name === selection.property)
+      ? JSON.stringify([selection.property, result.check_in, result.check_out])
+      : ""
+  const loadExtrasStock = useCallback(async () => {
+    if (!stockKey) return
+    const [prop, ci, co] = JSON.parse(stockKey) as [string, string, string]
+    const seq = ++stockSeq.current
+    try {
+      const data = await fetchExtrasAvailability(prop, ci, co)
+      if (seq === stockSeq.current) setStock({ key: stockKey, data })
+    } catch (e) {
+      // keep what was loaded for this stay: the quote and the booking check the capacity anyway
+      if (seq === stockSeq.current) setStock((s) => ({ key: stockKey, data: s.key === stockKey ? s.data : undefined, error: asApiError(e) }))
+    }
+  }, [stockKey])
+  useEffect(() => {
+    void loadExtrasStock()
+  }, [loadExtrasStock])
+  const extrasStock = stock.key === stockKey ? stock.data : undefined
+  const extrasStockError = stock.key === stockKey ? stock.error : undefined
 
   // ── quotes ──
   const loadSummary = useCallback(async (ids: string[], m: string) => {
@@ -430,9 +474,11 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
             const o = findOffer(sel.property, id)
             const room = o?.rooms.find((r) => r.room_index === i)
             if (!room) throw new TexApiError(t("crs.err.offer_missing"), 0, "Error")
-            const ex = Object.entries(roomExtras[i] ?? {})
-              .filter(([, q]) => q > 0)
-              .map(([code, quantity]) => ({ code, quantity }))
+            const ex: ExtraRequest[] = Object.entries(roomExtras[i] ?? {})
+              .filter(([, c]) => c.quantity > 0)
+              .map(([code, c]) =>
+                c.service_dates.length ? { code, quantity: c.quantity, service_dates: c.service_dates } : { code, quantity: c.quantity },
+              )
             return quoteOffer(room.offer_key, ex, promoChanged ? quotePromo : undefined)
           }),
         )
@@ -440,6 +486,8 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         setQuotes(res)
         setQuotedSig(sig)
         bookKey.current = null
+        // what the other callers took meanwhile: the picker shows it next to each limited extra
+        void loadExtrasStock()
         return res
       } catch (e) {
         setQuoteError(asApiError(e))
@@ -449,7 +497,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         setQuoting(false)
       }
     },
-    [selection, quotePromo, lastArgs, extras, findOffer, t],
+    [selection, quotePromo, lastArgs, extras, findOffer, t, loadExtrasStock],
   )
 
   // payment methods for the selected hotel / market / currency / channel
@@ -570,12 +618,18 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       setBooking(out)
       return out
     } catch (e) {
-      setBookError(asApiError(e))
+      const err = asApiError(e)
+      if (err.type === "ExtraSoldOut") {
+        // not a room sell-out: a limited extra (a spa slot…) went since the quote. Nothing was
+        // booked; quote the rooms again so the refused extra shows as not added (not charged).
+        await requestQuotes()
+      }
+      setBookError(err)
       return null
     } finally {
       setBookingPending(false)
     }
-  }, [validateGuest, quotesOk, quoteStale, methods, method, t, quoteIds, guest, booker, confirmUnpaid, summary, notes])
+  }, [validateGuest, quotesOk, quoteStale, methods, method, t, quoteIds, guest, booker, confirmUnpaid, summary, notes, requestQuotes])
 
   const resetAll = useCallback(
     (keepSearch = false) => {
@@ -620,6 +674,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     setRoomPick,
     extras,
     setExtra,
+    extrasStock,
+    extrasStockError,
+    reloadExtrasStock: loadExtrasStock,
     quotePromo,
     setQuotePromo,
     quotes,
@@ -656,6 +713,8 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     booking,
     bookingPending: booking_pending,
     bookError,
+    /** The booking failed because a limited extra sold out; the rooms were quoted again. */
+    extraSoldOut: bookError?.type === "ExtraSoldOut",
     resetAll,
   }
 }

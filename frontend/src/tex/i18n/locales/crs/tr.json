@@ -16,10 +16,13 @@
  "crs.board.HB": "Yarım pansiyon",
  "crs.board.RO": "Sadece oda",
  "crs.board.UAI": "Ultra her şey dahil",
+ "crs.book.extra_sold_out": "Rezervasyon yapılmadı: bir ek hizmet az önce tükendi",
+ "crs.book.extra_sold_out_hint": "Odalar tükenmedi: odalar yeniden fiyatlandı ve ek hizmet artık eklenmemiş olarak görünüyor (ücretlendirilmez). Misafire bildirin, başka bir gün seçin veya kaldırın, sonra tekrar rezervasyon yapın.",
  "crs.book.failed": "Rezervasyon tamamlanamadı",
  "crs.book.failed_hint": "Hiçbir şey rezerve edilmedi. Teklifin süresi dolduysa veya fiyat değiştiyse teklifi yenileyip tekrar rezervasyon yapın.",
  "crs.book.need_quote": "Önce bir oda için teklif alın.",
  "crs.book.requote": "Teklifi yenile",
+ "crs.book.review_quote": "Teklifi incele",
  "crs.book.submit": "Rezervasyonu yap",
  "crs.booker.name": "Rezervasyonu yapanın adı",
  "crs.booker.same": "Arayan kişi konaklayacak misafir",
@@ -149,12 +152,37 @@
  "crs.err.offer_missing": "Seçilen teklif artık sonuçlarda yok — tekrar arayın.",
  "crs.err.too_long": "90 geceden uzun konaklamaları rezervasyon ekibi yapar.",
  "crs.explain.title": "Fiyat açıklaması",
+ "crs.extras.choose_days": "En az bir gün seçin.",
+ "crs.extras.closed_on": "{date} günü kapalı",
+ "crs.extras.day": "Gün",
+ "crs.extras.day_arrival": "Giriş günü ({date})",
+ "crs.extras.day_closed": "kapalı",
+ "crs.extras.day_left": {
+  "one": "{count} kaldı",
+  "other": "{count} kaldı"
+ },
+ "crs.extras.day_sold_out": "tükendi",
+ "crs.extras.days": "Günler",
  "crs.extras.for_room": "{room} için ek hizmetler",
+ "crs.extras.left_on": {
+  "one": "{date} için {count} adet kaldı",
+  "other": "{date} için {count} adet kaldı"
+ },
  "crs.extras.less": "Azalt: {name}",
  "crs.extras.list_price": "Liste fiyatı {amount}",
  "crs.extras.mandatory": "Otomatik eklenir",
  "crs.extras.more": "Artır: {name}",
  "crs.extras.none": "Bu otel ek hizmet sunmuyor.",
+ "crs.extras.not_enough": {
+  "one": "{count} misafir için yetersiz",
+  "other": "{count} misafir için yetersiz"
+ },
+ "crs.extras.only_left_on": {
+  "one": "{date} için yalnızca {count} adet kaldı",
+  "other": "{date} için yalnızca {count} adet kaldı"
+ },
+ "crs.extras.sold_out_on": "{date} için tükendi",
+ "crs.extras.stock_failed": "Kontenjanlı ek hizmetlerin kalan kapasitesi yüklenemedi; teklif yine de kontrol eder.",
  "crs.extras.title": "Ek hizmetler",
  "crs.extras.title_count": "Ek hizmetler ({count})",
  "crs.guest.blacklisted": "Engelli",

@@ -33,7 +33,7 @@ import { GuestLookup } from "./components/GuestLookup"
 import { OfferBadges, OfferPrice, OfferTitle, PolicySummary, RoomFitNotes, roomName } from "./components/OfferParts"
 import { usePartyText } from "./components/PartyEditor"
 import { PriceBreakdown } from "./components/PriceBreakdown"
-import { ExtrasPicker, QuoteExpiry, roomExtras, useExtras } from "./components/QuoteParts"
+import { ExtraSoldOutNotice, ExtrasPicker, QuoteExpiry, roomExtras, roomStock, useExtras } from "./components/QuoteParts"
 import { RoomBuilder } from "./components/Results"
 import { SearchForm } from "./components/SearchForm"
 import { guestProfile, logCall } from "./lib/api"
@@ -958,9 +958,10 @@ function QuotePanel({
                       <ExtrasPicker
                         extras={roomExtras(extras.data, i)}
                         value={flow.extras[i] ?? {}}
-                        onChange={(code, qty) => flow.setExtra(i, code, qty)}
+                        onChange={(code, c) => flow.setExtra(i, code, c)}
                         roomLabel={t("crs.room_n", { n: i + 1 })}
                         idPrefix={`cc-q${i}`}
+                        {...roomStock(flow, i, extras.data)}
                       />
                     </Disclosure>}
                   </section>
@@ -1083,7 +1084,9 @@ function BookBlock({ flow, onBook }: { flow: BookingFlow; onBook: () => void }) 
   const { t } = useTexT()
   return (
     <div className="space-y-2 border-t border-zinc-100 pt-4">
-      {flow.bookError && (
+      {/* a limited extra sold out since the quote (not the room): re-quoted, the extra shows as not added */}
+      {flow.extraSoldOut && <ExtraSoldOutNotice flow={flow} />}
+      {flow.bookError && !flow.extraSoldOut && (
         <Notice tone="danger" title={flow.bookError.isPermission ? t("core.error.permission") : t("crs.book.failed")}>
           <p>{flow.bookError.message}</p>
           {!flow.bookError.isPermission && (

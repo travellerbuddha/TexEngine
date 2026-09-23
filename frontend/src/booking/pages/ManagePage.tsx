@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { MAX_ADULTS, MAX_CHILDREN, type Party } from "../lib/criteria"
+import { refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
 import { rememberPayment, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
@@ -11,7 +12,7 @@ import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
 import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
-import type { BookingRoom, BookingSummary, PaymentStart, Proposal } from "../types"
+import type { BookingRoom, BookingSummary, PaymentStart, Proposal, Reason } from "../types"
 import { Button, Field, Textarea } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -108,7 +109,13 @@ function CancelDialog({ room, currency, token, onClose, onDone }: { room: Bookin
 }
 
 function ChangeDialog({ room, currency, token, onClose, onDone }: { room: BookingRoom; currency: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
-  const { t, money } = useI18n()
+  const i18n = useI18n()
+  const { t, money } = i18n
+  // a limited extra no longer available on the new dates ("Spa: sold out on 2027-06-12", G-19)
+  const warningText = (w: Reason) => {
+    const at = w.code === "EXTRA_SOLD_OUT" ? w.message.lastIndexOf(": ") : -1
+    return at > 0 ? `${w.message.slice(0, at)}: ${refusalText(i18n, w.message.slice(at + 2))}` : w.message
+  }
   const [checkIn, setCheckIn] = useState<string | null>(room.check_in)
   const [checkOut, setCheckOut] = useState<string | null>(room.check_out)
   const initialAges = (room.child_ages ?? []).map((c) => (typeof c.age === "number" ? c.age : null))
@@ -226,7 +233,7 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
           )}
           {!proposal.sellable ? (
             <Alert tone="bad" title={t("manage.notPossibleTitle")}>
-              {proposal.warnings?.map((w) => w.message).join(" ") || t("manage.notPossibleBody")}
+              {proposal.warnings?.map(warningText).join(" ") || t("manage.notPossibleBody")}
             </Alert>
           ) : (
             <>
@@ -251,7 +258,8 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
               </dl>
               {!!proposal.warnings?.length && (
                 <Alert tone="warn" title={t("manage.warnings")}>
-                  {proposal.warnings.map((w) => w.message).join(" ")}
+                  {proposal.warnings.map(warningText).join(" ")}
+                  {proposal.warnings.some((w) => w.code === "EXTRA_SOLD_OUT") && ` ${t("manage.extraDropped")}`}
                 </Alert>
               )}
               {higher && <p className="text-sm text-soft">{t("manage.higherNote")}</p>}

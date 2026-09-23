@@ -11,7 +11,7 @@ import { Confirmation } from "./components/Confirmation"
 import { LiveRegion, Row } from "./components/controls"
 import { OfferTitle } from "./components/OfferParts"
 import { usePartyText } from "./components/PartyEditor"
-import { QuoteControls, QuoteExpiry, QuoteRoom, useExtras } from "./components/QuoteParts"
+import { ExtraSoldOutNotice, QuoteControls, QuoteExpiry, QuoteRoom, useExtras } from "./components/QuoteParts"
 import { Results, RoomBuilder } from "./components/Results"
 import { SearchForm } from "./components/SearchForm"
 import { focusFirstInvalid, useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
@@ -171,7 +171,15 @@ export default function CrsPage() {
                   <PaymentPicker flow={flow} canConfirmUnpaid={can("reservation.confirm_unpaid", flow.selection?.property)} />
                 </CardBody>
               </Card>
-              <BookErrors flow={flow} onRequote={() => void flow.requestQuotes()} onSearchAgain={() => { void flow.runSearch(undefined, true); go("search") }} />
+              <BookErrors
+                flow={flow}
+                onRequote={() => void flow.requestQuotes()}
+                onSearchAgain={() => {
+                  void flow.runSearch(undefined, true)
+                  go("search")
+                }}
+                onReviewQuote={() => go("quote")}
+              />
             </>
           )}
 
@@ -279,10 +287,22 @@ function QuoteStep({ flow, canCost }: { flow: BookingFlow; canCost: boolean }) {
   )
 }
 
-export function BookErrors({ flow, onRequote, onSearchAgain }: { flow: BookingFlow; onRequote: () => void; onSearchAgain: () => void }) {
+export function BookErrors({
+  flow,
+  onRequote,
+  onSearchAgain,
+  onReviewQuote,
+}: {
+  flow: BookingFlow
+  onRequote: () => void
+  onSearchAgain: () => void
+  /** Back to the quote step (an extra sold out: the rooms were quoted again without it). */
+  onReviewQuote?: () => void
+}) {
   const { t } = useTexT()
   if (!flow.bookError) return null
   if (flow.bookError.isPermission) return <Notice tone="danger" title={t("core.error.permission")}>{flow.bookError.message}</Notice>
+  if (flow.extraSoldOut) return <ExtraSoldOutNotice flow={flow} onReviewQuote={onReviewQuote} />
   return (
     <Notice tone="danger" title={t("crs.book.failed")}>
       <p>{flow.bookError.message}</p>

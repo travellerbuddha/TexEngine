@@ -16,10 +16,13 @@
  "crs.board.HB": "Half board",
  "crs.board.RO": "Room only",
  "crs.board.UAI": "Ultra all inclusive",
+ "crs.book.extra_sold_out": "Not booked: an extra has just sold out",
+ "crs.book.extra_sold_out_hint": "Not a room sell-out: the rooms were quoted again and the extra now shows as not added (not charged). Tell the guest, choose another day or remove it, then book again.",
  "crs.book.failed": "The booking could not be completed",
  "crs.book.failed_hint": "Nothing was booked. If the quote expired or the price moved, refresh the quote and book again.",
  "crs.book.need_quote": "Quote a room first.",
  "crs.book.requote": "Refresh quote",
+ "crs.book.review_quote": "Review the quote",
  "crs.book.submit": "Book now",
  "crs.booker.name": "Booker name",
  "crs.booker.same": "The caller is the staying guest",
@@ -149,12 +152,37 @@
  "crs.err.offer_missing": "The chosen offer is no longer in the results — search again.",
  "crs.err.too_long": "Stays longer than 90 nights are booked by the reservations team.",
  "crs.explain.title": "Pricing explanation",
+ "crs.extras.choose_days": "Choose at least one day.",
+ "crs.extras.closed_on": "Closed on {date}",
+ "crs.extras.day": "Day",
+ "crs.extras.day_arrival": "Arrival day ({date})",
+ "crs.extras.day_closed": "closed",
+ "crs.extras.day_left": {
+  "one": "{count} left",
+  "other": "{count} left"
+ },
+ "crs.extras.day_sold_out": "sold out",
+ "crs.extras.days": "Days",
  "crs.extras.for_room": "Extras for {room}",
+ "crs.extras.left_on": {
+  "one": "{count} left on {date}",
+  "other": "{count} left on {date}"
+ },
  "crs.extras.less": "Fewer: {name}",
  "crs.extras.list_price": "List price {amount}",
  "crs.extras.mandatory": "Included automatically",
  "crs.extras.more": "More: {name}",
  "crs.extras.none": "This hotel offers no extras.",
+ "crs.extras.not_enough": {
+  "one": "not enough for {count} guest",
+  "other": "not enough for {count} guests"
+ },
+ "crs.extras.only_left_on": {
+  "one": "Only {count} left on {date}",
+  "other": "Only {count} left on {date}"
+ },
+ "crs.extras.sold_out_on": "Sold out on {date}",
+ "crs.extras.stock_failed": "The remaining capacity of limited extras could not be loaded; the quote still checks it.",
  "crs.extras.title": "Extras",
  "crs.extras.title_count": "Extras ({count})",
  "crs.guest.blacklisted": "Blocked",

@@ -509,7 +509,7 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "disabled", kind: "check", label: "rates.f.disabled" },
           { key: "max_quantity", kind: "int", label: "rates.f.max_quantity", help: "rates.h.zero_no_limit" },
           { key: "inventory_tracked", kind: "check", label: "rates.f.inventory_tracked", help: "rates.h.inventory_tracked" },
-          { key: "daily_capacity", kind: "int", label: "rates.f.daily_capacity", showIf: (d) => Boolean(d.inventory_tracked) },
+          { key: "daily_capacity", kind: "int", label: "rates.f.daily_capacity", help: "rates.h.daily_capacity", required: true, showIf: (d) => Boolean(d.inventory_tracked) },
           { key: "sale_from", kind: "date", label: "rates.f.sale_from" },
           { key: "sale_to", kind: "date", label: "rates.f.sale_to" },
           { key: "service_from", kind: "date", label: "rates.f.service_from" },

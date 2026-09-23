@@ -1,7 +1,9 @@
+import { AlertTriangle } from "lucide-react"
 import { date, weekday } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Money } from "../../../ui"
 import { cn } from "../../../../lib/utils"
+import { extraReasonText, parseCapacityReason } from "../lib/extrasStock"
 import { isPositive, isZero } from "../lib/party"
 import type { QuoteDict } from "../lib/types"
 import { Disclosure, Row } from "./controls"
@@ -119,10 +121,12 @@ export function PriceBreakdown({
         )}
       </div>
       {failedExtras.length > 0 && (
-        <ul className="text-xs text-amber-800">
-          {failedExtras.map((e) => (
-            <li key={e.code}>
-              {t("crs.quote.extra_failed", { name: e.name || e.code, reason: e.reason })}
+        // not charged: a capacity refusal (sold out, closed, only N left — G-19) or a rule
+        <ul className="space-y-0.5 text-xs text-amber-800">
+          {failedExtras.map((e, i) => (
+            <li key={`${e.code}-${i}`} className={cn("flex items-start gap-1", parseCapacityReason(e.reason) && "font-medium")}>
+              <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
+              <span>{t("crs.quote.extra_failed", { name: e.name || e.code, reason: extraReasonText(t, e.reason) })}</span>
             </li>
           ))}
         </ul>

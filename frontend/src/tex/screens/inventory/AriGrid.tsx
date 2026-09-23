@@ -10,6 +10,7 @@ import { Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Notice, P
 import { decText, isoWeekday, useLookups, versionLabel, weekdayName } from "../rates/lib/util"
 import { PublishDialog } from "../rates/contracts/VersionActions"
 import { BulkDialog, CellDialog, scopeText } from "./Dialogs"
+import { InventoryNav } from "./InventoryNav"
 import { Legend } from "./Legend"
 import { METRICS, type Grid, type GridCell, type GridRow, type Metric, type Scope } from "./types"
 
@@ -86,6 +87,7 @@ export default function AriGrid() {
           )
         }
       />
+      <InventoryNav />
       <Toolbar className="items-end">
         <div className="flex items-end gap-1">
           <Button variant="secondary" size="md" aria-label={t("inventory.prev", { count: days })} onClick={() => setStart((s) => addDays(s, -days))} icon={<ChevronLeft className="size-4" aria-hidden />} />

@@ -53,6 +53,22 @@ export interface PriceChange {
   currency: string
 }
 
+/** An extra the guest asked for that the quote did not add (and does not charge). */
+export interface RejectedExtra {
+  room: number
+  /** the code as the guest's choice holds it */
+  code: string
+  name: string
+  /** the server's reason, e.g. "sold out on 2027-06-10" (see lib/extras refusalText) */
+  reason: string
+}
+
+export interface QuoteOutcome {
+  error: FlowError | null
+  /** extras requested but not added by the quotes just made (empty on error) */
+  rejected: RejectedExtra[]
+}
+
 interface FlowState {
   key: string | null
   hotel: string | null
@@ -124,8 +140,12 @@ interface Ctx {
   setActiveRoom: (i: number) => void
   select: (roomIndex: number, offer: Offer, hotel: string, roomName: string) => void
   setExtra: (roomIndex: number, code: string, choice: ExtraChoice | null) => void
-  quoteAll: (override?: (Selection | null)[], baseline?: (Selection | null)[]) => Promise<FlowError | null>
+  quoteAll: (override?: (Selection | null)[], baseline?: (Selection | null)[]) => Promise<QuoteOutcome>
   quotesFresh: boolean
+  /** extras the current quotes could not add (sold out, closed…): the guest is told, never charged */
+  rejectedExtras: RejectedExtra[]
+  /** continue without them: forget those choices, keeping the quotes (they do not include them) */
+  dropRejectedExtras: () => void
   refreshAfterExpiry: () => Promise<Refreshed>
   setGuest: (g: Partial<Guest>) => void
   setMethod: (m: PaymentMethod, providerAccount?: string | null) => void
@@ -163,6 +183,22 @@ export function useBooking() {
 function toFlowError(e: unknown): FlowError {
   if (e instanceof ApiError) return { kind: e.kind, message: e.message }
   return { kind: "server", message: "" }
+}
+
+/** Extras the guest chose that a room's quote refused (quote.extras[].ok = false). Extras
+ * the hotel adds by itself (mandatory) are not the guest's choice and are left out. */
+function findRejected(quotes: (QuoteResponse | null)[], extras: FlowState["extras"]): RejectedExtra[] {
+  const out: RejectedExtra[] = []
+  quotes.forEach((q, room) => {
+    const chosen = extras[room] ?? {}
+    const codes = new Map(Object.keys(chosen).map((c) => [c.toUpperCase(), c]))
+    for (const e of q?.ok ? q.quote?.extras ?? [] : []) {
+      const code = codes.get((e.code ?? "").toUpperCase())
+      if (e.ok || !code || out.some((r) => r.room === room && r.code === code)) continue
+      out.push({ room, code, name: e.name || code, reason: e.reason ?? "" })
+    }
+  })
+  return out
 }
 
 export function BookingProvider({ children }: { children: ReactNode }) {
@@ -347,10 +383,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     !!flow.quotedAt &&
     Date.now() - flow.quotedAt < QUOTE_MAX_AGE
 
-  const quoteAll = useCallback(async (override?: (Selection | null)[], baseline?: (Selection | null)[]): Promise<FlowError | null> => {
+  const quoteAll = useCallback(async (override?: (Selection | null)[], baseline?: (Selection | null)[]): Promise<QuoteOutcome> => {
     const sels = override ?? flow.selections
     const base = baseline ?? sels
-    if (!sels.length || sels.some((s) => !s)) return { kind: "invalid", message: "" }
+    const failed = (error: FlowError): QuoteOutcome => ({ error, rejected: [] })
+    if (!sels.length || sels.some((s) => !s)) return failed({ kind: "invalid", message: "" })
     const results = await Promise.allSettled(
       sels.map((s, i) =>
         pub<QuoteResponse>("quote", {
@@ -365,11 +402,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     const changes: PriceChange[] = []
     for (let i = 0; i < results.length; i++) {
       const r = results[i]
-      if (r.status === "rejected") return { ...toFlowError(r.reason), room: i }
+      if (r.status === "rejected") return failed({ ...toFlowError(r.reason), room: i })
       const q = r.value
       if (!q.ok || !q.quote) {
         const code = q.reasons?.[0]?.code
-        return { kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: q.reasons?.[0]?.message ?? "", room: i }
+        return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: q.reasons?.[0]?.message ?? "", room: i })
       }
       const before = (base[i] ?? sels[i])!.quote.totals.accommodation
       const after = q.quote.totals.accommodation
@@ -379,8 +416,25 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     }
     setFlow((f) => ({ ...f, quotes, quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
-    return null
+    return { error: null, rejected: findRejected(quotes, flow.extras) }
   }, [flow.selections, flow.extras, site.slug])
+
+  const rejectedExtras = useMemo(() => findRejected(flow.quotes, flow.extras), [flow.quotes, flow.extras])
+
+  // the quotes already leave these extras out (and do not charge them): keep the quotes
+  const dropRejectedExtras = useCallback(() => {
+    setFlow((f) => {
+      const gone = findRejected(f.quotes, f.extras)
+      if (!gone.length) return f
+      const extras = { ...f.extras }
+      for (const r of gone) {
+        const room = { ...(extras[r.room] ?? {}) }
+        delete room[r.code]
+        extras[r.room] = room
+      }
+      return { ...f, extras }
+    })
+  }, [])
 
   /** After "expired": search again with the same criteria and re-pick the same rooms. */
   const refreshAfterExpiry = useCallback(async (): Promise<Refreshed> => {
@@ -410,9 +464,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     setFlow((f) => ({ ...f, lang }))
     if (!requote) return
     setPending(true)
-    void quoteAll().then((err) => {
+    void quoteAll().then(({ error }) => {
       setPending(false)
-      if (err) setFlowError(err)
+      if (error) setFlowError(error)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, flow.lang])
@@ -518,6 +572,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     setExtra,
     quoteAll,
     quotesFresh,
+    rejectedExtras,
+    dropRejectedExtras,
     refreshAfterExpiry,
     setGuest,
     setMethod,

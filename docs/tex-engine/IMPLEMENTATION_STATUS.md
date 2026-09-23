@@ -42,7 +42,7 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), channel-manager / SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20), enterprise dashboard (R-47) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 6 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
+**Open gaps by severity:** 0 Critical, 5 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -50,9 +50,9 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 | Phase | Status | Why |
 |---|---|---|
-| 0 Audit + docs | COMPLETE | spec, architecture, ADR-001…031, this audit |
+| 0 Audit + docs | COMPLETE | spec, architecture, ADR-001…033, this audit |
 | 1 Foundation (shell, nav, design system, hide PMS) | PARTIAL | TEX shell and design system work; the legacy booking engine no longer sells TEX hotels (G-03 fixed); the legacy night audit leaves TEX-sold stays alone (G-04 fixed); the legacy PMS is closed in backend and SPA while switched off (G-16 fixed, ADR-030). Open: the login page, browser title and Desk tile still say "Kamra PMS" (G-60) |
-| 2 Commercial data model | PARTIAL | 60 DocTypes + patches p01–p12; extras and taxes are effective-dated revisions (G-20 fixed, ADR-031); money fields still partly Float (G-72) |
+| 2 Commercial data model | PARTIAL | 62 DocTypes + patches p01–p13; extras and taxes are effective-dated revisions (G-20 fixed, ADR-031); money fields still partly Float (G-72) |
 | 3 Pricing engine | PARTIAL | pure engine correct on every spec example; booking-level extras and fixed coupons priced once per booking, min basket in the sell currency (G-05, G-06, G-08 fixed); per-guest limits enforced at booking and modifications keep redemptions right (G-07, G-09 fixed); min basket per room (G-84) |
 | 4 Contract admin | PARTIAL | editor, publish, price check work (E2E); the first contract that can sell a stay wins (G-17 fixed); contract cost hidden from agents (G-11 fixed) |
 | 5 Rate/inventory grid | PARTIAL | grid + bulk edit exist; no backend/E2E tests, no copy period, rows are room types only (G-47) |
@@ -63,7 +63,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | 10 CRM | PARTIAL | guests, consent, segments, abandoned; 5 named segments not expressible (G-23), no loyalty admin UI (G-24) |
 | 11 Self-service | PARTIAL | view/pay/change/cancel; no extras after booking (G-22), credit/refund policies do nothing (G-45) |
 | 12 Reports | PARTIAL | production report; missing views/filters, margin does not reconcile (G-46) |
-| 13 Hardening | PARTIAL | this audit; all Critical items and G-10…G-18, G-20 fixed with regression tests; High G-19, G-21…G-25 open |
+| 13 Hardening | PARTIAL | this audit; all Critical items and G-10…G-20, G-85, G-86 fixed with regression tests; High G-21…G-25 open |
 
 ## 4. Requirements
 
@@ -87,7 +87,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-16 | Restrictions | PARTIAL | stop-sell modes, LOS, CTA/CTD, release, advance; enforced on search/quote/book · `TestRestrictions` | No booking-window restriction; no hotel/market-level cells; modifications treat restrictions as warnings (incl. guest path); no integration test of enforcement (G-48). |
 | R-17 | Inventory | PARTIAL | pools, allotments, oversell limit, manual adjustment, row locks; simultaneous bookings of different room types never deadlock, a deadlock victim is re-run (G-85 fixed, ADR-032) · `test_concurrency` (last room, room types side by side, retry) | Legacy `validate_type_capacity` blocks TEX oversell/pools; non-TEX reservations skip TEX locks; allotment/oversell untested (G-49). |
 | R-18 | Promotions | PARTIAL | all kinds/values/combination rules, reason per rejection · `test_promotions_extras.py` | Member discount unreachable (G-57). (Fixed: value guards in engine and on save G-18, min-basket currency G-08; `test_value_guards`, `TestCommercialValues`.) |
-| R-19 | Extras | PARTIAL | 12 pricing modes, service dates, mandatory; effective-dated revisions with Revise/Activate in Rates → Extras (G-20 fixed) · `TestExtras`, `TestEffectiveDatedExtrasAndTaxes`, e2e `policy-revisions` | Inventory/daily capacity offered in UI but not implemented (G-19). Not bookable after booking (G-22). No bundles (G-58). |
+| R-19 | Extras | PARTIAL | 12 pricing modes, service dates, mandatory; effective-dated revisions with Revise/Activate in Rates → Extras (G-20 fixed); limited daily capacity end to end, concurrency-safe, with Inventory → Extras, CRS and guest availability (G-19 fixed, ADR-033) · `TestExtras`, `TestEffectiveDatedExtrasAndTaxes`, `test_extras_inventory` (unit + integration), `TestConcurrentLastExtra`, e2e `policy-revisions` | Not bookable after booking (G-22). No bundles (G-58). |
 | R-20 | Coupons | PARTIAL | code promotions, scopes, usage and per-guest limits counted under the promotion's row lock with a current read (G-07 regression fixed) · `TestConcurrentCouponLimit` | `min_basket` is evaluated per room on multi-room bookings (G-84). No package scope (G-58). (Fixed: per-guest limit at booking G-07, min-basket currency G-08, modification redemptions G-09; redemption tests `TestBookingLevelTerms`, `TestCouponLimits`.) |
 | R-21 | Modification & repricing | PARTIAL | OLD vs PROPOSED, 4 bases, signed proposals, override needs permission + reason (`modification.py`, `ModifyDrawer.tsx`); repricing ignores the booking's own coupon use and redemptions follow the modification (G-09 fixed) · e2e crs + critical-journey, `TestCouponLimits` | `sale_at` accepted but ignored; ORIGINAL_SALE_DATE/HISTORICAL bases and override untested (G-51). |
 | R-22 | Historical simulator | PARTIAL | as-of markups/promotions/FX/extras/taxes, version by effective date; activation can't be back-dated (G-20 fixed) · `TestHistoricalSimulator`, `TestEffectiveDatedExtrasAndTaxes` | Reads live contract status/market/channels and coupon usage → not fully deterministic (G-51). |

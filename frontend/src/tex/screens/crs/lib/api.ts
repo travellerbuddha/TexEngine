@@ -1,6 +1,7 @@
 // CRS / Call Center / Reservations calls. Signatures: kamra/tex/api/crs.py and
 // ui_crs.py (this workstream's helper module). The server owns every amount.
 import { tex, type TexModule } from "../../../lib/api"
+import type { ExtrasAvailability } from "./extrasStock"
 import type {
   BookingSummary,
   ExtraDef,
@@ -30,7 +31,15 @@ export function searchOffers(args: SearchArgs, signal?: AbortSignal) {
   return tex<SearchResult>(UI_CRS, "search", { ...args }, { signal })
 }
 
-export function quoteOffer(offer_key: string, extras: { code: string; quantity: number }[], promo_codes?: string[]) {
+/** An extra of a quote request: SERVICE_DATE extras need at least one date; the others may
+ * name the day of the stay they are used on (default: arrival). */
+export interface ExtraRequest {
+  code: string
+  quantity: number
+  service_dates?: string[]
+}
+
+export function quoteOffer(offer_key: string, extras: ExtraRequest[], promo_codes?: string[]) {
   return tex<QuoteResult>("crs", "quote", { offer_key, extras, promo_codes }, { post: true })
 }
 
@@ -59,6 +68,11 @@ export function paymentMethods(property: string, market: string, currency: strin
 
 export function extrasFor(property: string) {
   return tex<ExtraDef[]>("crs", "extras_for", { property })
+}
+
+/** What is left of each limited extra per day of the stay, check-in..check-out inclusive (G-19). */
+export function extrasAvailability(property: string, check_in: string, check_out: string, signal?: AbortSignal) {
+  return tex<ExtrasAvailability>("crs", "extras_availability", { property, check_in, check_out }, { signal })
 }
 
 export function findGuests(q: string, signal?: AbortSignal) {

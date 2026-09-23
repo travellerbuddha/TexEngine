@@ -70,6 +70,9 @@ export interface ExtraOutcome {
   mandatory: boolean
   pricing_mode: string
   detail: string
+  service_dates?: string[]
+  /** Days and units it takes of a limited extra's daily capacity (G-19). */
+  usage?: { date: string; units: number }[]
 }
 
 export interface CancellationRule {

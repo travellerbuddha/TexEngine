@@ -4,6 +4,8 @@
 
 export type ErrorKind =
   | "sold_out"
+  /** a limited extra (spa slot, transfer…) ran out while booking — the room is not affected */
+  | "extra_sold_out"
   | "expired"
   | "rate_limit"
   | "not_found"
@@ -39,6 +41,8 @@ const EXPIRED = /expired|search again|no longer on sale|already used|invalid off
 
 function classify(message: string, status: number, type: string): ErrorKind {
   if (status === 429 || type === "RateLimitExceededError") return "rate_limit"
+  // before the wording test: "Spa has just sold out…" is an extra, not the room (G-19)
+  if (type === "ExtraSoldOut" || type.endsWith(".ExtraSoldOut")) return "extra_sold_out"
   if (SOLD_OUT.test(message)) return "sold_out"
   if (EXPIRED.test(message)) return "expired"
   if (status === 404 || type === "DoesNotExistError") return "not_found"

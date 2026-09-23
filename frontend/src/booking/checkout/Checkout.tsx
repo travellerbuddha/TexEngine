@@ -1,17 +1,18 @@
-import { Building2, Check, CreditCard, Landmark, Lock, ShieldCheck } from "lucide-react"
+import { AlertTriangle, Building2, Check, CreditCard, Landmark, Lock, ShieldCheck } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 import { useI18n, type MessageKey } from "../i18n"
-import { nightsBetween } from "../lib/dates"
+import { pub } from "../lib/api"
+import { extraAnchor, extraStock, refusalText, stayDays, type DayAvailability, type ExtrasAvailability } from "../lib/extras"
 import { boardLabel, cancellation, paymentTerms } from "../lib/policy"
 import { useBooking, type Step } from "../flow/BookingContext"
 import { continuePayment } from "../flow/payment"
 import { Summary } from "../flow/Summary"
-import { FlowErrorAlert, PriceChangeNotice, useContinue } from "../flow/useContinue"
-import { rememberReturn } from "../lib/storage"
+import { FlowErrorAlert, PriceChangeNotice, RejectedExtrasNotice, useBackToExtras, useContinue } from "../flow/useContinue"
+import { rememberReturn, sessionId } from "../lib/storage"
 import { useSite } from "../site/SiteContext"
 import type { PaymentMethod, PaymentStart, SiteExtra } from "../types"
-import { Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
+import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
 import { Photo } from "../ui/Photo"
@@ -86,9 +87,26 @@ function StepHeading({ children }: { children: ReactNode }) {
 
 const COUNTED = new Set(["UNIT", "USAGE"])
 
-function ExtraItem({ extra, roomIndex }: { extra: SiteExtra; roomIndex: number }) {
-  const { t, money, day } = useI18n()
-  const { flow, setExtra, criteria } = useBooking()
+/** Per-day state of the hotel's limited extras for this stay (G-19). Null until known or
+ * when it cannot be read: the extras then show as usual and the quote decides. */
+function useExtrasAvailability(hotel: string, checkIn: string | null, checkOut: string | null, refreshKey: string) {
+  const { site } = useSite()
+  const [data, setData] = useState<ExtrasAvailability | null>(null)
+  useEffect(() => {
+    if (!hotel || !checkIn || !checkOut) return
+    const ctl = new AbortController()
+    pub<ExtrasAvailability>("extras_availability", { site: site.slug, hotel, check_in: checkIn, check_out: checkOut, session_id: sessionId() }, ctl.signal)
+      .then((d) => setData(d && typeof d === "object" ? d : {}))
+      .catch(() => undefined)
+    return () => ctl.abort()
+  }, [site.slug, hotel, checkIn, checkOut, refreshKey])
+  return data
+}
+
+function ExtraItem({ extra, roomIndex, days }: { extra: SiteExtra; roomIndex: number; days?: Record<string, DayAvailability> }) {
+  const i18n = useI18n()
+  const { t, money, day } = i18n
+  const { flow, setExtra, criteria, rejectedExtras } = useBooking()
   const choice = flow.extras[roomIndex]?.[extra.extra_code]
   const qty = choice?.quantity ?? 0
   const mode = extra.pricing_mode
@@ -97,17 +115,22 @@ function ExtraItem({ extra, roomIndex }: { extra: SiteExtra; roomIndex: number }
   const max = extra.max_quantity && extra.max_quantity > 0 ? extra.max_quantity : 9
   const counted = COUNTED.has(mode) || (extra.max_quantity ?? 0) > 1
   const id = useId()
-  const nights = useMemo(() => {
-    const out: string[] = []
-    if (!criteria.checkIn || !criteria.checkOut) return out
-    const n = nightsBetween(criteria.checkIn, criteria.checkOut)
-    const d = new Date(`${criteria.checkIn}T12:00:00`)
-    for (let i = 0; i <= n; i++) {
-      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`)
-      d.setDate(d.getDate() + 1)
-    }
-    return out
-  }, [criteria.checkIn, criteria.checkOut])
+  const stay = useMemo(() => stayDays(criteria.checkIn, criteria.checkOut), [criteria.checkIn, criteria.checkOut])
+  // a chosen extra is used on its service date, else on arrival (as the server counts it)
+  const chosenDay = choice ? choice.service_dates?.[0] ?? criteria.checkIn : null
+  const stock = extraStock(mode, days, criteria.checkIn, criteria.checkOut, chosenDay)
+  const soldOut = stock.soldOut && !mandatory
+  const usedDay = chosenDay ?? stock.defaultDay
+  const rejected = rejectedExtras.find((r) => r.room === roomIndex && r.code === extra.extra_code)
+  // a limited extra is counted on one day of the stay: the guest may say which
+  const pickDay = stock.oneDay && stay.length > 1 && qty > 0 && !soldOut && !mandatory
+
+  const choose = (quantity: number) =>
+    setExtra(
+      roomIndex,
+      extra.extra_code,
+      quantity > 0 ? { code: extra.extra_code, quantity, ...(stock.oneDay && usedDay ? { service_dates: [usedDay] } : {}) } : null,
+    )
 
   const price = (
     <p className="text-sm">
@@ -117,26 +140,54 @@ function ExtraItem({ extra, roomIndex }: { extra: SiteExtra; roomIndex: number }
   )
   let control: ReactNode
   if (mandatory) control = <p className="text-sm font-medium text-soft">{t("extras.mandatory")}</p>
+  else if (soldOut)
+    control = (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="text-sm text-muted">{t("extras.soldOutBody")}</p>
+        {qty > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => setExtra(roomIndex, extra.extra_code, null)}>
+            {t("extras.remove")}
+            <span className="sr-only">: {extra.extra_name}</span>
+          </Button>
+        )}
+      </div>
+    )
   else if (mode === "SERVICE_DATE") {
     const dates = choice?.service_dates ?? []
     control = (
       <fieldset>
         <legend className="mb-1.5 text-sm font-medium text-soft">{t("extras.chooseDates")}</legend>
         <div className="flex flex-wrap gap-2">
-          {nights.map((d) => {
+          {stay.map((d) => {
             const on = dates.includes(d)
+            const a = stock.day(d)
+            // a day no longer available stays removable when it was already chosen
+            const locked = !a.available && !on
+            const look = on
+              ? a.available
+                ? "border-brand-ink bg-brand/10 font-semibold"
+                : "border-warn bg-warn-soft font-semibold"
+              : locked
+                ? "cursor-not-allowed border-line bg-sunken text-muted"
+                : "border-line-strong"
             return (
-              <label key={d} className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm ${on ? "border-brand-ink bg-brand/10 font-semibold" : "border-line-strong"}`}>
+              <label key={d} className={`inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm ${locked ? "" : "cursor-pointer"} ${look}`}>
                 <input
                   type="checkbox"
                   className="bk-check"
                   checked={on}
+                  disabled={locked}
                   onChange={(e) => {
                     const next = e.target.checked ? [...dates, d].sort() : dates.filter((x) => x !== d)
                     setExtra(roomIndex, extra.extra_code, next.length ? { code: extra.extra_code, quantity: 1, service_dates: next } : null)
                   }}
                 />
                 {day(d)}
+                {!a.available ? (
+                  <span className="text-xs font-medium">· {t("extras.soldOut")}</span>
+                ) : a.low ? (
+                  <span className="text-xs font-medium text-warn">· {t("extras.fewLeft")}</span>
+                ) : null}
               </label>
             )
           })}
@@ -150,7 +201,7 @@ function ExtraItem({ extra, roomIndex }: { extra: SiteExtra; roomIndex: number }
         value={qty}
         min={0}
         max={max}
-        onChange={(n) => setExtra(roomIndex, extra.extra_code, n ? { code: extra.extra_code, quantity: n } : null)}
+        onChange={choose}
         decLabel={t("extras.less", { name: extra.extra_name })}
         incLabel={t("extras.more", { name: extra.extra_name })}
       />
@@ -166,27 +217,57 @@ function ExtraItem({ extra, roomIndex }: { extra: SiteExtra; roomIndex: number }
           </span>
         }
         checked={qty > 0}
-        onChange={(v) => setExtra(roomIndex, extra.extra_code, v ? { code: extra.extra_code, quantity: 1 } : null)}
+        onChange={(v) => choose(v ? 1 : 0)}
       />
     )
 
   return (
-    <li className={`bk-card flex gap-4 p-4 ${qty ? "ring-2 ring-brand-ink" : ""}`}>
+    <li
+      id={extraAnchor(roomIndex, extra.extra_code)}
+      tabIndex={-1}
+      className={`bk-card flex scroll-mt-20 gap-4 p-4 outline-none ${rejected ? "ring-2 ring-warn" : qty ? "ring-2 ring-brand-ink" : ""}`}
+    >
       <Photo src={extra.image} alt="" className="hidden size-20 flex-none rounded-ui sm:grid" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-          <div>
+          <div className="min-w-0">
             <h3 className="text-base font-semibold" id={`${id}-name`}>
               {extra.extra_name}
             </h3>
             {extra.category && <p className="text-xs text-muted">{extra.category}</p>}
+            {soldOut ? (
+              <Badge className="mt-1">{t("extras.soldOut")}</Badge>
+            ) : (
+              !mandatory && stock.low && <Badge tone="warn" className="mt-1">{t("extras.fewLeft")}</Badge>
+            )}
           </div>
           {price}
         </div>
         {extra.description && <p className="mt-1 text-sm text-soft">{extra.description}</p>}
+        {rejected && (
+          <p className="mt-2 flex items-start gap-1.5 text-sm font-medium text-ink">
+            <AlertTriangle className="mt-0.5 size-4 flex-none text-warn" aria-hidden />
+            {refusalText(i18n, rejected.reason)}
+          </p>
+        )}
         <div className="mt-2" aria-describedby={`${id}-name`}>
           {control}
         </div>
+        {pickDay && (
+          <Field label={t("extras.day")} className="mt-2 max-w-xs">
+            <Select value={usedDay ?? ""} onChange={(e) => setExtra(roomIndex, extra.extra_code, { code: extra.extra_code, quantity: qty, service_dates: [e.target.value] })}>
+              {stay.map((d) => {
+                const a = stock.day(d)
+                const note = !a.available ? ` · ${t("extras.soldOut")}` : a.low ? ` · ${t("extras.fewLeft")}` : ""
+                return (
+                  <option key={d} value={d} disabled={!a.available && d !== usedDay}>
+                    {`${day(d)}${note}`}
+                  </option>
+                )
+              })}
+            </Select>
+          </Field>
+        )}
       </div>
     </li>
   )
@@ -195,11 +276,14 @@ function ExtraItem({ extra, roomIndex }: { extra: SiteExtra; roomIndex: number }
 function ExtrasStep() {
   const { t } = useI18n()
   const { site } = useSite()
-  const { criteria, flow } = useBooking()
+  const { criteria, flow, rejectedExtras } = useBooking()
   const { go, busy } = useContinue()
   const hotel = flow.selections[0]?.hotel ?? ""
   const extras = site.extras?.[hotel] ?? []
   const multi = criteria.rooms.length > 1
+  // read again when a quote refuses an extra: what is left has changed
+  const refused = rejectedExtras.map((r) => `${r.room}|${r.code}|${r.reason}`).join(",")
+  const availability = useExtrasAvailability(hotel, criteria.checkIn, criteria.checkOut, refused)
   return (
     <StepLayout
       summary={
@@ -218,6 +302,7 @@ function ExtrasStep() {
           <p className="mt-1 text-soft">{t("extras.subtitle")}</p>
         </div>
         <FlowErrorAlert />
+        <RejectedExtrasNotice />
         {criteria.rooms.map((_, i) => (
           <section key={i} aria-labelledby={multi ? `bk-extras-r${i}` : undefined} className="space-y-3">
             {multi && (
@@ -230,7 +315,7 @@ function ExtrasStep() {
               {extras
                 .filter((e) => i === 0 || e.pricing_mode !== "RESERVATION")
                 .map((e) => (
-                  <ExtraItem key={e.extra_code} extra={e} roomIndex={i} />
+                  <ExtraItem key={e.extra_code} extra={e} roomIndex={i} days={availability?.[e.extra_code] ?? availability?.[e.extra_code.toUpperCase()]} />
                 ))}
             </ul>
           </section>
@@ -319,6 +404,7 @@ function DetailsStep() {
         </div>
         <PriceChangeNotice />
         <FlowErrorAlert />
+        <RejectedExtrasNotice />
         {submitted && <ErrorSummary ref={summaryRef} title={t("details.errSummary", { count: errors.length })} errors={errors} />}
         <div className="bk-card space-y-4 p-4 sm:p-6">
           <h2 className="text-lg">{t("details.contact")}</h2>
@@ -413,6 +499,7 @@ function PaymentStep() {
   const navigate = useNavigate()
   const b = useBooking()
   const { flow, criteria, setMethod, setTerms, quotesFresh, quoteAll, book, pending, setPending, setFlowError } = b
+  const backToExtras = useBackToExtras()
   const [termsError, setTermsError] = useState(false)
   const [methodError, setMethodError] = useState<string | null>(null)
   const [redirecting, setRedirecting] = useState<PaymentStart | null>(null)
@@ -479,14 +566,18 @@ function PaymentStep() {
     setPending(true)
     setFlowError(null)
     if (!quotesFresh) {
-      const err = await quoteAll()
-      if (err) {
+      const { error, rejected } = await quoteAll()
+      if (error) {
         setPending(false)
-        return setFlowError(err)
+        return setFlowError(error)
       }
+      // an extra can no longer be added: the guest sees it (and the new total) before booking
+      if (rejected.length) return setPending(false)
     }
     const res = await book()
     if (res.error) {
+      // a limited extra ran out, not the room: back to the extras, never to the room search
+      if (res.error.kind === "extra_sold_out") return void backToExtras(res.error)
       setPending(false)
       if (res.error.kind === "invalid" && /payment|pay|hotel/i.test(res.error.message)) {
         setMethodError(res.error.message)
@@ -547,6 +638,7 @@ function PaymentStep() {
         </div>
         <PriceChangeNotice />
         <FlowErrorAlert />
+        <RejectedExtrasNotice />
         <section className="bk-card flex items-start justify-between gap-3 p-4 sm:px-6" aria-labelledby="bk-guest-review">
           <div className="min-w-0 text-sm">
             <h2 id="bk-guest-review" className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -721,9 +813,9 @@ function QuoteOnArrival() {
     if (done.current) return
     done.current = true
     setPending(true)
-    void quoteAll().then((err) => {
+    void quoteAll().then(({ error }) => {
       setPending(false)
-      if (err) setFlowError(err)
+      if (error) setFlowError(error)
     })
   }, [quoteAll, setFlowError, setPending])
   return null

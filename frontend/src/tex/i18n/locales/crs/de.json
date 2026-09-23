@@ -16,10 +16,13 @@
  "crs.board.HB": "Halbpension",
  "crs.board.RO": "Nur Übernachtung",
  "crs.board.UAI": "Ultra all inclusive",
+ "crs.book.extra_sold_out": "Nicht gebucht: Eine Zusatzleistung ist gerade ausverkauft",
+ "crs.book.extra_sold_out_hint": "Kein Zimmer-Ausverkauf: Die Zimmer wurden neu kalkuliert, die Zusatzleistung erscheint jetzt als nicht hinzugefügt (wird nicht berechnet). Informieren Sie den Gast, wählen Sie einen anderen Tag oder entfernen Sie sie und buchen Sie dann erneut.",
  "crs.book.failed": "Die Buchung konnte nicht abgeschlossen werden",
  "crs.book.failed_hint": "Es wurde nichts gebucht. Ist das Angebot abgelaufen oder hat sich der Preis geändert, aktualisieren Sie das Angebot und buchen Sie erneut.",
  "crs.book.need_quote": "Holen Sie zuerst ein Angebot ein.",
  "crs.book.requote": "Angebot aktualisieren",
+ "crs.book.review_quote": "Angebot prüfen",
  "crs.book.submit": "Jetzt buchen",
  "crs.booker.name": "Name des Buchenden",
  "crs.booker.same": "Der Anrufer ist der übernachtende Gast",
@@ -149,12 +152,37 @@
  "crs.err.offer_missing": "Das gewählte Angebot ist nicht mehr in den Ergebnissen — erneut suchen.",
  "crs.err.too_long": "Aufenthalte über 90 Nächte bucht das Reservierungsteam.",
  "crs.explain.title": "Preiserklärung",
+ "crs.extras.choose_days": "Wählen Sie mindestens einen Tag.",
+ "crs.extras.closed_on": "Am {date} geschlossen",
+ "crs.extras.day": "Tag",
+ "crs.extras.day_arrival": "Anreisetag ({date})",
+ "crs.extras.day_closed": "geschlossen",
+ "crs.extras.day_left": {
+  "one": "noch {count}",
+  "other": "noch {count}"
+ },
+ "crs.extras.day_sold_out": "ausverkauft",
+ "crs.extras.days": "Tage",
  "crs.extras.for_room": "Zusatzleistungen für {room}",
+ "crs.extras.left_on": {
+  "one": "Noch {count} am {date}",
+  "other": "Noch {count} am {date}"
+ },
  "crs.extras.less": "Weniger: {name}",
  "crs.extras.list_price": "Listenpreis {amount}",
  "crs.extras.mandatory": "Automatisch enthalten",
  "crs.extras.more": "Mehr: {name}",
  "crs.extras.none": "Dieses Hotel bietet keine Zusatzleistungen an.",
+ "crs.extras.not_enough": {
+  "one": "nicht genug für {count} Gast",
+  "other": "nicht genug für {count} Gäste"
+ },
+ "crs.extras.only_left_on": {
+  "one": "Nur noch {count} am {date}",
+  "other": "Nur noch {count} am {date}"
+ },
+ "crs.extras.sold_out_on": "Am {date} ausverkauft",
+ "crs.extras.stock_failed": "Die Restkapazität limitierter Zusatzleistungen konnte nicht geladen werden; das Angebot prüft sie trotzdem.",
  "crs.extras.title": "Zusatzleistungen",
  "crs.extras.title_count": "Zusatzleistungen ({count})",
  "crs.guest.blacklisted": "Gesperrt",

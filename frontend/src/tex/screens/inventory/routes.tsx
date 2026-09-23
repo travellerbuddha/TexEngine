@@ -1,11 +1,14 @@
 import { Navigate, Route, Routes } from "react-router-dom"
 import AriGrid from "./AriGrid"
+import ExtrasGrid from "./ExtrasGrid"
 
-/** Routes under /tex/inventory (rates & availability grid, workstream A). */
+/** Routes under /tex/inventory: rates & availability grid (workstream A) and the
+ * limited extras grid (G-19). */
 export default function AreaRoutes() {
   return (
     <Routes>
       <Route index element={<AriGrid />} />
+      <Route path="extras" element={<ExtrasGrid />} />
       <Route path="*" element={<Navigate to="/tex/inventory" replace />} />
     </Routes>
   )
