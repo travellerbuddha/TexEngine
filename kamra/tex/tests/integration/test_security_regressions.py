@@ -1263,12 +1263,15 @@ class TestGoLivePaymentsReview(TexTestCase):
 		r = pay.refund(txn, amount="30", reason="the overpayment", idempotency_key="g68-unalloc-1")
 		self.assertEqual(paid(), D("212.75"))                              # the booking keeps its money
 		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", r["refund"], "booking"))
-		r = pay.refund(txn, amount="20", reason="rest and more", idempotency_key="g68-unalloc-2", booking=b1)
-		self.assertEqual(paid(), D("202.75"))                              # 10 unallocated, then 10 from it
+		r = pay.refund(txn, amount="5", reason="named, but unallocated", idempotency_key="g68-unalloc-2", booking=b1)
+		self.assertEqual(paid(), D("212.75"))
+		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", r["refund"], "booking"))  # nothing came off it
+		r = pay.refund(txn, amount="20", reason="rest and more", idempotency_key="g68-unalloc-3", booking=b1)
+		self.assertEqual(paid(), D("197.75"))                              # 5 unallocated, then 15 from it
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", r["refund"], "booking"), b1)
 		self.assertEqual([D(x) for x in frappe.get_all("TEX Payment Allocation", filters={
-			"transaction": txn, "allocation_type": "Refund"}, pluck="amount")], [D("10")])
-		self.assertEqual(pay_api.transaction(txn)["booking_nets"], {b1: "202.75"})
+			"transaction": txn, "allocation_type": "Refund"}, pluck="amount")], [D("15")])
+		self.assertEqual(pay_api.transaction(txn)["booking_nets"], {b1: "197.75"})
 
 	def test_g68_the_refund_screen_offers_only_bookings_holding_money(self):
 		b1, txn = self.paid_booking("g68-nets-1")
