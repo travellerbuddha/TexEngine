@@ -20,7 +20,7 @@ from functools import wraps
 import frappe
 from frappe import _
 
-from kamra.tex.security.capabilities import ALL, PLATFORM_ROLES, ROLE_DEFAULTS
+from kamra.tex.security.capabilities import ALL, PLATFORM_ROLES, ROLE_DEFAULTS, profile_channels
 
 _CACHE_KEY = "tex_scope_cache"
 
@@ -146,6 +146,71 @@ def capabilities(property: str | None, user: str | None = None) -> frozenset[str
 
 def has_capability(cap: str, property: str | None = None, user: str | None = None) -> bool:
 	return cap in capabilities(property, user)
+
+
+# ─── sales-channel entitlement (ADR-050) ─────────────────────────────────
+
+
+def _every_channel() -> frozenset[str]:
+	cache = _cache()
+	if "__channels__" not in cache:
+		cache["__channels__"] = frozenset(frappe.get_all("TEX Sales Channel", pluck="name"))
+	return cache["__channels__"]
+
+
+def _profile_listed_channels(profile: str) -> frozenset[str]:
+	cache = _cache().setdefault("__profile_channels__", {})
+	if profile not in cache:
+		cache[profile] = frozenset(frappe.get_all(
+			"TEX Profile Channel", filters={"parent": profile, "parenttype": "TEX Permission Profile"},
+			pluck="sales_channel")) if frappe.db.table_exists("TEX Profile Channel") else frozenset()
+	return cache[profile]
+
+
+def sales_channels(property: str | None, user: str | None = None) -> frozenset[str]:
+	"""Sales channels the user may price and book on at ``property`` (``None``: at any hotel in
+	scope): the channels of each permission profile granted there (the call centre when a
+	profile names none; every channel with ``price.any_channel``), or of the user's Frappe role
+	defaults where no profile is granted. Platform administrators: every channel."""
+	user = user or frappe.session.user
+	every = _every_channel()
+	if is_platform_admin(user):
+		return every
+	scope = _scope(user)
+	role_caps: set[str] = set()
+	for role in frappe.get_roles(user):
+		role_caps |= ROLE_DEFAULTS.get(role, frozenset())
+
+	def at(profiles) -> frozenset[str]:
+		granted = {p for p in profiles if p}
+		if not granted:                               # legacy scope: the roles decide (as for capabilities)
+			return profile_channels(role_caps, (), every)
+		out: frozenset[str] = frozenset()
+		for prof in granted:
+			out |= profile_channels(_profile_caps(prof), _profile_listed_channels(prof), every)
+		return out
+
+	if property is None:
+		out: frozenset[str] = frozenset()
+		for profiles in scope.values():
+			out |= at(profiles)
+		return out
+	if property not in scope:
+		return frozenset()
+	return at(scope[property])
+
+
+def may_sell_on(channel: str | None, property: str, user: str | None = None) -> bool:
+	return bool(channel) and channel in sales_channels(property, user)
+
+
+def require_channel(channel: str | None, property: str) -> None:
+	"""Raise PermissionError unless the current user may price and book on ``channel`` at
+	``property``. The channel comes from what is being sold (an offer, a quote), never from
+	who asks."""
+	if not may_sell_on(channel, property):
+		frappe.throw(_("You may not sell on the {0} channel at {1}.").format(channel or "—", property),
+		             frappe.PermissionError)
 
 
 def assert_property(property: str) -> None:

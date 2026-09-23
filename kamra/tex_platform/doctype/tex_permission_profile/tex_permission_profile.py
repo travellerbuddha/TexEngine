@@ -16,9 +16,15 @@ class TEXPermissionProfile(Document):
 			if row.capability in seen:
 				frappe.throw(f"Capability {row.capability} listed twice")
 			seen.add(row.capability)
+		seen = set()
+		for row in self.get("sales_channels") or []:
+			if row.sales_channel in seen:
+				frappe.throw(f"Sales channel {row.sales_channel} listed twice")
+			seen.add(row.sales_channel)
 
 	def on_update(self):
 		from kamra.tex.security.audit import audit
 
 		audit("profile.update", reference_doctype=self.doctype, reference_name=self.name,
-		      new={"capabilities": sorted(r.capability for r in self.capabilities)})
+		      new={"capabilities": sorted(r.capability for r in self.capabilities),
+		           "sales_channels": sorted(r.sales_channel for r in self.get("sales_channels") or [])})

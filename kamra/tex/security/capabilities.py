@@ -9,6 +9,7 @@ CAPABILITIES: dict[str, str] = {
 	"price.view": "View selling prices and quotes",
 	"price.view_cost": "View contract cost, markup and margin",
 	"price.override": "Override a price manually (with reason)",
+	"price.any_channel": "Price and book on every sales channel, not only the profile's own channels",
 	"contract.edit": "Create and edit contracts and draft versions",
 	"contract.publish": "Publish, schedule and withdraw contract versions",
 	"promotion.edit": "Manage promotions and coupons",
@@ -47,9 +48,9 @@ _SALES = {"price.view", "reservation.view", "reservation.create", "reservation.m
 ROLE_DEFAULTS: dict[str, frozenset[str]] = {
 	"Hotel Admin": ALL,
 	"Revenue Manager": frozenset({
-		"price.view", "price.view_cost", "price.override", "contract.edit", "contract.publish", "promotion.edit",
-		"markup.edit", "fx.edit", "inventory.edit", "restriction.edit", "reservation.view", "reservation.create",
-		"reservation.modify", "reservation.confirm_unpaid", "report.view", "booking_site.edit", "crm.view",
+		"price.view", "price.view_cost", "price.override", "price.any_channel", "contract.edit", "contract.publish",
+		"promotion.edit", "markup.edit", "fx.edit", "inventory.edit", "restriction.edit", "reservation.view",
+		"reservation.create", "reservation.modify", "reservation.confirm_unpaid", "report.view", "booking_site.edit", "crm.view",
 		"loyalty.edit", "channel.view", "channel.manage"}),
 	"Front Desk": frozenset(_SALES),
 	"Call Center Agent": frozenset(_SALES),
@@ -71,6 +72,28 @@ DEFAULT_PROFILES: dict[str, frozenset[str]] = {
 }
 
 PLATFORM_ROLES = ("System Manager", "Administrator")
+
+# ─── sales-channel entitlement (ADR-050) ─────────────────────────────────
+# A staff user prices and books only on the channels they are entitled to at a hotel: those
+# of their permission profiles there, the call centre for a profile that names none, every
+# channel with ``price.any_channel``. The request never decides.
+ANY_CHANNEL = "price.any_channel"
+STAFF_DEFAULT_CHANNELS = frozenset({"CALL_CENTER"})
+# the capabilities a channel entitlement qualifies: a profile without them prices nowhere
+PRICING_CAPS = frozenset({"price.view", "reservation.create"})
+
+
+def profile_channels(caps, listed, every_channel) -> frozenset[str]:
+	"""Channels one permission profile (or a user's Frappe role defaults, ``listed`` empty)
+	lets its holder price and book on. ``every_channel``: all channel codes known to the site.
+	A profile that can neither see prices nor book adds no channel."""
+	every = frozenset(every_channel)
+	caps = frozenset(caps)
+	if not caps & PRICING_CAPS:
+		return frozenset()
+	if ANY_CHANNEL in caps:
+		return every
+	return (frozenset(listed) or STAFF_DEFAULT_CHANNELS) & every
 
 
 def validate_capability(cap: str) -> None:
