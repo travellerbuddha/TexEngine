@@ -1388,3 +1388,79 @@ sends:
 - A per-hotel sending address (the hotel's own domain) needs an outgoing account per domain
   with SPF/DKIM. That is an owner input and is not built.
 - Bounces after the mail server accepted a message are not tracked.
+
+## ADR-048 A TEX hotel's rooms are TEX inventory, whoever writes the reservation; an allotment's release and cutoff are separate
+**Context.** G-49 (R-17).
+- The legacy `Reservation.validate_type_capacity` (physical rooms of the room type times the
+  overbooking allowance) ran on every save, TEX's own stays included. It refused what TEX had
+  allowed: an explicit oversell, a shared pool (a Deluxe sold from the Standard rooms of its
+  pool) and configured inventory above the physical rooms. It also refused later saves of such a
+  stay (a note, a check-in). Only channel bookings were excepted (`tex_channel_accept`, G-69).
+- A reservation written outside the TEX services (the Desk form, REST, `import_bookings`,
+  `migrate.run_import`, legacy PMS actions by platform administrators) took no TEX inventory
+  lock. It was checked only against its own snapshot, by the legacy rule. TEX's counts included
+  it once it existed, but closures, manual adjustments and guaranteed allotments did not stop
+  it, and a desk stay and a TEX booking could both take the last room.
+- R-17 lists "allotment, cutoff, release"; an allotment had one field, `release_days`.
+- ADR-028 keeps admin imports writing reservations directly (migrations, not sales).
+
+**Decision.**
+- *At a TEX hotel TEX inventory is the only capacity rule.* `validate_type_capacity` asks
+  `kamra.tex.legacy.is_tex_hotel` first. For a TEX hotel it hands over to
+  `availability.repository.guard_reservation` and the legacy rule never runs. Hotels outside TEX
+  keep the legacy rule unchanged (the upstream suites rely on it).
+- *Who checked it.* A stay written by the TEX booking or modification service carries
+  `flags.tex_inventory_checked`: the service locked the nights and recounted for its contract
+  (allotments included) before writing. A channel's sale keeps `flags.tex_channel_accept` and is
+  accepted as sold. Document flags live only in the process: a REST payload cannot set them, so
+  a forged `tex_booking` or price lock gains nothing.
+- *Every other write takes the lock.* A save "takes rooms" when it creates a live stay, moves a
+  stay into a live status (Waitlist → Confirmed), or changes the hotel, room type or nights of a
+  live stay. Such a save takes the same `TEX Inventory Day` locks as a TEX booking
+  (`lock_nights`) and recounts under them with a locking read. It is refused when TEX has no room
+  left, with the night, the sold count and the capacity: closures, manual adjustments, the
+  oversell limit, pools, configured inventory and guaranteed allotments all apply. It sells from
+  general sale (no contract), so it never uses a contract's allotment. A day-use stay holds its
+  day. Restrictions (stop sell, LOS, CTA …) are selling rules of TEX's channels and do not apply
+  to it.
+- *Saves that take no room are never refused* (a note, a room assignment, check-in, a payment,
+  cancellation), so an oversold stay stays editable.
+- *We chose to take the lock rather than refuse.* The model cannot tell a Desk sale from a
+  migration import or a legacy PMS action (an extension, a waitlist confirmation). ADR-028 keeps
+  imports. Refusing would strand the existing stays of a hotel that joins TEX. With the lock, no
+  write can hold a TEX hotel's rooms outside TEX's rules. The legacy selling endpoints stay
+  refused (ADR-028).
+- *Release and cutoff are two deadlines*, both in days before each night of the allotment:
+  - release (`release_days`, unchanged): the hotel's side. Unsold rooms go back to general sale:
+    a guaranteed allotment stops being withheld, the contract's cap ends and it sells from
+    general sale;
+  - cutoff (`cutoff_days`, new): the partner's side, the contract's booking deadline. From then on
+    the contract sells nothing more for that night, from its allotment or from general sale.
+    Other sales are unaffected, and a guaranteed allotment stays withheld until its release. 0 =
+    no cutoff.
+
+  Either order is valid. Release 7 / cutoff 2: the partner books from general sale between
+  them. Cutoff 10 / release 3: the hotel keeps the rooms for the rooming list, then sells them.
+  The pure `inventory_math` reports a cut-off night as `cutoff`. Search, quotes, bookings,
+  modifications, the ARI grid and channel ARI all read it, and the daily channel resync already
+  re-sends time-based changes. The controller keeps both within 0 to 365 days. The allotment
+  editor (Rates → Allotments) sets both.
+- *Patch p27.* Every existing allotment gets cutoff 0 and sells exactly as before. A negative
+  release behaved like 0 and becomes 0. A release above 365 days is printed for review.
+- The ARI restriction field `release_days` (R-16) is a separate thing: a booking-window rule
+  on any scope ("stop selling N days before arrival", violation `RELEASE`). It keeps its name
+  and meaning.
+
+**Consequences.**
+- A reservation at a TEX hotel written through Desk, REST or an import now waits for TEX
+  bookings of the same nights, and may be refused where the legacy rule accepted it. A TEX
+  hotel's reservations are sold through TEX. To sell above capacity, staff set a manual
+  adjustment or an oversell limit in Inventory.
+- Generic Desk/REST inserts cannot be wrapped in the deadlock retry of ADR-032. A rare deadlock
+  there (for example two concurrent imports touching the same nights in different row orders)
+  surfaces as an error to retry.
+- A Desk/REST insert at a TEX hotel still prices through the legacy auto-price. It is not a TEX
+  sale and carries no TEX price lock. Only its inventory is governed here.
+- Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
+  bypass this guard, as they bypass every other rule.
+- An allotment's cutoff is per contract. Allotments still have no channel dimension (G-41).
