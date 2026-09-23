@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -173,6 +174,26 @@ def capacity_refusal(use: tuple[tuple[date, int], ...], days: dict[date, ExtraDa
 		if units > a.remaining:
 			return f"only {a.remaining} left on {d.isoformat()}"
 	return None
+
+
+_ONLY_LEFT = re.compile(r"\bonly \d+ left on\b")
+
+
+def guest_reason(text):
+	"""A capacity reason as a guest may read it: "not enough left on D", never how many are
+	left (staff see the count; ADR-033)."""
+	return _ONLY_LEFT.sub("not enough left on", text) if isinstance(text, str) else text
+
+
+def guest_safe(value):
+	"""``value`` (a response or part of one) with every capacity reason made guest-safe."""
+	if isinstance(value, str):
+		return guest_reason(value)
+	if isinstance(value, dict):
+		return {k: guest_safe(v) for k, v in value.items()}
+	if isinstance(value, list | tuple):
+		return [guest_safe(v) for v in value]
+	return value
 
 
 def price_extra(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext,

@@ -19,6 +19,7 @@ from frappe.utils import get_datetime, getdate, now_datetime
 from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import versions
+from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, modification, quoting
@@ -248,7 +249,7 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	if out.get("ok"):
 		_track(s, session_id, "quote", {"quote": out["quote_id"], "total": out["quote"]["totals"]["total"],
 		                                "currency": out["quote"]["currency"]})
-	return out
+	return guest_safe(out)                            # guests never see how many are left (G-19)
 
 
 def _session_hash(session_id: str | None) -> str | None:
@@ -623,9 +624,9 @@ def manage_propose(token: str, reservation: str, changes):
 	allowed = {"check_in", "check_out", "adults", "children"}
 	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}
 	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False)
-	return {"sellable": p["sellable"], "old_total": p["old"]["total"], "new_total": p["proposed"]["totals"].get(
-		"total"), "difference": p["difference"], "currency": p["proposed"]["currency"], "warnings": p["warnings"],
-	        "lines": p["proposed"].get("lines"), "proposal_token": p["proposal_token"]}
+	return guest_safe({"sellable": p["sellable"], "old_total": p["old"]["total"], "new_total": p["proposed"][
+		"totals"].get("total"), "difference": p["difference"], "currency": p["proposed"]["currency"],
+		"warnings": p["warnings"], "lines": p["proposed"].get("lines"), "proposal_token": p["proposal_token"]})
 
 
 @frappe.whitelist(allow_guest=True)
@@ -660,8 +661,8 @@ def manage_extras_propose(token: str, reservation: str, extras):
 	from kamra.tex.services import addons as addon_svc
 
 	p = addon_svc.propose(reservation, parse(extras, []), guest=True)
-	return {k: p[k] for k in ("ok", "reasons", "currency", "old_total", "new_total", "proposal_token")} | {
-		"lines": p["addon"]["lines"], "extras": p["addon"]["extras"], "totals": p["addon"]["totals"]}
+	return guest_safe({k: p[k] for k in ("ok", "reasons", "currency", "old_total", "new_total", "proposal_token")} | {
+		"lines": p["addon"]["lines"], "extras": p["addon"]["extras"], "totals": p["addon"]["totals"]})
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])

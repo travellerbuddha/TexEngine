@@ -28,6 +28,7 @@ from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, from_db, quantize, to_str
 from kamra.tex.pricing import addons, serialize
+from kamra.tex.pricing.extras import guest_reason
 from kamra.tex.pricing.model import ChildSpec
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -254,8 +255,9 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 	result = propose(res.name, changes, basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
 	                 _check_permission=False, _locked=True, internal=True)
 	if not result["sellable"]:
+		why = "; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")
 		frappe.throw(_("The modified stay cannot be sold: {0}").format(
-			"; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")))
+			guest_reason(str(why)) if _guest_authorized else why))
 	new = result["proposed"]
 	if new["totals"]["total"] != p["new_total"]:
 		frappe.throw(_("The price moved since this proposal was made — review it again."))

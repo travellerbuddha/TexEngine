@@ -313,7 +313,7 @@ def extras_bulk_update(property: str, extra_codes, start: str, end: str, weekday
 	from kamra.tex.security.audit import audit
 
 	out = xinv.bulk_update(property, parse(extra_codes, []), start, end, weekdays=parse(weekdays, None) or None,
-	                       capacity=capacity, closed=closed, note=text(note, 140) if note is not None else None)
+	                       capacity=capacity, closed=closed, note=(text(note, 140) or "") if note is not None else None)
 	audit("extra_inventory.update", property=property,
 	      new={"extras": parse(extra_codes, []), "start": start, "end": end, "weekdays": parse(weekdays, None),
 	           "capacity": capacity, "closed": closed, "updated": out["updated"]})

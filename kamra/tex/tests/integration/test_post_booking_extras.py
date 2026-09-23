@@ -267,3 +267,28 @@ class TestPostBookingExtras(AddonCase):
 			"reservation": res, "change_type": "Extras", "pricing_basis": "ORIGINAL_VERSION"}, "new_amount")), before)
 		other = self.book("g22-drop2")
 		self.add(other, [{"code": "SPA"}])                          # the slot is free again
+
+	def test_guests_never_see_how_many_are_left(self):
+		import json
+
+		extra("SPA", inventory_tracked=1, daily_capacity=1)
+		b = self.book("g22-count")
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest asks for two
+		p = public.manage_extras_propose(token=b["manage_token"], reservation=res,
+		                                 extras=[{"code": "SPA", "quantity": 2}])
+		self.assertEqual(p["reasons"][0]["code"], "ADDON_SOLD_OUT")
+		self.assertIn("not enough left on", p["reasons"][0]["message"])
+		self.assertNotRegex(json.dumps(p), r"\d+ left")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff see the count
+		staff = crs_api.addon_propose(res, [{"code": "SPA", "quantity": 2}])
+		self.assertIn("only 1 left on", staff["reasons"][0]["message"])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a new visitor quotes two
+		found = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                      rooms=[{"adults": 2}], market="DE", session_id="g22-count2")
+		offer = found["properties"][0]["offers"][0]
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=[{"code": "SPA", "quantity": 2}],
+		                 session_id="g22-count2")
+		spa = next(e for e in q["quote"]["extras"] if e["code"] == "SPA")
+		self.assertEqual((spa["ok"], spa["reason"]), (False, f"not enough left on {fx.d(6, 10)}"))
+		self.assertNotRegex(json.dumps(q), r"\d+ left")

@@ -87,6 +87,9 @@ def _hotel(name: str, spec: dict, group: str) -> dict:
 		extra = _ensure("TEX Extra", {"property": name, "extra_code": code},
 		                {"property": name, "extra_code": code, "extra_name": label, "category": cat,
 		                 "pricing_mode": mode, "currency": "EUR", "amount": amount, "bookable_online": 1,
+		                 # guests can add these from their booking page later (G-22)
+		                 "bookable_after_booking": 1 if code in ("TRF", "LCO", "MASSAGE") else 0,
+		                 "order_cutoff_hours": 24 if code == "TRF" else 0,
 		                 "tax_category": "TRANSFER" if code == "TRF" else "SERVICE",
 		                 # a limited extra (G-19): four treatment slots a day
 		                 "inventory_tracked": 1 if limit else 0, "daily_capacity": limit})

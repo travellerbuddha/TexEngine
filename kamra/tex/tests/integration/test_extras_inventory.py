@@ -207,6 +207,19 @@ class TestExtrasAdministration(ExtrasCase):
 		with self.assertRaises(frappe.ValidationError):                   # an extra without a limit
 			crs_api.extras_bulk_update(fx.PROPERTY, ["TRF"], str(fx.d(6, 10)), str(fx.d(6, 10)), capacity=2)
 
+	def test_a_day_note_is_set_and_removed(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager
+		day = str(fx.d(6, 10))
+		note = lambda: next(c for c in next(x for x in crs_api.extras_grid(fx.PROPERTY, day, 1)["extras"]  # noqa: E731
+		                                   if x["code"] == "SPA")["cells"])["note"]
+		crs_api.extras_bulk_update(fx.PROPERTY, ["SPA"], day, day, closed=1, note="therapist away")
+		self.assertEqual(note(), "therapist away")
+		crs_api.extras_bulk_update(fx.PROPERTY, ["SPA"], day, day, closed=0, note="")   # with another change
+		self.assertFalse(note())
+		crs_api.extras_bulk_update(fx.PROPERTY, ["SPA"], day, day, note="back at noon")
+		crs_api.extras_bulk_update(fx.PROPERTY, ["SPA"], day, day, note="")              # the only change
+		self.assertFalse(note())
+
 	def test_only_inventory_editors_change_capacity(self):
 		agent = fx.ensure_user("g19-agent@example.com", ["Call Center Agent"])
 		fx.ensure("TEX Access Grant", {"user": agent, "property": fx.PROPERTY},

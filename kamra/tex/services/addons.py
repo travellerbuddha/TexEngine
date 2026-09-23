@@ -19,7 +19,7 @@ from frappe.utils import add_to_date, getdate, now_datetime
 from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.commercial import context, contracts
 from kamra.tex.money import D, from_db, to_str
-from kamra.tex.pricing import addons, serialize
+from kamra.tex.pricing import addons, extras, serialize
 from kamra.tex.pricing.model import ExtraRequest
 from kamra.tex.security.audit import audit
 from kamra.tex.services import booking as booking_svc
@@ -166,7 +166,8 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 		frappe.throw(_("The reservation changed since these extras were priced — please check them again."))
 	q, snap, _unused = price(res, p["requests"], guest=guest)
 	if not q.ok:
-		frappe.throw("; ".join(r["message"] for r in q.reasons))
+		msg = "; ".join(r["message"] for r in q.reasons)
+		frappe.throw(extras.guest_reason(msg) if guest else msg)
 	if to_str(q.totals["total"]) != p["total"]:
 		frappe.throw(_("The price moved since these extras were priced — please check them again."))
 	now = now_datetime()

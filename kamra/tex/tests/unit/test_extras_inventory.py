@@ -91,3 +91,14 @@ class TestEngineCapacity(unittest.TestCase):
 		self.assertEqual(self.outcome(q, "DINNER").to_dict()["usage"],
 		                 [{"date": "2027-06-02", "units": 2}, {"date": "2027-06-03", "units": 2},
 		                  {"date": "2027-06-04", "units": 2}])
+
+
+class TestGuestReason(unittest.TestCase):
+	def test_guests_never_see_how_many_are_left(self):
+		self.assertEqual(extras.guest_reason("Spa: only 3 left on 2027-06-02"), "Spa: not enough left on 2027-06-02")
+		for same in ("sold out on 2027-06-02", "closed on 2027-06-02", "Pay only 3 nights"):
+			self.assertEqual(extras.guest_reason(same), same)
+		out = extras.guest_safe({"extras": [{"reason": "only 12 left on 2027-06-03", "amount": "20.00"}],
+		                         "warnings": ({"message": "Spa: only 1 left on 2027-06-04"},), "n": 3})
+		self.assertEqual(out, {"extras": [{"reason": "not enough left on 2027-06-03", "amount": "20.00"}],
+		                       "warnings": [{"message": "Spa: not enough left on 2027-06-04"}], "n": 3})
