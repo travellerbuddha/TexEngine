@@ -314,7 +314,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 		sell_promos = tuple(p for p in (*t.offers, *ctx.promotions) if p.stage == PromoStage.SELL)
 		gross_accom = sum(sells.values(), ZERO)
 		sell_ctx = promotions.PromoContext(basket=gross_accom + extras_total, sell_currency=sell_ccy,
-		                                   **promo_ctx_base)
+		                                   fx=ctx.promo_fx, **promo_ctx_base)
 		chosen, rejected = promotions.select(sell_promos, sell_ctx, ctx.coupon_usage)
 		accom_chosen = [p for p in chosen if p.applies_to == PromoAppliesTo.ACCOMMODATION]
 		basket_chosen = [p for p in chosen if p.applies_to != PromoAppliesTo.ACCOMMODATION]

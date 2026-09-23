@@ -19,7 +19,7 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 
 | Check | Command | Result |
 |---|---|---|
-| TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **138 passed** |
+| TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **141 passed** |
 | TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **73 OK**: admin_markets 3, commercial_flows 16, concurrency 1, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 22 |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **13 passed**: critical-journey (R-58, 19 steps), contract-admin, crs ×2, shell, booking ×4 desktop + ×4 mobile (Pixel 7) |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** |
@@ -42,8 +42,8 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), channel-manager / SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20), enterprise dashboard (R-47) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 5 Critical, 16 High, 35 Medium, 7 Low (+3 blocked items). G-01 to G-04
-were fixed after the audit (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
+**Open gaps by severity:** 4 Critical, 16 High, 35 Medium, 7 Low (+3 blocked items). G-01 to G-04
+and G-08 were fixed after the audit (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 ## 3. Phases (derived from the requirement rows below)

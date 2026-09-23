@@ -42,6 +42,7 @@ class PromoContext:
 	extras: frozenset[str]
 	basket: Decimal                 # accommodation (+extras) value used for min_basket
 	sell_currency: str
+	fx: dict[str, FxSnapshot] | None = None   # promotion currency → sell_currency (thresholds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,8 +120,13 @@ def check_eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | 
 		return "required package extras not selected"
 	if p.member_only and not ctx.member:
 		return "members only"
-	if p.min_basket is not None and ctx.basket < D(p.min_basket):
-		return f"basket {ctx.basket} below minimum {p.min_basket}"
+	if p.min_basket is not None:
+		# the threshold is in the promotion's currency; the basket in the sell currency (G-08)
+		minimum = in_currency(p.min_basket, p.currency, ctx.sell_currency, ctx.fx)
+		if minimum is None:
+			return f"no FX to compare the minimum basket in {p.currency} with {ctx.sell_currency}"
+		if ctx.basket < minimum:
+			return f"basket {ctx.basket} {ctx.sell_currency} below minimum {minimum}"
 	if usage is not None:
 		total, guest = usage
 		if p.usage_limit is not None and total >= p.usage_limit:
@@ -187,14 +193,20 @@ def select(promos: tuple[Promotion, ...], ctx: PromoContext,
 	return apply, rejected
 
 
+def in_currency(amount, from_ccy: str | None, to_ccy: str, fx: dict[str, FxSnapshot] | None) -> Decimal | None:
+	"""``amount`` in ``to_ccy`` through an explicit snapshot; None when there is no rate.
+	An amount without a currency is already in ``to_ccy``."""
+	if not from_ccy or from_ccy == to_ccy:
+		return D(amount)
+	snap = (fx or {}).get(from_ccy)
+	if snap is None or snap.to_currency != to_ccy:
+		return None
+	return D(amount) * snap.sell_rate
+
+
 def _fixed_in(p: Promotion, currency: str, fx: dict[str, FxSnapshot] | None) -> Decimal | None:
 	"""Fixed promotion amount in ``currency`` (converted through an explicit snapshot)."""
-	if not p.currency or p.currency == currency:
-		return D(p.value)
-	snap = (fx or {}).get(p.currency)
-	if snap is None:
-		return None
-	return D(p.value) * snap.sell_rate
+	return in_currency(p.value, p.currency, currency, fx)
 
 
 def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx: PromoContext,
