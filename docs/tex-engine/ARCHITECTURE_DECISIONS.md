@@ -1417,7 +1417,9 @@ sends:
 - *Every other write takes the lock.* A save "takes rooms" when it creates a live stay, moves a
   stay into a live status (Waitlist → Confirmed), or changes the hotel, room type or nights of a
   live stay. Such a save takes the same `TEX Inventory Day` locks as a TEX booking
-  (`lock_nights`) and recounts under them with a locking read. It is refused when TEX has no room
+  (`lock_nights`) and recounts under them with a locking read. A new reservation takes them in
+  `before_insert`, before its naming-series row lock: a TEX booking locks inventory days first
+  and names after, so the two never wait on each other in a cycle. It is refused when TEX has no room
   left, with the night, the sold count and the capacity: closures, manual adjustments, the
   oversell limit, pools, configured inventory and guaranteed allotments all apply. It sells from
   general sale (no contract), so it never uses a contract's allotment. A day-use stay holds its
@@ -1456,9 +1458,10 @@ sends:
   bookings of the same nights, and may be refused where the legacy rule accepted it. A TEX
   hotel's reservations are sold through TEX. To sell above capacity, staff set a manual
   adjustment or an oversell limit in Inventory.
-- Generic Desk/REST inserts cannot be wrapped in the deadlock retry of ADR-032. A rare deadlock
-  there (for example two concurrent imports touching the same nights in different row orders)
-  surfaces as an error to retry.
+- Generic Desk/REST writes cannot be wrapped in the deadlock retry of ADR-032. A rare deadlock
+  there surfaces as an error to retry: an edit of an existing stay holds its own row
+  (`check_if_latest`) before the inventory days, and a multi-row import holds the naming series
+  from its first row on.
 - A Desk/REST insert at a TEX hotel still prices through the legacy auto-price. It is not a TEX
   sale and carries no TEX price lock. Only its inventory is governed here.
 - Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
