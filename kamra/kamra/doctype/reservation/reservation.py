@@ -45,7 +45,18 @@ class Reservation(Document):
 		this stops UNASSIGNED bookings quietly over-selling a category. The
 		allowance (room type override, else property-wide, default 0%) is a
 		revenue-management decision made in Settings - never implicit.
+
+		A TEX hotel's rooms are TEX inventory instead (TEX Engine, G-49, ADR-048):
+		pools, configured inventory, manual adjustments, closures, the explicit
+		oversell limit and allotments. A stay the TEX services sold was checked
+		under TEX's inventory lock; any other write that takes rooms (Desk, REST,
+		imports) takes that lock and is checked against TEX inventory here.
 		"""
+		from kamra.tex.legacy import is_tex_hotel
+		if is_tex_hotel(self.property):
+			from kamra.tex.availability.repository import guard_reservation
+			guard_reservation(self)
+			return
 		# a booking a channel manager already sold is accepted as sold (TEX, G-69)
 		if self.flags.get("tex_channel_accept"):
 			return
@@ -386,10 +397,10 @@ class Reservation(Document):
 			"Inquiry", "Quoted", "Requested",
 		) or not self.room_type:
 			return
-		
+
 		# Get Room Category of the requested Room Type
 		category = frappe.db.get_value("Room Type", self.room_type, "room_category")
-		
+
 		if category == "Villa":
 			# A Villa is being booked. Check if ANY individual/shared room booking is confirmed/checked-in
 			overlap = frappe.db.sql(

@@ -5,6 +5,8 @@ evaluated with the pure functions in ``inventory_math`` / ``restrictions``.
 ``lock_nights`` serialises concurrent bookings of the same pool: it row-locks one
 ``TEX Inventory Day`` per night (created lazily, ascending date order), and the
 caller recounts availability under the lock before inserting reservations.
+``guard_reservation`` applies the same lock and recount to a reservation of a TEX hotel
+written outside the TEX services (Desk, REST, imports; ADR-048).
 """
 
 from __future__ import annotations
@@ -12,9 +14,10 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import frappe
-from frappe.utils import getdate
+from frappe import _
+from frappe.utils import getdate, nowdate
 
-from kamra.reservation_state import LIVE_STATUSES
+from kamra.reservation_state import LIVE_STATUSES, holds_inventory
 from kamra.tex.availability import inventory_math as inv
 from kamra.tex.availability import restrictions as rs
 
@@ -156,6 +159,64 @@ def lock_nights(property: str, requests: list[tuple[str, date, date]]) -> None:
 			   VALUES (%(n)s, NOW(), NOW(), 'Administrator', 'Administrator', 0, %(p)s, %(rt)s, %(d)s, 0, 0, 0, 0)
 			   ON DUPLICATE KEY UPDATE `modified` = `modified`""",
 			{"n": inventory_day_name(pool_key, d), "p": property, "rt": pool_key, "d": d})
+
+
+# ─── reservations written outside the TEX services (G-49, ADR-048) ───────
+
+STAY_FIELDS = ("property", "room_type", "check_in_date", "check_out_date")
+
+
+def takes_inventory(doc) -> bool:
+	"""This save makes the reservation hold rooms it did not hold before: a new live stay, a
+	stay moving into a live status, or a live stay whose hotel, room type or nights change.
+	Anything else (a note, a room assignment, check-in, payment) takes no room."""
+	if not holds_inventory(doc.status):
+		return False
+	before = None if doc.is_new() else doc.get_doc_before_save()
+	if before is None or not holds_inventory(before.status):
+		return True
+	for f in STAY_FIELDS:
+		a, b = before.get(f), doc.get(f)
+		if f.endswith("_date"):
+			a, b = getdate(a) if a else None, getdate(b) if b else None
+		if (a or None) != (b or None):
+			return True
+	return False
+
+
+def guard_reservation(doc) -> None:
+	"""A TEX hotel's rooms are TEX inventory, whoever writes the reservation (ADR-048).
+
+	The TEX services that sell or change a stay (booking, modification) lock the nights and
+	recount for their contract before they write, and mark the document
+	``flags.tex_inventory_checked``; a channel's sale is accepted as sold
+	(``flags.tex_channel_accept``, G-69). Flags live only in this process: a REST payload
+	cannot set them. Every other write that takes rooms — the Desk form, REST, legacy imports
+	and PMS actions — takes the same inventory lock here and is refused when TEX has no room
+	left: closures, manual adjustments, the oversell limit, pools, configured inventory and
+	guaranteed allotments all apply. It sells from general sale (no contract): it never uses a
+	contract's allotment. Restrictions (stop sell, LOS, …) are selling rules of the TEX
+	channels and do not apply to it."""
+	if doc.flags.get("tex_inventory_checked") or doc.flags.get("tex_channel_accept"):
+		return
+	if not doc.room_type or not takes_inventory(doc):
+		return
+	ci = getdate(doc.check_in_date)
+	co = max(getdate(doc.check_out_date), ci + timedelta(days=1))   # a day-use stay holds its day
+	lock_nights(doc.property, [(doc.room_type, ci, co)])
+	count, per_day = stay_availability(doc.property, doc.room_type, None, ci, co, getdate(nowdate()),
+	                                   exclude=[doc.name] if doc.name else None, locking=True)
+	if count >= 1:
+		return
+	day = next(d for d in per_day if d.available < 1)
+	name = frappe.db.get_value("Room Type", doc.room_type, "room_type_name") or doc.room_type
+	frappe.throw(
+		_("{0} has no room left in TEX inventory on {1} ({2} sold, capacity {3}{4}). This hotel is sold "
+		  "through TEX; to sell above its capacity, set a manual adjustment or an oversell limit in "
+		  "Inventory.").format(name, day.day.isoformat(), day.sold, day.capacity,
+		                       _(", closed") if day.reason == "closed" else
+		                       (_(", {0} held for allotments").format(day.withheld) if day.withheld else "")),
+		title=_("Sold out"))
 
 
 # ─── restrictions ────────────────────────────────────────────────────────

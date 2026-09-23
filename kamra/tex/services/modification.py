@@ -318,6 +318,8 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		                "amount_before_tax": final_total - quantize(D(amounts["tax_amount"]) * factor, ccy),
 		                "tex_margin_amount": D(amounts["tex_margin_amount"]) + (final_total - new_total)})
 	res.flags.tex_modification = True
+	# the new nights were locked and recounted for the contract above (ADR-048)
+	res.flags.tex_inventory_checked = True
 	res.update({
 		"check_in_date": req["check_in"], "check_out_date": req["check_out"], "room_type": req["room_type"],
 		"adults": int(req["adults"]), "children": len(req.get("children") or []), "rate_plan": req.get("rate_plan"),

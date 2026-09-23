@@ -441,6 +441,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 			**amounts,
 		})
 		res.flags.ignore_permissions = True
+		# its nights were locked and recounted for its contract above (ADR-048)
+		res.flags.tex_inventory_checked = True
 		res.insert(ignore_permissions=True)
 		reservations.append(res.name)
 		booking.append("rooms", {"reservation": res.name, "room_type": req["room_type"], "check_in": req["check_in"],
