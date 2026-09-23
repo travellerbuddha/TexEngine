@@ -7,7 +7,8 @@
 // navigates to it (mode="redirect"), or mode="button" renders a single button.
 //
 // Attributes: site (required), api (TEX host; default: same origin), lang, mode,
-// hotel, currency, label (button text for mode="button").
+// hotel, currency, market / country (campaign deep links: which market's prices),
+// label (button text for mode="button").
 // Events: "tex-booking:search" (detail: { checkIn, checkOut, adults, children }).
 
 type Lang = "en" | "tr" | "de" | "ru" | "ro" | "pl"
@@ -98,7 +99,7 @@ interface SiteInfo {
 const themeCache = new Map<string, Promise<SiteInfo | null>>()
 
 export class TexBookingWidget extends HTMLElement {
-  static observedAttributes = ["site", "api", "lang", "mode", "hotel", "currency", "label"]
+  static observedAttributes = ["site", "api", "lang", "mode", "hotel", "currency", "market", "country", "label"]
   private root: ShadowRoot
   private adults = 2
   private ages: (number | null)[] = []
@@ -192,6 +193,10 @@ export class TexBookingWidget extends HTMLElement {
     const ccy = this.getAttribute("currency")
     if (hotel) q.set("hotel", hotel)
     if (ccy && /^[A-Z]{3}$/.test(ccy)) q.set("currency", ccy)
+    const market = (this.getAttribute("market") || "").trim()
+    const country = (this.getAttribute("country") || "").trim()
+    if (/^[A-Za-z0-9_-]{1,40}$/.test(market)) q.set("market", market)
+    if (/^[A-Za-z]{2}$/.test(country)) q.set("country", country.toUpperCase())
     if (embed) q.set("embed", "1")
     return `${this.api}/book/${encodeURIComponent(this.site)}?${q}`
   }

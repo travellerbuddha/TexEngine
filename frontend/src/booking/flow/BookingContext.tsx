@@ -182,6 +182,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [basket, setBasket] = useState<BasketState>({ status: "idle", data: null, key: null })
   const [basketTick, setBasketTick] = useState(0)
   const searchSeq = useRef(0)
+  // a market / country from a link the server refused: search without it from then on
+  const refusedMarket = useRef<string | null>(null)
 
   useEffect(() => {
     setJSON(storeKey, flow)
@@ -209,7 +211,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       const seq = ++searchSeq.current
       setSearch((s) => ({ key, lang, hotelScope: scope, status: "loading", data: s.key === key ? s.data : null, error: null }))
       try {
-        const data = await pub<SearchResult>("search", {
+        const args = {
           site: site.slug,
           check_in: criteria.checkIn,
           check_out: criteria.checkOut,
@@ -218,7 +220,21 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           promo_code: criteria.promo || undefined,
           hotel: scope || undefined,
           session_id: sessionId(),
-        })
+        }
+        // campaign deep link: the market (or the guest's country) picks the contracts
+        const linked = criteria.market || criteria.country ? `${criteria.market ?? ""}|${criteria.country ?? ""}` : null
+        let data: SearchResult
+        if (linked && refusedMarket.current !== linked) {
+          try {
+            data = await pub<SearchResult>("search", { ...args, market: criteria.market || undefined, country: criteria.country || undefined })
+          } catch (e) {
+            // an unknown or ambiguous market must never break the page: search without it
+            if (!(e instanceof ApiError) || e.kind === "network" || e.kind === "rate_limit") throw e
+            console.warn(`[tex-booking] market link ignored (market=${criteria.market ?? "-"}, country=${criteria.country ?? "-"}): ${e.type || e.kind}${e.message ? ` ${e.message}` : ""}`)
+            refusedMarket.current = linked
+            data = await pub<SearchResult>("search", args)
+          }
+        } else data = await pub<SearchResult>("search", args)
         if (seq === searchSeq.current) setSearch({ key, lang, hotelScope: scope, status: "done", data, error: null })
         analyticsEvent("search", { check_in: criteria.checkIn, check_out: criteria.checkOut })
         return data
