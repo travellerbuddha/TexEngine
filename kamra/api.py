@@ -3403,7 +3403,9 @@ def get_quote(property: str, room_type: str, check_in_date: str,
               meal_plan: str | None = None, rate_plan: str | None = None,
               voucher_code: str | None = None):
 	from kamra.pricing import quote
+	from kamra.tex.legacy import refuse_legacy_sale
 
+	refuse_legacy_sale(property)  # TEX hotels are priced by their contracts (G-03)
 	return quote(property, room_type, check_in_date, check_out_date,
 	             int(adults), int(children), meal_plan or None,
 	             rate_plan or None, voucher_code or None)
@@ -3462,7 +3464,9 @@ def create_booking(property: str, room_type: str, check_in_date: str,
 	(ADR-006 / ADR-007). Desk callers leave them unset → Confirmed."""
 	from kamra.crs import assert_property_access
 	from kamra.reservation_state import find_by_idempotency, lock_sius_for_booking
+	from kamra.tex.legacy import refuse_legacy_sale
 	assert_property_access(property)
+	refuse_legacy_sale(property)  # TEX hotels are sold through TEX (G-03)
 
 	key = (idempotency_key or "").strip() or None
 	if key:
@@ -3691,6 +3695,9 @@ def create_group_booking(property: str, group_name: str, check_in_date: str,
                          rate_plan: str | None = None):
 	"""Create a Group Booking plus one reservation per requested room.
 	`rooms` = [{"room_type": <name>, "count": 2}, ...] (JSON string ok)."""
+	from kamra.tex.legacy import refuse_legacy_sale
+
+	refuse_legacy_sale(property)  # TEX hotels are sold through TEX (G-03)
 	if isinstance(rooms, str):
 		rooms = json.loads(rooms)
 

@@ -203,8 +203,14 @@ export default function PublicBooking() {
       property?: string
       sites?: typeof sites
       listing_slug?: string
+      url?: string
     }>("kamra.public_api.catalog_index")
       .then((idx) => {
+        if (idx.mode === "tex" && idx.url) {
+          // TEX hotels are sold on their TEX booking site, never here
+          window.location.replace(idx.url)
+          return null
+        }
         setCatalogMode(idx.mode)
         if (idx.mode === "single_listing" && idx.listing_slug) {
           navigate(`/stay/${idx.listing_slug}`, { replace: true })

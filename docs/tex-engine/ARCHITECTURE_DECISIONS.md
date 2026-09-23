@@ -266,3 +266,19 @@ fails when a guarded legacy endpoint takes a record argument without a declarati
 **Consequences.** Records without a hotel (platform-wide) and unknown names are left to the
 endpoint. A new legacy endpoint with a new record-argument name needs a declaration, or it
 must check the record in its body and be listed in the test's exceptions.
+
+## ADR-028 A TEX hotel is never sold through a legacy selling path
+**Context.** The legacy booking engine (`/kamra/book`, `kamra.public_api.showcase /
+search_stay / book / check_voucher`) and the legacy staff booking dialog
+(`kamra.api.get_quote / create_booking / create_group_booking`) price from the float
+`Room Type.base_price` and create reservations outside TEX contracts, inventory locks and
+payments. They sold TEX hotels at wrong prices (G-03).
+**Decision.** `kamra.tex.legacy.is_tex_hotel(property)` is true for a hotel inside the
+TEX hierarchy (enterprise or hotel group set) or with TEX contracts. The legacy selling
+endpoints call `refuse_legacy_sale(property)` first and refuse such a hotel, naming its TEX
+booking site. `catalog_index` and `default_property` skip TEX hotels; when no other hotel
+is left, `catalog_index` returns `mode: "tex"` and the legacy page redirects to the TEX
+booking site. Hotels outside TEX keep the legacy engine (the upstream suites use it).
+**Consequences.** Admin data imports (`import_bookings`, `migrate.run_import`) still write
+reservations directly; they are migrations, not sales. Legacy channel-manager OTA inbound
+bookings are tracked with G-15.

@@ -364,3 +364,46 @@ class TestLegacyTenancy(TexTestCase):
 						missing.append(f"{module}.{fname}({arg})")
 		self.assertGreater(checked, 250)  # the guarded legacy endpoints were really inspected
 		self.assertEqual(missing, [], "record arguments without a hotel check")
+
+
+class TestLegacySelling(TexTestCase):
+	"""G-03: the legacy booking engine (`/kamra/book`) and the legacy staff booking dialog
+	price from Room Type.base_price; they must never price or sell a TEX hotel."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		other_hotel_with_mock()  # outside the TEX hierarchy: the legacy engine may still sell it
+		self.stay = {"check_in_date": str(fx.d(6, 10)), "check_out_date": str(fx.d(6, 13))}
+		self.room_type = self.f["room_types"]["STD"]
+
+	def test_public_legacy_engine_refuses_a_tex_hotel(self):
+		from kamra import public_api
+
+		before = frappe.db.count("Reservation", {"property": fx.PROPERTY})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous visitor of /kamra/book
+		for call in (lambda: public_api.showcase(property=fx.PROPERTY),
+		             lambda: public_api.search_stay(property=fx.PROPERTY, **self.stay),
+		             lambda: public_api.book(property=fx.PROPERTY, room_type=self.room_type, guest_name="Legacy Probe",
+		                                     phone="+49 30 1234567", **self.stay)):
+			with self.assertRaisesRegex(frappe.ValidationError, "/book"):
+				call()
+		self.assertFalse(public_api.check_voucher(property=fx.PROPERTY, code="ANY")["ok"])
+		self.assertNotEqual(public_api.default_property(), fx.PROPERTY)
+		idx = public_api.catalog_index()
+		self.assertNotIn(fx.PROPERTY, [p["name"] for p in idx.get("properties", [])] + [idx.get("property")])
+		self.assertEqual(public_api.search_stay(property=OTHER, **self.stay), [])  # a non-TEX hotel still works
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- count as admin
+		self.assertEqual(frappe.db.count("Reservation", {"property": fx.PROPERTY}), before)
+
+	def test_legacy_staff_booking_refuses_a_tex_hotel(self):
+		from kamra import api
+
+		with self.assertRaisesRegex(frappe.ValidationError, "/book"):
+			api.get_quote(property=fx.PROPERTY, room_type=self.room_type, **self.stay)
+		with self.assertRaisesRegex(frappe.ValidationError, "/book"):
+			api.create_booking(property=fx.PROPERTY, room_type=self.room_type, guest_name="Legacy Probe",
+			                   phone="+49 30 7654321", **self.stay)
+		with self.assertRaisesRegex(frappe.ValidationError, "/book"):
+			api.create_group_booking(property=fx.PROPERTY, group_name="Legacy group", guest_name="Legacy Probe",
+			                         rooms=[{"room_type": self.room_type, "count": 1}], **self.stay)

@@ -152,13 +152,19 @@ def _build_locations(prop, room_types: list[dict]) -> list[dict]:
 
 @frappe.whitelist(allow_guest=True)
 def catalog_index():
-	"""Entry point for /book — how many properties, sites, or listings to show."""
-	properties = frappe.get_all(
+	"""Entry point for /book — how many properties, sites, or listings to show.
+	TEX hotels are sold on their TEX booking site, never here (G-03)."""
+	from kamra.tex.legacy import is_tex_hotel, tex_booking_path
+
+	enabled = frappe.get_all(
 		"Property",
 		filters={"booking_engine_enabled": 1, "disabled": 0},
 		fields=["name", "property_name", "page_slug", "city", "hero_image", "property_kind"],
 		order_by="property_name asc",
 	)
+	properties = [p for p in enabled if not is_tex_hotel(p.name)]
+	if not properties and not _legacy_properties():
+		return {"mode": "tex", "url": tex_booking_path(enabled[0].name if enabled else None)}
 	if len(properties) > 1:
 		for p in properties:
 			p["property_slug"] = p.get("page_slug") or slugify(p["property_name"])
@@ -226,16 +232,24 @@ def default_property():
 	(fresh install) or several are, falls back to the first Property so
 	the page still renders instead of hanging on a guest permission error.
 	"""
-	enabled = frappe.get_all(
-		"Property", filters={"booking_engine_enabled": 1}, pluck="name", limit=1,
-	)
+	from kamra.tex.legacy import is_tex_hotel
+
+	enabled = [p for p in frappe.get_all("Property", filters={"booking_engine_enabled": 1}, pluck="name")
+	           if not is_tex_hotel(p)]
 	if enabled:
 		return enabled[0]
-	any_property = frappe.get_all("Property", pluck="name", limit=1)
+	any_property = _legacy_properties()
 	if any_property:
 		return any_property[0]
 	frappe.throw("No property configured for this site.")
 	raise  # frappe.throw always raises; CodeQL does not treat it as noreturn
+
+
+def _legacy_properties() -> list[str]:
+	"""Hotels the legacy engine may sell: every hotel outside TEX."""
+	from kamra.tex.legacy import is_tex_hotel
+
+	return [p for p in frappe.get_all("Property", pluck="name", order_by="creation asc") if not is_tex_hotel(p)]
 
 
 def _public_locale(property: str) -> dict:
@@ -252,6 +266,9 @@ def _public_locale(property: str) -> dict:
 def showcase(property: str, listing_slug: str | None = None,
              location_slug: str | None = None):
 	"""Everything the public booking page needs to render."""
+	from kamra.tex.legacy import refuse_legacy_sale
+
+	refuse_legacy_sale(property)
 	prop = frappe.get_doc("Property", property)
 	if not prop.get("booking_engine_enabled"):
 		frappe.throw("Online booking is not enabled for this property.")
@@ -307,7 +324,9 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 	from kamra.api import _available_rooms_raw, _block_hold
 	from kamra.pricing import quote
 	from kamra.siu.availability import has_active_sius, sellable_count
+	from kamra.tex.legacy import refuse_legacy_sale
 
+	refuse_legacy_sale(property)
 	if date_diff(check_out_date, check_in_date) < 1:
 		frappe.throw("Check-out must be after check-in.")
 	if date_diff(check_out_date, check_in_date) > 30:
@@ -661,6 +680,9 @@ def book(property: str, room_type: str, check_in_date: str,
 	Pending Payment with a hold window. Request to Book: Requested (no
 	inventory) until the host approves.
 	"""
+	from kamra.tex.legacy import refuse_legacy_sale
+
+	refuse_legacy_sale(property)
 	if not guest_name.strip() or not phone.strip():
 		frappe.throw("Name and phone are required.")
 
@@ -793,9 +815,12 @@ def check_voucher(property: str, code: str, nights: int = 1):
 	"""Live promo-code feedback on the booking page. Never throws - returns
 	{ok, message, discount_type, value} so the guest sees a friendly note."""
 	from kamra.pricing import validate_voucher
+	from kamra.tex.legacy import is_tex_hotel
 	code = (code or "").strip()
 	if not code:
 		return {"ok": False, "message": "Enter a code."}
+	if is_tex_hotel(property):
+		return {"ok": False, "message": "Codes for this hotel apply on its booking site."}
 	try:
 		v = validate_voucher(property, code, int(nights or 1))
 	except Exception as e:
