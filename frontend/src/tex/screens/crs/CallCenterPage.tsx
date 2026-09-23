@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { ClipboardCopy, Keyboard, NotebookPen, PhoneCall, RefreshCw, Star, UserRound, X } from "lucide-react"
-import { date, dateTime, isoDay, money } from "../../lib/format"
+import { date, dateTime, money } from "../../lib/format"
 import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
 import {
@@ -30,17 +30,19 @@ import { GuestForm, PaymentPicker } from "./components/CheckoutParts"
 import { Confirmation } from "./components/Confirmation"
 import { Disclosure, LiveRegion } from "./components/controls"
 import { GuestLookup } from "./components/GuestLookup"
-import { OfferBadges, OfferPrice, OfferTitle, PolicySummary, roomName } from "./components/OfferParts"
+import { OfferBadges, OfferPrice, OfferTitle, PolicySummary, RoomFitNotes, roomName } from "./components/OfferParts"
 import { usePartyText } from "./components/PartyEditor"
 import { PriceBreakdown } from "./components/PriceBreakdown"
-import { ExtrasPicker, useExtras } from "./components/QuoteParts"
+import { ExtrasPicker, QuoteExpiry, useExtras } from "./components/QuoteParts"
 import { RoomBuilder } from "./components/Results"
 import { SearchForm } from "./components/SearchForm"
 import { guestProfile, logCall } from "./lib/api"
 import { useLabels } from "./lib/labels"
 import { copyText, offerId } from "./lib/party"
 import { quoteText } from "./lib/quoteText"
-import { asApiError, focusFirstInvalid, useBookingFlow, type BookingFlow } from "./lib/useBookingFlow"
+import { asApiError, focusFirstInvalid, useBookingFlow, type BookingFlow, type Selection } from "./lib/useBookingFlow"
+import { roomList, selectMessage } from "./lib/selectText"
+import { useServerClock } from "./lib/serverClock"
 import type { GuestProfile, GuestRow, Offer, PropertyResult } from "./lib/types"
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
@@ -91,6 +93,7 @@ export default function CallCenterPage() {
   const toast = useToast()
   const { can } = useSession()
   const partyText = usePartyText()
+  const clock = useServerClock()
   const flow = useBookingFlow({ channel: "CALL_CENTER" })
 
   const [caller, setCaller] = useState<GuestRow | null>(null)
@@ -101,6 +104,7 @@ export default function CallCenterPage() {
   const [announce, setAnnounce] = useState("")
   const [help, setHelp] = useState(false)
   const [activeId, setActiveId] = useState<string>()
+  const [selectNotice, setSelectNotice] = useState<{ tone: "info" | "warning"; text: string } | null>(null)
 
   const callerRef = useRef<HTMLInputElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -161,11 +165,7 @@ export default function CallCenterPage() {
   }, [flow, t, log, partyText])
 
   const quoteSelection = useCallback(
-    async (sel: ReturnType<BookingFlow["selectOffer"]>) => {
-      if (!sel.picks.every(Boolean)) {
-        setAnnounce(t("crs.cc.pick_more"))
-        return
-      }
+    async (sel: Selection) => {
       const res = await flow.requestQuotes(sel)
       if (!res) return
       if (res.every((q) => q.ok)) {
@@ -185,10 +185,19 @@ export default function CallCenterPage() {
   const chooseItem = useCallback(
     (item: ListItem | undefined, roomIndex?: number) => {
       if (!item || item.disabled) return
-      const sel = flow.selectOffer(item.prop.property, item.offer, roomIndex)
-      void quoteSelection(sel)
+      const res = flow.selectOffer(item.prop.property, item.offer, roomIndex)
+      const sel = res.selection
+      if (sel && sel.property === item.prop.property && sel.picks.every(Boolean)) {
+        setSelectNotice(null)
+        void quoteSelection(sel)
+        return
+      }
+      // rooms still open (offer fits some rooms only, or no stock left for all)
+      const msg = selectMessage(t, res, item.offer, rooms)
+      setSelectNotice(msg)
+      if (msg) setAnnounce(msg.text)
     },
-    [flow, quoteSelection],
+    [flow, quoteSelection, t, rooms],
   )
 
   const quoteCopy = useMemo(() => {
@@ -203,8 +212,9 @@ export default function CallCenterPage() {
       summary: flow.summary,
       paymentMethod: flow.method,
       partyText,
+      time: clock.label,
     })
-  }, [r, flow.quotes, flow.quoteStale, flow.summary, flow.method, selectedProp, t, L, partyText])
+  }, [r, flow.quotes, flow.quoteStale, flow.summary, flow.method, selectedProp, t, L, partyText, clock])
 
   const copyQuote = useCallback(async () => {
     if (!quoteCopy) return
@@ -226,6 +236,7 @@ export default function CallCenterPage() {
 
   const newCall = useCallback(() => {
     flow.resetAll(false)
+    setSelectNotice(null)
     setCaller(null)
     setEvents([])
     setCallNotes("")
@@ -446,7 +457,14 @@ export default function CallCenterPage() {
 
         {/* ── quote, guest, payment, book ── */}
         <div className="min-w-0 space-y-4">
-          <QuotePanel flow={flow} headingRef={quoteRef} canCost={canCost} quoteCopy={quoteCopy} onCopy={() => void copyQuote()} />
+          <QuotePanel
+            flow={flow}
+            headingRef={quoteRef}
+            canCost={canCost}
+            quoteCopy={quoteCopy}
+            onCopy={() => void copyQuote()}
+            notice={selectNotice}
+          />
           {flow.booking ? (
             <Confirmation
               compact
@@ -476,7 +494,7 @@ export default function CallCenterPage() {
                   </p>
                   <PaymentPicker
                     flow={flow}
-                    canConfirmUnpaid={can("reservation.create", flow.selection?.property)}
+                    canConfirmUnpaid={can("reservation.confirm_unpaid", flow.selection?.property)}
                     idPrefix="cc-pay"
                     showNotes={false}
                   />
@@ -537,6 +555,7 @@ function CallerPanel({
   const { t } = useTexT()
   const L = useLabels()
   const { can } = useSession()
+  const clock = useServerClock()
   const [profile, setProfile] = useState<GuestProfile>()
   const [error, setError] = useState<TexApiError>()
   const canCrm = can("crm.view")
@@ -552,7 +571,7 @@ function CallerPanel({
       live = false
     }
   }, [caller])
-  const today = isoDay(new Date())
+  const today = clock.today()
   const stays = profile?.stays ?? []
   const open = stays.filter((s) => s.check_out_date >= today && !["Cancelled", "No Show", "Checked Out"].includes(s.status))
   const past = stays.filter((s) => !open.includes(s)).slice(0, 5)
@@ -641,8 +660,8 @@ function StayList({
         <ul className="mt-1 space-y-1">
           {stays.map((s) => (
             <li key={s.name} className={cn("rounded px-1.5 py-1 text-xs", highlight && "bg-tex-50")}>
-              <div className="flex items-center justify-between gap-2">
-                <Link to={`/tex/reservations/${encodeURIComponent(s.name)}`} className="font-medium text-tex-700 hover:underline">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                <Link to={`/tex/reservations/${encodeURIComponent(s.name)}`} className="font-medium whitespace-nowrap text-tex-700 hover:underline">
                   {s.name}
                 </Link>
                 <Badge tone={statusTone(s.status)}>{L.status(s.status)}</Badge>
@@ -785,7 +804,11 @@ function OfferListbox({
               {p.property_name}
               {p.city ? <span className="font-normal text-zinc-500"> · {p.city}</span> : null}
             </span>
-            {p.messages.length ? <span className="font-normal text-amber-800">{p.messages[0]}</span> : null}
+            {p.unplaced_rooms?.length ? (
+              <span className="font-normal text-amber-800">{t("crs.results.unplaced_short", { count: p.unplaced_rooms.length, rooms: roomList(p.unplaced_rooms) })}</span>
+            ) : p.messages.length ? (
+              <span className="font-normal text-amber-800">{p.messages[0]}</span>
+            ) : null}
           </div>
           {gi.map((item) => {
             const isActive = item.id === activeId
@@ -817,7 +840,7 @@ function OfferListbox({
                     <OfferBadges offer={item.offer} rooms={rooms} />
                   </div>
                   <div className="shrink-0">
-                    {item.offer.total && item.offer.bookable ? (
+                    {item.offer.bookable ? (
                       <OfferPrice offer={item.offer} nights={r.nights} rooms={rooms} />
                     ) : (
                       <p className="max-w-48 text-right text-xs text-rose-800">
@@ -848,8 +871,9 @@ function OfferListbox({
                           <Money amount={item.offer.rooms[0].quote.totals.margin} currency={item.offer.currency} />
                         </p>
                       )}
+                      <RoomFitNotes offer={item.offer} />
                       <p className="mt-1 text-zinc-500">
-                        <Kbd>↵</Kbd> {t("crs.cc.key.quote")}
+                        <Kbd>↵</Kbd> {rooms > 1 && !item.offer.complete ? t("crs.cc.key.assign_fitting") : t("crs.cc.key.quote")}
                       </p>
                     </div>
                   </div>
@@ -869,12 +893,15 @@ function QuotePanel({
   canCost,
   quoteCopy,
   onCopy,
+  notice,
 }: {
   flow: BookingFlow
   headingRef: React.RefObject<HTMLHeadingElement | null>
   canCost: boolean
   quoteCopy: string
   onCopy: () => void
+  /** What the last offer assignment left open (multi-room). */
+  notice: { tone: "info" | "warning"; text: string } | null
 }) {
   const { t } = useTexT()
   const partyText = usePartyText()
@@ -900,6 +927,7 @@ function QuotePanel({
         ) : (
           <>
             {prop && <p className="text-xs font-medium text-zinc-500">{prop.property_name}</p>}
+            {notice && !flow.selectionComplete && <Notice tone={notice.tone}>{notice.text}</Notice>}
             {rooms > 1 && <RoomBuilder flow={flow} idPrefix="cc-rb" />}
             {flow.quoting && <Skeleton className="h-24 w-full" />}
             {!flow.quoting &&
@@ -938,6 +966,9 @@ function QuotePanel({
                   </section>
                 )
               })}
+            {flow.summary && !flow.quoteStale && !flow.quoting && (
+              <QuoteExpiry expiresAt={flow.summary.expires_at} onRequote={flow.booking ? undefined : () => void flow.requestQuotes()} />
+            )}
             {!flow.booking && <PromoAndRequote flow={flow} />}
             {quoteCopy && (
               <div className="space-y-1.5 border-t border-zinc-100 pt-3">

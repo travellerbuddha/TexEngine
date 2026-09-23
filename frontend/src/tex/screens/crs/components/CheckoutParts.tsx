@@ -1,4 +1,4 @@
-import { forwardRef } from "react"
+import { forwardRef, useEffect } from "react"
 import { Link2Off, Star } from "lucide-react"
 import { TEX_LANGS, useTexT } from "../../../i18n"
 import { Badge, Button, Checkbox, Field, FormGrid, Input, Money, Notice, Select, Skeleton, Textarea } from "../../../ui"
@@ -131,6 +131,11 @@ export function PaymentPicker({
   const L = useLabels()
   const { methods, methodsError, method, setMethod, summary, summaryLoading, summaryError } = flow
   const ccy = summary?.currency ?? flow.quoteCurrency ?? undefined
+  const { confirmUnpaid, setConfirmUnpaid } = flow
+  useEffect(() => {
+    // switching to a hotel where the user may not confirm unpaid must not carry the tick over
+    if (!canConfirmUnpaid && confirmUnpaid) setConfirmUnpaid(false)
+  }, [canConfirmUnpaid, confirmUnpaid, setConfirmUnpaid])
   return (
     <div className="space-y-4">
       <fieldset>
@@ -223,19 +228,23 @@ export function PaymentPicker({
         )}
       </div>
 
-      {canConfirmUnpaid && summary?.payment_required && (
-        <Checkbox
-          label={
-            <span>
-              {t("crs.pay.confirm_unpaid")}
-              <span className="block text-xs text-zinc-500">{t("crs.pay.confirm_unpaid_hint")}</span>
-            </span>
-          }
-          className="items-start"
-          checked={flow.confirmUnpaid}
-          onChange={(ev) => flow.setConfirmUnpaid(ev.target.checked)}
-        />
-      )}
+      {summary?.payment_required &&
+        (canConfirmUnpaid ? (
+          <Checkbox
+            label={
+              <span>
+                {t("crs.pay.confirm_unpaid")}
+                <span className="block text-xs text-zinc-500">{t("crs.pay.confirm_unpaid_hint")}</span>
+              </span>
+            }
+            className="items-start"
+            checked={flow.confirmUnpaid}
+            onChange={(ev) => flow.setConfirmUnpaid(ev.target.checked)}
+          />
+        ) : (
+          // reservation.confirm_unpaid is for managers / finance; agents book as pending payment
+          <p className="text-xs text-zinc-600">{t("crs.pay.pending_until_paid")}</p>
+        ))}
       {showNotes && (
         <Field label={t("crs.pay.notes")} hint={t("crs.pay.notes_hint")}>
           <Textarea id={`${idPrefix}-notes`} rows={2} value={flow.notes} onChange={(ev) => flow.setNotes(ev.target.value)} />

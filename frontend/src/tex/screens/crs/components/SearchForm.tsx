@@ -1,7 +1,8 @@
 import { forwardRef, useRef, type FormEvent } from "react"
 import { Search } from "lucide-react"
 import { useSession } from "../../../lib/session"
-import { addDays, isoDay, nightsBetween } from "../../../lib/format"
+import { addDays, nightsBetween } from "../../../lib/format"
+import { useServerClock } from "../lib/serverClock"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, Field, Input, Select } from "../../../ui"
 import { useLabels } from "../lib/labels"
@@ -33,7 +34,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
   const { boot } = useSession()
   const L = useLabels()
   const set = (patch: Partial<SearchFormState>) => onChange({ ...form, ...patch })
-  const today = isoDay(new Date())
+  const today = useServerClock().today()
   const nights = form.check_in && form.check_out && form.check_out > form.check_in ? nightsBetween(form.check_in, form.check_out) : 0
   const compact = variant === "compact"
   const submit = (e: FormEvent) => {
@@ -45,9 +46,10 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
   // also while a date is typed segment by segment (intermediate values are not choices).
   const stayNights = useRef(nights || 1)
   return (
-    <form onSubmit={submit} noValidate aria-label={t("crs.search.title")} className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Field label={t("crs.search.check_in")} error={errors.check_in} required>
+    <form onSubmit={submit} noValidate aria-label={t("crs.search.title")} className="@container space-y-4">
+      {/* sized by the card, not the viewport: the call-centre column is narrow on wide screens */}
+      <div className="grid grid-cols-2 gap-3 @lg:grid-cols-6 @4xl:grid-cols-4">
+        <Field className="@lg:col-span-2 @4xl:col-span-1" label={t("crs.search.check_in")} error={errors.check_in} required>
           <Input
             ref={firstRef}
             id={`${idPrefix}-check-in`}
@@ -62,6 +64,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
           />
         </Field>
         <Field
+          className="@lg:col-span-2 @4xl:col-span-1"
           label={t("crs.search.check_out")}
           error={errors.check_out}
           hint={nights ? t("core.label.nights", { count: nights }) : undefined}
@@ -80,7 +83,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
           />
         </Field>
         <Field
-          className="col-span-2 md:col-span-1"
+          className="col-span-2 @4xl:col-span-1"
           label={t("crs.search.market")}
           error={errors.market}
           hint={!errors.market && !marketHint && !compact ? t("crs.search.market_hint") : undefined}
@@ -94,7 +97,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
             onChange={(e) => set({ market: e.target.value })}
           />
         </Field>
-        <Field label={t("crs.search.channel")} error={errors.channel}>
+        <Field className="col-span-2 @sm:col-span-1 @lg:col-span-2 @4xl:col-span-1" label={t("crs.search.channel")} error={errors.channel}>
           <Select
             id={`${idPrefix}-channel`}
             value={form.channel}
@@ -105,7 +108,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
             onChange={(e) => set({ channel: e.target.value })}
           />
         </Field>
-        <Field label={t("crs.search.currency")}>
+        <Field className="col-span-2 @sm:col-span-1 @lg:col-span-2 @4xl:col-span-1" label={t("crs.search.currency")}>
           <Select
             id={`${idPrefix}-currency`}
             value={form.currency}
@@ -113,7 +116,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
             onChange={(e) => set({ currency: e.target.value })}
           />
         </Field>
-        <Field className="col-span-2 md:col-span-3" label={t("crs.search.promo")} hint={compact ? undefined : t("crs.search.promo_hint")}>
+        <Field className="col-span-2 @4xl:col-span-3" label={t("crs.search.promo")} hint={compact ? undefined : t("crs.search.promo_hint")}>
           <CodeChips
             id={`${idPrefix}-promo`}
             value={form.promo}

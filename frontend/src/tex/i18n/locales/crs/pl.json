@@ -26,6 +26,8 @@
  "crs.booker.title": "Rezerwujący",
  "crs.builder.choose": "Wybierz ofertę",
  "crs.builder.hint": "Każdy pokój jest wyceniany osobno. Wybierz uzupełnia wszystkie pokoje; pojedyncze pokoje zmienisz tutaj.",
+ "crs.builder.no_fit": "Żadna oferta tego hotelu nie pasuje do tego pokoju. Zmień skład gości lub wyszukaj ponownie.",
+ "crs.builder.none_left": "brak wolnych",
  "crs.builder.title": "Wybór dla pokoi",
  "crs.cc.assign_room": "przypisz do pokoju",
  "crs.cc.attach_notes": "Dodaj notatki z rozmowy do rezerwacji (wewnętrzne)",
@@ -44,6 +46,7 @@
  "crs.cc.guest_from_caller": "Uzupełniono danymi dzwoniącego — zmień, jeśli nocuje ktoś inny.",
  "crs.cc.history": "Ostatnie pobyty",
  "crs.cc.in_rooms": "Pokój {rooms}",
+ "crs.cc.key.assign_fitting": "Przypisz do pasujących pokoi",
  "crs.cc.key.book": "Zarezerwuj",
  "crs.cc.key.caller": "Znajdź dzwoniącego",
  "crs.cc.key.copy": "Kopiuj tekst wyceny",
@@ -76,7 +79,6 @@
   "few": "Otwarte rezerwacje ({count})",
   "many": "Otwarte rezerwacje ({count})"
  },
- "crs.cc.pick_more": "Wybierz ofertę dla każdego pokoju, aby otrzymać wycenę.",
  "crs.cc.quote_copied": "Skopiowano tekst wyceny",
  "crs.cc.quote_empty": "Wybierz ofertę z listy i naciśnij Enter.",
  "crs.cc.quote_text": "Wycena do przeczytania",
@@ -234,6 +236,12 @@
  "crs.mode.usage": "za użycie",
  "crs.offer.codes_available": "Dostępne kody",
  "crs.offer.contract": "Umowa {code} · {version}",
+ "crs.offer.fits": {
+  "one": "Tylko dla pokoju {rooms}",
+  "other": "Dla pokoi {rooms}",
+  "few": "Dla pokoi {rooms}",
+  "many": "Dla pokoi {rooms}"
+ },
  "crs.offer.for_rooms": {
   "one": "{nights} · {count} pokój",
   "other": "{nights} · {count} pokoju",
@@ -260,11 +268,18 @@
  },
  "crs.offer.nightly_stock": "Wolne pokoje na noc",
  "crs.offer.non_refundable": "Bezzwrotna",
+ "crs.offer.not_for_room": "Nie dla pokoju {n}: {reason}",
  "crs.offer.per_night": "śr. {amount} / noc",
  "crs.offer.promo_code": "Kod {code}",
  "crs.offer.refundable": "Zwrotna",
  "crs.offer.rooms_priced": "Cena za pokój",
  "crs.offer.sold_out": "Wyprzedane",
+ "crs.offer.stock_short": {
+  "one": "Został tylko {count} pokój tego typu – za mało dla wszystkich pasujących pokoi.",
+  "other": "Zostało tylko {count} pokoju tego typu – za mało dla wszystkich pasujących pokoi.",
+  "few": "Zostały tylko {count} pokoje tego typu – za mało dla wszystkich pasujących pokoi.",
+  "many": "Zostało tylko {count} pokoi tego typu – za mało dla wszystkich pasujących pokoi."
+ },
  "crs.page.no_access": "Do sprzedaży potrzebne są uprawnienia do podglądu cen i tworzenia rezerwacji w hotelu.",
  "crs.page.start_over": "Zacznij od nowa",
  "crs.page.subtitle": "Wyszukuj we wszystkich sprzedawanych hotelach, wyceniaj i rezerwuj.",
@@ -294,6 +309,7 @@
  "crs.pay.notes_hint": "Widoczna tylko dla personelu.",
  "crs.pay.pah_not_allowed": "Tej stawki nie można opłacić w hotelu.",
  "crs.pay.paid": "Zapłacono",
+ "crs.pay.pending_until_paid": "Płatność jest wymagana teraz. Bez niej rezerwacja czeka na płatność i może wygasnąć; wyślij gościowi link do płatności.",
  "crs.pay.sandbox": "Tryb testowy",
  "crs.pay.title": "Płatność",
  "crs.policy.cancellation": "Anulowanie",
@@ -317,6 +333,7 @@
  "crs.quote.avg_night": "Średnio za noc",
  "crs.quote.calculated_total": "Suma wyliczona",
  "crs.quote.discounts": "Rabaty",
+ "crs.quote.expired": "Wycena wygasła {time}. Zaktualizuj ją przed rezerwacją.",
  "crs.quote.extra_failed": "Nie dodano {name}: {reason}",
  "crs.quote.failed": "Nie udało się przygotować wyceny",
  "crs.quote.final_manual": "Cena końcowa (ustawiona ręcznie)",
@@ -335,6 +352,7 @@
  "crs.quote.subtotal": "Suma częściowa",
  "crs.quote.tax_added": "Podatki",
  "crs.quote.tax_included": "w cenie",
+ "crs.quote.time_left": "pozostało {left}",
  "crs.quote.title": "Wycena",
  "crs.quote.total": "Razem",
  "crs.quote.update": "Zaktualizuj wycenę",
@@ -349,6 +367,7 @@
  "crs.results.details": "Szczegóły",
  "crs.results.filtered_out": "Żadna oferta nie pasuje do filtrów.",
  "crs.results.from": "od {amount}",
+ "crs.results.from_all": "wszystkie pokoje od {amount}",
  "crs.results.none": "Brak dostępności dla tego wyszukiwania",
  "crs.results.none_here": "Brak ofert do rezerwacji w tym hotelu.",
  "crs.results.offer_count": {
@@ -361,6 +380,12 @@
  "crs.results.select": "Wybierz",
  "crs.results.select_all": "Wybierz dla wszystkich pokoi",
  "crs.results.select_aria": "Wybierz {room}, {board}, {plan}",
+ "crs.results.select_rooms": {
+  "one": "Wybierz dla pokoju {rooms}",
+  "other": "Wybierz dla pokoi {rooms}",
+  "few": "Wybierz dla pokoi {rooms}",
+  "many": "Wybierz dla pokoi {rooms}"
+ },
  "crs.results.selected": "Wybrano",
  "crs.results.selected_hotel": "Wybrany hotel",
  "crs.results.summary": "{from} – {to} · {nights} · rynek {market}",
@@ -372,6 +397,24 @@
   "many": "{count} ofert niedostępnych"
  },
  "crs.results.unavailable_multi": "Oferty pasujące tylko do części pokoi można wybrać osobno w wyborze dla pokoi.",
+ "crs.results.unplaced": {
+  "one": "Żaden typ pokoju w tym hotelu nie pasuje do pokoju {rooms}",
+  "other": "Żaden typ pokoju w tym hotelu nie pasuje do pokoi {rooms}",
+  "few": "Żaden typ pokoju w tym hotelu nie pasuje do pokoi {rooms}",
+  "many": "Żaden typ pokoju w tym hotelu nie pasuje do pokoi {rooms}"
+ },
+ "crs.results.unplaced_hint": {
+  "one": "Zmień skład gości w pokoju {rooms} albo usuń go i wyszukaj ponownie: rezerwacja tutaj wymaga oferty dla każdego pokoju.",
+  "other": "Zmień skład gości w pokojach {rooms} albo usuń je i wyszukaj ponownie: rezerwacja tutaj wymaga oferty dla każdego pokoju.",
+  "few": "Zmień skład gości w pokojach {rooms} albo usuń je i wyszukaj ponownie: rezerwacja tutaj wymaga oferty dla każdego pokoju.",
+  "many": "Zmień skład gości w pokojach {rooms} albo usuń je i wyszukaj ponownie: rezerwacja tutaj wymaga oferty dla każdego pokoju."
+ },
+ "crs.results.unplaced_short": {
+  "one": "Brak opcji dla pokoju {rooms}",
+  "other": "Brak opcji dla pokoi {rooms}",
+  "few": "Brak opcji dla pokoi {rooms}",
+  "many": "Brak opcji dla pokoi {rooms}"
+ },
  "crs.results.view_only": "Widzisz ceny, ale nie możesz rezerwować w tym hotelu.",
  "crs.room_n": "Pokój {n}",
  "crs.search.add_room": "Dodaj pokój",
@@ -402,6 +445,36 @@
  "crs.search.rooms": "Pokoje i goście",
  "crs.search.submit": "Szukaj",
  "crs.search.title": "Wyszukiwanie",
+ "crs.sel.assigned": {
+  "one": "Przypisano do pokoju {rooms}.",
+  "other": "Przypisano do pokoi {rooms}.",
+  "few": "Przypisano do pokoi {rooms}.",
+  "many": "Przypisano do pokoi {rooms}."
+ },
+ "crs.sel.missing": {
+  "one": "Wybierz ofertę dla pokoju {rooms}.",
+  "other": "Wybierz oferty dla pokoi {rooms}.",
+  "few": "Wybierz oferty dla pokoi {rooms}.",
+  "many": "Wybierz oferty dla pokoi {rooms}."
+ },
+ "crs.sel.no_stock": {
+  "one": "Dla pokoju {rooms} brakuje wolnych pokoi tego typu.",
+  "other": "Dla pokoi {rooms} brakuje wolnych pokoi tego typu.",
+  "few": "Dla pokoi {rooms} brakuje wolnych pokoi tego typu.",
+  "many": "Dla pokoi {rooms} brakuje wolnych pokoi tego typu."
+ },
+ "crs.sel.no_stock_rest": {
+  "one": "Dostępny jest tylko {count} pokój tego typu.",
+  "other": "Dostępne jest tylko {count} pokoju tego typu.",
+  "few": "Dostępne są tylko {count} pokoje tego typu.",
+  "many": "Dostępnych jest tylko {count} pokoi tego typu."
+ },
+ "crs.sel.unfit": {
+  "one": "Ta oferta nie pasuje do pokoju {rooms}: {reason}",
+  "other": "Ta oferta nie pasuje do pokoi {rooms}: {reason}",
+  "few": "Ta oferta nie pasuje do pokoi {rooms}: {reason}",
+  "many": "Ta oferta nie pasuje do pokoi {rooms}: {reason}"
+ },
  "crs.source.api": "API",
  "crs.source.call_center": "Call center",
  "crs.source.desk": "Recepcja",

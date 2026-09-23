@@ -26,6 +26,8 @@
  "crs.booker.title": "Booker",
  "crs.builder.choose": "Choose an offer",
  "crs.builder.hint": "Each room is priced on its own. Select fills every room; change single rooms here.",
+ "crs.builder.no_fit": "No offer at this hotel fits this room. Change its guests or search again.",
+ "crs.builder.none_left": "none left",
  "crs.builder.title": "Room builder",
  "crs.cc.assign_room": "assign to room",
  "crs.cc.attach_notes": "Add the call notes to the booking (internal)",
@@ -44,6 +46,7 @@
  "crs.cc.guest_from_caller": "Filled in from the caller — change it if someone else is staying.",
  "crs.cc.history": "Recent stays",
  "crs.cc.in_rooms": "Room {rooms}",
+ "crs.cc.key.assign_fitting": "Assign to the rooms it fits",
  "crs.cc.key.book": "Book",
  "crs.cc.key.caller": "Find caller",
  "crs.cc.key.copy": "Copy quote text",
@@ -74,7 +77,6 @@
   "one": "Open booking ({count})",
   "other": "Open bookings ({count})"
  },
- "crs.cc.pick_more": "Choose an offer for every room to get a quote.",
  "crs.cc.quote_copied": "Quote text copied",
  "crs.cc.quote_empty": "Choose an offer in the list and press Enter.",
  "crs.cc.quote_text": "Quote to read out",
@@ -228,6 +230,10 @@
  "crs.mode.usage": "per use",
  "crs.offer.codes_available": "Codes available",
  "crs.offer.contract": "Contract {code} · {version}",
+ "crs.offer.fits": {
+  "one": "Fits room {rooms} only",
+  "other": "Fits rooms {rooms}"
+ },
  "crs.offer.for_rooms": {
   "one": "{nights} · {count} room",
   "other": "{nights} · {count} rooms"
@@ -246,11 +252,16 @@
  },
  "crs.offer.nightly_stock": "Rooms free per night",
  "crs.offer.non_refundable": "Non-refundable",
+ "crs.offer.not_for_room": "Not for room {n}: {reason}",
  "crs.offer.per_night": "avg. {amount} / night",
  "crs.offer.promo_code": "Code {code}",
  "crs.offer.refundable": "Refundable",
  "crs.offer.rooms_priced": "Price per room",
  "crs.offer.sold_out": "Sold out",
+ "crs.offer.stock_short": {
+  "one": "Only {count} room of this type is left, not enough for every room it fits.",
+  "other": "Only {count} rooms of this type are left, not enough for every room it fits."
+ },
  "crs.page.no_access": "Selling needs the price view and reservation create rights at a hotel.",
  "crs.page.start_over": "Start over",
  "crs.page.subtitle": "Search every hotel you sell, quote and book.",
@@ -276,6 +287,7 @@
  "crs.pay.notes_hint": "Visible to staff only.",
  "crs.pay.pah_not_allowed": "This rate cannot be paid at the hotel.",
  "crs.pay.paid": "Paid",
+ "crs.pay.pending_until_paid": "Payment is due now. Without it the booking is held as pending payment and may expire; send the guest a payment link.",
  "crs.pay.sandbox": "Test mode",
  "crs.pay.title": "Payment",
  "crs.policy.cancellation": "Cancellation",
@@ -297,6 +309,7 @@
  "crs.quote.avg_night": "Average per night",
  "crs.quote.calculated_total": "Calculated total",
  "crs.quote.discounts": "Discounts",
+ "crs.quote.expired": "Quote expired at {time}. Update it before booking.",
  "crs.quote.extra_failed": "{name} not added: {reason}",
  "crs.quote.failed": "The quote could not be made",
  "crs.quote.final_manual": "Final price (set manually)",
@@ -315,6 +328,7 @@
  "crs.quote.subtotal": "Subtotal",
  "crs.quote.tax_added": "Taxes",
  "crs.quote.tax_included": "included",
+ "crs.quote.time_left": "{left} left",
  "crs.quote.title": "Quote",
  "crs.quote.total": "Total",
  "crs.quote.update": "Update quote",
@@ -327,6 +341,7 @@
  "crs.results.details": "Details",
  "crs.results.filtered_out": "No offer matches the filters.",
  "crs.results.from": "from {amount}",
+ "crs.results.from_all": "all rooms from {amount}",
  "crs.results.none": "Nothing available for this search",
  "crs.results.none_here": "No bookable offer at this hotel.",
  "crs.results.offer_count": {
@@ -337,6 +352,10 @@
  "crs.results.select": "Select",
  "crs.results.select_all": "Select for all rooms",
  "crs.results.select_aria": "Select {room}, {board}, {plan}",
+ "crs.results.select_rooms": {
+  "one": "Select for room {rooms}",
+  "other": "Select for rooms {rooms}"
+ },
  "crs.results.selected": "Selected",
  "crs.results.selected_hotel": "Selected hotel",
  "crs.results.summary": "{from} – {to} · {nights} · market {market}",
@@ -346,6 +365,18 @@
   "other": "{count} offers not bookable"
  },
  "crs.results.unavailable_multi": "Offers that fit only some rooms of the party can still be chosen per room in the room builder.",
+ "crs.results.unplaced": {
+  "one": "No room type here fits room {rooms}",
+  "other": "No room type here fits rooms {rooms}"
+ },
+ "crs.results.unplaced_hint": {
+  "one": "Change the guests of room {rooms}, or remove it and search again: a booking here needs an offer for every room.",
+  "other": "Change the guests of rooms {rooms}, or remove them and search again: a booking here needs an offer for every room."
+ },
+ "crs.results.unplaced_short": {
+  "one": "Nothing fits room {rooms}",
+  "other": "Nothing fits rooms {rooms}"
+ },
  "crs.results.view_only": "You can see prices here but not book at this hotel.",
  "crs.room_n": "Room {n}",
  "crs.search.add_room": "Add room",
@@ -376,6 +407,26 @@
  "crs.search.rooms": "Rooms and guests",
  "crs.search.submit": "Search",
  "crs.search.title": "Search",
+ "crs.sel.assigned": {
+  "one": "Assigned to room {rooms}.",
+  "other": "Assigned to rooms {rooms}."
+ },
+ "crs.sel.missing": {
+  "one": "Choose an offer for room {rooms}.",
+  "other": "Choose offers for rooms {rooms}."
+ },
+ "crs.sel.no_stock": {
+  "one": "Not enough rooms of this type left for room {rooms}.",
+  "other": "Not enough rooms of this type left for rooms {rooms}."
+ },
+ "crs.sel.no_stock_rest": {
+  "one": "Only {count} room of this type is available.",
+  "other": "Only {count} rooms of this type are available."
+ },
+ "crs.sel.unfit": {
+  "one": "This offer does not fit room {rooms}: {reason}",
+  "other": "This offer does not fit rooms {rooms}: {reason}"
+ },
  "crs.source.api": "API",
  "crs.source.call_center": "Call center",
  "crs.source.desk": "Desk",

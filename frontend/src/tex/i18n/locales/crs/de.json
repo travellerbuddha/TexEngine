@@ -26,6 +26,8 @@
  "crs.booker.title": "Buchender",
  "crs.builder.choose": "Angebot wählen",
  "crs.builder.hint": "Jedes Zimmer wird einzeln berechnet. Auswählen füllt alle Zimmer; einzelne Zimmer ändern Sie hier.",
+ "crs.builder.no_fit": "Kein Angebot dieses Hotels passt zu diesem Zimmer. Ändern Sie die Belegung oder suchen Sie erneut.",
+ "crs.builder.none_left": "keins mehr frei",
  "crs.builder.title": "Zimmerzusammenstellung",
  "crs.cc.assign_room": "Zimmer zuordnen",
  "crs.cc.attach_notes": "Gesprächsnotizen zur Buchung hinzufügen (intern)",
@@ -44,6 +46,7 @@
  "crs.cc.guest_from_caller": "Vom Anrufer übernommen — ändern, falls jemand anderes übernachtet.",
  "crs.cc.history": "Letzte Aufenthalte",
  "crs.cc.in_rooms": "Zimmer {rooms}",
+ "crs.cc.key.assign_fitting": "Den passenden Zimmern zuordnen",
  "crs.cc.key.book": "Buchen",
  "crs.cc.key.caller": "Anrufer suchen",
  "crs.cc.key.copy": "Angebotstext kopieren",
@@ -74,7 +77,6 @@
   "one": "Offene Buchung ({count})",
   "other": "Offene Buchungen ({count})"
  },
- "crs.cc.pick_more": "Wählen Sie für jedes Zimmer ein Angebot, um ein Angebot zu erhalten.",
  "crs.cc.quote_copied": "Angebotstext kopiert",
  "crs.cc.quote_empty": "Wählen Sie ein Angebot in der Liste und drücken Sie Enter.",
  "crs.cc.quote_text": "Angebot zum Vorlesen",
@@ -228,6 +230,10 @@
  "crs.mode.usage": "pro Nutzung",
  "crs.offer.codes_available": "Verfügbare Codes",
  "crs.offer.contract": "Vertrag {code} · {version}",
+ "crs.offer.fits": {
+  "one": "Nur für Zimmer {rooms}",
+  "other": "Für Zimmer {rooms}"
+ },
  "crs.offer.for_rooms": {
   "one": "{nights} · {count} Zimmer",
   "other": "{nights} · {count} Zimmer"
@@ -246,11 +252,16 @@
  },
  "crs.offer.nightly_stock": "Freie Zimmer pro Nacht",
  "crs.offer.non_refundable": "Nicht erstattbar",
+ "crs.offer.not_for_room": "Nicht für Zimmer {n}: {reason}",
  "crs.offer.per_night": "Ø {amount} / Nacht",
  "crs.offer.promo_code": "Code {code}",
  "crs.offer.refundable": "Erstattbar",
  "crs.offer.rooms_priced": "Preis pro Zimmer",
  "crs.offer.sold_out": "Ausgebucht",
+ "crs.offer.stock_short": {
+  "one": "Von diesem Typ ist nur noch {count} Zimmer frei – nicht genug für alle passenden Zimmer.",
+  "other": "Von diesem Typ sind nur noch {count} Zimmer frei – nicht genug für alle passenden Zimmer."
+ },
  "crs.page.no_access": "Zum Verkaufen sind Preisansicht und Reservierungsanlage in einem Hotel nötig.",
  "crs.page.start_over": "Neu beginnen",
  "crs.page.subtitle": "Alle Hotels durchsuchen, die Sie verkaufen, Angebote erstellen und buchen.",
@@ -276,6 +287,7 @@
  "crs.pay.notes_hint": "Nur für Mitarbeitende sichtbar.",
  "crs.pay.pah_not_allowed": "Diese Rate kann nicht im Hotel bezahlt werden.",
  "crs.pay.paid": "Bezahlt",
+ "crs.pay.pending_until_paid": "Die Zahlung ist jetzt fällig. Ohne Zahlung wird die Buchung als zahlungsausstehend gehalten und kann verfallen; senden Sie dem Gast einen Zahlungslink.",
  "crs.pay.sandbox": "Testmodus",
  "crs.pay.title": "Zahlung",
  "crs.policy.cancellation": "Stornierung",
@@ -297,6 +309,7 @@
  "crs.quote.avg_night": "Durchschnitt pro Nacht",
  "crs.quote.calculated_total": "Berechnete Summe",
  "crs.quote.discounts": "Rabatte",
+ "crs.quote.expired": "Angebot abgelaufen um {time}. Aktualisieren Sie es vor der Buchung.",
  "crs.quote.extra_failed": "{name} nicht hinzugefügt: {reason}",
  "crs.quote.failed": "Das Angebot konnte nicht erstellt werden",
  "crs.quote.final_manual": "Endpreis (manuell festgelegt)",
@@ -315,6 +328,7 @@
  "crs.quote.subtotal": "Zwischensumme",
  "crs.quote.tax_added": "Steuern",
  "crs.quote.tax_included": "enthalten",
+ "crs.quote.time_left": "noch {left}",
  "crs.quote.title": "Angebot",
  "crs.quote.total": "Gesamt",
  "crs.quote.update": "Angebot aktualisieren",
@@ -327,6 +341,7 @@
  "crs.results.details": "Details",
  "crs.results.filtered_out": "Kein Angebot passt zu den Filtern.",
  "crs.results.from": "ab {amount}",
+ "crs.results.from_all": "alle Zimmer ab {amount}",
  "crs.results.none": "Für diese Suche ist nichts verfügbar",
  "crs.results.none_here": "In diesem Hotel gibt es kein buchbares Angebot.",
  "crs.results.offer_count": {
@@ -337,6 +352,10 @@
  "crs.results.select": "Auswählen",
  "crs.results.select_all": "Für alle Zimmer wählen",
  "crs.results.select_aria": "Auswählen: {room}, {board}, {plan}",
+ "crs.results.select_rooms": {
+  "one": "Für Zimmer {rooms} wählen",
+  "other": "Für Zimmer {rooms} wählen"
+ },
  "crs.results.selected": "Ausgewählt",
  "crs.results.selected_hotel": "Gewähltes Hotel",
  "crs.results.summary": "{from} – {to} · {nights} · Markt {market}",
@@ -346,6 +365,18 @@
   "other": "{count} Angebote nicht buchbar"
  },
  "crs.results.unavailable_multi": "Angebote, die nur für einige Zimmer passen, können in der Zimmerzusammenstellung pro Zimmer gewählt werden.",
+ "crs.results.unplaced": {
+  "one": "Hier passt kein Zimmertyp zu Zimmer {rooms}",
+  "other": "Hier passt kein Zimmertyp zu den Zimmern {rooms}"
+ },
+ "crs.results.unplaced_hint": {
+  "one": "Ändern Sie die Belegung von Zimmer {rooms} oder entfernen Sie es und suchen Sie erneut: Für eine Buchung hier braucht jedes Zimmer ein Angebot.",
+  "other": "Ändern Sie die Belegung der Zimmer {rooms} oder entfernen Sie sie und suchen Sie erneut: Für eine Buchung hier braucht jedes Zimmer ein Angebot."
+ },
+ "crs.results.unplaced_short": {
+  "one": "Nichts passt zu Zimmer {rooms}",
+  "other": "Nichts passt zu den Zimmern {rooms}"
+ },
  "crs.results.view_only": "Sie sehen hier Preise, können in diesem Hotel aber nicht buchen.",
  "crs.room_n": "Zimmer {n}",
  "crs.search.add_room": "Zimmer hinzufügen",
@@ -376,6 +407,26 @@
  "crs.search.rooms": "Zimmer und Gäste",
  "crs.search.submit": "Suchen",
  "crs.search.title": "Suche",
+ "crs.sel.assigned": {
+  "one": "Zimmer {rooms} zugeordnet.",
+  "other": "Den Zimmern {rooms} zugeordnet."
+ },
+ "crs.sel.missing": {
+  "one": "Wählen Sie ein Angebot für Zimmer {rooms}.",
+  "other": "Wählen Sie Angebote für die Zimmer {rooms}."
+ },
+ "crs.sel.no_stock": {
+  "one": "Für Zimmer {rooms} ist von diesem Typ nicht mehr genug frei.",
+  "other": "Für die Zimmer {rooms} ist von diesem Typ nicht mehr genug frei."
+ },
+ "crs.sel.no_stock_rest": {
+  "one": "Von diesem Typ ist nur {count} Zimmer frei.",
+  "other": "Von diesem Typ sind nur {count} Zimmer frei."
+ },
+ "crs.sel.unfit": {
+  "one": "Dieses Angebot passt nicht zu Zimmer {rooms}: {reason}",
+  "other": "Dieses Angebot passt nicht zu den Zimmern {rooms}: {reason}"
+ },
  "crs.source.api": "API",
  "crs.source.call_center": "Callcenter",
  "crs.source.desk": "Rezeption",
