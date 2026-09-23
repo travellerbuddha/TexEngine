@@ -114,7 +114,7 @@ REASONS: dict[str, str] = {
 	"overpaid": "{count} payment link(s) were paid more than once in the last {days} days.",
 	"capture_mismatch": "{count} gateway capture(s) did not match their charge in the last {days} days.",
 	"refund_unknown": "{count} refund(s) the gateway never confirmed: check them at the gateway before refunding "
-	                  "again (Reservations → guest changes).",
+	                  "again, then record the outcome (Payments → the refund).",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
