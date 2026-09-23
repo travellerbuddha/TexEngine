@@ -36,8 +36,14 @@ VIA_PARENT = {
 }
 # belongs to an enterprise; presets (``system_key``) are shared by every tenant
 ENTERPRISE_DOCTYPES = ("TEX Guest Segment",)
+# guest activity of a booking site: a group site's rows have no hotel yet and belong to the
+# site's hotels (G-26); a row with neither is platform-level
+SITE_DOCTYPES = ("TEX Funnel Event", "TEX Abandoned Booking")
+# the tenant structure itself: grants, enterprises and hotel groups are seen only inside the
+# tenant (G-26); a platform-scope grant only by platform administrators
+TENANT_DOCTYPES = ("TEX Access Grant", "TEX Enterprise", "TEX Hotel Group")
 SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, "Guest",
-                   *ENTERPRISE_DOCTYPES)
+                   *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES)
 
 
 def _sql_list(values) -> str:
@@ -83,6 +89,19 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	if doctype in ENTERPRISE_DOCTYPES:
 		return (f"(ifnull({t}.`system_key`, '') != '' or "
 		        f"{t}.`enterprise` in ({_sql_list(_enterprises(props))}))")
+	if doctype == "TEX Enterprise":
+		return f"{t}.`name` in ({_sql_list(_enterprises(props))})"
+	if doctype == "TEX Hotel Group":
+		return f"{t}.`name` in ({_sql_list(_groups(props))})"
+	if doctype == "TEX Access Grant":
+		return (f"({t}.`user` = {frappe.db.escape(user)}"
+		        f" or ({t}.`scope_level` = 'Hotel' and {t}.`property` in ({_sql_list(props)}))"
+		        f" or ({t}.`scope_level` = 'Hotel Group' and {t}.`hotel_group` in ({_sql_list(_groups(props))}))"
+		        f" or ({t}.`scope_level` = 'Enterprise' and {t}.`enterprise` in ({_sql_list(_enterprises(props))})))")
+	if doctype in SITE_DOCTYPES:
+		return (f"({t}.`property` in ({_sql_list(props)}) or (ifnull({t}.`property`, '') = '' and "
+		        f"{t}.`site` in (select name from `tabTEX Booking Site` where "
+		        f"{_owner_condition('TEX Booking Site', props)})))")
 	if doctype == "Guest":
 		ents = _enterprises(props)
 		return (f"({t}.name in (select r.guest from `tabReservation` r where r.property in ({_sql_list(props)}))"
@@ -125,7 +144,30 @@ def _doc_properties(doc) -> tuple[set[str] | None, bool]:
 	prop = doc.get("property")
 	if prop:
 		return {prop}, False
+	if dt in SITE_DOCTYPES:
+		site = frappe.db.get_value("TEX Booking Site", doc.get("site"), ["property", "hotel_group"],
+		                           as_dict=True) if doc.get("site") else None
+		if site and site.property:
+			return {site.property}, False
+		if site and site.hotel_group:
+			return set(frappe.get_all("Property", filters={"tex_hotel_group": site.hotel_group}, pluck="name")), False
+		return None, True
 	return None, dt in STRICT_DOCTYPES
+
+
+def _tenant_doc_permitted(doc, user: str) -> bool:
+	"""TEX Enterprise / Hotel Group / Access Grant for a non-platform user (G-26)."""
+	props = scope.permitted_properties(user)
+	if doc.doctype == "TEX Enterprise":
+		return doc.name in _enterprises(props)
+	if doc.doctype == "TEX Hotel Group":
+		return doc.name in _groups(props)
+	if doc.is_new():
+		return True                                  # the controller decides who may grant what
+	# who may change or delete it is decided by the TEX Access Grant controller, on every path
+	if doc.scope_level == "Platform":
+		return doc.user == user
+	return doc.user == user or bool(set(scope._grant_properties(doc)) & props)
 
 
 def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
@@ -142,6 +184,8 @@ def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
 	if doc.doctype in ENTERPRISE_DOCTYPES:
 		return bool(doc.get("system_key")) or (bool(doc.get("enterprise"))
 		                                        and doc.enterprise in _enterprises(scope.permitted_properties(user)))
+	if doc.doctype in TENANT_DOCTYPES:
+		return _tenant_doc_permitted(doc, user)
 	props, platform_level = _doc_properties(doc)
 	if platform_level:
 		return False

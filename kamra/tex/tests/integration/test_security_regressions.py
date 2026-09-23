@@ -645,3 +645,91 @@ class TestLegacyWebhooks(TexTestCase):
 		finally:
 			frappe.local.flags.aiosell_webhook_auth = None
 		self.assertFalse(frappe.db.exists("Reservation", {"ota_ref": ("like", "AIO-1%")}))
+
+
+class TestAdminDataTenancy(TexTestCase):
+	"""G-26: another enterprise's hotel admin, through Desk/REST, neither reads nor changes this
+	tenant's access grants, enterprise, hotel group or group-site guest activity; permission
+	profiles are listed only to user administrators."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.tests.integration.test_crm_segments import OTHER as THERE
+		from kamra.tex.tests.integration.test_crm_segments import agent, other_tenant
+
+		self.there_hotel = THERE
+		other_tenant()
+		self.here = agent("g26-here@example.com", fx.PROPERTY)
+		self.grant = frappe.db.get_value("TEX Access Grant", {"user": self.here, "property": fx.PROPERTY})
+		grouped = fx.ensure_user("g26-group@example.com", ["Call Center Agent"])
+		self.group_grant = fx.ensure("TEX Access Grant", {"user": grouped, "hotel_group": fx.GROUP},
+		                             {"user": grouped, "scope_level": "Hotel Group", "hotel_group": fx.GROUP,
+		                              "permission_profile": "Reservations Agent"})
+		self.there = agent("g26-there@example.com", THERE, "Hotel Admin")
+		frappe.get_doc("User", self.there).add_roles("Hotel Admin")                 # Desk / REST role
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		self.group_site = frappe.get_doc({"doctype": "TEX Booking Site", "site_name": "G26 group site",
+		                                  "site_slug": "g26-group", "enabled": 1, "hotel_group": fx.GROUP,
+		                                  "default_market": "DE", "default_currency": "EUR", "currencies": "EUR"}
+		                                 ).insert(ignore_permissions=True).name
+		self.funnel = frappe.get_doc({"doctype": "TEX Funnel Event", "event": "search", "site": self.group_site,
+		                              "session_id": "g26"}).insert(ignore_permissions=True).name
+		self.abandoned = frappe.get_doc({"doctype": "TEX Abandoned Booking", "site": self.group_site,
+		                                 "session_id": "g26", "email": "g26.guest@example.com",
+		                                 "stage_reached": "guest_details"}).insert(ignore_permissions=True).name
+
+	def as_there(self):
+		frappe.set_user(self.there)  # nosemgrep: frappe-setuser -- the other tenant's admin
+		scope.clear_cache()
+
+	def test_grants_of_another_tenant_are_hidden_and_untouchable(self):
+		self.as_there()
+		self.assertFalse({self.grant, self.group_grant} & set(frappe.get_list("TEX Access Grant", pluck="name")))
+		self.assertFalse(frappe.get_doc("TEX Access Grant", self.group_grant).has_permission("read"))
+		doc = frappe.get_doc("TEX Access Grant", self.grant)
+		self.assertFalse(doc.has_permission("read"))
+		with self.assertRaises(frappe.PermissionError):                             # REST DELETE
+			frappe.delete_doc("TEX Access Grant", self.grant)
+		with self.assertRaises(frappe.PermissionError):                             # REST PUT, moving it here
+			doc.property = self.there_hotel
+			doc.save()
+		doc.reload()
+		doc.property = self.there_hotel
+		with self.assertRaises(frappe.PermissionError):                             # even from trusted code
+			doc.save(ignore_permissions=True)
+		with self.assertRaises(frappe.PermissionError):
+			frappe.get_doc("TEX Access Grant", self.grant).delete(ignore_permissions=True)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- verify
+		self.assertEqual(frappe.db.get_value("TEX Access Grant", self.grant, "property"), fx.PROPERTY)
+		own = frappe.db.get_value("TEX Access Grant", {"user": self.there})
+		self.as_there()
+		self.assertIn(own, frappe.get_list("TEX Access Grant", pluck="name"))           # its own tenant's grants
+
+	def test_enterprise_and_group_names_stay_in_their_tenant(self):
+		self.as_there()
+		self.assertNotIn(fx.ENTERPRISE, frappe.get_list("TEX Enterprise", pluck="name"))
+		self.assertNotIn(fx.GROUP, frappe.get_list("TEX Hotel Group", pluck="name"))
+		self.assertFalse(frappe.get_doc("TEX Hotel Group", fx.GROUP).has_permission("read"))
+		self.assertFalse(frappe.get_doc("TEX Enterprise", fx.ENTERPRISE).has_permission("read"))
+		self.assertTrue(frappe.get_list("TEX Enterprise", pluck="name"))                # its own is listed
+
+	def test_group_site_activity_stays_with_the_groups_hotels(self):
+		self.as_there()
+		self.assertNotIn(self.funnel, frappe.get_list("TEX Funnel Event", pluck="name"))
+		self.assertNotIn(self.abandoned, frappe.get_list("TEX Abandoned Booking", pluck="name"))
+		self.assertFalse(frappe.get_doc("TEX Abandoned Booking", self.abandoned).has_permission("read"))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		frappe.get_doc("User", self.here).add_roles("Hotel Admin")                  # may read the list in Desk
+		frappe.set_user(self.here)  # nosemgrep: frappe-setuser -- a user of the group's hotel
+		scope.clear_cache()
+		self.assertIn(self.abandoned, frappe.get_list("TEX Abandoned Booking", pluck="name"))
+
+	def test_permission_profiles_need_user_administration(self):
+		from kamra.tex.api import admin
+
+		frappe.set_user(self.here)  # nosemgrep: frappe-setuser -- a reservations agent
+		scope.clear_cache()
+		with self.assertRaises(frappe.PermissionError):
+			admin.profiles()
+		self.as_there()
+		self.assertTrue(admin.profiles()["profiles"])

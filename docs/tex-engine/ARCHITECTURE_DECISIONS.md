@@ -760,3 +760,32 @@ enterprise or group view (G-25).
 - The sandbox proves the full flow end to end without pretending to reach a channel.
 - Reconciliation against a provider's own booking list waits for an adapter that
   implements `fetch_reservations`.
+
+## ADR-040 The tenant structure is itself tenant data; guest identity is shared inside an enterprise
+**Context.** G-26: Desk/REST exposed the tenant structure across tenants.
+- `TEX Access Grant`: Hotel Admin had full Desk rights and there was no permission hook. Any
+  tenant's grants could be listed, and a grant of another tenant could be deleted (the
+  controller checked only saves), or moved to one's own hotel (it checked only the new state).
+- `TEX Enterprise` and `TEX Hotel Group` names were listable by every hotel admin.
+- Funnel events and abandoned bookings of a *group* booking site have no hotel yet. They were
+  read as platform-wide rows, so every tenant saw them (abandoned bookings carry e-mails).
+- `admin.profiles` answered any logged-in user.
+**Decision.**
+- *Tenant structure.* `TEX Access Grant`, `TEX Enterprise` and `TEX Hotel Group` are scoped
+  (`perm.TENANT_DOCTYPES`):
+  - an enterprise or group is visible only to users with a hotel in it;
+  - a grant is visible to its own user, and otherwise when it covers a hotel the viewer may
+    see. A platform-scope grant is visible only to its user and to platform administrators.
+- *Who may change a grant* is decided by the controller on every path, including trusted code
+  that ignores permissions:
+  - an update must be allowed on the grant *as it stands* and as it will be;
+  - a delete must be allowed on the grant as it stands (anti-escalation, ADR-020).
+- *Site activity.* `TEX Funnel Event` and `TEX Abandoned Booking` rows without a hotel belong to
+  their booking site's hotel or hotel group (`perm.SITE_DOCTYPES`). A row with neither is
+  platform-level.
+- *Permission profiles* are listed only to user administrators (and platform administrators).
+- *Guest identity* stays shared inside an enterprise, by design (ADR-018). A hotel admin of any
+  hotel of the enterprise sees and edits the enterprise's guest profiles, which is what a
+  chain-wide CRM needs. Every profile change is audited, and nothing crosses enterprises.
+**Consequences.** A hotel-only CRM view, where one hotel cannot see another hotel's guests
+inside the same enterprise, would need a per-enterprise setting. It is not built.

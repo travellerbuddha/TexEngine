@@ -117,6 +117,8 @@ def invite_user(email: str, first_name: str, last_name: str | None = None):
 
 @frappe.whitelist()
 def profiles():
+	if not (scope.is_platform_admin() or _user_admin_props()):
+		frappe.throw(_("Not permitted: {0}.").format("user.admin"), frappe.PermissionError)
 	rows = frappe.get_all("TEX Permission Profile", fields=["name", "profile_name", "description", "is_system"],
 	                      order_by="profile_name asc")
 	for r in rows:

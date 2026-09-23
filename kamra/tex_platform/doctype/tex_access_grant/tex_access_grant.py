@@ -18,6 +18,9 @@ class TEXAccessGrant(Document):
 			frappe.throw(_("Only platform administrators grant platform scope."), frappe.PermissionError)
 		from kamra.tex.security import grants
 
+		before = None if self.is_new() else self.get_doc_before_save()
+		if before:
+			grants.assert_can_manage(before)       # may I touch the grant as it stands? (G-26)
 		grants.assert_can_manage(self)
 
 	def on_update(self):
@@ -29,6 +32,7 @@ class TEXAccessGrant(Document):
 	def on_trash(self):
 		from kamra.tex.security import grants
 
+		grants.assert_can_manage(self)             # whoever deletes it, however (G-26)
 		grants.audit_grant(self, "grant.delete")
 
 	def after_delete(self):
