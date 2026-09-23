@@ -593,7 +593,7 @@
  "rates.policy.activate_now": "Сейчас",
  "rates.policy.activate_title": "Активировать эту редакцию?",
  "rates.policy.activated": "Редакция действует",
- "rates.policy.allotments.help": "До даты релиза контракт может продать не больше указанного числа номеров в ночь; гарантированные квоты недоступны остальным.",
+ "rates.policy.allotments.help": "До даты релиза контракт может продать не больше указанного числа номеров в ночь; гарантированные квоты недоступны остальным. После релиза он продаёт из общей продажи до своей отсечки.",
  "rates.policy.allotments.intro": "Номера, закреплённые за контрактом на каждую ночь; возвращаются в общую продажу в день релиза.",
  "rates.policy.allotments.one": "квота",
  "rates.policy.allotments.title": "Квоты",
@@ -934,5 +934,7 @@
  "rates.version_status.Draft": "Черновик",
  "rates.version_status.Published": "Опубликована",
  "rates.version_status.Superseded": "Заменена",
- "rates.version_status.Withdrawn": "Отозвана"
+ "rates.version_status.Withdrawn": "Отозвана",
+ "rates.f.cutoff_days": "Отсечка продаж (дней до заезда)",
+ "rates.h.cutoff_days": "За столько дней до заезда контракт прекращает продажу этих ночей, в том числе из общей продажи. 0 — без отсечки. Не зависит от релиза."
 }
