@@ -460,6 +460,10 @@ def import_bookings(property: str, bookings):
 				doc.status = row["status"]
 				doc.save()
 			created.append(doc.name)
+		except frappe.QueryDeadlockError:
+			# InnoDB rolled back the whole import so far: stop, never report those rows as
+			# created (TEX Engine, G-49 review)
+			raise
 		except Exception as e:
 			errors.append({"row": i + 1,
 			               "guest": row.get("guest_name"),

@@ -66,6 +66,17 @@ def reservation_validate(doc, method=None):
 			title=_("Price locked"))
 
 
+def reservation_before_insert(doc, method=None):
+	"""A TEX hotel's reservation written outside TEX locks its nights before it takes its name,
+	in a TEX booking's lock order (ADR-048)."""
+	from kamra.tex.legacy import is_tex_hotel
+
+	if is_tex_hotel(doc.property):
+		from kamra.tex.availability.repository import lock_before_naming
+
+		lock_before_naming(doc)
+
+
 def reservation_on_update(doc, method=None):
 	if doc.guest:
 		from kamra.tex.crm import service as crm

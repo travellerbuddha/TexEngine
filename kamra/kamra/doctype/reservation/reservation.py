@@ -45,7 +45,18 @@ class Reservation(Document):
 		this stops UNASSIGNED bookings quietly over-selling a category. The
 		allowance (room type override, else property-wide, default 0%) is a
 		revenue-management decision made in Settings - never implicit.
+
+		A TEX hotel's rooms are TEX inventory instead (TEX Engine, G-49, ADR-048):
+		pools, configured inventory, manual adjustments, closures, the explicit
+		oversell limit and allotments. A stay the TEX services sold was checked
+		under TEX's inventory lock; any other write that takes rooms (Desk, REST,
+		imports) takes that lock and is checked against TEX inventory here.
 		"""
+		from kamra.tex.legacy import is_tex_hotel
+		if is_tex_hotel(self.property):
+			from kamra.tex.availability.repository import guard_reservation
+			guard_reservation(self)
+			return
 		# a booking a channel manager already sold is accepted as sold (TEX, G-69)
 		if self.flags.get("tex_channel_accept"):
 			return
@@ -95,6 +106,7 @@ class Reservation(Document):
 		self.validate_status_transition()
 		self.validate_blacklist()
 		self.validate_occupancy()
+		self.validate_room_type_belongs_to_property()
 		self.validate_room_belongs_to_type()
 		self.validate_no_overlap()
 		self.validate_villa_lockout()
@@ -307,6 +319,21 @@ class Reservation(Document):
 		else:
 			self.commission_amount = 0
 
+	def validate_room_type_belongs_to_property(self):
+		"""A reservation books its own hotel's room types: another hotel's room type would be
+		counted against that hotel's inventory without its checks (TEX Engine, G-49 review).
+		Checked when the stay is written or its hotel or room type changes."""
+		if not self.room_type:
+			return
+		old = None if self.is_new() else self.get_doc_before_save()
+		if old and (old.room_type, old.property) == (self.room_type, self.property):
+			return
+		owner = frappe.db.get_value("Room Type", self.room_type, "property")
+		if owner and owner != self.property:
+			# the other hotel is not named: the user may not see it
+			frappe.throw(_("Room type {0} does not belong to {1}.").format(self.room_type, self.property),
+			             title=_("Wrong hotel"))
+
 	def validate_room_belongs_to_type(self):
 		if not self.room:
 			return
@@ -386,10 +413,10 @@ class Reservation(Document):
 			"Inquiry", "Quoted", "Requested",
 		) or not self.room_type:
 			return
-		
+
 		# Get Room Category of the requested Room Type
 		category = frappe.db.get_value("Room Type", self.room_type, "room_category")
-		
+
 		if category == "Villa":
 			# A Villa is being booked. Check if ANY individual/shared room booking is confirmed/checked-in
 			overlap = frappe.db.sql(

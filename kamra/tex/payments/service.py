@@ -45,6 +45,12 @@ class RefundUnknown(frappe.ValidationError):
 	ADR-044)."""
 
 
+# a refund on record (Pending) this long without an answer: the run that asked for it died, or
+# the gateway never answered (its calls time out in well under a minute). Staff check it at the
+# gateway, and nothing refunds its money again until they did (G-45 re-review)
+REFUND_STUCK_MINUTES = 5
+
+
 def _durable_commit() -> None:
 	"""Put a money movement on record before a gateway is asked to make it, so that a crash or a
 	timeout after the gateway acted can never lose the record and repeat the movement. Tests
@@ -639,6 +645,21 @@ def refunded_of(transaction: str) -> D:
 	return sum((from_db(r.amount, r.currency) for r in rows), ZERO)
 
 
+def pending_refunds(booking: str) -> list:
+	"""Refunds that come off this booking and the gateway has not confirmed (Pending): their
+	money may be back on the card already, so it is not the booking's to use (G-45 re-review)."""
+	return frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Refund", "status": "Pending",
+	                                                          "booking": booking},
+	                      fields=["name", "amount", "currency"])
+
+
+def stuck(row, now=None) -> bool:
+	"""A Pending refund the gateway never answered (UNKNOWN), or on record so long that the run
+	asking for it must have died."""
+	now = get_datetime(now or now_datetime())
+	return row.error_code == "UNKNOWN" or get_datetime(row.creation) < add_to_date(now, minutes=-REFUND_STUCK_MINUTES)
+
+
 def in_flight_of(transaction: str) -> D:
 	"""Refunds of this charge the gateway was asked for and has not confirmed (Pending): the
 	money may be gone, so it is never refunded or planned again (review of ADR-044)."""
@@ -731,7 +752,7 @@ def booking_charges(booking: str) -> list[dict]:
 
 
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
-           _system: bool = False, durable: bool = False) -> dict:
+           _system: bool = False, durable: bool = False, on_record=None) -> dict:
 	"""Refund a successful charge, or money a gateway captured that TEX refused to count
 	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
 	stated, against the captured payment, and never touches a booking.
@@ -745,7 +766,10 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	outcome) is a definite failure; any other error (timeout, connection, server) leaves the
 	refund Pending with the error UNKNOWN and raises ``RefundUnknown``: the gateway may have
 	refunded, so the same key never asks again and staff check it at the gateway. A replay of
-	the key returns the refund as it is (``status``)."""
+	the key returns the refund as it is (``status``).
+
+	``on_record(refund)``: called with the new refund's name before it is committed, so the
+	caller's record of it (the guest change making it) is durable with it (G-45 re-review)."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	if _system:
 		if not booking:
@@ -790,6 +814,8 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	r = _new_txn(property=txn.property, txn_type="Refund", method=txn.method, amount=amount, currency=ccy,
 	             provider_account=txn.provider_account, provider=txn.provider, idempotency_key=idempotency_key,
 	             parent_transaction=txn.name, booking=target, reason=reason)
+	if on_record:
+		on_record(r.name)
 	if durable:
 		_durable_commit()                 # on record before the gateway acts (review of ADR-044)
 	try:
@@ -843,9 +869,11 @@ def _refund_unknown(r, txn, error: str, durable: bool) -> None:
 
 
 def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | None, reason: str) -> dict:
-	"""Staff checked at the gateway a refund it never confirmed (``RefundUnknown``), and record
-	what it did: ``Succeeded`` takes the money off the booking the refund named (the payment's
-	unallocated money first, ADR-042), ``Failed`` leaves it where it is. Needs payment.refund."""
+	"""Staff checked at the gateway a refund it never confirmed (``RefundUnknown``, or left
+	Pending by a run that died), and record what it did: ``Succeeded`` takes the money off the
+	booking the refund named (the payment's unallocated money first, ADR-042), ``Failed`` leaves
+	it where it is. Needs payment.refund. Callers go through ``guest_changes.verify_refund``,
+	which also settles the guest change the refund was made for."""
 	r = frappe.get_doc("TEX Payment Transaction", refund_txn, for_update=True)
 	scope.require("payment.refund", r.property)
 	if r.txn_type != "Refund" or r.status != "Pending":

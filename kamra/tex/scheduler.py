@@ -48,6 +48,11 @@ def every_15_minutes() -> None:
 		_run(job)
 
 
+def site_midnight() -> None:
+	# allotment releases and cutoffs that start today reach the channels at once (G-49 review)
+	_run("kamra.tex.distribution.repository.allotment_boundaries")
+
+
 def fx_daily() -> None:
 	_run("kamra.tex.connect.fx_providers.daily_fetch")
 

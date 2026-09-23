@@ -194,6 +194,8 @@
  "res.gcr.overpaid": "Zapłacono ponad nową sumę",
  "res.gcr.reason": "Powód",
  "res.gcr.refund_pending": "Zwrot jest w kolejce i zostanie wykonany automatycznie.",
+ "res.gcr.penalty_terms": "Zgłoszone w ramach warunków anulowania taryfy: akceptując, rezygnujesz z tego, co te warunki by naliczyły.",
+ "res.gcr.refund_waits": "Reszta tego zwrotu czeka, aż zwrot powyżej zostanie sprawdzony.",
  "res.gcr.refunded": "Zwrócono",
  "res.gcr.reject": "Odrzuć",
  "res.gcr.reject_body": "Rezerwacja pozostaje bez zmian.",
@@ -324,7 +326,7 @@
  "res.gcr.staff.refund_by_staff": "Do zwrotu przez hotel:",
  "res.gcr.staff.verify_refund_at_gateway": "Zwrot do sprawdzenia w bramce płatności:",
  "res.gcr.staff.unknown_refund": "Bramka płatności nigdy nie potwierdziła zwrotu {refund}: sprawdź go tam, zanim zwrócisz ponownie.",
- "res.gcr.verify_body": "Bramka płatności nie odpowiedziała na zwrot {refund}. Sprawdź w niej, czy został wykonany, i zapisz wynik.",
+ "res.gcr.verify_body": "Bramka płatności nie odpowiedziała na zwrot {refund}. Sprawdź w niej, czy został wykonany, i zapisz wynik: TEX zwróci następnie to, co zmiana jest jeszcze winna.",
  "res.gcr.verify_choice": "Co zrobiła bramka płatności",
  "res.gcr.verify_succeeded": "Zwróciła pieniądze",
  "res.gcr.verify_failed": "Nie zwróciła"

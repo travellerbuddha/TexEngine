@@ -297,6 +297,10 @@ def run_import(property: str, csv_text: str, preset: str = "auto"):
 					doc.status = "Checked In"
 					doc.save()
 			created.append(doc.name)
+		except frappe.QueryDeadlockError:
+			# InnoDB rolled back the whole import so far: stop, never report those rows as
+			# created (TEX Engine, G-49 review)
+			raise
 		except Exception as e:
 			errors.append({"row": i, "guest": row["guest_name"],
 			               "error": str(e)[:160]})

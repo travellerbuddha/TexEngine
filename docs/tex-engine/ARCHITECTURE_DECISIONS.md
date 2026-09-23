@@ -1142,6 +1142,77 @@ the deposit due was never recomputed.
 - Schema: four fields on TEX Guest Change Request (no patch: migrate adds them, nothing to
   backfill before release).
 
+**Second review follow-up (G-45 re-review F1–F8).** The first follow-up made each refund
+durable, but a refund run could still act around its own refund in flight, two runs could
+overlap, and some money could be left with no one to settle it.
+- *A refund run never plans around its own refund in flight, and runs one at a time (F1).*
+  `payments.service.refund(on_record=…)` names the new refund on the request
+  (`refund_in_flight`) in the same commit as the Pending refund row, before the gateway is
+  asked. Every refund run (`guest_changes.settle`) starts, and re-checks before each refund,
+  with that refund: still Pending and fresh, the run stops and a later run looks again;
+  unanswered (`UNKNOWN`) or older than `REFUND_STUCK_MINUTES` (5; the worker that asked died),
+  it goes to staff as "Verify refund at gateway" with `unknown_refund`, and the request waits.
+  Nothing is ever planned around it: its charge is not swapped for an older one, and a single
+  charge is never handed to staff as "Refund by staff" while its refund may have been made.
+  One run per request at a time: the run holds the request's refunds (`settle_claim`,
+  `settle_claimed_until`, a lease of `SETTLE_LEASE_MINUTES` = 10 renewed with each refund,
+  committed with the first refund's record); a second run meanwhile does nothing, and a run
+  that died is taken over once its lease lapsed. `apply_paid` run twice for one payment (the
+  job and the scheduler) does nothing the second time: a payment already given back
+  (`returned_charges`) or a request whose refund run is pending is never a new late payment.
+  Refunds that come off a booking and have no answer yet (a staff refund, a guest change's
+  refund) are set aside from what the booking holds (`earmarked`): they reduce what is still
+  over, what a change may use and the guest's credit.
+- *Every unconfirmed refund can be closed, and is seen (F2).* `payments.finish_refund`
+  (payment.refund on the refund's hotel, reason required, POST, audited
+  `payment.refund_verified`) records what the gateway did with any Pending refund, from the
+  payment screen ("Record gateway outcome"); a guest change the refund was made for is settled
+  with it (`guest_changes.verify_refund`, the same path as closing it on the guest change
+  card). The system status (`payments.callbacks` `refund_unknown`) counts every refund left
+  Pending for more than `REFUND_STUCK_MINUTES`, not only `UNKNOWN` ones. A replay of an
+  unanswered refund is announced as not confirmed, never as done; what is refundable leaves
+  refunds in flight out.
+- *Nothing of a refund is dropped after an unanswered one (F3).* When a refund is not
+  answered, the request keeps `settle_pending` (the rest stays owed, set aside and blocks new
+  changes); closing the refund with its outcome takes it off `staff_amount` (and adds it to
+  `refunded_amount` when it was made) and queues the run again: TEX refunds what the change
+  still owes from the other charges, or hands it to staff. A "Failed" outcome is a definite
+  no: that charge is skipped, as for any refusal. `refund_done` is true only once nothing of
+  the refund is still being made; a refund to verify is shown as a card refund, not a hotel
+  refund.
+- *A paid change still to be applied is set aside and blocks new changes (F4).* The payment
+  of a change waiting for `apply_paid` (and a payment to give back not given back yet) is not
+  the booking's to use: no refund plan takes it, no change counts it, and the booking takes no
+  new guest change until it is applied (`ChangeApplying`, `changes_blocked:
+  CHANGE_APPLYING`).
+- *The rate's terms are judged on an arrival moved later too (F5).* Chosen: a change that
+  moves the arrival later while cancelling now would cost a fee goes to the hotel
+  (`staff_approval`, `settlement.settle(terms_review=True)`), whatever its price: moved out of
+  its penalty window the stay could then be shortened (refund) or cancelled (no fee) without
+  the fee. A later check-out (an extension), fewer or more guests, and an earlier arrival do
+  not move the window and stay self-service. The request records `penalty_terms`; staff see
+  it. (Not chosen: judging every later change on the terms held at the first change; it
+  would need the original terms carried on the reservation and would still leave the
+  cancellation path open.)
+- *Transient errors are retried, never judged (F6).* `apply_paid` retries a deadlock, a lock
+  wait or statement timeout and a lost connection (MariaDB 1205, 1213, 1969; client 2003,
+  2006, 2013; `pymysql.InterfaceError`) a few times, then leaves the change waiting for the
+  scheduler; only an error of the change itself fails it and refunds the payment.
+- *A queued refund cannot be lost (F7).* `apply_paid` registers the refund job before its
+  own commit, so that commit sends it and a later rollback in the same scheduler run cannot
+  drop it. The scheduler also sweeps succeeded payments of requests no longer waiting (30
+  days back) that were neither the change's payment nor given back and that no refund run
+  holds, and hands them to `apply_paid` (the apply job was lost).
+- *One lock order, the channel's flows included (F8).* A channel modification or
+  cancellation locks the booking, then each reservation, then its nights, and voids a guest
+  change still waiting for a room the channel changed or cancelled (`close_open`), as staff
+  and guest cancellations do.
+- Schema: five fields on TEX Guest Change Request (`refund_in_flight`, `returned_charges`,
+  `settle_claim`, `settle_claimed_until`, `penalty_terms`; no patch: migrate adds them).
+- Consequences: a request whose refund the gateway did not answer blocks new guest changes of
+  its booking until staff record the outcome (they see it in the queue, on the payment screen
+  and in the system status). A stay inside its penalty window cannot be moved later online.
+
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 *Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
 a suspend stops quotes and bookings in flight, and the scheduler isolates each record.*
@@ -1488,6 +1559,136 @@ sends:
 - A per-hotel sending address (the hotel's own domain) needs an outgoing account per domain
   with SPF/DKIM. That is an owner input and is not built.
 - Bounces after the mail server accepted a message are not tracked.
+
+## ADR-048 A TEX hotel's rooms are TEX inventory, whoever writes the reservation; an allotment's release and cutoff are separate
+*Amended by the G-49 review follow-up: a change is checked only on the nights it newly takes; a
+cutoff also gives the rooms back; a reservation books only its own hotel's room types; a service
+flag covers one save; deadlocks of desk writes, channel bookings and imports; channels hear
+allotment deadlines at the site's midnight.*
+
+**Context.** G-49 (R-17).
+- The legacy `Reservation.validate_type_capacity` (physical rooms of the room type times the
+  overbooking allowance) ran on every save, TEX's own stays included. It refused what TEX had
+  allowed: an explicit oversell, a shared pool (a Deluxe sold from the Standard rooms of its
+  pool) and configured inventory above the physical rooms. It also refused later saves of such a
+  stay (a note, a check-in). Only channel bookings were excepted (`tex_channel_accept`, G-69).
+- A reservation written outside the TEX services (the Desk form, REST, `import_bookings`,
+  `migrate.run_import`, legacy PMS actions by platform administrators) took no TEX inventory
+  lock. It was checked only against its own snapshot, by the legacy rule. TEX's counts included
+  it once it existed, but closures, manual adjustments and guaranteed allotments did not stop
+  it, and a desk stay and a TEX booking could both take the last room.
+- R-17 lists "allotment, cutoff, release"; an allotment had one field, `release_days`.
+- ADR-028 keeps admin imports writing reservations directly (migrations, not sales).
+
+**Decision.**
+- *At a TEX hotel TEX inventory is the only capacity rule.* `validate_type_capacity` asks
+  `kamra.tex.legacy.is_tex_hotel` first. For a TEX hotel it hands over to
+  `availability.repository.guard_reservation` and the legacy rule never runs. Hotels outside TEX
+  keep the legacy rule unchanged (the upstream suites rely on it).
+- *Who checked it.* A stay written by the TEX booking or modification service carries
+  `flags.tex_inventory_checked`: the service locked the nights and recounted for its contract
+  (allotments included) before writing. A channel's sale keeps `flags.tex_channel_accept` and is
+  accepted as sold. Document flags live only in the process: a REST payload cannot set them, so
+  a forged `tex_booking` or price lock gains nothing.
+- *Every other write takes the lock.* A save "takes rooms" when it creates a live stay, moves a
+  stay into a live status (Waitlist → Confirmed), or changes the hotel, room type or nights of a
+  live stay. Such a save takes the same `TEX Inventory Day` locks as a TEX booking
+  (`lock_nights`) and recounts under them with a locking read. A new reservation takes them in
+  `before_insert`, before its naming-series row lock: a TEX booking locks inventory days first
+  and names after, so the two never wait on each other in a cycle. It is refused when TEX has no room
+  left, with the night, the sold count and the capacity: closures, manual adjustments, the
+  oversell limit, pools, configured inventory and guaranteed allotments all apply. It sells from
+  general sale (no contract), so it never uses a contract's allotment. A day-use stay holds its
+  day. Restrictions (stop sell, LOS, CTA …) are selling rules of TEX's channels and do not apply
+  to it.
+- *Saves that take no room are never refused* (a note, a room assignment, check-in, a payment,
+  cancellation), so an oversold stay stays editable.
+- *A change is checked only on the nights it newly takes* (review H1, M1). The nights a stay
+  already holds in the pool (`repository.held_nights`) are its own: a cutoff, a closure or a
+  full house on them never refuses a change. Leaving early, a room type of the same pool, or an
+  extension is checked only on its new nights; a change that takes none is never refused. A
+  move to another pool (or hotel) takes every night again. This applies to TEX modifications
+  (`modification.propose`, staff and guest self-service alike) and to writes outside TEX (the
+  guard locks and recounts only the new nights). A night held under one contract and kept after
+  repricing under another is not re-checked against the new contract's allotment.
+- *A reservation books only its own hotel's room types* (review M3). `Reservation.validate`
+  refuses another hotel's room type (without naming that hotel), for every hotel, TEX or not;
+  it is checked when the stay is written or its hotel or room type changes, so legacy rows are
+  never blocked. The guard and the lock before naming work on the room type's own hotel, so no
+  inventory row of one hotel is created under another and no figure leaks.
+- *A service's flag covers one save* (review L3). The guard pops `tex_inventory_checked`, so a
+  later save of the same document object is checked again.
+- *We chose to take the lock rather than refuse.* The model cannot tell a Desk sale from a
+  migration import or a legacy PMS action (an extension, a waitlist confirmation). ADR-028 keeps
+  imports. Refusing would strand the existing stays of a hotel that joins TEX. With the lock, no
+  write can hold a TEX hotel's rooms outside TEX's rules. The legacy selling endpoints stay
+  refused (ADR-028).
+- *Release and cutoff are two deadlines*, both in days before each night of the allotment:
+  - release (`release_days`, unchanged): the hotel's side. Unsold rooms go back to general sale:
+    a guaranteed allotment stops being withheld, the contract's cap ends and it sells from
+    general sale;
+  - cutoff (`cutoff_days`, new): the partner's side, the contract's booking deadline. From then on
+    the contract sells nothing more for that night, from its allotment or from general sale.
+    Other sales are unaffected. 0 = no cutoff.
+  - *The cutoff also gives the rooms back* (review L2). Once the contract can no longer book its
+    rooms, nobody could, so they return to general sale at the cutoff at the latest: the
+    effective release is `max(release, cutoff)`. We chose this over letting privileged staff book
+    under the contract after its cutoff: that would need a new capability and an audited
+    override in the booking service, while the rooms simply went unsold. A rooming list for rooms
+    already booked needs no inventory.
+
+  Release 7 / cutoff 2: the rooms return 7 days out and the partner books from general sale until
+  2 days out. Cutoff 10 / release 3: the partner stops 10 days out and the rooms return then.
+  The pure `inventory_math` reports a cut-off night as `cutoff`. Search, quotes, bookings,
+  modifications, the ARI grid and channel ARI all read it. Both deadlines count days on the
+  site's day (System Settings time zone), not a hotel's own time zone.
+- *Channels hear a deadline when it starts* (review L4). A job just after the site's midnight
+  (`distribution.repository.allotment_boundaries`, cron `1 0 * * *`, which Frappe evaluates on
+  the site's clock) queues an ARI push for the nights whose release or cutoff starts that day.
+  The 02:30 daily resync remains the safety net.
+- The controller keeps both within 0 to 365 days. A disabled allotment always saves, so one
+  whose release is above 365 (possible before p27) can be switched off; to edit it otherwise,
+  bring the value into range. The allotment editor (Rates → Allotments) sets both.
+- *Patch p27.* Every existing allotment gets cutoff 0 and sells exactly as before. A negative
+  release behaved like 0 and becomes 0. A release above 365 days is printed for review.
+- The ARI restriction field `release_days` (R-16) is a separate thing: a booking-window rule
+  on any scope ("stop selling N days before arrival", violation `RELEASE`). It keeps its name
+  and meaning.
+
+**Consequences.**
+- A reservation at a TEX hotel written through Desk, REST or an import now waits for TEX
+  bookings of the same nights, and may be refused where the legacy rule accepted it. A TEX
+  hotel's reservations are sold through TEX. To sell above capacity, staff set a manual
+  adjustment or an oversell limit in Inventory.
+- *Deadlocks* (review M2, L1). Lock orders that can still meet:
+  - `modification.apply` locks the booking, then the reservation (`FOR UPDATE`), then the
+    nights (G-45 order, kept). Every recount (`create_booking`, the guard, a channel booking)
+    locks the nights, then reads the pool's live reservations `LOCK IN SHARE MODE`. That read
+    locks every live reservation of the pool arriving before the stay ends, not only the
+    overlapping ones: the index is `(room_type, status, check_in_date)`, and a
+    `check_out_date > start` condition would only filter rows after they are locked. A lower
+    bound on arrival would need a maximum stay length, which neither TEX nor the legacy PMS
+    enforces, so the read is left as it is. An `apply` holding its reservation and a recount
+    holding the nights can therefore deadlock; one of them is the victim.
+  - Every TEX endpoint into a booking or a change re-runs a victim (`retry_on_deadlock`:
+    `public.book`, `manage_apply`, `manage_change_pay`, `crs.book`, `crs.apply_modification`,
+    `crs.resolve_guest_change`, `ui_crs.book`; a test keeps the list complete). Payment-driven
+    guest changes retry from their job.
+  - A desk or REST write cannot be re-run for its user. When it is the victim it is refused with
+    "please try again" (`InventoryBusy`, a `ValidationError` that is also a
+    `QueryDeadlockError`): nothing of it was saved.
+  - Imports (`import_bookings`, `run_import`) stop on a deadlock instead of reporting the rows
+    InnoDB has already undone as created.
+  - A channel booking takes every room's nights before its guest, booking or rooms take a name,
+    in the order of a TEX booking and of a desk write.
+  - Remaining risk: an edit of an existing desk stay holds its own row (`check_if_latest`)
+    before the nights, and a multi-row import holds the naming series from its first row on.
+    These are rare and end as "please try again".
+- A Desk/REST insert at a TEX hotel still prices through the legacy auto-price. It is not a TEX
+  sale and carries no TEX price lock. Only its inventory is governed here (G-92, open).
+- Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
+  bypass this guard, as they bypass every other rule.
+- An allotment's cutoff is per contract. Allotments still have no channel dimension (G-41).
 
 ## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
 **Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day

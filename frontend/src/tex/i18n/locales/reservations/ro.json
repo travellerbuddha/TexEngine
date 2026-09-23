@@ -186,6 +186,8 @@
  "res.gcr.overpaid": "Plătit peste noul total",
  "res.gcr.reason": "Motiv",
  "res.gcr.refund_pending": "O rambursare este programată și rulează automat.",
+ "res.gcr.penalty_terms": "Cerută în condițiile de anulare ale tarifului: aprobând-o, renunțați la ce ar percepe aceste condiții.",
+ "res.gcr.refund_waits": "Restul acestei rambursări așteaptă până când rambursarea de mai sus este verificată.",
  "res.gcr.refunded": "Rambursat",
  "res.gcr.reject": "Respinge",
  "res.gcr.reject_body": "Rezervarea rămâne neschimbată.",
@@ -313,7 +315,7 @@
  "res.gcr.staff.refund_by_staff": "De rambursat de hotel:",
  "res.gcr.staff.verify_refund_at_gateway": "Rambursare de verificat la procesatorul de plăți:",
  "res.gcr.staff.unknown_refund": "Procesatorul de plăți nu a confirmat niciodată rambursarea {refund}: verificați-o acolo înainte de a rambursa din nou.",
- "res.gcr.verify_body": "Procesatorul de plăți nu a răspuns la rambursarea {refund}. Verificați acolo dacă a fost făcută, apoi înregistrați rezultatul.",
+ "res.gcr.verify_body": "Procesatorul de plăți nu a răspuns la rambursarea {refund}. Verificați acolo dacă a fost făcută, apoi înregistrați rezultatul: TEX rambursează apoi ce mai datorează modificarea.",
  "res.gcr.verify_choice": "Ce a făcut procesatorul de plăți",
  "res.gcr.verify_succeeded": "A rambursat banii",
  "res.gcr.verify_failed": "Nu a rambursat"

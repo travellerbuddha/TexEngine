@@ -40,3 +40,4 @@ kamra.patches.tex.p22_payment_api_key_password
 kamra.patches.tex.p23_system_status_alerts
 kamra.patches.tex.p24_g83_review
 kamra.patches.tex.p25_contract_header_snapshot
+kamra.patches.tex.p27_inventory_cutoff_release

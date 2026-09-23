@@ -612,7 +612,7 @@ export const POLICY_KINDS: PolicyKind[] = [
     intro: "rates.policy.allotments.intro",
     titleField: (d) => String(d.name || ""),
     propertyRequired: true,
-    newDoc: () => ({ rooms: 1, release_days: 7, guaranteed: 0, disabled: 0 }),
+    newDoc: () => ({ rooms: 1, release_days: 7, cutoff_days: 0, guaranteed: 0, disabled: 0 }),
     list: [
       { key: "room_type", label: "rates.f.room_type", render: "room" },
       { key: "contract", label: "rates.f.contract", render: "contract" },
@@ -633,6 +633,7 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "date_to", kind: "date", label: "rates.f.date_to", required: true },
           { key: "rooms", kind: "int", label: "rates.f.rooms_per_night", required: true },
           { key: "release_days", kind: "int", label: "rates.f.release_days", help: "rates.h.release_days" },
+          { key: "cutoff_days", kind: "int", label: "rates.f.cutoff_days", help: "rates.h.cutoff_days" },
           { key: "guaranteed", kind: "check", label: "rates.f.guaranteed", help: "rates.h.guaranteed" },
           { key: "disabled", kind: "check", label: "rates.f.disabled" },
           { key: "note", kind: "text", label: "rates.f.note", wide: true },

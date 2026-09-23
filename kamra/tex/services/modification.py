@@ -210,8 +210,10 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	warnings = []
 	stay_changed = any(k in changes for k in ("check_in", "check_out", "room_type"))
 	if stay_changed:
+		# the nights the stay already holds stay its own: only the new ones are checked (ADR-048)
 		count, _days = avail.stay_availability(res.property, req.room_type, terms.contract_id, req.check_in,
-		                                      req.check_out, now.date(), exclude=[res.name], locking=_locked)
+		                                      req.check_out, now.date(), exclude=[res.name], locking=_locked,
+		                                      held=avail.held_nights(req.room_type, res))
 		if count < 1:
 			warnings.append({"code": "SOLD_OUT", "message": _("No availability for the new stay.")})
 		sc = RestrictionScope(room_type=req.room_type, contract=terms.contract_id, market=req.market,
@@ -354,6 +356,8 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		                "amount_before_tax": final_total - quantize(D(amounts["tax_amount"]) * factor, ccy),
 		                "tex_margin_amount": D(amounts["tex_margin_amount"]) + (final_total - new_total)})
 	res.flags.tex_modification = True
+	# the new nights were locked and recounted for the contract above (ADR-048)
+	res.flags.tex_inventory_checked = True
 	res.update({
 		"check_in_date": req["check_in"], "check_out_date": req["check_out"], "room_type": req["room_type"],
 		"adults": int(req["adults"]), "children": len(req.get("children") or []), "rate_plan": req.get("rate_plan"),

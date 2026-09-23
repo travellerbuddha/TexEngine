@@ -104,6 +104,97 @@ class TestConcurrentLastRoom(IntegrationTestCase):
 		self.assertEqual(live, 2)
 
 
+class TestConcurrentDeskAndTexBooking(IntegrationTestCase):
+	"""G-49: a TEX booking of the last Deluxe room is in flight (its nights locked, not yet
+	committed) when a reservation for the same nights is written outside TEX (Desk form, REST,
+	import). The outside write waits for TEX's inventory lock, then sees the room is gone: the
+	hotel is never oversold. (Before G-49 the outside write took no lock and was checked only
+	against its own snapshot, so both were kept.)"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		cls.f = fx.base_setup()
+		fx.create_contract(cls.f, code="CONC")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		cls.ci, cls.co = fx.d(8, 20), fx.d(8, 22)
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=cls.ci, check_out=cls.co, rooms=[{"adults": 2}],
+		                      market="DE", channel="DIRECT_WEB", currency="EUR")["properties"][0]
+		cls.dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})
+		offer = next(o for o in prop["offers"] if o["room_type"] == cls.dlx and o["board"] == "AI")
+		quotes = [quoting.create_quote(offer["rooms"][0]["offer_key"])["quote_id"] for _ in range(2)]
+		booking.create_booking(quote_ids=[quotes[0]], guest={"first_name": "Pre", "last_name": "Booked",
+		                                                     "email": "pre.desk@example.com"}, payment_method="Card")
+		cls.racer = quotes[1]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		from kamra.api import _find_or_create_guest
+
+		cls.guest = _find_or_create_guest("Desk Racer", "+49 30 5550151")
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.db.sql("DELETE FROM `tabGuest` WHERE phone=%s", "+49 30 5550151")
+		_cleanup()
+		super().tearDownClass()
+
+	def test_a_desk_reservation_waits_for_the_tex_booking_and_is_refused(self):
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		tex_holds, desk_done = threading.Event(), threading.Event()
+		results: dict[str, str] = {}
+
+		def tex():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+				booking.create_booking(quote_ids=[self.racer], guest={"first_name": "Tex", "last_name": "Racer",
+				                                                      "email": "tex.racer@example.com"},
+				                       payment_method="Card")
+				tex_holds.set()
+				desk_done.wait(timeout=5)     # the desk write runs while this booking holds the nights
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each racer is its own request
+				results["tex"] = "booked"
+			except Exception as e:
+				frappe.db.rollback()
+				results["tex"] = f"{type(e).__name__}: {e}"
+			finally:
+				tex_holds.set()
+				frappe.destroy()
+
+		def desk():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a desk user
+				tex_holds.wait(timeout=30)
+				frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+				                "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
+				                "adults": 2, "status": "Confirmed"}).insert()
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each racer is its own request
+				results["desk"] = "booked"
+			except Exception as e:
+				frappe.db.rollback()
+				results["desk"] = f"{type(e).__name__}: {e}"
+			finally:
+				desk_done.set()
+				frappe.destroy()
+
+		threads = [threading.Thread(target=tex), threading.Thread(target=desk)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join(timeout=90)
+		self.assertEqual(results.get("tex"), "booked", results)
+		self.assertIn("TEX inventory", results.get("desk", ""), results)
+		frappe.db.rollback()
+		live = frappe.db.count("Reservation", {"property": fx.PROPERTY, "room_type": self.dlx,
+		                                       "status": ("in", ["Confirmed", "Pending Payment"])})
+		self.assertEqual(live, 2)
+
+
 class TestConcurrentAllocation(IntegrationTestCase):
 	"""G-14: two finance users allocate the same unallocated payment to two bookings at the
 	same instant. The payment is allocated once; the other is told nothing is left."""
