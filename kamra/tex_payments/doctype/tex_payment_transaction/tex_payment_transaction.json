@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,22 +11,22 @@
   "method",
   "amount",
   "currency",
-  "column_90",
+  "column_92",
   "provider_account",
   "provider",
   "provider_ref",
   "idempotency_key",
   "parent_transaction",
-  "section_91",
+  "section_93",
   "payment_link",
   "booking",
   "reservation",
-  "column_92",
+  "column_94",
   "card_brand",
   "card_last4",
   "actor",
   "completed_at",
-  "section_93",
+  "section_95",
   "raw_status",
   "error_code",
   "error_message",
@@ -77,7 +77,7 @@
    "options": "Currency"
   },
   {
-   "fieldname": "column_90",
+   "fieldname": "column_92",
    "fieldtype": "Column Break"
   },
   {
@@ -109,7 +109,7 @@
    "options": "TEX Payment Transaction"
   },
   {
-   "fieldname": "section_91",
+   "fieldname": "section_93",
    "fieldtype": "Section Break",
    "label": "Links"
   },
@@ -132,7 +132,7 @@
    "options": "Reservation"
   },
   {
-   "fieldname": "column_92",
+   "fieldname": "column_94",
    "fieldtype": "Column Break"
   },
   {
@@ -158,7 +158,7 @@
    "label": "Completed at"
   },
   {
-   "fieldname": "section_93",
+   "fieldname": "section_95",
    "fieldtype": "Section Break",
    "label": "Outcome"
   },
@@ -190,7 +190,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Transaction",

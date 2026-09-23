@@ -325,8 +325,23 @@ def extras_catalog(property: str, *, online_only: bool = False, after_booking: b
 # ─── assembly ────────────────────────────────────────────────────────────
 
 
+def _extra_availability(req: StayRequest, exclude_reservation: str | None):
+	"""What is left of the limited extras this request asks for, over the stay (G-19)."""
+	codes = {e.code for e in req.extras}
+	if not codes:
+		return {}
+	from kamra.tex.availability import extras_repository as xinv
+
+	return xinv.availability(req.property, codes, req.check_in, req.check_out,
+	                         exclude_reservation=exclude_reservation)
+
+
 def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = None,
-                  extras: dict[str, ExtraDef] | None = None, exclude_booking: str | None = None) -> PricingContext:
+                  extras: dict[str, ExtraDef] | None = None, exclude_booking: str | None = None,
+                  check_capacity: bool = True, exclude_reservation: str | None = None) -> PricingContext:
+	"""``check_capacity``: whether limited extras are checked against what is left now (not in
+	a historical simulation); ``exclude_reservation``: the reservation being repriced, whose
+	own units count as available to it (G-19)."""
 	at = req.sale_at
 	sell = req.sell_currency.upper()
 	promos = promotions(req.property, at)
@@ -360,6 +375,7 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 		promotions=promos,
 		tax_rules=taxes,
 		tax_fx=tax_fx,
+		extra_availability=_extra_availability(req, exclude_reservation) if check_capacity else None,
 		extras=catalog,
 		extra_fx=extra_fx,
 		promo_fx=promo_fx,

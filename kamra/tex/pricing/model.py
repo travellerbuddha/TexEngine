@@ -362,6 +362,14 @@ class ExtraDef:
 	revision: str | None = None       # the extra revision live at the sale time (G-20)
 
 
+@dataclass(frozen=True, slots=True)
+class ExtraDayAvailability:
+	"""How many more units of a capacity-limited extra can be sold on one day (G-19)."""
+
+	remaining: int
+	closed: bool = False
+
+
 # ─── request ─────────────────────────────────────────────────────────────
 
 
@@ -420,4 +428,7 @@ class PricingContext:
 	extra_fx: dict[str, FxSnapshot] = field(default_factory=dict)   # extra ccy → sell ccy
 	promo_fx: dict[str, FxSnapshot] = field(default_factory=dict)   # promo ccy → sell ccy
 	tax_fx: dict[str, FxSnapshot] = field(default_factory=dict)     # fixed levy ccy → sell ccy
+	# capacity of the extras tracked now: code → day → availability (G-19). A code that is
+	# absent is not limited; None means capacity is not checked (a historical simulation)
+	extra_availability: dict[str, dict[date, ExtraDayAvailability]] | None = None
 	coupon_usage: dict[str, tuple[int, int]] = field(default_factory=dict)  # promo_id → (total, this guest)

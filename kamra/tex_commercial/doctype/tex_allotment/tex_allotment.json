@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -9,7 +9,7 @@
   "room_type",
   "contract",
   "market",
-  "column_50",
+  "column_52",
   "date_from",
   "date_to",
   "rooms",
@@ -50,7 +50,7 @@
    "options": "TEX Market"
   },
   {
-   "fieldname": "column_50",
+   "fieldname": "column_52",
    "fieldtype": "Column Break"
   },
   {
@@ -96,7 +96,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX Allotment",

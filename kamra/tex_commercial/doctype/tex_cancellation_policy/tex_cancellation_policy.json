@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -8,10 +8,10 @@
   "policy_name",
   "property",
   "refundable",
-  "column_51",
+  "column_53",
   "no_show_type",
   "no_show_value",
-  "section_52",
+  "section_54",
   "rules",
   "description"
  ],
@@ -38,7 +38,7 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "column_51",
+   "fieldname": "column_53",
    "fieldtype": "Column Break"
   },
   {
@@ -56,7 +56,7 @@
    "precision": "6"
   },
   {
-   "fieldname": "section_52",
+   "fieldname": "section_54",
    "fieldtype": "Section Break",
    "label": "Rules"
   },
@@ -73,7 +73,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX Cancellation Policy",

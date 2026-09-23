@@ -168,8 +168,10 @@ def expire_holds() -> dict:
 			frappe.flags.kamra_status_transition = True
 			frappe.flags.kamra_cancelling = True
 			doc = frappe.get_doc("Reservation", name)
+			# a Select value (the free text used to fail validation, so no hold ever expired)
+			doc.cancellation_reason = "Payment failed" if doc.status == "Pending Payment" else "Other"
+			doc.cancellation_note = "Hold / payment window expired"
 			doc.status = "Cancelled"
-			doc.cancellation_reason = "Hold / payment window expired"
 			doc.cancelled_on = now
 			doc.hold_expires_on = None
 			doc.save(ignore_permissions=True)

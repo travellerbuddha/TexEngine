@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from kamra.tex.money import ZERO, D
 from kamra.tex.pricing.enums import ExtraPricingMode
-from kamra.tex.pricing.model import ExtraDef, ExtraPriceRule, ExtraRequest, FxSnapshot
+from kamra.tex.pricing.model import ExtraDayAvailability, ExtraDef, ExtraPriceRule, ExtraRequest, FxSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +43,7 @@ class ExtraOutcome:
 	detail: str = ""
 	revision: str | None = None       # the extra revision that priced it (G-20)
 	fx_rate: Decimal | None = None    # extra currency → sell currency, when converted
+	usage: tuple[tuple[str, int], ...] = ()   # (ISO day, units) it consumes of a limited capacity (G-19)
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
@@ -52,7 +53,8 @@ class ExtraOutcome:
 		        "tax_category": self.tax_category, "mandatory": self.mandatory,
 		        "pricing_mode": self.pricing_mode, "service_dates": list(self.service_dates),
 		        "rule_id": self.rule_id, "detail": self.detail, "revision": self.revision,
-		        "fx_rate": to_str6(self.fx_rate) if self.fx_rate is not None else None}
+		        "fx_rate": to_str6(self.fx_rate) if self.fx_rate is not None else None,
+		        "usage": [{"date": d, "units": u} for d, u in self.usage]}
 
 
 def _in(d: date, lo: date | None, hi: date | None) -> bool:
@@ -124,6 +126,52 @@ def eligibility(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext) -> str | N
 		overlap = overlap and (defn.service_from is None or defn.service_from <= ctx.check_out)
 		if not overlap:
 			return "not available during this stay"
+	return None
+
+
+def usage(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext) -> tuple[tuple[date, int], ...]:
+	"""The days a sold extra takes from a daily capacity and how many units on each (G-19).
+
+	Service-date extras use each chosen date; nightly ones every night of the stay; all the
+	others one day: the chosen service date, else the arrival day. Per-person modes count
+	heads (adults, children and infants), so a spa slot for a family of four is four units."""
+	qty = int(req.quantity)
+	heads = ctx.adults + ctx.children + ctx.infants
+	one_day = req.service_dates[0] if req.service_dates else ctx.check_in
+	nights = [ctx.check_in + timedelta(days=i) for i in range(max((ctx.check_out - ctx.check_in).days, 1))]
+	mode = defn.pricing_mode
+	if mode == ExtraPricingMode.SERVICE_DATE:
+		pairs = [(d, qty) for d in req.service_dates]
+	elif mode == ExtraPricingMode.NIGHT:
+		pairs = [(n, qty) for n in nights]
+	elif mode == ExtraPricingMode.PERSON_NIGHT:
+		pairs = [(n, qty * heads) for n in nights]
+	elif mode == ExtraPricingMode.PERSON:
+		pairs = [(one_day, qty * heads)]
+	elif mode == ExtraPricingMode.ADULT:
+		pairs = [(one_day, qty * ctx.adults)]
+	elif mode == ExtraPricingMode.CHILD:
+		pairs = [(one_day, qty * ctx.children)]
+	elif mode == ExtraPricingMode.INFANT:
+		pairs = [(one_day, qty * ctx.infants)]
+	else:        # per booking, room, stay, unit or use
+		pairs = [(one_day, qty)]
+	per_day: dict[date, int] = {}
+	for d, u in pairs:
+		per_day[d] = per_day.get(d, 0) + u
+	return tuple((d, u) for d, u in sorted(per_day.items()) if u > 0)
+
+
+def capacity_refusal(use: tuple[tuple[date, int], ...], days: dict[date, ExtraDayAvailability]) -> str | None:
+	"""Why a limited extra cannot be sold for these days, or None (G-19)."""
+	for d, units in use:
+		a = days.get(d)
+		if a is None or a.remaining <= 0:
+			return f"sold out on {d.isoformat()}" if not (a and a.closed) else f"closed on {d.isoformat()}"
+		if a.closed:
+			return f"closed on {d.isoformat()}"
+		if units > a.remaining:
+			return f"only {a.remaining} left on {d.isoformat()}"
 	return None
 
 

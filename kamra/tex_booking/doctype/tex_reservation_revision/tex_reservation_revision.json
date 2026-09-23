@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -10,23 +10,23 @@
   "revision_no",
   "change_type",
   "source",
-  "column_71",
+  "column_73",
   "actor",
   "actor_roles",
   "approval_status",
   "approved_by",
   "approved_at",
-  "section_72",
+  "section_74",
   "currency",
   "old_amount",
   "new_amount",
   "difference",
-  "column_73",
+  "column_75",
   "pricing_basis",
   "basis_sale_at",
   "override_amount",
   "reason",
-  "section_74",
+  "section_76",
   "changes_json",
   "snapshot_before",
   "snapshot_after"
@@ -67,7 +67,7 @@
    "options": "Desk\nCall Center\nGuest\nAPI\nSystem"
   },
   {
-   "fieldname": "column_71",
+   "fieldname": "column_73",
    "fieldtype": "Column Break"
   },
   {
@@ -101,7 +101,7 @@
    "label": "Approved at"
   },
   {
-   "fieldname": "section_72",
+   "fieldname": "section_74",
    "fieldtype": "Section Break",
    "label": "Money"
   },
@@ -133,7 +133,7 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "column_73",
+   "fieldname": "column_75",
    "fieldtype": "Column Break"
   },
   {
@@ -159,7 +159,7 @@
    "label": "Reason"
   },
   {
-   "fieldname": "section_74",
+   "fieldname": "section_76",
    "fieldtype": "Section Break",
    "label": "Detail"
   },
@@ -181,7 +181,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Reservation Revision",

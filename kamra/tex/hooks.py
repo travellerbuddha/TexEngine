@@ -78,6 +78,20 @@ def reservation_on_update(doc, method=None):
 
 	outbox.on_reservation_change(doc)
 	loyalty.on_reservation_change(doc)
+	_release_extras(doc)
+
+
+def _release_extras(doc) -> None:
+	"""A cancelled or no-show stay gives its limited extras' units back (G-19), whichever path
+	cancelled it: TEX cancel, the guest's manage page or the legacy hold expiry."""
+	if doc.status not in ("Cancelled", "No Show"):
+		return
+	before = doc.get_doc_before_save()
+	if before and before.status in ("Cancelled", "No Show"):
+		return
+	from kamra.tex.availability import extras_repository as xinv
+
+	xinv.release_reservation(doc.name, f"reservation {doc.status.lower()}")
 
 
 def property_validate(doc, method=None):

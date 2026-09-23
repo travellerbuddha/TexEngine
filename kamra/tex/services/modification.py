@@ -35,6 +35,7 @@ from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import quoting
 
 BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE", "CURRENT")
+CAPACITY_REASONS = ("sold out on ", "only ", "closed on ")     # pricing.extras.capacity_refusal
 EDITABLE = ("check_in", "check_out", "room_type", "adults", "children", "board", "rate_plan", "market",
             "promo_codes", "extras", "sale_at")
 
@@ -151,7 +152,7 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	version, at, how = _resolve(res, snap, req, basis, basis_sale_at)
 	req, _s = build_changed_request(res, changes, at)
 	# the booking's own coupon uses never count against it when it is repriced (G-09)
-	quote, terms = quoting.price_request(version, req, exclude_booking=res.tex_booking,
+	quote, terms = quoting.price_request(version, req, exclude_booking=res.tex_booking, exclude_reservation=res.name,
 	                                     gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest))
 	old_ccy = res.tex_currency or snap.get("currency")
 	old_total = from_db(res.tex_total_amount or res.amount_after_tax, old_ccy or "EUR")
@@ -169,6 +170,10 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		                      rate_plan=req.rate_plan, channel=req.channel)
 		for v in avail.check_restrictions(res.property, sc, req.check_in, req.check_out, now.date()):
 			warnings.append(v.to_dict())
+	for e in quote.extras:
+		if not e.ok and e.reason.startswith(CAPACITY_REASONS):
+			# a limited extra left: the change is shown, and the extra is dropped only if applied (G-19)
+			warnings.append({"code": "EXTRA_SOLD_OUT", "message": f"{e.name}: {e.reason}"})
 
 	new = quote.to_dict(internal=True)
 	old_totals = dict(snap.get("totals") or {})
@@ -231,6 +236,11 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 	new = result["proposed"]
 	if new["totals"]["total"] != p["new_total"]:
 		frappe.throw(_("The price moved since this proposal was made — review it again."))
+	# limited extras: give back the old units and take the new ones under the day locks (G-19)
+	from kamra.tex.availability import extras_repository as xinv
+
+	xinv.replace_for_reservation(res.property, res.tex_booking, res.name, new,
+	                             "Held" if res.status in ("Held", "Pending Payment") else "Confirmed")
 	ccy = new["currency"]
 	new_total = D(new["totals"]["total"])
 	final_total = quantize(D(override_amount), ccy) if override_amount not in (None, "") else new_total
@@ -310,7 +320,7 @@ def simulate(reservation: str, sale_at) -> dict:
 		return {"sellable": False, "reasons": [{"code": "NO_CONTRACT",
 		                                        "message": _("No contract was on sale at that time.")}]}
 	pick = next((c for c in cands if c[0].name == snap["contract"]["contract"]), cands[0])
-	quote, _terms = quoting.price_request(pick[1], req, exclude_booking=res.tex_booking,
+	quote, _terms = quoting.price_request(pick[1], req, exclude_booking=res.tex_booking, check_capacity=False,
 	                                      gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest))
 	internal = scope.has_capability("price.view_cost", res.property)
 	actual = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")

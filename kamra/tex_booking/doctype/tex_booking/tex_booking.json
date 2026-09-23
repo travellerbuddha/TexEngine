@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,28 +11,28 @@
   "market",
   "created_via",
   "sale_at",
-  "column_63",
+  "column_65",
   "booker_guest",
   "booker_name",
   "booker_email",
   "booker_phone",
   "language",
-  "section_64",
+  "section_66",
   "currency",
   "total_amount",
   "paid_amount",
   "balance_amount",
-  "column_65",
+  "column_67",
   "payment_status",
   "payment_method",
   "amount_due_now",
-  "section_66",
+  "section_68",
   "rooms",
-  "section_67",
+  "section_69",
   "guest_change_pending",
   "notes",
   "source",
-  "column_68",
+  "column_70",
   "confirmation_sent_at",
   "idempotency_key",
   "manage_token_hash",
@@ -85,7 +85,7 @@
    "label": "Sold at"
   },
   {
-   "fieldname": "column_63",
+   "fieldname": "column_65",
    "fieldtype": "Column Break"
   },
   {
@@ -117,7 +117,7 @@
    "label": "Language"
   },
   {
-   "fieldname": "section_64",
+   "fieldname": "section_66",
    "fieldtype": "Section Break",
    "label": "Money"
   },
@@ -149,7 +149,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_65",
+   "fieldname": "column_67",
    "fieldtype": "Column Break"
   },
   {
@@ -172,7 +172,7 @@
    "options": "currency"
   },
   {
-   "fieldname": "section_66",
+   "fieldname": "section_68",
    "fieldtype": "Section Break",
    "label": "Rooms"
   },
@@ -183,7 +183,7 @@
    "options": "TEX Booking Room"
   },
   {
-   "fieldname": "section_67",
+   "fieldname": "section_69",
    "fieldtype": "Section Break",
    "label": "Service"
   },
@@ -204,7 +204,7 @@
    "label": "Source / campaign"
   },
   {
-   "fieldname": "column_68",
+   "fieldname": "column_70",
    "fieldtype": "Column Break"
   },
   {
@@ -240,7 +240,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Booking",

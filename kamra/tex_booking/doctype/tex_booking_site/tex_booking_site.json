@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -10,7 +10,7 @@
   "enabled",
   "property",
   "hotel_group",
-  "column_75",
+  "column_77",
   "default_language",
   "languages",
   "default_currency",
@@ -18,32 +18,32 @@
   "default_market",
   "sales_channel",
   "self_service_enabled",
-  "tab_76",
+  "tab_78",
   "logo",
   "primary_color",
   "accent_color",
   "background_color",
   "font_family",
-  "column_77",
+  "column_79",
   "radius",
   "card_radius",
   "button_style",
   "header_layout",
   "search_style",
   "hero_image",
-  "tab_78",
+  "tab_80",
   "contact_phone",
   "contact_email",
   "whatsapp",
   "address",
-  "column_79",
+  "column_81",
   "custom_texts",
   "policies",
-  "tab_80",
+  "tab_82",
   "allowed_embed_origins",
   "widget_mode",
   "domains",
-  "tab_81",
+  "tab_83",
   "ga4_measurement_id",
   "gtm_container_id",
   "meta_pixel_id",
@@ -87,7 +87,7 @@
    "description": "Group site (multi-hotel search)"
   },
   {
-   "fieldname": "column_75",
+   "fieldname": "column_77",
    "fieldtype": "Column Break"
   },
   {
@@ -132,7 +132,7 @@
    "default": "1"
   },
   {
-   "fieldname": "tab_76",
+   "fieldname": "tab_78",
    "fieldtype": "Tab Break",
    "label": "Branding"
   },
@@ -167,7 +167,7 @@
    "default": "Inter"
   },
   {
-   "fieldname": "column_77",
+   "fieldname": "column_79",
    "fieldtype": "Column Break"
   },
   {
@@ -211,7 +211,7 @@
    "label": "Hero image"
   },
   {
-   "fieldname": "tab_78",
+   "fieldname": "tab_80",
    "fieldtype": "Tab Break",
    "label": "Content"
   },
@@ -237,7 +237,7 @@
    "label": "Address"
   },
   {
-   "fieldname": "column_79",
+   "fieldname": "column_81",
    "fieldtype": "Column Break"
   },
   {
@@ -252,7 +252,7 @@
    "label": "Policies"
   },
   {
-   "fieldname": "tab_80",
+   "fieldname": "tab_82",
    "fieldtype": "Tab Break",
    "label": "Embed & domains"
   },
@@ -276,7 +276,7 @@
    "options": "TEX Booking Domain"
   },
   {
-   "fieldname": "tab_81",
+   "fieldname": "tab_83",
    "fieldtype": "Tab Break",
    "label": "Analytics"
   },
@@ -303,7 +303,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Booking Site",

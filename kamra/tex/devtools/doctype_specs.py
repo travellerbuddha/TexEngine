@@ -511,6 +511,35 @@ COMMERCIAL_SPECS = [
 		F("note", "Data", "Note"),
 	], perms=COMMERCIAL, autoname="hash", sort_field="inventory_date"),
 
+	# a capacity-limited extra on one service day (G-19): the lock row and the counter, keyed
+	# by the extra's code so the capacity spans the extra's revisions
+	dt("TEX Extra Inventory Day", C, [
+		F("property", "Link", "Hotel", "Property", reqd=1, in_standard_filter=1),
+		F("extra_code", "Data", "Extra code", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("service_date", "Date", "Date", reqd=1, in_list_view=1),
+		CB(),
+		F("capacity", "Int", "Capacity", in_list_view=1, description="0 = the extra's daily capacity"),
+		F("closed", "Check", "Closed", in_list_view=1),
+		F("sold", "Int", "Sold (held and confirmed units)", read_only=1, in_list_view=1),
+		F("note", "Data", "Note"),
+	], perms=COMMERCIAL, autoname="hash", sort_field="service_date"),
+
+	# who holds a limited extra's units (G-19): one row per reservation, extra and day
+	dt("TEX Extra Allocation", C, [
+		F("property", "Link", "Hotel", "Property", reqd=1, in_standard_filter=1),
+		F("extra_code", "Data", "Extra code", reqd=1, in_list_view=1, in_standard_filter=1),
+		F("extra", "Link", "Extra (revision that priced it)", "TEX Extra"),
+		F("service_date", "Date", "Date", reqd=1, in_list_view=1),
+		F("units", "Int", "Units", reqd=1, in_list_view=1),
+		F("status", "Select", "Status", ["Held", "Confirmed", "Released"], default="Held", in_list_view=1,
+		  in_standard_filter=1),
+		CB(),
+		F("booking", "Link", "Booking", "TEX Booking"),
+		F("reservation", "Link", "Reservation", "Reservation", reqd=1),
+		F("released_at", "Datetime", "Released at"),
+		F("release_reason", "Data", "Release reason"),
+	], perms=IMMUTABLE_LOG, autoname="hash", track_changes=False, sort_field="creation", in_create=True),
+
 	dt("TEX Allotment", C, [
 		F("property", "Link", "Property", "Property", reqd=1, in_standard_filter=1),
 		F("room_type", "Link", "Room type", "Room Type", reqd=1, in_list_view=1),

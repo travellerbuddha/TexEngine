@@ -11,13 +11,15 @@ import traceback
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_days
 
 from kamra.tex.money import D
 from kamra.tex.services import booking, quoting
 from kamra.tex.tests.integration import fixtures as fx
 
 PROPERTY_TABLES = ("TEX Booking", "Reservation", "TEX Quote", "TEX Reservation Revision", "TEX Contract",
-                   "TEX Inventory Day", "TEX Promotion Redemption", "TEX Audit Event", "TEX Markup Rule")
+                   "TEX Inventory Day", "TEX Promotion Redemption", "TEX Audit Event", "TEX Markup Rule",
+                   "TEX Extra Allocation", "TEX Extra Inventory Day")
 
 
 def _cleanup():
@@ -356,3 +358,91 @@ class TestConcurrentRoomTypes(IntegrationTestCase):
 		self.assertEqual(frappe.db.count("TEX Booking", {"booker_email": "grace.retry@example.com"}), 1)
 		self.assertEqual(frappe.db.count("Reservation", {"tex_booking": out["booking"]}), 1)
 		frappe.db.rollback()
+
+
+def _cleanup_extras():
+	frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test cleanup
+	frappe.db.sql("DELETE FROM `tabTEX Extra` WHERE property=%s AND extra_code='CONCSPA'", fx.PROPERTY)
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+
+
+class TestConcurrentLastExtra(IntegrationTestCase):
+	"""G-19: a spa slot with one unit left, two guests book it at the same instant: exactly one
+	gets it. The same slot on two different days: both are booked, without a deadlock."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_extras()
+		cls.f = fx.base_setup()
+		fx.create_contract(cls.f, code="CONC")
+		fx.ensure_live("TEX Extra", {"property": fx.PROPERTY, "extra_code": "CONCSPA"}, {
+			"property": fx.PROPERTY, "extra_code": "CONCSPA", "extra_name": "Spa slot", "category": "Service",
+			"pricing_mode": "UNIT", "currency": "EUR", "amount": 30, "bookable_online": 1, "inventory_tracked": 1,
+			"daily_capacity": 1})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		cls.ci, cls.co = fx.d(8, 20), fx.d(8, 23)
+		offers = quoting.search(properties=[fx.PROPERTY], check_in=cls.ci, check_out=cls.co, rooms=[{"adults": 2}],
+		                        market="DE", channel="DIRECT_WEB", currency="EUR")["properties"][0]["offers"]
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		cls.key = next(o for o in offers if o["room_type"] == rt and o["board"] == "AI")["rooms"][0]["offer_key"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup()
+		_cleanup_extras()
+		super().tearDownClass()
+
+	def _race(self, days) -> dict[str, str]:
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the racers' quotes
+		quotes = [quoting.create_quote(self.key, extras=[{"code": "CONCSPA", "service_dates": [str(d)]}])
+		          for d in days]
+		assert all(next(e for e in q["quote"]["extras"] if e["code"] == "CONCSPA")["ok"] for q in quotes), quotes
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		barrier = threading.Barrier(len(quotes))
+		results: dict[str, str] = {}
+
+		def race(quote_id: str, who: str):
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+				barrier.wait(timeout=10)
+				booking.create_booking(quote_ids=[quote_id], guest={"first_name": who, "last_name": "Spa",
+				                                                    "email": f"{who}.spa@example.com"},
+				                       payment_method="Card")
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each racer is its own request
+				results[who] = "booked"
+			except Exception as e:
+				frappe.db.rollback()
+				results[who] = f"{type(e).__name__}: {e}"
+			finally:
+				frappe.destroy()
+
+		threads = [threading.Thread(target=race, args=(q["quote_id"], w))
+		           for q, w in zip(quotes, ("gina", "hugo"), strict=True)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join(timeout=60)
+		frappe.db.rollback()
+		return results
+
+	def test_one_of_two_simultaneous_bookings_gets_the_last_unit(self):
+		results = self._race([self.ci, self.ci])
+		self.assertEqual(sorted(v.split(":")[0] for v in results.values()), ["ExtraSoldOut", "booked"], results)
+		self.assertEqual(frappe.db.get_value("TEX Extra Inventory Day", {"property": fx.PROPERTY,
+		                                                                 "extra_code": "CONCSPA",
+		                                                                 "service_date": self.ci}, "sold"), 1)
+		self.assertEqual(frappe.db.count("TEX Extra Allocation", {"extra_code": "CONCSPA", "service_date": self.ci,
+		                                                          "status": ("!=", "Released")}), 1)
+
+	def test_different_days_book_side_by_side(self):
+		d1, d2 = add_days(self.ci, 1), add_days(self.ci, 2)
+		self.assertEqual(sorted(self._race([d1, d2]).values()), ["booked", "booked"])

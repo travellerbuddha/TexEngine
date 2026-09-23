@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -9,17 +9,17 @@
   "property",
   "hotel_group",
   "enabled",
-  "column_100",
+  "column_102",
   "currency",
   "point_value",
   "min_redeem_points",
   "max_redeem_percent",
   "pending_days",
   "expiry_months",
-  "section_101",
+  "section_103",
   "earn_rules",
   "tiers",
-  "section_102",
+  "section_104",
   "blackouts"
  ],
  "fields": [
@@ -51,7 +51,7 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "column_100",
+   "fieldname": "column_102",
    "fieldtype": "Column Break"
   },
   {
@@ -89,7 +89,7 @@
    "default": "24"
   },
   {
-   "fieldname": "section_101",
+   "fieldname": "section_103",
    "fieldtype": "Section Break",
    "label": "Earning"
   },
@@ -106,7 +106,7 @@
    "options": "TEX Loyalty Tier"
   },
   {
-   "fieldname": "section_102",
+   "fieldname": "section_104",
    "fieldtype": "Section Break",
    "label": "Blackouts"
   },
@@ -118,7 +118,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Loyalty Program",

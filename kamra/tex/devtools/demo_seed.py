@@ -80,13 +80,16 @@ def _hotel(name: str, spec: dict, group: str) -> dict:
 		                    {"property": name, "code": code, "rate_plan_name": label, "modifier_type": "Percent",
 		                     "modifier_value": 0, "tex_refundable": 1 if code == "FLEX" else 0,
 		                     "tex_cancellation_policy": cxl, "tex_payment_policy": pay})
-	for code, label, cat, mode, amount in (("TRF", "Airport transfer", "Transfer", "RESERVATION", 45),
-	                                       ("SPA", "Spa access", "Spa", "PERSON_NIGHT", 18),
-	                                       ("LCO", "Late check-out", "Service", "RESERVATION", 35)):
+	for code, label, cat, mode, amount, limit in (("TRF", "Airport transfer", "Transfer", "RESERVATION", 45, 0),
+	                                              ("SPA", "Spa access", "Spa", "PERSON_NIGHT", 18, 0),
+	                                              ("LCO", "Late check-out", "Service", "RESERVATION", 35, 0),
+	                                              ("MASSAGE", "Massage (60 min)", "Spa", "SERVICE_DATE", 60, 4)):
 		extra = _ensure("TEX Extra", {"property": name, "extra_code": code},
 		                {"property": name, "extra_code": code, "extra_name": label, "category": cat,
 		                 "pricing_mode": mode, "currency": "EUR", "amount": amount, "bookable_online": 1,
-		                 "tax_category": "TRANSFER" if code == "TRF" else "SERVICE"})
+		                 "tax_category": "TRANSFER" if code == "TRF" else "SERVICE",
+		                 # a limited extra (G-19): four treatment slots a day
+		                 "inventory_tracked": 1 if limit else 0, "daily_capacity": limit})
 		if frappe.db.get_value("TEX Extra", extra, "tex_status") == "Draft":
 			from kamra.tex.commercial import revisions
 

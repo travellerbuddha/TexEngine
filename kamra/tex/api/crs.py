@@ -277,3 +277,64 @@ def ari_bulk_update(property: str, start: str, end: str, room_types, weekdays=No
 	                            market=market or None, channel=channel or None, rate_plan=rate_plan or None,
 	                            restrictions=parse(restrictions, None), inventory=parse(inventory, None),
 	                            rate=parse(rate, None))
+
+
+# ─── limited extras (G-19) ───────────────────────────────────────────────
+
+
+@frappe.whitelist()
+def extras_availability(property: str, check_in: str, check_out: str):
+	"""What is left of each limited extra per day of a stay (the agent's extras picker)."""
+	scope.require("price.view", property)
+	from kamra.tex.availability import extras_repository as xinv
+
+	ci, co = getdate(check_in), getdate(check_out)
+	if co < ci or (co - ci).days > 60:
+		frappe.throw(_("Choose a stay of at most 60 nights."))
+	avail = xinv.availability(property, xinv.tracked(property), ci, co)
+	return {code: {str(d): {"remaining": a.remaining, "closed": a.closed} for d, a in days.items()}
+	        for code, days in avail.items()}
+
+
+@frappe.whitelist()
+def extras_grid(property: str, start: str, days: int = 14):
+	scope.require("price.view", property)
+	from kamra.tex.availability import extras_repository as xinv
+
+	return xinv.grid(property, start, as_int(days, 14))
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def extras_bulk_update(property: str, extra_codes, start: str, end: str, weekdays=None, capacity=None,
+                       closed=None, note: str | None = None):
+	scope.require("inventory.edit", property)
+	from kamra.tex.availability import extras_repository as xinv
+	from kamra.tex.security.audit import audit
+
+	out = xinv.bulk_update(property, parse(extra_codes, []), start, end, weekdays=parse(weekdays, None) or None,
+	                       capacity=capacity, closed=closed, note=text(note, 140) if note is not None else None)
+	audit("extra_inventory.update", property=property,
+	      new={"extras": parse(extra_codes, []), "start": start, "end": end, "weekdays": parse(weekdays, None),
+	           "capacity": capacity, "closed": closed, "updated": out["updated"]})
+	return out
+
+
+@frappe.whitelist()
+def extras_allocations(property: str, extra_code: str, date: str):
+	scope.require("reservation.view", property)
+	from kamra.tex.availability import extras_repository as xinv
+
+	return xinv.allocations(property, (extra_code or "").upper(), date)
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def extras_reconcile(property: str, extra_code: str | None = None):
+	scope.require("inventory.edit", property)
+	from kamra.tex.availability import extras_repository as xinv
+	from kamra.tex.security.audit import audit
+
+	drift = xinv.reconcile(property, (extra_code or "").upper() or None)
+	audit("extra_inventory.reconcile", property=property, new={"extra_code": extra_code, "drift": drift})
+	return {"drift": drift}

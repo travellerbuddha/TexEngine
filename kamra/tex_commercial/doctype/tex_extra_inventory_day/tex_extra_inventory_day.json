@@ -6,63 +6,60 @@
  "engine": "InnoDB",
  "field_order": [
   "property",
-  "room_type",
-  "inventory_date",
-  "column_49",
-  "base_inventory",
-  "manual_adjustment",
-  "oversell_limit",
+  "extra_code",
+  "service_date",
+  "column_50",
+  "capacity",
   "closed",
+  "sold",
   "note"
  ],
  "fields": [
   {
    "fieldname": "property",
    "fieldtype": "Link",
-   "label": "Property",
+   "label": "Hotel",
    "options": "Property",
-   "reqd": 1
-  },
-  {
-   "fieldname": "room_type",
-   "fieldtype": "Link",
-   "label": "Room type / pool",
-   "options": "Room Type",
    "reqd": 1,
-   "in_list_view": 1
+   "in_standard_filter": 1
   },
   {
-   "fieldname": "inventory_date",
+   "fieldname": "extra_code",
+   "fieldtype": "Data",
+   "label": "Extra code",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "service_date",
    "fieldtype": "Date",
    "label": "Date",
    "reqd": 1,
    "in_list_view": 1
   },
   {
-   "fieldname": "column_49",
+   "fieldname": "column_50",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "base_inventory",
+   "fieldname": "capacity",
    "fieldtype": "Int",
-   "label": "Base inventory",
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "manual_adjustment",
-   "fieldtype": "Int",
-   "label": "Manual adjustment",
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "oversell_limit",
-   "fieldtype": "Int",
-   "label": "Oversell limit"
+   "label": "Capacity",
+   "in_list_view": 1,
+   "description": "0 = the extra's daily capacity"
   },
   {
    "fieldname": "closed",
    "fieldtype": "Check",
    "label": "Closed",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "sold",
+   "fieldtype": "Int",
+   "label": "Sold (held and confirmed units)",
+   "read_only": 1,
    "in_list_view": 1
   },
   {
@@ -75,7 +72,7 @@
  "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
- "name": "TEX Inventory Day",
+ "name": "TEX Extra Inventory Day",
  "owner": "Administrator",
  "permissions": [
   {
@@ -96,7 +93,7 @@
    "report": 1
   }
  ],
- "sort_field": "inventory_date",
+ "sort_field": "service_date",
  "sort_order": "DESC",
  "states": [],
  "row_format": "Dynamic",

@@ -14,7 +14,7 @@ import json
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import get_datetime, now_datetime
+from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
@@ -202,6 +202,30 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out, "rooms": parse(rooms, []),
 	                                  "market": mkt})
 	return res
+
+
+# a guest sees whether a limited extra can still be booked on a day, and "few left", never
+# exact counts (G-19)
+LOW_STOCK = 3
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(**SEARCH_LIMIT)
+def extras_availability(site: str, hotel: str, check_in: str, check_out: str, session_id: str | None = None):
+	s = _site(site)
+	if hotel not in _site_properties(s):
+		frappe.throw(_("Invalid hotel."))
+	ci, co = getdate(check_in), getdate(check_out)
+	if co <= ci or (co - ci).days > 60:
+		frappe.throw(_("Invalid dates."))
+	from kamra.tex.availability import extras_repository as xinv
+	from kamra.tex.commercial.context import listed_extras
+
+	online = {e.extra_code for e in listed_extras(hotel, online_only=True)}
+	avail = xinv.availability(hotel, online & set(xinv.tracked(hotel)), ci, co)
+	return {code: {str(d): {"available": a.remaining > 0 and not a.closed,
+	                        "low": 0 < a.remaining <= LOW_STOCK and not a.closed} for d, a in days.items()}
+	        for code, days in avail.items()}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])

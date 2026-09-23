@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,7 +11,7 @@
   "category",
   "description",
   "image",
-  "column_54",
+  "column_56",
   "pricing_mode",
   "currency",
   "amount",
@@ -20,14 +20,14 @@
   "infant_pricing",
   "infant_amount",
   "tax_category",
-  "section_55",
+  "section_57",
   "is_mandatory",
   "bookable_online",
   "bookable_after_booking",
   "max_quantity",
   "inventory_tracked",
   "daily_capacity",
-  "column_56",
+  "column_58",
   "sale_from",
   "sale_to",
   "service_from",
@@ -36,14 +36,14 @@
   "channels",
   "room_types",
   "disabled",
-  "section_57",
+  "section_59",
   "price_rules",
   "legacy_experience",
-  "section_58",
+  "section_60",
   "tex_status",
   "active_from",
   "active_to",
-  "column_59",
+  "column_61",
   "revision_no",
   "revision_of"
  ],
@@ -89,7 +89,7 @@
    "label": "Image"
   },
   {
-   "fieldname": "column_54",
+   "fieldname": "column_56",
    "fieldtype": "Column Break"
   },
   {
@@ -151,7 +151,7 @@
    "default": "SERVICE"
   },
   {
-   "fieldname": "section_55",
+   "fieldname": "section_57",
    "fieldtype": "Section Break",
    "label": "Availability"
   },
@@ -189,7 +189,7 @@
    "depends_on": "eval:doc.inventory_tracked"
   },
   {
-   "fieldname": "column_56",
+   "fieldname": "column_58",
    "fieldtype": "Column Break"
   },
   {
@@ -233,7 +233,7 @@
    "label": "Disabled"
   },
   {
-   "fieldname": "section_57",
+   "fieldname": "section_59",
    "fieldtype": "Section Break",
    "label": "Price rules"
   },
@@ -251,7 +251,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_58",
+   "fieldname": "section_60",
    "fieldtype": "Section Break",
    "label": "Revision",
    "collapsible": 1
@@ -279,7 +279,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_59",
+   "fieldname": "column_61",
    "fieldtype": "Column Break"
   },
   {
@@ -298,7 +298,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX Extra",

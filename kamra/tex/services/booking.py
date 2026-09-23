@@ -18,6 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
 
+from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
@@ -304,6 +305,13 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		if v:
 			frappe.throw(_("This stay is no longer bookable: {0}").format(v[0].message))
 
+	# ── limited extras: every room's units together, re-checked under the day locks (G-19) ──
+	extras_tracked = xinv.tracked(property)
+	extras_need = xinv.demand([r[2] for r in rows], codes=set(extras_tracked))
+	if extras_need:
+		xinv.lock_days(property, extras_need)
+		xinv.check(property, extras_need, trk=extras_tracked)
+
 	# ── money ──
 	total = sum((D(r[2]["totals"]["total"]) for r in rows), ZERO)
 	due_now = ZERO
@@ -370,6 +378,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		                         "check_out": req["check_out"], "adults": int(req["adults"]), "children": len(kids),
 		                         "amount": amounts["amount_after_tax"], "status": status, "quote": row.name})
 		priced.append((result, res.name))
+		if extras_need:
+			xinv.allocate(property, booking.name, res.name, result, "Confirmed" if confirm else "Held",
+			              trk=extras_tracked)
 		q = frappe.get_doc("TEX Quote", row.name)
 		q.status = "Used"
 		q.booking = booking.name
@@ -522,6 +533,7 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 			row.status = "Confirmed"
 	finally:
 		frappe.flags.kamra_status_transition = False
+	xinv.confirm(booking)            # held extras units become confirmed (G-19)
 	for r in frappe.get_all("TEX Promotion Redemption", filters={"booking": booking, "status": "Reserved"},
 	                        pluck="name"):
 		d = frappe.get_doc("TEX Promotion Redemption", r)

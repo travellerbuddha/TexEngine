@@ -222,7 +222,7 @@ _TEX_SCOPED = (
 	"TEX ARI Restriction", "TEX Extra", "TEX Abandoned Booking", "TEX Integration Connection",
 	"TEX Integration Outbox", "TEX Payment Provider Account", "TEX Payment Method Rule",
 	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
-	"TEX Tax Policy",
+	"TEX Tax Policy", "TEX Extra Inventory Day", "TEX Extra Allocation",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
 	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Reservation Revision",
 	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation",

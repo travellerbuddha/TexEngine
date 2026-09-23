@@ -159,6 +159,9 @@ def ensure_indexes() -> None:
 		("TEX Markup Rule", ["property", "tex_status"], "tex_markup_prop_status"),
 		("TEX Extra", ["property", "tex_status"], "tex_extra_prop_status"),
 		("TEX Tax Policy", ["property", "tex_status"], "tex_taxpol_prop_status"),
+		("TEX Extra Allocation", ["reservation"], "tex_xalloc_res"),
+		("TEX Extra Allocation", ["property", "extra_code", "service_date"], "tex_xalloc_day"),
+		("TEX Extra Inventory Day", ["property", "extra_code", "service_date"], "tex_xday_lookup"),
 	):
 		try:
 			frappe.db.add_index(dt, fields, name)

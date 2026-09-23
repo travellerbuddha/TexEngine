@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 19:00:00.000000",
+ "creation": "2026-09-23 20:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,13 +11,13 @@
   "reservation",
   "channel",
   "direction",
-  "column_97",
+  "column_99",
   "status",
   "consent_basis",
   "template",
   "sent_at",
   "actor",
-  "section_98",
+  "section_100",
   "subject",
   "body"
  ],
@@ -63,7 +63,7 @@
    "default": "Outbound"
   },
   {
-   "fieldname": "column_97",
+   "fieldname": "column_99",
    "fieldtype": "Column Break"
   },
   {
@@ -98,7 +98,7 @@
    "options": "User"
   },
   {
-   "fieldname": "section_98",
+   "fieldname": "section_100",
    "fieldtype": "Section Break",
    "label": "Message"
   },
@@ -115,7 +115,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 19:00:00.000000",
+ "modified": "2026-09-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Communication",

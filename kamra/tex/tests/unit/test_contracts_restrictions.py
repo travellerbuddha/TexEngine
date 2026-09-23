@@ -252,7 +252,7 @@ class TestPurity(unittest.TestCase):
 		root = pathlib.Path(__file__).resolve().parents[2]
 		for pkg in ("pricing", "availability"):
 			for f in (root / pkg).glob("*.py"):
-				if f.name in ("repository.py", "loader.py"):
+				if f.name in ("repository.py", "loader.py") or f.name.endswith("_repository.py"):
 					continue
 				tree = ast.parse(f.read_text())
 				for node in ast.walk(tree):

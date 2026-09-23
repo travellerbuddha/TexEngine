@@ -8,7 +8,7 @@ never guesses: anything it cannot price makes the quote unsellable with reasons.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -338,6 +338,21 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 			if not outcome.ok and d.mandatory and (d.service_from or d.service_to) and \
 				outcome.reason == "not available during this stay":
 				continue   # mandatory seasonal extra outside this stay
+			if outcome.ok:
+				# a capacity-limited extra takes units on the days it is used (G-19)
+				use = extras.usage(d, requested[code], ex_ctx)
+				outcome = replace(outcome, usage=tuple((day.isoformat(), u) for day, u in use))
+				days = (ctx.extra_availability or {}).get(code)
+				refusal = extras.capacity_refusal(use, days) if days is not None else None
+				if refusal:
+					outcome = replace(outcome, ok=False, reason=refusal, amount=ZERO)
+					ex.add("extra", "EXTRA_SOLD_OUT", "{name} not added: {reason}", name=d.name, reason=refusal,
+					       rule=RuleRef("extra", d.code, Level.HOTEL, f"extra:{d.revision}" if d.revision else "",
+					                    d.name))
+					q.extras.append(outcome)
+					if d.mandatory:
+						raise Unsellable("MANDATORY_EXTRA", f"mandatory extra {d.name} cannot be priced: {refusal}")
+					continue
 			q.extras.append(outcome)
 			if outcome.ok:
 				ex.add("extra", "EXTRA", "{name}: {detail} = {amount}", after=outcome.amount, currency=sell_ccy,

@@ -36,5 +36,5 @@ def fx_daily() -> None:
 
 def daily() -> None:
 	for job in ("kamra.tex.crm.loyalty.mature_and_expire", "kamra.tex.crm.service.purge_funnel",
-	            "kamra.tex.crm.service.refresh_recent_checkouts"):
+	            "kamra.tex.crm.service.refresh_recent_checkouts", "kamra.tex.availability.extras_repository.reconcile_all"):
 		_run(job)

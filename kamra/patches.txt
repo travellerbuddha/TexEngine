@@ -27,3 +27,4 @@ kamra.patches.tex.p09_guest_stats_completed_stays
 kamra.patches.tex.p10_scrub_link_return_urls
 kamra.patches.tex.p11_allocation_idempotency
 kamra.patches.tex.p12_effective_dated_extras_and_taxes
+kamra.patches.tex.p13_extra_inventory
