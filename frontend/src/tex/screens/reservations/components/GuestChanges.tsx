@@ -8,7 +8,7 @@ import { usePartyText } from "../../crs/components/PartyEditor"
 import { isPositive, isZero } from "../../crs/lib/party"
 import { useServerClock } from "../../crs/lib/serverClock"
 import { asApiError } from "../../crs/lib/useBookingFlow"
-import { resolveGuestChange, type ResolveAction, type ResolveSettlement } from "../lib/api"
+import { resolveGuestChange, type RefundOutcome, type ResolveAction, type ResolveSettlement } from "../lib/api"
 import type { GuestChangeRequest } from "../lib/types"
 
 type Tone = "neutral" | "info" | "success" | "warning" | "danger"
@@ -29,8 +29,9 @@ const slug = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "_")
  * The guest's own changes of this reservation (manage page, G-45 / ADR-044): what they asked
  * for, what it cost, how the money was settled (paid online, at the hotel, refunded, kept as
  * credit, left to staff). A request waiting for the hotel is approved or rejected here
- * (reservation.modify; a refund needs payment.refund), and money left to staff is marked as
- * settled (payment.refund). The server decides and re-checks everything; amounts are its own.
+ * (reservation.modify; a refund needs payment.refund), and money left to staff (a refund TEX
+ * could not make, or one the gateway never confirmed: staff say what the gateway did) is marked
+ * as settled (payment.refund). The server decides and re-checks everything; amounts are its own.
  */
 export function GuestChangesCard({
   rows,
@@ -128,6 +129,13 @@ export function GuestChangesCard({
                   )}
                 </dl>
                 {r.settle_pending && <p className="text-xs text-amber-800">{t("res.gcr.refund_pending")}</p>}
+                {r.staff_open && (
+                  <Notice tone={r.staff_reason === "Verify refund at gateway" ? "danger" : "warning"}>
+                    <span className="font-medium">{t(`res.gcr.staff.${slug(r.staff_reason || "Refund by staff")}`)}</span>{" "}
+                    <Money amount={r.staff_amount} currency={ccy} className="font-semibold" />
+                    {r.unknown_refund && <span className="block text-xs">{t("res.gcr.staff.unknown_refund", { refund: r.unknown_refund })}</span>}
+                  </Notice>
+                )}
                 {r.note && (
                   <p className="text-sm text-zinc-600">
                     <span className="font-medium">{t("res.gcr.guest_note")}:</span> {r.note}
@@ -140,7 +148,7 @@ export function GuestChangesCard({
                     {r.resolution ? ` — ${r.resolution}` : ""}
                   </p>
                 )}
-                {((r.status === "Requested" && canDecide) || (r.settlement === "Staff" && !r.resolved_at && !r.settle_pending && canRefund)) && (
+                {((r.status === "Requested" && canDecide) || (r.staff_open && !r.settle_pending && canRefund)) && (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {r.status === "Requested" && canDecide && (
                       <>
@@ -152,7 +160,7 @@ export function GuestChangesCard({
                         </Button>
                       </>
                     )}
-                    {r.settlement === "Staff" && !r.resolved_at && !r.settle_pending && canRefund && (
+                    {r.staff_open && !r.settle_pending && canRefund && (
                       <Button size="sm" variant="secondary" icon={<CircleDollarSign className="size-4" aria-hidden />} onClick={() => setDialog({ row: r, action: "close" })}>
                         {t("res.gcr.close")}
                       </Button>
@@ -192,24 +200,28 @@ function ResolveDialog({
   const toast = useToast()
   const [reason, setReason] = useState("")
   const [settlement, setSettlement] = useState<ResolveSettlement>("Credit on booking")
+  const [outcome, setOutcome] = useState<RefundOutcome | "">("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<TexApiError>()
   const row = target?.row
   const action = target?.action
   const overpaid = action === "approve" && !!row?.overpaid_after && isPositive(row.overpaid_after)
+  // a refund the gateway never confirmed: staff say what the gateway did before closing
+  const verify = action === "close" && !!row?.unknown_refund
   useEffect(() => {
     if (!target) return
     setReason("")
     setError(undefined)
     setSettlement(canRefund ? "Refund" : "Credit on booking")
+    setOutcome("")
   }, [target, canRefund])
 
   const submit = async () => {
-    if (!row || !action || !reason.trim()) return
+    if (!row || !action || !reason.trim() || (verify && !outcome)) return
     setBusy(true)
     setError(undefined)
     try {
-      await resolveGuestChange(row.name, action, reason.trim(), overpaid ? settlement : undefined)
+      await resolveGuestChange(row.name, action, reason.trim(), overpaid ? settlement : undefined, verify && outcome ? outcome : undefined)
       toast.success(t(`res.gcr.done.${action}`))
       onDone()
     } catch (e) {
@@ -230,7 +242,7 @@ function ResolveDialog({
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             {t("core.action.cancel")}
           </Button>
-          <Button loading={busy} disabled={!reason.trim()} variant={action === "reject" ? "danger" : "primary"} onClick={() => void submit()}>
+          <Button loading={busy} disabled={!reason.trim() || (verify && !outcome)} variant={action === "reject" ? "danger" : "primary"} onClick={() => void submit()}>
             {action ? t(`res.gcr.${action}`) : ""}
           </Button>
         </>
@@ -254,6 +266,20 @@ function ResolveDialog({
                 ]}
               />
               {!canRefund && <p className="text-xs text-zinc-500">{t("res.gcr.no_refund_cap")}</p>}
+            </div>
+          )}
+          {verify && (
+            <div className="space-y-2">
+              <Notice tone="danger">{t("res.gcr.verify_body", { refund: row.unknown_refund ?? "" })}</Notice>
+              <Segmented<RefundOutcome | "">
+                label={t("res.gcr.verify_choice")}
+                value={outcome}
+                onChange={setOutcome}
+                options={[
+                  { value: "Succeeded", label: t("res.gcr.verify_succeeded") },
+                  { value: "Failed", label: t("res.gcr.verify_failed") },
+                ]}
+              />
             </div>
           )}
           <Field label={t("res.gcr.reason")} hint={t("core.hint.reason_audited")} required>

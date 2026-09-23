@@ -157,12 +157,16 @@ class IyzicoProvider(PaymentProvider):
 		               currency=res.get("currency"), card_brand=res.get("cardAssociation"),
 		               card_last4=(res.get("lastFourDigits") or "")[-4:] or None, raw_status="SUCCESS")
 
-	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
+	def refund(self, provider_ref: str, amount: Decimal, currency: str, *, reference: str | None = None) -> Outcome:
 		_pid, _, item = (iyzico_payment(provider_ref) or "").partition("|")
 		if not item:
 			raise ProviderError("iyzico payment reference is missing")
-		res = self._post(self.REFUND, {"locale": "en", "paymentTransactionId": item, "price": _money(amount),
-		                               "currency": currency, "ip": "127.0.0.1"})
+		payload = {"locale": "en", "paymentTransactionId": item, "price": _money(amount), "currency": currency,
+		           "ip": "127.0.0.1"}
+		if reference:
+			payload["conversationId"] = reference          # TEX's refund id, kept by iyzico with the refund
+		# a timeout or a server error propagates: the outcome is unknown and TEX never repeats it
+		res = self._post(self.REFUND, payload)
 		if res.get("status") != "success":
 			return Outcome(status="Failed", error_code=res.get("errorCode"), error_message=res.get("errorMessage"))
 		return Outcome(status="Succeeded", provider_ref=str(res.get("paymentTransactionId") or item), amount=amount,

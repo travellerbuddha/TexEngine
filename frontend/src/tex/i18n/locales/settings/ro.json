@@ -341,5 +341,6 @@
  "settings.status.reason.mail_suspended": "Trimiterea e-mailurilor este suspendată pe acest site.",
  "settings.status.reason.mail_failed": "E-mailuri eșuate în ultimele {hours} ore: {count}.",
  "settings.status.reason.mail_unsent": "E-mailuri încă netrimise: {count}, cel mai vechi așteaptă de {minutes} min.",
- "settings.status.reason.check_error": "Această verificare nu a putut rula (vezi Error Log)."
+ "settings.status.reason.check_error": "Această verificare nu a putut rula (vezi Error Log).",
+ "settings.status.reason.refund_unknown": "Rambursări neconfirmate niciodată de procesatorul de plăți: {count}. Verificați-le acolo înainte de a rambursa din nou."
 }

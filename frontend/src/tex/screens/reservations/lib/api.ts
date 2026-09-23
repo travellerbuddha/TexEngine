@@ -70,11 +70,14 @@ export function guestChangeRequests(reservation: string, signal?: AbortSignal) {
 
 export type ResolveAction = "approve" | "reject" | "close"
 export type ResolveSettlement = "Refund" | "Credit on booking"
+/** What the gateway did with a refund it never confirmed (staff checked it there). */
+export type RefundOutcome = "Succeeded" | "Failed"
 
 /** Approve / reject a request waiting for the hotel (reservation.modify; a refund also needs
- * payment.refund), or close money left to staff (payment.refund). The reason is audited. */
-export function resolveGuestChange(request: string, action: ResolveAction, reason: string, settlement?: ResolveSettlement) {
-  return tex<GuestChangeRequest>("crs", "resolve_guest_change", { request, action, reason, settlement }, { post: true })
+ * payment.refund), or close money left to staff (payment.refund; a refund the gateway never
+ * confirmed needs its outcome). The reason is audited. */
+export function resolveGuestChange(request: string, action: ResolveAction, reason: string, settlement?: ResolveSettlement, refund_outcome?: RefundOutcome) {
+  return tex<GuestChangeRequest>("crs", "resolve_guest_change", { request, action, reason, settlement, refund_outcome }, { post: true })
 }
 
 export function contractVersion(name: string) {

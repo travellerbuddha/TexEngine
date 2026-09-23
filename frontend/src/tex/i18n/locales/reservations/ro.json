@@ -309,5 +309,12 @@
  "res.snap.promotions": "Promoții",
  "res.snap.title": "Preț blocat",
  "res.resend.queued": "Confirmarea pentru {email} a fost pusă în coadă",
- "res.resend.queued_hint": "E-mailul este în coada de ieșire, încă netrimis. Cronologia oaspetelui arată când a fost trimis sau de ce a eșuat."
+ "res.resend.queued_hint": "E-mailul este în coada de ieșire, încă netrimis. Cronologia oaspetelui arată când a fost trimis sau de ce a eșuat.",
+ "res.gcr.staff.refund_by_staff": "De rambursat de hotel:",
+ "res.gcr.staff.verify_refund_at_gateway": "Rambursare de verificat la procesatorul de plăți:",
+ "res.gcr.staff.unknown_refund": "Procesatorul de plăți nu a confirmat niciodată rambursarea {refund}: verificați-o acolo înainte de a rambursa din nou.",
+ "res.gcr.verify_body": "Procesatorul de plăți nu a răspuns la rambursarea {refund}. Verificați acolo dacă a fost făcută, apoi înregistrați rezultatul.",
+ "res.gcr.verify_choice": "Ce a făcut procesatorul de plăți",
+ "res.gcr.verify_succeeded": "A rambursat banii",
+ "res.gcr.verify_failed": "Nu a rambursat"
 }

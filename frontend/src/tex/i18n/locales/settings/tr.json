@@ -275,6 +275,7 @@
  "settings.status.reason.overpaid": "Son {days} günde iki kez ödenen ödeme linkleri: {count}.",
  "settings.status.reason.payment_pending": "Hâlâ bekleyen kart ödemeleri: {count}, en eskisi {minutes} dk önce başladı.",
  "settings.status.reason.redis_unreachable": "Arka plan iş kuyruğuna (Redis) ulaşılamıyor.",
+ "settings.status.reason.refund_unknown": "Ödeme sisteminin hiç onaylamadığı iadeler: {count}. Yeniden iade etmeden önce ödeme sisteminde kontrol edin.",
  "settings.status.reason.scheduler_disabled": "Zamanlayıcı kapalı: hiçbir TEX işi çalışmıyor.",
  "settings.status.reason.scheduler_paused": "Zamanlayıcı duraklatıldı: hiçbir TEX işi çalışmıyor.",
  "settings.status.scope_hotels": "Otelleriniz: {hotels}",

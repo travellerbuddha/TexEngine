@@ -81,7 +81,11 @@ class PaymentProvider(ABC):
 		"Pending" while the gateway has no final answer. Never return Failed for an
 		unverified request — that would let anyone fail someone else's payment."""
 
-	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
+	def refund(self, provider_ref: str, amount: Decimal, currency: str, *, reference: str | None = None) -> Outcome:
+		"""Refund ``amount`` of the capture ``provider_ref``. ``reference``: TEX's id of this
+		refund, sent to a gateway that keeps one with the refund (so staff can find it there).
+		Raise ProviderError only for a definite "no"; any other exception means the outcome is
+		unknown (the gateway may have refunded)."""
 		raise ProviderError(f"{self.name} does not support refunds through TEX")
 
 	def can_add_checkout(self, provider_ref: str | None) -> bool:

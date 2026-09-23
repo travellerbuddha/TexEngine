@@ -113,6 +113,8 @@ REASONS: dict[str, str] = {
 	"callback_errors": "{count} payment callback(s) failed or were rejected in the last {hours} hours.",
 	"overpaid": "{count} payment link(s) were paid more than once in the last {days} days.",
 	"capture_mismatch": "{count} gateway capture(s) did not match their charge in the last {days} days.",
+	"refund_unknown": "{count} refund(s) the gateway never confirmed: check them at the gateway before refunding "
+	                  "again (Reservations → guest changes).",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
@@ -279,8 +281,12 @@ def pending_payments_check(count: int, oldest: datetime | None, now: datetime,
 	return make("payments.pending", issues, scope="hotel", since=oldest, properties=properties)
 
 
-def callbacks_check(*, errors: int, overpaid: int, mismatches: int, properties: Iterable[str] = ()) -> dict:
+def callbacks_check(*, errors: int, overpaid: int, mismatches: int, refunds_unknown: int = 0,
+                    properties: Iterable[str] = ()) -> dict:
 	issues = []
+	if refunds_unknown:
+		# the money may be gone or not: nothing refunds it again until staff checked (ADR-044 review)
+		issues.append(issue("refund_unknown", FAIL, count=refunds_unknown))
 	if mismatches:
 		issues.append(issue("capture_mismatch", FAIL, count=mismatches, days=PAYMENT_AUDIT_WINDOW_DAYS))
 	if errors:
