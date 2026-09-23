@@ -224,9 +224,14 @@ def _payments_callbacks(props, now) -> dict:
 	                            pluck="property")
 	overpaid = frappe.get_all("TEX Audit Event", filters={**audit_filters, "action": "payment_link.overpaid"},
 	                          pluck="property")
-	hotels = {p for p in (*errors, *mismatches, *overpaid) if p}
+	# refunds the gateway never answered (``payments.service.RefundUnknown``), at any age
+	unknown_filters = {"txn_type": "Refund", "status": "Pending", "error_code": "UNKNOWN"}
+	if props is not None:
+		unknown_filters["property"] = ("in", sorted(props) or [""])
+	unknown = frappe.get_all("TEX Payment Transaction", filters=unknown_filters, pluck="property")
+	hotels = {p for p in (*errors, *mismatches, *overpaid, *unknown) if p}
 	return C.callbacks_check(errors=len(errors), overpaid=len(overpaid), mismatches=len(mismatches),
-	                         properties=hotels)
+	                         refunds_unknown=len(unknown), properties=hotels)
 
 
 def fx_pairs(props, now) -> list[dict]:

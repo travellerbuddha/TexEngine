@@ -174,8 +174,10 @@ def reverify(transaction: str):
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def refund(transaction: str, amount, reason: str, idempotency_key: str, booking: str | None = None):
+	# durable: the refund is on record before the gateway is asked (a timeout never repeats it)
 	return pay.refund(transaction, amount=amount, reason=text(reason, 500) or "", booking=booking,
-	                  idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")))
+	                  idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")),
+	                  durable=True)
 
 
 @frappe.whitelist(methods=["POST"])
