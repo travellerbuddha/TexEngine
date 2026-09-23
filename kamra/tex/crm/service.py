@@ -223,19 +223,59 @@ def update_profile(guest: str, data: dict, *, consent_source: str = "staff",
 	return {"name": g.name, "changed": sorted(changed), "consent_changed": sorted(consent_changed)}
 
 
+# what a logged communication may point at (G-83): only these, only this guest's, and only at
+# the hotels through which the caller may edit the guest
+COMMUNICATION_LINKS = {"booking": "TEX Booking", "reservation": "Reservation"}
+
+
+def _communication_hotel(guest: str, via: set[str], *, booking: str | None, reservation: str | None,
+                         property: str | None) -> str:
+	"""The hotel a communication is logged at, after checking every record it links (G-83).
+	A record that does not exist, is another guest's, or is at a hotel outside ``via`` gets
+	the same answer, so the check tells nothing about other tenants."""
+	hotels = set()
+	if booking:
+		b = frappe.db.get_value(COMMUNICATION_LINKS["booking"], booking, ["property", "booker_guest"], as_dict=True)
+		if not b or b.property not in via or (b.booker_guest != guest and not frappe.db.exists(
+				"Reservation", {"tex_booking": booking, "guest": guest})):
+			frappe.throw(_("Booking {0} is not one of this guest's bookings at your hotels.").format(booking),
+			             frappe.PermissionError)
+		hotels.add(b.property)
+	if reservation:
+		r = frappe.db.get_value(COMMUNICATION_LINKS["reservation"], reservation, ["property", "guest", "tex_booking"],
+		                        as_dict=True)
+		if not r or r.property not in via or r.guest != guest:
+			frappe.throw(_("Reservation {0} is not one of this guest's stays at your hotels.").format(reservation),
+			             frappe.PermissionError)
+		if booking and r.tex_booking != booking:
+			frappe.throw(_("Reservation {0} is not part of booking {1}.").format(reservation, booking))
+		hotels.add(r.property)
+	if property:
+		if property not in via:
+			frappe.throw(_("You don't have access to {0}.").format(property), frappe.PermissionError)
+		hotels.add(property)
+	if len(hotels) > 1:
+		frappe.throw(_("The linked records belong to different hotels."))
+	return hotels.pop() if hotels else sorted(via)[0]
+
+
 def log_communication(guest: str, *, channel: str, direction: str, subject: str | None, body: str | None,
                       consent_basis: str = "Transactional", booking: str | None = None,
                       reservation: str | None = None, property: str | None = None) -> str:
 	via = require_guest(guest, "crm.edit")
-	if property and property not in via:
-		frappe.throw(_("You don't have access to {0}.").format(property), frappe.PermissionError)
 	if channel not in ("Email", "SMS", "WhatsApp", "Phone", "Note"):
 		frappe.throw(_("Unknown channel."))
+	if direction not in ("Outbound", "Inbound", "Internal"):
+		frappe.throw(_("Unknown direction."))
+	if consent_basis not in ("Transactional", "Marketing", "Legitimate Interest"):
+		frappe.throw(_("Unknown consent basis."))
+	booking, reservation = booking or None, reservation or None
+	property = _communication_hotel(guest, via, booking=booking, reservation=reservation, property=property or None)
 	if consent_basis == "Marketing" and direction == "Outbound" and channel in ("Email", "SMS", "WhatsApp"):
 		field = {"Email": "tex_consent_email", "SMS": "tex_consent_sms", "WhatsApp": "tex_consent_whatsapp"}[channel]
 		if not frappe.db.get_value("Guest", guest, field):
 			frappe.throw(_("The guest has not consented to marketing by {0}.").format(channel))
-	doc = frappe.get_doc({"doctype": "TEX Communication", "guest": guest, "property": property or sorted(via)[0],
+	doc = frappe.get_doc({"doctype": "TEX Communication", "guest": guest, "property": property,
 	                      "booking": booking, "reservation": reservation, "channel": channel,
 	                      "direction": direction, "status": "Logged", "consent_basis": consent_basis,
 	                      "subject": (subject or "")[:140], "body": (body or "")[:5000], "sent_at": now_datetime(),
