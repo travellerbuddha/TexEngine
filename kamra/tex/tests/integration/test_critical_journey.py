@@ -248,3 +248,23 @@ class TestHistoricalSimulator(TexTestCase):
 		self.assertEqual(then["simulated"]["totals"]["total"], "400.00")
 		self.assertEqual(now["simulated"]["totals"]["total"], "600.00")
 		self.assertEqual(then["difference"], "0.00")
+
+
+class TestContractSelection(TexTestCase):
+	"""G-17: a room is sold by the highest-priority contract that can sell this stay at
+	this sale time; a contract closed for the sale date or the stay hides nothing."""
+
+	def _contract(self, code: str, base: int, priority: int, **window) -> str:
+		c = fx.create_contract(self.f, code=code, base=base, publish=False)
+		frappe.db.set_value("TEX Contract", c["contract"], {"priority": priority, **window})
+		contracts.publish(c["version"])
+		return c["contract"]
+
+	def test_a_contract_that_cannot_sell_the_stay_hides_nothing(self):
+		main = self._contract("DE-MAIN", 100, 0)
+		early = self._contract("DE-EARLY", 60, 10, stay_to=fx.d(6, 30))     # stays until the end of June
+		self._contract("DE-CLOSED", 50, 20, sale_to=frappe.utils.add_days(frappe.utils.nowdate(), -1))
+		july = search_std(fx.d(7, 10), fx.d(7, 13), [{"adults": 2}])
+		self.assertEqual({o["contract"] for o in july["offers"]}, {main})
+		june = search_std(fx.d(6, 10), fx.d(6, 13), [{"adults": 2}])
+		self.assertEqual({o["contract"] for o in june["offers"]}, {early})  # the early contract wins where it sells

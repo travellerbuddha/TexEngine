@@ -13,7 +13,7 @@ from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, now_datetime
+from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.money import D, D_or_none
 from kamra.tex.pricing import ages as age_math
@@ -452,7 +452,11 @@ def candidate_contracts(property: str, market: str, channel: str, at: datetime) 
 	                      fields=["name", "contract_code", "contract_name", "market", "priority", "sale_from",
 	                              "sale_to", "contract_currency", "sell_currency", "is_bar"])
 	out = []
+	sale = getdate(at)
 	for r in rows:
+		# closed for sale at this time: never a candidate (G-17)
+		if (r.sale_from and sale < getdate(r.sale_from)) or (r.sale_to and sale > getdate(r.sale_to)):
+			continue
 		chans = frappe.get_all("TEX Contract Channel", filters={"parent": r.name, "parenttype": "TEX Contract"},
 		                       pluck="sales_channel")
 		if chans and channel not in chans:

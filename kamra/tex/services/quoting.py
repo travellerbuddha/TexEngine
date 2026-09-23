@@ -167,6 +167,9 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	cells = avail.restriction_cells(property, check_in, check_out)
 	sale_date = sale_at.date()
 	seen_rooms: set[str] = set()
+	# why a room cannot be sold, from the first contract that tried: shown only when no
+	# later contract can price the room either (G-17)
+	fallback: dict[str, list[dict]] = {}
 	ctx_cache: dict[tuple, object] = {}
 
 	for contract_row, version in cands:
@@ -181,6 +184,8 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 				continue
 			count, per_day = avail.stay_availability(property, rt, contract_row.name, check_in, check_out, sale_date)
 			rate_plans = sorted(terms.rate_plans) or [None]
+			priced_here = False   # this contract can price this room for this stay (G-17)
+			pending: list[tuple[bool, dict]] = []
 			boards = _boards_of(terms)
 			for rp in rate_plans:
 				scope = RestrictionScope(room_type=rt, contract=contract_row.name, market=market, rate_plan=rp,
@@ -255,8 +260,20 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						entry["reasons"] = [{"code": r["code"], "room_index": r["room_index"],
 						                     "message": _("Room {0}: {1}").format(r["room_index"] + 1, r["message"])}
 						                    for r in room_reasons]
+					priced_here = priced_here or sellable
+					pending.append((bookable, entry))
+			# the room belongs to the first contract that can price it; a contract closed for this
+			# sale date or stay (or that cannot price the room) hides nothing from the next one
+			if priced_here:
+				for bookable, entry in pending:
 					(result["offers"] if bookable else result["unavailable"]).append(entry)
-			seen_rooms.add(rt)
+				seen_rooms.add(rt)
+			else:
+				fallback.setdefault(rt, [entry for _b, entry in pending])
+
+	for rt, entries in fallback.items():
+		if rt not in seen_rooms:
+			result["unavailable"].extend(entries)
 
 	content = _room_content(sorted({o["room_type"] for o in result["offers"] + result["unavailable"]}))
 	result["rooms"] = {k: {"name": v.room_type_name, "description": v.description, "bed_type": v.bed_type,
