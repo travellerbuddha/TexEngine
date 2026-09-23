@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import type { Option } from "../../../../ui"
 import { IssueList } from "../../components/common"
-import type { EditorState } from "../../lib/tables"
+import type { EditorState, SellingForm } from "../../lib/tables"
 import type { Issue, Lookups, Row, VersionDoc, VersionSetting, VersionTable } from "../../lib/types"
 import { issueTab } from "../../lib/util"
 
@@ -12,6 +12,8 @@ export interface TabProps {
   issues: Issue[] | undefined
   setTable: (t: VersionTable, rows: Row[]) => void
   setSetting: (k: VersionSetting, v: string | number) => void
+  /** Edit the draft's selling terms (only when ``state.selling`` is set). */
+  setSelling: (patch: Partial<SellingForm>) => void
   lookups?: Lookups
   /** Whether the editor has unsaved edits (server previews use the saved draft). */
   dirty: boolean

@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react"
-import { useTexMutation } from "../../../lib/api"
+import { tex, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
-import { Button, Checkbox, Dialog, Field, FormGrid, InlineError, Input, Notice, Select, Textarea, useToast } from "../../../ui"
+import { Button, Checkbox, ConfirmDialog, Dialog, Field, FormGrid, InlineError, Input, Notice, Select, Textarea, useToast } from "../../../ui"
 import { CsvPicker } from "../components/pickers"
-import { BASIS, CONTRACT_STATUS, enumOptions } from "../lib/options"
-import type { ContractBundle, ContractDoc } from "../lib/types"
+import { BASIS, enumLabel, enumOptions } from "../lib/options"
+import type { ContractBundle, ContractDoc, ContractStatusAction } from "../lib/types"
 import { invalidateLookups, joinCsv, splitCsv } from "../lib/util"
 
 interface HeaderForm {
   contract_code: string
   contract_name: string
   market: string
-  status: string
   pricing_basis: string
   contract_currency: string
   sell_currency: string
@@ -31,7 +30,6 @@ function toForm(c: ContractDoc | undefined, defaults: { currency?: string; marke
     contract_code: c?.contract_code ?? "",
     contract_name: c?.contract_name ?? "",
     market: c?.market ?? defaults.market ?? "",
-    status: c?.status ?? "Draft",
     pricing_basis: c?.pricing_basis ?? "PERSON",
     contract_currency: c?.contract_currency ?? defaults.currency ?? "EUR",
     sell_currency: c?.sell_currency ?? "",
@@ -46,16 +44,22 @@ function toForm(c: ContractDoc | undefined, defaults: { currency?: string; marke
   }
 }
 
-/** New contract / edit contract header (save_contract). */
+/** New contract / edit contract header (save_contract). Once a version was published, what the
+ * contract sells on is fixed (G-50, ADR-045): market, currency and basis for good, windows,
+ * channels, priority and sell currency per version. Those fields are shown read-only; the server
+ * refuses them too. The status moves through the contract's actions, never through this form. */
 export function ContractFormDialog({
   open,
   onClose,
   contract,
+  published = false,
   onSaved,
 }: {
   open: boolean
   onClose: () => void
   contract?: ContractDoc
+  /** A version of this contract was published (``get_contract().published``). */
+  published?: boolean
   onSaved: (b: ContractBundle) => void
 }) {
   const { t } = useTexT()
@@ -73,11 +77,13 @@ export function ContractFormDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, contract])
   const set = <K extends keyof HeaderForm>(k: K, v: HeaderForm[K]) => setF((x) => ({ ...x, [k]: v }))
-  const locked = Boolean(contract?.active_version)
+  const locked = Boolean(contract) && published
+  const fixedHint = locked ? t("rates.h.locked_fixed") : undefined
+  const versionedHint = locked ? t("rates.h.locked_versioned") : undefined
   const saleBad = f.sale_from && f.sale_to && f.sale_from > f.sale_to
   const stayBad = f.stay_from && f.stay_to && f.stay_from > f.stay_to
   const missing = !f.contract_code.trim() || !f.contract_name.trim() || !f.market || !f.contract_currency
-  const invalid = missing || Boolean(saleBad) || Boolean(stayBad)
+  const invalid = missing || (!locked && (Boolean(saleBad) || Boolean(stayBad)))
 
   const submit = async () => {
     setTouched(true)
@@ -85,20 +91,22 @@ export function ContractFormDialog({
     const data: Record<string, unknown> = {
       contract_code: f.contract_code.trim(),
       contract_name: f.contract_name.trim(),
-      market: f.market,
-      status: f.status,
-      pricing_basis: f.pricing_basis,
-      contract_currency: f.contract_currency,
-      sell_currency: f.sell_currency || null,
-      priority: f.priority,
       is_bar: f.is_bar ? 1 : 0,
-      sale_from: f.sale_from || null,
-      sale_to: f.sale_to || null,
-      stay_from: f.stay_from || null,
-      stay_to: f.stay_to || null,
-      channels: splitCsv(f.channels),
       notes: f.notes || null,
     }
+    if (!locked)
+      Object.assign(data, {
+        market: f.market,
+        pricing_basis: f.pricing_basis,
+        contract_currency: f.contract_currency,
+        sell_currency: f.sell_currency || null,
+        priority: f.priority,
+        sale_from: f.sale_from || null,
+        sale_to: f.sale_to || null,
+        stay_from: f.stay_from || null,
+        stay_to: f.stay_to || null,
+        channels: splitCsv(f.channels),
+      })
     if (contract) data.name = contract.name
     else data.property = property?.name
     try {
@@ -141,6 +149,11 @@ export function ContractFormDialog({
           void submit()
         }}
       >
+        {locked && (
+          <Notice tone="info" title={t("rates.contract.locked_title")}>
+            {t("rates.contract.locked_body")}
+          </Notice>
+        )}
         <FormGrid cols={2}>
           <Field label={t("rates.f.contract_code")} required hint={t("rates.h.contract_code")} error={touched && !f.contract_code.trim() ? t("rates.v.required") : undefined}>
             <Input value={f.contract_code} maxLength={40} onChange={(e) => set("contract_code", e.target.value.toUpperCase())} data-autofocus />
@@ -148,46 +161,43 @@ export function ContractFormDialog({
           <Field label={t("rates.f.contract_name")} required error={touched && !f.contract_name.trim() ? t("rates.v.required") : undefined}>
             <Input value={f.contract_name} maxLength={140} onChange={(e) => set("contract_name", e.target.value)} />
           </Field>
-          <Field label={t("rates.f.market")} required hint={t("rates.h.market")} error={touched && !f.market ? t("rates.v.required") : undefined}>
-            <Select value={f.market} onChange={(e) => set("market", e.target.value)} options={marketOpts} placeholder={t("rates.common.choose")} />
+          <Field label={t("rates.f.market")} required hint={fixedHint ?? t("rates.h.market")} error={touched && !f.market ? t("rates.v.required") : undefined}>
+            <Select value={f.market} disabled={locked} onChange={(e) => set("market", e.target.value)} options={marketOpts} placeholder={t("rates.common.choose")} />
           </Field>
-          <Field label={t("rates.f.status")} hint={t("rates.h.contract_status")}>
-            <Select value={f.status} onChange={(e) => set("status", e.target.value)} options={enumOptions(t, "contract_status", CONTRACT_STATUS)} />
-          </Field>
-          <Field label={t("rates.f.pricing_basis")} hint={locked ? t("rates.h.locked_after_publish") : t("rates.h.pricing_basis")}>
+          <Field label={t("rates.f.pricing_basis")} hint={fixedHint ?? t("rates.h.pricing_basis")}>
             <Select value={f.pricing_basis} disabled={locked} onChange={(e) => set("pricing_basis", e.target.value)} options={enumOptions(t, "basis", BASIS)} />
           </Field>
-          <Field label={t("rates.f.contract_currency")} required hint={locked ? t("rates.h.locked_after_publish") : t("rates.h.contract_currency")}>
+          <Field label={t("rates.f.contract_currency")} required hint={fixedHint ?? t("rates.h.contract_currency")}>
             <Select value={f.contract_currency} disabled={locked} onChange={(e) => set("contract_currency", e.target.value)} options={ccyOpts} />
           </Field>
-          <Field label={t("rates.f.sell_currency")} hint={t("rates.h.sell_currency")}>
-            <Select value={f.sell_currency} onChange={(e) => set("sell_currency", e.target.value)} options={ccyOpts} placeholder={t("rates.common.same_as_contract")} />
+          <Field label={t("rates.f.sell_currency")} hint={versionedHint ?? t("rates.h.sell_currency")}>
+            <Select value={f.sell_currency} disabled={locked} onChange={(e) => set("sell_currency", e.target.value)} options={ccyOpts} placeholder={t("rates.common.same_as_contract")} />
           </Field>
-          <Field label={t("rates.f.priority")} hint={t("rates.h.contract_priority")}>
-            <Input type="number" step={1} value={String(f.priority)} onChange={(e) => set("priority", parseInt(e.target.value || "0", 10) || 0)} />
+          <Field label={t("rates.f.priority")} hint={versionedHint ?? t("rates.h.contract_priority")}>
+            <Input type="number" step={1} disabled={locked} value={String(f.priority)} onChange={(e) => set("priority", parseInt(e.target.value || "0", 10) || 0)} />
           </Field>
         </FormGrid>
         <Checkbox label={t("rates.f.is_bar")} checked={f.is_bar} onChange={(e) => set("is_bar", e.target.checked)} />
         <fieldset className="space-y-3">
           <legend className="text-sm font-semibold text-zinc-900">{t("rates.contract.validity")}</legend>
-          <p className="text-xs text-zinc-500">{t("rates.h.sale_vs_stay")}</p>
+          <p className="text-xs text-zinc-500">{versionedHint ?? t("rates.h.sale_vs_stay")}</p>
           <FormGrid cols={4}>
             <Field label={t("rates.f.sale_from")}>
-              <Input type="date" value={f.sale_from} onChange={(e) => set("sale_from", e.target.value)} />
+              <Input type="date" disabled={locked} value={f.sale_from} onChange={(e) => set("sale_from", e.target.value)} />
             </Field>
-            <Field label={t("rates.f.sale_to")} error={saleBad ? t("rates.v.range") : undefined}>
-              <Input type="date" value={f.sale_to} onChange={(e) => set("sale_to", e.target.value)} />
+            <Field label={t("rates.f.sale_to")} error={!locked && saleBad ? t("rates.v.range") : undefined}>
+              <Input type="date" disabled={locked} value={f.sale_to} onChange={(e) => set("sale_to", e.target.value)} />
             </Field>
             <Field label={t("rates.f.stay_from")}>
-              <Input type="date" value={f.stay_from} onChange={(e) => set("stay_from", e.target.value)} />
+              <Input type="date" disabled={locked} value={f.stay_from} onChange={(e) => set("stay_from", e.target.value)} />
             </Field>
-            <Field label={t("rates.f.stay_to")} error={stayBad ? t("rates.v.range") : undefined}>
-              <Input type="date" value={f.stay_to} onChange={(e) => set("stay_to", e.target.value)} />
+            <Field label={t("rates.f.stay_to")} error={!locked && stayBad ? t("rates.v.range") : undefined}>
+              <Input type="date" disabled={locked} value={f.stay_to} onChange={(e) => set("stay_to", e.target.value)} />
             </Field>
           </FormGrid>
         </fieldset>
-        <Field label={t("rates.f.channels")} hint={t("rates.h.channels")}>
-          <CsvPicker value={f.channels} onChange={(v) => set("channels", v)} options={channelOpts} label={t("rates.f.channels")} allLabel={t("rates.common.all_channels")} />
+        <Field label={t("rates.f.channels")} hint={versionedHint ?? t("rates.h.channels")}>
+          <CsvPicker value={f.channels} disabled={locked} onChange={(v) => set("channels", v)} options={channelOpts} label={t("rates.f.channels")} allLabel={t("rates.common.all_channels")} />
         </Field>
         <Field label={t("rates.f.notes")}>
           <Textarea value={f.notes} onChange={(e) => set("notes", e.target.value)} rows={2} />
@@ -197,6 +207,41 @@ export function ContractFormDialog({
         <button type="submit" hidden />
       </form>
     </Dialog>
+  )
+}
+
+/** Suspend, resume, archive or restore a contract (G-50): an explicit, audited action with a
+ * reason (``contract.publish``), the only way besides publishing that the status changes. */
+export function ContractStatusDialog({
+  open,
+  onClose,
+  contract,
+  action,
+  onDone,
+}: {
+  open: boolean
+  onClose: () => void
+  contract: { name: string; contract_code: string }
+  action: ContractStatusAction
+  onDone: () => void
+}) {
+  const { t } = useTexT()
+  const toast = useToast()
+  return (
+    <ConfirmDialog
+      open={open}
+      onClose={onClose}
+      tone={action === "suspend" || action === "archive" ? "danger" : "primary"}
+      requireReason
+      title={t(`rates.contract.status_title.${action}`, { code: contract.contract_code })}
+      body={t(`rates.contract.status_body.${action}`)}
+      confirmLabel={t(`rates.contract.status_action.${action}`)}
+      onConfirm={async (reason) => {
+        const r = await tex<{ status: string }>("contracts", "set_contract_status", { name: contract.name, action, reason }, { post: true })
+        toast.success(t("rates.contract.status_done", { code: contract.contract_code, status: enumLabel(t, "contract_status", r.status) }))
+        onDone()
+      }}
+    />
   )
 }
 

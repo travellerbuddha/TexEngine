@@ -156,7 +156,7 @@ def terms_to_payload(t: ContractTerms) -> dict:
 			"id": t.contract_id, "code": t.contract_code, "name": t.contract_name, "property": t.property,
 			"market": t.market, "currency": t.currency, "basis": t.basis.value,
 			"sale_from": t.sale_from, "sale_to": t.sale_to, "stay_from": t.stay_from, "stay_to": t.stay_to,
-			"channels": t.channels,
+			"channels": t.channels, "priority": t.priority, "sell_currency": t.sell_currency,
 		},
 		"version": {"id": t.version_id, "no": t.version_no},
 		"settings": {
@@ -285,6 +285,8 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		offers=tuple(promotion_from_dict({**o, "source": "contract"}) for o in payload.get("offers") or []),
 		sale_from=_d(c.get("sale_from")), sale_to=_d(c.get("sale_to")),
 		stay_from=_d(c.get("stay_from")), stay_to=_d(c.get("stay_to")), channels=_set(c.get("channels")),
+		priority=_int(c.get("priority")),
+		sell_currency=(c.get("sell_currency") or "").upper() or None,
 		child_ordering=ChildOrdering(s.get("child_ordering") or "OLDEST_FIRST"),
 		age_basis=AgeBasis(s.get("age_basis") or "ARRIVAL"),
 		children_over_max_as_adults=bool(s.get("children_over_max_as_adults", True)),

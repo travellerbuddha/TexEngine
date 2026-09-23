@@ -247,6 +247,10 @@ class ContractTerms:
 	stay_from: date | None = None
 	stay_to: date | None = None
 	channels: frozenset[str] | None = None
+	# selection order and default sell currency (G-50, ADR-045); None = the payload was frozen
+	# before they were, and selection falls back to the contract header
+	priority: int | None = None
+	sell_currency: str | None = None
 	child_ordering: ChildOrdering = ChildOrdering.OLDEST_FIRST
 	age_basis: AgeBasis = AgeBasis.ARRIVAL
 	children_over_max_as_adults: bool = True

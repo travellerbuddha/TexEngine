@@ -268,3 +268,276 @@ class TestContractSelection(TexTestCase):
 		self.assertEqual({o["contract"] for o in july["offers"]}, {main})
 		june = search_std(fx.d(6, 10), fx.d(6, 13), [{"adults": 2}])
 		self.assertEqual({o["contract"] for o in june["offers"]}, {early})  # the early contract wins where it sells
+
+
+LOCK_OTHER_HOTEL = "TEX Header Lock Other Hotel"
+
+
+class TestContractHeaderLock(TexTestCase):
+	"""G-50 (ADR-045): once a contract has a published version, what selection and pricing read
+	(hotel, market, currency, pricing basis, sale/stay windows, channels, priority, sell currency)
+	is fixed; windows, channels, priority and sell currency change only with a new version. The
+	header mirrors the live version, selection reads the frozen version, and the status moves
+	only through audited actions."""
+
+	def setUp(self):
+		super().setUp()
+		self.c = fx.create_contract(self.f, code="LOCK")
+		self.name = self.c["contract"]
+		contracts.clear_terms_cache()
+
+	def _audit(self, action: str, name: str | None = None) -> dict:
+		rows = frappe.get_all("TEX Audit Event", filters={"action": action, "reference_name": name or self.name},
+		                      fields=["old_value", "new_value", "reason"], order_by="creation desc, name desc",
+		                      limit=1)
+		self.assertTrue(rows, f"no {action} audit for {name or self.name}")
+		r = rows[0]
+		return {"old": json.loads(r.old_value) if r.old_value else None,
+		        "new": json.loads(r.new_value) if r.new_value else None, "reason": r.reason}
+
+	def _published(self, code: str, base: int, priority: int) -> str:
+		c = fx.create_contract(self.f, code=code, base=base, publish=False)
+		frappe.db.set_value("TEX Contract", c["contract"], "priority", priority)  # before the first publish
+		contracts.publish(c["version"])
+		return c["contract"]
+
+	def _other_hotel(self) -> str:
+		if not frappe.db.exists("Property", LOCK_OTHER_HOTEL):
+			frappe.get_doc({"doctype": "Property", "property_name": LOCK_OTHER_HOTEL, "city": "Side",
+			                "country": "Turkey", "currency": "EUR", "tex_hotel_group": self.f["group"]}
+			               ).insert(ignore_permissions=True)
+		return LOCK_OTHER_HOTEL
+
+	def test_published_header_refuses_commercial_edits_through_the_api(self):
+		from kamra.tex.api import contracts as api
+
+		before = frappe.get_doc("TEX Contract", self.name).as_dict()
+		changes = {"market": "UK", "channels": ["OTA"], "sale_from": str(fx.d(1, 15)), "sale_to": str(fx.d(6, 1)),
+		           "stay_from": str(fx.d(6, 1)), "stay_to": str(fx.d(9, 30)), "priority": 50,
+		           "sell_currency": "GBP", "contract_currency": "GBP", "pricing_basis": "ROOM", "status": "Suspended"}
+		for field, value in changes.items():
+			with self.subTest(field=field), self.assertRaises(frappe.ValidationError):
+				api.save_contract(data={"name": self.name, field: value})
+		after = frappe.get_doc("TEX Contract", self.name)
+		for field in changes:
+			if field != "channels":
+				self.assertEqual(str(after.get(field) or ""), str(before.get(field) or ""), field)
+		self.assertEqual([c.sales_channel for c in after.channels], [])
+
+	def test_published_header_refuses_commercial_edits_through_desk_and_rest(self):
+		other = self._other_hotel()
+		for field, value in (("market", "UK"), ("sale_to", fx.d(6, 1)), ("stay_from", fx.d(6, 1)), ("priority", 50),
+		                     ("sell_currency", "GBP"), ("status", "Suspended"), ("property", other),
+		                     ("active_version", None)):
+			doc = frappe.get_doc("TEX Contract", self.name)
+			doc.set(field, value)
+			with self.subTest(field=field), self.assertRaises(frappe.ValidationError):
+				doc.save()
+		doc = frappe.get_doc("TEX Contract", self.name)
+		doc.append("channels", {"sales_channel": "OTA"})
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()
+		from frappe.client import set_value
+
+		with self.assertRaises(frappe.ValidationError):              # REST: PUT /api/resource runs the same save
+			set_value("TEX Contract", self.name, "market", "UK")
+		self.assertEqual(frappe.db.get_value("TEX Contract", self.name, "market"), "DE")
+		# a new contract always starts as a draft, whatever the request says
+		new = frappe.get_doc({"doctype": "TEX Contract", "property": fx.PROPERTY, "contract_code": "LOCK-INS",
+		                      "contract_name": "Inserted", "market": "DE", "contract_currency": "EUR",
+		                      "pricing_basis": "PERSON", "status": "Active"}).insert(ignore_permissions=True)
+		self.assertEqual(new.status, "Draft")
+
+	def test_name_notes_and_code_stay_editable_and_are_audited(self):
+		from kamra.tex.api import contracts as api
+
+		api.save_contract(data={"name": self.name, "contract_name": "Renamed", "notes": "memo", "is_bar": 1})
+		doc = frappe.get_doc("TEX Contract", self.name)
+		self.assertEqual((doc.contract_name, doc.notes, doc.is_bar), ("Renamed", "memo", 1))
+		ev = self._audit("contract.save")
+		self.assertEqual(ev["old"]["contract_name"], "LOCK contract")
+		self.assertEqual(ev["new"]["contract_name"], "Renamed")
+		self.assertEqual(ev["new"]["notes"], "memo")
+		# a Desk / REST save of the header is audited too
+		doc.contract_name = "Renamed in Desk"
+		doc.save()
+		self.assertEqual(self._audit("contract.save")["new"]["contract_name"], "Renamed in Desk")
+
+	def test_save_contract_audit_records_channels_and_every_changed_field(self):
+		from kamra.tex.api import contracts as api
+
+		draft = fx.create_contract(self.f, code="LOCK-D", publish=False)["contract"]
+		api.save_contract(data={"name": draft, "channels": ["OTA", "B2B"], "sale_to": str(fx.d(9, 30)),
+		                        "priority": 4})
+		ev = self._audit("contract.save", draft)
+		self.assertEqual(ev["old"]["channels"], [])
+		self.assertEqual(ev["new"]["channels"], ["B2B", "OTA"])
+		self.assertEqual((ev["old"]["sale_to"], ev["new"]["sale_to"]), (str(fx.STAY_TO), str(fx.d(9, 30))))
+		self.assertEqual((ev["old"]["priority"], ev["new"]["priority"]), (0, 4))
+		api.save_contract(data={"name": draft, "channels": ["OTA"]})
+		ev = self._audit("contract.save", draft)
+		self.assertEqual((ev["old"]["channels"], ev["new"]["channels"]), (["B2B", "OTA"], ["OTA"]))
+
+	def test_status_moves_only_through_audited_actions(self):
+		from kamra.tex.api import contracts as api
+
+		july = (fx.d(7, 10), fx.d(7, 13), [{"adults": 2}])
+		self.assertTrue(search_std(*july)["offers"])
+		with self.assertRaises(frappe.ValidationError):              # a reason is required
+			api.set_contract_status(name=self.name, action="suspend", reason=" ")
+		api.set_contract_status(name=self.name, action="suspend", reason="Hotel overbooked")
+		self.assertEqual(frappe.db.get_value("TEX Contract", self.name, "status"), "Suspended")
+		self.assertEqual(search_std(*july)["offers"], [])            # stop sale takes effect at once
+		ev = self._audit("contract.status")
+		self.assertEqual((ev["old"], ev["new"], ev["reason"]),
+		                 ({"status": "Active"}, {"status": "Suspended"}, "Hotel overbooked"))
+		with self.assertRaises(frappe.ValidationError):              # only an active contract is suspended
+			api.set_contract_status(name=self.name, action="suspend", reason="again")
+		api.set_contract_status(name=self.name, action="resume", reason="Rooms back")
+		self.assertTrue(search_std(*july)["offers"])
+		api.set_contract_status(name=self.name, action="archive", reason="Season over")
+		self.assertEqual(frappe.db.get_value("TEX Contract", self.name, "status"), "Archived")
+		api.set_contract_status(name=self.name, action="restore", reason="Archived by mistake")
+		self.assertEqual(frappe.db.get_value("TEX Contract", self.name, "status"), "Suspended")
+		draft = fx.create_contract(self.f, code="LOCK-NP", publish=False)["contract"]
+		with self.assertRaises(frappe.ValidationError):              # nothing published: nothing to resume
+			api.set_contract_status(name=draft, action="resume", reason="x")
+
+	def test_selection_reads_the_frozen_version_not_the_header(self):
+		now = frappe.utils.now_datetime()
+		# the header is changed behind the controller's back (DB / data import)
+		frappe.db.set_value("TEX Contract", self.name, {"market": "UK", "sell_currency": "GBP",
+		                                                "sale_to": add_days(frappe.utils.nowdate(), -1)})
+		frappe.get_doc({"doctype": "TEX Contract Channel", "parent": self.name, "parenttype": "TEX Contract",
+		                "parentfield": "channels", "idx": 1, "sales_channel": "OTA"}).db_insert()
+		cands = contracts.candidate_contracts(fx.PROPERTY, "DE", "DIRECT_WEB", now)
+		self.assertEqual([c[0].name for c in cands], [self.name])
+		row = cands[0][0]
+		self.assertEqual((row.market, str(row.sale_to), row.sell_currency), ("DE", str(fx.STAY_TO), "EUR"))
+		self.assertEqual(contracts.candidate_contracts(fx.PROPERTY, "UK", "OTA", now), [])
+		offers = search_std(fx.d(7, 10), fx.d(7, 13), [{"adults": 2}])["offers"]
+		self.assertEqual({(o["contract"], o["currency"]) for o in offers}, {(self.name, "EUR")})
+
+	def test_a_tampered_priority_does_not_change_the_winner(self):
+		early = self._published("LOCK-EARLY", 60, 10)
+		july = (fx.d(7, 10), fx.d(7, 13), [{"adults": 2}])
+		self.assertEqual({o["contract"] for o in search_std(*july)["offers"]}, {early})
+		frappe.db.set_value("TEX Contract", self.name, "priority", 99)
+		self.assertEqual({o["contract"] for o in search_std(*july)["offers"]}, {early})
+
+	def test_a_version_frozen_before_g50_still_selects_by_its_header(self):
+		from kamra.tex.pricing import serialize
+
+		early = self._published("LOCK-EARLY", 60, 10)
+		# payloads frozen before ADR-045 carry no priority or sell currency
+		v = self.c["version"]
+		payload = json.loads(frappe.db.get_value("TEX Contract Version", v, "payload"))
+		payload["contract"].pop("priority", None)
+		payload["contract"].pop("sell_currency", None)
+		frappe.db.set_value("TEX Contract Version", v, {"payload": json.dumps(payload),
+		                                                "payload_hash": serialize.payload_hash(payload)},
+		                    update_modified=False)
+		frappe.db.set_value("TEX Contract", self.name, {"priority": 30, "sell_currency": "GBP"})
+		contracts.clear_terms_cache()
+		cands = contracts.candidate_contracts(fx.PROPERTY, "DE", "DIRECT_WEB", frappe.utils.now_datetime())
+		self.assertEqual([c[0].name for c in cands], [self.name, early])
+		self.assertEqual((cands[0][0].priority, cands[0][0].sell_currency), (30, "GBP"))
+
+	def test_selling_terms_change_with_a_new_version(self):
+		from kamra.tex.api import contracts as api
+
+		v1 = self.c["version"]
+		v2 = contracts.new_draft(self.name)
+		d = api.get_version(v2)
+		self.assertTrue(d["selling_editable"])
+		self.assertEqual(d["selling"]["sale_to"], str(fx.STAY_TO))
+		self.assertEqual(d["selling"]["channels"], [])
+		api.save_version(v2, {"selling": {"sale_to": str(fx.d(8, 31)), "stay_to": str(fx.d(8, 31)),
+		                                  "channels": ["OTA"], "priority": 7}})
+		contracts.publish(v2, change_note="OTA only, summer")
+		header = frappe.get_doc("TEX Contract", self.name)         # the header mirrors the live version
+		self.assertEqual((str(header.sale_to), str(header.stay_to), header.priority),
+		                 (str(fx.d(8, 31)), str(fx.d(8, 31)), 7))
+		self.assertEqual([c.sales_channel for c in header.channels], ["OTA"])
+		self.assertIsNone(contracts.load_terms(v1).channels)       # V1 keeps what it sold with
+		self.assertEqual(api.get_version(v1)["selling"]["channels"], [])
+		now = frappe.utils.now_datetime()
+		self.assertEqual(contracts.candidate_contracts(fx.PROPERTY, "DE", "DIRECT_WEB", now), [])
+		self.assertEqual([c[0].name for c in contracts.candidate_contracts(fx.PROPERTY, "DE", "OTA", now)],
+		                 [self.name])
+		ev = self._audit("contract.publish", v2)
+		self.assertEqual(ev["new"]["selling"]["channels"], ["OTA"])
+		self.assertEqual(ev["old"]["selling"]["channels"], [])
+		with self.assertRaises(frappe.ValidationError):              # published versions stay frozen
+			api.save_version(v2, {"selling": {"priority": 1}})
+
+	def test_a_version_made_outside_new_draft_starts_from_the_published_terms(self):
+		# Desk / REST insert of a version, without selling terms: not "everywhere, always"
+		v = frappe.get_doc({"doctype": "TEX Contract Version", "contract": self.name}).insert(ignore_permissions=True)
+		self.assertEqual((str(v.sale_to), str(v.stay_from), v.sell_currency), (str(fx.STAY_TO), str(fx.STAY_FROM), "EUR"))
+
+	def test_p21_gives_drafts_of_published_contracts_their_header_terms(self):
+		from kamra.patches.tex import p21_contract_header_lock
+
+		v2 = contracts.new_draft(self.name)
+		# a draft made before G-50 has no selling terms of its own; its header had a channel
+		frappe.db.set_value("TEX Contract Version", v2, {f: 0 if f == "priority" else None
+		                                                 for f in contracts.SELLING_FIELDS})
+		frappe.get_doc({"doctype": "TEX Contract Channel", "parent": self.name, "parenttype": "TEX Contract",
+		                "parentfield": "channels", "idx": 1, "sales_channel": "B2B"}).db_insert()
+		from unittest import mock
+
+		with mock.patch("frappe.reload_doc"):                         # no schema sync (DDL commits) in a test
+			p21_contract_header_lock.execute()
+		d = frappe.get_doc("TEX Contract Version", v2)
+		self.assertEqual((str(d.sale_to), str(d.stay_from), [c.sales_channel for c in d.channels]),
+		                 (str(fx.STAY_TO), str(fx.STAY_FROM), ["B2B"]))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.c["version"], "payload_hash"),
+		                 self.c["payload_hash"])                     # published payloads are not touched
+
+	def test_before_the_first_publish_the_header_holds_the_selling_terms(self):
+		from kamra.tex.api import contracts as api
+
+		c = fx.create_contract(self.f, code="LOCK-NEW", publish=False)
+		api.save_contract(data={"name": c["contract"], "market": "UK", "priority": 5, "channels": ["CALL_CENTER"]})
+		d = api.get_version(c["version"])
+		self.assertFalse(d["selling_editable"])
+		self.assertEqual((d["selling"]["priority"], d["selling"]["channels"]), (5, ["CALL_CENTER"]))
+		with self.assertRaises(frappe.ValidationError):
+			api.save_version(c["version"], {"selling": {"priority": 9}})
+		contracts.publish(c["version"])
+		t = contracts.load_terms(c["version"])
+		self.assertEqual((t.market, t.channels, t.priority, t.sell_currency), ("UK", frozenset({"CALL_CENTER"}), 5, "EUR"))
+		self.assertTrue(api.get_contract(c["contract"])["published"])
+
+	def test_only_contract_managers_of_the_hotel_change_a_contract(self):
+		from kamra.tex.api import contracts as api
+		from kamra.tex.security import scope
+
+		other = self._other_hotel()
+		fx.ensure("TEX Permission Profile", {"profile_name": "G50 Contract Editor"},
+		          {"profile_name": "G50 Contract Editor",
+		           "capabilities": [{"capability": "price.view"}, {"capability": "contract.edit"}]})
+		agent = fx.ensure_user("g50-agent@example.com", ["Call Center Agent"])
+		editor = fx.ensure_user("g50-editor@example.com", ["Revenue Manager"])
+		foreign = fx.ensure_user("g50-foreign@example.com", ["Hotel Admin"])
+		for user, prop, profile in ((agent, fx.PROPERTY, "Reservations Agent"),
+		                            (editor, fx.PROPERTY, "G50 Contract Editor"), (foreign, other, "Hotel Admin")):
+			fx.ensure("TEX Access Grant", {"user": user, "property": prop},
+			          {"user": user, "scope_level": "Hotel", "property": prop, "permission_profile": profile})
+		for user in (agent, foreign):
+			frappe.set_user(user)  # nosemgrep: frappe-setuser -- no contract.edit at this hotel
+			scope.clear_cache()
+			with self.assertRaises(frappe.PermissionError):
+				api.save_contract(data={"name": self.name, "contract_name": "hijacked"})
+			with self.assertRaises(frappe.PermissionError):
+				api.set_contract_status(name=self.name, action="suspend", reason="probe")
+		frappe.set_user(editor)  # nosemgrep: frappe-setuser -- contract.edit without contract.publish
+		scope.clear_cache()
+		api.save_contract(data={"name": self.name, "contract_name": "Edited by editor"})
+		with self.assertRaises(frappe.PermissionError):
+			api.set_contract_status(name=self.name, action="suspend", reason="probe")
+		self.assertFalse(api.get_contract(self.name)["status_actions"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- verify
+		self.assertEqual(frappe.db.get_value("TEX Contract", self.name, ["contract_name", "status"]),
+		                 ("Edited by editor", "Active"))
