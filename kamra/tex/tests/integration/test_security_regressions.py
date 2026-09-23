@@ -6,6 +6,10 @@ H4 Desk/REST cannot bypass capabilities, scope, revision lifecycle or cost hidin
 M2 guests of other tenants stay invisible · L4 shared FX rates are platform-only.
 """
 
+import hashlib
+import hmac
+from unittest import mock
+
 import frappe
 
 from kamra.tex.api import payments as pay_api
@@ -733,3 +737,28 @@ class TestAdminDataTenancy(TexTestCase):
 			admin.profiles()
 		self.as_there()
 		self.assertTrue(admin.profiles()["profiles"])
+
+
+class TestGoLivePayments(TexTestCase):
+	"""Go-live hardening (ADR-041). G-89: signatures never fall back to the site name."""
+
+	def test_g89_signatures_need_the_site_encryption_key(self):
+		from kamra.tex.services import quoting
+
+		key = str(frappe.local.conf.get("encryption_key") or "")
+		self.assertTrue(key, "the test site must have an encryption key")
+		# with a key, every signature is exactly what it was (issued offers and callbacks stay valid)
+		self.assertEqual(pay._mock_secret(), hashlib.sha256(("tex-mock-pay:" + key).encode()).hexdigest())
+		self.assertEqual(pay.callback_signature("PTX-1"),
+		                 hmac.new(("tex-callback:" + key).encode(), b"PTX-1", hashlib.sha256).hexdigest()[:32])
+		self.assertEqual(quoting._secret(), hashlib.sha256(("tex-offer:" + key).encode()).digest())
+		token = quoting.sign({"kind": "offer", "n": 1})
+		with mock.patch.dict(frappe.local.conf):
+			frappe.local.conf.pop("encryption_key", None)
+			for signing in (lambda: quoting.sign({"kind": "offer"}), lambda: quoting.verify(token),
+			                lambda: pay.callback_signature("PTX-1"), pay._mock_secret):
+				with self.assertRaisesRegex(frappe.ValidationError, "encryption key") as caught:
+					signing()
+				self.assertNotIn(key, str(caught.exception))
+				self.assertNotIn(frappe.local.site, str(caught.exception))
+		self.assertEqual(quoting.verify(token)["n"], 1)

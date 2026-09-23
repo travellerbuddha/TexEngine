@@ -21,11 +21,12 @@ from kamra.tex.payments.providers import simple, turkey
 from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
+from kamra.tex.security.keys import site_secret
 
 
 def _mock_secret() -> str:
-	key = frappe.local.conf.get("encryption_key") or frappe.local.site
-	return hashlib.sha256(("tex-mock-pay:" + str(key)).encode()).hexdigest()
+	# the site key, never the public site name (G-89): same value as before for a keyed site
+	return hashlib.sha256(site_secret("tex-mock-pay").encode()).hexdigest()
 
 
 def ns_key(property: str, raw: str | None, kind: str) -> str | None:
@@ -39,8 +40,7 @@ def ns_key(property: str, raw: str | None, kind: str) -> str | None:
 
 def callback_signature(transaction: str) -> str:
 	"""Signs the gateway return URL so arbitrary transaction ids cannot be poked."""
-	key = frappe.local.conf.get("encryption_key") or frappe.local.site
-	return hmac.new(("tex-callback:" + str(key)).encode(), transaction.encode(), hashlib.sha256).hexdigest()[:32]
+	return hmac.new(site_secret("tex-callback").encode(), transaction.encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def allowed_return_hosts(property: str) -> set[str]:
