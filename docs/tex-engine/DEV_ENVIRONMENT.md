@@ -77,6 +77,7 @@ services back (as root):
 ```bash
 mysqld_safe > /dev/null 2>&1 &                     # MariaDB (root password "root")
 redis-server --daemonize yes --dir /tmp            # Redis 6379 (keep its dump out of the repo)
+grep -q test.localhost /etc/hosts || echo "127.0.0.1 test.localhost" >> /etc/hosts   # Node/Playwright need it
 su frappe -s /bin/bash -c "source /home/user/bench/env.sh; cd /home/user/bench/frappe-bench; \
   nohup bench serve --port 8000 >> /home/user/bench/serve.log 2>&1 &"
 ```
