@@ -541,3 +541,203 @@ class TestContractHeaderLock(TexTestCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- verify
 		self.assertEqual(frappe.db.get_value("TEX Contract", self.name, ["contract_name", "status"]),
 		                 ("Edited by editor", "Active"))
+
+
+class TestContractHeaderLockReview(TexTestCase):
+	"""G-50 review follow-up (ADR-045). Before G-50 selection read the header and pricing the
+	payload, so a header narrowed after publish (a channel removed, the sale window closed, the
+	market changed) stopped sales. Such narrowings survive the upgrade: a version frozen before
+	G-50 sells only where both its payload and the header (as snapshotted at the upgrade, p25)
+	let it, and p25 reports every such contract. A suspend stops quotes and bookings in flight;
+	the scheduler survives a broken header; Desk-made versions and p21 re-runs never lose terms."""
+
+	def setUp(self):
+		super().setUp()
+		self.c = fx.create_contract(self.f, code="LOCKR")
+		self.name = self.c["contract"]
+		contracts.clear_terms_cache()
+
+	_audit = TestContractHeaderLock._audit
+
+	def _pre_g50(self, version: str) -> None:
+		"""Make a published version look frozen before G-50: no priority or sell currency in its
+		payload (re-hashed) and no selling terms of its own."""
+		from kamra.tex.pricing import serialize
+
+		payload = json.loads(frappe.db.get_value("TEX Contract Version", version, "payload"))
+		payload["contract"].pop("priority", None)
+		payload["contract"].pop("sell_currency", None)
+		frappe.db.set_value("TEX Contract Version", version, {
+			"payload": json.dumps(payload), "payload_hash": serialize.payload_hash(payload), "priority": 0,
+			"sale_from": None, "sale_to": None, "stay_from": None, "stay_to": None, "sell_currency": None},
+			update_modified=False)
+		frappe.db.delete("TEX Contract Channel", {"parent": version, "parenttype": "TEX Contract Version"})
+		contracts.clear_terms_cache()
+
+	def _header_channels(self, contract: str, *channels: str) -> None:
+		frappe.db.delete("TEX Contract Channel", {"parent": contract, "parenttype": "TEX Contract"})
+		for idx, ch in enumerate(channels, 1):
+			frappe.get_doc({"doctype": "TEX Contract Channel", "parent": contract, "parenttype": "TEX Contract",
+			                "parentfield": "channels", "idx": idx, "sales_channel": ch}).db_insert()
+
+	def _narrowed_legacy_contracts(self) -> dict:
+		"""Three contracts published before G-50 whose headers staff narrowed after publishing."""
+		ota = self.name
+		self._pre_g50(self.c["version"])
+		self._header_channels(ota, "OTA")                                     # DIRECT_WEB removed
+		closed = fx.create_contract(self.f, code="LOCKR-CLOSED")
+		self._pre_g50(closed["version"])
+		frappe.db.set_value("TEX Contract", closed["contract"], "sale_to", add_days(frappe.utils.nowdate(), -1))
+		de = fx.create_contract(self.f, code="LOCKR-GLOBAL", market="GLOBAL")
+		self._pre_g50(de["version"])
+		frappe.db.set_value("TEX Contract", de["contract"], "market", "DE")    # GLOBAL payload, DE header
+		return {"ota": ota, "closed": closed["contract"], "de": de["contract"], "versions": {
+			ota: self.c["version"], closed["contract"]: closed["version"], de["contract"]: de["version"]}}
+
+	def _candidates(self, market: str, channel: str) -> list[str]:
+		return [c[0].name for c in contracts.candidate_contracts(fx.PROPERTY, market, channel,
+		                                                         frappe.utils.now_datetime())]
+
+	def _upgrade(self) -> None:
+		from unittest import mock
+
+		from kamra.patches.tex import p21_contract_header_lock as p21
+		from kamra.patches.tex import p25_contract_header_snapshot as p25
+
+		with mock.patch("frappe.reload_doc"):                         # no schema sync (DDL commits) in a test
+			p21.execute()
+			p25.execute()
+
+	def test_a_pre_g50_version_still_honours_its_narrowed_header(self):
+		# finding 1: selection of a version frozen before G-50 = payload ∩ header, as before G-50
+		k = self._narrowed_legacy_contracts()
+		self.assertEqual(self._candidates("DE", "DIRECT_WEB"), [k["de"]])
+		self.assertEqual(sorted(self._candidates("DE", "OTA")), sorted([k["ota"], k["de"]]))
+		self.assertEqual(self._candidates("UK", "DIRECT_WEB"), [])       # the GLOBAL payload sells DE only
+		self.assertEqual({o["contract"] for o in search_std(fx.d(7, 10), fx.d(7, 13), [{"adults": 2}])["offers"]},
+		                 {k["de"]})
+
+	def test_the_upgrade_keeps_header_narrowings_fixed_and_reports_them(self):
+		k = self._narrowed_legacy_contracts()
+		hashes = {v: frappe.db.get_value("TEX Contract Version", v, "payload_hash") for v in k["versions"].values()}
+		self._upgrade()
+		self.assertEqual(self._candidates("DE", "DIRECT_WEB"), [k["de"]])
+		# finding 3: the snapshot is fixed; later header changes (DB) no longer move selection
+		self._header_channels(k["ota"])
+		frappe.db.set_value("TEX Contract", k["closed"], {"sale_to": fx.STAY_TO, "priority": 50})
+		frappe.db.set_value("TEX Contract", k["de"], "market", "UK")
+		self.assertEqual(self._candidates("DE", "DIRECT_WEB"), [k["de"]])
+		self.assertEqual(self._candidates("UK", "DIRECT_WEB"), [])
+		v = frappe.get_doc("TEX Contract Version", k["versions"][k["ota"]])
+		self.assertEqual(([c.sales_channel for c in v.channels], v.header_market), (["OTA"], "DE"))
+		self.assertTrue(v.header_snapshot_at)
+		for version, digest in hashes.items():                          # payloads and hashes untouched
+			self.assertEqual(frappe.db.get_value("TEX Contract Version", version, "payload_hash"), digest)
+		# every contract whose header differs from its live payload is reported
+		self.assertEqual(self._audit("contract.header_differs", k["ota"])["new"]["channels"], ["OTA"])
+		self.assertEqual(self._audit("contract.header_differs", k["ota"])["old"]["channels"], [])
+		self.assertIn("sale_to", self._audit("contract.header_differs", k["closed"])["new"])
+		ev = self._audit("contract.header_differs", k["de"])
+		self.assertEqual((ev["old"]["market"], ev["new"]["market"]), ("GLOBAL", "DE"))
+		# a re-run changes nothing and reports nothing new
+		before = frappe.db.count("TEX Audit Event", {"action": "contract.header_differs"})
+		self._upgrade()
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "contract.header_differs"}), before)
+
+	def test_a_draft_from_a_pre_g50_version_starts_from_what_it_sold(self):
+		k = self._narrowed_legacy_contracts()
+		self._upgrade()
+		d = frappe.get_doc("TEX Contract Version", contracts.new_draft(k["ota"]))
+		self.assertEqual(([c.sales_channel for c in d.channels], str(d.sale_to)), (["OTA"], str(fx.STAY_TO)))
+
+	def test_suspend_stops_quotes_and_bookings_already_in_flight(self):
+		# finding 2: an offer (20 min) or a quote (30 min) taken before a suspend no longer sells
+		from kamra.tex.api import contracts as api
+
+		offer = pick(search_std(fx.d(7, 10), fx.d(7, 13), [{"adults": 2}]))
+		key = offer["rooms"][0]["offer_key"]
+		quoted = quoting.create_quote(key)
+		self.assertTrue(quoted["ok"])
+		api.set_contract_status(name=self.name, action="suspend", reason="Overbooked")
+		late = quoting.create_quote(key)
+		self.assertFalse(late["ok"])
+		self.assertEqual(late["reasons"][0]["code"], "CONTRACT_SUSPENDED")
+		guest = {"first_name": "Sus", "last_name": "Pended", "email": "suspended@example.com"}
+		with self.assertRaises(contracts.ContractNotOnSale) as caught:
+			booking.create_booking(quote_ids=[quoted["quote_id"]], guest=guest, payment_method="Card")
+		self.assertEqual(caught.exception.code, "CONTRACT_SUSPENDED")
+		api.set_contract_status(name=self.name, action="resume", reason="Rooms back")
+		self.assertTrue(booking.create_booking(quote_ids=[quoted["quote_id"]], guest=guest,
+		                                       payment_method="Card")["booking"])
+
+	def test_the_scheduler_mirrors_a_version_going_live_and_survives_a_broken_header(self):
+		# findings 4 and 7: one contract whose header no longer validates stops nothing else
+		from frappe.utils import add_to_date
+
+		from kamra.tex.api import contracts as api
+
+		now = frappe.utils.now_datetime()
+		past, later = add_to_date(now, minutes=-1), add_to_date(now, minutes=30)
+
+		def schedule(contract, version, selling=None):
+			v2 = contracts.new_draft(contract)
+			if selling:
+				api.save_version(v2, {"selling": selling})
+			contracts.publish(v2, effective_from=later)
+			frappe.db.set_value("TEX Contract Version", v2, "effective_from", past)   # it is due now
+			frappe.db.set_value("TEX Contract Version", version, "active_to", past)
+			return v2
+
+		broken = fx.create_contract(self.f, code="LOCKR-BROKEN")
+		b2 = schedule(broken["contract"], broken["version"])
+		# legacy data: two contracts of the hotel share a code, so this header no longer saves
+		frappe.db.set_value("TEX Contract", broken["contract"], "contract_code", "LOCKR")
+		v2 = schedule(self.name, self.c["version"], {"channels": ["OTA"], "priority": 4})
+		contracts.roll_version_statuses()                               # does not raise
+		header = frappe.get_doc("TEX Contract", self.name)
+		self.assertEqual((header.active_version, header.priority, [c.sales_channel for c in header.channels]),
+		                 (v2, 4, ["OTA"]))
+		ev = self._audit("contract.version_live")
+		self.assertEqual((ev["new"]["version"], ev["new"]["selling"]["channels"]), (v2, ["OTA"]))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.c["version"], "status"), "Superseded")
+		# the broken contract is skipped and logged; its version flip is kept
+		self.assertEqual(frappe.db.get_value("TEX Contract", broken["contract"], "active_version"),
+		                 broken["version"])
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", broken["version"], "status"), "Superseded")
+		self.assertTrue(frappe.db.exists("Error Log", {"method": ("like", f"%{broken['contract']}%")}))
+		self.assertTrue(b2)
+
+	def test_a_desk_copy_of_a_pre_g50_version_keeps_selling_terms(self):
+		# finding 5: a version made in Desk from a published one (based_on set) without terms
+		self._pre_g50(self.c["version"])
+		self._header_channels(self.name, "OTA")
+		v = frappe.get_doc({"doctype": "TEX Contract Version", "contract": self.name,
+		                    "based_on": self.c["version"]}).insert(ignore_permissions=True)
+		self.assertEqual(([c.sales_channel for c in v.channels], str(v.sale_to)), (["OTA"], str(fx.STAY_TO)))
+
+	def test_p21_rerun_keeps_a_drafts_own_terms(self):
+		# finding 6: p21 fills only drafts without selling terms of their own
+		from kamra.tex.api import contracts as api
+
+		v2 = contracts.new_draft(self.name)
+		api.save_version(v2, {"selling": {"channels": ["OTA"], "priority": 9}})
+		self._upgrade()
+		d = frappe.get_doc("TEX Contract Version", v2)
+		self.assertEqual((d.priority, [c.sales_channel for c in d.channels]), (9, ["OTA"]))
+
+	def test_original_sale_date_pricing_uses_the_terms_on_sale_then(self):
+		# finding 7: V2 stops selling on DIRECT_WEB; a stay sold on V1 is re-priced on V1's terms
+		from kamra.tex.api import contracts as api
+
+		offer = pick(search_std(fx.d(7, 10), fx.d(7, 13), [{"adults": 2}]))
+		q = quoting.create_quote(offer["rooms"][0]["offer_key"])
+		b = booking.create_booking(quote_ids=[q["quote_id"]], guest={
+			"first_name": "Ori", "last_name": "Ginal", "email": "original@example.com"}, payment_method="Card")
+		res = b["rooms"][0]["reservation"]
+		v2 = contracts.new_draft(self.name)
+		api.save_version(v2, {"selling": {"channels": ["OTA"]}})
+		contracts.publish(v2)
+		p = modification.propose(res, {"check_out": fx.d(7, 14)}, basis="ORIGINAL_SALE_DATE")
+		self.assertEqual(p["proposed"]["contract"]["version"], self.c["version"])
+		with self.assertRaises(frappe.ValidationError):                # on sale now: V2, not on DIRECT_WEB
+			modification.propose(res, {"check_out": fx.d(7, 14)}, basis="CURRENT")

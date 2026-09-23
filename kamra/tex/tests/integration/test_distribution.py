@@ -224,6 +224,22 @@ class TestInbound(DistributionCase):
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
 		                                                     "reference_name": out[0]["booking"]}))
 
+	def test_a_booking_for_a_suspended_contract_is_accepted_with_a_warning(self):
+		# ADR-045: the channel sold the stay before the closed ARI reached it and the guest holds its
+		# confirmation, so TEX accepts it like an overbooking: with a warning and an audit event
+		from kamra.tex.commercial import contracts
+
+		contract = frappe.db.get_value("TEX Contract", {"property": fx.PROPERTY, "contract_code": "PAY"})
+		frappe.db.set_value("TEX Channel Mapping", self.mapping.name, "contract", contract)
+		frappe.clear_document_cache("TEX Channel Mapping", self.mapping.name)
+		contracts.set_status(contract, "suspend", "Overbooked")
+		self.send(message(ref="OTA-310"))
+		out = self.apply_all()
+		self.assertTrue(out[0]["booking"])
+		self.assertIn("suspended", (out[0]["warning"] or "").lower())
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
+		                                                     "reference_name": out[0]["booking"]}))
+
 	def test_a_bookings_messages_apply_in_order(self):
 		self.send(message(ref="OTA-400"))
 		self.send(message(ref="OTA-400", status="modified", total="500.00"))
