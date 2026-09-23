@@ -62,3 +62,11 @@ Specs: `shell`, `contract-admin`, `booking` (desktop + 390 px), `crs` (call cent
 change) and `critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
 (contracts, booking, reservations) and `e2e/helpers.ts`. The dev bench's System Settings
 time zone is Europe/Istanbul (the demo hotels are in Türkiye).
+
+## Local testing on your own machine
+For sales/revenue staff and developers who want TEX Engine with the demo data on a laptop
+(macOS, Windows 10/11, Linux), see [`deploy/tex-local/README.md`](../../deploy/tex-local/README.md):
+Docker Compose (`cd deploy/tex-local && docker compose up -d`, then
+`http://localhost:8000/kamra/tex`) or, without Docker, a native bench made by
+`deploy/tex-local/setup-local.sh` ([`NATIVE.md`](../../deploy/tex-local/NATIVE.md)). Both are
+for local testing only (well-known demo passwords, `developer_mode`, never `tex_production`).

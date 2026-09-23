@@ -1,0 +1,82 @@
+# TEX Engine - local test stack (MariaDB + Redis + TEX/Frappe). LOCAL TESTING ONLY.
+#
+#   cd deploy/tex-local
+#   docker compose up -d          # first start builds the image, creates the site, loads demo data
+#   docker compose logs -f tex    # follow progress
+#
+# Settings come from .env next to this file (copy .env.example); every value has a default.
+# The default passwords are well known - never expose this stack to a network.
+name: tex-local
+
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-tex-local-root}"
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # cache + job queue only; nothing here needs to survive a restart
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # the image declares a volume for /data; without this every `down` + `up` would leave
+    # an empty anonymous Docker volume behind
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  tex:
+    build:
+      context: ../..
+      dockerfile: deploy/tex-local/Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TEX_SITE: "${TEX_SITE:-tex.localhost}"
+      TEX_PORT: "${TEX_PORT:-8000}"
+      TEX_TIME_ZONE: "${TEX_TIME_ZONE:-Europe/Istanbul}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin}"
+      DEMO_PASSWORD: "${DEMO_PASSWORD:-TexDemo#2026}"
+      DB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-tex-local-root}"
+      DB_HOST: db
+      REDIS_URL: redis://redis:6379
+    ports:
+      # localhost only by default; see README before changing TEX_BIND
+      - "${TEX_BIND:-127.0.0.1}:${TEX_PORT:-8000}:8000"
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/method/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # the first start (site + apps + demo data) takes several minutes
+      start_period: 20m
+    stop_grace_period: 30s
+
+volumes:
+  db-data:
+  sites:

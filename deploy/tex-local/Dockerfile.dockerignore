@@ -1,0 +1,37 @@
+# Build context = repository root; this file (next to the Dockerfile) replaces any
+# root .dockerignore for this build. Keep the context small and secret-free.
+.git
+**/.git
+.github
+.claude
+**/node_modules
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.venv
+e2e-results
+e2e-report
+frontend/test-results
+frontend/e2e-report
+frontend/dist
+frontend/tsconfig.tsbuildinfo
+docs-site
+graphify-out
+**/*.rdb
+**/*.log
+**/.DS_Store
+# a native bench (setup-local.sh) must never end up in the image: env/ and apps/ are
+# hundreds of MB and sites/ holds database passwords, encryption keys and backups.
+# setup-local.sh refuses a bench inside the checkout; these are a second line of defence.
+tex-bench
+**/site_config.json
+**/common_site_config.json
+**/archived
+**/archived_sites
+# local settings and secrets never go into the image
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.crt
