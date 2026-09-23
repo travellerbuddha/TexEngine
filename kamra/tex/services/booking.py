@@ -551,8 +551,9 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict:
 	"""Record money received against a booking (called by the payments service).
 	The booking row is locked so concurrent allocations never lose an update."""
-	frappe.db.sql("SELECT name FROM `tabTEX Booking` WHERE name=%s FOR UPDATE", booking)
-	b = frappe.get_doc("TEX Booking", booking)
+	# a locking read: the booking as it is now, not as this request's snapshot saw it before
+	# it waited for the lock (a stale copy would lose the other payment's amount)
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	amount = D(amount)
 	paid = from_db(b.paid_amount, b.currency) + amount
 	total = from_db(b.total_amount, b.currency)

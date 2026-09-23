@@ -32,6 +32,21 @@ def _money(v: Decimal) -> str:
 	return format(Decimal(v).quantize(Decimal("0.01")), "f")
 
 
+def _stated(v) -> Decimal | None:
+	"""An amount a gateway states, or None when it states none (or nothing readable)."""
+	if v is None or str(v).strip() == "":
+		return None
+	try:
+		return Decimal(str(v).strip())
+	except ArithmeticError:
+		return None
+
+
+def _override(account) -> str:
+	"""The account's gateway URL override (checked by ``account_problem``), or ""."""
+	return (account.get("gateway_url") or "").strip()
+
+
 # ─── iyzico ──────────────────────────────────────────────────────────────
 
 
@@ -43,17 +58,28 @@ def iyzico_auth_header(api_key: str, secret_key: str, uri_path: str, body: str, 
 	return "IYZWSv2 " + base64.b64encode(raw.encode()).decode()
 
 
+def iyzico_tokens(provider_ref: str | None) -> list[str]:
+	"""The checkout-form tokens stored for a charge (a captured payment is "paymentId|itemId")."""
+	return [t for t in str(provider_ref or "").split() if "|" not in t]
+
+
+def iyzico_payment(provider_ref: str | None) -> str | None:
+	"""The captured payment ("paymentId|paymentTransactionId") stored for a charge."""
+	return next((t for t in str(provider_ref or "").split() if "|" in t), None)
+
+
 class IyzicoProvider(PaymentProvider):
 	name = "iyzico"
 	reports_amount = True
 	supports_refund = True
+	sandbox_hosts = ("sandbox-api.iyzipay.com",)
 	INIT = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 	DETAIL = "/payment/iyzipos/checkoutform/auth/ecom/detail"
 	REFUND = "/payment/refund"
 
 	@property
 	def base(self) -> str:
-		return self.account.get("gateway_url") or (
+		return _override(self.account) or (
 			"https://sandbox-api.iyzipay.com" if self.sandbox else "https://api.iyzipay.com")
 
 	def _post(self, path: str, payload: dict) -> dict:
@@ -92,25 +118,20 @@ class IyzicoProvider(PaymentProvider):
 		return Checkout(kind="redirect", url=res.get("paymentPageUrl"), provider_ref=res.get("token"))
 
 	FINAL_FAILURE = ("FAILURE",)
-	REF_LENGTH = 140                     # TEX Payment Transaction.provider_ref (Data)
 
-	def merge_ref(self, previous: str | None, new: str | None) -> str | None:
-		"""Every checkout form of a charge has its own token, and a guest may pay on an older
-		page (another tab): keep the newest tokens that fit, newest first, space-separated."""
-		if not new:
-			return previous
-		kept: list[str] = []
-		for token in [new, *(t for t in (previous or "").split() if t != new and "|" not in t)]:
-			if len(" ".join([*kept, token])) > self.REF_LENGTH:
-				break
-			kept.append(token)
-		return " ".join(kept)
+	def can_add_checkout(self, provider_ref: str | None) -> bool:
+		"""One checkout form per charge. Every form is its own payment at iyzico, so a second
+		form on one charge could capture the money twice while TEX counts it once, and the
+		page of a form cannot be shown again (TEX keeps its token, not its URL). Another tab
+		therefore supersedes the charge: TEX starts a new one and still records the old
+		one's payment should the guest complete it (G-68)."""
+		return not iyzico_tokens(provider_ref)
 
 	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
 	                    provider_ref: str | None = None) -> Outcome:
 		token = params.get("token")
 		# only a checkout-form token we stored for this charge is accepted
-		issued = str(provider_ref or "").split("|")[0].split()
+		issued = iyzico_tokens(provider_ref)
 		if not token or not any(hmac.compare_digest(str(token), t) for t in issued):
 			raise ProviderError("iyzico callback token does not match this payment")
 		res = self._post(self.DETAIL, {"locale": "en", "conversationId": transaction, "token": token})
@@ -126,12 +147,20 @@ class IyzicoProvider(PaymentProvider):
 			raise ProviderError("iyzico result belongs to another order")
 		items = res.get("itemTransactions") or [{}]
 		ref = f"{res.get('paymentId')}|{items[0].get('paymentTransactionId') or ''}"
-		return Outcome(status="Succeeded", provider_ref=ref, amount=Decimal(str(res.get("paidPrice") or "0")),
+		# ``paidPrice`` includes the instalment interest a merchant may pass on to the guest;
+		# ``price`` is the basket TEX asked for. Less paid than asked still never matches.
+		price, paid = _stated(res.get("price")), _stated(res.get("paidPrice"))
+		amount = price if price is not None else paid
+		if price is not None and paid is not None and paid < price:
+			amount = paid
+		return Outcome(status="Succeeded", provider_ref=ref, amount=amount,
 		               currency=res.get("currency"), card_brand=res.get("cardAssociation"),
 		               card_last4=(res.get("lastFourDigits") or "")[-4:] or None, raw_status="SUCCESS")
 
 	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
-		_pid, _, item = provider_ref.partition("|")
+		_pid, _, item = (iyzico_payment(provider_ref) or "").partition("|")
+		if not item:
+			raise ProviderError("iyzico payment reference is missing")
 		res = self._post(self.REFUND, {"locale": "en", "paymentTransactionId": item, "price": _money(amount),
 		                               "currency": currency, "ip": "127.0.0.1"})
 		if res.get("status") != "success":
@@ -181,11 +210,15 @@ def sipay_parse_hash_key(hash_key: str, app_secret: str) -> list[str]:
 
 class SipayProvider(PaymentProvider):
 	name = "Sipay"
-	reports_amount = True
+	# the field names of the check-status answer are taken from the public documentation and
+	# not yet confirmed by a recorded sandbox response (certification, BLOCKED): a stated
+	# ``amount`` must match, but a success without one is not refused until then
+	reports_amount = False
+	sandbox_hosts = ("provisioning.sipay.com.tr",)
 
 	@property
 	def base(self) -> str:
-		return self.account.get("gateway_url") or (
+		return _override(self.account) or (
 			"https://provisioning.sipay.com.tr/ccpayment" if self.sandbox else "https://app.sipay.com.tr/ccpayment")
 
 	def _creds(self):
@@ -252,7 +285,7 @@ class SipayProvider(PaymentProvider):
 			# unknown / still processing: never fail a payment on an unconfirmed answer
 			return Outcome(status="Pending", raw_status=state or str(data.get("status_code")))
 		return Outcome(status="Succeeded", provider_ref=str(data.get("order_no") or transaction),
-		               amount=Decimal(str(data.get("amount") or "0")), currency=data.get("currency_code"),
+		               amount=_stated(data.get("amount")), currency=data.get("currency_code"),
 		               raw_status="completed")
 
 
@@ -274,10 +307,11 @@ def nestpay_hash_v3(params: dict, store_key: str) -> str:
 class NestPayProvider(PaymentProvider):
 	name = "Virtual POS"
 	reports_amount = True
+	sandbox_hosts = ("entegrasyon.asseco-see.com.tr",)
 
 	@property
 	def gateway(self) -> str:
-		return self.account.get("gateway_url") or (
+		return _override(self.account) or (
 			"https://entegrasyon.asseco-see.com.tr/fim/est3Dgate" if self.sandbox else "")
 
 	def create_checkout(self, intent: Intent) -> Checkout:
@@ -313,7 +347,7 @@ class NestPayProvider(PaymentProvider):
 		masked = params.get("MaskedPan") or ""
 		numeric = str(params.get("currency") or "")
 		return Outcome(status="Succeeded" if approved else "Failed", provider_ref=params.get("TransId"),
-		               amount=Decimal(str(params.get("amount") or "0")), raw_status=params.get("Response"),
+		               amount=_stated(params.get("amount")), raw_status=params.get("Response"),
 		               # a code TEX never sends stays as is, so it can never pass for the charge's currency
 		               currency=ISO_ALPHA.get(numeric, numeric) or None,
 		               card_last4=masked[-4:] if masked[-4:].isdigit() else None,

@@ -120,11 +120,19 @@ def transaction(name: str):
 		a["creation"] = str(a["creation"])
 	refunds = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": name}, fields=_TXN_FIELDS,
 	                         order_by="creation asc")
+	succeeded = r.txn_type == "Charge" and r.status == "Succeeded"
+	# money a gateway captured that TEX refused to count (G-67) is refundable in its own currency
+	capture = None if succeeded else pay.refused_capture(r)
+	refundable = from_db(r.amount, r.currency) - pay.refunded_of(name) if succeeded else (
+		capture["amount"] - pay.refunded_of(name) if capture else None)
 	return {**_txn_row(r), "allocations": allocations, "refunds": [_txn_row(x) for x in refunds],
 	        "unallocated": to_str(from_db(r.amount, r.currency) - pay.allocated_of(name) - pay.refunded_of(name))
-	        if r.txn_type == "Charge" and r.status == "Succeeded" else "0",
-	        "refundable": to_str(from_db(r.amount, r.currency) - pay.refunded_of(name))
-	        if r.txn_type == "Charge" and r.status == "Succeeded" else "0"}
+	        if succeeded else "0",
+	        "refundable": to_str(refundable) if refundable is not None else "0",
+	        "refund_currency": capture["currency"] if capture else r.currency,
+	        # where the money sits now: a refund comes from these bookings, never from one holding none (G-68)
+	        "booking_nets": {b: to_str(n) for b, n in sorted(pay.booking_nets(name).items()) if n > 0}
+	        if succeeded else {}}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -132,23 +140,31 @@ def transaction(name: str):
 def reverify(transaction: str):
 	"""Ask the gateway again for a Pending or Failed charge (iyzico / Sipay support a
 	status query): a charge the gateway did capture is recovered, never lost."""
+	from kamra.tex.payments.providers.turkey import iyzico_tokens
+
 	row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref", "status"],
 	                          as_dict=True)
-	if row.status not in ("Pending", "Failed") or row.provider not in ("iyzico", "Sipay"):
-		frappe.throw(_("Only pending or failed iyzico / Sipay payments can be re-verified."))
-	# iyzico: every checkout form issued for this charge (another tab gets its own), newest first
+	if row.status not in pay.SETTLEABLE or row.provider not in ("iyzico", "Sipay"):
+		frappe.throw(_("Only pending, failed or cancelled iyzico / Sipay payments can be re-verified."))
+	# iyzico: each checkout-form token stored for this charge, newest first
 	if row.provider == "iyzico":
-		attempts = [{"token": t} for t in (row.provider_ref or "").split("|")[0].split()] or [{"token": ""}]
+		attempts = [{"token": t} for t in iyzico_tokens(row.provider_ref)] or [{"token": ""}]
 	else:
 		attempts = [{}]
 	out, error = None, None
 	for params in attempts:
 		try:
-			out = pay.complete(transaction, params=params)
+			res = pay.complete(transaction, params=params)
 		except ProviderError as e:
+			error = e                                  # this token is not verifiable: try the next
+			continue
+		except Exception as e:
+			# the gateway did not answer for this token: an older one may still hold the payment
+			log_exception(f"TEX payment re-verify error {transaction}")
 			error = e
 			continue
-		if out.get("status") == "Succeeded":
+		out = res
+		if res.get("status") == "Succeeded":
 			break
 	if out is None:
 		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(error)[:200]))
@@ -277,6 +293,8 @@ def accounts(property: str):
 		r["secrets_set"] = {f: bool(doc.get_password(f, raise_exception=False)) for f in _SECRETS}
 		cls = REGISTRY.get(r["provider"])
 		r["production_verified"] = bool(cls and cls.production_verified)
+		# why it may not take new money now (ADR-041); its open charges still settle
+		r["problem"] = pay.account_rule(r, "new")
 	rules = frappe.get_all("TEX Payment Method Rule", filters={"property": property},
 	                       fields=["name", "method", "provider_account", "market", "currency", "sales_channel",
 	                               "priority", "disabled"], order_by="priority desc, method asc")
@@ -304,7 +322,8 @@ def save_account(property: str, data):
 	for f in _SECRETS:
 		if d.get(f):          # blank = keep the stored secret
 			doc.set(f, d[f])
-	# the controller refuses the mock, an uncertified gateway or a gateway URL override in Production
+	# the controller refuses an enabled account that could not take new money (ADR-041, ADR-042);
+	# a disabled one can always be saved
 	doc.save(ignore_permissions=True)
 	from kamra.tex.security.audit import audit
 

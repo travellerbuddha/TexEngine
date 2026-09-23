@@ -12,6 +12,10 @@ import frappe
 from frappe import _
 
 
+class SigningKeyMissing(frappe.ValidationError):
+	"""The site cannot sign: ``encryption_key`` is missing from its site_config."""
+
+
 def site_secret(purpose: str) -> str:
 	"""Secret key material for one purpose: ``"<purpose>:<encryption_key>"``.
 
@@ -23,6 +27,11 @@ def site_secret(purpose: str) -> str:
 	key = frappe.local.conf.get("encryption_key")
 	if not key:
 		# the message names the purpose and the setting, never a secret or the site name
-		frappe.throw(_("TEX cannot sign {0}: this site has no encryption key. Set encryption_key in the site's "
-		               "site_config.json.").format(purpose), frappe.ValidationError, title=_("Missing encryption key"))
+		message = _("TEX cannot sign {0}: this site has no encryption key. Set encryption_key in the site's "
+		            "site_config.json.").format(purpose)
+		if frappe.session.user == "Guest":
+			# a guest is never told how the site is configured; staff find it in the error log
+			frappe.log_error(title="TEX signing key missing", message=message)
+			frappe.throw(_("This service is temporarily unavailable. Please try again later."), SigningKeyMissing)
+		frappe.throw(message, SigningKeyMissing, title=_("Missing encryption key"))
 	return f"{purpose}:{key}"

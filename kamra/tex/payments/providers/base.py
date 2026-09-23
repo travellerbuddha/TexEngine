@@ -56,6 +56,12 @@ class PaymentProvider(ABC):
 	# the gateway states the amount (and currency) it captured: a success without them is
 	# not trusted (G-67); offline methods and the sandbox mock report nothing
 	reports_amount: bool = False
+	# money moves through a gateway (the sandbox mock included): in Sandbox that is test money,
+	# which must never confirm a booking on a live site (ADR-041)
+	gateway: bool = True
+	# the only hosts a Sandbox account's gateway URL override may point at; empty for a
+	# provider that never reads the override (ADR-041)
+	sandbox_hosts: tuple[str, ...] = ()
 
 	def __init__(self, account):
 		self.account = account
@@ -78,9 +84,14 @@ class PaymentProvider(ABC):
 	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
 		raise ProviderError(f"{self.name} does not support refunds through TEX")
 
+	def can_add_checkout(self, provider_ref: str | None) -> bool:
+		"""Whether a Pending charge that already has checkouts may get another one (a second
+		tab, a restart, G-68). By default yes: the gateway knows the charge by TEX's own id."""
+		return True
+
 	def merge_ref(self, previous: str | None, new: str | None) -> str | None:
-		"""The reference to keep when a Pending charge gets another checkout (a second tab, a
-		restart, G-68). By default the new one: the gateway knows the charge by TEX's own id."""
+		"""The reference to keep when a Pending charge gets another checkout. By default the
+		new one: the gateway knows the charge by TEX's own id."""
 		return new or previous
 
 	def secret(self, field_name: str) -> str | None:
