@@ -62,6 +62,26 @@ export interface ContractBundle {
   versions: VersionRow[]
   can_edit: boolean
   can_publish: boolean
+  /** A version was published once: the commercial header fields are fixed (G-50, ADR-045). */
+  published?: boolean
+  /** Header fields the server refuses to change (read-only in the header editor). */
+  locked_fields?: string[]
+  /** Status actions the user may take now (suspend, resume, archive, restore). */
+  status_actions?: ContractStatusAction[]
+}
+
+export type ContractStatusAction = "suspend" | "resume" | "archive" | "restore"
+
+/** A version's selling terms (G-50): frozen when published, the draft's own once the contract
+ * was published, the contract header's before that. */
+export interface SellingTerms {
+  sale_from: string | null
+  sale_to: string | null
+  stay_from: string | null
+  stay_to: string | null
+  priority: number | null
+  sell_currency: string | null
+  channels: string[]
 }
 
 export interface RoomTypeOpt {
@@ -130,6 +150,9 @@ export interface VersionDoc {
   room_basis_children_fill_included: number
   validation_report: { ok?: boolean; issues?: Issue[] } | null | number
   editable: boolean
+  selling?: SellingTerms
+  selling_source?: "frozen" | "version" | "header"
+  selling_editable?: boolean
   contract_doc: {
     name: string
     property: string

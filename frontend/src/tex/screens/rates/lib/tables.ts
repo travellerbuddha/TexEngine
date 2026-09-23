@@ -2,7 +2,7 @@
 // (TEX Contract Room, TEX Price Period, TEX Period Rate, TEX Child Age Band,
 // TEX Occupancy Rule, TEX Board Rule, TEX Contract Rate Plan, TEX Contract Offer).
 import type { Row, VersionDoc, VersionSetting, VersionTable } from "./types"
-import { fromRow, toRow, type FieldKind } from "./util"
+import { fromRow, joinCsv, splitCsv, toRow, type FieldKind } from "./util"
 
 export const KINDS: Record<VersionTable, Record<string, FieldKind>> = {
   rooms: {
@@ -134,9 +134,21 @@ export const NEW_ROW: Record<VersionTable, () => Omit<Row, "_key">> = {
 export type Tables = Record<VersionTable, Row[]>
 export type Settings = Record<VersionSetting, string | number>
 
+/** A draft's own selling terms as edited (G-50); absent when they are not editable here. */
+export interface SellingForm {
+  sale_from: string
+  sale_to: string
+  stay_from: string
+  stay_to: string
+  priority: number
+  sell_currency: string
+  channels: string
+}
+
 export interface EditorState {
   settings: Settings
   tables: Tables
+  selling?: SellingForm
 }
 
 export function stateFromDoc(doc: VersionDoc): EditorState {
@@ -157,6 +169,18 @@ export function stateFromDoc(doc: VersionDoc): EditorState {
       change_note: doc.change_note ?? "",
     },
     tables,
+    selling:
+      doc.selling && doc.selling_editable && doc.editable
+        ? {
+            sale_from: doc.selling.sale_from ?? "",
+            sale_to: doc.selling.sale_to ?? "",
+            stay_from: doc.selling.stay_from ?? "",
+            stay_to: doc.selling.stay_to ?? "",
+            priority: doc.selling.priority ?? 0,
+            sell_currency: doc.selling.sell_currency ?? "",
+            channels: joinCsv(doc.selling.channels ?? []),
+          }
+        : undefined,
   }
 }
 
@@ -164,6 +188,18 @@ export function stateFromDoc(doc: VersionDoc): EditorState {
 export function payloadOf(s: EditorState): Record<string, unknown> {
   const out: Record<string, unknown> = { ...s.settings }
   if (out.change_note === "") out.change_note = null
+  if (s.selling) {
+    const g = s.selling
+    out.selling = {
+      sale_from: g.sale_from || null,
+      sale_to: g.sale_to || null,
+      stay_from: g.stay_from || null,
+      stay_to: g.stay_to || null,
+      priority: g.priority,
+      sell_currency: g.sell_currency || null,
+      channels: splitCsv(g.channels),
+    }
+  }
   for (const k of Object.keys(KINDS) as VersionTable[]) {
     out[k] = s.tables[k].map((r) => {
       const row = fromRow(r, KINDS[k])

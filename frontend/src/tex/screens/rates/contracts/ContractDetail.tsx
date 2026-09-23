@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { Ban, CheckCircle2, Copy, FilePlus2, History, Pencil, PencilLine, Rocket, Undo2 } from "lucide-react"
+import { Archive, ArchiveRestore, Ban, CheckCircle2, CirclePause, CirclePlay, Copy, FilePlus2, History, Pencil, PencilLine, Rocket, Undo2 } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexQuery } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
@@ -10,10 +10,18 @@ import { Badge, Button, Card, CardBody, CardHeader, DescriptionList, EmptyState,
 import { DateRange, StatusBadge } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
 import { enumLabel } from "../lib/options"
-import type { ContractBundle, VersionRow } from "../lib/types"
+import type { ContractBundle, ContractStatusAction, VersionRow } from "../lib/types"
 import { versionLabel } from "../lib/util"
-import { ContractFormDialog, DuplicateDialog } from "./ContractDialogs"
+import { ContractFormDialog, ContractStatusDialog, DuplicateDialog } from "./ContractDialogs"
 import { NewDraftDialog, PublishDialog, WithdrawDialog } from "./VersionActions"
+
+// explicit, audited status actions (G-50); the header form never changes the status
+const STATUS_ICON: Record<ContractStatusAction, typeof CheckCircle2> = {
+  suspend: CirclePause,
+  resume: CirclePlay,
+  archive: Archive,
+  restore: ArchiveRestore,
+}
 
 const DOT: Record<string, { cls: string; icon: typeof CheckCircle2 }> = {
   Draft: { cls: "bg-amber-100 text-amber-800 ring-amber-300", icon: PencilLine },
@@ -34,6 +42,7 @@ export default function ContractDetail() {
   const [draftFrom, setDraftFrom] = useState<string | null>(null)
   const [publishing, setPublishing] = useState<VersionRow | null>(null)
   const [withdrawing, setWithdrawing] = useState<VersionRow | null>(null)
+  const [statusAction, setStatusAction] = useState<ContractStatusAction | null>(null)
 
   const b = q.data
   const c = b?.contract
@@ -73,22 +82,34 @@ export default function ContractDetail() {
           )
         }
         actions={
-          b?.can_edit && (
+          (b?.can_edit || Boolean(b?.status_actions?.length)) && (
             <>
-              <Button variant="secondary" icon={<Pencil className="size-4" aria-hidden />} onClick={() => setEditing(true)}>
-                {t("rates.contract.edit_header")}
-              </Button>
-              <Button variant="secondary" icon={<Copy className="size-4" aria-hidden />} onClick={() => setDuplicating(true)}>
-                {t("rates.contract.duplicate")}
-              </Button>
-              {draft ? (
-                <Button icon={<PencilLine className="size-4" aria-hidden />} onClick={() => navigate(editorLink(draft.name))}>
-                  {t("rates.version.open_draft", { v: versionLabel(draft.name, draft.version_no) })}
-                </Button>
-              ) : (
-                <Button icon={<FilePlus2 className="size-4" aria-hidden />} onClick={() => setDraftFrom("")}>
-                  {t("rates.version.new_draft")}
-                </Button>
+              {(b?.status_actions ?? []).map((a) => {
+                const Icon = STATUS_ICON[a]
+                return (
+                  <Button key={a} variant="secondary" icon={<Icon className="size-4" aria-hidden />} onClick={() => setStatusAction(a)}>
+                    {t(`rates.contract.status_action.${a}`)}
+                  </Button>
+                )
+              })}
+              {b?.can_edit && (
+                <>
+                  <Button variant="secondary" icon={<Pencil className="size-4" aria-hidden />} onClick={() => setEditing(true)}>
+                    {t("rates.contract.edit_header")}
+                  </Button>
+                  <Button variant="secondary" icon={<Copy className="size-4" aria-hidden />} onClick={() => setDuplicating(true)}>
+                    {t("rates.contract.duplicate")}
+                  </Button>
+                  {draft ? (
+                    <Button icon={<PencilLine className="size-4" aria-hidden />} onClick={() => navigate(editorLink(draft.name))}>
+                      {t("rates.version.open_draft", { v: versionLabel(draft.name, draft.version_no) })}
+                    </Button>
+                  ) : (
+                    <Button icon={<FilePlus2 className="size-4" aria-hidden />} onClick={() => setDraftFrom("")}>
+                      {t("rates.version.new_draft")}
+                    </Button>
+                  )}
+                </>
               )}
             </>
           )
@@ -172,7 +193,7 @@ export default function ContractDetail() {
         </Card>
 
         <Card>
-          <CardHeader title={t("rates.contract.details")} />
+          <CardHeader title={t("rates.contract.details")} description={b?.published ? t("rates.contract.details_live") : undefined} />
           <CardBody>
             {!c ? (
               <Skeleton className="h-40 w-full" />
@@ -204,7 +225,19 @@ export default function ContractDetail() {
 
       {c && (
         <>
-          <ContractFormDialog open={editing} onClose={() => setEditing(false)} contract={c} onSaved={() => q.reload()} />
+          <ContractFormDialog open={editing} onClose={() => setEditing(false)} contract={c} published={Boolean(b?.published)} onSaved={() => q.reload()} />
+          {statusAction && (
+            <ContractStatusDialog
+              open
+              onClose={() => setStatusAction(null)}
+              contract={c}
+              action={statusAction}
+              onDone={() => {
+                setStatusAction(null)
+                q.reload()
+              }}
+            />
+          )}
           <DuplicateDialog open={duplicating} onClose={() => setDuplicating(false)} contract={c} onDone={(nb) => navigate(`/tex/rates/contracts/${encodeURIComponent(nb.contract.name)}`)} />
           <NewDraftDialog
             open={draftFrom !== null}

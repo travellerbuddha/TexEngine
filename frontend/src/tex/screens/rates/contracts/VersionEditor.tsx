@@ -8,7 +8,7 @@ import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, ErrorState, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
 import { IssueCount, IssueList, StatusBadge } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
-import { fingerprint, payloadOf, stateFromDoc, type EditorState } from "../lib/tables"
+import { fingerprint, payloadOf, stateFromDoc, type EditorState, type SellingForm } from "../lib/tables"
 import type { ContractBundle, Row, ValidationResult, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
 import { countIssues, useLookups, versionLabel } from "../lib/util"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
@@ -118,6 +118,7 @@ export default function VersionEditor() {
 
   const setTable = useCallback((k: VersionTable, rows: Row[]) => setState((s) => (s ? { ...s, tables: { ...s.tables, [k]: rows } } : s)), [])
   const setSetting = useCallback((k: VersionSetting, v: string | number) => setState((s) => (s ? { ...s, settings: { ...s.settings, [k]: v } } : s)), [])
+  const setSelling = useCallback((patch: Partial<SellingForm>) => setState((s) => (s?.selling ? { ...s, selling: { ...s.selling, ...patch } } : s)), [])
   const changeTab = (id: string) => {
     setTab(id as TabId)
     window.history.replaceState(null, "", `#${id}`)
@@ -160,7 +161,7 @@ export default function VersionEditor() {
     )
 
   const props: TabProps | undefined =
-    doc && state ? { doc, state, readOnly: !editable, issues, setTable, setSetting, lookups: lookups.data, dirty, onSave } : undefined
+    doc && state ? { doc, state, readOnly: !editable, issues, setTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave } : undefined
 
   return (
     <>

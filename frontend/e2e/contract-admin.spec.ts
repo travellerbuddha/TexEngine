@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { ADMIN_PASSWORD, login, trackErrors } from "./helpers"
+import { ADMIN_PASSWORD, byLabel, login, trackErrors } from "./helpers"
 import {
   addBoard,
   addOccupancyRules,
@@ -127,6 +127,22 @@ test("contract admin: market → contract → publish (frozen) → price check �
     await page.getByRole("button", { name: "View V1", exact: true }).click()
     const again = await previewPrice(page, { room: ROOM, board: "HB", ...stay, ...party })
     expect(again.total).toBe("815.00")
+  })
+
+  await test.step("the published header is locked; status moves through actions (G-50)", async () => {
+    // the server refuses, not only the UI
+    const r = await pageApi(page, "kamra.tex.api.contracts.save_contract", { data: { name: contract, market: "GLOBAL" } })
+    expect(r.ok).toBeFalsy()
+    expect(JSON.stringify(r.body)).toContain("of a published contract cannot change")
+    await openContract(page, contract)
+    await expect(page.getByRole("button", { name: "Suspend sales", exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Edit header", exact: true }).click()
+    const dlg = page.getByRole("dialog", { name: `Edit contract ${code}` })
+    await expect(dlg.getByText("Published contract", { exact: true })).toBeVisible()
+    await expect(byLabel(dlg, "Market")).toBeDisabled()
+    await expect(byLabel(dlg, "Sale to")).toBeDisabled()
+    await expect(byLabel(dlg, "Contract name")).toBeEnabled()
+    await dlg.getByRole("button", { name: "Cancel", exact: true }).click()
   })
 
   noErrors()

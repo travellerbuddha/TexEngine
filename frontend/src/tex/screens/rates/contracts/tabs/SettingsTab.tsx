@@ -1,11 +1,14 @@
 import { useTexT } from "../../../../i18n"
 import { useSession } from "../../../../lib/session"
-import { DescriptionList, Field, FormGrid, Select, Switch, Textarea } from "../../../../ui"
+import { DescriptionList, Field, FormGrid, Input, Notice, Select, Switch, Textarea } from "../../../../ui"
+import { CsvPicker } from "../../components/pickers"
+import { DateRange } from "../../components/common"
 import { AGE_BASIS, CHILD_ORDERING, enumLabel, enumOptions, EXTRA_UNIT, STACKING } from "../../lib/options"
 import { TabIntro, TabIssues, type TabProps } from "./shared"
 
 /** Version-wide engine settings (child ordering, age basis, stacking, room-basis options). */
-export function SettingsTab({ doc, state, readOnly, issues, setSetting }: TabProps) {
+export function SettingsTab(props: TabProps) {
+  const { doc, state, readOnly, issues, setSetting } = props
   const { t } = useTexT()
   const { boot } = useSession()
   const s = state.settings
@@ -14,6 +17,7 @@ export function SettingsTab({ doc, state, readOnly, issues, setSetting }: TabPro
     <div className="space-y-5">
       <TabIntro title={t("rates.tab.settings")}>{t("rates.settings.intro")}</TabIntro>
       <TabIssues issues={issues} tab="settings" />
+      <SellingTerms {...props} />
       <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-4">
         <DescriptionList
           cols={3}
@@ -76,5 +80,81 @@ export function SettingsTab({ doc, state, readOnly, issues, setSetting }: TabPro
         <Textarea disabled={readOnly} value={String(s.change_note ?? "")} onChange={(e) => setSetting("change_note", e.target.value)} rows={3} maxLength={500} />
       </Field>
     </div>
+  )
+}
+
+/** When, where and in which order this version sells (G-50, ADR-045): a draft of a published
+ * contract edits its own; a published version shows what it froze; before the contract's first
+ * publish they come from the contract header. */
+function SellingTerms({ doc, state, readOnly, setSelling }: TabProps) {
+  const { t } = useTexT()
+  const { boot } = useSession()
+  const g = state.selling
+  const v = doc.selling
+  if (!v) return null
+  const channelOpts = boot.channels.map((c) => ({ value: c.name, label: c.channel_name }))
+  const ccyOpts = boot.currencies.map((c) => ({ value: c, label: c }))
+  const channelNames = (codes: string[]) =>
+    codes.length ? codes.map((x) => boot.channels.find((ch) => ch.name === x)?.channel_name ?? x).join(", ") : t("rates.common.all_channels")
+  const saleBad = Boolean(g && g.sale_from && g.sale_to && g.sale_from > g.sale_to)
+  const stayBad = Boolean(g && g.stay_from && g.stay_to && g.stay_from > g.stay_to)
+  const hint =
+    doc.selling_source === "header"
+      ? t("rates.selling.from_header")
+      : doc.selling_source === "frozen"
+        ? t("rates.selling.frozen")
+        : t("rates.selling.intro_version")
+  return (
+    <section aria-labelledby="selling-terms" className="space-y-3 rounded-lg border border-zinc-200 p-4">
+      <div className="space-y-1">
+        <h3 id="selling-terms" className="text-sm font-semibold text-zinc-900">
+          {t("rates.selling.title")}
+        </h3>
+        <p className="text-xs text-zinc-500">{hint}</p>
+      </div>
+      {g && !readOnly ? (
+        <>
+          <FormGrid cols={4}>
+            <Field label={t("rates.f.sale_from")}>
+              <Input type="date" value={g.sale_from} onChange={(e) => setSelling({ sale_from: e.target.value })} />
+            </Field>
+            <Field label={t("rates.f.sale_to")} error={saleBad ? t("rates.v.range") : undefined}>
+              <Input type="date" value={g.sale_to} onChange={(e) => setSelling({ sale_to: e.target.value })} />
+            </Field>
+            <Field label={t("rates.f.stay_from")}>
+              <Input type="date" value={g.stay_from} onChange={(e) => setSelling({ stay_from: e.target.value })} />
+            </Field>
+            <Field label={t("rates.f.stay_to")} error={stayBad ? t("rates.v.range") : undefined}>
+              <Input type="date" value={g.stay_to} onChange={(e) => setSelling({ stay_to: e.target.value })} />
+            </Field>
+          </FormGrid>
+          <FormGrid cols={3}>
+            <Field label={t("rates.f.priority")} hint={t("rates.h.contract_priority")}>
+              <Input type="number" step={1} value={String(g.priority)} onChange={(e) => setSelling({ priority: parseInt(e.target.value || "0", 10) || 0 })} />
+            </Field>
+            <Field label={t("rates.f.sell_currency")} hint={t("rates.h.sell_currency")}>
+              <Select value={g.sell_currency} onChange={(e) => setSelling({ sell_currency: e.target.value })} options={ccyOpts} placeholder={t("rates.common.same_as_contract")} />
+            </Field>
+            <Field label={t("rates.f.channels")} hint={t("rates.h.channels")}>
+              <CsvPicker value={g.channels} onChange={(c) => setSelling({ channels: c })} options={channelOpts} label={t("rates.f.channels")} allLabel={t("rates.common.all_channels")} />
+            </Field>
+          </FormGrid>
+        </>
+      ) : (
+        <>
+          <DescriptionList
+            cols={3}
+            items={[
+              { label: t("rates.col.sale_window"), value: <DateRange from={v.sale_from} to={v.sale_to} /> },
+              { label: t("rates.col.stay_window"), value: <DateRange from={v.stay_from} to={v.stay_to} /> },
+              { label: t("rates.f.channels"), value: channelNames(v.channels) },
+              { label: t("rates.f.priority"), value: String(v.priority ?? 0) },
+              { label: t("rates.f.sell_currency"), value: v.sell_currency || t("rates.common.same_as_contract") },
+            ]}
+          />
+          {doc.selling_source === "header" && <Notice tone="info">{t("rates.selling.edit_in_header")}</Notice>}
+        </>
+      )}
+    </section>
   )
 }
