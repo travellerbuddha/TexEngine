@@ -140,6 +140,93 @@ def save_profile(data):
 	return {"name": doc.name}
 
 
+# ─── markets (platform master data, R-13) ────────────────────────────────
+
+MARKET_FIELDS = ("market_code", "market_name", "is_global", "disabled", "countries", "default_currency",
+                 "default_language", "parent_market")
+
+
+def _countries(value) -> set[str]:
+	return {c.strip().upper() for c in (value or "").replace("\n", ",").split(",") if c.strip()}
+
+
+def market_overlaps(code: str, countries: set[str], *, is_global: bool = False) -> list[dict]:
+	"""Countries this market shares with another enabled market of the same size: a
+	guest from there would get no market automatically (``resolve_market`` refuses to
+	guess), so staff must choose — worth knowing before saving."""
+	if is_global or not countries:
+		return []
+	out = []
+	for m in frappe.get_all("TEX Market", filters={"disabled": 0, "is_global": 0, "name": ("!=", code)},
+	                        fields=["name", "countries"]):
+		theirs = _countries(m.countries)
+		if len(theirs) != len(countries):
+			continue
+		shared = sorted(countries & theirs)
+		if shared:
+			out.append({"market": m.name, "countries": shared})
+	return out
+
+
+@frappe.whitelist()
+def markets():
+	"""All markets, with the countries each one claims (anyone who works with prices)."""
+	if not (scope.is_platform_admin() or scope.has_capability("price.view", None)):
+		frappe.throw(_("Not permitted."), frappe.PermissionError)
+	rows = frappe.get_all("TEX Market", fields=["name", *MARKET_FIELDS, "modified"],
+	                      order_by="is_global desc, market_code asc")
+	used = {r.market: r.n for r in frappe.db.sql(
+		"SELECT market, COUNT(*) AS n FROM `tabTEX Contract` WHERE market IS NOT NULL GROUP BY market",
+		as_dict=True)}
+	for r in rows:
+		r["contracts"] = int(used.get(r["name"], 0))
+		r["overlaps"] = market_overlaps(r["name"], _countries(r["countries"]), is_global=bool(r["is_global"])) \
+			if not r["disabled"] else []
+	return rows
+
+
+@frappe.whitelist(methods=["POST"])
+def save_market(data):
+	"""Create or edit a market (platform administrators). The code is fixed once created."""
+	_require_platform()
+	d = parse(data, {}) or {}
+	name = text(d.get("name"), 20)
+	doc = frappe.get_doc("TEX Market", name) if name else frappe.new_doc("TEX Market")
+	before = {f: doc.get(f) for f in MARKET_FIELDS} if name else None
+	if not name:
+		code = (text(d.get("market_code"), 20) or "").upper()
+		if not code or not code.replace("_", "").isalnum():
+			frappe.throw(_("Market code: letters, digits and _ only."))
+		if frappe.db.exists("TEX Market", code):
+			frappe.throw(_("Market {0} already exists.").format(code))
+		doc.market_code = code
+	doc.market_name = text(d.get("market_name"), 140) or doc.market_name
+	if not doc.market_name:
+		frappe.throw(_("Market name is required."))
+	doc.is_global = 1 if d.get("is_global") else 0
+	doc.disabled = 1 if d.get("disabled") else 0
+	doc.countries = text(d.get("countries"), 2000) or ""
+	ccy = text(d.get("default_currency"), 3)
+	if ccy and not frappe.db.exists("Currency", ccy):
+		frappe.throw(_("Unknown currency {0}.").format(ccy))
+	doc.default_currency = ccy or None
+	lang = text(d.get("default_language"), 10)
+	doc.default_language = lang or None
+	parent = text(d.get("parent_market"), 20)
+	if parent and (parent == doc.market_code or not frappe.db.exists("TEX Market", parent)):
+		frappe.throw(_("Invalid parent market."))
+	doc.parent_market = parent or None
+	if doc.disabled and not doc.is_new():
+		default = frappe.db.get_single_value("TEX Settings", "default_market")
+		if default == doc.name:
+			frappe.throw(_("The default market cannot be disabled."))
+	doc.save(ignore_permissions=True)
+	audit("market.save", reference_doctype="TEX Market", reference_name=doc.name, old=before,
+	      new={f: doc.get(f) for f in MARKET_FIELDS})
+	return {"name": doc.name, "overlaps": market_overlaps(doc.name, _countries(doc.countries),
+	                                                      is_global=bool(doc.is_global)) if not doc.disabled else []}
+
+
 # ─── settings (platform) ─────────────────────────────────────────────────
 
 SETTINGS_FIELDS = ("strict_tenancy", "show_legacy_pms", "brand_name", "support_email", "default_market",
