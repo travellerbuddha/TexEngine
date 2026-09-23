@@ -21,6 +21,7 @@ from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.scope import require_capability
+from kamra.tex.services.txn import retry_on_deadlock
 
 GATEWAYS = ("iyzico", "Sipay", "Virtual POS")
 
@@ -123,8 +124,10 @@ def transaction(name: str):
 	succeeded = r.txn_type == "Charge" and r.status == "Succeeded"
 	# money a gateway captured that TEX refused to count (G-67) is refundable in its own currency
 	capture = None if succeeded else pay.refused_capture(r)
-	refundable = from_db(r.amount, r.currency) - pay.refunded_of(name) if succeeded else (
-		capture["amount"] - pay.refunded_of(name) if capture else None)
+	# a refund still waiting for the gateway's answer may have been made: it is not refundable again
+	in_flight = pay.in_flight_of(name)
+	refundable = from_db(r.amount, r.currency) - pay.refunded_of(name) - in_flight if succeeded else (
+		capture["amount"] - pay.refunded_of(name) - in_flight if capture else None)
 	return {**_txn_row(r), "allocations": allocations, "refunds": [_txn_row(x) for x in refunds],
 	        "unallocated": to_str(from_db(r.amount, r.currency) - pay.allocated_of(name) - pay.refunded_of(name))
 	        if succeeded else "0",
@@ -178,6 +181,22 @@ def refund(transaction: str, amount, reason: str, idempotency_key: str, booking:
 	return pay.refund(transaction, amount=amount, reason=text(reason, 500) or "", booking=booking,
 	                  idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")),
 	                  durable=True)
+
+
+@frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("refund", "TEX Payment Transaction"))
+@retry_on_deadlock
+def finish_refund(refund: str, outcome: str, reason: str, reference: str | None = None):
+	"""Record what the gateway did with a refund it never confirmed (Pending: unanswered, or left
+	by a run that died), after staff checked it in the gateway's panel (G-45 re-review):
+	``Succeeded`` takes the money off the booking, ``Failed`` leaves it there. A guest change the
+	refund was made for is settled with it (what it still owes is refunded again). Audited."""
+	from kamra.tex.services import guest_changes
+
+	if outcome not in ("Succeeded", "Failed"):
+		frappe.throw(_("Choose whether the gateway refunded it."))
+	return guest_changes.verify_refund(refund, outcome=outcome, reason=text(reason, 500) or "",
+	                                   reference=text(reference, 140))
 
 
 @frappe.whitelist(methods=["POST"])

@@ -32,6 +32,11 @@
   "staff_amount",
   "staff_reason",
   "unknown_refund",
+  "refund_in_flight",
+  "returned_charges",
+  "settle_claim",
+  "settle_claimed_until",
+  "penalty_terms",
   "gcr_column_3",
   "revision",
   "error",
@@ -220,6 +225,41 @@
    "description": "A refund the gateway did not confirm: check it at the gateway before refunding again"
   },
   {
+   "fieldname": "refund_in_flight",
+   "fieldtype": "Link",
+   "label": "Refund being made",
+   "options": "TEX Payment Transaction",
+   "read_only": 1
+  },
+  {
+   "fieldname": "returned_charges",
+   "fieldtype": "Small Text",
+   "label": "Payments given back",
+   "read_only": 1,
+   "description": "Payments of this change that were given back, or left to staff to give back"
+  },
+  {
+   "fieldname": "settle_claim",
+   "fieldtype": "Data",
+   "label": "Refund run",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "settle_claimed_until",
+   "fieldtype": "Datetime",
+   "label": "Refund run until",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "penalty_terms",
+   "fieldtype": "Check",
+   "label": "Inside the rate's cancellation terms",
+   "read_only": 1,
+   "description": "Asked while cancelling would cost a fee: the hotel approves it"
+  },
+  {
    "fieldname": "gcr_column_3",
    "fieldtype": "Column Break"
   },
@@ -252,7 +292,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-26 00:00:00.000000",
+ "modified": "2026-09-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Guest Change Request",

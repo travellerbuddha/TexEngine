@@ -86,6 +86,14 @@ class TestLowerPrice(unittest.TestCase):
 		# a higher price is collected as usual
 		self.assertEqual(settle("842.50", "1110.00", "842.50", "1110.00", penalty=True).kind, st.PAY_NOW)
 
+	def test_moving_the_stay_inside_the_penalty_window_goes_to_the_hotel_at_any_price(self):
+		# the stay moved later would leave the window: a later shortening would dodge the fee
+		# (G-45 re-review F5)
+		for new, paid in (("1110.00", "842.50"), ("842.50", "842.50"), ("575.00", "842.50")):
+			s = st.settle(D("842.50"), D(new), D(paid), D("0"), pay_at_hotel=False, lower_policy=st.LOWER_REFUND,
+			              card_available=True, terms_review=True)
+			self.assertEqual((s.kind, s.collect, s.refund, s.credit), (st.STAFF_APPROVAL, D("0"), D("0"), D("0")))
+
 	def test_what_no_card_can_take_back_is_refunded_by_the_hotel(self):
 		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("100.00"))
 		self.assertEqual((s.kind, s.refund, s.hotel_refund, s.amount), (st.REFUND, D("100.00"), D("167.50"),

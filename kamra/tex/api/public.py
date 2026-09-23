@@ -624,12 +624,14 @@ def _guest_booking(b) -> dict:
 		              else None})
 	credit, refund_due = guest_changes.guest_credit(b.name)
 	blocked = ("PAYMENT_PENDING" if b.status in ("Pending Payment", "Held")
-	           else "REFUND_PENDING" if guest_changes.refund_pending(b.name) else None)
+	           else "REFUND_PENDING" if guest_changes.refund_pending(b.name)
+	           else "CHANGE_APPLYING" if guest_changes.change_applying(b.name) else None)
 	return {**summary, "rooms": rooms, "hotel": frappe.db.get_value("Property", b.property, "property_name"),
 	        "self_service": _self_service_allowed(b),
 	        # credit the guest may use; money set aside for a refund is not theirs to spend (G-45)
 	        "credit": to_str(credit), "refund_due": to_str(refund_due),
-	        # the booking's own payment, or a refund of an earlier change, comes first (G-45)
+	        # the booking's own payment, a refund of an earlier change, or a paid change still
+	        # being applied comes first (G-45)
 	        "changes_blocked": blocked,
 	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
 	        "can_pay_online": bool(guest_changes.card_account(b))}
