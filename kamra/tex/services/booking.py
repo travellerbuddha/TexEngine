@@ -92,11 +92,12 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 	"""→ (guest profile, consent granted now, consent asked for but not applied).
 
 	Marketing consent is only ever granted explicitly, never implied (ADR-046). It is
-	recorded on a profile this booking creates, and by staff, who took the guest's word and
-	are accountable for it. An anonymous booker who types the e-mail or phone of an EXISTING
-	profile does not prove to be its owner, so that profile's consent is left as it is: the
-	request is returned for the caller to keep on record, and the hotel confirms it on a
-	verified channel (CRM). Nothing here ever withdraws consent."""
+	recorded on a profile this booking creates, and by staff who may edit guest profiles at
+	the hotel (``crm.edit``): they took the guest's word and are accountable for it. Anyone
+	else who types the e-mail or phone of an EXISTING profile (an anonymous booker, or staff
+	who may only sell) does not change that profile's consent: the request is returned for the
+	caller to keep on record, and the hotel confirms it on a verified channel (CRM). Nothing
+	here ever withdraws consent."""
 	enterprise = frappe.db.get_value("Property", property, "tex_enterprise")
 	existing = None
 	if g.get("email"):
@@ -113,7 +114,8 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 				doc.set(f, v)
 				changed = True
 		new = [k for k in asked if not doc.get(k)]
-		if new and staff:
+		trusted = staff and scope.has_capability("crm.edit", property)
+		if new and trusted:
 			for k in new:
 				doc.set(k, 1)
 			doc.tex_consent_updated_at = now_datetime()
@@ -121,7 +123,7 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 			changed = True
 		if changed:
 			doc.save(ignore_permissions=True)
-		return (doc.name, new, []) if staff else (doc.name, [], new)
+		return (doc.name, new, []) if trusted else (doc.name, [], new)
 	doc = frappe.get_doc({
 		"doctype": "Guest", "first_name": g["first_name"], "last_name": g["last_name"], "email": g.get("email"),
 		"phone": g.get("phone"), "nationality": g.get("nationality"),

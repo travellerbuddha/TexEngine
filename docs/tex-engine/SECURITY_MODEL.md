@@ -58,7 +58,7 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Secret leakage | Frappe `Password` fields (encrypted at rest); never returned by APIs; never logged |
 | Audit tampering | `TEX Audit Event` has no write/delete permission for any role; inserted only by server code |
 | Embedding abuse (clickjacking) | Booking iframe allowed only for `allowed_embed_origins` via CSP `frame-ancestors` |
-| Uploads | Checked on the server (ADR-046): TEX branding images by their bytes (PNG/JPEG/GIF/WebP, decoded, 2 MB) through `admin.upload_site_image`; no path stores HTML, SVG, XML or script as a public file (File controller extension) |
+| Uploads | Checked on the server (ADR-046 and review): TEX branding images by their bytes (PNG/JPEG/GIF/WebP, every frame decoded, 2 MB) through `admin.upload_site_image`; the public folder serves only an allow-list (images, video, audio, PDF, office documents, fonts, zip) judged on the name File stores, on every path, before anything is written (File controller extension); everything else is private |
 | Bearer tokens in URLs | Guest links carry tokens in the URL fragment (never sent to a server); token endpoints take POST bodies only; payment pages send no Referer (ADR-046); only token hashes are stored |
 | PII over-exposure | `crm.view` / `guest.export` capabilities; masked ID numbers (existing `_mask_id`); exports audited |
 | Open redirect through payment return URLs | Browser-supplied return URLs accepted only for the TEX host or a DNS-verified booking domain (ADR-021) |

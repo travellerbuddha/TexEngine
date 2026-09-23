@@ -27,11 +27,14 @@ class TEXBookingSite(Document):
 			if self.get(f) and not HEX.match(self.get(f)):
 				frappe.throw(_("{0} must be a #RRGGBB colour.").format(self.meta.get_label(f)))
 		for f in ("logo", "hero_image"):
-			# guests' pages show these: an image of this platform or an https address, never script,
-			# markup (SVG, HTML) or another scheme (G-83)
-			if self.get(f) and not safe_image_url(self.get(f)):
-				frappe.throw(_("{0} must be an uploaded PNG, JPEG, GIF or WebP image or an https:// address.").format(
-					self.meta.get_label(f)))
+			# guests' pages show these: a PNG/JPEG/GIF/WebP in the public files or an https address on
+			# another host; never script, markup (SVG, HTML), another path of the platform or another
+			# scheme (G-83). Only a changed value is judged: a site saved with an older image stays
+			# savable (a domain check saves the site as it is); patch p24 lists those sites
+			if self.get(f) and (self.is_new() or self.has_value_changed(f)) and not safe_image_url(
+					self.get(f), sites.own_hosts()):
+				frappe.throw(_("{0} must be an uploaded PNG, JPEG, GIF or WebP image or an https:// address on "
+				               "another site.").format(self.meta.get_label(f)))
 		origins = [o.strip().lower().rstrip("/") for o in (self.allowed_embed_origins or "").splitlines() if o.strip()]
 		bad = [o for o in origins if not ORIGIN.match(o)]
 		if bad:
