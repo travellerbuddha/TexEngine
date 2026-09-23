@@ -347,6 +347,12 @@ COMMERCIAL_SPECS = [
 		F("sell_currency", "Link", "Default sell currency", "Currency", description="Blank = contract currency."),
 		F("channels", "Table MultiSelect", "Sales channels", "TEX Contract Channel",
 		  description="Blank = every channel."),
+		F("header_snapshot_section", "Section Break", "Frozen before selling terms were versioned"),
+		F("header_snapshot_at", "Datetime", "Header snapshot taken", read_only=1,
+		  description="Only a version frozen before selling terms were versioned: the terms above are the contract "
+		              "header's at the upgrade, and the version sells only where both they and its frozen payload "
+		              "allow."),
+		F("header_market", "Link", "Header market at the upgrade", "TEX Market", read_only=1),
 		TAB("Settings"),
 		F("child_ordering", "Select", "Child order", ["OLDEST_FIRST", "YOUNGEST_FIRST", "AS_ENTERED"],
 		  default="OLDEST_FIRST"),

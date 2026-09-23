@@ -61,11 +61,18 @@ def get_contract(name: str):
 	                          order_by="version_no desc")
 	can_publish = scope.has_capability("contract.publish", c.property)
 	published = any(v.status != "Draft" for v in versions)
+	live = svc.active_version_header(name, now_datetime())
+	try:
+		live_selling = svc.version_selling(live.version_id).as_dict() if live else None
+	except frappe.ValidationError:          # a payload failing its integrity check sells nothing
+		live_selling = None
 	return {"contract": doc_dict(c), "versions": versions,
 	        "can_edit": scope.has_capability("contract.edit", c.property), "can_publish": can_publish,
 	        # G-50: after the first publish these belong to the versions (header = the live version's)
 	        "published": published, "locked_fields": list(LOCKED_AFTER_PUBLISH) if published else [],
-	        "status_actions": svc.status_actions(c.status) if can_publish else []}
+	        "status_actions": svc.status_actions(c.status) if can_publish else [],
+	        # what the live version sells (a version frozen before G-50: narrowed by its header)
+	        "live_selling": live_selling}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -169,7 +176,8 @@ def _selling(v, c) -> dict:
 	"""A version's selling terms (G-50, ADR-045): what a published version froze; a draft's own
 	once the contract was published; before that, the contract header's (edited there)."""
 	if v.status != "Draft" and v.payload:
-		return {"selling": svc.frozen_selling(svc.load_terms(v.name), c), "selling_source": "frozen",
+		# what it sells: a version frozen before G-50 stays narrowed by its header (``legacy``)
+		return {"selling": svc.version_selling(v.name).as_dict(), "selling_source": "frozen",
 		        "selling_editable": False}
 	if svc.is_published(c.name):
 		return {"selling": svc.selling_values(v), "selling_source": "version",

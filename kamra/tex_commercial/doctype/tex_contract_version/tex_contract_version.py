@@ -35,19 +35,21 @@ class TEXContractVersion(Document):
 			frappe.throw(_("Use Publish to publish a version."))
 
 	def _default_selling_terms(self):
-		"""A version created outside ``new_draft`` (Desk, REST) for a published contract, with no
-		selling terms of its own, starts from the last published version's frozen ones instead of
-		selling everywhere, always (G-50, ADR-045)."""
+		"""A version created with no selling terms of its own for a published contract (Desk, REST,
+		a Desk "Duplicate") starts from what its source sold (``based_on``, else the last published
+		version) instead of selling everywhere, always (G-50, ADR-045)."""
 		from kamra.tex.commercial import contracts as svc
 
-		if self.based_on or not svc.is_published(self.contract):
+		if not svc.selling_empty(self) or not svc.is_published(self.contract):
 			return
-		if any(self.get(f) for f in svc.SELLING_FIELDS) or self.get("channels"):
-			return
-		last = frappe.db.get_value("TEX Contract Version", {"contract": self.contract, "status": ("!=", "Draft")},
-		                           "name", order_by="version_no desc")
-		header = frappe.db.get_value("TEX Contract", self.contract, ["priority", "sell_currency"], as_dict=True)
-		svc.set_selling(self, svc.frozen_selling(svc.load_terms(last), header))
+		src = None
+		if self.based_on:
+			src = frappe.db.get_value("TEX Contract Version", {"name": self.based_on, "contract": self.contract,
+			                                                   "status": ("!=", "Draft")}, "name")
+		src = src or frappe.db.get_value("TEX Contract Version", {"contract": self.contract,
+		                                                          "status": ("!=", "Draft")},
+		                                 "name", order_by="version_no desc")
+		svc.set_selling(self, svc.version_selling(src).draft_values())
 
 	def on_trash(self):
 		if self.status != "Draft":

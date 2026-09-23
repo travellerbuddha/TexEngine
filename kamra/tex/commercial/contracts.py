@@ -10,8 +10,8 @@ payload: a policy change reaches a contract only when it is republished.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import date, datetime
 
 import frappe
 from frappe import _
@@ -169,17 +169,112 @@ def selling_values(doc) -> dict:
 	        "channels": sorted({c.sales_channel for c in (doc.get("channels") or [])})}
 
 
-def frozen_selling(terms: ContractTerms, header=None) -> dict:
-	"""Selling terms a published version froze. A payload frozen before G-50 has no priority or
-	sell currency: ``header`` (the contract row) fills them in (ADR-045 back-compat)."""
-	priority, sell = terms.priority, terms.sell_currency
-	if priority is None and header is not None:
-		priority = int(header.priority or 0)
-	if not sell and header is not None:
-		sell = header.sell_currency or None
+def selling_empty(doc) -> bool:
+	"""A version (or header) with no selling terms of its own."""
+	return not any(doc.get(f) for f in SELLING_FIELDS) and not doc.get("channels")
+
+
+def frozen_selling(terms: ContractTerms) -> dict:
+	"""The selling terms a payload froze (a version published since G-50)."""
 	return {"sale_from": _iso(terms.sale_from), "sale_to": _iso(terms.sale_to), "stay_from": _iso(terms.stay_from),
-	        "stay_to": _iso(terms.stay_to), "priority": priority, "sell_currency": sell,
+	        "stay_to": _iso(terms.stay_to), "priority": terms.priority, "sell_currency": terms.sell_currency,
 	        "channels": sorted(terms.channels or ())}
+
+
+def _later(a, b):
+	return max(a, b) if a and b else (a or b)
+
+
+def _earlier(a, b):
+	return min(a, b) if a and b else (a or b)
+
+
+def _both(a: frozenset | None, b: frozenset | None) -> frozenset | None:
+	"""Channels both allow (None = every channel; an empty set = none)."""
+	return b if a is None else (a if b is None else a & b)
+
+
+@dataclass(frozen=True)
+class SellingTerms:
+	"""What selection applies to one published version (ADR-045)."""
+	markets: tuple[str, ...]            # each must be the requested market or GLOBAL
+	sale_from: date | None
+	sale_to: date | None
+	stay_from: date | None
+	stay_to: date | None
+	channels: frozenset[str] | None     # None = every channel; empty = none
+	priority: int
+	sell_currency: str | None
+	source: str                         # frozen | snapshot | header
+	snapshot: dict | None = None        # the header terms a version frozen before G-50 is narrowed by
+
+	def admits(self, market: str, channel: str, sale: date) -> bool:
+		if any(m not in (market, GLOBAL_MARKET) for m in self.markets):
+			return False
+		if (self.sale_from and sale < self.sale_from) or (self.sale_to and sale > self.sale_to):
+			return False
+		return self.channels is None or channel in self.channels
+
+	def as_dict(self) -> dict:
+		return {"sale_from": _iso(self.sale_from), "sale_to": _iso(self.sale_to), "stay_from": _iso(self.stay_from),
+		        "stay_to": _iso(self.stay_to), "priority": self.priority, "sell_currency": self.sell_currency,
+		        "channels": sorted(self.channels or ()), "no_channel": self.channels is not None and not self.channels,
+		        "legacy": self.snapshot is not None, "header_market": (self.snapshot or {}).get("market")}
+
+	def draft_values(self) -> dict:
+		"""Selling terms for a draft based on this version: what it sold. Where a version frozen
+		before G-50 sold nothing (its header and payload windows or channels do not overlap), the
+		draft takes the header's value, the terms staff last set."""
+		out = {k: v for k, v in self.as_dict().items() if k in (*SELLING_FIELDS, "channels")}
+		snap = self.snapshot
+		if snap and self.sale_from and self.sale_to and self.sale_from > self.sale_to:
+			out["sale_from"], out["sale_to"] = _iso(snap["sale_from"]), _iso(snap["sale_to"])
+		if snap and self.channels is not None and not self.channels:
+			out["channels"] = sorted(snap["channels"] or ())
+		return out
+
+
+def _header_terms(parent: str, parenttype: str, row, market: str | None) -> dict:
+	d = lambda v: getdate(v) if v else None  # noqa: E731
+	chans = frappe.get_all("TEX Contract Channel", filters={"parent": parent, "parenttype": parenttype},
+	                       pluck="sales_channel")
+	return {"market": market, "sale_from": d(row.sale_from), "sale_to": d(row.sale_to),
+	        "stay_from": d(row.stay_from), "stay_to": d(row.stay_to), "channels": frozenset(chans) or None,
+	        "priority": int(row.priority or 0), "sell_currency": row.sell_currency or None}
+
+
+def legacy_snapshot(version: str, contract: str) -> tuple[dict, str]:
+	"""The header terms a version frozen before G-50 is narrowed by: the snapshot the upgrade
+	(p25) stored on the version, or, before it ran, the live contract header."""
+	row = frappe.db.get_value("TEX Contract Version", version,
+	                          ["header_snapshot_at", "header_market", *SELLING_FIELDS], as_dict=True)
+	if row and row.header_snapshot_at:
+		return _header_terms(version, "TEX Contract Version", row, row.header_market), "snapshot"
+	h = frappe.db.get_value("TEX Contract", contract, ["market", *SELLING_FIELDS], as_dict=True)
+	return _header_terms(contract, "TEX Contract", h, h.market), "header"
+
+
+def selling_terms(version: str, terms: ContractTerms) -> SellingTerms:
+	"""Selling terms of a published version (ADR-045). A version published since G-50 sells on
+	what its payload froze. Before G-50, selection read the header and pricing the payload, so a
+	header narrowed after publish stopped sales; a version frozen then keeps selling only where
+	both its payload and that header allow (market, sale window, channels), in the header's
+	priority and sell currency. The header's stay window never narrowed anything."""
+	if terms.priority is not None:
+		return SellingTerms(markets=(terms.market,), sale_from=terms.sale_from, sale_to=terms.sale_to,
+		                    stay_from=terms.stay_from, stay_to=terms.stay_to, channels=terms.channels,
+		                    priority=terms.priority, sell_currency=terms.sell_currency, source="frozen")
+	snap, source = legacy_snapshot(version, terms.contract_id)
+	return SellingTerms(markets=(terms.market, snap["market"] or terms.market),
+	                    sale_from=_later(terms.sale_from, snap["sale_from"]),
+	                    sale_to=_earlier(terms.sale_to, snap["sale_to"]), stay_from=terms.stay_from,
+	                    stay_to=terms.stay_to, channels=_both(terms.channels, snap["channels"]),
+	                    priority=snap["priority"], sell_currency=snap["sell_currency"], source=source,
+	                    snapshot=snap)
+
+
+def version_selling(version: str) -> SellingTerms:
+	return selling_terms(version, load_terms(version))
 
 
 def set_selling(doc, values: dict) -> None:
@@ -354,9 +449,8 @@ def new_draft(contract: str, based_on: str | None = None) -> str:
 			doc.set(f, None)
 		doc.based_on = src.name
 		if src.status != "Draft" and src.payload:
-			# the selling terms the source version froze, not whatever its fields say (G-50)
-			header = frappe.db.get_value("TEX Contract", contract, ["priority", "sell_currency"], as_dict=True)
-			set_selling(doc, frozen_selling(load_terms(src.name), header))
+			# what the source version sold, not whatever its fields say (G-50, ADR-045)
+			set_selling(doc, version_selling(src.name).draft_values())
 	else:
 		doc = frappe.new_doc("TEX Contract Version")
 		doc.contract = contract
@@ -461,30 +555,40 @@ def withdraw(name: str, reason: str) -> None:
 	clear_terms_cache()
 
 
+def _supersede(version: str) -> None:
+	doc = frappe.get_doc("TEX Contract Version", version)
+	doc.flags.tex_lifecycle = True
+	doc.status = "Superseded"
+	doc.save(ignore_permissions=True)
+
+
+def _go_live(contract: str, version: str | None) -> None:
+	doc = frappe.get_doc("TEX Contract", contract)
+	doc.active_version = version
+	selling = None
+	if version:
+		st = version_selling(version)
+		selling = st.as_dict()
+		if st.source == "frozen":
+			set_selling(doc, frozen_selling(load_terms(version)))   # the header mirrors the live version
+		# a version frozen before G-50 is narrowed by the header it had: nothing to mirror
+	doc.flags.tex_lifecycle = True
+	doc.save(ignore_permissions=True)
+	audit("contract.version_live", reference_doctype="TEX Contract", reference_name=contract, property=doc.property,
+	      new={"version": version, "selling": selling})
+
+
 def roll_version_statuses() -> None:
 	"""Scheduler: flip scheduled versions live and superseded ones to Superseded."""
 	now = now_datetime()
 	for v in frappe.get_all("TEX Contract Version", filters={"status": "Published", "active_to": ("<=", now)},
 	                        pluck="name"):
-		doc = frappe.get_doc("TEX Contract Version", v)
-		doc.flags.tex_lifecycle = True
-		doc.status = "Superseded"
-		doc.save(ignore_permissions=True)
+		_supersede(v)
 	for c in frappe.get_all("TEX Contract", filters={"status": "Active"}, pluck="name"):
 		live = active_version_header(c, now)
 		new = live.version_id if live else None
-		if frappe.db.get_value("TEX Contract", c, "active_version") == new:
-			continue
-		doc = frappe.get_doc("TEX Contract", c)
-		doc.active_version = new
-		selling = None
-		if new:
-			selling = frozen_selling(load_terms(new), doc)
-			set_selling(doc, selling)             # a scheduled version went live: the header mirrors it
-		doc.flags.tex_lifecycle = True
-		doc.save(ignore_permissions=True)
-		audit("contract.version_live", reference_doctype="TEX Contract", reference_name=c, property=doc.property,
-		      new={"version": new, "selling": selling})
+		if frappe.db.get_value("TEX Contract", c, "active_version") != new:
+			_go_live(c, new)
 
 
 # ─── loading frozen terms ────────────────────────────────────────────────
@@ -531,11 +635,11 @@ def candidate_contracts(property: str, market: str, channel: str, at: datetime) 
 	→ [(contract row, version name)], highest priority first.
 
 	The header only says whether a contract sells at all (its status); market, channels, sale
-	window, priority and default sell currency are those the version live at ``at`` froze, the
-	same terms pricing runs on (G-50, ADR-045)."""
+	window, priority and default sell currency are those of the version live at ``at``
+	(``selling_terms``: what it froze, narrowed by its header snapshot if it was frozen before
+	G-50), so selection is the same whenever it is re-run for ``at`` (G-50, ADR-045)."""
 	rows = frappe.get_all("TEX Contract", filters={"property": property, "status": "Active"},
-	                      fields=["name", "contract_code", "contract_name", "priority", "sell_currency", "is_bar"],
-	                      order_by="name asc")
+	                      fields=["name", "contract_code", "contract_name", "is_bar"], order_by="name asc")
 	out = []
 	sale = getdate(at)
 	for r in rows:
@@ -543,21 +647,19 @@ def candidate_contracts(property: str, market: str, channel: str, at: datetime) 
 		if not h:
 			continue
 		t = load_terms(h.version_id)
-		if t.property != property or t.market not in (market, GLOBAL_MARKET):
+		if t.property != property:
 			continue
-		# closed for sale at this time: never a candidate (G-17)
-		if (t.sale_from and sale < t.sale_from) or (t.sale_to and sale > t.sale_to):
+		st = selling_terms(h.version_id, t)
+		# closed for this market, sale date (G-17) or channel: never a candidate
+		if not st.admits(market, channel, sale):
 			continue
-		if t.channels is not None and channel not in t.channels:
-			continue
-		sel = frozen_selling(t, r)
 		out.append((frappe._dict(
 			name=r.name, contract_code=r.contract_code, contract_name=r.contract_name, is_bar=r.is_bar,
-			market=t.market, contract_currency=t.currency, priority=sel["priority"],
-			sell_currency=sel["sell_currency"], channels=sel["channels"], sale_from=t.sale_from, sale_to=t.sale_to,
-			stay_from=t.stay_from, stay_to=t.stay_to), h.version_id))
+			market=t.market, specific=market in st.markets, contract_currency=t.currency, priority=st.priority,
+			sell_currency=st.sell_currency, channels=sorted(st.channels or ()), sale_from=st.sale_from,
+			sale_to=st.sale_to, stay_from=st.stay_from, stay_to=st.stay_to), h.version_id))
 	# a market-specific contract beats the GLOBAL fallback; then priority
-	out.sort(key=lambda x: (x[0].market != market, -(x[0].priority or 0), x[0].name))
+	out.sort(key=lambda x: (not x[0].specific, -(x[0].priority or 0), x[0].name))
 	return out
 
 

@@ -25,6 +25,9 @@
   "priority",
   "sell_currency",
   "channels",
+  "header_snapshot_section",
+  "header_snapshot_at",
+  "header_market",
   "tab_20",
   "child_ordering",
   "age_basis",
@@ -173,6 +176,25 @@
    "label": "Sales channels",
    "options": "TEX Contract Channel",
    "description": "Blank = every channel."
+  },
+  {
+   "fieldname": "header_snapshot_section",
+   "fieldtype": "Section Break",
+   "label": "Frozen before selling terms were versioned"
+  },
+  {
+   "fieldname": "header_snapshot_at",
+   "fieldtype": "Datetime",
+   "label": "Header snapshot taken",
+   "read_only": 1,
+   "description": "Only a version frozen before selling terms were versioned: the terms above are the contract header's at the upgrade, and the version sells only where both they and its frozen payload allow."
+  },
+  {
+   "fieldname": "header_market",
+   "fieldtype": "Link",
+   "label": "Header market at the upgrade",
+   "options": "TEX Market",
+   "read_only": 1
   },
   {
    "fieldname": "tab_20",
