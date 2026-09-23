@@ -904,3 +904,61 @@ of them stranded money a gateway had already captured:
   allocating the same payment at the same moment could both pass the limit check. Locking them
   needs indexes on `transaction` / `parent_transaction` (a schema change, not made here).
 - Bookings paid in Sandbox on a site without `tex_production` carry no per-booking flag.
+
+## ADR-046 Consent needs a proven owner; bearer tokens never travel in a URL path; public files never carry active content
+**Context.** G-83 (security hygiene, R-53) found four behaviours that trusted what a browser
+sends:
+- An anonymous booker who typed the e-mail or phone of an *existing* guest profile set that
+  profile's marketing consent (`booking.find_or_create_guest`). Anyone could opt a stranger in,
+  and abandoned-payment recovery then used the profile's contact data on the same tick.
+- A payment link was `/book/pay/<token>`. The bearer token sat in the URL path, so it reached
+  web-server access logs and the `Referer` of every request the page made. Manage links
+  already used the fragment (`#token=`).
+- Booking-site images were validated only in the browser, through Frappe's generic
+  `upload_file`, which lets any Desk user store HTML or SVG in the public folder, served in the
+  platform's origin.
+- The PMS webhook adapter refused an empty signing key only as a retryable error, and a webhook
+  connection could be enabled without a secret.
+**Decision.**
+- *Consent needs a proven owner.* Marketing consent is only ever granted explicitly, by someone
+  who owns or is accountable for the profile:
+  - a booking that *creates* the profile records the booker's consent (source `booking`);
+  - staff (CRS) record it on an existing profile (source `booking (staff)`): they took the
+    guest's word and are accountable for it;
+  - an anonymous booking that *matches* an existing profile changes nothing on it. The request
+    is audited (`guest.consent_requested`, with the booking) and the CRM consent history shows
+    it as "requested, not applied". The hotel records it once the guest confirms on a verified
+    channel (CRM, with the source).
+  - Every consent granted through a booking is audited (`guest.consent`). Nothing in a booking
+    withdraws consent; withdrawal stays one CRM step. Abandoned-payment recovery keeps contact
+    data only when the profile itself has e-mail consent.
+- *Bearer tokens never travel in a URL path or query string.* Guest links carry their token in
+  the fragment (`manage#token=…`, now also `pay#token=…`), which browsers never send to a
+  server. The page moves it out of the address bar, keeps it for the tab and posts it in a JSON
+  body; endpoints that take a token accept POST only. Links issued before (`/book/pay/<token>`)
+  keep working until they expire (at most 60 days): the page moves the token into the fragment
+  before the app starts, and payment pages answer with `Referrer-Policy: no-referrer` (header
+  and `<meta>`, both mounts). Tokens are stored only as hashes.
+- *Public files never carry active content.* A File controller extension
+  (`hooks.extend_doctype_class`, `kamra.tex.security.uploads.PublicFileGuard`) refuses HTML, SVG,
+  XML and script as a public file on every path, before anything is written, and refuses making
+  such a private file public. TEX images go through `admin.upload_site_image`: the bytes decide
+  (PNG, JPEG, GIF or WebP, decoded by Pillow, 2 MB, 8000 px), never the name. A booking site's
+  logo and hero image are an image of the platform or an https address.
+- *A signing adapter never sends unsigned.* An adapter that signs (`requires_secret`) cannot be
+  enabled without a secret; at run time a missing secret or a non-https endpoint is a final
+  refusal (`AdapterRefused`: Dead at once, audited as `connect.delivery_refused`, reason only),
+  in every environment. The Connect screen's retry sends it once fixed.
+- Payment provider API keys are Password fields like every other credential (p22).
+**Consequences.**
+- A returning guest who ticks marketing consent in the booking engine is not opted in until the
+  hotel confirms it. A double opt-in e-mail (a signed confirmation link sent to the profile's own
+  address) would close that loop without staff; it needs outgoing e-mail (BLOCKED, SMTP) and is
+  an owner decision.
+- The first request of a payment link e-mailed before this change still carries its token in the
+  path, so it can appear once in an access log until the link expires or is reissued (reissuing
+  gives a fragment link and voids the old token). Removing that needs log scrubbing at the proxy,
+  an operations decision.
+- Frappe's e-mail queue keeps the message body, link included, until the queue is cleared;
+  TEX never stores or logs the raw token itself.
+- An SVG logo can no longer be uploaded (TEX or legacy screens); an https URL still works.
