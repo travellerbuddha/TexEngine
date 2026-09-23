@@ -6,6 +6,7 @@ import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
 import { instructionsFor, manageToken, rememberPayment, rememberReturn } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
+import { sitePath, siteRoute, siteUrl, useSiteSlug } from "../lib/mount"
 import { Shell } from "../site/Layout"
 import { siteText, SiteProvider, useSite, useSiteData } from "../site/SiteContext"
 import type { BookingSummary, PaymentStart } from "../types"
@@ -110,10 +111,10 @@ function Confirmation({ booking }: { booking: string }) {
       const p = await pub<PaymentStart>("pay_booking", {
         token,
         payment_method: "Card",
-        return_url: `${window.location.origin}/book/${site.slug}/confirmation/${encodeURIComponent(booking)}`,
+        return_url: siteUrl(site.slug, `confirmation/${encodeURIComponent(booking)}`),
       })
       rememberPayment(p, { amount: isZero(data.paid) ? data.due_now : undefined, currency: data.currency, hotel: data.hotel })
-      rememberReturn(p.transaction, `/${site.slug}/confirmation/${encodeURIComponent(booking)}`)
+      rememberReturn(p.transaction, sitePath(site.slug, `confirmation/${encodeURIComponent(booking)}`))
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {
@@ -173,7 +174,7 @@ function Confirmation({ booking }: { booking: string }) {
     body = t("confirm.payBody")
   }
   const note = siteText(site, lang, "confirmation_note")
-  const manageHref = `/${site.slug}/manage#token=${encodeURIComponent(token)}`
+  const manageHref = siteRoute(site.slug, `manage#token=${encodeURIComponent(token)}`)
   const canPay = pending && !bank && !payAtHotel && isPositive(data.due_now)
 
   return (
@@ -249,13 +250,14 @@ function Confirmation({ booking }: { booking: string }) {
 }
 
 export default function ConfirmationPage() {
-  const { site: slug, booking } = useParams()
+  const { booking } = useParams()
+  const slug = useSiteSlug()
   const { site, error, retry } = useSiteData(slug)
   if (error) return <SiteError error={error} onRetry={retry} />
   if (!site || !booking) return <Spinner className="p-10" />
   return (
     <SiteProvider site={site}>
-      <Shell home={`/book/${site.slug}`}>
+      <Shell home={sitePath(site.slug)}>
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
           <Confirmation booking={booking} />
         </div>

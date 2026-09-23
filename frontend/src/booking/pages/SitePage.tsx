@@ -1,10 +1,10 @@
 import { CalendarDays, MapPin, Pencil, Users } from "lucide-react"
 import { lazy, Suspense, useEffect, useState } from "react"
-import { useParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { safeImage } from "../lib/branding"
 import { isComplete } from "../lib/criteria"
 import { nightsBetween } from "../lib/dates"
+import { useSiteSlug } from "../lib/mount"
 import { isEmbedded } from "../lib/storage"
 import { BookingProvider, useBooking } from "../flow/BookingContext"
 import { guestsSummary } from "../search/GuestsPicker"
@@ -210,7 +210,7 @@ function SiteHome() {
 }
 
 export default function SitePage() {
-  const { site: slug } = useParams()
+  const slug = useSiteSlug()
   const { site, error, retry } = useSiteData(slug)
   if (error) return <SiteError error={error} onRetry={retry} />
   if (!site) return <Loading />

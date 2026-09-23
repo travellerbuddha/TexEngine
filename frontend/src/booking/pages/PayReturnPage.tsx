@@ -2,6 +2,7 @@ import { CheckCircle2, Clock, XCircle } from "lucide-react"
 import { useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
+import { resumeAt } from "../flow/payment"
 import { returnPathFor } from "../lib/storage"
 import { EmptyState, Spinner } from "../ui/feedback"
 import { PlainShell } from "./SiteError"
@@ -18,7 +19,7 @@ export default function PayReturnPage() {
   const own = txn ? returnPathFor(txn) : null
 
   useEffect(() => {
-    if (own) navigate(`${own}${own.includes("?") ? "&" : "?"}${sp.toString()}`, { replace: true })
+    if (own) resumeAt(own, sp.toString(), navigate)
   }, [own, navigate, sp])
 
   if (own)

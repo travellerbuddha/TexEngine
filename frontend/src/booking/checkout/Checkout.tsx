@@ -7,6 +7,7 @@ import { extraAnchor, extraStock, refusalText, stayDays, type DayAvailability, t
 import { boardLabel, cancellation, paymentTerms } from "../lib/policy"
 import { useBooking, type Step } from "../flow/BookingContext"
 import { continuePayment } from "../flow/payment"
+import { sitePath, siteRoute } from "../lib/mount"
 import { Summary } from "../flow/Summary"
 import { FlowErrorAlert, PriceChangeNotice, RejectedExtrasNotice, useBackToExtras, useContinue } from "../flow/useContinue"
 import { rememberReturn, sessionId } from "../lib/storage"
@@ -599,17 +600,17 @@ function PaymentStep() {
       return
     }
     const booking = res.booking!
-    const confirmation = `/${site.slug}/confirmation/${encodeURIComponent(booking.booking)}`
+    const confirmation = `confirmation/${encodeURIComponent(booking.booking)}`
     const p = res.payment
     if (p && (p.kind === "redirect" || p.kind === "form_post")) {
-      rememberReturn(p.transaction, confirmation)
+      rememberReturn(p.transaction, sitePath(site.slug, confirmation))
       setRedirecting(p)
       const outcome = continuePayment(p, navigate)
       if (outcome === "blocked") setBlocked(true)
       return
     }
     setPending(false)
-    navigate(confirmation, { replace: true })
+    navigate(siteRoute(site.slug, confirmation), { replace: true })
   }
 
   if (redirecting)

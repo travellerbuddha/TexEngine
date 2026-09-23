@@ -1,7 +1,9 @@
 import { Globe, SearchX, WifiOff } from "lucide-react"
 import { useEffect, useId, type ReactNode } from "react"
+import { Link } from "react-router-dom"
 import { isLang, LANGS, useI18n } from "../i18n"
 import type { ApiError } from "../lib/api"
+import { PINNED } from "../lib/mount"
 import { Button } from "../ui/controls"
 import { EmptyState } from "../ui/feedback"
 
@@ -72,7 +74,18 @@ export function NotFound() {
   return (
     <PlainShell title={t("errors.pageNotFound")}>
       <h1 className="sr-only">{t("errors.pageNotFound")}</h1>
-      <EmptyState icon={<SearchX className="size-8" aria-hidden />} title={t("errors.pageNotFound")}>
+      <EmptyState
+        icon={<SearchX className="size-8" aria-hidden />}
+        title={t("errors.pageNotFound")}
+        actions={
+          // on a hotel's own host the booking page is always at "/"
+          PINNED && (
+            <Link to="/" className="bk-btn bk-btn-primary">
+              {t("common.startAgain")}
+            </Link>
+          )
+        }
+      >
         {t("errors.pageNotFoundBody")}
       </EmptyState>
     </PlainShell>

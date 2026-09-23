@@ -1,13 +1,14 @@
 import { CalendarCog, CreditCard, KeyRound, Mail, Phone, Sparkles, XCircle } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { MAX_ADULTS, MAX_CHILDREN, type Party } from "../lib/criteria"
 import { parseRefusal, refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
 import { rememberPayment, returnPathFor, setItem, siteManageToken } from "../lib/storage"
-import { continuePayment } from "../flow/payment"
+import { continuePayment, resumeAt } from "../flow/payment"
+import { sitePath, siteUrl, useSiteSlug } from "../lib/mount"
 import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
@@ -320,7 +321,7 @@ function Manage({ token }: { token: string | null }) {
   useEffect(() => {
     const txn = sp.get("payment")
     const own = txn ? returnPathFor(txn) : null
-    if (own && !own.startsWith(`/${site.slug}/manage`)) navigate(`${own}${own.includes("?") ? "&" : "?"}${sp.toString()}`, { replace: true })
+    if (own && !own.startsWith(sitePath(site.slug, "manage"))) resumeAt(own, sp.toString(), navigate)
   }, [sp, site.slug, navigate])
   useEffect(() => {
     document.title = `${t("manage.title")} · ${site.name}`
@@ -344,7 +345,7 @@ function Manage({ token }: { token: string | null }) {
     if (!token || !data) return
     setPaying(true)
     try {
-      const p = await pub<PaymentStart>("pay_booking", { token, payment_method: "Card", return_url: `${window.location.origin}/book/${site.slug}/manage` })
+      const p = await pub<PaymentStart>("pay_booking", { token, payment_method: "Card", return_url: siteUrl(site.slug, "manage") })
       rememberPayment(p, { currency: data.currency, hotel: data.hotel, amount: isZero(data.paid) && data.status === "Pending Payment" ? data.due_now : undefined })
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
@@ -479,13 +480,13 @@ function ManageInSite() {
 }
 
 export default function ManagePage() {
-  const { site: slug } = useParams()
+  const slug = useSiteSlug()
   const { site, error, retry } = useSiteData(slug)
   if (error) return <SiteError error={error} onRetry={retry} />
   if (!site) return <Spinner className="p-10" />
   return (
     <SiteProvider site={site}>
-      <Shell home={`/book/${site.slug}`}>
+      <Shell home={sitePath(site.slug)}>
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
           <ManageInSite />
         </div>

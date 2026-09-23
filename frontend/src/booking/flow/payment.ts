@@ -2,9 +2,8 @@
 // ever entered on the provider's page (or the TEX sandbox page); TEX never sees them.
 import type { NavigateFunction } from "react-router-dom"
 import type { PaymentStart } from "../types"
+import { routeFor } from "../lib/mount"
 import { disarmAbandon } from "../lib/track"
-
-const BASE = "/book"
 
 function inFrame() {
   try {
@@ -14,20 +13,19 @@ function inFrame() {
   }
 }
 
-/** In-app path (without the /book basename) for a URL on this booking engine, else null. */
+/** In-app router path (without the basename) for a URL on this booking engine, else null
+ * (see routeFor in lib/mount: /book/… on the platform, the site's own pages on its host). */
 export function appPath(url: string): string | null {
-  let u: URL
-  try {
-    u = new URL(url, window.location.origin)
-  } catch {
-    return null
-  }
-  if (!/^https?:$/.test(u.protocol)) return null
-  // Any /book/… URL (this host, the TEX host behind a dev proxy, or a verified custom
-  // domain) continues inside this app on the current origin, where the tab's
-  // session state lives. Only the path is used, so this is never an open redirect.
-  if (u.pathname === BASE || u.pathname.startsWith(`${BASE}/`)) return (u.pathname.slice(BASE.length) || "/") + u.search + u.hash
-  return null
+  return routeFor(url)
+}
+
+/** Continue on a page of this engine (absolute path or URL) with a payment result query
+ * appended: inside the app when it is one of ours, else a full page load. */
+export function resumeAt(target: string, query: string, navigate: NavigateFunction) {
+  const url = `${target}${target.includes("?") ? "&" : "?"}${query}`
+  const inApp = appPath(url)
+  if (inApp) navigate(inApp, { replace: true })
+  else window.location.assign(url)
 }
 
 export type PaymentOutcome = "internal" | "external" | "blocked" | "none"

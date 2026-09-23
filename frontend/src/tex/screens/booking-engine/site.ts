@@ -2,11 +2,17 @@
 // (tex_booking_site.py) re-validates everything; these rules mirror it so users
 // see problems before saving.
 
+/** A custom booking host (ADR-035). `verified`, `verified_at`, `last_checked_at` and
+ * `check_failures` are written only by the server's DNS check: read-only here, and the
+ * server ignores them on save. */
 export interface SiteDomain {
   domain: string
   is_primary: number
   verified: number
   verification_token?: string | null
+  verified_at?: string | null
+  last_checked_at?: string | null
+  check_failures?: number | null
 }
 
 export interface Site {
@@ -131,7 +137,10 @@ export const lines = (v: string | null | undefined) =>
 
 export const HEX = /^#[0-9a-fA-F]{6}$/
 export const ORIGIN = /^https:\/\/[a-z0-9.-]+(:\d+)?$/
-export const DOMAIN = /^[a-z0-9.-]+\.[a-z]{2,}(\/[a-z0-9._~-]+)*$/
+/** A host name (book.hotel.com), never a path: the same rule as HOST in kamra/tex/services/sites.py. */
+export const HOST = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
+/** A verified host that misses its TXT record on this many daily checks in a row is un-verified (sites.UNVERIFY_AFTER). */
+export const UNVERIFY_AFTER = 3
 
 export function normaliseSlug(s: string) {
   return s
@@ -144,12 +153,23 @@ export function normaliseOrigin(s: string) {
   return s.trim().toLowerCase().replace(/\/+$/, "")
 }
 
+/** Like the server's normalize_host: lower case, without scheme, trailing slashes or dot. */
 export function normaliseDomain(s: string) {
   return s
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/\/+$/, "")
+    .replace(/\.+$/, "")
+}
+
+/** Why a custom domain is refused (an i18n key), or null for a valid host name. A path
+ * (hotel.com/book) gets its own message: TEX cannot serve a path on the hotel's own website. */
+export function domainError(raw: string): string | null {
+  const d = normaliseDomain(raw)
+  if (HOST.test(d)) return null
+  if (/[/?#]/.test(d)) return "be.err.domain_path"
+  return "be.err.domain"
 }
 
 /** Images: uploaded files, app assets or https URLs only (no data:, javascript: …). */
@@ -187,7 +207,9 @@ export function validateSite(s: Site): Errors {
   if (s.gtm_container_id && !/^GTM-[A-Z0-9]{4,10}$/.test(s.gtm_container_id)) e.gtm_container_id = "be.err.gtm"
   if (s.meta_pixel_id && !/^\d{6,20}$/.test(s.meta_pixel_id)) e.meta_pixel_id = "be.err.pixel"
   if (lines(s.allowed_embed_origins).some((o) => !ORIGIN.test(normaliseOrigin(o)))) e.allowed_embed_origins = "be.err.origin"
-  if (s.domains.some((d) => !DOMAIN.test(normaliseDomain(d.domain)))) e.domains = "be.err.domain"
+  const badDomain = s.domains.map((d) => domainError(d.domain)).find(Boolean)
+  if (badDomain) e.domains = badDomain
+  else if (new Set(s.domains.map((d) => normaliseDomain(d.domain))).size < s.domains.length) e.domains = "be.domains.duplicate"
   else if (s.domains.filter((d) => d.is_primary).length > 1) e.domains = "be.err.one_primary"
   if (s.custom_texts) {
     try {

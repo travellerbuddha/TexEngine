@@ -4,7 +4,8 @@ import { useNavigate, useParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { forgetPayment, returnPathFor, storedPayment } from "../lib/storage"
-import { appPath } from "../flow/payment"
+import { resumeAt } from "../flow/payment"
+import { HOME_PATH } from "../lib/mount"
 import { Button } from "../ui/controls"
 import { Alert, EmptyState } from "../ui/feedback"
 import { PlainShell } from "./SiteError"
@@ -42,13 +43,7 @@ export default function MockPayPage() {
       const status = (r.status || "").toLowerCase()
       const query = `payment=${encodeURIComponent(r.transaction)}&status=${encodeURIComponent(status)}`
       // the page this tab started the payment from wins over the server's default return URL
-      const own = returnPathFor(txn)
-      if (own) return navigate(`${own}${own.includes("?") ? "&" : "?"}${query}`, { replace: true })
-      const target = r.return_url || "/book"
-      const url = `${target}${target.includes("?") ? "&" : "?"}${query}`
-      const inApp = appPath(url)
-      if (inApp) navigate(inApp, { replace: true })
-      else window.location.assign(url)
+      resumeAt(returnPathFor(txn) ?? (r.return_url || HOME_PATH), query, navigate)
     } catch (e) {
       setBusy(null)
       setError(e instanceof ApiError && e.message ? e.message : t("errors.generic"))

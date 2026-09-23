@@ -28,11 +28,15 @@ function toDraft(d: Site & Record<string, unknown>): Site {
   for (const k of Object.keys(base)) if (k in d) out[k] = d[k] ?? (base as unknown as Record<string, unknown>)[k]
   out.name = d.name
   out.modified = d.modified
+  // verified / verified_at / last_checked_at / check_failures are shown, never sent back
   out.domains = ((d.domains as Site["domains"]) ?? []).map((x) => ({
     domain: x.domain,
     is_primary: x.is_primary ? 1 : 0,
     verified: x.verified ? 1 : 0,
     verification_token: x.verification_token ?? null,
+    verified_at: x.verified_at ?? null,
+    last_checked_at: x.last_checked_at ?? null,
+    check_failures: Number(x.check_failures ?? 0) || 0,
   }))
   for (const k of ["property", "hotel_group", "default_currency", "currencies", "default_market", "sales_channel", "logo", "hero_image"]) out[k] = d[k] ?? null
   return out as unknown as Site
@@ -99,7 +103,8 @@ export default function SiteEditor({ isNew = false }: { isNew?: boolean }) {
       ...draft,
       site_slug: normaliseSlug(draft.site_slug),
       allowed_embed_origins: lines(draft.allowed_embed_origins).map(normaliseOrigin).join("\n"),
-      domains: draft.domains.map((d) => ({ ...d, domain: normaliseDomain(d.domain) })),
+      // only what the admin edits: the DNS check alone writes a domain's verification state (ADR-035)
+      domains: draft.domains.map((d) => ({ domain: normaliseDomain(d.domain), is_primary: d.is_primary, verification_token: d.verification_token ?? null })),
     }
     delete data.modified
     if (isNew) delete data.name

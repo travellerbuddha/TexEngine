@@ -8,6 +8,7 @@ import { useI18n } from "../i18n"
 import { analyticsEvent } from "../lib/analytics"
 import { ApiError, pub, type ErrorKind } from "../lib/api"
 import { apiRooms, applyCriteria, isComplete, parseCriteria, searchKey, type Criteria } from "../lib/criteria"
+import { siteUrl } from "../lib/mount"
 import { getJSON, manageToken, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
 import { armAbandon, disarmAbandon } from "../lib/track"
 import { useSite } from "../site/SiteContext"
@@ -558,7 +559,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         language: lang,
         session_id: sessionId(),
         // the server fills in {booking} and accepts only its own host or the site's verified domains
-        return_url: `${window.location.origin}/book/${site.slug}/confirmation/{booking}`,
+        return_url: siteUrl(site.slug, "confirmation/{booking}"),
       })
       // A retried request (same session + key) answers like the first one, with a short-lived
       // resume token instead of the manage token: never replace a manage token we already hold.

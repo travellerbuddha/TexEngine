@@ -34,6 +34,8 @@ export interface GuestSearchOptions {
   market?: string
   /** campaign deep link: the guest's country, from which the server picks the market (?country=) */
   country?: string
+  /** entry page instead of the platform's /book/<slug> (e.g. "/?lang=en" on a site's own host, G-21) */
+  path?: string
 }
 
 /** Booking engine URL of a site, with optional market / country deep-link parameters. */
@@ -138,7 +140,7 @@ export async function guestSearch(page: Page, opts: GuestSearchOptions): Promise
   const slug = opts.slug ?? "aurora"
   const rooms = opts.rooms?.length ? opts.rooms : [{ adults: 2 }]
   await forceEnglish(page)
-  await page.goto(bookingPath(slug, { market: opts.market, country: opts.country }))
+  await page.goto(opts.path ?? bookingPath(slug, { market: opts.market, country: opts.country }))
   const form = page.getByRole("search", { name: "Search for a stay" })
   await expect(form).toBeVisible()
 
@@ -394,6 +396,19 @@ export async function payWithSandbox(page: Page, outcome: "success" | "fail"): P
   return { ...(await completeSandbox(page, outcome)), dueNow }
 }
 
+/** On the payment step: pay at the hotel, accept the conditions and book (nothing is
+ * charged now, so the engine goes straight to the confirmation page). */
+export async function bookPayAtHotel(page: Page) {
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Payment")
+  const atHotel = page.getByRole("radio", { name: /^Pay at the hotel/ }).first()
+  await expect(atHotel, "pay at the hotel offered").toBeVisible()
+  await atHotel.check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  const book = visible(page.getByRole("button", { name: "Book now", exact: true }))
+  await expect(book).toBeEnabled()
+  await book.click()
+}
+
 /** The sandbox provider page: simulate the outcome and return to the booking engine. */
 export async function completeSandbox(page: Page, outcome: "success" | "fail"): Promise<Omit<SandboxPayment, "dueNow">> {
   await page.waitForURL(/\/book\/pay\/mock\//, { timeout: 30_000 })
@@ -406,9 +421,10 @@ export async function completeSandbox(page: Page, outcome: "success" | "fail"): 
   return { amount, transaction }
 }
 
-/** Read the confirmation page once the payment outcome is known. */
-export async function readConfirmation(page: Page): Promise<Confirmation> {
-  await page.waitForURL(/\/book\/[^/]+\/confirmation\/[^/?#]+/, { timeout: 30_000 })
+/** Read the confirmation page once the payment outcome is known. `url` is where the page
+ * is expected (default: the platform's /book/<slug>/confirmation/<booking>). */
+export async function readConfirmation(page: Page, opts: { url?: RegExp } = {}): Promise<Confirmation> {
+  await page.waitForURL(opts.url ?? /\/book\/[^/]+\/confirmation\/[^/?#]+/, { timeout: 30_000 })
   const h1 = page.getByRole("heading", { level: 1 })
   await expect(h1).toBeVisible({ timeout: 30_000 })
   // the page re-checks a payment the provider has not reported yet

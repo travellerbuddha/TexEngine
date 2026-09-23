@@ -6,6 +6,7 @@ import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
 import { rememberPayment, rememberReturn } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
+import { payPath } from "../lib/mount"
 import type { PaymentLinkInfo, PaymentStart } from "../types"
 import { Button } from "../ui/controls"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -61,7 +62,7 @@ export default function PayLinkPage() {
       const p = await pub<PaymentStart>("pay_link", { token, provider_account: account ?? undefined })
       rememberPayment(p, { amount: isZero(link.paid) ? link.amount : undefined, currency: link.currency, hotel: link.hotel ?? undefined })
       // the gateway returns to /pay/return (the token is never sent to it); come back here
-      rememberReturn(p.transaction, `/pay/${token}`)
+      rememberReturn(p.transaction, payPath(encodeURIComponent(token)))
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {

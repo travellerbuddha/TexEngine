@@ -119,16 +119,17 @@ export function rememberPayment(p: PaymentStart, extra: Omit<StoredPayment, "tra
   }
 }
 
-/** In-app page (without /book) the guest should come back to after this payment.
- * Used when the server falls back to its default return URL (e.g. a dev host or a
- * domain it does not know yet). */
+/** Page the guest should come back to after this payment: an absolute path on this
+ * origin (lib/mount sitePath/payPath, so it is right whether the engine runs under /book
+ * or pinned on a hotel's own host). Used when the server falls back to its default return
+ * URL (e.g. a dev host or a domain it does not know yet). */
 export function rememberReturn(txn: string, path: string) {
-  setItem(`tex.return.${txn}`, path)
+  setItem(`tex.back.${txn}`, path)
 }
 
 export function returnPathFor(txn: string) {
-  const p = getItem(`tex.return.${txn}`)
-  return p && p.startsWith("/") && !p.startsWith("//") ? p : null
+  const p = getItem(`tex.back.${txn}`)
+  return p && p.startsWith("/") && !p.startsWith("//") && !p.startsWith("/\\") ? p : null
 }
 
 export function storedPayment(txn: string) {
