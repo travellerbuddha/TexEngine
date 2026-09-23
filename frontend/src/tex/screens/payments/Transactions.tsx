@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Link2, Plus, RefreshCw } from "lucide-react"
 import { tex, useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
-import { dateTime, isoDay } from "../../lib/format"
+import { dateTime } from "../../lib/format"
 import { useTexT } from "../../i18n"
 import { Badge, Button, Card, DataTable, EmptyState, ErrorState, Field, Input, Money, PageHeader, Select, Toolbar, useToast } from "../../ui"
 import { MethodLabel, PaymentsNav, TxnStatusBadge } from "./components/common"
@@ -40,9 +40,7 @@ export default function Transactions() {
     setParams(next, { replace: true })
   }
 
-  // the server filters on a closed range: fill the open end
-  const rangeFrom = from || (to ? "2000-01-01" : "")
-  const rangeTo = to || (from ? isoDay(new Date()) : "")
+  // an open end stays open: the server filters on whichever bound is set (never the browser's "today")
   const badRange = Boolean(from && to && from > to)
   const q = useTexQuery<Txn[]>(
     "payments",
@@ -52,12 +50,12 @@ export default function Transactions() {
       status: status || undefined,
       method: method || undefined,
       booking: dBooking || undefined,
-      date_from: rangeFrom || undefined,
-      date_to: rangeTo || undefined,
+      date_from: from || undefined,
+      date_to: to || undefined,
       start,
       limit: PAGE,
     },
-    [property, status, method, dBooking, rangeFrom, rangeTo, start],
+    [property, status, method, dBooking, from, to, start],
     Boolean(property) && can("payment.view") && !badRange,
   )
   const filtered = Boolean(status || method || from || to || dBooking)
