@@ -116,7 +116,7 @@ async function changeThisDay(page: Page, cell: Locator) {
 /** Review, check the listed changes, apply to one cell and wait for the toast. */
 async function reviewAndApply(page: Page, dialog: Locator, lines: string[]) {
   await dialog.getByRole("button", { name: "Review changes" }).click()
-  await expect(dialog.getByText("1 day(s) × 1 extra(s) = 1 cells will be updated.")).toBeVisible()
+  await expect(dialog.getByText("Days: 1 × extras: 1 = cells to update: 1.")).toBeVisible()
   await expect(dd(dialog, "Extras")).toHaveText(EXTRA.name)
   await expect(dialog.getByRole("listitem")).toHaveText(lines)
   await dialog.getByRole("button", { name: "Apply to 1 cell" }).click()
