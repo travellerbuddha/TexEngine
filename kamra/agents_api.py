@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import frappe
 
-from kamra.authz import require_roles
+from kamra.authz import property_scope, require_roles
 
 
 @frappe.whitelist()
@@ -21,6 +21,10 @@ def activity_feed(property: str | None = None, actor_kind: str | None = None,
 	if property:
 		conds.append("property = %(property)s")
 		params["property"] = property
+	elif (hotels := property_scope()) is not None:
+		# no hotel chosen: only the hotels in the caller's TEX scope
+		conds.append("property IN %(hotels)s")
+		params["hotels"] = tuple(hotels)
 	if actor_kind == "agent":
 		conds.append("COALESCE(agent_name, '') != ''")
 	elif actor_kind == "human":

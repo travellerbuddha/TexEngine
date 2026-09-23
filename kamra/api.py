@@ -8,7 +8,7 @@ import json
 
 import frappe
 from frappe import _
-from kamra.authz import require_it_admin, require_roles
+from kamra.authz import assert_record, property_scope, require_it_admin, require_roles
 from frappe.utils import add_days, get_datetime, now_datetime, nowdate
 
 
@@ -1760,6 +1760,8 @@ def gstr1_rows(from_date: str, to_date: str, property: str | None = None):
 	}
 	if property:
 		filters["property"] = property
+	elif (hotels := property_scope()) is not None:
+		filters["property"] = ("in", hotels)
 	folios = frappe.get_all(
 		"Folio",
 		filters=filters,
@@ -1773,12 +1775,14 @@ def gstr1_rows(from_date: str, to_date: str, property: str | None = None):
 @frappe.whitelist()
 @require_roles("Front Desk", "Kamra Agent")
 def guests_with_stats(search: str | None = None):
-	"""Guest list with stay stats - the CRM index."""
-	where = ""
-	params: dict = {}
+	"""Guest list with stay stats - the CRM index. Only the guests and stays of the
+	caller's hotels (TEX tenancy)."""
+	conds, params = _guest_scope_sql()
 	if search:
-		where = "WHERE g.full_name LIKE %(q)s OR g.phone LIKE %(q)s"
+		conds.append("(g.full_name LIKE %(q)s OR g.phone LIKE %(q)s)")
 		params["q"] = f"%{search}%"
+	where = ("WHERE " + " AND ".join(conds)) if conds else ""
+	stays_in = _stays_in_scope_sql("r")
 	return frappe.db.sql(  # nosemgrep: frappe-sql-format-injection -- values are parameterized; interpolated text is a constant or whitelisted identifier, not user input
 		f"""
 		SELECT
@@ -1789,7 +1793,7 @@ def guests_with_stats(search: str | None = None):
 			COALESCE(SUM(CASE WHEN r.status != 'Cancelled' THEN r.amount_after_tax ELSE 0 END), 0) AS lifetime_value,
 			MAX(r.check_in_date) AS last_stay
 		FROM `tabGuest` g
-		LEFT JOIN `tabReservation` r ON r.guest = g.name
+		LEFT JOIN `tabReservation` r ON r.guest = g.name{stays_in}
 		{where}
 		GROUP BY g.name
 		ORDER BY lifetime_value DESC, g.modified DESC
@@ -1807,20 +1811,39 @@ def guest_search(q: str):
 	q = (q or "").strip()
 	if len(q) < 2:
 		return []
-	return frappe.db.sql(
-		"""
+	conds, params = _guest_scope_sql()
+	conds.append("(g.full_name LIKE %(q)s OR g.phone LIKE %(q)s)")
+	params["q"] = f"%{q}%"
+	return frappe.db.sql(  # nosemgrep: frappe-sql-format-injection -- values are parameterized; interpolated text is built from escaped hotel names by the tenancy helpers
+		f"""
 		SELECT g.name, g.full_name, g.phone, g.email, g.vip, g.blacklisted,
 		       COUNT(r.name) AS stays, MAX(r.check_in_date) AS last_stay
 		FROM `tabGuest` g
 		LEFT JOIN `tabReservation` r
-		       ON r.guest = g.name AND r.status IN ('Checked In', 'Checked Out')
-		WHERE g.full_name LIKE %(q)s OR g.phone LIKE %(q)s
+		       ON r.guest = g.name AND r.status IN ('Checked In', 'Checked Out'){_stays_in_scope_sql("r")}
+		WHERE {" AND ".join(conds)}
 		GROUP BY g.name
 		ORDER BY stays DESC, g.modified DESC
 		LIMIT 8
 		""",
-		{"q": f"%{q}%"}, as_dict=True,
+		params, as_dict=True,
 	)
+
+
+def _guest_scope_sql() -> tuple[list[str], dict]:
+	"""WHERE conditions (on alias g) limiting Guest rows to the caller's tenancy."""
+	from kamra.tex.security.perm import query_conditions
+	cond = query_conditions(doctype="Guest")
+	return ([cond.replace("`tabGuest`", "g")] if cond else []), {}
+
+
+def _stays_in_scope_sql(alias: str) -> str:
+	"""JOIN condition keeping only the stays at the caller's hotels (stats never
+	count another tenant's bookings)."""
+	hotels = property_scope()
+	if hotels is None:
+		return ""
+	return f" AND {alias}.property IN ({', '.join(frappe.db.escape(h) for h in hotels)})"
 
 
 _GUEST_LINKS = [  # every doctype that points at a Guest
@@ -1927,9 +1950,12 @@ def guest_journey(guest: str):
 	before speaking to a returning guest."""
 	doc = frappe.get_doc("Guest", guest)
 
+	stay_filters = {"guest": guest}
+	if (hotels := property_scope()) is not None:
+		stay_filters["property"] = ("in", hotels)
 	reservations = frappe.get_all(
 		"Reservation",
-		filters={"guest": guest},
+		filters=stay_filters,
 		fields=[
 			"name", "status", "source", "channel", "room", "room_type",
 			"check_in_date", "check_out_date", "nights", "adults", "children",
@@ -4160,9 +4186,18 @@ def linked_records(doctype: str, name: str):
 	out = {"guest": None, "guest_name": None, "reservations": [],
 	       "folios": [], "company": None, "group_booking": None,
 	       "group_name": None, "event": None, "event_type": None}
+	if doctype not in ("Reservation", "Venue Booking", "Group Booking", "Guest"):
+		frappe.throw(_("Linked records are available for reservations, events, groups and guests."))
+	assert_record(doctype, name)
+	hotels = property_scope()
+
+	def in_scope(filters):
+		if hotels is not None:
+			filters["property"] = ("in", hotels)
+		return filters
 
 	def folios_for(filters):
-		return frappe.get_all("Folio", filters=filters,
+		return frappe.get_all("Folio", filters=in_scope(filters),
 			fields=["name", "folio_type", "status", "balance",
 			        "invoice_number"], order_by="creation asc")
 
@@ -4202,7 +4237,7 @@ def linked_records(doctype: str, name: str):
 		out["guest"] = name
 		out["guest_name"] = frappe.db.get_value("Guest", name, "full_name")
 		out["reservations"] = frappe.get_all("Reservation",
-			filters={"guest": name},
+			filters=in_scope({"guest": name}),
 			fields=["name", "status", "check_in_date"],
 			order_by="check_in_date desc", limit=5)
 		out["folios"] = folios_for({"guest": name})[-5:]

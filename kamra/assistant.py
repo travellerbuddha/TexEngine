@@ -413,10 +413,16 @@ def _settings(property: str):
 
 @frappe.whitelist()
 def assistant_status(property: str):
+	from kamra.authz import ADMIN
+	from kamra.tex.security import scope
+	# any desk user of the hotel may ask whether the assistant is on; only there
+	if not scope.is_platform_admin() and property not in scope.permitted_properties():
+		frappe.throw(frappe._("You don't have access to this hotel."), frappe.PermissionError)
 	s = _settings(property)
 	key = s.get_password("api_key", raise_exception=False) if s else None
-	# Never return the key - only a masked tail so admins can confirm one is set.
-	key_hint = ("••••" + key[-4:]) if key and len(key) >= 4 else None
+	# Never return the key - only a masked tail, and only to admins confirming one is set.
+	is_admin = bool(set(ADMIN) & set(frappe.get_roles()))
+	key_hint = ("••••" + key[-4:]) if is_admin and key and len(key) >= 4 else None
 	return {
 		"enabled": bool(s and s.enabled and key),
 		"model": (s.model if s else None) or "gpt-4o-mini",

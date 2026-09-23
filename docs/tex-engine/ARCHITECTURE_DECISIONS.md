@@ -247,3 +247,22 @@ Rate-plan and policy dicts are shared with cached contract terms, so the localis
 copies. Translations are cached per hotel in Redis and invalidated on every change.
 **Consequences.** Staff screens keep the hotel's own texts; guest e-mails do not name rooms.
 Promotion names (group-level) are not yet translatable.
+
+## ADR-027 Legacy endpoints declare the record behind every id argument
+**Context.** `require_roles` scoped legacy Kamra endpoints only through the arguments
+`property`, `reservation`, `folio`, `room`, `room_type` and `group_booking` (ADR-011/019).
+Endpoints that take a POS order, a banquet function, a guest, an action log or a generic
+`name` read and changed other tenants' records, and some list endpoints returned every
+hotel when no hotel was given (G-02).
+**Decision.** `kamra.authz.RECORD_ARGS` declares, per legacy module, the DocType behind each
+record argument; `ENDPOINT_RECORD_ARGS` covers endpoints that reuse a name (`name`,
+`source`, `user`). `require_roles` resolves each record's `property` and refuses a hotel
+outside the caller's scope. Guests are checked with the TEX guest visibility rule; merging
+and erasing a guest (`GUEST_OWNED`) also require every stay of the guest to be in scope.
+Legacy list endpoints restrict to the caller's hotels (`authz.property_scope()`), and guest
+lists and stats use the Guest query condition. `linked_records` checks its record with
+`authz.assert_record`. A static test (`test_every_legacy_record_argument_is_scoped`)
+fails when a guarded legacy endpoint takes a record argument without a declaration.
+**Consequences.** Records without a hotel (platform-wide) and unknown names are left to the
+endpoint. A new legacy endpoint with a new record-argument name needs a declaration, or it
+must check the record in its body and be listed in the test's exceptions.

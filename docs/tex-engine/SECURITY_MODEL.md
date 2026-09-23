@@ -92,12 +92,13 @@ the guest's manage token.
 ## 7. Known gaps (tracked)
 
 The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). Security-relevant open items
-are G-01, G-02 and G-03 (Critical), and G-10 to G-16 (High), plus G-26 and G-83. The notes below
-predate that audit.
-- Legacy PMS endpoints whose hotel is only reachable through module-specific arguments
-  (`order`, `outlet`, `task`, `venue`, generic `name`) are not yet resolved by the scope guard.
-  These modules (POS, laundry, housekeeping, banquet) are hidden from TEX navigation
-  (ADR-014, DECOUPLE LATER); the Frappe permission hooks do not cover their DocTypes yet.
+are G-03 (Critical), and G-10 to G-16 (High), plus G-26 and G-83; G-01 and G-02 are fixed. The
+notes below predate that audit.
+- Legacy PMS endpoints resolve every record argument (`order`, `outlet`, `task`, `function`,
+  `guest`, generic `name` ...) to its hotel through `kamra.authz.RECORD_ARGS` (ADR-027). On Desk
+  and REST, legacy DocTypes with a Property link (POS, laundry, housekeeping, banquet) are
+  filtered by the User Permissions that grants mirror (`security/grants.py`; probed 2026-09-23:
+  a hotel GM reads its own POS orders and action logs, not another hotel's).
 - iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
   production-verified**; enabling a Production account requires the provider's sandbox
   certification with real merchant credentials.

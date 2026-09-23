@@ -251,3 +251,116 @@ class TestPriceLock(TexTestCase):
 		out = booking.cancel_reservation(self.res, reason="guest request")
 		self.assertEqual(frappe.db.get_value("Reservation", self.res, "status"), "Cancelled")
 		self.assertIn("penalty", out)
+
+
+# argument names that always name a record in the legacy Kamra modules (G-02)
+LEGACY_RECORD_ARGS = {"order", "task", "ticket", "session", "account", "function", "outlet", "menu", "menu_item",
+                      "ingredient", "venue", "connection", "guest", "service_item", "from_folio", "to_folio",
+                      "folios", "new_room", "name", "group"}
+# checked inside the endpoint instead (linked_records resolves `doctype` + `name` itself)
+LEGACY_CHECKED_IN_BODY = {("kamra.api.linked_records", "name")}
+LEGACY_MODULES = ("kamra.api", "kamra.agents_api", "kamra.assistant", "kamra.banquet", "kamra.banquet_ops",
+                  "kamra.cashier", "kamra.channel_manager", "kamra.inventory", "kamra.laundry", "kamra.ledger",
+                  "kamra.marketplace", "kamra.menu_import", "kamra.pos", "kamra.whatsapp", "kamra.crs",
+                  "kamra.dashboards", "kamra.accounting", "kamra.allocation", "kamra.reports")
+
+
+class TestLegacyTenancy(TexTestCase):
+	"""G-02: legacy Kamra endpoints resolve every record argument (guest, POS order, action
+	log, hurdle rate ...) to its hotel, and their lists only show the caller's hotels."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		other_hotel_with_mock()
+		self.gm = fx.ensure_user("sec-gm@example.com", ["Hotel Admin"])
+		fx.ensure("TEX Access Grant", {"user": self.gm, "property": OTHER},
+		          {"user": self.gm, "scope_level": "Hotel", "property": OTHER, "permission_profile": "Hotel Admin"})
+		b = guest_books(session="sec-g02")  # this guest has stayed only at the test resort
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		self.reservation = b["rooms"][0]["reservation"]
+		self.guest = frappe.db.get_value("Reservation", self.reservation, "guest")
+		self.guest_name = frappe.db.get_value("Guest", self.guest, "full_name")
+		self.twin = frappe.get_doc({"doctype": "Guest", "first_name": "Sec", "last_name": "Twin",
+		                            "full_name": "Sec Twin"}).insert(ignore_permissions=True).name
+		outlet = fx.ensure("POS Outlet", {"property": fx.PROPERTY, "outlet_name": "Sec Bar"},
+		                   {"property": fx.PROPERTY, "outlet_name": "Sec Bar"})
+		self.order = frappe.get_doc({"doctype": "POS Order", "property": fx.PROPERTY,
+		                             "outlet": outlet}).insert(ignore_permissions=True).name
+		self.log = frappe.get_doc({"doctype": "Agent Action Log", "property": fx.PROPERTY,
+		                           "action_type": "sec_probe"}).insert(ignore_permissions=True).name
+		self.own_log = frappe.get_doc({"doctype": "Agent Action Log", "property": OTHER,
+		                               "action_type": "sec_probe"}).insert(ignore_permissions=True).name
+		self.hurdle = frappe.get_doc({"doctype": "Hurdle Rate", "property": fx.PROPERTY,
+		                              "occupancy_from": 80}).insert(ignore_permissions=True).name
+		scope.clear_cache()
+		frappe.set_user(self.gm)  # nosemgrep: frappe-setuser -- the other hotel's GM probes
+
+	def test_another_hotels_guest_is_not_listed_or_opened(self):
+		from kamra import api
+
+		self.assertNotIn(self.guest, [g.name for g in api.guests_with_stats()])
+		self.assertEqual(api.guests_with_stats(search=self.guest_name), [])
+		self.assertEqual(api.guest_search(q=self.guest_name), [])
+		for call in (lambda: api.guest_journey(guest=self.guest),
+		             lambda: api.linked_records(doctype="Guest", name=self.guest),
+		             lambda: api.linked_records(doctype="Reservation", name=self.reservation)):
+			with self.assertRaises(frappe.PermissionError):
+				call()
+		with self.assertRaises(frappe.ValidationError):
+			api.linked_records(doctype="User", name="Administrator")
+
+	def test_another_hotels_guest_cannot_be_erased_or_merged(self):
+		from kamra import api
+
+		with self.assertRaises(frappe.PermissionError):
+			api.anonymize_guest(guest=self.guest)
+		with self.assertRaises(frappe.PermissionError):
+			api.merge_guests(source=self.guest, target=self.twin)
+		with self.assertRaises(frappe.PermissionError):
+			api.merge_guests(source=self.twin, target=self.guest)
+		self.assertEqual(frappe.db.get_value("Guest", self.guest, "full_name"), self.guest_name)
+		self.assertTrue(frappe.db.exists("Guest", self.twin))
+
+	def test_another_hotels_records_are_refused_by_id(self):
+		from kamra import agents_api, api, assistant, pos
+
+		for call in (lambda: pos.order_detail(order=self.order),
+		             lambda: pos.cancel_order(order=self.order, reason="probe"),
+		             lambda: api.delete_hurdle_rate(name=self.hurdle),
+		             lambda: agents_api.activity_detail(name=self.log),
+		             lambda: assistant.assistant_status(property=fx.PROPERTY)):
+			with self.assertRaises(frappe.PermissionError):
+				call()
+		self.assertTrue(frappe.db.exists("Hurdle Rate", self.hurdle))
+		self.assertNotEqual(frappe.db.get_value("POS Order", self.order, "status"), "Cancelled")
+		# the GM's own hotel still works, and the feed shows only it
+		self.assertEqual(agents_api.activity_detail(name=self.own_log)["property"], OTHER)
+		feed = {r.name for r in agents_api.activity_feed(limit=200)}
+		self.assertIn(self.own_log, feed)
+		self.assertNotIn(self.log, feed)
+		self.assertIn("enabled", assistant.assistant_status(property=OTHER))
+
+	def test_every_legacy_record_argument_is_scoped(self):
+		import importlib
+		import inspect
+
+		from kamra.authz import SCOPED_ARGS, record_args
+
+		scoped = {a for a, _dt in SCOPED_ARGS}
+		missing, checked = [], 0
+		for module in LEGACY_MODULES:
+			mod = importlib.import_module(module)
+			for fname, fn in vars(mod).items():
+				if not callable(fn) or getattr(fn, "__module__", None) != module or fn not in frappe.whitelisted:
+					continue
+				if fn in frappe.guest_methods or not hasattr(fn, "_kamra_roles"):
+					continue
+				checked += 1
+				records = record_args(fn)
+				for arg in inspect.signature(fn).parameters:
+					if arg in LEGACY_RECORD_ARGS and arg not in scoped and arg not in records \
+							and (f"{module}.{fname}", arg) not in LEGACY_CHECKED_IN_BODY:
+						missing.append(f"{module}.{fname}({arg})")
+		self.assertGreater(checked, 250)  # the guarded legacy endpoints were really inspected
+		self.assertEqual(missing, [], "record arguments without a hotel check")

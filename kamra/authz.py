@@ -6,6 +6,7 @@ import inspect
 from functools import wraps
 
 import frappe
+from frappe import _
 from frappe.utils import now_datetime, add_to_date
 
 ADMIN = ("System Manager", "Administrator", "Hotel Admin")
@@ -37,27 +38,142 @@ def require_it_admin(fn):
 SCOPED_ARGS = (("property", None), ("reservation", "Reservation"), ("folio", "Folio"),
                ("room", "Room"), ("room_type", "Room Type"), ("group_booking", "Group Booking"))
 
+# Record arguments beyond SCOPED_ARGS (G-02). Legacy modules reuse argument names for
+# different records (`order` is a POS order in pos.py and a laundry order in
+# laundry.py), so they are declared per module, and per endpoint where one module
+# reuses a name. The record's `property` must be in the caller's scope.
+GUEST = "Guest"  # visible to the caller (kamra.tex.security.perm)
+GUEST_OWNED = "Guest (owned)"  # destructive: every stay of the guest in the caller's scope
+USER = "User"  # a colleague: shares a hotel with the caller, never a platform admin
 
-def assert_scope(sig, args, kwargs):
-	"""Refuse a call whose property / reservation / folio / room / room type / group
-	booking argument belongs to a hotel outside the user's TEX scope."""
+RECORD_ARGS = {
+	"kamra.api": {"task": "Housekeeping Task", "ticket": "Service Ticket", "from_folio": "Folio",
+	              "to_folio": "Folio", "new_room": "Room", "rate_plan": "Rate Plan",
+	              "meal_plan": "Meal Plan", "venue": "Venue", "guest": GUEST},
+	"kamra.agents_api": {"name": "Agent Action Log"},
+	"kamra.assistant": {"name": "Copilot Conversation"},
+	"kamra.banquet": {"function": "Venue Booking", "venue": "Venue", "menu": "Banquet Menu",
+	                  "service_item": "Banquet Service Item", "outlet": "POS Outlet", "guest": GUEST},
+	"kamra.banquet_ops": {"function": "Venue Booking", "task": "Banquet Function Task"},
+	"kamra.cashier": {"session": "Cashier Session"},
+	"kamra.channel_manager": {"connection": "Channel Manager Connection"},
+	"kamra.inventory": {"name": "Ingredient", "ingredient": "Ingredient", "outlet": "POS Outlet",
+	                    "menu_item": "Menu Item"},
+	"kamra.laundry": {"name": "Laundry Rate", "order": "Laundry Order"},
+	"kamra.ledger": {"account": "City Ledger Account", "folios": "Folio", "group": "Group Booking",
+	                 "guest": GUEST},
+	"kamra.marketplace": {"connection": "Channel Provider Connection"},
+	"kamra.menu_import": {"outlet": "POS Outlet"},
+	"kamra.pos": {"order": "POS Order", "outlet": "POS Outlet"},
+}
+ENDPOINT_RECORD_ARGS = {
+	"kamra.api.save_hurdle_rate": {"name": "Hurdle Rate"},
+	"kamra.api.delete_hurdle_rate": {"name": "Hurdle Rate"},
+	"kamra.api.release_room_block": {"name": "Room Block"},
+	"kamra.api.merge_guests": {"source": GUEST_OWNED, "target": GUEST_OWNED},
+	"kamra.api.anonymize_guest": {"guest": GUEST_OWNED},
+	"kamra.api.hk_assign_task": {"user": USER},
+	"kamra.api.reset_cashier_pin": {"user": USER},
+	"kamra.banquet.save_banquet_menu": {"name": "Banquet Menu"},
+	"kamra.banquet.delete_banquet_menu": {"name": "Banquet Menu"},
+	"kamra.banquet.save_service_item": {"name": "Banquet Service Item"},
+	"kamra.banquet.delete_service_item": {"name": "Banquet Service Item"},
+	"kamra.banquet.save_dish": {"name": "Banquet Dish"},
+	"kamra.banquet.delete_dish": {"name": "Banquet Dish"},
+}
+
+
+def record_args(fn) -> dict:
+	"""The record arguments an endpoint takes, with the DocType behind each."""
+	module = getattr(fn, "__module__", "")
+	return {**RECORD_ARGS.get(module, {}),
+	        **ENDPOINT_RECORD_ARGS.get(f"{module}.{getattr(fn, '__name__', '')}", {})}
+
+
+def _values(value) -> list[str]:
+	"""An argument's record names: one name, or a JSON / list of names (batch endpoints)."""
+	if isinstance(value, str) and value.lstrip().startswith("["):
+		try:
+			value = frappe.parse_json(value)
+		except Exception:
+			return [value]
+	if isinstance(value, (list, tuple)):
+		return [v for v in value if isinstance(v, str) and v]
+	return [value] if isinstance(value, str) and value else []
+
+
+def _guest_allowed(name: str, permitted: set[str], owned: bool) -> bool:
+	guest = frappe.db.get_value("Guest", name, ["name", "tex_enterprise"], as_dict=True)
+	if not guest:
+		return True  # the endpoint reports the missing profile
+	from kamra.tex.security.perm import _guest_visible
+	if not _guest_visible(guest, frappe.session.user):
+		return False
+	if not owned:
+		return True
+	stays = set(frappe.get_all("Reservation", filters={"guest": name}, pluck="property", distinct=True))
+	return stays <= permitted
+
+
+def _user_allowed(user: str, permitted: set[str]) -> bool:
+	from kamra.tex.security import scope
+	if not frappe.db.exists("User", user):
+		return True
+	if scope.is_platform_admin(user):
+		return False
+	return bool(scope.permitted_properties(user) & permitted)
+
+
+def assert_scope(sig, args, kwargs, records=None):
+	"""Refuse a call whose hotel argument, or a record argument (reservation, folio,
+	POS order, banquet function, guest ...), belongs to a hotel outside the user's
+	TEX scope. A record without a hotel (platform-wide) or not found is left to the
+	endpoint."""
 	try:
 		bound = sig.bind_partial(*args, **kwargs).arguments if sig else kwargs
 	except TypeError:
 		bound = kwargs
-	if not any(isinstance(bound.get(a), str) and bound.get(a) for a, _dt in SCOPED_ARGS):
+	checks = [(doctype, value) for arg, doctype in (*SCOPED_ARGS, *(records or {}).items())
+	          for value in _values(bound.get(arg))]
+	if not checks:
 		return
 	from kamra.tex.security import scope
 	if scope.is_platform_admin():
 		return
 	permitted = scope.permitted_properties()
-	for arg, doctype in SCOPED_ARGS:
-		value = bound.get(arg)
-		if not value or not isinstance(value, str):
-			continue
-		prop = value if doctype is None else frappe.db.get_value(doctype, value, "property")
-		if prop and prop not in permitted:
-			frappe.throw(f"You don't have access to {prop}.", frappe.PermissionError)
+	for doctype, value in checks:
+		_check(doctype, value, permitted)
+
+
+def _check(doctype, value: str, permitted: set[str]) -> None:
+	if doctype in (GUEST, GUEST_OWNED):
+		if not _guest_allowed(value, permitted, doctype == GUEST_OWNED):
+			frappe.throw(_("You don't have access to this guest."), frappe.PermissionError)
+		return
+	if doctype == USER:
+		if not _user_allowed(value, permitted):
+			frappe.throw(_("You don't have access to this user."), frappe.PermissionError)
+		return
+	prop = value if doctype is None else frappe.db.get_value(doctype, value, "property")
+	if prop and prop not in permitted:
+		frappe.throw(_("You don't have access to {0}.").format(prop), frappe.PermissionError)
+
+
+def assert_record(doctype: str, name: str) -> None:
+	"""assert_scope for a record named at run time (e.g. linked_records(doctype, name))."""
+	from kamra.tex.security import scope
+	if not name or scope.is_platform_admin():
+		return
+	_check(GUEST if doctype == "Guest" else doctype, name, scope.permitted_properties())
+
+
+def property_scope() -> list[str] | None:
+	"""The hotels a list endpoint may read: None for platform administrators (all),
+	else the caller's hotels (never empty - [""] matches nothing)."""
+	from kamra.tex.security import scope
+	if scope.is_platform_admin():
+		return None
+	return sorted(scope.permitted_properties()) or [""]
 
 
 def require_roles(*roles):
@@ -76,6 +192,7 @@ def require_roles(*roles):
 			sig = inspect.signature(fn)
 		except (TypeError, ValueError):
 			sig = None
+		records = record_args(fn)
 
 		@wraps(fn)
 		def guarded(*args, **kwargs):
@@ -83,7 +200,7 @@ def require_roles(*roles):
 				frappe.throw(
 					f"Not permitted - needs one of: {', '.join(sorted(roles))}.",
 					frappe.PermissionError)
-			assert_scope(sig, args, kwargs)
+			assert_scope(sig, args, kwargs, records)
 			return fn(*args, **kwargs)
 		# introspectable RBAC: Kamra Agent filters its tool list by this
 		guarded._kamra_roles = allowed
