@@ -1,1 +1,0 @@
-import{j as e,R as t,a as o,c as s,r,B as n}from"./chunk-62JRHF6Z-CrVIg-Pc.js";function a(){return e.jsx(t,{children:e.jsx(o,{path:"*",element:e.jsx("main",{className:"p-8 text-center text-sm text-zinc-600",children:"TEX Booking"})})})}s.createRoot(document.getElementById("tex-booking")).render(e.jsx(r.StrictMode,{children:e.jsx(n,{basename:"/book",children:e.jsx(a,{})})}));
