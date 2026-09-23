@@ -53,6 +53,9 @@ class PaymentProvider(ABC):
 	name: str = "base"
 	supports_refund: bool = False
 	production_verified: bool = False   # True only after certification against the live gateway
+	# the gateway states the amount (and currency) it captured: a success without them is
+	# not trusted (G-67); offline methods and the sandbox mock report nothing
+	reports_amount: bool = False
 
 	def __init__(self, account):
 		self.account = account
@@ -74,6 +77,11 @@ class PaymentProvider(ABC):
 
 	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
 		raise ProviderError(f"{self.name} does not support refunds through TEX")
+
+	def merge_ref(self, previous: str | None, new: str | None) -> str | None:
+		"""The reference to keep when a Pending charge gets another checkout (a second tab, a
+		restart, G-68). By default the new one: the gateway knows the charge by TEX's own id."""
+		return new or previous
 
 	def secret(self, field_name: str) -> str | None:
 		try:

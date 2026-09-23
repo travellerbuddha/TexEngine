@@ -25,6 +25,7 @@ from kamra.tex.payments.providers.base import Checkout, Intent, Outcome, Payment
 
 TIMEOUT = 20
 ISO_NUMERIC = {"TRY": "949", "EUR": "978", "USD": "840", "GBP": "826"}
+ISO_ALPHA = {v: k for k, v in ISO_NUMERIC.items()}
 
 
 def _money(v: Decimal) -> str:
@@ -44,6 +45,7 @@ def iyzico_auth_header(api_key: str, secret_key: str, uri_path: str, body: str, 
 
 class IyzicoProvider(PaymentProvider):
 	name = "iyzico"
+	reports_amount = True
 	supports_refund = True
 	INIT = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 	DETAIL = "/payment/iyzipos/checkoutform/auth/ecom/detail"
@@ -90,12 +92,26 @@ class IyzicoProvider(PaymentProvider):
 		return Checkout(kind="redirect", url=res.get("paymentPageUrl"), provider_ref=res.get("token"))
 
 	FINAL_FAILURE = ("FAILURE",)
+	REF_LENGTH = 140                     # TEX Payment Transaction.provider_ref (Data)
+
+	def merge_ref(self, previous: str | None, new: str | None) -> str | None:
+		"""Every checkout form of a charge has its own token, and a guest may pay on an older
+		page (another tab): keep the newest tokens that fit, newest first, space-separated."""
+		if not new:
+			return previous
+		kept: list[str] = []
+		for token in [new, *(t for t in (previous or "").split() if t != new and "|" not in t)]:
+			if len(" ".join([*kept, token])) > self.REF_LENGTH:
+				break
+			kept.append(token)
+		return " ".join(kept)
 
 	def handle_callback(self, transaction: str, params: dict, headers: dict, body: bytes, *,
 	                    provider_ref: str | None = None) -> Outcome:
 		token = params.get("token")
-		# the checkout-form token we stored at initialisation is the only one accepted
-		if not token or not provider_ref or not hmac.compare_digest(str(token), str(provider_ref).split("|")[0]):
+		# only a checkout-form token we stored for this charge is accepted
+		issued = str(provider_ref or "").split("|")[0].split()
+		if not token or not any(hmac.compare_digest(str(token), t) for t in issued):
 			raise ProviderError("iyzico callback token does not match this payment")
 		res = self._post(self.DETAIL, {"locale": "en", "conversationId": transaction, "token": token})
 		if res.get("conversationId") not in (None, transaction):
@@ -165,6 +181,7 @@ def sipay_parse_hash_key(hash_key: str, app_secret: str) -> list[str]:
 
 class SipayProvider(PaymentProvider):
 	name = "Sipay"
+	reports_amount = True
 
 	@property
 	def base(self) -> str:
@@ -256,6 +273,7 @@ def nestpay_hash_v3(params: dict, store_key: str) -> str:
 
 class NestPayProvider(PaymentProvider):
 	name = "Virtual POS"
+	reports_amount = True
 
 	@property
 	def gateway(self) -> str:
@@ -293,7 +311,10 @@ class NestPayProvider(PaymentProvider):
 		approved = params.get("Response") == "Approved" and params.get("ProcReturnCode") == "00" \
 			and str(params.get("mdStatus")) in ("1", "2", "3", "4")
 		masked = params.get("MaskedPan") or ""
+		numeric = str(params.get("currency") or "")
 		return Outcome(status="Succeeded" if approved else "Failed", provider_ref=params.get("TransId"),
 		               amount=Decimal(str(params.get("amount") or "0")), raw_status=params.get("Response"),
+		               # a code TEX never sends stays as is, so it can never pass for the charge's currency
+		               currency=ISO_ALPHA.get(numeric, numeric) or None,
 		               card_last4=masked[-4:] if masked[-4:].isdigit() else None,
 		               error_code=params.get("ProcReturnCode"), error_message=params.get("ErrMsg"))

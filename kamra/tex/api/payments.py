@@ -136,11 +136,23 @@ def reverify(transaction: str):
 	                          as_dict=True)
 	if row.status not in ("Pending", "Failed") or row.provider not in ("iyzico", "Sipay"):
 		frappe.throw(_("Only pending or failed iyzico / Sipay payments can be re-verified."))
-	params = {"token": (row.provider_ref or "").split("|")[0]} if row.provider == "iyzico" else {}
-	try:
-		return pay.complete(transaction, params=params, allow_failed=True)
-	except ProviderError as e:
-		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(e)[:200]))
+	# iyzico: every checkout form issued for this charge (another tab gets its own), newest first
+	if row.provider == "iyzico":
+		attempts = [{"token": t} for t in (row.provider_ref or "").split("|")[0].split()] or [{"token": ""}]
+	else:
+		attempts = [{}]
+	out, error = None, None
+	for params in attempts:
+		try:
+			out = pay.complete(transaction, params=params)
+		except ProviderError as e:
+			error = e
+			continue
+		if out.get("status") == "Succeeded":
+			break
+	if out is None:
+		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(error)[:200]))
+	return out
 
 
 @frappe.whitelist(methods=["POST"])
@@ -256,12 +268,15 @@ _SECRETS = ("secret_key", "merchant_key", "store_key", "webhook_secret")
 @frappe.whitelist()
 @require_capability("settings.admin")
 def accounts(property: str):
+	from kamra.tex.payments.providers import REGISTRY
+
 	rows = frappe.get_all("TEX Payment Provider Account", filters={"property": property}, fields=_ACCOUNT_FIELDS,
 	                      order_by="label asc")
 	for r in rows:
 		doc = frappe.get_doc("TEX Payment Provider Account", r["name"])
 		r["secrets_set"] = {f: bool(doc.get_password(f, raise_exception=False)) for f in _SECRETS}
-		r["production_verified"] = False
+		cls = REGISTRY.get(r["provider"])
+		r["production_verified"] = bool(cls and cls.production_verified)
 	rules = frappe.get_all("TEX Payment Method Rule", filters={"property": property},
 	                       fields=["name", "method", "provider_account", "market", "currency", "sales_channel",
 	                               "priority", "disabled"], order_by="priority desc, method asc")
@@ -289,8 +304,7 @@ def save_account(property: str, data):
 	for f in _SECRETS:
 		if d.get(f):          # blank = keep the stored secret
 			doc.set(f, d[f])
-	if doc.environment == "Production" and doc.provider == "Mock":
-		frappe.throw(_("The mock provider can only be used in Sandbox."))
+	# the controller refuses the mock, an uncertified gateway or a gateway URL override in Production
 	doc.save(ignore_permissions=True)
 	from kamra.tex.security.audit import audit
 

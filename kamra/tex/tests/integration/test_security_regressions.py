@@ -15,6 +15,7 @@ import frappe
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
+from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.security import scope
@@ -739,8 +740,95 @@ class TestAdminDataTenancy(TexTestCase):
 		self.assertTrue(admin.profiles()["profiles"])
 
 
+def _return_url() -> str:
+	from kamra.tex.services import sites
+
+	return sites.guest_url(sites.site_for(fx.PROPERTY), "pay/return", site_scoped=False)
+
+
 class TestGoLivePayments(TexTestCase):
-	"""Go-live hardening (ADR-041). G-89: signatures never fall back to the site name."""
+	"""Go-live payments hardening (ADR-041). G-67: an uncertified gateway never runs in
+	Production (save and run time), a Production account takes no gateway URL override, and
+	a gateway's success must carry the charged amount and currency. G-68: a payment link
+	starts one charge at a time and a second success is kept but flagged; a refund comes out
+	of the booking that holds the money. G-89: signatures never fall back to the site name."""
+
+	def setUp(self):
+		super().setUp()
+		self.p = setup_site_and_payments(self.f)
+
+	def account(self, provider, environment="Sandbox", **kw):
+		return frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": f"{provider} {environment}",
+		                       "property": fx.PROPERTY, "provider": provider, "environment": environment,
+		                       "enabled": 1, "currencies": "EUR", **kw}).insert(ignore_permissions=True)
+
+	def charge(self, key: str, amount="100", **kw) -> str:
+		return pay.start_payment(property=fx.PROPERTY, amount=amount, currency="EUR",
+		                         provider_account=self.p["account"], description="test", customer={},
+		                         return_url=_return_url(), idempotency_key=key, **kw)["transaction"]
+
+	# ─── G-67 production gating ──────────────────────────────────────────
+
+	def test_g67_an_uncertified_gateway_cannot_be_saved_for_production(self):
+		for provider in ("iyzico", "Sipay", "Virtual POS"):
+			with self.assertRaisesRegex(frappe.ValidationError, "not certified for production", msg=provider):
+				self.account(provider, "Production")
+		with self.assertRaisesRegex(frappe.ValidationError, "only be used in Sandbox"):
+			self.account("Mock", "Production")
+		with self.assertRaisesRegex(frappe.ValidationError, "gateway URL"):     # overrides are for test hosts
+			self.account("Bank Transfer", "Production", gateway_url="https://pay.example.com")
+		self.account("Bank Transfer", "Production", bank_name="Test Bank", iban="TR000000")  # no gateway to certify
+		self.account("Pay at Hotel", "Production")
+		self.account("iyzico", gateway_url="https://sandbox-api.iyzipay.com")    # a sandbox host may be overridden
+		with self.assertRaisesRegex(frappe.ValidationError, "not certified for production"):  # the TEX API too
+			pay_api.save_account(property=fx.PROPERTY, data={"label": "Live iyzico", "provider": "iyzico",
+			                                                 "environment": "Production"})
+		listed = {a["provider"]: a["production_verified"] for a in pay_api.accounts(property=fx.PROPERTY)["accounts"]}
+		self.assertEqual((listed["Bank Transfer"], listed["Pay at Hotel"], listed["iyzico"], listed["Mock"]),
+		                 (True, True, False, False))
+
+	def test_g67_run_time_refuses_an_uncertified_or_overridden_production_account(self):
+		iyz = self.account("iyzico")
+		iyz.db_set("environment", "Production")          # e.g. changed in SQL, bypassing the controller
+		with self.assertRaisesRegex(frappe.ValidationError, "not certified for production"):
+			pay.provider_for(iyz.name)
+		bank = self.account("Bank Transfer", "Production", bank_name="Test Bank", iban="TR000000")
+		self.assertEqual(pay.provider_for(bank.name).name, "Bank Transfer")
+		bank.db_set("gateway_url", "https://pay.example.com")
+		with self.assertRaisesRegex(frappe.ValidationError, "gateway URL"):
+			pay.provider_for(bank.name)
+		frappe.db.set_value("TEX Payment Provider Account", self.p["account"], "environment", "Production")
+		with self.assertRaises((frappe.ValidationError, ProviderError)):
+			pay.provider_for(self.p["account"])
+		self.assertFalse([m for m in pay.payment_methods(fx.PROPERTY, market=None, currency="EUR", channel=None)
+		                  if m["provider_account"] == self.p["account"]])   # not offered either
+
+	def test_g67_a_gateway_success_must_carry_the_amount_and_currency(self):
+		from kamra.tex.payments.providers.base import Outcome
+
+		class Gateway:
+			name, reports_amount, sandbox = "iyzico", True, True
+
+			def __init__(self, outcome):
+				self.outcome = outcome
+
+			def handle_callback(self, *args, **kwargs):
+				return self.outcome
+
+		cases = [(None, "EUR", "AMOUNT_MISMATCH"), (D("0"), "EUR", "AMOUNT_MISMATCH"),
+		         (D("99.99"), "EUR", "AMOUNT_MISMATCH"), (D("100"), "TRY", "CURRENCY_MISMATCH")]
+		for i, (amount, ccy, code) in enumerate(cases):
+			txn = self.charge(f"g67-amount-{i}")
+			gw = Gateway(Outcome(status="Succeeded", provider_ref="GW-1", amount=amount, currency=ccy))
+			with mock.patch.object(pay, "provider_for", return_value=gw):
+				self.assertEqual(pay.complete(txn, params={})["status"], "Failed", msg=code)
+			self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "error_code"), code)
+		txn = self.charge("g67-amount-ok")
+		gw = Gateway(Outcome(status="Succeeded", provider_ref="GW-2", amount=D("100.00"), currency="eur"))
+		with mock.patch.object(pay, "provider_for", return_value=gw):
+			self.assertEqual(pay.complete(txn, params={})["status"], "Succeeded")
+
+	# ─── G-89 signing keys ───────────────────────────────────────────────
 
 	def test_g89_signatures_need_the_site_encryption_key(self):
 		from kamra.tex.services import quoting
@@ -762,3 +850,127 @@ class TestGoLivePayments(TexTestCase):
 				self.assertNotIn(key, str(caught.exception))
 				self.assertNotIn(frappe.local.site, str(caught.exception))
 		self.assertEqual(quoting.verify(token)["n"], 1)
+
+	# ─── G-68 payment links ──────────────────────────────────────────────
+
+	def link(self, amount="80"):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent sends a link
+		out = pay.create_link(property=fx.PROPERTY, amount=amount, currency="EUR", description="deposit",
+		                      provider_account=self.p["account"], guest_name="Link Guest")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens the link
+		return out
+
+	def test_g68_a_link_starts_one_charge_until_that_one_fails(self):
+		link = self.link()
+		first = public.pay_link(token=link["token"])
+		again = public.pay_link(token=link["token"])                     # a second tab or a double click
+		self.assertEqual(again["transaction"], first["transaction"])
+		public.mock_pay(transaction=first["transaction"], outcome="fail", sig=first["fields"]["fail_sig"])
+		retry = public.pay_link(token=link["token"])                     # after a failure: a new charge
+		self.assertNotEqual(retry["transaction"], first["transaction"])
+		self.assertEqual(public.pay_link(token=link["token"])["transaction"], retry["transaction"])
+		public.mock_pay(transaction=retry["transaction"], outcome="success", sig=retry["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- verify
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Paid")
+		self.assertEqual(frappe.db.count("TEX Payment Transaction", {"payment_link": link["link"],
+		                                                             "status": "Succeeded"}), 1)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest tries again
+		with self.assertRaises(frappe.ValidationError):
+			public.pay_link(token=link["token"])
+
+	def test_g68_a_charge_paid_in_one_tab_after_failing_in_another_is_recorded(self):
+		link = self.link()
+		tab1 = public.pay_link(token=link["token"])
+		tab2 = public.pay_link(token=link["token"])                      # the same charge, a second checkout
+		public.mock_pay(transaction=tab1["transaction"], outcome="fail", sig=tab1["fields"]["fail_sig"])
+		out = public.mock_pay(transaction=tab2["transaction"], outcome="success", sig=tab2["fields"]["success_sig"])
+		self.assertEqual(out["status"], "Succeeded")                      # captured money is never ignored
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- verify
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Paid")
+		again = public.mock_pay(transaction=tab1["transaction"], outcome="fail", sig=tab1["fields"]["fail_sig"])
+		self.assertEqual((again["status"], again.get("replay")), ("Succeeded", True))   # a late failure changes nothing
+
+	def test_g68_a_reused_charge_is_never_rerouted_or_repriced(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- service-level check
+		first = self.charge("g68-reuse")
+		self.assertEqual(self.charge("g68-reuse"), first)                 # the same start again: the same charge
+		other = self.account("Mock", label="Second sandbox").name
+		with self.assertRaisesRegex(frappe.ValidationError, "another method or amount"):
+			pay.start_payment(property=fx.PROPERTY, amount="100", currency="EUR", provider_account=other,
+			                  description="test", customer={}, return_url=_return_url(), idempotency_key="g68-reuse")
+		with self.assertRaisesRegex(frappe.ValidationError, "another method or amount"):
+			self.charge("g68-reuse", amount="90")
+
+	def test_g68_a_failed_restart_keeps_the_first_checkout_payable(self):
+		from kamra.tex.payments.providers import simple
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- service-level check
+		key = "g68-restart"
+		first = pay.start_payment(property=fx.PROPERTY, amount="100", currency="EUR",
+		                          provider_account=self.p["account"], description="test", customer={},
+		                          return_url=_return_url(), idempotency_key=key)
+		with mock.patch.object(simple.MockProvider, "create_checkout", side_effect=ProviderError("gateway down")):
+			with self.assertRaises(frappe.ValidationError):              # the second tab cannot start...
+				self.charge(key)
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", first["transaction"], "status"), "Pending")
+		out = public.mock_pay(transaction=first["transaction"], outcome="success", sig=first["fields"]["success_sig"])
+		self.assertEqual(out["status"], "Succeeded")                     # ...and the first one is still paid
+
+	def test_g68_a_second_success_on_a_paid_link_is_kept_and_flagged(self):
+		link = self.link()
+		first = public.pay_link(token=link["token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a charge started before this fix
+		stale = pay.start_payment(property=fx.PROPERTY, amount="80", currency="EUR",
+		                          provider_account=self.p["account"], payment_link=link["link"], description="deposit",
+		                          customer={}, return_url=_return_url(), idempotency_key="g68-stale-tab")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest pays in both tabs
+		public.mock_pay(transaction=first["transaction"], outcome="success", sig=first["fields"]["success_sig"])
+		public.mock_pay(transaction=stale["transaction"], outcome="success", sig=stale["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance looks
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", stale["transaction"], "status"), "Succeeded")
+		lk = frappe.get_doc("TEX Payment Link", link["link"])
+		self.assertEqual((lk.status, D(lk.paid_amount)), ("Paid", D("160")))  # the money is recorded, never lost
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment_link.overpaid",
+		                                                     "reference_name": link["link"]}))
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment_link.overpaid",
+		                                                     "reference_name": link["link"]}), 1)
+
+	# ─── G-68 refund target ──────────────────────────────────────────────
+
+	def paid_and_second(self, session):
+		b1 = guest_books(session=f"{session}-1")
+		p1 = b1["payment"]
+		public.mock_pay(transaction=p1["transaction"], outcome="success", sig=p1["fields"]["success_sig"])
+		b2 = guest_books(session=f"{session}-2", guest={**GUEST, "email": f"{session}.second@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance user
+		return b1["booking"], b2["booking"], p1["transaction"]
+
+	def test_g68_a_refund_after_a_transfer_comes_from_the_booking_holding_the_money(self):
+		b1, b2, txn = self.paid_and_second("g68-rf")
+		pay.transfer(txn, from_booking=b1, to_booking=b2, amount="252.75", reason="guest moved the deposit")
+		paid = lambda b: D(frappe.db.get_value("TEX Booking", b, "paid_amount"))  # noqa: E731
+		balance = lambda b: D(frappe.db.get_value("TEX Booking", b, "balance_amount"))  # noqa: E731
+		before = (paid(b1), balance(b1))
+		self.assertEqual((paid(b1), paid(b2)), (D("0"), D("252.75")))
+		r = pay.refund(txn, amount="50", reason="goodwill", idempotency_key="g68-rf-1")
+		self.assertEqual(r["status"], "Succeeded")
+		rows = frappe.get_all("TEX Payment Allocation", filters={"transaction": txn, "allocation_type": "Refund"},
+		                      fields=["booking", "amount"])
+		self.assertEqual([(x.booking, D(x.amount)) for x in rows], [(b2, D("50"))])
+		self.assertEqual((paid(b1), balance(b1)), before)                 # the first booking is untouched
+		self.assertEqual(paid(b2), D("202.75"))
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", r["refund"], "booking"), b2)
+		with self.assertRaises(frappe.ValidationError):                   # the first booking holds nothing now
+			pay.refund(txn, amount="10", reason="wrong booking", idempotency_key="g68-rf-2", booking=b1)
+
+	def test_g68_a_refund_split_over_bookings_must_name_one(self):
+		b1, b2, txn = self.paid_and_second("g68-amb")
+		pay.transfer(txn, from_booking=b1, to_booking=b2, amount="20", reason="part of the deposit")
+		with self.assertRaisesRegex(frappe.ValidationError, "which booking"):
+			pay.refund(txn, amount="10", reason="goodwill", idempotency_key="g68-amb-1")
+		with self.assertRaises(frappe.ValidationError):                   # more than that booking holds
+			pay.refund(txn, amount="30", reason="goodwill", idempotency_key="g68-amb-2", booking=b2)
+		r = pay.refund(txn, amount="10", reason="goodwill", idempotency_key="g68-amb-3", booking=b2)
+		self.assertEqual(r["status"], "Succeeded")
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b2, "paid_amount")), D("10"))
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b1, "paid_amount")), D("232.75"))

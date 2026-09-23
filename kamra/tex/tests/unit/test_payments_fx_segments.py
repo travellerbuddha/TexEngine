@@ -6,6 +6,7 @@ import hmac
 import unittest
 from datetime import date
 from decimal import Decimal
+from unittest import mock
 
 from kamra.tex.connect import fx_providers as fx
 from kamra.tex.payments.providers import simple, turkey
@@ -123,3 +124,57 @@ class TestGatewaySignatures(unittest.TestCase):
 		tampered = {**params, "amount": "1.00"}
 		with self.assertRaises(turkey.ProviderError):
 			p.handle_callback("PTX-5", tampered, {}, b"")
+
+
+class TestProviderRegistry(unittest.TestCase):
+	"""G-67 (ADR-041): one registry decides what each provider may do."""
+
+	def test_only_offline_methods_are_production_verified(self):
+		from kamra.tex.payments.providers import REGISTRY
+
+		self.assertEqual({k for k, cls in REGISTRY.items() if cls.production_verified}, {"Bank Transfer", "Pay at Hotel"})
+		self.assertEqual({k for k, cls in REGISTRY.items() if cls.reports_amount}, {"iyzico", "Sipay", "Virtual POS"})
+		self.assertEqual({k: cls.name for k, cls in REGISTRY.items()}, {k: k for k in REGISTRY})
+
+	def test_nestpay_reports_the_currency_it_charged(self):
+		class Acc(dict):
+			def get(self, k, default=None):
+				return super().get(k, default)
+
+			def get_password(self, field, raise_exception=False):
+				return "SK" if field == "store_key" else None
+
+		p = turkey.NestPayProvider(Acc(environment="Sandbox"))
+		params = {"oid": "PTX-7", "Response": "Approved", "ProcReturnCode": "00", "mdStatus": "1",
+		          "amount": "10.00", "currency": "978", "TransId": "T7"}
+		params["HASH"] = turkey.nestpay_hash_v3(params, "SK")
+		self.assertEqual(p.handle_callback("PTX-7", dict(params), {}, b"").currency, "EUR")
+		odd = {**params, "currency": "999"}
+		odd["HASH"] = turkey.nestpay_hash_v3({k: v for k, v in odd.items() if k != "HASH"}, "SK")
+		self.assertEqual(p.handle_callback("PTX-7", odd, {}, b"").currency, "999")   # never mistaken for ours
+
+	def test_iyzico_recognises_every_checkout_of_a_reused_charge(self):
+		class Acc(dict):
+			def get(self, k, default=None):
+				return super().get(k, default)
+
+			def get_password(self, field, raise_exception=False):
+				return "sk" if field == "secret_key" else None
+
+		p = turkey.IyzicoProvider(Acc(environment="Sandbox", api_key="ak"))
+		ref = p.merge_ref(p.merge_ref(None, "tok-a"), "tok-b")
+		self.assertEqual(ref, "tok-b tok-a")                                      # newest first
+		self.assertEqual(p.merge_ref(ref, "tok-b"), ref)
+		full = p.merge_ref(" ".join(f"{i:036d}" for i in range(4)), "n" * 36)
+		self.assertTrue(len(full) <= 140 and full.startswith("n" * 36))          # fits provider_ref
+		self.assertEqual(simple.MockProvider(Acc(environment="Sandbox"), "s").merge_ref("MOCK-1", "MOCK-1"), "MOCK-1")
+		detail = {"status": "success", "paymentStatus": "SUCCESS", "conversationId": "PTX-1", "basketId": "PTX-1",
+		          "paidPrice": "80.00", "currency": "EUR", "paymentId": "P1",
+		          "itemTransactions": [{"paymentTransactionId": "I1"}]}
+		with mock.patch.object(p, "_post", return_value=detail):
+			out = p.handle_callback("PTX-1", {"token": "tok-a"}, {}, b"", provider_ref=ref)   # the older tab
+			self.assertEqual((out.status, out.amount, out.currency, out.provider_ref),
+			                 ("Succeeded", Decimal("80.00"), "EUR", "P1|I1"))
+			for forged in ("tok-x", "", "tok-b tok-a"):
+				with self.assertRaises(turkey.ProviderError):
+					p.handle_callback("PTX-1", {"token": forged}, {}, b"", provider_ref=ref)

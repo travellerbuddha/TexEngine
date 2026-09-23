@@ -496,9 +496,12 @@ def pay_link(token: str, provider_account: str | None = None):
 	from kamra.tex.payments import service as pay
 
 	link = pay.link_by_token(token)
-	if link.status not in ("Active", "Partially Paid"):
-		frappe.throw(_("This payment link is {0}.").format(link.status.lower()))
-	due = from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency)
+	# one start at a time per link (G-68): a second, simultaneous start waits here and then
+	# sees the link as it is now (paid, or with the first start's charge to reuse)
+	now = pay.lock_link(link.name)
+	if now.status not in ("Active", "Partially Paid"):
+		frappe.throw(_("This payment link is {0}.").format(now.status.lower()))
+	due = from_db(now.amount, now.currency) - from_db(now.paid_amount, now.currency)
 	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
 	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
 	if link.provider_account:
@@ -517,7 +520,8 @@ def pay_link(token: str, provider_account: str | None = None):
 	                         # never the link's bearer token: the guest's tab remembers its link page (G-10)
 	                         return_url=sites.guest_url(sites.site_for(link.property), "pay/return",
 	                                                    site_scoped=False),
-	                         idempotency_key=f"link:{link.name}:{to_str(due)}:{frappe.generate_hash(length=6)}")
+	                         # deterministic: the same Pending charge for every tab, a new one after a failure
+	                         idempotency_key=pay.link_charge_key(link.name, due, account))
 
 
 # ─── funnel ──────────────────────────────────────────────────────────────
