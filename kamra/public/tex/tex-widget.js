@@ -1,7 +1,7 @@
 var C = Object.defineProperty;
 var D = (l, c, t) => c in l ? C(l, c, { enumerable: !0, configurable: !0, writable: !0, value: t }) : l[c] = t;
 var g = (l, c, t) => D(l, typeof c != "symbol" ? c + "" : c, t);
-const y = {
+const v = {
   en: { ci: "Check-in", co: "Check-out", guests: "Guests", adults: "Adults", children: "Children", age: "Age of child {n}", pick: "Age", under1: "Under 1", search: "Search", book: "Book now", close: "Close", booking: "Booking", done: "Done", less: "Fewer {what}", more: "More {what}", errDates: "Choose check-in and check-out dates.", errOrder: "Check-out must be after check-in.", errAges: "Add the age of each child.", a: "{n} adult", as: "{n} adults", c: "{n} child", cs: "{n} children" },
   tr: { ci: "Giriş", co: "Çıkış", guests: "Misafirler", adults: "Yetişkin", children: "Çocuk", age: "{n}. çocuğun yaşı", pick: "Yaş", under1: "1 yaşından küçük", search: "Ara", book: "Rezervasyon yap", close: "Kapat", booking: "Rezervasyon", done: "Tamam", less: "{what} azalt", more: "{what} artır", errDates: "Giriş ve çıkış tarihlerini seçin.", errOrder: "Çıkış, girişten sonra olmalıdır.", errAges: "Her çocuğun yaşını ekleyin.", a: "{n} yetişkin", as: "{n} yetişkin", c: "{n} çocuk", cs: "{n} çocuk" },
   de: { ci: "Anreise", co: "Abreise", guests: "Gäste", adults: "Erwachsene", children: "Kinder", age: "Alter von Kind {n}", pick: "Alter", under1: "Unter 1", search: "Suchen", book: "Jetzt buchen", close: "Schließen", booking: "Buchung", done: "Fertig", less: "Weniger {what}", more: "Mehr {what}", errDates: "Wählen Sie An- und Abreise.", errOrder: "Die Abreise muss nach der Anreise liegen.", errAges: "Geben Sie das Alter jedes Kindes an.", a: "{n} Erwachsener", as: "{n} Erwachsene", c: "{n} Kind", cs: "{n} Kinder" },
@@ -56,15 +56,15 @@ dialog::backdrop{background:rgb(15 17 21/.55)}
 iframe{flex:1;width:100%;border:0;display:block}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `, E = (l) => `${l.getFullYear()}-${String(l.getMonth() + 1).padStart(2, "0")}-${String(l.getDate()).padStart(2, "0")}`, w = (l, c) => {
-  const [t, o, s] = l.split("-").map(Number);
-  return E(new Date(t, o - 1, s + c, 12));
+  const [t, s, i] = l.split("-").map(Number);
+  return E(new Date(t, s - 1, i + c, 12));
 }, d = (l) => l.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function A(l) {
-  const c = l.length === 4 ? l.slice(1).split("").map((i) => i + i).join("") : l.slice(1), [t, o, s] = [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16) / 255).map((i) => i <= 0.03928 ? i / 12.92 : ((i + 0.055) / 1.055) ** 2.4), e = 0.2126 * t + 0.7152 * o + 0.0722 * s;
+  const c = l.length === 4 ? l.slice(1).split("").map((o) => o + o).join("") : l.slice(1), [t, s, i] = [0, 2, 4].map((o) => parseInt(c.slice(o, o + 2), 16) / 255).map((o) => o <= 0.03928 ? o / 12.92 : ((o + 0.055) / 1.055) ** 2.4), e = 0.2126 * t + 0.7152 * s + 0.0722 * i;
   return 1.05 / (e + 0.05) >= (e + 0.05) / 0.05 ? "#ffffff" : "#16181d";
 }
 const k = /* @__PURE__ */ new Map();
-class L extends HTMLElement {
+class z extends HTMLElement {
   constructor() {
     super();
     g(this, "root");
@@ -73,17 +73,17 @@ class L extends HTMLElement {
     g(this, "siteName", "");
     g(this, "rendered", !1);
     g(this, "onMessage", (t) => {
-      var s;
-      const o = this.root.querySelector("iframe");
-      o && t.source === o.contentWindow && ((s = t.data) == null ? void 0 : s.type) === "tex-booking:close" && this.close();
+      var i;
+      const s = this.root.querySelector("iframe");
+      s && t.source === s.contentWindow && ((i = t.data) == null ? void 0 : i.type) === "tex-booking:close" && this.close();
     });
     g(this, "closeGuests", () => {
     });
     g(this, "opener", null);
     g(this, "hostOverflow", "");
     this.root = this.attachShadow({ mode: "open" }), this.root.addEventListener("click", (t) => {
-      const o = t.composedPath(), s = this.root.querySelector("#gp"), e = this.root.querySelector("#gb");
-      s && e && !o.includes(s) && !o.includes(e) && this.closeGuests();
+      const s = t.composedPath(), i = this.root.querySelector("#gp"), e = this.root.querySelector("#gb");
+      i && e && !s.includes(i) && !s.includes(e) && this.closeGuests();
     });
   }
   get api() {
@@ -93,10 +93,10 @@ class L extends HTMLElement {
     return (this.getAttribute("site") || "").trim().toLowerCase();
   }
   get uiLang() {
-    return [this.getAttribute("lang"), document.documentElement.lang, navigator.language].map((o) => (o || "").slice(0, 2).toLowerCase()).find((o) => o in y) || "en";
+    return [this.getAttribute("lang"), document.documentElement.lang, navigator.language].map((s) => (s || "").slice(0, 2).toLowerCase()).find((s) => s in v) || "en";
   }
-  t(t, o = {}) {
-    return (y[this.uiLang][t] ?? y.en[t]).replace(/\{(\w+)\}/g, (s, e) => String(o[e] ?? ""));
+  t(t, s = {}) {
+    return (v[this.uiLang][t] ?? v.en[t]).replace(/\{(\w+)\}/g, (i, e) => String(s[e] ?? ""));
   }
   connectedCallback() {
     window.addEventListener("message", this.onMessage), this.render(), this.loadTheme();
@@ -104,8 +104,8 @@ class L extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener("message", this.onMessage);
   }
-  attributeChangedCallback(t, o, s) {
-    !this.rendered || o === s || (this.render(), (t === "site" || t === "api") && this.loadTheme());
+  attributeChangedCallback(t, s, i) {
+    !this.rendered || s === i || (this.render(), (t === "site" || t === "api") && this.loadTheme());
   }
   async loadTheme() {
     if (!this.site) return;
@@ -114,24 +114,26 @@ class L extends HTMLElement {
       t,
       fetch(`${this.api}/api/method/kamra.tex.api.public.site?slug=${encodeURIComponent(this.site)}`, { credentials: "omit" }).then((u) => u.ok ? u.json() : null).then((u) => (u == null ? void 0 : u.message) ?? null).catch(() => null)
     );
-    const o = await k.get(t), s = this.root.querySelector(".w");
-    if (!o || !s) return;
-    this.siteName = o.name || "";
-    const e = o.branding || {};
-    e.primary && M.test(e.primary) && (s.style.setProperty("--p", e.primary), s.style.setProperty("--op", A(e.primary)), s.style.setProperty("--pi", A(e.primary) === "#ffffff" ? e.primary : "#16181d")), e.font && e.font in $ && s.style.setProperty("--f", `${$[e.font]}ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`), e.radius && e.radius in x && s.style.setProperty("--r", x[e.radius]), s.style.setProperty("--br", e.button_style === "pill" ? "999px" : x[e.radius ?? "md"] ?? "8px"), e.button_style === "outline" && (s.dataset.btn = "outline");
-    const i = this.root.querySelector(".mt");
-    i && (i.textContent = this.siteName || this.t("booking"));
-    const n = o.texts ?? {}, r = [this.uiLang, o.default_language].map((u) => {
+    const s = await k.get(t), i = this.root.querySelector(".w");
+    if (!s || !i) return;
+    this.siteName = s.name || "";
+    const e = s.branding || {};
+    e.primary && M.test(e.primary) && (i.style.setProperty("--p", e.primary), i.style.setProperty("--op", A(e.primary)), i.style.setProperty("--pi", A(e.primary) === "#ffffff" ? e.primary : "#16181d")), e.font && e.font in $ && i.style.setProperty("--f", `${$[e.font]}ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif`), e.radius && e.radius in x && i.style.setProperty("--r", x[e.radius]), i.style.setProperty("--br", e.button_style === "pill" ? "999px" : x[e.radius ?? "md"] ?? "8px"), e.button_style === "outline" && (i.dataset.btn = "outline");
+    const o = this.root.querySelector(".mt");
+    o && (o.textContent = this.siteName || this.t("booking"));
+    const n = s.texts ?? {}, r = [this.uiLang, s.default_language].map((u) => {
       var b;
       return u ? (b = n[u]) == null ? void 0 : b.search_button : null;
     }).find((u) => typeof u == "string" && u.trim()), f = this.root.querySelector(".go");
     f && typeof r == "string" && (f.textContent = r.trim());
   }
-  url(t, o) {
-    const s = new URLSearchParams(t);
-    s.set("lang", this.uiLang);
-    const e = this.getAttribute("hotel"), i = this.getAttribute("currency");
-    return e && s.set("hotel", e), i && /^[A-Z]{3}$/.test(i) && s.set("currency", i), o && s.set("embed", "1"), `${this.api}/book/${encodeURIComponent(this.site)}?${s}`;
+  url(t, s) {
+    const i = new URLSearchParams(t);
+    i.set("lang", this.uiLang);
+    const e = this.getAttribute("hotel"), o = this.getAttribute("currency");
+    e && i.set("hotel", e), o && /^[A-Z]{3}$/.test(o) && i.set("currency", o);
+    const n = (this.getAttribute("market") || "").trim(), r = (this.getAttribute("country") || "").trim();
+    return /^[A-Za-z0-9_-]{1,40}$/.test(n) && i.set("market", n), /^[A-Za-z]{2}$/.test(r) && i.set("country", r.toUpperCase()), s && i.set("embed", "1"), `${this.api}/book/${encodeURIComponent(this.site)}?${i}`;
   }
   guestsText() {
     const t = this.ages.length;
@@ -139,7 +141,7 @@ class L extends HTMLElement {
   }
   render() {
     this.rendered = !0;
-    const t = this.getAttribute("mode") || "search", o = E(/* @__PURE__ */ new Date());
+    const t = this.getAttribute("mode") || "search", s = E(/* @__PURE__ */ new Date());
     if (t === "button") {
       this.root.innerHTML = `<style>${S}</style><div class="w" part="root"><button type="button" class="bk" part="button">${d(this.getAttribute("label") || this.t("book"))}</button>${this.modalHtml()}</div>`, this.root.querySelector(".bk").addEventListener("click", () => this.open(this.url({}, !0))), this.wireModal();
       return;
@@ -147,8 +149,8 @@ class L extends HTMLElement {
     this.root.innerHTML = `<style>${S}</style>
 <div class="w" part="root">
   <form novalidate part="form">
-    <div class="f"><label for="ci">${d(this.t("ci"))}</label><input id="ci" type="date" min="${o}" required></div>
-    <div class="f"><label for="co">${d(this.t("co"))}</label><input id="co" type="date" min="${w(o, 1)}" required></div>
+    <div class="f"><label for="ci">${d(this.t("ci"))}</label><input id="ci" type="date" min="${s}" required></div>
+    <div class="f"><label for="co">${d(this.t("co"))}</label><input id="co" type="date" min="${w(s, 1)}" required></div>
     <div class="f g"><span class="lb" id="gl">${d(this.t("guests"))}</span>
       <button type="button" class="gb" id="gb" aria-expanded="false" aria-controls="gp" aria-labelledby="gl gb"></button>
       <div class="pop" id="gp" role="group" aria-labelledby="gl" hidden></div>
@@ -158,17 +160,17 @@ class L extends HTMLElement {
   </form>
   ${this.modalHtml()}
 </div>`;
-    const s = (a) => this.root.querySelector(a), e = s("#ci"), i = s("#co");
+    const i = (a) => this.root.querySelector(a), e = i("#ci"), o = i("#co");
     e.addEventListener("change", () => {
-      e.value && (i.min = w(e.value, 1), (!i.value || i.value <= e.value) && (i.value = w(e.value, 1)));
+      e.value && (o.min = w(e.value, 1), (!o.value || o.value <= e.value) && (o.value = w(e.value, 1)));
     });
-    const n = s("#gb"), r = s("#gp");
+    const n = i("#gb"), r = i("#gp");
     n.textContent = this.guestsText();
     const f = typeof r.showPopover == "function", u = () => f ? r.matches(":popover-open") : !r.hidden, b = () => {
       const a = n.getBoundingClientRect(), p = Math.min(320, window.innerWidth - 16);
       r.style.width = `${p}px`, r.style.left = `${Math.max(8, Math.min(a.left, window.innerWidth - p - 8))}px`;
-      const h = r.offsetHeight || 280, v = a.bottom + 6;
-      r.style.top = `${v + h > window.innerHeight - 8 && a.top - 6 - h > 8 ? a.top - 6 - h : v}px`;
+      const h = r.offsetHeight || 280, y = a.bottom + 6;
+      r.style.top = `${y + h > window.innerHeight - 8 && a.top - 6 - h > 8 ? a.top - 6 - h : y}px`;
     }, m = (a, p = !0) => {
       var h;
       if (a !== u()) {
@@ -186,34 +188,34 @@ class L extends HTMLElement {
       a.key === "Escape" && (a.stopPropagation(), m(!1));
     }), this.closeGuests = () => m(!1, !1)), r.addEventListener("tex-done", () => {
       m(!1), n.focus();
-    }), s("form").addEventListener("submit", (a) => {
+    }), i("form").addEventListener("submit", (a) => {
       a.preventDefault();
-      const p = s("#er");
-      if (p.textContent = "", !e.value || !i.value)
-        return p.textContent = this.t("errDates"), (e.value ? i : e).focus();
-      if (i.value <= e.value || e.value < o)
-        return p.textContent = this.t("errOrder"), i.focus();
-      if (this.ages.some((z) => z === null))
+      const p = i("#er");
+      if (p.textContent = "", !e.value || !o.value)
+        return p.textContent = this.t("errDates"), (e.value ? o : e).focus();
+      if (o.value <= e.value || e.value < s)
+        return p.textContent = this.t("errOrder"), o.focus();
+      if (this.ages.some((L) => L === null))
         return p.textContent = this.t("errAges"), m(!0);
       const h = this.ages.length ? `${this.adults}-${this.ages.join("_")}` : `${this.adults}`;
       this.dispatchEvent(
-        new CustomEvent("tex-booking:search", { bubbles: !0, composed: !0, detail: { checkIn: e.value, checkOut: i.value, adults: this.adults, children: this.ages.slice() } })
+        new CustomEvent("tex-booking:search", { bubbles: !0, composed: !0, detail: { checkIn: e.value, checkOut: o.value, adults: this.adults, children: this.ages.slice() } })
       );
-      const v = { checkin: e.value, checkout: i.value, rooms: h };
-      t === "redirect" ? window.location.assign(this.url(v, !1)) : this.open(this.url(v, !0));
+      const y = { checkin: e.value, checkout: o.value, rooms: h };
+      t === "redirect" ? window.location.assign(this.url(y, !1)) : this.open(this.url(y, !0));
     }), this.wireModal();
   }
   renderGuests() {
-    const t = this.root.querySelector("#gp"), o = (e, i, n, r, f) => `
-      <div class="row" role="group" aria-labelledby="${e}-l"><span id="${e}-l">${d(i)}</span>
-        <span class="st"><button type="button" data-k="${e}" data-d="-1" aria-label="${d(this.t("less", { what: i }))}" ${n <= r ? "disabled" : ""}>−</button>
+    const t = this.root.querySelector("#gp"), s = (e, o, n, r, f) => `
+      <div class="row" role="group" aria-labelledby="${e}-l"><span id="${e}-l">${d(o)}</span>
+        <span class="st"><button type="button" data-k="${e}" data-d="-1" aria-label="${d(this.t("less", { what: o }))}" ${n <= r ? "disabled" : ""}>−</button>
         <output aria-live="polite">${n}</output>
-        <button type="button" data-k="${e}" data-d="1" aria-label="${d(this.t("more", { what: i }))}" ${n >= f ? "disabled" : ""}>+</button></span></div>`, s = (e) => `<option value="">${d(this.t("pick"))}</option>` + Array.from({ length: 18 }, (i, n) => `<option value="${n}" ${e === n ? "selected" : ""}>${n === 0 ? d(this.t("under1")) : n}</option>`).join("");
-    t.innerHTML = o("ad", this.t("adults"), this.adults, 1, 8) + o("ch", this.t("children"), this.ages.length, 0, 6) + (this.ages.length ? `<div class="ages">${this.ages.map((e, i) => `<div class="f"><label for="age${i}">${d(this.t("age", { n: i + 1 }))}</label><select id="age${i}" data-i="${i}">${s(e)}</select></div>`).join("")}</div>` : "") + `<button type="button" class="dn">${d(this.t("done"))}</button>`, t.querySelectorAll("button[data-k]").forEach(
+        <button type="button" data-k="${e}" data-d="1" aria-label="${d(this.t("more", { what: o }))}" ${n >= f ? "disabled" : ""}>+</button></span></div>`, i = (e) => `<option value="">${d(this.t("pick"))}</option>` + Array.from({ length: 18 }, (o, n) => `<option value="${n}" ${e === n ? "selected" : ""}>${n === 0 ? d(this.t("under1")) : n}</option>`).join("");
+    t.innerHTML = s("ad", this.t("adults"), this.adults, 1, 8) + s("ch", this.t("children"), this.ages.length, 0, 6) + (this.ages.length ? `<div class="ages">${this.ages.map((e, o) => `<div class="f"><label for="age${o}">${d(this.t("age", { n: o + 1 }))}</label><select id="age${o}" data-i="${o}">${i(e)}</select></div>`).join("")}</div>` : "") + `<button type="button" class="dn">${d(this.t("done"))}</button>`, t.querySelectorAll("button[data-k]").forEach(
       (e) => e.addEventListener("click", () => {
         var n;
-        const i = Number(e.dataset.d);
-        e.dataset.k === "ad" ? this.adults = Math.min(8, Math.max(1, this.adults + i)) : this.ages = i > 0 ? [...this.ages, null].slice(0, 6) : this.ages.slice(0, -1), this.renderGuests(), (n = this.root.querySelector(`button[data-k="${e.dataset.k}"][data-d="${i}"]`)) == null || n.focus(), this.root.querySelector("#gb").textContent = this.guestsText();
+        const o = Number(e.dataset.d);
+        e.dataset.k === "ad" ? this.adults = Math.min(8, Math.max(1, this.adults + o)) : this.ages = o > 0 ? [...this.ages, null].slice(0, 6) : this.ages.slice(0, -1), this.renderGuests(), (n = this.root.querySelector(`button[data-k="${e.dataset.k}"][data-d="${o}"]`)) == null || n.focus(), this.root.querySelector("#gb").textContent = this.guestsText();
       })
     ), t.querySelectorAll("select").forEach(
       (e) => e.addEventListener("change", () => {
@@ -226,22 +228,22 @@ class L extends HTMLElement {
   }
   wireModal() {
     const t = this.root.querySelector("dialog");
-    t.querySelector(".x").addEventListener("click", () => this.close()), t.addEventListener("cancel", (o) => {
-      o.preventDefault(), this.close();
+    t.querySelector(".x").addEventListener("click", () => this.close()), t.addEventListener("cancel", (s) => {
+      s.preventDefault(), this.close();
     });
   }
   open(t) {
-    const o = this.root.querySelector("dialog"), s = o.querySelector("iframe");
-    s.getAttribute("src") !== t && s.setAttribute("src", t), this.opener = this.root.activeElement ?? null, this.hostOverflow = document.documentElement.style.overflow, document.documentElement.style.overflow = "hidden", o.showModal(), s.focus();
+    const s = this.root.querySelector("dialog"), i = s.querySelector("iframe");
+    i.getAttribute("src") !== t && i.setAttribute("src", t), this.opener = this.root.activeElement ?? null, this.hostOverflow = document.documentElement.style.overflow, document.documentElement.style.overflow = "hidden", s.showModal(), i.focus();
   }
   close() {
-    var o;
+    var s;
     const t = this.root.querySelector("dialog");
-    t != null && t.open && (t.close(), document.documentElement.style.overflow = this.hostOverflow, (o = this.opener) == null || o.focus());
+    t != null && t.open && (t.close(), document.documentElement.style.overflow = this.hostOverflow, (s = this.opener) == null || s.focus());
   }
 }
-g(L, "observedAttributes", ["site", "api", "lang", "mode", "hotel", "currency", "label"]);
-customElements.get("tex-booking-widget") || customElements.define("tex-booking-widget", L);
+g(z, "observedAttributes", ["site", "api", "lang", "mode", "hotel", "currency", "market", "country", "label"]);
+customElements.get("tex-booking-widget") || customElements.define("tex-booking-widget", z);
 export {
-  L as TexBookingWidget
+  z as TexBookingWidget
 };
