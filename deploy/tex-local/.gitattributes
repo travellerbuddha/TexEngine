@@ -1,0 +1,8 @@
+# Shell scripts and the Procfile run inside a Linux container: keep LF even on Windows.
+*.sh text eol=lf
+Procfile text eol=lf
+Dockerfile text eol=lf
+*.dockerignore text eol=lf
+*.yml text eol=lf
+.env.example text eol=lf
+frappe_cli.py text eol=lf

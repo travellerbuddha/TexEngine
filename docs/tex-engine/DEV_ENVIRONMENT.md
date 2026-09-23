@@ -62,3 +62,25 @@ Specs: `shell`, `contract-admin`, `booking` (desktop + 390 px), `crs` (call cent
 change) and `critical-journey` (R-58, 19 steps). Reusable steps live in `e2e/flows/`
 (contracts, booking, reservations) and `e2e/helpers.ts`. The dev bench's System Settings
 time zone is Europe/Istanbul (the demo hotels are in Türkiye).
+
+## Local testing on your own machine
+For sales/revenue staff and developers who want TEX Engine with the demo data on a laptop
+(macOS, Windows 10/11, Linux), see [`deploy/tex-local/README.md`](../../deploy/tex-local/README.md):
+Docker Compose (`cd deploy/tex-local && docker compose up -d`, then
+`http://localhost:8000/kamra/tex`) or, without Docker, a native bench made by
+`deploy/tex-local/setup-local.sh` ([`NATIVE.md`](../../deploy/tex-local/NATIVE.md)). Both are
+for local testing only (well-known demo passwords, `developer_mode`, never `tex_production`).
+
+## After a container restart
+Cloud containers can restart between turns; files survive, processes do not. Bring the
+services back (as root):
+```bash
+mysqld_safe > /dev/null 2>&1 &                     # MariaDB (root password "root")
+redis-server --daemonize yes --dir /tmp            # Redis 6379 (keep its dump out of the repo)
+grep -q test.localhost /etc/hosts || echo "127.0.0.1 test.localhost" >> /etc/hosts   # Node/Playwright need it
+su frappe -s /bin/bash -c "source /home/user/bench/env.sh; cd /home/user/bench/frappe-bench; \
+  nohup bench serve --port 8000 >> /home/user/bench/serve.log 2>&1 &"
+```
+`env.sh` takes the proxy from the session's `HTTPS_PROXY` (its port changes on restart). Bench
+test runs shared by several agents go through `/home/user/bench/scratch/benchtest.sh <tree> <module>`
+(one run at a time, under a file lock).

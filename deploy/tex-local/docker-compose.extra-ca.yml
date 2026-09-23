@@ -1,0 +1,23 @@
+# OPTIONAL override - only for networks whose proxy re-signs HTTPS (some company
+# networks). It hands that network's root CA to the image build as the BuildKit
+# secret "extra_ca"; the CA is used while downloading and never stored in the image.
+#
+# Easiest (any OS, every compose command in this folder uses it, `up -d --build` too):
+# put these three lines in .env (see .env.example)
+#   COMPOSE_PATH_SEPARATOR=,
+#   COMPOSE_FILE=docker-compose.yml,docker-compose.extra-ca.yml
+#   TEX_EXTRA_CA_FILE=/path/to/company-root-ca.pem
+# or, for a single command in bash/zsh:
+#   TEX_EXTRA_CA_FILE=/path/to/company-root-ca.pem \
+#     docker compose -f docker-compose.yml -f docker-compose.extra-ca.yml up -d --build
+#
+# Not needed (and not used) anywhere else.
+services:
+  tex:
+    build:
+      secrets:
+        - extra_ca
+
+secrets:
+  extra_ca:
+    file: ${TEX_EXTRA_CA_FILE:?set TEX_EXTRA_CA_FILE to the PEM file of your network's root CA}

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link2, ListRestart, Send, CloudUpload } from "lucide-react"
 import { tex, TexApiError, useTexQuery } from "../../../lib/api"
-import { isoDay } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, CardBody, ConfirmDialog, EmptyState, ErrorState, Field, Input, Segmented, Select, useToast } from "../../../ui"
 import { AriTable } from "./AriTable"
@@ -19,7 +18,8 @@ export function AriTab({ connection, conn, mappings, lookups, canManage, onChang
   const names = useLookupNames(lookups.data)
   const rows = useMemo(() => mappings.data ?? [], [mappings.data])
   const [mapping, setMapping] = useState("")
-  const [from, setFrom] = useState(() => isoDay(new Date()))
+  // null = the site's today (the server's day, where the push horizon starts — not the browser's)
+  const [from, setFrom] = useState<string | null>(null)
   const [span, setSpan] = useState<Span>("14")
   const [busy, setBusy] = useState<"queue" | "full" | "send" | null>(null)
   const [confirmFull, setConfirmFull] = useState(false)
@@ -29,8 +29,8 @@ export function AriTab({ connection, conn, mappings, lookups, canManage, onChang
     if (rows.length && !rows.some((m) => m.name === mapping)) setMapping((rows.find((m) => m.enabled) ?? rows[0]).name)
   }, [rows, mapping])
 
-  const validFrom = ISO.test(from)
-  const q = useTexQuery<AriPreview>("distribution", "ari_preview", { mapping, date_from: from, days: Number(span) }, [mapping, from, span], !!mapping && validFrom)
+  const validFrom = from === null || ISO.test(from)
+  const q = useTexQuery<AriPreview>("distribution", "ari_preview", { mapping, date_from: from ?? undefined, days: Number(span) }, [mapping, from, span], !!mapping && validFrom)
   // a cleared or invalid date shows no days (not the last answer under the new date)
   const days = !mapping ? undefined : !validFrom ? NO_DAYS : q.data?.mapping === mapping ? q.data.days : undefined
   // a switched-off connection sends nothing: the server would queue 0 and mark jobs done unsent
@@ -105,7 +105,7 @@ export function AriTab({ connection, conn, mappings, lookups, canManage, onChang
             />
           </Field>
           <Field label={t("connect.channels.ari.from")} className="w-full sm:w-auto" error={validFrom ? undefined : t("connect.channels.ari.err_date")}>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Input type="date" value={from ?? q.data?.date_from ?? ""} onChange={(e) => setFrom(e.target.value)} />
           </Field>
           <div className="space-y-1.5">
             <span className="block text-sm font-medium text-zinc-800" aria-hidden>

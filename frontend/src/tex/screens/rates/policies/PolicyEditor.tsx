@@ -84,7 +84,26 @@ function payload(kind: PolicyKind, d: Doc): Doc {
   return out
 }
 
-function sourceOptions(t: T, source: string | undefined, boot: ReturnType<typeof useSession>["boot"], lookups: Lookups | undefined, doc: Doc): Option[] {
+/** An age band of another live pricing policy this one cascades with (rules cascade by band code). */
+interface InheritedBand {
+  code: string
+  label: string
+  is_infant: boolean
+  policies: string[]
+}
+
+/** The policy's own bands, then the band codes of the live policies it cascades with, so a
+ * hotel (+ market) policy without bands can name the market policy's (ADR-043). */
+function bandOptions(t: T, doc: Doc, inherited: InheritedBand[] | undefined): Option[] {
+  const own = ((doc.age_bands as Row[]) ?? []).map((b) => String(b.band_code ?? "").trim().toUpperCase()).filter(Boolean)
+  const out: Option[] = own.map((code) => ({ value: code, label: code }))
+  for (const b of inherited ?? []) {
+    if (!own.includes(b.code)) out.push({ value: b.code, label: t("rates.policy.pricing.band_from", { code: b.code, policy: b.policies.join(", ") }) })
+  }
+  return out
+}
+
+function sourceOptions(t: T, source: string | undefined, boot: ReturnType<typeof useSession>["boot"], lookups: Lookups | undefined, doc: Doc, inherited?: InheritedBand[]): Option[] {
   switch (source) {
     case "market":
       return boot.markets.map((m) => ({ value: m.name, label: `${m.name} · ${m.market_name}` }))
@@ -101,7 +120,7 @@ function sourceOptions(t: T, source: string | undefined, boot: ReturnType<typeof
     case "board":
       return enumOptions(t, "board", BOARDS)
     case "band":
-      return ((doc.age_bands as Row[]) ?? []).filter((b) => b.band_code).map((b) => ({ value: String(b.band_code).toUpperCase(), label: String(b.band_code).toUpperCase() }))
+      return bandOptions(t, doc, inherited)
     default:
       return []
   }
@@ -127,6 +146,9 @@ export default function PolicyEditor() {
   const [busy, setBusy] = useState(false)
   const [actionErr, setActionErr] = useState<TexApiError>()
   const lookups = useLookups(String(doc?.property || property || "") || undefined)
+  const pricing = kind?.doctype === "TEX Pricing Policy"
+  const bandArgs = { property: String(doc?.property || "") || null, market: String(doc?.market || "") || null, exclude: isNew ? null : name }
+  const inheritedBands = useTexQuery<InheritedBand[]>("policies", "pricing_policy_bands", bandArgs, [pricing, bandArgs.property, bandArgs.market, bandArgs.exclude], Boolean(pricing && doc))
 
   useEffect(() => {
     if (!kind) return
@@ -332,7 +354,7 @@ export default function PolicyEditor() {
                 <CardHeader title={t(s.title)} description={s.help ? t(s.help) : undefined} />
                 <CardBody>
                   {table ? (
-                    <TableField f={visible[0]} doc={doc} readOnly={!editable} lookups={lookups.data} onChange={(rows) => set(visible[0].key, rows)} />
+                    <TableField f={visible[0]} doc={doc} readOnly={!editable} lookups={lookups.data} inheritedBands={inheritedBands.data} onChange={(rows) => set(visible[0].key, rows)} />
                   ) : (
                     <FormGrid cols={3}>
                       {visible.map((f) => (
@@ -498,7 +520,7 @@ function FieldControl({
   }
 }
 
-function TableField({ f, doc, readOnly, lookups, onChange }: { f: PolicyField; doc: Doc; readOnly: boolean; lookups: Lookups | undefined; onChange: (rows: Row[]) => void }) {
+function TableField({ f, doc, readOnly, lookups, inheritedBands, onChange }: { f: PolicyField; doc: Doc; readOnly: boolean; lookups: Lookups | undefined; inheritedBands?: InheritedBand[]; onChange: (rows: Row[]) => void }) {
   const { t } = useTexT()
   const { boot } = useSession()
   const cols: ColSpec[] = (f.columns ?? []).map((c) => ({
@@ -509,7 +531,7 @@ function TableField({ f, doc, readOnly, lookups, onChange }: { f: PolicyField; d
     required: c.required,
     decimals: c.decimals,
     allowNegative: c.allowNegative,
-    options: c.options ? enumOptions(t, c.group ?? "", c.options) : c.source ? sourceOptions(t, c.source, boot, lookups, doc) : undefined,
+    options: c.options ? enumOptions(t, c.group ?? "", c.options) : c.source ? sourceOptions(t, c.source, boot, lookups, doc, inheritedBands) : undefined,
     placeholder: c.blank ? t(c.blank) : undefined,
     suffix: c.percentWhenOp ? (r: Row) => (PERCENT_OPS.has(String(r.op)) ? "%" : null) : undefined,
     disabled: c.key === "age_band" ? (r: Row) => r.target !== "CHILD" : undefined,

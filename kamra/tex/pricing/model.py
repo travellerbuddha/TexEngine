@@ -141,6 +141,9 @@ class OccupancyRule:
 	base_level: Level = Level.VERSION  # GLOBAL/HOTEL/MARKET for inherited policy rules
 	source: str = "version"
 	note: str = ""
+	# origin of an inherited policy rule: hotel 1 | market 2 (global 0, hotel + market 3), like
+	# markup.weight; ranks policies of one level (MARKET: hotel + market > market). 0 for version rules
+	scope_weight: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +255,9 @@ class ContractTerms:
 	stacking: StackingMode = StackingMode.SEQUENTIAL
 	room_basis_extra_unit: RoomBasisExtraUnit = RoomBasisExtraUnit.PER_PERSON_SHARE
 	room_basis_children_fill_included: bool = False   # children occupy unused included places
+	# how occupancy rules rank (occupancy.LEGACY / CASCADE, ADR-043): a payload frozen before v2 has
+	# no such key and keeps the ranking it was sold with
+	occupancy_precedence: int = 2
 
 
 # ─── selling policies ────────────────────────────────────────────────────

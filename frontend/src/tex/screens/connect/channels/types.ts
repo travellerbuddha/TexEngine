@@ -95,6 +95,7 @@ export interface AriDay {
 
 export interface AriPreview {
   mapping: string
+  date_from: string
   days: AriDay[]
 }
 

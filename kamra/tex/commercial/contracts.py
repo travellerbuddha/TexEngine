@@ -1,14 +1,16 @@
 """Contract & contract-version service (ADR-004).
 
 Draft versions are edited through their child tables. ``publish`` validates the
-draft, resolves everything it inherits (hotel/market pricing policy, room
-capacities, rate-plan policies) and freezes the canonical payload + sha256 hash.
-Pricing always runs on that frozen payload.
+draft, resolves everything it inherits (every applicable pricing policy - global,
+hotel, market, hotel + market, ADR-043 - room capacities, rate-plan policies) and
+freezes the canonical payload + sha256 hash. Pricing always runs on that frozen
+payload: a policy change reaches a contract only when it is republished.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 
 import frappe
@@ -17,7 +19,7 @@ from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.money import D, D_or_none
 from kamra.tex.pricing import ages as age_math
-from kamra.tex.pricing import serialize, validate, versions
+from kamra.tex.pricing import inherit, occupancy, serialize, validate, versions
 from kamra.tex.pricing.enums import (
 	AgeBasis,
 	ChildOrdering,
@@ -96,29 +98,25 @@ def _nz(v) -> int | None:
 # ─── inherited policy ────────────────────────────────────────────────────
 
 
-def _policy_for(property: str, market: str, at: datetime):
-	"""Most specific live pricing policy: hotel+market > hotel > market > global."""
+def _policy_layers(property: str, market: str, at: datetime) -> list[inherit.PolicyLayer]:
+	"""Every pricing policy live at ``at`` that applies to this hotel and market: global,
+	hotel, market and hotel + market (G-30). ``inherit.cascade`` ranks them."""
 	from kamra.tex.commercial.revisions import as_of
 
-	rows = as_of("TEX Pricing Policy", at, fields=("name", "property", "market"))
-	best, best_rank = None, -1
-	for r in rows:
-		if r.property and r.property != property:
+	layers = []
+	for r in as_of("TEX Pricing Policy", at, fields=("name", "property", "market", "revision_no")):
+		if (r.property and r.property != property) or (r.market and r.market != market):
 			continue
-		if r.market and r.market != market:
-			continue
-		rank = (2 if r.property else 0) + (1 if r.market else 0)
-		if rank > best_rank:
-			best, best_rank = r, rank
-	if not best:
-		return None, None
-	level = Level.HOTEL if best.property else (Level.MARKET if best.market else Level.GLOBAL)
-	if best.property and best.market:
-		level = Level.MARKET
-	return frappe.get_doc("TEX Pricing Policy", best.name), level
+		doc = frappe.get_doc("TEX Pricing Policy", r.name)
+		layer = inherit.PolicyLayer(policy_id=r.name, revision=int(r.revision_no or 1),
+		                            property=r.property or None, market=r.market or None, bands=age_bands_of(doc.age_bands))
+		layers.append(replace(layer, rules=occupancy_rules_of(doc.occupancy_rules, base_level=layer.level,
+		                                                      source=layer.source, scope_weight=layer.weight)))
+	return layers
 
 
-def _bands(rows) -> tuple[AgeBand, ...]:
+def age_bands_of(rows) -> tuple[AgeBand, ...]:
+	"""Age bands from TEX Child Age Band rows (codes upper-cased, ages in exact months)."""
 	return tuple(
 		AgeBand(code=r.band_code.strip().upper(), label=r.label or r.band_code,
 		        from_months=age_math.years_to_months(r.from_age or 0),
@@ -126,7 +124,9 @@ def _bands(rows) -> tuple[AgeBand, ...]:
 		for r in rows)
 
 
-def _occ_rules(rows, *, base_level: Level, source: str) -> tuple[OccupancyRule, ...]:
+def occupancy_rules_of(rows, *, base_level: Level, source: str,
+                       scope_weight: int = 0) -> tuple[OccupancyRule, ...]:
+	"""Occupancy rules from TEX Occupancy Rule rows, stamped with their origin."""
 	out = []
 	for r in rows:
 		adults, children = parse_combination(r.combination)
@@ -136,7 +136,7 @@ def _occ_rules(rows, *, base_level: Level, source: str) -> tuple[OccupancyRule, 
 			position=_nz(r.position), age_band=(r.age_band or "").strip().upper() or None,
 			room_type=r.room_type or None, period=(r.period_code or "").strip() or None,
 			adults=adults, children=children, is_override=bool(r.is_override), base_level=base_level,
-			source=source, note=r.note or ""))
+			source=source, note=r.note or "", scope_weight=scope_weight))
 	return tuple(out)
 
 
@@ -199,13 +199,13 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		         value=None if r.op == "INHERIT" else D(r.value), base_room_type=r.base_room_type or None)
 		for r in version.period_rates)
 
-	policy, level = _policy_for(contract.property, contract.market, at)
-	bands = _bands(version.age_bands) if version.age_bands else (
-		_bands(policy.age_bands) if policy else ())
-	occ = _occ_rules(version.occupancy_rules, base_level=Level.VERSION, source="version")
-	if policy:
-		occ = occ + _occ_rules(policy.occupancy_rules, base_level=level,
-		                       source=f"policy:{policy.name}/r{policy.revision_no}")
+	# the version's own bands and rules, then every applicable pricing policy's (G-30, ADR-043)
+	try:
+		bands, occ = inherit.cascade(age_bands_of(version.age_bands),
+		                             occupancy_rules_of(version.occupancy_rules, base_level=Level.VERSION, source="version"),
+		                             _policy_layers(contract.property, contract.market, at))
+	except inherit.PolicyAmbiguous as e:   # never ranked by guesswork (PRICING_POLICY_AMBIGUOUS)
+		frappe.throw(_("Pricing policies cannot be combined: {0}.").format(e), title=_("Pricing policy ambiguous"))
 
 	board_rules = tuple(
 		BoardRule(rule_id=b.name, board=b.board, is_base=bool(b.is_base), op=Op(b.op or "ADD"),
@@ -258,6 +258,7 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		prices_include_tax=bool(version.prices_include_tax), stacking=StackingMode(version.stacking or "SEQUENTIAL"),
 		room_basis_extra_unit=RoomBasisExtraUnit(version.room_basis_extra_unit or "PER_PERSON_SHARE"),
 		room_basis_children_fill_included=bool(version.room_basis_children_fill_included),
+		occupancy_precedence=occupancy.CASCADE,
 	)
 
 

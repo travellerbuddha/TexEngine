@@ -19,11 +19,11 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 
 | Check | Command | Result |
 |---|---|---|
-| TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **214 passed** (G-45: `test_settlement` 17) |
-| TEX integration tests (15 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **234 OK**: admin_markets 4, commercial_flows 41, concurrency 7 (threaded), critical_journey 10, crm_segments 7, custom_domains 9, distribution 17, extras_inventory 17, loyalty_admin 7, migrations_notify 7, portfolio 2, post_booking_extras 12, public_booking 17, security_regressions 58, self_service_money 19 (re-run for G-45, ADR-044) |
-| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **14 passed**: critical-journey (R-58, 19 steps), contract-admin, crs ×2, shell, policy-revisions (G-20), booking ×4 desktop + ×4 mobile (Pixel 7). `manage-money.spec.ts` (G-45, 3) is written and type-checked, not yet run |
+| TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **UNIT_COUNT passed** (incl. G-45 `test_settlement` 17) |
+| TEX integration tests (16 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **IT_COUNT** |
+| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **E2E_COUNT** |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** |
-| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (re-run for G-45; its UI changes are not in the committed bundles in `kamra/public`: rebuild after merging) |
+| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (re-run on the merge of G-45 self-service money flows, ADR-044, with occupancy precedence v2, ADR-043; bundles rebuilt) |
 | Lint / static security | `ruff check kamra/tex kamra/patches/tex`; semgrep (Frappe rules, ERROR) | clean / 0 findings (semgrep 1.177, frappe/semgrep-rules + r/python.lang.correctness, ERROR; G-45's changed files re-scanned: 0) |
 
 **Coverage gaps.** Green tests do not prove absence of the defects below. The audit reproduced
@@ -33,6 +33,8 @@ several critical defects with probes and scratch tests that the suite does not c
 **CI.** `.github/workflows/ci.yml` runs all of the above including Playwright. It has never
 run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
+**2026-09-23.** The work paused at the owner's request is merged: G-30/G-31 occupancy precedence v2 (ADR-043) and G-45 self-service money flows (ADR-044). G-50, G-83 and TEX monitoring are in progress. Root `SECURITY.md` is rewritten for TEX (the security contact is still an owner input).
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
@@ -40,12 +42,12 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
 | Status | Count | Requirements |
 |---|---|---|
-| COMPLETE | 11 | R-06, R-10, R-26, R-38, R-42, R-45, R-46, R-57, R-58, R-60 (process), R-61 (process) |
-| PARTIAL | 51 | all others; the gaps are listed per row |
+| COMPLETE | 12 | R-06, R-07, R-10, R-26, R-38, R-42, R-45, R-46, R-57, R-58, R-60 (process), R-61 (process) |
+| PARTIAL | 50 | all others; the gaps are listed per row |
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 5 High, 32 Medium, 7 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables. All nine Critical
+**Open gaps by severity:** 0 Critical, 5 High, 30 Medium, 8 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables. All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -78,9 +80,9 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `screens/rates/contracts/*` · e2e `contract-admin` | Header fields editable after publish (G-50). (Fixed: contract selection G-17, cost visibility G-11; `TestContractSelection`.) |
 | R-05 | Versioning & snapshot | PARTIAL | immutable versions, frozen payload + hash verified on load (`tex_contract_version.py`, `revisions.py`) · `TestContractImmutability`, `test_payload_integrity_is_checked`, e2e | Snapshot keeps periods/rules by reference only; no explicit quote timestamp (G-73). (The REST lock bypass G-01 is fixed, `TestPriceLock`.) |
 | R-06 | Base pricing modes | **COMPLETE** | `occupancy.py` PERSON/ROOM · `TestRoomBasis`, `TestPersonBasis`; basis select in `ContractDialogs.tsx` | — |
-| R-07 | Occupancy formula engine | PARTIAL | slot model, combinations not hardcoded (`occupancy.py`, `contracts.parse_combination`) · spec examples reproduced (270; 2A+1C 250 vs 1A+1C 200) | Global/hotel/market policy rules do not cascade (single `_policy_for`) (G-30). Band-less position/combination rules silently outrank band rules incl. infant ×0; no publish warning (G-31). |
+| R-07 | Occupancy formula engine | **COMPLETE** | slot model, combinations not hardcoded (`occupancy.py`, `contracts.parse_combination`); every live pricing policy (global, hotel, market, hotel + market) cascades into a contract at publish, rule origin ranked before qualifiers, an infant priced by its band rule first, ambiguous rules refused at publish where the tie decides a price, a pricing policy checked on its own before it goes live, legacy payloads priced as sold (occupancy precedence v2, ADR-043, G-30/G-31 fixed and reviewed); policy and contract occupancy editors (`screens/rates`; a policy rule can name the bands of the policies it cascades with) · spec examples reproduced (270; 2A+1C 250 vs 1A+1C 200), `TestPrecedenceV2`, `test_policy_cascade`, `test_pricing_policies` (14) | — |
 | R-08 | Child age engine | PARTIAL | integer months, DOB-at-arrival (`ages.py`) · `test_boundaries_in_months`, `TestChildrenAtBoundaries` (35/36, 83/84, 143/144 months) | Per-hotel/market bands untested; band gaps not detected at publish; no DOB input in UI (G-52). |
-| R-09 | Rule hierarchy | PARTIAL | `Level` precedence; winning + overridden rules in the price check (`PreviewTab.tsx`) · markup/occupancy precedence tests, e2e asserts explanation | Policy cascade (G-30). Same-scope markup ties resolved silently. Markup explanation level ignores channel (G-53). |
+| R-09 | Rule hierarchy | PARTIAL | `Level` precedence; occupancy rules rank origin (version > hotel + market > market > hotel > global) then level (ADR-043, G-30 fixed); a policy's "specific override" ranks within its policy (publish warns where that changed a price, `OCC_POLICY_OVERRIDE_OUTRANKED`); one live pricing policy per scope, activations serialised; winning + overridden rules and the policy scope in the price check (`PreviewTab.tsx`) · markup/occupancy precedence tests, `test_policy_cascade`, `test_pricing_policies`, e2e asserts explanation | Same-scope markup ties resolved silently. Markup explanation level ignores channel (G-53). |
 | R-10 | Derived rooms | **COMPLETE** | `rooms.py` (derivation, cycle guard, absolute override) · `test_derived_rooms`, `test_base_change_propagates`, `test_absolute_override_wins_in_its_period`; `RatesTab.tsx` | — |
 | R-11 | Stay periods | PARTIAL | unlimited periods, weekday/priority, grid bulk rate change into a draft | No copy period; no bulk edit of occupancy/child/board across periods; `apply_rate_change` untested (G-47). |
 | R-12 | Sale vs stay date | PARTIAL | sale/stay windows, promotion booking-date/arrival/departure/LOS/through rules; extras and taxes effective-dated by sale time (G-20 fixed) · `test_sale_date_outside_eb_window`, `TestEligibility`, `TestEffectiveDatedExtrasAndTaxes` | Base rates/markups have no arrival/LOS/booking-date rules (G-54). |

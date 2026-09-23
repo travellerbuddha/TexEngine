@@ -357,7 +357,7 @@ export const POLICY_KINDS: PolicyKind[] = [
               { key: "room_type", kind: "select", source: "room_type", label: "rates.f.room_type", blank: "rates.common.all_rooms" },
               { key: "op", kind: "select", label: "rates.f.rule", options: OPS_OCC, group: "op", required: true, default: "PERCENT_OF" },
               { key: "value", kind: "decimal", label: "rates.f.value", allowNegative: true, percentWhenOp: true },
-              { key: "is_override", kind: "check", label: "rates.f.is_override" },
+              { key: "is_override", kind: "check", label: "rates.f.is_override", help: "rates.policy.pricing.override_help" },
               { key: "note", kind: "text", label: "rates.f.note" },
             ],
           },
