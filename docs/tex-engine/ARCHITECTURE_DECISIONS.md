@@ -206,3 +206,31 @@ caller's record. Offer keys and modification proposals are distinct signed token
 proposals expire after 30 minutes. Cost, margin and rule explanations are stripped from
 proposals and simulations unless the caller holds `price.view_cost`.
 
+
+## ADR-024 Multi-room search places every room on its own
+**Context.** A search for several rooms priced every party against each room type and
+dropped the room type as soon as one party did not fit, so "2 adults + 1 adult with 2
+children" could return nothing although each room had a match (R-29).
+**Decision.** `quoting.search_property` prices each party separately. An offer lists only
+the rooms it fits (`rooms[].room_index`, `room_indexes`), says whether it fits all of them
+(`complete`) and why not (`room_reasons`). A grand `total` exists only for complete offers.
+The hotel's `from_total` is the cheapest placement of every room — the cheapest offer per
+room, summed, possibly across room types — in one currency; a room that fits nowhere is
+reported (`unplaced_rooms`) and leaves `from_total` empty. `bookable` means at least one
+room fits, no restriction applies and a room is free; how many requested rooms a type can
+take at once is `available`, re-checked atomically at booking. Clients look rooms up by
+`room_index`, never by position.
+**Consequences.** Booking engine and CRS let each room pick its own room type; the server
+remains the only source of totals (`public.basket`, `ui_crs.quote_summary`, both through
+`booking.quotes_summary`).
+
+## ADR-025 Lost booking responses and re-sent confirmations
+**Context.** Manage tokens exist in clear only once (ADR-017). A guest whose `book`
+response was lost, or who lost the e-mail, had no way back to the booking or its payment.
+**Decision.** A retried `public.book` from the same session and idempotency key returns a
+signed resume token (`kind=booking-resume`, 24 h, HMAC with the site secret) that the
+guest endpoints accept like a manage token, and restarts the original payment attempt only
+while it is still Pending. The emailed manage link stays the only long-lived secret. Staff
+re-send the confirmation with `crs.resend_confirmation`, which rotates the manage token (the
+old link stops working) and is audited. Confirming a booking before its deposit is paid is
+a credit decision guarded by `reservation.confirm_unpaid` (not held by agents by default).

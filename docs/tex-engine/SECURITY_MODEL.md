@@ -77,6 +77,10 @@ Bearer links: manage-booking and payment-link tokens are stored only as sha256 h
 clear URL exists in the API response that created it and in the outgoing e-mail; Frappe's
 Email Queue keeps the rendered message until its retention purge (System Manager access only).
 Staff who lose a payment link reissue it (new token; the old URL stops working).
+A retried guest booking request (same session and idempotency key) gets a signed 24-hour
+resume token instead of the manage token (ADR-025); staff re-sending a confirmation rotate
+the manage token. Neither is stored in clear. Agent-facing booking responses never contain
+the guest's manage token.
 
 ## 6. Review log
 - 2026-09-22 adversarial review: 4 High, 7 Medium, 5 Low findings — all fixed with regression
