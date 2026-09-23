@@ -206,8 +206,8 @@ def may_sell_on(channel: str | None, property: str, user: str | None = None) -> 
 
 def require_channel(channel: str | None, property: str) -> None:
 	"""Raise PermissionError unless the current user may price and book on ``channel`` at
-	``property``. The channel comes from what is being sold (an offer, a quote), never from
-	who asks."""
+	``property``: the channel a search asks for, or the one a signed offer or stored quote
+	carries (never a channel the caller merely claims for it)."""
 	if not may_sell_on(channel, property):
 		frappe.throw(_("You may not sell on the {0} channel at {1}.").format(channel or "—", property),
 		             frappe.PermissionError)
