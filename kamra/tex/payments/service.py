@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 
 import frappe
@@ -17,15 +18,35 @@ from frappe import _
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
-from kamra.tex.payments.providers import simple, turkey
+from kamra.tex.payments.providers import REGISTRY, account_problem, simple
 from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
+from kamra.tex.security.keys import site_secret
+
+
+class AccountRefused(frappe.ValidationError):
+	"""A provider account that may not run for what was asked of it (G-67, ADR-041)."""
+
+
+class ChargeSuperseded(frappe.ValidationError):
+	"""A reused Pending charge could not take another checkout, so it was cancelled; the
+	caller may start a new charge (G-68). A late verified payment of it is still recorded."""
+
+
+class PaymentBusy(frappe.ValidationError):
+	"""Another request is starting a payment for the same link right now."""
+
+
+# a charge in one of these states still records a payment the gateway verifies (another tab,
+# a restart, a superseded checkout): money a gateway captured is never ignored (G-68)
+SETTLEABLE = ("Pending", "Failed", "Cancelled")
+MAX_LINK_ATTEMPTS = 50
 
 
 def _mock_secret() -> str:
-	key = frappe.local.conf.get("encryption_key") or frappe.local.site
-	return hashlib.sha256(("tex-mock-pay:" + str(key)).encode()).hexdigest()
+	# the site key, never the public site name (G-89): same value as before for a keyed site
+	return hashlib.sha256(site_secret("tex-mock-pay").encode()).hexdigest()
 
 
 def ns_key(property: str, raw: str | None, kind: str) -> str | None:
@@ -39,8 +60,7 @@ def ns_key(property: str, raw: str | None, kind: str) -> str | None:
 
 def callback_signature(transaction: str) -> str:
 	"""Signs the gateway return URL so arbitrary transaction ids cannot be poked."""
-	key = frappe.local.conf.get("encryption_key") or frappe.local.site
-	return hmac.new(("tex-callback:" + str(key)).encode(), transaction.encode(), hashlib.sha256).hexdigest()[:32]
+	return hmac.new(site_secret("tex-callback").encode(), transaction.encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def allowed_return_hosts(property: str) -> set[str]:
@@ -80,18 +100,90 @@ def check_return_url(property: str, url: str) -> str:
 	return url
 
 
-def provider_for(account_name: str):
+def account_rule(acc, purpose: str = "new") -> str | None:
+	"""Why this account may not run for ``purpose``, or None (ADR-041).
+
+	- ``new``: take new money: start a charge, offer a method, save an enabled account;
+	- ``settle``: money a gateway already holds: record a capture, re-verify, refund. An
+	  uncertified Production account left from before certification was required still
+	  settles, so captured money is never stranded;
+	- ``keep``: save a disabled account. It runs nothing until it is enabled again, and
+	  enabling it is a save under ``new``, so only an unknown provider is refused."""
+	if purpose == "keep":
+		return None if acc.get("provider") in REGISTRY else "unknown"
+	return account_problem(acc.get("provider"), acc.get("environment"), acc.get("gateway_url"),
+	                       live_site=bool(frappe.conf.get("tex_production")),
+	                       developer_mode=bool(frappe.conf.get("developer_mode")), settling=purpose == "settle")
+
+
+def _refuse(acc, message: str) -> None:
+	if frappe.session.user == "Guest":
+		# a guest is never told how the hotel's payments are set up; staff find the reason in
+		# the error log (G-67)
+		frappe.log_error(title=f"TEX payment account refused: {acc.get('name')}"[:140], message=message)
+		frappe.throw(_("This payment method is not available."), AccountRefused)
+	frappe.throw(message, AccountRefused, title=_("Payment provider"))
+
+
+def check_account(acc, *, purpose: str = "new") -> None:
+	"""The rules every provider account obeys (G-67, ADR-041): checked by the account's
+	controller whoever saves it (TEX API, Desk, REST) and again before every use, so an
+	account changed behind the controller's back fails closed."""
+	problem = account_rule(acc, purpose)
+	if not problem:
+		return
+	provider = acc.get("provider") or "—"
+	cls = REGISTRY.get(acc.get("provider") or "")
+	_refuse(acc, {
+		"unknown": _("{0} is not an installed payment provider.").format(provider),
+		"mock": _("The mock provider can only be used in Sandbox."),
+		"uncertified": _("{0} is not certified for production: use the Sandbox environment.").format(provider),
+		"gateway_url": _("A gateway URL override is only allowed in Sandbox (for sandbox or test hosts). "
+		                 "A Production account uses the provider's live host: clear the gateway URL."),
+		"sandbox_host": _("A Sandbox gateway URL override must be an https address on {0}'s own sandbox host "
+		                  "({1}): clear it to use the default sandbox address.").format(
+			provider, ", ".join(cls.sandbox_hosts) if cls else "—"),
+		"sandbox_live_site": _("{0} is set to Sandbox and this site is live (tex_production): a sandbox payment is "
+		                       "test money and must not confirm a booking. Disable this account.").format(provider),
+	}[problem])
+
+
+def provider_for(account_name: str, *, purpose: str = "new", transaction: str | None = None):
+	"""The provider of an account, checked for ``purpose`` (see ``account_rule``). A disabled
+	account runs nothing, settling included: disabling is the hotel's stop switch (a leaked
+	gateway key must not confirm bookings)."""
 	acc = frappe.get_doc("TEX Payment Provider Account", account_name)
 	if not acc.enabled:
-		frappe.throw(_("Payment provider {0} is disabled.").format(acc.label))
-	return {
-		"Mock": lambda: simple.MockProvider(acc, _mock_secret()),
-		"Bank Transfer": lambda: simple.BankTransferProvider(acc),
-		"Pay at Hotel": lambda: simple.PayAtHotelProvider(acc),
-		"iyzico": lambda: turkey.IyzicoProvider(acc),
-		"Sipay": lambda: turkey.SipayProvider(acc),
-		"Virtual POS": lambda: turkey.NestPayProvider(acc),
-	}[acc.provider]()
+		_refuse(acc, _("Payment provider {0} is disabled.").format(acc.label))
+	check_account(acc, purpose=purpose)
+	if purpose == "settle" and (gated := account_rule(acc, "new")):
+		# an account that could not take this money today still settles it, on the record (ADR-041)
+		audit("payment_account.settled_while_gated", reference_doctype="TEX Payment Provider Account",
+		      reference_name=acc.name, property=acc.property,
+		      new={"problem": gated, "transaction": transaction, "provider": acc.provider,
+		           "environment": acc.environment})
+	cls = REGISTRY[acc.provider]
+	return cls(acc, _mock_secret()) if cls is simple.MockProvider else cls(acc)
+
+
+def gated_accounts(property: str | None = None) -> list[dict]:
+	"""The go-live check (ADR-041): every account that may not take new money, why, and its
+	open (Pending) charges. Those charges still settle; new ones are refused. Run by patch
+	p19 on migrate and shown on the payments setup screen."""
+	filters = {"property": property} if property else {}
+	out = []
+	for a in frappe.get_all("TEX Payment Provider Account", filters=filters,
+	                        fields=["name", "label", "property", "provider", "environment", "enabled", "gateway_url"],
+	                        order_by="property asc, label asc"):
+		problem = account_rule(a, "new")
+		if not problem:
+			continue
+		open_charges = frappe.get_all("TEX Payment Transaction", filters={
+			"provider_account": a.name, "txn_type": "Charge", "status": "Pending"}, pluck="name")
+		out.append({"account": a.name, "label": a.label, "property": a.property, "provider": a.provider,
+		            "environment": a.environment, "enabled": bool(a.enabled), "problem": problem,
+		            "open_charges": len(open_charges), "open_charge_names": open_charges[:20]})
+	return out
 
 
 # ─── method selection ────────────────────────────────────────────────────
@@ -114,10 +206,12 @@ def payment_methods(property: str, *, market: str | None, currency: str | None, 
 	out = []
 	for method, (_spec, r) in sorted(best.items(), key=lambda x: (-x[1][0][1], x[0])):
 		acc = frappe.db.get_value("TEX Payment Provider Account", r.provider_account,
-		                          ["provider", "label", "environment", "enabled", "currencies"], as_dict=True) \
-			if r.provider_account else None
+		                          ["provider", "label", "environment", "enabled", "currencies", "gateway_url"],
+		                          as_dict=True) if r.provider_account else None
 		if r.provider_account and (not acc or not acc.enabled):
 			continue
+		if acc and account_rule(acc, "new"):
+			continue                     # it could not run (G-67): never offer it
 		if acc and acc.currencies and currency and currency not in [c.strip() for c in acc.currencies.split(",")]:
 			continue
 		out.append({"method": method, "provider_account": r.provider_account,
@@ -139,6 +233,10 @@ def _new_txn(**kw) -> frappe.model.document.Document:
 def start_payment(*, property: str, amount, currency: str, provider_account: str, booking: str | None = None,
                   payment_link: str | None = None, description: str, customer: dict, return_url: str,
                   idempotency_key: str, method: str = "Card", locale: str = "en") -> dict:
+	"""Start (or, with the same key, restart) a charge. A restart reuses the Pending charge;
+	when that charge cannot take another checkout, or its new checkout fails, it is superseded:
+	cancelled, with a late verified payment still recorded, and ``ChargeSuperseded`` raised so
+	the caller can start a new charge (G-68)."""
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Nothing to pay."))
@@ -148,15 +246,31 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		frappe.throw(_("This payment method is not available."), frappe.PermissionError)
 	check_return_url(property, return_url)
 	idempotency_key = ns_key(property, idempotency_key, "charge")
-	existing = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key},
-	                               ["name", "status"], as_dict=True)
+	existing = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key}, "name")
+	if existing:
+		# a locking read by name: the charge as it is now (a callback may have settled it after
+		# this request's snapshot, G-68). Only an existing row is locked, never a gap of the key
+		# index, so no other payment's insert waits behind this one's gateway call.
+		existing = frappe.db.get_value("TEX Payment Transaction", existing,
+		                               ["name", "status", "provider_account", "amount", "currency"], as_dict=True,
+		                               for_update=True)
 	if existing and existing.status != "Pending":
 		frappe.throw(_("This payment was already processed ({0}).").format(existing.status))
+	if existing and (existing.provider_account != provider_account or existing.currency != currency
+	                 or from_db(existing.amount, existing.currency) != amount):
+		# a reused charge is exactly the charge that was started, never re-routed or re-priced
+		frappe.throw(_("This payment was started with another method or amount."))
 	provider = provider_for(provider_account)
-	txn = frappe.get_doc("TEX Payment Transaction", existing.name) if existing else _new_txn(
-		property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
-		provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
-		booking=booking, payment_link=payment_link, return_url=return_url)
+	# a second start of the same charge (another tab, a double click, a restart) reuses the
+	# Pending transaction: one charge, never two (G-68)
+	if existing:
+		txn = frappe.get_doc("TEX Payment Transaction", existing.name, for_update=True)
+		if not provider.can_add_checkout(txn.provider_ref):
+			_supersede(txn, "another checkout was asked for")
+	else:
+		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
+		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
+		               booking=booking, payment_link=payment_link, return_url=return_url)
 	# gateways call back to the platform host, never to a host taken from the request (G-21)
 	callback = _platform_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}"
 	                         f"&cb={callback_signature(txn.name)}")
@@ -164,44 +278,85 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
 		                                           description=description, return_url=return_url,
 		                                           callback_url=callback, customer=customer, locale=locale))
-	except (ProviderError, Exception) as e:
+	except Exception as e:
+		log_exception(f"TEX payment start failed {txn.name}")
+		if existing:
+			# the gateway may refuse a second checkout for the same order; a new charge gets a
+			# new order, and the checkout started earlier is still recorded if it is paid
+			_supersede(txn, "the gateway refused another checkout")
 		txn.status = "Failed"
 		txn.error_message = str(e)[:500]
 		txn.completed_at = now_datetime()
 		txn.save(ignore_permissions=True)
-		log_exception(f"TEX payment start failed {txn.name}")
 		frappe.throw(_("The payment could not be started. Please try another method."))
 	if checkout.provider_ref:
-		txn.provider_ref = checkout.provider_ref
+		# a reused charge keeps what its earlier checkouts need to be recognised when paid
+		txn.provider_ref = provider.merge_ref(txn.provider_ref, checkout.provider_ref) if existing \
+			else checkout.provider_ref
 		txn.save(ignore_permissions=True)
 	return {"transaction": txn.name, "kind": checkout.kind, "url": checkout.url, "fields": checkout.fields,
 	        "instructions": checkout.instructions, "sandbox": provider.sandbox}
 
 
-def complete(transaction: str, *, params: dict, headers: dict | None = None, body: bytes = b"",
-             allow_failed: bool = False) -> dict:
+def _supersede(txn, why: str) -> None:
+	"""Cancel a reused Pending charge that cannot go on and raise ``ChargeSuperseded``. The
+	charge keeps its references, so a payment of one of its checkouts is still verified and
+	recorded (``complete`` settles Cancelled charges) and flagged if it overpays."""
+	txn.flags.tex_system_update = True
+	txn.status = "Cancelled"
+	txn.error_code = "SUPERSEDED"
+	txn.error_message = why
+	txn.completed_at = now_datetime()
+	txn.save(ignore_permissions=True)
+	audit("payment.superseded", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, new={"reason": why, "link": txn.payment_link, "booking": txn.booking})
+	# raised, not frappe.throw: the callers catch it and go on, and a queued message would reach
+	# the guest in the successful response
+	raise ChargeSuperseded(_("The payment could not be started. Please try again."))
+
+
+def complete(transaction: str, *, params: dict, headers: dict | None = None, body: bytes = b"") -> dict:
 	"""Provider callback → verified outcome → transaction final + allocation. Idempotent.
 
 	Only an outcome the gateway authenticated for THIS transaction changes it; an
 	unverifiable or not-yet-final result raises ProviderError / stays Pending, so a
 	forged request can never fail a payment the guest is completing (ADR-021).
-	``allow_failed``: staff re-verification may turn a Failed charge into Succeeded."""
-	frappe.db.sql("SELECT name FROM `tabTEX Payment Transaction` WHERE name=%s FOR UPDATE", transaction)
-	txn = frappe.get_doc("TEX Payment Transaction", transaction)
-	if txn.status != "Pending" and not (allow_failed and txn.status == "Failed"):
-		return {"transaction": txn.name, "status": txn.status, "replay": True}
-	provider = provider_for(txn.provider_account)
-	outcome = provider.handle_callback(txn.name, params, headers or {}, body, provider_ref=txn.provider_ref)
+	A Failed or Cancelled charge still accepts a verified success (the gateway captured the
+	money): a charge can have had several checkouts (another tab, a restart, G-68), and one of
+	them failing must not hide another one paid; staff re-verification uses the same path.
+
+	The gateway is asked first, holding no lock: a slow gateway must not keep the link or
+	the payment locked while other requests wait (G-68). Then the link and the payment are
+	locked and read as they are now (locking reads), and the outcome is applied once."""
+	row = frappe.db.get_value("TEX Payment Transaction", transaction,
+	                          ["name", "status", "provider_account", "provider_ref", "payment_link"], as_dict=True)
+	if not row:
+		frappe.throw(_("Unknown payment."), frappe.DoesNotExistError)
+	if row.status not in SETTLEABLE:
+		return {"transaction": row.name, "status": row.status, "replay": True}
+	provider = provider_for(row.provider_account, purpose="settle", transaction=row.name)
+	outcome = provider.handle_callback(row.name, params, headers or {}, body, provider_ref=row.provider_ref)
 	if outcome.status == "Pending":
-		return {"transaction": txn.name, "status": txn.status, "pending": True}
-	if allow_failed and txn.status == "Failed" and outcome.status != "Succeeded":
-		return {"transaction": txn.name, "status": txn.status}
-	if outcome.amount and quantize(outcome.amount, txn.currency) != from_db(txn.amount, txn.currency):
-		outcome = Outcome(status="Failed", provider_ref=outcome.provider_ref, raw_status=outcome.raw_status,
-		                  error_code="AMOUNT_MISMATCH", error_message="provider amount differs")
+		return {"transaction": row.name, "status": row.status, "pending": True}
+	_lock_link_then_payment(row.name, row.payment_link)
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)
+	if txn.status not in SETTLEABLE:
+		return {"transaction": txn.name, "status": txn.status, "replay": True}
+	refused = False
+	if outcome.status == "Succeeded":
+		checked = _checked_capture(provider, outcome, txn)
+		if checked is not outcome:
+			_capture_refused(txn, outcome, checked)
+			refused = True
+		outcome = checked
+	if txn.status != "Pending" and outcome.status != "Succeeded":
+		return {"transaction": txn.name, "status": txn.status, "replay": True}
 	txn.status = outcome.status if outcome.status in ("Succeeded", "Failed", "Cancelled") else "Pending"
 	txn.flags.tex_system_update = True
-	txn.provider_ref = outcome.provider_ref or txn.provider_ref
+	if not refused:
+		# a refused capture keeps the charge's checkout references (another tab of it may still
+		# be paid); the gateway's reference of the refused capture is in its audit entry
+		txn.provider_ref = outcome.provider_ref or txn.provider_ref
 	txn.raw_status = outcome.raw_status
 	txn.error_code = outcome.error_code
 	txn.error_message = (outcome.error_message or "")[:500] or None
@@ -218,14 +373,140 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	return {"transaction": txn.name, "status": txn.status}
 
 
+def _checked_capture(provider, outcome: Outcome, txn) -> Outcome:
+	"""A gateway's success counts only for exactly this charge (G-67): a gateway that reports
+	amounts must state the amount it captured (missing or 0 is not trusted), any stated amount
+	must equal the charge, and a stated currency must be the charge's currency. Returns the
+	outcome itself when it counts, else a Failed outcome naming the mismatch."""
+	expected = from_db(txn.amount, txn.currency)
+	try:
+		stated = quantize(D(outcome.amount), txn.currency) if outcome.amount is not None else ZERO
+	except (TypeError, ValueError, ArithmeticError):
+		stated = None                                  # unreadable: never equal to the charge
+	must_state = getattr(provider, "reports_amount", False)
+	code = message = None
+	if stated is None or (stated and stated != expected) or (not stated and must_state):
+		code = "AMOUNT_MISMATCH"
+		message = f"provider amount {to_str(stated) if stated else '-'} differs from {to_str(expected)}"
+	elif outcome.currency and str(outcome.currency).strip().upper() != (txn.currency or "").upper():
+		code = "CURRENCY_MISMATCH"
+		message = f"provider currency {str(outcome.currency)[:8]} differs from {txn.currency}"
+	if not code:
+		return outcome
+	return Outcome(status="Failed", provider_ref=outcome.provider_ref, raw_status=outcome.raw_status,
+	               error_code=code, error_message=message)
+
+
+def _capture_refused(txn, captured: Outcome, checked: Outcome) -> None:
+	"""The gateway holds money TEX did not count (G-67): put what it stated on the record,
+	once per gateway reference, so finance can refund it (``refund`` reads it back)."""
+	ref = (captured.provider_ref or "")[:140] or None
+	seen = frappe.get_all("TEX Audit Event", filters={"action": "payment.capture_mismatch",
+	                                                  "reference_doctype": "TEX Payment Transaction",
+	                                                  "reference_name": txn.name}, pluck="new_value")
+	if any((json.loads(v or "{}") or {}).get("provider_ref") == ref for v in seen):
+		return
+	try:
+		amount = to_str(D(captured.amount)) if captured.amount is not None else None
+	except (TypeError, ValueError, ArithmeticError):
+		amount = None
+	audit("payment.capture_mismatch", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, source="Webhook",
+	      new={"code": checked.error_code, "provider_ref": ref, "amount": amount,
+	           "currency": str(captured.currency).strip().upper()[:8] if captured.currency else None,
+	           "expected_amount": to_str(from_db(txn.amount, txn.currency)), "expected_currency": txn.currency,
+	           "link": txn.payment_link, "booking": txn.booking})
+
+
+def refused_capture(txn) -> dict | None:
+	"""The money a gateway captured for this charge that TEX refused to count (G-67), as the
+	gateway stated it: {provider_ref, amount, currency}. A missing amount or currency is the
+	charge's own. None when there is none, or when there are several (those are refunded in
+	the gateway's merchant panel)."""
+	if txn.txn_type != "Charge" or txn.status == "Succeeded":
+		return None
+	rows = frappe.get_all("TEX Audit Event", filters={"action": "payment.capture_mismatch",
+	                                                  "reference_doctype": "TEX Payment Transaction",
+	                                                  "reference_name": txn.name}, pluck="new_value")
+	captures = {c.get("provider_ref"): c for c in (json.loads(v or "{}") or {} for v in rows)}
+	if len(captures) != 1:
+		return None
+	(ref, c), = captures.items()
+	if not ref:
+		return None
+	ccy = c.get("currency") or txn.currency
+	return {"provider_ref": ref, "currency": ccy,
+	        "amount": quantize(D(c.get("amount")), ccy) if c.get("amount") else from_db(txn.amount, txn.currency)}
+
+
+def _lock_link_then_payment(transaction: str, link: str | None = None) -> None:
+	"""Lock order for a payment: its link first (if any), then the payment row. ``pay_link``
+	holds the link while it reuses or starts the link's charge, so a callback of that charge
+	must never hold the charge while it waits for the link."""
+	link = link or frappe.db.get_value("TEX Payment Transaction", transaction, "payment_link")
+	if link:
+		_lock("TEX Payment Link", link)
+	_lock("TEX Payment Transaction", transaction)
+
+
+def lock_link(name: str, *, nowait: bool = False) -> frappe._dict:
+	"""Lock a payment link and read it as it is now (a locking read, not the snapshot).
+	``nowait``: a link another request is starting a payment for answers at once instead of
+	waiting behind that request's gateway call (G-68)."""
+	query = "SELECT name, status, amount, paid_amount, currency, property FROM `tabTEX Payment Link` WHERE name=%s"
+	try:
+		rows = frappe.db.sql(query + (" FOR UPDATE NOWAIT" if nowait else " FOR UPDATE"), name, as_dict=True)
+	except frappe.QueryTimeoutError:
+		frappe.throw(_("A payment for this link is being started. Please wait a moment and try again."), PaymentBusy)
+	if not rows:
+		frappe.throw(_("This payment link is not valid."), frappe.DoesNotExistError)
+	return rows[0]
+
+
+def link_charge_key(link: str, due, provider_account: str, property: str) -> str:
+	"""The idempotency key of a link's next charge (G-68): the same while its charge is
+	Pending (two tabs, a double click → one charge), a new one after each Failed or Cancelled
+	attempt (a retry is a new charge). A guest who switches to another gateway gets that
+	gateway's own charge. Called under ``lock_link``.
+
+	Each attempt's key is looked up, and a charge found is read again with a locking read by
+	name, so its status is what it is now, not what this request's snapshot saw (a callback may
+	have settled it since). A count would be a snapshot read, and a locking count would lock
+	the whole table: ``payment_link`` has no index."""
+	stem = f"link:{link}:{provider_account}:{to_str(D(due))}"
+	for n in range(MAX_LINK_ATTEMPTS):
+		key = f"{stem}:{n}"
+		name = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": ns_key(property, key, "charge")})
+		status = frappe.db.get_value("TEX Payment Transaction", name, "status", for_update=True) if name else None
+		if status not in ("Failed", "Cancelled"):
+			return key          # a new charge, the Pending one to reuse, or a paid one start_payment refuses
+	frappe.throw(_("This payment link has had too many attempts. Please contact the hotel."))
+
+
 def _after_charge(txn) -> None:
 	amount = from_db(txn.amount, txn.currency)
 	if txn.payment_link:
-		link = frappe.get_doc("TEX Payment Link", txn.payment_link)
+		# locked and read as it is now: a stale copy would lose the other payment's amount
+		link = frappe.get_doc("TEX Payment Link", txn.payment_link, for_update=True)
 		link.flags.tex_system_update = True
-		link.paid_amount = from_db(link.paid_amount, link.currency) + amount
-		link.status = "Paid" if link.paid_amount >= from_db(link.amount, link.currency) else "Partially Paid"
+		owed = from_db(link.amount, link.currency)
+		before = from_db(link.paid_amount, link.currency)
+		closed = link.status if link.status in ("Cancelled", "Expired") else None
+		link.paid_amount = before + amount
+		link.status = "Paid" if link.paid_amount >= owed else "Partially Paid"
 		link.save(ignore_permissions=True)
+		if before + amount > owed:
+			# the money is recorded and allocated as usual (never lost); finance refunds the excess
+			audit("payment_link.overpaid", reference_doctype="TEX Payment Link", reference_name=link.name,
+			      property=link.property, new={"transaction": txn.name, "amount": to_str(amount),
+			                                   "link_amount": to_str(owed), "paid_before": to_str(before),
+			                                   "excess": to_str(before + amount - owed), "currency": link.currency})
+		if closed:
+			# a checkout opened before staff cancelled the link (or before it expired) was paid:
+			# the money is recorded; finance decides whether to keep or refund it
+			audit("payment_link.paid_after_close", reference_doctype="TEX Payment Link", reference_name=link.name,
+			      property=link.property, new={"transaction": txn.name, "amount": to_str(amount),
+			                                   "status_before": closed, "currency": link.currency})
 		if link.booking and not txn.booking:
 			allocate(txn.name, booking=link.booking, amount=amount, reason="payment link", _system=True)
 			return
@@ -257,8 +538,7 @@ def _replayed_allocation(property: str, key: str | None, kind: str) -> tuple[str
 
 def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bool = False,
              idempotency_key: str | None = None) -> str:
-	_lock("TEX Payment Transaction", transaction)
-	txn = frappe.get_doc("TEX Payment Transaction", transaction)
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)    # locked, as it is now
 	if not _system:
 		scope.require("payment.refund", txn.property)
 	key, done = _replayed_allocation(txn.property, idempotency_key, "allocate")
@@ -335,7 +615,53 @@ def refunded_of(transaction: str) -> D:
 	return sum((from_db(r.amount, r.currency) for r in rows), ZERO)
 
 
+def booking_nets(transaction: str) -> dict[str, D]:
+	"""What each booking holds of this payment now: Allocate +, Release −, Refund −."""
+	nets: dict[str, D] = {}
+	for r in frappe.get_all("TEX Payment Allocation", filters={"transaction": transaction},
+	                        fields=["booking", "allocation_type", "amount", "currency"]):
+		if r.booking:
+			a = from_db(r.amount, r.currency)
+			nets[r.booking] = nets.get(r.booking, ZERO) + (-a if r.allocation_type in ("Release", "Refund") else a)
+	return nets
+
+
+def _refund_source(txn, amount: D, booking: str | None) -> tuple[str | None, D]:
+	"""Which booking a refund comes out of, and how much of it (G-68). → (booking or None,
+	amount taken off that booking).
+
+	The payment's unallocated remainder goes first: it belongs to no booking. Only the rest
+	comes off a booking, where the money sits *now* (after a transfer it is on the new
+	booking, not on ``txn.booking``): the named booking, at most what it holds; without a
+	name, the one booking holding money, and a question when several do. When nothing comes
+	off a booking, the refund names none."""
+	ccy = txn.currency
+	holding = {b: n for b, n in booking_nets(txn.name).items() if n > 0}
+	unallocated = from_db(txn.amount, ccy) - allocated_of(txn.name) - refunded_of(txn.name)
+	rest = max(ZERO, amount - max(ZERO, unallocated))
+	if booking:
+		held = holding.get(booking, ZERO)
+		if rest > held:
+			frappe.throw(_("Booking {0} holds {1} {3} of this payment and {2} {3} of it is unallocated: at most "
+			               "{4} {3} can be refunded from this booking.").format(
+				booking, to_str(held), to_str(unallocated), ccy, to_str(held + unallocated)))
+		return (booking, rest) if rest > 0 else (None, ZERO)
+	if not rest:
+		return None, ZERO
+	if len(holding) > 1:
+		frappe.throw(_("{0} {1} of this refund must come from a booking and this payment is allocated to several "
+		               "bookings ({2}): choose which booking the refund comes from.").format(
+			to_str(rest), ccy, ", ".join(sorted(holding))))
+	target, held = next(iter(holding.items()), (None, ZERO))
+	if rest > held:
+		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(held + unallocated), ccy))
+	return target, rest
+
+
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None) -> dict:
+	"""Refund a successful charge, or money a gateway captured that TEX refused to count
+	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
+	stated, against the captured payment, and never touches a booking."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	scope.require("payment.refund", txn.property)
 	if not (reason or "").strip():
@@ -348,19 +674,34 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	done = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": idempotency_key}, "name")
 	if done:
 		return {"refund": done, "replay": True}
-	frappe.db.sql("SELECT name FROM `tabTEX Payment Transaction` WHERE name=%s FOR UPDATE", transaction)
-	amount = quantize(D(amount), txn.currency)
-	refundable = from_db(txn.amount, txn.currency) - refunded_of(transaction)
-	if txn.status != "Succeeded" or txn.txn_type != "Charge":
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)   # locked, as it is now
+	if txn.txn_type != "Charge":
 		frappe.throw(_("Only successful charges can be refunded."))
+	if txn.status == "Succeeded":
+		ccy, ref = txn.currency, txn.provider_ref
+		amount = quantize(D(amount), ccy)
+		refundable = from_db(txn.amount, ccy) - refunded_of(transaction)
+	else:
+		capture = refused_capture(txn)
+		if not capture:
+			frappe.throw(_("Only successful charges, or a capture TEX refused, can be refunded."))
+		if booking:
+			frappe.throw(_("This money was never on a booking: refund it without choosing one."))
+		if not frappe.db.exists("Currency", capture["currency"]):
+			frappe.throw(_("The gateway stated an unknown currency ({0}): refund it in the gateway's merchant "
+			               "panel.").format(capture["currency"]))
+		ccy, ref = capture["currency"], capture["provider_ref"]
+		amount = quantize(D(amount), ccy)
+		refundable = capture["amount"] - refunded_of(transaction)
 	if amount <= 0 or amount > refundable:
-		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(refundable), txn.currency))
-	r = _new_txn(property=txn.property, txn_type="Refund", method=txn.method, amount=amount, currency=txn.currency,
+		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(refundable), ccy))
+	target, from_booking = _refund_source(txn, amount, booking) if txn.status == "Succeeded" else (None, ZERO)
+	provider = provider_for(txn.provider_account, purpose="settle", transaction=txn.name)
+	r = _new_txn(property=txn.property, txn_type="Refund", method=txn.method, amount=amount, currency=ccy,
 	             provider_account=txn.provider_account, provider=txn.provider, idempotency_key=idempotency_key,
-	             parent_transaction=txn.name, booking=booking or txn.booking, reason=reason)
-	provider = provider_for(txn.provider_account)
+	             parent_transaction=txn.name, booking=target, reason=reason)
 	try:
-		outcome = provider.refund(txn.provider_ref, amount, txn.currency)
+		outcome = provider.refund(ref, amount, ccy)
 	except ProviderError as e:
 		outcome = Outcome(status="Failed", error_code="PROVIDER", error_message=str(e))
 	r.status = outcome.status
@@ -369,23 +710,25 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	r.error_message = (outcome.error_message or "")[:500] or None
 	r.completed_at = now_datetime()
 	r.save(ignore_permissions=True)
-	if r.status == "Succeeded" and (booking or txn.booking):
-		target = booking or txn.booking
+	if r.status == "Succeeded" and target and from_booking > 0:
+		# only what comes off the booking is taken from it; the rest was unallocated money
 		frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
-		                "allocation_type": "Refund", "amount": amount, "currency": txn.currency,
+		                "allocation_type": "Refund", "amount": from_booking, "currency": txn.currency,
 		                "booking": target, "reason": reason, "actor": frappe.session.user}).insert(
 			ignore_permissions=True)
 		from kamra.tex.services import booking as booking_svc
 
-		booking_svc.apply_payment(target, -amount, reference=f"refund {r.name}")
+		booking_svc.apply_payment(target, -from_booking, reference=f"refund {r.name}")
 	audit("payment.refund", reference_doctype="TEX Payment Transaction", reference_name=r.name,
-	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "status": r.status}, reason=reason)
+	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "status": r.status,
+	                                  "booking": target, "from_booking": to_str(from_booking),
+	                                  "refused_capture": txn.status != "Succeeded"}, reason=reason)
 	return {"refund": r.name, "status": r.status}
 
 
 def mark_transfer_received(transaction: str, *, reference: str) -> dict:
-	_lock("TEX Payment Transaction", transaction)
-	txn = frappe.get_doc("TEX Payment Transaction", transaction)
+	_lock_link_then_payment(transaction)
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)   # as it is now
 	scope.require("payment.refund", txn.property)
 	if txn.provider != "Bank Transfer" or txn.status != "Pending":
 		frappe.throw(_("Only pending bank transfers can be confirmed."))
@@ -458,6 +801,9 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 	if provider_account and frappe.db.get_value("TEX Payment Provider Account", provider_account,
 	                                            "property") != property:
 		frappe.throw(_("That payment account belongs to another hotel."))
+	if provider_account:
+		# staff hear now why the account could not take the money, not the guest later (G-67)
+		provider_for(provider_account)
 	token = secrets.token_urlsafe(24)
 	doc = frappe.get_doc({
 		"doctype": "TEX Payment Link", "property": property, "status": "Active", "amount": amount,
