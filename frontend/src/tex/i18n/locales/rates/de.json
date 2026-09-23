@@ -414,7 +414,7 @@
  "rates.h.contract_status": "Nur aktive Verträge verkaufen. „Ausgesetzt“ pausiert den Verkauf, ohne Versionen zu ändern.",
  "rates.h.coupon_code": "Gäste oder Agenten geben diesen Code ein, um den Rabatt zu erhalten.",
  "rates.h.currency_fixed": "Währung fester Beträge; leer = Vertragswährung.",
- "rates.h.cutoff_days": "Der Vertrag verkauft diese Nächte so viele Tage vor Anreise nicht mehr, auch nicht aus dem allgemeinen Verkauf. 0 = kein Cutoff. Unabhängig vom Release.",
+ "rates.h.cutoff_days": "Der Vertrag verkauft diese Nächte so viele Tage vor Anreise nicht mehr, auch nicht aus dem allgemeinen Verkauf; seine unverkauften Zimmer gehen spätestens dann in den allgemeinen Verkauf zurück. 0 = kein Cutoff.",
  "rates.h.daily_capacity": "Einheiten pro Tag. Ein Extra mit Leistungsdatum belegt jedes gewählte Datum, ein nächtliches jede Nacht, ein Extra pro Person eine Einheit je Gast; die übrigen belegen ihren gewählten Tag (standardmäßig den Anreisetag).",
  "rates.h.days_before_arrival": "Die Gebühr fällt an, wenn weniger als so viele Tage vor Anreise storniert wird.",
  "rates.h.duplicate_market": "Wählen Sie einen anderen Markt, z. B. den UK-Vertrag aus dem deutschen.",

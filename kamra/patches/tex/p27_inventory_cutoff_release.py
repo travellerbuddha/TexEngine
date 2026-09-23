@@ -7,8 +7,8 @@ the release, then from general sale until the night.
 
 The controller now keeps both within 0 to 365 days. A negative release day count behaved like 0 for
 every night still on sale, so it is set to 0 here. A count above 365 is left as it is and printed:
-its owner decides the right value the next time the allotment is saved. The patch can run again
-safely.
+its owner decides the right value the next time the allotment is saved (a disabled allotment
+saves whatever it says, so it can always be switched off). The patch can run again safely.
 """
 
 import frappe

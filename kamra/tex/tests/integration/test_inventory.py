@@ -19,7 +19,7 @@ from kamra.tex.api import policies as policy_api
 from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import grid
 from kamra.tex.security import scope
-from kamra.tex.services import booking, quoting
+from kamra.tex.services import booking, modification, quoting
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 
@@ -77,9 +77,19 @@ class InventoryCase(TexTestCase):
 		                       "check_out_date": check_out or self.co, "adults": 2, "status": "Confirmed",
 		                       **kw}).insert()
 
-	def set_inventory(self, code: str, **values):
-		"""The staff grid (inventory.edit) over every night of the stay."""
-		grid.bulk_update(fx.PROPERTY, self.nights[0], self.nights[-1], room_types=[self.rt(code)], inventory=values)
+	def set_inventory(self, code: str, start=None, end=None, **values):
+		"""The staff grid (inventory.edit), by default over every night of the stay."""
+		grid.bulk_update(fx.PROPERTY, start or self.nights[0], end or self.nights[-1], room_types=[self.rt(code)],
+		                 inventory=values)
+
+	def allot(self, contract: str | None = None, **kw) -> str:
+		return frappe.get_doc({"doctype": "TEX Allotment", "property": fx.PROPERTY, "room_type": self.dlx,
+		                       "contract": contract or self.c["contract"], "date_from": fx.d(7, 1), "date_to": fx.d(7, 31),
+		                       "rooms": 1, "release_days": 7, **kw}).insert().name
+
+	def stay(self, contract, sale_date) -> tuple[int, str]:
+		count, per = avail.stay_availability(fx.PROPERTY, self.dlx, contract, self.ci, self.co, sale_date)
+		return count, next((d.reason for d in per if d.available < 1), "")
 
 	def live(self, code: str = "DLX") -> int:
 		return frappe.db.count("Reservation", {"property": fx.PROPERTY, "room_type": self.rt(code),
@@ -280,14 +290,6 @@ class TestLegacyHotel(InventoryCase):
 class TestAllotments(InventoryCase):
 	"""Allotment consumption, release and cutoff (G-49)."""
 
-	def allot(self, **kw) -> str:
-		return frappe.get_doc({"doctype": "TEX Allotment", "property": fx.PROPERTY, "room_type": self.dlx,
-		                       "contract": self.c["contract"], "date_from": fx.d(7, 1), "date_to": fx.d(7, 31),
-		                       "rooms": 1, "release_days": 7, **kw}).insert().name
-
-	def stay(self, contract, sale_date) -> tuple[int, str]:
-		count, per = avail.stay_availability(fx.PROPERTY, self.dlx, contract, self.ci, self.co, sale_date)
-		return count, next((d.reason for d in per if d.available < 1), "")
 
 	def test_an_allotment_caps_its_contract_and_is_consumed(self):
 		self.allot()
@@ -351,3 +353,129 @@ class TestAllotments(InventoryCase):
 			p27.execute()                                  # runs again safely
 		self.assertEqual(frappe.db.get_value("TEX Allotment", kept, ["release_days", "cutoff_days"]), (7, 0))
 		self.assertEqual(frappe.db.get_value("TEX Allotment", broken, ["release_days", "cutoff_days"]), (0, 0))
+
+
+# ─── review follow-up (G-49 review) ──────────────────────────────────────
+
+
+class TestChangesKeepHeldNights(InventoryCase):
+	"""H1: a change never loses the nights the stay already holds — a cutoff, a closure or a
+	full house on those nights refuses only the nights it would newly take."""
+
+	def pool(self):
+		for code in ("STD", "DLX"):
+			frappe.db.set_value("Room Type", self.rt(code), "tex_inventory_pool", "G49-POOL")
+
+	def test_a_staff_change_keeps_the_nights_already_held(self):
+		res = self.tex_book(who="held")
+		# the contract's allotment for the booked nights is now inside its cutoff
+		self.allot(date_from=self.ci, date_to=add_days(self.ci, 1), cutoff_days=365)
+		longer = modification.propose(res, {"check_out": add_days(self.co, 1)})
+		self.assertTrue(longer["sellable"], longer["warnings"])
+		modification.apply(longer["proposal_token"], reason="one more night")
+		shorter = modification.propose(res, {"check_out": add_days(self.ci, 1)})
+		self.assertTrue(shorter["sellable"], shorter["warnings"])
+		self.pool()
+		other_type = modification.propose(res, {"room_type": self.std})
+		self.assertTrue(other_type["sellable"], other_type["warnings"])
+		# a night it does not hold yet is still checked: inside the cutoff it is refused
+		self.allot(date_from=add_days(self.co, 1), date_to=add_days(self.co, 3), cutoff_days=365)
+		cut = modification.propose(res, {"check_out": add_days(self.co, 3)})
+		self.assertFalse(cut["sellable"])
+		self.assertIn("SOLD_OUT", [w["code"] for w in cut["warnings"]])
+
+	def test_leaving_early_over_closed_nights_is_accepted(self):
+		"""M1: an outside-TEX stay covering closed or oversold nights may still be shortened, or
+		moved to another room type of the same pool; it takes no new night."""
+		res = self.desk(check_in=self.ci, check_out=add_days(self.ci, 5))
+		self.set_inventory("DLX", self.ci, add_days(self.ci, 4), closed=1)   # every night, after it was sold
+		res.check_out_date = add_days(self.ci, 2)                          # leaves after night 2
+		res.save()
+		self.pool()
+		self.set_inventory("DLX", self.ci, add_days(self.ci, 1), closed=1)   # the pool's row: both types
+		res.room_type = self.std
+		res.save()
+		self.assertEqual(frappe.db.get_value("Reservation", res.name, "room_type"), self.std)
+
+
+class TestGuestChangeKeepsHeldNights(TexTestCase):
+	"""H1 on the guest's manage page: an extension is priced, not refused as sold out, because
+	the booked nights fell inside the contract's cutoff."""
+
+	def test_a_guest_extension_keeps_the_nights_already_held(self):
+		from kamra.tex.api import public
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books, setup_site_and_payments
+
+		setup_site_and_payments(self.f)
+		b = guest_books(session="g49-h1", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the revenue manager sets the cutoff
+		res = b["rooms"][0]["reservation"]
+		contract, rt = frappe.db.get_value("Reservation", res, ["tex_contract", "room_type"])
+		frappe.get_doc({"doctype": "TEX Allotment", "property": fx.PROPERTY, "room_type": rt, "contract": contract,
+		                "date_from": fx.d(6, 10), "date_to": fx.d(6, 12), "rooms": 1, "release_days": 7,
+		                "cutoff_days": 365}).insert()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		up = public.manage_propose(token=b["manage_token"], reservation=res, changes={"check_out": str(fx.d(6, 14))})
+		self.assertTrue(up["sellable"], up["warnings"])
+		self.assertNotIn("SOLD_OUT", [w["code"] for w in up["warnings"]])
+
+
+class TestRoomTypeBelongsToTheHotel(TestLegacyHotel):
+	"""M3: a reservation books its own hotel's room types, in both directions."""
+
+	def test_another_hotels_room_type_is_refused(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "does not belong to"):
+			frappe.get_doc({"doctype": "Reservation", "property": LEGACY_HOTEL, "guest": self.guest,
+			                "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
+			                "adults": 2, "status": "Confirmed"}).insert()
+		with self.assertRaisesRegex(frappe.ValidationError, "does not belong to"):
+			frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+			                "room_type": self.legacy_rt, "check_in_date": self.ci, "check_out_date": self.co,
+			                "adults": 2, "status": "Confirmed"}).insert()
+		# nothing of the other hotel's inventory was created under this one
+		self.assertFalse(frappe.db.exists("TEX Inventory Day", {"property": fx.PROPERTY,
+		                                                        "room_type": self.legacy_rt}))
+
+
+class TestReviewFollowUps(InventoryCase):
+	def test_a_cutoff_before_the_release_gives_the_rooms_back(self):
+		"""L2: from the contract's cutoff it can no longer book its rooms, so they go back to
+		general sale then, even when its release is later."""
+		self.allot(rooms=1, guaranteed=1, release_days=3, cutoff_days=10)
+		sale = self.ci - timedelta(days=6)
+		self.assertEqual(self.stay(self.c["contract"], sale), (0, "cutoff"))
+		self.assertEqual(self.stay(None, sale)[0], 2)                     # not withheld from anyone
+		self.assertEqual(self.stay(None, self.ci - timedelta(days=20))[0], 1)   # before the cutoff: withheld
+
+	def test_the_service_flag_is_used_once(self):
+		"""L3: a document a TEX service marked as checked is checked again on its next save."""
+		res = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+		                      "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
+		                      "adults": 2, "status": "Confirmed"})
+		res.flags.tex_inventory_checked = True
+		res.insert()
+		self.set_inventory("DLX", fx.d(7, 20), fx.d(7, 21), closed=1)
+		res.check_in_date, res.check_out_date = fx.d(7, 20), fx.d(7, 22)
+		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
+			res.save()
+
+	def test_a_deadlock_asks_the_desk_to_try_again(self):
+		"""M2: a desk write chosen as a deadlock victim is told to try again (it cannot be re-run
+		for it, unlike the TEX endpoints)."""
+		from unittest import mock
+
+		with mock.patch.object(avail, "lock_nights", side_effect=frappe.QueryDeadlockError("1213 Deadlock")):
+			with self.assertRaisesRegex(frappe.ValidationError, "try again") as caught:
+				self.desk()
+		self.assertIsInstance(caught.exception, frappe.QueryDeadlockError)   # TEX endpoints still retry it
+
+	def test_a_disabled_allotment_saves_whatever_its_release(self):
+		name = self.allot()
+		frappe.db.set_value("TEX Allotment", name, "release_days", 400, update_modified=False)
+		doc = frappe.get_doc("TEX Allotment", name)
+		with self.assertRaises(frappe.ValidationError):
+			doc.save()                                    # a live allotment is brought into range first
+		doc.reload()
+		doc.disabled = 1
+		doc.save()                                        # but it can always be switched off
+		self.assertEqual(frappe.db.get_value("TEX Allotment", name, "disabled"), 1)

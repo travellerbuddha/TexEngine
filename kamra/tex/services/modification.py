@@ -182,8 +182,10 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	warnings = []
 	stay_changed = any(k in changes for k in ("check_in", "check_out", "room_type"))
 	if stay_changed:
+		# the nights the stay already holds stay its own: only the new ones are checked (ADR-048)
 		count, _days = avail.stay_availability(res.property, req.room_type, terms.contract_id, req.check_in,
-		                                      req.check_out, now.date(), exclude=[res.name], locking=_locked)
+		                                      req.check_out, now.date(), exclude=[res.name], locking=_locked,
+		                                      held=avail.held_nights(req.room_type, res))
 		if count < 1:
 			warnings.append({"code": "SOLD_OUT", "message": _("No availability for the new stay.")})
 		sc = RestrictionScope(room_type=req.room_type, contract=terms.contract_id, market=req.market,

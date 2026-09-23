@@ -16,10 +16,11 @@ class TEXAllotment(Document):
 		if int(self.rooms or 0) < 0:
 			frappe.throw("Rooms cannot be negative.")
 		# release: unsold rooms go back to general sale; cutoff: the contract's booking
-		# deadline. Two separate deadlines, in days before each night (G-49)
+		# deadline. Two separate deadlines, in days before each night (G-49). A disabled
+		# allotment sells nothing, so it can always be saved (switched off) whatever it says
 		for field, label in (("release_days", _("Release days")), ("cutoff_days", _("Cutoff days"))):
 			days = int(self.get(field) or 0)
-			if days < 0 or days > MAX_DAYS:
+			if days < 0 or (days > MAX_DAYS and not self.disabled):
 				frappe.throw(_("{0} must be between 0 and {1}.").format(label, MAX_DAYS))
 		contract_prop = frappe.db.get_value("TEX Contract", self.contract, "property")
 		if contract_prop and contract_prop != self.property:

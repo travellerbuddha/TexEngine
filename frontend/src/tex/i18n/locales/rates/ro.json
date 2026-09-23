@@ -928,5 +928,5 @@
  "rates.version_status.Superseded": "Înlocuită",
  "rates.version_status.Withdrawn": "Retrasă",
  "rates.f.cutoff_days": "Cutoff (zile înainte de sosire)",
- "rates.h.cutoff_days": "Contractul nu mai vinde aceste nopți cu atâtea zile înainte de sosire, nici din vânzarea generală. 0 = fără cutoff. Independent de release."
+ "rates.h.cutoff_days": "Contractul nu mai vinde aceste nopți cu atâtea zile înainte de sosire, nici din vânzarea generală; camerele nevândute revin la vânzarea generală cel târziu atunci. 0 = fără cutoff."
 }

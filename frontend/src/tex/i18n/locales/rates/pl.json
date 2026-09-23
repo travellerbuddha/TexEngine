@@ -936,5 +936,5 @@
  "rates.version_status.Superseded": "Zastąpiona",
  "rates.version_status.Withdrawn": "Wycofana",
  "rates.f.cutoff_days": "Cutoff (dni przed przyjazdem)",
- "rates.h.cutoff_days": "Umowa przestaje sprzedawać te noce tyle dni przed przyjazdem, także z ogólnej sprzedaży. 0 = bez cutoff. Niezależne od release."
+ "rates.h.cutoff_days": "Umowa przestaje sprzedawać te noce tyle dni przed przyjazdem, także z ogólnej sprzedaży; niesprzedane pokoje wracają do ogólnej sprzedaży najpóźniej wtedy. 0 = bez cutoff."
 }

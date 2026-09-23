@@ -130,12 +130,34 @@ def pool_days(property: str, room_type: str, days: list[date], *, exclude: list[
 
 
 def stay_availability(property: str, room_type: str, contract: str | None, check_in: date, check_out: date,
-                      sale_date: date, *, exclude: list[str] | None = None,
-                      locking: bool = False) -> tuple[int, list[inv.DayAvailability]]:
-	"""Rooms bookable for the stay. Pass ``locking=True`` after ``lock_nights``."""
-	days = nights(check_in, check_out)
+                      sale_date: date, *, exclude: list[str] | None = None, locking: bool = False,
+                      held: frozenset[date] | None = None) -> tuple[int, list[inv.DayAvailability]]:
+	"""Rooms bookable for the stay. Pass ``locking=True`` after ``lock_nights``.
+
+	``held``: for a change of a booked stay, the nights it already holds in this pool
+	(``held_nights``). Only the other nights are read and checked (G-49 review, ADR-048)."""
+	held = held or frozenset()
+	days = [d for d in nights(check_in, check_out) if d not in held]
 	pdays, allot = pool_days(property, room_type, days, exclude=exclude, locking=locking)
-	return inv.stay_availability(pdays, allot, contract, sale_date)
+	return inv.stay_availability(pdays, allot, contract, sale_date, held=held)
+
+
+def stay_nights(check_in, check_out) -> list[date]:
+	"""The nights a stay holds; a day-use stay (out the day it arrives) holds its day."""
+	ci = getdate(check_in)
+	return nights(ci, max(getdate(check_out), ci + timedelta(days=1)))
+
+
+def held_nights(room_type: str, holder) -> frozenset[date]:
+	"""The nights ``holder`` (a reservation as it is stored) holds in ``room_type``'s pool: none
+	when it holds no room or holds them in another pool (another hotel or room type pool)."""
+	if holder is None or not holds_inventory(holder.get("status")) or not holder.get("room_type"):
+		return frozenset()
+	if not holder.get("check_in_date") or not holder.get("check_out_date"):
+		return frozenset()
+	if pool_of(holder.get("room_type"))[0] != pool_of(room_type)[0]:
+		return frozenset()
+	return frozenset(stay_nights(holder.get("check_in_date"), holder.get("check_out_date")))
 
 
 def lock_nights(property: str, requests: list[tuple[str, date, date]]) -> None:
@@ -185,8 +207,26 @@ def takes_inventory(doc) -> bool:
 	return False
 
 
+class InventoryBusy(frappe.ValidationError, frappe.QueryDeadlockError):
+	"""A write outside TEX was chosen as a deadlock victim while it took or recounted a TEX
+	hotel's nights: nothing of it was saved. Shown as "try again"; still a deadlock for the TEX
+	endpoints' retry and for imports, which must stop (G-49 review)."""
+
+
+def _busy() -> None:
+	frappe.throw(_("Another booking was changing these nights at the same moment, so nothing was saved. "
+	               "Please try again."), InventoryBusy, title=_("Please try again"))
+
+
 def _outside_tex(doc) -> bool:
 	return not (doc.flags.get("tex_inventory_checked") or doc.flags.get("tex_channel_accept"))
+
+
+def _hotel_of(doc) -> str | None:
+	"""The hotel whose inventory a reservation's room type is: its room type's hotel. None when
+	the room type is another hotel's (``Reservation.validate`` refuses that, G-49 review)."""
+	owner = frappe.db.get_value("Room Type", doc.room_type, "property") or doc.property
+	return owner if owner == doc.property else None
 
 
 def lock_before_naming(doc) -> None:
@@ -198,8 +238,14 @@ def lock_before_naming(doc) -> None:
 		return
 	if not doc.check_in_date or not doc.check_out_date:
 		return
+	hotel = _hotel_of(doc)
+	if not hotel:
+		return
 	ci = getdate(doc.check_in_date)
-	lock_nights(doc.property, [(doc.room_type, ci, max(getdate(doc.check_out_date), ci + timedelta(days=1)))])
+	try:
+		lock_nights(hotel, [(doc.room_type, ci, max(getdate(doc.check_out_date), ci + timedelta(days=1)))])
+	except frappe.QueryDeadlockError:
+		_busy()
 
 
 def guard_reservation(doc) -> None:
@@ -207,21 +253,35 @@ def guard_reservation(doc) -> None:
 
 	The TEX services that sell or change a stay (booking, modification) lock the nights and
 	recount for their contract before they write, and mark the document
-	``flags.tex_inventory_checked``; a channel's sale is accepted as sold
+	``flags.tex_inventory_checked`` for that one save; a channel's sale is accepted as sold
 	(``flags.tex_channel_accept``, G-69). Flags live only in this process: a REST payload
 	cannot set them. Every other write that takes rooms — the Desk form, REST, legacy imports
 	and PMS actions — takes the same inventory lock here and is refused when TEX has no room
-	left: closures, manual adjustments, the oversell limit, pools, configured inventory and
-	guaranteed allotments all apply. It sells from general sale (no contract): it never uses a
-	contract's allotment. Restrictions (stop sell, LOS, …) are selling rules of the TEX
-	channels and do not apply to it."""
-	if not _outside_tex(doc) or not doc.room_type or not takes_inventory(doc):
+	left on a night it newly takes: closures, manual adjustments, the oversell limit, pools,
+	configured inventory and guaranteed allotments all apply. The nights it already holds in
+	the pool stay its own, so leaving early or moving to a room type of the same pool is never
+	refused. It sells from general sale (no contract): it never uses a contract's allotment.
+	Restrictions (stop sell, LOS, …) are selling rules of the TEX channels and do not apply."""
+	# the service's word covers the save it was given for, not a later save of the same object
+	if doc.flags.pop("tex_inventory_checked", None) or doc.flags.get("tex_channel_accept"):
 		return
-	ci = getdate(doc.check_in_date)
-	co = max(getdate(doc.check_out_date), ci + timedelta(days=1))   # a day-use stay holds its day
-	lock_nights(doc.property, [(doc.room_type, ci, co)])
-	count, per_day = stay_availability(doc.property, doc.room_type, None, ci, co, getdate(nowdate()),
-	                                   exclude=[doc.name] if doc.name else None, locking=True)
+	if not doc.room_type or not takes_inventory(doc):
+		return
+	hotel = _hotel_of(doc)
+	if not hotel:
+		return
+	before = None if doc.is_new() else doc.get_doc_before_save()
+	held = held_nights(doc.room_type, before)
+	new = [d for d in stay_nights(doc.check_in_date, doc.check_out_date) if d not in held]
+	if not new:
+		return
+	try:
+		lock_nights(hotel, [(doc.room_type, d, d + timedelta(days=1)) for d in new])
+		count, per_day = stay_availability(hotel, doc.room_type, None, new[0], new[-1] + timedelta(days=1),
+		                                   getdate(nowdate()), exclude=[doc.name] if doc.name else None,
+		                                   locking=True, held=held)
+	except frappe.QueryDeadlockError:
+		_busy()
 	if count >= 1:
 		return
 	day = next(d for d in per_day if d.available < 1)

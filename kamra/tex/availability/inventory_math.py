@@ -11,7 +11,11 @@ An allotment has two separate deadlines, both in days before the night (ADR-048)
     release — the hotel's side: unsold rooms go back to general sale (a guaranteed allotment
               stops being withheld, the contract's cap ends and it sells from general sale);
     cutoff  — the partner's side: the contract's booking deadline for that night; from then
-              on it sells nothing more for it. 0 = no cutoff.
+              on it sells nothing more for it, and its unsold rooms go back to general sale at
+              the latest then (nobody could book them otherwise). 0 = no cutoff.
+
+A change of a booked stay is checked only on the nights it would newly take: the nights it
+already holds in the pool are its own, whatever the capacity, a closure or a cutoff says now.
 """
 
 from __future__ import annotations
@@ -31,8 +35,9 @@ class Allotment:
 	cutoff_days: int = 0
 
 	def released(self, sale_date: date) -> bool:
-		"""Unsold rooms are back in general sale."""
-		return (self.day - sale_date).days < self.release_days
+		"""Unsold rooms are back in general sale: at the release, or at the cutoff when that comes
+		first (from then on the contract cannot book them, so nobody could)."""
+		return (self.day - sale_date).days < max(self.release_days, self.cutoff_days)
 
 	def cut_off(self, sale_date: date) -> bool:
 		"""The contract's booking deadline for this night has passed."""
@@ -104,7 +109,13 @@ def day_availability(p: PoolDay, allotments: list[Allotment], contract: str | No
 
 
 def stay_availability(days: list[PoolDay], allotments: list[Allotment], contract: str | None,
-                      sale_date: date) -> tuple[int, list[DayAvailability]]:
-	"""Rooms bookable for every night of the stay (the minimum over nights)."""
-	per = [day_availability(p, allotments, contract, sale_date) for p in days]
+                      sale_date: date, held: frozenset[date] = frozenset()) -> tuple[int, list[DayAvailability]]:
+	"""Rooms bookable for every night of the stay (the minimum over nights).
+
+	``held``: the nights a stay being changed already holds in this pool. They are not checked
+	again, so only the nights it would newly take count (``per`` lists those); a change that
+	takes no new night fits: 1."""
+	per = [day_availability(p, allotments, contract, sale_date) for p in days if p.day not in held]
+	if held and not per:
+		return 1, []
 	return (min((d.available for d in per), default=0), per)

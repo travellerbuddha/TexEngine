@@ -387,15 +387,31 @@ class TestInventoryMath(unittest.TestCase):
 		self.assertEqual(inv.day_availability(p, [tui], None, self.before(1)).available, 5)  # others still sell
 		self.assertEqual(inv.day_availability(p, [tui], "TUI", self.before(2)).available, 5)  # the deadline day
 
-	def test_a_cutoff_before_release_keeps_the_rooms_held(self):
-		"""Cutoff 10, release 3: the partner stops booking 10 days out, the hotel keeps its rooms
-		withheld until the release (e.g. for the rooming list), then sells them."""
+	def test_a_cutoff_before_release_gives_the_rooms_back(self):
+		"""Cutoff 10, release 3: the partner stops booking 10 days out, and rooms nobody can book
+		under the contract any more go back to general sale then (G-49 review, L2)."""
 		tui = inv.Allotment("A1", "TUI", self.DAY, rooms=2, release_days=3, guaranteed=True, cutoff_days=10)
 		p = self.pool(sold=5, sold_by_contract=(("TUI", 1),))
 		self.assertEqual(inv.day_availability(p, [tui], "TUI", self.before(8)).available, 0)
-		held = inv.day_availability(p, [tui], None, self.before(8))
+		back = inv.day_availability(p, [tui], None, self.before(8))
+		self.assertEqual((back.withheld, back.available), (0, 5))
+		held = inv.day_availability(p, [tui], None, self.before(12))       # before the cutoff: withheld
 		self.assertEqual((held.withheld, held.available), (1, 4))
-		self.assertEqual(inv.day_availability(p, [tui], None, self.before(2)).available, 5)
+
+	def test_a_change_is_checked_only_on_the_nights_it_takes(self):
+		"""G-49 review, H1: an in-house stay (arrival today) under a contract whose cutoff is 3 days
+		keeps its nights; only a new night is checked."""
+		today = self.DAY
+		stay = [today + timedelta(days=i) for i in range(6)]
+		tui = [inv.Allotment("A1", "TUI", d, rooms=2, release_days=7, cutoff_days=3) for d in stay]
+		days = [inv.PoolDay(d, 10, sold=4) for d in stay]
+		count, per = inv.stay_availability(days, tui, "TUI", today)
+		self.assertEqual((count, [d.reason for d in per]), (0, ["cutoff"] * 3 + [""] * 3))
+		longer = [*days, inv.PoolDay(today + timedelta(days=6), 10, sold=4)]
+		self.assertEqual(inv.stay_availability(longer, tui, "TUI", today, held=frozenset(stay))[0], 6)
+		self.assertEqual(inv.stay_availability(days[:3], tui, "TUI", today, held=frozenset(stay)), (1, []))
+		full = [*days, inv.PoolDay(today + timedelta(days=6), 10, sold=10)]
+		self.assertEqual(inv.stay_availability(full, tui, "TUI", today, held=frozenset(stay))[0], 0)
 
 	def test_no_cutoff_by_default(self):
 		"""An allotment without a cutoff (every allotment before G-49) sells from general sale after

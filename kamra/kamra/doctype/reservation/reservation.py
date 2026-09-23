@@ -106,6 +106,7 @@ class Reservation(Document):
 		self.validate_status_transition()
 		self.validate_blacklist()
 		self.validate_occupancy()
+		self.validate_room_type_belongs_to_property()
 		self.validate_room_belongs_to_type()
 		self.validate_no_overlap()
 		self.validate_villa_lockout()
@@ -317,6 +318,21 @@ class Reservation(Document):
 			self.commission_amount = float(self.amount_before_tax or 0) * float(pct) / 100
 		else:
 			self.commission_amount = 0
+
+	def validate_room_type_belongs_to_property(self):
+		"""A reservation books its own hotel's room types: another hotel's room type would be
+		counted against that hotel's inventory without its checks (TEX Engine, G-49 review).
+		Checked when the stay is written or its hotel or room type changes."""
+		if not self.room_type:
+			return
+		old = None if self.is_new() else self.get_doc_before_save()
+		if old and (old.room_type, old.property) == (self.room_type, self.property):
+			return
+		owner = frappe.db.get_value("Room Type", self.room_type, "property")
+		if owner and owner != self.property:
+			# the other hotel is not named: the user may not see it
+			frappe.throw(_("Room type {0} does not belong to {1}.").format(self.room_type, self.property),
+			             title=_("Wrong hotel"))
 
 	def validate_room_belongs_to_type(self):
 		if not self.room:
