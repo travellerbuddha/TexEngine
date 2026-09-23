@@ -57,7 +57,7 @@ def _scheduler(now) -> dict:
 
 	reason = None
 	if frappe.local.conf.get("maintenance_mode"):
-		reason = "maintenance mode"
+		reason = "maintenance"
 	elif frappe.local.conf.get("pause_scheduler"):
 		reason = "paused"
 	elif is_scheduler_disabled(verbose=False):

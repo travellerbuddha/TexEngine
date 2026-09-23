@@ -158,7 +158,7 @@
  "payments.links.email_failed": "Nie udało się wysłać e-maila. Skopiuj URL i wyślij go gościowi samodzielnie.",
  "payments.links.email_invalid": "Podaj prawidłowy adres e-mail.",
  "payments.links.email_language": "Język e-maila",
- "payments.links.emailed": "Wysłano e-mailem na {email}.",
+ "payments.links.emailed": "E-mail na {email} dodano do kolejki wysyłki.",
  "payments.links.empty": "Brak linków do płatności",
  "payments.links.empty_filtered": "Brak linków dla tych filtrów",
  "payments.links.empty_hint": "Utwórz link, aby pobrać zaliczkę, dopłatę lub opłatę za dodatki, z rezerwacją lub bez.",

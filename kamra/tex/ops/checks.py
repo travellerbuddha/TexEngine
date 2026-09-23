@@ -94,7 +94,9 @@ TITLES: dict[str, str] = {
 OK_DETAIL = "No problems found."
 
 REASONS: dict[str, str] = {
-	"scheduler_off": "The scheduler is off ({why}): no TEX job runs.",
+	"scheduler_disabled": "The scheduler is disabled: no TEX job runs.",
+	"scheduler_paused": "The scheduler is paused: no TEX job runs.",
+	"maintenance_mode": "The site is in maintenance mode: no TEX job runs.",
 	"job_missing": "The TEX job {job} is not registered (run bench migrate).",
 	"job_stopped": "The TEX job {job} is stopped.",
 	"job_never_ran": "The TEX job {job} has never run.",
@@ -191,10 +193,15 @@ def business_days(since: date, today: date) -> int:
 # ─── platform checks ─────────────────────────────────────────────────────
 
 
+SCHEDULER_OFF = {"disabled": "scheduler_disabled", "paused": "scheduler_paused", "maintenance": "maintenance_mode"}
+
+
 def scheduler_check(*, inactive_reason: str | None, live: bool) -> dict:
-	"""``inactive_reason``: None, "maintenance mode", "paused" or "disabled". A switched-off
+	"""``inactive_reason``: None, "maintenance", "paused" or "disabled". A switched-off
 	scheduler fails a live site; on a developer site it is a warning."""
-	issues = [issue("scheduler_off", FAIL if live else WARN, why=inactive_reason)] if inactive_reason else []
+	issues = []
+	if inactive_reason:
+		issues.append(issue(SCHEDULER_OFF.get(inactive_reason, "scheduler_disabled"), FAIL if live else WARN))
 	return make("scheduler", issues, scope="platform")
 
 

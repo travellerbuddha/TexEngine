@@ -8,7 +8,7 @@ export const CAP_GROUPS: { id: string; caps: string[] }[] = [
   { id: "payments", caps: ["payment.view", "payment.link", "payment.refund"] },
   { id: "guests", caps: ["crm.view", "crm.edit", "guest.export", "loyalty.edit"] },
   { id: "distribution", caps: ["report.view", "booking_site.edit", "connect.admin"] },
-  { id: "admin", caps: ["settings.admin", "user.admin"] },
+  { id: "admin", caps: ["settings.admin", "user.admin", "system.monitor"] },
 ]
 
 /** Capabilities that expose secrets, money movements or other people's access. */

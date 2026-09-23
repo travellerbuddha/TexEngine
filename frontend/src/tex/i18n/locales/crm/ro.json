@@ -636,5 +636,6 @@
  "crm.stay.status.quoted": "Ofertată",
  "crm.stay.status.requested": "Cerută",
  "crm.stay.status.waitlist": "Listă de așteptare",
- "crm.vip": "VIP"
+ "crm.vip": "VIP",
+ "crm.comm.delivery_error": "Motiv: {reason}"
 }

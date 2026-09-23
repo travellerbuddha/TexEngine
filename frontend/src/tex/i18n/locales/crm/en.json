@@ -72,6 +72,7 @@
  "crm.comm.channel.phone": "Phone call",
  "crm.comm.channel.sms": "SMS",
  "crm.comm.channel.whatsapp": "WhatsApp",
+ "crm.comm.delivery_error": "Reason: {reason}",
  "crm.comm.direction": "Direction",
  "crm.comm.direction.inbound": "Inbound",
  "crm.comm.direction.internal": "Internal",

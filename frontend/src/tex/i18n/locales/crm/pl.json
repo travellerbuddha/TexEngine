@@ -644,5 +644,6 @@
  "crm.stay.status.quoted": "Wyceniona",
  "crm.stay.status.requested": "Zamówiona",
  "crm.stay.status.waitlist": "Lista oczekujących",
- "crm.vip": "VIP"
+ "crm.vip": "VIP",
+ "crm.comm.delivery_error": "Powód: {reason}"
 }

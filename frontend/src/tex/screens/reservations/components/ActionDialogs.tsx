@@ -317,8 +317,9 @@ export function AcknowledgeDialog({ open, onClose, res, onDone }: { open: boolea
 /**
  * Re-send the booking e-mail (crs.resend_confirmation). Only a hash of the guest's manage
  * link is stored, so the e-mail carries a NEW link and the old one stops working — the
- * agent is told before confirming. `sent: false` is shown as it is: the link was replaced
- * but no e-mail went out.
+ * agent is told before confirming. The result says what happened, never more: "queued" (the
+ * guest's timeline later shows Sent or Failed), or not queued — the link was replaced but no
+ * e-mail went out.
  */
 export function ResendConfirmationDialog({ open, onClose, booking }: { open: boolean; onClose: () => void; booking: string }) {
   const { t } = useTexT()
@@ -355,7 +356,7 @@ export function ResendConfirmationDialog({ open, onClose, booking }: { open: boo
                 try {
                   const r = await resendConfirmation(booking)
                   setResult(r)
-                  if (r.sent) toast.success(t("res.resend.sent", { email: r.email }))
+                  if (r.queued) toast.success(t("res.resend.queued", { email: r.email }))
                 } catch (e) {
                   setError(asApiError(e))
                 } finally {
@@ -370,9 +371,9 @@ export function ResendConfirmationDialog({ open, onClose, booking }: { open: boo
       }
     >
       {result ? (
-        result.sent ? (
-          <Notice tone="success" title={t("res.resend.sent", { email: result.email })}>
-            {t("res.resend.old_dead")}
+        result.queued ? (
+          <Notice tone="success" title={t("res.resend.queued", { email: result.email })}>
+            {t("res.resend.queued_hint")} {t("res.resend.old_dead")}
           </Notice>
         ) : (
           <Notice tone="warning" title={t("res.resend.not_sent_title")}>

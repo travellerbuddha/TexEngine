@@ -156,7 +156,7 @@
  "payments.links.email_failed": "E-posta gönderilemedi. URL'yi kopyalayıp misafire kendiniz gönderin.",
  "payments.links.email_invalid": "Geçerli bir e-posta adresi girin.",
  "payments.links.email_language": "E-posta dili",
- "payments.links.emailed": "{email} adresine e-postayla gönderildi.",
+ "payments.links.emailed": "{email} adresine gidecek e-posta gönderim kuyruğuna alındı.",
  "payments.links.empty": "Henüz ödeme linki yok",
  "payments.links.empty_filtered": "Bu filtrelere uyan link yok",
  "payments.links.empty_hint": "Rezervasyonlu veya rezervasyonsuz; ön ödeme, bakiye ya da ekstra tahsil etmek için bir link oluşturun.",

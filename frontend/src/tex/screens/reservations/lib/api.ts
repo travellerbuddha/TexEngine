@@ -66,8 +66,10 @@ export function contractVersion(name: string) {
 
 export interface ResendResult {
   booking: string
-  /** false when no e-mail went out (e.g. no outgoing mail account); the new link replaced the old one anyway */
-  sent: boolean
+  /** true when the e-mail queue took the message — queued, not yet sent (ADR-047); false when
+   * nothing could be queued (e.g. no outgoing mail account). The new link replaced the old one anyway. */
+  queued: boolean
+  status: "Queued" | "Failed"
   email: string
 }
 

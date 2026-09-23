@@ -156,7 +156,7 @@
  "payments.links.email_failed": "The email could not be sent. Copy the URL and send it to the guest yourself.",
  "payments.links.email_invalid": "Enter a valid email address.",
  "payments.links.email_language": "Email language",
- "payments.links.emailed": "Sent by email to {email}.",
+ "payments.links.emailed": "E-mail to {email} queued for sending.",
  "payments.links.empty": "No payment links yet",
  "payments.links.empty_filtered": "No links match these filters",
  "payments.links.empty_hint": "Create a link to collect a deposit, a balance or an extra, with or without a booking.",
