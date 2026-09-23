@@ -65,14 +65,29 @@ const REASONS: Record<string, MessageKey> = {
   MAX_ADULTS: "reason.occupancy",
   MAX_CHILDREN: "reason.occupancy",
   MAX_OCCUPANTS: "reason.occupancy",
-  MIN_ADULTS: "reason.occupancy",
+  MIN_ADULTS: "reason.minAdults",
 }
 
-export function reasonText(t: I18n["t"], reasons: Reason[] | undefined, multiRoom = false) {
+const whole = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0
+
+/** Guest wording for why a room type cannot be offered (reasons are per requested room).
+ * Occupancy reasons name the limit when the server sends it (else the room content's). */
+export function reasonText(
+  t: I18n["t"],
+  reasons: Reason[] | undefined,
+  room?: { max_adults?: number | null; max_children?: number | null },
+) {
   const r = reasons?.[0]
   if (!r) return t("reason.unavailable")
+  if (r.code === "MAX_CHILDREN") {
+    const n = whole(r.max_children) ? r.max_children : room?.max_children
+    if (whole(n)) return n === 0 ? t("reason.noChildren") : t("reason.maxChildren", { count: n })
+  }
+  if (r.code === "MAX_ADULTS") {
+    const n = whole(r.max_adults) ? r.max_adults : room?.max_adults
+    if (whole(n) && n > 0) return t("reason.maxAdults", { count: n })
+  }
+  if (r.code === "MAX_OCCUPANTS" && whole(r.max_occupants) && r.max_occupants > 0) return t("reason.maxGuests", { count: r.max_occupants })
   const k = REASONS[r.code]
-  // with several rooms, a room type is offered only when it fits every room's guests
-  if (k === "reason.occupancy" && multiRoom) return t("reason.occupancyMulti")
   return k ? t(k) : t("reason.unavailable")
 }

@@ -2,6 +2,7 @@
 // links from the widget, back/forward and reloads all land on the same results.
 //
 //   ?checkin=2026-12-10&checkout=2026-12-13&rooms=2-5_8,1&promo=EARLY10&currency=EUR&hotel=…
+//   &market=DE&country=DE   (campaign deep links: which market's contracts price the stay)
 //
 // `rooms` lists each room as "<adults>" or "<adults>-<age>_<age>…" (child ages in
 // whole years). `adults` + `children` (comma-separated ages) are accepted as a
@@ -21,6 +22,10 @@ export interface Criteria {
   promo: string
   currency: string | null
   hotel: string | null
+  /** market code from a campaign link (never shown to the guest) */
+  market: string | null
+  /** guest country (ISO 3166-1 alpha-2) from a link; the server picks the market from it */
+  country: string | null
 }
 
 export const MAX_ROOMS = 8
@@ -73,18 +78,23 @@ export function parseCriteria(sp: URLSearchParams): Criteria {
     promo: (sp.get("promo") ?? "").trim().slice(0, 40),
     currency: /^[A-Z]{3}$/.test(sp.get("currency") ?? "") ? sp.get("currency") : null,
     hotel: sp.get("hotel") || null,
+    market: /^[A-Za-z0-9_-]{1,40}$/.test(sp.get("market") ?? "") ? sp.get("market") : null,
+    country: /^[A-Za-z]{2}$/.test(sp.get("country") ?? "") ? sp.get("country")!.toUpperCase() : null,
   }
 }
 
 export function applyCriteria(sp: URLSearchParams, c: Criteria) {
   const out = new URLSearchParams(sp)
-  for (const k of ["checkin", "checkout", "check_in", "check_out", "rooms", "adults", "children", "ages", "promo", "currency", "hotel", "step"]) out.delete(k)
+  for (const k of ["checkin", "checkout", "check_in", "check_out", "rooms", "adults", "children", "ages", "promo", "currency", "hotel", "market", "country", "step"])
+    out.delete(k)
   if (c.checkIn) out.set("checkin", c.checkIn)
   if (c.checkOut) out.set("checkout", c.checkOut)
   out.set("rooms", roomsParam(c.rooms))
   if (c.promo) out.set("promo", c.promo)
   if (c.currency) out.set("currency", c.currency)
   if (c.hotel) out.set("hotel", c.hotel)
+  if (c.market) out.set("market", c.market)
+  if (c.country) out.set("country", c.country)
   return out
 }
 
@@ -94,7 +104,7 @@ export function isComplete(c: Criteria) {
 
 /** Identity of a search (everything that changes prices), without the hotel filter. */
 export function searchKey(c: Criteria) {
-  return JSON.stringify([c.checkIn, c.checkOut, roomsParam(c.rooms), c.promo.toUpperCase(), c.currency])
+  return JSON.stringify([c.checkIn, c.checkOut, roomsParam(c.rooms), c.promo.toUpperCase(), c.currency, c.market, c.country])
 }
 
 export function apiRooms(c: Criteria) {

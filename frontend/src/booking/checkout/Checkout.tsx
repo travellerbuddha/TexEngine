@@ -12,9 +12,13 @@ import { rememberReturn } from "../lib/storage"
 import { useSite } from "../site/SiteContext"
 import type { PaymentMethod, PaymentStart, SiteExtra } from "../types"
 import { Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
-import { Alert, ErrorSummary, type FieldError } from "../ui/feedback"
+import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
+import { isZero } from "../lib/format"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
+
+/** special_requests limit the server accepts */
+const REQUESTS_MAX = 1000
 
 // ─── progress ────────────────────────────────────────────────────────────
 
@@ -267,9 +271,11 @@ function DetailsStep() {
       /* old engines */
     }
     return Object.entries(COUNTRIES as Record<string, string>)
-      .map(([code, value]) => ({ code, value, label: names?.of(code) ?? value }))
+      .map(([code, name]) => ({ code, name, label: names?.of(code) ?? name }))
       .sort((a, b) => a.label.localeCompare(b.label, locale))
   }, [locale])
+  // the server takes ISO 3166-1 alpha-2 codes; older saved forms may hold a country name
+  const countryCode = g.country && !(g.country in COUNTRIES) ? countries.find((c) => c.name === g.country)?.code ?? "" : g.country
 
   const errors: FieldError[] = []
   if (!g.first_name.trim()) errors.push({ id: ids.first, message: t("details.errFirst") })
@@ -327,10 +333,10 @@ function DetailsStep() {
               <Input type="tel" inputMode="tel" value={g.phone} onChange={(e) => setGuest({ phone: e.target.value.slice(0, 40) })} autoComplete="tel" required />
             </Field>
             <Field label={t("details.country")} optional={t("common.optional")} id={ids.country} className="sm:col-span-2">
-              <Select value={g.country} onChange={(e) => setGuest({ country: e.target.value })} autoComplete="country-name">
+              <Select value={countryCode} onChange={(e) => setGuest({ country: e.target.value })} autoComplete="country">
                 <option value="">{t("details.selectCountry")}</option>
                 {countries.map((c) => (
-                  <option key={c.code} value={c.value}>
+                  <option key={c.code} value={c.code}>
                     {c.label}
                   </option>
                 ))}
@@ -343,10 +349,15 @@ function DetailsStep() {
           <Field
             label={t("details.requests")}
             optional={t("common.optional")}
-            hint={t("details.requestsHint", { count: 140 - g.special_requests.length })}
+            hint={t("details.requestsHint", { count: REQUESTS_MAX - g.special_requests.length })}
             id={ids.requests}
           >
-            <Textarea value={g.special_requests} onChange={(e) => setGuest({ special_requests: e.target.value.slice(0, 140) })} maxLength={140} rows={3} />
+            <Textarea
+              value={g.special_requests}
+              onChange={(e) => setGuest({ special_requests: e.target.value.slice(0, REQUESTS_MAX) })}
+              maxLength={REQUESTS_MAX}
+              rows={4}
+            />
           </Field>
         </div>
         <fieldset className="bk-card space-y-3 p-4 sm:p-6">
@@ -380,10 +391,21 @@ const METHOD_TEXT: Record<PaymentMethod, { label: MessageKey; body: MessageKey }
   "Bank Transfer": { label: "payment.bank", body: "payment.bankBody" },
   "Pay at Hotel": { label: "payment.hotel", body: "payment.hotelBody" },
 }
+const KNOWN = new Set<string>(["Card", "Bank Transfer", "Pay at Hotel"])
+
+interface PayChoice {
+  method: PaymentMethod
+  account: string | null
+  /** gateway label when several accounts offer the same method */
+  via: string | null
+  dueNow: string | null
+  later: string | null
+  sandbox: boolean
+}
 
 function PaymentStep() {
   const i18n = useI18n()
-  const { t } = i18n
+  const { t, money } = i18n
   const { site } = useSite()
   const navigate = useNavigate()
   const b = useBooking()
@@ -396,13 +418,52 @@ function PaymentStep() {
   const radioName = useId()
   const methodErrRef = useRef<HTMLDivElement>(null)
 
-  const payAtHotel = flow.selections.every((s) => s && paymentTerms(i18n, s.rateInfo, s.currency).payAtHotel)
-  const methods: PaymentMethod[] = ["Card", "Bank Transfer", ...(payAtHotel ? (["Pay at Hotel"] as PaymentMethod[]) : [])]
-  const method: PaymentMethod = flow.method && methods.includes(flow.method) ? flow.method : "Card"
+  // Methods and amounts come from the server basket (same deposit rules as booking);
+  // if it cannot be read, fall back to the generic list and let book() decide.
+  const basket = b.basket.status === "done" ? b.basket.data : null
+  const basketLoading = b.basket.status === "loading" || (b.basket.status === "idle" && b.quotesFresh)
+  const choices: PayChoice[] = useMemo(() => {
+    if (basket) {
+      const avail = basket.methods.filter((m) => m.available && KNOWN.has(m.method))
+      return avail.map((m) => ({
+        method: m.method as PaymentMethod,
+        account: m.provider_account,
+        via: avail.filter((x) => x.method === m.method).length > 1 ? m.label : null,
+        dueNow: m.due_now,
+        later: m.balance_after,
+        sandbox: m.sandbox,
+      }))
+    }
+    const payAtHotel = flow.selections.every((s) => s && paymentTerms(i18n, s.rateInfo, s.currency).payAtHotel)
+    return (["Card", "Bank Transfer", ...(payAtHotel ? ["Pay at Hotel"] : [])] as PaymentMethod[]).map((m) => ({
+      method: m,
+      account: null,
+      via: null,
+      dueNow: null,
+      later: null,
+      sandbox: false,
+    }))
+  }, [basket, flow.selections, i18n])
+  const current =
+    choices.find((c) => c.method === flow.method && (!c.account || !flow.providerAccount || c.account === flow.providerAccount)) ?? choices[0] ?? null
+  const method: PaymentMethod = current?.method ?? "Card"
+  const currency = basket?.currency ?? flow.selections[0]?.currency ?? ""
+  const payingNow = current?.dueNow ? !isZero(current.dueNow) : method !== "Pay at Hotel"
+  const bookLabel = payingNow
+    ? current?.dueNow
+      ? t("payment.bookAndPayAmount", { amount: money(current.dueNow, currency) })
+      : t("payment.bookAndPay")
+    : t("payment.bookNow")
 
   useEffect(() => {
-    if (flow.method !== method) setMethod(method)
-  }, [flow.method, method, setMethod])
+    if (current && (flow.method !== current.method || (current.account && flow.providerAccount !== current.account)))
+      setMethod(current.method, current.account)
+  }, [current, flow.method, flow.providerAccount, setMethod])
+
+  // quotes used or expired since they were made: offer the refresh path
+  useEffect(() => {
+    if (basket && !basket.usable) setFlowError({ kind: "expired", message: "" })
+  }, [basket, setFlowError])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -469,8 +530,8 @@ function PaymentStep() {
       summary={
         <Summary
           action={
-            <Button onClick={() => document.getElementById("bk-pay-submit")?.click()} busy={pending} block>
-              {method === "Card" ? t("payment.bookAndPay") : t("payment.bookNow")}
+            <Button onClick={() => document.getElementById("bk-pay-submit")?.click()} busy={pending} disabled={!choices.length} block>
+              {bookLabel}
             </Button>
           }
         />
@@ -509,25 +570,55 @@ function PaymentStep() {
               <p>{methodError}</p>
             </div>
           )}
-          <div className="mt-3 space-y-2.5">
-            {methods.map((m) => {
-              const Icon = METHOD_ICON[m]
-              const on = method === m
-              return (
-                <label
-                  key={m}
-                  className={`flex cursor-pointer items-start gap-3 rounded-ui border p-3.5 has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink ${on ? "border-brand-ink bg-brand/5 ring-1 ring-brand-ink" : "border-line hover:border-line-strong"}`}
-                >
-                  <input type="radio" name={radioName} value={m} checked={on} onChange={() => setMethod(m)} className="bk-check mt-0.5 rounded-full" />
-                  <Icon className="mt-0.5 size-5 flex-none text-soft" aria-hidden />
-                  <span className="min-w-0">
-                    <span className="block font-semibold">{t(METHOD_TEXT[m].label)}</span>
-                    <span className="block text-sm text-muted">{t(METHOD_TEXT[m].body)}</span>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
+          {basketLoading && !basket ? (
+            <p className="mt-3">
+              <Spinner label={t("payment.checkingOptions")} />
+            </p>
+          ) : !choices.length ? (
+            <Alert tone="warn" className="mt-3" title={t("payment.noMethodsTitle")}>
+              {t("payment.noMethodsBody")}
+            </Alert>
+          ) : (
+            <div className="mt-3 space-y-2.5">
+              {choices.map((c) => {
+                const Icon = METHOD_ICON[c.method]
+                const on = current === c
+                return (
+                  <label
+                    key={`${c.method}|${c.account ?? ""}`}
+                    className={`flex cursor-pointer items-start gap-3 rounded-ui border p-3.5 has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-ink ${on ? "border-brand-ink bg-brand/5 ring-1 ring-brand-ink" : "border-line hover:border-line-strong"}`}
+                  >
+                    <input
+                      type="radio"
+                      name={radioName}
+                      value={`${c.method}|${c.account ?? ""}`}
+                      checked={on}
+                      onChange={() => setMethod(c.method, c.account)}
+                      className="bk-check mt-0.5 rounded-full"
+                    />
+                    <Icon className="mt-0.5 size-5 flex-none text-soft" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold">
+                        {t(METHOD_TEXT[c.method].label)}
+                        {c.via && <span className="font-normal text-muted"> · {c.via}</span>}
+                      </span>
+                      <span className="block text-sm text-muted">{t(METHOD_TEXT[c.method].body)}</span>
+                      {c.dueNow !== null && (
+                        <span className="mt-1 block text-sm">
+                          {isZero(c.dueNow) ? (
+                            <span className="font-medium text-ok">{t("payment.nothingNow")}</span>
+                          ) : (
+                            <span className="font-semibold">{t("payment.dueNowAmount", { amount: money(c.dueNow, currency) })}</span>
+                          )}
+                          {c.later && !isZero(c.later) && <span className="text-soft"> · {t("payment.laterAmount", { amount: money(c.later, currency) })}</span>}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
           {method === "Card" && (
             <p className="mt-3 flex items-start gap-2 text-sm text-soft">
               <ShieldCheck className="mt-0.5 size-4 flex-none text-ok" aria-hidden />
@@ -576,9 +667,9 @@ function PaymentStep() {
         </section>
 
         <div className="hidden justify-end lg:flex">
-          <Button type="submit" size="lg" busy={pending}>
+          <Button type="submit" size="lg" busy={pending} disabled={!choices.length}>
             <Lock className="size-4" aria-hidden />
-            {method === "Card" ? t("payment.bookAndPay") : t("payment.bookNow")}
+            {bookLabel}
           </Button>
         </div>
         <button type="submit" id="bk-pay-submit" hidden />

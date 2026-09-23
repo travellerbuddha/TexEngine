@@ -1,4 +1,4 @@
-import { ArrowLeft, BedDouble, Check, Eye, Maximize2, SearchX, Users } from "lucide-react"
+import { AlertTriangle, ArrowLeft, BedDouble, Check, Eye, Maximize2, SearchX, Users } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useI18n } from "../i18n"
 import { nightsBetween } from "../lib/dates"
@@ -10,7 +10,7 @@ import { Summary, uniformNight } from "../flow/Summary"
 import { useContinue } from "../flow/useContinue"
 import { partyText } from "../search/GuestsPicker"
 import { useSite } from "../site/SiteContext"
-import type { Offer, PropertyResult, RoomContent } from "../types"
+import type { Offer, PropertyResult, Reason, RoomContent } from "../types"
 import { Badge, Button } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Skeleton } from "../ui/feedback"
@@ -47,7 +47,7 @@ function HotelList({ properties }: { properties: PropertyResult[] }) {
       <ul className="mt-4 grid gap-4 md:grid-cols-2">
         {properties.map((p) => {
           const h = site.hotels.find((x) => x.name === p.property)
-          const cheapest = p.offers[0]
+          const hasOffers = p.offers.length > 0
           const types = new Set(p.offers.map((o) => o.room_type)).size
           return (
             <li key={p.property} className="bk-card flex flex-col overflow-hidden">
@@ -57,18 +57,21 @@ function HotelList({ properties }: { properties: PropertyResult[] }) {
                 {p.city && <p className="text-sm text-muted">{p.city}</p>}
                 {h?.showcase_description && <p className="mt-2 line-clamp-2 text-sm text-soft">{h.showcase_description}</p>}
                 <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-                  {cheapest?.total ? (
+                  {p.from_total ? (
                     <div>
-                      <p className="text-xs text-muted">{t("results.fromFor", { count: nights })}</p>
-                      <p className="text-xl font-bold tabular-nums">{money(cheapest.total, cheapest.currency)}</p>
+                      <p className="text-xs text-muted">
+                        {t("results.fromFor", { count: nights })}
+                        {criteria.rooms.length > 1 && ` · ${t("guests.rooms", { count: criteria.rooms.length })}`}
+                      </p>
+                      <p className="text-xl font-bold tabular-nums">{money(p.from_total, p.from_currency ?? p.offers[0]?.currency)}</p>
                       <p className="text-xs text-muted">{t("results.roomTypes", { count: types })}</p>
                     </div>
                   ) : (
-                    <p className="text-sm font-medium text-soft">{t("results.hotelUnavailable")}</p>
+                    <p className="text-sm font-medium text-soft">{hasOffers ? t("results.notAllRoomsFit") : t("results.hotelUnavailable")}</p>
                   )}
                   <Button
-                    variant={cheapest ? "primary" : "secondary"}
-                    disabled={!cheapest}
+                    variant={p.from_total ? "primary" : "secondary"}
+                    disabled={!hasOffers}
                     onClick={() => setCriteria({ ...criteria, hotel: p.property })}
                     aria-label={t("results.seeRoomsAt", { name: p.property_name })}
                   >
@@ -126,11 +129,12 @@ function RoomDetails({ open, onClose, content, name }: { open: boolean; onClose:
   )
 }
 
-function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName }: { offer: Offer; roomIndex: number; nights: number; onSelect: () => void; selected: boolean; roomName: string }) {
+function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName, disabled }: { offer: Offer; roomIndex: number; nights: number; onSelect: () => void; selected: boolean; roomName: string; disabled?: boolean }) {
   const i18n = useI18n()
   const { t, money } = i18n
   const { criteria } = useBooking()
-  const rq = offer.rooms[roomIndex] ?? offer.rooms[0]
+  // rooms holds only the parties this room type fits: look up by room_index
+  const rq = offer.rooms.find((r) => r.room_index === roomIndex)
   const q = rq?.quote
   if (!q) return null
   const info = offer.rate_plan_info ?? q.rate_plan
@@ -199,6 +203,7 @@ function RateRow({ offer, roomIndex, nights, onSelect, selected, roomName }: { o
           <Button
             variant={selected ? "secondary" : "primary"}
             onClick={onSelect}
+            disabled={disabled}
             aria-pressed={selected}
             aria-label={`${selected ? t("rate.selected") : t("rate.select")}: ${roomName}, ${planName}, ${boardLabel(t, offer.board)}, ${money(q.totals.total, q.currency)}`}
             className="min-w-28"
@@ -242,6 +247,9 @@ function RoomCard({ property, roomType, offers }: { property: PropertyResult; ro
   const current = boards.includes(board) ? board : boards[0]
   const rates = offers.filter((o) => o.board === current)
   const available = Math.min(...offers.map((o) => o.available))
+  // the same room type cannot take more of the requested rooms than it has free
+  const takenElsewhere = flow.selections.filter((s, j) => s && j !== activeRoom && s.roomType === roomType).length
+  const left = available - takenElsewhere
   const f = facts(t, content)
   const sel = flow.selections[activeRoom]
   const boardGroup = `board-${roomType}`
@@ -250,9 +258,9 @@ function RoomCard({ property, roomType, offers }: { property: PropertyResult; ro
       <div className="flex flex-col md:flex-row">
         <div className="relative md:w-72 md:flex-none">
           <Photo src={content?.image} alt={name} className="aspect-[16/9] w-full md:aspect-auto md:h-full md:min-h-56" />
-          {available <= 3 && (
+          {left > 0 && left <= 3 && (
             <span className="absolute left-3 top-3 rounded-full bg-surface/95 px-2.5 py-1 text-xs font-semibold text-warn shadow-card">
-              {t("room.onlyLeft", { count: available })}
+              {t("room.onlyLeft", { count: left })}
             </span>
           )}
         </div>
@@ -307,9 +315,15 @@ function RoomCard({ property, roomType, offers }: { property: PropertyResult; ro
             </fieldset>
           )}
           {boards.length === 1 && <p className="mt-3 text-sm font-medium text-soft">{boardLabel(t, current)}</p>}
+          {left <= 0 && (
+            <p className="mt-3 rounded-ui bg-warn-soft px-3 py-2 text-sm text-warn" role="note">
+              {t("room.allTaken", { name })}
+            </p>
+          )}
           <ul className="mt-3 space-y-2" aria-label={t("room.ratesFor", { name })}>
             {rates.map((o) => {
-              const rq = o.rooms[activeRoom] ?? o.rooms[0]
+              const rq = o.rooms.find((r) => r.room_index === activeRoom)
+              const selected = !!sel && sel.offerKey === rq?.offer_key
               return (
                 <RateRow
                   key={`${o.rate_plan}-${o.board}`}
@@ -317,7 +331,8 @@ function RoomCard({ property, roomType, offers }: { property: PropertyResult; ro
                   roomIndex={activeRoom}
                   nights={nights}
                   roomName={name}
-                  selected={!!sel && sel.offerKey === rq?.offer_key}
+                  disabled={left <= 0 && !selected}
+                  selected={selected}
                   onSelect={() => {
                     select(activeRoom, o, property.property, name)
                     trackRoomView(site.slug, { hotel: property.property, room_type: roomType, board: o.board, rate_plan: o.rate_plan })
@@ -333,7 +348,7 @@ function RoomCard({ property, roomType, offers }: { property: PropertyResult; ro
   )
 }
 
-function RoomTabs() {
+function RoomTabs({ unplaced }: { unplaced: number[] }) {
   const { t } = useI18n()
   const { criteria, activeRoom, setActiveRoom, flow } = useBooking()
   if (criteria.rooms.length < 2) return null
@@ -353,8 +368,11 @@ function RoomTabs() {
               >
                 <span className="flex items-center gap-1.5 font-semibold">
                   {sel && <Check className="size-4 text-ok" aria-hidden />}
+                  {!sel && unplaced.includes(i) && <AlertTriangle className="size-4 text-warn" aria-hidden />}
                   {t("guests.room", { n: i + 1 })}
-                  <span className="sr-only">{sel ? `, ${t("results.chosen", { name: sel.roomName })}` : `, ${t("summary.notSelected")}`}</span>
+                  <span className="sr-only">
+                    {sel ? `, ${t("results.chosen", { name: sel.roomName })}` : unplaced.includes(i) ? `, ${t("results.tabFitsNothing")}` : `, ${t("summary.notSelected")}`}
+                  </span>
                 </span>
                 <span className="block text-xs text-muted">{sel ? sel.roomName : partyText(t, r)}</span>
               </button>
@@ -371,20 +389,31 @@ function RoomList({ property }: { property: PropertyResult }) {
   const { site } = useSite()
   const { criteria, setCriteria, activeRoom } = useBooking()
   const [freeOnly, setFreeOnly] = useState(false)
+  // each offer names the requested rooms it fits (room_indexes)
+  const fitting = useMemo(
+    () => property.offers.filter((o) => (o.room_indexes ?? o.rooms.map((r) => r.room_index)).includes(activeRoom)),
+    [property, activeRoom],
+  )
   const groups = useMemo(() => {
     const m = new Map<string, Offer[]>()
-    for (const o of property.offers) {
+    for (const o of fitting) {
       if (freeOnly && o.refundable === false) continue
       m.set(o.room_type, [...(m.get(o.room_type) ?? []), o])
     }
     return [...m.entries()]
-  }, [property, freeOnly])
+  }, [fitting, freeOnly])
+  // room types this room cannot have, with the reason for THIS room
   const unavailable = useMemo(() => {
-    const avail = new Set(property.offers.map((o) => o.room_type))
-    const m = new Map<string, Offer>()
-    for (const o of property.unavailable) if (!avail.has(o.room_type) && !m.has(o.room_type)) m.set(o.room_type, o)
-    return [...m.values()]
-  }, [property])
+    const ok = new Set(fitting.map((o) => o.room_type))
+    const m = new Map<string, Reason[] | undefined>()
+    for (const o of [...property.offers, ...property.unavailable]) {
+      if (ok.has(o.room_type) || m.has(o.room_type)) continue
+      const own = o.room_reasons?.find((r) => r.room_index === activeRoom)
+      m.set(o.room_type, own ? [own] : o.reasons)
+    }
+    return [...m.entries()]
+  }, [property, fitting, activeRoom])
+  const unplaced = property.unplaced_rooms ?? []
   const multi = criteria.rooms.length > 1
   const heading = useRef<HTMLHeadingElement>(null)
   const firstRender = useRef(true)
@@ -426,7 +455,8 @@ function RoomList({ property }: { property: PropertyResult }) {
           </button>
         )}
       </div>
-      <RoomTabs />
+      {unplaced.length > 0 && <UnplacedNotice rooms={unplaced} />}
+      <RoomTabs unplaced={unplaced} />
       {groups.length ? (
         <ul className="space-y-4">
           {groups.map(([rt, offers]) => (
@@ -434,24 +464,61 @@ function RoomList({ property }: { property: PropertyResult }) {
           ))}
         </ul>
       ) : (
-        <EmptyState icon={<SearchX className="size-8" aria-hidden />} title={property.offers.length ? t("results.noMatchFilter") : t("results.noneTitle")}>
-          {property.offers.length ? null : t(multi ? "results.noneBodyMulti" : "results.noneBody")}
+        <EmptyState
+          icon={<SearchX className="size-8" aria-hidden />}
+          title={fitting.length ? t("results.noMatchFilter") : multi ? t("results.roomFitsNothing", { n: activeRoom + 1 }) : t("results.noneTitle")}
+        >
+          {fitting.length ? null : t(multi ? "results.noneBodyMulti" : "results.noneBody")}
         </EmptyState>
       )}
       {unavailable.length > 0 && (
         <div className="pt-4">
           <h3 className="text-base font-semibold text-soft">{t("results.unavailableTitle")}</h3>
           <ul className="mt-2 divide-y divide-line rounded-card border border-line bg-surface">
-            {unavailable.map((o) => (
-              <li key={o.room_type} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
-                <span className="font-medium text-soft">{property.rooms[o.room_type]?.name ?? o.room_type}</span>
-                <span className="text-muted">{reasonText(t, o.reasons, multi)}</span>
+            {unavailable.map(([rt, reasons]) => (
+              <li key={rt} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                <span className="font-medium text-soft">{property.rooms[rt]?.name ?? rt}</span>
+                <span className="text-muted">{reasonText(t, reasons, property.rooms[rt])}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
     </section>
+  )
+}
+
+/** Some requested room fits no room type of this hotel: explain and offer the ways out. */
+function UnplacedNotice({ rooms }: { rooms: number[] }) {
+  const { t } = useI18n()
+  const { site } = useSite()
+  const { criteria, setCriteria } = useBooking()
+  return (
+    <Alert
+      tone="warn"
+      title={t("results.unplacedTitle", { count: rooms.length, rooms: rooms.map((i) => i + 1).join(", ") })}
+      actions={
+        <>
+          <Button size="sm" variant="secondary" onClick={() => window.dispatchEvent(new Event("tex-booking:edit-guests"))}>
+            {t("results.changeGuests")}
+          </Button>
+          {site.group && site.hotels.length > 1 && (
+            <Button size="sm" variant="ghost" onClick={() => setCriteria({ ...criteria, hotel: null })}>
+              {t("results.otherHotels")}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <p>{t("results.unplacedBody")}</p>
+      <ul className="mt-1 list-disc pl-5">
+        {rooms.map((i) => (
+          <li key={i}>
+            {t("guests.room", { n: i + 1 })}: {criteria.rooms[i] ? partyText(t, criteria.rooms[i]) : ""}
+          </li>
+        ))}
+      </ul>
+    </Alert>
   )
 }
 

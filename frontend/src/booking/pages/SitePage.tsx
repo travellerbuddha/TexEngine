@@ -159,6 +159,17 @@ function SiteHome() {
 
   useEffect(() => setEditing(false), [criteria])
 
+  // "Change guests" from the results (a room fits no room type): open the guests editor
+  useEffect(() => {
+    const on = () => {
+      setEditing(true)
+      window.scrollTo({ top: 0, behavior: "smooth" })
+      setTimeout(() => document.querySelectorAll<HTMLButtonElement>("form[role=search] button[aria-haspopup=dialog]")[1]?.click(), 60)
+    }
+    window.addEventListener("tex-booking:edit-guests", on)
+    return () => window.removeEventListener("tex-booking:edit-guests", on)
+  }, [])
+
   if (step !== "rooms")
     return (
       <Shell>
