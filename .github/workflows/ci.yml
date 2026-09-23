@@ -158,3 +158,35 @@ jobs:
           printf 'exec(open("/tmp/fresh_check.py").read())\nexit\n' \
             | bench --site test.localhost console | tee fresh.out
           grep -q "FRESH-INSTALL CHECKS PASSED" fresh.out
+
+      - name: Browser E2E (Playwright, R-58 journey + booking/CRS/contract specs)
+        run: |
+          cd frappe-bench
+          bench --site test.localhost execute kamra.tex.devtools.demo_seed.execute \
+            --kwargs "{'password': 'TexDemo#2026'}"
+          bench --site test.localhost set-config -p tex_public_write_limit 1000
+          bench --site test.localhost set-config -p tex_public_search_limit 1000
+          echo "127.0.0.1 test.localhost" | sudo tee -a /etc/hosts
+          # --skip-assets: link the app's committed bundles where the web server looks
+          mkdir -p sites/assets
+          [ -e sites/assets/kamra ] || ln -s "$(pwd)/apps/kamra/kamra/public" sites/assets/kamra
+          nohup bench serve --port 8000 > serve.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://test.localhost:8000/api/method/ping > /dev/null && break
+            sleep 2
+          done
+          cd ../apps/kamra/frontend
+          npm ci
+          npx playwright install --with-deps chromium
+          TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD='TexDemo#2026' \
+            npx playwright test -c e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/kamra/e2e-report
+            apps/kamra/e2e-results
+            frappe-bench/serve.log

@@ -114,7 +114,9 @@ export async function proposeChange(
 
   const [resp] = await Promise.all([
     page.waitForResponse((r) => r.url().includes("crs.propose_modification")),
-    drawer.getByRole("button", { name: /^(Calculate new price|Recalculate)$/ }).click(),
+    // after a change of basis the stale result also offers an inline "Recalculate" link;
+    // the drawer's own action button comes last
+    drawer.getByRole("button", { name: /^(Calculate new price|Recalculate)$/ }).last().click(),
   ])
   expect(resp.ok(), `propose_modification ${resp.status()}`).toBeTruthy()
 
