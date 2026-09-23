@@ -395,6 +395,10 @@
   "paylink.closedBody": "Bitte fordern Sie beim Hotel einen neuen Link an.",
   "paylink.invalidTitle": "Zahlungslink nicht gefunden",
   "paylink.invalidBody": "Prüfen Sie, ob Sie den vollständigen Link aus Ihrer Nachricht geöffnet haben.",
+  "payreturn.succeededTitle": "Zahlung erhalten – vielen Dank!",
+  "payreturn.failedTitle": "Die Zahlung ist nicht durchgegangen",
+  "payreturn.pendingTitle": "Wir bestätigen Ihre Zahlung",
+  "payreturn.body": "Um die Zahlungsanforderung erneut zu sehen, öffnen Sie den Link aus Ihrer Nachricht.",
 
   "mock.docTitle": "Testzahlung",
   "mock.badge": "TEX-Testumgebung",

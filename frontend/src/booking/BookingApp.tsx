@@ -10,6 +10,7 @@ const ConfirmationPage = lazy(() => import("./pages/ConfirmationPage"))
 const ManagePage = lazy(() => import("./pages/ManagePage"))
 const PayLinkPage = lazy(() => import("./pages/PayLinkPage"))
 const MockPayPage = lazy(() => import("./pages/MockPayPage"))
+const PayReturnPage = lazy(() => import("./pages/PayReturnPage"))
 
 /** Inside the widget's modal iframe, Esc (with no dialog of ours open) asks the
  * host page's widget to close the modal. */
@@ -30,6 +31,7 @@ function useEmbedBridge() {
  *  /:site/confirmation/:booking   after booking / payment return
  *  /:site/manage#token=…          self-service (magic link)
  *  /pay/:token                    payment link
+ *  /pay/return                    gateway return of a payment link (no token)
  *  /pay/mock/:txn                 sandbox gateway (Mock provider) */
 export default function BookingApp() {
   useEmbedBridge()
@@ -37,6 +39,7 @@ export default function BookingApp() {
     <Suspense fallback={<Spinner className="grid min-h-dvh place-items-center" />}>
       <Routes>
         <Route path="/pay/mock/:txn" element={<MockPayPage />} />
+        <Route path="/pay/return" element={<PayReturnPage />} />
         <Route path="/pay/:token" element={<PayLinkPage />} />
         <Route path="/:site/confirmation/:booking" element={<ConfirmationPage />} />
         <Route path="/:site/manage" element={<ManagePage />} />

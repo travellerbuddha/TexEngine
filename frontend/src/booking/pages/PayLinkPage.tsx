@@ -4,7 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
-import { rememberPayment } from "../lib/storage"
+import { rememberPayment, rememberReturn } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import type { PaymentLinkInfo, PaymentStart } from "../types"
 import { Button } from "../ui/controls"
@@ -60,6 +60,8 @@ export default function PayLinkPage() {
       // the server picks the hotel's gateway; the guest only chooses when it asks (several card gateways)
       const p = await pub<PaymentStart>("pay_link", { token, provider_account: account ?? undefined })
       rememberPayment(p, { amount: isZero(link.paid) ? link.amount : undefined, currency: link.currency, hotel: link.hotel ?? undefined })
+      // the gateway returns to /pay/return (the token is never sent to it); come back here
+      rememberReturn(p.transaction, `/pay/${token}`)
       const out = continuePayment(p, navigate)
       if (out === "none" || out === "blocked") setPaying(false)
     } catch (e) {

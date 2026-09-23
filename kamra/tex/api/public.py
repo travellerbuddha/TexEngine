@@ -424,10 +424,18 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 @rate_limit(limit=30, seconds=60)
 def mock_pay(transaction: str, outcome: str, sig: str):
 	"""Sandbox payment page action (only Mock provider accounts reach this)."""
+	import hmac
+
 	from kamra.tex.payments import service as pay
+	from kamra.tex.payments.providers.base import ProviderError
+	from kamra.tex.payments.providers.simple import mock_signature
 
 	if frappe.db.get_value("TEX Payment Transaction", transaction, "provider") != "Mock":
 		frappe.throw(_("Not a sandbox payment."))
+	# the signature first: a replay of a finished payment tells nothing to whoever cannot sign it (G-10)
+	if outcome not in ("success", "fail") or not hmac.compare_digest(
+			mock_signature(pay._mock_secret(), transaction, outcome), str(sig or "")):
+		raise ProviderError("invalid mock signature")
 	out = pay.complete(transaction, params={"outcome": outcome, "sig": sig})
 	txn = frappe.db.get_value("TEX Payment Transaction", transaction, ["booking", "payment_link", "return_url"],
 	                          as_dict=True)
@@ -472,7 +480,8 @@ def pay_link(token: str, provider_account: str | None = None):
 	                         payment_link=link.name, booking=None, description=link.description or link.name,
 	                         customer={"name": link.guest_name, "email": link.guest_email,
 	                                   "ip": getattr(frappe.local, "request_ip", None)},
-	                         return_url=frappe.utils.get_url(f"/book/pay/{token}"),
+	                         # never the link's bearer token: the guest's tab remembers its link page (G-10)
+	                         return_url=frappe.utils.get_url("/book/pay/return"),
 	                         idempotency_key=f"link:{link.name}:{to_str(due)}:{frappe.generate_hash(length=6)}")
 
 

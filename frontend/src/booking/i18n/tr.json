@@ -395,6 +395,10 @@
   "paylink.closedBody": "Yeni bir bağlantı için lütfen otelle iletişime geçin.",
   "paylink.invalidTitle": "Ödeme bağlantısı bulunamadı",
   "paylink.invalidBody": "Mesajınızdaki bağlantının tamamını açtığınızdan emin olun.",
+  "payreturn.succeededTitle": "Ödeme alındı — teşekkürler!",
+  "payreturn.failedTitle": "Ödeme gerçekleşmedi",
+  "payreturn.pendingTitle": "Ödemenizi doğruluyoruz",
+  "payreturn.body": "Ödeme talebini yeniden görmek için mesajınızdaki bağlantıyı açın.",
 
   "mock.docTitle": "Test ödemesi",
   "mock.badge": "TEX test ortamı",

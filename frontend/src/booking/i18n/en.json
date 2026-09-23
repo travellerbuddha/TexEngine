@@ -395,6 +395,10 @@
   "paylink.closedBody": "Please contact the hotel for a new link.",
   "paylink.invalidTitle": "Payment link not found",
   "paylink.invalidBody": "Check that you opened the complete link from your message.",
+  "payreturn.succeededTitle": "Payment received — thank you!",
+  "payreturn.failedTitle": "The payment did not go through",
+  "payreturn.pendingTitle": "We are confirming your payment",
+  "payreturn.body": "To see the payment request again, open the link from your message.",
 
   "mock.docTitle": "Sandbox payment",
   "mock.badge": "TEX sandbox",

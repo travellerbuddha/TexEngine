@@ -444,3 +444,41 @@ class TestLegacyNightAudit(TexTestCase):
 		self.assertEqual(out["no_shows_flagged"], 1)
 		self.assertIn("left 1 TEX-sold reservations to TEX",
 		              frappe.db.get_value("Night Audit Run", out["audit"], "log"))
+
+
+class TestPaymentLinkTokens(TexTestCase):
+	"""G-10: a payment link's bearer token is never stored in a transaction nor handed to
+	someone who cannot prove the payment's signature."""
+
+	def setUp(self):
+		super().setUp()
+		self.p = setup_site_and_payments(self.f)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent sends a link
+		self.link = pay.create_link(property=fx.PROPERTY, amount="80", currency="EUR", description="deposit",
+		                            provider_account=self.p["account"], guest_name="Link Guest")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens the link
+		self.start = public.pay_link(token=self.link["token"])
+		self.txn = self.start["transaction"]
+
+	def test_the_transaction_does_not_keep_the_link_token(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- what hotel staff can read over REST
+		stored = frappe.db.get_value("TEX Payment Transaction", self.txn, "return_url")
+		self.assertNotIn(self.link["token"], stored)
+		self.assertTrue(stored.endswith("/book/pay/return"))
+
+	def test_a_replay_without_the_signature_learns_nothing(self):
+		ok = public.mock_pay(transaction=self.txn, outcome="success", sig=self.start["fields"]["success_sig"])
+		self.assertEqual(ok["status"], "Succeeded")
+		self.assertNotIn(self.link["token"], ok.get("return_url") or "")
+		with self.assertRaises(ProviderError):                      # the payment is final; a forged replay
+			public.mock_pay(transaction=self.txn, outcome="success", sig="0" * 64)
+
+	def test_old_transactions_are_scrubbed(self):
+		from kamra.patches.tex import p10_scrub_link_return_urls
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- migration
+		leaked = frappe.utils.get_url(f"/book/pay/{self.link['token']}")
+		frappe.db.set_value("TEX Payment Transaction", self.txn, "return_url", leaked)
+		p10_scrub_link_return_urls.execute()
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", self.txn, "return_url"),
+		                 frappe.utils.get_url("/book/pay/return"))

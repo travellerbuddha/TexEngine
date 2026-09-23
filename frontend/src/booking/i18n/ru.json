@@ -395,6 +395,10 @@
   "paylink.closedBody": "Свяжитесь с отелем, чтобы получить новую ссылку.",
   "paylink.invalidTitle": "Ссылка на оплату не найдена",
   "paylink.invalidBody": "Проверьте, что вы открыли ссылку из сообщения полностью.",
+  "payreturn.succeededTitle": "Оплата получена — спасибо!",
+  "payreturn.failedTitle": "Оплата не прошла",
+  "payreturn.pendingTitle": "Подтверждаем вашу оплату",
+  "payreturn.body": "Чтобы снова открыть запрос на оплату, перейдите по ссылке из сообщения.",
 
   "mock.docTitle": "Тестовый платёж",
   "mock.badge": "Тестовая среда TEX",

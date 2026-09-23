@@ -92,7 +92,7 @@ the guest's manage token.
 ## 7. Known gaps (tracked)
 
 The authoritative list is `FINAL_GAP_AUDIT.md` (2026-09-23 audit). Security-relevant open items
-are G-10 to G-16 (High), plus G-26 and G-83; the Critical G-01, G-02 and G-03 are fixed. The
+are G-11 to G-16 (High), plus G-26 and G-83; the Critical G-01…G-03 and the High G-10 are fixed. The
 notes below predate that audit.
 - Legacy PMS endpoints resolve every record argument (`order`, `outlet`, `task`, `function`,
   `guest`, generic `name` ...) to its hotel through `kamra.authz.RECORD_ARGS` (ADR-027). On Desk

@@ -395,6 +395,10 @@
   "paylink.closedBody": "Contactați hotelul pentru un link nou.",
   "paylink.invalidTitle": "Linkul de plată nu a fost găsit",
   "paylink.invalidBody": "Verificați că ați deschis linkul complet din mesaj.",
+  "payreturn.succeededTitle": "Plată primită — vă mulțumim!",
+  "payreturn.failedTitle": "Plata nu a fost efectuată",
+  "payreturn.pendingTitle": "Confirmăm plata dvs.",
+  "payreturn.body": "Pentru a vedea din nou cererea de plată, deschideți linkul din mesajul primit.",
 
   "mock.docTitle": "Plată de test",
   "mock.badge": "Mediu de test TEX",

@@ -395,6 +395,10 @@
   "paylink.closedBody": "Skontaktuj się z hotelem, aby otrzymać nowy link.",
   "paylink.invalidTitle": "Nie znaleziono linku do płatności",
   "paylink.invalidBody": "Sprawdź, czy otwierasz pełny link z wiadomości.",
+  "payreturn.succeededTitle": "Płatność otrzymana — dziękujemy!",
+  "payreturn.failedTitle": "Płatność nie została zrealizowana",
+  "payreturn.pendingTitle": "Potwierdzamy Twoją płatność",
+  "payreturn.body": "Aby ponownie zobaczyć prośbę o płatność, otwórz link z wiadomości.",
 
   "mock.docTitle": "Płatność testowa",
   "mock.badge": "Środowisko testowe TEX",
