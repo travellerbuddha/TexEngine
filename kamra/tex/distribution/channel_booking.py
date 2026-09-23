@@ -10,6 +10,10 @@ Messages carry the full state of the booking: ``new`` and ``modified`` both make
 rooms equal to the message (by the channel's room line id), ``cancelled`` cancels every
 room. The same message is applied once (the inbound idempotency key); a modification
 for a booking TEX has not seen is applied as new.
+
+A modification or cancellation locks the booking, then each reservation, then its nights: the
+order every change to a TEX booking takes (ADR-044), and a guest change still waiting for a
+room the channel changed or cancelled is void (G-45 re-review F8).
 """
 
 from __future__ import annotations
@@ -178,7 +182,9 @@ def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, 
 
 def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, inbound: str) -> dict:
 	"""Make TEX's rooms equal to the channel's (full state), line by line."""
-	b = frappe.get_doc("TEX Booking", booking)
+	from kamra.tex.services import guest_changes
+
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # the booking first
 	prop = b.property
 	lines = {}
 	for row in b.rooms:
@@ -210,7 +216,7 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			                             new_amount=res.tex_total_amount, currency=ccy, basis="EXTERNAL",
 			                             reason=f"room added by the channel ({ref})", source="Channel")
 		else:
-			res = frappe.get_doc("Reservation", name)
+			res = frappe.get_doc("Reservation", name, for_update=True)      # then the room, then its nights
 			before = {f: str(res.get(f) or "") for f in values if f != "tex_pricing_snapshot"}
 			if all(before[f] == str(values[f] or "") for f in before) and res.status in LIVE:
 				continue
@@ -228,6 +234,7 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			                             reason=f"modified by the channel ({ref})", source="Channel",
 			                             changes={k: [before.get(k), str(values[k])] for k in before
 			                                      if before[k] != str(values[k] or "")})
+			guest_changes.close_open(res.name, f"the channel changed the room ({ref})")
 		if w:
 			warnings.append(w)
 	for line, name in lines.items():
@@ -242,8 +249,11 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 
 
 def _cancel_one(reservation: str, booking: str, reason: str) -> None:
-	"""The channel's cancellation: no TEX penalty (the channel's own terms apply)."""
-	res = frappe.get_doc("Reservation", reservation)
+	"""The channel's cancellation: no TEX penalty (the channel's own terms apply). The caller
+	holds the booking's lock."""
+	from kamra.tex.services import guest_changes
+
+	res = frappe.get_doc("Reservation", reservation, for_update=True)
 	old = D(str(res.tex_total_amount or 0))
 	frappe.flags.kamra_cancelling = True
 	frappe.flags.kamra_status_transition = True
@@ -260,10 +270,11 @@ def _cancel_one(reservation: str, booking: str, reason: str) -> None:
 		frappe.flags.kamra_status_transition = False
 	booking_svc._record_revision(res.name, booking, change_type="Cancellation", old_amount=old, new_amount=0,
 	                             currency=res.tex_currency, basis="EXTERNAL", reason=reason, source="Channel")
+	guest_changes.close_open(res.name, f"the room was cancelled ({reason})")
 
 
 def _cancel_all(booking: str, ref: str, inbound: str) -> dict:
-	b = frappe.get_doc("TEX Booking", booking)
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # the booking first
 	n = 0
 	for row in b.rooms:
 		if frappe.db.get_value("Reservation", row.reservation, "status") in LIVE:
