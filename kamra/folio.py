@@ -704,7 +704,18 @@ def run_night_audit(property: str, business_date: str | None = None) -> dict:
 	folios_opened = charges_posted = no_shows = 0
 	amount_posted = Decimal(0)
 
-	in_house = frappe.get_all(
+	# TEX-sold stays are priced and changed only by TEX (ADR-010, G-04): the audit
+	# never posts legacy room rates, flags no-shows or charges fees on them
+	from kamra.tex.legacy import TEX_SOLD_FIELDS, is_tex_reservation
+	tex_skipped = 0
+
+	def legacy_only(rows):
+		nonlocal tex_skipped
+		keep = [r for r in rows if not is_tex_reservation(r)]
+		tex_skipped += len(rows) - len(keep)
+		return keep
+
+	in_house = legacy_only(frappe.get_all(
 		"Reservation",
 		filters={
 			"property": property,
@@ -712,8 +723,8 @@ def run_night_audit(property: str, business_date: str | None = None) -> dict:
 			"check_in_date": ("<=", business_date),
 			"check_out_date": (">", business_date),
 		},
-		fields=["name"],
-	)
+		fields=["name", *TEX_SOLD_FIELDS],
+	))
 	for row in in_house:
 		res = frappe.get_doc("Reservation", row.name)
 		if not frappe.db.get_value(
@@ -730,15 +741,15 @@ def run_night_audit(property: str, business_date: str | None = None) -> dict:
 	# charged per the property's policy
 	no_show_basis = frappe.db.get_value(
 		"Property", property, "no_show_charge") or "None"
-	stale = frappe.get_all(
+	stale = legacy_only(frappe.get_all(
 		"Reservation",
 		filters={
 			"property": property,
 			"status": "Confirmed",
 			"check_in_date": ("<", business_date),
 		},
-		fields=["name"],
-	)
+		fields=["name", *TEX_SOLD_FIELDS],
+	))
 	for row in stale:
 		frappe.db.set_value("Reservation", row.name, "status", "No Show")
 		no_shows += 1
@@ -762,6 +773,8 @@ def run_night_audit(property: str, business_date: str | None = None) -> dict:
 		purged += 1
 	if purged:
 		log_lines.append(f"purged {purged} stale waitlist entries")
+	if tex_skipped:
+		log_lines.append(f"left {tex_skipped} TEX-sold reservations to TEX")
 
 	audit = frappe.get_doc({
 		"doctype": "Night Audit Run",

@@ -407,3 +407,40 @@ class TestLegacySelling(TexTestCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "/book"):
 			api.create_group_booking(property=fx.PROPERTY, group_name="Legacy group", guest_name="Legacy Probe",
 			                         rooms=[{"room_type": self.room_type, "count": 1}], **self.stay)
+
+
+class TestLegacyNightAudit(TexTestCase):
+	"""G-04: the legacy night audit (daily 03:00) never flags a TEX-sold stay as a no-show,
+	charges it a no-show fee or posts legacy room nights on it — only TEX changes it."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		b = guest_books(session="sec-g04")
+		public.mock_pay(transaction=b["payment"]["transaction"], outcome="success",
+		                sig=b["payment"]["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler runs as Administrator
+		self.tex = b["rooms"][0]["reservation"]
+		guest = frappe.db.get_value("Reservation", self.tex, "guest")
+		self.legacy = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": guest,
+		                              "room_type": self.f["room_types"]["DLX"], "check_in_date": fx.d(6, 10),
+		                              "check_out_date": fx.d(6, 12), "status": "Confirmed"}).insert(
+			ignore_permissions=True).name
+		frappe.db.set_value("Property", fx.PROPERTY, "no_show_charge", "First Night")
+
+	def test_night_audit_leaves_tex_stays_to_tex(self):
+		from unittest.mock import patch
+
+		from kamra.folio import run_night_audit
+
+		self.assertEqual(frappe.db.get_value("Reservation", self.tex, "status"), "Confirmed")
+		before = frappe.db.get_value("Reservation", self.tex, ["status", "amount_after_tax", "tex_total_amount"])
+		with patch.object(frappe.db, "commit", lambda *a, **k: None):  # the test rolls back
+			out = run_night_audit(fx.PROPERTY, business_date=str(fx.d(6, 11)))
+		self.assertEqual(frappe.db.get_value("Reservation", self.tex, ["status", "amount_after_tax",
+		                                                               "tex_total_amount"]), before)
+		self.assertFalse(frappe.db.exists("Folio", {"reservation": self.tex}))
+		self.assertEqual(frappe.db.get_value("Reservation", self.legacy, "status"), "No Show")  # legacy still audited
+		self.assertEqual(out["no_shows_flagged"], 1)
+		self.assertIn("left 1 TEX-sold reservations to TEX",
+		              frappe.db.get_value("Night Audit Run", out["audit"], "log"))

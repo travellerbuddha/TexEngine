@@ -21,6 +21,15 @@ def is_tex_hotel(property: str | None) -> bool:
 	return bool(row.tex_enterprise or row.tex_hotel_group or frappe.db.exists("TEX Contract", {"property": property}))
 
 
+# a reservation sold by TEX carries these (ADR-010); legacy jobs read them to leave it alone
+TEX_SOLD_FIELDS = ("tex_booking", "tex_price_locked", "tex_pricing_source")
+
+
+def is_tex_reservation(row) -> bool:
+	"""Sold and priced by TEX: only the TEX services change it (price lock, ADR-010)."""
+	return bool(row.get("tex_booking") or row.get("tex_price_locked") or row.get("tex_pricing_source") == "TEX")
+
+
 def tex_booking_path(property: str | None = None) -> str:
 	"""The hotel's TEX booking site (its own, else its hotel group's), or the TEX engine root."""
 	site = None
