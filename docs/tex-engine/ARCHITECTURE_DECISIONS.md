@@ -684,3 +684,79 @@ enterprise or group view (G-25).
 **Consequences.**
 - "Today" is the server date; per-hotel time zones are still open.
 - No reporting-currency conversion: totals stay per currency.
+
+## ADR-039 TEX distributes through its own provider-neutral channel layer; certification gates production
+**Context.** TEX had no channel distribution of its own (G-69, a go-live blocker).
+- The legacy Kamra channel manager prices from `Room Type.base_price` and books outside TEX
+  (ADR-028, G-15). A TEX hotel must not use it.
+- No channel-manager provider credentials or certification are available, so no real
+  provider can be implemented honestly.
+**Decision.**
+- *Structure.* `kamra/tex/distribution/` is split into two kinds of module:
+  - Pure modules, with no frappe import: `model`, `ari`, `signing`, `adapters`.
+  - Frappe glue: `repository` and `channel_booking`.
+- *Adapters.* An adapter (`ChannelAdapter`) only translates and transports:
+  - `push_ari(runs)`, `verify_webhook`, `parse_webhook` and optionally
+    `fetch_reservations`.
+  - Only adapters in `REGISTRY` can be chosen.
+  - An adapter with `certified = False` is refused in the Production environment, both by
+    the connection controller and at run time.
+  - The only adapter is the `sandbox_channel` (uncertified), which accepts, fails or rejects
+    pushes on request and receives signed bookings in TEX's neutral format. **Real providers
+    are BLOCKED on credentials and certification.**
+- *Mapping.* `TEX Channel Mapping` maps one external room/rate code to TEX's room type,
+  board, rate plan, market, sales channel, currency, contract (optional), occupancies and a
+  horizon of up to 365 days.
+- *ARI is computed, never typed.* For each day, availability comes from the same pool and
+  inventory math that selling uses. Restrictions come from the effective TEX ARI
+  restrictions. The price per occupancy comes from `quoting.price_request` on the mapping's
+  published contract version. A day that cannot be priced goes out closed.
+- *Only changes are pushed.* `TEX Channel ARI Day` stores the fingerprint the channel
+  last accepted, and a push sends only the days that differ, grouped into runs.
+- *Change detection.* These edits mark the affected mapping-days dirty:
+  - TEX Inventory Day, ARI Restriction, Allotment and Channel Mapping;
+  - a contract version's status;
+  - a reservation's status, room type, dates or hotel (on insert, whatever Frappe has
+    loaded as "before").
+  Dirty days become one coalesced `TEX Integration Outbox` job (`kind = ARI`) per mapping.
+- *Job claims and retries.* Workers claim jobs with a token and a lease, so no two
+  workers take the same row. A failure retries with exponential back-off. A rejection
+  (`retryable = False`), or eight attempts, parks the job as Dead. Errors are redacted.
+- *Inbound bookings.* The webhook is guest-reachable and rate limited to 120/min.
+  - It verifies the adapter's signature and fails closed: `X-TEX-Timestamp` +
+    `X-TEX-Signature` HMAC-SHA256 over "<ts>.<body>", with a 300 s replay window.
+  - Each message is stored once in `TEX Channel Inbound`, keyed by a unique idempotency
+    key, and the webhook answers fast. The queue applies messages later.
+  - A booking's messages apply in the order received, one per booking per run.
+  - Each message is applied once: its row is locked and its status re-checked.
+- *Channel bookings.* A channel booking is the channel's sale.
+  - The TEX Booking is created with `created_via = Channel`, `external_ref` and
+    `channel_connection`.
+  - Its reservations carry the channel's total, with `tex_pricing_source = Channel`,
+    price-locked, and an `EXTERNAL` revision.
+  - New, modified and cancelled messages carry the full state of each line (`line_ref`).
+  - An overbooking is accepted, with a warning and a `channel.overbooking` audit event: the
+    channel has already sold it.
+  - TEX never reprices such a stay and never sells add-ons onto it. Changes arrive from the
+    channel.
+- *Reconciliation* reports two kinds of mismatch:
+  - ARI drift: TEX's current fingerprint differs from the one the channel last accepted.
+  - Booking differences: the channel's view, taken from the provider when it can answer
+    and otherwise from the latest message, compared with TEX's bookings.
+- *The PMS outbox* (`kind = Reservation`) goes to PMS connections only. A channel gets ARI,
+  not reservation events.
+- *Legacy guards.* The legacy channel-manager paths refuse TEX hotels:
+  - webhook, ARI push, queued jobs and room import;
+  - AioSell's reservation webhook (G-87).
+- *Security.*
+  - `channel.view` / `channel.manage` are checked at the connection's hotel.
+  - `api_key` and `secret` are Password fields.
+  - Secret-like keys are refused in `settings_json`, and endpoints must be `https://`.
+  - A connection with mappings cannot move to another hotel, and a connection with history
+    cannot be deleted.
+**Consequences.**
+- Certification with a real provider (Channex, SiteMinder, …) is the remaining go-live
+  step. It needs that provider's credentials and a new adapter subclass.
+- The sandbox proves the full flow end to end without pretending to reach a channel.
+- Reconciliation against a provider's own booking list waits for an adapter that
+  implements `fetch_reservations`.

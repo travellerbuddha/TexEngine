@@ -36,6 +36,8 @@ def _snapshot(res) -> dict:
 
 
 def _open(res) -> None:
+	if res.get("tex_pricing_source") == "Channel":
+		frappe.throw(_("This booking came from a channel: its price is the channel's."))
 	if res.status not in OPEN_STATUSES:
 		frappe.throw(_("Extras can no longer be added to a {0} reservation.").format(_(res.status).lower()))
 

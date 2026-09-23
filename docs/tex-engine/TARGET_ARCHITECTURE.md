@@ -38,7 +38,7 @@ Status: authoritative design. Decisions and their rationale are in
 | Security | `kamra/tex/security/` | Capability registry, scope resolution (Platform → Enterprise → Group → Hotel), decorators, audit events. |
 | Payments | `kamra/tex/payments/` | Provider interface + providers (mock, bank transfer, pay-at-hotel, iyzico, Sipay, virtual POS), links, ledger, webhooks. |
 | CRM | `kamra/tex/crm/` | Segments DSL, funnel/abandoned tracking, loyalty ledger, consent. |
-| Connect | `kamra/tex/connect/` | Transactional outbox + adapter registry (PMS, channel manager, FX, messaging). |
+| Connect | `kamra/tex/connect/`, `kamra/tex/distribution/` | Transactional outbox + adapter registry (PMS, FX, messaging); channel distribution (ADR-039). |
 | API | `kamra/tex/api/*.py` | Thin whitelisted endpoints: parse → authorise → call service → serialise (money as strings). |
 | DocTypes | `kamra/tex_platform`, `kamra/tex_commercial`, `kamra/tex_booking`, `kamra/tex_payments`, `kamra/tex_crm`, `kamra/tex_connect` | Frappe modules; controllers only validate/guard, logic lives in services. |
 | Frontend admin/CRS/Call Center | `frontend/src/tex/` | TEX design system (`tex/ui`), TEX shell/nav, screens. Never computes authoritative prices. |
@@ -189,8 +189,11 @@ Enterprise → Hotel Group → Hotel; audit events for every commercial action.
 - Transactional outbox (`TEX Integration Outbox`) written in the reservation transaction; worker
   delivers via adapters with retries/backoff; adapter registry per category
   (PMS: `push_reservation`, `modify_reservation`, `cancel_reservation`, `fetch_availability`).
-- Existing Kamra channel-manager adapters (Channex, STAAH, AioSell) kept behind the Channel Manager
-  category.
+- Channel distribution is TEX's own, provider-neutral layer (`kamra/tex/distribution/`, ADR-039):
+  mappings, ARI computed from TEX and pushed as changes, signed idempotent inbound bookings, error
+  queue, reconciliation. The legacy Kamra channel-manager adapters (Channex, STAAH, AioSell) are
+  NOT used for TEX hotels and refuse them (ADR-028, G-15, G-87); a real provider is a new
+  `ChannelAdapter` subclass, certified before it may run in Production.
 
 ## 10. Testing
 - Unit (pure): `kamra/tex/tests/unit` — pricing, restrictions, inventory math, FX, promotions,

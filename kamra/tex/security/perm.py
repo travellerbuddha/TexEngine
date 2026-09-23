@@ -22,7 +22,7 @@ PROPERTY_DOCTYPES = (
 	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
 	"TEX Tax Policy", "TEX Extra Inventory Day", "TEX Extra Allocation",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event",
-	"TEX Content Translation",
+	"TEX Content Translation", "TEX Channel Mapping", "TEX Channel ARI Day", "TEX Channel Inbound",
 )
 # belongs to a hotel or to a whole hotel group
 GROUP_DOCTYPES = ("TEX Promotion", "TEX Loyalty Program", "TEX Booking Site")

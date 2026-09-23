@@ -71,6 +71,7 @@ def reservation_on_update(doc, method=None):
 		from kamra.tex.crm import service as crm
 
 		crm.refresh_guest_stats(doc.guest)
+	_channels_see(doc)
 	if not doc.get("tex_booking"):
 		return
 	from kamra.tex.connect import outbox
@@ -79,6 +80,49 @@ def reservation_on_update(doc, method=None):
 	outbox.on_reservation_change(doc)
 	loyalty.on_reservation_change(doc)
 	_release_extras(doc)
+
+
+def _channels_see(doc) -> None:
+	"""Any stay at a TEX hotel changes what its channels may sell (G-69): queue an ARI sync
+	for the old and the new nights and room types."""
+	from kamra.tex.legacy import is_tex_hotel
+
+	if not is_tex_hotel(doc.property):
+		return
+	# on insert, Frappe (v16) still hands on_update a "before" copy: a new stay is always news
+	before = None if doc.flags.get("in_insert") else doc.get_doc_before_save()
+	watched = ("status", "room_type", "check_in_date", "check_out_date", "property")
+	if before and all(str(before.get(f) or "") == str(doc.get(f) or "") for f in watched):
+		return
+	from kamra.tex.distribution import repository as dist
+
+	for d in ([before] if before else []) + [doc]:
+		dist.mark_dirty(d.property, [d.room_type], d.check_in_date, d.check_out_date, reason="reservation")
+
+
+def ari_source_changed(doc, method=None):
+	"""Inventory, a restriction, an allotment or a mapping changed (G-69)."""
+	from kamra.tex.distribution import repository as dist
+
+	prop = doc.get("property") or frappe.db.get_value("TEX Integration Connection", doc.get("connection"), "property")
+	if not prop:
+		return
+	a = doc.get("inventory_date") or doc.get("restriction_date") or doc.get("date_from")
+	b = doc.get("inventory_date") or doc.get("restriction_date") or doc.get("date_to")
+	dist.mark_dirty(prop, [doc.get("room_type")] if doc.get("room_type") else None, a, b,
+	                reason=doc.doctype.removeprefix("TEX ").lower())
+
+
+def contract_version_changed(doc, method=None):
+	"""A version was published, withdrawn or went live: prices may have changed (G-69)."""
+	before = None if doc.flags.get("in_insert") else doc.get_doc_before_save()
+	if before and before.get("status") == doc.get("status"):
+		return
+	prop = frappe.db.get_value("TEX Contract", doc.contract, "property")
+	if prop:
+		from kamra.tex.distribution import repository as dist
+
+		dist.mark_dirty(prop, reason="contract")
 
 
 def _release_extras(doc) -> None:

@@ -250,9 +250,9 @@ class TestPurity(unittest.TestCase):
 
 	def test_no_frappe_imports_in_source(self):
 		root = pathlib.Path(__file__).resolve().parents[2]
-		for pkg in ("pricing", "availability"):
+		for pkg in ("pricing", "availability", "distribution"):
 			for f in (root / pkg).glob("*.py"):
-				if f.name in ("repository.py", "loader.py") or f.name.endswith("_repository.py"):
+				if f.name in ("repository.py", "loader.py", "channel_booking.py") or f.name.endswith("_repository.py"):
 					continue
 				tree = ast.parse(f.read_text())
 				for node in ast.walk(tree):
@@ -272,6 +272,7 @@ class TestPurity(unittest.TestCase):
 		code = ("import sys; sys.modules['frappe'] = None\n"
 		        "import kamra.tex.pricing.engine, kamra.tex.pricing.validate, kamra.tex.pricing.versions\n"
 		        "import kamra.tex.availability.restrictions, kamra.tex.availability.inventory_math\n"
+		        "import kamra.tex.distribution.ari, kamra.tex.distribution.adapters, kamra.tex.distribution.signing\n"
 		        "print('ok')")
 		root = pathlib.Path(__file__).resolve().parents[4]
 		out = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True)

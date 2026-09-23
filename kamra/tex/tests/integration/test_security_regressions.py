@@ -625,3 +625,23 @@ class TestLegacyWebhooks(TexTestCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a manual ARI push
 		with self.assertRaisesRegex(frappe.ValidationError, "through TEX"):
 			channel_manager.push_ari(connection=self.conn)
+		# G-87: a job queued before the guard, the room import and AioSell's own webhook refuse too
+		with self.assertRaisesRegex(frappe.ValidationError, "through TEX"):
+			channel_manager.process_webhook_events(self.conn, {"event": "new", "ota_ref": "X-2"})
+		with self.assertRaisesRegex(frappe.ValidationError, "through TEX"):
+			channel_manager.import_room_mappings(self.conn, dry_run=1)
+		import base64
+
+		from kamra.channels import aiosell
+
+		frappe.get_doc({"doctype": "Channel Manager Connection", "property": fx.PROPERTY, "provider": "AioSell",
+		                "active": 1, "api_username": "aio", "api_key": "aio-key-1",
+		                "external_property_id": "TEX-G87"}).insert(ignore_permissions=True)
+		frappe.local.flags.aiosell_webhook_auth = "Basic " + base64.b64encode(b"aio:aio-key-1").decode()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- AioSell's server, authenticated
+		try:
+			with self.assertRaisesRegex(frappe.ValidationError, "through TEX"):
+				aiosell.reservation_webhook(hotelCode="TEX-G87", action="book", bookingId="AIO-1")
+		finally:
+			frappe.local.flags.aiosell_webhook_auth = None
+		self.assertFalse(frappe.db.exists("Reservation", {"ota_ref": ("like", "AIO-1%")}))

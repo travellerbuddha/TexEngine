@@ -302,6 +302,9 @@ def reservation_webhook(**kwargs):
 	if not conn or not _auth_ok(conn):
 		# same answer for unknown hotel and bad credentials - don't leak which
 		frappe.throw("Unauthorized", frappe.AuthenticationError)
+	from kamra.channel_manager import _refuse_tex_hotel
+
+	_refuse_tex_hotel(conn)       # a TEX hotel receives channel bookings through TEX Connect only (G-15, G-87)
 
 	frappe.logger("aiosell", allow_site=True).info({
 		"connection": conn.name, "action": payload.get("action"),

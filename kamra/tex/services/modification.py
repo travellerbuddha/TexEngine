@@ -147,6 +147,9 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		frappe.throw(_("Unknown pricing basis {0}.").format(basis))
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("A {0} reservation cannot be modified.").format(res.status.lower()))
+	if res.get("tex_pricing_source") == "Channel":
+		# its price and its stay are the channel's: changes arrive from the channel (G-69)
+		frappe.throw(_("This booking came from a channel: change it in the channel, and the change arrives here."))
 	changes = {k: v for k, v in (changes or {}).items() if v is not None}
 	if "drop_addons" in changes:
 		raw = changes.pop("drop_addons")

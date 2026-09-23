@@ -1,16 +1,19 @@
 {
  "actions": [],
- "creation": "2026-09-23 23:30:00.000000",
+ "creation": "2026-09-24 00:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "connection",
   "property",
+  "kind",
   "event",
   "status",
   "attempts",
   "next_attempt_at",
+  "claimed_until",
+  "claim_token",
   "column_108",
   "reference_doctype",
   "reference_name",
@@ -33,6 +36,15 @@
    "fieldtype": "Link",
    "label": "Hotel",
    "options": "Property",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Kind",
+   "options": "Reservation\nARI",
+   "default": "Reservation",
+   "in_list_view": 1,
    "in_standard_filter": 1
   },
   {
@@ -59,6 +71,18 @@
    "fieldname": "next_attempt_at",
    "fieldtype": "Datetime",
    "label": "Next attempt"
+  },
+  {
+   "fieldname": "claimed_until",
+   "fieldtype": "Datetime",
+   "label": "Claimed until",
+   "read_only": 1
+  },
+  {
+   "fieldname": "claim_token",
+   "fieldtype": "Data",
+   "label": "Claim",
+   "read_only": 1
   },
   {
    "fieldname": "column_108",
@@ -105,7 +129,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 23:30:00.000000",
+ "modified": "2026-09-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Connect",
  "name": "TEX Integration Outbox",

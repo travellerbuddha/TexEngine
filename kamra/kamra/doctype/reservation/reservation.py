@@ -46,6 +46,9 @@ class Reservation(Document):
 		allowance (room type override, else property-wide, default 0%) is a
 		revenue-management decision made in Settings - never implicit.
 		"""
+		# a booking a channel manager already sold is accepted as sold (TEX, G-69)
+		if self.flags.get("tex_channel_accept"):
+			return
 		# waitlisted / inquiry stays hold no inventory
 		from kamra.reservation_state import holds_inventory
 		if not holds_inventory(self.status):
@@ -101,6 +104,9 @@ class Reservation(Document):
 
 	def validate_minimum_nights(self):
 		"""Property.minimum_nights is a hard floor for overnight stays."""
+		# a booking a channel manager already sold is accepted as sold (TEX, G-69)
+		if self.flags.get("tex_channel_accept"):
+			return
 		if self.status in ("Cancelled", "No Show", "Checked Out", "Inquiry", "Quoted"):
 			return
 		# day-use is nights == 0; min nights applies to overnight only
@@ -139,6 +145,9 @@ class Reservation(Document):
 	def validate_occupancy(self):
 		"""A room only sleeps so many. Checked when the party or room type
 		changes — legacy over-capacity stays can still check out."""
+		# a booking a channel manager already sold is accepted as sold (TEX, G-69)
+		if self.flags.get("tex_channel_accept"):
+			return
 		if not self.room_type:
 			return
 		old = None if self.is_new() else self.get_doc_before_save()

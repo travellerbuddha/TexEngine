@@ -51,6 +51,7 @@ scheduler_events = {
 		# TEX Engine: integration outbox, expired payment holds and links (5 min);
 		# FX after TCMB's 15:30 publication; loyalty maturation/expiry (02:30)
 		"*/5 * * * *": ["kamra.tex.scheduler.every_5_minutes"],
+		"* * * * *": ["kamra.tex.scheduler.every_minute"],
 		"45 15,17 * * *": ["kamra.tex.scheduler.fx_daily"],
 		"30 2 * * *": ["kamra.tex.scheduler.daily"],
 	},
@@ -226,6 +227,7 @@ _TEX_SCOPED = (
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
 	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Reservation Revision",
 	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation", "TEX Guest Segment",
+	"TEX Channel Mapping", "TEX Channel ARI Day", "TEX Channel Inbound",
 )
 permission_query_conditions = {dt: "kamra.tex.security.perm.query_conditions" for dt in _TEX_SCOPED}
 permission_query_conditions["Property"] = "kamra.tex.security.perm.property_query_conditions"
@@ -269,6 +271,11 @@ doc_events["Property"] = {
 doc_events.setdefault("Guest", {})["before_insert"] = "kamra.tex.security.perm.stamp_guest_enterprise"
 # a room type's tax % no longer prices a TEX hotel once its tax policy began (G-20): say so
 doc_events.setdefault("Room Type", {})["validate"] = "kamra.tex.hooks.room_type_validate"
+# what channels may sell changed: queue an ARI sync (G-69, ADR-039)
+for _dt in ("TEX Inventory Day", "TEX ARI Restriction", "TEX Allotment", "TEX Channel Mapping"):
+	doc_events.setdefault(_dt, {}).update({"on_update": "kamra.tex.hooks.ari_source_changed",
+	                                       "on_trash": "kamra.tex.hooks.ari_source_changed"})
+doc_events.setdefault("TEX Contract Version", {})["on_update"] = "kamra.tex.hooks.contract_version_changed"
 
 # Scheduled Tasks
 # ---------------

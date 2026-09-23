@@ -164,6 +164,11 @@ def ensure_indexes() -> None:
 		("TEX Extra Inventory Day", ["property", "extra_code", "service_date"], "tex_xday_lookup"),
 		("Reservation", ["guest", "property"], "tex_res_guest_prop"),              # CRM facts (G-23)
 		("TEX Abandoned Booking", ["guest", "property"], "tex_abandoned_guest"),
+		("TEX Channel ARI Day", ["mapping", "ari_date"], "tex_ari_day_lookup"),            # G-69
+		("TEX Channel Inbound", ["connection", "provider_ref"], "tex_inbound_ref"),
+		("TEX Channel Inbound", ["status", "next_attempt_at"], "tex_inbound_due"),
+		("TEX Integration Outbox", ["kind", "status", "next_attempt_at"], "tex_outbox_due"),
+		("TEX Booking", ["channel_connection", "external_ref"], "tex_booking_channel_ref"),
 	):
 		try:
 			frappe.db.add_index(dt, fields, name)

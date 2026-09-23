@@ -17,6 +17,13 @@ def _run(path: str) -> None:
 		log_exception(f"TEX job {path}")
 
 
+def every_minute() -> None:
+	"""Channel distribution (G-69): inbound bookings first, then ARI pushes."""
+	for job in ("kamra.tex.distribution.repository.process_inbound",
+	            "kamra.tex.distribution.repository.deliver_ari"):
+		_run(job)
+
+
 def every_5_minutes() -> None:
 	for job in ("kamra.tex.connect.outbox.deliver_pending",
 	            "kamra.tex.services.booking.expire_pending_bookings",
@@ -37,5 +44,6 @@ def fx_daily() -> None:
 def daily() -> None:
 	for job in ("kamra.tex.crm.loyalty.mature_and_expire", "kamra.tex.crm.service.purge_funnel",
 	            "kamra.tex.crm.service.refresh_recent_checkouts", "kamra.tex.availability.extras_repository.reconcile_all",
-	            "kamra.tex.services.sites.recheck_domains"):
+	            "kamra.tex.services.sites.recheck_domains",
+	            "kamra.tex.distribution.repository.daily_resync"):
 		_run(job)

@@ -1,0 +1,163 @@
+{
+ "actions": [],
+ "creation": "2026-09-24 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "connection",
+  "property",
+  "enabled",
+  "room_type",
+  "external_room_code",
+  "external_rate_code",
+  "column_110",
+  "board",
+  "rate_plan",
+  "market",
+  "sales_channel",
+  "contract",
+  "sell_currency",
+  "occupancies",
+  "horizon_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection",
+   "fieldtype": "Link",
+   "label": "Connection",
+   "options": "TEX Integration Connection",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Link",
+   "label": "Room type",
+   "options": "Room Type",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "external_room_code",
+   "fieldtype": "Data",
+   "label": "Channel room code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "external_rate_code",
+   "fieldtype": "Data",
+   "label": "Channel rate code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_110",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "board",
+   "fieldtype": "Data",
+   "label": "Board",
+   "reqd": 1,
+   "description": "TEX board code sold under this rate"
+  },
+  {
+   "fieldname": "rate_plan",
+   "fieldtype": "Link",
+   "label": "Rate plan",
+   "options": "Rate Plan"
+  },
+  {
+   "fieldname": "market",
+   "fieldtype": "Link",
+   "label": "Market",
+   "options": "TEX Market",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sales_channel",
+   "fieldtype": "Link",
+   "label": "Sales channel",
+   "options": "TEX Sales Channel",
+   "reqd": 1
+  },
+  {
+   "fieldname": "contract",
+   "fieldtype": "Link",
+   "label": "Contract",
+   "options": "TEX Contract",
+   "description": "Empty: the contract TEX would sell this market and channel with"
+  },
+  {
+   "fieldname": "sell_currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "occupancies",
+   "fieldtype": "Data",
+   "label": "Adults priced",
+   "default": "2",
+   "description": "Comma-separated, e.g. 1,2,3"
+  },
+  {
+   "fieldname": "horizon_days",
+   "fieldtype": "Int",
+   "label": "Days ahead",
+   "default": "90"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Connect",
+ "name": "TEX Channel Mapping",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "hash",
+ "title_field": "external_room_code",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

@@ -300,7 +300,7 @@ def outbox(property: str, status: str | None = None, limit=100):
 	if status:
 		filters["status"] = status
 	rows = frappe.get_all("TEX Integration Outbox", filters=filters,
-	                      fields=["name", "connection", "event", "status", "attempts", "next_attempt_at", "sent_at",
+	                      fields=["name", "connection", "kind", "event", "status", "attempts", "next_attempt_at", "sent_at",
 	                              "last_error", "reference_doctype", "reference_name", "creation"],
 	                      order_by="creation desc", limit_page_length=as_int(limit, 100, lo=1, hi=500))
 	for r in rows:
@@ -315,9 +315,11 @@ def retry_outbox(name: str):
 	scope.require("connect.admin", row.property)
 	if row.status not in ("Failed", "Dead"):
 		frappe.throw(_("Only failed deliveries can be retried."))
-	row.status = "Pending"
-	row.next_attempt_at = frappe.utils.now_datetime()
-	row.save(ignore_permissions=True)
+	# a fresh start: a dead row gets its full number of attempts again
+	frappe.db.set_value("TEX Integration Outbox", name, {"status": "Pending", "attempts": 0, "claim_token": None,
+	                                                    "claimed_until": None,
+	                                                    "next_attempt_at": frappe.utils.now_datetime()},
+	                    update_modified=False)
 	audit("outbox.retry", reference_doctype="TEX Integration Outbox", reference_name=name, property=row.property)
 	return {"ok": True}
 
@@ -327,21 +329,37 @@ def test_connection(name: str):
 	from kamra.tex.connect import adapters
 
 	conn = frappe.get_doc("TEX Integration Connection", name)
+	if not conn.property and not scope.is_platform_admin():
+		frappe.throw(_("Only a platform administrator can test a platform-wide connection."), frappe.PermissionError)
 	scope.require("connect.admin", conn.property)
 	try:
-		result = adapters.get(conn).test()
+		if conn.category == "Channel Manager":
+			from kamra.tex.distribution import repository as dist
+
+			result = dist.adapter_for(conn).test()
+		else:
+			result = adapters.get(conn).test()
 		conn.db_set({"last_status": "OK", "last_error": None}, update_modified=False)
 		return {"ok": True, **(result or {})}
 	except Exception as e:
-		conn.db_set({"last_status": "Error", "last_error": str(e)[:500]}, update_modified=False)
-		return {"ok": False, "error": str(e)[:300]}
+		from kamra.tex.security.audit import redact_text
+
+		conn.db_set({"last_status": "Error", "last_error": redact_text(str(e))[:500]}, update_modified=False)
+		return {"ok": False, "error": redact_text(str(e))[:300]}
 
 
 @frappe.whitelist()
 def adapters():
+	"""The installed adapters per category, and whether each may run in Production."""
+	scope.require("connect.admin", None)
 	from kamra.tex.connect import adapters as reg
+	from kamra.tex.distribution import adapters as channels
 
-	return [{"key": k, "category": c.category, "label": c.label} for k, c in sorted(reg.REGISTRY.items())]
+	out = [{"key": k, "category": c.category, "label": c.label, "certified": c.certified}
+	       for k, c in sorted(reg.REGISTRY.items())]
+	out += [{"key": k, "category": "Channel Manager", "label": c.label, "certified": c.certified}
+	        for k, c in sorted(channels.REGISTRY.items())]
+	return out
 
 
 # ─── audit trail ─────────────────────────────────────────────────────────

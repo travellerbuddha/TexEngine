@@ -17,6 +17,7 @@ class Adapter:
 	category = "PMS"
 	key = "base"
 	label = "Base adapter"
+	certified = False                     # may run in Production (see the connection's validation)
 
 	def __init__(self, connection):
 		self.connection = connection
@@ -51,6 +52,7 @@ class WebhookPMS(Adapter):
 
 	key = "webhook"
 	label = "Generic PMS webhook (signed JSON)"
+	certified = True                      # the hotel's own endpoint: no third-party certification involved
 
 	def test(self) -> dict:
 		self._post("ping", {"ping": True}, "ping")
@@ -65,6 +67,8 @@ class WebhookPMS(Adapter):
 			raise ValueError("webhook PMS needs an https endpoint")
 		body = json.dumps({"event": event, "data": payload}, sort_keys=True, default=str).encode()
 		secret = self.connection.get_password("secret", raise_exception=False) or ""
+		if not secret:
+			raise ValueError("webhook PMS needs a signing secret")      # never sign with an empty key
 		sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 		r = requests.post(url, data=body, timeout=15, headers={
 			"Content-Type": "application/json", "X-TEX-Signature": f"sha256={sig}",

@@ -420,6 +420,7 @@ def process_webhook_events(connection: str, payload: dict) -> None:
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	if not conn.active:
 		return
+	_refuse_tex_hotel(conn)       # also for jobs queued before the guard (G-87)
 	events = provider_for(conn.provider).parse_webhook(conn, payload)
 	if not events:
 		return
@@ -455,6 +456,7 @@ def import_room_mappings(connection: str, dry_run: int = 0):
 	returned under `unmatched` so you can map it by hand. Pass dry_run=1 to
 	preview without writing."""
 	conn = frappe.get_doc("Channel Manager Connection", connection)
+	_refuse_tex_hotel(conn)       # a TEX hotel maps its rooms in TEX Connect (G-87)
 	provider = provider_for(conn.provider)
 	if not hasattr(provider, "fetch_property_details"):
 		frappe.throw(f"{conn.provider} does not support mapping import.")

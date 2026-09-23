@@ -28,7 +28,7 @@ EXT = {
 		F("tex_board", "Data", "Board"),
 		F("tex_child_ages", "Data", "Child ages (JSON)"),
 		CB(),
-		F("tex_pricing_source", "Select", "Pricing source", ["", "TEX", "Legacy", "Manual"], read_only=1),
+		F("tex_pricing_source", "Select", "Pricing source", ["", "TEX", "Legacy", "Manual", "Channel"], read_only=1),
 		F("tex_price_locked", "Check", "Price locked", read_only=1),
 		F("tex_locked_at", "Datetime", "Locked at", read_only=1),
 		F("tex_sale_at", "Datetime", "Sold at", read_only=1),
