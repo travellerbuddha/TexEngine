@@ -114,13 +114,16 @@ export default function BookingDetail() {
                 {
                   key: "stay",
                   header: t("res.col.stay"),
+                  // guests under the dates: the card is two thirds wide, a separate column clipped the total
                   cell: (r) => (
-                    <span className="whitespace-nowrap">
+                    <span className="block whitespace-nowrap">
                       {date(r.check_in, "short")} – {date(r.check_out, "short")}
+                      <span className="block text-xs text-zinc-500">
+                        {t("res.col.pax")}: {num(r.adults)} + {num(r.children)}
+                      </span>
                     </span>
                   ),
                 },
-                { key: "pax", header: t("res.col.pax"), hideBelow: "md", align: "right", cell: (r) => `${num(r.adults)} + ${num(r.children)}` },
                 { key: "status", header: t("core.label.status"), cell: (r) => <Badge tone={statusTone(r.status)}>{L.status(r.status)}</Badge> },
                 {
                   key: "amount",
