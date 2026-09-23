@@ -231,3 +231,30 @@ class TestStaffBookingControls(TexTestCase):
 		self.assertEqual(out["payment_links"][-1]["amount"], "12.50")
 		self.assertEqual(out["payment_links"][-1]["paid_amount"], "0.00")
 		self.assertNotIn("public_url", out["payment_links"][-1])
+
+
+class TestGuestStats(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def test_upcoming_bookings_are_not_stays_yet(self):
+		from kamra.tex.crm import service as crm_svc
+
+		b = guest_books(session="sess-stats", guest={**GUEST, "email": "stats.guest@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- stats check
+		res = b["rooms"][0]["reservation"]
+		guest = frappe.db.get_value("Reservation", res, "guest")
+		g = frappe.db.get_value("Guest", guest, ["tex_stays", "tex_last_stay", "tex_lifetime_currency"], as_dict=True)
+		self.assertEqual((g.tex_stays, g.tex_last_stay, g.tex_lifetime_currency), (0, None, None))
+		# the stay happened: check-out in the past (moved directly; the price lock guards the form)
+		frappe.db.set_value("Reservation", res, {"check_in_date": frappe.utils.add_days(frappe.utils.nowdate(), -3),
+		                                         "check_out_date": frappe.utils.add_days(frappe.utils.nowdate(), -1)})
+		self.assertGreaterEqual(crm_svc.refresh_recent_checkouts(), 1)
+		g = frappe.db.get_value("Guest", guest, ["tex_stays", "tex_lifetime_value", "tex_lifetime_currency"],
+		                        as_dict=True)
+		self.assertEqual(g.tex_stays, 1)
+		self.assertEqual(g.tex_lifetime_currency, "EUR")
+		self.assertEqual(D(g.tex_lifetime_value), D(b["total"]))
+		row = next(r for r in crm_svc.list_guests(q="stats.guest@example.com")["rows"] if r["name"] == guest)
+		self.assertEqual(row["tex_lifetime_value"], b["total"])

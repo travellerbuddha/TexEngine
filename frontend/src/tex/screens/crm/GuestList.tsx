@@ -202,7 +202,7 @@ export default function GuestList() {
                       header: t("crm.col.ltv"),
                       align: "right",
                       hideBelow: "md",
-                      cell: (r) => <span className="tabular-nums">{money(r.tex_lifetime_value)}</span>,
+                      cell: (r) => <span className="tabular-nums">{r.tex_lifetime_currency ? money(r.tex_lifetime_value, r.tex_lifetime_currency) : "—"}</span>,
                     },
                     {
                       key: "last",

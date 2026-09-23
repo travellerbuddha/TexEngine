@@ -22,6 +22,7 @@ export interface GuestRow {
   tex_tags: string | null
   tex_stays: number | null
   tex_lifetime_value: string
+  tex_lifetime_currency?: string | null
   tex_last_stay: string | null
   tex_loyalty_points: number | null
   tex_consent_email: Flag
@@ -64,6 +65,7 @@ export interface Guest {
   tex_consent_text_version: string | null
   tex_stays: number | null
   tex_lifetime_value: string
+  tex_lifetime_currency?: string | null
   tex_last_stay: string | null
   tex_loyalty_points: number | null
   tex_enterprise: string | null
