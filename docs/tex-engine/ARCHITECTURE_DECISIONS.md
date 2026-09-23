@@ -537,3 +537,46 @@ confirmed price to sell a dinner.
   add-on is a staff modification.
 - A limited extra added after booking is Held while the booking's payment is pending, and
   Confirmed otherwise.
+
+## ADR-035 A booking site's own host: verified by DNS, pinned to its site, used in every guest link
+**Context.** A booking site could list custom domains and verify them by DNS, but nothing
+served them (G-21). Guest links were built from the request's Host header. A domain could
+be "reserved" by any site before verification, and paths such as `hotel.com/book` were
+accepted although TEX cannot serve a path on a hotel's own web server.
+**Decision.**
+- *A custom domain is a host name* (`book.hotel.com`) that the hotel points at TEX (CNAME).
+  Paths are refused. p15 un-verifies existing path rows so no guest link points at them;
+  the hotel must replace them with a host.
+- *Ownership*:
+  - A TXT record `_tex-verify.<host>` must hold the row's token, resolved over
+    DNS-over-HTTPS. The answer's `Status` is checked: NXDOMAIN means no record, any other
+    error is a lookup failure.
+  - Several sites may claim a host while it is unverified; only one site can hold it
+    verified.
+  - `verified`, `verified_at`, `last_checked_at` and `check_failures` are written only by
+    the DNS check. An edit, including the admin UI sending the rows back, keeps the stored
+    values.
+  - A daily job checks every verified host again. The record missing on three consecutive
+    checks un-verifies the host and audits it. A resolver failure does not count.
+- *Serving*:
+  - A `page_renderer` (`kamra.tex.booking_host`) claims website paths on a verified host of
+    an enabled site. It renders the booking engine pinned to that site through
+    `<meta name="tex-booking-site">`, with the site's CSP frame-ancestors.
+  - Platform paths pass through: assets, files, API, `.well-known` and `/book/pay/…`.
+    `/book/<another site>` redirects to `/`.
+  - The host → site map is cached and cleared on every site change.
+- *Binding*: on a pinned host, the public API answers for that site only.
+- *Links*:
+  - Manage links in e-mails, payment links, default payment return pages and the embed
+    link use the site's primary verified host (`https://<host>/…`), else the platform's
+    `/book/<slug>/…`.
+  - Platform links and gateway callbacks use `get_url(allow_header_override=False)`:
+    `host_name` from the site config, never the request's Host header.
+  - Payment return URLs may point only at the platform or at the verified hosts of the
+    hotel's enabled sites.
+- *Operations* (outside TEX): the host must be added to the Frappe site (`bench setup
+  add-domain`), the web server config regenerated and a TLS certificate issued. Production
+  sets `host_name`. These steps are listed in GO_LIVE_READINESS.md.
+**Consequences.**
+- A site without a verified host behaves exactly as before.
+- Staff log in on the platform host; a hotel's booking host only serves its engine.

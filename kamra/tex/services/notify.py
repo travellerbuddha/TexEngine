@@ -9,7 +9,7 @@ Sending is best-effort: a mail problem never fails the booking or the payment.
 from __future__ import annotations
 
 import frappe
-from frappe.utils import escape_html, get_url
+from frappe.utils import escape_html
 
 from kamra.tex.lib_text import render
 from kamra.tex.money import from_db, to_str
@@ -18,20 +18,13 @@ from kamra.tex.security.audit import log_exception
 LANGS = ("en", "tr", "de", "ru", "ro", "pl")
 
 
-def _site_slug(property: str, booking_site: str | None) -> str | None:
-	if booking_site:
-		return frappe.db.get_value("TEX Booking Site", booking_site, "site_slug")
-	slug = frappe.db.get_value("TEX Booking Site", {"property": property, "enabled": 1}, "site_slug")
-	if slug:
-		return slug
-	group = frappe.db.get_value("Property", property, "tex_hotel_group")
-	return frappe.db.get_value("TEX Booking Site", {"hotel_group": group, "enabled": 1}, "site_slug") if group else None
-
-
 def manage_url(property: str, booking_site: str | None, token: str) -> str | None:
-	slug = _site_slug(property, booking_site)
-	# the token travels in the URL fragment, which browsers never send to servers
-	return get_url(f"/book/{slug}/manage#token={token}") if slug else None
+	from kamra.tex.services import sites
+
+	site = sites.site_for(property, booking_site)
+	# the token travels in the URL fragment, which browsers never send to servers; the link
+	# opens on the site's own host when it has one (G-21), never on a request's Host header
+	return sites.guest_url(site, f"manage#token={token}") if site else None
 
 
 def _amount(value, ccy: str | None) -> str:

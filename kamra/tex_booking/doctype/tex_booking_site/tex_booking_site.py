@@ -7,9 +7,10 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from kamra.tex.services import sites
+
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 ORIGIN = re.compile(r"^https://[a-z0-9.-]+(:\d+)?$")
-DOMAIN = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}(/[a-z0-9._~-]+)*$")
 
 
 class TEXBookingSite(Document):
@@ -29,29 +30,48 @@ class TEXBookingSite(Document):
 		if bad:
 			frappe.throw(_("Embed origins must be https origins: {0}").format(", ".join(bad)))
 		self.allowed_embed_origins = "\n".join(origins)
-		primaries = 0
-		before = self.get_doc_before_save()
-		verified_before = {(d.domain, d.verification_token) for d in (before.domains if before else []) if d.verified}
-		for d in self.domains:
-			d.domain = d.domain.strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
-			if not DOMAIN.match(d.domain):
-				frappe.throw(_("Invalid domain {0}").format(d.domain))
-			if not d.verification_token:
-				d.verification_token = frappe.generate_hash(length=24)
-			# "verified" is set only by the DNS check (kamra.tex.services.sites), never by an edit
-			if d.verified and (d.domain, d.verification_token) not in verified_before \
-					and not self.flags.tex_domain_verified:
-				d.verified = 0
-			taken = frappe.db.get_value("TEX Booking Domain", {"domain": d.domain, "parent": ("!=", self.name)},
-			                            "parent")
-			if taken:
-				frappe.throw(_("{0} is already used by booking site {1}.").format(d.domain, taken))
-			primaries += int(d.is_primary or 0)
-		if primaries > 1:
-			frappe.throw(_("Only one primary domain."))
+		self._validate_domains()
 		if self.custom_texts:
 			try:
 				data = frappe.parse_json(self.custom_texts)
 				assert isinstance(data, dict)
 			except Exception:
 				frappe.throw(_("Custom texts must be a JSON object keyed by language."))
+
+	def _validate_domains(self):
+		"""Custom domains are hostnames (ADR-035). Whether one is verified, when, and how its
+		daily checks went are written only by the DNS check (kamra.tex.services.sites): an
+		edit — including the admin UI, which sends the rows back — never sets them."""
+		before = self.get_doc_before_save()
+		kept = {(d.domain, d.verification_token): d for d in (before.domains if before else [])}
+		seen, primaries = set(), 0
+		for d in self.domains:
+			d.domain = sites.normalize_host(d.domain)
+			if not sites.HOST.match(d.domain):
+				frappe.throw(_("{0} is not a host name. Use a host such as book.yourhotel.com (no path): "
+				               "point it at TEX and verify it.").format(d.domain or "—"))
+			if d.domain in seen:
+				frappe.throw(_("{0} is listed twice.").format(d.domain))
+			seen.add(d.domain)
+			if not d.verification_token:
+				d.verification_token = frappe.generate_hash(length=24)
+			old = kept.get((d.domain, d.verification_token))
+			if not self.flags.tex_domain_verified:
+				for f in ("verified", "verified_at", "last_checked_at", "check_failures"):
+					d.set(f, old.get(f) if old else (0 if f in ("verified", "check_failures") else None))
+			# several sites may claim a host while unverified; only one can hold it verified
+			if d.verified:
+				taken = frappe.db.get_value("TEX Booking Domain", {"domain": d.domain, "verified": 1,
+				                                                   "parent": ("!=", self.name),
+				                                                   "parenttype": "TEX Booking Site"}, "parent")
+				if taken:
+					frappe.throw(_("{0} is already verified for booking site {1}.").format(d.domain, taken))
+			primaries += int(d.is_primary or 0)
+		if primaries > 1:
+			frappe.throw(_("Only one primary domain."))
+
+	def on_update(self):
+		sites.clear_host_cache()
+
+	def on_trash(self):
+		sites.clear_host_cache()

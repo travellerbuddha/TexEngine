@@ -782,10 +782,15 @@ BOOKING_SPECS = [
 	   sort_field="creation", in_create=True),
 
 	dt("TEX Booking Domain", B, [
-		F("domain", "Data", "Domain", reqd=1, in_list_view=1, description="booking.hotel.com or hotel.com/book"),
-		F("is_primary", "Check", "Primary", in_list_view=1),
+		F("domain", "Data", "Domain", reqd=1, in_list_view=1,
+		  description="A host name such as book.hotel.com, pointed at TEX (ADR-035)"),
+		F("is_primary", "Check", "Primary", in_list_view=1,
+		  description="Used in guest e-mails, payment links and return pages"),
 		F("verified", "Check", "Verified", read_only=1, in_list_view=1),
 		F("verification_token", "Data", "Verification token", read_only=1),
+		F("verified_at", "Datetime", "Verified at", read_only=1),
+		F("last_checked_at", "Datetime", "Last checked", read_only=1),
+		F("check_failures", "Int", "Failed checks in a row", read_only=1),
 	], istable=True),
 
 	dt("TEX Booking Site", B, [

@@ -331,7 +331,8 @@ doc_events.setdefault("Room Type", {})["validate"] = "kamra.tex.hooks.room_type_
 ignore_links_on_delete = ["TEX Audit Event"]
 
 # Remote MCP + OAuth live at /mcp and /mcp/oauth/* (not the SPA).
-page_renderer = ["kamra.mcp_http.MCPPageRenderer"]
+# a hotel's verified booking host serves its TEX booking engine (G-21, ADR-035)
+page_renderer = ["kamra.mcp_http.MCPPageRenderer", "kamra.tex.booking_host.BookingHostRenderer"]
 
 # Request Events
 # ----------------

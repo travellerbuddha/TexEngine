@@ -279,12 +279,13 @@ def embed_snippet(site: str):
 	from kamra.tex.services import sites
 
 	s = sites.require_site(site, "price.view")
-	base = frappe.utils.get_url()
+	base = sites.platform_url()
 	return {
 		"script": f'<script type="module" src="{base}/assets/kamra/tex/tex-widget.js" defer></script>',
 		"element": f'<tex-booking-widget site="{s.site_slug}" api="{base}" mode="{s.widget_mode or "search"}">'
 		           f"</tex-booking-widget>",
-		"link": f"{base}/book/{s.site_slug}",
+		# the hotel's own booking host when it has one (G-21)
+		"link": sites.guest_url(s).rstrip("/"),
 		"allowed_origins": (s.allowed_embed_origins or "").splitlines(),
 	}
 

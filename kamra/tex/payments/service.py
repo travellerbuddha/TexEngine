@@ -14,7 +14,7 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, get_datetime, get_url, now_datetime
+from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.payments.providers import simple, turkey
@@ -44,16 +44,29 @@ def callback_signature(transaction: str) -> str:
 
 
 def allowed_return_hosts(property: str) -> set[str]:
-	from urllib.parse import urlparse
+	"""The platform host and the verified hosts of the hotel's (and its group's) enabled
+	booking sites — never the request's Host header (G-21)."""
+	from kamra.tex.services import sites as sites_svc
 
-	hosts = {urlparse(get_url()).hostname}
 	group = frappe.db.get_value("Property", property, "tex_hotel_group")
-	sites = frappe.get_all("TEX Booking Site", or_filters={"property": property, "hotel_group": group or "__none__"},
+	names = frappe.get_all("TEX Booking Site", or_filters={"property": property, "hotel_group": group or "__none__"},
 	                       pluck="name")
-	if sites:
-		hosts |= set(frappe.get_all("TEX Booking Domain", filters={"parent": ("in", sites), "verified": 1},
-		                            pluck="domain"))
-	return hosts
+	return sites_svc.return_hosts(names)
+
+
+def _platform_url(uri: str) -> str:
+	from kamra.tex.services import sites as sites_svc
+
+	return sites_svc.platform_url(uri)
+
+
+def _link_url(property: str, booking: str | None, token: str) -> str:
+	"""A payment link opens on the hotel's booking host when it has one (G-21)."""
+	from kamra.tex.services import sites as sites_svc
+
+	site = sites_svc.site_for(property, frappe.db.get_value("TEX Booking", booking, "booking_site") if booking
+	                          else None)
+	return sites_svc.guest_url(site, f"pay/{token}", site_scoped=False)
 
 
 def check_return_url(property: str, url: str) -> str:
@@ -144,7 +157,9 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
 		booking=booking, payment_link=payment_link, return_url=return_url)
-	callback = get_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}&cb={callback_signature(txn.name)}")
+	# gateways call back to the platform host, never to a host taken from the request (G-21)
+	callback = _platform_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}"
+	                         f"&cb={callback_signature(txn.name)}")
 	try:
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
 		                                           description=description, return_url=return_url,
@@ -454,7 +469,7 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		"idempotency_key": idempotency_key, "public_url": None,
 	})
 	doc.insert(ignore_permissions=True)
-	url = get_url(f"/book/pay/{token}")
+	url = _link_url(property, booking, token)
 	emailed = False
 	if send_email:
 		from kamra.tex.services import notify
@@ -475,7 +490,7 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 	link.flags.tex_system_update = True
 	link.token_hash = link_token_hash(token)
 	link.save(ignore_permissions=True)
-	url = get_url(f"/book/pay/{token}")
+	url = _link_url(link.property, link.booking, token)
 	emailed = False
 	if send_email:
 		from kamra.tex.services import notify

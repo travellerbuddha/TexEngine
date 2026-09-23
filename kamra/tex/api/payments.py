@@ -29,7 +29,9 @@ GATEWAYS = ("iyzico", "Sipay", "Virtual POS")
 
 
 def _forward(url: str | None, **params) -> None:
-	target = url or frappe.utils.get_url("/book")
+	from kamra.tex.services import sites
+
+	target = url or sites.platform_url("/book")
 	sep = "&" if urlparse(target).query else "?"
 	frappe.local.response["type"] = "redirect"
 	frappe.local.response["location"] = target + sep + urlencode({k: v for k, v in params.items() if v})

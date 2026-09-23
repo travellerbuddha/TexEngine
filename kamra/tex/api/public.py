@@ -22,7 +22,7 @@ from kamra.tex.pricing import versions
 from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import content, modification, quoting
+from kamra.tex.services import content, modification, quoting, sites
 from kamra.tex.services.txn import retry_on_deadlock
 
 
@@ -50,6 +50,10 @@ def _site(slug: str | None = None, domain: str | None = None):
 		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
 	site = frappe.get_cached_doc("TEX Booking Site", name)
 	if not site.enabled:
+		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
+	# a hotel's own booking host answers for its site only (G-21)
+	pinned = sites.pinned_slug()
+	if pinned and pinned != site.site_slug:
 		frappe.throw(_("Booking site not found."), frappe.DoesNotExistError)
 	return site
 
@@ -85,10 +89,7 @@ def _safe_return_url(site, url: str | None, booking: str | None = None) -> str |
 	u = urlparse(url)
 	if u.scheme != "https" and not (u.scheme == "http" and frappe.conf.get("developer_mode")):
 		return None
-	allowed = {urlparse(frappe.utils.get_url()).hostname}
-	allowed |= set(frappe.get_all("TEX Booking Domain", filters={"parent": site.name, "verified": 1},
-	                              pluck="domain"))
-	return url if u.hostname in allowed else None
+	return url if u.hostname in sites.return_hosts([site.name]) else None
 
 
 @frappe.whitelist(allow_guest=True)
@@ -391,8 +392,8 @@ def _start_booking_payment(s, result: dict, *, due, method: str, provider_accoun
 		provider_account=chosen["provider_account"], booking=result["booking"],
 		description=_("Booking {0}").format(result["booking"]), locale=language or "en",
 		customer={**customer, "ip": getattr(frappe.local, "request_ip", None)},
-		return_url=_safe_return_url(s, return_url, result["booking"]) or frappe.utils.get_url(
-			f"/book/{s.site_slug}/confirmation/{result['booking']}"),
+		return_url=_safe_return_url(s, return_url, result["booking"]) or sites.guest_url(
+			s, f"confirmation/{result['booking']}"),
 		idempotency_key=key, method=method)
 
 
@@ -439,7 +440,7 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 	if not chosen:
 		frappe.throw(_("This payment method is not available."))
 	site = frappe.get_cached_doc("TEX Booking Site", b.booking_site) if b.booking_site else None
-	default_return = frappe.utils.get_url(f"/book/{site.site_slug}/manage" if site else "/book")
+	default_return = sites.guest_url(site, "manage") if site else sites.platform_url("/book")
 	attempt = frappe.db.count("TEX Payment Transaction", {"booking": b.name, "txn_type": "Charge"}) + 1
 	return pay.start_payment(
 		property=b.property, amount=due, currency=ccy, provider_account=chosen["provider_account"], booking=b.name,
@@ -514,7 +515,8 @@ def pay_link(token: str, provider_account: str | None = None):
 	                         customer={"name": link.guest_name, "email": link.guest_email,
 	                                   "ip": getattr(frappe.local, "request_ip", None)},
 	                         # never the link's bearer token: the guest's tab remembers its link page (G-10)
-	                         return_url=frappe.utils.get_url("/book/pay/return"),
+	                         return_url=sites.guest_url(sites.site_for(link.property), "pay/return",
+	                                                    site_scoped=False),
 	                         idempotency_key=f"link:{link.name}:{to_str(due)}:{frappe.generate_hash(length=6)}")
 
 

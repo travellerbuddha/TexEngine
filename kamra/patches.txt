@@ -29,3 +29,4 @@ kamra.patches.tex.p11_allocation_idempotency
 kamra.patches.tex.p12_effective_dated_extras_and_taxes
 kamra.patches.tex.p13_extra_inventory
 kamra.patches.tex.p14_post_booking_extras
+kamra.patches.tex.p15_booking_hosts

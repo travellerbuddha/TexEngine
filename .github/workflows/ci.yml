@@ -128,7 +128,7 @@ jobs:
           cd frappe-bench
           for m in test_critical_journey test_concurrency test_commercial_flows test_migrations_notify \
                    test_security_regressions test_public_booking \
-                   test_admin_markets test_extras_inventory test_post_booking_extras; do
+                   test_admin_markets test_extras_inventory test_post_booking_extras test_custom_domains; do
             bench --site test.localhost run-tests --module kamra.tex.tests.integration.$m 2>&1 | tee tex_$m.out
             grep -qE "^OK$" tex_$m.out
           done

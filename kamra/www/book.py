@@ -7,37 +7,29 @@ The page may be framed only by the booking site's allowed embed origins
 (CSP frame-ancestors); everything else is same-origin.
 """
 
-import os
-
 import frappe
+
+from kamra.tex.booking_host import booking_html, frame_ancestors
+from kamra.tex.services import sites
 
 no_cache = 1
 
-RESERVED = {"pay"}
-
-
-def _frame_ancestors(slug: str | None) -> str:
-	origins = []
-	if slug and slug not in RESERVED:
-		raw = frappe.db.get_value("TEX Booking Site", {"site_slug": slug, "enabled": 1}, "allowed_embed_origins")
-		origins = [o.strip() for o in (raw or "").splitlines() if o.strip().startswith("https://")]
-	return " ".join(["'self'", *origins])
-
 
 def get_context(context):
-	index_path = frappe.get_app_path("kamra", "public", "frontend", "booking.html")
-	if not os.path.exists(index_path):
-		frappe.throw(frappe._("The booking engine is not built."), title="TEX booking not built")
-	with open(index_path, encoding="utf-8") as f:  # nosemgrep: frappe-security-file-traversal -- fixed app path, not user input
-		html = f.read()
+	html = booking_html()
 	path = (frappe.form_dict.get("app_path") or "").strip("/")
 	slug = path.split("/", 1)[0] if path else None
+	pinned = sites.pinned_slug()
+	if pinned and slug not in (pinned, "pay"):
+		# a hotel's own host serves only its site (payment pages are site-less)
+		frappe.local.flags.redirect_location = "/"
+		raise frappe.Redirect(302)
 	if not slug:
 		# bare /book: the only TEX booking site, or the legacy Kamra page when none exists
-		sites = frappe.get_all("TEX Booking Site", filters={"enabled": 1}, pluck="site_slug", limit=2)
-		frappe.local.flags.redirect_location = f"/book/{sites[0]}" if len(sites) == 1 else "/kamra/book"
+		sites_ = frappe.get_all("TEX Booking Site", filters={"enabled": 1}, pluck="site_slug", limit=2)
+		frappe.local.flags.redirect_location = f"/book/{sites_[0]}" if len(sites_) == 1 else "/kamra/book"
 		raise frappe.Redirect(302)
-	frappe.local.response_headers["Content-Security-Policy"] = f"frame-ancestors {_frame_ancestors(slug)}"
+	frappe.local.response_headers["Content-Security-Policy"] = f"frame-ancestors {frame_ancestors(slug)}"
 	frappe.local.response_headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 	context.spa_html = html
 	context.no_cache = 1

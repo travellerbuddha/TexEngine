@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 21:00:00.000000",
+ "creation": "2026-09-23 22:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -8,7 +8,10 @@
   "domain",
   "is_primary",
   "verified",
-  "verification_token"
+  "verification_token",
+  "verified_at",
+  "last_checked_at",
+  "check_failures"
  ],
  "fields": [
   {
@@ -17,13 +20,14 @@
    "label": "Domain",
    "reqd": 1,
    "in_list_view": 1,
-   "description": "booking.hotel.com or hotel.com/book"
+   "description": "A host name such as book.hotel.com, pointed at TEX (ADR-035)"
   },
   {
    "fieldname": "is_primary",
    "fieldtype": "Check",
    "label": "Primary",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Used in guest e-mails, payment links and return pages"
   },
   {
    "fieldname": "verified",
@@ -37,10 +41,28 @@
    "fieldtype": "Data",
    "label": "Verification token",
    "read_only": 1
+  },
+  {
+   "fieldname": "verified_at",
+   "fieldtype": "Datetime",
+   "label": "Verified at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_checked_at",
+   "fieldtype": "Datetime",
+   "label": "Last checked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "check_failures",
+   "fieldtype": "Int",
+   "label": "Failed checks in a row",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-09-23 21:00:00.000000",
+ "modified": "2026-09-23 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Booking Domain",
