@@ -577,7 +577,11 @@ COMMERCIAL_SPECS = [
 		F("date_from", "Date", "From", reqd=1, in_list_view=1),
 		F("date_to", "Date", "To", reqd=1, in_list_view=1),
 		F("rooms", "Int", "Rooms per night", reqd=1, in_list_view=1),
-		F("release_days", "Int", "Release days"),
+		# two deadlines, in days before each night (G-49, ADR-048)
+		F("release_days", "Int", "Release days",
+		  description="Unsold rooms go back to general sale this many days before each night."),
+		F("cutoff_days", "Int", "Cutoff days",
+		  description="The contract stops selling this many days before each night (0 = no cutoff)."),
 		F("guaranteed", "Check", "Guaranteed (withheld until release)"),
 		F("disabled", "Check", "Disabled"),
 		F("note", "Data", "Note"),

@@ -96,13 +96,14 @@ def _allotments(property: str, room_types: list[str], days: list[date]) -> list[
 	rows = frappe.get_all("TEX Allotment",
 	                      filters={"property": property, "room_type": ("in", room_types), "disabled": 0,
 	                               "date_from": ("<=", days[-1]), "date_to": (">=", days[0])},
-	                      fields=["name", "contract", "date_from", "date_to", "rooms", "release_days", "guaranteed"])
+	                      fields=["name", "contract", "date_from", "date_to", "rooms", "release_days", "guaranteed",
+	                              "cutoff_days"])
 	out = []
 	for r in rows:
 		d = max(getdate(r.date_from), days[0])
 		while d <= min(getdate(r.date_to), days[-1]):
 			out.append(inv.Allotment(r.name, r.contract, d, int(r.rooms or 0), int(r.release_days or 0),
-			                         bool(r.guaranteed)))
+			                         bool(r.guaranteed), int(r.cutoff_days or 0)))
 			d += timedelta(days=1)
 	return out
 
