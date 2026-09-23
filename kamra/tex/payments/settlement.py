@@ -9,7 +9,11 @@
   never charged by a change (``collect`` is capped at the difference);
 - a lower price follows the hotel's policy: staff approval, an automatic refund of the true
   overpayment (``paid − new total``; a deposit-only booking just gets a smaller balance), or a
-  credit kept on the booking.
+  credit kept on the booking. A lower price on a non-refundable rate, or while cancelling now
+  would cost a penalty (``penalty_applies``), always goes to the hotel: shortening a stay must
+  never give back what its terms keep (review of ADR-044). Of a refund, only what the charges
+  holding the money can give back automatically (``auto_refundable``) goes back to the card;
+  the rest is refunded by the hotel (``hotel_refund``).
 
 ``plan_refunds`` splits a refund over the charges holding the booking's money: newest first,
 each at most what it holds for this booking, only charges whose provider can refund. What no
@@ -48,6 +52,7 @@ class Settlement:
 	collect: Decimal = ZERO                # charged online before the change applies
 	refund: Decimal = ZERO                 # refunded after the change applied
 	credit: Decimal = ZERO                 # kept on the booking as credit
+	hotel_refund: Decimal = ZERO           # of the overpayment: refunded by the hotel, not to a card by TEX
 	difference: Decimal = ZERO             # new total − old total
 	balance_after: Decimal = ZERO          # new total − money held once settled (< 0: credit)
 	due_later: Decimal = ZERO              # how much more the open balance grows (+) or shrinks (−)
@@ -58,7 +63,7 @@ class Settlement:
 		if self.kind in (PAY_NOW, STAFF) and self.collect:
 			return self.collect
 		if self.kind == REFUND:
-			return self.refund
+			return self.refund + self.hotel_refund
 		if self.kind == CREDIT:
 			return self.credit
 		if self.kind in (PAY_AT_HOTEL, BALANCE):
@@ -77,10 +82,13 @@ def _open(total: Decimal, held: Decimal) -> Decimal:
 
 
 def settle(old_total, new_total, paid, required_now_new, *, pay_at_hotel: bool, lower_policy: str | None,
-           card_available: bool) -> Settlement:
+           card_available: bool, penalty_applies: bool = False, auto_refundable=None) -> Settlement:
 	"""One change of a booking. Totals are the booking's (all rooms), before and after the
-	change; ``paid`` is what the booking holds now; ``required_now_new`` what its payment terms
-	require to be paid by now with the new price (deposit rules, 0 for pay at hotel)."""
+	change; ``paid`` is what the booking holds now and may use (money set aside for a refund
+	is not counted); ``required_now_new`` what its payment terms require to be paid by now with
+	the new price (deposit rules, 0 for pay at hotel). ``penalty_applies``: the room's rate is
+	non-refundable or cancelling it now costs a penalty. ``auto_refundable``: how much of an
+	overpayment the charges holding it can refund to the card (None: all of it)."""
 	old_total, new_total, paid, required = (Decimal(old_total), Decimal(new_total), Decimal(paid),
 	                                         Decimal(required_now_new))
 	diff = new_total - old_total
@@ -97,15 +105,17 @@ def settle(old_total, new_total, paid, required_now_new, *, pay_at_hotel: bool, 
 			                  due_later=_open(new_total, paid + collect) - _open(old_total, paid))
 		return Settlement(PAY_AT_HOTEL if pay_at_hotel else BALANCE, difference=diff,
 		                  balance_after=new_total - paid, due_later=due_later)
-	if lower_policy not in (LOWER_REFUND, LOWER_CREDIT):
-		# the default, and any policy this code does not know: the hotel decides
+	if penalty_applies or lower_policy not in (LOWER_REFUND, LOWER_CREDIT):
+		# the default, any policy this code does not know, and any lower price the rate's terms
+		# would charge for: the hotel decides
 		return Settlement(STAFF_APPROVAL, difference=diff, balance_after=new_total - paid, due_later=due_later)
 	over = max(ZERO, paid - new_total)
 	if over == 0:
 		return Settlement(BALANCE, difference=diff, balance_after=new_total - paid, due_later=due_later)
 	if lower_policy == LOWER_REFUND:
-		return Settlement(REFUND, refund=over, difference=diff, balance_after=new_total - (paid - over),
-		                  due_later=due_later)
+		auto = over if auto_refundable is None else min(over, max(ZERO, Decimal(auto_refundable)))
+		return Settlement(REFUND, refund=auto, hotel_refund=over - auto, difference=diff,
+		                  balance_after=new_total - (paid - over), due_later=due_later)
 	return Settlement(CREDIT, credit=over, difference=diff, balance_after=new_total - paid, due_later=due_later)
 
 

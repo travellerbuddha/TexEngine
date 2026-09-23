@@ -1,4 +1,4 @@
-"""Pure tests: how a guest's own change is settled (G-45, ADR-044).
+"""Pure tests: how a guest's own change is settled (G-45, ADR-044 and its review).
 
 The fixture booking: FLEX, 842.50 with a 30 % deposit (252.75); one more LOW night costs
 267.50 (new total 1110.00, deposit 333.00); one night less makes it 575.00."""
@@ -11,9 +11,10 @@ from kamra.tex.payments import settlement as st
 D = Decimal
 
 
-def settle(old, new, paid, required, *, pay_at_hotel=False, policy=st.LOWER_STAFF, card=True):
+def settle(old, new, paid, required, *, pay_at_hotel=False, policy=st.LOWER_STAFF, card=True, penalty=False,
+           auto=None):
 	return st.settle(D(old), D(new), D(paid), D(required), pay_at_hotel=pay_at_hotel, lower_policy=policy,
-	                 card_available=card)
+	                 card_available=card, penalty_applies=penalty, auto_refundable=auto)
 
 
 class TestHigherPrice(unittest.TestCase):
@@ -75,6 +76,24 @@ class TestLowerPrice(unittest.TestCase):
 		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_CREDIT)
 		self.assertEqual((s.kind, s.credit, s.refund, s.balance_after), (st.CREDIT, D("267.50"), D("0"),
 		                                                                  D("-267.50")))
+
+	def test_a_lower_price_the_rate_would_charge_for_goes_to_the_hotel(self):
+		# a non-refundable rate, or inside the cancellation penalty window (review of ADR-044)
+		for policy in (st.LOWER_REFUND, st.LOWER_CREDIT, st.LOWER_STAFF):
+			s = settle("842.50", "307.50", "842.50", "307.50", policy=policy, penalty=True)
+			self.assertEqual((s.kind, s.refund, s.credit, s.amount), (st.STAFF_APPROVAL, D("0"), D("0"),
+			                                                           D("535.00")))
+		# a higher price is collected as usual
+		self.assertEqual(settle("842.50", "1110.00", "842.50", "1110.00", penalty=True).kind, st.PAY_NOW)
+
+	def test_what_no_card_can_take_back_is_refunded_by_the_hotel(self):
+		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("100.00"))
+		self.assertEqual((s.kind, s.refund, s.hotel_refund, s.amount), (st.REFUND, D("100.00"), D("167.50"),
+		                                                                D("267.50")))
+		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("0"))
+		self.assertEqual((s.refund, s.hotel_refund), (D("0"), D("267.50")))
+		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("900.00"))
+		self.assertEqual((s.refund, s.hotel_refund), (D("267.50"), D("0")))
 
 	def test_only_the_true_overpayment_is_refunded(self):
 		s = settle("842.50", "575.00", "600.00", "172.50", policy=st.LOWER_REFUND)
