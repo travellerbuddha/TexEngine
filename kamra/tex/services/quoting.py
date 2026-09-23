@@ -467,6 +467,9 @@ def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 		               if isinstance(n, dict)]
 	for k in INTERNAL_TOTALS:
 		(q.get("totals") or {}).pop(k, None)
+	for a in q.get("addons") or []:               # extras added after booking keep their own quote (G-22)
+		if isinstance(a, dict) and isinstance(a.get("quote"), dict):
+			strip_internal(a["quote"], staff=True)
 	if staff:
 		return q
 	q["promotions"] = [pr for pr in q.get("promotions") or [] if pr.get("applied")]

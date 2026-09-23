@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 20:00:00.000000",
+ "creation": "2026-09-23 21:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -24,6 +24,7 @@
   "is_mandatory",
   "bookable_online",
   "bookable_after_booking",
+  "order_cutoff_hours",
   "max_quantity",
   "inventory_tracked",
   "daily_capacity",
@@ -173,6 +174,12 @@
    "default": "1"
   },
   {
+   "fieldname": "order_cutoff_hours",
+   "fieldtype": "Int",
+   "label": "Order cut-off (hours)",
+   "description": "Added after booking: at least this many hours before the day it is used (0 = until that day)"
+  },
+  {
    "fieldname": "max_quantity",
    "fieldtype": "Int",
    "label": "Max quantity"
@@ -298,7 +305,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 20:00:00.000000",
+ "modified": "2026-09-23 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX Extra",

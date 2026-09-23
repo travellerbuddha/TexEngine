@@ -117,6 +117,15 @@ class TestEffectiveDatingMigration(TexTestCase):
 	"""p12 (G-20): a TEX hotel keeps selling with exactly the taxes it had, now as a tax
 	policy live since the hotel was set up; a second run changes nothing."""
 
+	def setUp(self):
+		super().setUp()
+		# the schema is migrated already; a patch's reload_doc that re-syncs a DocType runs
+		# DDL, and MariaDB commits the open transaction on DDL, so this test's changes to the
+		# shared test hotel would outlive its rollback
+		from unittest import mock
+
+		self.enterContext(mock.patch.object(frappe, "reload_doc"))
+
 	def _strip(self, rules):
 		return sorted((r.code, r.kind.value, r.rate, r.amount, tuple(sorted(r.applies_to)), r.compound, r.order)
 		              for r in rules)

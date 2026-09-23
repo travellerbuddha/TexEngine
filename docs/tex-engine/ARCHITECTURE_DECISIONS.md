@@ -436,3 +436,104 @@ back-date it and so rewrite what `as_of` reports for the past.
 another booking's insert under rare index layouts; the retry absorbs that. MariaDB ≥ 11.6
 (`innodb_snapshot_isolation`) reports changed-row conflicts as deadlocks too, and they are
 retried the same way. A new write endpoint that locks inventory must use the decorator.
+
+## ADR-033 Limited extras: a day counter keyed by code, an allocation ledger, locks by primary key
+**Context.** An extra could be marked *Limited daily inventory* with a daily capacity, but
+nothing read it, so spa slots and dinners never sold out (G-19). Capacity is operational
+(like room inventory, ADR-005's note) and must survive the extra's price revisions (G-20).
+**Decision.**
+- *What a sale takes* is pure (`pricing.extras.usage`):
+  - a service-date extra takes each chosen date;
+  - a nightly extra takes every night;
+  - a per-person extra takes one unit per guest (children and infants included);
+  - every other extra takes one day, its chosen day or else the arrival day.
+
+  The quote records it per extra line (`usage`).
+- *Is it limited?* The revision on sale **now** decides (`inventory_tracked` and
+  `daily_capacity` ≥ 1), not the revision that priced an older sale. A limited extra cannot
+  be mandatory.
+- *Counter and ledger.*
+  - `TEX Extra Inventory Day` holds one row per (hotel, extra code, day), with a capacity
+    override, a closed flag and `sold`. The row name is deterministic, so it can be
+    created and locked in one statement.
+  - `TEX Extra Allocation` holds one row per (reservation, code, day), Held → Confirmed →
+    Released.
+  - Keyed by code, so a capacity spans revisions.
+  - `sold` is written only by the service; a Desk edit restores it.
+- *Quotes* see what is left, excluding the reservation being modified. A refused optional
+  extra is `ok=false` with "sold out / only N left / closed on <date>" and is not charged.
+  A historical simulation does not check capacity.
+- *Bookings* aggregate the demand of all rooms and lock the day rows by primary key,
+  sorted, after the room nights (global order: quotes → room days → extra days →
+  promotions → booking). They re-read the rows `FOR UPDATE`, refuse with `ExtraSoldOut`,
+  then allocate: Held while payment is pending, Confirmed otherwise. Confirming the booking
+  confirms the units.
+- A cancelled or no-show reservation releases its units through the Reservation hook,
+  whichever path cancelled it. A checked-out stay keeps them.
+- A modification takes the new units and gives back the old ones under the same locks. What
+  the reservation held counts as available to it.
+- Stays sold before an extra became limited get their allocations from their snapshots:
+  when a limited revision goes live, at migration (p13), and daily, which covers scheduled
+  revisions. A daily job rebuilds every counter from the ledger and audits any drift.
+  Inventory → Extras can also run it (Recount).
+- Staff see and edit per-day capacity and closures in Inventory → Extras (`inventory.edit`)
+  and the holders of a day (`reservation.view`). Guests see available / few left, never
+  counts.
+**Consequences.**
+- A multi-room quote checks each room alone; the booking step can still refuse on the
+  aggregate, and the UIs re-quote.
+- An extra switched to limited by a revision scheduled for later is backfilled by the next
+  daily run, so it may oversell until then.
+- Applying a modification that makes a limited extra unavailable drops that extra, which
+  the proposal shows (`EXTRA_SOLD_OUT` warning).
+
+## ADR-034 Extras added after booking are priced on their own; the stay stays price-locked
+**Context.** Guests could only choose extras while booking. Staff could add one through a
+modification, which re-prices the whole stay on a chosen basis (G-22). A guest who books a
+massage a week later must not see the room price move, and the hotel must not re-open a
+confirmed price to sell a dinner.
+**Decision.**
+- *Pricing is pure and separate* (`pricing.addons.price_addons`):
+  - the requested extras are priced against the booked stay as sold (its request, room,
+    party and dates, from the frozen snapshot);
+  - they use the extra revision on sale **now** (ADR-031) and the hotel's tax rules now,
+    restricted to the EXTRA categories;
+  - the room, board, promotions and contract terms are untouched. No promotion or coupon
+    applies to an add-on (an `ADDON_NO_PROMOTIONS` explanation step says so).
+- *Refusals are explicit*:
+  - `ADDON_EMPTY` / `ADDON_PARTY`;
+  - `ADDON_NOT_AVAILABLE` — unknown, mandatory, not eligible, or a per-booking extra on a
+    room other than the first;
+  - `ADDON_QUANTITY` — over the maximum with what is already booked;
+  - `ADDON_TOO_LATE` — a usage day before today or before the extra's order cut-off
+    (`order_cutoff_hours`, new field);
+  - `ADDON_SOLD_OUT` — a limited extra (ADR-033).
+- *Guests* see only extras sold online **and** after booking, with available / few left,
+  never counts, and no explanation. Staff (`reservation.modify`) see everything on sale; the
+  explanation is shown only with `price.view_cost`.
+- *Propose → apply*: the proposal is a signed, 30-minute token bound to the reservation's
+  `modified`, the requests, the total and who proposed it (guest or staff). Apply:
+  - locks the reservation row;
+  - replays the same token once (the id is a hash of the token);
+  - refuses if the reservation changed or the price moved;
+  - takes limited units under the day locks (G-19);
+  - merges the add-on into the snapshot — EXTRA lines before the first TAX line, its TAX
+    lines at the end, totals summed, and an `addons[]` entry `{id, at, quote, requests,
+    source}`;
+  - records a `TEX Reservation Revision` (`change_type=Extras`, `pricing_basis=ADD_ON`),
+    refreshes the booking and audits `reservation.addon`.
+
+  A guest's add-on flags the reservation and the booking for staff attention.
+- *Payment is apply-then-pay*: the booking's balance grows by the add-on and is paid like any
+  balance — online from the manage page (Pay now) or at the hotel. No card is charged by
+  the add-on itself.
+- *Later changes carry it over*: a modification re-prices the stay on its basis, then merges
+  each earlier add-on's frozen quote back. It warns `ADDON_OUTSIDE_STAY` when a usage day
+  falls outside the new dates; a guest cannot apply such a change themselves.
+- Cancellation penalties, refunds, reports and loyalty read the reservation's total, which
+  includes add-ons.
+**Consequences.**
+- An add-on keeps the price it was sold at even if the stay is later re-priced; removing an
+  add-on is a staff modification.
+- A limited extra added after booking is Held while the booking's payment is pending, and
+  Confirmed otherwise.

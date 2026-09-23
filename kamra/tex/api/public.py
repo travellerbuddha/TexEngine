@@ -619,12 +619,64 @@ def manage_propose(token: str, reservation: str, changes):
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to change your booking."))
-	allowed = {"check_in", "check_out", "adults", "children", "extras", "board"}
+	# extras are added through manage_extras_* (priced on their own; the stay stays price-locked)
+	allowed = {"check_in", "check_out", "adults", "children"}
 	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}
 	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False)
 	return {"sellable": p["sellable"], "old_total": p["old"]["total"], "new_total": p["proposed"]["totals"].get(
 		"total"), "difference": p["difference"], "currency": p["proposed"]["currency"], "warnings": p["warnings"],
 	        "lines": p["proposed"].get("lines"), "proposal_token": p["proposal_token"]}
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(**SEARCH_LIMIT)
+def manage_extras(token: str, reservation: str):
+	"""Extras the guest can still add to a room of their booking (G-22)."""
+	b = _booking_by_token(token)
+	_own_reservation(b, reservation)
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to change your booking."))
+	from kamra.tex.services import addons as addon_svc
+	from kamra.tex.services.content import Localizer, guest_language
+
+	out = addon_svc.options(reservation, guest=True)
+	loc = Localizer(guest_language())
+	names = {e["extra_code"]: e for e in loc.extras(b.property, [{"extra_code": x["code"], "extra_name": x["name"],
+	                                                                "description": x["description"]}
+	                                                               for x in out["extras"]])}
+	for x in out["extras"]:
+		x["name"] = (names.get(x["code"]) or {}).get("extra_name") or x["name"]
+		x["description"] = (names.get(x["code"]) or {}).get("description") or x["description"]
+	return out
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def manage_extras_propose(token: str, reservation: str, extras):
+	b = _booking_by_token(token)
+	_own_reservation(b, reservation)
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to change your booking."))
+	from kamra.tex.services import addons as addon_svc
+
+	p = addon_svc.propose(reservation, parse(extras, []), guest=True)
+	return {k: p[k] for k in ("ok", "reasons", "currency", "old_total", "new_total", "proposal_token")} | {
+		"lines": p["addon"]["lines"], "extras": p["addon"]["extras"], "totals": p["addon"]["totals"]}
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
+def manage_extras_apply(token: str, proposal_token: str):
+	b = _booking_by_token(token)
+	p = quoting.verify(proposal_token, kind="addon")
+	_own_reservation(b, p["reservation"])
+	if not _self_service_allowed(b):
+		frappe.throw(_("Please contact the hotel to change your booking."))
+	from kamra.tex.services import addons as addon_svc
+
+	frappe.flags.tex_source = "Guest"
+	return addon_svc.apply(proposal_token, source="Guest", reason="Extras added online", guest=True)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])

@@ -360,6 +360,7 @@ class ExtraDef:
 	price_rules: tuple[ExtraPriceRule, ...] = ()
 	inventory_tracked: bool = False
 	revision: str | None = None       # the extra revision live at the sale time (G-20)
+	cutoff_hours: int = 0             # added after booking: at least this long before the day it is used (G-22)
 
 
 @dataclass(frozen=True, slots=True)

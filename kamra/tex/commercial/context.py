@@ -318,7 +318,8 @@ def extras_catalog(property: str, *, online_only: bool = False, after_booking: b
 			mandatory=bool(e.is_mandatory), sale_from=_date(e.sale_from), sale_to=_date(e.sale_to),
 			service_from=_date(e.service_from), service_to=_date(e.service_to), markets=_csv(e.markets),
 			channels=_csv(e.channels), room_types=_csv(e.room_types), max_quantity=e.max_quantity or None,
-			price_rules=rules, inventory_tracked=bool(e.inventory_tracked), revision=e.name)
+			price_rules=rules, inventory_tracked=bool(e.inventory_tracked), revision=e.name,
+			cutoff_hours=int(e.get("order_cutoff_hours") or 0))
 	return out
 
 

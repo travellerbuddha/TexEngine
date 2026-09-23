@@ -27,7 +27,7 @@ from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, from_db, quantize, to_str
-from kamra.tex.pricing import serialize
+from kamra.tex.pricing import addons, serialize
 from kamra.tex.pricing.model import ChildSpec
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -37,7 +37,7 @@ from kamra.tex.services import quoting
 BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE", "CURRENT")
 CAPACITY_REASONS = ("sold out on ", "only ", "closed on ")     # pricing.extras.capacity_refusal
 EDITABLE = ("check_in", "check_out", "room_type", "adults", "children", "board", "rate_plan", "market",
-            "promo_codes", "extras", "sale_at")
+            "promo_codes", "extras", "sale_at", "drop_addons")
 
 
 def _snapshot(res) -> dict:
@@ -79,7 +79,7 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 			base[k] = str(v).upper()
 		elif k == "rate_plan":
 			base[k] = v or None
-		elif k != "sale_at":
+		elif k not in ("sale_at", "drop_addons"):
 			base[k] = v
 	base["sale_at"] = sale_at.isoformat()
 	return serialize.request_from_dict(base), snap
@@ -147,6 +147,11 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("A {0} reservation cannot be modified.").format(res.status.lower()))
 	changes = {k: v for k, v in (changes or {}).items() if v is not None}
+	if "drop_addons" in changes:
+		raw = changes.pop("drop_addons")
+		ids = sorted({raw} if isinstance(raw, str) else {str(x) for x in raw or []})
+		if ids:
+			changes["drop_addons"] = ids
 	placeholder_at = now_datetime()
 	req, snap = build_changed_request(res, changes, placeholder_at)
 	version, at, how = _resolve(res, snap, req, basis, basis_sale_at)
@@ -176,16 +181,33 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 			warnings.append({"code": "EXTRA_SOLD_OUT", "message": f"{e.name}: {e.reason}"})
 
 	new = quote.to_dict(internal=True)
+	# extras added after booking are carried over at the price they were added for, unless
+	# staff remove them (G-22)
+	drop = set(changes.get("drop_addons") or ())
+	unknown = drop - {a["id"] for a in snap.get("addons") or []}
+	if unknown:
+		frappe.throw(_("Not added to this reservation: {0}").format(", ".join(sorted(unknown))))
+	for a in snap.get("addons") or []:
+		if a["id"] in drop:
+			continue
+		new = addons.merge_addons(new, a["quote"], addon_id=a["id"], at=a["at"])
+		new["addons"][-1].update({k: a[k] for k in ("requests", "source") if k in a})
+		for e in a["quote"].get("extras") or []:
+			days = [getdate(u["date"]) for u in e.get("usage") or []]
+			if any(not (req.check_in <= d <= req.check_out) for d in days):
+				warnings.append({"code": "ADDON_OUTSIDE_STAY",
+				                 "message": _("{0} was added for a day outside the new stay.").format(e["name"])})
+	new_total = D(new["totals"]["total"]) if quote.sellable else None
 	old_totals = dict(snap.get("totals") or {})
 	if not internal:
 		quoting.strip_internal(new)
 		for k in quoting.INTERNAL_TOTALS:
 			old_totals.pop(k, None)
-	diff = (quote.total - old_total) if quote.sellable and quote.currency == old_ccy else None
+	diff = (new_total - old_total) if quote.sellable and quote.currency == old_ccy else None
 	proposal = {
 		"reservation": res.name, "modified": str(res.modified), "changes": changes, "basis": basis,
 		"basis_sale_at": str(basis_sale_at) if basis_sale_at else None, "version": version,
-		"new_total": to_str(quote.total) if quote.sellable else None, "currency": quote.currency,
+		"new_total": to_str(new_total) if quote.sellable else None, "currency": quote.currency,
 	}
 	return {
 		"reservation": res.name,
@@ -193,7 +215,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		"old": {"total": to_str(old_total), "currency": old_ccy, "request": snap["request"],
 		        "contract": snap.get("contract"), "lines": snap.get("lines"), "totals": old_totals},
 		"proposed": new,
-		"sellable": quote.sellable and not any(w.get("code") == "SOLD_OUT" for w in warnings),
+		"sellable": quote.sellable and not any(w.get("code") == "SOLD_OUT" for w in warnings)
+		and not (not _check_permission and any(w.get("code") == "ADDON_OUTSIDE_STAY" for w in warnings)),
 		"difference": to_str(diff) if diff is not None else None,
 		"currency_changed": quote.currency != old_ccy,
 		"warnings": warnings,
@@ -282,7 +305,7 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 	kinds = {"check_in_date": "Dates", "check_out_date": "Dates", "room_type": "Room", "adults": "Occupancy",
 	         "children": "Occupancy", "tex_board": "Board", "tex_market": "Market", "rate_plan": "Board"}
 	types = {kinds[k] for k in changed_fields if k in kinds}
-	if "extras" in changes:
+	if "extras" in changes or "drop_addons" in changes:
 		types.add("Extras")
 	if "promo_codes" in changes:
 		types.add("Discount")

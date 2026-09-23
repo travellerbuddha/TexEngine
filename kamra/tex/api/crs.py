@@ -338,3 +338,37 @@ def extras_reconcile(property: str, extra_code: str | None = None):
 	drift = xinv.reconcile(property, (extra_code or "").upper() or None)
 	audit("extra_inventory.reconcile", property=property, new={"extra_code": extra_code, "drift": drift})
 	return {"drift": drift}
+
+
+
+# ─── extras added after booking (G-22) ───────────────────────────────────
+
+
+@frappe.whitelist()
+def addon_options(reservation: str):
+	scope.require("reservation.modify", frappe.db.get_value("Reservation", reservation, "property"))
+	from kamra.tex.services import addons as addon_svc
+
+	return addon_svc.options(reservation, guest=False)
+
+
+@frappe.whitelist(methods=["POST"])
+def addon_propose(reservation: str, extras):
+	prop = frappe.db.get_value("Reservation", reservation, "property")
+	scope.require("reservation.modify", prop)
+	from kamra.tex.services import addons as addon_svc
+
+	p = addon_svc.propose(reservation, parse(extras, []), guest=False)
+	if not scope.has_capability("price.view_cost", prop):
+		p["addon"].pop("explanation", None)
+	return p
+
+
+@frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
+def addon_apply(proposal_token: str, reason: str | None = None):
+	p = quoting.verify(proposal_token, kind="addon")
+	scope.require("reservation.modify", frappe.db.get_value("Reservation", p["reservation"], "property"))
+	from kamra.tex.services import addons as addon_svc
+
+	return addon_svc.apply(proposal_token, source="Desk", reason=text(reason, 500) or "Extras added", guest=False)
