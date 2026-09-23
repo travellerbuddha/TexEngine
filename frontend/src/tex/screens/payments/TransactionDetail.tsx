@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeftRight, Landmark, RefreshCw, RotateCcw, SquareArrowDownRight } from "lucide-react"
+import { ArrowLeftRight, ClipboardCheck, Landmark, RefreshCw, RotateCcw, SquareArrowDownRight } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { dateTime } from "../../lib/format"
@@ -23,11 +23,23 @@ import {
   useToast,
 } from "../../ui"
 import { bookingHref, CardLabel, PaymentsNav, TxnStatusBadge } from "./components/common"
-import { AllocateDialog, canAllocate, canConfirmTransfer, canRefund, canReverify, canTransfer, ConfirmTransferDialog, RefundDialog, TransferDialog } from "./detail/Actions"
+import {
+  AllocateDialog,
+  canAllocate,
+  canConfirmTransfer,
+  canFinishRefund,
+  canRefund,
+  canReverify,
+  canTransfer,
+  ConfirmTransferDialog,
+  FinishRefundDialog,
+  RefundDialog,
+  TransferDialog,
+} from "./detail/Actions"
 import { allocKey, methodKey, typeKey, useEvent } from "./lib"
 import type { Allocation, Txn, TxnDetail } from "./types"
 
-type Action = "refund" | "allocate" | "transfer" | "bank" | null
+type Action = "refund" | "allocate" | "transfer" | "bank" | "finish" | null
 
 export default function TransactionDetail() {
   const { name = "" } = useParams()
@@ -93,6 +105,11 @@ export default function TransactionDetail() {
                   {t("payments.reverify.button")}
                 </Button>
               )}
+              {finance && canFinishRefund(d) && (
+                <Button icon={<ClipboardCheck className="size-4" aria-hidden />} onClick={() => setAction("finish")}>
+                  {t("payments.finish.button")}
+                </Button>
+              )}
               {finance && canConfirmTransfer(d) && (
                 <Button icon={<Landmark className="size-4" aria-hidden />} onClick={() => setAction("bank")}>
                   {t("payments.bank.button")}
@@ -129,6 +146,11 @@ export default function TransactionDetail() {
           {d.status === "Pending" && d.provider === "Bank Transfer" && <Notice tone="warning">{t("payments.detail.pending_bank")}</Notice>}
           {d.status === "Pending" && (d.provider === "iyzico" || d.provider === "Sipay") && <Notice tone="warning">{t("payments.detail.pending_gateway")}</Notice>}
           {d.status === "Failed" && canReverify(d) && <Notice tone="info">{t("payments.detail.failed_gateway")}</Notice>}
+          {canFinishRefund(d) && (
+            <Notice tone="warning" title={t("payments.detail.pending_refund_title")}>
+              {[t("payments.detail.pending_refund"), d.error_message].filter(Boolean).join(" ")}
+            </Notice>
+          )}
           {d.status === "Failed" && (d.error_message || d.error_code) && (
             <Notice tone="danger" title={t("payments.detail.failed")}>
               {[d.error_code, d.error_message].filter(Boolean).join(" · ")}
@@ -279,6 +301,7 @@ export default function TransactionDetail() {
           <AllocateDialog open={action === "allocate"} onClose={close} txn={d} onDone={q.reload} />
           <TransferDialog open={action === "transfer"} onClose={close} txn={d} onDone={q.reload} />
           <ConfirmTransferDialog open={action === "bank"} onClose={close} txn={d} onDone={q.reload} />
+          <FinishRefundDialog open={action === "finish"} onClose={close} txn={d} onDone={q.reload} />
         </div>
       )}
     </>

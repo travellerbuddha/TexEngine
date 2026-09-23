@@ -587,7 +587,11 @@ COMMERCIAL_SPECS = [
 		F("date_from", "Date", "From", reqd=1, in_list_view=1),
 		F("date_to", "Date", "To", reqd=1, in_list_view=1),
 		F("rooms", "Int", "Rooms per night", reqd=1, in_list_view=1),
-		F("release_days", "Int", "Release days"),
+		# two deadlines, in days before each night (G-49, ADR-048)
+		F("release_days", "Int", "Release days",
+		  description="Unsold rooms go back to general sale this many days before each night."),
+		F("cutoff_days", "Int", "Cutoff days",
+		  description="The contract stops selling this many days before each night (0 = no cutoff)."),
 		F("guaranteed", "Check", "Guaranteed (withheld until release)"),
 		F("disabled", "Check", "Disabled"),
 		F("note", "Data", "Note"),
@@ -860,6 +864,16 @@ BOOKING_SPECS = [
 		F("staff_reason", "Select", "Why staff", ["", "Refund by staff", "Verify refund at gateway"], read_only=1),
 		F("unknown_refund", "Link", "Refund to verify", "TEX Payment Transaction", read_only=1,
 		  description="A refund the gateway did not confirm: check it at the gateway before refunding again"),
+		# second review of ADR-044: the refund being made (on record, with the refund, before the
+		# gateway is asked), the payments already given back or left to staff, the run that holds
+		# the refunds (one at a time) and whether the rate's cancellation terms applied
+		F("refund_in_flight", "Link", "Refund being made", "TEX Payment Transaction", read_only=1),
+		F("returned_charges", "Small Text", "Payments given back", read_only=1,
+		  description="Payments of this change that were given back, or left to staff to give back"),
+		F("settle_claim", "Data", "Refund run", read_only=1, hidden=1),
+		F("settle_claimed_until", "Datetime", "Refund run until", read_only=1, hidden=1),
+		F("penalty_terms", "Check", "Inside the rate's cancellation terms", read_only=1,
+		  description="Asked while cancelling would cost a fee: the hotel approves it"),
 		F("gcr_column_3", "Column Break"),
 		F("revision", "Link", "Revision", "TEX Reservation Revision"),
 		F("error", "Small Text", "Why it was not applied"),
@@ -868,8 +882,9 @@ BOOKING_SPECS = [
 		F("resolution", "Small Text", "Staff note"),
 	], perms=IMMUTABLE_LOG, autoname="GCR-.YYYY.-.#####", naming_rule="Expression (old style)",
 	   sort_field="creation", in_create=True,
-	   # the staff fields came after the first migration: a newer stamp makes migrate load them
-	   extra={"modified": "2026-09-26 00:00:00.000000"}),
+	   # the staff fields, then the refund-run fields, came after the first migration: a newer
+	   # stamp makes migrate load them
+	   extra={"modified": "2026-09-27 00:00:00.000000"}),
 
 	dt("TEX Booking Domain", B, [
 		F("domain", "Data", "Domain", reqd=1, in_list_view=1,

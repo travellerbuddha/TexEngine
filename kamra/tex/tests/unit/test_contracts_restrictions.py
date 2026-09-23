@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from kamra.tex.availability import inventory_math as inv
@@ -367,6 +367,66 @@ class TestInventoryMath(unittest.TestCase):
 	def test_stay_minimum(self):
 		days = [self.pool(sold=2), inv.PoolDay(date(2027, 7, 11), 10, sold=9)]
 		self.assertEqual(inv.stay_availability(days, [], None, date(2027, 7, 1))[0], 1)
+
+	def before(self, days: int) -> date:
+		return self.DAY - timedelta(days=days)
+
+	def test_release_and_cutoff_are_separate(self):
+		"""G-49: release gives the unsold rooms back to general sale (the hotel's side); the cutoff
+		is the contract's booking deadline (the partner's side). Release 7, cutoff 2."""
+		tui = inv.Allotment("A1", "TUI", self.DAY, rooms=2, release_days=7, guaranteed=True, cutoff_days=2)
+		p = self.pool(sold=5)
+		early = inv.day_availability(p, [tui], "TUI", self.before(20))
+		self.assertEqual((early.allotment_remaining, early.available), (2, 2))       # capped by its allotment
+		self.assertEqual(inv.day_availability(p, [tui], None, self.before(20)).available, 3)   # 10 − 5 − 2 withheld
+		released = inv.day_availability(p, [tui], "TUI", self.before(5))
+		self.assertEqual((released.allotment_remaining, released.available), (None, 5))  # general sale, no cap
+		self.assertEqual(inv.day_availability(p, [tui], None, self.before(5)).available, 5)
+		cut = inv.day_availability(p, [tui], "TUI", self.before(1))
+		self.assertEqual((cut.available, cut.reason), (0, "cutoff"))
+		self.assertEqual(inv.day_availability(p, [tui], None, self.before(1)).available, 5)  # others still sell
+		self.assertEqual(inv.day_availability(p, [tui], "TUI", self.before(2)).available, 5)  # the deadline day
+
+	def test_a_cutoff_before_release_gives_the_rooms_back(self):
+		"""Cutoff 10, release 3: the partner stops booking 10 days out, and rooms nobody can book
+		under the contract any more go back to general sale then (G-49 review, L2)."""
+		tui = inv.Allotment("A1", "TUI", self.DAY, rooms=2, release_days=3, guaranteed=True, cutoff_days=10)
+		p = self.pool(sold=5, sold_by_contract=(("TUI", 1),))
+		self.assertEqual(inv.day_availability(p, [tui], "TUI", self.before(8)).available, 0)
+		back = inv.day_availability(p, [tui], None, self.before(8))
+		self.assertEqual((back.withheld, back.available), (0, 5))
+		held = inv.day_availability(p, [tui], None, self.before(12))       # before the cutoff: withheld
+		self.assertEqual((held.withheld, held.available), (1, 4))
+
+	def test_a_change_is_checked_only_on_the_nights_it_takes(self):
+		"""G-49 review, H1: an in-house stay (arrival today) under a contract whose cutoff is 3 days
+		keeps its nights; only a new night is checked."""
+		today = self.DAY
+		stay = [today + timedelta(days=i) for i in range(6)]
+		tui = [inv.Allotment("A1", "TUI", d, rooms=2, release_days=7, cutoff_days=3) for d in stay]
+		days = [inv.PoolDay(d, 10, sold=4) for d in stay]
+		count, per = inv.stay_availability(days, tui, "TUI", today)
+		self.assertEqual((count, [d.reason for d in per]), (0, ["cutoff"] * 3 + [""] * 3))
+		longer = [*days, inv.PoolDay(today + timedelta(days=6), 10, sold=4)]
+		self.assertEqual(inv.stay_availability(longer, tui, "TUI", today, held=frozenset(stay))[0], 6)
+		self.assertEqual(inv.stay_availability(days[:3], tui, "TUI", today, held=frozenset(stay)), (1, []))
+		full = [*days, inv.PoolDay(today + timedelta(days=6), 10, sold=10)]
+		self.assertEqual(inv.stay_availability(full, tui, "TUI", today, held=frozenset(stay))[0], 0)
+
+	def test_no_cutoff_by_default(self):
+		"""An allotment without a cutoff (every allotment before G-49) sells from general sale after
+		its release until the night itself."""
+		tui = inv.Allotment("A1", "TUI", self.DAY, rooms=2, release_days=7)
+		self.assertEqual(tui.cutoff_days, 0)
+		self.assertEqual(inv.day_availability(self.pool(sold=5), [tui], "TUI", self.DAY).available, 5)
+
+	def test_oversell_and_adjustment_move_the_capacity(self):
+		self.assertEqual(inv.day_availability(self.pool(sold=10, oversell_limit=2), [], None, self.DAY).available, 2)
+		self.assertEqual(inv.day_availability(self.pool(sold=12, oversell_limit=2), [], None, self.DAY).reason,
+		                 "sold out")
+		self.assertEqual(inv.day_availability(self.pool(sold=7, manual_adjustment=-3), [], None, self.DAY)
+		                 .available, 0)
+		self.assertEqual(inv.capacity(self.pool(manual_adjustment=-12, oversell_limit=1)), 0)
 
 
 class TestPurity(unittest.TestCase):

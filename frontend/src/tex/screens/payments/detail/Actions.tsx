@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { tex } from "../../../lib/api"
 import { useTexT } from "../../../i18n"
-import { Button, DecimalInput, Dialog, Field, InlineError, Input, Money, Notice, Select, Textarea, useToast } from "../../../ui"
+import { Button, DecimalInput, Dialog, Field, InlineError, Input, Money, Notice, Segmented, Select, Textarea, useToast } from "../../../ui"
 import { BookingPicker } from "../components/BookingPicker"
 import { isPositiveAmount, isZero, useEvent, useIntentKey } from "../lib"
 import type { TxnDetail } from "../types"
@@ -79,7 +79,9 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
       ),
     )
     if (!r) return
+    // a refund the gateway has not confirmed (a replay of an unanswered one) is never announced as done
     if (r.status === "Failed") toast.error(t("payments.refund.failed", { name: r.refund }))
+    else if (r.status === "Pending") toast.info(t("payments.refund.pending", { name: r.refund }))
     else toast.success(r.replay ? t("payments.refund.replay", { name: r.refund }) : t("payments.refund.done", { name: r.refund }))
     onDone()
     onClose()
@@ -273,12 +275,83 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
   )
 }
 
+type RefundOutcome = "Succeeded" | "Failed"
+
+/** A refund the gateway never confirmed: staff checked it in the gateway's panel and record what it did (G-45). */
+export function FinishRefundDialog({ open, onClose, txn, onDone }: { open: boolean; onClose: () => void; txn: TxnDetail; onDone: () => void }) {
+  const { t } = useTexT()
+  const toast = useToast()
+  const a = useAction(open)
+  const [outcome, setOutcome] = useState<RefundOutcome | "">("")
+  const [reference, setReference] = useState("")
+  const [reason, setReason] = useState("")
+  const close = useEvent(() => {
+    if (!a.pending) onClose()
+  })
+  useEffect(() => {
+    if (!open) return
+    setOutcome("")
+    setReference("")
+    setReason("")
+  }, [open])
+  const valid = Boolean(outcome) && reason.trim().length > 2
+  const submit = async () => {
+    if (!valid) return
+    const r = await a.run(() =>
+      tex<{ refund: string; status: string }>(
+        "payments",
+        "finish_refund",
+        { refund: txn.name, outcome, reason: reason.trim(), reference: reference.trim() || undefined },
+        { post: true },
+      ),
+    )
+    if (!r) return
+    toast.success(t("payments.finish.done", { name: r.refund }))
+    onDone()
+    onClose()
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title={t("payments.finish.title")}
+      description={t("payments.finish.desc")}
+      footer={<Footer onCancel={close} onConfirm={submit} pending={a.pending} disabled={!valid} label={t("payments.finish.confirm")} />}
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-zinc-700">
+          {t("payments.finish.amount")} <Money amount={txn.amount} currency={txn.currency} className="font-semibold" />
+        </p>
+        <Segmented<RefundOutcome | "">
+          label={t("payments.finish.outcome")}
+          value={outcome}
+          onChange={setOutcome}
+          options={[
+            { value: "Succeeded", label: t("payments.finish.succeeded") },
+            { value: "Failed", label: t("payments.finish.failed") },
+          ]}
+        />
+        <Notice tone="info">{t("payments.finish.effect")}</Notice>
+        <Field label={t("payments.finish.reference")} hint={t("payments.finish.reference_hint")}>
+          <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={140} autoComplete="off" />
+        </Field>
+        <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} />
+        </Field>
+        <InlineError error={a.error} />
+      </div>
+    </Dialog>
+  )
+}
+
 /** A successful charge, or a Failed one whose capture TEX refused to count (the server reports it refundable). */
 export const canRefund = (txn: TxnDetail) =>
   txn.txn_type === "Charge" && (txn.status === "Succeeded" || txn.status === "Failed") && !isZero(txn.refundable) && txn.provider !== "Manual" && txn.provider !== "Loyalty"
 export const canAllocate = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && !isZero(txn.unallocated)
 export const canTransfer = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && holdingBookings(txn).length > 0
 export const canConfirmTransfer = (txn: TxnDetail) => txn.provider === "Bank Transfer" && txn.status === "Pending"
+/** A refund still waiting for the gateway's answer (never confirmed, or left by a run that stopped). */
+export const canFinishRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending"
 /** Pending charges, and Failed or superseded (Cancelled) ones: a captured payment whose callback was lost can be recovered. */
 export const canReverify = (txn: TxnDetail) =>
   txn.txn_type === "Charge" && txn.status !== "Succeeded" && (txn.provider === "iyzico" || txn.provider === "Sipay")

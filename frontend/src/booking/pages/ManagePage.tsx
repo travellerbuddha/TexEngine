@@ -93,7 +93,8 @@ function settlementText(i18n: I18nT, s: Settlement, difference: string | null): 
     case "credit":
       return { tone: "info", body: t("manage.settle.credit", { amount }) }
     case "staff_approval":
-      return { tone: "info", title: t("manage.lowerTitle"), body: t("manage.lowerBody") }
+      // a lower price, or a new arrival inside the rate's cancellation terms (the server decides which)
+      return { tone: "info", title: t(difference && isNegative(difference) ? "manage.lowerTitle" : "manage.termsTitle"), body: t("manage.lowerBody") }
     case "staff":
       return { tone: "warn", title: t("manage.settle.staffTitle"), body: t("manage.settle.staff", { amount }) }
     default:
@@ -644,6 +645,11 @@ function Manage({ token }: { token: string | null }) {
       {data.changes_blocked === "REFUND_PENDING" && (
         <Alert tone="info" title={t("manage.refundPendingTitle")}>
           {t("manage.refundPendingBody")}
+        </Alert>
+      )}
+      {data.changes_blocked === "CHANGE_APPLYING" && (
+        <Alert tone="info" title={t("manage.changeApplyingTitle")}>
+          {t("manage.changeApplyingBody")}
         </Alert>
       )}
       {atHotel && (

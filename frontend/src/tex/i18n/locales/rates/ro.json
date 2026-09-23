@@ -588,7 +588,7 @@
  "rates.policy.activate_now": "Acum",
  "rates.policy.activate_title": "Activați această revizie?",
  "rates.policy.activated": "Revizia este în vigoare",
- "rates.policy.allotments.help": "Contractul poate vinde cel mult atâtea camere pe noapte până la release; alotmentele garantate sunt reținute față de toți ceilalți.",
+ "rates.policy.allotments.help": "Contractul poate vinde cel mult atâtea camere pe noapte până la release; alotmentele garantate sunt reținute față de toți ceilalți. După release vinde din vânzarea generală până la cutoff.",
  "rates.policy.allotments.intro": "Camere rezervate pentru un contract pe fiecare noapte, care revin la vânzarea generală la release.",
  "rates.policy.allotments.one": "alotment",
  "rates.policy.allotments.title": "Alotmente",
@@ -926,5 +926,7 @@
  "rates.version_status.Draft": "Ciornă",
  "rates.version_status.Published": "Publicată",
  "rates.version_status.Superseded": "Înlocuită",
- "rates.version_status.Withdrawn": "Retrasă"
+ "rates.version_status.Withdrawn": "Retrasă",
+ "rates.f.cutoff_days": "Cutoff (zile înainte de sosire)",
+ "rates.h.cutoff_days": "Contractul nu mai vinde aceste nopți cu atâtea zile înainte de sosire, nici din vânzarea generală; camerele nevândute revin la vânzarea generală cel târziu atunci. 0 = fără cutoff."
 }

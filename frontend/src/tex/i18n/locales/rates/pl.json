@@ -593,7 +593,7 @@
  "rates.policy.activate_now": "Teraz",
  "rates.policy.activate_title": "Aktywować tę rewizję?",
  "rates.policy.activated": "Rewizja obowiązuje",
- "rates.policy.allotments.help": "Do release umowa może sprzedać najwyżej tyle pokoi na noc; gwarantowane allotmenty są niedostępne dla pozostałych.",
+ "rates.policy.allotments.help": "Do release umowa może sprzedać najwyżej tyle pokoi na noc; gwarantowane allotmenty są niedostępne dla pozostałych. Po release sprzedaje z ogólnej sprzedaży do swojego cutoff.",
  "rates.policy.allotments.intro": "Pokoje zarezerwowane dla umowy na każdą noc, wracające do ogólnej sprzedaży w dniu release.",
  "rates.policy.allotments.one": "allotment",
  "rates.policy.allotments.title": "Allotmenty",
@@ -934,5 +934,7 @@
  "rates.version_status.Draft": "Szkic",
  "rates.version_status.Published": "Opublikowana",
  "rates.version_status.Superseded": "Zastąpiona",
- "rates.version_status.Withdrawn": "Wycofana"
+ "rates.version_status.Withdrawn": "Wycofana",
+ "rates.f.cutoff_days": "Cutoff (dni przed przyjazdem)",
+ "rates.h.cutoff_days": "Umowa przestaje sprzedawać te noce tyle dni przed przyjazdem, także z ogólnej sprzedaży; niesprzedane pokoje wracają do ogólnej sprzedaży najpóźniej wtedy. 0 = bez cutoff."
 }

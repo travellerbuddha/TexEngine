@@ -240,6 +240,34 @@ class TestInbound(DistributionCase):
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
 		                                                     "reference_name": out[0]["booking"]}))
 
+	def test_a_channel_change_locks_the_booking_first_and_voids_a_waiting_guest_change(self):
+		"""G-45 re-review F8: the channel's modification and cancellation take the booking, then the
+		reservation, then the nights (the order every change to a TEX booking takes), and a guest
+		change still waiting for the room is void (a payment of it arriving later is refunded)."""
+		from kamra.tex.tests.integration.test_self_service_money import locks_during
+
+		self.send(message(ref="OTA-900"))
+		b = frappe.get_doc("TEX Booking", self.apply_all()[0]["booking"])
+		res = b.rooms[0].reservation
+
+		def waiting(key):
+			return frappe.get_doc({"doctype": "TEX Guest Change Request", "property": fx.PROPERTY, "booking": b.name,
+			                       "reservation": res, "status": "Awaiting Payment", "proposal_hash": key,
+			                       "proposal": "{}", "currency": "EUR", "attempt": 0}).insert(ignore_permissions=True)
+
+		for msg in (message(ref="OTA-900", status="modified", co=fx.d(6, 14), total="600.00"),
+		            message(ref="OTA-900", status="cancelled", rooms=[])):
+			with self.subTest(status=msg["status"]):
+				gcr = waiting(f"gcm-channel-{msg['status']}")
+				self.send(msg)
+				seen = locks_during(self.apply_all)
+				booking_at = seen.index("tabTEX Booking")
+				for table in ("tabReservation", "tabTEX Inventory Day"):
+					if table in seen:
+						self.assertLess(booking_at, seen.index(table), f"{table} locked before the booking: {seen}")
+				self.assertEqual(frappe.db.get_value("TEX Guest Change Request", gcr.name, "status"), "Superseded")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
+
 	def test_a_bookings_messages_apply_in_order(self):
 		self.send(message(ref="OTA-400"))
 		self.send(message(ref="OTA-400", status="modified", total="500.00"))
