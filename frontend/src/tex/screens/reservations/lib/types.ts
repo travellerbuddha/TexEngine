@@ -290,6 +290,14 @@ export interface GuestChangeRequest {
   staff_reason: "" | "Refund by staff" | "Verify refund at gateway" | null
   /** the refund the gateway never confirmed */
   unknown_refund: string | null
+  /** the refund being made now (on record before the gateway was asked) */
+  refund_in_flight: string | null
+  /** asked while cancelling would cost a fee: the rate's terms send it to the hotel */
+  penalty_terms: boolean
+  /** the refund staff verify at the gateway now (still unconfirmed), if any */
+  verify_refund: string | null
+  /** the money left to staff can be closed now (a refund to verify at once; the rest once TEX is done) */
+  can_close: boolean
   revision: string | null
   error: string | null
   note: string | null
