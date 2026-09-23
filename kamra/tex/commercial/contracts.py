@@ -555,6 +555,21 @@ def withdraw(name: str, reason: str) -> None:
 	clear_terms_cache()
 
 
+def _isolated(label: str, fn) -> None:
+	"""Run one scheduler step in a savepoint: a record that fails is rolled back and logged, and
+	never stops the others (one legacy header must not stall every hotel's contracts)."""
+	frappe.db.savepoint("tex_contract_roll")
+	try:
+		fn()
+	except Exception:
+		frappe.db.rollback(save_point="tex_contract_roll")
+		from kamra.tex.security.audit import log_exception
+
+		log_exception(f"TEX contract roll {label}")
+	else:
+		frappe.db.release_savepoint("tex_contract_roll")
+
+
 def _supersede(version: str) -> None:
 	doc = frappe.get_doc("TEX Contract Version", version)
 	doc.flags.tex_lifecycle = True
@@ -583,12 +598,12 @@ def roll_version_statuses() -> None:
 	now = now_datetime()
 	for v in frappe.get_all("TEX Contract Version", filters={"status": "Published", "active_to": ("<=", now)},
 	                        pluck="name"):
-		_supersede(v)
+		_isolated(v, lambda v=v: _supersede(v))
 	for c in frappe.get_all("TEX Contract", filters={"status": "Active"}, pluck="name"):
 		live = active_version_header(c, now)
 		new = live.version_id if live else None
 		if frappe.db.get_value("TEX Contract", c, "active_version") != new:
-			_go_live(c, new)
+			_isolated(c, lambda c=c, new=new: _go_live(c, new))
 
 
 # ─── loading frozen terms ────────────────────────────────────────────────
