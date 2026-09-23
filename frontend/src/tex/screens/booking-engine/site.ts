@@ -172,7 +172,7 @@ export function domainError(raw: string): string | null {
   return "be.err.domain"
 }
 
-/** Images: uploaded files, app assets or https URLs only (no data:, javascript: …). */
+/** Images shown in the preview: uploaded files, app assets or https URLs only (no data:, javascript: …). */
 export function safeImageUrl(u: string | null | undefined): string | null {
   const v = (u ?? "").trim()
   if (!v) return null
@@ -181,11 +181,20 @@ export function safeImageUrl(u: string | null | undefined): string | null {
   return null
 }
 
+/** What the server accepts as a NEW logo or hero (G-83): a PNG, JPEG, GIF or WebP in the public
+ * files, or an https address (the server also refuses the platform's own hosts). An image a site
+ * already had is not judged again. */
+export function newImageUrlOk(u: string | null | undefined): boolean {
+  const v = (u ?? "").trim()
+  if (/^\/files\/[A-Za-z0-9._-]+\.(png|jpe?g|gif|webp)$/i.test(v)) return !v.includes("..")
+  return /^https:\/\/[a-z0-9.-]+(:\d+)?\/[^\s"'<>()`\\]+$/i.test(v)
+}
+
 export type TabId = "general" | "branding" | "texts" | "contact" | "analytics" | "embed" | "domains"
 export type Errors = Partial<Record<string, string>>
 
 /** Field errors keyed by field name (values are i18n keys). */
-export function validateSite(s: Site): Errors {
+export function validateSite(s: Site, saved?: Site | null): Errors {
   const e: Errors = {}
   if (!s.site_name.trim()) e.site_name = "be.err.required"
   const slug = normaliseSlug(s.site_slug)
@@ -198,8 +207,7 @@ export function validateSite(s: Site): Errors {
   const ccys = csv(s.currencies)
   if (s.default_currency && ccys.length && !ccys.includes(s.default_currency)) e.default_currency = "be.err.default_currency"
   for (const f of ["primary_color", "accent_color", "background_color"] as const) if (s[f] && !HEX.test(s[f])) e[f] = "be.err.hex"
-  if (s.logo && !safeImageUrl(s.logo)) e.logo = "be.err.image_url"
-  if (s.hero_image && !safeImageUrl(s.hero_image)) e.hero_image = "be.err.image_url"
+  for (const f of ["logo", "hero_image"] as const) if (s[f] && s[f] !== saved?.[f] && !newImageUrlOk(s[f])) e[f] = "be.err.image_url"
   if (s.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.contact_email)) e.contact_email = "be.err.email"
   if (s.whatsapp && !/^\+?[0-9 ()-]{6,20}$/.test(s.whatsapp)) e.whatsapp = "be.err.phone"
   if (s.contact_phone && !/^\+?[0-9 ()./-]{6,24}$/.test(s.contact_phone)) e.contact_phone = "be.err.phone"
