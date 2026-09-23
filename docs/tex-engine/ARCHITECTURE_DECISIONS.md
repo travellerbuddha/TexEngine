@@ -655,3 +655,32 @@ programs (G-65).
     in a redemption blackout. Old rows become Both.
 - A guest's summary lists only the viewer's programs.
 **Consequences.** Point value stays a 6-decimal Float read through Decimal (G-72 open).
+
+## ADR-038 The portfolio dashboard reports on the hotels a user may see, money per currency
+**Context.** The dashboard covered one hotel and lacked most of R-47's sales figures: booking
+value, direct and call-centre revenue, pending payments, market and room performance,
+abandoned bookings with their value, and inventory and restriction alerts. There was no
+enterprise or group view (G-25).
+**Decision.**
+- `reports.portfolio(level, name, from, to)` covers All my hotels, an Enterprise, a Hotel
+  Group or one Hotel.
+  - Only hotels where the user holds `report.view` are included.
+  - A scope with none of them is refused, without confirming that it exists.
+  - `portfolio_scopes` lists what the picker may offer.
+- Figures come from SQL aggregates read as text and summed with Decimal, per currency, never
+  across currencies:
+  - Sales count on their sale day (TEX sale time, else creation): count, today's sales and
+    value, booking value, direct (Booking Engine channel group) and call-centre (Call
+    Center group) value, markets, and room types with room nights.
+  - Cancellations count on the day they were cancelled.
+  - Bookings waiting for payment and open balances come from TEX Booking balances.
+  - Open abandoned bookings of the last 30 days are shown with their value.
+- Alerts cover the next 14 days:
+  - room pools that are closed, oversold, sold out, or at 10 % or less left (from the same
+    pool/inventory math as selling);
+  - stop-sell, closed-to-arrival and closed-to-departure restrictions.
+- SQL aliases never shadow a column: MariaDB resolves a GROUP BY name to a column first, and
+  Reservation has a legacy `channel` column.
+**Consequences.**
+- "Today" is the server date; per-hotel time zones are still open.
+- No reporting-currency conversion: totals stay per currency.

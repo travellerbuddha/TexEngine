@@ -22,3 +22,21 @@ def production(property: str, date_from: str, date_to: str, group_by: str = "cha
 @frappe.whitelist()
 def pace(property: str, stay_from: str, stay_to: str):
 	return rep.pace(property, stay_from, stay_to)
+
+
+@frappe.whitelist()
+def portfolio_scopes():
+	"""Enterprises, groups and hotels the user may report on (R-47)."""
+	from kamra.tex.reports import portfolio as pf
+
+	return pf.scopes()
+
+
+@frappe.whitelist()
+def portfolio(level: str = "All", name: str | None = None, date_from: str | None = None,
+              date_to: str | None = None):
+	"""The sales dashboard of a portfolio: every hotel of the scope where the user holds
+	``report.view`` (checked per hotel in the service)."""
+	from kamra.tex.reports import portfolio as pf
+
+	return pf.portfolio(level, name, date_from, date_to)
