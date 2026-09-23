@@ -6,15 +6,15 @@ import { Badge, Button, Drawer, Field, FormGrid, InlineError, Input, Notice, Seg
 import { useEvent } from "../lib"
 import { GATEWAYS, PROVIDERS, type Account, type Provider, type SecretField } from "../types"
 
-type DataField = "api_key" | "terminal_id" | "bank_code" | "gateway_url" | "bank_name" | "iban" | "account_holder" | "transfer_instructions"
+type DataField = "terminal_id" | "bank_code" | "gateway_url" | "bank_name" | "iban" | "account_holder" | "transfer_instructions"
 
 /** Which fields each adapter reads (kamra/tex/payments/providers). */
 const FIELDS: Record<Provider, { data: DataField[]; secrets: SecretField[] }> = {
   Mock: { data: [], secrets: [] },
   "Pay at Hotel": { data: [], secrets: [] },
   "Bank Transfer": { data: ["bank_name", "iban", "account_holder", "transfer_instructions"], secrets: [] },
-  iyzico: { data: ["api_key", "gateway_url"], secrets: ["secret_key", "webhook_secret"] },
-  Sipay: { data: ["api_key", "gateway_url"], secrets: ["secret_key", "merchant_key", "webhook_secret"] },
+  iyzico: { data: ["gateway_url"], secrets: ["api_key", "secret_key", "webhook_secret"] },
+  Sipay: { data: ["gateway_url"], secrets: ["api_key", "secret_key", "merchant_key", "webhook_secret"] },
   "Virtual POS": { data: ["bank_code", "terminal_id", "gateway_url"], secrets: ["store_key", "webhook_secret"] },
 }
 /** Provider-specific names for the shared fields (e.g. Sipay calls the API key "App ID"). */
@@ -36,7 +36,7 @@ interface Form {
 
 function formOf(a: Account | null): Form {
   const data = {} as Record<DataField, string>
-  for (const f of ["api_key", "terminal_id", "bank_code", "gateway_url", "bank_name", "iban", "account_holder", "transfer_instructions"] as DataField[])
+  for (const f of ["terminal_id", "bank_code", "gateway_url", "bank_name", "iban", "account_holder", "transfer_instructions"] as DataField[])
     data[f] = (a?.[f] as string | null) ?? ""
   return {
     label: a?.label ?? "",
@@ -46,7 +46,7 @@ function formOf(a: Account | null): Form {
     currencies: a?.currencies ?? "",
     data,
     // secrets are write-only: never pre-filled, blank keeps the stored value
-    secrets: { secret_key: "", merchant_key: "", store_key: "", webhook_secret: "" },
+    secrets: { api_key: "", secret_key: "", merchant_key: "", store_key: "", webhook_secret: "" },
   }
 }
 
@@ -101,7 +101,7 @@ export function AccountDrawer({
     try {
       await save.run({ property, data })
       // drop the typed secrets from memory as soon as they are stored
-      setForm((x) => ({ ...x, secrets: { secret_key: "", merchant_key: "", store_key: "", webhook_secret: "" } }))
+      setForm((x) => ({ ...x, secrets: { api_key: "", secret_key: "", merchant_key: "", store_key: "", webhook_secret: "" } }))
       toast.success(t("payments.acc.saved"))
       onSaved()
       onClose()
@@ -197,7 +197,7 @@ export function AccountDrawer({
                     <Input
                       value={form.data[f]}
                       onChange={(e) => setForm({ ...form, data: { ...form.data, [f]: e.target.value } })}
-                      className={f === "iban" || f === "api_key" || f === "terminal_id" ? "font-mono" : undefined}
+                      className={f === "iban" || f === "terminal_id" ? "font-mono" : undefined}
                       inputMode={f === "gateway_url" ? "url" : undefined}
                     />
                   </Field>

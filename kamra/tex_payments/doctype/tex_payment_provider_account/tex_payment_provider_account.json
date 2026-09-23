@@ -79,8 +79,9 @@
   },
   {
    "fieldname": "api_key",
-   "fieldtype": "Data",
-   "label": "API key / merchant id"
+   "fieldtype": "Password",
+   "label": "API key / merchant id",
+   "description": "Stored encrypted; never shown again (G-83)"
   },
   {
    "fieldname": "secret_key",
@@ -150,7 +151,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-25 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Provider Account",

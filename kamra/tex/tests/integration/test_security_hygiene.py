@@ -8,6 +8,7 @@
 - a payment provider's API key is a write-only encrypted secret.
 """
 
+import base64
 import hashlib
 import hmac
 import io
@@ -23,6 +24,8 @@ from werkzeug.wrappers import Request
 
 from kamra.tex.api import admin as admin_api
 from kamra.tex.api import crm as crm_api
+from kamra.tex.api import payments as pay_api
+from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
 from kamra.tex.crm import service as crm
 from kamra.tex.payments import service as pay
@@ -283,3 +286,49 @@ class TestSecurityHygieneG83(TexTestCase):
 		                                                     "reference_name": queued[0]}, pluck="new_value")
 		self.assertEqual(len(refused), 1)
 		self.assertNotIn(secret, refused[0])
+
+	# ── 6. payment provider API key ───────────────────────────────────────
+
+	def test_g83_a_payment_api_key_is_a_write_only_secret(self):
+		self.as_user("Administrator")
+		key = "ak-live-g83-0123456789"
+		name = pay_api.save_account(property=fx.PROPERTY, data={
+			"label": "iyzico g83", "provider": "iyzico", "environment": "Sandbox", "enabled": 1,
+			"currencies": "EUR", "api_key": key, "secret_key": "sk-g83"})["name"]
+		self.assertNotIn(key, str(frappe.db.get_value("TEX Payment Provider Account", name, "api_key")))
+		self.assertEqual(frappe.get_doc("TEX Payment Provider Account", name).get_password("api_key"), key)
+		listed = pay_api.accounts(property=fx.PROPERTY)
+		self.assertNotIn(key, json.dumps(listed, default=str))
+		self.assertTrue(next(a for a in listed["accounts"] if a["name"] == name)["secrets_set"]["api_key"])
+		self.assertNotIn(key, json.dumps(policy_api.get_record("TEX Payment Provider Account", name), default=str))
+		pay_api.save_account(property=fx.PROPERTY, data={"name": name, "label": "iyzico g83 renamed"})
+		acc = frappe.get_doc("TEX Payment Provider Account", name)
+		self.assertEqual(acc.get_password("api_key"), key)                       # blank keeps the stored key
+		for v in frappe.get_all("TEX Audit Event", filters={"reference_name": name}, pluck="new_value"):
+			self.assertNotIn(key, v or "")
+		# the gateway call is signed with the decrypted key, not the masked column
+		from kamra.tex.payments.providers import turkey
+
+		with mock.patch.object(turkey.requests, "post") as post:
+			post.return_value.json.return_value = {"status": "success"}
+			turkey.IyzicoProvider(acc)._post(turkey.IyzicoProvider.DETAIL, {"token": "t"})
+		auth = post.call_args.kwargs["headers"]["Authorization"].split(" ", 1)[1]
+		self.assertTrue(base64.b64decode(auth).decode().startswith(f"apiKey:{key}&"))
+
+	def test_g83_p22_moves_plain_api_keys_into_the_encrypted_store(self):
+		from kamra.patches.tex import p22_payment_api_key_password as p22
+
+		self.as_user("Administrator")
+		name = frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "legacy iyzico",
+		                       "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox",
+		                       "enabled": 0}).insert(ignore_permissions=True).name
+		remove_encrypted_password("TEX Payment Provider Account", name, "api_key")
+		frappe.db.sql("UPDATE `tabTEX Payment Provider Account` SET api_key=%s WHERE name=%s",
+		              ("plain-key-g83", name))                                   # as stored before p22
+		with mock.patch("builtins.print") as printed:
+			p22.execute()
+			p22.execute()                                                        # idempotent
+		self.assertNotIn("plain-key-g83", str(printed.call_args_list))
+		self.assertEqual(frappe.db.get_value("TEX Payment Provider Account", name, "api_key"), "*" * 13)
+		self.assertEqual(frappe.get_doc("TEX Payment Provider Account", name).get_password("api_key"),
+		                 "plain-key-g83")

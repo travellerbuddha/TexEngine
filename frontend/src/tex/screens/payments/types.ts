@@ -93,7 +93,8 @@ export type Provider = "Mock" | "iyzico" | "Sipay" | "Virtual POS" | "Bank Trans
 export const PROVIDERS: Provider[] = ["Mock", "Bank Transfer", "Pay at Hotel", "iyzico", "Sipay", "Virtual POS"]
 export const GATEWAYS: Provider[] = ["iyzico", "Sipay", "Virtual POS"]
 
-export const SECRET_FIELDS = ["secret_key", "merchant_key", "store_key", "webhook_secret"] as const
+// write-only: stored encrypted and never returned (the API key too, G-83)
+export const SECRET_FIELDS = ["api_key", "secret_key", "merchant_key", "store_key", "webhook_secret"] as const
 export type SecretField = (typeof SECRET_FIELDS)[number]
 
 export interface Account {
@@ -104,7 +105,6 @@ export interface Account {
   environment: "Sandbox" | "Production"
   enabled: 0 | 1
   currencies: string | null
-  api_key: string | null
   terminal_id: string | null
   bank_code: string | null
   gateway_url: string | null

@@ -83,7 +83,7 @@ class IyzicoProvider(PaymentProvider):
 			"https://sandbox-api.iyzipay.com" if self.sandbox else "https://api.iyzipay.com")
 
 	def _post(self, path: str, payload: dict) -> dict:
-		key, secret = self.account.get("api_key"), self.secret("secret_key")
+		key, secret = self.secret("api_key"), self.secret("secret_key")        # both encrypted (G-83)
 		if not key or not secret:
 			raise ProviderError("iyzico API key / secret key are not configured")
 		body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
@@ -222,7 +222,7 @@ class SipayProvider(PaymentProvider):
 			"https://provisioning.sipay.com.tr/ccpayment" if self.sandbox else "https://app.sipay.com.tr/ccpayment")
 
 	def _creds(self):
-		app_id = self.account.get("api_key")
+		app_id = self.secret("api_key")                                           # encrypted (G-83)
 		app_secret = self.secret("secret_key")
 		merchant_key = self.secret("merchant_key")
 		if not (app_id and app_secret and merchant_key):

@@ -887,7 +887,7 @@ PAYMENT_SPECS = [
 		F("enabled", "Check", "Enabled", default="1", in_list_view=1),
 		F("currencies", "Small Text", "Currencies", description="Blank = any"),
 		SB("Credentials", depends_on="eval:!['Bank Transfer','Pay at Hotel','Mock'].includes(doc.provider)"),
-		F("api_key", "Data", "API key / merchant id"),
+		F("api_key", "Password", "API key / merchant id", description="Stored encrypted; never shown again (G-83)"),
 		F("secret_key", "Password", "Secret key"),
 		F("merchant_key", "Password", "Merchant key"),
 		CB(),
