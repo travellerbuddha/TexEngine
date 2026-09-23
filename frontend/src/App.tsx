@@ -146,6 +146,15 @@ function RequireAuth() {
   return <Outlet />
 }
 
+/** The legacy PMS screens exist only while the site runs the PMS modules (TEX
+ *  Settings); otherwise every legacy route leads to the TEX workspace. The backend
+ *  refuses the PMS endpoints as well (G-16), this only spares the user dead screens. */
+function LegacyPmsGate() {
+  const { legacyPms } = useAuth()
+  if (!legacyPms) return <Navigate to="/tex" replace />
+  return <AppShell />
+}
+
 /** The /login route. Already signed in → bounce to where you came from.
  *  On success, a full-page nav re-boots with the authenticated session's CSRF
  *  token (login rotates it); dev soft-navigates. */
@@ -214,7 +223,7 @@ export default function App() {
           {/* TEX Engine: the default workspace (its own shell and navigation) */}
           <Route path="tex/*" element={<TexApp />} />
           <Route index element={<Navigate to="/tex" replace />} />
-          <Route element={<AppShell />}>
+          <Route element={<LegacyPmsGate />}>
           {/* legacy PMS front desk, reachable when the site keeps PMS modules */}
           <Route path="today" element={<Today />} />
           <Route path="apps" element={<AppLauncher />} />

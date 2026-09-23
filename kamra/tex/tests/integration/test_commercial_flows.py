@@ -352,6 +352,7 @@ class TestTenantIsolation(TexTestCase):
 		self.assertTrue(site.domains[0].verification_token)
 
 	def test_legacy_endpoints_and_desk_lists_respect_tenancy(self):
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1)  # a site that runs the PMS (G-16)
 		b = guest_books(session="sess-leg")
 		res = b["rooms"][0]["reservation"]
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- give the agent a legacy role

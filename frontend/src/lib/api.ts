@@ -172,6 +172,8 @@ export interface WhoAmI {
   user: string
   full_name: string
   roles: string[]
+  /** the PMS modules are open to this user (TEX Settings; platform admins always) */
+  legacy_pms?: boolean
 }
 
 export const whoami = () => call<WhoAmI>("kamra.api.whoami")

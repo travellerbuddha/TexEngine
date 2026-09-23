@@ -17,10 +17,14 @@ class BanquetTestCase(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- controlled user context switch; target user is validated and scope-limited in this flow
 		frappe.local.lang = frappe.local.lang or "en"
+		# banquet is a PMS module: these tests run with the modules switched on (G-16)
+		self._legacy_pms = frappe.db.get_single_value("TEX Settings", "show_legacy_pms")
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1)
 		self.f = build()
 
 	def tearDown(self):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- controlled user context switch; target user is validated and scope-limited in this flow
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", self._legacy_pms or 0)
 
 	def sheet(self, fn):
 		return frappe.get_doc("Venue Booking", fn)

@@ -176,6 +176,22 @@ def property_scope() -> list[str] | None:
 	return sorted(scope.permitted_properties()) or [""]
 
 
+def legacy_pms_enabled() -> bool:
+	"""TEX Settings > Show legacy PMS modules. Off, the PMS (front desk, housekeeping,
+	POS, laundry, banquet, cashier...) is closed to hotel users - in the backend, not
+	only in the navigation (G-16). Sites without TEX Settings are plain Kamra sites."""
+	try:
+		return bool(frappe.db.get_single_value("TEX Settings", "show_legacy_pms", cache=True))
+	except Exception:
+		return True
+
+
+def legacy_pms_open_to_user() -> bool:
+	from kamra.tex.security import scope
+
+	return legacy_pms_enabled() or scope.is_platform_admin()
+
+
 def require_roles(*roles):
 	"""Allow the listed roles (plus admins), at hotels in the caller's scope.
 	Usage - below the whitelist decorator so the registered function is the
@@ -200,6 +216,8 @@ def require_roles(*roles):
 				frappe.throw(
 					f"Not permitted - needs one of: {', '.join(sorted(roles))}.",
 					frappe.PermissionError)
+			if not legacy_pms_open_to_user():
+				frappe.throw(_("The PMS modules are switched off on this site."), frappe.PermissionError)
 			assert_scope(sig, args, kwargs, records)
 			return fn(*args, **kwargs)
 		# introspectable RBAC: Kamra Agent filters its tool list by this

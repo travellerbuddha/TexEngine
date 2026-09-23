@@ -317,6 +317,8 @@ def execute():
 	real_commit, frappe.db.commit = frappe.db.commit, lambda *a, **k: None
 	frappe.db.savepoint("fd_eval_start")
 	try:
+		# the journey exercises the PMS modules: switched on inside the savepoint (G-16)
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1)
 		RT, ROOM, ROOM2 = setup()
 		for fn in (f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13):
 			fn()

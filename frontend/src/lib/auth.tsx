@@ -20,6 +20,8 @@ interface AuthValue {
   status: Status
   user: string | null
   roles: string[]
+  /** false when the PMS modules are switched off for this user: legacy screens send them to /tex */
+  legacyPms: boolean
   refresh: () => Promise<void>
   signOut: () => Promise<void>
 }
@@ -36,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>("loading")
   const [user, setUser] = useState<string | null>(null)
   const [roles, setRoles] = useState<string[]>([])
+  const [legacyPms, setLegacyPms] = useState(false)
   const navigate = useNavigate()
   const statusRef = useRef<Status>("loading")
   statusRef.current = status
@@ -55,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("authed")
         setUser(w.full_name || w.user)
         setRoles(w.roles)
+        setLegacyPms(w.legacy_pms !== false)
       }
     } catch (e) {
       // an unreachable server is NOT a sign-out: keep the session and let
@@ -97,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [navigate])
 
   return (
-    <AuthCtx.Provider value={{ status, user, roles, refresh, signOut }}>
+    <AuthCtx.Provider value={{ status, user, roles, legacyPms, refresh, signOut }}>
       {children}
     </AuthCtx.Provider>
   )

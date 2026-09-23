@@ -20,7 +20,7 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 | Check | Command | Result |
 |---|---|---|
 | TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **147 passed** |
-| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **89 OK**: admin_markets 3, commercial_flows 23, concurrency 2, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 30 |
+| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **90 OK**: admin_markets 3, commercial_flows 23, concurrency 2, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 31 |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **13 passed**: critical-journey (R-58, 19 steps), contract-admin, crs ×2, shell, booking ×4 desktop + ×4 mobile (Pixel 7) |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** |
 | TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean; the rebuild is identical to the committed bundles |
@@ -42,7 +42,7 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), channel-manager / SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20), enterprise dashboard (R-47) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 10 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
+**Open gaps by severity:** 0 Critical, 9 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -51,7 +51,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | Phase | Status | Why |
 |---|---|---|
 | 0 Audit + docs | COMPLETE | spec, architecture, ADR-001…026, this audit |
-| 1 Foundation (shell, nav, design system, hide PMS) | PARTIAL | TEX shell and design system work; the legacy booking engine no longer sells TEX hotels (G-03 fixed); the legacy night audit leaves TEX-sold stays alone (G-04 fixed); the legacy PMS SPA is still reachable for TEX users (G-16) |
+| 1 Foundation (shell, nav, design system, hide PMS) | PARTIAL | TEX shell and design system work; the legacy booking engine no longer sells TEX hotels (G-03 fixed); the legacy night audit leaves TEX-sold stays alone (G-04 fixed); the legacy PMS is closed in backend and SPA while switched off (G-16 fixed, ADR-030). Open: the login page, browser title and Desk tile still say "Kamra PMS" (G-60) |
 | 2 Commercial data model | PARTIAL | 59 DocTypes + patches p01–p09; extras/taxes are not versioned (G-20) |
 | 3 Pricing engine | PARTIAL | pure engine correct on every spec example; booking-level extras and fixed coupons priced once per booking, min basket in the sell currency (G-05, G-06, G-08 fixed); per-guest limits enforced at booking and modifications keep redemptions right (G-07, G-09 fixed); min basket per room (G-84) |
 | 4 Contract admin | PARTIAL | editor, publish, price check work (E2E); an unsellable contract can hide others (G-17); contract cost hidden from agents (G-11 fixed) |
@@ -69,7 +69,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 | ID | Requirement | Status | Evidence (files · tests) | Gaps (→ FINAL_GAP_AUDIT) |
 |---|---|---|---|---|
-| R-01 | Source & identity | PARTIAL | AGPL notices, `NOTICE.md`, baseline 418ed1a in history; TEX shell branding | Legacy PMS SPA still reachable for TEX users (G-16); the legacy booking engine refuses TEX hotels and the legacy night audit leaves TEX stays alone (G-03, G-04 fixed, ADR-028). Login/tab/Desk still say "Kamra PMS" (G-60). Release/nightly workflows ship upstream Kamra images (G-61). |
+| R-01 | Source & identity | PARTIAL | AGPL notices, `NOTICE.md`, baseline 418ed1a in history; TEX shell branding | The legacy PMS is closed to hotel users while switched off (G-16 fixed, ADR-030); the legacy booking engine refuses TEX hotels and the legacy night audit leaves TEX stays alone (G-03, G-04 fixed, ADR-028). Login/tab/Desk still say "Kamra PMS" (G-60). Release/nightly workflows ship upstream Kamra images (G-61). |
 | R-02 | Architecture principles | PARTIAL | `kamra/tex/pricing` has no frappe import (`TestPurity`); no import cycles; the frontend only formats decimal strings | Loyalty uses Float money fields (G-72). The legacy float pricing path remains only for hotels outside TEX (ADR-028; G-03 fixed). |
 | R-03 | Pricing engine | PARTIAL | modular resolvers in `kamra/tex/pricing/*`; Decimal (`money.calc`); explanation trace · `test_engine.py`, `TestPayload` | Extras and tax rules are neither in the frozen payload nor effective-dated, so a quote is not reproducible as of its sale time (G-20). |
 | R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `screens/rates/contracts/*` · e2e `contract-admin` | A higher-priority contract whose sale/stay window does not apply hides lower/GLOBAL contracts (G-17). Contract cost readable with `price.view` (G-11). Header fields editable after publish (G-50). |
@@ -121,7 +121,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-50 | Responsive | PARTIAL | no page overflow at 320–1920 on 11 screens; booking mobile e2e | Content clipped at 320 px (inventory, reports); no admin responsive tests (G-80). |
 | R-51 | Accessibility | PARTIAL | skip link, focus, labels, dialogs, keyboard e2e | Contrast failures (sidebar 2.62:1, grid, weekend headers); no automated a11y tests (G-63). |
 | R-52 | Performance | PARTIAL | lazy areas/languages, caches on immutable terms | 295 KB legacy shell in admin bundle; per-room-type availability queries; guest quotes carry contract internals; no budgets (G-71). |
-| R-53 | Security | PARTIAL | TEX endpoints scoped (115, 34 probed), legacy record arguments resolved to their hotel (G-02 fixed, ADR-027), REST/Desk isolation, CSRF, parameterised SQL, escaped e-mail, rate limits, hashed tokens, fail-closed callbacks | High: G-16 (G-10…G-15 fixed). Medium: G-26. |
+| R-53 | Security | PARTIAL | TEX endpoints scoped (115, 34 probed), legacy record arguments resolved to their hotel (G-02 fixed, ADR-027), REST/Desk isolation, CSRF, parameterised SQL, escaped e-mail, rate limits, hashed tokens, fail-closed callbacks | (G-10…G-16 fixed.) Medium: G-26. |
 | R-54 | Audit trail | PARTIAL | immutable `TEX Audit Event` (actor, roles, hotel, source, old/new, reason) | Draft/rate edits, grid bulk old values, payment rules not audited; group grant events lack hotel (G-74). |
 | R-55 | UX productivity | PARTIAL | Ctrl+K, shortcuts, quick booking, duplicate contract, bulk edit, quick payment link | No global search, recent reservations, copy period/restrictions, saved filters (G-75). |
 | R-56 | Migrations | PARTIAL | p01–p09 idempotent, in `patches.txt` · p05/p06 tested | p01–p04, p07–p09 untested; no end-to-end upgrade test (G-76). |

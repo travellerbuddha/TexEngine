@@ -3163,6 +3163,8 @@ def execute():
 	real_commit, frappe.db.commit = frappe.db.commit, lambda *a, **k: None
 	frappe.db.savepoint("eval_start")
 	try:
+		# the harness exercises the PMS modules: switched on inside the savepoint (G-16)
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1)
 		RT, ROOM = setup()
 		for fn in (t1, t2, t3, t3b, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13,
 		           t14, t15, t16, t17, t18, t19, t20, t21, t22, t23, t24,

@@ -307,3 +307,18 @@ CRS extras pickers list per-booking extras on room 1 only.
 on a multi-room booking whose total would qualify (never the reverse; G-84). Snapshots
 made before this change have no room index and reprice as room 1. Cancelling room 1 alone
 cancels the per-booking extra with it.
+
+## ADR-030 The legacy PMS switch is enforced in the backend
+**Context.** TEX Settings > "Show legacy PMS modules" only hid the sidebar link. Every
+legacy route (front desk, POS, housekeeping, cashier, laundry, tape chart…) loaded for any
+user, and the legacy endpoints answered: finance@ got a working restaurant POS, a Hotel
+Admin the whole front desk (G-16).
+**Decision.** `kamra.authz.require_roles` (the guard of every legacy PMS endpoint) refuses
+hotel users while the setting is off (`legacy_pms_open_to_user`); platform administrators
+keep access to operate and migrate. `kamra.api.whoami` reports `legacy_pms`, and the SPA's
+legacy shell is mounted behind a gate that sends such users to `/tex`. The upstream suites,
+which test the PMS itself, switch the modules on for their run (inside their savepoint, or
+restored in tearDown).
+**Consequences.** A site that runs the PMS turns the setting on (upgraded sites with PMS data
+default to on, ADR-014). Guest-facing legacy pages (`/kamra/book`, self check-in, QR menu)
+are not behind `require_roles` and keep their own rules (ADR-028, G-15).

@@ -54,10 +54,14 @@ def whoami():
 	{user: "Guest"} cleanly instead of a 403 in the console.
 	"""
 	user = frappe.session.user
+	from kamra.authz import legacy_pms_open_to_user
+
 	return {
 		"user": user,
 		"full_name": frappe.db.get_value("User", user, "full_name") or user,
 		"roles": frappe.get_roles(user),
+		# the SPA sends TEX users to /tex when the PMS modules are off (G-16)
+		"legacy_pms": user != "Guest" and legacy_pms_open_to_user(),
 	}
 
 

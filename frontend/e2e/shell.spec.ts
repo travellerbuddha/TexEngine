@@ -26,5 +26,10 @@ test("TEX shell: spec navigation, PMS hidden, hotel scope, language switch", asy
   await page.getByRole("combobox", { name: "Command palette" }).fill("reserv")
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/tex\/reservations/)
+  // PMS screens are not reachable by URL either while the PMS is switched off (G-16)
+  for (const legacy of ["/kamra/today", "/kamra/pos", "/kamra/housekeeping", "/kamra/cashier"]) {
+    await page.goto(legacy)
+    await expect(page).toHaveURL(/\/kamra\/tex/)
+  }
   noErrors()
 })

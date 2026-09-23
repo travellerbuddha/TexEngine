@@ -333,10 +333,12 @@ LEGACY_MODULES = ("kamra.api", "kamra.agents_api", "kamra.assistant", "kamra.ban
 
 class TestLegacyTenancy(TexTestCase):
 	"""G-02: legacy Kamra endpoints resolve every record argument (guest, POS order, action
-	log, hurdle rate ...) to its hotel, and their lists only show the caller's hotels."""
+	log, hurdle rate ...) to its hotel, and their lists only show the caller's hotels.
+	G-16: with the PMS modules switched off, they are closed to hotel users altogether."""
 
 	def setUp(self):
 		super().setUp()
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1)  # a site that runs the PMS
 		setup_site_and_payments(self.f)
 		other_hotel_with_mock()
 		self.gm = fx.ensure_user("sec-gm@example.com", ["Hotel Admin"])
@@ -406,6 +408,23 @@ class TestLegacyTenancy(TexTestCase):
 		self.assertIn(self.own_log, feed)
 		self.assertNotIn(self.log, feed)
 		self.assertIn("enabled", assistant.assistant_status(property=OTHER))
+
+	def test_g16_switched_off_pms_is_closed_in_the_backend(self):
+		from kamra import agents_api, api
+
+		self.assertTrue(api.whoami()["legacy_pms"])
+		self.assertEqual(agents_api.activity_detail(name=self.own_log)["property"], OTHER)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the platform switches the PMS off
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 0)
+		frappe.set_user(self.gm)  # nosemgrep: frappe-setuser -- the hotel's own records, PMS off
+		self.assertFalse(api.whoami()["legacy_pms"])                   # the SPA sends the user to /tex
+		with self.assertRaisesRegex(frappe.PermissionError, "switched off"):
+			agents_api.activity_detail(name=self.own_log)
+		with self.assertRaisesRegex(frappe.PermissionError, "switched off"):
+			api.front_desk_snapshot(property=OTHER)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- platform administrators keep it
+		self.assertTrue(api.whoami()["legacy_pms"])
+		self.assertEqual(agents_api.activity_detail(name=self.own_log)["property"], OTHER)
 
 	def test_every_legacy_record_argument_is_scoped(self):
 		import importlib
