@@ -1086,6 +1086,9 @@ the deposit due was never recomputed.
   assignment) makes the paid change fail and its payment be refunded: the guest proposes again.
 
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
+*Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
+a suspend stops quotes and bookings in flight, and the scheduler isolates each record.*
+
 **Context.** G-50 (R-04). After a publish, the contract header stayed editable through the TEX
 API, Desk and REST: market, channels, sale and stay windows, priority, sell currency and status.
 - Selection (`candidate_contracts`) read the live header, while pricing read the version's frozen
@@ -1141,6 +1144,18 @@ API, Desk and REST: market, channels, sale and stay windows, priority, sell curr
   Each action needs `contract.publish` at the contract's hotel and a reason. It takes a row lock
   and is audited as `contract.status` with the reason. Status is not versioned on purpose: a stop
   sale must act now.
+- *A suspend stops what is in flight.* Offers (20 minutes) and quotes (30 minutes) taken before a
+  suspend no longer sell: `create_quote` answers `CONTRACT_SUSPENDED` (or `CONTRACT_NOT_ON_SALE`
+  for an archived or draft contract), and `create_booking` raises `ContractSuspended` /
+  `ContractNotOnSale`. The booking reads the status under a shared row lock, so a suspend (which
+  takes the row's exclusive lock) waits for bookings in flight and every later booking sees it.
+  Guests hear only "This rate is no longer on sale". Modifications of stays already sold are not
+  new bookings and are unaffected.
+- *Channel bookings* are the channel's sale, and the guest holds the channel's confirmation. A
+  stay on a mapping whose contract is not Active (or, without a mapped contract, where no contract
+  sells the market and channel) is accepted with a warning and a `channel.overbooking` audit, like
+  an overbooking. The ARI TEX pushes already closes the contract, so this covers only the time
+  until the channel applies it.
 - *Selection reads the frozen version.* `candidate_contracts` takes only the hotel and the status
   from the header. Everything else comes from the payload of the version live at the sale time,
   the same terms pricing runs on:
@@ -1149,14 +1164,41 @@ API, Desk and REST: market, channels, sale and stay windows, priority, sell curr
   - the priority and the sell currency.
 
   A header changed behind the controller (DB, data import) therefore changes nothing, and
-  historical selection is reproducible. `load_terms` reads the payload hash first and reads the
-  payload only on a cache miss.
-- *Back-compat.* Payloads frozen before G-50 already hold the market, windows and channels. They
-  have no priority or sell currency (`ContractTerms.priority` and `sell_currency` are `None`), and
-  selection takes those two from the contract header. No published payload or hash is rewritten.
-  Patch p21 gives every existing draft of an already-published contract its header's selling
-  terms, which is what its publish would have frozen before G-50 (audited
-  `contract.version.selling_backfill`). Drafts of unpublished contracts need nothing.
+  historical selection is reproducible: it depends only on versions and their stored terms.
+  `load_terms` reads the payload hash first and reads the payload only on a cache miss.
+- *Versions frozen before G-50 keep their header narrowings.* Before G-50, selection read the
+  header and pricing the payload, so a contract sold only where both allowed. A header narrowed
+  after publish (a channel removed, the sale window closed, the market changed) was a working stop
+  sale. Reading only the payload would have reopened it on deploy. So:
+  - such a payload (no `priority` key; `ContractTerms.priority` is `None`) sells only where both
+    it and the header allow (`selling_terms`): both markets must admit the request (a GLOBAL
+    payload under a DE header sells DE only; a DE payload under a UK header sells nowhere, as
+    before), the sale windows and the channels are intersected, and priority and sell currency
+    are the header's. The header's stay window never narrowed anything and still does not;
+  - patch p25 copies the header's selling terms and market onto every published version frozen
+    before G-50: the version's own selling-term columns, `header_market` and `header_snapshot_at`.
+    From then on the narrowing is fixed; later header changes no longer move it, so historical
+    selection over these versions is reproducible too. Before p25 has run, the live header stands
+    in;
+  - p25 prints and audits (`contract.header_differs`: payload values as old, header values as
+    new) every contract whose header differs from its live payload, so staff can publish a
+    corrective version where a difference was not meant to narrow sales;
+  - a draft based on such a version (`new_draft`, or a version inserted in Desk/REST with or
+    without `based_on`) starts from what it sold. Where it sold nothing (header and payload
+    windows or channels do not overlap), the draft takes the header's value, the terms staff last
+    set. A new version is built with the header's market, which is locked;
+  - the scheduler does not mirror such a version onto the header (the header is where its
+    narrowing came from); the contract page and the version editor show its effective terms
+    and say that the header still narrows it.
+
+  No published payload or hash is rewritten. Patch p21 gives every existing draft of an
+  already-published contract without selling terms of its own the header's terms, which is what
+  its publish would have frozen before G-50 (audited `contract.version.selling_backfill`); a
+  draft that has terms is left alone, so p21 and p25 can run again safely. Drafts of unpublished
+  contracts need nothing.
+- *The scheduler isolates each record.* Each version flip and each contract going live runs in a
+  savepoint; a record that fails (e.g. a legacy header that no longer validates) is rolled back to
+  it and logged, and every other hotel's contracts still roll.
 - *Audit.* The controller audits every header change on every path:
   - `contract.save` holds the old and new value of each changed field, with channels as a sorted
     list; creation holds the full header;
@@ -1164,11 +1206,12 @@ API, Desk and REST: market, channels, sale and stay windows, priority, sell curr
   - `contract.publish` holds the frozen selling terms (new) and the header's before (old).
 
 **Consequences.**
-- For a version frozen before G-50, priority and sell currency follow the header. The header now
-  changes only through a later version's mirror, so a historical selection over such a version
-  can use a later priority. Versions published from now on are exact.
+- A version frozen before G-50 is selected on the header terms snapshotted at the upgrade, not on
+  the terms of the day it was sold (the header was not versioned then). Sites where p21 ran
+  before p25 existed (dev and test sites) get the snapshot from p25 on their next migrate.
 - Selection loads the live version of every Active contract of the hotel (one hash read each;
-  payloads are cached per process) instead of filtering markets in SQL.
+  payloads are cached per process) instead of filtering markets in SQL; a version frozen before
+  G-50 costs one more read for its snapshot.
 - Status stays live, not versioned: the simulator still cannot select an Archived or Suspended
   contract for a past sale time (G-51).
 - Extending a sale window or adding a channel now needs a new version and a publish (with
