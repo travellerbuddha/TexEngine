@@ -18,12 +18,18 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 ## 3. Tenancy & authorisation (ADR-011)
 - Hierarchy: Platform → Enterprise → Hotel Group → Hotel (Property).
 - **Capabilities** (code registry `kamra/tex/security/capabilities.py`): `price.view`,
-  `price.view_cost`, `contract.edit`, `contract.publish`, `price.override`, `promotion.edit`,
-  `markup.edit`, `fx.edit`, `reservation.create`, `reservation.modify`, `reservation.cancel`,
+  `price.view_cost`, `price.any_channel`, `contract.edit`, `contract.publish`, `price.override`,
+  `promotion.edit`, `markup.edit`, `fx.edit`, `reservation.create`, `reservation.modify`, `reservation.cancel`,
   `payment.view`, `payment.link`, `payment.refund`, `inventory.edit`, `restriction.edit`,
   `crm.view`, `crm.edit`, `guest.export`, `report.view`, `booking_site.edit`, `connect.admin`,
   `settings.admin`, `user.admin`.
 - Sources: default profile per Frappe role + `TEX Access Grant` (user × scope × profile).
+- **Sales channels** (ADR-050): staff price and book only on the channels they are entitled to
+  at a hotel: the channel list of each profile granted there (blank = the call centre), every
+  channel with `price.any_channel`. `scope.require_channel(channel, property)` checks the
+  channel a search asks for, and on quote, quote summary and booking the channel of the signed
+  offer or stored quote itself, in every CRS call and in `create_booking` for staff;
+  modifications keep the reservation's channel. Granting a profile needs its channels.
 - `require_capability(cap, property)` on every TEX endpoint; list endpoints filter by
   `permitted_properties()`; document endpoints resolve the document's property first.
 - Legacy `require_roles` resolves `property` / `reservation` / `folio` / `room` / `room_type` /
@@ -44,6 +50,7 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 |---|---|
 | Cross-tenant read/write (IDOR) | Capability + property scope on every endpoint; document→property resolution; integration tests per endpoint family |
 | Price tampering from client | Server prices from signed offer inputs; client totals ignored; HMAC offer keys with expiry; quotes persisted server-side |
+| Selling at another channel's prices | Channel entitlement per profile and hotel (ADR-050): the searched channel, and the offer's or quote's own channel on quote and book, are checked; a Booking Engine quote cannot be booked from the CRS; a modification never switches the channel |
 | Promotion/coupon abuse | Server-side eligibility; usage limits enforced with row locks; per-guest limits keyed by normalised email hash; rate limit on code checks |
 | Inventory race / double sell | `TEX Inventory Day` row locks + recount under lock; idempotency keys |
 | Replay / duplicate payments | Caller-namespaced idempotency keys (no cross-caller replay); `FOR UPDATE` on transactions and bookings |
