@@ -35,7 +35,7 @@ jobs:
   github-release:
     name: Publish GitHub Release
     # Only for hand-pushed tags; release-please already created the Release.
-    if: github.event_name == 'push'
+    if: github.repository == 'Kamra-PMS/kamra-pms' && (github.event_name == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +57,8 @@ jobs:
 
   docker:
     name: Publish Docker image
+    # this fork (TEX Engine) never builds or ships upstream Kamra images
+    if: github.repository == 'Kamra-PMS/kamra-pms'
     runs-on: ubuntu-latest
     steps:
       - name: Resolve tag
@@ -106,6 +108,8 @@ jobs:
 
   deploy-demo:
     name: Deploy demo.kamrapms.com
+    # this fork (TEX Engine) never builds or ships upstream Kamra images
+    if: github.repository == 'Kamra-PMS/kamra-pms'
     needs: docker
     runs-on: ubuntu-latest
     timeout-minutes: 30

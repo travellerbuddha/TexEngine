@@ -4,12 +4,26 @@ on:
   push:
     branches: [main, develop]
   pull_request:
+  workflow_dispatch:        # run it on any branch from the Actions tab (a full run takes ~30-40 min)
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  ruff:
+    name: Python lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: ruff (config in pyproject.toml)
+        run: |
+          pip install ruff==0.15.8
+          ruff check kamra/tex kamra/patches/tex
+
   frontend:
     name: Frontend typecheck & build
     runs-on: ubuntu-latest
@@ -123,13 +137,12 @@ jobs:
           ./env/bin/python -m unittest discover -s apps/kamra/kamra/tex/tests/unit -t apps/kamra 2>&1 | tee tex_unit.out
           grep -qE "^OK$" tex_unit.out
 
-      - name: Run TEX integration tests (journey, concurrency, commercial flows)
+      - name: Run TEX integration tests (every kamra/tex/tests/integration/test_*.py module)
         run: |
           cd frappe-bench
-          for m in test_critical_journey test_concurrency test_commercial_flows test_migrations_notify \
-                   test_security_regressions test_public_booking \
-                   test_admin_markets test_extras_inventory test_post_booking_extras test_custom_domains test_crm_segments test_loyalty_admin test_portfolio \
-                   test_distribution; do
+          # discovered, never listed: a new module can't be skipped silently
+          for f in apps/kamra/kamra/tex/tests/integration/test_*.py; do
+            m=$(basename "$f" .py)
             bench --site test.localhost run-tests --module kamra.tex.tests.integration.$m 2>&1 | tee tex_$m.out
             grep -qE "^OK$" tex_$m.out
           done

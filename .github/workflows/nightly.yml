@@ -17,6 +17,8 @@ permissions:
 jobs:
   gate:
     name: Anything new on develop?
+    # this fork (TEX Engine) never builds or ships upstream Kamra images
+    if: github.repository == 'Kamra-PMS/kamra-pms'
     runs-on: ubuntu-latest
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
