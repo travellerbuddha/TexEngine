@@ -904,3 +904,92 @@ of them stranded money a gateway had already captured:
   allocating the same payment at the same moment could both pass the limit check. Locking them
   needs indexes on `transaction` / `parent_transaction` (a schema change, not made here).
 - Bookings paid in Sandbox on a site without `tex_production` carry no per-booking flag.
+
+## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
+**Context.** G-50 (R-04). After a publish, the contract header stayed editable through the TEX
+API, Desk and REST: market, channels, sale and stay windows, priority, sell currency and status.
+- Selection (`candidate_contracts`) read the live header, while pricing read the version's frozen
+  payload. A header edit could:
+  - make a contract a candidate for a market or channel its payload refuses;
+  - hide a contract that still sells.
+- Priority and sell currency were not frozen at all, so a header edit changed which contract
+  wins and the offer's currency, with no new version.
+- Historical selection (a modification priced at the original sale date, the simulator) used
+  today's header.
+- The `save_contract` audit had no channels. Desk and REST header saves were not audited, except
+  for status.
+- The first idea was "lock the header; publish a new version". It had a gap: a new version froze
+  the header's values, so with a locked header no version could ever change a window or a
+  channel. Only a new contract could, and a new contract loses everything linked to the contract
+  (allotments, restrictions, markups, channel mappings).
+
+**Decision.**
+- *Fixed terms.* Once any version was published (Published, Superseded or Withdrawn: it may have
+  sold), the hotel, market, contract currency and pricing basis never change. Another market or
+  currency is another contract; Duplicate lets the user pick the market.
+- *Selling terms are versioned.* The sale window, stay window, channels, priority and default sell
+  currency belong to each version:
+  - they are new fields on `TEX Contract Version`, frozen into the payload at publish;
+  - `priority` and `sell_currency` are new payload keys; the sell currency is frozen resolved
+    (the contract currency when blank);
+  - until the contract's first publish, the header is their source (new-contract dialog,
+    `save_contract`);
+  - after that, `new_draft` gives the draft the terms its source version froze (read from the
+    payload, not from the version's fields), `save_version` edits them (`selling`), and the version
+    editor shows them (Settings → Selling terms);
+  - they change only by publishing a new version. A shorter window (a narrowing) is also a new
+    version, published now, validated and audited. There is no free narrowing edit.
+- *The header mirrors the live version.* It is updated by the publish when the version takes
+  effect now, and by the 15-minute job when a scheduled version goes live (audited
+  `contract.version_live`). Lists, Desk and REST readers therefore still show what is on sale.
+  Nothing reads the mirror to sell.
+- *The controller enforces it*, so the TEX API, Desk and REST are all covered:
+  - After the first publish, a change of a fixed field or a selling term is refused. The message
+    names the fields and says what to do: duplicate the contract, or change the terms in a draft
+    version and publish it.
+  - The hotel never changes after creation.
+  - `status`, `active_version` and `latest_version_no` move only through the lifecycle (publish,
+    withdraw, the scheduler; flag `tex_lifecycle`) or a status action.
+  - A new contract always starts as Draft.
+  - Code, name, notes and the BAR flag stay editable. Selection and pricing do not read them.
+- *Status actions.* `contracts.set_contract_status(name, action, reason)`:
+  - suspend: Active → Suspended, selling stops at once;
+  - resume: Suspended → Active, needs a Published version;
+  - archive: Draft, Active or Suspended → Archived;
+  - restore: Archived → Suspended, or Draft if the contract was never published.
+
+  Each action needs `contract.publish` at the contract's hotel and a reason. It takes a row lock
+  and is audited as `contract.status` with the reason. Status is not versioned on purpose: a stop
+  sale must act now.
+- *Selection reads the frozen version.* `candidate_contracts` takes only the hotel and the status
+  from the header. Everything else comes from the payload of the version live at the sale time,
+  the same terms pricing runs on:
+  - the market (or GLOBAL);
+  - the channels and the sale window;
+  - the priority and the sell currency.
+
+  A header changed behind the controller (DB, data import) therefore changes nothing, and
+  historical selection is reproducible. `load_terms` reads the payload hash first and reads the
+  payload only on a cache miss.
+- *Back-compat.* Payloads frozen before G-50 already hold the market, windows and channels. They
+  have no priority or sell currency (`ContractTerms.priority` and `sell_currency` are `None`), and
+  selection takes those two from the contract header. No published payload or hash is rewritten.
+  Patch p21 gives every existing draft of an already-published contract its header's selling
+  terms, which is what its publish would have frozen before G-50 (audited
+  `contract.version.selling_backfill`). Drafts of unpublished contracts need nothing.
+- *Audit.* The controller audits every header change on every path:
+  - `contract.save` holds the old and new value of each changed field, with channels as a sorted
+    list; creation holds the full header;
+  - `contract.status` holds the reason;
+  - `contract.publish` holds the frozen selling terms (new) and the header's before (old).
+
+**Consequences.**
+- For a version frozen before G-50, priority and sell currency follow the header. The header now
+  changes only through a later version's mirror, so a historical selection over such a version
+  can use a later priority. Versions published from now on are exact.
+- Selection loads the live version of every Active contract of the hotel (one hash read each;
+  payloads are cached per process) instead of filtering markets in SQL.
+- Status stays live, not versioned: the simulator still cannot select an Archived or Suspended
+  contract for a past sale time (G-51).
+- Extending a sale window or adding a channel now needs a new version and a publish (with
+  `contract.publish`); `contract.edit` alone prepares the draft.
