@@ -41,11 +41,17 @@ def users():
 	                                                     "enterprise", "permission_profile", "valid_until",
 	                                                     "disabled", "notes"], order_by="user asc")
 	visible = []
+	platform = scope.is_platform_admin()
 	for g in grants:
 		covered = set(scope._grant_properties(g))
-		if scope.is_platform_admin() or (covered and covered & props):
+		if platform or (covered and covered & props):
 			g["valid_until"] = str(g["valid_until"]) if g["valid_until"] else None
-			g["properties"] = sorted(covered)
+			# hotels outside the viewer's own scope are counted, never named
+			g["properties"] = sorted(covered if platform else covered & props)
+			g["other_hotels"] = 0 if platform else len(covered - props)
+			refusal = grants_mod().manage_refusal(frappe._dict(g))
+			g["can_manage"] = refusal is None
+			g["manage_refusal"] = refusal[0] if refusal else None
 			visible.append(g)
 	names = sorted({g["user"] for g in visible})
 	info = {u.name: u for u in frappe.get_all("User", filters={"name": ("in", names or [""])},

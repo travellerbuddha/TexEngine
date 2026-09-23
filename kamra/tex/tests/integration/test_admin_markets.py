@@ -45,3 +45,31 @@ class TestMarketAdmin(TexTestCase):
 		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous
 		with self.assertRaises(frappe.PermissionError):
 			admin.markets()
+
+
+class TestGrantVisibility(TexTestCase):
+	def test_hotel_admin_sees_foreign_hotels_only_as_a_count(self):
+		other = "TEX Grant Other Hotel"
+		if not frappe.db.exists("Property", other):
+			frappe.get_doc({"doctype": "Property", "property_name": other, "city": "Kemer", "country": "Turkey",
+			                "currency": "EUR", "tex_hotel_group": frappe.db.get_value("Property", fx.PROPERTY,
+			                                                                      "tex_hotel_group")}).insert(
+				ignore_permissions=True)
+		group = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
+		gm = fx.ensure_user("grant-gm@example.com", ["Hotel Admin"])
+		fx.ensure("TEX Access Grant", {"user": gm, "property": fx.PROPERTY},
+		          {"user": gm, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": "Hotel Admin"})
+		agent = fx.ensure_user("grant-agent@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": agent, "hotel_group": group},
+		          {"user": agent, "scope_level": "Hotel Group", "hotel_group": group,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+		frappe.set_user(gm)  # nosemgrep: frappe-setuser -- hotel-level admin
+		row = next(u for u in admin.users()["users"] if u["user"] == agent)
+		g = row["grants"][0]
+		self.assertEqual(g["properties"], [fx.PROPERTY])
+		self.assertGreaterEqual(g["other_hotels"], 1)
+		self.assertFalse(g["can_manage"])
+		self.assertNotIn(other, g["manage_refusal"] or "")
+		with self.assertRaises(frappe.PermissionError):
+			admin.delete_grant(g["name"])
