@@ -834,28 +834,57 @@ Old payloads must keep their sold semantics: prices are computed from the frozen
 - *One live policy per scope.* The `TEX Pricing Policy` controller refuses activating a second
   live or scheduled policy with the same (hotel, market), under a locking read
   (`revisions.live_or_scheduled_roots(for_update=True)`; its None filter now matches a blank
-  scope, so the global scope is a scope). If two exist anyway, the build fails
+  scope, so the global scope is a scope). `revisions.activate` serialises pricing-policy
+  activations first (a lock on the DocType's own row, taken before `Document.save` locks the
+  draft's row), so two activations at the same instant wait for each other instead of
+  deadlocking on each other's rows; the second then sees the first and is refused with the
+  check's message. If two live policies exist anyway, the build fails
   (`inherit.PolicyAmbiguous`, PRICING_POLICY_AMBIGUOUS): publish refuses, validate reports
   BUILD. The controller also upper-cases band codes and checks them (`ages.validate_bands`),
   refuses period codes (periods belong to contracts) and a room type of another hotel.
+- *A policy is checked on its own.* It cascades into every contract of its scope, so rows no
+  contract could publish are refused when the draft is saved (an adult rule naming a band, a
+  combination rule without adults/children), and on activation `validate.policy_issues`
+  refuses twin rules and rules that tie in some party (rooms and periods unknown: any party
+  the rules name, any band). The policy screen offers the band codes of the live policies a
+  policy cascades with (`policies.pricing_policy_bands`), so a hotel (+ market) policy
+  without bands of its own can name the market's.
 - *Versioned precedence.* New payloads carry `settings.occupancy_precedence = 2` and
   `scope_weight` per rule. A payload without the key reads as 1 (`LEGACY`) and uses exactly
   the old ranking, so sold and live versions price as sold until republished. The payload
   schema string stays `tex.contract.v1`: the keys are optional (no patch, no DocType change).
 - *Publish validation* (pure `pricing/validate.py`): `OCC_AMBIGUOUS` ERROR when two
-  non-INHERIT rules of equal rank can price the same slot in a sellable room/party (e.g.
-  "child 1 at 2+*" and "child 1 at *+2" meet at 2A+2C) with different values; the sweep's
+  non-INHERIT rules of equal rank price the same slot with different values in a sellable
+  room/party where the tie decides the price: no higher-ranked rule prices that slot (e.g.
+  "child 1 at 2+*" and "child 1 at *+2" meet at 2A+2C, unless an exact "2+2" rule prices child
+  1 there), the runtime gets to it (every child before it has a rule), and it is priced at all
+  (a child filling an included ROOM-basis place is free). So a policy tie that the contract's
+  own rules always outrank does not block publishing; one that prices a slot does. A fuzz of
+  4,200 random rule sets (PERSON and ROOM basis, children filling places or not, infants
+  counted or not) found the static check and the runtime in exact agreement. The sweep's
   `AMBIGUOUS_OCCUPANCY_RULES` is an ERROR; `OCC_INFANT_GENERIC` WARNING when an infant band is
   priced only by band-less rules; `NO_AGE_BANDS` WARNING when a room takes children but no
-  bands exist; `scope_weight` joins the duplicate signature.
+  bands exist; `scope_weight` joins the duplicate signature. Twin rules of the version are an
+  ERROR (`OCC_DUPLICATE`); twins inherited from one policy only where they decide a price
+  (`OCC_AMBIGUOUS`); an inherited adult rule naming a band never applies
+  (`OCC_INHERITED_ADULT_BAND_UNUSED` WARNING); an inherited combination rule without
+  adults/children stays an ERROR (it would reprice every combination).
+- *Policy overrides.* A pricing policy's "specific override" ranks within its policy only: a
+  contract's own rule, a more specific policy's rule and (for an infant) a rule naming its
+  band beat it, although the legacy ranking let it win. Publishing warns where that changes a
+  price (`OCC_POLICY_OVERRIDE_OUTRANKED`), and the policy screen says so next to the checkbox.
 
 **Consequences.**
 - A policy change reaches a contract only when it is republished (ADR-004); the simulator and
   ORIGINAL_* repricing use the payload of the version on sale at the sale time.
 - Live versions keep v1 until republished. `devtools/precedence_report.py` (bench execute,
-  read-only) lists versions whose grid prices differ under v2, or when rebuilt now with every
-  live policy, versions that cannot be rebuilt, and scopes with two live policies (they cannot
-  publish until one is archived: list them at deploy).
+  read-only) lists versions whose grid prices differ under v2, or when rebuilt with every
+  policy live at the version's start (a scheduled version at its `effective_from`), versions
+  a republish would refuse (the build fails, or the publish check reports an ERROR, e.g. a
+  policy row activated before the policy checks), and scopes with two policies live now or
+  scheduled (they cannot publish until one is archived: list them at deploy). The grid prices
+  a child at the start of every age band of either side, so a version frozen without bands
+  (its children sold as adults) shows its child cells.
 - `parent_market` chains are not walked: a policy for a parent market does not reach a
   contract of a child market.
 - An infant still counts toward the child count and takes a position (YOUNGEST_FIRST pushes
