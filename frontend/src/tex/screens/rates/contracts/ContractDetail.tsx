@@ -47,6 +47,17 @@ export default function ContractDetail() {
   const b = q.data
   const c = b?.contract
   const draft = b?.versions.find((v) => v.status === "Draft")
+  // what sells now (the live version's terms; the header until a version is live)
+  const live = b?.live_selling ?? null
+  const sel = live ?? {
+    sale_from: c?.sale_from ?? null,
+    sale_to: c?.sale_to ?? null,
+    stay_from: c?.stay_from ?? null,
+    stay_to: c?.stay_to ?? null,
+    priority: c?.priority ?? 0,
+    sell_currency: c?.sell_currency ?? null,
+    channels: (c?.channels ?? []).map((x) => x.sales_channel),
+  }
   const editorLink = (v: string) => `/tex/rates/contracts/${encodeURIComponent(name)}/versions/${encodeURIComponent(v)}`
 
   if (q.error)
@@ -193,7 +204,7 @@ export default function ContractDetail() {
         </Card>
 
         <Card>
-          <CardHeader title={t("rates.contract.details")} description={b?.published ? t("rates.contract.details_live") : undefined} />
+          <CardHeader title={t("rates.contract.details")} description={live ? t(live.legacy ? "rates.selling.legacy" : "rates.contract.details_live") : undefined} />
           <CardBody>
             {!c ? (
               <Skeleton className="h-40 w-full" />
@@ -202,17 +213,22 @@ export default function ContractDetail() {
                 cols={1}
                 items={[
                   { label: t("rates.f.market"), value: `${c.market} · ${boot.markets.find((m) => m.name === c.market)?.market_name ?? ""}` },
-                  { label: t("rates.col.sale_window"), value: <DateRange from={c.sale_from} to={c.sale_to} /> },
-                  { label: t("rates.col.stay_window"), value: <DateRange from={c.stay_from} to={c.stay_to} /> },
+                  ...(live?.legacy && live.header_market && live.header_market !== c.market
+                    ? [{ label: t("rates.selling.header_market"), value: live.header_market }]
+                    : []),
+                  { label: t("rates.col.sale_window"), value: <DateRange from={sel.sale_from} to={sel.sale_to} /> },
+                  { label: t("rates.col.stay_window"), value: <DateRange from={sel.stay_from} to={sel.stay_to} /> },
                   { label: t("rates.f.pricing_basis"), value: enumLabel(t, "basis", c.pricing_basis) },
                   { label: t("rates.f.contract_currency"), value: c.contract_currency },
-                  { label: t("rates.f.sell_currency"), value: c.sell_currency || t("rates.common.same_as_contract") },
-                  { label: t("rates.f.priority"), value: String(c.priority ?? 0) },
+                  { label: t("rates.f.sell_currency"), value: sel.sell_currency || t("rates.common.same_as_contract") },
+                  { label: t("rates.f.priority"), value: String(sel.priority ?? 0) },
                   {
                     label: t("rates.f.channels"),
-                    value: c.channels.length
-                      ? c.channels.map((x) => boot.channels.find((ch) => ch.name === x.sales_channel)?.channel_name ?? x.sales_channel).join(", ")
-                      : t("rates.common.all_channels"),
+                    value: live?.no_channel
+                      ? t("rates.selling.no_channel")
+                      : sel.channels.length
+                        ? sel.channels.map((x) => boot.channels.find((ch) => ch.name === x)?.channel_name ?? x).join(", ")
+                        : t("rates.common.all_channels"),
                   },
                   { label: t("rates.col.active_version"), value: c.active_version ? versionLabel(c.active_version) : t("rates.contracts.not_published") },
                   ...(c.notes ? [{ label: t("rates.f.notes"), value: <span className="whitespace-pre-line">{c.notes}</span> }] : []),

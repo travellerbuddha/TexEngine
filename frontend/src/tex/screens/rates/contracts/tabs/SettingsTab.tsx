@@ -147,12 +147,18 @@ function SellingTerms({ doc, state, readOnly, setSelling }: TabProps) {
             items={[
               { label: t("rates.col.sale_window"), value: <DateRange from={v.sale_from} to={v.sale_to} /> },
               { label: t("rates.col.stay_window"), value: <DateRange from={v.stay_from} to={v.stay_to} /> },
-              { label: t("rates.f.channels"), value: channelNames(v.channels) },
+              { label: t("rates.f.channels"), value: v.no_channel ? t("rates.selling.no_channel") : channelNames(v.channels) },
               { label: t("rates.f.priority"), value: String(v.priority ?? 0) },
               { label: t("rates.f.sell_currency"), value: v.sell_currency || t("rates.common.same_as_contract") },
             ]}
           />
           {doc.selling_source === "header" && <Notice tone="info">{t("rates.selling.edit_in_header")}</Notice>}
+          {v.legacy && (
+            <Notice tone="warning">
+              {t("rates.selling.legacy")}
+              {v.header_market && v.header_market !== doc.contract_doc.market ? ` ${t("rates.selling.legacy_market", { market: v.header_market })}` : ""}
+            </Notice>
+          )}
         </>
       )}
     </section>

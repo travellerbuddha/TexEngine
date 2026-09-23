@@ -68,6 +68,8 @@ export interface ContractBundle {
   locked_fields?: string[]
   /** Status actions the user may take now (suspend, resume, archive, restore). */
   status_actions?: ContractStatusAction[]
+  /** What the live version sells (a version frozen before G-50: narrowed by its header). */
+  live_selling?: SellingTerms | null
 }
 
 export type ContractStatusAction = "suspend" | "resume" | "archive" | "restore"
@@ -82,6 +84,11 @@ export interface SellingTerms {
   priority: number | null
   sell_currency: string | null
   channels: string[]
+  /** Channels of the payload and of the header do not overlap: it sells on no channel. */
+  no_channel?: boolean
+  /** Frozen before G-50: its header (``header_market`` and the terms above) still narrows it. */
+  legacy?: boolean
+  header_market?: string | null
 }
 
 export interface RoomTypeOpt {
