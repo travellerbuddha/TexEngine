@@ -140,6 +140,28 @@ class TestOutsideTexReservations(InventoryCase):
 		self.desk()
 		self.assertEqual(self.available(), 1)
 
+	def test_a_desk_insert_locks_the_nights_before_it_takes_a_name(self):
+		"""The lock order of a TEX booking: inventory days first, then the reservation's naming
+		series row. A desk insert in the opposite order could deadlock with a TEX booking."""
+		from unittest import mock
+
+		from frappe.model.document import Document
+
+		order = []
+		real_lock, real_name = avail.lock_nights, Document.set_new_name
+
+		def lock(*a, **kw):
+			order.append("inventory")
+			return real_lock(*a, **kw)
+
+		def name(doc, *a, **kw):
+			order.append(f"name {doc.doctype}")
+			return real_name(doc, *a, **kw)
+
+		with mock.patch.object(avail, "lock_nights", lock), mock.patch.object(Document, "set_new_name", name):
+			self.desk()
+		self.assertEqual(order[:2], ["inventory", "name Reservation"])
+
 	def test_a_closed_night_refuses_desk_and_rest(self):
 		self.set_inventory("DLX", closed=1)
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):

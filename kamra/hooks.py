@@ -265,6 +265,8 @@ doc_events["Reservation"] = {
 # TEX Engine: price-lock guard + outbox for integrations (ADR-010, ADR-015),
 # hotel-group/enterprise propagation on Property.
 doc_events["Reservation"]["validate"] = "kamra.tex.hooks.reservation_validate"
+# inventory days before the naming series, as a TEX booking locks them (G-49, ADR-048)
+doc_events["Reservation"]["before_insert"] = "kamra.tex.hooks.reservation_before_insert"
 doc_events["Reservation"]["on_update"].append("kamra.tex.hooks.reservation_on_update")
 doc_events["Property"] = {
 	"validate": "kamra.tex.hooks.property_validate",

@@ -184,6 +184,23 @@ def takes_inventory(doc) -> bool:
 	return False
 
 
+def _outside_tex(doc) -> bool:
+	return not (doc.flags.get("tex_inventory_checked") or doc.flags.get("tex_channel_accept"))
+
+
+def lock_before_naming(doc) -> None:
+	"""``before_insert`` of a TEX hotel's reservation written outside TEX: take the nights'
+	inventory locks before the reservation takes its name (the naming series row lock). A TEX
+	booking locks in that order — inventory days, then names — so the two never wait on each
+	other in a cycle. ``guard_reservation`` then recounts under these locks."""
+	if not _outside_tex(doc) or not doc.room_type or not holds_inventory(doc.status):
+		return
+	if not doc.check_in_date or not doc.check_out_date:
+		return
+	ci = getdate(doc.check_in_date)
+	lock_nights(doc.property, [(doc.room_type, ci, max(getdate(doc.check_out_date), ci + timedelta(days=1)))])
+
+
 def guard_reservation(doc) -> None:
 	"""A TEX hotel's rooms are TEX inventory, whoever writes the reservation (ADR-048).
 
@@ -197,9 +214,7 @@ def guard_reservation(doc) -> None:
 	guaranteed allotments all apply. It sells from general sale (no contract): it never uses a
 	contract's allotment. Restrictions (stop sell, LOS, …) are selling rules of the TEX
 	channels and do not apply to it."""
-	if doc.flags.get("tex_inventory_checked") or doc.flags.get("tex_channel_accept"):
-		return
-	if not doc.room_type or not takes_inventory(doc):
+	if not _outside_tex(doc) or not doc.room_type or not takes_inventory(doc):
 		return
 	ci = getdate(doc.check_in_date)
 	co = max(getdate(doc.check_out_date), ci + timedelta(days=1))   # a day-use stay holds its day
