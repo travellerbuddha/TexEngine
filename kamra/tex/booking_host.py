@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 
 import frappe
 from werkzeug.wrappers import Response
@@ -33,7 +34,7 @@ def booking_html() -> str:
 # payment pages send no Referer at all: a payment link e-mailed before G-83 carries its token
 # in the path (/book/pay/<token>) until the page moves it out; nothing may repeat it meanwhile
 DEFAULT_REFERRER = "strict-origin-when-cross-origin"
-_META_REFERRER = f'<meta name="referrer" content="{DEFAULT_REFERRER}"'
+_META_REFERRER = re.compile(r"<meta\s+name=[\"']?referrer[\"']?[^>]*>", re.IGNORECASE)
 
 
 def referrer_policy(path: str | None) -> str:
@@ -43,9 +44,14 @@ def referrer_policy(path: str | None) -> str:
 
 
 def with_referrer_policy(page: str, policy: str) -> str:
-	"""The page with its ``<meta name="referrer">`` saying ``policy`` (a meta tag overrides the header)."""
-	return page.replace(_META_REFERRER, f'<meta name="referrer" content="{policy}"') if policy != DEFAULT_REFERRER \
-		else page
+	"""The page with its ``<meta name="referrer">`` saying ``policy``: the page's own tag would
+	override the header, and it comes before the page's scripts and styles load."""
+	if policy == DEFAULT_REFERRER:
+		return page
+	tag = f'<meta name="referrer" content="{policy}" />'
+	if _META_REFERRER.search(page):
+		return _META_REFERRER.sub(tag, page, count=1)
+	return page.replace("<head>", f"<head>{tag}", 1)
 
 
 def frame_ancestors(slug: str | None) -> str:
