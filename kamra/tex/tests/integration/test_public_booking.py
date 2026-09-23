@@ -336,3 +336,29 @@ class TestContentTranslation(TexTestCase):
 		frappe.set_user(agent)  # nosemgrep: frappe-setuser -- no booking_site.edit
 		with self.assertRaises(frappe.PermissionError):
 			content_api.items(fx.PROPERTY)
+
+
+class TestMarketLinks(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def test_unknown_market_link_is_a_clean_validation_error(self):
+		from kamra.tex.pricing.versions import MarketResolutionError
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous visitor
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+			              rooms=[{"adults": 2, "children": []}], market="NOPE", session_id="sess-mk")
+		self.assertNotIsInstance(ctx.exception, MarketResolutionError)
+		self.assertIn("NOPE", str(ctx.exception))
+
+	def test_public_limits_can_only_be_raised(self):
+		self.assertEqual(public.WRITE_LIMIT["limit"](), 20)
+		frappe.conf["tex_public_write_limit"] = 500
+		try:
+			self.assertEqual(public.WRITE_LIMIT["limit"](), 500)
+			frappe.conf["tex_public_write_limit"] = 1
+			self.assertEqual(public.WRITE_LIMIT["limit"](), 20)
+		finally:
+			frappe.conf.pop("tex_public_write_limit", None)

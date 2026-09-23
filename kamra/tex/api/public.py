@@ -23,8 +23,15 @@ from kamra.tex.security.audit import log_exception
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, modification, quoting
 
-SEARCH_LIMIT = {"limit": 60, "seconds": 60}
-WRITE_LIMIT = {"limit": 20, "seconds": 600}
+
+def _limit(default: int, key: str):
+	"""Per-IP request limit; ``site_config.json`` may raise it (``tex_public_search_limit``,
+	``tex_public_write_limit``) for load tests and E2E benches, never below the default."""
+	return lambda: max(default, int(frappe.conf.get(key) or 0))
+
+
+SEARCH_LIMIT = {"limit": _limit(60, "tex_public_search_limit"), "seconds": 60}
+WRITE_LIMIT = {"limit": _limit(20, "tex_public_write_limit"), "seconds": 600}
 
 
 # ─── site ────────────────────────────────────────────────────────────────
@@ -145,8 +152,12 @@ def _strip_names(rows: dict) -> dict:
 def _market(site, market: str | None, country: str | None) -> str:
 	markets = [versions.MarketDef(m.name, frozenset(_csv(m.countries)), bool(m.is_global), bool(m.disabled))
 	           for m in frappe.get_all("TEX Market", fields=["name", "countries", "is_global", "disabled"])]
-	code, _how = versions.resolve_market(explicit=market, country=country, markets=markets,
-	                                     default=site.default_market)
+	try:
+		code, _how = versions.resolve_market(explicit=market, country=country, markets=markets,
+		                                     default=site.default_market)
+	except versions.MarketResolutionError as e:
+		# a clean 417 the booking app can act on (it retries without the deep link)
+		frappe.throw(str(e), frappe.ValidationError, title=_("Market"))
 	return code
 
 

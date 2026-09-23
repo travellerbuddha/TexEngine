@@ -135,8 +135,12 @@ def check_capacity(spec: RoomSpec, party: Party, infants_count: bool) -> None:
 	if party.adults < max(1, spec.min_adults):
 		raise Unsellable("MIN_ADULTS", f"{spec.name} needs at least {max(1, spec.min_adults)} adult(s)")
 	if party.adults > spec.max_adults:
-		raise Unsellable("MAX_ADULTS", f"{spec.name} sleeps at most {spec.max_adults} adults",
-		                 max_adults=spec.max_adults)
+		# children above the oldest child band count as adults: say so, or "at most 2
+		# adults" reads wrong to a family of 2 adults and 2 teenagers
+		older = len(party.children_as_adults)
+		note = f" (children above the child age bands count as adults: {older})" if older else ""
+		raise Unsellable("MAX_ADULTS", f"{spec.name} sleeps at most {spec.max_adults} adults{note}",
+		                 max_adults=spec.max_adults, children_as_adults=older)
 	if party.child_count > spec.max_children:
 		raise Unsellable("MAX_CHILDREN", f"{spec.name} sleeps at most {spec.max_children} children",
 		                 max_children=spec.max_children)
