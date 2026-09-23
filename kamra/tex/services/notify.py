@@ -54,11 +54,12 @@ def _send(to: str, subject: str, html: str, *, reference: tuple[str, str]) -> No
 	                reference_name=reference[1], delayed=True)
 
 
-def booking_created(booking: str, manage_token: str) -> None:
+def booking_created(booking: str, manage_token: str) -> bool:
+	"""Booking e-mail with the manage link. True when it was queued."""
 	try:
 		b = frappe.get_doc("TEX Booking", booking)
 		if not b.booker_email:
-			return
+			return False
 		lang = (b.language or "en")[:2]
 		lang = lang if lang in LANGS else "en"
 		hotel = frappe.db.get_value("Property", b.property, "property_name") or b.property
@@ -69,8 +70,10 @@ def booking_created(booking: str, manage_token: str) -> None:
 		                       link=link or "")
 		_send(b.booker_email, subject, body, reference=("TEX Booking", b.name))
 		_log(b.booker_guest, b.property, subject, key, booking=b.name)
+		return True
 	except Exception:
 		log_exception(f"TEX booking e-mail {booking}")
+		return False
 
 
 def booking_confirmed(booking: str) -> None:

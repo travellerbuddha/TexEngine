@@ -61,32 +61,41 @@ def _granter_scope_level(user: str) -> set[str]:
 	return {g.scope_level for g in scope._grants(user)}
 
 
-def assert_can_manage(grant) -> None:
-	"""The current user may create/change this grant only if they administer users at
-	(at least) the grant's scope and already hold every capability they hand out."""
+def manage_refusal(grant) -> tuple[str, type[Exception]] | None:
+	"""Why the current user may NOT create/change this grant (None: they may). They
+	must administer users at (at least) the grant's scope and already hold every
+	capability they hand out."""
 	me = frappe.session.user
 	if scope.is_platform_admin(me):
-		return
+		return None
 	if grant.user == me:
-		frappe.throw(_("You cannot change your own access."), frappe.PermissionError)
+		return _("You cannot change your own access."), frappe.PermissionError
 	levels = _granter_scope_level(me)
 	order = ["Hotel", "Hotel Group", "Enterprise", "Platform"]
 	mine = max((order.index(level) for level in levels), default=-1)
 	if order.index(grant.scope_level) > mine:
-		frappe.throw(_("You can only grant access up to your own scope."), frappe.PermissionError)
+		return _("You can only grant access up to your own scope."), frappe.PermissionError
 	props = scope._grant_properties(grant)
 	if not props:
-		frappe.throw(_("The grant covers no hotel."))
+		return _("The grant covers no hotel."), frappe.ValidationError
 	profile_caps = set(frappe.get_all("TEX Profile Capability",
 	                                  filters={"parent": grant.permission_profile}, pluck="capability"))
 	for p in props:
 		held = scope.capabilities(p, me)
 		if "user.admin" not in held:
-			frappe.throw(_("You don't administer users at {0}.").format(p), frappe.PermissionError)
+			# never name a hotel outside the caller's own scope
+			return _("This access covers a hotel where you don't administer users."), frappe.PermissionError
 		missing = profile_caps - held
 		if missing:
-			frappe.throw(_("You cannot grant capabilities you don't hold: {0}.").format(", ".join(sorted(missing))),
-			             frappe.PermissionError)
+			return (_("You cannot grant capabilities you don't hold: {0}.").format(", ".join(sorted(missing))),
+			        frappe.PermissionError)
+	return None
+
+
+def assert_can_manage(grant) -> None:
+	refusal = manage_refusal(grant)
+	if refusal:
+		frappe.throw(refusal[0], refusal[1])
 
 
 def audit_grant(grant, action: str) -> None:

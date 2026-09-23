@@ -23,6 +23,8 @@ export interface Bootstrap {
   markets: { name: string; market_name: string; is_global: number; default_currency?: string; countries?: string }[]
   channels: { name: string; channel_name: string; channel_group?: string }[]
   currencies: string[]
+  /** Server wall clock: datetimes from the API are naive times in `time_zone`. */
+  server?: { time_zone: string; now: string }
 }
 
 interface SessionValue {

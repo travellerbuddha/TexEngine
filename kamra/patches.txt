@@ -22,3 +22,5 @@ kamra.patches.tex.p04_lock_legacy_prices
 kamra.patches.tex.p05_vouchers_to_promotions
 kamra.patches.tex.p06_experiences_to_extras
 kamra.patches.tex.p07_forget_payment_link_urls
+kamra.patches.tex.p08_confirm_unpaid_capability
+kamra.patches.tex.p09_guest_stats_completed_stays

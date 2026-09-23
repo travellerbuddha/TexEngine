@@ -40,7 +40,11 @@ export interface Grant {
   valid_until: string | null
   disabled: number
   notes: string | null
+  /** Hotels of the grant inside the viewer's own scope (others are only counted). */
   properties: string[]
+  other_hotels?: number
+  can_manage?: boolean
+  manage_refusal?: string | null
 }
 
 interface UserRow {
@@ -215,14 +219,17 @@ export default function UsersAccess() {
                   <ul className="mt-2 space-y-1.5 sm:pl-12" aria-label={t("settings.users.grants_of", { user: u.full_name || u.user })}>
                     {u.grants.map((g) => {
                       const st = grantState(g, today)
-                      const locked = self && !platform
+                      // the server says which grants this user may change (scope + held capabilities)
+                      const locked = (self && !platform) || g.can_manage === false
                       return (
                         <li key={g.name} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-zinc-200 bg-zinc-50/60 px-3 py-2 text-sm">
                           <Badge tone="info">{t(scopeKey(g.scope_level))}</Badge>
                           <span className="min-w-0 font-medium text-zinc-900" title={g.properties.join(", ")}>
                             {target(g)}
                             {g.scope_level !== "Hotel" && (
-                              <span className="ml-1 text-xs font-normal text-zinc-500">({t("settings.grant.hotels", { count: g.properties.length })})</span>
+                              <span className="ml-1 text-xs font-normal text-zinc-500">
+                                ({t("settings.grant.hotels", { count: g.properties.length + (g.other_hotels ?? 0) })})
+                              </span>
                             )}
                           </span>
                           <span className="text-zinc-600">{g.permission_profile}</span>
@@ -253,6 +260,9 @@ export default function UsersAccess() {
                               onClick={() => setRemoving(g)}
                             />
                           </span>
+                          {!self && g.can_manage === false && g.manage_refusal && (
+                            <p className="basis-full text-xs text-zinc-500">{g.manage_refusal}</p>
+                          )}
                         </li>
                       )
                     })}

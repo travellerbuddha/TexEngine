@@ -1,6 +1,7 @@
-// TEX i18n (ADR-013): key-based catalogs per area and language, merged at build
-// time. Areas live in locales/<area>/<lang>.json so feature teams never edit the
-// same file. Missing keys fall back to English, then to the key itself.
+// TEX i18n (ADR-013): key-based catalogs per area and language. Areas live in
+// locales/<area>/<lang>.json so feature teams never edit the same file. English is
+// bundled (it is the fallback); every other language is one lazy chunk loaded when
+// chosen. Missing keys fall back to English, then to the key itself.
 import { useCallback, useEffect, useState } from "react"
 
 export const TEX_LANGS = [
@@ -17,12 +18,33 @@ type Plural = { zero?: string; one?: string; few?: string; many?: string; other:
 type Entry = string | Plural
 type Catalog = Record<string, Entry>
 
-const files = import.meta.glob("./locales/*/*.json", { eager: true, import: "default" }) as Record<string, Catalog>
+const english = import.meta.glob("./locales/*/en.json", { eager: true, import: "default" }) as Record<string, Catalog>
+const lazyFiles = import.meta.glob(["./locales/*/*.json", "!./locales/*/en.json"], { import: "default" }) as Record<
+  string,
+  () => Promise<Catalog>
+>
 
-const CATALOGS: Record<string, Catalog> = {}
-for (const [path, cat] of Object.entries(files)) {
-  const lang = path.split("/").pop()!.replace(".json", "")
-  CATALOGS[lang] = { ...(CATALOGS[lang] ?? {}), ...cat }
+const CATALOGS: Record<string, Catalog> = { en: Object.assign({}, ...Object.values(english)) as Catalog }
+const loading = new Map<string, Promise<void>>()
+
+/** Load a language's catalogs (all areas); resolves at once for English or when loaded. */
+export function loadTexLang(lang: string): Promise<void> {
+  if (CATALOGS[lang]) return Promise.resolve()
+  let p = loading.get(lang)
+  if (!p) {
+    const parts = Object.entries(lazyFiles).filter(([path]) => path.endsWith(`/${lang}.json`))
+    p = Promise.all(parts.map(([, load]) => load()))
+      .then((cats) => {
+        CATALOGS[lang] = Object.assign({}, ...cats) as Catalog
+        window.dispatchEvent(new Event("tex:lang"))
+      })
+      .catch(() => {
+        // offline or a stale deploy: keep English rather than failing the app
+        loading.delete(lang)
+      })
+    loading.set(lang, p)
+  }
+  return p
 }
 
 const KEY = "tex-lang"
@@ -43,6 +65,22 @@ let current: TexLang = detect()
 // <html lang> drives hyphenation, screen readers and locale-aware text-transform
 // (Turkish uppercase: "Tarih" → "TARİH", not "TARIH")
 if (typeof document !== "undefined") document.documentElement.setAttribute("lang", current)
+void loadTexLang(current)
+
+/** True once the current language's catalogs are loaded (gate the first paint on it
+ * so the UI does not flash English). */
+export function useTexI18nReady(): boolean {
+  const [ready, setReady] = useState(() => !!CATALOGS[current])
+  useEffect(() => {
+    if (ready) return
+    let alive = true
+    void loadTexLang(current).then(() => alive && setReady(true))
+    return () => {
+      alive = false
+    }
+  }, [ready])
+  return ready
+}
 
 export function getTexLang(): TexLang {
   return current
@@ -52,7 +90,8 @@ export function intlLocale(lang: TexLang = current): string {
   return TEX_LANGS.find((l) => l.code === lang)?.intl ?? "en-GB"
 }
 
-export function setTexLang(lang: TexLang) {
+export async function setTexLang(lang: TexLang) {
+  await loadTexLang(lang)
   current = lang
   try {
     localStorage.setItem(KEY, lang)
@@ -97,7 +136,8 @@ export function useTexT() {
   return { t, lang, locale: intlLocale(lang) }
 }
 
-/** Keys missing from a language (dev aid, used by the i18n completeness test). */
+/** Keys missing from a loaded language (dev aid; the build-time check is
+ * scripts/tex-i18n-check.mjs). */
 export function missingKeys(lang: TexLang): string[] {
   const en = CATALOGS.en ?? {}
   const other = CATALOGS[lang] ?? {}

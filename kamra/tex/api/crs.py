@@ -182,9 +182,23 @@ def booking(name: str):
 		for t in out["transactions"]:
 			t["amount"] = to_str(from_db(t["amount"], t["currency"] or "EUR"))
 		out["payment_links"] = frappe.get_all("TEX Payment Link", filters={"booking": name},
-		                                      fields=["name", "status", "amount", "currency", "public_url",
-		                                              "expires_at"])
+		                                      fields=["name", "status", "amount", "paid_amount", "currency",
+		                                              "expires_at", "creation"], order_by="creation asc")
+		for link in out["payment_links"]:
+			ccy = link["currency"] or b.currency or "EUR"
+			link["amount"] = to_str(from_db(link["amount"], ccy))
+			link["paid_amount"] = to_str(from_db(link["paid_amount"], ccy))
 	return out
+
+
+@frappe.whitelist(methods=["POST"])
+def resend_confirmation(booking: str):
+	"""Send the guest the booking e-mail again (with a fresh manage link)."""
+	b = frappe.db.get_value("TEX Booking", text(booking, 140), "property")
+	if not b:
+		frappe.throw(_("Booking not found."), frappe.DoesNotExistError)
+	scope.require("reservation.modify", b)
+	return booking_svc.resend_confirmation(text(booking, 140))
 
 
 # ─── modification / simulation / cancel ──────────────────────────────────

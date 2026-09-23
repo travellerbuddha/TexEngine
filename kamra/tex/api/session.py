@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import frappe
+from frappe.utils import get_system_timezone, now_datetime
 
 from kamra.tex.security import scope
 from kamra.tex.security.capabilities import CAPABILITIES
@@ -40,4 +41,7 @@ def bootstrap():
 		"channels": frappe.get_all("TEX Sales Channel", filters={"disabled": 0},
 		                           fields=["name", "channel_name", "channel_group"], order_by="name asc"),
 		"currencies": frappe.get_all("Currency", filters={"enabled": 1}, pluck="name", order_by="name asc"),
+		# server datetimes are naive wall-clock times in this zone; ``now`` lets the UI
+		# measure the offset to the browser clock (expiry countdowns)
+		"server": {"time_zone": get_system_timezone(), "now": now_datetime().isoformat()},
 	}

@@ -5,6 +5,7 @@ import { useTexT } from "../../i18n"
 import { Card, EmptyState, PageHeader } from "../../ui"
 import SitesList from "./SitesList"
 import SiteEditor from "./SiteEditor"
+import ContentTranslations from "./ContentTranslations"
 
 function NoAccess() {
   const { t } = useTexT()
@@ -27,6 +28,7 @@ export default function AreaRoutes() {
     <Routes>
       <Route index element={<SitesList />} />
       <Route path="new" element={<SiteEditor key="new" isNew />} />
+      <Route path="content" element={<ContentTranslations />} />
       <Route path=":name" element={<SiteEditor key="edit" />} />
       <Route path="*" element={<SitesList />} />
     </Routes>

@@ -202,6 +202,7 @@ function CellControl({
   readOnly?: boolean
   onValue: (v: string | number) => void
 }) {
+  const { t } = useTexT()
   const v = row[col.key]
   const aria = `${col.label} ${index + 1}`
   if (readOnly) return <ReadValue col={col} row={row} value={v} />
@@ -245,17 +246,21 @@ function CellControl({
           />
         </span>
       )
-    case "select":
+    case "select": {
+      const empty = v === null || v === undefined || v === ""
       return (
         <Select
           aria-label={aria}
-          value={v === null || v === undefined ? "" : String(v)}
+          value={empty ? "" : String(v)}
           onChange={(e) => onValue(e.target.value)}
           options={withCurrent(col.options ?? [], String(v ?? ""))}
-          placeholder={col.required ? undefined : (col.placeholder ?? "—")}
+          // a required select without a value must not look as if its first option were chosen
+          placeholder={col.required ? (empty ? t("rates.common.choose") : undefined) : (col.placeholder ?? "—")}
+          aria-invalid={col.required && empty ? true : undefined}
           className="h-8! min-w-28 pl-2! text-sm"
         />
       )
+    }
     case "date":
       return (
         <Input

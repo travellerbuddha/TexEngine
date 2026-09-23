@@ -3,7 +3,7 @@ import { Route, Routes } from "react-router-dom"
 import { TexSessionProvider, useSession } from "./lib/session"
 import { TexShell } from "./shell/TexShell"
 import { Card, EmptyState, ErrorState, Spinner, ToastProvider } from "./ui"
-import { useTexT } from "./i18n"
+import { useTexI18nReady, useTexT } from "./i18n"
 
 // One lazy chunk per area; each area owns its own sub-routes (routes.tsx).
 const Dashboard = lazy(() => import("./screens/dashboard/Dashboard"))
@@ -46,6 +46,7 @@ function NotFound() {
 
 /** TEX admin / CRS / call-centre application, mounted at /tex/*. */
 export default function TexApp() {
+  const i18nReady = useTexI18nReady()
   useEffect(() => {
     const previous = document.title
     document.title = "TEX Engine"
@@ -53,6 +54,12 @@ export default function TexApp() {
       document.title = previous
     }
   }, [])
+  if (!i18nReady)
+    return (
+      <div className="tex-root flex min-h-screen items-center justify-center bg-zinc-50">
+        <Spinner />
+      </div>
+    )
   return (
     <ToastProvider>
       <TexSessionProvider
