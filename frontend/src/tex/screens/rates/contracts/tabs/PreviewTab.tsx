@@ -248,10 +248,13 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
           <CardBody className="space-y-4">
             <div className="flex flex-wrap items-end gap-x-8 gap-y-2">
               <div>
-                <p className="text-xs font-medium tracking-wide text-zinc-500 uppercase">{t("core.label.total")}</p>
-                <p className="text-3xl font-semibold tracking-tight text-zinc-950">
-                  <Money amount={tot.total} currency={ccy} />
+                <p id="pv-total-label" className="text-xs font-medium tracking-wide text-zinc-500 uppercase">
+                  {t("core.label.total")}
                 </p>
+                {/* <output>: the result of the server calculation, named "Total" for assistive tech */}
+                <output aria-labelledby="pv-total-label" className="block text-3xl font-semibold tracking-tight text-zinc-950">
+                  <Money amount={tot.total} currency={ccy} />
+                </output>
               </div>
               {canCost && tot.cost !== undefined && (
                 <>
@@ -380,7 +383,7 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
           }
         />
         <CardBody>
-          <ol className="space-y-1.5">
+          <ol className="space-y-1.5" aria-label={t("rates.preview.why")}>
             {steps.map((s, i) => (
               <StepItem key={i} s={s} />
             ))}
