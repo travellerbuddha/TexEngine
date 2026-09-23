@@ -354,11 +354,15 @@ class TestMarketLinks(TexTestCase):
 		self.assertIn("NOPE", str(ctx.exception))
 
 	def test_public_limits_can_only_be_raised(self):
-		self.assertEqual(public.WRITE_LIMIT["limit"](), 20)
-		frappe.conf["tex_public_write_limit"] = 500
+		# independent of the bench's own site_config (E2E benches raise the limit)
+		saved = frappe.conf.pop("tex_public_write_limit", None)
 		try:
+			self.assertEqual(public.WRITE_LIMIT["limit"](), 20)
+			frappe.conf["tex_public_write_limit"] = 500
 			self.assertEqual(public.WRITE_LIMIT["limit"](), 500)
 			frappe.conf["tex_public_write_limit"] = 1
 			self.assertEqual(public.WRITE_LIMIT["limit"](), 20)
 		finally:
 			frappe.conf.pop("tex_public_write_limit", None)
+			if saved is not None:
+				frappe.conf["tex_public_write_limit"] = saved
