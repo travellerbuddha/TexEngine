@@ -34,3 +34,4 @@ kamra.patches.tex.p16_crm_segments
 kamra.patches.tex.p17_loyalty_admin
 kamra.patches.tex.p18_channel_distribution
 kamra.patches.tex.p19_payments_go_live_check
+kamra.patches.tex.p21_contract_header_lock

@@ -18,6 +18,8 @@ from kamra.tex.security.audit import audit
 
 CONTRACT_FIELDS = ("contract_code", "contract_name", "market", "status", "pricing_basis", "contract_currency",
                    "sell_currency", "priority", "is_bar", "sale_from", "sale_to", "stay_from", "stay_to", "notes")
+# fixed once a version was published (G-50, ADR-045): the controller refuses, the UI shows them read-only
+LOCKED_AFTER_PUBLISH = (*svc.FIXED_FIELDS, *svc.SELLING_FIELDS, "channels")
 VERSION_SETTINGS = ("child_ordering", "age_basis", "children_over_max_as_adults", "infants_count_as_occupants",
                     "prices_include_tax", "stacking", "room_basis_extra_unit", "room_basis_children_fill_included",
                     "change_note")
@@ -57,9 +59,13 @@ def get_contract(name: str):
 	                          fields=["name", "version_no", "status", "effective_from", "active_to", "published_at",
 	                                  "published_by", "change_note", "payload_hash", "based_on"],
 	                          order_by="version_no desc")
+	can_publish = scope.has_capability("contract.publish", c.property)
+	published = any(v.status != "Draft" for v in versions)
 	return {"contract": doc_dict(c), "versions": versions,
-	        "can_edit": scope.has_capability("contract.edit", c.property),
-	        "can_publish": scope.has_capability("contract.publish", c.property)}
+	        "can_edit": scope.has_capability("contract.edit", c.property), "can_publish": can_publish,
+	        # G-50: after the first publish these belong to the versions (header = the live version's)
+	        "published": published, "locked_fields": list(LOCKED_AFTER_PUBLISH) if published else [],
+	        "status_actions": svc.status_actions(c.status) if can_publish else []}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -73,15 +79,14 @@ def save_contract(data):
 		doc = frappe.new_doc("TEX Contract")
 		doc.property = prop
 	scope.require("contract.edit", prop)
-	before = {f: doc.get(f) for f in CONTRACT_FIELDS}
 	for f in CONTRACT_FIELDS:
 		if f in data:
 			doc.set(f, data[f])
 	if "channels" in data:
 		doc.set("channels", [{"sales_channel": c} for c in (data.get("channels") or [])])
+	# the controller refuses a published contract's commercial fields and a free status change,
+	# and audits every changed field, channels included (G-50)
 	doc.save(ignore_permissions=True)
-	audit("contract.save", reference_doctype="TEX Contract", reference_name=doc.name, property=prop,
-	      old=before if not doc.is_new() else None, new={f: doc.get(f) for f in CONTRACT_FIELDS})
 	if not frappe.db.exists("TEX Contract Version", {"contract": doc.name}):
 		svc.new_draft(doc.name)
 	return get_contract(doc.name)
@@ -151,6 +156,7 @@ def get_version(name: str):
 	c = frappe.get_doc("TEX Contract", v.contract)
 	out["contract_doc"] = {f: c.get(f) for f in ("name", "property", "contract_code", "contract_name", "market",
 	                                             "pricing_basis", "contract_currency", "status")}
+	out.update(_selling(v, c))
 	out["room_types"] = frappe.get_all("Room Type", filters={"property": c.property, "disabled": 0},
 	                                   fields=["name", "room_type_name", "adults_capacity", "children_capacity",
 	                                           "max_total_occupants", "base_occupancy"], order_by="room_type_name")
@@ -159,15 +165,49 @@ def get_version(name: str):
 	return out
 
 
+def _selling(v, c) -> dict:
+	"""A version's selling terms (G-50, ADR-045): what a published version froze; a draft's own
+	once the contract was published; before that, the contract header's (edited there)."""
+	if v.status != "Draft" and v.payload:
+		return {"selling": svc.frozen_selling(svc.load_terms(v.name), c), "selling_source": "frozen",
+		        "selling_editable": False}
+	if svc.is_published(c.name):
+		return {"selling": svc.selling_values(v), "selling_source": "version",
+		        "selling_editable": scope.has_capability("contract.edit", c.property)}
+	return {"selling": svc.selling_values(c), "selling_source": "header", "selling_editable": False}
+
+
+def _set_selling(v, selling) -> None:
+	if not isinstance(selling, dict):
+		frappe.throw(_("Selling terms must be an object."))
+	if not svc.is_published(v.contract):
+		frappe.throw(_("Until the contract's first publish, its sale and stay windows, channels, priority and "
+		               "sell currency are edited on the contract (Edit header)."))
+	values = {}
+	for f in ("sale_from", "sale_to", "stay_from", "stay_to", "sell_currency"):
+		if f in selling:
+			values[f] = text(selling[f], 20)
+	if "priority" in selling:
+		values["priority"] = as_int(selling["priority"], 0, lo=-9999, hi=9999)
+	if "channels" in selling:
+		chans = selling["channels"] or []
+		if not isinstance(chans, list):
+			frappe.throw(_("Channels must be a list."))
+		values["channels"] = sorted({text(ch, 140) for ch in chans if text(ch, 140)})
+	svc.set_selling(v, values)
+
+
 @frappe.whitelist(methods=["POST"])
 def save_version(name: str, data):
-	"""Replace the draft's settings and child tables in one call (autosave-friendly)."""
+	"""Replace the draft's settings, selling terms and child tables in one call (autosave-friendly)."""
 	data = parse(data, {})
 	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)
 	scope.require("contract.edit", prop)
 	if v.status != "Draft":
 		frappe.throw(_("Only draft versions can be edited — create a new draft."))
+	if "selling" in data:
+		_set_selling(v, data["selling"])
 	for f in VERSION_SETTINGS:
 		if f in data:
 			v.set(f, data[f])
@@ -197,6 +237,13 @@ def publish_version(name: str, effective_from: str | None = None, change_note: s
 @frappe.whitelist(methods=["POST"])
 def new_draft(contract: str, based_on: str | None = None):
 	return {"version": svc.new_draft(contract, based_on)}
+
+
+@frappe.whitelist(methods=["POST"])
+def set_contract_status(name: str, action: str, reason: str):
+	"""Suspend (stop selling now), resume, archive or restore a contract (G-50): the only way a
+	contract's status changes besides publishing; needs ``contract.publish``, a reason, and is audited."""
+	return svc.set_status(name, (action or "").strip().lower(), text(reason, 500))
 
 
 @frappe.whitelist(methods=["POST"])

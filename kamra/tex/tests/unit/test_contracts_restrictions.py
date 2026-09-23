@@ -49,6 +49,22 @@ class TestPayload(unittest.TestCase):
 		b = engine.price_stay(fx.ctx(t2, markups=(DE_MARKUP,)), spec_request()).to_dict()
 		self.assertEqual(a, b)
 
+	def test_selection_terms_are_frozen_and_optional(self):
+		# G-50 (ADR-045): priority and default sell currency travel in the payload
+		t = replace(spec_terms(), payload_hash="x", priority=7, sell_currency="GBP")
+		payload = serialize.normalise_payload(serialize.terms_to_payload(t))
+		self.assertEqual((payload["contract"]["priority"], payload["contract"]["sell_currency"]), (7, "GBP"))
+		self.assertEqual(serialize.terms_from_payload(payload, "x"), t)
+		zero = serialize.normalise_payload(serialize.terms_to_payload(replace(t, priority=0)))
+		self.assertEqual(serialize.terms_from_payload(zero, "x").priority, 0)    # 0 is frozen, not missing
+		# a payload frozen before G-50 has neither: None tells selection to use the contract header
+		for key in ("priority", "sell_currency"):
+			payload["contract"].pop(key)
+		old = serialize.terms_from_payload(payload, "x")
+		self.assertEqual((old.priority, old.sell_currency), (None, None))
+		self.assertEqual(engine.price_stay(fx.ctx(old, markups=(DE_MARKUP,)), spec_request()).to_dict(),
+		                 engine.price_stay(fx.ctx(t, markups=(DE_MARKUP,)), spec_request()).to_dict())
+
 	def test_request_roundtrip(self):
 		r = spec_request(promo_codes=("A",))
 		self.assertEqual(serialize.request_from_dict(serialize.request_to_dict(r)), r)

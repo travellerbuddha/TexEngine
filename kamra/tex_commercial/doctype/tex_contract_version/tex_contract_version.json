@@ -15,6 +15,16 @@
   "published_by",
   "active_to",
   "based_on",
+  "selling_tab",
+  "sale_from",
+  "sale_to",
+  "selling_column",
+  "stay_from",
+  "stay_to",
+  "selling_section",
+  "priority",
+  "sell_currency",
+  "channels",
   "tab_20",
   "child_ordering",
   "age_basis",
@@ -109,6 +119,60 @@
    "label": "Based on",
    "options": "TEX Contract Version",
    "read_only": 1
+  },
+  {
+   "fieldname": "selling_tab",
+   "fieldtype": "Tab Break",
+   "label": "Selling terms"
+  },
+  {
+   "fieldname": "sale_from",
+   "fieldtype": "Date",
+   "label": "Sale from",
+   "description": "Until the contract's first publish, the contract header's values are used."
+  },
+  {
+   "fieldname": "sale_to",
+   "fieldtype": "Date",
+   "label": "Sale to"
+  },
+  {
+   "fieldname": "selling_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stay_from",
+   "fieldtype": "Date",
+   "label": "Stay from"
+  },
+  {
+   "fieldname": "stay_to",
+   "fieldtype": "Date",
+   "label": "Stay to"
+  },
+  {
+   "fieldname": "selling_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority",
+   "description": "Higher wins when several contracts could sell the stay."
+  },
+  {
+   "fieldname": "sell_currency",
+   "fieldtype": "Link",
+   "label": "Default sell currency",
+   "options": "Currency",
+   "description": "Blank = contract currency."
+  },
+  {
+   "fieldname": "channels",
+   "fieldtype": "Table MultiSelect",
+   "label": "Sales channels",
+   "options": "TEX Contract Channel",
+   "description": "Blank = every channel."
   },
   {
    "fieldname": "tab_20",

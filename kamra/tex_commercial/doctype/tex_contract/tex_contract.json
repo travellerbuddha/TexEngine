@@ -96,13 +96,13 @@
    "fieldtype": "Link",
    "label": "Default sell currency",
    "options": "Currency",
-   "description": "Blank = contract currency."
+   "description": "Blank = contract currency. After the first publish: the live version's (read-only)."
   },
   {
    "fieldname": "priority",
    "fieldtype": "Int",
    "label": "Priority",
-   "description": "Higher wins when several contracts could sell the stay."
+   "description": "Higher wins when several contracts could sell the stay. After the first publish: the live version's (read-only)."
   },
   {
    "fieldname": "is_bar",
@@ -112,7 +112,8 @@
   {
    "fieldname": "section_14",
    "fieldtype": "Section Break",
-   "label": "Validity"
+   "label": "Validity",
+   "description": "Until the first publish these are edited here. Afterwards every version carries its own sale/stay windows, channels, priority and sell currency, and these fields show the live version's."
   },
   {
    "fieldname": "sale_from",

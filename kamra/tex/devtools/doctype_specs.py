@@ -192,10 +192,13 @@ COMMERCIAL_SPECS = [
 		F("pricing_basis", "Select", "Pricing basis", ["PERSON", "ROOM"], default="PERSON", reqd=1),
 		F("contract_currency", "Link", "Contract currency", "Currency", reqd=1),
 		F("sell_currency", "Link", "Default sell currency", "Currency",
-		  description="Blank = contract currency."),
-		F("priority", "Int", "Priority", description="Higher wins when several contracts could sell the stay."),
+		  description="Blank = contract currency. After the first publish: the live version's (read-only)."),
+		F("priority", "Int", "Priority", description="Higher wins when several contracts could sell the stay. "
+		  "After the first publish: the live version's (read-only)."),
 		F("is_bar", "Check", "Best Available Rate (direct contract)"),
-		SB("Validity"),
+		SB("Validity", description="Until the first publish these are edited here. Afterwards every version "
+		   "carries its own sale/stay windows, channels, priority and sell currency, and these fields show the "
+		   "live version's."),
 		F("sale_from", "Date", "Sale from"),
 		F("sale_to", "Date", "Sale to"),
 		CB(),
@@ -325,6 +328,20 @@ COMMERCIAL_SPECS = [
 		F("published_by", "Link", "Published by", "User", read_only=1),
 		F("active_to", "Datetime", "Active until", read_only=1),
 		F("based_on", "Link", "Based on", "TEX Contract Version", read_only=1),
+		# selling terms (G-50, ADR-045): each version carries them and freezes them at publish;
+		# explicit layout names keep the generated section/column numbering of other DocTypes
+		F("selling_tab", "Tab Break", "Selling terms"),
+		F("sale_from", "Date", "Sale from",
+		  description="Until the contract's first publish, the contract header's values are used."),
+		F("sale_to", "Date", "Sale to"),
+		F("selling_column", "Column Break"),
+		F("stay_from", "Date", "Stay from"),
+		F("stay_to", "Date", "Stay to"),
+		F("selling_section", "Section Break"),
+		F("priority", "Int", "Priority", description="Higher wins when several contracts could sell the stay."),
+		F("sell_currency", "Link", "Default sell currency", "Currency", description="Blank = contract currency."),
+		F("channels", "Table MultiSelect", "Sales channels", "TEX Contract Channel",
+		  description="Blank = every channel."),
 		TAB("Settings"),
 		F("child_ordering", "Select", "Child order", ["OLDEST_FIRST", "YOUNGEST_FIRST", "AS_ENTERED"],
 		  default="OLDEST_FIRST"),

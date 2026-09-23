@@ -471,6 +471,30 @@ class TestContractHeaderLock(TexTestCase):
 		with self.assertRaises(frappe.ValidationError):              # published versions stay frozen
 			api.save_version(v2, {"selling": {"priority": 1}})
 
+	def test_a_version_made_outside_new_draft_starts_from_the_published_terms(self):
+		# Desk / REST insert of a version, without selling terms: not "everywhere, always"
+		v = frappe.get_doc({"doctype": "TEX Contract Version", "contract": self.name}).insert(ignore_permissions=True)
+		self.assertEqual((str(v.sale_to), str(v.stay_from), v.sell_currency), (str(fx.STAY_TO), str(fx.STAY_FROM), "EUR"))
+
+	def test_p21_gives_drafts_of_published_contracts_their_header_terms(self):
+		from kamra.patches.tex import p21_contract_header_lock
+
+		v2 = contracts.new_draft(self.name)
+		# a draft made before G-50 has no selling terms of its own; its header had a channel
+		frappe.db.set_value("TEX Contract Version", v2, {f: 0 if f == "priority" else None
+		                                                 for f in contracts.SELLING_FIELDS})
+		frappe.get_doc({"doctype": "TEX Contract Channel", "parent": self.name, "parenttype": "TEX Contract",
+		                "parentfield": "channels", "idx": 1, "sales_channel": "B2B"}).db_insert()
+		from unittest import mock
+
+		with mock.patch("frappe.reload_doc"):                         # no schema sync (DDL commits) in a test
+			p21_contract_header_lock.execute()
+		d = frappe.get_doc("TEX Contract Version", v2)
+		self.assertEqual((str(d.sale_to), str(d.stay_from), [c.sales_channel for c in d.channels]),
+		                 (str(fx.STAY_TO), str(fx.STAY_FROM), ["B2B"]))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.c["version"], "payload_hash"),
+		                 self.c["payload_hash"])                     # published payloads are not touched
+
 	def test_before_the_first_publish_the_header_holds_the_selling_terms(self):
 		from kamra.tex.api import contracts as api
 

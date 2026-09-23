@@ -18,6 +18,7 @@ from frappe.utils import get_datetime, getdate, now_datetime
 from kamra.tex.money import D, D_or_none
 from kamra.tex.pricing import ages as age_math
 from kamra.tex.pricing import serialize, validate, versions
+from kamra.tex.pricing.engine import GLOBAL_MARKET
 from kamra.tex.pricing.enums import (
 	AgeBasis,
 	ChildOrdering,
@@ -140,6 +141,61 @@ def _occ_rules(rows, *, base_level: Level, source: str) -> tuple[OccupancyRule, 
 	return tuple(out)
 
 
+# ─── selling terms (G-50, ADR-045) ───────────────────────────────────────
+
+# Each version carries (and freezes at publish) when, where and in which order it sells. Until a
+# contract's first publish they are edited on the contract header; from then on in a draft version,
+# and the header only mirrors the live version. Hotel, market, currency and pricing basis never
+# change once a version was published (another market or currency is another contract).
+SELLING_FIELDS = ("sale_from", "sale_to", "stay_from", "stay_to", "priority", "sell_currency")
+FIXED_FIELDS = ("property", "market", "contract_currency", "pricing_basis")
+
+
+def is_published(contract: str | None) -> bool:
+	"""A version of this contract was published once (it may have sold): its commercial terms are fixed."""
+	return bool(contract) and bool(
+		frappe.db.exists("TEX Contract Version", {"contract": contract, "status": ("!=", "Draft")}))
+
+
+def _iso(v) -> str | None:
+	return str(getdate(v)) if v else None
+
+
+def selling_values(doc) -> dict:
+	"""Selling terms as entered on a contract header or a version."""
+	return {"sale_from": _iso(doc.sale_from), "sale_to": _iso(doc.sale_to), "stay_from": _iso(doc.stay_from),
+	        "stay_to": _iso(doc.stay_to), "priority": int(doc.priority or 0),
+	        "sell_currency": doc.sell_currency or None,
+	        "channels": sorted({c.sales_channel for c in (doc.get("channels") or [])})}
+
+
+def frozen_selling(terms: ContractTerms, header=None) -> dict:
+	"""Selling terms a published version froze. A payload frozen before G-50 has no priority or
+	sell currency: ``header`` (the contract row) fills them in (ADR-045 back-compat)."""
+	priority, sell = terms.priority, terms.sell_currency
+	if priority is None and header is not None:
+		priority = int(header.priority or 0)
+	if not sell and header is not None:
+		sell = header.sell_currency or None
+	return {"sale_from": _iso(terms.sale_from), "sale_to": _iso(terms.sale_to), "stay_from": _iso(terms.stay_from),
+	        "stay_to": _iso(terms.stay_to), "priority": priority, "sell_currency": sell,
+	        "channels": sorted(terms.channels or ())}
+
+
+def set_selling(doc, values: dict) -> None:
+	for f in SELLING_FIELDS:
+		if f in values:
+			doc.set(f, values[f])
+	if "channels" in values:
+		doc.set("channels", [{"sales_channel": c} for c in (values["channels"] or [])])
+
+
+def selling_source(version, contract):
+	"""Where a draft's selling terms come from: the contract header until the contract's first
+	publish, the draft itself afterwards."""
+	return version if is_published(contract.name) else contract
+
+
 # ─── build terms from a draft ────────────────────────────────────────────
 
 
@@ -241,7 +297,8 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		          free_nights_pay=o.free_nights_pay if o.value_type == "FREE_NIGHTS" else None, source="contract")
 		for o in version.offers)
 
-	channels = frozenset(c.sales_channel for c in contract.channels) or None
+	src = selling_source(version, contract)
+	channels = frozenset(c.sales_channel for c in src.channels) or None
 	d = lambda v: get_datetime(v).date() if v else None  # noqa: E731
 	return ContractTerms(
 		contract_id=contract.name, contract_code=contract.contract_code, contract_name=contract.contract_name,
@@ -249,8 +306,9 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		property=contract.property, market=contract.market, currency=contract.contract_currency,
 		basis=PricingBasis(contract.pricing_basis), rooms=rooms, periods=periods, room_rules=room_rules,
 		occupancy_rules=occ, age_bands=bands, boards=board_rules, rate_plans=rate_plans, offers=offers,
-		sale_from=d(contract.sale_from), sale_to=d(contract.sale_to), stay_from=d(contract.stay_from),
-		stay_to=d(contract.stay_to), channels=channels,
+		sale_from=d(src.sale_from), sale_to=d(src.sale_to), stay_from=d(src.stay_from),
+		stay_to=d(src.stay_to), channels=channels, priority=int(src.priority or 0),
+		sell_currency=(src.sell_currency or contract.contract_currency).upper(),
 		child_ordering=ChildOrdering(version.child_ordering or "OLDEST_FIRST"),
 		age_basis=AgeBasis(version.age_basis or "ARRIVAL"),
 		children_over_max_as_adults=bool(version.children_over_max_as_adults),
@@ -294,9 +352,14 @@ def new_draft(contract: str, based_on: str | None = None) -> str:
 		          "payload_hash", "validation_report", "change_note"):
 			doc.set(f, None)
 		doc.based_on = src.name
+		if src.status != "Draft" and src.payload:
+			# the selling terms the source version froze, not whatever its fields say (G-50)
+			header = frappe.db.get_value("TEX Contract", contract, ["priority", "sell_currency"], as_dict=True)
+			set_selling(doc, frozen_selling(load_terms(src.name), header))
 	else:
 		doc = frappe.new_doc("TEX Contract Version")
 		doc.contract = contract
+		set_selling(doc, selling_values(frappe.get_doc("TEX Contract", contract)))
 	doc.status = "Draft"
 	doc.insert(ignore_permissions=True)
 	audit("contract.version.draft", reference_doctype="TEX Contract Version", reference_name=doc.name,
@@ -325,6 +388,8 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 		             title=_("Contract has errors"))
 	payload = serialize.normalise_payload(serialize.terms_to_payload(terms))
 	digest = serialize.payload_hash(payload)
+	selling = frozen_selling(terms)
+	selling_before = selling_values(contract)      # the header shows the live version's (or the first draft's)
 
 	# supersede what was on sale at `eff`; withdraw versions scheduled after it
 	others = frappe.get_all("TEX Contract Version",
@@ -343,6 +408,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 		ov.save(ignore_permissions=True)
 
 	version.flags.tex_lifecycle = True
+	set_selling(version, selling)                 # the version records what it froze
 	version.status = "Published"
 	version.effective_from = eff
 	version.published_at = now
@@ -358,12 +424,15 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 	contract.latest_version_no = max(int(contract.latest_version_no or 0), int(version.version_no))
 	if eff <= now:
 		contract.active_version = version.name
+		set_selling(contract, selling)            # the header mirrors the live version
 	if contract.status == "Draft":
 		contract.status = "Active"
+	contract.flags.tex_lifecycle = True
 	contract.save(ignore_permissions=True)
 	audit("contract.publish", reference_doctype="TEX Contract Version", reference_name=version.name,
-	      property=contract.property, new={"payload_hash": digest, "effective_from": str(eff),
-	                                       "warnings": len(issues)}, reason=change_note)
+	      property=contract.property, old={"selling": selling_before},
+	      new={"payload_hash": digest, "effective_from": str(eff), "warnings": len(issues), "selling": selling},
+	      reason=change_note)
 	clear_terms_cache()
 	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff),
 	        "warnings": [i.to_dict() for i in issues]}
@@ -384,6 +453,7 @@ def withdraw(name: str, reason: str) -> None:
 	contract = frappe.get_doc("TEX Contract", version.contract)
 	if contract.active_version == name:
 		contract.active_version = None
+		contract.flags.tex_lifecycle = True
 		contract.save(ignore_permissions=True)
 	audit("contract.withdraw", reference_doctype="TEX Contract Version", reference_name=name, property=prop,
 	      reason=reason)
@@ -401,8 +471,19 @@ def roll_version_statuses() -> None:
 		doc.save(ignore_permissions=True)
 	for c in frappe.get_all("TEX Contract", filters={"status": "Active"}, pluck="name"):
 		live = active_version_header(c, now)
-		if frappe.db.get_value("TEX Contract", c, "active_version") != (live.version_id if live else None):
-			frappe.db.set_value("TEX Contract", c, "active_version", live.version_id if live else None)
+		new = live.version_id if live else None
+		if frappe.db.get_value("TEX Contract", c, "active_version") == new:
+			continue
+		doc = frappe.get_doc("TEX Contract", c)
+		doc.active_version = new
+		selling = None
+		if new:
+			selling = frozen_selling(load_terms(new), doc)
+			set_selling(doc, selling)             # a scheduled version went live: the header mirrors it
+		doc.flags.tex_lifecycle = True
+		doc.save(ignore_permissions=True)
+		audit("contract.version_live", reference_doctype="TEX Contract", reference_name=c, property=doc.property,
+		      new={"version": new, "selling": selling})
 
 
 # ─── loading frozen terms ────────────────────────────────────────────────
@@ -417,13 +498,13 @@ def clear_terms_cache() -> None:
 
 def load_terms(version_name: str) -> ContractTerms:
 	"""Frozen terms of a published version (safe to cache: payloads are immutable)."""
-	row = frappe.db.get_value("TEX Contract Version", version_name, ["payload", "payload_hash", "status"],
-	                          as_dict=True)
+	digest = frappe.db.get_value("TEX Contract Version", version_name, "payload_hash")
+	cached = _TERMS.get(version_name)
+	if digest and cached and cached.payload_hash == digest:
+		return cached       # selection loads every live version: the payload is read only on a miss
+	row = frappe.db.get_value("TEX Contract Version", version_name, ["payload", "payload_hash"], as_dict=True)
 	if not row or not row.payload:
 		frappe.throw(_("Contract version {0} is not published.").format(version_name))
-	cached = _TERMS.get(version_name)
-	if cached and cached.payload_hash == row.payload_hash:
-		return cached
 	payload = json.loads(row.payload)
 	if serialize.payload_hash(payload) != row.payload_hash:
 		frappe.throw(_("Contract version {0} failed its integrity check.").format(version_name))
@@ -446,24 +527,77 @@ def active_version_header(contract: str, at: datetime) -> versions.VersionHeader
 
 def candidate_contracts(property: str, market: str, channel: str, at: datetime) -> list[tuple[dict, str]]:
 	"""Contracts that can sell for this hotel/market/channel at sale time ``at``
-	→ [(contract row, version name)], highest priority first."""
-	rows = frappe.get_all("TEX Contract", filters={"property": property, "status": "Active",
-	                                               "market": ("in", [market, "GLOBAL"])},
-	                      fields=["name", "contract_code", "contract_name", "market", "priority", "sale_from",
-	                              "sale_to", "contract_currency", "sell_currency", "is_bar"])
+	→ [(contract row, version name)], highest priority first.
+
+	The header only says whether a contract sells at all (its status); market, channels, sale
+	window, priority and default sell currency are those the version live at ``at`` froze, the
+	same terms pricing runs on (G-50, ADR-045)."""
+	rows = frappe.get_all("TEX Contract", filters={"property": property, "status": "Active"},
+	                      fields=["name", "contract_code", "contract_name", "priority", "sell_currency", "is_bar"],
+	                      order_by="name asc")
 	out = []
 	sale = getdate(at)
 	for r in rows:
-		# closed for sale at this time: never a candidate (G-17)
-		if (r.sale_from and sale < getdate(r.sale_from)) or (r.sale_to and sale > getdate(r.sale_to)):
-			continue
-		chans = frappe.get_all("TEX Contract Channel", filters={"parent": r.name, "parenttype": "TEX Contract"},
-		                       pluck="sales_channel")
-		if chans and channel not in chans:
-			continue
 		h = active_version_header(r.name, at)
-		if h:
-			out.append((r, h.version_id))
+		if not h:
+			continue
+		t = load_terms(h.version_id)
+		if t.property != property or t.market not in (market, GLOBAL_MARKET):
+			continue
+		# closed for sale at this time: never a candidate (G-17)
+		if (t.sale_from and sale < t.sale_from) or (t.sale_to and sale > t.sale_to):
+			continue
+		if t.channels is not None and channel not in t.channels:
+			continue
+		sel = frozen_selling(t, r)
+		out.append((frappe._dict(
+			name=r.name, contract_code=r.contract_code, contract_name=r.contract_name, is_bar=r.is_bar,
+			market=t.market, contract_currency=t.currency, priority=sel["priority"],
+			sell_currency=sel["sell_currency"], channels=sel["channels"], sale_from=t.sale_from, sale_to=t.sale_to,
+			stay_from=t.stay_from, stay_to=t.stay_to), h.version_id))
 	# a market-specific contract beats the GLOBAL fallback; then priority
 	out.sort(key=lambda x: (x[0].market != market, -(x[0].priority or 0), x[0].name))
 	return out
+
+
+# ─── status (G-50, ADR-045) ──────────────────────────────────────────────
+
+# action → (statuses it applies to, new status); a status never changes through a header edit
+STATUS_ACTIONS = {
+	"suspend": (("Active",), "Suspended"),                    # stop selling now; resume later
+	"resume": (("Suspended",), "Active"),
+	"archive": (("Draft", "Active", "Suspended"), "Archived"),
+	"restore": (("Archived",), None),                         # → Suspended (or Draft if never published)
+}
+
+
+def status_actions(status: str | None) -> list[str]:
+	return [a for a, (frm, _to) in STATUS_ACTIONS.items() if status in frm]
+
+
+def set_status(contract: str, action: str, reason: str | None) -> dict:
+	"""Suspend, resume, archive or restore a contract: capability-checked, locked and audited."""
+	prop = frappe.db.get_value("TEX Contract", contract, "property")
+	if not prop:
+		frappe.throw(_("Contract {0} not found.").format(contract), frappe.DoesNotExistError)
+	scope.require("contract.publish", prop)
+	if action not in STATUS_ACTIONS:
+		frappe.throw(_("Unknown contract action {0}.").format(action))
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required."))
+	frappe.db.get_value("TEX Contract", contract, "name", for_update=True)
+	doc = frappe.get_doc("TEX Contract", contract)
+	allowed, target = STATUS_ACTIONS[action]
+	if doc.status not in allowed:
+		frappe.throw(_("A contract that is {0} cannot be changed this way (possible: {1}).").format(
+			_(doc.status), ", ".join(status_actions(doc.status)) or "—"))
+	if action == "resume" and not frappe.db.exists("TEX Contract Version",
+	                                               {"contract": contract, "status": "Published"}):
+		frappe.throw(_("Publish a version before resuming sales: this contract has nothing on sale."))
+	if action == "restore":
+		target = "Suspended" if is_published(contract) else "Draft"
+	doc.status = target
+	doc.flags.tex_status_action = True
+	doc.flags.tex_status_reason = reason.strip()
+	doc.save(ignore_permissions=True)
+	return {"status": doc.status}
