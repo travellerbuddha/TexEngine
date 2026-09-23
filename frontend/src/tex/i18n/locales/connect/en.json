@@ -9,7 +9,7 @@
  "connect.cat.sms": "SMS",
  "connect.cat.whatsapp": "WhatsApp",
  "connect.channels.adapter.sandbox_channel": "Sandbox channel manager (no real channel)",
- "connect.channels.ari.actions_hint": "Queue changes compares every enabled mapping of this hotel's channel connections over its days ahead and queues the days that differ; the queue sends them within a minute, or use Send now for this connection. Resend everything also sends this connection's unchanged days again.",
+ "connect.channels.ari.actions_hint": "Queue changes compares every enabled mapping of this connection over its days ahead and queues the days that differ; the queue sends them within a minute, or use Send now. Resend everything also sends this connection's unchanged days again. Switched-off mappings are not compared: switching one off already queued its close-out, which Send now sends.",
  "connect.channels.ari.actions_off": "This connection is switched off, so nothing can be queued or sent. Enable it under Connections first.",
  "connect.channels.ari.adults": {
   "one": "{count} adult",
@@ -50,14 +50,14 @@
  "connect.channels.ari.open": "Open",
  "connect.channels.ari.queue": "Queue changes",
  "connect.channels.ari.queued": {
-  "one": "Changes queued: {count} mapping checked across this hotel's channel connections.",
-  "other": "Changes queued: {count} mappings checked across this hotel's channel connections."
+  "one": "Changes queued for {count} mapping of this connection.",
+  "other": "Changes queued for {count} mappings of this connection."
  },
  "connect.channels.ari.resend": "Resend everything",
  "connect.channels.ari.resend_body": "Every day within each mapping's horizon is sent to this channel again, including the days it already has. Use it when the channel lost data.",
  "connect.channels.ari.resend_queued": {
-  "one": "Every day of this connection queued again ({count} mapping checked across this hotel's channel connections).",
-  "other": "Every day of this connection queued again ({count} mappings checked across this hotel's channel connections)."
+  "one": "Every day queued again for {count} mapping of this connection.",
+  "other": "Every day queued again for {count} mappings of this connection."
  },
  "connect.channels.ari.resend_title": "Resend every day?",
  "connect.channels.ari.send_now": "Send now",
@@ -118,7 +118,7 @@
  "connect.channels.mapping.contract_hint": "Automatic uses the contract TEX would sell this market and sales channel with.",
  "connect.channels.mapping.currency": "Currency",
  "connect.channels.mapping.enabled": "Send to the channel",
- "connect.channels.mapping.enabled_hint": "When off, nothing is sent for this mapping (mappings are switched off, not deleted, so their history stays). Bookings the channel sends for its codes are retried for a few hours, then marked Dead; retry them under Bookings from the channel once it is on again.",
+ "connect.channels.mapping.enabled_hint": "When off, TEX sends the channel a close-out — nothing left to sell on any day ahead — so the channel stops selling this room and rate; once the channel has accepted it, the switched-off mapping can be deleted. Bookings the channel still sends for its codes are retried for a few hours, then marked Dead; retry them under Bookings from the channel once it is on again.",
  "connect.channels.mapping.err_horizon": "Enter a whole number from 1 to 365.",
  "connect.channels.mapping.err_occupancies": "Use whole numbers from 1 to 9 separated by commas, e.g. 1,2,3.",
  "connect.channels.mapping.horizon": "Days ahead",
@@ -141,12 +141,17 @@
  },
  "connect.channels.mappings": "Mappings",
  "connect.channels.mappings.add": "Add mapping",
+ "connect.channels.mappings.delete_body": "The channel must first have accepted the close-out queued when this mapping was switched off (nothing left to sell on any day). If it has not yet, send it under ARI preview → Send now until every day shows In sync, then delete.",
+ "connect.channels.mappings.delete_named": "Delete mapping {codes}",
+ "connect.channels.mappings.delete_removes": "Deleting removes the mapping, its record of the days sent to the channel and its queued jobs. Its history stays in the audit trail.",
+ "connect.channels.mappings.delete_title": "Delete mapping {codes}?",
+ "connect.channels.mappings.deleted": "Mapping {codes} deleted.",
  "connect.channels.mappings.edit_named": "Edit mapping {codes}",
  "connect.channels.mappings.empty": "No mappings yet",
  "connect.channels.mappings.empty_hint": "Map the room and rate codes the channel uses. Until then nothing is sent; bookings for unmapped rooms are retried for a few hours, then marked Dead — retry them under Bookings from the channel once mapped.",
  "connect.channels.mappings.hint": "Each channel room/rate code pair sells one TEX room type with a board, market, sales channel and currency. Only mapped rooms receive availability and prices.",
  "connect.channels.mappings.saved": "Mapping saved. Its availability and prices are queued for the channel.",
- "connect.channels.mappings.saved_off": "Mapping saved. It is switched off, so nothing is sent for it.",
+ "connect.channels.mappings.saved_off": "Mapping saved and switched off: its close-out is queued, so the channel stops selling it. Once the channel has accepted it (ARI preview → Send now), you can delete the mapping.",
  "connect.channels.mappings.title": "Room and rate mappings",
  "connect.channels.never_synced": "Not synced yet",
  "connect.channels.no_access": "Channel distribution needs the “See channel distribution” permission at this hotel.",

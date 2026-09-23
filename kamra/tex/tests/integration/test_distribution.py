@@ -247,6 +247,9 @@ class TestInbound(DistributionCase):
 		self.assertEqual(dist_api.send_now(self.conn.name)["pushed"], 1)
 		self.assertEqual(frappe.db.get_all("TEX Integration Outbox", filters={"connection": other.name, "kind": "ARI"},
 		                                   pluck="status"), ["Pending"])                # the other one waits
+		frappe.db.delete("TEX Integration Outbox", {"kind": "ARI"})
+		self.assertEqual(dist_api.push_now(self.conn.name)["queued"], 1)              # this connection's mapping only
+		self.assertFalse(frappe.db.exists("TEX Integration Outbox", {"connection": other.name, "kind": "ARI"}))
 
 	def test_the_pms_hears_a_new_stay_as_created(self):
 		pms = frappe.get_doc({"doctype": "TEX Integration Connection", "label": "PMS log", "property": fx.PROPERTY,

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { Trash2 } from "lucide-react"
 import { useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
@@ -64,19 +65,22 @@ function toForm(m: Mapping | null, lookups: Lookups, defaults: { market: string;
   }
 }
 
-/** Add or edit one mapping; the server validates again (codes unique per connection). */
+/** Add or edit one mapping; the server validates again (codes unique per connection).
+ * A mapping saved as switched off offers Delete (`onDelete` asks for confirmation). */
 export function MappingDrawer({
   mapping,
   connection,
   lookups,
   onClose,
   onSaved,
+  onDelete,
 }: {
   mapping: Mapping | "new" | null
   connection: string
   lookups: Lookups
   onClose: () => void
   onSaved: () => void
+  onDelete?: (m: Mapping) => void
 }) {
   const { t } = useTexT()
   const toast = useToast()
@@ -162,6 +166,13 @@ export function MappingDrawer({
       title={isNew ? t("connect.channels.mappings.add") : t("connect.channels.mappings.edit_named", { codes: current ? mappingCodes(current) : "" })}
       footer={
         <>
+          {/* only what is saved as switched off (its close-out is queued), and not while the
+              switch is being turned back on */}
+          {current && !current.enabled && !form.enabled && onDelete && (
+            <Button variant="ghost" className="mr-auto text-rose-700" icon={<Trash2 className="size-4" aria-hidden />} onClick={() => onDelete(current)}>
+              {t("core.action.delete")}
+            </Button>
+          )}
           <Button variant="secondary" onClick={onClose}>
             {t("core.action.cancel")}
           </Button>

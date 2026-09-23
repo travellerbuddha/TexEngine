@@ -1,18 +1,22 @@
 import { useState } from "react"
-import { Link2, Pencil, Plus } from "lucide-react"
+import { Link2, Pencil, Plus, Trash2 } from "lucide-react"
+import { tex } from "../../../lib/api"
 import { num } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, CardHeader, DataTable, EmptyState, ErrorState, IconButton } from "../../../ui"
+import { Badge, Button, CardHeader, ConfirmDialog, DataTable, EmptyState, ErrorState, IconButton, useToast } from "../../../ui"
 import { mappingCodes, useLookupNames } from "./common"
 import { MappingDrawer } from "./MappingDrawer"
 import type { Mapping, TabProps } from "./types"
 
-/** Channel room/rate codes ↔ what TEX sells under them. A mapping is switched off rather
- * than deleted: its ARI jobs and history keep pointing at it. */
+/** Channel room/rate codes ↔ what TEX sells under them. Switching a mapping off sends the
+ * channel a close-out (nothing left to sell); only a switched-off mapping offers Delete, and
+ * the server refuses it until the channel has accepted that close-out. */
 export function MappingsTab({ connection, lookups, mappings, canManage, onChanged }: TabProps) {
   const { t } = useTexT()
+  const toast = useToast()
   const names = useLookupNames(lookups.data)
   const [editing, setEditing] = useState<Mapping | "new" | null>(null)
+  const [deleting, setDeleting] = useState<Mapping | null>(null)
   const changed = () => {
     mappings.reload()
     onChanged()
@@ -101,16 +105,31 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
                     header: <span className="sr-only">{t("connect.outbox.col.actions")}</span>,
                     align: "right" as const,
                     cell: (m: Mapping) => (
-                      <IconButton
-                        size="sm"
-                        label={t("connect.channels.mappings.edit_named", { codes: mappingCodes(m) })}
-                        icon={<Pencil className="size-4" />}
-                        onKeyDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setEditing(m)
-                        }}
-                      />
+                      <span className="inline-flex gap-0.5">
+                        {!m.enabled && (
+                          <IconButton
+                            size="sm"
+                            label={t("connect.channels.mappings.delete_named", { codes: mappingCodes(m) })}
+                            icon={<Trash2 className="size-4" />}
+                            className="hover:bg-rose-50 hover:text-rose-700"
+                            onKeyDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setDeleting(m)
+                            }}
+                          />
+                        )}
+                        <IconButton
+                          size="sm"
+                          label={t("connect.channels.mappings.edit_named", { codes: mappingCodes(m) })}
+                          icon={<Pencil className="size-4" />}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditing(m)
+                          }}
+                        />
+                      </span>
                     ),
                   },
                 ]
@@ -128,8 +147,31 @@ export function MappingsTab({ connection, lookups, mappings, canManage, onChange
             setEditing(null)
             changed()
           }}
+          onDelete={canManage ? setDeleting : undefined}
         />
       )}
+      {/* opened from a row or from the drawer (it then sits on top of it); a refusal
+          ("disable it first", "close-out not accepted yet") shows inside the dialog */}
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        tone="danger"
+        title={t("connect.channels.mappings.delete_title", { codes: deleting ? mappingCodes(deleting) : "" })}
+        body={
+          <div className="space-y-2">
+            <p>{t("connect.channels.mappings.delete_body")}</p>
+            <p>{t("connect.channels.mappings.delete_removes")}</p>
+          </div>
+        }
+        confirmLabel={t("core.action.delete")}
+        onConfirm={async () => {
+          if (!deleting) return
+          await tex("distribution", "delete_mapping", { name: deleting.name }, { post: true })
+          toast.success(t("connect.channels.mappings.deleted", { codes: mappingCodes(deleting) }))
+          setEditing(null)
+          changed()
+        }}
+      />
     </>
   )
 }

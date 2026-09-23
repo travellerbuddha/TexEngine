@@ -9,7 +9,7 @@
  "connect.cat.sms": "SMS",
  "connect.cat.whatsapp": "WhatsApp",
  "connect.channels.adapter.sandbox_channel": "Sandbox-Channel-Manager (kein echter Kanal)",
- "connect.channels.ari.actions_hint": "„Änderungen einreihen“ vergleicht jede aktive Zuordnung aller Kanalverbindungen dieses Hotels über ihre Tage im Voraus und reiht abweichende Tage ein; die Warteschlange sendet sie innerhalb einer Minute, oder nutzen Sie „Jetzt senden“ für diese Verbindung. „Alles erneut senden“ sendet auch die unveränderten Tage dieser Verbindung noch einmal.",
+ "connect.channels.ari.actions_hint": "„Änderungen einreihen“ vergleicht jede aktive Zuordnung dieser Verbindung über ihre Tage im Voraus und reiht abweichende Tage ein; die Warteschlange sendet sie innerhalb einer Minute, oder nutzen Sie „Jetzt senden“. „Alles erneut senden“ sendet auch die unveränderten Tage dieser Verbindung noch einmal. Ausgeschaltete Zuordnungen werden nicht verglichen: Beim Ausschalten wurde ihre Schließung bereits eingereiht, „Jetzt senden“ sendet sie.",
  "connect.channels.ari.actions_off": "Diese Verbindung ist ausgeschaltet, daher kann nichts eingereiht oder gesendet werden. Schalten Sie sie zuerst unter Verbindungen ein.",
  "connect.channels.ari.adults": {
   "one": "{count} Erwachsener",
@@ -50,14 +50,14 @@
  "connect.channels.ari.open": "Offen",
  "connect.channels.ari.queue": "Änderungen einreihen",
  "connect.channels.ari.queued": {
-  "one": "Änderungen eingereiht: {count} Zuordnung in den Kanalverbindungen dieses Hotels geprüft.",
-  "other": "Änderungen eingereiht: {count} Zuordnungen in den Kanalverbindungen dieses Hotels geprüft."
+  "one": "Änderungen für {count} Zuordnung dieser Verbindung eingereiht.",
+  "other": "Änderungen für {count} Zuordnungen dieser Verbindung eingereiht."
  },
  "connect.channels.ari.resend": "Alles erneut senden",
  "connect.channels.ari.resend_body": "Jeder Tag im Zeitraum jeder Zuordnung wird erneut an diesen Kanal gesendet, auch die Tage, die er schon hat. Nutzen Sie dies, wenn der Kanal Daten verloren hat.",
  "connect.channels.ari.resend_queued": {
-  "one": "Alle Tage dieser Verbindung erneut eingereiht ({count} Zuordnung in den Kanalverbindungen dieses Hotels geprüft).",
-  "other": "Alle Tage dieser Verbindung erneut eingereiht ({count} Zuordnungen in den Kanalverbindungen dieses Hotels geprüft)."
+  "one": "Alle Tage für {count} Zuordnung dieser Verbindung erneut eingereiht.",
+  "other": "Alle Tage für {count} Zuordnungen dieser Verbindung erneut eingereiht."
  },
  "connect.channels.ari.resend_title": "Alle Tage erneut senden?",
  "connect.channels.ari.send_now": "Jetzt senden",
@@ -118,7 +118,7 @@
  "connect.channels.mapping.contract_hint": "Automatisch verwendet den Vertrag, mit dem TEX diesen Markt und Vertriebskanal verkaufen würde.",
  "connect.channels.mapping.currency": "Währung",
  "connect.channels.mapping.enabled": "An den Kanal senden",
- "connect.channels.mapping.enabled_hint": "Wenn aus, wird für diese Zuordnung nichts gesendet (Zuordnungen werden ausgeschaltet, nicht gelöscht, damit ihr Verlauf erhalten bleibt). Buchungen, die der Kanal für ihre Codes sendet, werden einige Stunden lang erneut versucht und dann als „Abgebrochen“ markiert; versuchen Sie sie unter „Buchungen vom Kanal“ erneut, sobald die Zuordnung wieder an ist.",
+ "connect.channels.mapping.enabled_hint": "Wenn aus, sendet TEX dem Kanal eine Schließung – an keinem der kommenden Tage ist noch etwas zu verkaufen –, damit der Kanal dieses Zimmer und diese Rate nicht mehr verkauft; sobald der Kanal sie angenommen hat, lässt sich die ausgeschaltete Zuordnung löschen. Buchungen, die der Kanal noch für ihre Codes sendet, werden einige Stunden lang erneut versucht und dann als „Abgebrochen“ markiert; versuchen Sie sie unter „Buchungen vom Kanal“ erneut, sobald die Zuordnung wieder an ist.",
  "connect.channels.mapping.err_horizon": "Geben Sie eine ganze Zahl von 1 bis 365 ein.",
  "connect.channels.mapping.err_occupancies": "Ganze Zahlen von 1 bis 9, durch Kommas getrennt, z. B. 1,2,3.",
  "connect.channels.mapping.horizon": "Tage im Voraus",
@@ -141,12 +141,17 @@
  },
  "connect.channels.mappings": "Zuordnungen",
  "connect.channels.mappings.add": "Zuordnung hinzufügen",
+ "connect.channels.mappings.delete_body": "Zuerst muss der Kanal die Schließung angenommen haben, die beim Ausschalten dieser Zuordnung eingereiht wurde (an keinem Tag mehr etwas zu verkaufen). Ist das noch nicht geschehen, senden Sie sie unter „ARI-Vorschau“ mit „Jetzt senden“, bis jeder Tag „Synchron“ zeigt, und löschen Sie dann.",
+ "connect.channels.mappings.delete_named": "Zuordnung {codes} löschen",
+ "connect.channels.mappings.delete_removes": "Beim Löschen werden die Zuordnung, ihr Protokoll der an den Kanal gesendeten Tage und ihre eingereihten Aufträge entfernt. Ihr Verlauf bleibt im Audit-Protokoll.",
+ "connect.channels.mappings.delete_title": "Zuordnung {codes} löschen?",
+ "connect.channels.mappings.deleted": "Zuordnung {codes} gelöscht.",
  "connect.channels.mappings.edit_named": "Zuordnung {codes} bearbeiten",
  "connect.channels.mappings.empty": "Noch keine Zuordnungen",
  "connect.channels.mappings.empty_hint": "Ordnen Sie die Zimmer- und Ratencodes des Kanals zu. Bis dahin wird nichts gesendet; Buchungen für nicht zugeordnete Zimmer werden einige Stunden lang erneut versucht und dann als „Abgebrochen“ markiert – versuchen Sie sie nach der Zuordnung unter „Buchungen vom Kanal“ erneut.",
  "connect.channels.mappings.hint": "Jedes Paar aus Zimmer- und Ratencode des Kanals verkauft einen TEX-Zimmertyp mit Verpflegung, Markt, Vertriebskanal und Währung. Nur zugeordnete Zimmer erhalten Verfügbarkeiten und Preise.",
  "connect.channels.mappings.saved": "Zuordnung gespeichert. Ihre Verfügbarkeiten und Preise sind für den Kanal eingereiht.",
- "connect.channels.mappings.saved_off": "Zuordnung gespeichert. Sie ist ausgeschaltet, daher wird für sie nichts gesendet.",
+ "connect.channels.mappings.saved_off": "Zuordnung gespeichert und ausgeschaltet: Ihre Schließung ist eingereiht, damit der Kanal sie nicht mehr verkauft. Sobald der Kanal sie angenommen hat (ARI-Vorschau → Jetzt senden), können Sie die Zuordnung löschen.",
  "connect.channels.mappings.title": "Zimmer- und Ratenzuordnungen",
  "connect.channels.never_synced": "Noch nicht synchronisiert",
  "connect.channels.no_access": "Die Kanaldistribution erfordert in diesem Hotel die Berechtigung „Kanaldistribution ansehen“.",

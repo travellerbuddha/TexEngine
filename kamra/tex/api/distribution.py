@@ -169,7 +169,7 @@ def ari_preview(mapping: str, date_from: str | None = None, days=14):
 def push_now(connection: str, full=0):
 	"""Queue the whole horizon of every mapping; ``full`` sends every day again."""
 	conn = _conn(connection, "channel.manage")
-	n = dist.mark_dirty(conn.property, reason="manual")
+	n = dist.mark_dirty(conn.property, reason="manual", connection=conn.name)
 	if as_int(full, 0):
 		for row in frappe.get_all("TEX Integration Outbox", filters={"connection": connection, "kind": "ARI",
 		                                                             "status": "Pending"}, fields=["name", "payload"]):

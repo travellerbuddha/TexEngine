@@ -9,7 +9,7 @@
  "connect.cat.sms": "SMS",
  "connect.cat.whatsapp": "WhatsApp",
  "connect.channels.adapter.sandbox_channel": "Test kanal yöneticisi (gerçek kanal yok)",
- "connect.channels.ari.actions_hint": "“Değişiklikleri kuyruğa al” düğmesi, bu oteldeki tüm kanal bağlantılarının açık eşleştirmelerini ileriye dönük gün aralıkları boyunca karşılaştırır ve farklı olan günleri kuyruğa ekler; kuyruk bunları bir dakika içinde gönderir. Beklemek istemezseniz bu bağlantı için “Şimdi gönder” düğmesini kullanın. “Tümünü yeniden gönder” ise bu bağlantının değişmemiş günlerini de yeniden gönderir.",
+ "connect.channels.ari.actions_hint": "“Değişiklikleri kuyruğa al” düğmesi, bu bağlantının açık eşleştirmelerini ileriye dönük gün aralıkları boyunca karşılaştırır ve farklı olan günleri kuyruğa ekler; kuyruk bunları bir dakika içinde gönderir. Beklemek istemezseniz “Şimdi gönder” düğmesini kullanın. “Tümünü yeniden gönder” ise bu bağlantının değişmemiş günlerini de yeniden gönderir. Kapalı eşleştirmeler karşılaştırılmaz: kapatıldıklarında satış kapatma bildirimleri zaten kuyruğa alınmıştır, “Şimdi gönder” bu bildirimi gönderir.",
  "connect.channels.ari.actions_off": "Bu bağlantı kapalı olduğu için hiçbir şey kuyruğa alınamaz veya gönderilemez. Önce Bağlantılar altında açın.",
  "connect.channels.ari.adults": {
   "one": "{count} yetişkin",
@@ -50,14 +50,14 @@
  "connect.channels.ari.open": "Açık",
  "connect.channels.ari.queue": "Değişiklikleri kuyruğa al",
  "connect.channels.ari.queued": {
-  "one": "Değişiklikler kuyruğa alındı: bu oteldeki kanal bağlantılarında {count} eşleştirme kontrol edildi.",
-  "other": "Değişiklikler kuyruğa alındı: bu oteldeki kanal bağlantılarında {count} eşleştirme kontrol edildi."
+  "one": "Bu bağlantının {count} eşleştirmesi için değişiklikler kuyruğa alındı.",
+  "other": "Bu bağlantının {count} eşleştirmesi için değişiklikler kuyruğa alındı."
  },
  "connect.channels.ari.resend": "Tümünü yeniden gönder",
  "connect.channels.ari.resend_body": "Her eşleştirmenin ileriye dönük gün aralığındaki tüm günler, kanalda zaten olanlar dahil, bu kanala yeniden gönderilir. Kanal veri kaybettiğinde kullanın.",
  "connect.channels.ari.resend_queued": {
-  "one": "Bu bağlantının tüm günleri yeniden kuyruğa alındı (bu oteldeki kanal bağlantılarında {count} eşleştirme kontrol edildi).",
-  "other": "Bu bağlantının tüm günleri yeniden kuyruğa alındı (bu oteldeki kanal bağlantılarında {count} eşleştirme kontrol edildi)."
+  "one": "Bu bağlantının {count} eşleştirmesi için tüm günler yeniden kuyruğa alındı.",
+  "other": "Bu bağlantının {count} eşleştirmesi için tüm günler yeniden kuyruğa alındı."
  },
  "connect.channels.ari.resend_title": "Tüm günler yeniden gönderilsin mi?",
  "connect.channels.ari.send_now": "Şimdi gönder",
@@ -118,7 +118,7 @@
  "connect.channels.mapping.contract_hint": "Otomatik seçilirse TEX'in bu pazar ve satış kanalında satacağı kontrat kullanılır.",
  "connect.channels.mapping.currency": "Para birimi",
  "connect.channels.mapping.enabled": "Kanala gönder",
- "connect.channels.mapping.enabled_hint": "Kapalıyken bu eşleştirme için hiçbir şey gönderilmez (eşleştirmeler silinmez, kapatılır; böylece geçmişleri korunur). Kanalın bu kodlar için gönderdiği rezervasyonlar birkaç saat boyunca yeniden denenir, ardından “Ölü” olarak işaretlenir; eşleştirme yeniden açıldığında bunları “Kanaldan gelen rezervasyonlar” sekmesinde yeniden deneyin.",
+ "connect.channels.mapping.enabled_hint": "Kapatıldığında TEX kanala bir satış kapatma bildirimi gönderir: ileriye dönük hiçbir günde satılacak oda kalmaz ve kanal bu oda ile fiyatı satmayı bırakır. Kanal bildirimi kabul ettikten sonra kapalı eşleştirme silinebilir. Kanalın bu kodlar için göndermeye devam ettiği rezervasyonlar birkaç saat boyunca yeniden denenir, ardından “Ölü” olarak işaretlenir; eşleştirme yeniden açıldığında bunları “Kanaldan gelen rezervasyonlar” sekmesinde yeniden deneyin.",
  "connect.channels.mapping.err_horizon": "1 ile 365 arasında bir tam sayı girin.",
  "connect.channels.mapping.err_occupancies": "1 ile 9 arasında, virgülle ayrılmış tam sayılar girin (örn. 1,2,3).",
  "connect.channels.mapping.horizon": "Kaç gün ileri",
@@ -141,12 +141,17 @@
  },
  "connect.channels.mappings": "Eşleştirmeler",
  "connect.channels.mappings.add": "Eşleştirme ekle",
+ "connect.channels.mappings.delete_body": "Önce kanalın, eşleştirme kapatılırken kuyruğa alınan satış kapatma bildirimini (hiçbir günde satılacak oda kalmadığını) kabul etmiş olması gerekir. Henüz kabul etmediyse “ARI önizleme” sekmesinde tüm günler “Güncel” görünene kadar “Şimdi gönder” düğmesine basın, ardından silin.",
+ "connect.channels.mappings.delete_named": "{codes} eşleştirmesini sil",
+ "connect.channels.mappings.delete_removes": "Silme işlemi eşleştirmeyi, kanala gönderilen günlerin kaydını ve kuyruktaki görevlerini kaldırır. Geçmişi denetim kaydında kalır.",
+ "connect.channels.mappings.delete_title": "{codes} eşleştirmesi silinsin mi?",
+ "connect.channels.mappings.deleted": "{codes} eşleştirmesi silindi.",
  "connect.channels.mappings.edit_named": "{codes} eşleştirmesini düzenle",
  "connect.channels.mappings.empty": "Henüz eşleştirme yok",
  "connect.channels.mappings.empty_hint": "Kanalın kullandığı oda ve fiyat kodlarını eşleştirin. O zamana kadar hiçbir şey gönderilmez; eşleştirilmemiş odalar için gelen rezervasyonlar birkaç saat boyunca yeniden denenir, ardından “Ölü” olarak işaretlenir. Eşleştirmeyi yaptıktan sonra bunları “Kanaldan gelen rezervasyonlar” sekmesinde yeniden deneyin.",
  "connect.channels.mappings.hint": "Kanaldaki her oda/fiyat kodu çifti, TEX'te bir oda tipini belirli bir pansiyon, pazar, satış kanalı ve para birimiyle satar. Müsaitlik ve fiyat yalnızca eşleştirilmiş odalara gönderilir.",
  "connect.channels.mappings.saved": "Eşleştirme kaydedildi. Müsaitlik ve fiyatları kanala gönderilmek üzere kuyruğa alındı.",
- "connect.channels.mappings.saved_off": "Eşleştirme kaydedildi. Eşleştirme kapalı olduğundan kanala hiçbir şey gönderilmez.",
+ "connect.channels.mappings.saved_off": "Eşleştirme kaydedildi ve kapatıldı: satış kapatma bildirimi kuyruğa alındı, kanal bu oda ile fiyatı satmayı bırakacak. Kanal bildirimi kabul ettikten sonra (ARI önizleme → Şimdi gönder) eşleştirmeyi silebilirsiniz.",
  "connect.channels.mappings.title": "Oda ve fiyat eşleştirmeleri",
  "connect.channels.never_synced": "Henüz senkronize edilmedi",
  "connect.channels.no_access": "Kanal dağıtımı için bu otelde “Kanal dağıtımını görüntüleme” yetkisi gerekir.",

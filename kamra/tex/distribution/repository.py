@@ -183,11 +183,12 @@ def _accept(m, days: list[AriDay]) -> None:
 			 "f": d.fingerprint(), "j": json.dumps(d.to_dict())})
 
 
-def mark_dirty(property: str, room_types=None, date_from=None, date_to=None, *, reason: str = "") -> int:
-	"""Queue an ARI sync for every enabled mapping of the hotel's channel connections that
-	covers these room types (their pools) and dates. Jobs are coalesced per mapping while
-	they wait. Returns the number of jobs touched."""
-	conns = channel_connections(property)
+def mark_dirty(property: str, room_types=None, date_from=None, date_to=None, *, reason: str = "",
+               connection: str | None = None) -> int:
+	"""Queue an ARI sync for every enabled mapping of the hotel's channel connections (or of
+	one ``connection``) that covers these room types (their pools) and dates. Jobs are
+	coalesced per mapping while they wait. Returns the number of jobs touched."""
+	conns = [c for c in channel_connections(property) if connection is None or c == connection]
 	if not conns:
 		return 0
 	from kamra.tex.availability import repository as avail
