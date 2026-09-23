@@ -36,7 +36,8 @@ scheduler_events = {
 		"0 9 * * *": ["kamra.prearrival.run_prearrival_outreach"],
 		# every 15 min - escalate overdue housekeeping tasks up the ladder;
 		# also release expired Held / Pending Payment reservations (ADR-006)
-		# (+ TEX contract-version roll-over and abandoned-booking detection)
+		# (+ TEX contract-version roll-over, abandoned-booking detection and the
+		# system-status alerts, ADR-047: kamra.tex.scheduler.EVERY_15_MINUTES)
 		"*/15 * * * *": [
 			"kamra.housekeeping.escalate_overdue_tasks",
 			"kamra.reservation_state.expire_holds",

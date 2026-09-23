@@ -21,7 +21,9 @@
   "manage_link_days",
   "section_5",
   "fx_provider_default",
-  "fx_max_age_days"
+  "fx_max_age_days",
+  "section_monitoring",
+  "status_alert_recipients"
  ],
  "fields": [
   {
@@ -120,6 +122,17 @@
    "fieldtype": "Int",
    "label": "Max FX rate age (days)",
    "default": "4"
+  },
+  {
+   "fieldname": "section_monitoring",
+   "fieldtype": "Section Break",
+   "label": "Monitoring"
+  },
+  {
+   "fieldname": "status_alert_recipients",
+   "fieldtype": "Small Text",
+   "label": "System-status alert recipients",
+   "description": "E-mail addresses, one per line, told when a system-status check gets worse or recovers (ADR-047). Sent through the site's outgoing e-mail account."
   }
  ],
  "links": [],

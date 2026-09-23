@@ -25,8 +25,10 @@ EVERY_5_MINUTES = ("kamra.tex.connect.outbox.deliver_pending",
                    "kamra.tex.services.booking.expire_pending_bookings",
                    "kamra.tex.payments.service.expire_links",
                    "kamra.tex.services.mail_status.sync")
+# system-status alerts run last, so they see this run's outcome (ADR-047)
 EVERY_15_MINUTES = ("kamra.tex.commercial.contracts.roll_version_statuses",
-                    "kamra.tex.crm.service.detect_abandoned")
+                    "kamra.tex.crm.service.detect_abandoned",
+                    "kamra.tex.ops.alerts.evaluate")
 
 
 def every_minute() -> None:
