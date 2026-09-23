@@ -231,3 +231,93 @@ class TestRoomsAndPeriods(unittest.TestCase):
 		with self.assertRaises(Unsellable) as cm:
 			self.unit("STD", "P1", replace(self.t, room_rules=()))
 		self.assertEqual(cm.exception.code, "NO_ROOM_PRICE")
+
+
+def _pol(rule_id, target, op, value, level, weight, **kw):
+	"""A rule inherited from a pricing policy of scope ``weight`` (hotel 1 | market 2)."""
+	return OccupancyRule(rule_id, target, op, D(value) if value is not None else None, base_level=level,
+	                     scope_weight=weight, source=f"policy:{rule_id}", **kw)
+
+
+def _without(t, *ids):
+	return tuple(r for r in t.occupancy_rules if r.rule_id not in ids)
+
+
+class TestPrecedenceV2(unittest.TestCase):
+	"""Occupancy precedence v2 (G-30, G-31, ADR-042): the rule's origin ranks before its
+	qualifiers, and an infant is priced by a rule naming its band before any band-less rule."""
+
+	def setUp(self):
+		self.t = fx.terms()
+
+	# ── G-30: origin before qualifiers ──
+
+	def test_version_combination_rule_beats_same_policy_rule(self):
+		room = TestRoomBasis()
+		room.setUp()
+		t = replace(room.t, occupancy_rules=(
+			*room.t.occupancy_rules,
+			_pol("POL-1A", OccTarget.COMBINATION, Op.PERCENT_OF, "90", Level.HOTEL, 1, adults=1, children=0)))
+		self.assertEqual(occ(t, "STD", "P1", 1).total, D("160"))       # the version's 80 % of 200
+
+	def test_contract_rule_beats_policy_room_rule(self):
+		t = replace(self.t, occupancy_rules=(
+			*self.t.occupancy_rules,
+			_pol("POL-A3-DLX", OccTarget.ADULT, Op.MULTIPLY, "0.90", Level.HOTEL, 1, position=3, room_type="DLX")))
+		r = occ(t, "DLX", "P1", 3)
+		self.assertEqual(r.total, D("364.500"))                         # 135 + 135 + 0.70 × 135
+		self.assertEqual(r.slots[2].rule.rule_id, "O-A3")
+
+	def test_hotel_market_policy_beats_market_policy(self):
+		t = replace(self.t, occupancy_rules=(
+			*_without(self.t, "O-CHB"),
+			_pol("M-CHB", OccTarget.CHILD, Op.PERCENT_OF, "40", Level.MARKET, 2, age_band="CHB"),
+			_pol("HM-CHB", OccTarget.CHILD, Op.PERCENT_OF, "45", Level.MARKET, 3, age_band="CHB")))
+		self.assertEqual(occ(t, "STD", "P1", 2, 8).total, D("245"))
+
+	def test_inherit_in_hotel_market_policy_defers_to_market_policy(self):
+		t = replace(self.t, occupancy_rules=(
+			*_without(self.t, "O-CHB"),
+			_pol("HM-CHB", OccTarget.CHILD, Op.INHERIT, None, Level.MARKET, 3, age_band="CHB"),
+			_pol("M-CHB", OccTarget.CHILD, Op.PERCENT_OF, "40", Level.MARKET, 2, age_band="CHB"),
+			_pol("H-CHB", OccTarget.CHILD, Op.PERCENT_OF, "30", Level.HOTEL, 1, age_band="CHB")))
+		self.assertEqual(occ(t, "STD", "P1", 2, 8).total, D("240"))
+
+	# ── G-31: an infant is priced by its band ──
+
+	def test_infant_is_priced_by_its_band_rule_not_a_band_less_combination_rule(self):
+		ex = Explanation()
+		r = occ(self.t, "STD", "P1", 2, 8, 1, explain=ex)
+		self.assertEqual(r.total, D("250"))
+		self.assertEqual([s.amount for s in r.slots], [D("100"), D("100"), D("50"), D("0")])
+		self.assertEqual(r.slots[3].rule.rule_id, "O-INF")
+		infant_step = [s for s in ex.steps if s.code == "CHILD_SLOT"][-1]
+		self.assertIn("O-2A2C-C2", [o.rule_id for o in infant_step.overridden])
+
+	def test_band_less_position_rule_never_prices_an_infant(self):
+		t = replace(self.t, occupancy_rules=(
+			*self.t.occupancy_rules, OccupancyRule("O-C1", OccTarget.CHILD, Op.MULTIPLY, D("0.5"), position=1)))
+		self.assertEqual(occ(t, "STD", "P1", 2, 1).total, D("200"))
+		self.assertEqual(occ(t, "STD", "P1", 2, 4).total, D("250"))    # a child: the position rule still wins
+
+	def test_policy_infant_rule_beats_version_band_less_rule(self):
+		t = replace(self.t, occupancy_rules=(
+			*_without(self.t, "O-INF"), OccupancyRule("O-C1", OccTarget.CHILD, Op.MULTIPLY, D("0.5"), position=1),
+			_pol("G-INF", OccTarget.CHILD, Op.MULTIPLY, "0", Level.GLOBAL, 0, age_band="INF")))
+		self.assertEqual(occ(t, "STD", "P1", 2, 1).total, D("200"))
+
+	def test_band_less_rule_still_prices_an_infant_without_a_band_rule(self):
+		t = replace(self.t, occupancy_rules=(
+			*_without(self.t, "O-INF"), OccupancyRule("O-ANY", OccTarget.CHILD, Op.PERCENT_OF, D("50"))))
+		self.assertEqual(occ(t, "STD", "P1", 2, 1).total, D("250"))
+
+	def test_an_explicit_infant_combination_rule_wins(self):
+		t = replace(self.t, occupancy_rules=(
+			*self.t.occupancy_rules,
+			OccupancyRule("O-2A2C-INF", OccTarget.CHILD, Op.FIXED, D("10"), position=2, age_band="INF",
+			              adults=2, children=2)))
+		self.assertEqual(occ(t, "STD", "P1", 2, 8, 1).total, D("260"))
+
+	def test_legacy_payload_keeps_its_sold_price(self):
+		legacy = replace(self.t, occupancy_precedence=1)
+		self.assertEqual(occ(legacy, "STD", "P1", 2, 8, 1).total, D("275"))   # as sold before v2

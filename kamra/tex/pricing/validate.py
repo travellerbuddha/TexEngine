@@ -3,6 +3,12 @@
 A version can only be published with zero ERRORs. WARNINGs (e.g. an occupancy
 combination with no child rule, which will simply be unsellable) are shown to the
 contract manager before publishing.
+
+Occupancy rules (ADR-042): two rules that can price the same slot at the same
+precedence with different values are an ERROR (``OCC_AMBIGUOUS``; the offer would be
+unsellable). A rule the contract's own version names wrongly (unknown band, room or
+period) is an ERROR; a rule inherited from a pricing policy that this contract cannot
+use simply never applies and is a WARNING (``OCC_INHERITED_*_UNUSED``).
 """
 
 from __future__ import annotations
@@ -13,8 +19,8 @@ from datetime import date
 from kamra.tex.money import ZERO, D
 from kamra.tex.pricing import ages, occupancy, rooms
 from kamra.tex.pricing.ages import ChildSlot, Party
-from kamra.tex.pricing.enums import OccTarget, Op, PricingBasis, PromoValueType
-from kamra.tex.pricing.model import ContractTerms, PricingError, Unsellable
+from kamra.tex.pricing.enums import Level, OccTarget, Op, PricingBasis, PromoValueType
+from kamra.tex.pricing.model import ContractTerms, OccupancyRule, PricingError, RoomSpec, Unsellable
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,25 +104,45 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	except PricingError as e:
 		issues.append(_err("AGE_BANDS", str(e)))
 	band_codes = {b.code for b in t.age_bands}
+	if not t.age_bands and any(r.max_children > 0 for r in t.rooms.values()):
+		issues.append(_warn("NO_AGE_BANDS", "no child age bands (neither the version nor a pricing policy defines "
+		                    "any): " + ("every child is priced as an adult" if t.children_over_max_as_adults
+		                                else "children cannot be booked")))
 
 	# occupancy rules
 	for r in t.occupancy_rules:
-		if r.age_band and r.age_band not in band_codes:
-			issues.append(_err("OCC_UNKNOWN_BAND", f"rule {r.rule_id} names unknown age band {r.age_band}"))
+		for unknown, code, what in ((r.age_band and r.age_band not in band_codes, "BAND", f"age band {r.age_band}"),
+		                            (r.room_type and r.room_type not in t.rooms, "ROOM", f"room {r.room_type}"),
+		                            (r.period and r.period not in codes, "PERIOD", f"period {r.period}")):
+			if not unknown:
+				continue
+			if r.base_level >= Level.CONTRACT:
+				issues.append(_err(f"OCC_UNKNOWN_{code}", f"rule {r.rule_id} names unknown {what}"))
+			else:   # inherited from a pricing policy: it simply never applies to this contract
+				issues.append(_warn(f"OCC_INHERITED_{code}_UNUSED",
+				                    f"pricing-policy rule {r.rule_id} ({r.source}) names {what}, which this "
+				                    "contract does not have; it never applies here"))
 		if r.target == OccTarget.COMBINATION and r.adults is None and r.children is None:
 			issues.append(_err("OCC_COMBINATION_QUALIFIER", f"combination rule {r.rule_id} needs adults/children"))
 		if r.target == OccTarget.ADULT and r.age_band:
 			issues.append(_err("OCC_ADULT_BAND", f"adult rule {r.rule_id} cannot name an age band"))
 		if r.op != Op.INHERIT and r.value is None:
 			issues.append(_err("OCC_NO_VALUE", f"rule {r.rule_id} has no value"))
-		if r.room_type and r.room_type not in t.rooms:
-			issues.append(_err("OCC_UNKNOWN_ROOM", f"rule {r.rule_id} names unknown room {r.room_type}"))
-		if r.period and r.period not in codes:
-			issues.append(_err("OCC_UNKNOWN_PERIOD", f"rule {r.rule_id} names unknown period {r.period}"))
-	sig = [(r.target, r.position, r.age_band, r.room_type, r.period, r.adults, r.children, r.is_override,
-	        r.base_level) for r in t.occupancy_rules if r.op != Op.INHERIT]
+	sig = [_signature(r) for r in t.occupancy_rules if r.op != Op.INHERIT]
 	for s in sorted({s for s in sig if sig.count(s) > 1}, key=str):
 		issues.append(_err("OCC_DUPLICATE", f"two occupancy rules share the same scope {s}"))
+	for a, b, where in _ambiguous_pairs(t):
+		issues.append(_err("OCC_AMBIGUOUS", f"rules {a.rule_id} and {b.rule_id} both price {where} at the same "
+		                   "precedence with different values; make one more specific or remove one"))
+	generic = sorted(r.rule_id for r in t.occupancy_rules
+	                 if r.target == OccTarget.CHILD and r.age_band is None and r.op != Op.INHERIT)
+	for band in t.age_bands:
+		if generic and band.is_infant and not any(
+				r.target == OccTarget.CHILD and r.age_band == band.code and r.op != Op.INHERIT
+				for r in t.occupancy_rules):
+			issues.append(_warn("OCC_INFANT_GENERIC",
+			                    f"no rule names infant band {band.code}: infants are priced by the band-less child "
+			                    f"rules ({', '.join(generic)}) — add a {band.code} rule if infants stay free"))
 
 	# boards
 	if not any(b.is_base for b in t.boards):
@@ -139,9 +165,76 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	return issues
 
 
+def _signature(r: OccupancyRule) -> tuple:
+	return (r.target, r.position, r.age_band, r.room_type, r.period, r.adults, r.children, r.is_override,
+	        r.base_level, r.scope_weight)
+
+
+def _slot_exists(t: ContractTerms, spec: RoomSpec, r: OccupancyRule, adults: int, children: int) -> bool:
+	if r.target == OccTarget.COMBINATION:
+		return True
+	if r.target == OccTarget.CHILD:
+		return children >= 1 and (r.position is None or r.position <= children)
+	included = max(1, spec.included_adults) if t.basis == PricingBasis.ROOM else 0   # included adults: no rule
+	return adults > included and (r.position is None or included < r.position <= adults)
+
+
+def _meeting_point(t: ContractTerms, a: OccupancyRule, b: OccupancyRule) -> str | None:
+	"""A room/party in which both rules price the same slot, or None (they never meet).
+	The rules have the same room, period, position and band; their combinations may be
+	partial ('2+*' and '*+2' meet at 2A+2C)."""
+	if (a.adults is not None and b.adults is not None and a.adults != b.adults) or \
+			(a.children is not None and b.children is not None and a.children != b.children):
+		return None
+	if (a.period and a.period not in {p.code for p in t.periods}) or \
+			(a.age_band and a.age_band not in {x.code for x in t.age_bands}):
+		return None
+	want_a = a.adults if a.adults is not None else b.adults
+	want_c = a.children if a.children is not None else b.children
+	infants_free = not t.infants_count_as_occupants and any(x.is_infant for x in t.age_bands)
+	if a.room_type:
+		specs = [t.rooms[a.room_type]] if a.room_type in t.rooms else []
+	else:
+		specs = [t.rooms[k] for k in sorted(t.rooms)]
+	for spec in specs:
+		for n_a in range(max(1, spec.min_adults), spec.max_adults + 1):
+			for n_c in range(0, spec.max_children + 1):
+				if (want_a is not None and n_a != want_a) or (want_c is not None and n_c != want_c):
+					continue
+				if n_a + n_c > spec.max_occupants and not infants_free:
+					continue
+				if _slot_exists(t, spec, a, n_a, n_c):
+					who = a.target.value.lower()
+					slot = f"the {who}" if a.target == OccTarget.COMBINATION else \
+						f"{who} {a.position}" if a.position else f"a {who}"
+					return f"{slot} of {spec.room_type} {n_a}A+{n_c}C"
+	return None
+
+
+def _ambiguous_pairs(t: ContractTerms) -> list[tuple[OccupancyRule, OccupancyRule, str]]:
+	"""Pairs of non-INHERIT rules with the same rank that can price the same slot with
+	different values: the runtime would refuse to guess (AMBIGUOUS_OCCUPANCY_RULES)."""
+	rules = [r for r in t.occupancy_rules if r.op != Op.INHERIT]
+	rank = {id(r): occupancy.specificity(r, precedence=t.occupancy_precedence) for r in rules}
+	out = []
+	for i, a in enumerate(rules):
+		for b in rules[i + 1:]:
+			if a.target != b.target or (a.op, a.value) == (b.op, b.value) or rank[id(a)] != rank[id(b)]:
+				continue
+			if _signature(a) == _signature(b):
+				continue   # OCC_DUPLICATE
+			if (a.room_type, a.period, a.position, a.age_band) != (b.room_type, b.period, b.position, b.age_band):
+				continue
+			where = _meeting_point(t, a, b)
+			if where:
+				out.append((a, b, where))
+	return out
+
+
 def _sweep(t: ContractTerms, limit: int) -> list[Issue]:
 	"""Price every valid combination (all children in one band) once per period and
-	report the ones that cannot be priced."""
+	report the ones that cannot be priced. Ambiguous rules are an ERROR (the runtime
+	refuses to guess); a combination without a rule only makes that offer unsellable."""
 	out: list[Issue] = []
 	seen: set[tuple] = set()
 	for rt, spec in sorted(t.rooms.items()):
@@ -165,7 +258,8 @@ def _sweep(t: ContractTerms, limit: int) -> list[Issue]:
 							if key in seen:
 								continue
 							seen.add(key)
-							out.append(_warn(u.code, f"{rt} {a}A+{c}C"
+							level = "ERROR" if u.code == "AMBIGUOUS_OCCUPANCY_RULES" else "WARNING"
+							out.append(Issue(level, u.code, f"{rt} {a}A+{c}C"
 							                 f"{' [' + band.code + ']' if band else ''}: {u.message}"))
 							if len(out) >= limit:
 								return out

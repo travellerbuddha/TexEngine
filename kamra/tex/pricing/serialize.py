@@ -166,6 +166,7 @@ def terms_to_payload(t: ContractTerms) -> dict:
 			"prices_include_tax": t.prices_include_tax, "stacking": t.stacking.value,
 			"room_basis_extra_unit": t.room_basis_extra_unit.value,
 			"room_basis_children_fill_included": t.room_basis_children_fill_included,
+			"occupancy_precedence": t.occupancy_precedence,
 		},
 		"rooms": [
 			{"room_type": r.room_type, "name": r.name, "max_adults": r.max_adults, "max_children": r.max_children,
@@ -188,7 +189,7 @@ def terms_to_payload(t: ContractTerms) -> dict:
 			{"id": r.rule_id, "target": r.target.value, "op": r.op.value, "value": dec_str(r.value),
 			 "position": r.position, "age_band": r.age_band, "room_type": r.room_type, "period": r.period,
 			 "adults": r.adults, "children": r.children, "is_override": r.is_override,
-			 "base_level": r.base_level.name, "source": r.source, "note": r.note}
+			 "base_level": r.base_level.name, "scope_weight": r.scope_weight, "source": r.source, "note": r.note}
 			for r in t.occupancy_rules
 		],
 		"age_bands": [
@@ -248,7 +249,8 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 			room_type=r.get("room_type") or None, period=r.get("period") or None,
 			adults=_int(r.get("adults")), children=_int(r.get("children")),
 			is_override=bool(r.get("is_override")), base_level=Level[r.get("base_level") or "VERSION"],
-			source=r.get("source") or "version", note=r.get("note") or "")
+			source=r.get("source") or "version", note=r.get("note") or "",
+			scope_weight=int(r.get("scope_weight") or 0))
 		for r in payload.get("occupancy_rules") or []
 	)
 	bands = tuple(
@@ -291,6 +293,8 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		stacking=StackingMode(s.get("stacking") or "SEQUENTIAL"),
 		room_basis_extra_unit=RoomBasisExtraUnit(s.get("room_basis_extra_unit") or "PER_PERSON_SHARE"),
 		room_basis_children_fill_included=bool(s.get("room_basis_children_fill_included")),
+		# frozen before occupancy precedence v2 → priced as sold (ADR-042)
+		occupancy_precedence=int(s.get("occupancy_precedence") or 1),
 	)
 
 

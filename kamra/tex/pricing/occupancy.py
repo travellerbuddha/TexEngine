@@ -1,4 +1,4 @@
-"""OccupancyResolver — the adult/child formula engine (R-07, ADR-006, ADR-007).
+"""OccupancyResolver — the adult/child formula engine (R-07, R-09, ADR-006, ADR-007, ADR-042).
 
 "Occupancy" here means the PEOPLE in the room, not hotel occupancy %.
 
@@ -11,11 +11,26 @@ Slot model
   room price, per contract setting). Under-occupancy (e.g. single use = 80 %) is a
   COMBINATION rule.
 
-Rule precedence (most specific wins; INHERIT defers):
-    OVERRIDE > COMBINATION > PERIOD > ROOM > VERSION > MARKET > HOTEL > GLOBAL
-with, inside one level: period-qualified > room-qualified > explicit position >
-explicit age band. A rule that is still tied with another matching rule is a
-configuration error and makes the offer unsellable rather than picking one silently.
+Rule precedence (occupancy precedence v2, ``CASCADE``; most specific wins, INHERIT defers)
+------------------------------------------------------------------------------------------
+For one slot (an adult, a child, or the whole combination), rules are ranked by:
+
+1. infant slots only: a rule naming the infant's age band beats every band-less rule,
+   whatever its origin or qualifiers (G-31) — band-less rules still price an infant when
+   no rule names its band;
+2. origin: contract version > hotel + market policy > market policy > hotel policy >
+   global policy (G-30, ``inherit``);
+3. level: OVERRIDE > COMBINATION > PERIOD > ROOM > none;
+4. qualifiers: period > room > exact combination (adults and children);
+5. slot: position + band > position > band > neither (a position rule is an exception
+   to a band default for a child who is not an infant).
+
+Two matching rules with the same rank and a different value are a configuration error:
+the offer is unsellable rather than one being picked silently (publish refuses them).
+
+Payloads frozen before v2 (``LEGACY``) keep the ranking they were sold with:
+level > period > room > exact combination > position > band, with the policy level
+(GLOBAL/HOTEL/MARKET) standing in for the level of a rule without qualifiers.
 """
 
 from __future__ import annotations
@@ -49,15 +64,19 @@ def rule_level(rule: OccupancyRule) -> Level:
 	return rule.base_level
 
 
-def specificity(rule: OccupancyRule) -> tuple:
-	return (
-		int(rule_level(rule)),
-		rule.period is not None,
-		rule.room_type is not None,
-		rule.adults is not None and rule.children is not None,
-		rule.position is not None,
-		rule.age_band is not None,
-	)
+LEGACY, CASCADE = 1, 2   # ContractTerms.occupancy_precedence; a payload without the key → LEGACY
+
+
+def specificity(rule: OccupancyRule, *, precedence: int = CASCADE, infant_slot: bool = False) -> tuple:
+	"""Rank of a matching rule for one slot (higher wins); see the module docstring."""
+	qual = (int(rule_level(rule)), rule.period is not None, rule.room_type is not None,
+	        rule.adults is not None and rule.children is not None)
+	slot = (rule.position is not None, rule.age_band is not None)
+	if precedence == LEGACY:
+		return (*qual, *slot)                                  # exactly the pre-v2 ranking
+	return (infant_slot and rule.age_band is not None,         # G-31: the infant's band first
+	        int(rule.base_level), rule.scope_weight,           # G-30: VERSION > H+M > M > H > GLOBAL
+	        *qual, *slot)
 
 
 def rule_ref(rule: OccupancyRule) -> RuleRef:
@@ -89,16 +108,16 @@ def _qualifiers_match(rule: OccupancyRule, room_type: str, period: Period, party
 	return True
 
 
-def _pick(candidates: list[OccupancyRule], what: str) -> tuple[OccupancyRule | None, tuple[RuleRef, ...]]:
-	"""Most specific non-INHERIT rule; INHERIT rules are recorded as skipped."""
-	ordered = sorted(candidates, key=specificity, reverse=True)
+def _pick(candidates: list[OccupancyRule], what: str, key) -> tuple[OccupancyRule | None, tuple[RuleRef, ...]]:
+	"""Most specific non-INHERIT rule by ``key``; INHERIT rules are recorded as skipped."""
+	ordered = sorted(candidates, key=key, reverse=True)
 	winner = None
 	for i, r in enumerate(ordered):
 		if r.op == Op.INHERIT:
 			continue
-		# ambiguity guard: another non-INHERIT rule with identical specificity
+		# ambiguity guard: another non-INHERIT rule with identical rank
 		for other in ordered[i + 1:]:
-			if specificity(other) != specificity(r):
+			if key(other) != key(r):
 				break
 			if other.op != Op.INHERIT and (other.op, other.value) != (r.op, r.value):
 				raise Unsellable("AMBIGUOUS_OCCUPANCY_RULES",
@@ -154,6 +173,10 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 	room_type = spec.room_type
 	rules = [r for r in terms.occupancy_rules if _qualifiers_match(r, room_type, period, party)]
 	slots: list[SlotPrice] = []
+	precedence = terms.occupancy_precedence
+
+	def rank(r: OccupancyRule) -> tuple:
+		return specificity(r, precedence=precedence)
 
 	if terms.basis == PricingBasis.PERSON:
 		slot_unit = unit
@@ -175,7 +198,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 			continue
 		cands = [r for r in rules if r.target == OccTarget.ADULT and r.age_band is None
 		         and (r.position is None or r.position == pos)]
-		winner, overridden = _pick(cands, f"adult {pos}")
+		winner, overridden = _pick(cands, f"adult {pos}", rank)
 		if winner is None:
 			winner, overridden = GLOBAL_ADULT_DEFAULT, overridden
 		amount = apply_op(winner.op, winner.value, reference=slot_unit)
@@ -202,7 +225,9 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 		cands = [r for r in rules if r.target == OccTarget.CHILD
 		         and (r.position is None or r.position == child.position)
 		         and (r.age_band is None or r.age_band == child.band.code)]
-		winner, overridden = _pick(cands, f"child {child.position} band {child.band.code}")
+		infant = child.band.is_infant
+		winner, overridden = _pick(cands, f"child {child.position} band {child.band.code}",
+		                           lambda r, infant=infant: specificity(r, precedence=precedence, infant_slot=infant))
 		if winner is None:
 			raise Unsellable("NO_CHILD_RULE",
 			                 f"no occupancy rule for child {child.position} in band {child.band.code} "
@@ -220,7 +245,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 
 	# ── whole-combination rules ──
 	combo_cands = [r for r in rules if r.target == OccTarget.COMBINATION]
-	combo, overridden = _pick(combo_cands, f"combination {party.adults}A+{party.child_count}C")
+	combo, overridden = _pick(combo_cands, f"combination {party.adults}A+{party.child_count}C", rank)
 	combo_ref = None
 	if combo is not None:
 		combo_ref = rule_ref(combo)

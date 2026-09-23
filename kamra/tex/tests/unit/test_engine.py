@@ -251,3 +251,8 @@ class TestChildrenAtBoundaries(unittest.TestCase):
 		self.assertEqual(self.total(date(2015, 6, 2)), D("270.00"))   # exactly 12 → TEEN 70 %
 		self.assertEqual(self.total(date(2011, 6, 2)), D("270.00"))   # 16 → priced as 3rd adult ×0.70
 		self.assertEqual(arrival, fx.req().check_in)
+
+	def test_engine_family_with_infant(self):
+		# 2A + child 8 + infant: the infant's band rule (×0) beats the band-less 2A+2C child-2 rule (G-31)
+		q = engine.price_stay(fx.ctx(), fx.req(children=(8, 1)))
+		self.assertEqual(q.totals["total"], D("250.00"))

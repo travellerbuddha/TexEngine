@@ -12,7 +12,7 @@ from decimal import Decimal
 from kamra.tex.availability import inventory_math as inv
 from kamra.tex.availability import restrictions as rs
 from kamra.tex.pricing import engine, serialize, validate, versions
-from kamra.tex.pricing.enums import OccTarget, Op
+from kamra.tex.pricing.enums import Level, OccTarget, Op
 from kamra.tex.pricing.model import OccupancyRule, Period, RoomRule, Unsellable
 from kamra.tex.tests.unit import fixtures as fx
 from kamra.tex.tests.unit.test_engine import DE_MARKUP, EB, spec_request, spec_terms
@@ -48,6 +48,28 @@ class TestPayload(unittest.TestCase):
 		a = engine.price_stay(fx.ctx(t, markups=(DE_MARKUP,)), spec_request()).to_dict()
 		b = engine.price_stay(fx.ctx(t2, markups=(DE_MARKUP,)), spec_request()).to_dict()
 		self.assertEqual(a, b)
+
+	def test_payload_keeps_rule_origin_and_precedence(self):
+		t = fx.terms(occupancy_rules=(*fx.occ_rules(), OccupancyRule(
+			"POL-CHB", OccTarget.CHILD, Op.PERCENT_OF, D("30"), age_band="CHB", base_level=Level.MARKET,
+			scope_weight=3, source="policy:POL-1/r1/hotel+market")))
+		payload = serialize.normalise_payload(serialize.terms_to_payload(t))
+		self.assertEqual(payload["settings"]["occupancy_precedence"], 2)
+		self.assertEqual(payload["occupancy_rules"][-1]["scope_weight"], 3)
+		back = serialize.terms_from_payload(payload, "x")
+		self.assertEqual(back.occupancy_precedence, 2)
+		self.assertEqual(back.occupancy_rules[-1].scope_weight, 3)
+
+	def test_payload_without_precedence_is_priced_as_sold(self):
+		# a payload frozen before occupancy precedence v2 keeps its sold semantics (ADR-042)
+		payload = serialize.normalise_payload(serialize.terms_to_payload(fx.terms()))
+		payload["settings"].pop("occupancy_precedence", None)
+		for r in payload["occupancy_rules"]:
+			r.pop("scope_weight", None)
+		old = serialize.terms_from_payload(payload)
+		self.assertEqual(old.occupancy_precedence, 1)
+		q = engine.price_stay(fx.ctx(old), fx.req(children=(8, 1)))
+		self.assertEqual(q.totals["total"], D("275.00"))
 
 	def test_request_roundtrip(self):
 		r = spec_request(promo_codes=("A",))
@@ -140,6 +162,59 @@ class TestValidation(unittest.TestCase):
 			*t.occupancy_rules, OccupancyRule("x", OccTarget.CHILD, Op.PERCENT_OF, D(5), age_band="ZZ")))))
 		self.assertIn("NO_BASE_BOARD", self.codes(replace(t, boards=t.boards[1:])))
 		self.assertIn("OFFER_VALUE", self.codes(replace(t, offers=(replace(EB, value=D("150")),))))
+
+	def test_overlapping_partial_combinations_are_an_error(self):
+		# "child 1 at 2+*" and "child 1 at *+2" both price child 1 of 2A+2C: never guess (G-31)
+		t = fx.terms(occupancy_rules=(
+			*fx.occ_rules(),
+			OccupancyRule("P-2A", OccTarget.CHILD, Op.PERCENT_OF, D("60"), position=1, adults=2),
+			OccupancyRule("P-2C", OccTarget.CHILD, Op.PERCENT_OF, D("40"), position=1, children=2)))
+		errors = [i for i in validate.validate_terms(t) if i.level == "ERROR"]
+		self.assertEqual([i.code for i in errors], ["OCC_AMBIGUOUS"])
+		self.assertIn("P-2A", errors[0].message)
+		self.assertIn("P-2C", errors[0].message)
+
+	def test_partial_combinations_that_never_meet_are_fine(self):
+		# 3+* and *+2 meet only at 3A+2C, which STD (4 guests at most) never sells
+		t = fx.terms(occupancy_rules=(
+			*fx.occ_rules(),
+			OccupancyRule("P-3A", OccTarget.CHILD, Op.PERCENT_OF, D("60"), position=1, adults=3, room_type="STD"),
+			OccupancyRule("P-2C", OccTarget.CHILD, Op.PERCENT_OF, D("40"), position=1, children=2,
+			              room_type="STD")))
+		self.assertNotIn("OCC_AMBIGUOUS", self.codes(t))
+
+	def test_sweep_reports_an_ambiguous_combination_as_an_error(self):
+		t = fx.terms(occupancy_rules=(
+			*fx.occ_rules(), OccupancyRule("O-CHB-DUP", OccTarget.CHILD, Op.PERCENT_OF, D("60"), age_band="CHB")))
+		found = {(i.level, i.code) for i in validate._sweep(t, 50)}
+		self.assertIn(("ERROR", "AMBIGUOUS_OCCUPANCY_RULES"), found)
+
+	def test_infants_priced_only_by_band_less_rules_warn(self):
+		t = fx.terms(occupancy_rules=(
+			*(r for r in fx.occ_rules() if r.rule_id != "O-INF"),
+			OccupancyRule("O-ANY", OccTarget.CHILD, Op.PERCENT_OF, D("50"))))
+		self.assertEqual(self.codes(t), [])
+		self.assertIn("OCC_INFANT_GENERIC", self.codes(t, "WARNING"))
+
+	def test_inherited_rules_the_contract_cannot_use_only_warn(self):
+		inherited = dict(base_level=Level.HOTEL, scope_weight=1, source="policy:POL-H/r1/hotel")
+		t = fx.terms(occupancy_rules=(
+			*fx.occ_rules(),
+			OccupancyRule("H-CHD", OccTarget.CHILD, Op.PERCENT_OF, D("50"), age_band="CHD", **inherited),
+			OccupancyRule("H-FAM", OccTarget.CHILD, Op.PERCENT_OF, D("20"), age_band="CHB", room_type="FAM",
+			              **inherited)))
+		self.assertEqual(self.codes(t), [])
+		warnings = self.codes(t, "WARNING")
+		self.assertIn("OCC_INHERITED_BAND_UNUSED", warnings)
+		self.assertIn("OCC_INHERITED_ROOM_UNUSED", warnings)
+		version = fx.terms(occupancy_rules=(
+			*fx.occ_rules(), OccupancyRule("V-CHD", OccTarget.CHILD, Op.PERCENT_OF, D("50"), age_band="CHD")))
+		self.assertIn("OCC_UNKNOWN_BAND", self.codes(version))
+
+	def test_a_contract_without_age_bands_warns(self):
+		# no bands anywhere: every child would silently be priced as an adult
+		t = fx.terms(age_bands=(), occupancy_rules=tuple(r for r in fx.occ_rules() if not r.age_band))
+		self.assertIn("NO_AGE_BANDS", self.codes(t, "WARNING"))
 
 	def test_sweep_warns_about_unpriceable_combinations(self):
 		t = fx.terms(occupancy_rules=tuple(r for r in fx.occ_rules() if r.rule_id != "O-TEEN"))
