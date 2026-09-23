@@ -275,6 +275,7 @@
  "settings.status.reason.overpaid": "Zweimal bezahlte Zahlungslinks in den letzten {days} Tagen: {count}.",
  "settings.status.reason.payment_pending": "Noch ausstehende Kartenzahlungen: {count}, die älteste begann vor {minutes} Min.",
  "settings.status.reason.redis_unreachable": "Die Hintergrund-Warteschlange (Redis) ist nicht erreichbar.",
+ "settings.status.reason.refund_unknown": "Vom Zahlungsanbieter nie bestätigte Erstattungen: {count}. Prüfen Sie sie dort, bevor Sie erneut erstatten.",
  "settings.status.reason.scheduler_disabled": "Der Scheduler ist deaktiviert: kein TEX-Job läuft.",
  "settings.status.reason.scheduler_paused": "Der Scheduler ist pausiert: kein TEX-Job läuft.",
  "settings.status.scope_hotels": "Ihre Hotels: {hotels}",
