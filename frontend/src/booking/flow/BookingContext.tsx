@@ -8,10 +8,10 @@ import { useI18n } from "../i18n"
 import { analyticsEvent } from "../lib/analytics"
 import { ApiError, pub, type ErrorKind } from "../lib/api"
 import { apiRooms, applyCriteria, isComplete, parseCriteria, searchKey, type Criteria } from "../lib/criteria"
-import { getJSON, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
+import { getJSON, manageToken, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
 import { armAbandon, disarmAbandon } from "../lib/track"
 import { useSite } from "../site/SiteContext"
-import type { BookResponse, Offer, PaymentMethod, PaymentStart, QuoteResponse, RatePlanInfo, RoomQuote, SearchResult } from "../types"
+import type { Basket, BookResponse, Offer, PaymentMethod, PaymentStart, QuoteResponse, RatePlanInfo, RoomQuote, SearchResult } from "../types"
 
 export type Step = "rooms" | "extras" | "details" | "payment"
 
@@ -63,6 +63,8 @@ interface FlowState {
   priceChanges: PriceChange[]
   guest: Guest
   method: PaymentMethod | null
+  /** gateway chosen when several accounts offer the same method (e.g. two card gateways) */
+  providerAccount: string | null
   terms: boolean
   bookKey: string | null
 }
@@ -80,7 +82,7 @@ const EMPTY_GUEST: Guest = {
 }
 
 function emptyFlow(guest: Guest = EMPTY_GUEST): FlowState {
-  return { key: null, hotel: null, selections: [], extras: {}, quotes: [], quotedAt: null, priceChanges: [], guest, method: null, terms: false, bookKey: null }
+  return { key: null, hotel: null, selections: [], extras: {}, quotes: [], quotedAt: null, priceChanges: [], guest, method: null, providerAccount: null, terms: false, bookKey: null }
 }
 
 export interface SearchState {
@@ -122,7 +124,7 @@ interface Ctx {
   quotesFresh: boolean
   refreshAfterExpiry: () => Promise<Refreshed>
   setGuest: (g: Partial<Guest>) => void
-  setMethod: (m: PaymentMethod) => void
+  setMethod: (m: PaymentMethod, providerAccount?: string | null) => void
   setTerms: (v: boolean) => void
   book: () => Promise<{ error?: FlowError; payment?: PaymentStart | null; booking?: BookResponse }>
   hasExtras: boolean
@@ -134,6 +136,16 @@ interface Ctx {
   setFlowError: (e: FlowError | null) => void
   /** booking reference made in this visit (the basket is already cleared) */
   justBooked: string | null
+  /** server total and amount due now per payment method of the quoted rooms */
+  basket: BasketState
+  reloadBasket: () => void
+}
+
+export interface BasketState {
+  status: "idle" | "loading" | "done" | "error"
+  data: Basket | null
+  /** quote ids the data belongs to */
+  key: string | null
 }
 
 const BookingCtx = createContext<Ctx | null>(null)
@@ -163,6 +175,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState(false)
   const [flowError, setFlowError] = useState<FlowError | null>(null)
   const [justBooked, setJustBooked] = useState<string | null>(null)
+  const [basket, setBasket] = useState<BasketState>({ status: "idle", data: null, key: null })
+  const [basketTick, setBasketTick] = useState(0)
   const searchSeq = useRef(0)
 
   useEffect(() => {
@@ -240,7 +254,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   const select = useCallback(
     (roomIndex: number, offer: Offer, hotelName: string, roomName: string) => {
-      const room = offer.rooms[roomIndex] ?? offer.rooms[0]
+      // rooms holds only the parties this room type fits: look up by room_index
+      const room = offer.rooms.find((r) => r.room_index === roomIndex)
       if (!room) return
       const sel: Selection = {
         hotel: hotelName,
@@ -325,7 +340,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     const next: (Selection | null)[] = flow.selections.map((s, i) => {
       if (!s) return null
       const offer = prop.offers.find((o) => o.room_type === s.roomType && o.board === s.board && o.rate_plan === s.ratePlan)
-      const room = offer?.rooms[i]
+      const room = offer?.rooms.find((r) => r.room_index === i)
       if (!offer || !room) return null
       if (room.quote.totals.total !== s.quote.totals.total) changed = true
       return { ...s, offerKey: room.offer_key, quote: room.quote }
@@ -336,9 +351,32 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   }, [runSearch, flow.selections])
 
   const setGuest = useCallback((g: Partial<Guest>) => setFlow((f) => ({ ...f, guest: { ...f.guest, ...g } })), [])
-  const setMethod = useCallback((m: PaymentMethod) => setFlow((f) => (f.method === m ? f : { ...f, method: m, bookKey: null })), [])
+  const setMethod = useCallback(
+    (m: PaymentMethod, providerAccount: string | null = null) =>
+      setFlow((f) => (f.method === m && f.providerAccount === providerAccount ? f : { ...f, method: m, providerAccount, bookKey: null })),
+    [],
+  )
   const setTerms = useCallback((v: boolean) => setFlow((f) => ({ ...f, terms: v })), [])
   const clearPriceChanges = useCallback(() => setFlow((f) => ({ ...f, priceChanges: [] })), [])
+
+  // server total and amount due now per payment method, once every room is quoted
+  const quotedIds = flow.quotes.map((q) => q?.quote_id).filter((x): x is string => !!x)
+  const basketKey = quotedIds.length && quotedIds.length === flow.selections.length ? quotedIds.join(",") : null
+  useEffect(() => {
+    if (!basketKey) {
+      setBasket({ status: "idle", data: null, key: null })
+      return
+    }
+    let alive = true
+    setBasket((b) => ({ status: "loading", data: b.key === basketKey ? b.data : null, key: basketKey }))
+    pub<Basket>("basket", { site: site.slug, quote_ids: basketKey.split(","), session_id: sessionId() })
+      .then((data) => alive && setBasket({ status: "done", data, key: basketKey }))
+      .catch(() => alive && setBasket({ status: "error", data: null, key: basketKey }))
+    return () => {
+      alive = false
+    }
+  }, [basketKey, site.slug, basketTick])
+  const reloadBasket = useCallback(() => setBasketTick((n) => n + 1), [])
 
   const book = useCallback(async () => {
     const quoteIds = flow.quotes.map((q) => q?.quote_id).filter((x): x is string => !!x)
@@ -346,6 +384,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     const bookKey = flow.bookKey ?? newKey("book")
     if (!flow.bookKey) setFlow((f) => ({ ...f, bookKey }))
     const g = flow.guest
+    const method = flow.method ?? "Card"
+    // name the gateway only when several accounts offer this method (e.g. two card gateways)
+    const sameMethod = basket.data?.methods.filter((m) => m.available && m.method === method) ?? []
+    const providerAccount = sameMethod.length > 1 ? flow.providerAccount ?? sameMethod[0].provider_account : null
     try {
       const res = await pub<BookResponse>("book", {
         site: site.slug,
@@ -361,12 +403,18 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           consent_sms: g.consent_sms,
           consent_whatsapp: g.consent_whatsapp,
         },
-        payment_method: flow.method ?? "Card",
+        payment_method: method,
+        provider_account: providerAccount || undefined,
         idempotency_key: bookKey,
         language: lang,
         session_id: sessionId(),
+        // the server fills in {booking} and accepts only its own host or the site's verified domains
+        return_url: `${window.location.origin}/book/${site.slug}/confirmation/{booking}`,
       })
-      if (res.manage_token) saveManageToken(res.booking, res.manage_token, site.slug)
+      // A retried request (same session + key) answers like the first one, with a short-lived
+      // resume token instead of the manage token: never replace a manage token we already hold.
+      const held = manageToken(res.booking)
+      if (res.manage_token && !(res.idempotent_replay && held && !held.includes("."))) saveManageToken(res.booking, res.manage_token, site.slug)
       const hotelName = site.hotels.find((h) => h.name === res.property)?.property_name ?? res.property
       if (res.payment) {
         rememberPayment(res.payment, { amount: res.due_now, currency: res.currency, hotel: hotelName })
@@ -382,7 +430,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       return { error: toFlowError(e) }
     }
-  }, [flow, site, lang, storeKey])
+  }, [flow, site, lang, storeKey, basket.data])
 
   const hasExtras = !!(hotel && (site.extras?.[hotel]?.length ?? 0) > 0)
   const allSelected = flow.selections.length === criteria.rooms.length && flow.selections.every(Boolean)
@@ -416,6 +464,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     flowError,
     setFlowError,
     justBooked,
+    basket,
+    reloadBasket,
   }
   return <BookingCtx.Provider value={value}>{children}</BookingCtx.Provider>
 }

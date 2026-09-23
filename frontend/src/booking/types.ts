@@ -146,6 +146,10 @@ export interface RoomQuote {
 export interface Reason {
   code: string
   message: string
+  /** occupancy limits, on MAX_ADULTS / MAX_CHILDREN / MAX_OCCUPANTS */
+  max_adults?: number
+  max_children?: number
+  max_occupants?: number
 }
 
 export interface OfferRoom {
@@ -154,18 +158,32 @@ export interface OfferRoom {
   quote: RoomQuote
 }
 
+export interface RoomReason extends Reason {
+  room_index: number
+}
+
+/** One room type × board × rate plan. Every requested room (party) is priced on its
+ * own: `rooms` holds only the parties this room type fits — look them up by
+ * `room_index`, never by position. */
 export interface Offer {
   room_type: string
   board: string
   rate_plan: string | null
   currency: string
+  /** rooms of this type still free (the same type cannot take more requested rooms) */
   available: number
+  /** server total for all requested rooms — only when `complete` */
   total?: Money
   refundable?: boolean
   rate_plan_info?: RatePlanInfo | null
   bookable: boolean
   reasons?: Reason[]
   rooms: OfferRoom[]
+  room_indexes: number[]
+  /** fits every requested room */
+  complete: boolean
+  /** why it does not fit the other rooms */
+  room_reasons?: RoomReason[]
 }
 
 export interface RoomContent {
@@ -189,6 +207,11 @@ export interface PropertyResult {
   offers: Offer[]
   unavailable: Offer[]
   rooms: Record<string, RoomContent>
+  /** cheapest placement of every requested room (null when a room fits nowhere) */
+  from_total?: Money | null
+  from_currency?: string | null
+  /** requested rooms (0-based) no room type of this hotel fits */
+  unplaced_rooms?: number[]
 }
 
 export interface SearchResult {
@@ -259,8 +282,40 @@ export interface BookingSummary {
 }
 
 export interface BookResponse extends BookingSummary {
+  /** manage token; on a retried request (idempotent_replay) a signed 24 h resume token */
   manage_token?: string
   payment: PaymentStart | null
+}
+
+export interface BasketMethod {
+  method: PaymentMethod | string
+  provider_account: string | null
+  label: string
+  provider: string | null
+  sandbox: boolean
+  available: boolean
+  due_now: Money | null
+  balance_after: Money | null
+}
+
+/** Server totals of the quoted rooms before booking (public.basket). */
+export interface Basket {
+  currency: string
+  total: Money
+  usable: boolean
+  expires_at: string
+  pay_at_hotel_allowed: boolean
+  rooms: {
+    quote_id: string
+    room_type: string
+    total: Money
+    due_now: Money | null
+    deposit_type: string
+    pay_at_hotel_allowed: boolean
+    expires_at: string
+    problem: string | null
+  }[]
+  methods: BasketMethod[]
 }
 
 export interface PaymentLinkInfo {

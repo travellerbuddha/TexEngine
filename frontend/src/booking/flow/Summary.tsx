@@ -7,7 +7,7 @@ import { boardLabel, cancellation } from "../lib/policy"
 import { partyText } from "../search/GuestsPicker"
 import { Dialog } from "../ui/Dialog"
 import type { QuoteLine, RoomQuote } from "../types"
-import { useBooking, type Selection } from "./BookingContext"
+import { useBooking, type BasketState, type Selection } from "./BookingContext"
 
 /** Nightly amount when every night costs the same (server figures), else null. */
 export function uniformNight(q: RoomQuote | null | undefined): string | null {
@@ -93,12 +93,28 @@ function RoomSummary({ i, sel, multi }: { i: number; sel: Selection | null; mult
   )
 }
 
+/** The total to show: the basket's server total once every room is quoted, else the
+ * single room's own server total (several unquoted rooms: none — never summed here). */
+export function serverTotal(basket: BasketState, single: RoomQuote | null | undefined) {
+  if (basket.status === "done" && basket.data) return { amount: basket.data.total, currency: basket.data.currency }
+  if (single) return { amount: single.totals.total, currency: single.currency }
+  return null
+}
+
+/** The basket's figures for the payment method the guest picked. */
+export function chosenMethod(basket: BasketState, method: string | null, providerAccount: string | null) {
+  if (basket.status !== "done" || !basket.data || !method) return null
+  return basket.data.methods.find((m) => m.available && m.method === method && (!providerAccount || m.provider_account === providerAccount)) ?? null
+}
+
 export function SummaryBody({ children }: { children?: ReactNode }) {
   const { t, money, range } = useI18n()
-  const { flow, criteria, hotelName } = useBooking()
+  const { flow, criteria, hotelName, basket } = useBooking()
   const n = criteria.rooms.length
   const nights = criteria.checkIn && criteria.checkOut ? nightsBetween(criteria.checkIn, criteria.checkOut) : 0
   const single = n === 1 ? (flow.quotes[0]?.ok ? flow.quotes[0]!.quote! : flow.selections[0]?.quote) : null
+  const total = serverTotal(basket, single)
+  const chosen = chosenMethod(basket, flow.method, flow.providerAccount)
   return (
     <div>
       {hotelName && <p className="text-lg font-semibold leading-snug">{hotelName}</p>}
@@ -119,16 +135,30 @@ export function SummaryBody({ children }: { children?: ReactNode }) {
           <RoomSummary key={i} i={i} sel={flow.selections[i] ?? null} multi={n > 1} />
         ))}
       </ul>
-      {single ? (
+      {total ? (
         <div className="mt-3 flex items-baseline justify-between gap-3">
           <span className="font-semibold">{t("summary.total")}</span>
-          <span className="text-2xl font-bold tabular-nums">{money(single.totals.total, single.currency)}</span>
+          <span className="text-2xl font-bold tabular-nums">{money(total.amount, total.currency)}</span>
         </div>
       ) : (
-        n > 1 && <p className="mt-3 text-sm text-muted">{t("summary.multiTotalNote")}</p>
+        n > 1 && <p className="mt-3 text-sm text-muted">{basket.status === "loading" ? t("summary.calculating") : t("summary.multiTotalNote")}</p>
       )}
       {single && !isZero(single.totals.tax ?? "0") && isZero(single.totals.tax_added ?? "0") && (
         <p className="mt-1 text-right text-xs text-muted">{t("summary.taxesIncluded")}</p>
+      )}
+      {chosen?.due_now && total && (
+        <dl className="mt-2 space-y-1 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="font-medium">{t("summary.dueNow")}</dt>
+            <dd className="font-semibold tabular-nums">{money(chosen.due_now, total.currency)}</dd>
+          </div>
+          {chosen.balance_after && !isZero(chosen.balance_after) && (
+            <div className="flex justify-between gap-3 text-soft">
+              <dt>{t("summary.dueLater")}</dt>
+              <dd className="tabular-nums">{money(chosen.balance_after, total.currency)}</dd>
+            </div>
+          )}
+        </dl>
       )}
       {children && <div className="mt-4">{children}</div>}
     </div>
@@ -139,15 +169,16 @@ export function SummaryBody({ children }: { children?: ReactNode }) {
  * figure and the next action; the full summary opens in a sheet. */
 export function Summary({ action, compactLabel }: { action?: ReactNode; compactLabel?: ReactNode }) {
   const { t, money } = useI18n()
-  const { flow, criteria } = useBooking()
+  const { flow, criteria, basket } = useBooking()
   const [open, setOpen] = useState(false)
   if (compactLabel === undefined) {
     const n = criteria.rooms.length
     const q = n === 1 ? (flow.quotes[0]?.ok ? flow.quotes[0]!.quote! : flow.selections[0]?.quote) : null
+    const total = serverTotal(basket, q)
     const nights = criteria.checkIn && criteria.checkOut ? nightsBetween(criteria.checkIn, criteria.checkOut) : 0
-    compactLabel = q ? (
+    compactLabel = total ? (
       <>
-        <span className="tabular-nums">{money(q.totals.total, q.currency)}</span>
+        <span className="tabular-nums">{money(total.amount, total.currency)}</span>
         <span className="font-normal text-muted"> · {t("dates.nights", { count: nights })}</span>
       </>
     ) : (
