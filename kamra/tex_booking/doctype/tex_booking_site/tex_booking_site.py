@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from kamra.tex.security.filetypes import safe_image_url
 from kamra.tex.services import sites
 
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -25,6 +26,12 @@ class TEXBookingSite(Document):
 		for f in ("primary_color", "accent_color", "background_color"):
 			if self.get(f) and not HEX.match(self.get(f)):
 				frappe.throw(_("{0} must be a #RRGGBB colour.").format(self.meta.get_label(f)))
+		for f in ("logo", "hero_image"):
+			# guests' pages show these: an image of this platform or an https address, never script,
+			# markup (SVG, HTML) or another scheme (G-83)
+			if self.get(f) and not safe_image_url(self.get(f)):
+				frappe.throw(_("{0} must be an uploaded PNG, JPEG, GIF or WebP image or an https:// address.").format(
+					self.meta.get_label(f)))
 		origins = [o.strip().lower().rstrip("/") for o in (self.allowed_embed_origins or "").splitlines() if o.strip()]
 		bad = [o for o in origins if not ORIGIN.match(o)]
 		if bad:

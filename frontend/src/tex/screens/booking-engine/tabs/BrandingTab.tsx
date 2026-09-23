@@ -6,7 +6,7 @@ import { Button, Card, CardBody, Field, FormGrid, IconButton, Input, Notice, Seg
 import { FormSection } from "../../settings/components/common"
 import { BrandPreview } from "../BrandPreview"
 import { BUTTON_STYLES, FONTS, HEADER_LAYOUTS, HEX, RADII, SEARCH_STYLES, contrast, onColor, safeImageUrl } from "../site"
-import { IMAGE_TYPES, MAX_IMAGE_BYTES, uploadPublicImage } from "../upload"
+import { IMAGE_TYPES, MAX_IMAGE_BYTES, uploadPublicImage, type ImageTarget } from "../upload"
 import type { TabProps } from "./common"
 
 /** Native colour picker + #RRGGBB text input kept in sync. */
@@ -57,7 +57,7 @@ function ColorField({ label, value, onChange, error, hint }: { label: string; va
 }
 
 /** Image by URL, or upload a public file and keep its /files/… URL. */
-function ImageField({ label, value, onChange, error, hint }: { label: string; value: string | null; onChange: (v: string | null) => void; error?: string; hint: string }) {
+function ImageField({ label, value, onChange, error, hint, target }: { label: string; value: string | null; onChange: (v: string | null) => void; error?: string; hint: string; target: ImageTarget }) {
   const { t } = useTexT()
   const file = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
@@ -94,7 +94,7 @@ function ImageField({ label, value, onChange, error, hint }: { label: string; va
             setBusy(true)
             setUploadErr(null)
             try {
-              onChange(await uploadPublicImage(f))
+              onChange(await uploadPublicImage(f, target))
             } catch (err) {
               setUploadErr((err as TexApiError).message)
             } finally {
@@ -123,8 +123,10 @@ function ImageField({ label, value, onChange, error, hint }: { label: string; va
   )
 }
 
-export function BrandingTab({ site, set, err }: TabProps) {
+export function BrandingTab({ site, set, err, isNew }: TabProps) {
   const { t } = useTexT()
+  // a saved site authorises the upload; a new one by the hotel or group it will serve
+  const target: ImageTarget = !isNew && site.name ? { site: site.name } : { property: site.property, hotel_group: site.hotel_group }
   const btnText = onColor(site.primary_color)
   const cButton = contrast(site.primary_color, btnText)
   const cText = contrast(site.background_color, "#1F2328")
@@ -201,8 +203,8 @@ export function BrandingTab({ site, set, err }: TabProps) {
           </FormSection>
 
           <FormSection title={t("be.brand.images")} description={t("be.brand.images_hint")}>
-            <ImageField label={t("be.field.logo")} value={site.logo} error={err("logo")} hint={t("be.field.logo_hint")} onChange={(v) => set({ logo: v })} />
-            <ImageField label={t("be.field.hero_image")} value={site.hero_image} error={err("hero_image")} hint={t("be.field.hero_image_hint")} onChange={(v) => set({ hero_image: v })} />
+            <ImageField label={t("be.field.logo")} value={site.logo} error={err("logo")} hint={t("be.field.logo_hint")} onChange={(v) => set({ logo: v })} target={target} />
+            <ImageField label={t("be.field.hero_image")} value={site.hero_image} error={err("hero_image")} hint={t("be.field.hero_image_hint")} onChange={(v) => set({ hero_image: v })} target={target} />
           </FormSection>
         </CardBody>
       </Card>

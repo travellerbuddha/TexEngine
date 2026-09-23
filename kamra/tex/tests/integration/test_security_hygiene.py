@@ -8,22 +8,41 @@
 - a payment provider's API key is a write-only encrypted secret.
 """
 
+import io
 import json
+import os
+from unittest import mock
 
 import frappe
 from frappe.utils import add_to_date, now_datetime
+from werkzeug.test import EnvironBuilder
+from werkzeug.wrappers import Request
 
+from kamra.tex.api import admin as admin_api
 from kamra.tex.api import crm as crm_api
 from kamra.tex.crm import service as crm
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import (
 	GUEST,
+	SLUG,
 	guest_books,
 	setup_site_and_payments,
 )
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 from kamra.tex.tests.integration.test_security_regressions import OTHER, other_hotel_with_mock
+
+
+def png_bytes(size=(4, 4)) -> bytes:
+	from PIL import Image
+
+	buf = io.BytesIO()
+	Image.new("RGB", size, (200, 30, 30)).save(buf, format="PNG")
+	return buf.getvalue()
+
+
+SVG = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>'
+HTML = b"<!doctype html><html><body><script>fetch('/api/method/frappe.auth.get_logged_user')</script></body></html>"
 
 
 class TestSecurityHygieneG83(TexTestCase):
@@ -128,3 +147,55 @@ class TestSecurityHygieneG83(TexTestCase):
 		# withdrawing stays one step: staff record it in the CRM
 		crm_api.update_guest(existing.name, {"tex_consent_email": 0}, consent_source="guest asked by phone")
 		self.assertEqual(frappe.db.get_value("Guest", existing.name, "tex_consent_email"), 0)
+
+	# ── 3. uploads ────────────────────────────────────────────────────────
+
+	def upload(self, name: str, content: bytes, **kw):
+		"""The endpoint as a browser's multipart POST reaches it."""
+		env = EnvironBuilder(method="POST", path="/api/method/kamra.tex.api.admin.upload_site_image",
+		                     data={"file": (io.BytesIO(content), name)}).get_environ()
+		with mock.patch.object(frappe.local, "request", Request(env), create=True):
+			return admin_api.upload_site_image(**kw)
+
+	def test_g83_uploads_are_checked_on_the_server(self):
+		self.as_user(self.editor)
+		out = self.upload("hotel logo.PNG", png_bytes(), site=SLUG)
+		f = frappe.db.get_value("File", {"file_url": out["file_url"]},
+		                        ["is_private", "attached_to_doctype", "attached_to_name", "file_name"], as_dict=True)
+		self.assertEqual((f.is_private, f.attached_to_doctype, f.attached_to_name), (0, "TEX Booking Site", SLUG))
+		self.assertTrue(f.file_name.endswith(".png"), f.file_name)
+		# the bytes decide, never the name: markup named .png, SVG, a broken image, too big, empty
+		for name, content in (("logo.png", HTML), ("logo.svg", SVG), ("logo.gif", SVG),
+		                      ("logo.png", png_bytes()[:40]), ("logo.png", png_bytes() + b"\0" * (2 * 1024 * 1024)),
+		                      ("logo.png", b"")):
+			with self.assertRaises(frappe.ValidationError, msg=f"{name} {content[:20]!r}"):
+				self.upload(name, content, site=SLUG)
+		self.as_user(self.outsider)                     # another hotel's admin cannot brand this site
+		with self.assertRaises(frappe.PermissionError):
+			self.upload("logo.png", png_bytes(), site=SLUG)
+		with self.assertRaises(frappe.PermissionError):
+			self.upload("logo.png", png_bytes(), property=fx.PROPERTY)
+		# the generic Frappe upload path never serves active content from the public folder
+		self.as_user(self.editor)
+		for name, content in (("page.html", HTML), ("logo.svg", SVG), ("x.xhtml", HTML), ("x.js", b"alert(1)")):
+			with self.assertRaises(frappe.ValidationError, msg=name):
+				frappe.get_doc({"doctype": "File", "file_name": name, "content": content, "is_private": 0}
+				               ).insert(ignore_permissions=True)
+			self.assertFalse(os.path.exists(frappe.get_site_path("public", "files", name)), name)   # never written
+		kept = frappe.get_doc({"doctype": "File", "file_name": "kept.svg", "content": SVG, "is_private": 1}
+		                      ).insert(ignore_permissions=True)          # private: served as a download only
+		self.assertTrue(kept.file_url.startswith("/private/files/"))
+		kept.is_private = 0
+		with self.assertRaises(frappe.ValidationError):                   # and it cannot be made public later
+			kept.save(ignore_permissions=True)
+		# a booking site's images are image addresses, never script or active content
+		self.as_user("Administrator")
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		for bad in ("javascript:alert(1)", "/files/evil.svg", "http://insecure.example/logo.png",
+		            'https://x.example/a.png" onerror="alert(1)', "/files/page.html"):
+			site.logo = bad
+			with self.assertRaises(frappe.ValidationError, msg=bad):
+				site.save(ignore_permissions=True)
+		site.reload()
+		site.logo, site.hero_image = out["file_url"], "https://images.example.com/hero.webp"
+		site.save(ignore_permissions=True)

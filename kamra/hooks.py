@@ -312,6 +312,9 @@ doc_events.setdefault("TEX Contract Version", {})["on_update"] = "kamra.tex.hook
 # extend_doctype_class = {
 # 	"Task": "kamra.custom.task.CustomTaskMixin"
 # }
+# no upload path puts HTML, SVG, XML or script into the public folder (G-83); checked before
+# File writes anything to disk
+extend_doctype_class = {"File": "kamra.tex.security.uploads.PublicFileGuard"}
 
 # Overriding Methods
 # ------------------------------
