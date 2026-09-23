@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowUpRight, Mail, MessageCircle, MessagesSquare, Noteb
 import { useTexMutation } from "../../../lib/api"
 import { date, dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, Dialog, EmptyState, Field, FormGrid, InlineError, Input, Notice, Select, Textarea, useToast } from "../../../ui"
+import { Badge, Button, Dialog, EmptyState, Field, FormGrid, InlineError, Input, Notice, Select, Textarea, useToast, type Tone } from "../../../ui"
 import { useEvent } from "../lib"
 import type { CommChannel, CommDirection, Communication, ConsentBasis, Guest, Stay } from "../types"
 
@@ -11,6 +11,8 @@ const ICON: Record<CommChannel, typeof Mail> = { Email: Mail, SMS: Smartphone, W
 const CHANNELS: CommChannel[] = ["Phone", "Note", "Email", "SMS", "WhatsApp"]
 const DIRECTIONS: CommDirection[] = ["Outbound", "Inbound", "Internal"]
 const BASES: ConsentBasis[] = ["Transactional", "Marketing", "Legitimate Interest"]
+// "Queued" is in the outgoing queue, not sent: never shown as a success (ADR-047)
+const STATUS_TONE: Record<string, Tone> = { Queued: "info", Sent: "success", Delivered: "success", Failed: "danger" }
 const CONSENT_OF: Partial<Record<CommChannel, keyof Guest>> = { Email: "tex_consent_email", SMS: "tex_consent_sms", WhatsApp: "tex_consent_whatsapp" }
 
 export const channelKey = (c: string) => `crm.comm.channel.${c.toLowerCase()}`
@@ -56,8 +58,9 @@ export function CommunicationsTimeline({ items }: { items: Communication[] }) {
                   {t(channelKey(c.channel))} · {t(directionKey(c.direction))}
                 </Badge>
                 <Badge tone={c.consent_basis === "Marketing" ? "brand" : "info"}>{t(basisKey(c.consent_basis))}</Badge>
-                {c.status && c.status !== "Logged" && <Badge tone={c.status === "Failed" ? "danger" : "success"}>{t(`crm.comm.status.${c.status.toLowerCase()}`)}</Badge>}
+                {c.status && c.status !== "Logged" && <Badge tone={STATUS_TONE[c.status] ?? "info"}>{t(`crm.comm.status.${c.status.toLowerCase()}`)}</Badge>}
               </div>
+              {c.status === "Failed" && c.delivery_error && <p className="mt-1 text-xs text-rose-800">{t("crm.comm.delivery_error", { reason: c.delivery_error })}</p>}
               {c.body && <p className="mt-1 text-sm whitespace-pre-line text-zinc-700">{c.body}</p>}
               <p className="mt-1 text-xs text-zinc-500">
                 {dateTime(c.sent_at || c.creation)} · {c.actor === "Guest" ? t("crm.actor.guest") : c.actor || "—"}

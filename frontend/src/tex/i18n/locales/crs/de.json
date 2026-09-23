@@ -229,7 +229,7 @@
  },
  "crs.link.open": "Zahlungsseite öffnen",
  "crs.link.ready": "Der Link ist fertig. Senden Sie ihn dem Gast per E-Mail oder Nachricht.",
- "crs.link.ready_emailed": "Der Link ist fertig und wurde dem Gast per E-Mail gesendet.",
+ "crs.link.ready_emailed": "Der Link ist fertig und die E-Mail an den Gast ist in der Warteschlange.",
  "crs.link.reissue": "Link neu ausstellen",
  "crs.link.reissue_hint": "Es wird eine neue Adresse erstellt; die alte funktioniert nicht mehr.",
  "crs.link.reissue_short": "Neu ausstellen",

@@ -158,7 +158,7 @@
  "payments.links.email_failed": "Не удалось отправить письмо. Скопируйте ссылку и отправьте её гостю сами.",
  "payments.links.email_invalid": "Введите корректный адрес эл. почты.",
  "payments.links.email_language": "Язык письма",
- "payments.links.emailed": "Отправлено на {email}.",
+ "payments.links.emailed": "Письмо на {email} поставлено в очередь на отправку.",
  "payments.links.empty": "Ссылок на оплату пока нет",
  "payments.links.empty_filtered": "Нет ссылок по этим фильтрам",
  "payments.links.empty_hint": "Создайте ссылку, чтобы получить предоплату, остаток или оплату услуг — с бронированием или без.",

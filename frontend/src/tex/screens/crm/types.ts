@@ -105,6 +105,8 @@ export interface Communication {
   booking: string | null
   reservation: string | null
   creation: string
+  /** e-mail: why the mail failed, e.g. "SMTPRecipientsRefused (550)" (ADR-047) */
+  delivery_error?: string | null
 }
 
 export interface LoyaltyEntry {

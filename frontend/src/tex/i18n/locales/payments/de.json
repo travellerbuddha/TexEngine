@@ -156,7 +156,7 @@
  "payments.links.email_failed": "Die E-Mail konnte nicht gesendet werden. Kopieren Sie die URL und senden Sie sie selbst an den Gast.",
  "payments.links.email_invalid": "Geben Sie eine gültige E-Mail-Adresse ein.",
  "payments.links.email_language": "Sprache der E-Mail",
- "payments.links.emailed": "Per E-Mail an {email} gesendet.",
+ "payments.links.emailed": "E-Mail an {email} zum Versand in die Warteschlange gestellt.",
  "payments.links.empty": "Noch keine Zahlungslinks",
  "payments.links.empty_filtered": "Keine Links für diese Filter",
  "payments.links.empty_hint": "Erstellen Sie einen Link für Anzahlung, Restbetrag oder Extras, mit oder ohne Buchung.",

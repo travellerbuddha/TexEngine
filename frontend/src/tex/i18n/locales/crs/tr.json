@@ -229,7 +229,7 @@
  },
  "crs.link.open": "Ödeme sayfasını aç",
  "crs.link.ready": "Link hazır. Misafire e-posta veya mesajla gönderin.",
- "crs.link.ready_emailed": "Link hazır ve misafire e-postayla gönderildi.",
+ "crs.link.ready_emailed": "Link hazır ve misafire gidecek e-posta kuyruğa alındı.",
  "crs.link.reissue": "Linki yeniden oluştur",
  "crs.link.reissue_hint": "Yeni bir adres oluşturulur; eskisi çalışmaz hale gelir.",
  "crs.link.reissue_short": "Yenile",

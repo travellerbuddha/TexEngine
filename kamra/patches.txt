@@ -37,3 +37,4 @@ kamra.patches.tex.p19_payments_go_live_check
 kamra.patches.tex.p20_guest_change_requests
 kamra.patches.tex.p21_contract_header_lock
 kamra.patches.tex.p22_payment_api_key_password
+kamra.patches.tex.p23_system_status_alerts

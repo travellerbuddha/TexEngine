@@ -72,6 +72,7 @@
  "crm.comm.channel.phone": "Telefon görüşmesi",
  "crm.comm.channel.sms": "SMS",
  "crm.comm.channel.whatsapp": "WhatsApp",
+ "crm.comm.delivery_error": "Neden: {reason}",
  "crm.comm.direction": "Yön",
  "crm.comm.direction.inbound": "Gelen",
  "crm.comm.direction.internal": "Dahili",

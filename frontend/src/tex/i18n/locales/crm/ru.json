@@ -646,5 +646,6 @@
  "crm.stay.status.quoted": "Предложено",
  "crm.stay.status.requested": "Запрошено",
  "crm.stay.status.waitlist": "Лист ожидания",
- "crm.vip": "VIP"
+ "crm.vip": "VIP",
+ "crm.comm.delivery_error": "Причина: {reason}"
 }

@@ -738,8 +738,12 @@ def _refresh_booking_after_change(booking: str) -> None:
 
 
 def resend_confirmation(booking: str) -> dict:
-	"""Send the booking e-mail again with a NEW manage link (only a hash of the old one
-	exists, so it cannot be re-sent; the old link stops working)."""
+	"""Queue the booking e-mail again with a NEW manage link (only a hash of the old one
+	exists, so it cannot be re-sent; the old link stops working).
+
+	Reports what happened, never more (ADR-047): ``queued`` when the e-mail queue took the
+	message (``status`` "Queued"; the guest's timeline later shows Sent or Failed), else
+	``status`` "Failed" (e.g. no outgoing e-mail account)."""
 	from kamra.tex.services import notify
 
 	b = frappe.get_doc("TEX Booking", booking)
@@ -751,10 +755,11 @@ def resend_confirmation(booking: str) -> dict:
 	token, digest = new_manage_token()
 	b.manage_token_hash = digest
 	b.save(ignore_permissions=True)
-	sent = notify.booking_created(b.name, token)
+	mail = notify.booking_mail(b.name, token)
 	audit("booking.confirmation_resent", reference_doctype="TEX Booking", reference_name=b.name,
-	      property=b.property, new={"sent": bool(sent)})
-	return {"booking": b.name, "sent": bool(sent), "email": b.booker_email}
+	      property=b.property, new={"queued": mail["queued"], "status": mail["status"],
+	                                "communication": mail["communication"]})
+	return {"booking": b.name, "queued": mail["queued"], "status": mail["status"], "email": b.booker_email}
 
 
 # ─── read ────────────────────────────────────────────────────────────────

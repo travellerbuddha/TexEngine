@@ -229,7 +229,7 @@
  },
  "crs.link.open": "Open payment page",
  "crs.link.ready": "The link is ready. Send it to the guest by email or message.",
- "crs.link.ready_emailed": "The link is ready and was e-mailed to the guest.",
+ "crs.link.ready_emailed": "The link is ready and the e-mail to the guest is queued.",
  "crs.link.reissue": "Reissue link",
  "crs.link.reissue_hint": "A new address is created; the old one stops working.",
  "crs.link.reissue_short": "Reissue",

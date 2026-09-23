@@ -236,7 +236,7 @@
  },
  "crs.link.open": "Deschide pagina de plată",
  "crs.link.ready": "Linkul este gata. Trimiteți-l oaspetelui prin e-mail sau mesaj.",
- "crs.link.ready_emailed": "Linkul este gata și a fost trimis oaspetelui pe e-mail.",
+ "crs.link.ready_emailed": "Linkul este gata, iar e-mailul către oaspete a fost pus în coadă.",
  "crs.link.reissue": "Reemite linkul",
  "crs.link.reissue_hint": "Se creează o adresă nouă; cea veche nu mai funcționează.",
  "crs.link.reissue_short": "Reemite",

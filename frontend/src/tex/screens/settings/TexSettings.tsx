@@ -18,6 +18,7 @@ import {
   Select,
   Skeleton,
   Switch,
+  Textarea,
   useToast,
 } from "../../ui"
 import { SettingsFrame } from "./SettingsFrame"
@@ -36,6 +37,8 @@ interface TexSettingsData {
   manage_link_days: number | null
   fx_provider_default: string | null
   fx_max_age_days: number | null
+  /** system-status alert recipients, one e-mail address per line (ADR-047) */
+  status_alert_recipients: string | null
 }
 
 const INT_FIELDS: { key: keyof TexSettingsData; min: number; max: number }[] = [
@@ -81,6 +84,8 @@ export default function TexSettings() {
     if (!/^\d+$/.test(age) || Number(age) < 1 || Number(age) > 30) errors.fx_max_age_days = t("settings.err.range", { min: 1, max: 30 })
     if (form.support_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.support_email)) errors.support_email = t("settings.err.email")
     if (!form.brand_name.trim()) errors.brand_name = t("settings.err.required")
+    const recipients = form.status_alert_recipients.split(/[\s,;]+/).filter(Boolean)
+    if (recipients.length > 20 || recipients.some((r) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r))) errors.status_alert_recipients = t("settings.err.recipients")
   }
   const valid = Object.keys(errors).length === 0
 
@@ -95,6 +100,7 @@ export default function TexSettings() {
       default_sales_channel: form.default_sales_channel || null,
       fx_provider_default: form.fx_provider_default || "TCMB",
       fx_max_age_days: Number(form.fx_max_age_days),
+      status_alert_recipients: form.status_alert_recipients.split(/[\s,;]+/).filter(Boolean).join("\n") || null,
     }
     for (const f of INT_FIELDS) data[f.key] = Number(form[f.key])
     try {
@@ -220,6 +226,20 @@ export default function TexSettings() {
                   <Input inputMode="numeric" value={form.fx_max_age_days} onChange={(e) => set("fx_max_age_days", e.target.value.replace(/[^\d]/g, ""))} />
                 </Field>
               </FormGrid>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title={t("settings.tex.monitoring")} description={t("settings.tex.monitoring_hint")} />
+            <CardBody>
+              <Field label={t("settings.tex.alert_recipients")} error={errors.status_alert_recipients} hint={t("settings.tex.alert_recipients_hint")}>
+                <Textarea
+                  rows={3}
+                  value={form.status_alert_recipients}
+                  onChange={(e) => set("status_alert_recipients", e.target.value)}
+                  spellCheck={false}
+                />
+              </Field>
             </CardBody>
           </Card>
 

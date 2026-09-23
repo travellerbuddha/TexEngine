@@ -239,7 +239,7 @@ def save_market(data):
 
 SETTINGS_FIELDS = ("strict_tenancy", "show_legacy_pms", "brand_name", "support_email", "default_market",
                    "default_sales_channel", "offer_ttl_minutes", "quote_ttl_minutes", "hold_minutes",
-                   "manage_link_days", "fx_provider_default", "fx_max_age_days")
+                   "manage_link_days", "fx_provider_default", "fx_max_age_days", "status_alert_recipients")
 
 
 @frappe.whitelist()

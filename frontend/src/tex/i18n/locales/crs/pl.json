@@ -243,7 +243,7 @@
  },
  "crs.link.open": "Otwórz stronę płatności",
  "crs.link.ready": "Link jest gotowy. Wyślij go gościowi e-mailem lub wiadomością.",
- "crs.link.ready_emailed": "Link jest gotowy i został wysłany gościowi e-mailem.",
+ "crs.link.ready_emailed": "Link jest gotowy, a e-mail do gościa jest w kolejce.",
  "crs.link.reissue": "Wygeneruj link ponownie",
  "crs.link.reissue_hint": "Zostanie utworzony nowy adres; stary przestanie działać.",
  "crs.link.reissue_short": "Odnów",

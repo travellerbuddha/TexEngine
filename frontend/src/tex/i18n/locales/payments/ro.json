@@ -157,7 +157,7 @@
  "payments.links.email_failed": "E-mailul nu a putut fi trimis. Copiați URL-ul și trimiteți-l singur oaspetelui.",
  "payments.links.email_invalid": "Introduceți o adresă de e-mail validă.",
  "payments.links.email_language": "Limba e-mailului",
- "payments.links.emailed": "Trimis prin e-mail la {email}.",
+ "payments.links.emailed": "E-mailul către {email} a fost pus în coada de trimitere.",
  "payments.links.empty": "Încă niciun link de plată",
  "payments.links.empty_filtered": "Niciun link pentru aceste filtre",
  "payments.links.empty_hint": "Creați un link pentru un avans, un sold sau un serviciu extra, cu sau fără rezervare.",

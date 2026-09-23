@@ -87,6 +87,11 @@ PLATFORM_SPECS = [
 		SB("Currency"),
 		F("fx_provider_default", "Select", "Default FX provider", ["TCMB", "ECB", "MANUAL"], default="TCMB"),
 		F("fx_max_age_days", "Int", "Max FX rate age (days)", default="4"),
+		# an explicit name: SB() numbers sections globally, a new one would rename every later section
+		F("section_monitoring", "Section Break", "Monitoring"),
+		F("status_alert_recipients", "Small Text", "System-status alert recipients",
+		  description="E-mail addresses, one per line, told when a system-status check gets worse or "
+		              "recovers (ADR-047). Sent through the site's outgoing e-mail account."),
 	], perms=[SM, perm("Hotel Admin", "readonly")], issingle=True),
 
 	dt("TEX Enterprise", P, [
@@ -1082,6 +1087,9 @@ CRM_SPECS = [
 		F("template", "Data", "Template"),
 		F("sent_at", "Datetime", "Sent at"),
 		F("actor", "Link", "Actor", "User"),
+		F("email_queue", "Data", "E-mail queue entry", read_only=1,
+		  description="The Email Queue row of this message; its status is synced every 5 minutes (ADR-047)."),
+		F("delivery_error", "Data", "Delivery error", read_only=1),
 		SB("Message"),
 		F("subject", "Data", "Subject", in_list_view=1),
 		F("body", "Text", "Body"),

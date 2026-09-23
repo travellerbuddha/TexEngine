@@ -272,9 +272,8 @@
  "res.resend.button": "Retrimite confirmarea",
  "res.resend.confirm": "Trimite cu link nou",
  "res.resend.not_sent": "Nu s-a trimis nimic la {email}, de exemplu pentru că nu este configurat un cont de e-mail de ieșire. S-a creat totuși un link nou de gestionare, deci cel anterior nu mai funcționează. Retrimiteți când e-mailul funcționează sau comunicați oaspetelui numărul rezervării.",
- "res.resend.not_sent_title": "E-mailul nu a fost trimis",
+ "res.resend.not_sent_title": "E-mailul nu a putut fi pus în coadă",
  "res.resend.old_dead": "Linkul de gestionare anterior nu mai funcționează.",
- "res.resend.sent": "Confirmarea a fost trimisă la {email}",
  "res.resend.title": "Retrimiteți e-mailul de confirmare?",
  "res.resend.warning": "Linkul de gestionare anterior nu mai funcționează imediat. Va funcționa doar linkul din acest e-mail nou.",
  "res.rev.added": "Adăugat",
@@ -308,5 +307,7 @@
  "res.snap.hash": "Hash-ul datelor",
  "res.snap.override": "Preț setat manual la",
  "res.snap.promotions": "Promoții",
- "res.snap.title": "Preț blocat"
+ "res.snap.title": "Preț blocat",
+ "res.resend.queued": "Confirmarea pentru {email} a fost pusă în coadă",
+ "res.resend.queued_hint": "E-mailul este în coada de ieșire, încă netrimis. Cronologia oaspetelui arată când a fost trimis sau de ce a eșuat."
 }

@@ -167,7 +167,7 @@ def profile(guest: str) -> dict:
 		s["tex_total_amount"] = to_str(from_db(s["tex_total_amount"], s["tex_currency"] or "EUR"))
 	comms = frappe.get_all("TEX Communication", filters={"guest": guest, "property": ("in", [*via, ""])},
 	                       fields=["name", "channel", "direction", "status", "consent_basis", "subject", "body",
-	                               "sent_at", "actor", "booking", "reservation", "creation"],
+	                               "sent_at", "actor", "booking", "reservation", "creation", "delivery_error"],
 	                       order_by="creation desc", limit=100)
 	for c in comms:
 		c["sent_at"] = str(c["sent_at"]) if c["sent_at"] else None
