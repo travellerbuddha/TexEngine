@@ -1051,13 +1051,16 @@ the deposit due was never recomputed.
   saves the reservation (its `modified` is what a waiting proposal is checked against).
 - *Locks.* The booking, then the request, then the reservation: the guest's submit, the payment
   callback (it holds the booking once the money is allocated), the refund job and staff all take
-  them in that order.
+  them in that order. *Amended by the review follow-up below: the change is applied by a job
+  after the payment's commit, and staff modifications and cancellations lock the booking first.*
 - *Refunds after commit.* Refunds are made by `guest_changes.settle`, queued with
   `enqueue_after_commit` (inline in tests), keyed per request, charge and step, each step
   committed before the next, so a request retried after a deadlock never refunds twice.
   `payments.service.refund(_system=True)` skips the capability check for this trusted caller
   only and always names the booking. What cannot be refunded goes to staff (settlement "Staff",
-  audit `guest_change.refund_incomplete`, the booking flagged).
+  audit `guest_change.refund_incomplete`, the booking flagged). *Superseded by the review
+  follow-up below: the settlement stays, the money is on `staff_open` / `staff_amount`, and the
+  audit is `guest_change.refund_by_staff`.*
 - *Credit.* "Keep as credit" keeps `paid − total` on the booking (`booking_summary.credit`); later
   changes use it automatically, because they collect against what is paid. There is no ledger
   across stays.
@@ -1071,7 +1074,8 @@ the deposit due was never recomputed.
   screen lists the requests of the reservation with these actions. The scheduler expires requests
   whose payment never came and retries refunds that were queued but did not run.
 - *Audit.* `guest_change.request`, `.applied`, `.credit`, `.failed`, `.late_payment`,
-  `.superseded`, `.expired`, `.refund_incomplete`, `.resolve`, besides the payment events.
+  `.superseded`, `.expired`, `.refund_by_staff`, `.refund_unknown`, `.refund_capped`, `.resolve`,
+  besides the payment events (`payment.refund_unknown`, `payment.refund_verified`).
 **Consequences.**
 - Inventory is not held while the guest pays: a change can fail after the payment and is then
   refunded automatically.
@@ -1079,11 +1083,64 @@ the deposit due was never recomputed.
   moment is deterministic, except that coupon usage limits are counted as they are now.
 - The deposit share of the new total is one reading of "what is due now"; a per-hotel choice
   (e.g. the whole difference) would be a later option.
-- A refund recorded at the gateway whose database commit then fails can still be repeated by a
-  retry (as for any refund); the per-step commits keep that window to one refund.
+- A refund is on record (Pending) before the gateway is asked: a crash or a timeout after the
+  gateway acted leaves an unconfirmed refund for staff to verify, never a second refund.
 - A credit belongs to its booking only: moving it to another stay is a staff transfer.
 - Any save of the reservation between the proposal and the payment (a staff change, a room
   assignment) makes the paid change fail and its payment be refunded: the guest proposes again.
+
+**Review follow-up (adversarial review of G-45).**
+- *Terms the rate would keep are never given back (H1).* A lower price on a non-refundable rate,
+  or while cancelling the room now would cost a fee (`booking.cancellation_penalty` > 0), goes
+  to the hotel (`staff_approval`) whatever the refund policy: shortening a stay can no longer
+  undo a non-refundable rate or a penalty, as a refund or as credit. Guests change a room only
+  while it is Confirmed and before arrival (`guard_room`: `manage_propose`, submit, the retry
+  and the paid job); an arrived room is not cancelled online either.
+- *A refund is never made twice (H2).* `payments.service.refund(durable=True)` (the refund job
+  and the staff endpoint) commits the refund as Pending with its idempotency key before the
+  gateway is asked, and passes TEX's refund id to a gateway that keeps one (iyzico
+  `conversationId`). `ProviderError` or a Failed outcome is a definite "no"; any other error
+  (timeout, connection, server) leaves the refund Pending with error `UNKNOWN`
+  (`RefundUnknown`, audit `payment.refund_unknown`): TEX never asks again for that key, a
+  Pending refund counts against what is refundable and makes its charge unsupported for
+  automatic refunds. The refund job stops for that request: nothing moves to another charge;
+  the money waits for staff as "Verify refund at gateway" (queue, system status
+  `payments.callbacks` `refund_unknown`). Staff close it with what the gateway did
+  (`finish_unknown_refund`: Succeeded takes it off the booking, Failed leaves it). Only a
+  definite failure moves on to the next charge.
+- *A refund is what is still over when it is made (H3).* The job re-reads the booking under
+  its lock and refunds at most `paid − total − money set aside for other refunds`: a later
+  change or a refund staff made by hand is never refunded again (audit
+  `guest_change.refund_capped`). Charges another request must give back (a payment of a change
+  that did not apply) are left out of every other refund plan. Money set aside for refunds is
+  not the guest's credit (`earmarked`; the guest view shows `credit` and `refund_due` apart)
+  and pays for no change; while a refund is being made the booking takes no new guest change
+  (`RefundPending`, `changes_blocked: REFUND_PENDING`).
+- *The payment callback only records the charge (M1).* `on_charge_succeeded` queues
+  `apply_paid(request, charge)` after the payment's commit: a job with its own unit of work and
+  deadlock retries that applies the change (or fails it and refunds the payment). A paid change
+  left waiting is applied by the scheduler; the payment deadline is judged by when the gateway
+  confirmed the charge, not by when the job runs. **Lock order**, everywhere: the booking row,
+  then the request, the reservation and the inventory days (`modification.apply` and
+  `booking.cancel_reservation` now lock the booking first); the payment callback holds the
+  payment row, then the booking, and nothing more.
+- *Money for staff is explicit (M2).* `staff_open`, `staff_amount`, `staff_reason` ("Refund by
+  staff", "Verify refund at gateway") and `unknown_refund` on the request, set wherever money
+  is left to staff (a refund TEX cannot make, a duplicate payment it cannot refund, an approved
+  refund that came up short, a refund the gateway never confirmed); `needs_staff` is a
+  Requested request or `staff_open`. The settlement stays what it was (`Refund`, `Online
+  payment`, …).
+- *Guest wording (L1).* The proposal splits a refund into what a card can take back
+  (`refund`, planned from the charges holding the money) and what the hotel refunds
+  (`hotel_refund`); the answer says whether the card part is back already (`refund_done`); a
+  change not made says what became of the guest's payment (`money_back`: none, refunded,
+  refunding, hotel), so a declined checkout is never announced as a refund.
+- *One request per proposal (L2)* is keyed by the decoded body and signature of the token (the
+  raw string let junk appended to it open a second request); the old key is still looked up.
+- *No row lock through a checkout (L3).* The first submit commits the request before the
+  gateway is asked for a checkout; the request is locked again after the gateway answered.
+- Schema: four fields on TEX Guest Change Request (no patch: migrate adds them, nothing to
+  backfill before release).
 
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 **Context.** G-50 (R-04). After a publish, the contract header stayed editable through the TEX
