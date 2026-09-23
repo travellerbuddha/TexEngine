@@ -27,7 +27,7 @@ from frappe import _
 
 from kamra.tex.api import crs
 from kamra.tex.api._util import parse, text
-from kamra.tex.money import ZERO, D, quantize, to_str
+from kamra.tex.money import D, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import quoting
@@ -61,12 +61,6 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 	return res
 
 
-def _pay_at_hotel_allowed(result: dict) -> bool:
-	# mirrors booking_svc.amount_due_now: the frozen payment policy decides
-	policy = (result.get("rate_plan") or {}).get("payment_policy") or {"deposit_type": "FULL"}
-	return bool(policy.get("allow_pay_at_hotel")) or policy.get("deposit_type") == "NONE"
-
-
 @frappe.whitelist()
 def quote_summary(quote_ids, payment_method: str | None = None):
 	"""Server totals for the room quotes of one booking: grand total, amount due now for
@@ -77,51 +71,12 @@ def quote_summary(quote_ids, payment_method: str | None = None):
 	ids = [str(q) for q in (parse(quote_ids, []) or [])]
 	if not ids or len(ids) > quoting.MAX_ROOMS:
 		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
-	method = text(payment_method, 40)
 	loaded = [quoting.load_quote(qid) for qid in ids]
 	props = {row.property for row, _req, _res in loaded}
 	if len(props) != 1:
 		frappe.throw(_("All rooms of a booking must be at the same hotel."))
-	prop = props.pop()
-	scope.require("reservation.create", prop)
-	currencies = {result["currency"] for _row, _req, result in loaded}
-	if len(currencies) != 1:
-		frappe.throw(_("All rooms must share currency, market and channel."))
-	ccy = currencies.pop()
-
-	rooms = []
-	total = ZERO
-	due = ZERO
-	due_known = True
-	pay_at_hotel = True
-	for row, req, result in loaded:
-		room_total = D(result["totals"]["total"])
-		total += room_total
-		allowed = _pay_at_hotel_allowed(result)
-		pay_at_hotel = pay_at_hotel and allowed
-		policy = (result.get("rate_plan") or {}).get("payment_policy") or {}
-		if method == "Pay at Hotel":
-			room_due, kind = (ZERO, "Pay at Hotel") if allowed else (None, policy.get("deposit_type") or "FULL")
-		else:
-			room_due, kind = booking_svc.amount_due_now(result, method)
-		if room_due is None:
-			due_known = False
-		else:
-			due += room_due
-		rooms.append({
-			"quote_id": row.name, "room_type": req.get("room_type"), "total": to_str(room_total),
-			"due_now": to_str(room_due) if room_due is not None else None, "deposit_type": kind,
-			"payment_policy": policy.get("name"), "pay_at_hotel_allowed": allowed,
-			"expires_at": str(row.expires_at), "problem": quoting.quote_is_usable(row),
-		})
-	return {
-		"property": prop, "currency": ccy, "payment_method": method, "total": to_str(total),
-		"due_now": to_str(due) if due_known else None,
-		"balance_after": to_str(total - due) if due_known else None,
-		"payment_required": bool(due_known and due > 0), "pay_at_hotel_allowed": pay_at_hotel,
-		"usable": all(r["problem"] is None for r in rooms),
-		"expires_at": min(r["expires_at"] for r in rooms), "rooms": rooms,
-	}
+	scope.require("reservation.create", next(iter(props)))
+	return booking_svc.quotes_summary(loaded, text(payment_method, 40))
 
 
 def _booker(raw) -> dict | None:

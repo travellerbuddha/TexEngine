@@ -70,6 +70,10 @@ class QuoteLine:
 		        "included": self.included, "ref": self.ref}
 
 
+# totals only staff with cost access may see (supplier cost, margin)
+INTERNAL_TOTALS = ("cost", "margin", "margin_percent", "cost_contract_currency")
+
+
 @dataclass
 class RoomQuote:
 	request: StayRequest
@@ -99,7 +103,7 @@ class RoomQuote:
 
 		totals = {k: to_str(v) for k, v in self.totals.items()}
 		if not internal:
-			for k in ("cost", "margin", "margin_percent"):
+			for k in INTERNAL_TOTALS:
 				totals.pop(k, None)
 		out = {
 			"engine_version": self.engine_version,

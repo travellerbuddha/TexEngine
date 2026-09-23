@@ -47,10 +47,7 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 			for group in ("offers", "unavailable"):
 				for o in p[group]:
 					for r in o["rooms"]:
-						r["quote"].pop("explanation", None)
-						r["quote"].pop("nights", None)
-						for k in ("cost", "margin", "margin_percent", "cost_contract_currency"):
-							r["quote"]["totals"].pop(k, None)
+						quoting.strip_internal(r["quote"], staff=True)
 	return res
 
 
@@ -69,10 +66,13 @@ def book(quote_ids, guest, payment_method: str | None = None, confirm_without_pa
 		frappe.throw(_("Select at least one room."))
 	prop = frappe.db.get_value("TEX Quote", ids[0], "property")
 	scope.require("reservation.create", prop)
-	return booking_svc.create_booking(quote_ids=ids, guest=parse(guest, {}), payment_method=payment_method,
-	                                  confirm_without_payment=bool(int(confirm_without_payment or 0)),
-	                                  notes=text(notes, 2000), idempotency_key=text(idempotency_key, 140),
-	                                  language=text(language, 10))
+	out = booking_svc.create_booking(quote_ids=ids, guest=parse(guest, {}), payment_method=payment_method,
+	                                 confirm_without_payment=bool(int(confirm_without_payment or 0)),
+	                                 notes=text(notes, 2000), idempotency_key=text(idempotency_key, 140),
+	                                 language=text(language, 10))
+	# the guest's self-service link goes to the guest (email), never to the agent's screen
+	out.pop("manage_token", None)
+	return out
 
 
 @frappe.whitelist()
@@ -145,10 +145,7 @@ def reservation(name: str):
 	internal = scope.has_capability("price.view_cost", res.property)
 	snap = json.loads(res.tex_pricing_snapshot or "{}")
 	if not internal:
-		snap.pop("explanation", None)
-		snap.pop("nights", None)
-		for k in ("cost", "margin", "margin_percent", "cost_contract_currency"):
-			(snap.get("totals") or {}).pop(k, None)
+		quoting.strip_internal(snap, staff=True)
 	guest = frappe.db.get_value("Guest", res.guest, ["name", "full_name", "email", "phone", "tex_language",
 	                                                "tex_country", "vip", "tex_tags"], as_dict=True) \
 		if scope.has_capability("crm.view", res.property) else None

@@ -17,7 +17,9 @@ export default defineConfig(({ command }) => ({
       name: "tex-booking-dev-fallback",
       configureServer(server) {
         server.middlewares.use((req, _res, next) => {
-          if (req.url && /^\/book(\/|\?|$)/.test(req.url) && !/\.[a-z0-9]+(\?|$)/i.test(req.url)) req.url = "/booking.html"
+          // decide on the path only: a query value like "?rooms=2_4.5" is not a file extension
+          const path = (req.url ?? "").split("?", 1)[0]
+          if (/^\/book(\/|$)/.test(path) && !/\.[a-z0-9]+$/i.test(path)) req.url = "/booking.html"
           next()
         })
       },

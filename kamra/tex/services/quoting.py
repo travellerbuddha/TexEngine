@@ -24,7 +24,7 @@ from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
-from kamra.tex.money import D, to_str
+from kamra.tex.money import D, quantize, to_str
 from kamra.tex.pricing import engine, serialize
 from kamra.tex.pricing.model import ChildSpec, ExtraRequest, PricingError, StayRequest, Unsellable
 
@@ -187,9 +187,10 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 				                         channel=channel)
 				violations = avail.check_restrictions(property, scope, check_in, check_out, sale_date, cells)
 				for board in boards:
+					# R-29: every party is priced on its own, so a room type that fits room 1
+					# but not room 2 is still offered for room 1 (``room_indexes``)
 					rooms_out = []
-					sellable = True
-					reasons = []
+					room_reasons = []
 					for idx, party in enumerate(parties):
 						req = build_request(property=property, room_type=rt, board=board, rate_plan=rp,
 						                    check_in=check_in, check_out=check_out, party=party, sale_at=sale_at,
@@ -201,14 +202,14 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 								ctx_cache[key] = ctxmod.build_context(terms, req, extras={})
 							q = engine.price_stay(ctx_cache[key], req)
 						except Unsellable as u:
-							sellable, reasons = False, [{"code": u.code, "message": u.message}]
-							break
+							room_reasons.append({"room_index": idx, "code": u.code, "message": u.message})
+							continue
 						except PricingError as e:
-							sellable, reasons = False, [{"code": "PRICING_ERROR", "message": str(e)}]
-							break
+							room_reasons.append({"room_index": idx, "code": "PRICING_ERROR", "message": str(e)})
+							continue
 						if not q.sellable:
-							sellable, reasons = False, q.reasons
-							break
+							room_reasons.extend({"room_index": idx} | dict(r) for r in q.reasons)
+							continue
 						offer = {"v": 1, "property": property, "room_type": rt, "board": board, "rate_plan": rp,
 						         "contract": contract_row.name, "version": version, "check_in": check_in.isoformat(),
 						         "check_out": check_out.isoformat(), "party": party.key(), "market": market,
@@ -217,6 +218,8 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						         "exp": offer_exp.isoformat()}
 						rooms_out.append({"room_index": idx, "offer_key": sign(offer),
 						                  "quote": q.to_dict(internal=internal)})
+					sellable = bool(rooms_out)
+					complete = len(rooms_out) == len(parties)
 					entry = {
 						"room_type": rt, "board": board, "rate_plan": rp, "contract": contract_row.name,
 						"contract_code": contract_row.contract_code, "market": terms.market,
@@ -225,20 +228,33 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						                                     for d in per_day] if internal else None,
 						"restrictions": [v.to_dict() for v in violations],
 						"rooms": rooms_out,
+						"room_indexes": [r["room_index"] for r in rooms_out],
+						"complete": complete,
 					}
-					bookable = sellable and not violations and count >= len(parties)
+					if room_reasons:
+						entry["room_reasons"] = room_reasons
+					# a room type with at least one free room can take any party it fits; how many
+					# of the requested rooms it can take at once is ``available`` (checked again,
+					# atomically, when the booking is made)
+					bookable = sellable and not violations and count > 0
 					if sellable:
-						entry["total"] = to_str(sum(D(r["quote"]["totals"]["total"]) for r in rooms_out))
-						rp_info = rooms_out[0]["quote"].get("rate_plan") if rooms_out else None
+						if complete:
+							entry["total"] = to_str(sum(D(r["quote"]["totals"]["total"]) for r in rooms_out))
+						rp_info = rooms_out[0]["quote"].get("rate_plan")
 						entry["refundable"] = bool(rp_info["refundable"]) if rp_info else True
 						entry["rate_plan_info"] = rp_info
 					entry["bookable"] = bookable
 					if not sellable:
-						entry["reasons"] = reasons
-					elif count < len(parties):
+						entry["reasons"] = [{k: v for k, v in r.items() if k != "room_index"}
+						                    for r in room_reasons if r["room_index"] == room_reasons[0]["room_index"]]
+					elif count < 1:
 						entry["reasons"] = [{"code": "SOLD_OUT", "message": _("Not enough rooms available")}]
 					elif violations:
 						entry["reasons"] = [{"code": v.code, "message": v.message} for v in violations]
+					elif not complete:
+						entry["reasons"] = [{"code": r["code"], "room_index": r["room_index"],
+						                     "message": _("Room {0}: {1}").format(r["room_index"] + 1, r["message"])}
+						                    for r in room_reasons]
 					(result["offers"] if bookable else result["unavailable"]).append(entry)
 			seen_rooms.add(rt)
 
@@ -249,8 +265,40 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	                                     if a.strip()], "image": v.image,
 	                       "max_adults": v.adults_capacity, "max_children": v.children_capacity}
 	                   for k, v in content.items()}
-	result["offers"].sort(key=lambda o: (D(o["total"]), o["room_type"], o["board"], o.get("rate_plan") or ""))
+	result["offers"].sort(key=lambda o: (not o["complete"], _offer_sort_total(o), o["room_type"], o["board"],
+	                                     o.get("rate_plan") or ""))
+	result["from_total"], result["from_currency"] = _from_total(result["offers"], len(parties))
+	unplaced = [i for i in range(len(parties))
+	            if not any(i in o["room_indexes"] for o in result["offers"])]
+	if result["offers"] and unplaced:
+		result["unplaced_rooms"] = unplaced
+		result["messages"].append(_("No available room type fits room {0}.").format(
+			", ".join(str(i + 1) for i in unplaced)))
 	return result
+
+
+def _offer_sort_total(o: dict):
+	return D(o["total"]) if o.get("total") else min(D(r["quote"]["totals"]["total"]) for r in o["rooms"])
+
+
+def _from_total(offers: list[dict], n_rooms: int) -> tuple[str | None, str | None]:
+	"""Cheapest way to place every requested room: the cheapest offer of each party,
+	summed (rooms may be of different types) in the currency of the first offer.
+	(None, None) when a party fits nowhere."""
+	if not offers:
+		return None, None
+	ccy = offers[0]["currency"]
+	best: dict[int, object] = {}
+	for o in offers:
+		if o["currency"] != ccy:
+			continue
+		for r in o["rooms"]:
+			t = D(r["quote"]["totals"]["total"])
+			if r["room_index"] not in best or t < best[r["room_index"]]:
+				best[r["room_index"]] = t
+	if len(best) < n_rooms:
+		return None, None
+	return to_str(sum(best.values())), ccy
 
 
 def search(*, properties: list[str], check_in, check_out, rooms, market: str, channel: str,
@@ -271,10 +319,8 @@ def search(*, properties: list[str], check_in, check_out, rooms, market: str, ch
 		prop = frappe.db.get_value("Property", p, ["property_name", "city", "star_category"], as_dict=True) or {}
 		res.update({"property_name": prop.get("property_name"), "city": prop.get("city"),
 		            "star_category": prop.get("star_category")})
-		if res["offers"]:
-			res["from_total"] = min(o["total"] for o in res["offers"]) if res["offers"] else None
 		out.append(res)
-	out.sort(key=lambda r: (not r["offers"], D(r.get("from_total") or 0)))
+	out.sort(key=lambda r: (not r.get("from_total"), D(r.get("from_total") or 0)))
 	return {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": (co - ci).days, "market": market,
 	        "channel": channel, "rooms": [p.key() for p in parties], "properties": out}
 
@@ -375,21 +421,31 @@ def default_sale_window(check_in: date) -> timedelta:
 	return timedelta(days=max(0, (check_in - getdate(now_datetime())).days))
 
 
-INTERNAL_TOTALS = ("cost", "margin", "margin_percent", "cost_contract_currency")
+INTERNAL_TOTALS = engine.INTERNAL_TOTALS
 
 
-def strip_internal(q: dict | None) -> dict | None:
+def _night_amount(n: dict, ccy: str) -> str | None:
+	if n.get("amount") is not None:
+		return n["amount"]
+	return to_str(quantize(D(n["final"]), ccy)) if n.get("final") not in (None, "") and ccy else None
+
+
+def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 	"""Remove cost, margin, per-night cost and the rule explanation from a quote dict
-	(for users without price.view_cost and for guests)."""
+	(for users without price.view_cost and for guests). ``staff`` keeps the list of
+	promotions that did not apply (an agent may offer those codes to the caller)."""
 	if not q:
 		return q
 	q.pop("explanation", None)
 	q.pop("fx", None)
 	if isinstance(q.get("nights"), list):
-		q["nights"] = [{"date": n.get("date"), "amount": n.get("amount") or n.get("final")} for n in q["nights"]
+		ccy = q.get("currency") or ""
+		q["nights"] = [{"date": n.get("date"), "amount": _night_amount(n, ccy)} for n in q["nights"]
 		               if isinstance(n, dict)]
 	for k in INTERNAL_TOTALS:
 		(q.get("totals") or {}).pop(k, None)
+	if staff:
+		return q
 	q["promotions"] = [pr for pr in q.get("promotions") or [] if pr.get("applied")]
 	return q
 

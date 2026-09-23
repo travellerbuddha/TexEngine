@@ -138,6 +138,59 @@ def amount_due_now(result: dict, method: str | None) -> tuple[D, str]:
 	return total, "FULL"
 
 
+def pay_at_hotel_allowed(result: dict) -> bool:
+	# mirrors amount_due_now: the frozen payment policy decides
+	policy = (result.get("rate_plan") or {}).get("payment_policy") or {"deposit_type": "FULL"}
+	return bool(policy.get("allow_pay_at_hotel")) or policy.get("deposit_type") == "NONE"
+
+
+def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
+	"""Grand total and amount due now for ``method`` of the room quotes of one booking,
+	with the same deposit rules ``create_booking`` applies. ``loaded`` is a list of
+	``quoting.load_quote`` results (callers check access first)."""
+	props = {row.property for row, _req, _res in loaded}
+	if len(props) != 1:
+		frappe.throw(_("All rooms of a booking must be at the same hotel."))
+	keys = {(result["currency"], req.get("market"), req.get("channel")) for _row, req, result in loaded}
+	if len(keys) != 1:
+		frappe.throw(_("All rooms must share currency, market and channel."))
+	ccy, market, channel = keys.pop()
+	rooms = []
+	total = ZERO
+	due = ZERO
+	due_known = True
+	pay_at_hotel = True
+	for row, req, result in loaded:
+		room_total = D(result["totals"]["total"])
+		total += room_total
+		allowed = pay_at_hotel_allowed(result)
+		pay_at_hotel = pay_at_hotel and allowed
+		policy = (result.get("rate_plan") or {}).get("payment_policy") or {}
+		if method == "Pay at Hotel":
+			room_due, kind = (ZERO, "Pay at Hotel") if allowed else (None, policy.get("deposit_type") or "FULL")
+		else:
+			room_due, kind = amount_due_now(result, method)
+		if room_due is None:
+			due_known = False
+		else:
+			due += room_due
+		rooms.append({
+			"quote_id": row.name, "room_type": req.get("room_type"), "total": to_str(room_total),
+			"due_now": to_str(room_due) if room_due is not None else None, "deposit_type": kind,
+			"payment_policy": policy.get("name"), "pay_at_hotel_allowed": allowed,
+			"expires_at": str(row.expires_at), "problem": quoting.quote_is_usable(row),
+		})
+	return {
+		"property": row.property, "currency": ccy, "market": market, "channel": channel,
+		"payment_method": method, "total": to_str(total),
+		"due_now": to_str(due) if due_known else None,
+		"balance_after": to_str(total - due) if due_known else None,
+		"payment_required": bool(due_known and due > 0), "pay_at_hotel_allowed": pay_at_hotel,
+		"usable": all(r["problem"] is None for r in rooms),
+		"expires_at": min(r["expires_at"] for r in rooms), "rooms": rooms,
+	}
+
+
 def _record_revision(reservation: str, booking: str | None, *, change_type: str, old_amount, new_amount, currency,
                      basis: str, basis_sale_at=None, reason=None, changes=None, before=None, after=None,
                      source="Desk", approval="Not Required", override=None) -> str:
