@@ -18,11 +18,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D
 from kamra.tex.pricing.enums import PromoValueType, StackingMode, StayMatch
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import FxSnapshot, Promotion, RuleRef
+
+if TYPE_CHECKING:
+	from kamra.tex.pricing.fx import FxLog
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +47,8 @@ class PromoContext:
 	basket: Decimal                 # accommodation (+extras) value used for min_basket
 	sell_currency: str
 	fx: dict[str, FxSnapshot] | None = None   # promotion currency → sell_currency (thresholds)
+	# records the rates a threshold was converted with (G-56); not part of the context's identity
+	fx_log: FxLog | None = field(default=None, compare=False, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +144,8 @@ def check_eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | 
 		return "members only"
 	if p.min_basket is not None:
 		# the threshold is in the promotion's currency; the basket in the sell currency (G-08)
-		minimum = in_currency(p.min_basket, p.currency, ctx.sell_currency, ctx.fx)
+		minimum = in_currency(p.min_basket, p.currency, ctx.sell_currency, ctx.fx, log=ctx.fx_log,
+		                      use=f"promotion:{p.promo_id}:min_basket")
 		if minimum is None:
 			return f"no FX to compare the minimum basket in {p.currency} with {ctx.sell_currency}"
 		if ctx.basket < minimum:
@@ -209,27 +216,33 @@ def select(promos: tuple[Promotion, ...], ctx: PromoContext,
 	return apply, rejected
 
 
-def in_currency(amount, from_ccy: str | None, to_ccy: str, fx: dict[str, FxSnapshot] | None) -> Decimal | None:
+def in_currency(amount, from_ccy: str | None, to_ccy: str, fx: dict[str, FxSnapshot] | None, *,
+                log: FxLog | None = None, use: str = "") -> Decimal | None:
 	"""``amount`` in ``to_ccy`` through an explicit snapshot; None when there is no rate.
-	An amount without a currency is already in ``to_ccy``."""
+	An amount without a currency is already in ``to_ccy``. ``log`` records the rate used
+	(G-56) as ``use``."""
 	if not from_ccy or from_ccy == to_ccy:
 		return D(amount)
 	snap = (fx or {}).get(from_ccy)
 	if snap is None or snap.to_currency != to_ccy:
 		return None
+	if log is not None:
+		log.note(snap, use)
 	return D(amount) * snap.sell_rate
 
 
-def _fixed_in(p: Promotion, currency: str, fx: dict[str, FxSnapshot] | None) -> Decimal | None:
+def _fixed_in(p: Promotion, currency: str, fx: dict[str, FxSnapshot] | None,
+              log: FxLog | None = None) -> Decimal | None:
 	"""Fixed promotion amount in ``currency`` (converted through an explicit snapshot)."""
-	return in_currency(p.value, p.currency, currency, fx)
+	return in_currency(p.value, p.currency, currency, fx, log=log, use=f"promotion:{p.promo_id}")
 
 
 def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx: PromoContext,
                      stacking: StackingMode, currency: str, *, fx: dict[str, FxSnapshot] | None = None,
-                     explain: Explanation | None = None, stage: str = "promotion"
+                     explain: Explanation | None = None, stage: str = "promotion", fx_log: FxLog | None = None
                      ) -> tuple[dict[date, Decimal], list[PromoOutcome]]:
-	"""Apply chosen promotions to per-night amounts. → (new amounts, outcomes)."""
+	"""Apply chosen promotions to per-night amounts. → (new amounts, outcomes). ``fx_log``
+	records the rate a fixed amount in another currency is converted with (G-56)."""
 	running = dict(amounts)
 	base = dict(amounts)
 	outcomes: list[PromoOutcome] = []
@@ -253,7 +266,7 @@ def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx:
 				ref_amt = running[n] if stacking == StackingMode.SEQUENTIAL else base[n]
 				running[n] = max(ZERO, running[n] - ref_amt * (ONE - D(p.value)))
 		elif p.value_type == PromoValueType.FIXED_NIGHT:
-			amt = _fixed_in(p, currency, fx)
+			amt = _fixed_in(p, currency, fx, fx_log)
 			if amt is None:
 				outcomes.append(PromoOutcome(p.promo_id, p.name, p.kind, False,
 				                             f"no FX to convert {p.currency}", source=p.source, code=p.code))
@@ -261,7 +274,7 @@ def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx:
 			for n in nights:
 				running[n] = max(ZERO, running[n] - amt)
 		elif p.value_type == PromoValueType.FIXED_STAY:
-			amt = _fixed_in(p, currency, fx)
+			amt = _fixed_in(p, currency, fx, fx_log)
 			if amt is None:
 				outcomes.append(PromoOutcome(p.promo_id, p.name, p.kind, False,
 				                             f"no FX to convert {p.currency}", source=p.source, code=p.code))

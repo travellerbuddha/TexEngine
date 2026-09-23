@@ -398,6 +398,7 @@ def addon_propose(reservation: str, extras):
 	p = addon_svc.propose(reservation, parse(extras, []), guest=False)
 	if not scope.has_capability("price.view_cost", prop):
 		p["addon"].pop("explanation", None)
+		p["addon"].pop("fx_rates", None)
 	return p
 
 

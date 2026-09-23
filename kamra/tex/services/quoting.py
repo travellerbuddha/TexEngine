@@ -364,11 +364,13 @@ def request_from_offer(offer: dict, *, sale_at: datetime, extras=(), promo_codes
 
 def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None,
                   exclude_booking: str | None = None, check_capacity: bool = True,
-                  exclude_reservation: str | None = None):
+                  exclude_reservation: str | None = None, fx_pins=None):
+	"""``fx_pins``: rates recorded at the original sale, reused for their pairs (G-56)."""
 	terms = contracts.load_terms(version)
 	try:
 		ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog, exclude_booking=exclude_booking,
-		                           check_capacity=check_capacity, exclude_reservation=exclude_reservation)
+		                           check_capacity=check_capacity, exclude_reservation=exclude_reservation,
+		                           fx_pins=fx_pins)
 	except Unsellable as u:          # no FX rate, an ambiguous or missing tax policy…
 		return engine.unsellable_quote(terms, req, u), terms
 	return engine.price_stay(ctx, req), terms
@@ -471,6 +473,8 @@ def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 		return q
 	q.pop("explanation", None)
 	q.pop("fx", None)
+	q.pop("fx_rates", None)                       # rates, providers and FX margins (G-56)
+	q.pop("original_fx_rates", None)
 	if isinstance(q.get("nights"), list):
 		ccy = q.get("currency") or ""
 		q["nights"] = [{"date": n.get("date"), "amount": _night_amount(n, ccy)} for n in q["nights"]

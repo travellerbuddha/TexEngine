@@ -12,6 +12,11 @@ Calculation bases:
   ORIGINAL_SALE_DATE    whatever contract/policies were on sale at the original sale time
   HISTORICAL_SALE_DATE  as if sold at a chosen past moment (needs price.override)
   CURRENT               today's contracts and policies
+
+FX (G-56, ADR-051): the ORIGINAL_* bases convert with the rates the original sale recorded
+(``original_fx``), never the FX tables, for every pair the sale converted; a pair it did not
+convert (another contract currency, a new extra's currency) is resolved as of the original
+sale time. HISTORICAL_SALE_DATE and CURRENT resolve every rate as of their own sale time.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, from_db, quantize, to_str
 from kamra.tex.pricing import addons, serialize
+from kamra.tex.pricing import fx as fx_math
 from kamra.tex.pricing.extras import guest_reason
 from kamra.tex.pricing.model import ChildSpec
 from kamra.tex.security import scope
@@ -104,6 +110,29 @@ def original_priced_at(res, snap) -> datetime:
 	return get_datetime(res.tex_sale_at or snap.get("accepted_at"))
 
 
+RECORDED_FX_BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE")
+
+
+def original_fx(res, snap) -> list[dict]:
+	"""The FX conversions the original sale recorded (G-56): the booking's own snapshot has
+	them; a modification carries them on (``original_fx_rates``), like ``original_priced_at``.
+	A modification made before G-56 did not: they are then read from the Original revision."""
+	if isinstance(snap.get("original_fx_rates"), list):
+		return snap["original_fx_rates"]
+	if not snap.get("basis"):         # the booking's own snapshot, not a modification's
+		return fx_math.recorded(snap)
+	first = frappe.db.get_value("TEX Reservation Revision", {"reservation": res.name, "change_type": "Original"},
+	                            "snapshot_after", order_by="revision_no asc")
+	return fx_math.recorded(json.loads(first)) if first else []
+
+
+def fx_pins(res, snap, basis: str) -> dict | None:
+	"""The rates a reprice on ``basis`` converts with instead of the FX tables."""
+	if basis not in RECORDED_FX_BASES:
+		return None
+	return fx_math.pins(original_fx(res, snap), origin=f"reservation:{res.name}")
+
+
 def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[str, datetime, str]:
 	"""→ (contract version, effective sale time, how decided). ``sale_at`` pins CURRENT to the
 	moment a proposal was priced (a guest's paid change applies at the price they accepted)."""
@@ -171,9 +200,11 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	req, snap = build_changed_request(res, changes, placeholder_at)
 	version, at, how = _resolve(res, snap, req, basis, basis_sale_at, _sale_at)
 	req, _s = build_changed_request(res, changes, at)
-	# the booking's own coupon uses never count against it when it is repriced (G-09)
+	# the booking's own coupon uses never count against it when it is repriced (G-09); the
+	# ORIGINAL_* bases convert with the rates the sale recorded (G-56)
 	quote, terms = quoting.price_request(version, req, exclude_booking=res.tex_booking, exclude_reservation=res.name,
-	                                     gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest))
+	                                     gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+	                                     fx_pins=fx_pins(res, snap, basis))
 	old_ccy = res.tex_currency or snap.get("currency")
 	old_total = from_db(res.tex_total_amount or res.amount_after_tax, old_ccy or "EUR")
 
@@ -335,6 +366,7 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		"tex_fx_rate": D((new.get("fx") or {}).get("sell_rate") or 1),
 		"tex_pricing_snapshot": json.dumps({**new, "accepted_at": str(now_datetime()),
 		                                    "original_priced_at": str(original_priced_at(res, snap)),
+		                                    "original_fx_rates": original_fx(res, snap),
 		                                    "basis": p["basis"], "override_amount": to_str(final_total)
 		                                    if override_amount not in (None, "") else None},
 		                                   sort_keys=True, ensure_ascii=False),

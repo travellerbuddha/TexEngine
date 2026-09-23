@@ -339,12 +339,21 @@ def _extra_availability(req: StayRequest, exclude_reservation: str | None):
 
 def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = None,
                   extras: dict[str, ExtraDef] | None = None, exclude_booking: str | None = None,
-                  check_capacity: bool = True, exclude_reservation: str | None = None) -> PricingContext:
+                  check_capacity: bool = True, exclude_reservation: str | None = None,
+                  fx_pins: dict[tuple[str, str], FxSnapshot] | None = None) -> PricingContext:
 	"""``check_capacity``: whether limited extras are checked against what is left now (not in
 	a historical simulation); ``exclude_reservation``: the reservation being repriced, whose
-	own units count as available to it (G-19)."""
+	own units count as available to it (G-19). ``fx_pins``: (from, to) → a rate recorded
+	when the reservation was sold (``fx.pins``), used instead of the FX tables for that pair
+	(G-56, ADR-051); any other pair is resolved as of ``req.sale_at``."""
 	at = req.sale_at
 	sell = req.sell_currency.upper()
+	pinned = fx_pins or {}
+
+	def rate(ccy: str) -> FxSnapshot:
+		ccy = ccy.upper()
+		return pinned.get((ccy, sell)) or fx_snapshot(ccy, sell, req.property, at)
+
 	promos = promotions(req.property, at)
 	# extras and taxes as they were at the sale time being priced (G-20)
 	catalog = extras if extras is not None else extras_catalog(req.property, at=at)
@@ -352,13 +361,13 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 	extra_fx = {}
 	for ccy in sorted(needed):
 		try:
-			extra_fx[ccy] = fx_snapshot(ccy, sell, req.property, at)
+			extra_fx[ccy] = rate(ccy)
 		except Exception:
 			continue      # the extra is then reported as not convertible
 	promo_fx = {}
 	for ccy in sorted({p.currency for p in promos if p.currency and p.currency != sell}):
 		try:
-			promo_fx[ccy] = fx_snapshot(ccy, sell, req.property, at)
+			promo_fx[ccy] = rate(ccy)
 		except Exception:
 			continue
 	taxes = tax_rules(req.property, req.room_type, at=at)
@@ -366,12 +375,12 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 	for ccy in sorted({r.currency.upper() for r in taxes if r.kind != TaxKind.PERCENT and r.currency
 	                   and r.currency.upper() != sell}):
 		try:
-			tax_fx[ccy] = fx_snapshot(ccy, sell, req.property, at)
+			tax_fx[ccy] = rate(ccy)
 		except Exception:
 			continue      # the stay is then unsellable (TAX_FX): a levy is never charged unconverted
 	return PricingContext(
 		terms=terms,
-		fx=fx_snapshot(terms.currency, sell, req.property, at),
+		fx=rate(terms.currency),
 		markups=markups(req.property, at),
 		promotions=promos,
 		tax_rules=taxes,

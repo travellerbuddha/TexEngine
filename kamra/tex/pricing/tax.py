@@ -16,10 +16,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, quantize, to_str
 from kamra.tex.pricing.enums import TaxKind
 from kamra.tex.pricing.model import FxSnapshot, TaxRule, Unsellable
+
+if TYPE_CHECKING:
+	from kamra.tex.pricing.fx import FxLog
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,10 +78,11 @@ def _stack(rules: list[TaxRule], net: Decimal, nightly: Decimal | None = None) -
 
 def compute_taxes(rules: tuple[TaxRule, ...], categories: dict[str, Decimal], *, inclusive: bool,
                   currency: str, persons: int, nights: int,
-                  fx: dict[str, FxSnapshot] | None = None) -> tuple[list[TaxLine], dict[str, Decimal]]:
+                  fx: dict[str, FxSnapshot] | None = None,
+                  fx_log: FxLog | None = None) -> tuple[list[TaxLine], dict[str, Decimal]]:
 	"""→ (tax lines, net amount per category). Category amounts are already rounded;
 	they are gross when ``inclusive`` else net. ``fx`` converts levies fixed in another
-	currency (levy currency → ``currency``)."""
+	currency (levy currency → ``currency``); ``fx_log`` records the rate (G-56)."""
 	lines: list[TaxLine] = []
 	nets: dict[str, Decimal] = {}
 	for category in sorted(categories):
@@ -112,6 +117,8 @@ def compute_taxes(rules: tuple[TaxRule, ...], categories: dict[str, Decimal], *,
 				raise Unsellable("TAX_FX", f"no FX policy to charge {r.name} ({r.currency}) in {currency}",
 				                 tax=r.code, currency=r.currency)
 			rate = snap.sell_rate
+			if fx_log is not None:
+				fx_log.note(snap, f"tax:{r.code}")
 		amt = quantize(D(r.amount) * qty * (rate if rate is not None else ONE), currency)
 		if amt:
 			lines.append(TaxLine(r.code, r.name, "ACCOMMODATION", D(qty), None, amt, False, r.source, rate))

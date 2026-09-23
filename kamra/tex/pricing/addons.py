@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from kamra.tex.money import ZERO, D, calc, quantize, to_str
-from kamra.tex.pricing import ages, extras, tax
+from kamra.tex.pricing import ages, extras, fx, tax
 from kamra.tex.pricing.engine import QuoteLine
 from kamra.tex.pricing.enums import ExtraPricingMode, Level, LineKind
 from kamra.tex.pricing.explain import Explanation
@@ -43,6 +43,7 @@ class AddonQuote:
 	totals: dict[str, Decimal] = field(default_factory=dict)
 	reasons: list[dict] = field(default_factory=list)
 	explanation: Explanation = field(default_factory=Explanation)
+	fx_rates: list[dict] = field(default_factory=list)    # the conversions it made (G-56)
 
 	def to_dict(self, internal: bool = False) -> dict:
 		out = {"ok": self.ok, "currency": self.currency, "extras": [o.to_dict() for o in self.outcomes],
@@ -50,6 +51,7 @@ class AddonQuote:
 		       "totals": {k: to_str(v) for k, v in self.totals.items()}, "reasons": self.reasons}
 		if internal:
 			out["explanation"] = self.explanation.to_list()
+			out["fx_rates"] = self.fx_rates
 		return out
 
 
@@ -71,12 +73,17 @@ def price_addons(*, terms: ContractTerms, request: StayRequest, requests: tuple[
 	``booked``: quantities of each code the reservation already has (for ``max_quantity``);
 	``availability``: what is left of limited extras (G-19)."""
 	with calc():
-		return _price(terms=terms, request=request, requests=requests, catalog=catalog, today=today, now=now,
-		              extra_fx=extra_fx, tax_rules=tax_rules, tax_fx=tax_fx or {}, availability=availability,
-		              booked=booked or {})
+		log = fx.FxLog()
+		q = _price(terms=terms, request=request, requests=requests, catalog=catalog, today=today, now=now,
+		           extra_fx=extra_fx, tax_rules=tax_rules, tax_fx=tax_fx or {}, availability=availability,
+		           booked=booked or {}, log=log)
+		if q.ok:
+			q.fx_rates = log.to_list()
+		return q
 
 
-def _price(*, terms, request, requests, catalog, today, now, extra_fx, tax_rules, tax_fx, availability, booked):
+def _price(*, terms, request, requests, catalog, today, now, extra_fx, tax_rules, tax_fx, availability, booked,
+           log):
 	sell = request.sell_currency.upper()
 	ex = Explanation()
 	if not requests:
@@ -118,6 +125,9 @@ def _price(*, terms, request, requests, catalog, today, now, extra_fx, tax_rules
 		ex.add("extra", "EXTRA", "{name}: {detail} = {amount}", after=outcome.amount, currency=sell,
 		       rule=RuleRef("extra", d.code, Level.HOTEL, f"extra:{d.revision}" if d.revision else "", d.name),
 		       name=d.name, detail=outcome.detail, amount=outcome.amount)
+		if outcome.fx_rate is not None:
+			log.note(extra_fx.get(d.currency), f"extra:{d.code}")
+			fx.explain_new(log, ex)
 	ex.add("addon", "ADDON_NO_PROMOTIONS", "added after booking: priced on its own, without promotions or coupons")
 
 	lines: list[QuoteLine] = []
@@ -131,9 +141,10 @@ def _price(*, terms, request, requests, catalog, today, now, extra_fx, tax_rules
 	persons = party.adults + party.child_count
 	try:
 		tax_lines, _nets = tax.compute_taxes(tax_rules, categories, inclusive=terms.prices_include_tax,
-		                                    currency=sell, persons=persons, nights=nights, fx=tax_fx)
+		                                    currency=sell, persons=persons, nights=nights, fx=tax_fx, fx_log=log)
 	except Unsellable as u:
 		return _refuse(sell, u.code, u.message, ex)
+	fx.explain_new(log, ex)
 	for tl in tax_lines:
 		lines.append(QuoteLine(LineKind.TAX, tl.code, tl.name, tl.amount, category=tl.category, included=tl.included))
 		ex.add("tax", "TAX", "{name} {rate} on {category}: {amount}", after=tl.amount, currency=sell,

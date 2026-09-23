@@ -10,17 +10,22 @@ A rate always means ``1 from_currency = rate to_currency``. Selling-rate modes:
 Provider rates may be direct (EUR→TRY), inverse (TRY→EUR) or crossed through a
 pivot (GBP→EUR via TRY with TCMB, via EUR with ECB). Conversion without an explicit
 policy is refused - money is never converted with a silently assumed rate.
+
+Every conversion a quote makes is recorded (G-56, ADR-051): ``FxLog`` keeps each rate
+once, with what it converted, and the quote carries it as ``fx_rates`` - so a sold
+price is re-explained from its snapshot, and ``pins`` turns the record back into the
+snapshots a reprice on the sold rates uses.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from kamra.tex.money import ONE, D, pct, quantize_rate
+from kamra.tex.money import ONE, D, display_pct, pct, quantize_rate, to_str6
 from kamra.tex.pricing.enums import FxMode
-from kamra.tex.pricing.model import FxSnapshot, Unsellable
+from kamra.tex.pricing.model import FxSnapshot, RuleRef, Unsellable
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,3 +124,118 @@ def resolve_fx(frm: str, to: str, policy: FxPolicy | None, rates: tuple[Provider
 def convert(amount: Decimal, fx: FxSnapshot) -> Decimal:
 	"""Full-precision conversion; rounding happens at line level."""
 	return D(amount) * fx.sell_rate
+
+
+# ─── the record of a quote's conversions (G-56) ──────────────────────────
+
+
+def describe(snap: FxSnapshot) -> str:
+	"""Where a rate came from, for the explanation: "TCMB 50.000000 of 2027-01-14 +2%,
+	policy FXP-0001". A rate reused from a reservation's snapshot says so."""
+	adj = D(snap.adjustment) if snap.adjustment is not None else None
+	if snap.mode == FxMode.IDENTITY:
+		text = "same currency"
+	elif snap.mode == FxMode.MANUAL:
+		text = "manual rate"
+	else:
+		text = f"{snap.provider or '?'} {to_str6(snap.provider_rate)}"
+		if snap.rate_date:
+			text += f" of {snap.rate_date.isoformat()}"
+		if snap.mode == FxMode.PROVIDER_PERCENT and adj is not None:
+			text += f" {'+' if adj >= 0 else '−'}{display_pct(abs(adj))}%"
+		elif snap.mode == FxMode.PROVIDER_FIXED and adj is not None:
+			text += f" {'+' if adj >= 0 else '−'} {to_str6(abs(adj))}"
+	if snap.policy_id:
+		text += f", policy {snap.policy_id}"
+	if snap.origin:
+		text += f"; recorded at sale ({snap.origin})"
+	return text
+
+
+@dataclass
+class FxLog:
+	"""The conversions one quote made: each rate once, in the order first used, with what
+	it converted ("accommodation", "cost", "extra:SPA", "promotion:P1",
+	"promotion:P1:min_basket", "tax:CITY"). A same-currency 'conversion' is not one."""
+
+	entries: list[tuple[FxSnapshot, list[str]]] = field(default_factory=list)
+	unexplained: list[tuple[FxSnapshot, str]] = field(default_factory=list)
+
+	def note(self, snap: FxSnapshot | None, use: str) -> None:
+		if snap is None or snap.from_currency == snap.to_currency:
+			return
+		for s, uses in self.entries:
+			if s == snap:
+				if use not in uses:
+					uses.append(use)
+					self.unexplained.append((snap, use))
+				return
+		self.entries.append((snap, [use]))
+		self.unexplained.append((snap, use))
+
+	def take_unexplained(self) -> list[tuple[FxSnapshot, str]]:
+		out, self.unexplained = self.unexplained, []
+		return out
+
+	def to_list(self) -> list[dict]:
+		return [{**s.to_dict(), "used_for": list(uses)} for s, uses in self.entries]
+
+
+def explain_new(log: FxLog | None, explain) -> None:
+	"""One explanation step per conversion not explained yet: the pair, the exact rate, its
+	source and policy, and what it converted."""
+	if log is None or explain is None:
+		return
+	for snap, use in log.take_unexplained():
+		rule = RuleRef("fx_policy", snap.policy_id, None, f"fx_policy:{snap.policy_id}",
+		               f"{snap.from_currency}→{snap.to_currency}") if snap.policy_id else None
+		explain.add("fx", "FX", "{use}: 1 {from} = {rate} {to} ({source})", rule=rule, use=use,
+		            **{"from": snap.from_currency}, to=snap.to_currency, rate=to_str6(snap.sell_rate),
+		            mode=snap.mode.value, provider=snap.provider, provider_rate=to_str6(snap.provider_rate),
+		            provider_rate_id=snap.provider_rate_id,
+		            rate_date=snap.rate_date.isoformat() if snap.rate_date else None,
+		            adjustment=to_str6(snap.adjustment), policy=snap.policy_id,
+		            as_of=snap.as_of.isoformat() if snap.as_of else None, origin=snap.origin,
+		            source=describe(snap))
+
+
+def from_dict(d: dict, *, origin: str | None = None) -> FxSnapshot:
+	"""A snapshot back from its ``to_dict`` (a quote's record). ``origin`` marks it reused."""
+	def dec(v):
+		return D(v) if v not in (None, "") else None
+
+	def day(v):
+		return date.fromisoformat(str(v)[:10]) if v else None
+
+	return FxSnapshot(
+		from_currency=str(d["from"]).upper(), to_currency=str(d["to"]).upper(), mode=FxMode(d["mode"]),
+		sell_rate=D(d["sell_rate"]), provider=d.get("provider"), provider_rate=dec(d.get("provider_rate")),
+		provider_rate_id=d.get("provider_rate_id"), rate_date=day(d.get("rate_date")),
+		adjustment=dec(d.get("adjustment")), policy_id=d.get("policy_id"),
+		as_of=datetime.fromisoformat(d["as_of"]) if d.get("as_of") else None,
+		origin=origin if origin is not None else d.get("origin"))
+
+
+def recorded(snapshot: dict) -> list[dict]:
+	"""The conversions a priced snapshot records: its ``fx_rates``; a snapshot priced before
+	G-56 recorded the contract → sell rate only (``fx``)."""
+	if isinstance(snapshot.get("fx_rates"), list):
+		return [r for r in snapshot["fx_rates"] if isinstance(r, dict)]
+	room = snapshot.get("fx")
+	if isinstance(room, dict) and room.get("from") and room.get("to") and room["from"] != room["to"]:
+		return [{**room, "used_for": ["accommodation"]}]
+	return []
+
+
+def pins(record: list[dict], *, origin: str) -> dict[tuple[str, str], FxSnapshot]:
+	"""(from, to) → the recorded snapshot, marked with ``origin``: the rates a reprice on
+	the sold terms converts with instead of today's. The first record of a pair wins."""
+	out: dict[tuple[str, str], FxSnapshot] = {}
+	for r in record:
+		try:
+			snap = from_dict(r, origin=origin)
+		except (KeyError, ValueError, TypeError):
+			continue      # an unreadable entry pins nothing: that pair is resolved as of the sale
+		if snap.from_currency != snap.to_currency:
+			out.setdefault((snap.from_currency, snap.to_currency), snap)
+	return out

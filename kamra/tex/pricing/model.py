@@ -299,11 +299,14 @@ class FxSnapshot:
 	adjustment: Decimal | None = None
 	policy_id: str | None = None
 	as_of: datetime | None = None
+	# where a rate recorded earlier came from when it is reused (G-56, ADR-051), e.g.
+	# "reservation:RES-0001" for a price-locked reservation's sold rate; None = resolved now
+	origin: str | None = None
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
 
-		return {
+		out = {
 			"from": self.from_currency, "to": self.to_currency, "mode": self.mode.value,
 			"sell_rate": to_str6(self.sell_rate), "provider": self.provider,
 			"provider_rate": to_str6(self.provider_rate), "provider_rate_id": self.provider_rate_id,
@@ -311,6 +314,9 @@ class FxSnapshot:
 			"adjustment": to_str6(self.adjustment), "policy_id": self.policy_id,
 			"as_of": self.as_of.isoformat() if self.as_of else None,
 		}
+		if self.origin:
+			out["origin"] = self.origin
+		return out
 
 
 @dataclass(frozen=True, slots=True)
