@@ -162,6 +162,14 @@ class TestOutsideTexReservations(InventoryCase):
 			self.desk()
 		self.assertEqual(order[:2], ["inventory", "name Reservation"])
 
+	def test_an_unknown_room_type_is_refused_cleanly(self):
+		doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+		                      "room_type": "G49 No Such Room Type", "check_in_date": self.ci,
+		                      "check_out_date": self.co, "adults": 2, "status": "Confirmed"})
+		doc.flags.ignore_links = True                    # a write that skipped link validation
+		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
+			doc.insert()
+
 	def test_a_closed_night_refuses_desk_and_rest(self):
 		self.set_inventory("DLX", closed=1)
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):

@@ -28,7 +28,8 @@ def nights(check_in: date, check_out: date) -> list[date]:
 
 def pool_of(room_type: str) -> tuple[str, list[str]]:
 	"""(pool key, room types in the pool). The key is the pool's first room type."""
-	prop, pool = frappe.db.get_value("Room Type", room_type, ["property", "tex_inventory_pool"])
+	# an unknown room type (a write that skipped link validation) is a pool of its own, with no rooms
+	prop, pool = frappe.db.get_value("Room Type", room_type, ["property", "tex_inventory_pool"]) or (None, None)
 	if not pool:
 		return room_type, [room_type]
 	members = sorted(frappe.get_all("Room Type", filters={"property": prop, "tex_inventory_pool": pool,
