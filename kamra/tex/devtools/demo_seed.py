@@ -217,9 +217,53 @@ def execute(password: str | None = None, bookings: int = 6) -> dict:
 			filters["hotel_group"] = payload["hotel_group"] = grp
 		_ensure("TEX Access Grant", filters, payload)
 
+	_content()
 	made = _demo_bookings(bookings) if bookings else 0
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- bench execute seed script boundary
 	return {"enterprise": ent, "group": grp, "hotels": list(HOTELS), "site": SITE, "bookings": made}
+
+
+# room descriptions and their translations (Content & languages, R-49)
+CONTENT = {
+	"Standard Sea View": {
+		"description": "Sea-view room with balcony, king or twin beds.",
+		"de": ("Standardzimmer mit Meerblick", "Zimmer mit Meerblick und Balkon, Doppel- oder Einzelbetten."),
+		"tr": ("Deniz Manzaralı Standart Oda", "Balkonlu, deniz manzaralı; çift veya iki ayrı yatak."),
+		"ru": ("Стандартный номер с видом на море", "Номер с балконом и видом на море, двуспальная или две кровати."),
+	},
+	"Family Suite": {
+		"description": "Two rooms connected by a door, for up to 4 adults and 3 children.",
+		"de": ("Familiensuite", "Zwei verbundene Zimmer für bis zu 4 Erwachsene und 3 Kinder."),
+		"tr": ("Aile Süiti", "Kapıyla bağlı iki oda; 4 yetişkin ve 3 çocuğa kadar."),
+		"ru": ("Семейный люкс", "Две смежные комнаты для 4 взрослых и 3 детей."),
+	},
+	"Garden Villa": {
+		"description": "Private villa in the garden with terrace.",
+		"de": ("Gartenvilla", "Private Villa im Garten mit Terrasse."),
+		"tr": ("Bahçe Villası", "Bahçede, teraslı özel villa."),
+		"ru": ("Вилла в саду", "Отдельная вилла в саду с террасой."),
+	},
+}
+
+
+def _content() -> None:
+	from kamra.tex.services import content
+
+	hotel = "Aurora Beach Resort"
+	rows = []
+	for label, spec in CONTENT.items():
+		rt = frappe.db.get_value("Room Type", {"property": hotel, "room_type_name": label})
+		if not rt:
+			continue
+		if not frappe.db.get_value("Room Type", rt, "description"):
+			frappe.db.set_value("Room Type", rt, "description", spec["description"])
+		for lang in ("de", "tr", "ru"):
+			name, desc = spec[lang]
+			rows += [{"ref_doctype": "Room Type", "ref_name": rt, "field": "room_type_name", "language": lang,
+			          "text": name},
+			         {"ref_doctype": "Room Type", "ref_name": rt, "field": "description", "language": lang,
+			          "text": desc}]
+	content.save(hotel, rows)
 
 
 def _demo_bookings(n: int) -> int:
