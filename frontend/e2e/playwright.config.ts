@@ -16,6 +16,9 @@ export default defineConfig({
   outputDir: "../../e2e-results",
   use: {
     baseURL: process.env.TEX_E2E_BASE || "http://test.localhost:8000",
+    // fail a stuck step quickly instead of waiting out the whole test timeout
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     launchOptions: chromium ? { executablePath: chromium } : {},
