@@ -66,6 +66,7 @@
  "settings.cap.reservation.view": "View reservations",
  "settings.cap.restriction.edit": "Edit restrictions (stop sell, LOS, CTA/CTD)",
  "settings.cap.settings.admin": "Hotel settings and audit trail",
+ "settings.cap.tax.edit": "Manage the hotel's tax policy (VAT, accommodation tax, levies)",
  "settings.cap.user.admin": "Manage users and access grants",
  "settings.capgroup.admin": "Administration",
  "settings.capgroup.admin_hint": "Hotel settings, the audit trail and who has access to what.",

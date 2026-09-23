@@ -87,9 +87,12 @@ def payment_methods(property: str, market: str | None = None, currency: str | No
 @frappe.whitelist()
 def extras_for(property: str):
 	scope.require("price.view", property)
-	return frappe.get_all("TEX Extra", filters={"property": property, "disabled": 0},
-	                      fields=["extra_code", "extra_name", "category", "pricing_mode", "currency", "amount",
-	                              "is_mandatory", "description", "max_quantity"], order_by="category, extra_name")
+	from kamra.tex.commercial.context import listed_extras
+
+	cols = ("extra_code", "extra_name", "category", "pricing_mode", "currency", "amount", "is_mandatory",
+	        "description", "max_quantity")
+	rows = listed_extras(property, fields=cols)   # the revision on sale now (G-20)
+	return [{k: r.get(k) for k in cols} for r in sorted(rows, key=lambda r: (r.category or "", r.extra_name or ""))]
 
 
 # ─── reservations & bookings ─────────────────────────────────────────────

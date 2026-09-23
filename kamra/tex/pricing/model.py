@@ -309,12 +309,14 @@ class TaxRule:
 	name: str
 	kind: TaxKind = TaxKind.PERCENT
 	rate: Decimal = Decimal(0)        # percent for PERCENT
-	amount: Decimal = Decimal(0)      # money for fixed kinds (sell currency)
+	amount: Decimal = Decimal(0)      # money for fixed kinds, in ``currency``
 	applies_to: frozenset[str] = frozenset({"ACCOMMODATION"})  # ACCOMMODATION, EXTRA:<cat>, EXTRA:*
 	compound: bool = False            # computed on base + previous taxes
 	order: int = 0
 	# optional rate slabs by nightly tariff: ((threshold or None=∞, rate), …), first match wins
 	slabs: tuple[tuple[Decimal | None, Decimal], ...] = ()
+	source: str | None = None         # where it came from: "tax_policy:<rev>", "property:<hotel>", "pack:<pack>"
+	currency: str | None = None       # currency of a fixed ``amount``; None: the sell currency (G-20)
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,6 +359,7 @@ class ExtraDef:
 	max_quantity: int | None = None
 	price_rules: tuple[ExtraPriceRule, ...] = ()
 	inventory_tracked: bool = False
+	revision: str | None = None       # the extra revision live at the sale time (G-20)
 
 
 # ─── request ─────────────────────────────────────────────────────────────
@@ -416,4 +419,5 @@ class PricingContext:
 	extras: dict[str, ExtraDef] = field(default_factory=dict)
 	extra_fx: dict[str, FxSnapshot] = field(default_factory=dict)   # extra ccy → sell ccy
 	promo_fx: dict[str, FxSnapshot] = field(default_factory=dict)   # promo ccy → sell ccy
+	tax_fx: dict[str, FxSnapshot] = field(default_factory=dict)     # fixed levy ccy → sell ccy
 	coupon_usage: dict[str, tuple[int, int]] = field(default_factory=dict)  # promo_id → (total, this guest)

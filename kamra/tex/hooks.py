@@ -83,6 +83,55 @@ def reservation_on_update(doc, method=None):
 def property_validate(doc, method=None):
 	if doc.get("tex_hotel_group"):
 		doc.tex_enterprise = frappe.db.get_value("TEX Hotel Group", doc.tex_hotel_group, "enterprise")
+	_guard_superseded_tax_rules(doc)
+
+
+def room_type_validate(doc, method=None):
+	"""Some localization packs take a room type's tax % (G-20): once the hotel's tax policy
+	has begun, TEX prices ignore it, so a change is announced rather than silently diverging
+	from the legacy folio."""
+	if not doc.get("property") or not doc.meta.has_field("tax_percent"):
+		return
+	from kamra.tex.commercial.context import policy_started
+	from kamra.tex.money import D
+
+	before = doc.get_doc_before_save()
+	changed = D(before.get("tax_percent") or 0) != D(doc.get("tax_percent") or 0) if before \
+		else bool(doc.get("tax_percent"))
+	if changed and policy_started(doc.property):
+		frappe.msgprint(_("TEX prices at {0} use its tax policy (Rates → Taxes); this room type's tax % does not "
+		                  "affect them.").format(doc.property), title=_("Taxes are effective-dated"), indicator="orange")
+
+
+# what a localization pack computes taxes from (kamra/localization/*)
+PACK_TAX_FIELDS = ("country", "gst_mode", "gst_rate_low", "gst_rate_high", "gst_slab_threshold")
+
+
+def _guard_superseded_tax_rules(doc) -> None:
+	"""Once a hotel has a TEX Tax Policy, its taxes change only through revisions of it
+	(G-20): the old per-hotel table is no longer read, so an edit there would silently do
+	nothing."""
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+	# a TEX hotel still without a policy gets one from what it sells with now (this save's
+	# old values), so an edit in this save becomes a revision, never rewritten history
+	seed_tax_policy(doc.name)
+	from kamra.tex.commercial.context import policy_started
+
+	if not policy_started(doc.name):
+		return          # a draft or scheduled policy: the hotel still sells with these settings
+	if any(str(before.get(f) or "") != str(doc.get(f) or "") for f in PACK_TAX_FIELDS):
+		frappe.msgprint(_("TEX prices at {0} use its tax policy (Rates → Taxes); this change does not "
+		                  "affect them.").format(doc.name), title=_("Taxes are effective-dated"), indicator="orange")
+	from kamra.tex.money import D
+
+	strip = lambda rows: [(r.code, r.tax_name, r.kind, D(r.rate or 0), D(r.amount or 0), r.applies_to,  # noqa: E731
+	                       int(r.compound or 0), int(r.sort_order or 0)) for r in rows or []]
+	if (before.get("tex_tax_profile") != doc.get("tex_tax_profile")
+			or strip(before.get("tex_tax_rules")) != strip(doc.get("tex_tax_rules"))):
+		frappe.throw(_("{0}'s taxes are managed as a TEX tax policy; change them there (Rates → Taxes).")
+		             .format(doc.name), title=_("Taxes are effective-dated"))
 
 
 def property_on_update(doc, method=None):
@@ -91,3 +140,22 @@ def property_on_update(doc, method=None):
 		from kamra.tex.security import grants
 
 		grants.resync_for_properties([doc.name])
+	_seed_tax_policy(doc)
+
+
+def _seed_tax_policy(doc) -> None:
+	"""A TEX hotel's taxes are effective-dated from the start (G-20): the save that makes it a
+	TEX hotel gives it a tax policy holding its current taxes."""
+	seed_tax_policy(doc.name)
+
+
+def seed_tax_policy(property: str) -> None:
+	"""Called when a hotel may have just become a TEX hotel (its Property saved, its first
+	TEX contract created)."""
+	from kamra.tex.legacy import is_tex_hotel
+
+	if frappe.flags.in_install or frappe.flags.in_migrate or not property or not is_tex_hotel(property):
+		return
+	from kamra.tex.commercial import tax_policies
+
+	tax_policies.ensure(property)

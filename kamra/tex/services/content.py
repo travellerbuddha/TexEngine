@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 
 import frappe
+from frappe.utils import now_datetime
 
 LANGS = ("tr", "en", "de", "ru", "ro", "pl")
 
@@ -127,8 +128,9 @@ class Localizer:
 		names: dict[str, str] = {}
 		for e in q.get("extras") or []:
 			if e.get("code"):
-				e["name"] = names[e["code"]] = self.text(property, "TEX Extra", _extra_name(property, e["code"]),
-				                                         "extra_name", e.get("name"))
+				# the extra that was sold (its revision's record), not whichever record has the code
+				ref = _extra_root(e["revision"]) if e.get("revision") else _extra_name(property, e["code"])
+				e["name"] = names[e["code"]] = self.text(property, "TEX Extra", ref, "extra_name", e.get("name"))
 		req = q.get("request") or {}
 		for line in q.get("lines") or []:
 			if line.get("kind") == "ACCOMMODATION" and line.get("code") == req.get("room_type"):
@@ -158,7 +160,7 @@ class Localizer:
 
 	def extras(self, property: str, rows: list[dict]) -> list[dict]:
 		for e in rows:
-			name = e.get("name") or _extra_name(property, e.get("extra_code"))
+			name = _extra_root(e.get("name")) if e.get("name") else _extra_name(property, e.get("extra_code"))
 			e["extra_name"] = self.text(property, "TEX Extra", name, "extra_name", e.get("extra_name"))
 			e["description"] = self.text(property, "TEX Extra", name, "description", e.get("description"))
 		return rows
@@ -173,12 +175,44 @@ class Localizer:
 
 
 def _extra_name(property: str, code: str | None) -> str | None:
+	"""The extra's root record: translations belong to the extra, not to one revision (G-20).
+	A code can be reused after its extra was archived: the one on sale now wins, else the newest."""
 	if not code:
 		return None
-	return frappe.db.get_value("TEX Extra", {"property": property, "extra_code": code}, "name")
+	from kamra.tex.commercial.context import listed_extras
+
+	live = [r for r in listed_extras(property, fields=("revision_of",)) if r.extra_code == code]
+	if live:
+		return live[0].revision_of or live[0].name
+	row = frappe.db.get_value("TEX Extra", {"property": property, "extra_code": code}, ["name", "revision_of"],
+	                          as_dict=True, order_by="creation desc")
+	return (row.revision_of or row.name) if row else None
+
+
+def _extra_root(name: str) -> str:
+	return frappe.db.get_value("TEX Extra", name, "revision_of") or name
 
 
 # ── administration ──────────────────────────────────────────────────────────
+
+
+def _translatable_extras(property: str) -> list[dict]:
+	"""One row per extra that is not archived (drafts and scheduled ones too, so they can be
+	translated before they go on sale), with the text of its revision on sale now, else of
+	its newest revision."""
+	now = now_datetime()
+	rows = frappe.get_all("TEX Extra", filters={"property": property,
+	                                            "tex_status": ("in", ["Draft", "Active", "Superseded"])},
+	                      fields=["name", "revision_of", "extra_name", "description", "tex_status", "active_from",
+	                              "active_to", "creation"], order_by="creation desc")
+	chains: dict[str, dict] = {}
+	for r in rows:
+		root = r.revision_of or r.name
+		live = r.tex_status != "Draft" and r.active_from and r.active_from <= now and (
+			not r.active_to or r.active_to > now)
+		if root not in chains or (live and not chains[root]["live"]):
+			chains[root] = {"row": r, "live": live}
+	return sorted((c["row"] for c in chains.values()), key=lambda r: r.extra_name or "")
 
 
 def items(property: str) -> list[dict]:
@@ -198,9 +232,8 @@ def items(property: str) -> list[dict]:
 	for r in frappe.get_all("Rate Plan", filters={"property": property},
 	                        fields=["name", "rate_plan_name", "tex_inclusions"], order_by="rate_plan_name asc"):
 		add("Rate Plan", r.name, r.rate_plan_name, r)
-	for r in frappe.get_all("TEX Extra", filters={"property": property, "disabled": 0},
-	                        fields=["name", "extra_name", "description"], order_by="extra_name asc"):
-		add("TEX Extra", r.name, r.extra_name, r)
+	for r in _translatable_extras(property):
+		add("TEX Extra", r.revision_of or r.name, r.extra_name, r)
 	for dt in ("TEX Cancellation Policy", "TEX Payment Policy"):
 		for r in frappe.get_all(dt, filters={"property": property}, fields=["name", "policy_name", "description"],
 		                        order_by="policy_name asc"):

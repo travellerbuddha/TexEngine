@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 14:00:00.000000",
+ "creation": "2026-09-23 19:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,17 +11,17 @@
   "environment",
   "enabled",
   "currencies",
-  "section_78",
+  "section_83",
   "api_key",
   "secret_key",
   "merchant_key",
-  "column_79",
+  "column_84",
   "terminal_id",
   "store_key",
   "bank_code",
   "gateway_url",
   "webhook_secret",
-  "section_80",
+  "section_85",
   "bank_name",
   "iban",
   "account_holder",
@@ -72,7 +72,7 @@
    "description": "Blank = any"
   },
   {
-   "fieldname": "section_78",
+   "fieldname": "section_83",
    "fieldtype": "Section Break",
    "label": "Credentials",
    "depends_on": "eval:!['Bank Transfer','Pay at Hotel','Mock'].includes(doc.provider)"
@@ -93,7 +93,7 @@
    "label": "Merchant key"
   },
   {
-   "fieldname": "column_79",
+   "fieldname": "column_84",
    "fieldtype": "Column Break"
   },
   {
@@ -123,7 +123,7 @@
    "label": "Webhook secret"
   },
   {
-   "fieldname": "section_80",
+   "fieldname": "section_85",
    "fieldtype": "Section Break",
    "label": "Bank transfer",
    "depends_on": "eval:doc.provider=='Bank Transfer'"
@@ -150,7 +150,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 14:00:00.000000",
+ "modified": "2026-09-23 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Provider Account",

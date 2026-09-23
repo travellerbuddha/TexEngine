@@ -157,6 +157,8 @@ def ensure_indexes() -> None:
 		("TEX FX Rate", ["provider", "base_currency", "quote_currency", "rate_date"], "tex_fx_lookup"),
 		("TEX Promotion", ["property", "tex_status"], "tex_promo_prop_status"),
 		("TEX Markup Rule", ["property", "tex_status"], "tex_markup_prop_status"),
+		("TEX Extra", ["property", "tex_status"], "tex_extra_prop_status"),
+		("TEX Tax Policy", ["property", "tex_status"], "tex_taxpol_prop_status"),
 	):
 		try:
 			frappe.db.add_index(dt, fields, name)

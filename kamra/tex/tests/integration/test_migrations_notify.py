@@ -5,8 +5,12 @@ import email
 
 import frappe
 
-from kamra.patches.tex import p05_vouchers_to_promotions, p06_experiences_to_extras
-from kamra.tex.commercial import contracts, legacy
+from kamra.patches.tex import (
+	p05_vouchers_to_promotions,
+	p06_experiences_to_extras,
+	p12_effective_dated_extras_and_taxes,
+)
+from kamra.tex.commercial import context, contracts, legacy
 from kamra.tex.payments import service as pay
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import guest_books, setup_site_and_payments
@@ -107,6 +111,57 @@ class TestLegacyMigrations(TexTestCase):
 		self.assertTrue(check["ok"], check["issues"])
 		with self.assertRaises(frappe.ValidationError):
 			legacy.draft_from_legacy(fx.PROPERTY)                    # never twice
+
+
+class TestEffectiveDatingMigration(TexTestCase):
+	"""p12 (G-20): a TEX hotel keeps selling with exactly the taxes it had, now as a tax
+	policy live since the hotel was set up; a second run changes nothing."""
+
+	def _strip(self, rules):
+		return sorted((r.code, r.kind.value, r.rate, r.amount, tuple(sorted(r.applies_to)), r.compound, r.order)
+		              for r in rules)
+
+	def test_a_pack_hotel_gets_its_pack_taxes_as_a_policy(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- migration
+		names = frappe.get_all("TEX Tax Policy", filters={"property": fx.PROPERTY}, pluck="name")
+		if names:
+			frappe.db.delete("TEX Tax Rule", {"parenttype": "TEX Tax Policy", "parent": ("in", names)})
+			frappe.db.delete("TEX Tax Policy", {"name": ("in", names)})
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_tax_profile", "Localization pack")
+		frappe.clear_document_cache("Property", fx.PROPERTY)
+		before = context.tax_rules(fx.PROPERTY)
+		self.assertTrue(before and all(r.source.startswith("pack:") for r in before), before)
+		p12_effective_dated_extras_and_taxes.execute()
+		pol = frappe.get_all("TEX Tax Policy", filters={"property": fx.PROPERTY},
+		                     fields=["name", "tex_status", "active_from", "currency"])
+		self.assertEqual([(p.tex_status, p.currency) for p in pol], [("Active", "EUR")])
+		self.assertEqual(pol[0].active_from, frappe.db.get_value("Property", fx.PROPERTY, "creation"))
+		after = context.tax_rules(fx.PROPERTY)
+		self.assertEqual(self._strip(after), self._strip(before))        # the same taxes, now effective-dated
+		self.assertEqual({r.source for r in after}, {f"tax_policy:{pol[0].name}"})
+		p12_effective_dated_extras_and_taxes.execute()                    # idempotent
+		self.assertEqual(frappe.db.count("TEX Tax Policy", {"property": fx.PROPERTY}), 1)
+
+	def test_rates_that_differ_by_room_type_are_not_flattened(self):
+		from unittest import mock
+
+		from kamra.tex.commercial import tax_policies
+		from kamra.tex.money import D
+		from kamra.tex.pricing.model import TaxRule
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- migration
+		names = frappe.get_all("TEX Tax Policy", filters={"property": fx.PROPERTY}, pluck="name")
+		if names:
+			frappe.db.delete("TEX Tax Rule", {"parenttype": "TEX Tax Policy", "parent": ("in", names)})
+			frappe.db.delete("TEX Tax Policy", {"name": ("in", names)})
+
+		def by_room_type(prop, room_type=None, at=None):      # a pack with a lower Deluxe rate
+			rate = D("8") if room_type and room_type.endswith("DLX") else D("10")
+			return (TaxRule("TAX", "Tax", rate=rate, source="pack:generic"),)
+
+		with mock.patch.object(context, "tax_rules", side_effect=by_room_type):
+			self.assertIsNone(tax_policies.seed(fx.PROPERTY))              # left on its pack, never flattened
+		self.assertFalse(frappe.db.exists("TEX Tax Policy", {"property": fx.PROPERTY}))
 
 
 class TestSecretsNeverLogged(TexTestCase):

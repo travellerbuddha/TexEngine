@@ -201,6 +201,7 @@ _PROPERTY_FIELD = {
 	"TEX Cancellation Policy": "property", "TEX Payment Policy": "property", "Laundry Order": "property",
 	"POS Order": "property", "Venue Booking": "property", "City Ledger Account": "property",
 	"Cashier Session": "property", "Credit Note": "property", "Proforma Folio": "property",
+	"TEX Tax Policy": "property",
 }
 
 

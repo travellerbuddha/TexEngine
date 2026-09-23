@@ -39,6 +39,17 @@ def ensure(doctype: str, filters: dict, payload: dict) -> str:
 	return doc.name
 
 
+def ensure_live(doctype: str, filters: dict, payload: dict, at: str = "2020-01-01 00:00:00") -> str:
+	"""A revisioned record (G-20) that is live: created as a draft, then activated."""
+	from kamra.tex.commercial import revisions
+
+	name = frappe.db.get_value(doctype, {**filters, "tex_status": ("in", ["Draft", "Active"])}) \
+		or ensure(doctype, filters, payload)
+	if frappe.db.get_value(doctype, name, "tex_status") == "Draft":
+		revisions.activate(doctype, name, at=at, backdate=True)   # a fixture states what was on sale
+	return name
+
+
 def ensure_user(email: str, roles: list[str]) -> str:
 	if not frappe.db.exists("User", email):
 		frappe.get_doc({"doctype": "User", "email": email, "first_name": email.split("@")[0], "enabled": 1,
@@ -90,9 +101,9 @@ def base_setup() -> dict:
 		                   {"property": PROPERTY, "code": code, "rate_plan_name": name, "modifier_type": "Percent",
 		                    "modifier_value": 0, "tex_refundable": 1 if code == "FLEX" else 0,
 		                    "tex_cancellation_policy": cxl, "tex_payment_policy": pay})
-	ensure("TEX Extra", {"property": PROPERTY, "extra_code": "TRF"},
-	       {"property": PROPERTY, "extra_code": "TRF", "extra_name": "Airport transfer", "category": "Transfer",
-	        "pricing_mode": "RESERVATION", "currency": "EUR", "amount": 40, "tax_category": "TRANSFER"})
+	ensure_live("TEX Extra", {"property": PROPERTY, "extra_code": "TRF"},
+	            {"property": PROPERTY, "extra_code": "TRF", "extra_name": "Airport transfer", "category": "Transfer",
+	             "pricing_mode": "RESERVATION", "currency": "EUR", "amount": 40, "tax_category": "TRANSFER"})
 	return {"enterprise": ent, "group": grp, "property": PROPERTY, "room_types": rts, "rate_plans": rps}
 
 

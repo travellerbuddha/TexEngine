@@ -358,7 +358,10 @@ def request_from_offer(offer: dict, *, sale_at: datetime, extras=(), promo_codes
 def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None,
                   exclude_booking: str | None = None):
 	terms = contracts.load_terms(version)
-	ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog, exclude_booking=exclude_booking)
+	try:
+		ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog, exclude_booking=exclude_booking)
+	except Unsellable as u:          # no FX rate, an ambiguous or missing tax policy…
+		return engine.unsellable_quote(terms, req, u), terms
 	return engine.price_stay(ctx, req), terms
 
 

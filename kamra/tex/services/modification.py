@@ -84,9 +84,27 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 	return serialize.request_from_dict(base), snap
 
 
+def priced_at(res, snap) -> datetime:
+	"""When the snapshot's price was computed: its quote's (or modification's) sale time."""
+	return get_datetime((snap.get("request") or {}).get("sale_at") or res.tex_sale_at or snap.get("accepted_at"))
+
+
+def original_priced_at(res, snap) -> datetime:
+	"""When the booking was first priced: its quote's sale time, which precedes the booking by
+	up to the quote's lifetime. Extras and taxes are resolved as of it (G-20), so an unchanged
+	ORIGINAL_* reprice reproduces the sold price. Carried across modifications."""
+	if snap.get("original_priced_at"):
+		return get_datetime(snap["original_priced_at"])
+	if not snap.get("basis"):         # the booking's own snapshot, not a modification's
+		sale = (snap.get("request") or {}).get("sale_at")
+		if sale:
+			return get_datetime(sale)
+	return get_datetime(res.tex_sale_at or snap.get("accepted_at"))
+
+
 def _resolve(res, snap, req, basis: str, basis_sale_at) -> tuple[str, datetime, str]:
 	"""→ (contract version, effective sale time, how decided)."""
-	original_sale = get_datetime(res.tex_sale_at or snap.get("accepted_at"))
+	original_sale = original_priced_at(res, snap)
 	if basis == "ORIGINAL_VERSION":
 		return snap["contract"]["version"], original_sale, "original contract version"
 	if basis == "CURRENT":
@@ -239,6 +257,7 @@ def apply(proposal_token: str, *, reason: str, override_amount=None, source: str
 		"tex_payload_hash": new["contract"]["payload_hash"], "tex_currency": ccy,
 		"tex_fx_rate": D((new.get("fx") or {}).get("sell_rate") or 1),
 		"tex_pricing_snapshot": json.dumps({**new, "accepted_at": str(now_datetime()),
+		                                    "original_priced_at": str(original_priced_at(res, snap)),
 		                                    "basis": p["basis"], "override_amount": to_str(final_total)
 		                                    if override_amount not in (None, "") else None},
 		                                   sort_keys=True, ensure_ascii=False),
@@ -298,7 +317,7 @@ def simulate(reservation: str, sale_at) -> dict:
 	return {
 		"reservation": res.name, "simulated_sale_at": str(at), "contract_version": pick[1],
 		"actual": {"total": to_str(actual), "currency": res.tex_currency, "sale_at": str(res.tex_sale_at),
-		           "version": snap["contract"]["version"]},
+		           "priced_at": str(priced_at(res, snap)), "version": snap["contract"]["version"]},
 		"simulated": quote.to_dict(internal=internal),
 		"difference": to_str(quote.total - actual) if quote.sellable and quote.currency == res.tex_currency else None,
 	}

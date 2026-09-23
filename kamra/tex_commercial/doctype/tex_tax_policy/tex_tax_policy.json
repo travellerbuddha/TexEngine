@@ -1,0 +1,143 @@
+{
+ "actions": [],
+ "creation": "2026-09-23 19:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "policy_name",
+  "property",
+  "currency",
+  "description",
+  "section_60",
+  "rules",
+  "section_61",
+  "tex_status",
+  "active_from",
+  "active_to",
+  "column_62",
+  "revision_no",
+  "revision_of"
+ ],
+ "fields": [
+  {
+   "fieldname": "policy_name",
+   "fieldtype": "Data",
+   "label": "Policy",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency of fixed amounts",
+   "options": "Currency",
+   "description": "Fixed levies are charged in this currency, converted at the sale time's FX"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "section_60",
+   "fieldtype": "Section Break",
+   "label": "Tax rules"
+  },
+  {
+   "fieldname": "rules",
+   "fieldtype": "Table",
+   "label": "Tax rules",
+   "options": "TEX Tax Rule"
+  },
+  {
+   "fieldname": "section_61",
+   "fieldtype": "Section Break",
+   "label": "Revision",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "tex_status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nActive\nSuperseded\nArchived",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "active_from",
+   "fieldtype": "Datetime",
+   "label": "Active From",
+   "read_only": 1
+  },
+  {
+   "fieldname": "active_to",
+   "fieldtype": "Datetime",
+   "label": "Active To",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_62",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "revision_no",
+   "fieldtype": "Int",
+   "label": "Revision",
+   "read_only": 1,
+   "default": "1"
+  },
+  {
+   "fieldname": "revision_of",
+   "fieldtype": "Link",
+   "label": "Revision Of",
+   "options": "TEX Tax Policy",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-23 19:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Commercial",
+ "name": "TEX Tax Policy",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1,
+   "email": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "share": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "TXP-.#####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "policy_name",
+ "show_title_field_in_link": 1,
+ "track_changes": 1
+}

@@ -66,6 +66,7 @@
  "settings.cap.reservation.view": "Rezervasyonları görüntüleme",
  "settings.cap.restriction.edit": "Kısıtlamaları düzenleme (satış durdurma, min. konaklama, CTA/CTD)",
  "settings.cap.settings.admin": "Otel ayarları ve denetim kaydı",
+ "settings.cap.tax.edit": "Otelin vergi politikasını yönetme (KDV, konaklama vergisi, harçlar)",
  "settings.cap.user.admin": "Kullanıcıları ve erişim yetkilerini yönetme",
  "settings.capgroup.admin": "Yönetim",
  "settings.capgroup.admin_hint": "Otel ayarları, denetim kaydı ve kimin neye erişebildiği.",

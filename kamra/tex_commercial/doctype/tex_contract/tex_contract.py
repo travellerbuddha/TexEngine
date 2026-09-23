@@ -30,6 +30,12 @@ class TEXContract(Document):
 			audit("contract.status", reference_doctype=self.doctype, reference_name=self.name,
 			      property=self.property, old={"status": before.status}, new={"status": self.status})
 
+	def after_insert(self):
+		# a hotel's first TEX contract makes it a TEX hotel: its taxes become a policy (G-20)
+		from kamra.tex.hooks import seed_tax_policy
+
+		seed_tax_policy(self.property)
+
 	def on_trash(self):
 		if frappe.db.exists("TEX Contract Version", {"contract": self.name, "status": ("!=", "Draft")}):
 			frappe.throw(_("A contract with published versions cannot be deleted; archive it."))

@@ -70,6 +70,7 @@
  "settings.cap.reservation.view": "Просмотр бронирований",
  "settings.cap.restriction.edit": "Редактирование ограничений (стоп-продажа, мин. проживание, CTA/CTD)",
  "settings.cap.settings.admin": "Настройки отеля и журнал аудита",
+ "settings.cap.tax.edit": "Управление налоговой политикой отеля (НДС, туристический налог, сборы)",
  "settings.cap.user.admin": "Управление пользователями и доступом",
  "settings.capgroup.admin": "Администрирование",
  "settings.capgroup.admin_hint": "Настройки отеля, журнал аудита и то, у кого есть доступ и к чему.",

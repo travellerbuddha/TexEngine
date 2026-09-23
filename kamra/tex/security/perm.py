@@ -20,6 +20,7 @@ PROPERTY_DOCTYPES = (
 	"TEX ARI Restriction", "TEX Extra", "TEX Abandoned Booking", "TEX Integration Connection",
 	"TEX Integration Outbox", "TEX Payment Provider Account", "TEX Payment Method Rule",
 	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
+	"TEX Tax Policy",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event",
 	"TEX Content Translation",
 )

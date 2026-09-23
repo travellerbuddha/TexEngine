@@ -222,6 +222,7 @@ _TEX_SCOPED = (
 	"TEX ARI Restriction", "TEX Extra", "TEX Abandoned Booking", "TEX Integration Connection",
 	"TEX Integration Outbox", "TEX Payment Provider Account", "TEX Payment Method Rule",
 	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
+	"TEX Tax Policy",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
 	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Reservation Revision",
 	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation",
@@ -266,6 +267,8 @@ doc_events["Property"] = {
 }
 # a guest created by a single-tenant user belongs to that enterprise (tenancy)
 doc_events.setdefault("Guest", {})["before_insert"] = "kamra.tex.security.perm.stamp_guest_enterprise"
+# a room type's tax % no longer prices a TEX hotel once its tax policy began (G-20): say so
+doc_events.setdefault("Room Type", {})["validate"] = "kamra.tex.hooks.room_type_validate"
 
 # Scheduled Tasks
 # ---------------
@@ -323,6 +326,9 @@ doc_events.setdefault("Guest", {})["before_insert"] = "kamra.tex.security.perm.s
 # -----------------------------------------------------------
 
 # ignore_links_on_delete = ["Communication", "ToDo"]
+# an audit trail never blocks deleting a draft, and it stays after the delete (G-20); every
+# other link still does (a provider account used by payments, a site with bookings…)
+ignore_links_on_delete = ["TEX Audit Event"]
 
 # Remote MCP + OAuth live at /mcp and /mcp/oauth/* (not the SPA).
 page_renderer = ["kamra.mcp_http.MCPPageRenderer"]

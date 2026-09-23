@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 14:00:00.000000",
+ "creation": "2026-09-23 19:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -9,11 +9,11 @@
   "system_key",
   "description",
   "is_dynamic",
-  "column_90",
+  "column_95",
   "enterprise",
   "member_count",
   "last_evaluated",
-  "section_91",
+  "section_96",
   "rules_json"
  ],
  "fields": [
@@ -43,7 +43,7 @@
    "default": "1"
   },
   {
-   "fieldname": "column_90",
+   "fieldname": "column_95",
    "fieldtype": "Column Break"
   },
   {
@@ -66,7 +66,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_91",
+   "fieldname": "section_96",
    "fieldtype": "Section Break",
    "label": "Rules"
   },
@@ -78,7 +78,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 14:00:00.000000",
+ "modified": "2026-09-23 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Guest Segment",

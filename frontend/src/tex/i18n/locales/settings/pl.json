@@ -70,6 +70,7 @@
  "settings.cap.reservation.view": "Podgląd rezerwacji",
  "settings.cap.restriction.edit": "Edycja ograniczeń (wstrzymanie sprzedaży, min. pobyt, CTA/CTD)",
  "settings.cap.settings.admin": "Ustawienia hotelu i dziennik audytu",
+ "settings.cap.tax.edit": "Zarządzanie polityką podatkową hotelu (VAT, podatek od zakwaterowania, opłaty)",
  "settings.cap.user.admin": "Zarządzanie użytkownikami i dostępem",
  "settings.capgroup.admin": "Administracja",
  "settings.capgroup.admin_hint": "Ustawienia hotelu, dziennik audytu i to, kto ma do czego dostęp.",

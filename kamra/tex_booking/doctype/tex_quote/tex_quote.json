@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 14:00:00.000000",
+ "creation": "2026-09-23 19:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,14 +11,14 @@
   "market",
   "currency",
   "total_amount",
-  "column_64",
+  "column_69",
   "contract_version",
   "payload_hash",
   "expires_at",
   "booking",
   "session_hash",
   "offer_hash",
-  "section_65",
+  "section_70",
   "request_json",
   "result_json"
  ],
@@ -64,7 +64,7 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "column_64",
+   "fieldname": "column_69",
    "fieldtype": "Column Break"
   },
   {
@@ -101,7 +101,7 @@
    "label": "Offer (hash)"
   },
   {
-   "fieldname": "section_65",
+   "fieldname": "section_70",
    "fieldtype": "Section Break",
    "label": "Content"
   },
@@ -118,7 +118,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 14:00:00.000000",
+ "modified": "2026-09-23 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Quote",

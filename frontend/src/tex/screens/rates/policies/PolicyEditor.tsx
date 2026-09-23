@@ -37,7 +37,7 @@ import { RatesNav } from "../components/RatesNav"
 import { RowsEditor, type ColSpec } from "../components/RowsEditor"
 import { BOARDS, enumOptions, PERCENT_OPS } from "../lib/options"
 import type { Lookups, Row } from "../lib/types"
-import { decStr, fromRow, intVal, invalidateLookups, strVal, toFrappeDatetime, toRow, UI_RATES, useLookups, type FieldKind } from "../lib/util"
+import { decStr, fromRow, intVal, invalidateLookups, strVal, toRow, UI_RATES, useLookups, type FieldKind } from "../lib/util"
 import { fieldKinds, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
 
 type T = (k: string, p?: Record<string, string | number>) => string
@@ -518,6 +518,20 @@ function TableField({ f, doc, readOnly, lookups, onChange }: { f: PolicyField; d
   return <RowsEditor caption={t(f.label)} columns={cols} rows={(doc[f.key] as Row[]) ?? []} onChange={onChange} readOnly={readOnly} newRow={() => ({ ...defaults }) as Omit<Row, "_key">} addLabel={t("rates.common.add_row")} />
 }
 
+/** The picked local wall-clock time as an instant (ISO with offset): the server converts it to
+ * the hotel system's time zone, so a browser in another zone schedules the same moment. */
+function absoluteTime(local: string): string | null {
+  const d = local ? new Date(local) : null
+  return d && !Number.isNaN(d.getTime()) ? d.toISOString() : null
+}
+
+/** "yyyy-MM-ddTHH:mm" in the browser's time zone, for a datetime-local minimum. */
+function localNowMinute(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function ActivateDialog({ onClose, onConfirm, busy, error }: { onClose: () => void; onConfirm: (at: string | null) => Promise<void>; busy: boolean; error?: TexApiError }) {
   const { t } = useTexT()
   const [when, setWhen] = useState<"now" | "later">("now")
@@ -534,7 +548,7 @@ function ActivateDialog({ onClose, onConfirm, busy, error }: { onClose: () => vo
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             {t("core.action.cancel")}
           </Button>
-          <Button loading={busy} disabled={when === "later" && !at} onClick={() => void onConfirm(when === "later" ? toFrappeDatetime(at) : null).catch(() => undefined)}>
+          <Button loading={busy} disabled={when === "later" && !at} onClick={() => void onConfirm(when === "later" ? absoluteTime(at) : null).catch(() => undefined)}>
             {t("rates.policy.activate")}
           </Button>
         </>
@@ -551,7 +565,8 @@ function ActivateDialog({ onClose, onConfirm, busy, error }: { onClose: () => vo
         </label>
         {when === "later" && (
           <Field label={t("rates.f.active_from")} hint={t("rates.h.effective_from")}>
-            <Input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
+            {/* a revision only ever goes live from now on: the server refuses a past time (G-20) */}
+            <Input type="datetime-local" value={at} min={localNowMinute()} onChange={(e) => setAt(e.target.value)} />
           </Field>
         )}
         <InlineError error={error} />

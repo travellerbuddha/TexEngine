@@ -131,12 +131,18 @@ def site(slug: str | None = None, domain: str | None = None):
 
 
 def _public_extras(props: list[str]) -> dict:
+	from kamra.tex.commercial.context import listed_extras
+
 	out = {}
 	for p in props:
-		out[p] = frappe.get_all("TEX Extra", filters={"property": p, "disabled": 0, "bookable_online": 1},
-		                        fields=["name", "extra_code", "extra_name", "category", "description", "image", "pricing_mode",
-		                                "currency", "amount", "max_quantity", "is_mandatory", "service_from",
-		                                "service_to"], order_by="category asc, extra_name asc")
+		# the revision on sale now (G-20)
+		rows = listed_extras(p, online_only=True, fields=("extra_name", "category", "description", "image",
+		                                                "pricing_mode", "currency", "amount", "max_quantity",
+		                                                "is_mandatory", "service_from", "service_to"))
+		out[p] = [{k: r.get(k) for k in ("name", "extra_code", "extra_name", "category", "description", "image",
+		                                  "pricing_mode", "currency", "amount", "max_quantity", "is_mandatory",
+		                                  "service_from", "service_to")}
+		          for r in sorted(rows, key=lambda r: (r.category or "", r.extra_name or ""))]
 		for e in out[p]:
 			e["amount"] = to_str(from_db(e["amount"], e["currency"]))
 	return out
@@ -204,9 +210,9 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	offer = quoting.verify(offer_key)
 	if offer["property"] not in _site_properties(s) or offer["channel"] != _channel(s):
 		frappe.throw(_("Invalid offer."))
-	online = {e.extra_code for e in frappe.get_all("TEX Extra", filters={"property": offer["property"],
-	                                                                      "disabled": 0, "bookable_online": 1},
-	                                               fields=["extra_code"])}
+	from kamra.tex.commercial.context import listed_extras
+
+	online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
 	requested = parse(extras, []) or []
 	if any(str(e.get("code", "")).upper() not in online for e in requested):
 		frappe.throw(_("This extra cannot be booked online."))

@@ -41,6 +41,8 @@ class ExtraOutcome:
 	service_dates: tuple[str, ...] = ()
 	rule_id: str | None = None
 	detail: str = ""
+	revision: str | None = None       # the extra revision that priced it (G-20)
+	fx_rate: Decimal | None = None    # extra currency → sell currency, when converted
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
@@ -49,7 +51,8 @@ class ExtraOutcome:
 		        "quantity": to_str6(self.quantity), "amount": to_str6(self.amount), "currency": self.currency,
 		        "tax_category": self.tax_category, "mandatory": self.mandatory,
 		        "pricing_mode": self.pricing_mode, "service_dates": list(self.service_dates),
-		        "rule_id": self.rule_id, "detail": self.detail}
+		        "rule_id": self.rule_id, "detail": self.detail, "revision": self.revision,
+		        "fx_rate": to_str6(self.fx_rate) if self.fx_rate is not None else None}
 
 
 def _in(d: date, lo: date | None, hi: date | None) -> bool:
@@ -127,7 +130,7 @@ def eligibility(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext) -> str | N
 def price_extra(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext,
                 fx: dict[str, FxSnapshot] | None = None) -> ExtraOutcome:
 	base = dict(code=defn.code, name=defn.name, tax_category=defn.tax_category, mandatory=defn.mandatory,
-	            pricing_mode=defn.pricing_mode.value,
+	            pricing_mode=defn.pricing_mode.value, revision=defn.revision,
 	            service_dates=tuple(d.isoformat() for d in req.service_dates))
 	reason = eligibility(defn, req, ctx)
 	if reason:
@@ -168,10 +171,12 @@ def price_extra(defn: ExtraDef, req: ExtraRequest, ctx: ExtraContext,
 		return ExtraOutcome(ok=False, reason=f"unsupported pricing mode {mode}", **base)
 
 	currency = ctx.sell_currency
+	fx_rate = None
 	if defn.currency != ctx.sell_currency:
 		snap = (fx or {}).get(defn.currency)
 		if snap is None:
 			return ExtraOutcome(ok=False, reason=f"no FX policy for {defn.currency}→{ctx.sell_currency}", **base)
-		amount = amount * snap.sell_rate
+		fx_rate = snap.sell_rate
+		amount = amount * fx_rate
 	return ExtraOutcome(ok=True, quantity=units, amount=amount, currency=currency,
-	                    rule_id=rule.rule_id if rule else None, detail=detail, **base)
+	                    rule_id=rule.rule_id if rule else None, detail=detail, fx_rate=fx_rate, **base)

@@ -322,3 +322,94 @@ restored in tearDown).
 **Consequences.** A site that runs the PMS turns the setting on (upgraded sites with PMS data
 default to on, ADR-014). Guest-facing legacy pages (`/kamra/book`, self check-in, QR menu)
 are not behind `require_roles` and keep their own rules (ADR-028, G-15).
+
+## ADR-031 Extras and taxes are effective-dated revisions; history is never rewritten
+**Context.** Extras and tax rules were read live when a stay was priced. Nothing recorded
+which definition sold a stay. A price or tax change therefore also changed historical
+simulation and ORIGINAL_* repricing, and a quote could not be reproduced as of its sale
+time (G-20). A fixed levy's amount had no currency, so "2" was charged as 2 of whatever
+the stay was sold in. Any user who could activate a selling-policy revision could also
+back-date it and so rewrite what `as_of` reports for the past.
+**Decision.**
+- `TEX Extra` and a new `TEX Tax Policy` (one per hotel, holding `TEX Tax Rule` rows and a
+  currency for fixed levies) use the ADR-005 revision lifecycle: Draft → Active →
+  Superseded/Archived. A live revision is immutable; a change is a new revision.
+- They are not frozen into the contract payload. They are hotel-level and change
+  independently of contracts, so freezing them would force a republish per tax change.
+- Pricing at sale time T reads the extras (`context.live_extras` / `extras_catalog`) and
+  the tax policy (`context.tax_policy` / `tax_rules`) live at T. Every reader outside
+  pricing uses the same helper: the public site, quote checks, CRS, content and
+  translations (keyed by the revision root).
+- Two live definitions at T stop selling with a clear error; a price is never picked
+  silently. Two live extras with one code, or two live tax policies, are refused on save
+  and activation.
+- The quote and the reservation snapshot name what was used. Extra lines carry `revision`
+  and `fx_rate`; tax lines carry `source` (`tax_policy:<rev>`, `property:<hotel>` or
+  `pack:<pack>`) and `fx_rate`. The EXTRA and TAX explanation steps carry a `RuleRef` with
+  the same source.
+- A fixed levy is charged in its policy's currency. It is converted with the sale time's
+  FX snapshot, or the stay is unsellable (`TAX_FX`); it is never reread as the sell
+  currency.
+- `revisions.activate` refuses a time in the past (a 5-minute tolerance for client clocks
+  and minute pickers is clamped to now). It also refuses a time before an already
+  scheduled revision. Every sibling still live at the activation time ends there, so one
+  revision of a record is live at any instant. Only trusted code (migrations, test
+  fixtures) passes `backdate=True`. The API and UI never do.
+- Archiving takes a revision off sale from now, whatever its status (a superseded revision
+  stays live until its successor starts). Archiving a revision whose window has not begun
+  cancels it, whether it is Active or already superseded by a later schedule: the revision
+  it was to replace takes its window over. An archived revision is therefore never live
+  after it is archived, and archiving never leaves a gap nobody chose.
+- A hotel's live tax policy cannot be archived; it is revised instead (a revision without
+  rules charges no tax).
+- Once a hotel's tax policy has really begun (a non-empty live window; a cancelled schedule
+  does not count), a sale time with no policy in force makes that hotel's stays unsellable
+  (`TAX_POLICY`) instead of falling back to older settings.
+- Checks for "one live record" look at live windows, not statuses.
+- Two live definitions and gaps are `Unsellable` for that hotel only: a search over several
+  hotels goes on. Lists outside pricing (booking site, CRS pickers, content) show no extras
+  for an ambiguous hotel rather than failing the page.
+- A scheduled time is an instant: the browser sends it with its offset, and the server
+  converts it to the site's time zone before the back-dating check.
+- A revision keeps its record's hotel and, for an extra, its code (bookings, loyalty
+  rules, translations and capacity know an extra by its code).
+- An audit trail never blocks deleting a draft (`hooks.ignore_links_on_delete` = TEX Audit
+  Event); every other link still does.
+- ORIGINAL_* repricing uses the time the booking was priced (its quote's `sale_at`,
+  carried as `original_priced_at` across modifications), not the booking time. An
+  unchanged reprice therefore reproduces the sold price even when a revision went live
+  between quote and booking.
+- Tax policies need the new `tax.edit` capability (Finance and Hotel Admin, not Revenue
+  Manager). Once a hotel has a tax policy, its old `Property.tex_tax_rules` table can no
+  longer be edited.
+- Migration p12:
+  - existing extras become live from their creation (disabled ones are archived);
+  - every TEX hotel gets a tax policy holding exactly the taxes it was sold with (its custom
+    table or its localization pack), live from the hotel's creation;
+  - Finance and the admin profiles get `tax.edit`;
+  - a hotel whose rules a policy cannot hold is logged and skipped; the migration never
+    stops for one hotel.
+- A hotel that becomes a TEX hotel later gets its policy then: on the Property save that makes it one
+  (from the stored values, before that save's edits), or when its first TEX contract is
+  created (`tax_policies.ensure`). Two tax-policy drafts activated at once run one after the
+  other (the hotel row is locked). Seeded fixed levies take the currency the hotel's contracts sell in
+  (else the hotel's currency), and the policy description says so. A hotel without a policy
+  keeps the old meaning of a fixed amount (the sell currency).
+- Once a hotel's policy has begun, its old tax table cannot be edited, and a change to a
+  pack's inputs (country, GST rates) warns that TEX prices are not affected.
+- The p12 extras step runs on the patch's first execution only; a forced re-run never puts
+  live a draft made since.
+**Consequences.**
+- History before the migration is reproduced with the definitions as of the migration; the
+  price-locked snapshot stays the record.
+- Some hotels cannot be expressed as a policy yet and stay on their pack, which is not
+  effective-dated. These are hotels on a slab pack (India) and hotels whose pack rates
+  differ by room type. Their tax lines name the pack (`pack:india`), and the Error Log says
+  why.
+- Once seeded, a fixed levy has one currency and is converted for sales in other currencies,
+  where before the number was reread as whatever the stay was sold in.
+- A hotel whose pack takes a room type's tax % is not seeded when those rates differ by room
+  type. Once its policy has begun, a change to a room type's tax % warns that TEX prices are
+  not affected (the legacy folio still reads it).
+- Extras capacity (G-19) must key on the extra's code or root, never on a revision name.
+

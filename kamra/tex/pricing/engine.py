@@ -14,7 +14,15 @@ from decimal import Decimal
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, calc, quantize, to_str, to_str6
 from kamra.tex.pricing import ages, boards, extras, markup, occupancy, promotions, rooms, tax
-from kamra.tex.pricing.enums import ExtraPricingMode, LineKind, Op, PromoAppliesTo, PromoStage, PromoValueType
+from kamra.tex.pricing.enums import (
+	ExtraPricingMode,
+	Level,
+	LineKind,
+	Op,
+	PromoAppliesTo,
+	PromoStage,
+	PromoValueType,
+)
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import (
 	ExtraRequest,
@@ -184,6 +192,29 @@ def _check_contract(ctx: PricingContext, req: StayRequest, nights: tuple[date, .
 	return rp
 
 
+def _contract_info(t) -> dict:
+	return {"contract": t.contract_id, "code": t.contract_code, "name": t.contract_name,
+	        "version": t.version_id, "version_no": t.version_no, "payload_hash": t.payload_hash,
+	        "market": t.market, "currency": t.currency, "basis": t.basis.value}
+
+
+def _unsellable(q: RoomQuote, u: Unsellable) -> RoomQuote:
+	q.sellable = False
+	q.reasons.append({"code": u.code, "message": u.message, **{k: v for k, v in u.params.items()
+	                                                            if isinstance(v, str | int | list)}})
+	q.explanation.add("unsellable", u.code, "not sellable: {reason}", reason=u.message)
+	q.totals = {}
+	return q
+
+
+def unsellable_quote(terms, req: StayRequest, u: Unsellable) -> RoomQuote:
+	"""The quote of a stay whose selling context could not be built (no FX rate, an
+	ambiguous or missing tax policy…): unsellable with the reason, like any other."""
+	q = RoomQuote(request=req, sellable=True, currency=req.sell_currency.upper())
+	q.contract = _contract_info(terms)
+	return _unsellable(q, u)
+
+
 def price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 	with calc():
 		return _price_stay(ctx, req)
@@ -194,9 +225,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 	sell_ccy = req.sell_currency.upper()
 	q = RoomQuote(request=req, sellable=True, currency=sell_ccy)
 	ex = q.explanation
-	q.contract = {"contract": t.contract_id, "code": t.contract_code, "name": t.contract_name,
-	              "version": t.version_id, "version_no": t.version_no, "payload_hash": t.payload_hash,
-	              "market": t.market, "currency": t.currency, "basis": t.basis.value}
+	q.contract = _contract_info(t)
 
 	if req.check_out <= req.check_in:
 		raise PricingError("check-out must be after check-in")
@@ -312,6 +341,8 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 			q.extras.append(outcome)
 			if outcome.ok:
 				ex.add("extra", "EXTRA", "{name}: {detail} = {amount}", after=outcome.amount, currency=sell_ccy,
+				       rule=RuleRef("extra", d.code, Level.HOTEL, f"extra:{d.revision}" if d.revision else "",
+				                    d.name),
 				       name=d.name, detail=outcome.detail, amount=outcome.amount)
 			else:
 				ex.add("extra", "EXTRA_REJECTED", "{name} not added: {reason}", name=d.name, reason=outcome.reason)
@@ -375,12 +406,14 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 
 		persons = party.adults + party.child_count
 		tax_lines, _nets = tax.compute_taxes(ctx.tax_rules, categories, inclusive=t.prices_include_tax,
-		                                    currency=sell_ccy, persons=persons, nights=len(nights))
+		                                    currency=sell_ccy, persons=persons, nights=len(nights),
+		                                    fx=ctx.tax_fx)
 		q.taxes = tax_lines
 		for tl in tax_lines:
 			lines.append(QuoteLine(LineKind.TAX, tl.code, tl.name, tl.amount, category=tl.category,
 			                       included=tl.included))
 			ex.add("tax", "TAX", "{name} {rate} on {category}: {amount}{inc}", after=tl.amount, currency=sell_ccy,
+			       rule=RuleRef("tax", tl.code, Level.HOTEL, tl.source or "", tl.name),
 			       name=tl.name, rate=(f"{tl.rate}%" if tl.rate is not None else "fixed"), category=tl.category,
 			       amount=tl.amount, inc=" (included)" if tl.included else "")
 		q.lines = lines
@@ -410,11 +443,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 		ex.add("total", "TOTAL", "total {total} {currency}", after=total, currency=sell_ccy,
 		       total=total)
 	except Unsellable as u:
-		q.sellable = False
-		q.reasons.append({"code": u.code, "message": u.message, **{k: v for k, v in u.params.items()
-		                                                            if isinstance(v, str | int | list)}})
-		ex.add("unsellable", u.code, "not sellable: {reason}", reason=u.message)
-		q.totals = {}
+		_unsellable(q, u)
 	return q
 
 

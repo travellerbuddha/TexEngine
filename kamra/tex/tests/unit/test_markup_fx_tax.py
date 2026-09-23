@@ -4,10 +4,11 @@ import unittest
 from datetime import date, datetime
 from decimal import Decimal
 
-from kamra.tex.pricing import fx, markup, tax
-from kamra.tex.pricing.enums import FxMode, MarkupCombine, Op, TaxKind
+from kamra.tex.pricing import engine, fx, markup, tax
+from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, Level, MarkupCombine, Op, TaxKind
 from kamra.tex.pricing.explain import Explanation
-from kamra.tex.pricing.model import MarkupRule, TaxRule, Unsellable
+from kamra.tex.pricing.model import ExtraDef, ExtraRequest, FxSnapshot, MarkupRule, TaxRule, Unsellable
+from kamra.tex.tests.unit import fixtures
 
 D = Decimal
 NIGHT = date(2027, 7, 10)
@@ -186,3 +187,50 @@ class TestTax(unittest.TestCase):
 		                                persons=1, nights=1)
 		self.assertEqual(lines, [])
 		self.assertEqual(nets["ACCOMMODATION"], D("10"))
+
+
+class TestEffectiveDatedSources(unittest.TestCase):
+	"""G-20: every extra and tax step names the revision it came from, and a fixed levy
+	is charged in its own currency, converted, never re-read as the sell currency."""
+
+	EUR_TRY = FxSnapshot("EUR", "TRY", FxMode.PROVIDER_PERCENT, D("51"), provider="TCMB", provider_rate=D("50"),
+	                     adjustment=D("2"))
+
+	def test_the_extra_step_names_the_extra_revision(self):
+		trf = ExtraDef("TRF", "Airport transfer", ExtraPricingMode.RESERVATION, "EUR", D("40"), revision="EXT-00007")
+		q = engine.price_stay(fixtures.ctx(extras={"TRF": trf}), fixtures.req(extras=(ExtraRequest("TRF"),)))
+		step = next(s for s in q.explanation.steps if s.code == "EXTRA")
+		self.assertEqual(step.rule.to_dict(), {"kind": "extra", "rule_id": "TRF", "level": "HOTEL",
+		                                       "source": "extra:EXT-00007", "label": "Airport transfer"})
+		self.assertEqual(q.extras[0].revision, "EXT-00007")
+
+	def test_the_tax_line_and_step_name_the_tax_policy(self):
+		vat = TaxRule("VAT", "VAT", rate=D("10"), source="tax_policy:TXP-00002")
+		q = engine.price_stay(fixtures.ctx(tax_rules=(vat,)), fixtures.req())
+		self.assertEqual(q.taxes[0].source, "tax_policy:TXP-00002")
+		step = next(s for s in q.explanation.steps if s.code == "TAX")
+		self.assertEqual((step.rule.kind, step.rule.rule_id, step.rule.level, step.rule.source),
+		                 ("tax", "VAT", Level.HOTEL, "tax_policy:TXP-00002"))
+
+	def test_a_fixed_levy_in_another_currency_is_converted(self):
+		city = TaxRule("CITY", "City tax", kind=TaxKind.PER_PERSON_NIGHT, amount=D("2"), currency="EUR")
+		lines, _ = tax.compute_taxes((city,), {"ACCOMMODATION": D("9000")}, inclusive=False, currency="TRY",
+		                             persons=2, nights=3, fx={"EUR": self.EUR_TRY})
+		self.assertEqual((lines[0].amount, lines[0].fx_rate), (D("612.00"), D("51")))  # 2 × 6 person-nights × 51
+		same, _ = tax.compute_taxes((city,), {"ACCOMMODATION": D("300")}, inclusive=False, currency="EUR",
+		                            persons=2, nights=3)
+		self.assertEqual((same[0].amount, same[0].fx_rate), (D("12.00"), None))
+
+	def test_a_fixed_levy_without_fx_is_never_charged_as_the_sell_currency(self):
+		city = TaxRule("CITY", "City tax", kind=TaxKind.PER_ROOM_NIGHT, amount=D("2"), currency="EUR")
+		with self.assertRaises(Unsellable) as e:
+			tax.compute_taxes((city,), {"ACCOMMODATION": D("9000")}, inclusive=False, currency="TRY", persons=2,
+			                  nights=3)
+		self.assertEqual(e.exception.code, "TAX_FX")
+		q = engine.price_stay(fixtures.ctx(fx=self.EUR_TRY, tax_rules=(city,)), fixtures.req(sell_currency="TRY"))
+		self.assertFalse(q.sellable)
+		self.assertEqual(q.reasons[0]["code"], "TAX_FX")
+		ok = engine.price_stay(fixtures.ctx(fx=self.EUR_TRY, tax_rules=(city,), tax_fx={"EUR": self.EUR_TRY}),
+		                       fixtures.req(sell_currency="TRY"))
+		self.assertTrue(ok.sellable, ok.reasons)
+		self.assertEqual(next(t for t in ok.taxes if t.code == "CITY").amount, D("102.00"))  # 2 × 1 night × 51

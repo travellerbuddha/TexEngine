@@ -9,6 +9,8 @@ import {
   DEPOSIT,
   EXTRA_CATEGORIES,
   EXTRA_MODES,
+  TAX_APPLIES,
+  TAX_KINDS,
   FX_MODES,
   FX_PROVIDERS,
   INFANT_PRICING,
@@ -455,7 +457,8 @@ export const POLICY_KINDS: PolicyKind[] = [
     slug: "extras",
     doctype: "TEX Extra",
     cap: "contract.edit",
-    revisioned: false,
+    // a price change is a new revision from its activation; sold stays keep theirs (G-20)
+    revisioned: true,
     navLabel: "rates.nav.extras",
     title: "rates.policy.extras.title",
     singular: "rates.policy.extras.one",
@@ -469,6 +472,8 @@ export const POLICY_KINDS: PolicyKind[] = [
       { key: "category", label: "rates.f.category", render: "enum", group: "extra_category", hideBelow: "md" },
       { key: "pricing_mode", label: "rates.f.pricing_mode", render: "enum", group: "extra_mode", hideBelow: "sm" },
       { key: "amount", label: "rates.f.price", render: "decimal" },
+      { key: "tex_status", label: "rates.f.status", render: "status" },
+      { key: "revision_no", label: "rates.f.revision", render: "rev", hideBelow: "sm" },
     ],
     sections: [
       {
@@ -537,6 +542,58 @@ export const POLICY_KINDS: PolicyKind[] = [
               { key: "child_amount", kind: "decimal", label: "rates.f.child_amount" },
               { key: "infant_amount", kind: "decimal", label: "rates.f.infant_amount" },
               { key: "priority", kind: "int", label: "rates.f.priority" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  // ─── Taxes (effective-dated, G-20) ─────────────────────────────────────
+  {
+    slug: "taxes",
+    doctype: "TEX Tax Policy",
+    cap: "tax.edit",
+    revisioned: true,
+    navLabel: "rates.nav.taxes",
+    title: "rates.policy.taxes.title",
+    singular: "rates.policy.taxes.one",
+    intro: "rates.policy.taxes.intro",
+    titleField: "policy_name",
+    propertyRequired: true,
+    newDoc: () => ({ rules: [] }),
+    list: [
+      { key: "policy_name", label: "rates.f.policy_name", render: "text" },
+      { key: "tex_status", label: "rates.f.status", render: "status" },
+      { key: "revision_no", label: "rates.f.revision", render: "rev", hideBelow: "sm" },
+      { key: "active_from", label: "rates.f.active_from", render: "datetime", hideBelow: "md" },
+    ],
+    sections: [
+      {
+        title: "rates.policy.section.scope",
+        fields: [
+          { key: "policy_name", kind: "text", label: "rates.f.policy_name", required: true },
+          { key: "property", kind: "property", label: "rates.f.hotel" },
+          { key: "currency", kind: "link", source: "currency", label: "rates.f.currency_fixed", help: "rates.h.tax_currency", blank: "rates.common.hotel_currency" },
+          { key: "description", kind: "textarea", label: "rates.f.description", wide: true },
+        ],
+      },
+      {
+        title: "rates.policy.taxes.rules",
+        help: "rates.policy.taxes.rules_help",
+        fields: [
+          {
+            key: "rules",
+            kind: "table",
+            label: "rates.policy.taxes.rules",
+            columns: [
+              { key: "code", kind: "text", label: "rates.f.code", required: true },
+              { key: "tax_name", kind: "text", label: "rates.f.tax_name" },
+              { key: "kind", kind: "select", label: "rates.f.tax_kind", options: TAX_KINDS, group: "tax_kind", required: true, default: "PERCENT" },
+              { key: "rate", kind: "decimal", label: "rates.f.tax_rate" },
+              { key: "amount", kind: "decimal", label: "rates.f.tax_amount" },
+              { key: "applies_to", kind: "select", label: "rates.f.applies_to", options: TAX_APPLIES, group: "tax_applies", required: true, default: "ACCOMMODATION" },
+              { key: "compound", kind: "check", label: "rates.f.compound", help: "rates.h.compound" },
+              { key: "sort_order", kind: "int", label: "rates.f.sort_order" },
             ],
           },
         ],

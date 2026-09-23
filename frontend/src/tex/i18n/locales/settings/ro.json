@@ -68,6 +68,7 @@
  "settings.cap.reservation.view": "Vizualizare rezervări",
  "settings.cap.restriction.edit": "Editare restricții (stop vânzare, sejur minim, CTA/CTD)",
  "settings.cap.settings.admin": "Setări hotel și jurnal de audit",
+ "settings.cap.tax.edit": "Gestionarea politicii fiscale a hotelului (TVA, taxă de cazare, taxe locale)",
  "settings.cap.user.admin": "Gestionare utilizatori și acces",
  "settings.capgroup.admin": "Administrare",
  "settings.capgroup.admin_hint": "Setările hotelului, jurnalul de audit și cine are acces la ce.",

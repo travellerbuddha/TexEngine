@@ -2,18 +2,22 @@
 idempotency, refunds, transfers, payment links, guest self-service, CRM consent,
 loyalty, abandoned-booking detection, reports and tenant isolation."""
 
+import json
+
 import frappe
-from frappe.utils import add_to_date, now_datetime
+from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
+from kamra.tex.commercial import context
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
 from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
+from kamra.tex.pricing.model import Unsellable
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification
@@ -39,8 +43,9 @@ def setup_site_and_payments(f: dict) -> dict:
 	return {"account": acc}
 
 
-def guest_books(session="sess-1", method="Card", guest=None) -> dict:
-	"""search → quote → book through the public API, as an anonymous visitor."""
+def guest_books(session="sess-1", method="Card", guest=None, before_book=None) -> dict:
+	"""search → quote → book through the public API, as an anonymous visitor.
+	``before_book`` runs between the quote and the booking."""
 	frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
 	res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
 	                    rooms=[{"adults": 2, "children": [8]}], market="DE", session_id=session)
@@ -52,6 +57,9 @@ def guest_books(session="sess-1", method="Card", guest=None) -> dict:
 	q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=[{"code": "TRF", "quantity": 1}],
 	                 session_id=session)
 	assert q["ok"], q
+	if before_book:
+		before_book()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor books
 	return public.book(site=SLUG, quote_ids=[q["quote_id"]], guest=guest or GUEST, payment_method=method,
 	                   session_id=session, idempotency_key=f"idem-{session}")
 
@@ -512,3 +520,368 @@ class TestCouponLimits(TexTestCase):
 		p = modification.propose(res, {"promo_codes": []})
 		modification.apply(p["proposal_token"], reason="code not valid for this guest")
 		self.assertEqual(self._live(promo, b["booking"]), [])
+
+
+class TestEffectiveDatedExtrasAndTaxes(TexTestCase):
+	"""G-20: extras and tax rules are effective-dated revisions. A stay priced at sale time
+	T uses the extra and tax revisions live at T; the snapshot records which ones."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		self.trf = frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "TRF",
+		                                             "tex_status": "Active"})
+
+	def _revise(self, doctype: str, name: str, **changes) -> str:
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager
+		draft = revisions.revise(doctype, name)
+		doc = frappe.get_doc(doctype, draft)
+		for k, v in changes.items():
+			if k == "rules":
+				for row, rate in zip(doc.rules, v, strict=True):
+					row.rate = rate
+			else:
+				doc.set(k, v)
+		doc.save(ignore_permissions=True)
+		revisions.activate(doctype, draft)
+		return draft
+
+	def _extra(self, quote: dict, code: str) -> dict:
+		return next(e for e in quote["extras"] if e["code"] == code)
+
+	def test_a_live_extra_is_immutable_and_a_new_price_is_a_revision(self):
+		from kamra.tex.api import crs as crs_api
+
+		b = guest_books(session="g20-extra")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		res = b["rooms"][0]["reservation"]
+		snap = json.loads(frappe.db.get_value("Reservation", res, "tex_pricing_snapshot"))
+		self.assertEqual(self._extra(snap, "TRF")["revision"], self.trf)          # the snapshot names the revision
+		self.assertEqual(D(self._extra(snap, "TRF")["amount"]), D("40"))
+		live = frappe.get_doc("TEX Extra", self.trf)
+		live.amount = 60
+		with self.assertRaises(frappe.ValidationError):                        # never edited in place
+			live.save(ignore_permissions=True)
+		rev2 = self._revise("TEX Extra", self.trf, amount=60)
+		self.assertEqual([(e["extra_code"], D(e["amount"])) for e in crs_api.extras_for(fx.PROPERTY)
+		                  if e["extra_code"] == "TRF"], [("TRF", D("60"))])     # one live revision listed
+		change = {"check_out": str(fx.d(6, 14))}
+		now = modification.propose(res, change, basis="CURRENT")
+		then = modification.propose(res, change, basis="ORIGINAL_VERSION")
+		self.assertEqual((D(self._extra(now["proposed"], "TRF")["amount"]), self._extra(now["proposed"], "TRF")["revision"]),
+		                 (D("60"), rev2))
+		self.assertEqual((D(self._extra(then["proposed"], "TRF")["amount"]),
+		                  self._extra(then["proposed"], "TRF")["revision"]), (D("40"), self.trf))
+		sim = modification.simulate(res, sale_at=snap["request"]["sale_at"])
+		self.assertEqual(D(self._extra(sim["simulated"], "TRF")["amount"]), D("40"))
+
+	def _no_tax_policy(self):
+		"""The test hotel without a tax policy (rolled back with the test)."""
+		names = frappe.get_all("TEX Tax Policy", filters={"property": fx.PROPERTY}, pluck="name")
+		if names:
+			frappe.db.delete("TEX Tax Rule", {"parenttype": "TEX Tax Policy", "parent": ("in", names)})
+			frappe.db.delete("TEX Tax Policy", {"name": ("in", names)})
+			frappe.clear_document_cache("TEX Tax Policy")
+
+	def _tax_policy(self, rules, at="2020-01-01 00:00:00", **extra) -> str:
+		from kamra.tex.commercial import revisions
+
+		self._no_tax_policy()
+		pol = frappe.get_doc({"doctype": "TEX Tax Policy", "policy_name": "Resort taxes", "property": fx.PROPERTY,
+		                      "rules": rules, **extra}).insert(ignore_permissions=True)
+		revisions.activate("TEX Tax Policy", pol.name, at=at, backdate=True)
+		return pol.name
+
+	def test_tax_policy_revisions_apply_from_their_activation(self):
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance sets the hotel's taxes
+		pol = frappe.get_doc("TEX Tax Policy", self._tax_policy(
+			[{"code": "VAT", "tax_name": "VAT", "kind": "PERCENT", "rate": 10, "applies_to": "ACCOMMODATION"}]))
+		b = guest_books(session="g20-tax")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		res = b["rooms"][0]["reservation"]
+		snap = json.loads(frappe.db.get_value("Reservation", res, "tex_pricing_snapshot"))
+		accom = D(snap["totals"]["accommodation"])
+		self.assertEqual([(t["code"], D(t["amount"]), t["source"]) for t in snap["taxes"]],
+		                 [("VAT", (accom * D("0.10")).quantize(D("0.01")), f"tax_policy:{pol.name}")])
+		step = next(s for s in snap["explanation"] if s["code"] == "TAX")
+		self.assertEqual((step["rule"]["kind"], step["rule"]["source"]), ("tax", f"tax_policy:{pol.name}"))
+		rev2 = self._revise("TEX Tax Policy", pol.name, rules=[12])
+		change = {"check_out": str(fx.d(6, 14))}
+		now = modification.propose(res, change, basis="CURRENT")["proposed"]
+		then = modification.propose(res, change, basis="ORIGINAL_VERSION")["proposed"]
+		self.assertEqual((D(now["taxes"][0]["rate"]), now["taxes"][0]["source"]), (D("12"), f"tax_policy:{rev2}"))
+		self.assertEqual((D(then["taxes"][0]["rate"]), then["taxes"][0]["source"]),
+		                 (D("10"), f"tax_policy:{pol.name}"))
+		# one tax policy per hotel: a second one is never put live next to it
+		other = frappe.get_doc({"doctype": "TEX Tax Policy", "policy_name": "Second", "property": fx.PROPERTY,
+		                        "rules": [{"code": "CITY", "kind": "PERCENT", "rate": 2}]}).insert(ignore_permissions=True)
+		with self.assertRaises(frappe.ValidationError):
+			revisions.activate("TEX Tax Policy", other.name)
+
+	def test_history_is_never_rewritten(self):
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager
+		draft = revisions.revise("TEX Extra", self.trf)
+		with self.assertRaises(frappe.ValidationError):             # back-dated: what was sold stays as it was
+			policy_api.activate("TEX Extra", draft, at="2020-06-01 00:00:00")
+		self.assertEqual(frappe.db.get_value("TEX Extra", draft, "tex_status"), "Draft")
+		t0 = now_datetime()
+		policy_api.activate("TEX Extra", draft, at=str(add_to_date(t0, minutes=-1)))   # a lagging client clock
+		self.assertGreaterEqual(get_datetime(frappe.db.get_value("TEX Extra", draft, "active_from")), t0)
+		self.assertEqual(frappe.db.get_value("TEX Extra", self.trf, "active_to"),
+		                 frappe.db.get_value("TEX Extra", draft, "active_from"))
+		# scheduled changes stay in order: nothing slips in before an already scheduled revision
+		later = revisions.revise("TEX Extra", draft)
+		policy_api.activate("TEX Extra", later, at=str(add_to_date(t0, days=10)))
+		sooner = revisions.revise("TEX Extra", draft)
+		with self.assertRaises(frappe.ValidationError):
+			policy_api.activate("TEX Extra", sooner, at=str(add_to_date(t0, days=5)))
+		# at every instant exactly one revision of the extra is on sale
+		for at in (add_to_date(t0, minutes=1), add_to_date(t0, days=11)):
+			live = [r.name for r in context.live_extras(fx.PROPERTY, at=at) if r.extra_code == "TRF"]
+			self.assertEqual(len(live), 1, (at, live))
+		# cancelling the scheduled revision keeps the current one on sale: no gap
+		policy_api.archive("TEX Extra", later, reason="schedule dropped")
+		self.assertEqual(frappe.db.get_value("TEX Extra", draft, ["tex_status", "active_to"]), ("Active", None))
+		for at in (add_to_date(t0, minutes=1), add_to_date(t0, days=11)):
+			self.assertEqual([r.name for r in context.live_extras(fx.PROPERTY, at=at) if r.extra_code == "TRF"],
+			                 [draft], at)
+
+	def test_cancelling_two_schedules_leaves_one_live_revision(self):
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager
+		t0 = now_datetime()
+		t1, t2 = add_to_date(t0, days=5), add_to_date(t0, days=10)
+		r2 = revisions.revise("TEX Extra", self.trf)
+		policy_api.activate("TEX Extra", r2, at=str(t1))
+		r3 = revisions.revise("TEX Extra", self.trf)
+		policy_api.activate("TEX Extra", r3, at=str(t2))
+		policy_api.archive("TEX Extra", r2, reason="first change dropped")    # superseded by r3, not yet live
+		policy_api.archive("TEX Extra", r3, reason="second change dropped")
+
+		def live(at):
+			return [r.name for r in context.live_extras(fx.PROPERTY, at=at) if r.extra_code == "TRF"]
+
+		for at in (add_to_date(t0, minutes=1), add_to_date(t1, hours=1), add_to_date(t2, hours=1)):
+			self.assertEqual(live(at), [self.trf], at)                        # never an archived one
+		self.assertEqual(frappe.db.get_value("TEX Extra", self.trf, ["tex_status", "active_to"]), ("Active", None))
+		r4 = revisions.revise("TEX Extra", self.trf)                          # and it can be revised again
+		policy_api.activate("TEX Extra", r4)
+		self.assertEqual(live(add_to_date(t1, hours=1)), [r4])
+
+	def test_a_revision_stays_at_its_hotel(self):
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- an admin of both hotels
+		other = "TEX Other Hotel"                          # a hotel without extras: nothing else refuses it
+		if not frappe.db.exists("Property", other):
+			frappe.get_doc({"doctype": "Property", "property_name": other, "city": "Kemer", "country": "Turkey",
+			                "currency": "EUR"}).insert(ignore_permissions=True)
+		draft = frappe.get_doc("TEX Extra", revisions.revise("TEX Extra", self.trf))
+		draft.property = other
+		with self.assertRaisesRegex(frappe.ValidationError, "stays at its record's hotel"):
+			draft.save(ignore_permissions=True)        # activating it would end this hotel's extra
+		draft.reload()
+		draft.extra_code = "TRF-NEW"
+		with self.assertRaisesRegex(frappe.ValidationError, "keeps its code"):
+			draft.save(ignore_permissions=True)        # the code is the extra's identity across revisions
+
+	def test_live_taxes_are_never_switched_off(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance
+		from kamra.tex.commercial import revisions
+
+		pol = self._tax_policy([{"code": "VAT", "kind": "PERCENT", "rate": 10}])
+		with self.assertRaises(frappe.ValidationError):
+			policy_api.archive("TEX Tax Policy", pol, reason="no more taxes")
+		# a revision scheduled for later: the current one is superseded but still live until then
+		later = revisions.revise("TEX Tax Policy", pol)
+		policy_api.activate("TEX Tax Policy", later, at=str(add_to_date(now_datetime(), days=10)))
+		with self.assertRaises(frappe.ValidationError):
+			policy_api.archive("TEX Tax Policy", pol, reason="no more taxes")
+		policy_api.archive("TEX Tax Policy", later, reason="schedule dropped")   # cancelling is fine
+		self.assertEqual(frappe.db.get_value("TEX Tax Policy", pol, ["tex_status", "active_to"]), ("Active", None))
+		# a gap made behind TEX's back stops pricing; it never falls back to older settings
+		frappe.db.set_value("TEX Tax Policy", pol, "active_to", add_to_date(now_datetime(), days=-1))
+		frappe.clear_document_cache("TEX Tax Policy")
+		with self.assertRaises(Unsellable):
+			context.tax_rules(fx.PROPERTY)
+
+	def test_a_scheduled_time_from_another_time_zone_is_the_same_instant(self):
+		from datetime import UTC, datetime, timedelta
+		from zoneinfo import ZoneInfo
+
+		from frappe.utils import get_system_timezone
+
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager
+		draft = revisions.revise("TEX Extra", self.trf)
+		at = (datetime.now(UTC) + timedelta(hours=3)).replace(microsecond=0)
+		policy_api.activate("TEX Extra", draft, at=at.isoformat())        # what the browser sends
+		self.assertEqual(get_datetime(frappe.db.get_value("TEX Extra", draft, "active_from")),
+		                 at.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None))
+
+	def test_drafts_and_scheduled_extras_can_be_translated_before_launch(self):
+		from kamra.tex.services import content
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- content editor
+		d = policy_api.save_record("TEX Extra", {"property": fx.PROPERTY, "extra_code": "G20NEW",
+		                                         "extra_name": "Sunset cruise", "category": "Service",
+		                                         "pricing_mode": "UNIT", "currency": "EUR", "amount": "30"})
+		refs = {i["ref_name"]: i["label"] for i in content.items(fx.PROPERTY) if i["ref_doctype"] == "TEX Extra"}
+		self.assertEqual(refs.get(d["name"]), "Sunset cruise")
+		self.assertIn(self.trf, refs)
+
+	def test_a_first_policy_counts_only_once_it_has_begun(self):
+		from kamra.tex.commercial import revisions
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance
+		self._no_tax_policy()
+		pol = frappe.get_doc({"doctype": "TEX Tax Policy", "policy_name": "From October", "property": fx.PROPERTY,
+		                      "rules": [{"code": "VAT", "kind": "PERCENT", "rate": 10}]}).insert(ignore_permissions=True)
+		start = add_to_date(now_datetime(), days=10)
+		revisions.activate("TEX Tax Policy", pol.name, at=start)
+		prop = frappe.get_doc("Property", fx.PROPERTY)          # still what prices until the policy begins
+		prop.append("tex_tax_rules", {"code": "CITY", "kind": "PERCENT", "rate": 1, "applies_to": "ACCOMMODATION"})
+		prop.save(ignore_permissions=True)
+		policy_api.archive("TEX Tax Policy", pol.name, reason="postponed")   # the schedule is cancelled
+		later = add_to_date(start, days=1)
+		self.assertEqual([(r.code, r.source) for r in context.tax_rules(fx.PROPERTY, at=later)],
+		                 [("CITY", f"property:{fx.PROPERTY}")])            # the hotel still sells, as before
+
+	def test_a_room_type_tax_change_says_it_does_not_reprice(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- desk admin
+		self._tax_policy([{"code": "VAT", "kind": "PERCENT", "rate": 10}])
+		rt = frappe.get_doc("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		if not rt.meta.has_field("tax_percent"):
+			self.skipTest("no room-type tax field")
+		frappe.local.message_log = []
+		rt.tax_percent = (rt.tax_percent or 0) + 5
+		rt.save(ignore_permissions=True)
+		self.assertTrue(any("does not affect them" in str(m) for m in frappe.local.message_log))
+
+	def test_a_new_tex_hotel_starts_with_a_tax_policy(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- onboarding
+		self._no_tax_policy()
+		frappe.get_doc("Property", fx.PROPERTY).save(ignore_permissions=True)   # e.g. joins a hotel group
+		pol = frappe.get_all("TEX Tax Policy", filters={"property": fx.PROPERTY}, fields=["tex_status", "currency"])
+		self.assertEqual([(p.tex_status, p.currency) for p in pol], [("Active", "EUR")])
+		self.assertTrue(all(r.source.startswith("tax_policy:") for r in context.tax_rules(fx.PROPERTY)))
+
+	def test_an_unchanged_reprice_reproduces_the_sold_price(self):
+		# a new extra price goes live between the quote and the booking: the booking keeps the
+		# quoted price, and an unchanged ORIGINAL_* reprice gives exactly that price again
+		b = guest_books(session="g20-quote-time", before_book=lambda: self._revise("TEX Extra", self.trf, amount=55))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		res = b["rooms"][0]["reservation"]
+		snap = json.loads(frappe.db.get_value("Reservation", res, "tex_pricing_snapshot"))
+		self.assertEqual(D(self._extra(snap, "TRF")["amount"]), D("40"))
+		for basis in ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE"):
+			p = modification.propose(res, {"adults": 2}, basis=basis)
+			self.assertEqual(D(self._extra(p["proposed"], "TRF")["amount"]), D("40"), basis)
+			self.assertEqual(D(p["proposed"]["totals"]["total"]), D(snap["totals"]["total"]), basis)
+
+	def test_tax_policies_belong_to_finance(self):
+		rm = fx.ensure_user("g20-revenue@example.com", ["Revenue Manager"])
+		fin = fx.ensure_user("g20-finance@example.com", ["Finance"])
+		for user, profile in ((rm, "Revenue Manager"), (fin, "Finance")):
+			fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+			          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": profile})
+		scope.clear_cache()
+		payload = {"policy_name": "Finance taxes", "property": fx.PROPERTY,
+		           "rules": [{"code": "VAT", "kind": "PERCENT", "rate": 10}]}
+		frappe.set_user(rm)  # nosemgrep: frappe-setuser -- revenue manager: prices, not taxes
+		with self.assertRaises(frappe.PermissionError):
+			policy_api.save_record("TEX Tax Policy", payload)
+		frappe.set_user(fin)  # nosemgrep: frappe-setuser -- finance owns the hotel's taxes
+		d = policy_api.save_record("TEX Tax Policy", payload)
+		self.assertEqual((d["tex_status"], d["currency"]), ("Draft", "EUR"))   # defaults to the hotel's currency
+
+	def test_tax_rules_are_validated_and_levies_keep_their_currency(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance
+		bad = (
+			[{"code": "VAT", "kind": "PERCENT", "rate": 10, "applies_to": "ACOMODATION"}],       # typo: taxes nothing
+			[{"code": "CITY", "kind": "PER_PERSON_NIGHT", "amount": 2, "applies_to": "EXTRA:*"}],  # a levy is on the stay
+			[{"code": "CITY", "kind": "PER_ROOM_NIGHT", "amount": 2, "compound": 1}],
+			[{"code": "VAT", "kind": "PERCENT", "rate": 120}],
+		)
+		for rules in bad:
+			with self.assertRaises(frappe.ValidationError, msg=rules):
+				frappe.get_doc({"doctype": "TEX Tax Policy", "policy_name": "Bad", "property": fx.PROPERTY,
+				                "rules": rules}).insert(ignore_permissions=True)
+		fx.ensure_currency("CHF", "CHF")
+		self._tax_policy([{"code": "CITY", "tax_name": "City tax", "kind": "PER_PERSON_NIGHT", "amount": 2,
+		                   "applies_to": "ACCOMMODATION"}], currency="CHF")
+		rules = context.tax_rules(fx.PROPERTY)
+		self.assertEqual([(r.code, r.currency, r.amount) for r in rules], [("CITY", "CHF", D("2"))])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a visitor searching
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2}], market="DE", session_id="g20-levy")
+		# no CHF→EUR FX policy: the stay is not sold rather than charged "2 EUR"
+		self.assertFalse([o for p in res["properties"] for o in p["offers"]])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance sets the rate
+		fx.ensure_live("TEX FX Policy", {"property": fx.PROPERTY, "from_currency": "CHF", "to_currency": "EUR"},
+		               {"property": fx.PROPERTY, "from_currency": "CHF", "to_currency": "EUR", "mode": "MANUAL",
+		                "manual_rate": 1.05})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor searches again
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2}], market="DE", session_id="g20-levy-fx")
+		taxes = {t["code"]: t for o in res["properties"][0]["offers"] for t in o["rooms"][0]["quote"]["taxes"]}
+		self.assertEqual((D(taxes["CITY"]["amount"]), D(taxes["CITY"]["fx_rate"])),
+		                 (D("12.60"), D("1.05")))          # 2 CHF × 2 guests × 3 nights × 1.05
+
+	def test_the_superseded_hotel_tax_table_cannot_be_edited(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- desk admin
+		self._tax_policy([{"code": "VAT", "kind": "PERCENT", "rate": 10}])
+		prop = frappe.get_doc("Property", fx.PROPERTY)
+		prop.append("tex_tax_rules", {"code": "VAT", "kind": "PERCENT", "rate": 20, "applies_to": "ACCOMMODATION"})
+		with self.assertRaises(frappe.ValidationError):
+			prop.save(ignore_permissions=True)
+
+	def test_two_live_definitions_stop_selling_instead_of_guessing(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a corrupted catalog
+		clone = frappe.copy_doc(frappe.get_doc("TEX Extra", self.trf))
+		clone.extra_code = "TRF-COPY"
+		clone.insert(ignore_permissions=True)          # then forced live under the same code, past validation
+		frappe.db.set_value("TEX Extra", clone.name, {"extra_code": "TRF", "tex_status": "Active",
+		                                              "active_from": "2020-01-01"})
+		with self.assertRaises(Unsellable):
+			context.extras_catalog(fx.PROPERTY)
+		self.assertEqual(context.listed_extras(fx.PROPERTY), [])     # lists degrade, never fail a page
+		first = self._tax_policy([{"code": "VAT", "kind": "PERCENT", "rate": 10}])
+		second = frappe.copy_doc(frappe.get_doc("TEX Tax Policy", first))
+		second.insert(ignore_permissions=True)
+		frappe.db.set_value("TEX Tax Policy", second.name, {"tex_status": "Active", "active_from": "2020-01-01"})
+		frappe.clear_document_cache("TEX Tax Policy")
+		with self.assertRaises(Unsellable):
+			context.tax_rules(fx.PROPERTY)
+		# only this hotel stops selling: a search answers (a multi-hotel site keeps its other hotels)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a visitor searching
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2}], market="DE", session_id="g20-ambiguous")
+		self.assertFalse([o for p in res["properties"] for o in p["offers"]])
+
+	def test_a_draft_with_an_audit_trail_can_be_deleted(self):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager drafts, then drops it
+		d = policy_api.save_record("TEX Tax Policy", {"policy_name": "Scratch", "property": fx.PROPERTY,
+		                                              "rules": [{"code": "VAT", "kind": "PERCENT", "rate": 8}]})
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"reference_name": d["name"]}))
+		policy_api.delete_record("TEX Tax Policy", d["name"])
+		self.assertFalse(frappe.db.exists("TEX Tax Policy", d["name"]))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"reference_name": d["name"]}))  # the trail stays
+
+	def test_a_record_still_in_use_is_never_deleted(self):
+		# only the audit trail is ignored on delete: an account that took a payment stays
+		b = guest_books(session="g20-in-use")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- hotel admin
+		acc = frappe.db.get_value("TEX Payment Transaction", {"booking": b["booking"]}, "provider_account")
+		self.assertTrue(acc)
+		with self.assertRaises(frappe.LinkExistsError):
+			policy_api.delete_record("TEX Payment Provider Account", acc)
+		self.assertTrue(frappe.db.exists("TEX Payment Provider Account", acc))

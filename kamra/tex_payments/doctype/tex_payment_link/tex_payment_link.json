@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 14:00:00.000000",
+ "creation": "2026-09-23 19:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,17 +11,17 @@
   "currency",
   "description",
   "expires_at",
-  "column_82",
+  "column_87",
   "provider_account",
   "booking",
   "reservation",
   "guest_name",
   "guest_email",
-  "section_83",
+  "section_88",
   "paid_amount",
   "allocated_amount",
   "public_url",
-  "column_84",
+  "column_89",
   "token_hash",
   "idempotency_key"
  ],
@@ -70,7 +70,7 @@
    "label": "Expires"
   },
   {
-   "fieldname": "column_82",
+   "fieldname": "column_87",
    "fieldtype": "Column Break"
   },
   {
@@ -104,7 +104,7 @@
    "options": "Email"
   },
   {
-   "fieldname": "section_83",
+   "fieldname": "section_88",
    "fieldtype": "Section Break",
    "label": "Settlement"
   },
@@ -129,7 +129,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_84",
+   "fieldname": "column_89",
    "fieldtype": "Column Break"
   },
   {
@@ -147,7 +147,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 14:00:00.000000",
+ "modified": "2026-09-23 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Link",

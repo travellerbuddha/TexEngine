@@ -66,6 +66,7 @@
  "settings.cap.reservation.view": "Reservierungen ansehen",
  "settings.cap.restriction.edit": "Restriktionen bearbeiten (Stop-Sell, Mindestaufenthalt, CTA/CTD)",
  "settings.cap.settings.admin": "Hoteleinstellungen und Audit-Protokoll",
+ "settings.cap.tax.edit": "Steuerrichtlinie des Hotels verwalten (MwSt., Beherbergungssteuer, Abgaben)",
  "settings.cap.user.admin": "Benutzer und Zugriffsrechte verwalten",
  "settings.capgroup.admin": "Verwaltung",
  "settings.capgroup.admin_hint": "Hoteleinstellungen, das Audit-Protokoll und wer worauf zugreifen darf.",

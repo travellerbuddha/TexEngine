@@ -19,6 +19,7 @@ POLICY = {
 	"TEX Promotion": "promotion.edit",
 	"TEX FX Policy": "fx.edit",
 	"TEX Pricing Policy": "contract.edit",
+	"TEX Tax Policy": "tax.edit",
 	"TEX Cancellation Policy": "contract.edit",
 	"TEX Payment Policy": "contract.edit",
 	"TEX Extra": "contract.edit",
@@ -147,9 +148,11 @@ def delete_record(doctype: str, name: str):
 	_check(doctype, _prop_of(doctype, doc), write=True)
 	if doc.meta.has_field("tex_status") and doc.tex_status != "Draft":
 		frappe.throw(_("Live revisions are archived, not deleted."))
-	frappe.delete_doc(doctype, name, ignore_permissions=True)
+	# audited while the record still exists (same transaction); then the record goes and its audit
+	# trail stays (hooks.ignore_links_on_delete); any other link still blocks the delete
 	audit(f"{doctype.lower().replace(' ', '_')}.delete", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc))
+	      property=_audit_prop(doctype, doc), old=doc_dict(doc))
+	frappe.delete_doc(doctype, name, ignore_permissions=True)
 	return {"ok": True}
 
 
@@ -164,9 +167,9 @@ def _rev_doc(doctype: str, name: str):
 @frappe.whitelist(methods=["POST"])
 def activate(doctype: str, name: str, at: str | None = None):
 	doc = _rev_doc(doctype, name)
-	revisions.activate(doctype, name, at)
+	revisions.activate(doctype, name, at)   # never back-dated from here (G-20)
 	audit(f"{doctype.lower().replace(' ', '_')}.activate", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc))
+	      property=_audit_prop(doctype, doc), new={"active_from": str(frappe.db.get_value(doctype, name, "active_from"))})
 	return get_record(doctype, name)
 
 

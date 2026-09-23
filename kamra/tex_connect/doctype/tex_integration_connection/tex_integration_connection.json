@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-09-23 14:00:00.000000",
+ "creation": "2026-09-23 19:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -11,12 +11,12 @@
   "adapter",
   "enabled",
   "environment",
-  "column_99",
+  "column_104",
   "endpoint_url",
   "api_key",
   "secret",
   "settings_json",
-  "section_100",
+  "section_105",
   "last_sync_at",
   "last_status",
   "last_error"
@@ -66,7 +66,7 @@
    "default": "Sandbox"
   },
   {
-   "fieldname": "column_99",
+   "fieldname": "column_104",
    "fieldtype": "Column Break"
   },
   {
@@ -91,7 +91,7 @@
    "options": "JSON"
   },
   {
-   "fieldname": "section_100",
+   "fieldname": "section_105",
    "fieldtype": "Section Break",
    "label": "Status"
   },
@@ -115,7 +115,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-23 14:00:00.000000",
+ "modified": "2026-09-23 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Connect",
  "name": "TEX Integration Connection",

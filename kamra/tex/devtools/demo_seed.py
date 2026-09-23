@@ -83,10 +83,14 @@ def _hotel(name: str, spec: dict, group: str) -> dict:
 	for code, label, cat, mode, amount in (("TRF", "Airport transfer", "Transfer", "RESERVATION", 45),
 	                                       ("SPA", "Spa access", "Spa", "PERSON_NIGHT", 18),
 	                                       ("LCO", "Late check-out", "Service", "RESERVATION", 35)):
-		_ensure("TEX Extra", {"property": name, "extra_code": code},
-		        {"property": name, "extra_code": code, "extra_name": label, "category": cat, "pricing_mode": mode,
-		         "currency": "EUR", "amount": amount, "bookable_online": 1,
-		         "tax_category": "TRANSFER" if code == "TRF" else "SERVICE"})
+		extra = _ensure("TEX Extra", {"property": name, "extra_code": code},
+		                {"property": name, "extra_code": code, "extra_name": label, "category": cat,
+		                 "pricing_mode": mode, "currency": "EUR", "amount": amount, "bookable_online": 1,
+		                 "tax_category": "TRANSFER" if code == "TRF" else "SERVICE"})
+		if frappe.db.get_value("TEX Extra", extra, "tex_status") == "Draft":
+			from kamra.tex.commercial import revisions
+
+			revisions.activate("TEX Extra", extra)   # extras are effective-dated revisions (G-20)
 	return {"room_types": rts, "rate_plans": rps}
 
 

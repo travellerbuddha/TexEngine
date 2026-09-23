@@ -612,8 +612,21 @@ COMMERCIAL_SPECS = [
 		SB("Price rules"),
 		F("price_rules", "Table", "Price rules", "TEX Extra Price Rule"),
 		F("legacy_experience", "Link", "Legacy experience", "Experience", read_only=1),
+		*revision("TEX Extra"),
 	], perms=COMMERCIAL, autoname="EXT-.#####", naming_rule="Expression (old style)", title_field="extra_name",
 	   search_fields="extra_code,extra_name,property"),
+
+	# a hotel's tax rules, effective-dated (G-20): pricing at sale time T uses the policy live at T
+	dt("TEX Tax Policy", C, [
+		F("policy_name", "Data", "Policy", reqd=1, in_list_view=1),
+		F("property", "Link", "Hotel", "Property", reqd=1, in_standard_filter=1, in_list_view=1),
+		F("currency", "Link", "Currency of fixed amounts", "Currency",
+		  description="Fixed levies are charged in this currency, converted at the sale time's FX"),
+		F("description", "Small Text", "Description"),
+		SB("Tax rules"),
+		F("rules", "Table", "Tax rules", "TEX Tax Rule"),
+		*revision("TEX Tax Policy"),
+	], perms=COMMERCIAL, autoname="TXP-.#####", naming_rule="Expression (old style)", title_field="policy_name"),
 
 	dt("TEX Tax Rule", C, [
 		F("code", "Data", "Code", reqd=1, in_list_view=1),

@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import frappe
-from frappe.utils import get_datetime
+from frappe import _
+from frappe.utils import get_datetime, now_datetime
 
 from kamra.tex.commercial.revisions import as_of
 from kamra.tex.money import D, D_or_none
@@ -38,6 +39,7 @@ from kamra.tex.pricing.model import (
 	Promotion,
 	StayRequest,
 	TaxRule,
+	Unsellable,
 )
 
 
@@ -180,51 +182,123 @@ def fx_snapshot(frm: str, to: str, property: str, at: datetime) -> FxSnapshot:
 # ─── taxes ───────────────────────────────────────────────────────────────
 
 
-def _rule(d: dict) -> TaxRule:
+def _rule(d: dict, source: str | None = None, currency: str | None = None) -> TaxRule:
 	return TaxRule(code=d["code"], name=d.get("name") or d["code"], kind=TaxKind(d.get("kind") or "PERCENT"),
 	               rate=D(d.get("rate")), amount=D(d.get("amount")),
 	               applies_to=frozenset(d.get("applies_to") or ["ACCOMMODATION"]),
 	               compound=bool(d.get("compound")), order=int(d.get("order") or 0),
-	               slabs=tuple((D_or_none(t), D(r)) for t, r in (d.get("slabs") or ())))
+	               slabs=tuple((D_or_none(t), D(r)) for t, r in (d.get("slabs") or ())), source=source,
+	               currency=currency)
 
 
-def tax_rules(property: str, room_type: str | None = None) -> tuple[TaxRule, ...]:
+def _table_rules(rows, source: str, currency: str | None) -> tuple[TaxRule, ...]:
+	"""TEX Tax Rule rows (a tax policy's, or a hotel's legacy custom table)."""
+	return tuple(TaxRule(code=r.code, name=r.tax_name or r.code, kind=TaxKind(r.kind or "PERCENT"),
+	                     rate=D(r.rate), amount=D(r.amount), compound=bool(r.compound), order=int(r.sort_order or 0),
+	                     applies_to=frozenset(x.strip() for x in (r.applies_to or "ACCOMMODATION").split(",")
+	                                          if x.strip()), source=source, currency=currency or None)
+	             for r in rows or [])
+
+
+def policy_started(property: str, at: datetime | None = None) -> bool:
+	"""Has the hotel's tax policy begun by ``at`` (a revision that was really live, not a
+	cancelled schedule)? From then on its taxes are only ever a policy."""
+	return bool(frappe.db.sql("""SELECT 1 FROM `tabTEX Tax Policy` WHERE property=%s
+	                             AND tex_status IN ('Active','Superseded','Archived') AND active_from <= %s
+	                             AND (active_to IS NULL OR active_to > active_from) LIMIT 1""",
+	                          (property, at or now_datetime())))
+
+
+def tax_policy(property: str, at: datetime | None = None):
+	"""The hotel's tax policy revision live at ``at`` (G-20), or None. Two live at once is
+	refused on activation; should it ever happen, pricing stops rather than guess."""
+	at = get_datetime(at) if at else now_datetime()
+	rows = as_of("TEX Tax Policy", at, filters={"property": property}, fields=("name",))
+	# the stay is unsellable (never priced with a guess), and only at this hotel: a search
+	# over several hotels goes on (Unsellable, not a request-wide error)
+	if len(rows) > 1:
+		raise Unsellable("TAX_POLICY", _("{0} has more than one tax policy in force ({1}).").format(
+			property, ", ".join(r.name for r in rows)), property=property)
+	if not rows and policy_started(property, at):
+		# once a hotel's taxes are a policy they never silently fall back to older settings
+		raise Unsellable("TAX_POLICY", _("{0} has no tax policy in force at {1}.").format(property, at),
+		                 property=property)
+	return frappe.get_cached_doc("TEX Tax Policy", rows[0].name) if rows else None
+
+
+def tax_rules(property: str, room_type: str | None = None, at: datetime | None = None) -> tuple[TaxRule, ...]:
+	"""Tax rules in force at sale time ``at``: the hotel's TEX Tax Policy revision live then.
+	Without one (a hotel set up after G-20 that has no policy yet), the hotel's custom
+	table or its localization pack, which are not effective-dated; the rules' ``source``
+	says which, and every tax step of the explanation carries it."""
+	policy = tax_policy(property, at)
+	if policy:
+		return _table_rules(policy.rules, f"tax_policy:{policy.name}", policy.currency)
 	prop = frappe.get_cached_doc("Property", property)
 	if prop.get("tex_tax_profile") == "Custom":
-		return tuple(TaxRule(code=r.code, name=r.tax_name or r.code, kind=TaxKind(r.kind or "PERCENT"),
-		                     rate=D(r.rate), amount=D(r.amount), compound=bool(r.compound), order=int(r.sort_order or 0),
-		                     applies_to=frozenset(x.strip() for x in (r.applies_to or "ACCOMMODATION").split(",")
-		                                          if x.strip()))
-		             for r in prop.get("tex_tax_rules") or [])
+		# not a policy yet: a fixed amount keeps its old meaning (the sell currency)
+		return _table_rules(prop.get("tex_tax_rules"), f"property:{property}", None)
 	from kamra.localization import pack_for
 
 	pack = pack_for(property)
+	source = f"pack:{pack.__name__.rsplit('.', 1)[-1]}"
 	rt = frappe.get_cached_doc("Room Type", room_type) if room_type else None
 	fn = getattr(pack, "tex_tax_rules", None)
 	if fn:
-		return tuple(_rule(d) for d in fn(prop, rt))
+		return tuple(_rule(d, source) for d in fn(prop, rt))
 	if pack.__name__.endswith(".india") and (prop.get("gst_mode") or "Slab") != "Fixed":
 		threshold = D(prop.get("gst_slab_threshold") or 7500)
 		slab = ((threshold, D(prop.get("gst_rate_low") or 5)), (None, D(prop.get("gst_rate_high") or 18)))
-		room = TaxRule("GST", "GST", rate=slab[0][1], slabs=slab)
+		room = TaxRule("GST", "GST", rate=slab[0][1], slabs=slab, source=source)
 	else:
-		room = TaxRule("TAX", "Tax", rate=D(pack.calculate_room_tax(property, rt, Decimal(0))))
-	fnb = D(pack.fnb_tax_rate(property))
-	return (room, TaxRule("TAX-EXTRA", "Tax", rate=fnb, applies_to=frozenset({"EXTRA:*"}), order=1))
+		room = TaxRule("TAX", "Tax", rate=D(pack.calculate_room_tax(property, rt, Decimal(0))), source=source)
+	fnb = D(str(pack.fnb_tax_rate(property)))
+	return (room, TaxRule("TAX-EXTRA", "Tax", rate=fnb, applies_to=frozenset({"EXTRA:*"}), order=1, source=source))
 
 
 # ─── extras ──────────────────────────────────────────────────────────────
 
 
-def extras_catalog(property: str, *, online_only: bool = False, after_booking: bool = False) -> dict[str, ExtraDef]:
-	filters = {"property": property, "disabled": 0}
-	if online_only:
-		filters["bookable_online"] = 1
-	if after_booking:
-		filters["bookable_after_booking"] = 1
+EXTRA_LIST_FIELDS = ("name", "extra_code", "extra_name", "category", "description", "image", "pricing_mode",
+                     "currency", "amount", "is_mandatory", "max_quantity", "service_from", "service_to",
+                     "bookable_online", "bookable_after_booking", "inventory_tracked", "daily_capacity",
+                     "revision_of")
+
+
+def live_extras(property: str, *, at: datetime | None = None, online_only: bool = False,
+                after_booking: bool = False, fields=("name", "extra_code")) -> list[dict]:
+	"""The hotel's extras as sold at ``at`` (default now): one live revision per extra,
+	not disabled (G-20). ``fields`` are TEX Extra columns."""
+	cols = tuple(dict.fromkeys(("name", "extra_code", "disabled", "bookable_online", "bookable_after_booking",
+	                            *fields)))
+	live = as_of("TEX Extra", at or now_datetime(), filters={"property": property}, fields=cols)
+	codes = [r.extra_code for r in live]
+	clash = sorted({c for c in codes if codes.count(c) > 1})
+	if clash:
+		# refused on save; should it ever happen, this hotel stops selling rather than pick a price
+		frappe.log_error(title=f"TEX: ambiguous extras at {property}", message=", ".join(clash))
+		raise Unsellable("EXTRA_AMBIGUOUS", _("{0} has more than one live revision of extra {1}.").format(
+			property, ", ".join(clash)), property=property)
+	rows = [r for r in live if not r.disabled and (r.bookable_online or not online_only)
+	        and (r.bookable_after_booking or not after_booking)]
+	return sorted(rows, key=lambda r: r.extra_code)
+
+
+def listed_extras(property: str, **kw) -> list[dict]:
+	"""``live_extras`` for lists outside pricing (the booking site, CRS pickers, content): a
+	hotel whose catalog is ambiguous lists no extras instead of failing the whole page."""
+	try:
+		return live_extras(property, **kw)
+	except Unsellable:
+		return []
+
+
+def extras_catalog(property: str, *, online_only: bool = False, after_booking: bool = False,
+                   at: datetime | None = None) -> dict[str, ExtraDef]:
+	"""Extras priced as sold at ``at`` (the quote's sale time; default now)."""
 	out = {}
-	for name in frappe.get_all("TEX Extra", filters=filters, pluck="name"):
-		e = frappe.get_cached_doc("TEX Extra", name)
+	for row in live_extras(property, at=at, online_only=online_only, after_booking=after_booking):
+		e = frappe.get_cached_doc("TEX Extra", row.name)
 		child = D(e.child_amount) if e.child_pricing == "CUSTOM" else None
 		infant = (D(0) if e.infant_pricing == "FREE" else (D(e.infant_amount) if e.infant_pricing == "CUSTOM"
 		                                                   else None))
@@ -244,7 +318,7 @@ def extras_catalog(property: str, *, online_only: bool = False, after_booking: b
 			mandatory=bool(e.is_mandatory), sale_from=_date(e.sale_from), sale_to=_date(e.sale_to),
 			service_from=_date(e.service_from), service_to=_date(e.service_to), markets=_csv(e.markets),
 			channels=_csv(e.channels), room_types=_csv(e.room_types), max_quantity=e.max_quantity or None,
-			price_rules=rules, inventory_tracked=bool(e.inventory_tracked))
+			price_rules=rules, inventory_tracked=bool(e.inventory_tracked), revision=e.name)
 	return out
 
 
@@ -256,7 +330,8 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 	at = req.sale_at
 	sell = req.sell_currency.upper()
 	promos = promotions(req.property, at)
-	catalog = extras if extras is not None else extras_catalog(req.property)
+	# extras and taxes as they were at the sale time being priced (G-20)
+	catalog = extras if extras is not None else extras_catalog(req.property, at=at)
 	needed = {e.currency for e in catalog.values() if e.currency != sell}
 	extra_fx = {}
 	for ccy in sorted(needed):
@@ -270,12 +345,21 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 			promo_fx[ccy] = fx_snapshot(ccy, sell, req.property, at)
 		except Exception:
 			continue
+	taxes = tax_rules(req.property, req.room_type, at=at)
+	tax_fx = {}
+	for ccy in sorted({r.currency.upper() for r in taxes if r.kind != TaxKind.PERCENT and r.currency
+	                   and r.currency.upper() != sell}):
+		try:
+			tax_fx[ccy] = fx_snapshot(ccy, sell, req.property, at)
+		except Exception:
+			continue      # the stay is then unsellable (TAX_FX): a levy is never charged unconverted
 	return PricingContext(
 		terms=terms,
 		fx=fx_snapshot(terms.currency, sell, req.property, at),
 		markups=markups(req.property, at),
 		promotions=promos,
-		tax_rules=tax_rules(req.property, req.room_type),
+		tax_rules=taxes,
+		tax_fx=tax_fx,
 		extras=catalog,
 		extra_fx=extra_fx,
 		promo_fx=promo_fx,
