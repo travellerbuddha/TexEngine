@@ -118,23 +118,30 @@ def capabilities(property: str | None, user: str | None = None) -> frozenset[str
 	if is_platform_admin(user):
 		return ALL
 	scope = _scope(user)
+	role_caps: set[str] = set()
+	for role in frappe.get_roles(user):
+		role_caps |= ROLE_DEFAULTS.get(role, frozenset())
+
+	def at(profiles) -> set[str]:
+		# a hotel's granted profiles decide there; Frappe role defaults only apply where the
+		# user has no granted profile (legacy User Permission scope) (G-12)
+		granted = {p for p in profiles if p}
+		if not granted:
+			return set(role_caps)
+		caps: set[str] = set()
+		for prof in granted:
+			caps |= _profile_caps(prof)
+		return caps
+
 	if property is None:
 		# capability anywhere in scope (for list screens); still requires some scope
-		if not scope:
-			return frozenset()
 		caps: set[str] = set()
-		for props in scope.values():
-			for prof in props:
-				caps |= _profile_caps(prof)
-	else:
-		if property not in scope:
-			return frozenset()
-		caps = set()
-		for prof in scope[property]:
-			caps |= _profile_caps(prof)
-	for role in frappe.get_roles(user):
-		caps |= ROLE_DEFAULTS.get(role, frozenset())
-	return frozenset(caps)
+		for profiles in scope.values():
+			caps |= at(profiles)
+		return frozenset(caps)
+	if property not in scope:
+		return frozenset()
+	return frozenset(at(scope[property]))
 
 
 def has_capability(cap: str, property: str | None = None, user: str | None = None) -> bool:

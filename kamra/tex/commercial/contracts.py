@@ -286,6 +286,9 @@ def new_draft(contract: str, based_on: str | None = None) -> str:
 		                               order_by="version_no desc")
 	if based_on:
 		src = frappe.get_doc("TEX Contract Version", based_on)
+		if src.contract != contract:
+			# never another contract's terms (another hotel's cost), never a draft on its contract (G-13)
+			frappe.throw(_("A draft can only be based on a version of the same contract."), frappe.PermissionError)
 		doc = frappe.copy_doc(src)
 		for f in ("status", "published_at", "published_by", "active_to", "effective_from", "payload",
 		          "payload_hash", "validation_report", "change_note"):

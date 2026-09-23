@@ -158,6 +158,72 @@ class TestRestBypass(TexTestCase):
 		self.assertNotIn("cost", p["old"]["totals"] or {})
 		self.assertTrue(all("cost" not in n for n in p["proposed"]["nights"]))
 
+	def test_g11_agents_never_see_contract_cost(self):
+		from kamra.tex.api import contracts as contract_api
+		from kamra.tex.api import crs as crs_api
+
+		contract = frappe.db.get_value("TEX Contract", {"property": fx.PROPERTY}, "name")
+		version = frappe.db.get_value("TEX Contract Version", {"contract": contract, "status": "Published"}, "name")
+		fx.create_markup()
+		frappe.set_user(self.agent)  # nosemgrep: frappe-setuser -- a reservations agent sells, it never sees cost
+		scope.clear_cache()
+		info = contract_api.get_version(version)                 # what the modify drawer needs, nothing more
+		self.assertTrue(info["cost_hidden"])
+		self.assertLessEqual(set(info), {"name", "contract", "version_no", "status", "rooms", "boards", "rate_plans",
+		                                 "room_types", "rate_plan_options", "contract_doc", "editable", "cost_hidden"})
+		self.assertTrue(all(set(r) <= {"room_type"} for r in info["rooms"]))
+		self.assertTrue(all(set(b) <= {"board"} for b in info["boards"]))
+		self.assertTrue(all(set(r) <= {"rate_plan", "refundable"} for r in info["rate_plans"]))
+		with self.assertRaises(frappe.PermissionError):
+			contract_api.price_matrix(version)
+		with self.assertRaises(frappe.PermissionError):
+			policy_api.list_records(doctype="TEX Markup Rule", property=fx.PROPERTY)
+		grid = crs_api.ari_grid(property=fx.PROPERTY, start=str(fx.d(6, 10)), days=3, contract=contract)
+		self.assertTrue(all("rate" not in c and "draft_rate" not in c for r in grid["rows"] for c in r["cells"]))
+		# a contract is only graphed on its own hotel (G-83)
+		frappe.set_user(self.gm)  # nosemgrep: frappe-setuser -- another hotel's admin
+		scope.clear_cache()
+		with self.assertRaises(frappe.ValidationError):
+			crs_api.ari_grid(property=OTHER, start=str(fx.d(6, 10)), days=3, contract=contract)
+		# revenue management still sees everything
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- platform administrator
+		self.assertIn("period_rates", contract_api.get_version(version))
+		self.assertTrue(contract_api.price_matrix(version)["rooms"])
+		grid = crs_api.ari_grid(property=fx.PROPERTY, start=str(fx.d(6, 10)), days=3, contract=contract)
+		self.assertTrue(any(c.get("rate") for r in grid["rows"] for c in r["cells"]))
+
+	def test_g13_a_draft_is_never_based_on_another_hotels_contract(self):
+		from kamra.tex.commercial import contracts as contract_svc
+
+		victim = frappe.db.get_value("TEX Contract", {"property": fx.PROPERTY}, "name")
+		victim_version = frappe.db.get_value("TEX Contract Version", {"contract": victim, "status": "Published"},
+		                                     "name")
+		victim_drafts = frappe.db.count("TEX Contract Version", {"contract": victim, "status": "Draft"})
+		own = frappe.get_doc({"doctype": "TEX Contract", "property": OTHER, "contract_code": "SEC-OWN",
+		                      "contract_name": "Own contract", "market": "DE", "contract_currency": "EUR",
+		                      "pricing_basis": "PERSON", "status": "Draft"}).insert(ignore_permissions=True).name
+		frappe.set_user(self.gm)  # nosemgrep: frappe-setuser -- may edit contracts of its own hotel only
+		scope.clear_cache()
+		with self.assertRaises(frappe.PermissionError):
+			contract_svc.new_draft(own, based_on=victim_version)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- verify nothing was created
+		self.assertEqual(frappe.db.count("TEX Contract Version", {"contract": victim, "status": "Draft"}), victim_drafts)
+		self.assertFalse(frappe.db.exists("TEX Contract Version", {"contract": own}))
+
+	def test_g12_a_hotels_grant_decides_over_frappe_role_defaults(self):
+		viewer = fx.ensure_user("sec-viewer@example.com", ["Hotel Admin"])   # Frappe role: all TEX capabilities
+		fx.ensure("TEX Access Grant", {"user": viewer, "property": fx.PROPERTY},
+		          {"user": viewer, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": "Viewer"})
+		frappe.set_user(viewer)  # nosemgrep: frappe-setuser -- granted only "Viewer" at this hotel
+		scope.clear_cache()
+		self.assertTrue(scope.has_capability("price.view", fx.PROPERTY))
+		for cap in ("payment.refund", "contract.publish", "user.admin", "price.view_cost"):
+			self.assertFalse(scope.has_capability(cap, fx.PROPERTY), cap)
+			self.assertFalse(scope.has_capability(cap, None), cap)
+		frappe.set_user(self.gm)  # nosemgrep: frappe-setuser -- a "Hotel Admin" grant still means all of it
+		scope.clear_cache()
+		self.assertTrue(scope.has_capability("payment.refund", OTHER))
+
 	def test_staff_idempotency_replay_is_per_user(self):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff booking
 		first = guest_books(session="sec-staff-a")

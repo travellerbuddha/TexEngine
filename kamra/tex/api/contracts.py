@@ -114,11 +114,37 @@ def duplicate_contract(name: str, contract_code: str, contract_name: str | None 
 	return get_contract(new.name)
 
 
+def _sees_cost(prop: str | None) -> bool:
+	"""Contract rates, supplements, formulas and offers are cost (G-11): shown to who may see
+	cost or edits contracts, never to an agent who only sells."""
+	return scope.has_capability("price.view_cost", prop) or scope.has_capability("contract.edit", prop)
+
+
+def _catalogue(v, prop: str) -> dict:
+	"""What selling needs from a version (rooms, boards, rate plans), without any amount."""
+	c = frappe.db.get_value("TEX Contract", v.contract, ["name", "property", "contract_code", "contract_name",
+	                                                     "market", "contract_currency", "status"], as_dict=True)
+	return {
+		"name": v.name, "contract": v.contract, "version_no": v.version_no, "status": v.status,
+		"rooms": [{"room_type": r.room_type} for r in v.rooms],
+		"boards": [{"board": b.board} for b in v.boards],
+		"rate_plans": [{"rate_plan": r.rate_plan, "refundable": r.refundable} for r in v.rate_plans],
+		"room_types": frappe.get_all("Room Type", filters={"property": prop, "disabled": 0},
+		                             fields=["name", "room_type_name", "adults_capacity", "children_capacity"],
+		                             order_by="room_type_name"),
+		"rate_plan_options": frappe.get_all("Rate Plan", filters={"property": prop, "disabled": 0},
+		                                    fields=["name", "rate_plan_name", "code", "tex_refundable"]),
+		"contract_doc": dict(c or {}), "editable": False, "cost_hidden": True,
+	}
+
+
 @frappe.whitelist()
 def get_version(name: str):
 	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)
 	scope.require("price.view", prop)
+	if not _sees_cost(prop):
+		return _catalogue(v, prop)
 	out = doc_dict(v, exclude=("payload",))
 	out["validation_report"] = json.loads(v.validation_report) if v.validation_report else None
 	out["editable"] = v.status == "Draft" and scope.has_capability("contract.edit", prop)
@@ -213,6 +239,8 @@ def price_matrix(version: str, adults: int = 2):
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view", prop)
+	if not _sees_cost(prop):
+		frappe.throw(_("Not permitted: {0}.").format("price.view_cost"), frappe.PermissionError)
 	terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v)
 	from kamra.tex.pricing import rooms as room_math
 

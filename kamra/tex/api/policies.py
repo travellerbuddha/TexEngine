@@ -29,7 +29,9 @@ POLICY = {
 	"TEX Integration Connection": "connect.admin",
 }
 READ_CAP = {"TEX Payment Provider Account": "payment.view", "TEX Payment Method Rule": "payment.view",
-            "TEX Integration Connection": "connect.admin"}
+            "TEX Integration Connection": "connect.admin",
+            # markups and contract formulas are cost (G-11)
+            "TEX Markup Rule": "price.view_cost", "TEX Pricing Policy": "price.view_cost"}
 PROTECTED = {"name", "owner", "creation", "modified", "modified_by", "docstatus", "tex_status", "active_from",
              "active_to", "revision_no", "revision_of", "times_redeemed", "doctype"}
 

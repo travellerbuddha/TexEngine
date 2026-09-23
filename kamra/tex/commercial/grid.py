@@ -59,6 +59,10 @@ def _editable_version(contract: str) -> tuple[str | None, str | None]:
 def grid(property: str, start, days: int = 14, contract: str | None = None, market: str | None = None,
          channel: str | None = None, rate_plan: str | None = None) -> dict:
 	scope.require("price.view", property)
+	if contract and frappe.db.get_value("TEX Contract", contract, "property") != property:
+		frappe.throw(_("This contract belongs to another hotel."))
+	# contract rates are cost: only for who may see cost (G-11)
+	show_cost = scope.has_capability("price.view_cost", property)
 	start = getdate(start)
 	days = max(1, min(int(days or 14), 62))
 	dates = [start + timedelta(days=i) for i in range(days)]
@@ -103,7 +107,7 @@ def grid(property: str, start, days: int = 14, contract: str | None = None, mark
 				             and (not p.room_types or rt.name in p.room_types) for p in promos),
 			}
 			for label, t in (("rate", terms), ("draft_rate", draft_terms)):
-				if t and rt.name in t.rooms:
+				if show_cost and t and rt.name in t.rooms:
 					period = room_math.period_for(t, d)
 					try:
 						cell[label] = to_str(quantize(room_math.room_unit(t, rt.name, period), t.currency)) \
@@ -113,7 +117,7 @@ def grid(property: str, start, days: int = 14, contract: str | None = None, mark
 			row["cells"].append(cell)
 		out_rows.append(row)
 	return {"property": property, "start": start.isoformat(), "days": days, "dates": [d.isoformat() for d in dates],
-	        "contract": contract, "version": version, "draft": draft,
+	        "contract": contract, "version": version, "draft": draft, "rates_hidden": not show_cost,
 	        "basis": (terms or draft_terms).basis.value if (terms or draft_terms) else None,
 	        "currency": (terms or draft_terms).currency if (terms or draft_terms) else None, "rows": out_rows}
 
