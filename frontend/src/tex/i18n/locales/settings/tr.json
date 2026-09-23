@@ -51,6 +51,7 @@
  "settings.cap.fx.edit": "Kur politikalarını ve manuel kurları yönetme",
  "settings.cap.guest.export": "Misafir verilerini dışa aktarma",
  "settings.cap.inventory.edit": "Envanter, kontenjan ve kapatmaları düzenleme",
+ "settings.cap.loyalty.edit": "Sadakat programlarını düzenleme: kazanım kuralları, seviyeler, puan değeri ve kapalı tarihler",
  "settings.cap.markup.edit": "Markup kurallarını yönetme",
  "settings.cap.payment.link": "Ödeme linki oluşturma ve gönderme",
  "settings.cap.payment.refund": "İade ve ödeme aktarımı yapma",

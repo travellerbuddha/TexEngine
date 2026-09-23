@@ -11,6 +11,7 @@ export type TexModule =
   | "public"
   | "payments"
   | "crm"
+  | "loyalty"
   | "reports"
   | "admin"
   | "content"

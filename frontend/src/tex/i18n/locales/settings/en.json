@@ -51,6 +51,7 @@
  "settings.cap.fx.edit": "Manage FX policies and manual rates",
  "settings.cap.guest.export": "Export guest data",
  "settings.cap.inventory.edit": "Edit inventory, allotments and closures",
+ "settings.cap.loyalty.edit": "Edit loyalty programs: earn rules, tiers, point value and blackouts",
  "settings.cap.markup.edit": "Manage markup rules",
  "settings.cap.payment.link": "Create and send payment links",
  "settings.cap.payment.refund": "Refund and reallocate payments",

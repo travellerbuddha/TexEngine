@@ -89,18 +89,31 @@ export interface Option {
   disabled?: boolean
 }
 
+export interface OptionGroup {
+  label: string
+  options: Option[]
+}
+
 export const Select = forwardRef<
   HTMLSelectElement,
-  SelectHTMLAttributes<HTMLSelectElement> & { options: Option[]; placeholder?: string }
->(function Select({ className, options, placeholder, ...rest }, ref) {
+  SelectHTMLAttributes<HTMLSelectElement> & { options: Option[]; placeholder?: string; groups?: OptionGroup[] }
+>(function Select({ className, options, placeholder, groups, ...rest }, ref) {
+  const item = (o: Option) => (
+    <option key={o.value} value={o.value} disabled={o.disabled}>
+      {o.label}
+    </option>
+  )
   return (
     <select ref={ref} className={cn(CONTROL, "h-9 pr-8 pl-3", className)} {...rest}>
       {placeholder !== undefined && <option value="">{placeholder}</option>}
-      {options.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled}>
-          {o.label}
-        </option>
-      ))}
+      {options.map(item)}
+      {groups
+        ?.filter((g) => g.options.length)
+        .map((g) => (
+          <optgroup key={g.label} label={g.label}>
+            {g.options.map(item)}
+          </optgroup>
+        ))}
     </select>
   )
 })

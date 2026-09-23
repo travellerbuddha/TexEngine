@@ -7,6 +7,8 @@ import GuestList from "./GuestList"
 const GuestProfile = lazy(() => import("./GuestProfile"))
 const Segments = lazy(() => import("./Segments"))
 const Abandoned = lazy(() => import("./Abandoned"))
+const Programs = lazy(() => import("./loyalty/Programs"))
+const ProgramPage = lazy(() => import("./loyalty/ProgramPage"))
 
 function NotFound() {
   const { t } = useTexT()
@@ -25,6 +27,9 @@ export default function AreaRoutes() {
       <Route path="guests/:name" element={<GuestProfile />} />
       <Route path="segments" element={<Segments />} />
       <Route path="abandoned" element={<Abandoned />} />
+      <Route path="loyalty" element={<Programs />} />
+      <Route path="loyalty/new" element={<ProgramPage />} />
+      <Route path="loyalty/:name" element={<ProgramPage />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   )

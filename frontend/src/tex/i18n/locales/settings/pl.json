@@ -55,6 +55,7 @@
  "settings.cap.fx.edit": "Zarządzanie polityką walutową i kursami ręcznymi",
  "settings.cap.guest.export": "Eksport danych gości",
  "settings.cap.inventory.edit": "Edycja dostępności, alokacji i zamknięć",
+ "settings.cap.loyalty.edit": "Edycja programów lojalnościowych: zasady naliczania, poziomy, wartość punktu i terminy wyłączone",
  "settings.cap.markup.edit": "Zarządzanie regułami narzutu",
  "settings.cap.payment.link": "Tworzenie i wysyłanie linków płatności",
  "settings.cap.payment.refund": "Zwroty i przenoszenie płatności",

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { Crown, MessageSquarePlus, Pencil, ShieldAlert, Users } from "lucide-react"
+import { Crown, Lock, MessageSquarePlus, Pencil, ShieldAlert, Users } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
 import { date, money, nightsBetween, num } from "../../lib/format"
@@ -24,6 +24,7 @@ import {
 } from "../../ui"
 import { CrmNav } from "./components/common"
 import { useEvent } from "./lib"
+import { segmentLabel } from "./segments/meta"
 import { CommunicationsTimeline, LogCommunicationDialog } from "./profile/Communications"
 import { ConsentPanel } from "./profile/ConsentPanel"
 import { ContactCard } from "./profile/ContactCard"
@@ -231,7 +232,18 @@ export default function GuestProfile() {
                     <ul className="flex flex-wrap gap-1.5">
                       {d.segments.map((s) => (
                         <li key={s.name}>
-                          <Badge tone="brand">{s.segment_name}</Badge>
+                          <Link
+                            to={`/tex/crm/segments?s=${encodeURIComponent(s.name)}`}
+                            className="inline-flex items-center gap-1 rounded-full border border-tex-200 bg-tex-50 px-2 py-0.5 text-xs font-medium text-tex-800 hover:bg-tex-100 focus-visible:ring-2 focus-visible:ring-tex-500/40 focus-visible:outline-none"
+                          >
+                            {s.system_key && (
+                              <>
+                                <Lock className="size-3" aria-hidden />
+                                <span className="sr-only">{t("crm.seg.preset")}:</span>
+                              </>
+                            )}
+                            {segmentLabel(t, s)}
+                          </Link>
                         </li>
                       ))}
                     </ul>

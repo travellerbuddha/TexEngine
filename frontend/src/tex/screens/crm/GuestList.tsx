@@ -5,10 +5,11 @@ import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
 import { date, money, num } from "../../lib/format"
 import { useTexT } from "../../i18n"
-import { Badge, Card, DataTable, EmptyState, ErrorState, Field, Input, PageHeader, Segmented, Select, Toolbar } from "../../ui"
+import { Badge, Card, DataTable, EmptyState, ErrorState, Field, Input, Notice, PageHeader, Segmented, Select, Toolbar } from "../../ui"
 import { ConsentChips, CrmNav, Pager } from "./components/common"
-import { useDebounced } from "./lib"
-import type { GuestPage, GuestRow, SegmentsResponse } from "./types"
+import { safeJson, useDebounced } from "./lib"
+import { rulesLackCurrency, segmentLabel } from "./segments/meta"
+import type { GuestPage, GuestRow, Segment, SegmentRules, SegmentsResponse } from "./types"
 
 const PAGE = 25
 
@@ -53,10 +54,18 @@ export default function GuestList() {
   }
   const list = useTexQuery<GuestPage>("crm", "guests", args, [dq, vip, consent, segment, scopeAll, property, start])
 
-  const segmentOptions = useMemo(
-    () => (segs.data?.segments ?? []).map((s) => ({ value: s.name, label: s.segment_name })),
-    [segs.data],
-  )
+  // own segments first, then the shared presets (translated)
+  const segmentGroups = useMemo(() => {
+    const all = segs.data?.segments ?? []
+    const opt = (s: Segment) => ({ value: s.name, label: segmentLabel(t, s) })
+    return [
+      { label: t("crm.seg.mine"), options: all.filter((s) => !s.system_key).map(opt) },
+      { label: t("crm.seg.presets"), options: all.filter((s) => s.system_key).map(opt) },
+    ]
+  }, [segs.data, t])
+  const hasSegments = segmentGroups.some((g) => g.options.length > 0)
+  const chosen = segs.data?.segments.find((s) => s.name === segment)
+  const chosenLacksCurrency = Boolean(chosen && segs.data && rulesLackCurrency(safeJson<SegmentRules | null>(chosen.rules_json, null), segs.data.fields))
   const filtered = Boolean(dq || vip || consent || segment)
 
   return (
@@ -119,11 +128,21 @@ export default function GuestList() {
               <Select
                 value={segment}
                 onChange={(e) => set({ segment: e.target.value })}
-                disabled={!segmentOptions.length}
-                options={[{ value: "", label: t("crm.guests.segment_any") }, ...segmentOptions]}
+                disabled={!hasSegments && !segment}
+                options={[
+                  { value: "", label: t("crm.guests.segment_any") },
+                  // a segment named in the link that is not (yet) listed stays selectable
+                  ...(segment && !chosen && segs.data ? [{ value: segment, label: segment }] : []),
+                ]}
+                groups={segmentGroups}
               />
             </Field>
           </Toolbar>
+          {chosenLacksCurrency && (
+            <div className="mb-4">
+              <Notice tone="warning">{t("crm.seg.warn_currency")}</Notice>
+            </div>
+          )}
           <Card>
             {list.error ? (
               <ErrorState error={list.error} onRetry={list.reload} />

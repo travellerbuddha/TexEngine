@@ -6,7 +6,7 @@ export const CAP_GROUPS: { id: string; caps: string[] }[] = [
   { id: "inventory", caps: ["inventory.edit", "restriction.edit"] },
   { id: "reservations", caps: ["reservation.view", "reservation.create", "reservation.modify", "reservation.cancel"] },
   { id: "payments", caps: ["payment.view", "payment.link", "payment.refund"] },
-  { id: "guests", caps: ["crm.view", "crm.edit", "guest.export"] },
+  { id: "guests", caps: ["crm.view", "crm.edit", "guest.export", "loyalty.edit"] },
   { id: "distribution", caps: ["report.view", "booking_site.edit", "connect.admin"] },
   { id: "admin", caps: ["settings.admin", "user.admin"] },
 ]

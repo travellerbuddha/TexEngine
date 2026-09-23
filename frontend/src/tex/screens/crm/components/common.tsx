@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Mail, MessageCircle, Smartphone } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { num } from "../../../lib/format"
+import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
 import { Badge, Button } from "../../../ui"
 import type { ConsentField } from "../types"
@@ -10,10 +11,12 @@ import type { ConsentField } from "../types"
 /** Secondary navigation inside /tex/crm (links, not ARIA tabs: each is a page). */
 export function CrmNav() {
   const { t } = useTexT()
+  const { canAnywhere } = useSession()
   const items = [
     { to: "/tex/crm", label: t("crm.nav.guests"), end: true },
     { to: "/tex/crm/segments", label: t("crm.nav.segments") },
     { to: "/tex/crm/abandoned", label: t("crm.nav.abandoned") },
+    ...(canAnywhere("crm.view") ? [{ to: "/tex/crm/loyalty", label: t("crm.nav.loyalty") }] : []),
   ]
   return (
     <nav aria-label={t("crm.nav.label")} className="-mt-2 mb-5 flex gap-1 overflow-x-auto border-b border-zinc-200">

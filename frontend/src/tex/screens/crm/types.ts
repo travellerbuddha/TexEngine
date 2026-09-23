@@ -166,6 +166,8 @@ export interface Condition {
   field: string
   op: string
   value?: unknown
+  /** money conditions only: the 3-letter currency the value is compared in (ADR-036) */
+  currency?: string | null
 }
 
 export interface SegmentRules {
@@ -176,8 +178,12 @@ export interface SegmentRules {
 export interface Segment {
   name: string
   segment_name: string
+  /** set on the shared, read-only presets */
   system_key: string | null
   description: string | null
+  /** owner of a custom segment (null: a preset or a platform-level segment) */
+  enterprise?: string | null
+  /** stored count of a custom segment (all the counting user's hotels); always null for presets */
   member_count: number | null
   last_evaluated: string | null
   rules_json: string | null
@@ -187,6 +193,10 @@ export interface SegmentsResponse {
   segments: Segment[]
   fields: Record<string, FieldKind>
   ops: Record<FieldKind, string[]>
+  /** currencies a money condition may use */
+  currencies: string[]
+  /** enterprises a new segment may belong to (where the user holds crm.edit) */
+  enterprises: { name: string; label: string }[]
 }
 
 export interface ExportRow {
@@ -218,4 +228,108 @@ export interface AbandonedRow {
   check_out: string | null
   last_event_at: string | null
   recovered_booking: string | null
+}
+
+// ─── loyalty administration (kamra.tex.api.loyalty, ADR-037) ───────────────
+
+export type EarnBasis = "MONEY" | "NIGHTS" | "STAY" | "ROOM" | "EXTRA"
+export const EARN_BASES: EarnBasis[] = ["MONEY", "NIGHTS", "STAY", "ROOM", "EXTRA"]
+export type BlackoutPurpose = "Redemption" | "Earning" | "Both"
+export const BLACKOUT_PURPOSES: BlackoutPurpose[] = ["Redemption", "Earning", "Both"]
+export const LEDGER_TYPES = ["Earn", "Burn", "Adjust", "Expire", "Reverse"] as const
+export type LedgerType = (typeof LEDGER_TYPES)[number]
+
+export interface ProgramStats {
+  members: number
+  available_points: number
+  pending_points: number
+  /** available points × point value, a decimal string in the program currency */
+  liability: string
+}
+
+interface ProgramFields {
+  name: string
+  program_name: string
+  property: string | null
+  hotel_group: string | null
+  enabled: Flag
+  currency: string | null
+  /** decimal string (up to 6 decimals) */
+  point_value: string
+  min_redeem_points: number | null
+  /** decimal string, 0–100; 0 = points cannot be redeemed */
+  max_redeem_percent: string
+  pending_days: number | null
+  expiry_months: number | null
+  /** the enabled hotels the program reaches */
+  hotels: string[]
+  can_edit: boolean
+}
+
+export interface ProgramRow extends ProgramFields, ProgramStats {
+  modified: string
+}
+
+export interface ProgramsResponse {
+  programs: ProgramRow[]
+  /** where the user may create a program */
+  scopes: { hotels: string[]; groups: string[] }
+}
+
+export interface EarnRule {
+  basis: EarnBasis
+  rate: string
+  room_type: string | null
+  extra: string | null
+  date_from: string | null
+  date_to: string | null
+}
+
+export interface ProgramTier {
+  tier_name: string
+  min_points: number | null
+  earn_multiplier: string
+}
+
+export interface ProgramBlackout {
+  date_from: string
+  date_to: string
+  note: string | null
+  applies_to: BlackoutPurpose | null
+}
+
+export interface ProgramLookups {
+  room_types: { name: string; room_type_name: string | null; property: string }[]
+  extras: { name: string; extra_name: string | null; extra_code: string | null; property: string }[]
+  currencies: string[]
+}
+
+export interface ProgramDetail extends ProgramFields, ProgramStats {
+  earn_rules: EarnRule[]
+  tiers: ProgramTier[]
+  blackouts: ProgramBlackout[]
+  lookups: ProgramLookups
+}
+
+export interface LedgerRow {
+  name: string
+  guest: string
+  guest_name: string | null
+  entry_type: LedgerType
+  points: number
+  status: LoyaltyEntry["status"]
+  available_on: string | null
+  expires_on: string | null
+  booking: string | null
+  reservation: string | null
+  reason: string | null
+  actor: string | null
+  creation: string | null
+  /** JSON of an earning: {lines: [{rule, rate?, points, note?}], tier, multiplier} */
+  explanation: string | null
+}
+
+export interface LedgerPage {
+  rows: LedgerRow[]
+  total: number
 }
