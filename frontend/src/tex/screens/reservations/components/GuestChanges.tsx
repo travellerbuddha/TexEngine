@@ -128,7 +128,8 @@ export function GuestChangesCard({
                     </div>
                   )}
                 </dl>
-                {r.settle_pending && <p className="text-xs text-amber-800">{t("res.gcr.refund_pending")}</p>}
+                {r.status === "Requested" && r.penalty_terms && <p className="text-xs text-amber-800">{t("res.gcr.penalty_terms")}</p>}
+                {r.settle_pending && <p className="text-xs text-amber-800">{t(r.verify_refund ? "res.gcr.refund_waits" : "res.gcr.refund_pending")}</p>}
                 {r.staff_open && (
                   <Notice tone={r.staff_reason === "Verify refund at gateway" ? "danger" : "warning"}>
                     <span className="font-medium">{t(`res.gcr.staff.${slug(r.staff_reason || "Refund by staff")}`)}</span>{" "}
@@ -148,7 +149,7 @@ export function GuestChangesCard({
                     {r.resolution ? ` — ${r.resolution}` : ""}
                   </p>
                 )}
-                {((r.status === "Requested" && canDecide) || (r.staff_open && !r.settle_pending && canRefund)) && (
+                {((r.status === "Requested" && canDecide) || (r.can_close && canRefund)) && (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {r.status === "Requested" && canDecide && (
                       <>
@@ -160,7 +161,7 @@ export function GuestChangesCard({
                         </Button>
                       </>
                     )}
-                    {r.staff_open && !r.settle_pending && canRefund && (
+                    {r.can_close && canRefund && (
                       <Button size="sm" variant="secondary" icon={<CircleDollarSign className="size-4" aria-hidden />} onClick={() => setDialog({ row: r, action: "close" })}>
                         {t("res.gcr.close")}
                       </Button>
@@ -207,7 +208,7 @@ function ResolveDialog({
   const action = target?.action
   const overpaid = action === "approve" && !!row?.overpaid_after && isPositive(row.overpaid_after)
   // a refund the gateway never confirmed: staff say what the gateway did before closing
-  const verify = action === "close" && !!row?.unknown_refund
+  const verify = action === "close" && !!row?.verify_refund
   useEffect(() => {
     if (!target) return
     setReason("")
@@ -270,7 +271,7 @@ function ResolveDialog({
           )}
           {verify && (
             <div className="space-y-2">
-              <Notice tone="danger">{t("res.gcr.verify_body", { refund: row.unknown_refund ?? "" })}</Notice>
+              <Notice tone="danger">{t("res.gcr.verify_body", { refund: row.verify_refund ?? "" })}</Notice>
               <Segmented<RefundOutcome | "">
                 label={t("res.gcr.verify_choice")}
                 value={outcome}

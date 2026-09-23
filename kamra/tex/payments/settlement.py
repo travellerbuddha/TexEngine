@@ -13,7 +13,10 @@
   would cost a penalty (``penalty_applies``), always goes to the hotel: shortening a stay must
   never give back what its terms keep (review of ADR-044). Of a refund, only what the charges
   holding the money can give back automatically (``auto_refundable``) goes back to the card;
-  the rest is refunded by the hotel (``hotel_refund``).
+  the rest is refunded by the hotel (``hotel_refund``);
+- a change that moves the arrival later while cancelling would cost a fee (``terms_review``)
+  goes to the hotel whatever its price: moved out of its penalty window, the stay could then be
+  shortened or cancelled without the fee (G-45 re-review F5).
 
 ``plan_refunds`` splits a refund over the charges holding the booking's money: newest first,
 each at most what it holds for this booking, only charges whose provider can refund. What no
@@ -82,17 +85,21 @@ def _open(total: Decimal, held: Decimal) -> Decimal:
 
 
 def settle(old_total, new_total, paid, required_now_new, *, pay_at_hotel: bool, lower_policy: str | None,
-           card_available: bool, penalty_applies: bool = False, auto_refundable=None) -> Settlement:
+           card_available: bool, penalty_applies: bool = False, auto_refundable=None,
+           terms_review: bool = False) -> Settlement:
 	"""One change of a booking. Totals are the booking's (all rooms), before and after the
 	change; ``paid`` is what the booking holds now and may use (money set aside for a refund
 	is not counted); ``required_now_new`` what its payment terms require to be paid by now with
 	the new price (deposit rules, 0 for pay at hotel). ``penalty_applies``: the room's rate is
 	non-refundable or cancelling it now costs a penalty. ``auto_refundable``: how much of an
-	overpayment the charges holding it can refund to the card (None: all of it)."""
+	overpayment the charges holding it can refund to the card (None: all of it).
+	``terms_review``: the change moves the arrival later inside the penalty window."""
 	old_total, new_total, paid, required = (Decimal(old_total), Decimal(new_total), Decimal(paid),
 	                                         Decimal(required_now_new))
 	diff = new_total - old_total
 	due_later = _open(new_total, paid) - _open(old_total, paid)
+	if terms_review:
+		return Settlement(STAFF_APPROVAL, difference=diff, balance_after=new_total - paid, due_later=due_later)
 	if diff == 0:
 		return Settlement(NONE, difference=diff, balance_after=new_total - paid)
 	if diff > 0:

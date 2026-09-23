@@ -368,7 +368,9 @@ export interface BookingSummary {
   /** why the guest cannot change the booking yet (its own payment comes first) */
   /** money of this booking being refunded, or that the hotel refunds: not the guest's credit */
   refund_due?: Money
-  changes_blocked?: "PAYMENT_PENDING" | "REFUND_PENDING" | null
+  /** PAYMENT_PENDING: its own payment first · REFUND_PENDING: a refund of an earlier change is being
+   * made · CHANGE_APPLYING: a paid change is being applied (G-45) */
+  changes_blocked?: "PAYMENT_PENDING" | "REFUND_PENDING" | "CHANGE_APPLYING" | null
   /** the hotel takes card payments online for this booking */
   can_pay_online?: boolean
 }

@@ -17,15 +17,19 @@ Change Request and then:
   (``resolve``).
 
 A request is keyed by its proposal: submitting the same proposal twice is one request. Refunds
-are keyed per request and charge, on record before the gateway is asked, and made by a job
-queued after commit, so neither a retry nor a gateway timeout ever refunds twice. Money TEX
-cannot give back automatically (or whose refund the gateway never confirmed) waits for staff
-(``staff_open``). Nothing here raises into the payment callback.
+are keyed per request and charge, on record before the gateway is asked (with the request's
+``refund_in_flight``), and made by a job queued with the commit that decided them, one run per
+request at a time (``settle_claim``), so neither a retry, a second run, a gateway timeout nor a
+worker dying mid-refund ever refunds twice: a refund of the request still Pending stops its
+runs until it is answered, and staff verify it at the gateway once it is old. Money TEX cannot
+give back automatically (or whose refund the gateway never confirmed) waits for staff
+(``staff_open``); once staff record what the gateway did, TEX refunds what the change still
+owes. Nothing here raises into the payment callback.
 
 Locks: the booking first, then the request, the reservation and the inventory days. A guest's
 submit, the ``apply_paid`` and refund jobs, staff decisions, staff modifications and
-cancellations all take them in that order; the payment callback holds the payment row, then the
-booking, and no more.
+cancellations, and the channel's modifications and cancellations all take them in that order;
+the payment callback holds the payment row, then the booking, and no more.
 """
 
 from __future__ import annotations
@@ -62,8 +66,16 @@ SETTLE_RETRY_MINUTES = 10
 # not run (or could not finish), the scheduler applies it
 APPLY_RETRY_MINUTES = 2
 APPLY_ATTEMPTS = 3
+# a refund run holds the request's refunds this long (renewed with each refund): a second run
+# meanwhile does nothing, and a run that died is taken over once it lapsed (G-45 re-review F1)
+SETTLE_LEASE_MINUTES = 10
+# how far back the scheduler looks for a payment of a change no job looked at (re-review F7)
+SWEEP_DAYS = 30
 REFUND_BY_STAFF = "Refund by staff"
 VERIFY_REFUND = "Verify refund at gateway"
+# MariaDB / client errors that say "try again", never "this change cannot be made": a lock wait
+# timeout, a deadlock, a statement timeout, a connection refused, gone away or lost (re-review F6)
+TRANSIENT_CODES = (1205, 1213, 1969, 2003, 2006, 2013)
 
 
 class PaymentPending(frappe.ValidationError):
@@ -73,6 +85,11 @@ class PaymentPending(frappe.ValidationError):
 class RefundPending(frappe.ValidationError):
 	"""A refund of an earlier change of the booking is still being made: no new change until it
 	is (review of ADR-044: it must not be counted as money the booking still holds)."""
+
+
+class ChangeApplying(frappe.ValidationError):
+	"""A change of the booking was paid and is being applied: no new change until it is (the
+	payment is not money the booking may use for another change, re-review F4)."""
 
 
 class ChangeRefused(frappe.ValidationError):
@@ -99,6 +116,18 @@ def _undo(savepoint: str) -> None:
 		frappe.db.rollback()
 
 
+def _transient(e: BaseException) -> bool:
+	"""A deadlock, a lock wait or statement timeout, a lost connection: the work is tried again
+	later, never judged as the change failing (G-45 re-review F6)."""
+	if isinstance(e, frappe.QueryDeadlockError | frappe.QueryTimeoutError):
+		return True
+	import pymysql
+
+	if isinstance(e, pymysql.err.InterfaceError):
+		return True
+	return isinstance(e, pymysql.err.OperationalError) and bool(e.args) and e.args[0] in TRANSIENT_CODES
+
+
 def _release_locks() -> None:
 	"""The new request (and the ones it replaced) are on record, and the booking, reservation
 	and request rows released, before the gateway is asked for a checkout, which can take many
@@ -107,9 +136,12 @@ def _release_locks() -> None:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- no row lock is held through a gateway call
 
 
-def _lock(name: str):
-	"""The request's booking, then the request, read as they are now (locking reads)."""
-	booking = frappe.db.get_value(DT, name, "booking")
+def _lock(name: str, booking: str | None = None):
+	"""The request's booking, then the request, read as they are now (locking reads). Given its
+	booking, nothing is read before the booking's lock, so the rest of the transaction reads as
+	of after it (a REPEATABLE READ snapshot starts at the first plain read): what a run holding
+	the booking before committed is seen."""
+	booking = booking or frappe.db.get_value(DT, name, "booking")
 	if booking:
 		frappe.db.get_value("TEX Booking", booking, "name", for_update=True)
 	return frappe.get_doc(DT, name, for_update=True)
@@ -158,17 +190,29 @@ def _money(v, ccy: str) -> str:
 
 def guard(b) -> None:
 	"""A booking waiting for its own payment (or held) is paid first, then changed; a booking
-	whose refund of an earlier change is still being made waits for it."""
+	whose refund of an earlier change is still being made waits for it, and so does one whose
+	paid change is still being applied."""
 	if b.status in ("Pending Payment", "Held"):
 		frappe.throw(_("Please complete the payment of your booking before changing it."), PaymentPending,
 		             title=_("Payment pending"))
 	if refund_pending(b.name):
 		frappe.throw(_("A refund of your earlier change is being processed. Please try again in a few minutes."),
 		             RefundPending, title=_("Refund in progress"))
+	if change_applying(b.name):
+		frappe.throw(_("Your payment for an earlier change is being applied. Please try again in a few minutes."),
+		             ChangeApplying, title=_("Change in progress"))
 
 
 def refund_pending(booking: str) -> bool:
 	return bool(frappe.db.exists(DT, {"booking": booking, "settle_pending": 1}))
+
+
+def change_applying(booking: str) -> bool:
+	"""A change of this booking is paid (the gateway confirmed it) and not applied yet: the
+	``apply_paid`` job, or the scheduler after it, applies it (re-review F4)."""
+	return any(any(True for _t in _charges_of(r)) for r in frappe.get_all(
+		DT, filters={"booking": booking, "status": "Awaiting Payment", "attempt": (">", 0)},
+		fields=["name", "property", "attempt"]))
 
 
 def room_changeable(res) -> bool:
@@ -197,49 +241,103 @@ def card_account(b) -> str | None:
 
 def penalty_applies(res) -> bool:
 	"""The rate is non-refundable, or cancelling the room now would cost a fee: a lower price
-	of it is never refunded or credited without the hotel (review of ADR-044, H1)."""
+	of it is never refunded or credited without the hotel (review of ADR-044, H1), and its
+	arrival is never moved later without the hotel either: moved out of the window, the stay
+	could then be shortened or cancelled without the fee (re-review F5)."""
 	penalty, _basis = booking_svc.cancellation_penalty(res)
 	return penalty > 0
+
+
+def _arrival_moved_later(res, prop: dict) -> bool:
+	new = ((prop.get("proposed") or {}).get("request") or {}).get("check_in")
+	return bool(new) and getdate(new) > getdate(res.check_in_date)
 
 
 # ─── money set aside ─────────────────────────────────────────────────────
 
 
+def _returned(req) -> set[str]:
+	"""Payments of this request already given back, or left to staff to give back."""
+	return {t for t in (req.returned_charges or "").split() if t}
+
+
+def _mark_returned(req, txn: str) -> None:
+	req.returned_charges = "\n".join(sorted(_returned(req) | {txn}))
+
+
+def _unreturned(req) -> list[str]:
+	"""The succeeded payments of this request that did not pay for its change and were not
+	given back (or left to staff) yet."""
+	done = _returned(req)
+	return [t for t in _charges_of(req)
+	        if t not in done and not (req.status in DONE and t == req.payment_transaction)]
+
+
+def _in_flight(r):
+	"""The refund this request asked the gateway for and has no answer to (Pending): its money
+	may be back on the card already. → the refund row, or None."""
+	for name in dict.fromkeys(n for n in (r.refund_in_flight, r.unknown_refund) if n):
+		row = frappe.db.get_value(TXN, name, ["name", "txn_type", "status", "amount", "currency", "error_code",
+		                                      "creation"], as_dict=True)
+		if row and row.txn_type == "Refund" and row.status == "Pending":
+			return row
+	return None
+
+
+def _to_verify(r) -> D:
+	"""Of the money left to staff, the refund they verify at the gateway (not one to make)."""
+	row = _in_flight(r)
+	return from_db(row.amount, row.currency) if row and row.name == r.unknown_refund else ZERO
+
+
 def _reserved(booking: str, except_request: str | None = None) -> dict[str, D]:
-	"""Charges other requests of this booking still have to give back (a payment for a change
-	that did not apply, a second payment of one that did): {charge: what the booking holds of
-	it}. No other refund plan takes them (review of ADR-044, H3)."""
+	"""Payments of this booking's changes that are not the booking's to use: a payment for a
+	change still to be applied (the change uses it, re-review F4), a payment to give back (a
+	change that did not apply, a second payment of one that did): {charge: what the booking
+	holds of it, less refunds of it in flight}. No refund plan takes them and no change uses
+	them (review of ADR-044, H3)."""
 	from kamra.tex.payments import service as pay
 
 	out: dict[str, D] = {}
-	for r in frappe.get_all(DT, filters={"booking": booking, "settle_pending": 1},
-	                        fields=["name", "property", "attempt", "status", "settlement", "payment_transaction"]):
-		if r.name == except_request or (r.status in DONE and r.settlement == "Refund"):
-			continue
-		for txn in _charges_of(r):
-			if r.status in DONE and txn == r.payment_transaction:
-				continue
-			held = pay.booking_nets(txn).get(booking, ZERO)
+	for r in frappe.get_all(DT, filters={"booking": booking, "attempt": (">", 0), "name": ("!=", except_request or "")},
+	                        fields=["name", "property", "attempt", "status", "payment_transaction", "returned_charges"]):
+		for txn in _unreturned(r):
+			held = pay.booking_nets(txn).get(booking, ZERO) - pay.in_flight_of(txn)
 			if held > 0:
 				out[txn] = held
 	return out
 
 
 def earmarked(booking: str, except_request: str | None = None) -> D:
-	"""Money the booking holds that is set aside for a refund: refunds still to be made, money
-	waiting for staff, payments to give back. It is not the guest's credit and pays for no
-	change (review of ADR-044, H3)."""
+	"""Money the booking holds that is set aside: refunds the gateway was asked for and has not
+	answered (the money may be back on the card), refunds still to be made, money waiting for
+	staff, payments to give back and payments of a change still to be applied. It is not the
+	guest's credit and pays for no change (review of ADR-044, H3; re-review F1, F4)."""
+	from kamra.tex.payments import service as pay
+
 	total = sum(_reserved(booking, except_request).values(), ZERO)
+	counted: set[str] = set()
 	for r in frappe.get_all(DT, filters={"booking": booking, "name": ("!=", except_request or "")},
 	                        or_filters={"settle_pending": 1, "staff_open": 1},
-	                        fields=["status", "currency", "settlement", "settle_pending", "settlement_amount",
-	                                "refunded_amount", "staff_open", "staff_amount"]):
+	                        fields=["name", "status", "currency", "settlement", "settle_pending", "settlement_amount",
+	                                "refunded_amount", "staff_open", "staff_amount", "unknown_refund",
+	                                "refund_in_flight"]):
 		ccy = r.currency
+		row = _in_flight(r)
+		gone = from_db(row.amount, row.currency) if row else ZERO
+		verify = gone if row and row.name == r.unknown_refund else ZERO
+		if row:
+			counted.add(row.name)
+			total += gone
 		if r.staff_open:
-			total += from_db(r.staff_amount, ccy)
+			total += max(ZERO, from_db(r.staff_amount, ccy) - verify)
 		if r.settle_pending and r.status in DONE and r.settlement == "Refund":
 			total += max(ZERO, from_db(r.settlement_amount, ccy) - from_db(r.refunded_amount, ccy)
-			             - from_db(r.staff_amount, ccy))
+			             - from_db(r.staff_amount, ccy) - (gone - verify))
+	# refunds staff started from the payment screen, not answered yet (F1)
+	for row in pay.pending_refunds(booking):
+		if row.name not in counted:
+			total += from_db(row.amount, row.currency)
 	return total
 
 
@@ -276,26 +374,35 @@ def refundable_now(booking: str, amount, *, except_request: str | None = None,
 def preview(b, res, prop: dict) -> st.Settlement | None:
 	"""How ``prop`` (a ``modification.propose`` result for ``res``) would be settled for
 	booking ``b``; None when it cannot be (not priced, or priced in another currency)."""
+	return _preview(b, res, prop)[0]
+
+
+def _preview(b, res, prop: dict) -> tuple[st.Settlement | None, bool]:
+	"""→ (settlement, whether the rate's cancellation terms send it to the hotel)."""
 	ccy = b.currency
 	new_room = (prop.get("proposed") or {}).get("totals", {}).get("total")
 	if prop.get("currency_changed") or prop.get("difference") is None or not new_room \
 			or prop["proposed"].get("currency") != ccy or (res.tex_currency or ccy) != ccy:
-		return None
+		return None, False
 	old_total = from_db(b.total_amount, ccy)
 	new_total = old_total - D(prop["old"]["total"]) + D(new_room)
 	required = booking_svc.required_now(b, {res.name: prop["proposed"]})
 	paid = usable_paid(b)
 	policy = lower_policy(b.property)
-	penalty = new_total < old_total and penalty_applies(res)
+	lower, later = new_total < old_total, _arrival_moved_later(res, prop)
+	# the rate's terms are judged on a lower price (H1) and on an arrival moved later (F5): a stay
+	# moved out of its penalty window could then be shortened or cancelled without the fee
+	fee = (lower or later) and penalty_applies(res)
 	auto = None
 	over = max(ZERO, paid - new_total)
-	if new_total < old_total and policy == st.LOWER_REFUND and over > 0 and not penalty:
+	if lower and policy == st.LOWER_REFUND and over > 0 and not fee:
 		# only what a card can take back is promised as a card refund; the rest the hotel refunds
 		_plan, rest = refundable_now(b.name, over)
 		auto = over - rest
-	return st.settle(old_total, new_total, paid, required, pay_at_hotel=b.payment_method == "Pay at Hotel",
-	                 lower_policy=policy, card_available=bool(card_account(b)), penalty_applies=penalty,
-	                 auto_refundable=auto)
+	s = st.settle(old_total, new_total, paid, required, pay_at_hotel=b.payment_method == "Pay at Hotel",
+	              lower_policy=policy, card_available=bool(card_account(b)), penalty_applies=lower and fee,
+	              auto_refundable=auto, terms_review=later and fee)
+	return s, fee
 
 
 def settlement_dict(s: st.Settlement | None, ccy: str) -> dict | None:
@@ -337,11 +444,11 @@ def submit(b, proposal_token: str, *, note: str | None = None, return_url: str |
 		frappe.throw(_("This change cannot be priced in the currency of your booking. Please contact the hotel."),
 		             CurrencyChanged)
 	prop = _derive(res, p)
-	s = preview(b, res, prop)
+	s, fee = _preview(b, res, prop)
 	if s is None:
 		frappe.throw(_("This change cannot be priced in the currency of your booking. Please contact the hotel."),
 		             CurrencyChanged)
-	req = _insert(b, res, p, keys[0], s, note)
+	req = _insert(b, res, p, keys[0], s, note, terms=fee and s.kind == st.STAFF_APPROVAL)
 	if req is None:
 		# the same proposal is being submitted right now (another tab): its answer is on the way
 		return {"status": "processing", "request": None,
@@ -354,7 +461,8 @@ def submit(b, proposal_token: str, *, note: str | None = None, return_url: str |
 		return _start_payment(req, b, return_url, new_attempt=True)
 	if s.kind in (st.STAFF_APPROVAL, st.STAFF):
 		ccy = b.currency
-		why = (_("lower price, the hotel approves it") if s.kind == st.STAFF_APPROVAL
+		why = (_("inside the rate's cancellation terms, the hotel approves it") if req.penalty_terms
+		       else _("lower price, the hotel approves it") if s.kind == st.STAFF_APPROVAL
 		       else _("{0} {1} is due now and no card payment is set up").format(_money(s.collect, ccy), ccy))
 		_flag(res.name, b.name, f"Guest requests a change ({_money(s.difference, ccy)} {ccy}; {why}); "
 		                        f"request {req.name} {json.dumps(p['changes'], default=str)} {note or ''}")
@@ -380,7 +488,7 @@ def _derive(res, p: dict) -> dict:
 	return prop
 
 
-def _insert(b, res, p: dict, digest: str, s: st.Settlement, note: str | None):
+def _insert(b, res, p: dict, digest: str, s: st.Settlement, note: str | None, *, terms: bool = False):
 	ccy = b.currency
 	status = {st.PAY_NOW: "Awaiting Payment", st.STAFF_APPROVAL: "Requested", st.STAFF: "Requested"}.get(s.kind,
 	                                                                                                   "Applied")
@@ -391,6 +499,7 @@ def _insert(b, res, p: dict, digest: str, s: st.Settlement, note: str | None):
 		"expires_at": modification.payment_deadline(p) if s.kind == st.PAY_NOW else None,
 		"currency": ccy, "old_total": old_total, "new_total": old_total + s.difference, "difference": s.difference,
 		"collect_amount": s.collect if s.kind in (st.PAY_NOW, st.STAFF) else ZERO, "attempt": 0,
+		"penalty_terms": 1 if terms else 0,
 		"settlement": LABEL.get(s.kind, "") if status == "Applied" else "",
 		"settlement_amount": quantize(s.amount, ccy) if status == "Applied" else ZERO,
 	})
@@ -510,15 +619,17 @@ def _audit_row(req, s: st.Settlement | None = None) -> dict:
 
 def _settlement_view(req) -> dict:
 	"""How the request's money was settled, as the guest is told: a refund splits into what goes
-	back to the card (``refund``) and what the hotel refunds (``hotel_refund``)."""
+	back to the card (``refund``, including one the gateway has not confirmed yet) and what the
+	hotel refunds (``hotel_refund``). Done only once nothing of it is still being refunded."""
 	ccy = req.currency
 	kind = KIND.get(req.settlement or "", st.BALANCE)
-	staff = from_db(req.staff_amount, ccy) if kind == st.REFUND else ZERO
+	staff = max(ZERO, from_db(req.staff_amount, ccy) - _to_verify(req)) if kind == st.REFUND else ZERO
 	amount = from_db(req.settlement_amount, ccy)
 	card = max(ZERO, amount - staff) if kind == st.REFUND else ZERO
 	refunded = from_db(req.refunded_amount, ccy)
 	return {"kind": kind, "amount": to_str(amount), "refund": _money(card, ccy), "hotel_refund": _money(staff, ccy),
-	        "refunded": to_str(refunded), "refund_done": bool(card > 0 and refunded >= card), "currency": ccy}
+	        "refunded": to_str(refunded), "refund_done": bool(card > 0 and refunded >= card and not req.settle_pending),
+	        "currency": ccy}
 
 
 def _applied(req, *, replay: bool) -> dict:
@@ -537,7 +648,7 @@ def _applied(req, *, replay: bool) -> dict:
 
 def _requested(req, s: st.Settlement | None = None) -> dict:
 	ccy = req.currency
-	kind = s.kind if s else (st.STAFF_APPROVAL if D(req.difference) < 0 else st.STAFF)
+	kind = s.kind if s else (st.STAFF_APPROVAL if D(req.difference) < 0 or req.penalty_terms else st.STAFF)
 	amount = s.amount if s else (abs(from_db(req.difference, ccy)) if kind == st.STAFF_APPROVAL
 	                             else from_db(req.collect_amount, ccy))
 	return {"status": "requested", "request": req.name,
@@ -698,27 +809,36 @@ def queue_apply(request: str, transaction: str) -> None:
 def apply_paid(request: str, transaction: str) -> str:
 	"""A job: the change paid by ``transaction`` is applied (or, if it can no longer apply,
 	failed and its payment refunded; a payment for a request no longer waiting is refunded). Its
-	own unit of work; a deadlock is retried, and a change left waiting is applied by the
-	scheduler. Never raises. → "done" or "retry"."""
+	own unit of work; a deadlock, a lock wait timeout or a lost connection is tried again a few
+	times and then left to the scheduler, which applies a change left waiting (re-review F6):
+	only an error of the change itself fails it. Never raises. → "done" or "retry"."""
 	for attempt in range(1, APPLY_ATTEMPTS + 1):
 		frappe.db.savepoint("tex_gcr_paid")
 		try:
 			queue = _paid(request, transaction)
-		except frappe.QueryDeadlockError:
-			_undo("tex_gcr_paid")
-			if frappe.flags.in_test or attempt == APPLY_ATTEMPTS:
-				log_exception(f"TEX guest change {request} after payment {transaction}: deadlock")
-				return "retry"
-			time.sleep(random.uniform(0.05, 0.2) * attempt)
-			continue
 		except Exception as e:
-			_undo("tex_gcr_paid")
+			transient = _transient(e)
+			try:
+				_undo("tex_gcr_paid")
+			except Exception:
+				if not transient:
+					raise
+				log_exception(f"TEX guest change {request} after payment {transaction}: connection lost")
+				return "retry"                            # a new job (the scheduler) tries with a new connection
+			if transient:
+				if frappe.flags.in_test or attempt == APPLY_ATTEMPTS:
+					log_exception(f"TEX guest change {request} after payment {transaction}: try again later")
+					return "retry"
+				time.sleep(random.uniform(0.05, 0.2) * attempt)
+				continue
 			frappe.clear_last_message()
 			log_exception(f"TEX guest change {request} after payment {transaction}")
 			queue = _fail_safely(request, transaction, str(e))
-		_commit()
 		if queue:
+			# registered before this job's commit, so that commit sends it: a rollback later in the
+			# same job (the scheduler's next request failing) can no longer drop it (re-review F7)
 			queue_settle(request)
+		_commit()
 		return "done"
 	return "retry"
 
@@ -733,6 +853,11 @@ def _paid(name: str, transaction: str) -> bool:
 	if req.status in DONE and req.payment_transaction == txn.name:
 		return False                                      # this payment already applied it
 	if req.status != "Awaiting Payment":
+		if txn.name in _returned(req) or req.settle_pending:
+			# given back already, or a refund run is on it (it gives back every payment of the
+			# request not given back yet): the job and the scheduler may both bring this payment,
+			# and a run that failed the change with it queued its refund (re-review F1)
+			return False
 		req.settle_pending = 1
 		req.save(ignore_permissions=True)
 		audit("guest_change.late_payment", reference_doctype=DT, reference_name=name, property=req.property,
@@ -783,9 +908,9 @@ def _fail_safely(name: str, transaction: str, error: str) -> bool:
 			req.settle_pending = 1
 			req.save(ignore_permissions=True)
 		return True
-	except frappe.QueryDeadlockError:
-		raise
-	except Exception:
+	except Exception as e:
+		if _transient(e):
+			raise
 		log_exception(f"TEX guest change {name} could not be marked failed")
 		return False
 
@@ -804,27 +929,44 @@ def settle(request: str) -> dict:
 	"""The refunds a request owes (a queued job, retried by the scheduler). Idempotent:
 
 	- an applied change under the refund policy: the overpayment, as far as it is still over
-	  now (``paid − total``, less money set aside for other refunds: a later change or a refund
-	  staff made by hand may have used it), from the charges holding the booking's money that
-	  other requests do not have to give back (``settlement.plan_refunds``);
+	  now (``paid − total``, less money set aside: a later change or a refund staff made by hand
+	  may have used it), from the charges holding the booking's money that other requests do not
+	  have to give back (``settlement.plan_refunds``);
 	- a paid change that did not apply, or a payment arriving for a request that no longer
 	  waited: that payment, back to the card (what the booking still holds of it).
 
-	Each refund is keyed by the request, the charge and the step, committed as Pending before
-	the gateway is asked, and its outcome committed before the next one. A gateway that says
-	"no" moves on to the next charge; one that does not answer stops the request: staff verify
-	it at the gateway ("Verify refund at gateway"), and nothing is refunded twice. What no charge
-	can refund waits for staff ("Refund by staff")."""
+	One run per request at a time (``settle_claim``, a lease renewed with each refund): a
+	second run meanwhile does nothing. Each refund is keyed by the request, the charge and the
+	step, committed as Pending (with ``refund_in_flight``) before the gateway is asked, and its
+	outcome committed before the next one. A refund of the request still Pending stops the run:
+	fresh, a later run looks again; unanswered or old (the run asking it died), staff verify it
+	at the gateway ("Verify refund at gateway") and the rest waits for them, never planned
+	around it (re-review F1, F3). A gateway that says "no" moves on to the next charge. What no
+	charge can refund waits for staff ("Refund by staff")."""
+	from kamra.tex.payments import service as pay
+
 	req = _lock(request)
-	if not req.settle_pending:
-		return {"request": request, "refunded": "0.00", "not_refunded": "0.00", "pending": False}
 	ccy = req.currency
+	if not req.settle_pending:
+		return _settled(request, ccy)
+	if req.settle_claim and req.settle_claimed_until and get_datetime(req.settle_claimed_until) > now_datetime():
+		return _settled(request, ccy, pending=True, busy=True)     # another run holds its refunds
+	token = frappe.generate_hash(length=16)
+	_hold(req, token)
 	refunded = short = capped = ZERO
-	unknown: tuple[D, str | None] | None = None
-	if req.status in DONE and req.settlement == "Refund":
-		failed: set[str] = set()
-		first = True
-		while True:
+	waiting = False
+	failed: set[str] = set()
+	first = True
+	while True:
+		row = _in_flight(req)
+		if row:
+			waiting = True
+			if pay.stuck(row, now_datetime()) and req.unknown_refund != row.name:
+				_give_to_staff(req, from_db(row.amount, row.currency), VERIFY_REFUND,
+				               "the gateway did not confirm this refund: check it at the gateway before refunding "
+				               "again", unknown_refund=row.name)
+			break
+		if req.status in DONE and req.settlement == "Refund":
 			b = frappe.db.get_value("TEX Booking", req.booking, ["name", "paid_amount", "total_amount", "currency"],
 			                        as_dict=True)                    # locked by _lock: as it is now
 			target = max(ZERO, from_db(req.settlement_amount, ccy) - from_db(req.refunded_amount, ccy)
@@ -844,78 +986,109 @@ def settle(request: str) -> dict:
 			# keyed by the request, the charge and how much was refunded before: the same step
 			# replays, a later step (after a commit) is a new refund
 			key = f"change:{req.name}:refund:{txn}:{to_str(from_db(req.refunded_amount, ccy))}"
-			result, got, ref = _refund(req, txn, amount, key, "the guest's change lowered the price")
-			req = _lock(req.name)                                # the refund committed: locked again
-			if result == "unknown":
-				unknown = (got, ref)
-				break
+			result, got = _refund(req, txn, amount, key, "the guest's change lowered the price")
+			req = _relock(req, token)
+			if req is None:
+				return _settled(request, ccy, refunded, pending=True, busy=True)
 			if result == "failed":
 				failed.add(txn)
-				continue
-			refunded += got
-			req = _progress(req, got)
-			if not req.settle_pending:
-				return {"request": request, "refunded": to_str(quantize(refunded, ccy)), "not_refunded": "0.00",
-				        "pending": False}                       # another run finished it meanwhile
-	elif req.status != "Awaiting Payment":
-		from kamra.tex.payments import service as pay
-
-		for txn in list(_charges_of(req)):
-			if req.status in DONE and txn == req.payment_transaction:
-				continue                                      # the payment the change was made with
-			row = frappe.db.get_value(TXN, txn, ["name", "txn_type", "status", "provider_account", "amount",
-			                                      "currency"], as_dict=True)
-			in_flight = pay.in_flight_of(txn)
-			held = min(pay.booking_nets(txn).get(req.booking, ZERO),
-			           from_db(row.amount, row.currency) - pay.refunded_of(txn) - in_flight)
-			if held <= 0:
-				continue                                      # already given back
-			if not pay.auto_refundable(row) or in_flight > 0:
-				short += held
-				continue
-			result, got, ref = _refund(req, txn, held, f"change:{req.name}:return:{txn}",
-			                           "payment for a guest change that was not applied")
-			req = _lock(req.name)
+			elif result == "ok":
+				refunded += got
+				req = _progress(req, got, token)
+				if req is None:
+					return _settled(request, ccy, refunded, pending=True, busy=True)
+			continue                                          # "unknown": the loop sees it in flight
+		if req.status == "Awaiting Payment":
+			break
+		todo = _unreturned(req)
+		if not todo:
+			break
+		txn = todo[0]
+		row = frappe.db.get_value(TXN, txn, ["name", "txn_type", "status", "provider_account", "amount", "currency"],
+		                          as_dict=True)
+		in_flight = pay.in_flight_of(txn)
+		held = min(pay.booking_nets(txn).get(req.booking, ZERO),
+		           from_db(row.amount, row.currency) - pay.refunded_of(txn) - in_flight)
+		if held > 0 and pay.auto_refundable(row) and not in_flight:
+			result, got = _refund(req, txn, held, f"change:{req.name}:return:{txn}",
+			                      "payment for a guest change that was not applied")
+			req = _relock(req, token)
+			if req is None:
+				return _settled(request, ccy, refunded, pending=True, busy=True)
 			if result == "unknown":
-				unknown = (got, ref)
-				break
-			if result == "failed":
-				short += held
 				continue
-			refunded += got
-			req = _progress(req, got)
-	req.settle_pending = 0
+			_mark_returned(req, txn)
+			if result == "ok":
+				refunded += got
+				req = _progress(req, got, token)
+				if req is None:
+					return _settled(request, ccy, refunded, pending=True, busy=True)
+				continue
+		else:
+			_mark_returned(req, txn)                      # given back already, or TEX cannot give it back
+		if held > 0:
+			short += held
+			_give_to_staff(req, held, REFUND_BY_STAFF, f"no card refund TEX can make gives back {txn}: it stays "
+			                                           "as credit on the booking for staff to refund")
+		req.save(ignore_permissions=True)
+	if not waiting:
+		req.settle_pending = 0
+	req.settle_claim = None
+	req.settle_claimed_until = None
 	if capped > 0:
 		audit("guest_change.refund_capped", reference_doctype=DT, reference_name=req.name, property=req.property,
 		      new={"not_refunded": to_str(quantize(capped, ccy)), "currency": ccy,
 		           "why": "no longer over: a later change or a refund made by staff used it"})
 		req.error = (f"{to_str(quantize(capped, ccy))} {ccy} was not refunded: a later change or a refund made by "
 		             f"staff used it. {req.error or ''}")[:500]
-	if unknown:
-		_give_to_staff(req, unknown[0], VERIFY_REFUND, "the gateway did not confirm this refund: check it at the "
-		                                               "gateway before refunding again", unknown_refund=unknown[1])
-	if short > 0:
+	if short > 0 and req.status in DONE and req.settlement == "Refund":
 		_give_to_staff(req, short, REFUND_BY_STAFF, "no card payment TEX can refund holds it: it stays as credit "
 		                                            "on the booking for staff to refund")
 	req.save(ignore_permissions=True)
 	_commit()
-	return {"request": request, "refunded": to_str(quantize(refunded, ccy)),
-	        "not_refunded": to_str(quantize(short + (unknown[0] if unknown else ZERO), ccy)), "pending": False}
+	return _settled(request, ccy, refunded, short, pending=waiting)
 
 
-def _refund(req, txn: str, amount, key: str, why: str) -> tuple[str, D, str | None]:
-	"""One refund → ("ok", refunded, refund) | ("failed", 0, refund or None) | ("unknown", amount,
-	refund). Never raises but for a deadlock. "failed" is a definite no (the gateway refused, or
-	it was never asked); "unknown": the gateway did not answer and may have refunded."""
+def _settled(request: str, ccy: str, refunded=ZERO, short=ZERO, *, pending: bool = False, busy: bool = False) -> dict:
+	out = {"request": request, "refunded": to_str(quantize(refunded, ccy)),
+	       "not_refunded": to_str(quantize(short, ccy)), "pending": pending}
+	if busy:
+		out["busy"] = True
+	return out
+
+
+def _hold(req, token: str) -> None:
+	"""This run holds the request's refunds: committed with the first refund's record (the
+	booking lock keeps any other run out until then)."""
+	req.settle_claim = token
+	req.settle_claimed_until = add_to_date(now_datetime(), minutes=SETTLE_LEASE_MINUTES)
+	frappe.db.set_value(DT, req.name, {"settle_claim": token, "settle_claimed_until": req.settle_claimed_until},
+	                    update_modified=False)
+
+
+def _relock(req, token: str):
+	"""The booking and the request locked and read again after a commit; None when another run
+	took the refunds over (this run's lease lapsed): it stops."""
+	req = _lock(req.name, req.booking)
+	return req if req.settle_claim == token else None
+
+
+def _refund(req, txn: str, amount, key: str, why: str) -> tuple[str, D]:
+	"""One refund → ("ok", refunded) | ("failed", 0) | ("unknown", amount). The request is saved
+	first (its refund is committed with it, before the gateway is asked) and names the refund
+	(``refund_in_flight``). Never raises but for a deadlock. "failed" is a definite no (the
+	gateway refused, or it was never asked); "unknown": no answer yet, it may have refunded."""
 	from kamra.tex.payments import service as pay
 
+	req.save(ignore_permissions=True)
 	frappe.db.savepoint("tex_gcr_refund")
 	try:
 		out = pay.refund(txn, amount=amount, reason=f"Guest change {req.name}: {why}", idempotency_key=key,
-		                 booking=req.booking, _system=True, durable=True)
+		                 booking=req.booking, _system=True, durable=True,
+		                 on_record=lambda name: frappe.db.set_value(DT, req.name, "refund_in_flight", name,
+		                                                            update_modified=False))
 	except pay.RefundUnknown:
-		return "unknown", D(amount), frappe.db.get_value(TXN, {"idempotency_key": pay.ns_key(req.property, key,
-		                                                                                       "refund")}, "name")
+		return "unknown", D(amount)
 	except frappe.QueryDeadlockError:
 		raise
 	except Exception:
@@ -925,23 +1098,27 @@ def _refund(req, txn: str, amount, key: str, why: str) -> tuple[str, D, str | No
 		# after its durable commit the attempt is on record: judged by what it says
 		name = frappe.db.get_value(TXN, {"idempotency_key": pay.ns_key(req.property, key, "refund")}, "name")
 		if not name:
-			return "failed", ZERO, None                      # the gateway was never asked
+			return "failed", ZERO                          # the gateway was never asked
 		out = {"refund": name}
 	r = frappe.db.get_value(TXN, out["refund"], ["name", "status", "amount", "currency"], as_dict=True)
 	if not r or r.status == "Failed":
-		return "failed", ZERO, r.name if r else None
+		return "failed", ZERO
 	if r.status != "Succeeded":
-		return "unknown", from_db(r.amount, r.currency), r.name
-	return "ok", from_db(r.amount, r.currency), r.name
+		# a replay of a refund still Pending: name it, so the run waits for it (never around it)
+		frappe.db.set_value(DT, req.name, "refund_in_flight", r.name, update_modified=False)
+		return "unknown", from_db(r.amount, r.currency)
+	return "ok", from_db(r.amount, r.currency)
 
 
-def _progress(req, got):
+def _progress(req, got, token: str):
 	"""Each refund is on record, and committed outside tests, before the next one is made; the
-	booking and the request are then locked and read again as they are now."""
+	run's hold is renewed, and the booking and the request are locked and read again."""
 	req.refunded_amount = from_db(req.refunded_amount, req.currency) + got
+	req.refund_in_flight = None
+	req.settle_claimed_until = add_to_date(now_datetime(), minutes=SETTLE_LEASE_MINUTES)
 	req.save(ignore_permissions=True)
 	_commit()
-	return _lock(req.name)
+	return _relock(req, token)
 
 
 # ─── scheduler ───────────────────────────────────────────────────────────
@@ -954,9 +1131,11 @@ def expire_awaiting() -> dict:
 	  applied (or failed and refunded) now;
 	- a change whose payment did not arrive before its deadline expires (a payment arriving
 	  later is refunded);
+	- a payment of a request no longer waiting that no job looked at (its ``apply_paid`` job
+	  was lost: Redis down, a rollback dropped it) is given back (re-review F7);
 	- refunds that were queued but did not run are retried."""
 	now = now_datetime()
-	expired = settled = applied = 0
+	expired = settled = applied = returned = 0
 	paid_before = add_to_date(now, minutes=-APPLY_RETRY_MINUTES)
 	for name in frappe.get_all(DT, filters={"status": "Awaiting Payment"}, pluck="name"):
 		req = frappe.get_doc(DT, name)
@@ -969,11 +1148,26 @@ def expire_awaiting() -> dict:
 		if req.expires_at and get_datetime(req.expires_at) < now and _step(lambda n=name: _expire(n, now),
 		                                                                     f"TEX guest change {name} expiry"):
 			expired += 1
+	for r in frappe.get_all(DT, filters={"attempt": (">", 0), "status": ("!=", "Awaiting Payment"), "settle_pending": 0,
+	                                     "creation": (">=", add_to_date(now, days=-SWEEP_DAYS))},
+	                        fields=["name", "property", "booking", "attempt", "status", "payment_transaction",
+	                                "returned_charges"]):
+		late = [t for t in _unreturned(r) if _held(t, r.booking)
+		        and get_datetime(frappe.db.get_value(TXN, t, "completed_at") or now) <= paid_before]
+		if late and apply_paid(r.name, late[0]) == "done":
+			returned += 1
 	cutoff = add_to_date(now, minutes=-SETTLE_RETRY_MINUTES)
 	for name in frappe.get_all(DT, filters={"settle_pending": 1, "modified": ("<", cutoff)}, pluck="name"):
 		if _step(lambda n=name: settle(n), f"TEX guest change {name} refund retry"):
 			settled += 1
-	return {"expired": expired, "settled": settled, "applied": applied}
+	return {"expired": expired, "settled": settled, "applied": applied, "returned": returned}
+
+
+def _held(txn: str, booking: str) -> bool:
+	"""The booking still holds money of this payment that no refund is on its way for."""
+	from kamra.tex.payments import service as pay
+
+	return pay.booking_nets(txn).get(booking, ZERO) - pay.in_flight_of(txn) > 0
 
 
 def _expire(name: str, now) -> bool:
@@ -1031,7 +1225,7 @@ def guest_outcome(req) -> dict:
 	ccy = req.currency
 	paid = quantize(_paid_for(req), ccy)
 	refunded = from_db(req.refunded_amount, ccy)
-	hotel = from_db(req.staff_amount, ccy) if req.staff_open else ZERO
+	hotel = max(ZERO, from_db(req.staff_amount, ccy) - _to_verify(req)) if req.staff_open else ZERO
 	# for a change not made: what became of the guest's payment, decided here, never in the page
 	back = None if req.status in (*DONE, *OPEN) else (
 		"none" if paid <= 0 else "hotel" if hotel > 0 else "refunded" if refunded >= paid else "refunding")
@@ -1048,7 +1242,8 @@ def guest_view(req) -> dict:
 	ccy = req.currency
 	p = json.loads(req.proposal or "{}")
 	waiting = req.status == "Awaiting Payment"
-	kind = st.PAY_NOW if waiting else (st.STAFF_APPROVAL if from_db(req.difference, ccy) < 0 else st.STAFF)
+	kind = st.PAY_NOW if waiting else (st.STAFF_APPROVAL if from_db(req.difference, ccy) < 0 or req.penalty_terms
+	                                   else st.STAFF)
 	return {"request": req.name, "status": GUEST_STATUS.get(req.status, req.status.lower()), "kind": kind,
 	        "changes": p.get("changes") or {}, "difference": to_str(from_db(req.difference, ccy)),
 	        "amount": to_str(from_db(req.collect_amount, ccy)) if waiting else None,
@@ -1061,8 +1256,8 @@ def guest_view(req) -> dict:
 STAFF_FIELDS = ("name", "property", "booking", "reservation", "status", "currency", "old_total", "new_total",
                 "difference", "collect_amount", "payment_transaction", "attempt", "settlement", "settlement_amount",
                 "refunded_amount", "settle_pending", "staff_open", "staff_amount", "staff_reason", "unknown_refund",
-                "revision", "error", "note", "expires_at", "resolved_by", "resolved_at", "resolution", "creation",
-                "modified")
+                "refund_in_flight", "penalty_terms", "revision", "error", "note", "expires_at", "resolved_by",
+                "resolved_at", "resolution", "creation", "modified")
 MONEY_FIELDS = ("old_total", "new_total", "difference", "collect_amount", "settlement_amount", "refunded_amount",
                 "staff_amount")
 
@@ -1075,8 +1270,15 @@ def staff_row(row) -> dict:
 		out[f] = str(out[f]) if out[f] else None
 	out["settle_pending"] = bool(out["settle_pending"])
 	out["staff_open"] = bool(out["staff_open"])
+	out["penalty_terms"] = bool(out["penalty_terms"])
 	# waiting for staff: a request to decide, or money left to staff (a refund to make or to verify)
 	out["needs_staff"] = row.get("status") == "Requested" or out["staff_open"]
+	# a refund to verify is closed at once (TEX then refunds the rest); money to refund by staff
+	# once TEX is done refunding
+	verify = bool(row.get("unknown_refund")) and frappe.db.get_value(TXN, row.get("unknown_refund"),
+	                                                                   "status") == "Pending"
+	out["verify_refund"] = row.get("unknown_refund") if verify else None
+	out["can_close"] = out["staff_open"] and (verify or not out["settle_pending"])
 	out["changes"] = json.loads(row.get("proposal") or "{}").get("changes") or {}
 	return out
 
@@ -1128,7 +1330,8 @@ def resolve(request: str, action: str, *, settlement: str | None = None, reason:
 	- ``reject`` (Requested; reservation.modify): nothing changes;
 	- ``close`` (payment.refund): money left to staff was settled outside TEX. When it is a
 	  refund the gateway never confirmed, ``refund_outcome`` records what the gateway did
-	  (``Succeeded``: the money comes off the booking; ``Failed``: it stays, and staff settle it)."""
+	  (``Succeeded``: the money comes off the booking; ``Failed``: it stays), and TEX refunds
+	  what the change still owes (re-review F3)."""
 	if action not in RESOLVE_ACTIONS:
 		frappe.throw(_("Unknown action {0}.").format(action))
 	prop = frappe.db.get_value(DT, request, "property")
@@ -1150,7 +1353,7 @@ def resolve(request: str, action: str, *, settlement: str | None = None, reason:
 			frappe.throw(_("A rejected request settles nothing."))
 		req.status = "Rejected"
 	else:
-		_close(req, refund_outcome, reason)
+		queue = _close(req, refund_outcome, reason)
 	req.resolved_by = frappe.session.user
 	req.resolved_at = now_datetime()
 	note = reason.strip()[:500]
@@ -1165,21 +1368,82 @@ def resolve(request: str, action: str, *, settlement: str | None = None, reason:
 	return staff_row(req.as_dict())
 
 
-def _close(req, refund_outcome: str | None, reason: str) -> None:
+def _close(req, refund_outcome: str | None, reason: str) -> bool:
+	"""→ whether TEX refunds what the change still owes now (after a refund was verified)."""
 	from kamra.tex.payments import service as pay
 
-	if not req.staff_open or req.settle_pending:
+	if not req.staff_open:
 		frappe.throw(_("Only money left to staff can be closed."))
-	if req.unknown_refund and frappe.db.get_value(TXN, req.unknown_refund, "status") == "Pending":
+	row = _in_flight(req)
+	if row and row.name == req.unknown_refund:
 		if refund_outcome not in ("Succeeded", "Failed"):
 			frappe.throw(_("Say whether the gateway made refund {0}: check it at the gateway first.").format(
 				req.unknown_refund))
-		done = pay.finish_unknown_refund(req.unknown_refund, outcome=refund_outcome, reference=None, reason=reason)
-		if refund_outcome == "Succeeded":
-			req.refunded_amount = from_db(req.refunded_amount, req.currency) + D(done["amount"])
-	elif refund_outcome:
+		done = pay.finish_unknown_refund(row.name, outcome=refund_outcome, reference=None, reason=reason)
+		return _verified(req, row.name, refund_outcome, D(done["amount"]))
+	if refund_outcome:
 		frappe.throw(_("There is no refund to verify on this request."))
+	if req.settle_pending:
+		frappe.throw(_("TEX is still refunding this change: close the rest once it is done."))
 	req.staff_open = 0
+	return False
+
+
+def _verified(req, refund: str, outcome: str, amount: D) -> bool:
+	"""Staff recorded what the gateway did with the request's refund it never confirmed: the
+	money is refunded or not, it is no longer staff's to verify, and what the change still owes
+	(the rest of its refund, its other payments to give back) is TEX's to refund again: →
+	whether a refund run is queued (re-review F3). Saved by the caller."""
+	ccy = req.currency
+	if outcome == "Succeeded":
+		req.refunded_amount = from_db(req.refunded_amount, ccy) + amount
+	if req.unknown_refund == refund:
+		left = max(ZERO, from_db(req.staff_amount, ccy) - amount)
+		req.staff_amount = left
+		req.unknown_refund = None
+		req.staff_open = 1 if left > 0 else 0
+		req.staff_reason = REFUND_BY_STAFF if left > 0 else ""
+	if req.refund_in_flight == refund:
+		req.refund_in_flight = None
+	audit("guest_change.refund_verified", reference_doctype=DT, reference_name=req.name, property=req.property,
+	      new={"refund": refund, "outcome": outcome, "amount": to_str(quantize(amount, ccy)), "currency": ccy})
+	if req.status == "Awaiting Payment":
+		return False
+	req.settle_pending = 1
+	return True
+
+
+def verify_refund(refund: str, *, outcome: str, reason: str, reference: str | None = None) -> dict:
+	"""Staff checked at the gateway a refund it never confirmed (the payment screen: a refund
+	they started, or one a guest change's refund run left), and record what it did (needs
+	payment.refund; audited ``payment.refund_verified``). A guest change the refund was made for
+	is settled with it: TEX refunds what it still owes (G-45 re-review F2, F3). Locks the
+	booking, then the request, then the payment rows."""
+	from kamra.tex.payments import service as pay
+
+	row = frappe.db.get_value(TXN, refund, ["name", "property", "txn_type", "booking", "parent_transaction"],
+	                          as_dict=True)
+	if not row or row.txn_type != "Refund":
+		frappe.throw(_("Refund not found."), frappe.DoesNotExistError)
+	scope.require("payment.refund", row.property)
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required."))
+	name = (frappe.db.get_value(DT, {"refund_in_flight": refund}, "name")
+	        or frappe.db.get_value(DT, {"unknown_refund": refund}, "name"))
+	booking = ((frappe.db.get_value(DT, name, "booking") if name else None) or row.booking
+	           or frappe.db.get_value(TXN, row.parent_transaction, "booking"))
+	if booking:
+		frappe.db.get_value("TEX Booking", booking, "name", for_update=True)
+	req = _lock(name, booking) if name else None
+	done = pay.finish_unknown_refund(refund, outcome=outcome, reference=reference, reason=reason.strip())
+	if req:
+		resume = _verified(req, refund, outcome, D(done["amount"]))
+		req.save(ignore_permissions=True)
+		if not req.staff_open:
+			_acknowledge(req, f"refund {refund} checked at the gateway: {outcome}")
+		if resume:
+			queue_settle(req.name)
+	return done
 
 
 def _approve(req, settlement: str | None, reason: str) -> bool:

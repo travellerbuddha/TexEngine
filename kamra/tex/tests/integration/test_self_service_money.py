@@ -274,7 +274,8 @@ class TestLowerPrice(GuestMoneyCase):
 		self.assertEqual(refunds(b["booking"]), [])
 		later = add_to_date(now_datetime(), minutes=guest_changes.SETTLE_RETRY_MINUTES + 1)
 		with mock.patch("kamra.tex.services.guest_changes.now_datetime", return_value=later):
-			self.assertEqual(guest_changes.expire_awaiting(), {"expired": 0, "settled": 1, "applied": 0})
+			self.assertEqual(guest_changes.expire_awaiting(), {"expired": 0, "settled": 1, "applied": 0,
+			                                                   "returned": 0})
 		self.assertEqual([(r[1], r[2]) for r in refunds(b["booking"])], [(D("267.50"), "Succeeded")])
 		self.assertEqual(money(b["booking"]), (D("575.00"), D("575.00"), D("0.00")))
 		self.assertEqual(frappe.db.get_value(DT, out["request"], "settle_pending"), 0)
@@ -503,7 +504,7 @@ def nrf_books(session: str) -> dict:
 def gateway_calls(outcomes: dict | None = None, *, timeout: bool = False):
 	"""A sandbox gateway double for refunds: records each refund it is asked for; answers
 	Failed for the charges named in ``outcomes`` ({charge: "Failed"}), or refunds and then times
-	out (the answer never arrives) when ``timeout``."""
+	out (the answer never arrives) when ``timeout`` or for the charges named "Timeout"."""
 	import requests
 
 	from kamra.tex.payments.providers.base import Outcome
@@ -513,9 +514,10 @@ def gateway_calls(outcomes: dict | None = None, *, timeout: bool = False):
 
 	def refund(self, provider_ref, amount, currency, **_kw):
 		calls.append((provider_ref, D(amount)))
-		if timeout:
+		said = (outcomes or {}).get(provider_ref.removeprefix("MOCK-"))
+		if timeout or said == "Timeout":
 			raise requests.exceptions.ReadTimeout("the gateway did not answer in time")
-		if (outcomes or {}).get(provider_ref.removeprefix("MOCK-")) == "Failed":
+		if said == "Failed":
 			return Outcome(status="Failed", error_code="DECLINED", error_message="refund declined")
 		return Outcome(status="Succeeded", provider_ref=f"{provider_ref}-R", amount=amount, currency=currency,
 		               raw_status="REFUNDED")
@@ -590,8 +592,9 @@ class TestReviewRefundDurability(GuestMoneyCase):
 		self.assertEqual(refunds(b["booking"]), [(balance, D("267.50"), "Pending")])
 		self.assertEqual(money(b["booking"])[1], D("842.50"))          # not taken off until it is known
 		req = frappe.get_doc(DT, out["request"])
+		# the refund waits for staff, and the request with it (re-review F3: nothing of it is dropped)
 		self.assertEqual((req.staff_open, req.staff_reason, D(req.staff_amount), req.settle_pending),
-		                 (1, "Verify refund at gateway", D("267.50"), 0))
+		                 (1, "Verify refund at gateway", D("267.50"), 1))
 		self.assertTrue(req.unknown_refund)
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance checks the gateway
 		from kamra.tex.ops import status as system_status
@@ -610,7 +613,7 @@ class TestReviewRefundDurability(GuestMoneyCase):
 	def test_staff_record_a_refund_the_gateway_did_not_make(self):
 		lower_price_policy("Refund automatically")
 		b = self.fully_paid("gcm-timeout-no")
-		_deposit, balance = charges(b["booking"])
+		deposit, balance = charges(b["booking"])
 		_calls, gateway = gateway_calls(timeout=True)
 		with gateway:
 			out = self.accept(b, self.propose(b, (6, 12)))
@@ -619,9 +622,13 @@ class TestReviewRefundDurability(GuestMoneyCase):
 			crs_api.resolve_guest_change(request=out["request"], action="close", reason="checked")
 		done = crs_api.resolve_guest_change(request=out["request"], action="close", reason="not at the gateway",
 		                                    refund_outcome="Failed")
-		self.assertEqual((done["staff_open"], done["refunded_amount"]), (False, "0.00"))
-		self.assertEqual(refunds(b["booking"]), [(balance, D("267.50"), "Failed")])
-		self.assertEqual(money(b["booking"])[1], D("842.50"))             # the booking still holds it
+		# not made: TEX refunds it again from the other card payment, the rest waits for staff
+		# (re-review F3; before, a "Failed" close left all of it on the booking)
+		self.assertEqual(refunds(b["booking"]), [(balance, D("267.50"), "Failed"),
+		                                         (deposit, D("252.75"), "Succeeded")])
+		self.assertEqual((done["staff_open"], done["refunded_amount"], done["staff_amount"], done["staff_reason"]),
+		                 (True, "252.75", "14.75", "Refund by staff"))
+		self.assertEqual(money(b["booking"])[1], D("589.75"))
 
 	def test_a_declined_refund_moves_on_to_the_older_charges(self):
 		lower_price_policy("Refund automatically")
@@ -926,3 +933,351 @@ class TestReviewStaffCredit(GuestMoneyCase):
 		self.assertEqual(public.booking_status(token=b["manage_token"])["credit"], "267.50")
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "guest_change.credit",
 		                                                     "reference_name": b["booking"]}))
+
+
+# ─── second review (G-45 re-review F1–F8) ───────────────────────────────
+
+
+class Crash(BaseException):
+	"""The worker dies (killed, out of memory, the container lost): nothing after this point runs
+	and nothing TEX catches stops it. What is left is what was on record when it died: tests keep
+	one transaction, so that is what a commit before that point would have left (the durable
+	refund row is committed before the gateway is asked)."""
+
+
+def crashing_gateway():
+	"""The gateway makes the refund, and the worker dies before TEX hears the answer."""
+	from kamra.tex.payments.providers.simple import MockProvider
+
+	calls: list[tuple[str, D]] = []
+
+	def refund(self, provider_ref, amount, currency, **_kw):
+		calls.append((provider_ref, D(amount)))
+		raise Crash()
+
+	return calls, mock.patch.object(MockProvider, "refund", refund)
+
+
+def settle_queued():
+	"""The refund job is queued, not run (the worker has not picked it up yet)."""
+	from kamra.tex.services import guest_changes
+
+	return mock.patch.object(guest_changes, "queue_settle")
+
+
+def at(minutes: int):
+	"""TEX's guest-change clock ``minutes`` from now (the scheduler running later)."""
+	return mock.patch("kamra.tex.services.guest_changes.now_datetime",
+	                  return_value=add_to_date(now_datetime(), minutes=minutes))
+
+
+def refund_row(charge: str) -> str:
+	return frappe.db.get_value(TXN, {"parent_transaction": charge, "txn_type": "Refund"}, "name",
+	                           order_by="creation desc")
+
+
+def audits(action: str, name: str) -> int:
+	return frappe.db.count("TEX Audit Event", {"action": action, "reference_name": name})
+
+
+class TestReReviewInFlight(GuestMoneyCase):
+	"""F1: a refund run never plans around its own refund in flight, and never overlaps another."""
+
+	def test_a_refund_the_worker_never_finished_is_never_made_again(self):
+		lower_price_policy("Refund automatically")
+		b = self.fully_paid("gcm2-crash")
+		_deposit, balance = charges(b["booking"])
+		from kamra.tex.services import guest_changes
+
+		with settle_queued():
+			out = self.accept(b, self.propose(b, (6, 12)))
+		calls, gateway = crashing_gateway()
+		with gateway, self.assertRaises(Crash):
+			guest_changes.settle(out["request"])          # the gateway refunds; the worker dies before TEX hears it
+		self.assertEqual(calls, [(f"MOCK-{balance}", D("267.50"))])
+		row = refund_row(balance)
+		self.assertEqual(refunds(b["booking"]), [(balance, D("267.50"), "Pending")])
+		more, gateway = gateway_calls()
+		with gateway:
+			with at(1):
+				guest_changes.settle(out["request"])      # a second run while the first one holds the refunds
+			self.assertEqual(more, [])
+			# the first run's hold ended (it died) but its refund is fresh: wait, never plan around it
+			frappe.db.set_value(DT, out["request"], "settle_claimed_until", add_to_date(now_datetime(), minutes=-1))
+			guest_changes.settle(out["request"])
+			self.assertEqual(more, [])
+			self.assertEqual(frappe.db.get_value(DT, out["request"], ["settle_pending", "staff_open"]), (1, 0))
+			with at(guest_changes.SETTLE_RETRY_MINUTES + 1):
+				guest_changes.expire_awaiting()           # the scheduler: the refund is old, staff verify it
+		self.assertEqual(more, [])                        # no other charge refunded instead
+		self.assertEqual(refunds(b["booking"]), [(balance, D("267.50"), "Pending")])
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual((req.staff_open, req.staff_reason, D(req.staff_amount), req.unknown_refund),
+		                 (1, "Verify refund at gateway", D("267.50"), row))
+		self.assertEqual(money(b["booking"])[1], D("842.50"))
+		self.assertEqual(public.booking_status(token=b["manage_token"])["credit"], "0.00")
+
+	def test_the_apply_job_and_the_scheduler_hand_one_payment_back_once(self):
+		b = self.deposit_paid("gcm2-twice")
+		res = b["rooms"][0]["reservation"]
+		out = self.accept(b, self.propose(b, (6, 14)))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- an agent changes the stay meanwhile
+		staff = modification.propose(res, {"check_out": str(fx.d(6, 12))})
+		modification.apply(staff["proposal_token"], reason="guest phoned")
+		txn = out["payment"]["transaction"]
+		with settle_queued():
+			paid(out["payment"])                          # the apply job fails the change, its refund is queued
+		self.assertEqual(frappe.db.get_value(DT, out["request"], ["status", "settle_pending"]), ("Failed", 1))
+		from kamra.tex.services import guest_changes
+
+		calls, gateway = crashing_gateway()
+		with gateway, self.assertRaises(Crash):
+			guest_changes.settle(out["request"])          # the refund is asked for; the worker dies
+		more, gateway = gateway_calls()
+		with gateway:
+			# the scheduler had read the request as still waiting: the same payment, once more
+			self.assertEqual(guest_changes.apply_paid(out["request"], txn), "done")
+			self.assertEqual(audits("guest_change.late_payment", out["request"]), 0)
+			req = frappe.get_doc(DT, out["request"])
+			self.assertEqual((req.status, req.settle_pending, req.staff_open), ("Failed", 1, 0))
+			with at(guest_changes.SETTLE_RETRY_MINUTES + 1):
+				guest_changes.expire_awaiting()
+		self.assertEqual((len(calls), more), (1, []))
+		req.reload()
+		self.assertEqual((req.staff_open, req.staff_reason, req.unknown_refund),
+		                 (1, "Verify refund at gateway", refund_row(txn)))
+
+	def test_a_refund_staff_started_and_never_confirmed_is_not_the_guests_credit(self):
+		lower_price_policy("Keep as credit")
+		b = self.fully_paid("gcm2-staff-pending")
+		_deposit, balance = charges(b["booking"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance refunds a goodwill amount
+		_calls, gateway = gateway_calls(timeout=True)
+		with gateway, self.assertRaises(pay.RefundUnknown):
+			pay_api.refund(transaction=balance, amount="100.00", reason="goodwill", idempotency_key="gcm2-sp-1",
+			               booking=b["booking"])
+		down = self.propose(b, (6, 12))                   # 267.50 lower; 100.00 of it may be back on the card
+		self.assertEqual((down["settlement"]["kind"], down["settlement"]["amount"]), ("credit", "167.50"))
+		out = self.accept(b, down)
+		self.assertEqual((out["credit"], out["refund_due"]), ("167.50", "100.00"))
+
+
+class TestReReviewStaff(GuestMoneyCase):
+	"""F2 and F3: a refund the gateway never confirmed is closed from the payment screen too, and
+	what the change still owes is refunded after it."""
+
+	def setUp(self):
+		super().setUp()
+		other_hotel_with_mock()
+		self.outsider = fx.ensure_user("gcm-outsider@example.com", ["Hotel Admin"])
+		fx.ensure("TEX Access Grant", {"user": self.outsider, "property": OTHER},
+		          {"user": self.outsider, "scope_level": "Hotel", "property": OTHER,
+		           "permission_profile": "Hotel Admin"})
+		scope.clear_cache()
+
+	def test_staff_record_a_refunds_outcome_from_the_payment_screen(self):
+		b = self.fully_paid("gcm2-finish")
+		_deposit, balance = charges(b["booking"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance refunds a goodwill amount
+		_calls, gateway = gateway_calls(timeout=True)
+		with gateway, self.assertRaises(pay.RefundUnknown):
+			pay_api.refund(transaction=balance, amount="10.00", reason="goodwill", idempotency_key="gcm2-f1",
+			               booking=b["booking"])
+		row = refund_row(balance)
+		self.assertEqual(pay_api.transaction(name=balance)["refundable"], "579.75")   # 10.00 may be gone
+		frappe.set_user(self.outsider)  # nosemgrep: frappe-setuser -- the admin of another hotel
+		with self.assertRaises(frappe.PermissionError):
+			pay_api.finish_refund(refund=row, outcome="Succeeded", reason="seen")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance checked the gateway
+		with self.assertRaisesRegex(frappe.ValidationError, "reason"):
+			pay_api.finish_refund(refund=row, outcome="Succeeded", reason=" ")
+		done = pay_api.finish_refund(refund=row, outcome="Succeeded", reason="seen at the gateway",
+		                             reference="GW-77")
+		self.assertEqual((done["status"], done["amount"]), ("Succeeded", "10.00"))
+		self.assertEqual(money(b["booking"])[1], D("832.50"))
+		self.assertEqual(frappe.db.get_value(TXN, row, ["status", "provider_ref"]), ("Succeeded", "GW-77"))
+		self.assertEqual(audits("payment.refund_verified", row), 1)
+		with self.assertRaisesRegex(frappe.ValidationError, "waiting for its outcome"):
+			pay_api.finish_refund(refund=row, outcome="Failed", reason="again")
+
+	def test_a_refund_left_pending_is_flagged_after_a_few_minutes(self):
+		b = self.fully_paid("gcm2-stuck")
+		_deposit, balance = charges(b["booking"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance refunds; the worker dies
+		_calls, gateway = crashing_gateway()
+		with gateway, self.assertRaises(Crash):
+			pay_api.refund(transaction=balance, amount="10.00", reason="goodwill", idempotency_key="gcm2-s1",
+			               booking=b["booking"])
+		self.assertIsNone(frappe.db.get_value(TXN, refund_row(balance), "error_code"))   # no answer, no error
+		from kamra.tex.ops import status as system_status
+
+		def reasons(minutes):
+			check = next(c for c in system_status.collect(properties=[fx.PROPERTY],
+			                                              now=add_to_date(now_datetime(), minutes=minutes))
+			             if c["key"] == "payments.callbacks")
+			return [(i["reason"], i["params"]) for i in check["issues"]]
+
+		self.assertEqual(reasons(0), [])                                # just asked: its answer may still come
+		self.assertIn(("refund_unknown", {"count": 1}), reasons(pay.REFUND_STUCK_MINUTES + 1))
+
+	def test_a_guest_changes_refund_closed_from_the_payment_screen_settles_the_change(self):
+		lower_price_policy("Refund automatically")
+		b = self.fully_paid("gcm2-finish-gcr")
+		_deposit, balance = charges(b["booking"])
+		_calls, gateway = gateway_calls(timeout=True)
+		with gateway:
+			out = self.accept(b, self.propose(b, (6, 12)))
+		row = refund_row(balance)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance checked the gateway
+		pay_api.finish_refund(refund=row, outcome="Succeeded", reason="seen at the gateway")
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual((D(req.refunded_amount), req.staff_open, D(req.staff_amount), req.settle_pending),
+		                 (D("267.50"), 0, D("0"), 0))
+		self.assertEqual(money(b["booking"]), (D("575.00"), D("575.00"), D("0.00")))
+		self.assertEqual(crs_api.guest_change_requests(property=fx.PROPERTY, needs_staff=1), [])
+
+	def spread(self, session: str):
+		"""1110.00 paid by three card charges (deposit 252.75, the change's 80.25, the rest 777.00)."""
+		b = self.deposit_paid(session)
+		paid(self.accept(b, self.propose(b, (6, 14)))["payment"])
+		paid(public.pay_booking(token=b["manage_token"]))
+		return b, *charges(b["booking"])
+
+	def test_after_an_unanswered_refund_the_rest_is_still_refunded(self):
+		lower_price_policy("Refund automatically")
+		b, _deposit, change, rest = self.spread("gcm2-rest")
+		calls, gateway = gateway_calls({rest: "Timeout"})
+		down = self.propose(b, (6, 11))                   # 1110.00 → 307.50: 802.50 back
+		with gateway:
+			out = self.accept(b, down)
+			self.assertEqual(calls, [(f"MOCK-{rest}", D("777.00"))])   # stops at the refund never answered
+			req = frappe.get_doc(DT, out["request"])
+			self.assertEqual((req.settle_pending, req.staff_open, req.staff_reason, D(req.staff_amount)),
+			                 (1, 1, "Verify refund at gateway", D("777.00")))
+			# the rest is owed, not the guest's credit, and nothing changes until it is settled
+			view = public.booking_status(token=b["manage_token"])
+			self.assertEqual((view["credit"], view["refund_due"], view["changes_blocked"]),
+			                 ("0.00", "802.50", "REFUND_PENDING"))
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance saw the refund at the gateway
+			done = crs_api.resolve_guest_change(request=req.name, action="close", reason="refund seen at the gateway",
+			                                    refund_outcome="Succeeded")
+		self.assertEqual(refunds(b["booking"]), [(rest, D("777.00"), "Succeeded"), (change, D("25.50"), "Succeeded")])
+		self.assertEqual((done["refunded_amount"], done["staff_amount"], done["staff_open"], done["settle_pending"]),
+		                 ("802.50", "0.00", False, False))
+		self.assertEqual(money(b["booking"]), (D("307.50"), D("307.50"), D("0.00")))
+		again = self.accept(b, down)
+		self.assertEqual((again["settlement"]["refund"], again["settlement"]["hotel_refund"],
+		                  again["settlement"]["refund_done"]), ("802.50", "0.00", True))
+
+	def test_a_refund_found_not_made_is_made_from_the_other_payments(self):
+		lower_price_policy("Refund automatically")
+		b, deposit, change, rest = self.spread("gcm2-not-made")
+		calls, gateway = gateway_calls({rest: "Timeout"})
+		with gateway:
+			out = self.accept(b, self.propose(b, (6, 11)))
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the gateway shows no refund
+			done = crs_api.resolve_guest_change(request=out["request"], action="close", reason="not at the gateway",
+			                                    refund_outcome="Failed")
+		self.assertEqual([c[0] for c in calls], [f"MOCK-{rest}", f"MOCK-{change}", f"MOCK-{deposit}"])
+		self.assertEqual(refunds(b["booking"]), [(rest, D("777.00"), "Failed"), (change, D("80.25"), "Succeeded"),
+		                                         (deposit, D("252.75"), "Succeeded")])
+		self.assertEqual((done["refunded_amount"], done["staff_open"], done["staff_amount"], done["staff_reason"],
+		                  done["settle_pending"]), ("333.00", True, "469.50", "Refund by staff", False))
+		self.assertEqual(money(b["booking"])[1], D("777.00"))
+
+
+class TestReReviewPaidChanges(GuestMoneyCase):
+	"""F4–F7: a paid change waiting to apply, the penalty window, transient errors, lost jobs."""
+
+	def test_a_paid_change_waiting_to_be_applied_is_neither_credit_nor_changed_again(self):
+		b = self.deposit_paid("gcm2-waiting")
+		res = b["rooms"][0]["reservation"]
+		out = self.accept(b, self.propose(b, (6, 14)))
+		from kamra.tex.services import guest_changes
+
+		with mock.patch.object(guest_changes, "queue_apply"):
+			paid(out["payment"])                          # recorded; the job that applies it has not run yet
+		self.assertEqual(money(b["booking"])[1], D("333.00"))
+		self.assertEqual(guest_changes.usable_paid(frappe.get_doc("TEX Booking", b["booking"])), D("252.75"))
+		with self.assertRaisesRegex(frappe.ValidationError, "being applied"):
+			self.propose(b, (6, 15))                      # a new change would use the paid one's money
+		self.assertEqual(public.booking_status(token=b["manage_token"])["changes_blocked"], "CHANGE_APPLYING")
+		with at(guest_changes.APPLY_RETRY_MINUTES + 3):
+			self.assertEqual(guest_changes.expire_awaiting()["applied"], 1)
+		self.assertEqual(stay(res), (str(fx.d(6, 14)), D("1110.00")))
+		self.assertIsNone(public.booking_status(token=b["manage_token"])["changes_blocked"])
+
+	def test_moving_the_arrival_later_inside_the_penalty_window_goes_to_the_hotel(self):
+		lower_price_policy("Refund automatically")
+		b = self.fully_paid("gcm2-shift")
+		res = b["rooms"][0]["reservation"]
+		later = {"check_in": str(fx.d(6, 11)), "check_out": str(fx.d(6, 14))}
+		three_days_before = get_datetime(f"{fx.YEAR}-06-07 12:00:00")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		with mock.patch("kamra.tex.services.booking.now_datetime", return_value=three_days_before):
+			shift = public.manage_propose(token=b["manage_token"], reservation=res, changes=later)
+			# moved later, the stay would leave the window: then shortened, refunded without its fee
+			self.assertEqual(shift["settlement"]["kind"], "staff_approval")
+			out = self.accept(b, shift)
+		self.assertEqual(out["status"], "requested")
+		self.assertEqual(stay(res), (str(fx.d(6, 13)), D("842.50")))                    # the hotel decides
+		self.assertEqual(frappe.db.get_value(DT, out["request"], "penalty_terms"), 1)
+		view = public.booking_status(token=b["manage_token"])["rooms"][0]["pending_change"]
+		self.assertEqual(view["kind"], "staff_approval")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- outside the window it is the guest's own change
+		self.assertNotEqual(public.manage_propose(token=b["manage_token"], reservation=res,
+		                                          changes=later)["settlement"]["kind"], "staff_approval")
+
+	def test_a_lock_wait_or_a_lost_connection_while_applying_is_retried_not_refunded(self):
+		import pymysql
+
+		from kamra.tex.services import guest_changes
+
+		for session, error in (("gcm2-lockwait", frappe.QueryTimeoutError("Lock wait timeout exceeded")),
+		                       ("gcm2-lost", pymysql.err.OperationalError(2013, "Lost connection to server"))):
+			with self.subTest(error=type(error).__name__):
+				b = self.deposit_paid(session)
+				res = b["rooms"][0]["reservation"]
+				out = self.accept(b, self.propose(b, (6, 14)))
+				with mock.patch("kamra.tex.services.modification.apply", side_effect=error):
+					paid(out["payment"])
+				self.assertEqual(frappe.db.get_value(DT, out["request"], "status"), "Awaiting Payment")
+				self.assertEqual(refunds(b["booking"]), [])
+				with at(guest_changes.APPLY_RETRY_MINUTES + 3):
+					self.assertEqual(guest_changes.expire_awaiting()["applied"], 1)   # the scheduler applies it
+				self.assertEqual(stay(res), (str(fx.d(6, 14)), D("1110.00")))
+
+	def test_a_payment_whose_apply_job_was_lost_is_found_by_the_scheduler(self):
+		b = self.deposit_paid("gcm2-lost-job")
+		first = self.accept(b, self.propose(b, (6, 14)))
+		self.accept(b, self.propose(b, (6, 15)))          # replaces the first
+		from kamra.tex.services import guest_changes
+
+		with mock.patch.object(guest_changes, "queue_apply"):
+			paid(first["payment"])                        # the old tab is paid; the job that returns it is lost
+		self.assertEqual(refunds(b["booking"]), [])
+		with at(guest_changes.APPLY_RETRY_MINUTES + 3):
+			guest_changes.expire_awaiting()
+		self.assertEqual(refunds(b["booking"]), [(first["payment"]["transaction"], D("80.25"), "Succeeded")])
+		self.assertEqual(audits("guest_change.late_payment", first["request"]), 1)
+		with at(guest_changes.SETTLE_RETRY_MINUTES + 20):
+			guest_changes.expire_awaiting()               # found once, returned once
+		self.assertEqual(len(refunds(b["booking"])), 1)
+		self.assertEqual(audits("guest_change.late_payment", first["request"]), 1)
+
+	def test_a_refund_is_queued_with_the_commit_that_decided_it(self):
+		b = self.deposit_paid("gcm2-order")
+		res = b["rooms"][0]["reservation"]
+		out = self.accept(b, self.propose(b, (6, 14)))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- an agent changes the stay meanwhile
+		staff = modification.propose(res, {"check_out": str(fx.d(6, 12))})
+		modification.apply(staff["proposal_token"], reason="guest phoned")
+		from kamra.tex.services import guest_changes
+
+		order: list[str] = []
+		with mock.patch.object(guest_changes, "queue_settle", side_effect=lambda _n: order.append("queue")), \
+				mock.patch.object(guest_changes, "_commit", side_effect=lambda: order.append("commit")):
+			paid(out["payment"])
+		# registered before the job's commit, so that commit sends it: a later rollback in the same
+		# job (the next request failing) can no longer drop it
+		self.assertEqual(order[:2], ["queue", "commit"])

@@ -224,11 +224,17 @@ def _payments_callbacks(props, now) -> dict:
 	                            pluck="property")
 	overpaid = frappe.get_all("TEX Audit Event", filters={**audit_filters, "action": "payment_link.overpaid"},
 	                          pluck="property")
-	# refunds the gateway never answered (``payments.service.RefundUnknown``), at any age
-	unknown_filters = {"txn_type": "Refund", "status": "Pending", "error_code": "UNKNOWN"}
+	# refunds the gateway never answered (``payments.service.RefundUnknown``), at any age, and any
+	# refund still Pending after a few minutes (the run asking for it died): staff check them at
+	# the gateway (G-45 re-review F2)
+	from kamra.tex.payments import service as pay
+
+	unknown_filters = {"txn_type": "Refund", "status": "Pending"}
 	if props is not None:
 		unknown_filters["property"] = ("in", sorted(props) or [""])
-	unknown = frappe.get_all("TEX Payment Transaction", filters=unknown_filters, pluck="property")
+	unknown = [r.property for r in frappe.get_all("TEX Payment Transaction", filters=unknown_filters,
+	                                              fields=["property", "error_code", "creation"])
+	           if pay.stuck(r, now)]
 	hotels = {p for p in (*errors, *mismatches, *overpaid, *unknown) if p}
 	return C.callbacks_check(errors=len(errors), overpaid=len(overpaid), mismatches=len(mismatches),
 	                         refunds_unknown=len(unknown), properties=hotels)

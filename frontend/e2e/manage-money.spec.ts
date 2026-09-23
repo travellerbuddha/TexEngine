@@ -11,7 +11,9 @@
 //   outside its free-cancellation window, so no penalty keeps the money): the dialog and the
 //   notice announce the refund, and the refund job gives the money back to the card.
 // The change paid online is applied by a job right after the gateway confirmed the payment,
-// so the page looks again until the server has it (review of ADR-044).
+// so the page looks again until the server has it (review of ADR-044). Once the refund is made,
+// the booking can be changed again, and the refund is on the payment screen as made: there is
+// no gateway outcome left for staff to record (second review of ADR-044).
 // Every stay is cancelled at the end (free under the Flexible rate) so the demo inventory is
 // left as found. Amounts are compared as decimal strings (cents), never as floats.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_ADMIN_PASSWORD=… npx playwright test -c e2e manage-money
@@ -72,6 +74,7 @@ interface GuestBooking {
   credit: string
   due_now: string
   payment_status: string
+  changes_blocked?: string | null
   rooms: {
     reservation: string
     check_in: string
@@ -381,6 +384,20 @@ test("a fully paid booking is shortened under the refund policy: the page announ
     const done = await status(page.request, b.token)
     expect(done.credit).toBe("0.00")
     expect(done.rooms[0].last_change).toMatchObject({ status: "applied", settlement: "refund", refunded: p.settlement!.amount })
+    expect(done.changes_blocked ?? null).toBeNull()
+    // staff: the refund is on record as made; a refund the gateway confirmed has no outcome to record
+    const txns = await api<{ name: string; txn_type: string; status: string; amount: string }[]>(admin, "kamra.tex.api.payments.transactions", {
+      property: HOTEL,
+      booking: b.booking,
+    })
+    const refund = txns.find((x) => x.txn_type === "Refund")
+    expect(refund, "the refund on record").toBeTruthy()
+    expect(refund!).toMatchObject({ status: "Succeeded", amount: p.settlement!.amount })
+    const record = await admin.post("/api/method/kamra.tex.api.payments.finish_refund", {
+      data: { refund: refund!.name, outcome: "Succeeded", reason: "E2E: the gateway already confirmed it" },
+    })
+    expect(record.ok(), "only a refund waiting for its outcome can be recorded").toBeFalsy()
+    expect(await record.text()).toContain("waiting for its outcome")
     noErrors()
   } finally {
     await cancelStay(page.request, b)
