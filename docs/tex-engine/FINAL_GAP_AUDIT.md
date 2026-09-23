@@ -168,6 +168,7 @@ The rows below keep the original findings for traceability.
 | 66 | G-81 Abandoned e-mail hash | R-38 | `email_hash` is stored even without consent. The consented-contact and recovery paths are untested. | `crm/service.py` |
 | 67 | G-82 E2E occupancy change | R-58 | Journey step 17 changes dates only, not occupancy. | `frontend/e2e/critical-journey.spec.ts` |
 | 68 | G-83 Misc security hygiene | R-53 | (`ari_grid(contract=<other hotel>)` fixed with G-11.) `crm.log_communication` accepts unvalidated links. An anonymous booker can grant marketing consent on an existing profile by e-mail. Uploads are validated only in the browser. Raw tokens in URL paths. WebhookPMS signs with an empty key when no secret is set. | `commercial/grid.py`, `api/crm.py`, `services/booking.py`, `connect/adapters.py` |
+| 69 | G-91 (new) Browser-date defaults | R-50 | Staff date pickers start on the browser's day, not the site's: the inventory ARI and extras grids, the CRS arrival, FX rates, transactions, segment export, contract preview, access grants and the channel sandbox. Just after the site's midnight in an earlier browser time zone they start one day back (a past arrival the server then refuses, a grid starting yesterday). The channel ARI preview, where this showed a false "never sent" day, now starts on the site's day (`ari_preview` returns `date_from`; `test_the_preview_starts_on_the_sites_day`). | `frontend/src/tex/screens/**` (`isoDay(new Date())`) |
 
 ## 5. Blocked (owner input needed)
 

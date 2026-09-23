@@ -87,6 +87,16 @@ class TestAri(DistributionCase):
 		                "room_type": self.std, "stop_sell": "STOP"}).insert(ignore_permissions=True)
 		self.assertTrue(dist.build_days(self.mapping, a, a)[0].closed)
 
+	def test_the_preview_starts_on_the_sites_day(self):
+		# the push horizon starts on the site's day, so the preview does too: a browser in an earlier
+		# time zone just after the site's midnight must not show yesterday as a day never sent
+		out = dist_api.ari_preview(self.mapping.name, days=3)
+		self.assertEqual(out["date_from"], str(getdate()))
+		self.assertEqual([d["date"] for d in out["days"]],
+		                 [str(getdate() + timedelta(days=i)) for i in range(3)])
+		self.assertEqual(dist_api.ari_preview(self.mapping.name, date_from=str(fx.d(6, 10)), days=1)["date_from"],
+		                 str(fx.d(6, 10)))
+
 	def test_only_changes_are_pushed_and_jobs_coalesce(self):
 		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
 		a, b = fx.d(6, 10), fx.d(6, 14)

@@ -155,13 +155,14 @@ def delete_mapping(name: str):
 
 @frappe.whitelist()
 def ari_preview(mapping: str, date_from: str | None = None, days=14):
-	"""What TEX would send for a mapping, next to what the channel last accepted."""
+	"""What TEX would send for a mapping, next to what the channel last accepted. Without
+	``date_from`` it starts on the site's day, where the push horizon starts (not the browser's)."""
 	m = frappe.get_doc("TEX Channel Mapping", mapping)
 	_conn(m.connection, "channel.view")
 	a = getdate(date_from) if date_from else getdate()
 	b = frappe.utils.add_days(a, as_int(days, 14, lo=1, hi=62) - 1)
 	pushed = dist.pushed_state(m.name, a, getdate(b))
-	return {"mapping": m.name, "days": [{**d.to_dict(), "in_sync": pushed.get(d.day) == d.fingerprint(),
+	return {"mapping": m.name, "date_from": str(a), "days": [{**d.to_dict(), "in_sync": pushed.get(d.day) == d.fingerprint(),
 	                                     "sent": d.day in pushed} for d in dist.build_days(m, a, getdate(b))]}
 
 
