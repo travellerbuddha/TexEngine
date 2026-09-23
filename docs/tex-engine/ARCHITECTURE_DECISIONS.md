@@ -1142,6 +1142,77 @@ the deposit due was never recomputed.
 - Schema: four fields on TEX Guest Change Request (no patch: migrate adds them, nothing to
   backfill before release).
 
+**Second review follow-up (G-45 re-review F1–F8).** The first follow-up made each refund
+durable, but a refund run could still act around its own refund in flight, two runs could
+overlap, and some money could be left with no one to settle it.
+- *A refund run never plans around its own refund in flight, and runs one at a time (F1).*
+  `payments.service.refund(on_record=…)` names the new refund on the request
+  (`refund_in_flight`) in the same commit as the Pending refund row, before the gateway is
+  asked. Every refund run (`guest_changes.settle`) starts, and re-checks before each refund,
+  with that refund: still Pending and fresh, the run stops and a later run looks again;
+  unanswered (`UNKNOWN`) or older than `REFUND_STUCK_MINUTES` (5; the worker that asked died),
+  it goes to staff as "Verify refund at gateway" with `unknown_refund`, and the request waits.
+  Nothing is ever planned around it: its charge is not swapped for an older one, and a single
+  charge is never handed to staff as "Refund by staff" while its refund may have been made.
+  One run per request at a time: the run holds the request's refunds (`settle_claim`,
+  `settle_claimed_until`, a lease of `SETTLE_LEASE_MINUTES` = 10 renewed with each refund,
+  committed with the first refund's record); a second run meanwhile does nothing, and a run
+  that died is taken over once its lease lapsed. `apply_paid` run twice for one payment (the
+  job and the scheduler) does nothing the second time: a payment already given back
+  (`returned_charges`) or a request whose refund run is pending is never a new late payment.
+  Refunds that come off a booking and have no answer yet (a staff refund, a guest change's
+  refund) are set aside from what the booking holds (`earmarked`): they reduce what is still
+  over, what a change may use and the guest's credit.
+- *Every unconfirmed refund can be closed, and is seen (F2).* `payments.finish_refund`
+  (payment.refund on the refund's hotel, reason required, POST, audited
+  `payment.refund_verified`) records what the gateway did with any Pending refund, from the
+  payment screen ("Record gateway outcome"); a guest change the refund was made for is settled
+  with it (`guest_changes.verify_refund`, the same path as closing it on the guest change
+  card). The system status (`payments.callbacks` `refund_unknown`) counts every refund left
+  Pending for more than `REFUND_STUCK_MINUTES`, not only `UNKNOWN` ones. A replay of an
+  unanswered refund is announced as not confirmed, never as done; what is refundable leaves
+  refunds in flight out.
+- *Nothing of a refund is dropped after an unanswered one (F3).* When a refund is not
+  answered, the request keeps `settle_pending` (the rest stays owed, set aside and blocks new
+  changes); closing the refund with its outcome takes it off `staff_amount` (and adds it to
+  `refunded_amount` when it was made) and queues the run again: TEX refunds what the change
+  still owes from the other charges, or hands it to staff. A "Failed" outcome is a definite
+  no: that charge is skipped, as for any refusal. `refund_done` is true only once nothing of
+  the refund is still being made; a refund to verify is shown as a card refund, not a hotel
+  refund.
+- *A paid change still to be applied is set aside and blocks new changes (F4).* The payment
+  of a change waiting for `apply_paid` (and a payment to give back not given back yet) is not
+  the booking's to use: no refund plan takes it, no change counts it, and the booking takes no
+  new guest change until it is applied (`ChangeApplying`, `changes_blocked:
+  CHANGE_APPLYING`).
+- *The rate's terms are judged on an arrival moved later too (F5).* Chosen: a change that
+  moves the arrival later while cancelling now would cost a fee goes to the hotel
+  (`staff_approval`, `settlement.settle(terms_review=True)`), whatever its price: moved out of
+  its penalty window the stay could then be shortened (refund) or cancelled (no fee) without
+  the fee. A later check-out (an extension), fewer or more guests, and an earlier arrival do
+  not move the window and stay self-service. The request records `penalty_terms`; staff see
+  it. (Not chosen: judging every later change on the terms held at the first change; it
+  would need the original terms carried on the reservation and would still leave the
+  cancellation path open.)
+- *Transient errors are retried, never judged (F6).* `apply_paid` retries a deadlock, a lock
+  wait or statement timeout and a lost connection (MariaDB 1205, 1213, 1969; client 2003,
+  2006, 2013; `pymysql.InterfaceError`) a few times, then leaves the change waiting for the
+  scheduler; only an error of the change itself fails it and refunds the payment.
+- *A queued refund cannot be lost (F7).* `apply_paid` registers the refund job before its
+  own commit, so that commit sends it and a later rollback in the same scheduler run cannot
+  drop it. The scheduler also sweeps succeeded payments of requests no longer waiting (30
+  days back) that were neither the change's payment nor given back and that no refund run
+  holds, and hands them to `apply_paid` (the apply job was lost).
+- *One lock order, the channel's flows included (F8).* A channel modification or
+  cancellation locks the booking, then each reservation, then its nights, and voids a guest
+  change still waiting for a room the channel changed or cancelled (`close_open`), as staff
+  and guest cancellations do.
+- Schema: five fields on TEX Guest Change Request (`refund_in_flight`, `returned_charges`,
+  `settle_claim`, `settle_claimed_until`, `penalty_terms`; no patch: migrate adds them).
+- Consequences: a request whose refund the gateway did not answer blocks new guest changes of
+  its booking until staff record the outcome (they see it in the queue, on the payment screen
+  and in the system status). A stay inside its penalty window cannot be moved later online.
+
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 *Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
 a suspend stops quotes and bookings in flight, and the scheduler isolates each record.*
