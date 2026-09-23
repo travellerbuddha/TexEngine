@@ -281,7 +281,7 @@ is left, `catalog_index` returns `mode: "tex"` and the legacy page redirects to 
 booking site. Hotels outside TEX keep the legacy engine (the upstream suites use it).
 **Consequences.** Admin data imports (`import_bookings`, `migrate.run_import`) still write
 reservations directly; they are migrations, not sales. Legacy channel-manager OTA inbound
-bookings are tracked with G-15.
+bookings are refused for TEX hotels too, and the hourly legacy ARI push skips them (G-15).
 Legacy scheduled jobs apply the same boundary per reservation: the night audit leaves a
 TEX-sold stay (`is_tex_reservation`: TEX booking, price lock or TEX pricing source) alone —
 no legacy room nights, no-show flags or no-show fees (G-04). The legacy hold expiry still

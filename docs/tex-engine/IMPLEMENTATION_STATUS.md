@@ -20,7 +20,7 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 | Check | Command | Result |
 |---|---|---|
 | TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **147 passed** |
-| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **87 OK**: admin_markets 3, commercial_flows 23, concurrency 2, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 28 |
+| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **89 OK**: admin_markets 3, commercial_flows 23, concurrency 2, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 30 |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **13 passed**: critical-journey (R-58, 19 steps), contract-admin, crs ×2, shell, booking ×4 desktop + ×4 mobile (Pixel 7) |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** |
 | TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean; the rebuild is identical to the committed bundles |
@@ -42,7 +42,7 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), channel-manager / SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20), enterprise dashboard (R-47) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 11 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
+**Open gaps by severity:** 0 Critical, 10 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -121,7 +121,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-50 | Responsive | PARTIAL | no page overflow at 320–1920 on 11 screens; booking mobile e2e | Content clipped at 320 px (inventory, reports); no admin responsive tests (G-80). |
 | R-51 | Accessibility | PARTIAL | skip link, focus, labels, dialogs, keyboard e2e | Contrast failures (sidebar 2.62:1, grid, weekend headers); no automated a11y tests (G-63). |
 | R-52 | Performance | PARTIAL | lazy areas/languages, caches on immutable terms | 295 KB legacy shell in admin bundle; per-room-type availability queries; guest quotes carry contract internals; no budgets (G-71). |
-| R-53 | Security | PARTIAL | TEX endpoints scoped (115, 34 probed), legacy record arguments resolved to their hotel (G-02 fixed, ADR-027), REST/Desk isolation, CSRF, parameterised SQL, escaped e-mail, rate limits, hashed tokens, fail-closed callbacks | High: G-15, G-16 (G-10…G-13 fixed). Medium: G-26. |
+| R-53 | Security | PARTIAL | TEX endpoints scoped (115, 34 probed), legacy record arguments resolved to their hotel (G-02 fixed, ADR-027), REST/Desk isolation, CSRF, parameterised SQL, escaped e-mail, rate limits, hashed tokens, fail-closed callbacks | High: G-16 (G-10…G-15 fixed). Medium: G-26. |
 | R-54 | Audit trail | PARTIAL | immutable `TEX Audit Event` (actor, roles, hotel, source, old/new, reason) | Draft/rate edits, grid bulk old values, payment rules not audited; group grant events lack hotel (G-74). |
 | R-55 | UX productivity | PARTIAL | Ctrl+K, shortcuts, quick booking, duplicate contract, bulk edit, quick payment link | No global search, recent reservations, copy period/restrictions, saved filters (G-75). |
 | R-56 | Migrations | PARTIAL | p01–p09 idempotent, in `patches.txt` · p05/p06 tested | p01–p04, p07–p09 untested; no end-to-end upgrade test (G-76). |

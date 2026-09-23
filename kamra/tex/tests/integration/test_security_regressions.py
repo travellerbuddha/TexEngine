@@ -548,3 +548,61 @@ class TestPaymentLinkTokens(TexTestCase):
 		p10_scrub_link_return_urls.execute()
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", self.txn, "return_url"),
 		                 frappe.utils.get_url("/book/pay/return"))
+
+
+class TestLegacyWebhooks(TexTestCase):
+	"""G-15: legacy webhooks fail closed (no secret, no signature: nothing happens), and the
+	legacy channel manager never prices or books a TEX hotel (ADR-028)."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		b = guest_books(session="sec-g15")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		res = b["rooms"][0]["reservation"]
+		self.folio = frappe.get_doc({"doctype": "Folio", "property": fx.PROPERTY, "reservation": res,
+		                             "guest": frappe.db.get_value("Reservation", res, "guest")}).insert(
+			ignore_permissions=True).name
+		fx.ensure("Payment Gateway Settings", {"property": fx.PROPERTY},
+		          {"property": fx.PROPERTY, "gateway": "Razorpay", "enabled": 1, "test_mode": 1})
+		self.conn = frappe.get_doc({"doctype": "Channel Manager Connection", "property": fx.PROPERTY,
+		                            "provider": "Channex", "active": 1}).insert(ignore_permissions=True).name
+
+	def _post(self, body: bytes, headers: dict | None = None):
+		from werkzeug.test import EnvironBuilder
+		from werkzeug.wrappers import Request
+
+		frappe.local.request = Request(EnvironBuilder(method="POST", data=body, headers=headers or {}).get_environ())
+
+	def tearDown(self):
+		frappe.local.request = None
+		super().tearDown()
+
+	def test_unsigned_razorpay_post_records_nothing(self):
+		from kamra import payments
+
+		body = frappe.as_json({"event": "payment_link.paid", "payload": {"payment_link": {"entity": {
+			"id": "plink_forged", "amount_paid": 99900, "notes": {"folio": self.folio}}}}}).encode()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anyone on the internet
+		self._post(body)
+		with self.assertRaises(frappe.PermissionError):         # test mode no longer skips the signature
+			payments.razorpay_webhook()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- inspect the folio
+		self.assertEqual(len(frappe.get_doc("Folio", self.folio).payments), 0)
+
+	def test_channel_manager_needs_a_secret_and_stays_off_tex_hotels(self):
+		from kamra import channel_manager
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the channel manager's server
+		with self.assertRaises(frappe.PermissionError):         # no secret configured: nothing is accepted
+			channel_manager.webhook(connection=self.conn, event="new", ota_ref="X-1")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- configure the secret
+		conn = frappe.get_doc("Channel Manager Connection", self.conn)
+		conn.webhook_secret = "cm-secret-1"
+		conn.save(ignore_permissions=True)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- authenticated, but the hotel sells through TEX
+		with self.assertRaisesRegex(frappe.ValidationError, "through TEX"):
+			channel_manager.webhook(connection=self.conn, secret="cm-secret-1", event="new", ota_ref="X-1")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a manual ARI push
+		with self.assertRaisesRegex(frappe.ValidationError, "through TEX"):
+			channel_manager.push_ari(connection=self.conn)

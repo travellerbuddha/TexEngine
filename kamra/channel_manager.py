@@ -13,6 +13,7 @@ and cancellations match on the OTA's own reference (Reservation.ota_ref).
 
 from __future__ import annotations
 
+import hmac
 import json
 
 import frappe
@@ -161,6 +162,7 @@ def push_ari(connection: str, days: int | None = None):
 	conn = frappe.get_doc("Channel Manager Connection", connection)
 	if not conn.active:
 		frappe.throw("This connection is not active.")
+	_refuse_tex_hotel(conn)
 	snapshot = ari_snapshot(conn.property, connection,
 	                        int(days or conn.sync_days or 90))
 	if not snapshot:
@@ -182,11 +184,26 @@ def push_ari(connection: str, days: int | None = None):
 	return {"ok": True, "detail": detail}
 
 
+def _refuse_tex_hotel(conn) -> None:
+	"""The legacy channel manager prices from Room Type.base_price and books outside TEX:
+	a TEX hotel's rates and bookings go through TEX Connect only (ADR-028, G-15)."""
+	from kamra.tex.legacy import is_tex_hotel
+
+	if is_tex_hotel(conn.property):
+		frappe.log_error(title=f"Legacy channel manager refused for TEX hotel {conn.property}",
+		                 message=f"connection {conn.name}")
+		frappe.throw(f"{conn.property} is connected to channels through TEX, not this legacy connection.")
+
+
 def push_all_ari(property: str | None = None):
 	"""Hourly cron (and the post-change trigger): keep active connections
 	fresh. Best-effort per connection - one provider being down never blocks
 	the others. Pass `property` to scope the push to one property."""
+	from kamra.tex.legacy import is_tex_hotel
+
 	for name in _connections(property):
+		if is_tex_hotel(frappe.db.get_value("Channel Manager Connection", name, "property")):
+			continue  # TEX hotels are distributed by TEX Connect (G-15)
 		try:
 			push_ari(name)
 		except Exception:
@@ -232,8 +249,10 @@ def webhook(connection: str, **kwargs):
 	secret = conn.get_password("webhook_secret", raise_exception=False)
 	sent = (frappe.get_request_header("X-Webhook-Secret")
 	        if frappe.request else None) or kwargs.get("secret")
-	if secret and sent != secret:
+	# fail closed (G-15): a connection without a secret accepts nothing
+	if not secret or not hmac.compare_digest(str(sent or ""), secret):
 		frappe.throw("Webhook secret mismatch.", frappe.PermissionError)
+	_refuse_tex_hotel(conn)
 
 	try:
 		payload = json.loads(frappe.request.data or b"{}") \

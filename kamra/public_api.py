@@ -151,6 +151,7 @@ def _build_locations(prop, room_types: list[dict]) -> list[dict]:
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
 def catalog_index():
 	"""Entry point for /book — how many properties, sites, or listings to show.
 	TEX hotels are sold on their TEX booking site, never here (G-03)."""
@@ -203,6 +204,7 @@ def catalog_index():
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
 def resolve_slug(slug: str):
 	"""Resolve /stay/:slug to a listing or multi-listing site."""
 	return resolve_public_slug(slug)
@@ -220,6 +222,7 @@ def site_info():
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
 def default_property():
 	"""Which Property the public booking engine (``/book``) should show.
 
@@ -263,6 +266,7 @@ def _public_locale(property: str) -> dict:
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
 def showcase(property: str, listing_slug: str | None = None,
              location_slug: str | None = None):
 	"""Everything the public booking page needs to render."""
@@ -313,6 +317,7 @@ def showcase(property: str, listing_slug: str | None = None,
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
 def search_stay(property: str, check_in_date: str, check_out_date: str,
                 adults: int = 2, children: int = 0,
                 listing_slug: str | None = None,
@@ -371,6 +376,7 @@ def _res_by_token(token: str):
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=20, seconds=60)
 def precheckin_info(token: str):
 	"""Stay summary for the pre-arrival check-in page."""
 	res = _res_by_token(token)
@@ -570,6 +576,7 @@ GUEST_AGENT = "agent@kamra.local"
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=20, seconds=60)
 def laundry_info(token: str):
 	"""Laundry price list + stay context for the in-stay guest page.
 	Read-only — the guest sees what things cost, never a folio."""
@@ -804,6 +811,7 @@ def book(property: str, room_type: str, check_in_date: str,
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=20, seconds=60)
 def access_info(token: str):
 	"""Guest access instructions when gates pass (precheckin token)."""
 	from kamra.access import guest_access_info
@@ -811,6 +819,7 @@ def access_info(token: str):
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=20, seconds=60)
 def check_voucher(property: str, code: str, nights: int = 1):
 	"""Live promo-code feedback on the booking page. Never throws - returns
 	{ok, message, discount_type, value} so the guest sees a friendly note."""
@@ -832,6 +841,7 @@ def check_voucher(property: str, code: str, nights: int = 1):
 
 
 @frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
 def qr_menu(outlet: str):
 	"""The guest-facing digital menu behind a table/room QR code. Only shows
 	outlets a hotel has published items for; no prices are trusted from the
