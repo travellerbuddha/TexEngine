@@ -298,6 +298,7 @@
 
   "confirm.docTitle": "Your booking",
   "confirm.reference": "Booking reference",
+  "confirm.statusLabel": "Booking status",
   "confirm.confirmedTitle": "Your booking is confirmed",
   "confirm.confirmedBody": "Thank you! Keep your booking reference — you'll need it if you contact the hotel.",
   "confirm.confirmedPayAtHotel": "Thank you! You pay at the hotel during your stay. Keep your booking reference.",

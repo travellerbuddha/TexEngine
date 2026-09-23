@@ -298,6 +298,7 @@
 
   "confirm.docTitle": "Twoja rezerwacja",
   "confirm.reference": "Numer rezerwacji",
+  "confirm.statusLabel": "Status rezerwacji",
   "confirm.confirmedTitle": "Twoja rezerwacja jest potwierdzona",
   "confirm.confirmedBody": "Dziękujemy! Zachowaj numer rezerwacji — przyda się przy kontakcie z hotelem.",
   "confirm.confirmedPayAtHotel": "Dziękujemy! Zapłacisz w hotelu w trakcie pobytu. Zachowaj numer rezerwacji.",

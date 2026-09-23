@@ -99,10 +99,13 @@ const Ctx = createContext<I18n | null>(null)
 export function I18nProvider({ initial, children }: { initial: Lang; children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(initial)
   const [cat, setCat] = useState<Catalog>(() => loaded[initial] ?? (en as Catalog))
+  // hotel content (room, rate, policy and extra names) comes back in the Accept-Language
+  // language: set it while rendering, since the children's effects fetch before this
+  // provider's effects run
+  setApiLanguage(lang)
 
   useEffect(() => {
     let alive = true
-    setApiLanguage(lang)
     document.documentElement.lang = lang
     const have = loaded[lang]
     if (have) setCat(have)

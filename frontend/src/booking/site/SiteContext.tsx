@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { detectLang, useI18n } from "../i18n"
 import { hasTrackers, loadAnalytics, saveConsent, storedConsent, type Consent } from "../lib/analytics"
 import { ApiError, pub } from "../lib/api"
@@ -17,31 +17,45 @@ interface SiteCtx {
 
 const Ctx = createContext<SiteCtx | null>(null)
 
+/** Site data per slug and language (the server localises hotel content by Accept-Language). */
 const cache = new Map<string, Site>()
 
 export function useSiteData(slug: string | undefined) {
-  const [site, setSite] = useState<Site | null>(() => (slug ? cache.get(slug) ?? null : null))
+  const { lang } = useI18n()
+  const ck = `${slug ?? ""}|${lang}`
+  // the site shown and the slug it was loaded for (kept while another language loads)
+  const [shown, setShown] = useState<{ slug: string; site: Site } | null>(() => {
+    const hit = slug ? cache.get(ck) : undefined
+    return slug && hit ? { slug, site: hit } : null
+  })
+  const shownRef = useRef(shown)
+  useEffect(() => {
+    shownRef.current = shown
+  }, [shown])
   const [error, setError] = useState<ApiError | null>(null)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     if (!slug) return
-    if (cache.has(slug)) {
-      setSite(cache.get(slug)!)
+    const hit = cache.get(ck)
+    if (hit) {
+      setShown({ slug, site: hit })
       return
     }
     const ctl = new AbortController()
     setError(null)
     pub<Site>("site", { slug }, ctl.signal)
       .then((s) => {
-        cache.set(slug, s)
-        setSite(s)
+        cache.set(ck, s)
+        setShown({ slug, site: s })
       })
       .catch((e: unknown) => {
-        if ((e as Error).name !== "AbortError") setError(e instanceof ApiError ? e : new ApiError("", 0, "", "network"))
+        if ((e as Error).name === "AbortError") return
+        // after a language switch, keep showing the site in the previous language
+        if (shownRef.current?.slug !== slug) setError(e instanceof ApiError ? e : new ApiError("", 0, "", "network"))
       })
     return () => ctl.abort()
-  }, [slug, attempt])
-  return { site, error, retry: () => setAttempt((n) => n + 1) }
+  }, [slug, ck, attempt])
+  return { site: shown && shown.slug === slug ? shown.site : null, error, retry: () => setAttempt((n) => n + 1) }
 }
 
 export function SiteProvider({ site, children }: { site: Site; children: ReactNode }) {

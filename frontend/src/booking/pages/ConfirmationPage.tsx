@@ -77,9 +77,10 @@ function Confirmation({ booking }: { booking: string }) {
     }
   }, [token])
 
+  // the booking view is localised by the server: load it again after a language switch
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, lang])
 
   // the gateway result can reach the server a moment after the guest: re-check briefly
   useEffect(() => {
@@ -189,7 +190,7 @@ function Confirmation({ booking }: { booking: string }) {
           <span className="font-mono text-lg font-bold tracking-wide">{data.booking}</span>
           <CopyButton value={data.booking} label={t("confirm.reference")} />
         </div>
-        <div className="mt-3">
+        <div className="mt-3" role="status" aria-label={t("confirm.statusLabel")}>
           <StatusBadge status={data.status} />
         </div>
         {payError && (

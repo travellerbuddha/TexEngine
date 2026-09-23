@@ -298,6 +298,7 @@
 
   "confirm.docTitle": "Rezervarea dumneavoastră",
   "confirm.reference": "Numărul rezervării",
+  "confirm.statusLabel": "Starea rezervării",
   "confirm.confirmedTitle": "Rezervarea este confirmată",
   "confirm.confirmedBody": "Vă mulțumim! Păstrați numărul rezervării — veți avea nevoie de el dacă contactați hotelul.",
   "confirm.confirmedPayAtHotel": "Vă mulțumim! Plătiți la hotel în timpul sejurului. Păstrați numărul rezervării.",

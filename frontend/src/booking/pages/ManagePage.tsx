@@ -273,7 +273,7 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
 }
 
 function Manage({ token }: { token: string | null }) {
-  const { t, money } = useI18n()
+  const { t, money, lang } = useI18n()
   const { site } = useSite()
   const navigate = useNavigate()
   const [sp] = useSearchParams()
@@ -296,9 +296,10 @@ function Manage({ token }: { token: string | null }) {
     }
   }, [token])
 
+  // the booking view is localised by the server: load it again after a language switch
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, lang])
   // a gateway that fell back to the server's default return page: continue where this tab started
   useEffect(() => {
     const txn = sp.get("payment")

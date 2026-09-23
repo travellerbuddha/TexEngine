@@ -67,6 +67,8 @@ interface FlowState {
   providerAccount: string | null
   terms: boolean
   bookKey: string | null
+  /** language the saved names and quote lines are in (hotel content is localised) */
+  lang?: string
 }
 
 const EMPTY_GUEST: Guest = {
@@ -87,6 +89,8 @@ function emptyFlow(guest: Guest = EMPTY_GUEST): FlowState {
 
 export interface SearchState {
   key: string | null
+  /** language of the offers' names */
+  lang: string | null
   hotelScope: string | null
   status: "idle" | "loading" | "done" | "error"
   data: SearchResult | null
@@ -170,7 +174,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const storeKey = `tex.flow.${site.slug}`
 
   const [flow, setFlow] = useState<FlowState>(() => getJSON<FlowState>(storeKey) ?? emptyFlow())
-  const [search, setSearch] = useState<SearchState>({ key: null, hotelScope: null, status: "idle", data: null, error: null })
+  const [search, setSearch] = useState<SearchState>({ key: null, lang: null, hotelScope: null, status: "idle", data: null, error: null })
   const [activeRoom, setActiveRoom] = useState(0)
   const [pending, setPending] = useState(false)
   const [flowError, setFlowError] = useState<FlowError | null>(null)
@@ -200,9 +204,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     async (opts: { force?: boolean } = {}) => {
       if (!key) return null
       const scope = site.group && criteria.hotel ? criteria.hotel : null
-      if (!opts.force && search.key === key && search.status !== "error" && (search.hotelScope === null || search.hotelScope === scope)) return search.data
+      if (!opts.force && search.key === key && search.lang === lang && search.status !== "error" && (search.hotelScope === null || search.hotelScope === scope))
+        return search.data
       const seq = ++searchSeq.current
-      setSearch((s) => ({ key, hotelScope: scope, status: "loading", data: s.key === key ? s.data : null, error: null }))
+      setSearch((s) => ({ key, lang, hotelScope: scope, status: "loading", data: s.key === key ? s.data : null, error: null }))
       try {
         const data = await pub<SearchResult>("search", {
           site: site.slug,
@@ -214,22 +219,53 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           hotel: scope || undefined,
           session_id: sessionId(),
         })
-        if (seq === searchSeq.current) setSearch({ key, hotelScope: scope, status: "done", data, error: null })
+        if (seq === searchSeq.current) setSearch({ key, lang, hotelScope: scope, status: "done", data, error: null })
         analyticsEvent("search", { check_in: criteria.checkIn, check_out: criteria.checkOut })
         return data
       } catch (e) {
         if (seq === searchSeq.current)
-          setSearch({ key, hotelScope: scope, status: "error", data: null, error: e instanceof ApiError ? e : new ApiError("", 0, "", "network") })
+          setSearch({ key, lang, hotelScope: scope, status: "error", data: null, error: e instanceof ApiError ? e : new ApiError("", 0, "", "network") })
         return null
       }
     },
-    [key, criteria, site, search.key, search.status, search.hotelScope, search.data],
+    [key, criteria, site, lang, search.key, search.lang, search.status, search.hotelScope, search.data],
   )
 
+  // a language switch searches again: room and rate names come back in the new language
   useEffect(() => {
     if (key) void runSearch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, criteria.hotel])
+  }, [key, criteria.hotel, lang])
+
+  // Selections keep their names from the latest search (language switch, reload), and
+  // the fresh offer key and quote when the price is unchanged; a different price is
+  // left to the quote step, which reports it.
+  useEffect(() => {
+    const data = search.status === "done" ? search.data : null
+    if (!data) return
+    setFlow((f) => {
+      let touched = false
+      const selections = f.selections.map((s, i) => {
+        if (!s) return s
+        const prop = data.properties.find((p) => p.property === s.hotel)
+        const offer = prop?.offers.find((o) => o.room_type === s.roomType && o.board === s.board && o.rate_plan === s.ratePlan)
+        if (!prop || !offer) return s
+        const room = offer.rooms.find((r) => r.room_index === i)
+        const same = !!room && room.quote.totals.total === s.quote.totals.total
+        const next: Selection = {
+          ...s,
+          roomName: prop.rooms[s.roomType]?.name ?? s.roomName,
+          ratePlanName: offer.rate_plan_info?.name ?? s.ratePlanName,
+          rateInfo: offer.rate_plan_info ?? s.rateInfo,
+          offerKey: same ? room.offer_key : s.offerKey,
+          quote: same ? room.quote : s.quote,
+        }
+        touched = true
+        return next
+      })
+      return touched ? { ...f, selections } : f
+    })
+  }, [search.status, search.data])
 
   const setCriteria = useCallback(
     (c: Criteria, opts: { replace?: boolean } = {}) => setSp(applyCriteria(sp, c), { replace: opts.replace }),
@@ -349,6 +385,21 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     if (next.some((s) => !s)) return { status: "gone", selections: next }
     return { status: changed ? "changed" : "ok", selections: next }
   }, [runSearch, flow.selections])
+
+  // quotes (price lines, extra names) are in the language they were made in: after a
+  // switch, or on a flow saved in another language, quote the same rooms again
+  useEffect(() => {
+    if (flow.lang === lang) return
+    const requote = flow.quotes.length > 0 && flow.selections.length > 0 && flow.selections.every(Boolean)
+    setFlow((f) => ({ ...f, lang }))
+    if (!requote) return
+    setPending(true)
+    void quoteAll().then((err) => {
+      setPending(false)
+      if (err) setFlowError(err)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, flow.lang])
 
   const setGuest = useCallback((g: Partial<Guest>) => setFlow((f) => ({ ...f, guest: { ...f.guest, ...g } })), [])
   const setMethod = useCallback(

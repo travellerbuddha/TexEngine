@@ -298,6 +298,7 @@
 
   "confirm.docTitle": "Rezervasyonunuz",
   "confirm.reference": "Rezervasyon numarası",
+  "confirm.statusLabel": "Rezervasyon durumu",
   "confirm.confirmedTitle": "Rezervasyonunuz onaylandı",
   "confirm.confirmedBody": "Teşekkürler! Rezervasyon numaranızı saklayın — otelle iletişime geçerken gerekecek.",
   "confirm.confirmedPayAtHotel": "Teşekkürler! Ödemeyi konaklamanız sırasında otelde yapacaksınız. Rezervasyon numaranızı saklayın.",
