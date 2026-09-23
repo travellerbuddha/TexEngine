@@ -254,6 +254,13 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	props = {r[0].property for r in rows}
 	if len(props) != 1:
 		frappe.throw(_("All rooms of a booking must be at the same hotel."))
+	# room 1 of the search carries the booking-level terms (per-booking extras, fixed
+	# booking discounts), so it is booked exactly once, with rooms of the same search (ADR-029)
+	indexes = [int(r[1].get("room_index") or 0) for r in rows]
+	if indexes.count(0) != 1 or len(set(indexes)) != len(indexes):
+		frappe.throw(_("The rooms of one booking must come from one search, including its first room. "
+		               "Please search again."))
+	rows.sort(key=lambda r: int(r[1].get("room_index") or 0))
 	property = props.pop()
 	currencies = {r[2]["currency"] for r in rows}
 	markets = {r[1]["market"] for r in rows}
@@ -332,6 +339,7 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	booking.insert(ignore_permissions=True)
 
 	reservations = []
+	priced: list[tuple[dict, str]] = []
 	for idx, (row, req, result) in enumerate(rows):
 		amounts = reservation_amounts(result)
 		kids = req.get("children") or []
@@ -361,8 +369,7 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		booking.append("rooms", {"reservation": res.name, "room_type": req["room_type"], "check_in": req["check_in"],
 		                         "check_out": req["check_out"], "adults": int(req["adults"]), "children": len(kids),
 		                         "amount": amounts["amount_after_tax"], "status": status, "quote": row.name})
-		_record_redemptions(result, booking.name, res.name, property, guest.get("email") or guest.get("phone"),
-		                    committed=confirm)
+		priced.append((result, res.name))
 		q = frappe.get_doc("TEX Quote", row.name)
 		q.status = "Used"
 		q.booking = booking.name
@@ -370,6 +377,7 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		_record_revision(res.name, booking.name, change_type="Original", old_amount=None,
 		                 new_amount=amounts["amount_after_tax"], currency=currency, basis="CURRENT",
 		                 basis_sale_at=now, after=result, source="Guest" if not staff else "Desk")
+	_record_redemptions(priced, booking.name, property, guest.get("email") or guest.get("phone"), committed=confirm)
 	booking.save(ignore_permissions=True)
 	audit("booking.create", reference_doctype="TEX Booking", reference_name=booking.name, property=property,
 	      new={"reservations": reservations, "total": to_str(total), "currency": currency, "status": status,
@@ -382,28 +390,36 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	return out
 
 
-def _record_redemptions(result: dict, booking: str, reservation: str, property: str, guest_ident: str | None,
+def _record_redemptions(rooms: list[tuple[dict, str]], booking: str, property: str, guest_ident: str | None,
                         *, committed: bool) -> None:
+	"""One redemption per promotion per booking (G-06): a code used on a 3-room booking is
+	one use of the code; the amount is the discount over all rooms."""
 	gkey = ctxmod.guest_key(guest_ident if guest_ident and "@" in guest_ident else None,
 	                        guest_ident if guest_ident and "@" not in guest_ident else None)
-	for p in result.get("promotions") or []:
-		if not p["applied"] or not (p.get("code") or p["source"].startswith("promotion:")):
-			continue
-		root = p["promo_id"]
+	currency = rooms[0][0]["currency"] if rooms else None
+	used: dict[str, dict] = {}
+	for result, reservation in rooms:
+		for p in result.get("promotions") or []:
+			if not p["applied"] or not (p.get("code") or p["source"].startswith("promotion:")):
+				continue
+			entry = used.setdefault(p["promo_id"], {"promo": p, "reservation": reservation, "discount": ZERO})
+			entry["discount"] += D(p.get("discount") or 0)
+	for root in sorted(used):
+		p, reservation, discount = used[root]["promo"], used[root]["reservation"], used[root]["discount"]
 		if not frappe.db.exists("TEX Promotion", root):
 			continue
 		# row-lock the promotion so concurrent redemptions cannot exceed a usage limit
 		frappe.db.sql("SELECT name FROM `tabTEX Promotion` WHERE name=%s FOR UPDATE", root)
 		limit = frappe.db.get_value("TEX Promotion", root, "usage_limit")
 		if limit:
-			used = frappe.db.count("TEX Promotion Redemption",
-			                       {"promotion": root, "status": ("in", ["Reserved", "Committed"])})
-			if used >= int(limit):
+			taken = frappe.db.count("TEX Promotion Redemption",
+			                        {"promotion": root, "status": ("in", ["Reserved", "Committed"])})
+			if taken >= int(limit):
 				frappe.throw(_("Promotion {0} has just been fully redeemed.").format(p["name"]))
 		frappe.get_doc({"doctype": "TEX Promotion Redemption", "promotion": root, "code": p.get("code"),
 		                "property": property, "status": "Committed" if committed else "Reserved",
 		                "booking": booking, "reservation": reservation, "guest_key": gkey,
-		                "amount": D(p.get("discount") or 0), "currency": result["currency"]}).insert(
+		                "amount": discount, "currency": currency}).insert(
 			ignore_permissions=True)
 		frappe.db.sql("UPDATE `tabTEX Promotion` SET times_redeemed = IFNULL(times_redeemed, 0) + 1 WHERE name=%s",
 		              root)

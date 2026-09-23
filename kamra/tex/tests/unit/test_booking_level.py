@@ -54,5 +54,67 @@ class TestMinBasketCurrency(unittest.TestCase):
 		self.assertIsNotNone(applied(price(ctx={"promotions": (self.promo(currency=None, minimum="150"),)}), "MB"))
 
 
+
+FEE = ExtraDef("FEE", "Booking fee", ExtraPricingMode.RESERVATION, "EUR", D("40"), mandatory=True)
+TRF = ExtraDef("TRF", "Airport transfer", ExtraPricingMode.RESERVATION, "EUR", D("60"))
+COT = ExtraDef("COT", "Baby cot", ExtraPricingMode.ROOM, "EUR", D("15"))
+
+
+class TestPerBookingExtras(unittest.TestCase):
+	"""G-05: a per-booking (RESERVATION-mode) extra is charged once per booking — on the
+	booking's first room — however many rooms are booked."""
+
+	def test_mandatory_per_booking_extra_is_charged_on_the_first_room_only(self):
+		first = price(ctx={"extras": {"FEE": FEE}})
+		second = price(room_index=1, adults=1, ctx={"extras": {"FEE": FEE}})
+		self.assertEqual(first.totals["extras"], D("40.00"))
+		self.assertEqual(second.totals["extras"], D("0"))
+		self.assertEqual(first.totals["extras"] + second.totals["extras"], D("40.00"))
+
+	def test_per_booking_extra_requested_on_another_room_is_refused(self):
+		q = price(room_index=1, extras=(ExtraRequest("TRF"),), ctx={"extras": {"TRF": TRF}})
+		trf = next(e for e in q.extras if e.code == "TRF")
+		self.assertFalse(trf.ok)
+		self.assertIn("once per booking", trf.reason)
+		self.assertEqual(q.totals["extras"], D("0"))
+		self.assertEqual(price(extras=(ExtraRequest("TRF"),), ctx={"extras": {"TRF": TRF}}).totals["extras"], D("60.00"))
+
+	def test_per_room_extras_still_apply_to_every_room(self):
+		q = price(room_index=1, extras=(ExtraRequest("COT"),), ctx={"extras": {"COT": COT}})
+		self.assertEqual(q.totals["extras"], D("15.00"))
+
+
+class TestBookingCoupons(unittest.TestCase):
+	"""G-06: a fixed discount on the complete reservation (or on its extras) is granted
+	once per booking; a percentage is the same share of every room."""
+
+	def coupon(self, value_type=PromoValueType.FIXED_STAY, value="50", applies_to=PromoAppliesTo.TOTAL):
+		return Promotion("C", "Booking coupon", value_type, D(value), code="SAVE", applies_to=applies_to,
+		                 currency="EUR")
+
+	def test_fixed_total_coupon_is_granted_once(self):
+		c = self.coupon()
+		first = price(promo_codes=("SAVE",), ctx={"promotions": (c,)})
+		second = price(room_index=1, adults=1, promo_codes=("SAVE",), ctx={"promotions": (c,)})
+		self.assertEqual(first.totals["discounts"], D("50.00"))
+		self.assertEqual(second.totals["discounts"], D("0"))
+		self.assertIn("once per booking", next(p.reason for p in second.promotions if p.promo_id == "C"))
+
+	def test_fixed_extras_coupon_is_granted_once(self):
+		c = self.coupon(value="10", applies_to=PromoAppliesTo.EXTRAS)
+		kw = {"extras": (ExtraRequest("COT"),), "promo_codes": ("SAVE",)}
+		first = price(**kw, ctx={"promotions": (c,), "extras": {"COT": COT}})
+		second = price(room_index=1, **kw, ctx={"promotions": (c,), "extras": {"COT": COT}})
+		self.assertEqual((first.totals["discounts"], second.totals["discounts"]), (D("10.00"), D("0")))
+
+	def test_percentage_total_coupon_is_the_same_share_of_every_room(self):
+		c = self.coupon(PromoValueType.PERCENT, "10")
+		first = price(promo_codes=("SAVE",), ctx={"promotions": (c,)})
+		second = price(room_index=1, adults=1, promo_codes=("SAVE",), ctx={"promotions": (c,)})
+		self.assertEqual(first.totals["discounts"], (first.totals["subtotal"] + first.totals["discounts"]) / 10)
+		self.assertEqual(second.totals["discounts"], (second.totals["subtotal"] + second.totals["discounts"]) / 10)
+		self.assertGreater(second.totals["discounts"], D("0"))
+
+
 if __name__ == "__main__":
 	unittest.main()

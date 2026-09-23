@@ -226,9 +226,12 @@ function ExtrasStep() {
               </h2>
             )}
             <ul className="space-y-3">
-              {extras.map((e) => (
-                <ExtraItem key={e.extra_code} extra={e} roomIndex={i} />
-              ))}
+              {/* a per-booking extra is charged once, on room 1 (ADR-029) */}
+              {extras
+                .filter((e) => i === 0 || e.pricing_mode !== "RESERVATION")
+                .map((e) => (
+                  <ExtraItem key={e.extra_code} extra={e} roomIndex={i} />
+                ))}
             </ul>
           </section>
         ))}

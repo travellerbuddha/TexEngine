@@ -396,6 +396,9 @@ class StayRequest:
 	promo_codes: tuple[str, ...] = ()
 	member: bool = False
 	extras: tuple[ExtraRequest, ...] = ()
+	# position of this room in its booking (0-based). Room 0 carries the booking-level
+	# terms: per-booking extras and fixed booking discounts are priced once, there (ADR-029)
+	room_index: int = 0
 
 
 # ─── context ─────────────────────────────────────────────────────────────

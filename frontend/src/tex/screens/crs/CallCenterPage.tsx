@@ -33,7 +33,7 @@ import { GuestLookup } from "./components/GuestLookup"
 import { OfferBadges, OfferPrice, OfferTitle, PolicySummary, RoomFitNotes, roomName } from "./components/OfferParts"
 import { usePartyText } from "./components/PartyEditor"
 import { PriceBreakdown } from "./components/PriceBreakdown"
-import { ExtrasPicker, QuoteExpiry, useExtras } from "./components/QuoteParts"
+import { ExtrasPicker, QuoteExpiry, roomExtras, useExtras } from "./components/QuoteParts"
 import { RoomBuilder } from "./components/Results"
 import { SearchForm } from "./components/SearchForm"
 import { guestProfile, logCall } from "./lib/api"
@@ -956,7 +956,7 @@ function QuotePanel({
                     )}
                     {!flow.booking && <Disclosure summary={t("crs.extras.title_count", { count: Object.keys(flow.extras[i] ?? {}).length })}>
                       <ExtrasPicker
-                        extras={extras.data}
+                        extras={roomExtras(extras.data, i)}
                         value={flow.extras[i] ?? {}}
                         onChange={(code, qty) => flow.setExtra(i, code, qty)}
                         roomLabel={t("crs.room_n", { n: i + 1 })}

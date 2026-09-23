@@ -44,6 +44,11 @@ export function useExtras(property: string | undefined) {
   return { data, error }
 }
 
+/** Extras a room of the booking can take: a per-booking extra is charged once, on room 1 (ADR-029). */
+export function roomExtras(extras: ExtraDef[] | undefined, index: number): ExtraDef[] | undefined {
+  return index === 0 ? extras : extras?.filter((x) => x.pricing_mode !== "RESERVATION")
+}
+
 export function ExtrasPicker({
   extras,
   value,
@@ -136,7 +141,7 @@ export function QuoteRoom({
         <div>
           <p className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">{t("crs.extras.title")}</p>
           <ExtrasPicker
-            extras={extras}
+            extras={roomExtras(extras, index)}
             value={flow.extras[index] ?? {}}
             onChange={(code, qty) => flow.setExtra(index, code, qty)}
             roomLabel={label}

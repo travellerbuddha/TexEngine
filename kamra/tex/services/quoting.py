@@ -133,12 +133,12 @@ def _ttl(field_: str, default: int) -> int:
 
 
 def build_request(*, property, room_type, board, rate_plan, check_in, check_out, party: Party, sale_at, market,
-                  channel, currency, promo_codes=(), member=False, extras=()) -> StayRequest:
+                  channel, currency, promo_codes=(), member=False, extras=(), room_index: int = 0) -> StayRequest:
 	return StayRequest(property=property, room_type=room_type, board=board, rate_plan=rate_plan, check_in=check_in,
 	                   check_out=check_out, adults=party.adults, children=tuple(party.children), sale_at=sale_at,
 	                   market=market, channel=channel, sell_currency=currency.upper(),
 	                   promo_codes=tuple(sorted({c.strip().upper() for c in promo_codes if c and c.strip()})),
-	                   member=member, extras=tuple(extras))
+	                   member=member, extras=tuple(extras), room_index=room_index)
 
 
 # ─── search ──────────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						req = build_request(property=property, room_type=rt, board=board, rate_plan=rp,
 						                    check_in=check_in, check_out=check_out, party=party, sale_at=sale_at,
 						                    market=market, channel=channel, currency=sell_ccy,
-						                    promo_codes=promo_codes, member=member)
+						                    promo_codes=promo_codes, member=member, room_index=idx)
 						key = (version, sell_ccy, rt)
 						try:
 							if key not in ctx_cache:
@@ -335,7 +335,7 @@ def request_from_offer(offer: dict, *, sale_at: datetime, extras=(), promo_codes
 	                     check_out=getdate(offer["check_out"]), party=party, sale_at=sale_at,
 	                     market=offer["market"], channel=offer["channel"], currency=offer["currency"],
 	                     promo_codes=offer.get("promo_codes") if promo_codes is None else promo_codes,
-	                     member=bool(offer.get("member")), extras=extras)
+	                     member=bool(offer.get("member")), extras=extras, room_index=int(offer.get("room_index") or 0))
 
 
 def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None):

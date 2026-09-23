@@ -307,6 +307,7 @@ def request_to_dict(r: StayRequest) -> dict:
 		"sell_currency": r.sell_currency, "promo_codes": list(r.promo_codes), "member": r.member,
 		"extras": [{"code": e.code, "quantity": e.quantity, "service_dates": [d.isoformat() for d in e.service_dates]}
 		           for e in r.extras],
+		"room_index": r.room_index,
 	}
 
 
@@ -324,4 +325,5 @@ def request_from_dict(d: dict) -> StayRequest:
 		extras=tuple(ExtraRequest(code=e["code"], quantity=int(e.get("quantity") or 1),
 		                          service_dates=tuple(_d(x) for x in e.get("service_dates") or []))
 		             for e in d.get("extras") or []),
+		room_index=int(d.get("room_index") or 0),
 	)

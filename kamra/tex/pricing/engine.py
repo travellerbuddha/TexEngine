@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, calc, quantize, to_str, to_str6
 from kamra.tex.pricing import ages, boards, extras, markup, occupancy, promotions, rooms, tax
-from kamra.tex.pricing.enums import LineKind, Op, PromoAppliesTo, PromoStage, PromoValueType
+from kamra.tex.pricing.enums import ExtraPricingMode, LineKind, Op, PromoAppliesTo, PromoStage, PromoValueType
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import (
 	ExtraRequest,
@@ -287,14 +287,23 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 		                             children=party.child_count - party.infants, infants=party.infants,
 		                             sell_currency=sell_ccy)
 		requested = {e.code: e for e in req.extras}
+		lead_room = req.room_index == 0
 		for code in sorted(ctx.extras):
 			d = ctx.extras[code]
-			if d.mandatory and code not in requested:
+			# a per-booking extra belongs to the booking's first room only (G-05, ADR-029)
+			if d.mandatory and code not in requested and (lead_room or d.pricing_mode != ExtraPricingMode.RESERVATION):
 				requested[code] = ExtraRequest(code=code, quantity=1)
 		for code in sorted(requested):
 			d = ctx.extras.get(code)
 			if d is None:
 				q.extras.append(extras.ExtraOutcome(code=code, name=code, ok=False, reason="unknown extra"))
+				continue
+			if d.pricing_mode == ExtraPricingMode.RESERVATION and not lead_room:
+				q.extras.append(extras.ExtraOutcome(code=code, name=d.name, ok=False, currency=sell_ccy,
+				                                    pricing_mode=d.pricing_mode.value,
+				                                    reason="charged once per booking, on room 1"))
+				ex.add("extra", "EXTRA_REJECTED", "{name} not added: {reason}", name=d.name,
+				       reason="charged once per booking, on room 1")
 				continue
 			outcome = extras.price_extra(d, requested[code], ex_ctx, ctx.extra_fx)
 			if not outcome.ok and d.mandatory and (d.service_from or d.service_to) and \
@@ -352,6 +361,15 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 
 		categories = {"ACCOMMODATION": accom_gross - accom_discount, **extra_cats}
 		for p in basket_chosen:
+			if not lead_room and p.value_type != PromoValueType.PERCENT:
+				# a fixed discount on the complete booking (or its extras) is granted once,
+				# on room 1; a percentage is the same share of every room (G-06, ADR-029)
+				reason = "fixed booking discount granted once per booking, on room 1"
+				ex.add("coupon", "COUPON_REJECTED", "{name}: {reason}", rule=promotions.promo_ref(p), name=p.name,
+				       reason=reason)
+				q.promotions.append(promotions.PromoOutcome(p.promo_id, p.name, p.kind, False, reason,
+				                                            source=p.source, code=p.code))
+				continue
 			outcome = _apply_basket_promo(p, categories, sell_ccy, ctx, lines, ex)
 			q.promotions.append(outcome)
 

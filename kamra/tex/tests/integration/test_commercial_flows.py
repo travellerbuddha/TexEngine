@@ -357,3 +357,78 @@ class TestTenantIsolation(TexTestCase):
 
 		self.assertEqual(set(hooks._TEX_SCOPED), set(perm.SCOPED_DOCTYPES))
 
+
+
+def two_rooms_book(session: str, *, extras=((), ()), code: str | None = None, method="Pay at Hotel",
+                   guest=None) -> tuple[list[dict], dict]:
+	"""Search two rooms (2A+child 8, 1A), quote each with its extras, book them together."""
+	frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+	res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+	                    rooms=[{"adults": 2, "children": [8]}, {"adults": 1}], market="DE", promo_code=code,
+	                    session_id=session)
+	rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+	rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+	offer = next(o for o in res["properties"][0]["offers"]
+	             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
+	quotes = []
+	for room, extra in zip(sorted(offer["rooms"], key=lambda r: r["room_index"]), extras, strict=True):
+		q = public.quote(site=SLUG, offer_key=room["offer_key"], extras=[{"code": c, "quantity": 1} for c in extra],
+		                 promo_code=code, session_id=session)
+		assert q["ok"], q
+		quotes.append(q)
+	b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=guest or GUEST,
+	                payment_method=method, session_id=session, idempotency_key=f"idem-{session}")
+	return quotes, b
+
+
+class TestBookingLevelTerms(TexTestCase):
+	"""G-05/G-06 (ADR-029): a per-booking extra is charged once per booking and a fixed
+	booking coupon is granted once; a code used on a multi-room booking is one use."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def _coupon(self, code: str, **kw) -> str:
+		doc = policy_api.save_record("TEX Promotion", {
+			"promotion_name": f"Coupon {code}", "property": fx.PROPERTY, "trigger": "Code", "code": code,
+			"value_type": "FIXED_STAY", "value": 50, "currency": "EUR", "applies_to": "TOTAL", **kw})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		return doc["name"]
+
+	def test_per_booking_extra_is_charged_once(self):
+		quotes, b = two_rooms_book("blt-trf", extras=(("TRF",), ("TRF",)))
+		trf = [next(e for e in q["quote"]["extras"] if e["code"] == "TRF") for q in quotes]
+		self.assertTrue(trf[0]["ok"])
+		self.assertFalse(trf[1]["ok"])                                   # refused on room 2, with the reason
+		self.assertIn("once per booking", trf[1]["reason"])
+		self.assertEqual(D(quotes[0]["quote"]["totals"]["extras"]), D("40.00"))
+		self.assertEqual(D(quotes[1]["quote"]["totals"]["extras"]), D("0"))
+		self.assertEqual(D(b["total"]), sum(D(q["quote"]["totals"]["total"]) for q in quotes))
+
+	def test_fixed_booking_coupon_is_granted_once_and_used_once(self):
+		promo = self._coupon("TWOROOMS", usage_limit=1)
+		quotes, b = two_rooms_book("blt-coupon", code="TWOROOMS")
+		self.assertEqual([D(q["quote"]["totals"]["discounts"]) for q in quotes], [D("50.00"), D("0")])
+		self.assertTrue(b["booking"])                                    # one use left was enough for 2 rooms
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read the ledger
+		reds = frappe.get_all("TEX Promotion Redemption", filters={"promotion": promo},
+		                      fields=["booking", "amount", "reservation"])
+		self.assertEqual(len(reds), 1)
+		self.assertEqual((reds[0].booking, D(reds[0].amount)), (b["booking"], D("50")))
+
+	def test_rooms_of_one_booking_come_from_one_search(self):
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous visitor mixing two searches
+		ids = []
+		for _search in range(2):  # two one-room searches: both rooms claim to be room 1
+			res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+			                    rooms=[{"adults": 2}], market="DE", session_id="blt-mix")
+			offer = next(o for o in res["properties"][0]["offers"]
+			             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
+			ids.append(public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id="blt-mix")[
+				"quote_id"])
+		with self.assertRaisesRegex(frappe.ValidationError, "one search"):
+			public.book(site=SLUG, quote_ids=ids, guest=GUEST, payment_method="Pay at Hotel", session_id="blt-mix",
+			            idempotency_key="idem-blt-mix")

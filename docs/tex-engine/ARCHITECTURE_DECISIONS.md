@@ -286,3 +286,24 @@ Legacy scheduled jobs apply the same boundary per reservation: the night audit l
 TEX-sold stay (`is_tex_reservation`: TEX booking, price lock or TEX pricing source) alone —
 no legacy room nights, no-show flags or no-show fees (G-04). The legacy hold expiry still
 cancels expired Pending Payment holds for TEX bookings, by design (ADR-006).
+
+## ADR-029 Booking-level terms are priced once, on the booking's first room
+**Context.** R-29 prices every room of a booking on its own, and every reservation keeps
+its own locked snapshot. Terms that belong to the whole booking were priced inside every
+room: a per-booking (RESERVATION-mode) extra, including a mandatory one, was charged once
+per room; a fixed coupon on the complete reservation (TOTAL) or its extras (EXTRAS) was
+granted once per room; each room consumed one coupon redemption (G-05, G-06).
+**Decision.** `StayRequest.room_index` is the room's position in its search (0-based). The
+search stamps it into each room's signed offer, the quote keeps it in its request and the
+reservation snapshot keeps it for repricing. The engine prices booking-level terms only on
+room 0: mandatory per-booking extras are added there only; a per-booking extra requested
+on another room is refused ("charged once per booking, on room 1"); a fixed TOTAL/EXTRAS
+discount is granted there only (a percentage is the same share of every room, so it applies
+to each). `create_booking` requires exactly one room 0 and distinct room indexes (the rooms
+of one booking come from one search) and books room 0 as reservation 1. A promotion used on
+a booking is recorded as one redemption with the discount over all rooms. The guest and
+CRS extras pickers list per-booking extras on room 1 only.
+**Consequences.** A minimum basket is still evaluated per room, so a coupon can be refused
+on a multi-room booking whose total would qualify (never the reverse; G-84). Snapshots
+made before this change have no room index and reprice as room 1. Cancelling room 1 alone
+cancels the per-booking extra with it.
