@@ -1,7 +1,8 @@
 import { useState } from "react"
 import { Download, Info } from "lucide-react"
 import { tex, useTexQuery } from "../../../lib/api"
-import { isoDay, num } from "../../../lib/format"
+import { num } from "../../../lib/format"
+import { useSiteClock } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, CardHeader, InlineError, Notice, Skeleton, useToast } from "../../../ui"
 import { ConsentIcon } from "../components/common"
@@ -27,6 +28,7 @@ function ChannelRow({
 }) {
   const { t } = useTexT()
   const toast = useToast()
+  const clock = useSiteClock()
   // consented members (the server applies the same filter in the export)
   const q = useTexQuery<GuestPage>("crm", "guests", { segment, consent: field, property, limit: 1 }, [segment, field, property])
   const [busy, setBusy] = useState(false)
@@ -42,7 +44,7 @@ function ChannelRow({
       const rows = await tex<ExportRow[]>("crm", "export_segment", { segment, channel, property }, { post: true })
       const contact = channel === "Email" ? "email" : "phone"
       downloadCsv(
-        `${segmentLabel.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "segment"}-${channel.toLowerCase()}-${isoDay(new Date())}.csv`,
+        `${segmentLabel.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "segment"}-${channel.toLowerCase()}-${clock.today()}.csv`,
         ["guest", "first_name", "last_name", contact, "language", "country"],
         rows.map((r) => [r.guest, r.first_name, r.last_name, channel === "Email" ? r.email : r.phone, r.language, r.country]),
       )

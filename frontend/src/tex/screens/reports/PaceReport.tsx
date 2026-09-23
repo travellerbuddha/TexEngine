@@ -3,6 +3,7 @@ import { Info } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { date, num } from "../../lib/format"
+import { useSiteClock } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
 import { Card, CardBody, CardHeader, EmptyState, ErrorState, Skeleton } from "../../ui"
 import { cn } from "../../../lib/utils"
@@ -33,8 +34,9 @@ function signed(n: number) {
 export default function PaceReport() {
   const { t } = useTexT()
   const { property } = useSession()
+  const clock = useSiteClock()
   const [range, setRange] = useState<{ preset: RangePreset; from: string; to: string }>(() => {
-    const [from, to] = presetRange("next_90")
+    const [from, to] = presetRange("next_90", clock.today())
     return { preset: "next_90", from, to }
   })
   const problem = rangeProblem(range.from, range.to)

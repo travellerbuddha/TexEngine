@@ -3,7 +3,8 @@ import { Link, useSearchParams } from "react-router-dom"
 import { ArrowRight } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
-import { addDays, date, isoDay, money, num, pct } from "../../lib/format"
+import { addDays, date, money, num, pct } from "../../lib/format"
+import { useSiteToday } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
 import {
   Badge,
@@ -20,6 +21,7 @@ import {
   Skeleton,
   Stat,
 } from "../../ui"
+import { presetRange } from "../reports/lib"
 import PortfolioDashboard from "./PortfolioDashboard"
 
 interface ProdRow {
@@ -51,17 +53,6 @@ interface DashboardData {
 }
 
 type Range = "this_month" | "next_30" | "next_90"
-
-function rangeDates(r: Range): [string, string] {
-  const today = new Date()
-  if (r === "this_month") {
-    const a = new Date(today.getFullYear(), today.getMonth(), 1)
-    const b = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-    return [isoDay(a), isoDay(b)]
-  }
-  const start = isoDay(today)
-  return [start, addDays(start, r === "next_30" ? 29 : 89)]
-}
 
 type View = "hotel" | "portfolio"
 const VIEW_KEY = "tex-dashboard-view"
@@ -123,7 +114,9 @@ function HotelDashboard({ viewSwitch }: { viewSwitch?: ReactNode }) {
   const property = useProperty()
   const { can, property: hotel } = useSession()
   const [range, setRange] = useState<Range>("this_month")
-  const [from, to] = useMemo(() => rangeDates(range), [range])
+  // the hotel's month / next days start on the site's today (G-91)
+  const today = useSiteToday()
+  const [from, to] = useMemo(() => presetRange(range, today), [range, today])
   const canReports = can("report.view")
   const q = useTexQuery<DashboardData>("reports", "dashboard", { property, date_from: from, date_to: to }, [property, from, to], canReports)
   const d = q.data

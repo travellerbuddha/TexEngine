@@ -1,4 +1,5 @@
 import { useId } from "react"
+import { useSiteClock } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Field, Input, Select } from "../../../ui"
 import { presetRange, type RangePreset } from "../lib"
@@ -24,6 +25,7 @@ export function RangeFilter({
   error?: string | null
 }) {
   const { t } = useTexT()
+  const clock = useSiteClock()
   const id = useId()
   const errId = `${id}-err`
   const describedBy = error ? errId : undefined
@@ -36,7 +38,7 @@ export function RangeFilter({
             const p = e.target.value as RangePreset
             if (p === "custom") onChange({ preset: p, from, to })
             else {
-              const [a, b] = presetRange(p)
+              const [a, b] = presetRange(p, clock.today())
               onChange({ preset: p, from: a, to: b })
             }
           }}

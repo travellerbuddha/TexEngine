@@ -4,7 +4,8 @@ import { ArrowDownToLine, ArrowUpFromLine, Ban, ChevronLeft, ChevronRight, Layer
 import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
-import { addDays, date as fmtDate, isoDay } from "../../lib/format"
+import { addDays, date as fmtDate } from "../../lib/format"
+import { useSiteToday } from "../../lib/siteDay"
 import { getTexLang, intlLocale, useTexT } from "../../i18n"
 import { Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Notice, PageHeader, Segmented, Select, Skeleton, Toolbar } from "../../ui"
 import { decText, isoWeekday, useLookups, versionLabel, weekdayName } from "../rates/lib/util"
@@ -42,7 +43,10 @@ export default function AriGrid() {
   const { boot, can } = useSession()
   const lookups = useLookups(property)
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(property))
-  const [start, setStart] = useState(() => isoDay(new Date()))
+  // start null = the site's today (G-91): the grid follows the site's midnight until moved
+  const today = useSiteToday()
+  const [picked, setStart] = useState<string | null>(null)
+  const start = picked ?? today
   const [cellEdit, setCellEdit] = useState<{ row: GridRow; cell: GridCell } | null>(null)
   const [bulk, setBulk] = useState(false)
   const [publishDraft, setPublishDraft] = useState<string | null>(null)
@@ -71,7 +75,6 @@ export default function AriGrid() {
   const scopeLabel = scopeText(t, scope, contract ? `${contract.contract_code}` : undefined, ratePlan?.rate_plan_name, channel?.channel_name)
   const metrics = prefs.metrics.filter((m) => m !== "rate" || Boolean(grid?.contract))
   const canEditAny = can("restriction.edit") || can("inventory.edit") || (can("contract.edit") && Boolean(scope.contract))
-  const today = isoDay(new Date())
 
   return (
     <>
@@ -90,12 +93,12 @@ export default function AriGrid() {
       <InventoryNav />
       <Toolbar className="items-end">
         <div className="flex items-end gap-1">
-          <Button variant="secondary" size="md" aria-label={t("inventory.prev", { count: days })} onClick={() => setStart((s) => addDays(s, -days))} icon={<ChevronLeft className="size-4" aria-hidden />} />
+          <Button variant="secondary" size="md" aria-label={t("inventory.prev", { count: days })} onClick={() => setStart(addDays(start, -days))} icon={<ChevronLeft className="size-4" aria-hidden />} />
           <Field label={t("inventory.start")}>
             <Input type="date" value={start} onChange={(e) => e.target.value && setStart(e.target.value)} className="w-40" />
           </Field>
-          <Button variant="secondary" size="md" aria-label={t("inventory.next", { count: days })} onClick={() => setStart((s) => addDays(s, days))} icon={<ChevronRight className="size-4" aria-hidden />} />
-          <Button variant="ghost" onClick={() => setStart(today)} disabled={start === today}>
+          <Button variant="secondary" size="md" aria-label={t("inventory.next", { count: days })} onClick={() => setStart(addDays(start, days))} icon={<ChevronRight className="size-4" aria-hidden />} />
+          <Button variant="ghost" onClick={() => setStart(null)} disabled={start === today}>
             {t("inventory.today")}
           </Button>
         </div>

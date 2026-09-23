@@ -2,7 +2,8 @@ import { useState } from "react"
 import { Download, Plus } from "lucide-react"
 import { tex, TexApiError, useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
-import { date as fmtDate, dateTime, isoDay } from "../../../lib/format"
+import { date as fmtDate, dateTime } from "../../../lib/format"
+import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Button, Card, CardBody, CardHeader, DataTable, DecimalInput, EmptyState, ErrorState, Field, FormGrid, InlineError, Input, Notice, PageHeader, Segmented, Select, Toolbar, useToast } from "../../../ui"
 import { RatesNav } from "../components/RatesNav"
@@ -152,8 +153,11 @@ function ManualRate({ onSaved }: { onSaved: () => void }) {
   const toast = useToast()
   const { boot } = useSession()
   const add = useTexMutation<{ base_currency: string; quote_currency: string; rate: string; rate_date: string }>("policies", "add_manual_rate")
-  const [f, setF] = useState({ base_currency: "EUR", quote_currency: "TRY", rate: "", rate_date: isoDay(new Date()) })
-  const ok = f.base_currency && f.quote_currency && f.base_currency !== f.quote_currency && /^\d+(\.\d+)?$/.test(f.rate) && f.rate.replace(/[0.]/g, "") !== "" && f.rate_date
+  // rate date null = the site's today (G-91), which follows the site's midnight until one is picked
+  const today = useSiteToday()
+  const [f, setF] = useState<{ base_currency: string; quote_currency: string; rate: string; rate_date: string | null }>({ base_currency: "EUR", quote_currency: "TRY", rate: "", rate_date: null })
+  const rateDate = f.rate_date ?? today
+  const ok = f.base_currency && f.quote_currency && f.base_currency !== f.quote_currency && /^\d+(\.\d+)?$/.test(f.rate) && f.rate.replace(/[0.]/g, "") !== "" && rateDate
   const ccy = boot.currencies.map((c) => ({ value: c, label: c }))
   return (
     <Card>
@@ -165,7 +169,7 @@ function ManualRate({ onSaved }: { onSaved: () => void }) {
             e.preventDefault()
             if (!ok) return
             try {
-              await add.run(f)
+              await add.run({ ...f, rate_date: rateDate })
               toast.success(t("rates.fx.manual_saved", { pair: `${f.base_currency}/${f.quote_currency}` }))
               setF((x) => ({ ...x, rate: "" }))
               onSaved()
@@ -186,7 +190,7 @@ function ManualRate({ onSaved }: { onSaved: () => void }) {
             <DecimalInput value={f.rate} onValueChange={(v) => setF({ ...f, rate: v })} decimals={9} suffix={f.quote_currency} />
           </Field>
           <Field label={t("rates.fx.date")} required>
-            <Input type="date" value={f.rate_date} onChange={(e) => setF({ ...f, rate_date: e.target.value })} />
+            <Input type="date" value={rateDate} onChange={(e) => setF({ ...f, rate_date: e.target.value })} />
           </Field>
           <InlineError error={add.error} />
           <Button type="submit" loading={add.pending} disabled={!ok} icon={<Plus className="size-4" aria-hidden />}>

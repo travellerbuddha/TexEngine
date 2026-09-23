@@ -2,7 +2,7 @@ import { forwardRef, useRef, type FormEvent } from "react"
 import { Search } from "lucide-react"
 import { useSession } from "../../../lib/session"
 import { addDays, nightsBetween } from "../../../lib/format"
-import { useServerClock } from "../lib/serverClock"
+import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, Field, Input, Select } from "../../../ui"
 import { useLabels } from "../lib/labels"
@@ -34,7 +34,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
   const { boot } = useSession()
   const L = useLabels()
   const set = (patch: Partial<SearchFormState>) => onChange({ ...form, ...patch })
-  const today = useServerClock().today()
+  const today = useSiteToday()
   const nights = form.check_in && form.check_out && form.check_out > form.check_in ? nightsBetween(form.check_in, form.check_out) : 0
   const compact = variant === "compact"
   const submit = (e: FormEvent) => {

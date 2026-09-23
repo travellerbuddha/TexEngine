@@ -3,8 +3,9 @@
 // the server (crs.quote, ui_crs.quote_summary, ui_crs.book).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { idempotencyKey, TexApiError } from "../../../lib/api"
-import { addDays, isoDay, nightsBetween } from "../../../lib/format"
+import { addDays, nightsBetween } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
+import { useSiteClock } from "../../../lib/siteDay"
 import { TEX_LANGS, useTexT } from "../../../i18n"
 import {
   bookQuotes,
@@ -105,12 +106,9 @@ export function focusFirstInvalid(root: ParentNode = document) {
   window.setTimeout(() => root.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(), 0)
 }
 
-function today() {
-  return isoDay(new Date())
-}
-
-export function defaultSearchForm(properties: string[], channel = "CALL_CENTER"): SearchFormState {
-  const ci = addDays(today(), 1)
+/** A new search: tomorrow on the site's calendar (`today` from lib/siteDay, G-91), two nights. */
+export function defaultSearchForm(today: string, properties: string[], channel = "CALL_CENTER"): SearchFormState {
+  const ci = addDays(today, 1)
   return {
     check_in: ci,
     check_out: addDays(ci, 2),
@@ -152,6 +150,7 @@ function emailOk(s: string) {
 
 export function useBookingFlow(opts: { channel?: string } = {}) {
   const { boot } = useSession()
+  const clock = useSiteClock()
   const { t, lang } = useTexT()
   const sellable = useMemo(
     () => boot.properties.filter((p) => p.capabilities.includes("price.view")),
@@ -160,6 +159,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
 
   const [form, setForm] = useState<SearchFormState>(() =>
     defaultSearchForm(
+      clock.today(),
       sellable.map((p) => p.name),
       opts.channel,
     ),
@@ -255,7 +255,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     (f: SearchFormState): FieldErrors => {
       const e: FieldErrors = {}
       if (!f.check_in) e.check_in = t("crs.err.check_in")
-      else if (f.check_in < today()) e.check_in = t("crs.err.check_in_past")
+      else if (f.check_in < clock.today()) e.check_in = t("crs.err.check_in_past")
       if (!f.check_out) e.check_out = t("crs.err.check_out")
       else if (f.check_in && f.check_out <= f.check_in) e.check_out = t("crs.err.check_out_after")
       else if (f.check_in && nightsBetween(f.check_in, f.check_out) > 90) e.check_out = t("crs.err.too_long")
@@ -272,7 +272,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         e.rooms = t("crs.err.child_age")
       return e
     },
-    [t],
+    [t, clock],
   )
 
   // ── reset helpers ──
@@ -648,7 +648,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     (keepSearch = false) => {
       clearDownstream()
       if (!keepSearch) {
-        setForm(defaultSearchForm(sellable.map((p) => p.name), opts.channel))
+        setForm(defaultSearchForm(clock.today(), sellable.map((p) => p.name), opts.channel))
         setResult(undefined)
         setLastArgs(undefined)
         setFormErrors({})
@@ -660,7 +660,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       setGuestErrors({})
       setNotes("")
     },
-    [clearDownstream, sellable, opts.channel, lang],
+    [clearDownstream, sellable, opts.channel, lang, clock],
   )
 
   return {

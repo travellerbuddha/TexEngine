@@ -4,6 +4,7 @@ import { Download, Info } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { date, money, num, pct } from "../../lib/format"
+import { useSiteToday } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
 import {
   Button,
@@ -88,10 +89,11 @@ export default function ProductionReport() {
   const { t, locale } = useTexT()
   const { boot, property } = useSession()
   const [params, setParams] = useSearchParams()
+  const today = useSiteToday()
 
   // filters live in the URL so a report view can be bookmarked or shared
   const preset: RangePreset = isPreset(params.get("period")) ? (params.get("period") as RangePreset) : "this_month"
-  const [defFrom, defTo] = presetRange(preset === "custom" ? "this_month" : preset)
+  const [defFrom, defTo] = presetRange(preset === "custom" ? "this_month" : preset, today)
   const from = preset === "custom" ? params.get("from") || defFrom : defFrom
   const to = preset === "custom" ? params.get("to") || defTo : defTo
   const groupBy: Dimension = (DIMENSIONS as readonly string[]).includes(params.get("group") ?? "") ? (params.get("group") as Dimension) : "channel"
