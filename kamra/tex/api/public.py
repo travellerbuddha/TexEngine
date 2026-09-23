@@ -617,11 +617,15 @@ def _guest_booking(b) -> dict:
 		              "rate_plan": (snap.get("rate_plan") or {}).get("name"),
 		              "refundable": (snap.get("rate_plan") or {}).get("refundable", True),
 		              "lines": snap.get("lines"), "extras": [e for e in snap.get("extras") or [] if e.get("ok")],
-		              "cancellation_fee_now": to_str(penalty), "pending_change": _pending_change(res)})
+		              "cancellation_fee_now": to_str(penalty), "pending_change": _pending_change(res),
+		              "last_change": guest_changes.guest_outcome(last) if (last := guest_changes.last_request(res))
+		              else None})
 	return {**summary, "rooms": rooms, "hotel": frappe.db.get_value("Property", b.property, "property_name"),
 	        "self_service": _self_service_allowed(b),
 	        # the booking's own payment comes first: no change until it is complete (G-45)
-	        "changes_blocked": "PAYMENT_PENDING" if b.status in ("Pending Payment", "Held") else None}
+	        "changes_blocked": "PAYMENT_PENDING" if b.status in ("Pending Payment", "Held") else None,
+	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
+	        "can_pay_online": bool(guest_changes.card_account(b))}
 
 
 def _own_reservation(b, reservation: str) -> None:

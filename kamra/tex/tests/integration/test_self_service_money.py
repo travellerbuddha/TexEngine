@@ -119,6 +119,11 @@ class TestHigherPrice(GuestMoneyCase):
 		                 ("Applied", "Online payment", D("80.25"), out["payment"]["transaction"]))
 		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now")), D("333.00"))
 		self.assertEqual(frappe.db.get_value("Reservation", res, "tex_guest_change_pending"), 1)
+		status = public.booking_status(token=b["manage_token"])
+		self.assertEqual(status["rooms"][0]["last_change"], {"request": out["request"], "status": "applied",
+		                                                     "settlement": "pay_now", "amount": "80.25",
+		                                                     "refunded": "0.00", "currency": "EUR"})
+		self.assertTrue(status["can_pay_online"])
 		again = self.accept(b, up)                        # the manage page asks again: the same answer
 		self.assertEqual((again["status"], again["replay"], again["settlement"]["kind"]), ("applied", True,
 		                                                                                    "pay_now"))
@@ -160,6 +165,9 @@ class TestHigherPrice(GuestMoneyCase):
 		self.assertEqual(stay(res)[0], str(fx.d(6, 12)))                   # the agent's change stands
 		self.assertEqual(money(b["booking"])[1], D("252.75"))
 		self.assertEqual((D(req.refunded_amount), req.settle_pending), (D("80.25"), 0))
+		# back from the gateway, the guest is told the change was not made and the payment refunded
+		last = public.booking_status(token=b["manage_token"])["rooms"][0]["last_change"]
+		self.assertEqual((last["status"], last["amount"], last["refunded"]), ("failed", "80.25", "80.25"))
 
 	def test_a_waiting_change_is_paid_again_from_the_manage_page(self):
 		b = self.deposit_paid("gcm-again")
@@ -213,6 +221,7 @@ class TestHigherPrice(GuestMoneyCase):
 		frappe.db.set_value("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"}, "disabled", 1)
 		up = self.propose(b, (6, 14))
 		self.assertEqual((up["settlement"]["kind"], up["settlement"]["amount"]), ("staff", "80.25"))
+		self.assertFalse(public.booking_status(token=b["manage_token"])["can_pay_online"])
 		out = self.accept(b, up)
 		self.assertEqual((out["status"], out["settlement"]["kind"]), ("requested", "staff"))
 		self.assertEqual(stay(b["rooms"][0]["reservation"])[0], str(fx.d(6, 13)))

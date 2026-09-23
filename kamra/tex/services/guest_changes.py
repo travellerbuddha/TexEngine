@@ -734,6 +734,22 @@ def open_request(res):
 	return req
 
 
+def last_request(res):
+	"""The guest's latest change of reservation ``res``, whatever came of it, or None."""
+	name = frappe.db.get_value(DT, {"reservation": res.name}, "name", order_by="creation desc")
+	return frappe.get_doc(DT, name) if name else None
+
+
+def guest_outcome(req) -> dict:
+	"""What came of a guest's change: the manage page tells the guest, back from a payment,
+	whether the change was made, or not and the payment refunded (``refunded``)."""
+	ccy = req.currency
+	return {"request": req.name, "status": req.status.lower().replace(" ", "_"),
+	        "settlement": KIND.get(req.settlement or ""),
+	        "amount": to_str(from_db(req.settlement_amount if req.status in DONE else req.collect_amount, ccy)),
+	        "refunded": to_str(from_db(req.refunded_amount, ccy)), "currency": ccy}
+
+
 def guest_view(req) -> dict:
 	"""A waiting change as the guest sees it: what they asked for and what it waits for
 	(``pay_now``: their payment of ``amount``; ``staff_approval`` / ``staff``: the hotel)."""
