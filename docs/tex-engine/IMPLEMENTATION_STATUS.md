@@ -33,6 +33,9 @@ several critical defects with probes and scratch tests that the suite does not c
 **CI.** `.github/workflows/ci.yml` runs all of the above including Playwright. It has never
 run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
+**Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
+[`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
+
 ## 2. Summary
 
 | Status | Count | Requirements |

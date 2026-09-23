@@ -159,6 +159,8 @@ The rows below keep the original findings for traceability.
 
 ## 5. Blocked (owner input needed)
 
+See also [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md) for the per-area launch view.
+
 | Item | Req | What is needed |
 |---|---|---|
 | Production certification of iyzico, Sipay and NestPay | R-40 | Merchant sandbox + production credentials. The code paths exist but are uncertified (`production_verified=False`). |
