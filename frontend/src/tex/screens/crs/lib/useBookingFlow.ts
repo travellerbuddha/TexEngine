@@ -18,7 +18,7 @@ import {
   type SearchArgs,
 } from "./api"
 import { fitChoice, type ExtraChoice, type ExtrasAvailability, type StayDates } from "./extrasStock"
-import { offerId, partyComplete, partyToApi, type PartyForm } from "./party"
+import { DOB_ERRORS, dobProblem, isDob, offerId, partyComplete, partyToApi, type PartyForm } from "./party"
 import type {
   BookingSummary,
   GuestRow,
@@ -266,6 +266,10 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         if (r.adults < 1) e[`room_${i}`] = t("crs.err.adults")
         r.children.forEach((a, k) => {
           if (a === null) e[`room_${i}_child_${k}`] = t("crs.err.child_age")
+          else if (isDob(a)) {
+            const why = dobProblem(a.dob, clock.today(), f.check_in)
+            if (why) e[`room_${i}_child_${k}`] = t(DOB_ERRORS[why])
+          }
         })
       })
       if (!f.rooms.every(partyComplete) && !Object.keys(e).some((k) => k.startsWith("room_")))

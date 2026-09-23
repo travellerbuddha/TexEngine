@@ -154,6 +154,24 @@ export interface QuoteDict {
   nights?: NightLine[]
   explanation?: ExplanationStep[]
   fx?: { from: string; to: string; mode: string; sell_rate: string } | null
+  /** Every rate the price was converted with and what it converted (G-56; cost viewers only). */
+  fx_rates?: FxRate[]
+}
+
+export interface FxRate {
+  from: string
+  to: string
+  mode: string
+  sell_rate: string
+  provider: string | null
+  provider_rate: string | null
+  rate_date: string | null
+  policy_id: string | null
+  as_of: string | null
+  /** "accommodation", "cost", "extra:SPA", "promotion:P1", "promotion:P1:min_basket", "tax:CITY" */
+  used_for: string[]
+  /** set when the rate was reused from a reservation's snapshot */
+  origin?: string
 }
 
 // ─── search ────────────────────────────────────────────────────────────

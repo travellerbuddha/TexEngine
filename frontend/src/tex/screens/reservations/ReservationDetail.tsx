@@ -302,13 +302,32 @@ function DetailView({
                           </dd>
                         </div>
                       )}
-                      {snap.fx && snap.fx.from !== snap.fx.to && (
+                      {snap.fx_rates && snap.fx_rates.length > 0 ? (
                         <div>
                           <dt className="text-xs font-medium text-zinc-500">{t("res.snap.fx")}</dt>
-                          <dd className="text-zinc-800">
-                            1 {snap.fx.from} = {snap.fx.sell_rate} {snap.fx.to}
-                          </dd>
+                          {/* every rate the sold price was converted with, as recorded at the sale (G-56) */}
+                          {snap.fx_rates.map((r) => (
+                            <dd
+                              key={`${r.from}-${r.to}`}
+                              className="text-zinc-800"
+                              title={[r.provider && `${r.provider} ${r.provider_rate ?? ""} ${r.rate_date ?? ""}`, r.policy_id, r.used_for.join(", ")]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            >
+                              1 {r.from} = {r.sell_rate} {r.to}
+                            </dd>
+                          ))}
                         </div>
+                      ) : (
+                        snap.fx &&
+                        snap.fx.from !== snap.fx.to && (
+                          <div>
+                            <dt className="text-xs font-medium text-zinc-500">{t("res.snap.fx")}</dt>
+                            <dd className="text-zinc-800">
+                              1 {snap.fx.from} = {snap.fx.sell_rate} {snap.fx.to}
+                            </dd>
+                          </div>
+                        )
                       )}
                     </dl>
                     <PolicySummary rp={snap.rate_plan} currency={d.currency} />

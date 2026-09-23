@@ -19,7 +19,7 @@ export const UI_CRS = "ui_crs" as TexModule
 export interface SearchArgs {
   check_in: string
   check_out: string
-  rooms: { adults: number; children: { age: number }[] }[]
+  rooms: { adults: number; children: ({ age: number } | { dob: string })[] }[]
   market: string
   channel: string
   currency?: string

@@ -1,7 +1,8 @@
 import { Plus, Trash2, Users } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import { useI18n } from "../i18n"
-import { MAX_ADULTS, MAX_CHILDREN, MAX_ROOMS, type Party } from "../lib/criteria"
+import { MAX_ADULTS, MAX_CHILDREN, MAX_ROOMS, dobProblem, type Party } from "../lib/criteria"
+import { today } from "../lib/dates"
 import { Button, Counter } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { useWide } from "./DateRangePicker"
@@ -15,17 +16,39 @@ export function guestsSummary(t: ReturnType<typeof useI18n>["t"], rooms: Party[]
   return parts.join(" · ")
 }
 
-export function partyText(t: ReturnType<typeof useI18n>["t"], p: { adults: number; ages?: (number | null)[]; children?: number }) {
+const BY_DOB = "dob"
+const DOB_TEXT = { missing: "guests.dobRequired", future: "guests.dobFuture", adult: "guests.dobAdult" } as const
+
+/** A child the guest has finished entering: an age, or a date of birth that can be used. */
+export function childOk(a: number | string | null, checkIn?: string | null) {
+  return typeof a === "number" || (typeof a === "string" && dobProblem(a, today(), checkIn) === "")
+}
+
+export function partyText(t: ReturnType<typeof useI18n>["t"], p: { adults: number; ages?: (number | string | null)[]; children?: number }) {
   const kids = p.ages ? p.ages.length : p.children ?? 0
   const parts = [t("guests.adults", { count: p.adults })]
   if (kids) {
-    const ages = p.ages?.filter((a): a is number => a !== null)
+    // a child given by date of birth has no age here (the server derives it): the count only
+    const ages = p.ages?.filter((a): a is number => typeof a === "number")
     parts.push(ages && ages.length === kids ? t("guests.childrenAges", { count: kids, ages: ages.join(", ") }) : t("guests.children", { count: kids }))
   }
   return parts.join(", ")
 }
 
-export function RoomsEditor({ rooms, onChange, showErrors, single }: { rooms: Party[]; onChange: (r: Party[]) => void; showErrors: boolean; single?: boolean }) {
+export function RoomsEditor({
+  rooms,
+  onChange,
+  showErrors,
+  single,
+  checkIn,
+}: {
+  rooms: Party[]
+  onChange: (r: Party[]) => void
+  showErrors: boolean
+  single?: boolean
+  /** arrival, to tell a date of birth of an adult (18+ on arrival) */
+  checkIn?: string | null
+}) {
   const { t } = useI18n()
   const base = useId()
   const update = (i: number, p: Party) => onChange(rooms.map((r, j) => (j === i ? p : r)))
@@ -67,34 +90,65 @@ export function RoomsEditor({ rooms, onChange, showErrors, single }: { rooms: Pa
               {room.ages.map((age, k) => {
                 const id = `${base}-r${i}-c${k}`
                 const missing = showErrors && age === null
+                const dob = typeof age === "string" ? age : null
+                // a date of birth: its problem shows once typed (or on "done")
+                const why = dob !== null ? dobProblem(dob, today(), checkIn) : ""
+                const dobErr = why && (showErrors || why !== "missing") ? t(DOB_TEXT[why]) : null
+                const set = (v: number | string | null) => update(i, { ...room, ages: room.ages.map((a, j) => (j === k ? v : a)) })
                 return (
-                  <div key={k}>
-                    <label htmlFor={id} className="mb-1 block text-xs font-medium text-soft">
-                      {t("guests.childAge", { n: k + 1 })}
-                    </label>
-                    <select
-                      id={id}
-                      data-missing-age={age === null || undefined}
-                      className="bk-input"
-                      value={age === null ? "" : String(age)}
-                      aria-invalid={missing || undefined}
-                      aria-describedby={missing ? `${id}-err` : undefined}
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? null : Number(e.target.value)
-                        update(i, { ...room, ages: room.ages.map((a, j) => (j === k ? v : a)) })
-                      }}
-                    >
-                      <option value="">{t("guests.selectAge")}</option>
-                      {Array.from({ length: 18 }, (_, a) => (
-                        <option key={a} value={a}>
-                          {a === 0 ? t("guests.underOne") : t("guests.years", { count: a })}
-                        </option>
-                      ))}
-                    </select>
-                    {missing && (
-                      <p id={`${id}-err`} className="mt-1 text-xs font-medium text-bad">
-                        {t("guests.ageRequired")}
-                      </p>
+                  <div key={k} className={dob !== null ? "col-span-2 grid grid-cols-2 gap-3 sm:col-span-3 sm:grid-cols-3" : undefined}>
+                    <div>
+                      <label htmlFor={id} className="mb-1 block text-xs font-medium text-soft">
+                        {t("guests.childAge", { n: k + 1 })}
+                      </label>
+                      <select
+                        id={id}
+                        data-missing-age={age === null || undefined}
+                        className="bk-input"
+                        value={age === null ? "" : dob !== null ? BY_DOB : String(age)}
+                        aria-invalid={missing || undefined}
+                        aria-describedby={missing ? `${id}-err` : undefined}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          set(v === "" ? null : v === BY_DOB ? (dob ?? "") : Number(v))
+                        }}
+                      >
+                        <option value="">{t("guests.selectAge")}</option>
+                        {Array.from({ length: 18 }, (_, a) => (
+                          <option key={a} value={a}>
+                            {a === 0 ? t("guests.underOne") : t("guests.years", { count: a })}
+                          </option>
+                        ))}
+                        <option value={BY_DOB}>{t("guests.byDob")}</option>
+                      </select>
+                      {missing && (
+                        <p id={`${id}-err`} className="mt-1 text-xs font-medium text-bad">
+                          {t("guests.ageRequired")}
+                        </p>
+                      )}
+                    </div>
+                    {dob !== null && (
+                      <div className="sm:col-span-2">
+                        <label htmlFor={`${id}-dob`} className="mb-1 block text-xs font-medium text-soft">
+                          {t("guests.childDob", { n: k + 1 })}
+                        </label>
+                        <input
+                          id={`${id}-dob`}
+                          type="date"
+                          className="bk-input"
+                          data-missing-age={why !== "" || undefined}
+                          max={today()}
+                          value={dob}
+                          aria-invalid={dobErr ? true : undefined}
+                          aria-describedby={dobErr ? `${id}-dob-err` : undefined}
+                          onChange={(e) => set(e.target.value)}
+                        />
+                        {dobErr && (
+                          <p id={`${id}-dob-err`} className="mt-1 text-xs font-medium text-bad">
+                            {dobErr}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )
@@ -114,7 +168,19 @@ export function RoomsEditor({ rooms, onChange, showErrors, single }: { rooms: Pa
   )
 }
 
-export function GuestsPicker({ id, rooms, onChange, error }: { id: string; rooms: Party[]; onChange: (r: Party[]) => void; error?: string | null }) {
+export function GuestsPicker({
+  id,
+  rooms,
+  onChange,
+  error,
+  checkIn,
+}: {
+  id: string
+  rooms: Party[]
+  onChange: (r: Party[]) => void
+  error?: string | null
+  checkIn?: string | null
+}) {
   const { t } = useI18n()
   const wide = useWide()
   const [open, setOpen] = useState(false)
@@ -123,9 +189,9 @@ export function GuestsPicker({ id, rooms, onChange, error }: { id: string; rooms
   const labelId = useId()
   const valueId = useId()
   const done = () => {
-    if (rooms.some((r) => r.ages.some((a) => a === null))) {
+    if (rooms.some((r) => r.ages.some((a) => !childOk(a, checkIn)))) {
       setShowErrors(true)
-      document.querySelector<HTMLSelectElement>("dialog[open] [data-missing-age]")?.focus()
+      document.querySelector<HTMLElement>("dialog[open] [data-missing-age]")?.focus()
       return
     }
     setShowErrors(false)
@@ -172,7 +238,7 @@ export function GuestsPicker({ id, rooms, onChange, error }: { id: string; rooms
           </Button>
         }
       >
-        <RoomsEditor rooms={rooms} onChange={onChange} showErrors={showErrors} />
+        <RoomsEditor rooms={rooms} onChange={onChange} showErrors={showErrors} checkIn={checkIn} />
       </Dialog>
     </div>
   )

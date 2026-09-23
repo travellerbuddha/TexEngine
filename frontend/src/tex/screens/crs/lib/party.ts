@@ -6,10 +6,46 @@ export const MAX_ADULTS = 12
 export const MAX_CHILDREN = 8
 export const CHILD_AGES = Array.from({ length: 18 }, (_, i) => i)
 
+/** One child as the agent entered it: an age in whole years (0–17), or a date of birth
+ * ({ dob: "YYYY-MM-DD" }; "" until typed) — the server prices a date of birth in completed
+ * months on arrival (G-52). null until the agent chooses (never guessed). */
+export type ChildValue = number | { dob: string } | null
+
 export interface PartyForm {
   adults: number
-  /** One entry per child; null until the agent picks the age (never guessed). */
-  children: (number | null)[]
+  /** One entry per child. */
+  children: ChildValue[]
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+export function isDob(c: ChildValue): c is { dob: string } {
+  return c !== null && typeof c === "object"
+}
+
+/** Why a child's date of birth cannot be used yet ("" when it can). The server checks it
+ * again; an 18-year-old on arrival is an adult. Plain ISO string comparisons, no age maths. */
+export function dobProblem(dob: string, today: string, checkIn?: string | null): "" | "missing" | "future" | "adult" {
+  if (!ISO_DAY.test(dob)) return "missing"
+  if (dob > today) return "future"
+  if (checkIn && ISO_DAY.test(checkIn) && `${String(Number(dob.slice(0, 4)) + 18).padStart(4, "0")}${dob.slice(4)}` <= checkIn)
+    return "adult"
+  return ""
+}
+
+/** i18n key of each ``dobProblem``. */
+export const DOB_ERRORS = {
+  missing: "crs.err.child_dob_missing",
+  future: "crs.err.child_dob_future",
+  adult: "crs.err.child_dob_adult",
+} as const
+
+export function childComplete(c: ChildValue) {
+  return typeof c === "number" || (isDob(c) && ISO_DAY.test(c.dob))
+}
+
+export function childToApi(c: ChildValue): { age: number } | { dob: string } {
+  return isDob(c) ? { dob: c.dob } : { age: c as number }
 }
 
 export const BOARDS = ["RO", "BB", "HB", "FB", "AI", "UAI"] as const
@@ -20,11 +56,11 @@ export function boardKey(code: string | null | undefined) {
 }
 
 export function partyComplete(p: PartyForm) {
-  return p.adults >= 1 && p.children.every((a) => a !== null)
+  return p.adults >= 1 && p.children.every(childComplete)
 }
 
 export function partyToApi(p: PartyForm) {
-  return { adults: p.adults, children: p.children.map((a) => ({ age: a as number })) }
+  return { adults: p.adults, children: p.children.map(childToApi) }
 }
 
 /** Compare two decimal strings exactly (display ordering only). */

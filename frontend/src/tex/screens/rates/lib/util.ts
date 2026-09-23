@@ -128,7 +128,7 @@ export function issueTab(code: string): string {
   if (code.startsWith("PERIOD_") || code === "NO_PERIODS") return "periods"
   if (code.startsWith("ROOM_RULE") || code === "ROOM_NEGATIVE") return "rates"
   if (code === "ROOM_CAPACITY" || code === "INCLUDED_ADULTS" || code === "NO_ROOMS") return "rooms"
-  if (code === "AGE_BANDS") return "ages"
+  if (code.startsWith("AGE_BANDS")) return "ages"   // AGE_BANDS (gaps, overlaps), AGE_BANDS_MIN_AGE (G-52)
   if (code === "NO_BASE_BOARD") return "boards"
   if (code === "RATE_PLAN_BOARD") return "plans"
   return "settings"
