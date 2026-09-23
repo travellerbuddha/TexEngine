@@ -442,6 +442,7 @@
   "errors.seeAvailable": "Verfügbare Zimmer ansehen",
   "errors.extraSoldOutTitle": "Ein Extra ist nicht mehr verfügbar",
   "errors.extraSoldOutBody": "Ihre Zimmerauswahl bleibt erhalten – bitte prüfen Sie Ihre Extras und fahren Sie fort.",
+  "errors.extraSoldOutTogether": "Jedes Zimmer könnte es allein erhalten, zusammen benötigen Ihre Zimmer aber mehr, als noch verfügbar ist. Entfernen Sie das Extra bei einem der Zimmer, um fortzufahren.",
   "errors.reviewExtras": "Extras prüfen",
   "errors.expiredTitle": "Die Preise müssen kurz aktualisiert werden",
   "errors.expiredBody": "Angebote werden nur begrenzte Zeit gehalten. Wir prüfen den aktuellen Preis für dieselben Zimmer – Ihre Angaben bleiben erhalten.",

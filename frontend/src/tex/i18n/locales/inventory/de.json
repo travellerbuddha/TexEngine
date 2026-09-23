@@ -10,7 +10,7 @@
   "other": "Auf {count} Zellen anwenden"
  },
  "inventory.bulk.changes": "Änderungen",
- "inventory.bulk.confirm_body": "{days} Tag(e) × {rooms} Zimmertyp(en) = {cells} Zellen werden geändert.",
+ "inventory.bulk.confirm_body": "Tage: {days} × Zimmertypen: {rooms} = zu ändernde Zellen: {cells}.",
  "inventory.bulk.confirm_title": "Bitte bestätigen",
  "inventory.bulk.days_selected": {
   "one": "{count} Tag ausgewählt",
@@ -46,7 +46,7 @@
  "inventory.extras.change.capacity_bad": "Geben Sie eine ganze Zahl ab 0 ein.",
  "inventory.extras.change.capacity_hint": "Leer = unverändert. 0 = zurück zur Standard-Tageskapazität des Extras.",
  "inventory.extras.change.close": "Für den Verkauf schließen",
- "inventory.extras.change.confirm_body": "{days} Tag(e) × {extras} Extra(s) = {cells} Zellen werden geändert.",
+ "inventory.extras.change.confirm_body": "Tage: {days} × Extras: {extras} = zu ändernde Zellen: {cells}.",
  "inventory.extras.change.done": {
   "one": "{count} Zelle geändert",
   "other": "{count} Zellen geändert"

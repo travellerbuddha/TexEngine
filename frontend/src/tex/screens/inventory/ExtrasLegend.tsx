@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { AlertTriangle, Lock, StickyNote } from "lucide-react"
+import { AlertTriangle, Lock, StickyNote, TrendingDown } from "lucide-react"
 import { useTexT } from "../../i18n"
 import { Kbd } from "../../ui"
 
@@ -30,7 +30,10 @@ export function ExtrasLegend() {
           t("inventory.extras.legend.sold_out"),
         )}
         {item(
-          <span className="inline-flex h-5 items-center rounded bg-amber-50 px-1 text-[10px] font-semibold text-amber-900">{t("inventory.extras.short.left", { n: 1 })}</span>,
+          <span className="inline-flex h-5 items-center gap-0.5 rounded bg-amber-50 px-1 text-[10px] font-semibold text-amber-900">
+            <TrendingDown className="size-3" aria-hidden />
+            {t("inventory.extras.short.left", { n: 1 })}
+          </span>,
           t("inventory.extras.legend.low"),
         )}
         {item(

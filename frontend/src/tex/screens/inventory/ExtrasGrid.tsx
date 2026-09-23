@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type KeyboardEvent } from "react"
 import { Link } from "react-router-dom"
-import { AlertTriangle, ChevronLeft, ChevronRight, Layers, Lock, RefreshCcw, StickyNote } from "lucide-react"
+import { AlertTriangle, ChevronLeft, ChevronRight, Layers, Lock, RefreshCcw, StickyNote, TrendingDown } from "lucide-react"
 import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
@@ -309,17 +309,23 @@ function fmtMonth(iso: string) {
   return new Intl.DateTimeFormat(intlLocale(getTexLang()), { month: "short" }).format(new Date(`${iso}T12:00:00`))
 }
 
+/** Few left: open, not oversold, some left but at most a fifth of the day's capacity. */
+function isLow(c: ExtraGridCell): boolean {
+  return !c.over && !c.closed && c.capacity > 0 && c.remaining > 0 && c.remaining * 5 <= c.capacity
+}
+
 /** Background tone; every state also has an icon or text (never colour alone). */
 function cellTone(c: ExtraGridCell): string | false {
   if (c.over) return "bg-rose-100 text-rose-900"
   if (c.closed) return "bg-zinc-200/70 text-zinc-600"
   if (c.remaining === 0) return "bg-rose-50 text-rose-800"
-  if (c.capacity > 0 && c.remaining * 5 <= c.capacity) return "bg-amber-50 text-amber-900"
+  if (isLow(c)) return "bg-amber-50 text-amber-900"
   return false
 }
 
 function CellContent({ cell }: { cell: ExtraGridCell }) {
   const { t } = useTexT()
+  const low = isLow(cell)
   return (
     <span className="inline-flex flex-col items-center leading-tight">
       <span className="inline-flex items-center gap-0.5">
@@ -338,7 +344,10 @@ function CellContent({ cell }: { cell: ExtraGridCell }) {
           {t("inventory.short.closed")}
         </span>
       ) : (
-        <span className={cn("text-[10px]", cell.remaining === 0 ? "font-semibold" : "text-zinc-600")}>{t("inventory.extras.short.left", { n: cell.remaining })}</span>
+        <span className={cn("inline-flex items-center gap-0.5 text-[10px]", cell.remaining === 0 || low ? "font-semibold" : "text-zinc-600")}>
+          {low && <TrendingDown className="size-3" aria-hidden />}
+          {t("inventory.extras.short.left", { n: cell.remaining })}
+        </span>
       )}
     </span>
   )
@@ -350,6 +359,7 @@ function cellLabel(t: T, row: ExtraGridRow, c: ExtraGridCell): string {
   if (c.sold > 0) parts.push(t("inventory.extras.aria.held_confirmed", { held: c.held, confirmed: c.confirmed }))
   if (c.closed) parts.push(t("inventory.v.closed_sale"))
   if (c.over) parts.push(t("inventory.extras.legend.over"))
+  if (isLow(c)) parts.push(t("inventory.extras.legend.low"))
   if (c.override !== null) parts.push(t("inventory.extras.aria.override", { n: row.daily_capacity }))
   if (c.note) parts.push(t("inventory.extras.aria.note", { note: c.note }))
   return `${row.name}, ${day}: ${parts.join(", ")}`

@@ -195,6 +195,10 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   const [booking_pending, setBookingPending] = useState(false)
   const [bookError, setBookError] = useState<TexApiError>()
   const bookKey = useRef<string | null>(null)
+  // The quote signature a booking was refused for with ExtraSoldOut although every room's
+  // quote still adds its extras: each room is quoted alone, the booking counts the rooms
+  // together (G-19). Booking the same quotes again would be refused the same way.
+  const [extrasClash, setExtrasClash] = useState("")
 
   // ── lookups ──
   const propertyResult = useCallback(
@@ -242,6 +246,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   )
   const quotesOk = quotes.length > 0 && quotes.every((q) => q.ok && q.quote_id)
   const quoteStale = quotes.length > 0 && quotedSig !== currentSig
+  const extrasTogether = !!extrasClash && extrasClash === quotedSig
   const quoteIds = useMemo(() => (quotesOk ? quotes.map((q) => q.quote_id as string) : []), [quotes, quotesOk])
   const quoteCurrency = quotesOk ? quotes[0].quote?.currency : selectedOffers[0]?.currency
 
@@ -284,6 +289,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     setConfirmUnpaid(false)
     setBooking(undefined)
     setBookError(undefined)
+    setExtrasClash("")
     bookKey.current = null
   }, [])
 
@@ -464,6 +470,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       setSummary(undefined)
       setSummaryError(undefined)
       setBookError(undefined)
+      setExtrasClash("")
       const promoChanged = !sameCodes(quotePromo, lastArgs?.promo_codes ?? [])
       // extras belong to a hotel: a selection that just moved hotel starts without any
       const roomExtras = sel.property === selection?.property ? extras : {}
@@ -578,6 +585,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       summary.usable &&
       !summaryLoading &&
       !payAtHotelBlocked &&
+      !extrasTogether &&
       (!methods?.length || method),
   )
 
@@ -585,7 +593,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     const errs = validateGuest()
     setGuestErrors(errs)
     if (Object.keys(errs).length) return null
-    if (!quotesOk || quoteStale) return null
+    if (!quotesOk || quoteStale || extrasTogether) return null
     if (methods && methods.length && !method) {
       setGuestErrors({ method: t("crs.err.method") })
       return null
@@ -622,14 +630,19 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       if (err.type === "ExtraSoldOut") {
         // not a room sell-out: a limited extra (a spa slot…) went since the quote. Nothing was
         // booked; quote the rooms again so the refused extra shows as not added (not charged).
-        await requestQuotes()
+        const res = await requestQuotes()
+        // no room's quote refuses an extra: each room alone fits, the rooms together need more
+        // than is left. Not bookable again until the extras (or a fresh quote) change.
+        const chosen = Object.values(extras).some((room) => Object.keys(room).length > 0)
+        if (res && res.length > 1 && chosen && res.every((q) => q.ok && (q.quote?.extras ?? []).every((x) => x.ok)))
+          setExtrasClash(currentSig)
       }
       setBookError(err)
       return null
     } finally {
       setBookingPending(false)
     }
-  }, [validateGuest, quotesOk, quoteStale, methods, method, t, quoteIds, guest, booker, confirmUnpaid, summary, notes, requestQuotes])
+  }, [validateGuest, quotesOk, quoteStale, extrasTogether, methods, method, t, quoteIds, guest, booker, confirmUnpaid, summary, notes, requestQuotes, currentSig, extras])
 
   const resetAll = useCallback(
     (keepSearch = false) => {
@@ -715,6 +728,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     bookError,
     /** The booking failed because a limited extra sold out; the rooms were quoted again. */
     extraSoldOut: bookError?.type === "ExtraSoldOut",
+    /** Refused with ExtraSoldOut although no room's new quote refuses an extra: the rooms
+     * together need more than is left (booking stays off until the rooms are quoted again). */
+    extrasTogether,
     resetAll,
   }
 }

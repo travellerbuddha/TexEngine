@@ -18,6 +18,7 @@
  "crs.board.UAI": "Ultra all inclusive",
  "crs.book.extra_sold_out": "Not booked: an extra has just sold out",
  "crs.book.extra_sold_out_hint": "Not a room sell-out: the rooms were quoted again and the extra now shows as not added (not charged). Tell the guest, choose another day or remove it, then book again.",
+ "crs.book.extra_sold_out_together": "Not a room sell-out: each room alone still gets the extra, but the rooms together need more than is left. Tell the guest, then remove it from one of the rooms or choose another day, and book again.",
  "crs.book.failed": "The booking could not be completed",
  "crs.book.failed_hint": "Nothing was booked. If the quote expired or the price moved, refresh the quote and book again.",
  "crs.book.need_quote": "Quote a room first.",

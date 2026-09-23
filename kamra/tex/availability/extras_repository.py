@@ -153,9 +153,10 @@ def check(property: str, need: dict[Key, int], *, credit: dict[Key, int] | None 
 		if row and row[0].closed:
 			raise ExtraSoldOut(_("{0} is not available on {1}.").format(name, frappe.format(d, "Date")))
 		if units > left:
+			# never how many are left: this can reach a guest (ADR-033); staff see counts in the grid
 			raise ExtraSoldOut(_("Sorry — {0} has just sold out for {1}.").format(name, frappe.format(d, "Date"))
-			                   if left <= 0 else _("Sorry — only {0} left of {1} for {2}.").format(
-				                   left, name, frappe.format(d, "Date")))
+			                   if left <= 0 else _("Sorry — there is not enough {0} left for {1}.").format(
+				                   name, frappe.format(d, "Date")))
 
 
 def _add_sold(property: str, code: str, d: date, units: int) -> None:

@@ -18,6 +18,7 @@
  "crs.board.UAI": "Ultra all inclusive",
  "crs.book.extra_sold_out": "Nicht gebucht: Eine Zusatzleistung ist gerade ausverkauft",
  "crs.book.extra_sold_out_hint": "Kein Zimmer-Ausverkauf: Die Zimmer wurden neu kalkuliert, die Zusatzleistung erscheint jetzt als nicht hinzugefügt (wird nicht berechnet). Informieren Sie den Gast, wählen Sie einen anderen Tag oder entfernen Sie sie und buchen Sie dann erneut.",
+ "crs.book.extra_sold_out_together": "Kein Zimmer-Ausverkauf: Jedes Zimmer allein erhält die Zusatzleistung noch, zusammen benötigen die Zimmer aber mehr, als noch frei ist. Informieren Sie den Gast, entfernen Sie sie dann bei einem der Zimmer oder wählen Sie einen anderen Tag und buchen Sie erneut.",
  "crs.book.failed": "Die Buchung konnte nicht abgeschlossen werden",
  "crs.book.failed_hint": "Es wurde nichts gebucht. Ist das Angebot abgelaufen oder hat sich der Preis geändert, aktualisieren Sie das Angebot und buchen Sie erneut.",
  "crs.book.need_quote": "Holen Sie zuerst ein Angebot ein.",

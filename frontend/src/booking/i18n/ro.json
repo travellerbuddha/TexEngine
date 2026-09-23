@@ -442,6 +442,7 @@
   "errors.seeAvailable": "Vezi camerele disponibile",
   "errors.extraSoldOutTitle": "Un serviciu extra nu mai este disponibil",
   "errors.extraSoldOutBody": "Camera aleasă rămâne selectată — verificați serviciile extra și continuați.",
+  "errors.extraSoldOutTogether": "Fiecare cameră îl poate avea separat, dar împreună camerele dumneavoastră au nevoie de mai mult decât a rămas. Eliminați serviciul extra de la una dintre camere pentru a continua.",
   "errors.reviewExtras": "Verifică serviciile extra",
   "errors.expiredTitle": "Prețurile trebuie actualizate",
   "errors.expiredBody": "Ofertele sunt păstrate un timp limitat. Verificăm cel mai recent preț pentru aceleași camere — datele dumneavoastră se păstrează.",

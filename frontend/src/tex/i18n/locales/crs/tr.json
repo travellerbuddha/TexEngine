@@ -18,6 +18,7 @@
  "crs.board.UAI": "Ultra her şey dahil",
  "crs.book.extra_sold_out": "Rezervasyon yapılmadı: bir ek hizmet az önce tükendi",
  "crs.book.extra_sold_out_hint": "Odalar tükenmedi: odalar yeniden fiyatlandı ve ek hizmet artık eklenmemiş olarak görünüyor (ücretlendirilmez). Misafire bildirin, başka bir gün seçin veya kaldırın, sonra tekrar rezervasyon yapın.",
+ "crs.book.extra_sold_out_together": "Odalar tükenmedi: her oda tek başına ek hizmeti hâlâ alabiliyor, ancak odalar birlikte kalandan fazlasına ihtiyaç duyuyor. Misafire bildirin, ardından ek hizmeti odalardan birinden kaldırın veya başka bir gün seçin ve tekrar rezervasyon yapın.",
  "crs.book.failed": "Rezervasyon tamamlanamadı",
  "crs.book.failed_hint": "Hiçbir şey rezerve edilmedi. Teklifin süresi dolduysa veya fiyat değiştiyse teklifi yenileyip tekrar rezervasyon yapın.",
  "crs.book.need_quote": "Önce bir oda için teklif alın.",

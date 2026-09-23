@@ -156,7 +156,10 @@ function ExtraItem({ extra, roomIndex, days }: { extra: SiteExtra; roomIndex: nu
     const dates = choice?.service_dates ?? []
     control = (
       <fieldset>
-        <legend className="mb-1.5 text-sm font-medium text-soft">{t("extras.chooseDates")}</legend>
+        <legend className="mb-1.5 text-sm font-medium text-soft">
+          {t("extras.chooseDates")}
+          <span className="sr-only"> · {extra.extra_name}</span>
+        </legend>
         <div className="flex flex-wrap gap-2">
           {stay.map((d) => {
             const on = dates.includes(d)
@@ -231,9 +234,7 @@ function ExtraItem({ extra, roomIndex, days }: { extra: SiteExtra; roomIndex: nu
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold" id={`${id}-name`}>
-              {extra.extra_name}
-            </h3>
+            <h3 className="text-base font-semibold">{extra.extra_name}</h3>
             {extra.category && <p className="text-xs text-muted">{extra.category}</p>}
             {soldOut ? (
               <Badge className="mt-1">{t("extras.soldOut")}</Badge>
@@ -250,11 +251,17 @@ function ExtraItem({ extra, roomIndex, days }: { extra: SiteExtra; roomIndex: nu
             {refusalText(i18n, rejected.reason)}
           </p>
         )}
-        <div className="mt-2" aria-describedby={`${id}-name`}>
-          {control}
-        </div>
+        <div className="mt-2">{control}</div>
         {pickDay && (
-          <Field label={t("extras.day")} className="mt-2 max-w-xs">
+          <Field
+            label={
+              <>
+                {t("extras.day")}
+                <span className="sr-only"> · {extra.extra_name}</span>
+              </>
+            }
+            className="mt-2 max-w-xs"
+          >
             <Select value={usedDay ?? ""} onChange={(e) => setExtra(roomIndex, extra.extra_code, { code: extra.extra_code, quantity: qty, service_dates: [e.target.value] })}>
               {stay.map((d) => {
                 const a = stock.day(d)
@@ -558,6 +565,12 @@ function PaymentStep() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setMethodError(null)
+    // the booking refused this very choice of extras (the rooms together need more than is
+    // left, e.g. back here through the browser history): back to the extras with the message
+    if (b.extrasClash) {
+      b.goStep("extras", { keepError: true })
+      return setFlowError({ ...b.extrasClash })
+    }
     if (!flow.terms) {
       setTermsError(true)
       document.getElementById(termsId)?.focus()

@@ -116,7 +116,7 @@ export interface ExtraOutcome {
   name: string
   ok: boolean
   /** why it was not added (ok=false); a limited extra says "sold out on yyyy-mm-dd",
-   * "only N left on yyyy-mm-dd" or "closed on yyyy-mm-dd" (G-19) */
+   * "not enough left on yyyy-mm-dd" or "closed on yyyy-mm-dd" (G-19; guests never see a count) */
   reason?: string
   quantity: string
   amount: Money

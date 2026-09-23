@@ -146,6 +146,12 @@ interface Ctx {
   rejectedExtras: RejectedExtra[]
   /** continue without them: forget those choices, keeping the quotes (they do not include them) */
   dropRejectedExtras: () => void
+  /** The booking was refused with ExtraSoldOut although every room's quote still adds its extras:
+   * each room is quoted alone, the booking counts the rooms together (G-19). That error, while
+   * the extras chosen are still the ones refused (null once an extra choice or the search changes). */
+  extrasClash: FlowError | null
+  /** remember the current extras choice as refused together (see extrasClash) */
+  markExtrasClash: (error: FlowError) => void
   refreshAfterExpiry: () => Promise<Refreshed>
   setGuest: (g: Partial<Guest>) => void
   setMethod: (m: PaymentMethod, providerAccount?: string | null) => void
@@ -201,6 +207,20 @@ function findRejected(quotes: (QuoteResponse | null)[], extras: FlowState["extra
   return out
 }
 
+/** The extras chosen for every room (quantities and days), as one comparable string. */
+function extrasSignature(extras: FlowState["extras"]): string {
+  const rooms = Object.entries(extras)
+    .map(([room, choices]) => ({
+      room: Number(room),
+      choices: Object.entries(choices)
+        .map(([code, c]) => `${code}×${c.quantity}@${[...(c.service_dates ?? [])].sort().join("+")}`)
+        .sort(),
+    }))
+    .filter((r) => r.choices.length)
+    .sort((a, b) => a.room - b.room)
+  return JSON.stringify(rooms)
+}
+
 export function BookingProvider({ children }: { children: ReactNode }) {
   const { site } = useSite()
   const { lang } = useI18n()
@@ -217,6 +237,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const [justBooked, setJustBooked] = useState<string | null>(null)
   const [basket, setBasket] = useState<BasketState>({ status: "idle", data: null, key: null })
   const [basketTick, setBasketTick] = useState(0)
+  // ExtraSoldOut for an extras choice every room's quote accepts (see Ctx.extrasClash)
+  const [clash, setClash] = useState<{ sig: string; error: FlowError } | null>(null)
   const searchSeq = useRef(0)
   // a market / country from a link the server refused: search without it from then on
   const refusedMarket = useRef<string | null>(null)
@@ -338,6 +360,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setFlowError(null)
+    setClash(null)
   }, [key, hotel])
 
   const select = useCallback(
@@ -368,6 +391,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   )
 
   const setExtra = useCallback((roomIndex: number, code: string, choice: ExtraChoice | null) => {
+    setClash(null)
     setFlow((f) => {
       const room = { ...(f.extras[roomIndex] ?? {}) }
       if (choice && choice.quantity > 0) room[code] = choice
@@ -435,6 +459,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
       return { ...f, extras }
     })
   }, [])
+
+  const extrasSig = useMemo(() => extrasSignature(flow.extras), [flow.extras])
+  const extrasClash = clash && clash.sig === extrasSig ? clash.error : null
+  const markExtrasClash = useCallback((error: FlowError) => setClash({ sig: extrasSig, error }), [extrasSig])
 
   /** After "expired": search again with the same criteria and re-pick the same rooms. */
   const refreshAfterExpiry = useCallback(async (): Promise<Refreshed> => {
@@ -574,6 +602,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     quotesFresh,
     rejectedExtras,
     dropRejectedExtras,
+    extrasClash,
+    markExtrasClash,
     refreshAfterExpiry,
     setGuest,
     setMethod,

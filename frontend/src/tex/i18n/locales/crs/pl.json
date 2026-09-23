@@ -18,6 +18,7 @@
  "crs.board.UAI": "Ultra all inclusive",
  "crs.book.extra_sold_out": "Nie zarezerwowano: usługa dodatkowa właśnie się wyprzedała",
  "crs.book.extra_sold_out_hint": "To nie wyprzedaż pokoi: wycena została odświeżona, a usługa jest teraz pokazana jako niedodana (nie jest naliczana). Poinformuj gościa, wybierz inny dzień lub ją usuń i zarezerwuj ponownie.",
+ "crs.book.extra_sold_out_together": "To nie wyprzedaż pokoi: każdy pokój osobno nadal może mieć tę usługę, ale razem pokoje potrzebują więcej, niż zostało. Poinformuj gościa, a następnie usuń ją z jednego z pokoi lub wybierz inny dzień i zarezerwuj ponownie.",
  "crs.book.failed": "Nie udało się dokończyć rezerwacji",
  "crs.book.failed_hint": "Nic nie zostało zarezerwowane. Jeśli wycena wygasła lub cena się zmieniła, odśwież wycenę i zarezerwuj ponownie.",
  "crs.book.need_quote": "Najpierw wyceń pokój.",

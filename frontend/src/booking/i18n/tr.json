@@ -442,6 +442,7 @@
   "errors.seeAvailable": "Müsait odaları gör",
   "errors.extraSoldOutTitle": "Bir ekstra artık müsait değil",
   "errors.extraSoldOutBody": "Oda seçiminiz korunuyor — lütfen ekstralarınızı gözden geçirip devam edin.",
+  "errors.extraSoldOutTogether": "Odalarınızın her biri tek başına alabilir, ancak birlikte kalandan fazlası gerekiyor. Devam etmek için ekstrayı odalardan birinden kaldırın.",
   "errors.reviewExtras": "Ekstraları gözden geçir",
   "errors.expiredTitle": "Fiyatların yenilenmesi gerekiyor",
   "errors.expiredBody": "Teklifler sınırlı bir süre için tutulur. Aynı odalar için en güncel fiyatı kontrol edeceğiz — bilgileriniz korunur.",

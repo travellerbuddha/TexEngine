@@ -442,6 +442,7 @@
   "errors.seeAvailable": "See available rooms",
   "errors.extraSoldOutTitle": "An extra is no longer available",
   "errors.extraSoldOutBody": "Your room choice is kept — please review your extras and continue.",
+  "errors.extraSoldOutTogether": "Each of your rooms can have it on its own, but together they need more than is left. Remove it from one of the rooms to continue.",
   "errors.reviewExtras": "Review extras",
   "errors.expiredTitle": "Prices need a quick refresh",
   "errors.expiredBody": "Offers are held for a limited time. We'll check the latest price for the same rooms — your details are kept.",

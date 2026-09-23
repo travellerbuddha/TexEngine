@@ -15,6 +15,10 @@ export function useContinue() {
   const go = async (from: Step) => {
     b.setFlowError(null)
     if (from === "rooms" && b.hasExtras) return b.goStep("extras")
+    // the booking refused this very choice of extras (the rooms together need more than is
+    // left): going on would only be refused again. The message stays; a new object, so the
+    // alert takes focus and scrolls into view again.
+    if (from === "extras" && b.extrasClash) return b.setFlowError({ ...b.extrasClash })
     if (b.quotesFresh) {
       // the notice about extras that could not be added is on screen: going on accepts it
       if (from === "extras") b.dropRejectedExtras()
@@ -40,9 +44,14 @@ export function useBackToExtras() {
     if (b.hasExtras && b.step !== "extras") b.goStep("extras", { keepError: true })
     b.setFlowError(err)
     b.setPending(true)
-    const { error } = await b.quoteAll()
+    const { error, rejected } = await b.quoteAll()
     b.setPending(false)
-    if (error) b.setFlowError(error)
+    if (error) return b.setFlowError(error)
+    // Each room is quoted on its own but the booking counts the rooms together: when no room's
+    // quote refuses anything, the rooms together need more than is left. The message stays and
+    // this choice of extras cannot go on to booking again unchanged.
+    const chosen = Object.values(b.flow.extras).some((room) => Object.keys(room ?? {}).length > 0)
+    if (!rejected.length && chosen && b.criteria.rooms.length > 1) b.markExtrasClash(err)
   }
 }
 
@@ -101,7 +110,8 @@ export function FlowErrorAlert() {
     )
   } else if (e.kind === "extra_sold_out") {
     title = t("errors.extraSoldOutTitle")
-    body = [e.message, t("errors.extraSoldOutBody")].filter(Boolean).join(" ")
+    // every room alone still gets its extras, the rooms together need more than is left
+    body = [e.message, t(b.extrasClash ? "errors.extraSoldOutTogether" : "errors.extraSoldOutBody")].filter(Boolean).join(" ")
     if (b.step !== "extras" && b.hasExtras)
       action = (
         <Button size="sm" onClick={() => void backToExtras(e)} busy={b.pending}>

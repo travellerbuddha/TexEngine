@@ -4,7 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { MAX_ADULTS, MAX_CHILDREN, type Party } from "../lib/criteria"
-import { refusalText } from "../lib/extras"
+import { parseRefusal, refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
 import { rememberPayment, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
@@ -111,10 +111,13 @@ function CancelDialog({ room, currency, token, onClose, onDone }: { room: Bookin
 function ChangeDialog({ room, currency, token, onClose, onDone }: { room: BookingRoom; currency: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
   const i18n = useI18n()
   const { t, money } = i18n
-  // a limited extra no longer available on the new dates ("Spa: sold out on 2027-06-12", G-19)
+  // a limited extra no longer available on the new dates ("Spa: sold out on 2027-06-12" or
+  // "Spa: not enough left on 2027-06-12"; guests never see how many are left, G-19)
   const warningText = (w: Reason) => {
     const at = w.code === "EXTRA_SOLD_OUT" ? w.message.lastIndexOf(": ") : -1
-    return at > 0 ? `${w.message.slice(0, at)}: ${refusalText(i18n, w.message.slice(at + 2))}` : w.message
+    if (at <= 0) return w.message
+    const why = w.message.slice(at + 2)
+    return parseRefusal(why).kind === "other" ? w.message : `${w.message.slice(0, at)}: ${refusalText(i18n, why)}`
   }
   const [checkIn, setCheckIn] = useState<string | null>(room.check_in)
   const [checkOut, setCheckOut] = useState<string | null>(room.check_out)

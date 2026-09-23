@@ -409,7 +409,8 @@ export function QuoteRoom({
 /**
  * The booking was refused because a limited extra (a spa slot…) sold out since the quote — not
  * a room sell-out (G-19). Nothing was booked; the flow has quoted the rooms again, so the
- * refused extras are listed here as not added (and not charged).
+ * refused extras are listed here as not added (and not charged). When no room's quote refuses
+ * one, each room alone still fits but the rooms together need more than is left.
  */
 export function ExtraSoldOutNotice({ flow, onReviewQuote }: { flow: BookingFlow; onReviewQuote?: () => void }) {
   const { t } = useTexT()
@@ -429,7 +430,7 @@ export function ExtraSoldOutNotice({ flow, onReviewQuote }: { flow: BookingFlow;
           ))}
         </ul>
       )}
-      <p className="mt-1 text-xs">{t("crs.book.extra_sold_out_hint")}</p>
+      <p className="mt-1 text-xs">{t(flow.extrasTogether ? "crs.book.extra_sold_out_together" : "crs.book.extra_sold_out_hint")}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {onReviewQuote && (
           <Button size="sm" variant="secondary" onClick={onReviewQuote}>

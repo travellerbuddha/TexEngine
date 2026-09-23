@@ -442,6 +442,7 @@
   "errors.seeAvailable": "Zobacz dostępne pokoje",
   "errors.extraSoldOutTitle": "Dodatek nie jest już dostępny",
   "errors.extraSoldOutBody": "Wybór pokoju zostaje zachowany — sprawdź dodatki i kontynuuj.",
+  "errors.extraSoldOutTogether": "Każdy pokój osobno może go mieć, ale razem Twoje pokoje potrzebują więcej, niż zostało. Usuń dodatek z jednego z pokoi, aby kontynuować.",
   "errors.reviewExtras": "Sprawdź dodatki",
   "errors.expiredTitle": "Ceny wymagają odświeżenia",
   "errors.expiredBody": "Oferty są ważne przez ograniczony czas. Sprawdzimy aktualną cenę tych samych pokoi — Twoje dane zostaną zachowane.",

@@ -10,7 +10,7 @@
   "other": "Apply to {count} cells"
  },
  "inventory.bulk.changes": "Changes",
- "inventory.bulk.confirm_body": "{days} day(s) × {rooms} room type(s) = {cells} cells will be updated.",
+ "inventory.bulk.confirm_body": "Days: {days} × room types: {rooms} = cells to update: {cells}.",
  "inventory.bulk.confirm_title": "Please confirm",
  "inventory.bulk.days_selected": {
   "one": "{count} day selected",
@@ -46,7 +46,7 @@
  "inventory.extras.change.capacity_bad": "Enter a whole number, 0 or more.",
  "inventory.extras.change.capacity_hint": "Empty = unchanged. 0 = back to the extra's default daily capacity.",
  "inventory.extras.change.close": "Close for sale",
- "inventory.extras.change.confirm_body": "{days} day(s) × {extras} extra(s) = {cells} cells will be updated.",
+ "inventory.extras.change.confirm_body": "Days: {days} × extras: {extras} = cells to update: {cells}.",
  "inventory.extras.change.done": {
   "one": "{count} cell updated",
   "other": "{count} cells updated"

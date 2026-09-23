@@ -76,16 +76,17 @@ export function extraStock(
 
 type Refusal = { kind: "sold_out" | "few_left" | "closed"; date: string } | { kind: "other" }
 
-// the quote's reasons for a limited extra it could not add (pricing/extras.py capacity_refusal)
+// the quote's reasons for a limited extra it could not add (pricing/extras.py capacity_refusal);
+// guest endpoints say "not enough left on D" (guest_reason), staff ones "only N left on D"
 const SOLD_OUT_ON = /^sold out on (\d{4}-\d{2}-\d{2})$/i
-const ONLY_LEFT_ON = /^only \d+ left on (\d{4}-\d{2}-\d{2})$/i
+const NOT_ENOUGH_ON = /^(?:not enough|only \d+) left on (\d{4}-\d{2}-\d{2})$/i
 const CLOSED_ON = /^closed on (\d{4}-\d{2}-\d{2})$/i
 
 export function parseRefusal(reason: string | null | undefined): Refusal {
   const r = (reason ?? "").trim()
   let m = SOLD_OUT_ON.exec(r)
   if (m) return { kind: "sold_out", date: m[1] }
-  m = ONLY_LEFT_ON.exec(r)
+  m = NOT_ENOUGH_ON.exec(r)
   if (m) return { kind: "few_left", date: m[1] }
   m = CLOSED_ON.exec(r)
   if (m) return { kind: "closed", date: m[1] }
