@@ -8,10 +8,13 @@
 - a payment provider's API key is a write-only encrypted secret.
 """
 
+import json
 
 import frappe
+from frappe.utils import add_to_date, now_datetime
 
 from kamra.tex.api import crm as crm_api
+from kamra.tex.crm import service as crm
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import (
@@ -73,3 +76,55 @@ class TestSecurityHygieneG83(TexTestCase):
 		self.as_user(self.outsider)                     # the other hotel's staff do not see this guest at all
 		with self.assertRaises(frappe.PermissionError):
 			crm_api.log_communication(guest=guest, channel="Phone", booking=foreign.name)
+
+	# ── 2. marketing consent from an anonymous booking ────────────────────
+
+	def test_g83_an_anonymous_booker_cannot_grant_consent_on_an_existing_profile(self):
+		self.as_user("Administrator")
+		existing = frappe.get_doc({"doctype": "Guest", "first_name": "Ada", "last_name": "Existing",
+		                           "email": "g83-ada@example.com", "tex_enterprise": self.f["enterprise"]}
+		                          ).insert(ignore_permissions=True)
+		booked = guest_books(session="g83-consent-a", guest={**GUEST, "email": "g83-ada@example.com",
+		                                                     "consent_email": 1, "consent_sms": 1})
+		self.as_user("Administrator")
+		self.assertEqual(frappe.db.get_value("TEX Booking", booked["booking"], "booker_guest"), existing.name)
+		g = frappe.db.get_value("Guest", existing.name, ["tex_consent_email", "tex_consent_sms"], as_dict=True)
+		self.assertEqual((g.tex_consent_email, g.tex_consent_sms), (0, 0))       # typing an e-mail grants nothing
+		asked = frappe.get_all("TEX Audit Event", filters={"action": "guest.consent_requested",
+		                                                   "reference_name": existing.name}, pluck="new_value")
+		self.assertEqual(len(asked), 1)                                          # the request is on record
+		self.assertIn(booked["booking"], asked[0])
+		self.assertIn("tex_consent_email", asked[0])
+		self.as_user(self.agent)                        # and the hotel sees it, to confirm on a verified channel
+		history = crm.profile(existing.name)["consent_history"]
+		self.assertEqual([(h["action"], h["booking"]) for h in history],
+		                 [("guest.consent_requested", booked["booking"])])
+		self.assertEqual(json.loads(history[0]["new_value"]), {"tex_consent_email": True, "tex_consent_sms": True})
+		# a profile the booking creates records the booker's own consent, on the record
+		fresh = guest_books(session="g83-consent-b", guest={**GUEST, "email": "g83-new@example.com",
+		                                                    "consent_email": 1})
+		self.as_user("Administrator")
+		new_guest = frappe.db.get_value("TEX Booking", fresh["booking"], "booker_guest")
+		self.assertNotEqual(new_guest, existing.name)
+		self.assertEqual(frappe.db.get_value("Guest", new_guest, ["tex_consent_email", "tex_consent_source"]),
+		                 (1, "booking"))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "guest.consent", "reference_name": new_guest}))
+		# abandoned-payment recovery follows the profile's consent, not the anonymous tick
+		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
+		left = {r.session_id: r for r in frappe.get_all(
+			"TEX Abandoned Booking", filters={"session_id": ("in", ["g83-consent-a", "g83-consent-b"])},
+			fields=["session_id", "guest", "email", "consent_marketing"])}
+		self.assertEqual((left["g83-consent-a"].guest, left["g83-consent-a"].email,
+		                  left["g83-consent-a"].consent_marketing), (None, None, 0))
+		self.assertEqual((left["g83-consent-b"].guest, left["g83-consent-b"].consent_marketing), (new_guest, 1))
+		# staff, who took the guest's word and are accountable for it, still record it on a known profile
+		from kamra.tex.services import booking as booking_svc
+
+		self.as_user(self.agent)
+		name, granted, requested = booking_svc.resolve_guest(
+			{**GUEST, "email": "g83-ada@example.com", "consent_email": True}, property=fx.PROPERTY, market="DE",
+			language="en", staff=True)
+		self.assertEqual((name, granted, requested), (existing.name, ["tex_consent_email"], []))
+		# withdrawing stays one step: staff record it in the CRM
+		crm_api.update_guest(existing.name, {"tex_consent_email": 0}, consent_source="guest asked by phone")
+		self.assertEqual(frappe.db.get_value("Guest", existing.name, "tex_consent_email"), 0)

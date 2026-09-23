@@ -114,6 +114,8 @@
   "one": "{count} Änderung erfassen…",
   "other": "{count} Änderungen erfassen…"
  },
+ "crm.consent.requested": "angefragt, nicht übernommen",
+ "crm.consent.requested_hint": "In einer Online-Buchung mit der E-Mail-Adresse oder Telefonnummer dieses Gastes angefragt. Nicht übernommen: erfassen Sie sie, sobald der Gast sie über einen verifizierten Kanal bestätigt.",
  "crm.consent.saved": "Einwilligung gespeichert",
  "crm.consent.source": "Quelle",
  "crm.consent.source.booking": "Buchungsmaschine",

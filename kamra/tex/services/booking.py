@@ -77,15 +77,32 @@ def _clean_guest(g: dict) -> dict:
 	return g
 
 
+CONSENT_FIELDS = ("tex_consent_email", "tex_consent_sms", "tex_consent_whatsapp")
+
+
 def find_or_create_guest(g: dict, *, property: str, market: str | None, language: str | None) -> str:
+	"""The guest profile for a booking made on the guest's behalf (channels): no consent."""
+	return resolve_guest({k: v for k, v in g.items() if not k.startswith("consent_")}, property=property,
+	                     market=market, language=language, staff=False)[0]
+
+
+def resolve_guest(g: dict, *, property: str, market: str | None, language: str | None,
+                  staff: bool) -> tuple[str, list[str], list[str]]:
+	"""→ (guest profile, consent granted now, consent asked for but not applied).
+
+	Marketing consent is only ever granted explicitly, never implied (ADR-046). It is
+	recorded on a profile this booking creates, and by staff, who took the guest's word and
+	are accountable for it. An anonymous booker who types the e-mail or phone of an EXISTING
+	profile does not prove to be its owner, so that profile's consent is left as it is: the
+	request is returned for the caller to keep on record, and the hotel confirms it on a
+	verified channel (CRM). Nothing here ever withdraws consent."""
 	enterprise = frappe.db.get_value("Property", property, "tex_enterprise")
 	existing = None
 	if g.get("email"):
 		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": ("in", [enterprise, "", None])})
 	if not existing and g.get("phone"):
 		existing = frappe.db.get_value("Guest", {"phone": g["phone"], "tex_enterprise": ("in", [enterprise, "", None])})
-	consent = {k: 1 for k in ("tex_consent_email", "tex_consent_sms", "tex_consent_whatsapp")
-	           if g.get(k.replace("tex_", ""))}
+	asked = [k for k in CONSENT_FIELDS if g.get(k.replace("tex_", ""))]
 	if existing:
 		doc = frappe.get_doc("Guest", existing)
 		changed = False
@@ -94,25 +111,40 @@ def find_or_create_guest(g: dict, *, property: str, market: str | None, language
 			if v and not doc.get(f):
 				doc.set(f, v)
 				changed = True
-		if consent:   # consent only ever granted explicitly here, never implied
-			for k in consent:
+		new = [k for k in asked if not doc.get(k)]
+		if new and staff:
+			for k in new:
 				doc.set(k, 1)
 			doc.tex_consent_updated_at = now_datetime()
-			doc.tex_consent_source = "booking"
+			doc.tex_consent_source = "booking (staff)"
 			changed = True
 		if changed:
 			doc.save(ignore_permissions=True)
-		return doc.name
+		return (doc.name, new, []) if staff else (doc.name, [], new)
 	doc = frappe.get_doc({
 		"doctype": "Guest", "first_name": g["first_name"], "last_name": g["last_name"], "email": g.get("email"),
 		"phone": g.get("phone"), "nationality": g.get("nationality"),
 		"date_of_birth": g.get("date_of_birth") or None, "tex_enterprise": enterprise,
 		"tex_language": language, "tex_market": market,
 		"tex_country": g.get("country") if g.get("country") and frappe.db.exists("Country", g.get("country")) else None,
-		**consent, **({"tex_consent_updated_at": now_datetime(), "tex_consent_source": "booking"} if consent else {}),
+		**dict.fromkeys(asked, 1),
+		**({"tex_consent_updated_at": now_datetime(),
+		    "tex_consent_source": "booking (staff)" if staff else "booking"} if asked else {}),
 	})
 	doc.insert(ignore_permissions=True)
-	return doc.name
+	return doc.name, asked, []
+
+
+def _record_consent(guest: str, booking: str, property: str, granted: list[str], requested: list[str],
+                    staff: bool) -> None:
+	"""Consent given with a booking is on the guest's consent record (ADR-046); a request that
+	was not applied is on it too, for the hotel to confirm on a verified channel."""
+	if granted:
+		audit("guest.consent", reference_doctype="Guest", reference_name=guest, property=property,
+		      new={**dict.fromkeys(granted, True), "booking": booking}, reason="staff" if staff else "booking")
+	if requested:
+		audit("guest.consent_requested", reference_doctype="Guest", reference_name=guest, property=property,
+		      new={**dict.fromkeys(requested, True), "booking": booking}, reason="booking")
 
 
 def amount_due_now(result: dict, method: str | None) -> tuple[D, str]:
@@ -325,7 +357,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	status = "Confirmed" if confirm else "Pending Payment"
 	hold_until = None if confirm else add_to_date(now, minutes=int(
 		frappe.db.get_single_value("TEX Settings", "hold_minutes") or 20))
-	guest_name = find_or_create_guest(guest, property=property, market=market, language=language)
+	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
+	                                                               language=language, staff=staff)
 	booker = booker or {}
 	token, token_digest = new_manage_token()
 	manage_days = int(frappe.db.get_single_value("TEX Settings", "manage_link_days") or 365)
@@ -345,6 +378,7 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		"booking_site": booking_site,
 	})
 	booking.insert(ignore_permissions=True)
+	_record_consent(guest_name, booking.name, property, consent_granted, consent_requested, staff)
 
 	reservations = []
 	priced: list[tuple[dict, str]] = []

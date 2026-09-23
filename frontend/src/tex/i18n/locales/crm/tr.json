@@ -114,6 +114,8 @@
   "one": "{count} değişikliği kaydet…",
   "other": "{count} değişikliği kaydet…"
  },
+ "crm.consent.requested": "istendi, uygulanmadı",
+ "crm.consent.requested_hint": "Bu misafirin e-postası veya telefonuyla yapılan bir online rezervasyonda istendi. Uygulanmadı: misafir doğrulanmış bir kanaldan onayladığında kaydedin.",
  "crm.consent.saved": "Onay kaydedildi",
  "crm.consent.source": "Kaynak",
  "crm.consent.source.booking": "Rezervasyon motoru",

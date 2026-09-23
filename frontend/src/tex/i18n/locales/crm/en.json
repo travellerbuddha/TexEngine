@@ -114,6 +114,8 @@
   "one": "Record {count} change…",
   "other": "Record {count} changes…"
  },
+ "crm.consent.requested": "requested, not applied",
+ "crm.consent.requested_hint": "Asked for in an online booking made with this guest's e-mail or phone. Not applied: record it once the guest confirms it on a verified channel.",
  "crm.consent.saved": "Consent recorded",
  "crm.consent.source": "Source",
  "crm.consent.source.booking": "Booking engine",

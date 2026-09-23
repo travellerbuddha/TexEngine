@@ -176,12 +176,17 @@ def profile(guest: str) -> dict:
 
 	member_of = [{"name": s.name, "segment_name": s.segment_name, "system_key": s.system_key}
 	             for s in visible_segments(via) if s.rules_json and _safe_match(facts, s.rules_json, today)]
+	# changes, and requests from online bookings that were not applied (ADR-046) for the hotel to confirm
 	consent_log = frappe.get_all("TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": guest,
-	                                                         "action": "guest.consent"},
-	                             fields=["event_time", "actor", "new_value", "reason", "source"],
+	                                                         "action": ("in", ["guest.consent",
+	                                                                           "guest.consent_requested"])},
+	                             fields=["event_time", "action", "actor", "new_value", "reason", "source"],
 	                             order_by="event_time desc", limit=50)
 	for c in consent_log:
 		c["event_time"] = str(c["event_time"])
+		change = json.loads(c["new_value"] or "{}")
+		c["booking"] = change.pop("booking", None) if isinstance(change, dict) else None
+		c["new_value"] = json.dumps(change)
 	return {"guest": d, "stays": stays, "communications": comms, "segments": member_of,
 	        "loyalty": loyalty.summary(guest), "consent_history": consent_log, "hotels": sorted(via)}
 
@@ -494,7 +499,11 @@ def detect_abandoned(now=None) -> dict:
 		if booking and consent:
 			guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
 			if guest:
-				email, phone = frappe.db.get_value("Guest", guest, ["email", "phone"])
+				email, phone, agreed = frappe.db.get_value("Guest", guest, ["email", "phone", "tex_consent_email"])
+				if not agreed:
+					# the profile's own consent decides: a tick in an anonymous booking that matched
+					# an existing profile is only a request (ADR-046)
+					consent, guest, email, phone = False, None, None, None
 		prop = next((e.property for e in events if e.property), None)
 		if not prop and qp.get("quote"):
 			prop = frappe.db.get_value("TEX Quote", qp["quote"], "property")

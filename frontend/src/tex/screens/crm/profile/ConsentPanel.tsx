@@ -148,18 +148,21 @@ export function ConsentPanel({ guest, history, canEdit, onSaved }: { guest: Gues
             <ol className="mt-2 space-y-2">
               {history.map((h, i) => {
                 const changes = safeJson<Record<string, boolean>>(h.new_value, {})
+                const requested = h.action === "guest.consent_requested"
                 return (
                   <li key={i} className="rounded-lg border border-zinc-100 px-3 py-2 text-xs">
                     <div className="flex flex-wrap items-center gap-1.5">
                       {Object.entries(changes).map(([f, v]) => (
-                        <Badge key={f} tone={v ? "success" : "neutral"}>
+                        <Badge key={f} tone={requested ? "warning" : v ? "success" : "neutral"}>
                           {(CONSENT_FIELDS as readonly string[]).includes(f) ? t(consentLabelKey(f as ConsentField)) : f}:{" "}
-                          {v ? t("crm.consent.granted") : t("crm.consent.withdrawn")}
+                          {requested ? t("crm.consent.requested") : v ? t("crm.consent.granted") : t("crm.consent.withdrawn")}
                         </Badge>
                       ))}
                     </div>
+                    {requested && <p className="mt-1 text-amber-900">{t("crm.consent.requested_hint")}</p>}
                     <p className="mt-1 text-zinc-500">
                       {dateTime(h.event_time)} · {h.actor === "Guest" ? t("crm.actor.guest") : h.actor} · {sourceLabel(t, h.reason)}
+                      {h.booking ? ` · ${h.booking}` : ""}
                     </p>
                   </li>
                 )

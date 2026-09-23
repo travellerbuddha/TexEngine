@@ -116,6 +116,8 @@
   "few": "Înregistrează {count} modificări…",
   "other": "Înregistrează {count} de modificări…"
  },
+ "crm.consent.requested": "solicitat, neaplicat",
+ "crm.consent.requested_hint": "Solicitat într-o rezervare online făcută cu e-mailul sau telefonul acestui oaspete. Neaplicat: înregistrați-l după ce oaspetele îl confirmă pe un canal verificat.",
  "crm.consent.saved": "Consimțământ înregistrat",
  "crm.consent.source": "Sursă",
  "crm.consent.source.booking": "Motor de rezervări",
