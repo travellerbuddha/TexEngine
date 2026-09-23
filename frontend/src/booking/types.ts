@@ -268,7 +268,67 @@ export interface BookingRoom {
   lines?: QuoteLine[]
   extras?: ExtraOutcome[]
   cancellation_fee_now?: Money
-  pending_change?: boolean
+  /** the guest's change of this room still waiting (for their payment or for the hotel), or
+   * { status: "noted" } for a change the hotel has not reviewed yet (G-45) */
+  pending_change?: PendingChange | null
+  /** the guest's latest change of this room and what came of it */
+  last_change?: ChangeOutcome | null
+}
+
+/** How the money of a guest's change is settled (server-decided; G-45, ADR-044):
+ * pay_now: paid online before the change applies · pay_at_hotel: applies now, the difference
+ * is paid at the hotel · balance: applies now, the open balance changes · refund: applies now,
+ * the overpayment goes back to the card · credit: applies now, kept as credit on the booking ·
+ * staff_approval: a lower price the hotel approves first · staff: due now without online
+ * payment, the hotel takes it · none: the price does not change. */
+export type SettlementKind = "pay_now" | "pay_at_hotel" | "balance" | "refund" | "credit" | "staff_approval" | "staff" | "none"
+
+export interface Settlement {
+  kind: SettlementKind
+  /** the one figure the guest is shown for this kind */
+  amount: Money
+  collect?: Money
+  refund?: Money
+  credit?: Money
+  balance_after?: Money
+  currency: string
+}
+
+export interface PendingChange {
+  request?: string
+  status: "awaiting_payment" | "requested" | "noted"
+  kind?: "pay_now" | "staff_approval" | "staff"
+  changes?: { check_in?: string; check_out?: string; adults?: number; children?: unknown[] }
+  difference?: Money
+  /** what to pay online (awaiting_payment) */
+  amount?: Money | null
+  currency?: string
+  expires_at?: string | null
+}
+
+export interface ChangeOutcome {
+  request: string
+  status: "awaiting_payment" | "requested" | "applied" | "approved" | "rejected" | "failed" | "expired" | "superseded"
+  settlement: SettlementKind | null
+  amount: Money
+  refunded: Money
+  currency: string
+}
+
+/** manage_apply / manage_change_pay */
+export interface ChangeResult {
+  status: "payment_required" | "applied" | "requested" | "processing"
+  request?: string | null
+  amount?: Money
+  currency?: string
+  expires_at?: string
+  settlement?: Settlement
+  payment?: PaymentStart
+  balance?: Money
+  paid?: Money
+  credit?: Money
+  message?: string
+  replay?: boolean
 }
 
 export interface BookingSummary {
@@ -287,6 +347,12 @@ export interface BookingSummary {
   idempotent_replay?: boolean
   hotel?: string
   self_service?: boolean
+  /** money held above the total: a change kept as credit, or a refund still to come */
+  credit?: Money
+  /** why the guest cannot change the booking yet (its own payment comes first) */
+  changes_blocked?: "PAYMENT_PENDING" | null
+  /** the hotel takes card payments online for this booking */
+  can_pay_online?: boolean
 }
 
 export interface BookResponse extends BookingSummary {
@@ -346,7 +412,9 @@ export interface Proposal {
   currency: string
   warnings: Reason[]
   lines?: QuoteLine[]
-  proposal_token: string
+  /** how the change would be settled; null when it cannot be made */
+  settlement?: Settlement | null
+  proposal_token: string | null
 }
 
 // ─── extras added to a booked stay (G-22, ADR-034) ───────────────────────

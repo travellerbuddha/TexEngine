@@ -1,19 +1,19 @@
 import { CalendarCog, CreditCard, KeyRound, Mail, Phone, Sparkles, XCircle } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams, type NavigateFunction } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { MAX_ADULTS, MAX_CHILDREN, type Party } from "../lib/criteria"
 import { parseRefusal, refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
-import { rememberPayment, returnPathFor, setItem, siteManageToken } from "../lib/storage"
+import { getItem, rememberPayment, removeItem, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment, resumeAt } from "../flow/payment"
 import { sitePath, siteUrl, useSiteSlug } from "../lib/mount"
 import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
 import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
-import type { BookingRoom, BookingSummary, PaymentStart, Proposal, Reason } from "../types"
+import type { BookingRoom, BookingSummary, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
 import { Button, Field, Textarea } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -51,6 +51,127 @@ function useFragmentToken(slug: string) {
 }
 
 type Notice = { tone: "ok" | "warn" | "bad" | "info"; title: string; body?: string } | null
+type I18nT = ReturnType<typeof useI18n>
+
+/** A change's payment started from this tab: which request it pays for (read on return). */
+const changeKey = (txn: string) => `tex.change.pay.${txn}`
+
+/** Hand a change's payment to the gateway (the booking's own payment flow). The change is
+ * made by the server once the gateway confirms the payment, never by this page. */
+function payForChange(r: ChangeResult, ctx: { currency: string; hotel?: string }, navigate: NavigateFunction): boolean {
+  const p = r.payment
+  if (!p) return false
+  rememberPayment(p, { currency: r.currency || ctx.currency, hotel: ctx.hotel, amount: r.amount })
+  if (r.request) setItem(changeKey(p.transaction), r.request)
+  const out = continuePayment(p, navigate)
+  return out === "internal" || out === "external"
+}
+
+/** What happens to the money of a proposed change, in the guest's words (server figures only). */
+function settlementText(i18n: I18nT, s: Settlement, difference: string | null): { tone: "info" | "warn"; title?: string; body: string } | null {
+  const { t, money } = i18n
+  const amount = money(s.amount, s.currency)
+  switch (s.kind) {
+    case "pay_now":
+      return { tone: "info", title: t("manage.settle.payNowTitle", { amount }), body: t("manage.settle.payNowBody", { amount }) }
+    case "pay_at_hotel":
+      return { tone: "info", body: t("manage.settle.atHotel", { amount }) }
+    case "balance":
+      if (isZero(s.amount)) return { tone: "info", body: t("manage.settle.covered") }
+      return { tone: "info", body: isNegative(difference) ? t("manage.settle.balanceDown", { amount }) : t("manage.settle.balanceUp", { amount }) }
+    case "refund":
+      return { tone: "info", body: t("manage.settle.refund", { amount }) }
+    case "credit":
+      return { tone: "info", body: t("manage.settle.credit", { amount }) }
+    case "staff_approval":
+      return { tone: "info", title: t("manage.lowerTitle"), body: t("manage.lowerBody") }
+    case "staff":
+      return { tone: "warn", title: t("manage.settle.staffTitle"), body: t("manage.settle.staff", { amount }) }
+    default:
+      return null
+  }
+}
+
+/** The notice after the guest confirmed a change (server figures only). */
+function resultNotice(i18n: I18nT, r: ChangeResult, currency: string): Notice {
+  const { t, money } = i18n
+  const s = r.settlement
+  const amount = s ? money(s.amount, s.currency || currency) : ""
+  if (r.status === "processing") return { tone: "info", title: t("manage.done.processingTitle"), body: t("manage.done.processingBody") }
+  if (r.status === "requested")
+    return s?.kind === "staff"
+      ? { tone: "info", title: t("manage.requestedTitle"), body: t("manage.done.staff", { amount }) }
+      : { tone: "info", title: t("manage.requestedTitle"), body: t("manage.requestedBody") }
+  const title = t("manage.appliedTitle")
+  switch (s?.kind) {
+    case "pay_now":
+      return { tone: "ok", title, body: t("manage.done.paid", { amount }) }
+    case "pay_at_hotel":
+      return { tone: "ok", title, body: t("manage.done.atHotel", { amount }) }
+    case "refund":
+      return { tone: "ok", title, body: t("manage.done.refund", { amount }) }
+    case "staff":
+      return { tone: "ok", title, body: t("manage.done.refundByHotel", { amount }) }
+    case "credit":
+      return { tone: "ok", title, body: t("manage.done.credit", { amount }) }
+  }
+  return { tone: "ok", title, body: r.balance && isPositive(r.balance) ? t("manage.appliedBalance", { amount: money(r.balance, r.currency || currency) }) : t("manage.appliedBody") }
+}
+
+/** Back from the payment page of a change: what came of it, as the server has it now. */
+function changeReturnNotice(i18n: I18nT, data: BookingSummary, request: string, payStatus: string | null): Notice {
+  const { t, money } = i18n
+  const c = data.rooms.map((r) => r.last_change).find((x) => x?.request === request)
+  if (!c) return null
+  const amount = money(c.amount, c.currency)
+  switch (c.status) {
+    case "applied":
+    case "approved":
+      return { tone: "ok", title: t("manage.return.appliedTitle"), body: t("manage.return.appliedBody", { amount }) }
+    case "failed":
+      return { tone: "bad", title: t("manage.return.failedTitle"), body: t("manage.return.failedBody") }
+    case "expired":
+    case "superseded":
+      return { tone: "bad", title: t("manage.return.voidTitle"), body: t("manage.return.voidBody") }
+    case "awaiting_payment":
+      return payStatus === "failed" || payStatus === "cancelled"
+        ? { tone: "bad", title: t("manage.return.declinedTitle"), body: t("manage.return.declinedBody") }
+        : { tone: "warn", title: t("confirm.verifyingTitle"), body: t("confirm.verifyingBody") }
+  }
+  return null
+}
+
+/** A guest's change of a room still waiting: for their payment (with a way to pay), or for the hotel. */
+function PendingChangeNotice({ room, change, currency, onPay, paying }: { room: BookingRoom; change: PendingChange; currency: string; onPay: () => void; paying: boolean }) {
+  const { t, money, range } = useI18n()
+  const name = room.room_type_name ?? room.room_type
+  if (change.status === "awaiting_payment" && change.amount) {
+    const amount = money(change.amount, change.currency || currency)
+    const ch = change.changes ?? {}
+    const dates = range(ch.check_in ?? room.check_in, ch.check_out ?? room.check_out)
+    return (
+      <Alert
+        tone="warn"
+        title={t("manage.pending.payTitle", { name })}
+        actions={
+          <Button onClick={onPay} busy={paying}>
+            <CreditCard className="size-4" aria-hidden />
+            {t("manage.pending.payButton", { amount })}
+          </Button>
+        }
+      >
+        {t("manage.pending.payBody", { amount, dates })}
+      </Alert>
+    )
+  }
+  if (change.status === "requested")
+    return (
+      <Alert tone="info" title={t("manage.pending.requestTitle", { name })}>
+        {change.kind === "staff" && change.amount ? t("manage.done.staff", { amount: money(change.amount, change.currency || currency) }) : t("manage.requestedBody")}
+      </Alert>
+    )
+  return null
+}
 
 /** Reservation statuses extras can still be added to (services/addons.py OPEN_STATUSES). */
 const EXTRAS_OPEN = new Set(["Confirmed", "Pending Payment", "Held"])
@@ -113,9 +234,11 @@ function CancelDialog({ room, currency, token, onClose, onDone }: { room: Bookin
   )
 }
 
-function ChangeDialog({ room, currency, token, onClose, onDone }: { room: BookingRoom; currency: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
+function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room: BookingRoom; currency: string; hotel?: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
   const i18n = useI18n()
   const { t, money } = i18n
+  const { site } = useSite()
+  const navigate = useNavigate()
   // a limited extra no longer available on the new dates ("Spa: sold out on 2027-06-12" or
   // "Spa: not enough left on 2027-06-12"; guests never see how many are left, G-19)
   const warningText = (w: Reason) => {
@@ -157,17 +280,25 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
   }
 
   const apply = async () => {
-    if (!proposal) return
+    if (!proposal?.proposal_token) return
     setBusy(true)
     setError(null)
     try {
-      const r = await pub<{ status: string; message?: string; balance?: string; difference?: string; currency?: string }>("manage_apply", {
+      const r = await pub<ChangeResult>("manage_apply", {
         token,
         proposal_token: proposal.proposal_token,
         note: note.trim() || undefined,
+        // the gateway brings the guest back here; the server applies the change once it is paid
+        return_url: siteUrl(site.slug, "manage"),
       })
-      if (r.status === "requested") onDone({ tone: "info", title: t("manage.requestedTitle"), body: t("manage.requestedBody") })
-      else onDone({ tone: "ok", title: t("manage.appliedTitle"), body: r.balance && isPositive(r.balance) ? t("manage.appliedBalance", { amount: money(r.balance, r.currency || currency) }) : t("manage.appliedBody") })
+      if (r.status === "payment_required") {
+        if (!payForChange(r, { currency, hotel }, navigate)) {
+          setBusy(false)
+          setError(t("errors.generic"))
+        }
+        return
+      }
+      onDone(resultNotice(i18n, r, currency))
     } catch (e) {
       setBusy(false)
       if (e instanceof ApiError && e.kind === "expired") {
@@ -183,6 +314,15 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
 
   const lower = !!proposal?.difference && isNegative(proposal.difference)
   const higher = !!proposal?.difference && isPositive(proposal.difference)
+  const settlement = proposal?.settlement ?? null
+  const settleAmount = settlement ? money(settlement.amount, settlement.currency) : ""
+  const confirmLabel =
+    settlement?.kind === "pay_now"
+      ? t("manage.settle.payNowButton", { amount: settleAmount })
+      : settlement?.kind === "staff_approval" || settlement?.kind === "staff"
+        ? t("manage.sendRequest")
+        : t("manage.confirmChange")
+  const explain = settlement ? settlementText(i18n, settlement, proposal?.difference ?? null) : null
   return (
     <Dialog
       open
@@ -197,8 +337,8 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
               <Button variant="secondary" onClick={() => setProposal(null)}>
                 {t("manage.editAgain")}
               </Button>
-              <Button onClick={apply} busy={busy} disabled={!proposal.sellable}>
-                {lower ? t("manage.sendRequest") : t("manage.confirmChange")}
+              <Button onClick={apply} busy={busy} disabled={!proposal.sellable || !proposal.proposal_token}>
+                {confirmLabel}
               </Button>
             </>
           ) : (
@@ -270,8 +410,11 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
                   {proposal.warnings.some((w) => w.code === "EXTRA_SOLD_OUT") && ` ${t("manage.extraDropped")}`}
                 </Alert>
               )}
-              {higher && <p className="text-sm text-soft">{t("manage.higherNote")}</p>}
-              {lower && <Alert tone="info" title={t("manage.lowerTitle")}>{t("manage.lowerBody")}</Alert>}
+              {explain && (
+                <Alert tone={explain.tone} title={explain.title} live={false}>
+                  {explain.body}
+                </Alert>
+              )}
               <Field label={t("manage.note")} optional={t("common.optional")}>
                 <Textarea value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} rows={2} />
               </Field>
@@ -289,7 +432,8 @@ function ChangeDialog({ room, currency, token, onClose, onDone }: { room: Bookin
 }
 
 function Manage({ token }: { token: string | null }) {
-  const { t, money, lang } = useI18n()
+  const i18n = useI18n()
+  const { t, money, lang } = i18n
   const { site } = useSite()
   const navigate = useNavigate()
   const [sp] = useSearchParams()
@@ -300,8 +444,12 @@ function Manage({ token }: { token: string | null }) {
   const [change, setChange] = useState<BookingRoom | null>(null)
   const [addExtras, setAddExtras] = useState<BookingRoom | null>(null)
   const [paying, setPaying] = useState(false)
+  const [payingChange, setPayingChange] = useState<string | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const payStatus = sp.get("status")
+  const payTxn = sp.get("payment")
+  // a change's payment started from this tab: the page says what came of the change
+  const changeRequest = payTxn ? getItem(changeKey(payTxn)) : null
 
   const load = useCallback(async () => {
     if (!token) return
@@ -327,10 +475,20 @@ function Manage({ token }: { token: string | null }) {
     document.title = `${t("manage.title")} · ${site.name}`
   }, [t, site.name])
   useEffect(() => {
+    if (changeRequest) return
     if (payStatus === "succeeded") setNotice({ tone: "ok", title: t("manage.paidTitle") })
     else if (payStatus === "failed") setNotice({ tone: "bad", title: t("confirm.failedTitle"), body: t("confirm.failedBody") })
     else if (payStatus === "pending" || payStatus === "unverified") setNotice({ tone: "warn", title: t("confirm.verifyingTitle"), body: t("confirm.verifyingBody") })
-  }, [payStatus, t])
+  }, [payStatus, t, changeRequest])
+  // back from a change's payment: the change as the server has it now (made once the gateway
+  // confirmed the payment, or not made and the payment refunded)
+  useEffect(() => {
+    if (!changeRequest || !payTxn || !data) return
+    const n = changeReturnNotice(i18n, data, changeRequest, payStatus)
+    if (n) setNotice(n)
+    const c = data.rooms.map((r) => r.last_change).find((x) => x?.request === changeRequest)
+    if (c && c.status !== "awaiting_payment") removeItem(changeKey(payTxn))
+  }, [changeRequest, payTxn, data, payStatus, i18n])
 
   const done = (n: Notice) => {
     setCancel(null)
@@ -355,6 +513,33 @@ function Manage({ token }: { token: string | null }) {
     }
   }
 
+  const payChange = async (room: BookingRoom) => {
+    const request = room.pending_change?.request
+    if (!token || !data || !request) return
+    setPayingChange(request)
+    try {
+      const r = await pub<ChangeResult>("manage_change_pay", { token, request, return_url: siteUrl(site.slug, "manage") })
+      if (r.status === "payment_required") {
+        if (!payForChange(r, { currency: data.currency, hotel: data.hotel }, navigate)) {
+          setPayingChange(null)
+          setNotice({ tone: "bad", title: t("confirm.retryFailed"), body: t("errors.generic") })
+        }
+        return
+      }
+      setPayingChange(null)
+      done(resultNotice(i18n, r, data.currency))
+    } catch (e) {
+      setPayingChange(null)
+      // its price check expired: the guest makes the change again
+      setNotice({
+        tone: "bad",
+        title: t("confirm.retryFailed"),
+        body: e instanceof ApiError && e.kind === "expired" ? t("manage.pending.expired") : e instanceof ApiError ? e.message : undefined,
+      })
+      void load()
+    }
+  }
+
   if (!token)
     return (
       <EmptyState icon={<KeyRound className="size-8" aria-hidden />} title={t("manage.noTokenTitle")}>
@@ -371,6 +556,9 @@ function Manage({ token }: { token: string | null }) {
 
   const active = (r: BookingRoom) => !["Cancelled", "Checked Out", "No Show", "Checked In"].includes(r.status)
   const owes = data.status !== "Cancelled" && data.payment_status !== "Pay at Hotel" && (data.status === "Pending Payment" ? isPositive(data.due_now) : isPositive(data.balance))
+  // pay at the hotel: what is due there, and the choice to pay it online when the hotel takes cards
+  const atHotel = data.status !== "Cancelled" && data.payment_status === "Pay at Hotel" && isPositive(data.balance)
+  const waiting = data.rooms.filter((r) => r.pending_change && r.pending_change.status !== "noted")
   const c = site.contact || {}
   return (
     <div className="space-y-6">
@@ -407,8 +595,34 @@ function Manage({ token }: { token: string | null }) {
           }
         >
           {data.status === "Pending Payment" ? t("manage.paymentDueBody") : t("manage.balanceBody", { amount: money(data.balance, data.currency) })}
+          {data.changes_blocked === "PAYMENT_PENDING" && ` ${t("manage.changesAfterPayment")}`}
         </Alert>
       )}
+      {atHotel && (
+        <Alert
+          tone="info"
+          title={t("manage.atHotelTitle")}
+          actions={
+            data.can_pay_online ? (
+              <Button onClick={pay} busy={paying} variant="secondary">
+                <CreditCard className="size-4" aria-hidden />
+                {t("confirm.payNow")}
+              </Button>
+            ) : undefined
+          }
+        >
+          {t("manage.atHotelBody", { amount: money(data.balance, data.currency) })}
+          {data.can_pay_online && ` ${t("manage.atHotelOnline")}`}
+        </Alert>
+      )}
+      {data.credit && isPositive(data.credit) && (
+        <Alert tone="info" title={t("manage.creditTitle", { amount: money(data.credit, data.currency) })}>
+          {t("manage.creditBody")}
+        </Alert>
+      )}
+      {waiting.map((r) => (
+        <PendingChangeNotice key={r.reservation} room={r} change={r.pending_change!} currency={data.currency} onPay={() => void payChange(r)} paying={payingChange === r.pending_change?.request} />
+      ))}
       <section className="bk-card p-4 sm:p-6" aria-labelledby="bk-manage-hotel">
         <h2 id="bk-manage-hotel" className="text-lg">
           {data.hotel ?? site.name}
@@ -425,10 +639,12 @@ function Manage({ token }: { token: string | null }) {
               actions={
                 data.self_service && active(r) ? (
                   <>
-                    <Button variant="secondary" size="sm" onClick={() => setChange(r)}>
-                      <CalendarCog className="size-4" aria-hidden />
-                      {t("manage.change")}
-                    </Button>
+                    {!data.changes_blocked && (
+                      <Button variant="secondary" size="sm" onClick={() => setChange(r)}>
+                        <CalendarCog className="size-4" aria-hidden />
+                        {t("manage.change")}
+                      </Button>
+                    )}
                     {EXTRAS_OPEN.has(r.status) && (
                       <Button variant="secondary" size="sm" onClick={() => setAddExtras(r)}>
                         <Sparkles className="size-4" aria-hidden />
@@ -467,7 +683,7 @@ function Manage({ token }: { token: string | null }) {
         </Alert>
       )}
       {cancel && <CancelDialog room={cancel} currency={data.currency} token={token} onClose={() => setCancel(null)} onDone={done} />}
-      {change && <ChangeDialog room={change} currency={data.currency} token={token} onClose={() => setChange(null)} onDone={done} />}
+      {change && <ChangeDialog room={change} currency={data.currency} hotel={data.hotel} token={token} onClose={() => setChange(null)} onDone={done} />}
       {addExtras && <AddExtrasDialog room={addExtras} currency={data.currency} token={token} onClose={() => setAddExtras(null)} onDone={done} />}
     </div>
   )

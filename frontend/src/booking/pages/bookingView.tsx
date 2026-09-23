@@ -134,7 +134,13 @@ export function RoomBlock({ room, index, count, currency, actions, bookingStatus
       {room.refundable === false && <p className="mt-1 text-xs text-muted">{t("policy.nonRefundable")}</p>}
       {room.pending_change && (
         <p className="mt-2">
-          <Badge tone="warn">{t("manage.pendingChange")}</Badge>
+          <Badge tone="warn">
+            {room.pending_change.status === "awaiting_payment"
+              ? t("manage.pendingPayment")
+              : room.pending_change.status === "requested"
+                ? t("manage.pendingRequest")
+                : t("manage.pendingChange")}
+          </Badge>
         </p>
       )}
       {!!room.lines?.length && (
@@ -179,6 +185,13 @@ export function Totals({ b }: { b: BookingSummary }) {
         <div className="flex justify-between gap-3">
           <dt className="text-soft">{b.payment_status === "Pay at Hotel" ? t("booking.payAtHotel") : t("booking.balance")}</dt>
           <dd className="tabular-nums">{money(b.balance, b.currency)}</dd>
+        </div>
+      )}
+      {/* paid above the total: a change kept as credit, or a refund on its way (G-45) */}
+      {b.credit && isPositive(b.credit) && (
+        <div className="flex justify-between gap-3">
+          <dt className="text-soft">{t("booking.credit")}</dt>
+          <dd className="tabular-nums text-ok">{money(b.credit, b.currency)}</dd>
         </div>
       )}
       <div className="flex justify-between gap-3 text-xs text-muted">
