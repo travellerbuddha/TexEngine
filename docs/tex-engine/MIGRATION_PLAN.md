@@ -17,7 +17,10 @@ preserve IDs, keep compatibility, test the migration path, never casually delete
 
 Implemented as: `p01_foundation` (T1–T3), `p02_access_grants` (T4), `p03_indexes` (T10),
 `p04_lock_legacy_prices` (T9), `p05_vouchers_to_promotions` (T6), `p06_experiences_to_extras`
-(T7), `p07_forget_payment_link_urls` (security clean-up). T8 is the opt-in API
+(T7), `p07_forget_payment_link_urls` (security clean-up), `p08_confirm_unpaid_capability` (adds
+`reservation.confirm_unpaid` to the seeded admin/revenue/finance profiles, ADR-025) and
+`p09_guest_stats_completed_stays` (recomputes guest stats: completed stays only, lifetime value
+with its currency in the new `Guest.tex_lifetime_currency`). T8 is the opt-in API
 `kamra.tex.api.contracts.legacy_draft` (`kamra/tex/commercial/legacy.py`). T5 is not needed:
 TEX boards are contract-level codes (RO/BB/HB/FB/AI/UAI), independent of legacy Meal Plans.
 Tests: `kamra/tex/tests/integration/test_migrations_notify.py`.
