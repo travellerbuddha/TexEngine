@@ -320,5 +320,12 @@
  "res.snap.promotions": "Promocje",
  "res.snap.title": "Zablokowana cena",
  "res.resend.queued": "Potwierdzenie dla {email} dodano do kolejki",
- "res.resend.queued_hint": "E-mail jest w kolejce wychodzącej, jeszcze niewysłany. Oś czasu gościa pokaże, kiedy został wysłany lub dlaczego się nie udało."
+ "res.resend.queued_hint": "E-mail jest w kolejce wychodzącej, jeszcze niewysłany. Oś czasu gościa pokaże, kiedy został wysłany lub dlaczego się nie udało.",
+ "res.gcr.staff.refund_by_staff": "Do zwrotu przez hotel:",
+ "res.gcr.staff.verify_refund_at_gateway": "Zwrot do sprawdzenia w bramce płatności:",
+ "res.gcr.staff.unknown_refund": "Bramka płatności nigdy nie potwierdziła zwrotu {refund}: sprawdź go tam, zanim zwrócisz ponownie.",
+ "res.gcr.verify_body": "Bramka płatności nie odpowiedziała na zwrot {refund}. Sprawdź w niej, czy został wykonany, i zapisz wynik.",
+ "res.gcr.verify_choice": "Co zrobiła bramka płatności",
+ "res.gcr.verify_succeeded": "Zwróciła pieniądze",
+ "res.gcr.verify_failed": "Nie zwróciła"
 }

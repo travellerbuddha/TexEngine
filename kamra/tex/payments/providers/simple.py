@@ -46,7 +46,7 @@ class MockProvider(PaymentProvider):
 		return Outcome(status="Succeeded", provider_ref=f"MOCK-{transaction}", raw_status="APPROVED",
 		               card_brand="TESTCARD", card_last4="4242")
 
-	def refund(self, provider_ref: str, amount: Decimal, currency: str) -> Outcome:
+	def refund(self, provider_ref: str, amount: Decimal, currency: str, *, reference: str | None = None) -> Outcome:
 		return Outcome(status="Succeeded", provider_ref=f"{provider_ref}-R", amount=amount, currency=currency,
 		               raw_status="REFUNDED")
 

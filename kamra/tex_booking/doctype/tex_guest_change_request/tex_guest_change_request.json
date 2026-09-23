@@ -28,6 +28,10 @@
   "settlement_amount",
   "refunded_amount",
   "settle_pending",
+  "staff_open",
+  "staff_amount",
+  "staff_reason",
+  "unknown_refund",
   "gcr_column_3",
   "revision",
   "error",
@@ -187,6 +191,35 @@
    "read_only": 1
   },
   {
+   "fieldname": "staff_open",
+   "fieldtype": "Check",
+   "label": "Money waits for staff",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "staff_amount",
+   "fieldtype": "Currency",
+   "label": "For staff to settle",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "staff_reason",
+   "fieldtype": "Select",
+   "label": "Why staff",
+   "options": "\nRefund by staff\nVerify refund at gateway",
+   "read_only": 1
+  },
+  {
+   "fieldname": "unknown_refund",
+   "fieldtype": "Link",
+   "label": "Refund to verify",
+   "options": "TEX Payment Transaction",
+   "read_only": 1,
+   "description": "A refund the gateway did not confirm: check it at the gateway before refunding again"
+  },
+  {
    "fieldname": "gcr_column_3",
    "fieldtype": "Column Break"
   },
@@ -219,7 +252,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-26 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Guest Change Request",

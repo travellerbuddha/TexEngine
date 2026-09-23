@@ -243,19 +243,24 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 
 
 def apply(proposal_token: str | None, *, reason: str, override_amount=None, source: str = "Desk",
-          _guest_authorized: bool = False, _proposal: dict | None = None, _from_payment: bool = False) -> dict:
+          _guest_authorized: bool = False, _proposal: dict | None = None, _from_payment: bool = False,
+          _paid_at=None) -> dict:
 	"""``_guest_authorized``: set only by the self-service API after verifying the
 	guest's manage token owns the proposal's reservation. Guests can never override.
 
 	``_proposal``: a proposal the server verified and stored (a TEX Guest Change Request); it
 	is re-derived at the moment it was priced, so the price the guest accepted is the price
-	applied (G-45). ``_from_payment``: the guest paid for it; that holds until the proposal's
-	payment deadline (its expiry plus ``PAYMENT_GRACE_MINUTES``)."""
+	applied (G-45). ``_from_payment``: the guest paid for it (at ``_paid_at``, when the gateway
+	confirmed the charge); a payment made by the proposal's payment deadline (its expiry plus
+	``PAYMENT_GRACE_MINUTES``) applies it, whenever the job applying it runs.
+
+	Locks: the booking, then the reservation, then the inventory days: the order every path that
+	changes a TEX booking takes (review of ADR-044)."""
 	if _proposal is not None:
 		p = _proposal
 		if not p.get("pricing_sale_at") or p.get("kind") != "proposal":
 			frappe.throw(_("This change cannot be applied: its proposal carries no price time."))
-		if _from_payment and now_datetime() > payment_deadline(p):
+		if _from_payment and get_datetime(_paid_at or now_datetime()) > payment_deadline(p):
 			frappe.throw(_("The payment arrived after the price of this change expired."))
 		pin = p["pricing_sale_at"] if p["basis"] == "CURRENT" else None
 	else:
@@ -263,9 +268,12 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 			frappe.throw(_("A paid change applies from its stored proposal."))
 		p = quoting.verify(proposal_token, kind="proposal")
 		pin = None
-	# a stored proposal is applied later (a payment callback, staff approval): the reservation
-	# as it is now, read with a lock, not the caller's snapshot of it
-	res = frappe.get_doc("Reservation", p["reservation"], for_update=_proposal is not None)
+	# the booking first, then the reservation as it is now (a locking read, not the caller's
+	# snapshot of it): the lock order of every change to a TEX booking
+	booking = frappe.db.get_value("Reservation", p["reservation"], "tex_booking")
+	if booking:
+		frappe.db.get_value("TEX Booking", booking, "name", for_update=True)
+	res = frappe.get_doc("Reservation", p["reservation"], for_update=True)
 	if _guest_authorized:
 		if override_amount not in (None, ""):
 			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)

@@ -347,5 +347,6 @@
  "settings.status.reason.mail_suspended": "Отправка почты на этом сайте приостановлена.",
  "settings.status.reason.mail_failed": "Неудачных писем за {hours} ч: {count}.",
  "settings.status.reason.mail_unsent": "Ещё не отправлено писем: {count}, самое старое ждёт {minutes} мин.",
- "settings.status.reason.check_error": "Эту проверку не удалось выполнить (см. Error Log)."
+ "settings.status.reason.check_error": "Эту проверку не удалось выполнить (см. Error Log).",
+ "settings.status.reason.refund_unknown": "Возвраты, которые платёжная система так и не подтвердила: {count}. Проверьте их там, прежде чем возвращать снова."
 }

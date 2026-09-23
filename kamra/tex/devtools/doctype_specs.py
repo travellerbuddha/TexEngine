@@ -847,6 +847,13 @@ BOOKING_SPECS = [
 		F("settlement_amount", "Currency", "Settlement amount", options="currency"),
 		F("refunded_amount", "Currency", "Refunded", options="currency"),
 		F("settle_pending", "Check", "Refund queued", read_only=1),
+		# money of this change that waits for staff (review follow-up of ADR-044): a refund TEX
+		# cannot make, or one whose outcome the gateway never confirmed
+		F("staff_open", "Check", "Money waits for staff", read_only=1, in_standard_filter=1),
+		F("staff_amount", "Currency", "For staff to settle", options="currency", read_only=1),
+		F("staff_reason", "Select", "Why staff", ["", "Refund by staff", "Verify refund at gateway"], read_only=1),
+		F("unknown_refund", "Link", "Refund to verify", "TEX Payment Transaction", read_only=1,
+		  description="A refund the gateway did not confirm: check it at the gateway before refunding again"),
 		F("gcr_column_3", "Column Break"),
 		F("revision", "Link", "Revision", "TEX Reservation Revision"),
 		F("error", "Small Text", "Why it was not applied"),
@@ -854,7 +861,9 @@ BOOKING_SPECS = [
 		F("resolved_at", "Datetime", "Resolved at"),
 		F("resolution", "Small Text", "Staff note"),
 	], perms=IMMUTABLE_LOG, autoname="GCR-.YYYY.-.#####", naming_rule="Expression (old style)",
-	   sort_field="creation", in_create=True),
+	   sort_field="creation", in_create=True,
+	   # the staff fields came after the first migration: a newer stamp makes migrate load them
+	   extra={"modified": "2026-09-26 00:00:00.000000"}),
 
 	dt("TEX Booking Domain", B, [
 		F("domain", "Data", "Domain", reqd=1, in_list_view=1,

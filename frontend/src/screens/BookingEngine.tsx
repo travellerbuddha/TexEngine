@@ -416,8 +416,8 @@ export default function BookingEngine() {
                 <div className="space-y-4">
                   <ImageField
                     label="Logo"
-                    hint="Square, 512×512px · PNG or SVG with a transparent background. Shown on the booking page and invoices. Uploads save automatically."
-                    accept="image/png,image/svg+xml,image/webp"
+                    hint="Square, 512×512px · PNG or WebP with a transparent background (SVG cannot be a public file). Shown on the booking page and invoices. Uploads save automatically."
+                    accept="image/png,image/webp"
                     value={doc.logo_url ?? ""}
                     attach={{ doctype: "Property", docname: property, fieldname: "logo_url" }}
                     onChange={(v) => updateField("logo_url", v)}

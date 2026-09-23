@@ -348,7 +348,7 @@ const BOOKING_SPECS: Spec[] = [
     field: "logo_url",
     label: "Logo",
     type: "image",
-    hint: "Square, 512px+ - PNG or SVG with transparency looks best",
+    hint: "Square, 512px+ - a PNG or WebP with transparency looks best (SVG cannot be a public file)",
   },
   {
     field: "hero_image",

@@ -15,6 +15,7 @@ import io
 import json
 import os
 from unittest import mock
+from urllib.parse import urlparse
 
 import frappe
 from frappe.utils import add_to_date, now_datetime
@@ -53,7 +54,9 @@ SVG = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><script>ale
 HTML = b"<!doctype html><html><body><script>fetch('/api/method/frappe.auth.get_logged_user')</script></body></html>"
 
 
-class TestSecurityHygieneG83(TexTestCase):
+class G83Setup(TexTestCase):
+	"""Users and helpers shared by the G-83 tests (no tests of its own)."""
+
 	def setUp(self):
 		super().setUp()
 		self.p = setup_site_and_payments(self.f)
@@ -75,6 +78,16 @@ class TestSecurityHygieneG83(TexTestCase):
 	def as_user(self, user: str):
 		frappe.set_user(user)  # nosemgrep: frappe-setuser -- test context switch
 		scope.clear_cache()
+
+	def upload(self, name: str, content: bytes, **kw):
+		"""The endpoint as a browser's multipart POST reaches it."""
+		env = EnvironBuilder(method="POST", path="/api/method/kamra.tex.api.admin.upload_site_image",
+		                     data={"file": (io.BytesIO(content), name)}).get_environ()
+		with mock.patch.object(frappe.local, "request", Request(env), create=True):
+			return admin_api.upload_site_image(**kw)
+
+
+class TestSecurityHygieneG83(G83Setup):
 
 	# ── 1. CRM communication links ────────────────────────────────────────
 
@@ -157,13 +170,6 @@ class TestSecurityHygieneG83(TexTestCase):
 		self.assertEqual(frappe.db.get_value("Guest", existing.name, "tex_consent_email"), 0)
 
 	# ── 3. uploads ────────────────────────────────────────────────────────
-
-	def upload(self, name: str, content: bytes, **kw):
-		"""The endpoint as a browser's multipart POST reaches it."""
-		env = EnvironBuilder(method="POST", path="/api/method/kamra.tex.api.admin.upload_site_image",
-		                     data={"file": (io.BytesIO(content), name)}).get_environ()
-		with mock.patch.object(frappe.local, "request", Request(env), create=True):
-			return admin_api.upload_site_image(**kw)
 
 	def test_g83_uploads_are_checked_on_the_server(self):
 		self.as_user(self.editor)
@@ -332,3 +338,225 @@ class TestSecurityHygieneG83(TexTestCase):
 		self.assertEqual(frappe.db.get_value("TEX Payment Provider Account", name, "api_key"), "*" * 13)
 		self.assertEqual(frappe.get_doc("TEX Payment Provider Account", name).get_password("api_key"),
 		                 "plain-key-g83")
+
+
+def image_bytes(fmt: str, size=(96, 96), frames: int = 1) -> bytes:
+	"""A noisy image (so a cut really removes pixel data) in ``fmt``; ``frames`` > 1 makes an
+	MPO, the multi-picture JPEG iPhones save."""
+	from PIL import Image
+
+	pics = [Image.effect_noise(size, 60 + i).convert("RGB") for i in range(frames)]
+	buf = io.BytesIO()
+	if frames > 1:
+		pics[0].save(buf, format=fmt, save_all=True, append_images=pics[1:])
+	else:
+		pics[0].save(buf, format=fmt)
+	return buf.getvalue()
+
+
+RSS = b'<?xml version="1.0"?><rss version="2.0"><channel><title>x</title></channel></rss>'
+
+
+class TestSecurityHygieneG83Review(G83Setup):
+	"""The G-83 review (ADR-046, review follow-up). Each test failed on the first G-83 code."""
+
+	def site_files(self, *names):
+		for folder in ("public", "private"):
+			for n in names:
+				p = frappe.get_site_path(folder, "files", n)
+				if os.path.exists(p):
+					os.remove(p)
+
+	# ── R1. the File guard judges the name Frappe stores, against an allow-list ──
+
+	def test_r1_the_file_guard_judges_the_stored_name(self):
+		self.as_user(self.editor)
+		public = frappe.get_site_path("public", "files")
+		try:
+			for doc, stored in (({"file_name": "x.png?.html", "content": HTML}, "x.png_.html"),
+			                    ({"file_url": "/files/e%2Ehtml", "content": HTML}, "e.html"),
+			                    ({"file_name": "feed.rss", "content": RSS}, "feed.rss"),
+			                    ({"file_name": "feed.atom", "content": RSS}, "feed.atom"),
+			                    ({"file_name": "data.rdf", "content": RSS}, "data.rdf"),
+			                    ({"file_name": "f.mml", "content": RSS}, "f.mml"),
+			                    ({"file_name": "map.kml", "content": RSS}, "map.kml"),
+			                    ({"file_name": "s.xsd", "content": RSS}, "s.xsd"),
+			                    ({"file_name": "notes", "content": b"plain words"}, "notes")):
+				with self.assertRaises(frappe.ValidationError, msg=str(doc)[:60]):
+					frappe.get_doc({"doctype": "File", "is_private": 0, **doc}).insert(ignore_permissions=True)
+				self.assertFalse(os.path.exists(os.path.join(public, stored)), stored)     # never written
+			# what hotels store publicly still is: images, video, spreadsheets
+			for name, content in (("room.png", png_bytes()), ("tour.mp4", b"\0\0\0\x18ftypmp42" + b"\0" * 64),
+			                      ("rates.csv", b"date,rate\n2026-06-01,100\n")):
+				f = frappe.get_doc({"doctype": "File", "file_name": name, "content": content, "is_private": 0}
+				                   ).insert(ignore_permissions=True)
+				self.assertTrue(f.file_url.startswith("/files/"), f.file_url)
+		finally:
+			self.site_files("x.png_.html", "e.html", "feed.rss", "feed.atom", "data.rdf", "f.mml", "map.kml", "s.xsd",
+			                "notes")
+
+	# ── R2. a file kept private by its URL is private ─────────────────────
+
+	def test_r2_a_private_file_referenced_by_url_is_private(self):
+		self.as_user(self.editor)
+		kept = frappe.get_doc({"doctype": "File", "file_name": "g83-rates.xml", "content": b"<rates/>",
+		                       "is_private": 1}).insert(ignore_permissions=True)
+		# how Frappe's attach_files_to_document links an existing file: its URL only
+		ref = frappe.get_doc({"doctype": "File", "file_url": kept.file_url, "attached_to_doctype": "TEX Booking Site",
+		                      "attached_to_name": SLUG}).insert(ignore_permissions=True)
+		self.assertEqual((ref.is_private, ref.file_url), (1, kept.file_url))
+
+	# ── R3. inline images, old site images, existing public files ──────────
+
+	def test_r3_inline_svg_is_refused_with_a_reason_and_an_old_logo_keeps_the_site_savable(self):
+		from frappe.core.doctype.file.utils import extract_images_from_html
+
+		from kamra.tex.security.uploads import UploadRefused
+
+		self.as_user("Administrator")
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		svg64, png64 = base64.b64encode(SVG).decode(), base64.b64encode(png_bytes()).decode()
+		with self.assertRaises(UploadRefused) as refused:           # a public inline SVG: the save stops, saying why
+			extract_images_from_html(site, f'<p><img src="data:image/svg+xml;base64,{svg64}"></p>')
+		self.assertIn("SVG", str(refused.exception))
+		with self.assertRaises(UploadRefused):                      # a data URL cannot name its file .html
+			extract_images_from_html(site, f'<img src="data:image/png;filename=evil.html;base64,{png64}">')
+		self.assertIn('src="/files/', extract_images_from_html(site, f'<img src="data:image/png;base64,{png64}">'))
+		# a site whose logo was accepted before still saves as it is (verify_domain saves the site)
+		frappe.db.set_value("TEX Booking Site", SLUG, "logo", "/files/old hotel logo.svg")
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		site.site_name = "TEX Test Resort (renamed)"
+		site.save(ignore_permissions=True)
+		host = urlparse(frappe.utils.get_url()).hostname
+		for bad in ("/files/new.svg", "/files/../api/method/frappe.auth.get_logged_user?x=.png",
+		            "/private/files/logo.png", "/assets/kamra/logo.png", f"https://{host}/files/logo.png",
+		            f"https://{host}/api/method/frappe.auth.get_logged_user?x.png"):
+			site.reload()
+			site.hero_image = bad                                   # a changed image is checked
+			with self.assertRaises(frappe.ValidationError, msg=bad):
+				site.save(ignore_permissions=True)
+
+	def test_r3_p24_privatises_public_html_reports_the_rest_and_masks_versioned_keys(self):
+		from kamra.patches.tex import p24_g83_review as p24
+
+		self.as_user("Administrator")
+
+		def public_file(name: str, content: bytes) -> str:
+			"""A public file stored before the guard existed: on disk and on record, no hooks run."""
+			path = frappe.get_site_path("public", "files", name)
+			with open(path, "wb") as fh:
+				fh.write(content)
+			self.addCleanup(self.site_files, name)          # after tearDown's rollback has moved it back
+			f = frappe.new_doc("File")
+			f.update({"name": frappe.generate_hash(length=10), "file_name": name, "file_url": f"/files/{name}",
+			          "is_private": 0, "folder": "Home", "file_size": len(content)})
+			f.db_insert()
+			return f.name
+
+		page = public_file("g83-legacy-page.html", HTML)
+		logo = public_file("g83-legacy-logo.svg", SVG)
+		frappe.db.set_value("TEX Booking Site", SLUG, "logo", "/files/g83-legacy-logo.svg")
+		acc = frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "g83 versioned",
+		                      "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox",
+		                      "enabled": 0}).insert(ignore_permissions=True).name
+		ver = frappe.get_doc({"doctype": "Version", "ref_doctype": "TEX Payment Provider Account", "docname": acc,
+		                      "data": json.dumps({"changed": [["api_key", "old-plain-g83", "new-plain-g83"],
+		                                                      ["label", "a", "b"]]})}).insert(ignore_permissions=True)
+		with mock.patch("builtins.print") as printed:
+			p24.execute()
+			p24.execute()                                       # idempotent
+		out = str(printed.call_args_list)
+		f = frappe.db.get_value("File", page, ["is_private", "file_url"], as_dict=True)
+		self.assertEqual(f.is_private, 1)                       # HTML/script: made private
+		self.assertTrue(os.path.exists(frappe.get_site_path("private", "files", f.file_url.rsplit("/", 1)[-1])))
+		self.assertEqual(frappe.db.get_value("File", logo, "is_private"), 0)   # an SVG in use: reported only
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "file.public_active_content",
+		                                                     "reference_name": logo}))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking_site.invalid_image",
+		                                                     "reference_name": SLUG}))
+		data = json.loads(frappe.db.get_value("Version", ver.name, "data"))
+		self.assertEqual(data["changed"], [["api_key", "*****", "*****"], ["label", "a", "b"]])
+		self.assertNotIn("plain-g83", out)
+		# a key saved from now on never reaches the change history in clear
+		doc = frappe.get_doc("TEX Payment Provider Account", acc)
+		doc.api_key = "live-key-g83-review"
+		doc.save(ignore_permissions=True)
+		for v in frappe.get_all("Version", filters={"ref_doctype": "TEX Payment Provider Account", "docname": acc},
+		                        pluck="data"):
+			self.assertNotIn("live-key-g83-review", v)
+
+	# ── R4. images are decoded whole; iPhone JPEGs (MPO) pass ─────────────
+
+	def test_r4_images_are_decoded_whole_and_iphone_jpegs_pass(self):
+		self.as_user(self.editor)
+		out = self.upload("IMG_0001.JPG", image_bytes("MPO", frames=2), site=SLUG)
+		self.assertTrue(out["file_name"].endswith(".jpg"), out)
+		for name, fmt in (("cut.jpg", "JPEG"), ("cut.webp", "WEBP"), ("cut.gif", "GIF")):
+			whole = image_bytes(fmt)
+			with self.assertRaises(frappe.ValidationError, msg=name):          # the header alone is not an image
+				self.upload(name, whole[: len(whole) * 2 // 3], site=SLUG)
+
+	# ── R7. consent needs crm.edit; the consent history stays in my hotels ──
+
+	def test_r7_staff_consent_needs_crm_edit_and_the_history_stays_in_my_hotels(self):
+		from kamra.tex.security.audit import audit
+		from kamra.tex.services import booking as booking_svc
+
+		self.as_user("Administrator")
+		if not frappe.db.exists("TEX Permission Profile", "G83 Sales without CRM"):
+			frappe.get_doc({"doctype": "TEX Permission Profile", "profile_name": "G83 Sales without CRM",
+			                "capabilities": [{"capability": c} for c in ("price.view", "reservation.view",
+			                                                             "reservation.create")]}
+			               ).insert(ignore_permissions=True)
+		seller = fx.ensure_user("g83-seller@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": seller, "property": fx.PROPERTY},
+		          {"user": seller, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "G83 Sales without CRM"})
+		ada = frappe.get_doc({"doctype": "Guest", "first_name": "Ada", "last_name": "Known",
+		                      "email": "g83-known@example.com", "tex_enterprise": self.f["enterprise"]}
+		                     ).insert(ignore_permissions=True)
+		guest = {**GUEST, "email": "g83-known@example.com", "consent_email": True}
+		self.as_user(seller)                            # may sell, may not edit guest profiles
+		self.assertEqual(booking_svc.resolve_guest(guest, property=fx.PROPERTY, market="DE", language="en", staff=True),
+		                 (ada.name, [], ["tex_consent_email"]))
+		self.assertEqual(frappe.db.get_value("Guest", ada.name, "tex_consent_email"), 0)
+		self.as_user(self.agent)                        # crm.edit here: recorded
+		self.assertEqual(booking_svc.resolve_guest(guest, property=fx.PROPERTY, market="DE", language="en", staff=True),
+		                 (ada.name, ["tex_consent_email"], []))
+		# the consent history shows this hotel's requests, never another hotel's bookings or staff
+		self.as_user("Administrator")
+		for hotel, ref in ((OTHER, "TEX-OTHER-G83"), (fx.PROPERTY, "TEX-MINE-G83")):
+			audit("guest.consent_requested", reference_doctype="Guest", reference_name=ada.name, property=hotel,
+			      new={"tex_consent_sms": True, "booking": ref}, reason="booking")
+		self.as_user(self.agent)
+		self.assertEqual([h["booking"] for h in crm.profile(ada.name)["consent_history"]], ["TEX-MINE-G83"])
+
+	# ── test gap: a group site's image needs every hotel of the group ─────
+
+	def test_r9_a_group_sites_image_needs_every_hotel_of_the_group(self):
+		self.as_user("Administrator")
+		group = frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "G83 Group",
+		                        "enterprise": self.f["enterprise"]}).insert(ignore_permissions=True).name
+
+		def hotel(name):
+			frappe.get_doc({"doctype": "Property", "property_name": name, "city": "Kas", "country": "Turkey",
+			                "currency": "EUR", "tex_hotel_group": group}).insert(ignore_permissions=True)
+			return name
+
+		first = hotel("G83 Group Hotel 1")
+		fx.ensure("TEX Access Grant", {"user": self.editor, "property": first},
+		          {"user": self.editor, "scope_level": "Hotel", "property": first,
+		           "permission_profile": "Revenue Manager"})
+		self.as_user(self.editor)
+		self.assertTrue(self.upload("group.png", png_bytes(), hotel_group=group)["file_url"].startswith("/files/"))
+		self.as_user("Administrator")
+		hotel("G83 Group Hotel 2")                      # a hotel of the group the editor does not hold
+		self.as_user(self.editor)
+		with self.assertRaises(frappe.PermissionError):
+			self.upload("group.png", png_bytes(), hotel_group=group)
+		self.as_user("Administrator")
+		empty = frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "G83 Empty Group",
+		                        "enterprise": self.f["enterprise"]}).insert(ignore_permissions=True).name
+		self.as_user(self.editor)
+		with self.assertRaises(frappe.PermissionError):
+			self.upload("group.png", png_bytes(), hotel_group=empty)

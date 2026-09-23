@@ -284,6 +284,12 @@ export interface GuestChangeRequest {
   settlement_amount: string
   refunded_amount: string
   settle_pending: boolean
+  /** money of this change waits for staff: a refund TEX could not make, or one to verify at the gateway */
+  staff_open: boolean
+  staff_amount: string
+  staff_reason: "" | "Refund by staff" | "Verify refund at gateway" | null
+  /** the refund the gateway never confirmed */
+  unknown_refund: string | null
   revision: string | null
   error: string | null
   note: string | null

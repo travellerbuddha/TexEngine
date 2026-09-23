@@ -77,6 +77,10 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.callbacks_check(errors=2, overpaid=0, mismatches=0)["status"], c.WARN)
 		out = c.callbacks_check(errors=2, overpaid=1, mismatches=1)
 		self.assertEqual((out["status"], out["issues"][0]["reason"], out["count"]), (c.FAIL, "capture_mismatch", 1))
+		# a refund the gateway never confirmed fails the check (G-45 review)
+		unknown = c.callbacks_check(errors=0, overpaid=0, mismatches=0, refunds_unknown=2)
+		self.assertEqual((unknown["status"], unknown["issues"][0]["reason"], unknown["issues"][0]["params"]),
+		                 (c.FAIL, "refund_unknown", {"count": 2}))
 		self.assertEqual(c.pending_payments_check(2, NOW - timedelta(minutes=90), NOW)["issues"][0]["params"],
 		                 {"count": 2, "minutes": 90})
 

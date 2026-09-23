@@ -347,5 +347,6 @@
  "settings.status.reason.mail_suspended": "Wysyłanie e-maili w tej witrynie jest wstrzymane.",
  "settings.status.reason.mail_failed": "Nieudane e-maile w ciągu {hours} godz.: {count}.",
  "settings.status.reason.mail_unsent": "E-maile jeszcze niewysłane: {count}, najstarszy czeka {minutes} min.",
- "settings.status.reason.check_error": "Nie udało się wykonać tej kontroli (zob. Error Log)."
+ "settings.status.reason.check_error": "Nie udało się wykonać tej kontroli (zob. Error Log).",
+ "settings.status.reason.refund_unknown": "Zwroty, których bramka płatności nigdy nie potwierdziła: {count}. Sprawdź je tam, zanim zwrócisz ponownie."
 }

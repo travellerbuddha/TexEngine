@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urlparse
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
+from frappe.utils import add_days, getdate
 
 from kamra.tex.api._util import as_int, text
 from kamra.tex.money import from_db, to_str
@@ -94,15 +95,16 @@ _TXN_FIELDS = ["name", "property", "txn_type", "status", "method", "amount", "cu
 @require_capability("payment.view")
 def transactions(property: str, booking: str | None = None, status: str | None = None, method: str | None = None,
                  date_from: str | None = None, date_to: str | None = None, limit=100, start=0):
-	filters: dict = {"property": property}
-	if booking:
-		filters["booking"] = booking
-	if status:
-		filters["status"] = status
-	if method:
-		filters["method"] = method
-	if date_from and date_to:
-		filters["creation"] = ("between", [date_from, f"{date_to} 23:59:59"])
+	filters: list = [["property", "=", property]]
+	for field, value in (("booking", booking), ("status", status), ("method", method)):
+		if value:
+			filters.append([field, "=", value])
+	# either bound filters on its own (G-91): an open end stays open, so the screen never has to
+	# close it with a "today" of the browser's; creation is the site's wall clock
+	if date_from:
+		filters.append(["creation", ">=", str(getdate(date_from))])
+	if date_to:
+		filters.append(["creation", "<", str(add_days(getdate(date_to), 1))])
 	rows = frappe.get_all("TEX Payment Transaction", filters=filters, fields=_TXN_FIELDS, order_by="creation desc",
 	                      limit_start=as_int(start, 0, lo=0), limit_page_length=as_int(limit, 100, lo=1, hi=500))
 	return [_txn_row(r) for r in rows]
@@ -174,8 +176,10 @@ def reverify(transaction: str):
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 def refund(transaction: str, amount, reason: str, idempotency_key: str, booking: str | None = None):
+	# durable: the refund is on record before the gateway is asked (a timeout never repeats it)
 	return pay.refund(transaction, amount=amount, reason=text(reason, 500) or "", booking=booking,
-	                  idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")))
+	                  idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")),
+	                  durable=True)
 
 
 @frappe.whitelist(methods=["POST"])

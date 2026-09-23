@@ -133,6 +133,17 @@ def guest_url(site, path: str = "", *, site_scoped: bool = True) -> str:
 	return platform_url(f"/book/{path}".rstrip("/"))
 
 
+def own_hosts() -> set[str]:
+	"""Every host that serves this platform: its own and every booking domain (verified or not).
+	A booking site's image may not point at them: an image request carries the viewer's
+	session to whatever path it names (G-83)."""
+	from urllib.parse import urlparse
+
+	hosts = {urlparse(platform_url()).hostname, getattr(frappe.local, "site", None)}
+	hosts |= set(frappe.get_all("TEX Booking Domain", filters={"parenttype": "TEX Booking Site"}, pluck="domain"))
+	return {h.lower() for h in hosts if h}
+
+
 def return_hosts(sites: list[str]) -> set[str]:
 	"""Hosts a payment may return to: the platform and the verified domains of these (enabled) sites."""
 	from urllib.parse import urlparse

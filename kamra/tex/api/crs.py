@@ -280,15 +280,19 @@ def guest_change_requests(property: str | None = None, status: str | None = None
 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
-def resolve_guest_change(request: str, action: str, reason: str, settlement: str | None = None):
-	"""Approve or reject a guest's request, or close money left to staff (reservation.modify;
-	a refund also needs payment.refund)."""
+def resolve_guest_change(request: str, action: str, reason: str, settlement: str | None = None,
+                         refund_outcome: str | None = None):
+	"""Approve or reject a guest's request (reservation.modify; a refund also needs
+	payment.refund), or close money left to staff (payment.refund). Closing a refund the gateway
+	never confirmed records what the gateway did: ``refund_outcome`` Succeeded or Failed."""
 	from kamra.tex.services import guest_changes
 
 	if settlement not in (None, "", "Refund", "Credit on booking"):
 		frappe.throw(_("Choose Refund or Credit on booking."))
+	if refund_outcome not in (None, "", "Succeeded", "Failed"):
+		frappe.throw(_("Choose whether the gateway refunded it."))
 	return guest_changes.resolve(text(request, 140), text(action, 20), settlement=settlement or None,
-	                             reason=text(reason, 500))
+	                             reason=text(reason, 500), refund_outcome=refund_outcome or None)
 
 
 # ─── grid ────────────────────────────────────────────────────────────────

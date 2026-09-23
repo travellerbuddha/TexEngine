@@ -17,10 +17,12 @@ export type RangePreset =
   | "last_year"
   | "custom"
 
-export function presetRange(p: Exclude<RangePreset, "custom">, today = new Date()): [string, string] {
-  const y = today.getFullYear()
-  const m = today.getMonth()
-  const t = isoDay(today)
+/** The dates of a preset around `today`, the site's calendar day ("YYYY-MM-DD", lib/siteDay):
+ * "this month" is the hotel's month, whatever the browser's clock says (G-91). */
+export function presetRange(p: Exclude<RangePreset, "custom">, today: string): [string, string] {
+  const y = Number(today.slice(0, 4))
+  const m = Number(today.slice(5, 7)) - 1
+  const t = today
   switch (p) {
     case "this_month":
       return [isoDay(new Date(y, m, 1)), isoDay(new Date(y, m + 1, 0))]

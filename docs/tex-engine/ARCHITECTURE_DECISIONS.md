@@ -1051,13 +1051,16 @@ the deposit due was never recomputed.
   saves the reservation (its `modified` is what a waiting proposal is checked against).
 - *Locks.* The booking, then the request, then the reservation: the guest's submit, the payment
   callback (it holds the booking once the money is allocated), the refund job and staff all take
-  them in that order.
+  them in that order. *Amended by the review follow-up below: the change is applied by a job
+  after the payment's commit, and staff modifications and cancellations lock the booking first.*
 - *Refunds after commit.* Refunds are made by `guest_changes.settle`, queued with
   `enqueue_after_commit` (inline in tests), keyed per request, charge and step, each step
   committed before the next, so a request retried after a deadlock never refunds twice.
   `payments.service.refund(_system=True)` skips the capability check for this trusted caller
   only and always names the booking. What cannot be refunded goes to staff (settlement "Staff",
-  audit `guest_change.refund_incomplete`, the booking flagged).
+  audit `guest_change.refund_incomplete`, the booking flagged). *Superseded by the review
+  follow-up below: the settlement stays, the money is on `staff_open` / `staff_amount`, and the
+  audit is `guest_change.refund_by_staff`.*
 - *Credit.* "Keep as credit" keeps `paid − total` on the booking (`booking_summary.credit`); later
   changes use it automatically, because they collect against what is paid. There is no ledger
   across stays.
@@ -1071,7 +1074,8 @@ the deposit due was never recomputed.
   screen lists the requests of the reservation with these actions. The scheduler expires requests
   whose payment never came and retries refunds that were queued but did not run.
 - *Audit.* `guest_change.request`, `.applied`, `.credit`, `.failed`, `.late_payment`,
-  `.superseded`, `.expired`, `.refund_incomplete`, `.resolve`, besides the payment events.
+  `.superseded`, `.expired`, `.refund_by_staff`, `.refund_unknown`, `.refund_capped`, `.resolve`,
+  besides the payment events (`payment.refund_unknown`, `payment.refund_verified`).
 **Consequences.**
 - Inventory is not held while the guest pays: a change can fail after the payment and is then
   refunded automatically.
@@ -1079,11 +1083,64 @@ the deposit due was never recomputed.
   moment is deterministic, except that coupon usage limits are counted as they are now.
 - The deposit share of the new total is one reading of "what is due now"; a per-hotel choice
   (e.g. the whole difference) would be a later option.
-- A refund recorded at the gateway whose database commit then fails can still be repeated by a
-  retry (as for any refund); the per-step commits keep that window to one refund.
+- A refund is on record (Pending) before the gateway is asked: a crash or a timeout after the
+  gateway acted leaves an unconfirmed refund for staff to verify, never a second refund.
 - A credit belongs to its booking only: moving it to another stay is a staff transfer.
 - Any save of the reservation between the proposal and the payment (a staff change, a room
   assignment) makes the paid change fail and its payment be refunded: the guest proposes again.
+
+**Review follow-up (adversarial review of G-45).**
+- *Terms the rate would keep are never given back (H1).* A lower price on a non-refundable rate,
+  or while cancelling the room now would cost a fee (`booking.cancellation_penalty` > 0), goes
+  to the hotel (`staff_approval`) whatever the refund policy: shortening a stay can no longer
+  undo a non-refundable rate or a penalty, as a refund or as credit. Guests change a room only
+  while it is Confirmed and before arrival (`guard_room`: `manage_propose`, submit, the retry
+  and the paid job); an arrived room is not cancelled online either.
+- *A refund is never made twice (H2).* `payments.service.refund(durable=True)` (the refund job
+  and the staff endpoint) commits the refund as Pending with its idempotency key before the
+  gateway is asked, and passes TEX's refund id to a gateway that keeps one (iyzico
+  `conversationId`). `ProviderError` or a Failed outcome is a definite "no"; any other error
+  (timeout, connection, server) leaves the refund Pending with error `UNKNOWN`
+  (`RefundUnknown`, audit `payment.refund_unknown`): TEX never asks again for that key, a
+  Pending refund counts against what is refundable and makes its charge unsupported for
+  automatic refunds. The refund job stops for that request: nothing moves to another charge;
+  the money waits for staff as "Verify refund at gateway" (queue, system status
+  `payments.callbacks` `refund_unknown`). Staff close it with what the gateway did
+  (`finish_unknown_refund`: Succeeded takes it off the booking, Failed leaves it). Only a
+  definite failure moves on to the next charge.
+- *A refund is what is still over when it is made (H3).* The job re-reads the booking under
+  its lock and refunds at most `paid − total − money set aside for other refunds`: a later
+  change or a refund staff made by hand is never refunded again (audit
+  `guest_change.refund_capped`). Charges another request must give back (a payment of a change
+  that did not apply) are left out of every other refund plan. Money set aside for refunds is
+  not the guest's credit (`earmarked`; the guest view shows `credit` and `refund_due` apart)
+  and pays for no change; while a refund is being made the booking takes no new guest change
+  (`RefundPending`, `changes_blocked: REFUND_PENDING`).
+- *The payment callback only records the charge (M1).* `on_charge_succeeded` queues
+  `apply_paid(request, charge)` after the payment's commit: a job with its own unit of work and
+  deadlock retries that applies the change (or fails it and refunds the payment). A paid change
+  left waiting is applied by the scheduler; the payment deadline is judged by when the gateway
+  confirmed the charge, not by when the job runs. **Lock order**, everywhere: the booking row,
+  then the request, the reservation and the inventory days (`modification.apply` and
+  `booking.cancel_reservation` now lock the booking first); the payment callback holds the
+  payment row, then the booking, and nothing more.
+- *Money for staff is explicit (M2).* `staff_open`, `staff_amount`, `staff_reason` ("Refund by
+  staff", "Verify refund at gateway") and `unknown_refund` on the request, set wherever money
+  is left to staff (a refund TEX cannot make, a duplicate payment it cannot refund, an approved
+  refund that came up short, a refund the gateway never confirmed); `needs_staff` is a
+  Requested request or `staff_open`. The settlement stays what it was (`Refund`, `Online
+  payment`, …).
+- *Guest wording (L1).* The proposal splits a refund into what a card can take back
+  (`refund`, planned from the charges holding the money) and what the hotel refunds
+  (`hotel_refund`); the answer says whether the card part is back already (`refund_done`); a
+  change not made says what became of the guest's payment (`money_back`: none, refunded,
+  refunding, hotel), so a declined checkout is never announced as a refund.
+- *One request per proposal (L2)* is keyed by the decoded body and signature of the token (the
+  raw string let junk appended to it open a second request); the old key is still looked up.
+- *No row lock through a checkout (L3).* The first submit commits the request before the
+  gateway is asked for a checkout; the request is locked again after the gateway answered.
+- Schema: four fields on TEX Guest Change Request (no patch: migrate adds them, nothing to
+  backfill before release).
 
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 *Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
@@ -1274,6 +1331,49 @@ sends:
 - Frappe's e-mail queue keeps the message body, link included, until the queue is cleared;
   TEX never stores or logs the raw token itself.
 - An SVG logo can no longer be uploaded (TEX or legacy screens); an https URL still works.
+
+**Review follow-up (G-83 adversarial review, 2026-09-23).** Corrections to the decision above:
+- *The stored name decides, against an allow-list.* The guard judged the name a client sent:
+  `x.png?.html` was stored as `x.png_.html`, a `file_url` of `/files/e%2Ehtml` as `e.html`, and
+  XML types browsers render (`.rss`, `.atom`, `.rdf`, `.mml`, `.kml`, `.xsd`) were not on the
+  block list. It now judges every name File can store the bytes under (URL-decoded, then
+  Frappe's `[/\%?#] → _`): before File's own `before_insert`, again on the final name right
+  before the bytes are written (`save_file_on_filesystem`), and on the final URL when a file is
+  created, made public or moved. The public folder serves only an allow-list
+  (`filetypes.PUBLIC_EXTENSIONS`): images (png, jpg/jpeg, gif, webp, avif, bmp, ico, tif/tiff,
+  heic/heif), video (mp4, m4v, mov, webm, ogv, 3gp), audio (mp3, m4a, aac, oga/ogg, opus, wav,
+  weba), PDF and office documents (pdf, txt, csv, tsv, doc/docx, xls/xlsx, ppt/pptx, odt, ods,
+  odp, rtf), fonts (woff/woff2, ttf, otf, eot) and zip, and never a type whose MIME type is HTML,
+  XML or script. That is what upstream Kamra and TEX store publicly (room and housekeeping
+  photos and video, logos, brochures); anything else is stored private, where Frappe checks
+  access and forces a download. A file whose URL is under `/private/` is private without the
+  flag, as Frappe decides. With a storage hook (`write_file`, e.g. S3) the final-URL check
+  still refuses the record, after the upload.
+- *Inline images.* A public inline SVG (`extract_images_from_html`: Print Format HTML, doctypes
+  with public attachments) is refused with the reason, stopping the save visibly; it is not
+  stored private silently (a web page would then show a broken image). Use a PNG or WebP.
+- *Images decode whole.* `verify()` checks only PNG. Every frame is now decoded with
+  `LOAD_TRUNCATED_IMAGES` off (Frappe turns it on globally); an iPhone multi-picture JPEG (Pillow
+  reports `MPO`) is a JPEG.
+- *Site images.* A new logo or hero is a PNG/JPEG/GIF/WebP under `/files/` (no `..`, no
+  `/private/` or `/assets/`) or an https address on another host, never the platform's or a
+  booking domain (an image request carries the viewer's session to whatever path it names).
+  Only a changed image is judged, so a site with an older image stays savable; patch p24 lists
+  those sites.
+- *Existing data (p24).* Public HTML, XHTML and script files are made private; other public
+  files the allow-list no longer serves (SVG logos, XML) are reported one by one
+  (`file.public_active_content`), since a page may still show them. Plain API keys kept in the
+  change history (Version) of payment provider accounts before p22 are masked; a Password field
+  reaches the history only as asterisks.
+- *Consent needs `crm.edit`.* Staff who may only sell (`reservation.create`) record a request,
+  like an anonymous booker; only staff who may edit guest profiles at the hotel apply consent to
+  an existing profile. The CRM consent history shows entries of the viewer's hotels and
+  profile-level changes only, never another hotel's bookings or staff.
+- *Referrer-Policy behind nginx.* bench's nginx adds `Referrer-Policy: same-origin,
+  strict-origin-when-cross-origin` to every response, proxied ones included, and browsers use
+  the last valid value, which would weaken the payment pages' `no-referrer` header. The page's
+  `<meta name="referrer">` still wins, so the pages are safe; production nginx should not add
+  its own policy on `/book/pay`, `/pay` (GO_LIVE_READINESS §4 has the snippet).
 
 ## ADR-047 Operations: a scoped system status, a boolean guest ping, alerts on change; guest e-mail status follows Frappe's queue
 **Context.** GO_LIVE_READINESS listed two operations gaps.
@@ -1467,3 +1567,39 @@ sends:
 - Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
   bypass this guard, as they bypass every other rule.
 - An allotment's cutoff is per contract. Allotments still have no channel dimension (G-41).
+
+## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
+**Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day
+(`isoDay(new Date())`). The hotel's day is the server's day in the System Settings time zone:
+the server refuses a past arrival on it (`quoting._dates`), expires grants on it
+(`scope._grants`), dates FX rates and reports with it. Just after the site's midnight a browser
+in an earlier zone was still on yesterday (a grid starting yesterday, a refused arrival, a
+transactions list closed a day early); one in a later zone was already on tomorrow and refused
+the site's today as "in the past". The channel ARI preview had been fixed alone by asking the
+server for its first day.
+**Decision.**
+- `session.bootstrap` returns `server: {time_zone, now, today}` read from one instant, last,
+  just before the response leaves.
+- `frontend/src/tex/lib/siteDay.ts` is the only source of a business "today" in the staff app:
+  `useSiteToday()` for what is shown (re-renders at the site's midnight), `useSiteClock()`
+  (`today()`, `dayAfter(ms)`) for handlers and resets; `serverClock.today` delegates to it.
+- The site's wall clock is `Intl.DateTimeFormat({ timeZone: server.time_zone })` of the
+  browser clock plus a skew measured once: `server.now` minus that zone's wall clock read in
+  the browser when the bootstrap arrived. Chosen over "server day + elapsed time" alone because
+  Intl follows the site's own DST changes while a tab stays open for days, and over Intl alone
+  because the skew cancels a browser clock that is off (and zone data that disagrees with the
+  server's by a fixed offset). A browser that does not know the zone counts the time elapsed
+  since `server.now`. The result is never before `server.today`.
+- A default that should follow the day while the page stays open is kept as `null` = "site's
+  today" in state (inventory grids, FX rate date), not copied into state at mount.
+- The browser's clock stays in use only for what means "now, here": durations and timers
+  (countdown TTLs, call timer), instants shown in the viewer's zone (call log, "checked at"),
+  and a datetime-local value that is sent as an absolute instant.
+- Endpoints never need the client to supply "today": an open-ended date filter is open
+  (`payments.transactions` filters on either bound alone).
+**Consequences.**
+- New staff screens take "today" from `lib/siteDay`; `isoDay(new Date())` in `screens/**` is a
+  defect. The public booking engine is guest-facing and out of this decision.
+- `presetRange(preset, today)` and `defaultSearchForm(today, …)` take the day as an argument.
+- Tests: `TestSessionSiteDay`, `test_transactions_filter_on_either_date_bound`, e2e `site-day`
+  (browser in Pacific/Honolulu pinned just after the site's midnight).

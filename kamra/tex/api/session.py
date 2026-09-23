@@ -21,7 +21,7 @@ def bootstrap():
 	                                          fields=["name", "property_name", "city", "country", "currency",
 	                                                  "tex_hotel_group", "tex_enterprise", "tex_default_market"])}
 	settings = frappe.get_cached_doc("TEX Settings")
-	return {
+	out = {
 		"user": {"name": user, "full_name": frappe.utils.get_fullname(user),
 		         "roles": [r for r in frappe.get_roles(user) if r not in ("All", "Guest")],
 		         "platform_admin": scope.is_platform_admin(user)},
@@ -41,7 +41,11 @@ def bootstrap():
 		"channels": frappe.get_all("TEX Sales Channel", filters={"disabled": 0},
 		                           fields=["name", "channel_name", "channel_group"], order_by="name asc"),
 		"currencies": frappe.get_all("Currency", filters={"enabled": 1}, pluck="name", order_by="name asc"),
-		# server datetimes are naive wall-clock times in this zone; ``now`` lets the UI
-		# measure the offset to the browser clock (expiry countdowns)
-		"server": {"time_zone": get_system_timezone(), "now": now_datetime().isoformat()},
 	}
+	# server datetimes are naive wall-clock times in this zone; ``now`` (read last, just before
+	# the response leaves) lets the UI measure the offset to the browser clock (expiry
+	# countdowns); ``today`` is the site's calendar day, where staff date pickers start (G-91),
+	# taken from the same instant
+	now = now_datetime()
+	out["server"] = {"time_zone": get_system_timezone(), "now": now.isoformat(), "today": now.date().isoformat()}
+	return out

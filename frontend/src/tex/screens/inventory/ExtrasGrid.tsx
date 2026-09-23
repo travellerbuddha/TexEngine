@@ -4,7 +4,8 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Layers, Lock, RefreshCcw, Sti
 import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
-import { addDays, date as fmtDate, isoDay } from "../../lib/format"
+import { addDays, date as fmtDate } from "../../lib/format"
+import { useSiteToday } from "../../lib/siteDay"
 import { getTexLang, intlLocale, useTexT } from "../../i18n"
 import { Button, Card, EmptyState, ErrorState, Field, Input, PageHeader, Skeleton, Toolbar } from "../../ui"
 import { isoWeekday, weekdayName } from "../rates/lib/util"
@@ -23,7 +24,10 @@ export default function ExtrasGrid() {
   const { t } = useTexT()
   const property = useProperty()
   const { can } = useSession()
-  const [start, setStart] = useState(() => isoDay(new Date()))
+  // start null = the site's today (G-91): the grid follows the site's midnight until moved
+  const today = useSiteToday()
+  const [picked, setStart] = useState<string | null>(null)
+  const start = picked ?? today
   const [day, setDay] = useState<{ row: ExtraGridRow; cell: ExtraGridCell } | null>(null)
   const [change, setChange] = useState<ChangeInit | null>(null)
   const [recount, setRecount] = useState(false)
@@ -31,7 +35,6 @@ export default function ExtrasGrid() {
   const canEdit = can("inventory.edit")
   const q = useTexQuery<Grid>("crs", "extras_grid", { property, start, days: DAYS }, [property, start], Boolean(property) && canView)
   const grid = q.data && q.data.property === property ? q.data : undefined
-  const today = isoDay(new Date())
   const hasExtras = Boolean(grid && grid.extras.length > 0)
 
   return (
@@ -70,7 +73,7 @@ export default function ExtrasGrid() {
                 variant="secondary"
                 size="md"
                 aria-label={t("inventory.prev", { count: DAYS })}
-                onClick={() => setStart((s) => addDays(s, -DAYS))}
+                onClick={() => setStart(addDays(start, -DAYS))}
                 icon={<ChevronLeft className="size-4" aria-hidden />}
               />
               <Field label={t("inventory.start")}>
@@ -80,10 +83,10 @@ export default function ExtrasGrid() {
                 variant="secondary"
                 size="md"
                 aria-label={t("inventory.next", { count: DAYS })}
-                onClick={() => setStart((s) => addDays(s, DAYS))}
+                onClick={() => setStart(addDays(start, DAYS))}
                 icon={<ChevronRight className="size-4" aria-hidden />}
               />
-              <Button variant="ghost" onClick={() => setStart(today)} disabled={start === today}>
+              <Button variant="ghost" onClick={() => setStart(null)} disabled={start === today}>
                 {t("inventory.today")}
               </Button>
             </div>

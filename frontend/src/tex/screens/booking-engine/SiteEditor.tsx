@@ -73,7 +73,7 @@ export default function SiteEditor({ isNew = false }: { isNew?: boolean }) {
 
   const dirty = !!draft && !!base && JSON.stringify(draft) !== JSON.stringify(base)
   useUnsavedWarning(dirty)
-  const errors = useMemo(() => (draft ? validateSite(draft) : {}), [draft])
+  const errors = useMemo(() => (draft ? validateSite(draft, isNew ? null : base) : {}), [draft, base, isNew])
   const errorTabs = useMemo(() => {
     const m: Partial<Record<TabId, number>> = {}
     for (const f of Object.keys(errors)) {
