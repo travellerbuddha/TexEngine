@@ -36,6 +36,7 @@ CAPABILITIES: dict[str, str] = {
 	"connect.admin": "Configure integrations",
 	"settings.admin": "Hotel settings",
 	"user.admin": "Manage users and access grants",
+	"system.monitor": "See system status: background jobs, queues, payment callbacks, FX rates and e-mail delivery",
 }
 
 ALL = frozenset(CAPABILITIES)
