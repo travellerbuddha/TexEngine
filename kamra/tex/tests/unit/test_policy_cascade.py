@@ -13,6 +13,7 @@ Layers used here (STD P1 = 100, PERSON basis):
 """
 
 import unittest
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -134,3 +135,26 @@ class TestCascadedPrices(unittest.TestCase):
 		unused = [i for i in issues if i.code == "OCC_INHERITED_BAND_UNUSED"]
 		self.assertEqual(len(unused), 1)
 		self.assertIn("G-CHD", unused[0].message)
+
+
+class TestPrecedenceReport(unittest.TestCase):
+	"""devtools.precedence_report: which frozen versions price differently under v2."""
+
+	def test_lists_the_cells_a_legacy_payload_prices_differently(self):
+		from kamra.tex.devtools import precedence_report
+
+		legacy = replace(fx.terms(), occupancy_precedence=occupancy.LEGACY)
+		diff = precedence_report.differences(legacy)
+		self.assertIn({"room": "STD", "period": "P1", "party": "2A+[INF,CHB]", "sold_as": "275.00", "now": "250.00"},
+		              diff)
+		self.assertTrue(all("INF" in d["party"] for d in diff))    # only infants in 2A+2C change
+		self.assertEqual(precedence_report.differences(fx.terms(occupancy_precedence=occupancy.CASCADE)), [])
+
+	def test_compares_a_frozen_version_with_its_rebuild(self):
+		from kamra.tex.devtools import precedence_report
+
+		frozen = replace(fx.terms(), occupancy_precedence=occupancy.LEGACY)
+		rebuilt = cascaded(fx.bands(), fx.occ_rules())               # + every policy, v2 ranking
+		changed = {(d["room"], d["period"], d["party"]) for d in precedence_report.differences(frozen, rebuilt)}
+		self.assertIn(("STD", "P1", "1A"), changed)                   # hotel+market 1+0 ×0.90 now applies
+		self.assertIn(("STD", "P1", "2A+[INF,CHB]"), changed)
