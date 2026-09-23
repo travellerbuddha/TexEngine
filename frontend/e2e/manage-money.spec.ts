@@ -7,8 +7,11 @@
 // - a pay-at-hotel booking is extended: nothing is charged, the dialog and the notice say how
 //   much more is payable at the hotel;
 // - a fully paid booking is shortened while the hotel refunds lower prices automatically (the
-//   policy is set through the API as Administrator and restored afterwards): the dialog and
-//   the notice announce the refund, and the refund job gives the money back to the card.
+//   policy is set through the API as Administrator and restored afterwards; the stay is far
+//   outside its free-cancellation window, so no penalty keeps the money): the dialog and the
+//   notice announce the refund, and the refund job gives the money back to the card.
+// The change paid online is applied by a job right after the gateway confirmed the payment,
+// so the page looks again until the server has it (review of ADR-044).
 // Every stay is cancelled at the end (free under the Flexible rate) so the demo inventory is
 // left as found. Amounts are compared as decimal strings (cents), never as floats.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_ADMIN_PASSWORD=… npx playwright test -c e2e manage-money
@@ -41,6 +44,7 @@ interface Settlement {
   collect: string
   refund: string
   credit: string
+  hotel_refund?: string
   currency: string
 }
 interface Proposal {
@@ -259,11 +263,15 @@ test("a card-deposit booking is extended: the guest pays the difference first, t
     expect(moneyAmount((await dd(page, "Test amount").innerText()) ?? "")).toBe(p.settlement!.amount)
     await page.getByRole("button", { name: "Simulate successful payment" }).click()
     await page.waitForURL(new RegExp(`/book/${SLUG}/manage\\?.*status=succeeded`), { timeout: 30_000 })
+    // a job applies the change right after the gateway confirmed the payment; the page looks again
     const notice = page.getByRole("status").filter({ hasText: "Your change is confirmed" })
-    await expect(notice).toBeVisible()
+    await expect(notice).toBeVisible({ timeout: 30_000 })
     expect(moneyAmount((await notice.innerText()).replace(/^Your change is confirmed/, ""))).toBe(p.settlement!.amount)
 
-    // the server made the change when the gateway confirmed the payment
+    // the server made the change once the gateway confirmed the payment, never the browser
+    await expect
+      .poll(async () => (await status(page.request, b!.token)).rooms[0].check_out, { timeout: 30_000 })
+      .toBe(longer)
     const after = await status(page.request, b.token)
     expect(after.rooms[0].check_out).toBe(longer)
     expect(after.total).toBe(p.new_total)
@@ -357,9 +365,11 @@ test("a fully paid booking is shortened under the refund policy: the page announ
     expect(out.status).toBe("applied")
     expect(out.settlement?.kind).toBe("refund")
     await expect(dlg).toBeHidden()
-    const notice = page.getByRole("status").filter({ hasText: "is being refunded to your card" })
+    // the refund job runs after the change is committed: started, or already back on the card
+    const notice = page.getByRole("status").filter({ hasText: /A refund of .+ to your card has been started\.|was refunded to your card\./ })
     await expect(notice).toBeVisible()
     expect(moneyAmount((await notice.innerText()).replace(/^Your booking was updated/, ""))).toBe(p.settlement!.amount)
+    expect(out.settlement?.hotel_refund).toBe("0.00") // all of it back by card
 
     const after = await status(page.request, b.token)
     expect(after.rooms[0].check_out).toBe(shorter)
