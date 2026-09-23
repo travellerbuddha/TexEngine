@@ -7,6 +7,7 @@ import frappe
 
 from kamra.tex.api import crs, public
 from kamra.tex.money import D
+from kamra.tex.security import scope
 from kamra.tex.services import quoting
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import (
@@ -170,3 +171,63 @@ class TestPublicBooking(TexTestCase):
 		out = crs.book(quote_ids=[q["quote_id"]], guest=GUEST, payment_method="Card",
 		               confirm_without_payment=1)
 		self.assertNotIn("manage_token", out)
+
+
+class TestStaffBookingControls(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		self.agent = fx.ensure_user("unpaid-agent@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": self.agent, "property": fx.PROPERTY},
+		          {"user": self.agent, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+
+	def _quote(self):
+		res = crs.search(check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                 rooms=[{"adults": 2, "children": []}], market="DE", channel="CALL_CENTER",
+		                 properties=[fx.PROPERTY])
+		offers = res["properties"][0]["offers"]
+		if not offers:
+			self.skipTest("no call-centre contract in the fixtures")
+		return crs.quote(offer_key=offers[0]["rooms"][0]["offer_key"])["quote_id"]
+
+	def test_confirming_unpaid_needs_its_own_capability(self):
+		frappe.set_user(self.agent)  # nosemgrep: frappe-setuser -- reservations agent
+		scope.clear_cache()
+		self.assertFalse(scope.has_capability("reservation.confirm_unpaid", fx.PROPERTY))
+		with self.assertRaises(frappe.PermissionError):
+			crs.book(quote_ids=[self._quote()], guest=GUEST, payment_method="Card", confirm_without_payment=1)
+		# without the flag the agent books normally (pending payment)
+		out = crs.book(quote_ids=[self._quote()], guest=GUEST, payment_method="Card")
+		self.assertEqual(out["status"], "Pending Payment")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- platform admin
+		out = crs.book(quote_ids=[self._quote()], guest=GUEST, payment_method="Card", confirm_without_payment=1)
+		self.assertEqual(out["status"], "Confirmed")
+
+	def test_resend_confirmation_rotates_the_manage_link(self):
+		b = guest_books(session="sess-resend")
+		old = b["manage_token"]
+		self.assertEqual(public.booking_status(token=old)["booking"], b["booking"])
+		frappe.set_user(self.agent)  # nosemgrep: frappe-setuser -- reservations agent
+		scope.clear_cache()
+		out = crs.resend_confirmation(booking=b["booking"])
+		self.assertEqual(out["booking"], b["booking"])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's old link
+		with self.assertRaises(frappe.PermissionError):
+			public.booking_status(token=old)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- audit check
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.confirmation_resent",
+		                                                     "reference_name": b["booking"]}))
+
+	def test_booking_payment_link_amounts_are_decimal_strings(self):
+		b = guest_books(session="sess-links")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff view
+		from kamra.tex.payments import service as pay
+
+		pay.create_link(property=fx.PROPERTY, amount="12.5", currency="EUR", description="Balance",
+		                booking=b["booking"])
+		out = crs.booking(name=b["booking"])
+		self.assertEqual(out["payment_links"][-1]["amount"], "12.50")
+		self.assertEqual(out["payment_links"][-1]["paid_amount"], "0.00")
+		self.assertNotIn("public_url", out["payment_links"][-1])

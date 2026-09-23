@@ -20,6 +20,7 @@ CAPABILITIES: dict[str, str] = {
 	"reservation.create": "Create reservations and bookings",
 	"reservation.modify": "Modify reservations",
 	"reservation.cancel": "Cancel reservations",
+	"reservation.confirm_unpaid": "Confirm a booking before its deposit is paid",
 	"payment.view": "View payments",
 	"payment.link": "Create and send payment links",
 	"payment.refund": "Refund and reallocate payments",
@@ -43,11 +44,11 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
 	"Revenue Manager": frozenset({
 		"price.view", "price.view_cost", "price.override", "contract.edit", "contract.publish", "promotion.edit",
 		"markup.edit", "fx.edit", "inventory.edit", "restriction.edit", "reservation.view", "reservation.create",
-		"reservation.modify", "report.view", "booking_site.edit", "crm.view"}),
+		"reservation.modify", "reservation.confirm_unpaid", "report.view", "booking_site.edit", "crm.view"}),
 	"Front Desk": frozenset(_SALES),
 	"Call Center Agent": frozenset(_SALES),
-	"Finance": frozenset({"price.view", "price.view_cost", "reservation.view", "payment.view", "payment.link",
-	                      "payment.refund", "report.view", "crm.view"}),
+	"Finance": frozenset({"price.view", "price.view_cost", "reservation.view", "reservation.confirm_unpaid",
+	                      "payment.view", "payment.link", "payment.refund", "report.view", "crm.view"}),
 	"Kamra Agent": frozenset({"price.view", "reservation.view", "reservation.create", "reservation.modify"}),
 }
 

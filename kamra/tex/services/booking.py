@@ -303,6 +303,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	for _row, _req, result in rows:
 		d, _kind = amount_due_now(result, payment_method)
 		due_now += d
+	if staff and confirm_without_payment and due_now > 0:
+		# confirming before the deposit arrives is a credit decision, not an agent default
+		scope.require("reservation.confirm_unpaid", property)
 	confirm = due_now == 0 or (staff and confirm_without_payment)
 	status = "Confirmed" if confirm else "Pending Payment"
 	hold_until = None if confirm else add_to_date(now, minutes=int(
@@ -563,6 +566,26 @@ def _refresh_booking_after_change(booking: str) -> None:
 	paid = from_db(b.paid_amount, ccy)
 	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
 	b.save(ignore_permissions=True)
+
+
+def resend_confirmation(booking: str) -> dict:
+	"""Send the booking e-mail again with a NEW manage link (only a hash of the old one
+	exists, so it cannot be re-sent; the old link stops working)."""
+	from kamra.tex.services import notify
+
+	b = frappe.get_doc("TEX Booking", booking)
+	scope.require("reservation.modify", b.property)
+	if b.status == "Cancelled":
+		frappe.throw(_("This booking is cancelled."))
+	if not b.booker_email:
+		frappe.throw(_("This booking has no e-mail address."))
+	token, digest = new_manage_token()
+	b.manage_token_hash = digest
+	b.save(ignore_permissions=True)
+	sent = notify.booking_created(b.name, token)
+	audit("booking.confirmation_resent", reference_doctype="TEX Booking", reference_name=b.name,
+	      property=b.property, new={"sent": bool(sent)})
+	return {"booking": b.name, "sent": bool(sent), "email": b.booker_email}
 
 
 # ─── read ────────────────────────────────────────────────────────────────
