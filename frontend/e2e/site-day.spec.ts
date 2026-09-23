@@ -83,7 +83,7 @@ test("CRS: the arrival defaults and limits follow the site's day, not the browse
     if (r.url().includes("ui_crs.search")) searched++
   })
   await checkIn.fill(browserDay)
-  await page.getByRole("form", { name: "Search" }).getByRole("button", { name: /^Search/ }).click()
+  await page.getByRole("form", { name: "Search", exact: true }).getByRole("button", { name: /^Search/ }).click()
   await expect(page.getByText("Check-in cannot be in the past.").first()).toBeVisible()
   expect(searched, "no search is sent for a past arrival").toBe(0)
   noErrors()
