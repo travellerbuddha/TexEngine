@@ -20,7 +20,7 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 | Check | Command | Result |
 |---|---|---|
 | TEX pure unit tests | `python -m pytest kamra/tex/tests/unit -q` | **147 passed** |
-| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **85 OK**: admin_markets 3, commercial_flows 22, concurrency 1, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 28 |
+| TEX integration tests (7 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **87 OK**: admin_markets 3, commercial_flows 23, concurrency 2, critical_journey 9, migrations_notify 5, public_booking 17, security_regressions 28 |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **13 passed**: critical-journey (R-58, 19 steps), contract-admin, crs ×2, shell, booking ×4 desktop + ×4 mobile (Pixel 7) |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** |
 | TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean; the rebuild is identical to the committed bundles |
@@ -42,7 +42,7 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), channel-manager / SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20), enterprise dashboard (R-47) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 12 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
+**Open gaps by severity:** 0 Critical, 11 High, 36 Medium, 7 Low (+3 blocked items). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -59,7 +59,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | 6 CRS | PARTIAL | works incl. multi-room; no destination/group inputs (G-40) |
 | 7 Call Center | PARTIAL | keyboard-first flow tested; channel not bound to the agent (G-41) |
 | 8 Booking + widget | PARTIAL | full flow tested desktop+mobile; custom domains not served (G-21), no inline widget mode (G-44) |
-| 9 Payments | PARTIAL | sandbox end to end; link tokens never stored or leaked (G-10 fixed); allocation locking (G-14); production certification BLOCKED |
+| 9 Payments | PARTIAL | sandbox end to end; link tokens never stored or leaked, allocations locked and idempotent (G-10, G-14 fixed); production certification BLOCKED |
 | 10 CRM | PARTIAL | guests, consent, segments, abandoned; 5 named segments not expressible (G-23), no loyalty admin UI (G-24) |
 | 11 Self-service | PARTIAL | view/pay/change/cancel; no extras after booking (G-22), credit/refund policies do nothing (G-45) |
 | 12 Reports | PARTIAL | production report; missing views/filters, margin does not reconcile (G-46) |
@@ -109,7 +109,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-38 | Abandoned booking | **COMPLETE** | funnel events, detection, workflow, consent, purge · `test_abandoned_booking_detection` | (Low: email hash stored without consent — G-81) |
 | R-39 | Loyalty | PARTIAL | earn/mature/redeem/reverse/expire, ledger, manual adjustment · 1 integration test | No admin UI for programs/rules/tiers/blackouts (G-24). Redemption only as money; blackouts not applied to redemption; thin tests (G-66). |
 | R-40 | Payments | PARTIAL (production certification **BLOCKED**) | provider abstraction, hosted/3D flows, no PAN/CVV, fail-closed callbacks, method rules · `TestGuestPayment`, `TestPaymentIntegrity` | gateway_url overridable in production; sandbox payments unflagged; Sipay refund missing; iyzico/Sipay callbacks untested (G-67). Legacy Razorpay webhook unauthenticated (G-15). |
-| R-41 | Payment links | PARTIAL | create/reissue/pay/expire, allocation, refund, transfer · `test_payment_link_pays_and_allocates`, `test_refund_transfer_and_idempotency`, `TestPaymentLinkTokens` (G-10 fixed) | Allocation/transfer without lock or idempotency (G-14). Link can be paid twice; refund after transfer hits wrong booking (G-68). |
+| R-41 | Payment links | PARTIAL | create/reissue/pay/expire, allocation, refund, transfer · `test_payment_link_pays_and_allocates`, `test_refund_transfer_and_idempotency`, `TestPaymentLinkTokens` (G-10 fixed) | Link can be paid twice; refund after transfer hits wrong booking (G-68). |
 | R-42 | Guest self-service | PARTIAL | per-hotel toggle, hashed magic link, view/cancel/change with price shown first, pending staff state · `TestSelfService` | Guests cannot add extras after booking (G-22). Higher price not collected as part of the change; "refund"/"credit" policies do nothing; no manage-page e2e (G-45). |
 | R-43 | Enterprise / user model | PARTIAL | Enterprise→Group→Hotel grants, 14+ capabilities, anti-escalation, backend enforcement · `TestTenantIsolation`, `test_security_regressions` | Grants/segments/blank-property rows readable across tenants (G-26). |
 | R-44 | TEX Connect | PARTIAL | adapter interface, signed webhook PMS, sandbox, outbox with retry/dead-letter, FX adapters | No channel-manager/email/SMS/WhatsApp adapters (not started); `fetch_availability` unused; outbox/PMS adapters untested (G-69). |

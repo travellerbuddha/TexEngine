@@ -228,10 +228,27 @@ def allocated_of(transaction: str) -> D:
 	return total
 
 
-def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bool = False) -> str:
+def _lock(doctype: str, name: str) -> None:
+	"""Row lock: allocations of one payment (or changes of one link) run one at a time, so
+	two submits can never both see the same unallocated amount (G-14)."""
+	frappe.db.sql(f"SELECT name FROM `tab{doctype}` WHERE name=%s FOR UPDATE", name)  # nosemgrep -- constant doctype
+
+
+def _replayed_allocation(property: str, key: str | None, kind: str) -> tuple[str | None, str | None]:
+	"""→ (namespaced key, allocation already made with it)."""
+	key = ns_key(property, key, kind)
+	return key, (frappe.db.get_value("TEX Payment Allocation", {"idempotency_key": key}, "name") if key else None)
+
+
+def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bool = False,
+             idempotency_key: str | None = None) -> str:
+	_lock("TEX Payment Transaction", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	if not _system:
 		scope.require("payment.refund", txn.property)
+	key, done = _replayed_allocation(txn.property, idempotency_key, "allocate")
+	if done:
+		return done
 	if txn.status != "Succeeded" or txn.txn_type != "Charge":
 		frappe.throw(_("Only successful charges can be allocated."))
 	b = frappe.get_doc("TEX Booking", booking)
@@ -246,7 +263,7 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	doc = frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": transaction,
 	                      "allocation_type": "Allocate", "amount": amount, "currency": txn.currency,
 	                      "booking": booking, "payment_link": txn.payment_link, "reason": reason,
-	                      "actor": frappe.session.user})
+	                      "actor": frappe.session.user, "idempotency_key": key})
 	doc.insert(ignore_permissions=True)
 	from kamra.tex.services import booking as booking_svc
 
@@ -258,10 +275,14 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	return doc.name
 
 
-def release(transaction: str, *, booking: str, amount, reason: str) -> str:
+def release(transaction: str, *, booking: str, amount, reason: str, idempotency_key: str | None = None) -> str:
 	"""Take (part of) an allocation back from a booking — e.g. to transfer it."""
+	_lock("TEX Payment Transaction", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	scope.require("payment.refund", txn.property)
+	key, done = _replayed_allocation(txn.property, idempotency_key, "release")
+	if done:
+		return done
 	amount = quantize(D(amount), txn.currency)
 	on_booking = sum((from_db(r.amount, r.currency) * (1 if r.allocation_type == "Allocate" else -1)
 	                  for r in frappe.get_all("TEX Payment Allocation",
@@ -271,7 +292,8 @@ def release(transaction: str, *, booking: str, amount, reason: str) -> str:
 		frappe.throw(_("Only {0} is allocated to this booking.").format(to_str(on_booking)))
 	doc = frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": transaction,
 	                      "allocation_type": "Release", "amount": amount, "currency": txn.currency,
-	                      "booking": booking, "reason": reason, "actor": frappe.session.user})
+	                      "booking": booking, "reason": reason, "actor": frappe.session.user,
+	                      "idempotency_key": key})
 	doc.insert(ignore_permissions=True)
 	from kamra.tex.services import booking as booking_svc
 
@@ -282,9 +304,12 @@ def release(transaction: str, *, booking: str, amount, reason: str) -> str:
 	return doc.name
 
 
-def transfer(transaction: str, *, from_booking: str, to_booking: str, amount, reason: str) -> dict:
-	rel = release(transaction, booking=from_booking, amount=amount, reason=f"transfer: {reason}")
-	alloc = allocate(transaction, booking=to_booking, amount=amount, reason=f"transfer: {reason}")
+def transfer(transaction: str, *, from_booking: str, to_booking: str, amount, reason: str,
+             idempotency_key: str | None = None) -> dict:
+	rel = release(transaction, booking=from_booking, amount=amount, reason=f"transfer: {reason}",
+	              idempotency_key=f"{idempotency_key}:out" if idempotency_key else None)
+	alloc = allocate(transaction, booking=to_booking, amount=amount, reason=f"transfer: {reason}",
+	                 idempotency_key=f"{idempotency_key}:in" if idempotency_key else None)
 	return {"released": rel, "allocated": alloc}
 
 
@@ -344,6 +369,7 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 
 
 def mark_transfer_received(transaction: str, *, reference: str) -> dict:
+	_lock("TEX Payment Transaction", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	scope.require("payment.refund", txn.property)
 	if txn.provider != "Bank Transfer" or txn.status != "Pending":
@@ -486,6 +512,7 @@ def expire_links() -> int:
 
 
 def cancel_link(name: str, reason: str) -> None:
+	_lock("TEX Payment Link", name)
 	link = frappe.get_doc("TEX Payment Link", name)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Draft"):

@@ -934,6 +934,7 @@ PAYMENT_SPECS = [
 		F("payment_link", "Link", "Payment link", "TEX Payment Link"),
 		F("reason", "Small Text", "Reason"),
 		F("actor", "Link", "Actor", "User"),
+		F("idempotency_key", "Data", "Idempotency key", unique=1, read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="PAL-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
 ]

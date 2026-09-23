@@ -150,17 +150,19 @@ def refund(transaction: str, amount, reason: str, idempotency_key: str, booking:
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
-def allocate(transaction: str, booking: str, amount, reason: str):
-	return {"allocation": pay.allocate(transaction, booking=booking, amount=amount, reason=text(reason, 300) or "")}
+def allocate(transaction: str, booking: str, amount, reason: str, idempotency_key: str | None = None):
+	return {"allocation": pay.allocate(transaction, booking=booking, amount=amount, reason=text(reason, 300) or "",
+	                                   idempotency_key=text(idempotency_key, 140))}
 
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
-def transfer(transaction: str, from_booking: str, to_booking: str, amount, reason: str):
+def transfer(transaction: str, from_booking: str, to_booking: str, amount, reason: str,
+             idempotency_key: str | None = None):
 	if not text(reason, 300):
 		frappe.throw(_("A reason is required."))
 	return pay.transfer(transaction, from_booking=from_booking, to_booking=to_booking, amount=amount,
-	                    reason=text(reason, 300))
+	                    reason=text(reason, 300), idempotency_key=text(idempotency_key, 140))
 
 
 @frappe.whitelist(methods=["POST"])

@@ -143,6 +143,26 @@ class TestGuestPayment(TexTestCase):
 		self.assertEqual(detail["unallocated"], "0.00")
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.refund"}))
 
+	def test_allocation_submits_are_idempotent(self):
+		b1 = guest_books(session="sess-ai1")
+		p1 = b1["payment"]
+		public.mock_pay(transaction=p1["transaction"], outcome="success", sig=p1["fields"]["success_sig"])
+		b2 = guest_books(session="sess-ai2", guest={**GUEST, "email": "idem.second@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance user submitting twice
+		paid = lambda b: D(frappe.db.get_value("TEX Booking", b, "paid_amount"))  # noqa: E731
+		first = pay.transfer(p1["transaction"], from_booking=b1["booking"], to_booking=b2["booking"], amount="20",
+		                     reason="move the deposit", idempotency_key="tr-1")
+		again = pay.transfer(p1["transaction"], from_booking=b1["booking"], to_booking=b2["booking"], amount="20",
+		                     reason="move the deposit", idempotency_key="tr-1")
+		self.assertEqual(first, again)                                  # G-14: one transfer, not two
+		self.assertEqual((paid(b1["booking"]), paid(b2["booking"])), (D("232.75"), D("20")))
+		rel = [pay.release(p1["transaction"], booking=b2["booking"], amount="20", reason="back",
+		                   idempotency_key="rl-1") for _ in range(2)]
+		alloc = [pay.allocate(p1["transaction"], booking=b1["booking"], amount="20", reason="back",
+		                      idempotency_key="al-1") for _ in range(2)]
+		self.assertEqual((len(set(rel)), len(set(alloc))), (1, 1))
+		self.assertEqual((paid(b1["booking"]), paid(b2["booking"])), (D("252.75"), D("0")))
+
 	def test_payment_link_pays_and_allocates(self):
 		b = guest_books(session="sess-link", method="Pay at Hotel")
 		self.assertEqual(b["payment"], None)                      # 30 % deposit rate allows pay at hotel

@@ -25,3 +25,4 @@ kamra.patches.tex.p07_forget_payment_link_urls
 kamra.patches.tex.p08_confirm_unpaid_capability
 kamra.patches.tex.p09_guest_stats_completed_stays
 kamra.patches.tex.p10_scrub_link_return_urls
+kamra.patches.tex.p11_allocation_idempotency

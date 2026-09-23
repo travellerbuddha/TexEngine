@@ -123,6 +123,7 @@ export function AllocateDialog({ open, onClose, txn, onDone }: { open: boolean; 
   const { t } = useTexT()
   const toast = useToast()
   const a = useAction(open)
+  const key = useIntentKey("allocate", open)
   const [booking, setBooking] = useState("")
   const [amount, setAmount] = useState("")
   const [reason, setReason] = useState("")
@@ -139,7 +140,7 @@ export function AllocateDialog({ open, onClose, txn, onDone }: { open: boolean; 
   const valid = Boolean(booking) && isPositiveAmount(amount) && reason.trim().length > 2
   const submit = async () => {
     if (!valid) return
-    const r = await a.run(() => tex("payments", "allocate", { transaction: txn.name, booking, amount, reason: reason.trim() }, { post: true }))
+    const r = await a.run(() => tex("payments", "allocate", { transaction: txn.name, booking, amount, reason: reason.trim(), idempotency_key: key }, { post: true }))
     if (r === undefined) return
     toast.success(t("payments.allocate.done", { booking }))
     onDone()
@@ -175,6 +176,7 @@ export function TransferDialog({ open, onClose, txn, onDone }: { open: boolean; 
   const { t } = useTexT()
   const toast = useToast()
   const a = useAction(open)
+  const key = useIntentKey("transfer", open)
   const sources = useMemo(() => allocatedBookings(txn), [txn])
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
@@ -194,7 +196,7 @@ export function TransferDialog({ open, onClose, txn, onDone }: { open: boolean; 
   const valid = Boolean(from) && Boolean(to) && from !== to && isPositiveAmount(amount) && reason.trim().length > 2
   const submit = async () => {
     if (!valid) return
-    const r = await a.run(() => tex("payments", "transfer", { transaction: txn.name, from_booking: from, to_booking: to, amount, reason: reason.trim() }, { post: true }))
+    const r = await a.run(() => tex("payments", "transfer", { transaction: txn.name, from_booking: from, to_booking: to, amount, reason: reason.trim(), idempotency_key: key }, { post: true }))
     if (r === undefined) return
     toast.success(t("payments.transfer.done", { from, to }))
     onDone()
