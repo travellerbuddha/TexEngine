@@ -41,12 +41,9 @@ function Footer({ onCancel, onConfirm, pending, disabled, label, danger }: { onC
   )
 }
 
-/** Bookings that received (part of) this payment, from the allocation history. */
-function allocatedBookings(txn: TxnDetail) {
-  const s = new Set<string>()
-  for (const a of txn.allocations) if (a.booking && a.allocation_type === "Allocate") s.add(a.booking)
-  if (txn.booking) s.add(txn.booking)
-  return [...s]
+/** Bookings holding part of this payment now (after transfers and refunds), never one that holds none. */
+function holdingBookings(txn: TxnDetail) {
+  return Object.keys(txn.booking_nets ?? {})
 }
 
 export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; onClose: () => void; txn: TxnDetail; onDone: () => void }) {
@@ -57,7 +54,8 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
   const [amount, setAmount] = useState("")
   const [reason, setReason] = useState("")
   const [booking, setBooking] = useState("")
-  const bookings = useMemo(() => allocatedBookings(txn), [txn])
+  const bookings = useMemo(() => holdingBookings(txn), [txn])
+  const ccy = txn.refund_currency || txn.currency
   const close = useEvent(() => {
     if (!a.pending) onClose()
   })
@@ -65,7 +63,8 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
     if (!open) return
     setAmount(txn.refundable)
     setReason("")
-    setBooking(txn.booking ?? bookings[0] ?? "")
+    // no booking by default: the server refunds unallocated money first, then the one booking holding the rest
+    setBooking("")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   const valid = isPositiveAmount(amount) && reason.trim().length > 2
@@ -95,17 +94,20 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
     >
       <div className="space-y-4">
         <p className="text-sm text-zinc-700">
-          {t("payments.refund.refundable")} <Money amount={txn.refundable} currency={txn.currency} className="font-semibold" />
+          {t("payments.refund.refundable")} <Money amount={txn.refundable} currency={ccy} className="font-semibold" />
         </p>
         <Field label={t("payments.amount")} required hint={t("payments.refund.amount_hint")}>
-          <DecimalInput value={amount} onValueChange={setAmount} suffix={txn.currency} data-autofocus />
+          <DecimalInput value={amount} onValueChange={setAmount} suffix={ccy} data-autofocus />
         </Field>
-        {bookings.length > 0 && (
+        {bookings.length > 0 && txn.status === "Succeeded" && (
           <Field label={t("payments.refund.booking")} hint={t("payments.refund.booking_hint")}>
             <Select
               value={booking}
               onChange={(e) => setBooking(e.target.value)}
-              options={[{ value: "", label: t("payments.refund.no_booking") }, ...bookings.map((b) => ({ value: b, label: b }))]}
+              options={[
+                { value: "", label: t("payments.refund.no_booking") },
+                ...bookings.map((b) => ({ value: b, label: `${b} · ${txn.booking_nets[b]} ${txn.currency}` })),
+              ]}
             />
           </Field>
         )}
@@ -177,7 +179,7 @@ export function TransferDialog({ open, onClose, txn, onDone }: { open: boolean; 
   const toast = useToast()
   const a = useAction(open)
   const key = useIntentKey("transfer", open)
-  const sources = useMemo(() => allocatedBookings(txn), [txn])
+  const sources = useMemo(() => holdingBookings(txn), [txn])
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [amount, setAmount] = useState("")
@@ -271,11 +273,12 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
   )
 }
 
+/** A successful charge, or a Failed one whose capture TEX refused to count (the server reports it refundable). */
 export const canRefund = (txn: TxnDetail) =>
-  txn.txn_type === "Charge" && txn.status === "Succeeded" && !isZero(txn.refundable) && txn.provider !== "Manual" && txn.provider !== "Loyalty"
+  txn.txn_type === "Charge" && (txn.status === "Succeeded" || txn.status === "Failed") && !isZero(txn.refundable) && txn.provider !== "Manual" && txn.provider !== "Loyalty"
 export const canAllocate = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && !isZero(txn.unallocated)
-export const canTransfer = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && allocatedBookings(txn).length > 0
+export const canTransfer = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && holdingBookings(txn).length > 0
 export const canConfirmTransfer = (txn: TxnDetail) => txn.provider === "Bank Transfer" && txn.status === "Pending"
-/** Pending charges, and Failed ones (a captured payment whose callback was lost can be recovered). */
+/** Pending charges, and Failed or superseded (Cancelled) ones: a captured payment whose callback was lost can be recovered. */
 export const canReverify = (txn: TxnDetail) =>
-  txn.txn_type === "Charge" && (txn.status === "Pending" || txn.status === "Failed") && (txn.provider === "iyzico" || txn.provider === "Sipay")
+  txn.txn_type === "Charge" && txn.status !== "Succeeded" && (txn.provider === "iyzico" || txn.provider === "Sipay")
