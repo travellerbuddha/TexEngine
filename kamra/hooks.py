@@ -56,6 +56,8 @@ scheduler_events = {
 		"* * * * *": ["kamra.tex.scheduler.every_minute"],
 		"45 15,17 * * *": ["kamra.tex.scheduler.fx_daily"],
 		"30 2 * * *": ["kamra.tex.scheduler.daily"],
+		# cron runs on the site's clock (System Settings time zone): just after its midnight
+		"1 0 * * *": ["kamra.tex.scheduler.site_midnight"],
 	},
 }
 

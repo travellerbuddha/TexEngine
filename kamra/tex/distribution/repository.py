@@ -305,14 +305,38 @@ def deliver_ari(limit: int = 20, connection: str | None = None) -> dict:
 	return {"pushed": done, "failed": failed}
 
 
+def channel_properties() -> list[str]:
+	"""Hotels with an enabled channel-manager connection."""
+	return sorted({c.property for c in frappe.get_all("TEX Integration Connection", filters={
+		"category": CATEGORY, "enabled": 1}, fields=["property"]) if c.property})
+
+
 def daily_resync() -> int:
 	"""Scheduler (daily): changes no event reports — an allotment released by time, a new day
 	entering the horizon, FX, markups, a scheduled contract going live — reach the
 	channels because the whole horizon is compared again (only differences are pushed)."""
 	n = 0
-	for prop in {c.property for c in frappe.get_all("TEX Integration Connection", filters={
-			"category": CATEGORY, "enabled": 1}, fields=["property"]) if c.property}:
+	for prop in channel_properties():
 		n += mark_dirty(prop, reason="daily resync")
+	return n
+
+
+def allotment_boundaries(today: date | None = None) -> int:
+	"""Scheduler (just after the site's midnight): the nights whose allotment release or cutoff
+	starts today are queued for the channels at once, instead of waiting for the daily resync
+	(G-49 review). A night is released from the day ``night - max(release, cutoff) + 1`` and cut
+	off from ``night - cutoff + 1`` (``inventory_math.Allotment``), both on the site's day."""
+	today = getdate(today or now_datetime())
+	n = 0
+	for prop in channel_properties():
+		for a in frappe.get_all("TEX Allotment", filters={"property": prop, "disabled": 0,
+		                                                   "date_to": (">=", today)},
+		                        fields=["room_type", "date_from", "date_to", "release_days", "cutoff_days"]):
+			release, cutoff = int(a.release_days or 0), int(a.cutoff_days or 0)
+			for days in {max(release, cutoff), cutoff} - {0}:
+				night = today + timedelta(days=days - 1)
+				if getdate(a.date_from) <= night <= getdate(a.date_to):
+					n += mark_dirty(prop, [a.room_type], night, night, reason="allotment boundary")
 	return n
 
 

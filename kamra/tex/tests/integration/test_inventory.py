@@ -469,6 +469,31 @@ class TestReviewFollowUps(InventoryCase):
 				self.desk()
 		self.assertIsInstance(caught.exception, frappe.QueryDeadlockError)   # TEX endpoints still retry it
 
+	def test_every_endpoint_into_a_booking_or_a_change_retries_a_deadlock(self):
+		"""M2: a TEX endpoint whose request books or changes a stay (directly, or through the guest
+		change service) runs again when it is a deadlock victim: the lock orders of a booking, a
+		change and a desk write can still meet (ADR-032, ADR-048)."""
+		import ast
+		import pathlib
+
+		entry = {("booking_svc", "create_booking"), ("modification", "apply"), ("guest_changes", "submit"),
+		         ("guest_changes", "resolve"), ("guest_changes", "pay_again")}
+		root = pathlib.Path(frappe.get_app_path("kamra", "tex", "api"))
+		checked = []
+		for f in sorted(root.glob("*.py")):
+			for fn in ast.walk(ast.parse(f.read_text())):
+				if not isinstance(fn, ast.FunctionDef):
+					continue
+				decorators = [ast.unparse(d) for d in fn.decorator_list]
+				if not any("whitelist" in d for d in decorators):
+					continue
+				calls = {(c.func.value.id, c.func.attr) for c in ast.walk(fn) if isinstance(c, ast.Call)
+				         and isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name)}
+				if calls & entry:
+					checked.append(f"{f.stem}.{fn.name}")
+					self.assertIn("retry_on_deadlock", decorators, f"{f.stem}.{fn.name}")
+		self.assertGreaterEqual(len(checked), 7, checked)
+
 	def test_a_deadlock_stops_an_import(self):
 		"""L1: after a deadlock InnoDB has undone the earlier rows too; the import stops instead of
 		reporting them as created."""
@@ -502,6 +527,20 @@ class TestReviewFollowUps(InventoryCase):
 		doc.save()                                        # but it can always be switched off
 		self.assertEqual(frappe.db.get_value("TEX Allotment", name, "disabled"), 1)
 
+	def test_boundaries_crossing_today_queue_the_channels(self):
+		"""L4: the nights whose release or cutoff starts today are queued for the channels at the
+		site's midnight, not only at the daily resync."""
+		from unittest import mock
+
+		from kamra.tex.distribution import repository as dist
+
+		self.allot(release_days=7, cutoff_days=3)
+		today = fx.d(7, 14)
+		with mock.patch.object(dist, "channel_properties", return_value=[fx.PROPERTY]), \
+				mock.patch.object(dist, "mark_dirty", return_value=1) as dirty:
+			dist.allotment_boundaries(today)
+		marked = sorted((c.args[1][0], c.args[2], c.args[3]) for c in dirty.call_args_list)
+		self.assertEqual(marked, [(self.dlx, fx.d(7, 16), fx.d(7, 16)), (self.dlx, fx.d(7, 20), fx.d(7, 20))])
 
 
 def _channel_case():
