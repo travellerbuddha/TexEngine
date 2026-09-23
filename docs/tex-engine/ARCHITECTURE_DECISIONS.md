@@ -789,3 +789,58 @@ enterprise or group view (G-25).
   chain-wide CRM needs. Every profile change is audited, and nothing crosses enterprises.
 **Consequences.** A hotel-only CRM view, where one hotel cannot see another hotel's guests
 inside the same enterprise, would need a per-enterprise setting. It is not built.
+
+## ADR-041 Payments go live fail-closed: certification gates Production, a charge is exactly one charge
+**Context.** The go-live review of payments (G-67, G-68) and two related findings (G-89, G-90):
+- A Production account could use an uncertified gateway (iyzico, Sipay, NestPay) or override
+  its `gateway_url`. Only the TEX API refused the mock in Production; Desk/REST refused nothing.
+- `complete()` skipped the amount check when a gateway returned 0 or nothing, and never compared
+  the currency.
+- `pay_link` added a random suffix to its idempotency key, so two tabs started two charges and a
+  link could be paid twice. A refund was booked on `txn.booking` even after the money had been
+  transferred to another booking.
+- Signatures fell back to the public site name without an `encryption_key` (G-89). The PMS
+  outbox delivered through an uncertified adapter to a Production connection changed behind the
+  controller's back (G-90).
+**Decision.**
+- *One registry, one rule set.* `payments.providers.REGISTRY` maps a provider name to its class.
+  `account_problem` states the rules:
+  - the mock runs only in Sandbox;
+  - Production needs `production_verified` on the class. Bank Transfer and Pay at Hotel have no
+    gateway, so they are verified; the three gateways are not;
+  - a `gateway_url` override is for sandbox and test hosts. It is refused on a Production
+    account, whose live host comes from the provider code.
+  The account controller applies the rules on every save, `provider_for` again before every
+  use (fail closed), and `payment_methods` never offers an account that could not run.
+- *A success is exactly this charge.* A gateway with `reports_amount` must state the captured
+  amount: missing, 0 or different fails the charge (`AMOUNT_MISMATCH`). A stated currency must
+  be the charge's (`CURRENCY_MISMATCH`).
+- *One charge per link at a time.* `pay_link` locks the link row and keys the charge on link,
+  gateway, amount due and the number of earlier Failed/Cancelled attempts:
+  - a second tab or a double click reuses the Pending charge; a retry after a failure is new;
+  - a reused charge is never re-routed or re-priced, and a failed re-checkout leaves it Pending;
+  - iyzico keeps every checkout token issued for the charge, newest first, so a guest who pays
+    on the older tab is still recognised; staff re-verification tries each token;
+  - a verified success turns a Failed charge into Succeeded: the gateway has the money, and
+    one checkout failing must not hide another one paid;
+  - lock order is the link, then the payment;
+  - a success on an already paid link is recorded (money is never dropped) and audited as
+    `payment_link.overpaid` for finance to refund.
+- *Refunds come from where the money is.* The net allocation per booking is Allocate − Release −
+  Refund. Without a booking, the refund comes from the one booking holding money. When several
+  hold money, staff must choose; when none does, the refund is of unallocated money and has no
+  allocation. A named booking refunds at most what it holds plus the unallocated remainder.
+- *Signing keys* come only from `encryption_key` (`security.keys.site_secret`): a missing key is
+  an error, never the site name. The derived values are unchanged, so issued offers and
+  callbacks stay valid.
+- *PMS delivery* refuses an uncertified adapter for a Production connection at run time. The
+  refusal is not retryable, so the event goes Dead with the redacted error.
+**Consequences.**
+- Going live with a card gateway needs its certification and then `production_verified = True`
+  in code. NestPay's production host must come from a per-bank table, because overrides are
+  refused in Production.
+- A guest who pays in two tabs through *different* gateways can still pay twice. The second
+  payment is kept and flagged for a refund.
+- A second start that waited on the link lock can still meet the first start's charge after its
+  own read snapshot. It then gets a unique-key error instead of a second charge.
+- Bookings paid in Sandbox are not flagged yet: that needs a schema field.
