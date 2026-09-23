@@ -271,6 +271,8 @@ export interface BookingRoom {
   /** the guest's change of this room still waiting (for their payment or for the hotel), or
    * { status: "noted" } for a change the hotel has not reviewed yet (G-45) */
   pending_change?: PendingChange | null
+  /** the guest may change this room online (confirmed, not arrived yet) */
+  can_change?: boolean
   /** the guest's latest change of this room and what came of it */
   last_change?: ChangeOutcome | null
 }
@@ -288,7 +290,14 @@ export interface Settlement {
   /** the one figure the guest is shown for this kind */
   amount: Money
   collect?: Money
+  /** of a refund: what goes back to the card automatically */
   refund?: Money
+  /** of a refund: what the hotel refunds (paid in cash, by transfer, …) */
+  hotel_refund?: Money
+  /** of a refund: what went back to the card so far */
+  refunded?: Money
+  /** of a refund: the card part is back on the card */
+  refund_done?: boolean
   credit?: Money
   balance_after?: Money
   currency: string
@@ -311,7 +320,13 @@ export interface ChangeOutcome {
   status: "awaiting_payment" | "requested" | "applied" | "approved" | "rejected" | "failed" | "expired" | "superseded"
   settlement: SettlementKind | null
   amount: Money
+  /** what the guest paid online for this change */
+  paid: Money
   refunded: Money
+  /** money of this change the hotel refunds (it could not go back to a card automatically) */
+  hotel_refund: Money
+  /** a change not made: what became of the guest's payment (null while the change is open or made) */
+  money_back: "none" | "refunded" | "refunding" | "hotel" | null
   currency: string
 }
 
@@ -327,6 +342,7 @@ export interface ChangeResult {
   balance?: Money
   paid?: Money
   credit?: Money
+  refund_due?: Money
   message?: string
   replay?: boolean
 }
@@ -350,7 +366,9 @@ export interface BookingSummary {
   /** money held above the total: a change kept as credit, or a refund still to come */
   credit?: Money
   /** why the guest cannot change the booking yet (its own payment comes first) */
-  changes_blocked?: "PAYMENT_PENDING" | null
+  /** money of this booking being refunded, or that the hotel refunds: not the guest's credit */
+  refund_due?: Money
+  changes_blocked?: "PAYMENT_PENDING" | "REFUND_PENDING" | null
   /** the hotel takes card payments online for this booking */
   can_pay_online?: boolean
 }

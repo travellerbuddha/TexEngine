@@ -13,7 +13,7 @@ import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
 import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
-import type { BookingRoom, BookingSummary, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
+import type { BookingRoom, BookingSummary, ChangeOutcome, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
 import { Button, Field, Textarea } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -53,6 +53,10 @@ function useFragmentToken(slug: string) {
 type Notice = { tone: "ok" | "warn" | "bad" | "info"; title: string; body?: string } | null
 type I18nT = ReturnType<typeof useI18n>
 
+/** Back from a change's payment, the page looks again this often while the server applies it. */
+const CHANGE_RECHECKS = 10
+const CHANGE_RECHECK_MS = 2000
+
 /** A change's payment started from this tab: which request it pays for (read on return). */
 const changeKey = (txn: string) => `tex.change.pay.${txn}`
 
@@ -79,8 +83,13 @@ function settlementText(i18n: I18nT, s: Settlement, difference: string | null): 
     case "balance":
       if (isZero(s.amount)) return { tone: "info", body: t("manage.settle.covered") }
       return { tone: "info", body: isNegative(difference) ? t("manage.settle.balanceDown", { amount }) : t("manage.settle.balanceUp", { amount }) }
-    case "refund":
-      return { tone: "info", body: t("manage.settle.refund", { amount }) }
+    case "refund": {
+      // only what a card can take back is promised as a card refund; the rest the hotel refunds (server-decided)
+      const parts = []
+      if (s.refund && isPositive(s.refund)) parts.push(t("manage.settle.refund", { amount: money(s.refund, s.currency) }))
+      if (s.hotel_refund && isPositive(s.hotel_refund)) parts.push(t("manage.settle.hotelRefund", { amount: money(s.hotel_refund, s.currency) }))
+      return { tone: "info", body: parts.join(" ") || t("manage.settle.refund", { amount }) }
+    }
     case "credit":
       return { tone: "info", body: t("manage.settle.credit", { amount }) }
     case "staff_approval":
@@ -108,14 +117,37 @@ function resultNotice(i18n: I18nT, r: ChangeResult, currency: string): Notice {
       return { tone: "ok", title, body: t("manage.done.paid", { amount }) }
     case "pay_at_hotel":
       return { tone: "ok", title, body: t("manage.done.atHotel", { amount }) }
-    case "refund":
-      return { tone: "ok", title, body: t("manage.done.refund", { amount }) }
+    case "refund": {
+      // what went back to the card already, what is on its way, what the hotel refunds
+      const card = s.refund ?? s.amount
+      const hotel = s.hotel_refund && isPositive(s.hotel_refund) ? s.hotel_refund : null
+      const parts = []
+      if (isPositive(card)) parts.push(s.refund_done ? t("manage.done.refunded", { amount: money(card, s.currency) }) : t("manage.done.refund", { amount: money(card, s.currency) }))
+      if (hotel) parts.push(isPositive(card) ? t("manage.settle.hotelRefund", { amount: money(hotel, s.currency) }) : t("manage.done.refundByHotel", { amount: money(hotel, s.currency) }))
+      return { tone: "ok", title, body: parts.join(" ") || t("manage.appliedBody") }
+    }
     case "staff":
       return { tone: "ok", title, body: t("manage.done.refundByHotel", { amount }) }
     case "credit":
       return { tone: "ok", title, body: t("manage.done.credit", { amount }) }
   }
   return { tone: "ok", title, body: r.balance && isPositive(r.balance) ? t("manage.appliedBalance", { amount: money(r.balance, r.currency || currency) }) : t("manage.appliedBody") }
+}
+
+/** What happened to the guest's money for a change that was not made (the server decides it). */
+function moneyBack(i18n: I18nT, c: ChangeOutcome): string {
+  const { t, money } = i18n
+  const paid = money(c.paid, c.currency)
+  switch (c.money_back) {
+    case "hotel":
+      return t("manage.return.hotelRefund", { amount: paid })
+    case "refunded":
+      return t("manage.return.refunded", { amount: paid })
+    case "refunding":
+      return t("manage.return.refunding", { amount: paid })
+    default:
+      return t("manage.return.noPayment")
+  }
 }
 
 /** Back from the payment page of a change: what came of it, as the server has it now. */
@@ -129,10 +161,10 @@ function changeReturnNotice(i18n: I18nT, data: BookingSummary, request: string, 
     case "approved":
       return { tone: "ok", title: t("manage.return.appliedTitle"), body: t("manage.return.appliedBody", { amount }) }
     case "failed":
-      return { tone: "bad", title: t("manage.return.failedTitle"), body: t("manage.return.failedBody") }
+      return { tone: "bad", title: t("manage.return.failedTitle"), body: `${t("manage.return.failedBody")} ${moneyBack(i18n, c)}` }
     case "expired":
     case "superseded":
-      return { tone: "bad", title: t("manage.return.voidTitle"), body: t("manage.return.voidBody") }
+      return { tone: "bad", title: t("manage.return.voidTitle"), body: `${t("manage.return.voidBody")} ${moneyBack(i18n, c)}` }
     case "awaiting_payment":
       return payStatus === "failed" || payStatus === "cancelled"
         ? { tone: "bad", title: t("manage.return.declinedTitle"), body: t("manage.return.declinedBody") }
@@ -483,13 +515,23 @@ function Manage({ token }: { token: string | null }) {
   }, [payStatus, t, changeRequest])
   // back from a change's payment: the change as the server has it now (made once the gateway
   // confirmed the payment, or not made and the payment refunded)
+  const [recheck, setRecheck] = useState(0)
   useEffect(() => {
     if (!changeRequest || !payTxn || !data) return
     const n = changeReturnNotice(i18n, data, changeRequest, payStatus)
     if (n) setNotice(n)
     const c = data.rooms.map((r) => r.last_change).find((x) => x?.request === changeRequest)
     if (c && c.status !== "awaiting_payment") removeItem(changeKey(payTxn))
-  }, [changeRequest, payTxn, data, payStatus, i18n])
+    // the gateway confirmed the payment and the server applies the change right after it: look
+    // again for a little while (the page never applies it itself)
+    if (c?.status === "awaiting_payment" && payStatus === "succeeded" && recheck < CHANGE_RECHECKS) {
+      const timer = window.setTimeout(() => {
+        setRecheck((n) => n + 1)
+        void load()
+      }, CHANGE_RECHECK_MS)
+      return () => window.clearTimeout(timer)
+    }
+  }, [changeRequest, payTxn, data, payStatus, i18n, recheck, load])
 
   const done = (n: Notice) => {
     setCancel(null)
@@ -599,6 +641,11 @@ function Manage({ token }: { token: string | null }) {
           {data.changes_blocked === "PAYMENT_PENDING" && ` ${t("manage.changesAfterPayment")}`}
         </Alert>
       )}
+      {data.changes_blocked === "REFUND_PENDING" && (
+        <Alert tone="info" title={t("manage.refundPendingTitle")}>
+          {t("manage.refundPendingBody")}
+        </Alert>
+      )}
       {atHotel && (
         <Alert
           tone="info"
@@ -621,6 +668,11 @@ function Manage({ token }: { token: string | null }) {
           {t("manage.creditBody")}
         </Alert>
       )}
+      {data.refund_due && isPositive(data.refund_due) && data.changes_blocked !== "REFUND_PENDING" && (
+        <Alert tone="info" title={t("manage.refundDueTitle", { amount: money(data.refund_due, data.currency) })}>
+          {t("manage.refundDueBody")}
+        </Alert>
+      )}
       {waiting.map((r) => (
         <PendingChangeNotice key={r.reservation} room={r} change={r.pending_change!} currency={data.currency} onPay={() => void payChange(r)} paying={payingChange === r.pending_change?.request} />
       ))}
@@ -640,7 +692,7 @@ function Manage({ token }: { token: string | null }) {
               actions={
                 data.self_service && active(r) ? (
                   <>
-                    {!data.changes_blocked && (
+                    {!data.changes_blocked && r.can_change !== false && (
                       <Button variant="secondary" size="sm" onClick={() => setChange(r)}>
                         <CalendarCog className="size-4" aria-hidden />
                         {t("manage.change")}
