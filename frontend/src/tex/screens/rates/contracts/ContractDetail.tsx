@@ -108,7 +108,7 @@ export default function ContractDetail() {
             ) : b.versions.length === 0 ? (
               <EmptyState title={t("rates.version.none")} />
             ) : (
-              <ol className="relative space-y-5 before:absolute before:top-2 before:bottom-2 before:left-4 before:w-px before:bg-zinc-200">
+              <ol aria-label={t("rates.version.timeline")} className="relative space-y-5 before:absolute before:top-2 before:bottom-2 before:left-4 before:w-px before:bg-zinc-200">
                 {b.versions.map((v) => {
                   const d = DOT[v.status] ?? DOT.Superseded
                   const live = c?.active_version === v.name
