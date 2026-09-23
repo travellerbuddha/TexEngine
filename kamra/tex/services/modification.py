@@ -53,15 +53,11 @@ def _snapshot(res) -> dict:
 	return json.loads(res.tex_pricing_snapshot)
 
 
-def _children(raw) -> tuple[ChildSpec, ...]:
-	out = []
-	for c in raw or []:
-		if isinstance(c, dict):
-			out.append(ChildSpec(age=c.get("age") if c.get("age") is not None else None,
-			                     dob=getdate(c["dob"]) if c.get("dob") else None))
-		else:
-			out.append(ChildSpec(age=int(c)))
-	return tuple(out)
+def _children(raw, arrival=None) -> tuple[ChildSpec, ...]:
+	"""The changed party's children: an age in whole years or a date of birth, checked
+	against the (new) arrival like a search's (G-52)."""
+	return tuple(quoting.Party.parse({"adults": 1, "children": list(raw or [])},
+	                                 arrival=getdate(arrival) if arrival else None).children)
 
 
 def build_changed_request(res, changes: dict, sale_at: datetime):
@@ -70,11 +66,12 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 	unknown = set(changes) - set(EDITABLE)
 	if unknown:
 		frappe.throw(_("Cannot change: {0}").format(", ".join(sorted(unknown))))
+	arrival = getdate(changes.get("check_in") or base["check_in"])
 	for k, v in changes.items():
 		if k in ("check_in", "check_out"):
 			base[k] = getdate(v).isoformat()
 		elif k == "children":
-			base[k] = [{"age": c.age, "dob": c.dob.isoformat() if c.dob else None} for c in _children(v)]
+			base[k] = [{"age": c.age, "dob": c.dob.isoformat() if c.dob else None} for c in _children(v, arrival)]
 		elif k == "adults":
 			base[k] = int(v)
 		elif k == "promo_codes":

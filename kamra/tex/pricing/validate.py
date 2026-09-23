@@ -108,11 +108,13 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 			except Unsellable as u:
 				issues.append(_err(u.code, f"{rt} / {p.code}: {u.message}"))
 
-	# age bands
-	try:
-		ages.validate_bands(t.age_bands)
-	except PricingError as e:
-		issues.append(_err("AGE_BANDS", str(e)))
+	# age bands, on the month scale pricing uses: a gap leaves a child unsellable (G-52)
+	for problem in ages.band_problems(t.age_bands):
+		issues.append(_err("AGE_BANDS", problem))
+	young = ages.youngest_uncovered(t.age_bands)
+	if young and any(r.max_children > 0 for r in t.rooms.values()):
+		issues.append(_warn("AGE_BANDS_MIN_AGE", f"no age band covers {ages.months_span(*young)}: children that "
+		                    "young cannot be booked under this contract"))
 	band_codes = {b.code for b in t.age_bands}
 	if not t.age_bands and any(r.max_children > 0 for r in t.rooms.values()):
 		issues.append(_warn("NO_AGE_BANDS", "no child age bands (neither the version nor a pricing policy defines "
