@@ -469,6 +469,28 @@ class TestReviewFollowUps(InventoryCase):
 				self.desk()
 		self.assertIsInstance(caught.exception, frappe.QueryDeadlockError)   # TEX endpoints still retry it
 
+	def test_a_deadlock_stops_an_import(self):
+		"""L1: after a deadlock InnoDB has undone the earlier rows too; the import stops instead of
+		reporting them as created."""
+		from unittest import mock
+
+		from kamra import api
+
+		rows = [{"guest_name": f"Import {i}", "phone": f"+49 30 55502{i}", "room_type_code": "STD",
+		         "check_in": str(self.ci), "check_out": str(self.co), "amount_after_tax": 300} for i in (1, 2)]
+		real = api._find_or_create_guest
+		calls = []
+
+		def guest(name, phone):
+			calls.append(name)
+			if len(calls) == 2:
+				raise frappe.QueryDeadlockError("1213 Deadlock found when trying to get lock")
+			return real(name, phone)
+
+		with mock.patch.object(api, "_find_or_create_guest", side_effect=guest):
+			with self.assertRaises(frappe.QueryDeadlockError):
+				api.import_bookings(fx.PROPERTY, rows)
+
 	def test_a_disabled_allotment_saves_whatever_its_release(self):
 		name = self.allot()
 		frappe.db.set_value("TEX Allotment", name, "release_days", 400, update_modified=False)
@@ -479,3 +501,48 @@ class TestReviewFollowUps(InventoryCase):
 		doc.disabled = 1
 		doc.save()                                        # but it can always be switched off
 		self.assertEqual(frappe.db.get_value("TEX Allotment", name, "disabled"), 1)
+
+
+
+def _channel_case():
+	from kamra.tex.tests.integration.test_distribution import DistributionCase
+
+	return DistributionCase
+
+
+class TestChannelLockOrder(_channel_case()):
+	"""L1: a channel booking takes every room's nights before it names its booking or rooms —
+	the order of a TEX booking and of a desk write — so none of them waits on the others in a
+	cycle."""
+
+	def test_a_channel_booking_locks_all_nights_before_any_name(self):
+		from unittest import mock
+
+		from frappe.model.document import Document
+
+		from kamra.tex.tests.integration.test_distribution import message
+
+		events = []
+		real_lock, real_name = avail.lock_nights, Document.set_new_name
+
+		def lock(prop, requests):
+			events.append(("inventory", sorted((str(a), str(b)) for _rt, a, b in requests)))
+			return real_lock(prop, requests)
+
+		def name(doc, *a, **kw):
+			if doc.doctype in ("TEX Booking", "Reservation"):
+				events.append(("name", doc.doctype))
+			return real_name(doc, *a, **kw)
+
+		rooms = [{"room_code": "DBL", "rate_code": "BAR", "check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 12)),
+		          "adults": 2, "total": "300.00", "currency": "EUR", "line_ref": "L1"},
+		         {"room_code": "DBL", "rate_code": "BAR", "check_in": str(fx.d(6, 11)), "check_out": str(fx.d(6, 13)),
+		          "adults": 2, "total": "300.00", "currency": "EUR", "line_ref": "L2"}]
+		self.send(message("OTA-G49", rooms=rooms))
+		with mock.patch.object(avail, "lock_nights", lock), mock.patch.object(Document, "set_new_name", name):
+			self.apply_all()
+		first_name = next(i for i, e in enumerate(events) if e[0] == "name")
+		self.assertEqual(events[0][0], "inventory", events)
+		self.assertLess(0, first_name)
+		self.assertEqual(events[0][1], [(str(fx.d(6, 10)), str(fx.d(6, 12))), (str(fx.d(6, 11)), str(fx.d(6, 13)))],
+		                 events)

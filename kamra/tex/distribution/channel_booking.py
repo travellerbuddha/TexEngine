@@ -127,8 +127,18 @@ def apply(inbound) -> dict:
 	return _create(prop, mapped, data, conn, ref, ccy, inbound.name)
 
 
+def _lock_all(prop: str, mapped: list) -> None:
+	"""Every room's nights, before the guest, the booking or any room takes a name: the lock
+	order of a TEX booking and of a desk write, so none of them waits on another in a cycle
+	(G-49 review). Each room is then recounted under these locks."""
+	from kamra.tex.availability import repository as avail
+
+	avail.lock_nights(prop, [(m.room_type, getdate(r["check_in"]), getdate(r["check_out"])) for r, m in mapped])
+
+
 def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, inbound: str) -> dict:
 	first = mapped[0][1]
+	_lock_all(prop, mapped)
 	guest = _guest(data.get("guest"), property=prop, market=first.market, ref=ref)
 	now = now_datetime()
 	total = sum((quantize(D(r["total"]), ccy) for r, _m in mapped), D(0))
@@ -180,6 +190,7 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 	"""Make TEX's rooms equal to the channel's (full state), line by line."""
 	b = frappe.get_doc("TEX Booking", booking)
 	prop = b.property
+	_lock_all(prop, mapped)
 	lines = {}
 	for row in b.rooms:
 		snap = json.loads(frappe.db.get_value("Reservation", row.reservation, "tex_pricing_snapshot") or "{}")
