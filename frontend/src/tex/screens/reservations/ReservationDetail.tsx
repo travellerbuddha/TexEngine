@@ -30,10 +30,11 @@ import { copyText, shortCode } from "../crs/lib/party"
 import { AcknowledgeDialog, CancelDialog, ResendConfirmationDialog, SimulatorDialog } from "./components/ActionDialogs"
 import { AddExtrasDialog } from "./components/AddExtrasDialog"
 import { AddedExtrasCard } from "./components/AddonParts"
+import { GuestChangesCard } from "./components/GuestChanges"
 import { PaymentSummaryCard, RevisionTimeline } from "./components/DetailParts"
 import { ModifyDrawer } from "./components/ModifyDrawer"
 import { ADDON_STATUSES } from "./lib/addons"
-import type { ReservationDetail as Detail } from "./lib/types"
+import type { ReservationDetail as Detail, GuestChangeRequest } from "./lib/types"
 
 const TERMINAL = ["Cancelled", "No Show", "Checked Out"]
 type Dlg = "modify" | "simulate" | "cancel" | "ack" | "resend" | "addon" | null
@@ -92,6 +93,24 @@ function DetailView({
   const partyText = usePartyText()
   const clock = useServerClock()
   const caps = new Set(d.capabilities)
+  // the guest's own changes and their money (G-45): read again after anything on the page changed
+  const [gcrTick, setGcrTick] = useState(0)
+  const gcr = useTexQuery<GuestChangeRequest[]>("crs", "guest_change_requests", { reservation: d.name }, [d.name, d.revision_no, d.status, d.guest_change_pending, gcrTick], caps.has("reservation.view"))
+  const guestChanges = gcr.data ?? []
+  const decideFirst = guestChanges.some((r) => r.needs_staff)
+  const guestChangesCard = guestChanges.length > 0 && (
+    <GuestChangesCard
+      rows={guestChanges}
+      caps={caps}
+      currency={d.currency}
+      adults={d.adults}
+      childAges={(d.child_ages ?? []).map((c) => c.age)}
+      onResolved={() => {
+        setGcrTick((n) => n + 1)
+        reload()
+      }}
+    />
+  )
   const terminal = TERMINAL.includes(d.status)
   const texPriced = Boolean(d.pricing?.request)
   const canModify = caps.has("reservation.modify") && !terminal && texPriced
@@ -203,6 +222,7 @@ function DetailView({
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="min-w-0 space-y-5 lg:col-span-2">
+          {decideFirst && guestChangesCard}
           <Card>
             <CardHeader title={t("res.detail.stay")} />
             <CardBody>
@@ -304,6 +324,8 @@ function DetailView({
           </Card>
 
           {texPriced && (snap.addons?.length ?? 0) > 0 && <AddedExtrasCard addons={snap.addons ?? []} />}
+
+          {!decideFirst && guestChangesCard}
 
           <Card role="region" aria-label={t("res.rev.title")}>
             <CardHeader title={t("res.rev.title")} description={t("res.rev.subtitle")} />

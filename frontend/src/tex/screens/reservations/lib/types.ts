@@ -263,3 +263,39 @@ export interface ContractVersionInfo {
   room_types: { name: string; room_type_name: string; adults_capacity: number; children_capacity: number }[]
   rate_plan_options: { name: string; rate_plan_name: string; code: string; tex_refundable: number }[]
 }
+
+/** A guest's own change of a reservation and how its money was settled (crs.guest_change_requests; G-45). */
+export interface GuestChangeRequest {
+  name: string
+  property: string
+  booking: string
+  reservation: string
+  status: "Awaiting Payment" | "Applied" | "Requested" | "Approved" | "Rejected" | "Failed" | "Expired" | "Superseded"
+  currency: string
+  /** booking totals before and after the change */
+  old_total: string
+  new_total: string
+  difference: string
+  /** charged online before the change applies */
+  collect_amount: string
+  payment_transaction: string | null
+  attempt: number | null
+  settlement: "" | "None" | "Online payment" | "Pay at hotel" | "Balance" | "Refund" | "Credit on booking" | "Staff" | null
+  settlement_amount: string
+  refunded_amount: string
+  settle_pending: boolean
+  revision: string | null
+  error: string | null
+  note: string | null
+  expires_at: string | null
+  resolved_by: string | null
+  resolved_at: string | null
+  resolution: string | null
+  creation: string
+  modified: string
+  /** a request to decide, or money left for staff to refund */
+  needs_staff: boolean
+  changes: { check_in?: string; check_out?: string; adults?: number; children?: (number | { age?: number | null })[] }
+  /** Requested with a lower price: what approving it would leave paid above the new total */
+  overpaid_after?: string
+}
