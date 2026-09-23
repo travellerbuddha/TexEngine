@@ -11,7 +11,29 @@ import { expect, request as pwRequest, test, type APIRequestContext, type Page }
 import { ADMIN_PASSWORD, api, trackErrors, uniqueRunId } from "./helpers"
 
 const BASE = process.env.TEX_E2E_BASE || "http://test.localhost:8000"
+const PLATFORM = new URL(BASE)
 const HOTEL = "Aurora Beach Resort"
+/** The demo seed verifies this host for the aurora site, so its links are issued on it. */
+const HOST = "book.aurora.test"
+
+// a link on the hotel's own host (https, no port, as in production) is reached on the bench:
+// Chromium resolves the host to the bench and every request names the Frappe site (as in
+// custom-host.spec)
+test.use({
+  extraHTTPHeaders: { "X-Frappe-Site-Name": PLATFORM.hostname },
+  launchOptions: async ({ launchOptions }, use) =>
+    use({ ...launchOptions, args: [...(launchOptions.args ?? []), `--host-resolver-rules=MAP ${HOST} ${PLATFORM.hostname}`] }),
+})
+
+/** The issued link as this bench serves it: same host, path and fragment; the bench's scheme and port. */
+function onBench(url: string): URL {
+  const u = new URL(url)
+  if (u.hostname !== PLATFORM.hostname) {
+    u.protocol = PLATFORM.protocol
+    u.port = PLATFORM.port
+  }
+  return u
+}
 
 interface Link {
   link: string
@@ -72,7 +94,7 @@ test("a new link carries its token in the fragment only", async ({ page }) => {
   expect(new URL(link.url).pathname).not.toContain(link.token)
   const seen = watchRequests(page)
   const doc = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith("/pay"))
-  await page.goto(link.url)
+  await page.goto(onBench(link.url).toString())
   expect((await doc).headers()["referrer-policy"]).toContain("no-referrer")
   await expect(page.getByRole("heading", { name: "Payment request" })).toBeVisible()
   await expect(page.getByText("12.50").first()).toBeVisible()
@@ -89,7 +111,7 @@ test("a new link carries its token in the fragment only", async ({ page }) => {
 test("an old /book/pay/<token> link opens the same page and moves the token out of the path", async ({ page }) => {
   const noErrors = trackErrors(page)
   await english(page)
-  const old = new URL(link.url)
+  const old = onBench(link.url)
   old.pathname = `${old.pathname}/${link.token}`
   old.hash = ""
   const seen = watchRequests(page)
