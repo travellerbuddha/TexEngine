@@ -94,13 +94,16 @@ class TestCustomDomains(DomainCase):
 	def test_the_record_is_checked_every_day(self):
 		self.add(SLUG, HOST)
 		self.verify(SLUG, HOST)
+		def recheck():                                                     # other sites' hosts (demo data) aside
+			return [r for r in sites.recheck_domains() if r["site"] == SLUG]
+
 		with mock.patch.object(sites, "txt_records", side_effect=sites.DnsLookupFailed("timeout")):
-			self.assertEqual(sites.recheck_domains(), [])                  # a resolver failure is not evidence
+			self.assertEqual(recheck(), [])                                # a resolver failure is not evidence
 		with mock.patch.object(sites, "txt_records", return_value=[]):
 			for _ in range(sites.UNVERIFY_AFTER - 1):
-				self.assertEqual(sites.recheck_domains(), [])
+				self.assertEqual(recheck(), [])
 			self.assertEqual(sites.host_map().get(HOST), SLUG)
-			self.assertEqual(sites.recheck_domains(), [{"site": SLUG, "domain": HOST}])
+			self.assertEqual(recheck(), [{"site": SLUG, "domain": HOST}])
 		self.assertIsNone(sites.host_map().get(HOST))
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking_site.domain_unverified",
 		                                                     "reference_name": SLUG}))
