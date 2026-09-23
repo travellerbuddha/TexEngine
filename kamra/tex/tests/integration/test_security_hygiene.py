@@ -20,7 +20,9 @@ from werkzeug.wrappers import Request
 
 from kamra.tex.api import admin as admin_api
 from kamra.tex.api import crm as crm_api
+from kamra.tex.api import public
 from kamra.tex.crm import service as crm
+from kamra.tex.payments import service as pay
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import (
@@ -199,3 +201,40 @@ class TestSecurityHygieneG83(TexTestCase):
 		site.reload()
 		site.logo, site.hero_image = out["file_url"], "https://images.example.com/hero.webp"
 		site.save(ignore_permissions=True)
+
+	# ── 4. tokens in URLs ─────────────────────────────────────────────────
+
+	def test_g83_bearer_tokens_stay_out_of_url_paths_and_referers(self):
+		self.as_user("Administrator")
+		link = pay.create_link(property=fx.PROPERTY, amount="10", currency="EUR", description="deposit")
+		self.assertNotIn(f"/pay/{link['token']}", link["url"])
+		self.assertTrue(link["url"].endswith(f"/book/pay#token={link['token']}"), link["url"])
+		again = pay.reissue_link(link["link"])
+		self.assertTrue(again["url"].endswith(f"/book/pay#token={again['token']}"), again["url"])
+		# guest reads that take a bearer token accept it in a POST body only, never in a query string
+		for fn in (public.booking_status, public.payment_link, public.manage_extras):
+			self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func.get(fn), ["POST"], fn.__name__)
+		# payment pages send no Referer: an old e-mailed /book/pay/<token> link never leaks through it
+		from kamra.tex import booking_host
+		from kamra.www import book
+
+		page = '<html><head><meta name="referrer" content="strict-origin-when-cross-origin" /></head></html>'
+		frappe.local.response_headers = {}
+		try:
+			with mock.patch("kamra.www.book.booking_html", return_value=page):
+				frappe.form_dict.app_path = f"pay/{again['token']}"
+				ctx = book.get_context(frappe._dict())
+				self.assertEqual(frappe.local.response_headers["Referrer-Policy"], "no-referrer")
+				self.assertIn('content="no-referrer"', ctx.spa_html)
+				self.assertNotIn("strict-origin-when-cross-origin", ctx.spa_html)
+				frappe.local.response_headers = {}
+				frappe.form_dict.app_path = f"{SLUG}/manage"                 # the other pages are unchanged
+				book.get_context(frappe._dict())
+				self.assertEqual(frappe.local.response_headers["Referrer-Policy"], "strict-origin-when-cross-origin")
+		finally:
+			frappe.form_dict.pop("app_path", None)
+		self.assertEqual(booking_host.referrer_policy("pay/abc"), "no-referrer")          # a hotel's own host
+		self.assertEqual(booking_host.referrer_policy("manage"), "strict-origin-when-cross-origin")
+		# an existing link keeps working: the page reads its token and posts it
+		self.as_user("Guest")
+		self.assertEqual(public.payment_link(token=again["token"])["status"], "Active")

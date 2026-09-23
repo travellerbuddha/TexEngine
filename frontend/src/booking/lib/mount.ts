@@ -56,6 +56,32 @@ export function payPath(sub: string): string {
   return PINNED ? payRoute(sub) : `/book${payRoute(sub)}`
 }
 
+/** Router path of the payment-link page. The token travels in the URL fragment, which
+ * browsers never send to a server: no access log or Referer header ever holds it (G-83). */
+export function payLinkRoute(token: string): string {
+  return `/pay#token=${encodeURIComponent(token)}`
+}
+
+/** Absolute path of the payment-link page for `token` ("/book/pay#token=…" on the platform). */
+export function payLinkPath(token: string): string {
+  return PINNED ? payLinkRoute(token) : `/book${payLinkRoute(token)}`
+}
+
+/** A payment link e-mailed before G-83 carries its token in the path (…/pay/<token>). Move
+ * it into the fragment before the app starts, so that no request the page makes (API calls
+ * and their Referer) repeats it. Call once, before the router reads the location. */
+export function adoptPathToken(): void {
+  try {
+    const base = PINNED ? "" : "/book"
+    const m = /^\/pay\/([^/]+)\/?$/.exec(window.location.pathname.slice(base.length))
+    if (!window.location.pathname.startsWith(`${base}/pay/`) || !m || m[1] === "return") return
+    const token = decodeURIComponent(m[1])
+    window.history.replaceState(window.history.state, "", `${base}/pay${window.location.search}#token=${encodeURIComponent(token)}`)
+  } catch {
+    /* leave the address as it is */
+  }
+}
+
 /** Absolute URL on the current origin of a page of a booking site (return URLs sent to the server). */
 export function siteUrl(slug: string, sub = ""): string {
   return `${window.location.origin}${sitePath(slug, sub)}`
@@ -68,7 +94,7 @@ export function useSiteSlug(): string | undefined {
 }
 
 // pages a pinned engine serves from "/" (everything else on the host is the platform's)
-const PINNED_ROUTE = /^\/(?:|manage|confirmation\/[^/]+|pay\/.+)$/
+const PINNED_ROUTE = /^\/(?:|manage|confirmation\/[^/]+|pay|pay\/.+)$/
 
 /** In-app router path for a URL of this booking engine, else null (leave the app).
  * - /book/… on any host (this host, the TEX host behind a dev proxy, a verified custom
@@ -90,7 +116,7 @@ export function routeFor(url: string): string | null {
     const inner = p.slice("/book".length) || "/"
     if (!PINNED) return inner + rest
     if (inner === "/") return "/" + rest
-    if (inner.startsWith("/pay/")) return inner + rest
+    if (inner === "/pay" || inner.startsWith("/pay/")) return inner + rest
     const prefix = `/${PINNED_SLUG}`
     if (inner === prefix || inner.startsWith(`${prefix}/`)) return (inner.slice(prefix.length) || "/") + rest
     return null
