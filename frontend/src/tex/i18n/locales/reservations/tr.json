@@ -296,6 +296,7 @@
  "res.rev.to": "yeni değer",
  "res.sim.actual": "Gerçek · satış {date}",
  "res.sim.button": "Simüle et",
+ "res.sim.contract_now": "Bu kontrat şu anda {status}; bu, o zamanki satış fiyatıdır.",
  "res.sim.difference_hint": "Simülasyon eksi gerçek",
  "res.sim.not_sellable": "O tarihte satılamazdı",
  "res.sim.readonly": "Salt okunur: hiçbir şey kaydedilmez veya değiştirilmez.",

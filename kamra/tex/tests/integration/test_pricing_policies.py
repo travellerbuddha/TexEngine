@@ -189,17 +189,19 @@ class TestPolicyCascade(PolicyCase):
 		draft.save(ignore_permissions=True)
 		revisions.activate(POLICY, draft.name)
 		self.assertEqual(self.occupancy(v1, 2, 8), D("240.00"))     # the published version keeps its terms
-		# republished (effective tomorrow), the new version inherits the change
+		# republished, the new version inherits the change
 		v2 = contracts.new_draft(c["contract"])
-		eff = add_to_date(now_datetime(), days=1)
-		contracts.publish(v2, effective_from=str(eff))
+		contracts.publish(v2)
 		self.assertEqual(self.occupancy(v2, 2, 8), D("245.00"))
 		self.assertIn(f"policy:{draft.name}/r2/market", {r["source"] for r in self.payload(v2)["occupancy_rules"]})
-		# the simulator prices a sale time with the version on sale then
+		# the simulator prices a sale time with the version on sale then (a past one: a future
+		# sale time is refused, G-51)
 		then = modification.simulate(res, sale_at=sold_at)
-		later = modification.simulate(res, sale_at=str(add_to_date(eff, hours=1)))
+		later = modification.simulate(res, sale_at=str(now_datetime()))
 		self.assertEqual((then["contract_version"], D(then["simulated"]["nights"][0]["occupancy"])), (v1, D("240")))
 		self.assertEqual((later["contract_version"], D(later["simulated"]["nights"][0]["occupancy"])), (v2, D("245")))
+		with self.assertRaises(frappe.ValidationError):
+			modification.simulate(res, sale_at=str(add_to_date(now_datetime(), days=1)))
 
 
 class TestInfantPrecedence(PolicyCase):
