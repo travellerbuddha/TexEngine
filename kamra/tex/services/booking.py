@@ -110,13 +110,17 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 	here ever withdraws consent.
 
 	Which profile: the e-mail's, when one is given; the phone's only for a booking without an
-	e-mail or a profile without one (ADR-056 review)."""
+	e-mail or a profile without one (ADR-056 review), only for staff (an anonymous booker's phone is
+	not verified) and only when exactly one profile has it (a shared phone is nobody's identity:
+	ADR-056 second review). Otherwise a new profile is made, which the CRM shows with its possible
+	duplicates for staff to merge."""
 	enterprise = frappe.db.get_value("Property", property, "tex_enterprise")
 	existing = None
 	tenant = ("in", [enterprise, "", None])
 	if g.get("email"):
-		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": tenant})
-	if not existing and g.get("phone"):
+		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": tenant},
+		                               order_by="creation asc")
+	if not existing and g.get("phone") and staff:
 		# the e-mail is the identity when given: a phone only finds a profile for a booking without
 		# an e-mail, or a profile known by phone alone. Another e-mail on a shared phone (a family, a
 		# colleague, a travel agent's number) is another person, never their stays or history
@@ -124,7 +128,8 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 		by_phone = {"phone": g["phone"], "tex_enterprise": tenant}
 		if g.get("email"):
 			by_phone["email"] = ("is", "not set")
-		existing = frappe.db.get_value("Guest", by_phone)
+		found = frappe.get_all("Guest", filters=by_phone, pluck="name", order_by="creation asc", limit=2)
+		existing = found[0] if len(found) == 1 else None
 	asked = [k for k in CONSENT_FIELDS if consent_given(g.get(k.replace("tex_", "")))]
 	if existing:
 		doc = frappe.get_doc("Guest", existing)
@@ -143,6 +148,7 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 			doc.tex_consent_source = "booking (staff)"
 			changed = True
 		if changed:
+			doc.flags.tex_consent_recorded = True        # with the booking (``_record_consent``)
 			doc.save(ignore_permissions=True)
 		return (doc.name, new, []) if trusted else (doc.name, [], new)
 	doc = frappe.get_doc({
@@ -155,6 +161,7 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 		**({"tex_consent_updated_at": now_datetime(),
 		    "tex_consent_source": "booking (staff)" if staff else "booking"} if asked else {}),
 	})
+	doc.flags.tex_consent_recorded = True                # with the booking (``_record_consent``)
 	doc.insert(ignore_permissions=True)
 	return doc.name, asked, []
 

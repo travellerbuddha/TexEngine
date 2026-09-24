@@ -236,7 +236,7 @@ def profile(guest: str) -> dict:
 	# made at another hotel (a booking there, its staff) stay with that hotel; profile-level
 	# changes (CRM, no hotel) are the consent record everyone sharing the profile relies on
 	consent_log = [c for c in frappe.get_all(
-		"TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": guest,
+		"TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": ("in", [guest, *merged_into(guest)]),
 		                            "action": ("in", ["guest.consent", "guest.consent_requested"])},
 		fields=["event_time", "action", "actor", "new_value", "reason", "source", "property"],
 		order_by="event_time desc", limit=200) if not c.property or c.property in via][:50]
@@ -249,7 +249,9 @@ def profile(guest: str) -> dict:
 	return {"guest": d, "stays": stays, "communications": comms, "segments": member_of,
 	        "loyalty": loyalty.summary(guest, loyalty.visible_programs(via), hotels=via),
 	        "extras": extras, "extras_summary": extras_summary, "cancellations": _cancellations(guest, via),
-	        "consent_history": consent_log, "hotels": sorted(via)}
+	        "consent_history": consent_log, "hotels": sorted(via),
+	        "possible_duplicates": possible_duplicates(guest, {p for p in scope.permitted_properties()
+	                                                           if scope.has_capability("crm.view", p)})}
 
 
 def _quantity(q) -> str:
@@ -830,3 +832,172 @@ def purge_funnel(days: int = 180) -> int:
 	n = frappe.db.count("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
 	frappe.db.delete("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
 	return n
+
+
+# ─── duplicates and merging (ADR-056 second review) ─────────────────────
+
+# what a merged profile takes from the duplicate where it has nothing itself
+MERGE_FILL = ("first_name", "last_name", "email", "phone", "nationality", "date_of_birth", "gender", "id_type",
+              "id_number", "address_line", "city", "guest_notes", "tex_language", "tex_country", "tex_market",
+              "tex_preferences", "id_file", "address_proof_file")
+
+
+def possible_duplicates(guest: str, props: set[str]) -> list[dict]:
+	"""Other profiles the viewer may see, of the same enterprise (or none), with this profile's phone
+	or e-mail: the identity rule keeps a shared phone apart (``booking.resolve_guest``), so staff
+	decide, and merge (``merge_guests``)."""
+	g = frappe.db.get_value("Guest", guest, ["email", "phone", "tex_enterprise"], as_dict=True)
+	email, phone = (g.email or "").strip(), (g.phone or "").strip()
+	if not (email or phone) or not props:
+		return []
+	cond, params = _visible_guest_sql(props)
+	match = [c for c, v in (("g.email = %(email)s", email), ("g.phone = %(phone)s", phone)) if v]
+	tenant = "AND IFNULL(g.tex_enterprise, '') IN %(tenants)s" if g.tex_enterprise else ""
+	rows = frappe.db.sql(  # nosemgrep -- static conditions, values bound
+		f"""SELECT g.name, g.full_name, g.email, g.phone FROM `tabGuest` g
+		WHERE g.name != %(me)s AND ({" OR ".join(match)}) {tenant} AND {cond}
+		ORDER BY g.creation ASC, g.name ASC LIMIT 20""",
+		{**params, "me": guest, "email": email, "phone": phone, "tenants": (g.tex_enterprise or "", "")},
+		as_dict=True)
+	return [{"name": r.name, "full_name": r.full_name,
+	         "match": [f for f, v in (("email", email), ("phone", phone)) if v and (r[f] or "").strip().lower() == v.lower()]}
+	        for r in rows]
+
+
+def merged_into(guest: str) -> list[str]:
+	"""The profiles merged into this one (and into those, …): their consent record is this profile's."""
+	names, frontier = [], [guest]
+	for _depth in range(10):
+		found = []
+		for old in frappe.get_all("TEX Audit Event", filters={"action": "guest.merge", "reference_doctype": "Guest",
+		                                                      "reference_name": ("in", frontier)}, pluck="old_value"):
+			try:
+				source = (json.loads(old or "{}") or {}).get("source")
+			except (ValueError, AttributeError):
+				source = None
+			if source and source != guest and source not in names:
+				found.append(source)
+		if not found:
+			break
+		names += found
+		frontier = found
+	return names
+
+
+def _guest_links() -> list[tuple[str, str]]:
+	"""Every (DocType, field) linking to a Guest, from the meta (custom fields included)."""
+	from frappe.model.rename_doc import get_link_fields
+
+	return sorted({(f["parent"], f["fieldname"]) for f in get_link_fields("Guest")
+	               if not f.get("issingle") and frappe.db.table_exists(f["parent"])})
+
+
+def _records_hotels(guests: tuple[str, ...]) -> set[str]:
+	"""The hotels any record of these profiles belongs to (each linking DocType that names one)."""
+	hotels = set()
+	for parent, field in _guest_links():
+		if frappe.db.has_column(parent, "property"):
+			hotels |= set(frappe.db.sql(  # nosemgrep -- identifiers from the meta, values bound
+				f"SELECT DISTINCT property FROM `tab{parent}` WHERE `{field}` IN %(g)s AND IFNULL(property, '') != ''",
+				{"g": guests}, pluck=True))
+	return hotels
+
+
+def _repoint(source: str, target: str) -> dict[str, list[str]]:
+	"""Every link to ``source`` now names ``target``: read, then written by primary key."""
+	moved: dict[str, list[str]] = {}
+	for parent, field in _guest_links():
+		names = frappe.db.sql(f"SELECT name FROM `tab{parent}` WHERE `{field}` = %(g)s",  # nosemgrep
+		                      {"g": source}, pluck=True)
+		for chunk in _chunks(names):
+			frappe.db.sql(f"UPDATE `tab{parent}` SET `{field}` = %(t)s WHERE name IN %(n)s",  # nosemgrep
+			              {"t": target, "n": chunk})
+		if names:
+			moved.setdefault(parent, []).extend(names)
+	# comments, attachments and the change history follow the profile; the audit trail is immutable and
+	# keeps the duplicate's name (its consent events are read through the merge event: ``merged_into``)
+	from frappe.model.dynamic_links import get_dynamic_link_map
+
+	skip = set(frappe.get_hooks("ignore_links_on_delete"))
+	for df in get_dynamic_link_map().get("Guest", []):
+		if df.parent in skip or frappe.get_meta(df.parent).issingle:
+			continue
+		frappe.db.sql(  # nosemgrep -- identifiers from the meta, values bound
+			f"UPDATE `tab{df.parent}` SET `{df.fieldname}` = %(t)s WHERE `{df.options}` = 'Guest' AND `{df.fieldname}` = %(s)s",
+			{"t": target, "s": source})
+	frappe.db.sql("""UPDATE `tabFile` SET attached_to_name = %(t)s
+		WHERE attached_to_doctype = 'Guest' AND attached_to_name = %(s)s""", {"t": target, "s": source})
+	frappe.db.sql("UPDATE `tabVersion` SET docname = %(t)s WHERE ref_doctype = 'Guest' AND docname = %(s)s",
+	              {"t": target, "s": source})
+	return moved
+
+
+def merge_guests(source: str, target: str) -> dict:
+	"""Merge the duplicate profile ``source`` into ``target`` (ADR-056 second review).
+
+	Who: staff who may edit both profiles (``crm.edit``) and may edit guests at every hotel either
+	profile has a record at: its stays, bookings, communications, cases and loyalty entries go with it.
+	Both profiles belong to one enterprise (or to none). What moves: every link to the duplicate
+	(from the meta: TEX and legacy DocTypes, custom fields), its comments, attachments and history; its
+	loyalty entries, so the balance is one and the tier follows the merged lifetime. The profile that
+	stays keeps its own data and takes the duplicate's where it has none; VIP and blacklist are kept if
+	either has them. Consent is the stricter of the two: a channel stays consented only when both
+	profiles consented to it. The duplicate is then deleted; the merge is audited (no contact data)."""
+	if not source or not target or source == target:
+		frappe.throw(_("Pick two different profiles to merge."))
+	for g in (source, target):
+		if not frappe.db.exists("Guest", g):
+			frappe.throw(_("Guest not found."), frappe.DoesNotExistError)
+	require_guest(target, "crm.edit")
+	require_guest(source, "crm.edit")
+	# both rows locked in name order: two merges of the same profiles never deadlock
+	frappe.db.sql("SELECT name FROM `tabGuest` WHERE name IN %(g)s ORDER BY name FOR UPDATE", {"g": (source, target)})
+	hotels = _records_hotels((source, target))
+	if not scope.is_platform_admin():
+		allowed = {p for p in scope.permitted_properties() if scope.has_capability("crm.edit", p)}
+		if not hotels <= allowed:
+			frappe.throw(_("These profiles have records at hotels where you may not edit guests; someone who may "
+			               "edit guests at all of them can merge them."), frappe.PermissionError)
+	src, dst = frappe.get_doc("Guest", source), frappe.get_doc("Guest", target)
+	ents = {e for e in (src.tex_enterprise, dst.tex_enterprise) if e} | _enterprises(hotels)
+	if len(ents) > 1:
+		frappe.throw(_("Profiles of different enterprises cannot be merged."))
+	before = {g.name: {f: bool(g.get(f)) for f in CONSENT} for g in (src, dst)}
+	moved = _repoint(source, target)
+	filled = [f for f in MERGE_FILL if not dst.get(f) and src.get(f)]
+	for f in filled:
+		dst.set(f, src.get(f))
+	if src.vip and not dst.vip:
+		dst.vip = 1
+		filled.append("vip")
+	if src.blacklisted and not dst.blacklisted:
+		dst.blacklisted, dst.blacklist_reason = 1, dst.blacklist_reason or src.blacklist_reason
+		filled.append("blacklisted")
+	tags = [t for t in dict.fromkeys(x.strip() for x in f"{dst.tex_tags or ''},{src.tex_tags or ''}".split(","))
+	        if t]
+	if ",".join(tags) != (dst.tex_tags or ""):
+		dst.tex_tags = ",".join(tags)
+	if ents and not dst.tex_enterprise:
+		dst.tex_enterprise = next(iter(ents))
+		filled.append("tex_enterprise")
+	consent = {f: before[source][f] and before[target][f] for f in CONSENT}
+	for f, v in consent.items():
+		dst.set(f, 1 if v else 0)
+	dst.flags.tex_consent_source = "merge"             # a change is stamped and audited (``guest_validate``)
+	dst.save(ignore_permissions=True)
+	if not consent["tex_consent_email"]:
+		# the duplicate's cases came with the links; without consent they keep no contact data
+		forget_contact(target, emails={src.email, dst.email})
+	for doctype in ("Reservation", "Folio"):
+		if moved.get(doctype) and frappe.db.has_column(doctype, "guest_name"):
+			for chunk in _chunks(moved[doctype]):
+				frappe.db.sql(f"UPDATE `tab{doctype}` SET guest_name = %(n)s WHERE name IN %(r)s",  # nosemgrep
+				              {"n": dst.full_name, "r": chunk})
+	frappe.delete_doc("Guest", source, ignore_permissions=True, delete_permanently=True)
+	loyalty._sync_guest(target)
+	refresh_guest_stats(target)
+	counts = {dt: len(names) for dt, names in sorted(moved.items())}
+	audit("guest.merge", reference_doctype="Guest", reference_name=target, hotels=sorted(hotels),
+	      enterprise=next(iter(ents)) if ents else None,
+	      old={"source": source, "consent": before}, new={"moved": counts, "filled": sorted(filled), "consent": consent})
+	return {"target": target, "source": source, "moved": counts, "filled": sorted(filled), "consent": consent}
