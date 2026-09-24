@@ -1,26 +1,29 @@
+# The app, its Python package and its DocType modules stay "kamra" (ADR-001); what people
+# see says TEX Engine (G-60, ADR-060). TEX Engine is derived from Kamra PMS (HeyKoala and
+# contributors) under AGPL-3.0: see NOTICE.md and license.txt.
 app_name = "kamra"
-app_title = "Kamra"
+app_title = "TEX Engine"
 app_publisher = "HeyKoala"
 app_description = (
-	"Open-source, AI-native hotel PMS — front desk, direct booking, "
-	"housekeeping, folios and GST billing, with an MCP tool layer so AI "
-	"agents can run the property."
+	"TEX Engine: hotel commercial platform (CRS, contracts, pricing, direct booking, "
+	"call centre, CRM, payments, integrations), derived from Kamra (AGPL-3.0)."
 )
 app_email = "hello@kamrapms.com"
 app_license = "agpl-3.0"
 
 # Branding shown in the Desk navbar, app switcher and marketplace listing.
-app_logo_url = "/assets/kamra/kamra-mark.svg"
+app_logo_url = "/assets/kamra/tex-mark.svg"
 app_icon = "octicon octicon-home"
-app_color = "#1E7B4F"
+app_color = "#2250D1"
 
 # The product UI is the React SPA at /kamra; surface it in the Apps launcher
-# (and the /apps grid) so users land on it instead of the Desk.
+# (and the /apps grid) so users land on it instead of the Desk. The route stays
+# /kamra (marketplace_install_check); the SPA opens the TEX admin app there.
 add_to_apps_screen = [
 	{
 		"name": "kamra",
-		"logo": "/assets/kamra/kamra-mark.svg",
-		"title": "Kamra",
+		"logo": "/assets/kamra/tex-mark.svg",
+		"title": "TEX Engine",
 		"route": "/kamra",
 	}
 ]

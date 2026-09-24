@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import frappe
+from frappe.rate_limiter import rate_limit
 from frappe.utils import get_system_timezone, now_datetime
 
+from kamra.tex import entry as entry_screens
 from kamra.tex.security import scope
 from kamra.tex.security.capabilities import CAPABILITIES
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+@rate_limit(limit=60, seconds=60)
+def entry():
+	"""The public sign-in page's name and source offer (G-60, ADR-060): the brand from TEX
+	Settings and where TEX Engine's source is offered (AGPL-3.0 section 13). Nothing about the
+	site, its hotels or its users."""
+	return entry_screens.info()
 
 
 @frappe.whitelist()
@@ -40,7 +51,7 @@ def bootstrap():
 			"booking_channels": sorted(scope.booking_channels(p, user)),
 		} for p in props if p in rows],
 		"capabilities": CAPABILITIES,
-		"settings": {"brand_name": settings.brand_name or "TEX Engine",
+		"settings": {"brand_name": entry_screens.brand_name(), "source_url": entry_screens.source_url(),
 		             "show_legacy_pms": bool(settings.show_legacy_pms),
 		             "default_market": settings.default_market, "default_sales_channel": settings.default_sales_channel},
 		"markets": frappe.get_all("TEX Market", filters={"disabled": 0},
