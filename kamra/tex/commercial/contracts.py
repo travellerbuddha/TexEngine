@@ -424,6 +424,12 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 def validate_version(name: str) -> dict:
 	version = frappe.get_doc("TEX Contract Version", name)
 	scope.require("contract.edit", scope.property_of("TEX Contract Version", name))
+	return validate_doc(version)
+
+
+def validate_doc(version) -> dict:
+	"""Validation of a version document as it is: a loaded draft, or a draft with unsaved changes
+	applied in memory (ADR-061). The caller checks who may validate it."""
 	try:
 		terms = build_terms(version)
 	except frappe.ValidationError as e:

@@ -1,0 +1,328 @@
+"""Pricing Workspace backend (ADR-061, slice S2).
+
+* GAP-1: ``price_matrix``, ``validate_version`` and ``preview_price`` take the editor's unsaved
+  ``data`` and apply it to the draft in memory (the read-only overlay). Nothing is saved or
+  audited; each row's client key becomes its rule id (``~<_key>``).
+* GAP-8: a blank rule value is refused by ``save_version`` and by the overlay (Frappe stored it
+  as 0), naming the row.
+* GAP-10: ``get_version`` says what the viewer may do (``can_preview``, ``can_publish``,
+  ``can_edit_contract``), whether the pricing basis is locked and the contract currency's
+  minor units.
+"""
+
+import json
+
+import frappe
+
+from kamra.tex.api import contracts as api
+from kamra.tex.commercial import contracts
+from kamra.tex.money import D
+from kamra.tex.security import scope
+from kamra.tex.tests.integration import fixtures as fx
+from kamra.tex.tests.integration.test_critical_journey import TexTestCase
+from kamra.tex_commercial.doctype.tex_contract.tex_contract import header_values
+
+OTHER_HOTEL = "PW Other Hotel"
+RM = "pw-revenue@example.com"          # Revenue Manager at the test hotel
+EDITOR = "pw-editor@example.com"       # contract.edit without price.view_cost
+FINANCE = "pw-finance@example.com"     # price.view_cost without contract.edit
+AGENT = "pw-agent@example.com"         # sells only: the catalogue
+FOREIGN = "pw-foreign@example.com"     # a Revenue Manager of another hotel
+ROW_MESSAGE = "a value is required; clear the cell to remove the price."
+
+
+def keyed(table: str, rows: list[dict]) -> list[dict]:
+	"""Rows as the workspace posts them: each with its client key (and the server's bookkeeping,
+	which the server drops)."""
+	return [{**r, "_key": f"{table}-k{i + 1}"} for i, r in enumerate(rows)]
+
+
+def as_json(data: dict) -> str:
+	"""What the browser posts (dates as ISO text)."""
+	return json.dumps(data, default=str)
+
+
+def find(rows: list[dict], **match) -> dict:
+	return next(r for r in rows if all(r.get(k) == v for k, v in match.items()))
+
+
+class WorkspaceCase(TexTestCase):
+	def setUp(self):
+		super().setUp()
+		self.std, self.dlx = self.f["room_types"]["STD"], self.f["room_types"]["DLX"]
+		self.c = fx.create_contract(self.f, code="PW-S2", publish=False)
+		self.v = self.c["version"]
+		fx.ensure("TEX Permission Profile", {"profile_name": "PW Contract Editor"},
+		          {"profile_name": "PW Contract Editor",
+		           "capabilities": [{"capability": "price.view"}, {"capability": "contract.edit"}]})
+		if not frappe.db.exists("Property", OTHER_HOTEL):
+			frappe.get_doc({"doctype": "Property", "property_name": OTHER_HOTEL, "city": "Side", "country": "Turkey",
+			                "currency": "EUR", "tex_hotel_group": self.f["group"]}).insert(ignore_permissions=True)
+		for user, prop, profile in ((RM, fx.PROPERTY, "Revenue Manager"), (EDITOR, fx.PROPERTY, "PW Contract Editor"),
+		                            (FINANCE, fx.PROPERTY, "Finance"), (AGENT, fx.PROPERTY, "Reservations Agent"),
+		                            (FOREIGN, OTHER_HOTEL, "Revenue Manager")):
+			fx.ensure_user(user, ["Revenue Manager"])
+			fx.ensure("TEX Access Grant", {"user": user, "property": prop},
+			          {"user": user, "scope_level": "Hotel", "property": prop, "permission_profile": profile})
+		scope.clear_cache()
+
+	def as_user(self, user: str) -> None:
+		frappe.set_user(user)  # nosemgrep: frappe-setuser -- test context switch
+		scope.clear_cache()
+
+	def payload(self) -> dict:
+		"""The draft's saved state as the workspace posts it (every table, keyed rows)."""
+		doc = api.get_version(self.v)
+		return {t: keyed(t, doc[t]) for t in api.VERSION_TABLES}
+
+	def std_low(self, data: dict) -> dict:
+		return find(data["period_rates"], room_type=self.std, period_code="LOW")
+
+	def preview(self, version: str | None = None, **kw):
+		args = {"room_type": self.std, "board": "AI", "check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 11)),
+		        "adults": 2, "market": "DE", "rate_plan": self.f["rate_plans"]["FLEX"], **kw}
+		return api.preview_price(version or self.v, **args)
+
+	def untouched(self) -> tuple:
+		"""What a write would change: the draft's modified time, its audit events and its rows."""
+		rows = {t: frappe.get_all(frappe.get_meta("TEX Contract Version").get_field(t).options,
+		                          filters={"parent": self.v, "parenttype": "TEX Contract Version"},
+		                          fields=["name", "modified"], order_by="idx asc")
+		        for t in api.VERSION_TABLES}
+		return (frappe.db.get_value("TEX Contract Version", self.v, "modified"),
+		        frappe.db.count("TEX Audit Event", {"reference_name": self.v}),
+		        {t: [(r.name, str(r.modified)) for r in rs] for t, rs in rows.items()})
+
+
+class TestOverlayReads(WorkspaceCase):
+	def test_unsaved_data_is_priced_validated_and_quoted_without_a_write(self):
+		before = self.untouched()
+		data = self.payload()
+		self.std_low(data).update(op="ABSOLUTE", value="123.45")
+
+		m = api.price_matrix(self.v, data=as_json(data))
+		std = find(m["rooms"], room_type=self.std)
+		dlx = find(m["rooms"], room_type=self.dlx)
+		self.assertEqual(D(std["cells"]["LOW"]), D("123.45"))
+		self.assertEqual(D(dlx["cells"]["LOW"]), D("123.45") * D("1.35"))     # the derived room follows
+		self.assertEqual(D(std["cells"]["HIGH"]), D("120"))
+		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+		q = self.preview(data=data)
+		self.assertTrue(q["sellable"], q.get("reasons"))
+		self.assertEqual(D(q["nights"][0]["unit"]), D("123.45"))
+
+		# the draft as saved: unchanged, unaudited, the same rows
+		self.assertEqual(self.untouched(), before)
+		self.assertEqual(self.std_low(api.get_version(self.v))["value"], "100")
+		self.assertEqual(D(find(api.price_matrix(self.v)["rooms"], room_type=self.std)["cells"]["LOW"]), D("100"))
+		self.assertEqual(D(self.preview()["nights"][0]["unit"]), D("100"))
+
+	def test_validation_of_unsaved_data_reports_its_issues(self):
+		data = self.payload()
+		data["period_rates"].append({**self.std_low(data), "_key": "dup", "value": "90"})
+		report = api.validate_version(self.v, data=as_json(data))
+		self.assertFalse(report["ok"])
+		self.assertIn("ROOM_RULE_DUPLICATE", [i["code"] for i in report["issues"]])
+		self.assertTrue(api.validate_version(self.v)["ok"])                        # the saved draft
+		self.assertEqual(contracts.validate_version(self.v), api.validate_version(self.v))
+
+	def test_rule_ids_are_the_rows_client_keys(self):
+		data = self.payload()
+		key = self.std_low(data)["_key"]
+		q = self.preview(data=data)
+		ids = {s["rule"]["rule_id"] for s in q["explanation"] if s.get("rule") and s["rule"]["kind"] == "room_rule"}
+		self.assertEqual(ids, {f"~{key}"})
+		# a row without a key is named by its table and position
+		for r in data["period_rates"]:
+			r.pop("_key")
+		q = self.preview(data=data)
+		pos = data["period_rates"].index(self.std_low(data)) + 1
+		ids = {s["rule"]["rule_id"] for s in q["explanation"] if s.get("rule") and s["rule"]["kind"] == "room_rule"}
+		self.assertEqual(ids, {f"~period_rates-{pos}"})
+		# the saved draft keeps its row names
+		saved = self.std_low(api.get_version(self.v))["name"]
+		q = self.preview()
+		ids = {s["rule"]["rule_id"] for s in q["explanation"] if s.get("rule") and s["rule"]["kind"] == "room_rule"}
+		self.assertEqual(ids, {saved})
+
+	def test_the_overlay_prices_what_a_save_would_store(self):
+		data = self.payload()
+		self.std_low(data).update(value="123.45")
+		dlx_high = {"room_type": self.dlx, "period_code": "HIGH", "op": "INHERIT", "value": None, "base_room_type": None,
+		            "_key": "inherit"}
+		data["period_rates"].append(dlx_high)                                    # INHERIT: a blank value is fine
+		# a new supplement board with no child percent: the DocType default (50) applies, as on save
+		data["boards"].append({"board": "UAI", "op": "ADD", "adult_amount": "30", "child_percent": None,
+		                       "infant_free": 1, "room_type": self.dlx, "period_code": "LOW", "_key": "uai-dlx"})
+		# a check typed as text is stored as 0: a child above the top band is not an adult
+		data["children_over_max_as_adults"] = "0"
+		parties = [dict(room_type=self.dlx, board="UAI", children=json.dumps([8])),
+		           dict(room_type=self.std, board="AI", check_in=str(fx.d(7, 10)), check_out=str(fx.d(7, 12)), adults=3),
+		           dict(room_type=self.dlx, board="AI", children=json.dumps([13]))]
+
+		overlay_matrix = api.price_matrix(self.v, data=data)
+		overlay_quotes = [self.preview(data=data, **p) for p in parties]
+		self.assertTrue(overlay_quotes[0]["sellable"] and overlay_quotes[1]["sellable"],
+		                [q.get("reasons") for q in overlay_quotes])
+		api.save_version(self.v, as_json(data))
+		saved_matrix = api.price_matrix(self.v)
+		saved_quotes = [self.preview(**p) for p in parties]
+
+		def cells(m):
+			return {(r["room_type"], p): D(c) for r in m["rooms"] for p, c in r["cells"].items()}
+
+		def money(q):
+			if not q["sellable"]:
+				return False, q["reasons"]
+			return True, {k: D(v) for k, v in q["totals"].items()}, [
+				{k: D(v) for k, v in n.items() if k not in ("date", "period")} for n in q["nights"]]
+
+		self.assertEqual(cells(overlay_matrix), cells(saved_matrix))
+		self.assertEqual([money(q) for q in overlay_quotes], [money(q) for q in saved_quotes])
+		self.assertEqual(find(api.get_version(self.v)["boards"], board="UAI", room_type=self.dlx)["child_percent"], "50")
+
+
+class TestOverlayRefusals(WorkspaceCase):
+	def calls(self, data):
+		return (("price_matrix", lambda: api.price_matrix(self.v, data=data)),
+		        ("validate_version", lambda: api.validate_version(self.v, data=data)),
+		        ("preview_price", lambda: self.preview(data=data)))
+
+	def test_a_published_version_is_never_overlaid(self):
+		data = self.payload()
+		contracts.publish(self.v)
+		for name, call in self.calls(data):
+			with self.subTest(endpoint=name), self.assertRaises(frappe.ValidationError) as cm:
+				call()
+			self.assertIn("Only draft versions can be previewed with unsaved changes", str(cm.exception))
+		self.assertTrue(api.price_matrix(self.v)["rooms"])                          # its frozen terms still read
+
+	def test_the_overlay_needs_contract_edit_at_the_versions_hotel(self):
+		data = self.payload()
+		for user in (FINANCE, FOREIGN):
+			self.as_user(user)
+			for name, call in self.calls(data):
+				with self.subTest(user=user, endpoint=name), self.assertRaises(frappe.PermissionError):
+					call()
+		self.as_user(RM)
+		self.assertTrue(api.price_matrix(self.v, data=data)["rooms"])
+		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+		self.assertIn("sellable", self.preview(data=data))
+
+	def test_a_blank_value_is_refused_on_save_and_in_the_overlay(self):
+		before = self.untouched()
+		cases = (
+			("period_rates", dict(room_type=self.std, period_code="LOW"), "value", "", "Room prices"),
+			("occupancy_rules", dict(target="CHILD", age_band="CHA"), "value", None, "Occupancy rules"),
+			("boards", dict(board="UAI"), "adult_amount", "  ", "Boards"),
+		)
+		for table, match, field, blank, label in cases:
+			data = self.payload()
+			row = find(data[table], **match)
+			row[field] = blank
+			message = f"{label}, row {data[table].index(row) + 1}: {ROW_MESSAGE}"
+			with self.subTest(table=table, path="save"), self.assertRaises(frappe.ValidationError) as cm:
+				api.save_version(self.v, as_json(data))
+			self.assertIn(message, str(cm.exception))
+			for name, call in self.calls(data):
+				with self.subTest(table=table, path=name), self.assertRaises(frappe.ValidationError) as cm:
+					call()
+				self.assertIn(message, str(cm.exception))
+		self.assertEqual(self.untouched(), before)
+
+	def test_inherit_and_the_included_board_need_no_value(self):
+		data = self.payload()
+		data["period_rates"].append({"room_type": self.dlx, "period_code": "HIGH", "op": "INHERIT", "value": "",
+		                             "_key": "inh"})
+		find(data["boards"], board="AI")["adult_amount"] = None                     # the included (base) board
+		self.assertTrue(api.price_matrix(self.v, data=data)["rooms"])
+		out = api.save_version(self.v, as_json(data))
+		self.assertEqual(find(out["period_rates"], room_type=self.dlx, period_code="HIGH")["value"], "0")
+
+	def test_more_than_nine_places_are_refused_as_save_refuses_them(self):
+		data = self.payload()
+		find(data["occupancy_rules"], target="ADULT", position=3)["value"] = "0.3333333333"
+		with self.assertRaises(frappe.ValidationError) as saved:
+			api.save_version(self.v, as_json(data))
+		with self.assertRaises(frappe.ValidationError) as overlaid:
+			api.price_matrix(self.v, data=data)
+		self.assertIn("9 decimal places", str(overlaid.exception))
+		self.assertEqual(str(overlaid.exception), str(saved.exception))
+
+	def test_more_than_5000_rows_are_refused(self):
+		data = self.payload()
+		rate = {"room_type": self.std, "period_code": "LOW", "op": "ABSOLUTE", "value": "100"}
+		data["period_rates"] = [{**rate, "_key": f"r{i}"} for i in range(5001)]
+		with self.assertRaises(frappe.ValidationError) as cm:
+			api.price_matrix(self.v, data=data)
+		self.assertIn("5000", str(cm.exception))
+
+	def test_a_build_error_is_answered_not_raised(self):
+		data = self.payload()
+		data["rooms"].append({"room_type": "PW no such room", "_key": "bad"})
+		m = api.price_matrix(self.v, data=data)
+		self.assertEqual((m["rooms"], m["periods"]), ([], []))
+		self.assertTrue(m["build_error"])
+		report = api.validate_version(self.v, data=data)
+		self.assertEqual([i["code"] for i in report["issues"]], ["BUILD"])
+
+
+class TestViewerFlags(WorkspaceCase):
+	def test_each_viewer_is_told_what_it_may_do(self):
+		expect = {  # user: (editable, can_preview, can_publish, can_edit_contract)
+			RM: (True, True, True, True),
+			EDITOR: (True, False, False, True),
+			FINANCE: (False, True, False, False),
+		}
+		for user, flags in expect.items():
+			self.as_user(user)
+			doc = api.get_version(self.v)
+			with self.subTest(user=user):
+				self.assertEqual((doc["editable"], doc["can_preview"], doc["can_publish"], doc["can_edit_contract"]),
+				                 flags)
+		self.as_user(AGENT)
+		doc = api.get_version(self.v)
+		self.assertTrue(doc["cost_hidden"])
+		self.assertEqual((doc["can_preview"], doc["can_publish"], doc["can_edit_contract"]), (False, False, False))
+
+	def test_finance_reads_the_saved_matrix_but_never_validates(self):
+		self.as_user(FINANCE)
+		self.assertTrue(api.price_matrix(self.v)["rooms"])
+		with self.assertRaises(frappe.PermissionError):
+			api.validate_version(self.v)
+
+	def test_the_basis_is_locked_once_a_version_was_published(self):
+		self.assertFalse(api.get_version(self.v)["basis_locked"])
+		contracts.publish(self.v)
+		self.assertTrue(api.get_version(self.v)["basis_locked"])
+		draft = contracts.new_draft(self.c["contract"])
+		doc = api.get_version(draft)
+		self.assertTrue(doc["basis_locked"])
+		self.assertTrue(doc["can_edit_contract"])                                   # whatever the lock says
+
+	def test_minor_units_of_the_contract_currency(self):
+		self.assertEqual(api.get_version(self.v)["contract_doc"]["minor_units"], 2)
+		fx.ensure_currency("KWD", "KD")
+		kwd = frappe.get_doc({"doctype": "TEX Contract", "property": fx.PROPERTY, "contract_code": "PW-KWD",
+		                      "contract_name": "PW KWD", "market": "DE", "contract_currency": "KWD",
+		                      "pricing_basis": "PERSON", "status": "Draft"}).insert(ignore_permissions=True)
+		draft = contracts.new_draft(kwd.name)
+		self.assertEqual(api.get_version(draft)["contract_doc"]["minor_units"], 3)
+
+
+class TestPricingBasis(WorkspaceCase):
+	def test_the_basis_alone_changes_before_the_first_publish(self):
+		header = header_values(frappe.get_doc("TEX Contract", self.c["contract"]))
+		before = self.untouched()
+		api.save_contract(data={"name": self.c["contract"], "pricing_basis": "ROOM"})
+		after = header_values(frappe.get_doc("TEX Contract", self.c["contract"]))
+		self.assertEqual({k: v for k, v in after.items() if header[k] != v}, {"pricing_basis": "ROOM"})
+		self.assertEqual(self.untouched(), before)                                 # the draft is untouched
+		self.assertEqual(api.get_version(self.v)["contract_doc"]["pricing_basis"], "ROOM")
+
+	def test_the_basis_is_refused_after_publish(self):
+		contracts.publish(self.v)
+		with self.assertRaises(frappe.ValidationError) as cm:
+			api.save_contract(data={"name": self.c["contract"], "pricing_basis": "ROOM"})
+		self.assertIn("cannot change", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("TEX Contract", self.c["contract"], "pricing_basis"), "PERSON")

@@ -6,11 +6,13 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, now_datetime
+from frappe.utils import cint, getdate, now_datetime
 
+from kamra.tex import money
 from kamra.tex.api._util import as_int, doc_dict, parse, text
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts as svc
+from kamra.tex.commercial import decimals
 from kamra.tex.pricing import engine
 from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
 from kamra.tex.security import scope
@@ -23,6 +25,11 @@ LOCKED_AFTER_PUBLISH = (*svc.FIXED_FIELDS, *svc.SELLING_FIELDS, "channels")
 VERSION_SETTINGS = svc.DRAFT_SETTINGS
 VERSION_TABLES = ("rooms", "periods", "period_rates", "age_bands", "occupancy_rules", "boards", "rate_plans",
                   "offers")
+# what a posted row carries that is not its content: the server's bookkeeping (client keys start with "_")
+ROW_BOOKKEEPING = ("name", "parent", "parenttype", "parentfield", "doctype", "idx", "creation", "modified", "owner",
+                   "modified_by", "docstatus")
+# the most rows a draft previewed with unsaved changes may have, over all its tables (ADR-061)
+OVERLAY_MAX_ROWS = 5000
 
 
 @frappe.whitelist()
@@ -145,6 +152,7 @@ def _catalogue(v, prop: str) -> dict:
 		"rate_plan_options": frappe.get_all("Rate Plan", filters={"property": prop, "disabled": 0},
 		                                    fields=["name", "rate_plan_name", "code", "tex_refundable"]),
 		"contract_doc": dict(c or {}), "editable": False, "cost_hidden": True,
+		"can_preview": False, "can_publish": False, "can_edit_contract": False,
 	}
 
 
@@ -158,9 +166,16 @@ def get_version(name: str):
 	out = doc_dict(v, exclude=("payload",))
 	out["validation_report"] = json.loads(v.validation_report) if v.validation_report else None
 	out["editable"] = v.status == "Draft" and scope.has_capability("contract.edit", prop)
+	# what the workspace may offer this viewer (ADR-061); the endpoints check again
+	out["can_preview"] = scope.has_capability("price.view_cost", prop)
+	out["can_publish"] = scope.has_capability("contract.publish", prop)
+	out["can_edit_contract"] = scope.has_capability("contract.edit", prop)
+	# the header's pricing basis is fixed once a version was published (the controller's own test)
+	out["basis_locked"] = svc.is_published(v.contract)
 	c = frappe.get_doc("TEX Contract", v.contract)
 	out["contract_doc"] = {f: c.get(f) for f in ("name", "property", "contract_code", "contract_name", "market",
 	                                             "pricing_basis", "contract_currency", "status")}
+	out["contract_doc"]["minor_units"] = money.minor_units(c.contract_currency)
 	out.update(_selling(v, c))
 	out["room_types"] = frappe.get_all("Room Type", filters={"property": c.property, "disabled": 0},
 	                                   fields=["name", "room_type_name", "adults_capacity", "children_capacity",
@@ -221,19 +236,119 @@ def save_version(name: str, data):
 			v.set(f, data[f])
 	for t in VERSION_TABLES:
 		if t in data:
-			clean = []
-			for row in data[t] or []:
-				row = {k: val for k, val in row.items() if not k.startswith("_") and k not in
-				       ("name", "parent", "parenttype", "parentfield", "doctype", "idx", "creation", "modified",
-				        "owner", "modified_by", "docstatus")}
-				clean.append(row)
-			v.set(t, clean)
+			v.set(t, _clean_rows(data[t]))
+	_require_values(v)
 	v.save(ignore_permissions=True)
 	return get_version(name)
 
 
+def _clean_rows(rows) -> list[dict]:
+	"""A posted table's rows without the client's keys (``_*``) and the server's bookkeeping."""
+	return [{k: val for k, val in row.items() if not k.startswith("_") and k not in ROW_BOOKKEEPING}
+	        for row in rows or []]
+
+
+def _blank(value) -> bool:
+	return value is None or (isinstance(value, str) and not value.strip())
+
+
+# (table, value field, whether a row needs a value) — GAP-8
+_VALUE_REQUIRED = (
+	("period_rates", "value", lambda r: (r.op or "").strip() != "INHERIT"),
+	("occupancy_rules", "value", lambda r: (r.op or "").strip() != "INHERIT"),
+	("boards", "adult_amount", lambda r: not cint(r.is_base)),
+)
+
+
+def _require_values(v) -> None:
+	"""A rule's value is never left blank (GAP-8, ADR-061): Frappe would store a blank as 0 and
+	the draft would price it as 0. INHERIT rules and the included board have no value; to remove
+	a price the editor removes its row."""
+	for table, field, needs in _VALUE_REQUIRED:
+		for row in v.get(table) or []:
+			if needs(row) and _blank(row.get(field)):
+				label = _(v.meta.get_field(table).label)
+				frappe.throw(_("{0}, row {1}: a value is required; clear the cell to remove the price.")
+				             .format(label, row.idx))
+
+
+def _overlay(name: str, data):
+	"""The draft ``name`` with the editor's unsaved ``data`` applied in memory, never saved
+	(GAP-1, ADR-061): the Pricing Workspace prices, validates and quotes what it shows before
+	anyone saves. ``data`` is what ``save_version`` takes and is applied the same way (the same
+	row cleaning, selling terms and settings), then checked as a save checks it: blank values,
+	decimal places, mandatory fields, select options and lengths. Each row is named after its
+	client key (``~<_key>``, else ``~<table>-<position>``), so the rule ids of an explanation or an
+	issue point back to the row. Only drafts, only for who may edit them; nothing is written or
+	audited."""
+	data = parse(data, {})
+	if not isinstance(data, dict):
+		frappe.throw(_("Invalid JSON payload."))
+	v = frappe.get_doc("TEX Contract Version", name)
+	prop = scope.property_of("TEX Contract Version", name)
+	scope.require("contract.edit", prop)
+	if v.status != "Draft":
+		frappe.throw(_("Only draft versions can be previewed with unsaved changes."))
+	for t in VERSION_TABLES:
+		rows = data.get(t)
+		if t in data and rows is not None and not (isinstance(rows, list) and all(isinstance(r, dict) for r in rows)):
+			frappe.throw(_("Invalid JSON payload."))
+	total = sum(len(data[t] or []) if t in data else len(v.get(t) or []) for t in VERSION_TABLES)
+	if total > OVERLAY_MAX_ROWS:
+		frappe.throw(_("A draft previewed with unsaved changes has at most {0} rows; this one has {1}.")
+		             .format(OVERLAY_MAX_ROWS, total))
+	if "selling" in data:
+		_set_selling(v, data["selling"])
+	for f in VERSION_SETTINGS:
+		if f in data:
+			v.set(f, data[f])
+	for t in VERSION_TABLES:
+		if t in data:
+			keys = [text(row.get("_key"), 100) for row in data[t] or []]
+			v.set(t, _clean_rows(data[t]))
+			for i, (child, key) in enumerate(zip(v.get(t), keys, strict=True)):
+				child.name = f"~{key}" if key else f"~{t}-{i + 1}"
+	_require_values(v)
+	# what a save runs before it writes, none of which writes: the DocType defaults, the decimal
+	# check (before_validate) and Frappe's own field checks
+	v._set_defaults()
+	decimals.check_inputs(v)
+	v._validate_mandatory()
+	for d in (v, *v.get_all_children()):
+		d._validate_data_fields()
+		d._validate_selects()
+		d._validate_non_negative()
+		d._validate_length()
+	for d in (v, *v.get_all_children()):
+		_as_stored(d)
+	return v
+
+
+def _as_stored(d) -> None:
+	"""``d``'s values as a save stores them and a load reads them back: checks 0/1, integers,
+	decimals as the exact Decimal (a blank one is 0), a blank date none. The overlay then prices
+	what a save would."""
+	for df in d.meta.fields:
+		f, value = df.fieldname, d.get(df.fieldname)
+		if df.fieldtype == "Check":
+			d.set(f, 1 if cint(value) else 0)
+		elif df.fieldtype == "Int":
+			d.set(f, cint(value))
+		elif df.fieldtype in decimals.FLOAT_LIKE:
+			d.set(f, money.db_input(value, places=decimals.places_of(df)) or money.ZERO)
+		elif df.fieldtype in ("Date", "Datetime") and value == "":
+			d.set(f, None)
+
+
+def _has_data(data) -> bool:
+	return data is not None and data != ""
+
+
 @frappe.whitelist()
-def validate_version(name: str):
+def validate_version(name: str, data=None):
+	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061)."""
+	if _has_data(data):
+		return svc.validate_doc(_overlay(name, data))
 	return svc.validate_version(name)
 
 
@@ -263,15 +378,20 @@ def withdraw_version(name: str, reason: str):
 @frappe.whitelist(methods=["POST"])
 def preview_price(version: str, room_type: str, board: str, check_in: str, check_out: str, adults: int = 2,
                   children=None, rate_plan: str | None = None, market: str | None = None, channel: str = "DIRECT_WEB",
-                  currency: str | None = None, sale_at: str | None = None, promo_codes=None):
+                  currency: str | None = None, sale_at: str | None = None, promo_codes=None, data=None):
 	"""Price a stay on any version — including an unpublished draft — with the full
-	explanation (contract editor 'test price' panel; also answers 'which rule won')."""
+	explanation (contract editor 'test price' panel; also answers 'which rule won'). With
+	``data``: on the draft with those unsaved changes (ADR-061)."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view_cost", prop)
 	at = frappe.utils.get_datetime(sale_at) if sale_at else now_datetime()
+	draft = _overlay(version, data) if _has_data(data) else None
 	try:
-		terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v, at=at)
+		if draft is not None:
+			terms = svc.build_terms(draft, at=at)
+		else:
+			terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v, at=at)
 	except frappe.ValidationError as e:
 		return {"sellable": False, "reasons": [{"code": "BUILD", "message": str(e)}]}
 	kids = tuple(ChildSpec(age=int(a)) for a in (parse(children, []) or []))
@@ -289,14 +409,23 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
 
 
 @frappe.whitelist()
-def price_matrix(version: str, adults: int = 2):
-	"""Nightly unit (base person / room price) per room × period for the editor grid."""
+def price_matrix(version: str, adults: int = 2, data=None):
+	"""Nightly unit (base person / room price) per room × period for the editor grid. With
+	``data``: of the draft with those unsaved changes (ADR-061); a draft that cannot be built
+	answers ``build_error``."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view", prop)
 	if not _sees_cost(prop):
 		frappe.throw(_("Not permitted: {0}.").format("price.view_cost"), frappe.PermissionError)
-	terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v)
+	if _has_data(data):
+		draft = _overlay(version, data)
+		try:
+			terms = svc.build_terms(draft)
+		except frappe.ValidationError as e:
+			return {"build_error": str(e), "rooms": [], "periods": []}
+	else:
+		terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v)
 	from kamra.tex.pricing import rooms as room_math
 
 	out = []
