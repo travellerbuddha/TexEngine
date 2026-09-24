@@ -17,6 +17,8 @@
   "footer.policies": "Hotelrichtlinien",
   "footer.cookies": "Cookie-Einstellungen",
   "footer.poweredBy": "Buchungssystem: TEX Engine",
+  "footer.source": "Quellcode",
+  "footer.sourceHint": "Freie Software (AGPL-3.0): Sie dürfen den Quellcode erhalten, untersuchen und ändern",
 
   "consent.title": "Analyse-Cookies",
   "consent.body": "{name} möchte Analyse-Cookies verwenden, um zu verstehen, wie diese Buchungsseite genutzt wird. Ohne Ihre Zustimmung wird nichts geladen – Ihre Buchung funktioniert in jedem Fall.",

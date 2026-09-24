@@ -682,6 +682,7 @@
  "crm.comms.col.when": "Когда",
  "crm.comms.col.by": "Кто",
  "crm.comms.system": "TEX (автоматически)",
+ "crm.comms.not_openable": "Нет бронирований в ваших отелях: профиль вам недоступен",
  "crm.loyalty.adjust_hotel": "Отель",
  "crm.loyalty.adjust_hotel_hint": "Корректировка относится к этому отелю: причину и автора видят только его сотрудники.",
  "crm.loyalty.adjust_hotel_pick": "Выберите отель",

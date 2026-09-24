@@ -63,7 +63,7 @@ export function CommunicationsTimeline({ items }: { items: Communication[] }) {
               {c.status === "Failed" && c.delivery_error && <p className="mt-1 text-xs text-rose-800">{t("crm.comm.delivery_error", { reason: c.delivery_error })}</p>}
               {c.body && <p className="mt-1 text-sm whitespace-pre-line text-zinc-700">{c.body}</p>}
               <p className="mt-1 text-xs text-zinc-500">
-                {dateTime(c.sent_at || c.creation)} · {c.actor === "Guest" ? t("crm.actor.guest") : c.actor || "—"}
+                {dateTime(c.sent_at || c.creation)} · {c.actor_name || t("crm.comms.system")}
                 {c.booking ? ` · ${c.booking}` : ""}
               </p>
             </li>

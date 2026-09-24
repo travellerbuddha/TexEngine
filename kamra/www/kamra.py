@@ -49,7 +49,8 @@ def get_context(context):
 	html = _TITLE.sub(lambda _m: title, html, count=1)
 
 	csrf = frappe.sessions.get_csrf_token()
-	boot = f'<script>window.csrf_token = "{csrf}";</script>'
+	# the source offer is part of the page (AGPL-3.0 section 13): shown even when the API is not
+	boot = f'<script>window.csrf_token = "{csrf}";</script>' + entry.source_meta()
 	# Inject before the module script so the token is set before the app boots.
 	html = html.replace("</head>", boot + "</head>", 1)
 

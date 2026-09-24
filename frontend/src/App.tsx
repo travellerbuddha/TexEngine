@@ -91,6 +91,7 @@ import {
   vouchersConfig,
 } from "./screens/configs"
 import ConnectionBanner from "./components/ConnectionBanner"
+import { SourceNotice } from "./tex/shell/SourceNotice"
 
 class ErrorBoundary extends Component<
   { children: ReactNode },
@@ -145,6 +146,19 @@ function RequireAuth() {
       />
     )
   return <Outlet />
+}
+
+/** The legacy guest pages still served (/kamra/book, stay, checkin, menu and the housekeeping
+ *  app): their users are offered TEX Engine's source too (AGPL-3.0 section 13, ADR-060 review). */
+function WithSourceNotice() {
+  return (
+    <>
+      <Outlet />
+      <footer className="bg-white px-4 py-3 text-center">
+        <SourceNotice className="text-[11px]" />
+      </footer>
+    </>
+  )
 }
 
 /** The legacy PMS screens exist only while the site runs the PMS modules (TEX
@@ -203,6 +217,7 @@ export default function App() {
         {/* public booking engine - no login; stay state lives in the URL
             (/book/2026-07-10/2026-07-12/2/0) so links are shareable and
             crawlable */}
+        <Route element={<WithSourceNotice />}>
         <Route path="book" element={<PublicBooking />} />
         <Route
           path="book/:checkin/:checkout?/:adults?/:children?"
@@ -218,6 +233,7 @@ export default function App() {
         {/* housekeeping phone app - share the /hk URL with the HK team */}
         <Route path="hk" element={<HkApp />} />
         <Route path="menu/:outlet" element={<QrMenu />} />
+        </Route>
         {/* dedicated login route so signing out changes the URL */}
         <Route path="login" element={<LoginPage />} />
         <Route element={<RequireAuth />}>

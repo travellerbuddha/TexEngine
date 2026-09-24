@@ -17,6 +17,8 @@
   "footer.policies": "Regulile hotelului",
   "footer.cookies": "Setări cookie",
   "footer.poweredBy": "Sistem de rezervări TEX Engine",
+  "footer.source": "Cod sursă",
+  "footer.sourceHint": "Software liber (AGPL-3.0): puteți obține, studia și modifica codul sursă",
 
   "consent.title": "Cookie-uri de analiză",
   "consent.body": "{name} ar dori să folosească cookie-uri de analiză pentru a înțelege cum este folosit acest site de rezervări. Nimic nu se încarcă fără acordul dumneavoastră, iar rezervarea funcționează oricum.",

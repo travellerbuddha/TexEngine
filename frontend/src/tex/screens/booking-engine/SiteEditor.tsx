@@ -137,7 +137,7 @@ export default function SiteEditor({ isNew = false }: { isNew?: boolean }) {
       setBase(d)
       setAttempted(false)
       toast.success(isNew ? t("be.created") : t("core.saved"))
-      if (isNew && saved.name) navigate(`/tex/booking-engine/${encodeURIComponent(String(saved.name))}${tab !== "general" ? `?tab=${tab}` : ""}`, { replace: true })
+      if (isNew && saved.name) navigate(`/tex/booking-engine/sites/${encodeURIComponent(String(saved.name))}${tab !== "general" ? `?tab=${tab}` : ""}`, { replace: true })
     } catch {
       window.scrollTo({ top: 0, behavior: "smooth" })
     }

@@ -138,6 +138,8 @@ export interface Communication {
   body: string | null
   sent_at: string | null
   actor: string | null
+  /** Who sent or logged it; null for TEX itself (an online booking, the scheduler). */
+  actor_name?: string | null
   booking: string | null
   reservation: string | null
   creation: string

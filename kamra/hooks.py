@@ -117,7 +117,9 @@ website_redirects = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/kamra/css/kamra.css"
-# app_include_js = "/assets/kamra/js/kamra.js"
+# Desk's Help > About offers TEX Engine's source (AGPL-3.0 section 13, ADR-060 review)
+app_include_js = "/assets/kamra/js/tex_source.js"
+extend_bootinfo = "kamra.tex.entry.extend_bootinfo"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/kamra/css/kamra.css"

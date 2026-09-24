@@ -7,6 +7,7 @@ import { isEmbedded } from "../lib/storage"
 import { Button } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { siteText, useSite } from "./SiteContext"
+import { SourceLine } from "./SourceLine"
 
 function LanguageSelect() {
   const { t, lang, setLang } = useI18n()
@@ -199,7 +200,7 @@ export function Footer() {
               {t("footer.cookies")}
             </button>
           )}
-          <p className="text-xs text-muted">{t("footer.poweredBy")}</p>
+          <SourceLine />
         </div>
       </div>
       <Dialog open={policies} onClose={() => setPolicies(false)} title={t("footer.policies")} closeLabel={t("common.close")}>
@@ -250,6 +251,8 @@ export function Shell({ children, home }: { children: ReactNode; home?: string }
         {children}
       </main>
       {!embedded && <Footer />}
+      {/* in the widget's modal the hotel's page frames us: the source offer stays */}
+      {embedded && <SourceLine className="px-4 py-2 text-center text-[11px] text-muted" />}
       <ConsentBanner />
     </div>
   )

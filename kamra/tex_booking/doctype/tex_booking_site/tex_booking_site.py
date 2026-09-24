@@ -13,6 +13,12 @@ from kamra.tex.services import sites
 
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 ORIGIN = re.compile(r"^https://[a-z0-9.-]+(:\d+)?$")
+# the booking engine's own paths under /book
+RESERVED_SLUGS = ("pay", "api", "assets", "manage", "widget")
+# the admin area's own pages under /tex/booking-engine (G-64 review M3): a new site (named after its
+# slug) or a site moved to another slug may not take one; sites named so before keep their name and
+# slug, and patch p47 reports them
+ADMIN_SLUGS = ("new", "sites", "content", "rooms", "analytics")
 
 
 class TEXBookingSite(Document):
@@ -20,7 +26,8 @@ class TEXBookingSite(Document):
 		self.site_slug = re.sub(r"[^a-z0-9-]+", "-", (self.site_slug or "").lower()).strip("-")
 		if not self.site_slug:
 			frappe.throw(_("Slug is required."))
-		if self.site_slug in ("pay", "api", "assets", "manage", "widget"):
+		if self.site_slug in RESERVED_SLUGS or (
+				self.site_slug in ADMIN_SLUGS and (self.is_new() or self.has_value_changed("site_slug"))):
 			frappe.throw(_("{0} is reserved; choose another slug.").format(self.site_slug))
 		if not self.property and not self.hotel_group:
 			frappe.throw(_("A booking site serves a hotel or a hotel group."))

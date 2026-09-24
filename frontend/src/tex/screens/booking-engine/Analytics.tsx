@@ -161,7 +161,7 @@ export default function Analytics() {
                   {mine.map((s) => (
                     <li key={s.name} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
                       <span className="min-w-0 truncate font-medium text-zinc-900">{s.site_name}</span>
-                      <Link to={`/tex/booking-engine/${encodeURIComponent(s.name)}?tab=analytics`} className="inline-flex shrink-0 items-center gap-1.5 font-medium text-tex-700 underline">
+                      <Link to={`/tex/booking-engine/sites/${encodeURIComponent(s.name)}?tab=analytics`} className="inline-flex shrink-0 items-center gap-1.5 font-medium text-tex-700 underline">
                         <Settings2 className="size-4" aria-hidden />
                         {t("be.analytics_page.tracking_open")}
                       </Link>

@@ -133,7 +133,10 @@ SECTIONS = {
 	               ["rate_plan", "op", "value", "refundable", "boards", "cancellation_policy", "payment_policy"]),
 }
 COST_SECTIONS = ("periods", "occupancy")
+# a table lists the rows of at most MAX_VERSIONS versions, the most recently changed first, and at
+# most MAX_ROWS rows, in that order; "truncated" says when either cap left something out (L5)
 MAX_ROWS = 5000
+MAX_VERSIONS = 2000
 
 
 @frappe.whitelist()
@@ -149,13 +152,19 @@ def version_rows(section: str, property: str | None = None, status: str | None =
 	wanted = _status_filter(status, default="current")
 	if wanted:
 		filters["status"] = wanted
-	versions_ = {v.name: v for v in frappe.get_all(
-		"TEX Contract Version", filters=filters, fields=["name", "contract", "version_no", "status", "effective_from"],
-		limit=2000)}
+	found = frappe.get_all("TEX Contract Version", filters=filters,
+	                       fields=["name", "contract", "version_no", "status", "effective_from"],
+	                       order_by="modified desc, name desc", limit=MAX_VERSIONS + 1)
+	versions_ = {v.name: v for v in found[:MAX_VERSIONS]}
 	doctype, parentfield, fields = SECTIONS[section]
-	rows = frappe.get_all(doctype, filters={"parenttype": "TEX Contract Version", "parentfield": parentfield,
-	                                        "parent": ("in", list(versions_) or ["__none__"])},
-	                      fields=["parent", "idx", *fields], order_by="parent asc, idx asc", limit=MAX_ROWS + 1)
+	# the rows in the versions' order (then each version's own), so a cut keeps the recent ones
+	cols = ", ".join(f"r.`{f}`" for f in ("parent", "idx", *fields))
+	rows = frappe.db.sql(  # nosemgrep -- a fixed table and columns (SECTIONS), values bound
+		f"""SELECT {cols} FROM `tab{doctype}` r JOIN `tabTEX Contract Version` v ON v.name = r.parent
+		WHERE r.parenttype = 'TEX Contract Version' AND r.parentfield = %(field)s AND r.parent IN %(versions)s
+		ORDER BY v.modified DESC, v.name DESC, r.idx ASC LIMIT %(limit)s""",
+		{"field": parentfield, "versions": tuple(versions_) or ("__none__",), "limit": MAX_ROWS + 1},
+		as_dict=True)
 	meta = frappe.get_meta(doctype)
 	sees_cost = {p: any(scope.has_capability(c, p) for c in COST) for p in hotels}
 	rooms = _names("Room Type", (r.get("room_type") for r in rows), "room_type_name")
@@ -188,7 +197,7 @@ def version_rows(section: str, property: str | None = None, status: str | None =
 		out.append({"version": v.name, "version_no": v.version_no, "version_status": v.status,
 		            "state": _state(v, c, now), "contract": c.name, "contract_code": c.contract_code,
 		            "contract_name": c.contract_name, "market": c.market, "property": c.property, **row})
-	return {"rows": out, "truncated": len(rows) > MAX_ROWS}
+	return {"rows": out, "truncated": len(rows) > MAX_ROWS or len(found) > MAX_VERSIONS}
 
 
 # ─── restrictions ────────────────────────────────────────────────────────
@@ -271,7 +280,7 @@ def communications(property: str | None = None, channel: str | None = None, stat
                    direction: str | None = None, q: str | None = None, start=0, limit=50):
 	"""Guest communications logged or sent at the hotels, newest first; the message body stays
 	on the guest's profile."""
-	from kamra.tex.crm.service import _like
+	from kamra.tex.crm.service import _like, actor_name, openable_guests
 
 	hotels = _hotels("crm.view", property)
 	where = ["c.property IN %(hotels)s"]
@@ -296,10 +305,14 @@ def communications(property: str | None = None, channel: str | None = None, stat
 		c.delivery_error {join} WHERE {cond} ORDER BY c.creation DESC, c.name DESC
 		LIMIT %(_limit)s OFFSET %(_start)s""",
 		{**params, "_limit": as_int(limit, 50, lo=1, hi=200), "_start": as_int(start, 0, lo=0)}, as_dict=True)
+	# a row names its guest, but the profile opens only for a guest the viewer may see (a booking at
+	# one of their hotels, or their enterprise's profile): the others are not links (L6)
+	openable = openable_guests(r["guest"] for r in rows)
 	for r in rows:
 		r["sent_at"], r["creation"] = _day(r["sent_at"]), _day(r["creation"])
-		# a message sent while a guest booked online has the visitor ("Guest") as its actor
-		r["actor_name"] = get_fullname(r["actor"]) if r["actor"] and r["actor"] != "Guest" else None
+		# the online booking's visitor ("Guest") and the system (Administrator) are shown as TEX (L4)
+		r["actor_name"] = actor_name(r["actor"])
+		r["guest_openable"] = bool(r["guest"]) and r["guest"] in openable
 	return {"rows": rows, "total": total}
 
 
