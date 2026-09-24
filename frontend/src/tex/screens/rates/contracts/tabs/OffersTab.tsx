@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { ChevronDown, ChevronRight, Copy, Plus, Trash2 } from "lucide-react"
 import { useTexT } from "../../../../i18n"
-import { Badge, Button, Checkbox, DecimalInput, Field, FormGrid, IconButton, Input, Select } from "../../../../ui"
+import { Badge, Button, Checkbox, DECIMAL_PLACES, DecimalInput, Field, FormGrid, IconButton, Input, Select } from "../../../../ui"
 import { DateRange } from "../../components/common"
 import { CsvPicker } from "../../components/pickers"
 import { BOARDS, enumLabel, enumOptions, PROMO_KINDS, PROMO_STAGE, PROMO_VALUE, STAY_MATCH } from "../../lib/options"
@@ -132,7 +132,7 @@ function OfferForm({
         </Field>
         {vt !== "FREE_NIGHTS" && vt !== "VALUE_ADDED" && (
           <Field label={t("rates.f.value")}>
-            <DecimalInput disabled={readOnly} value={s("value")} onValueChange={(v) => onChange({ value: v })} decimals={6} suffix={vt === "PERCENT" ? "%" : vt === "MULTIPLIER" ? "×" : ccy} />
+            <DecimalInput disabled={readOnly} value={s("value")} onValueChange={(v) => onChange({ value: v })} decimals={DECIMAL_PLACES} suffix={vt === "PERCENT" ? "%" : vt === "MULTIPLIER" ? "×" : ccy} />
           </Field>
         )}
         {vt === "FREE_NIGHTS" && (

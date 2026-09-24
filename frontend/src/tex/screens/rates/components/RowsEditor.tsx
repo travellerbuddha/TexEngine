@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
 import { date as fmtDate } from "../../../lib/format"
-import { Button, DecimalInput, IconButton, Input, Select, type Option } from "../../../ui"
+import { Button, DECIMAL_PLACES, DecimalInput, IconButton, Input, Select, type Option } from "../../../ui"
 import type { FieldKind } from "../lib/util"
 import { intVal, newKey, splitCsv } from "../lib/util"
 import type { Row } from "../lib/types"
@@ -228,7 +228,7 @@ function CellControl({
           aria-label={aria}
           value={v === null || v === undefined ? "" : String(v)}
           onValueChange={onValue}
-          decimals={col.decimals ?? 6}
+          decimals={col.decimals ?? DECIMAL_PLACES}
           allowNegative={col.allowNegative}
           suffix={col.suffix?.(row)}
           className="h-8! min-w-20 px-2!"

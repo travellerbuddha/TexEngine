@@ -12,6 +12,7 @@ import {
   CardBody,
   CardHeader,
   ConfirmDialog,
+  DECIMAL_PLACES,
   DecimalInput,
   EmptyState,
   ErrorState,
@@ -438,7 +439,7 @@ export default function ProgramPage() {
                       <DecimalInput
                         value={draft.point_value}
                         onValueChange={(v) => set({ point_value: v })}
-                        decimals={6}
+                        decimals={DECIMAL_PLACES}
                         suffix={draft.currency || undefined}
                         disabled={readOnly}
                       />
@@ -522,7 +523,7 @@ export default function ProgramPage() {
                               />
                             </Field>
                             <Field label={t("crm.program.rate")} hint={t(`crm.program.rate_hint.${r.basis.toLowerCase()}`)} error={err(`rule.${r.key}.rate`)}>
-                              <DecimalInput value={r.rate} onValueChange={(v) => setRule(r.key, { rate: v })} decimals={6} disabled={readOnly} />
+                              <DecimalInput value={r.rate} onValueChange={(v) => setRule(r.key, { rate: v })} decimals={DECIMAL_PLACES} disabled={readOnly} />
                             </Field>
                             {r.basis === "ROOM" && (
                               <Field label={t("crm.program.room_type")} required error={err(`rule.${r.key}.room_type`)}>
@@ -602,7 +603,7 @@ export default function ProgramPage() {
                               <DecimalInput
                                 value={x.earn_multiplier}
                                 onValueChange={(v) => setTier(x.key, { earn_multiplier: v })}
-                                decimals={6}
+                                decimals={DECIMAL_PLACES}
                                 suffix="×"
                                 disabled={readOnly}
                               />
