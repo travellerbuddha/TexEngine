@@ -183,9 +183,9 @@ def delete_program(name: str):
 	return {"ok": True}
 
 
-# what an entry tied to another hotel's booking or stay never shows (ADR-056 review): which booking,
-# the stay's dates (reason), how its points were earned (explanation: rate × value) and who made it
-OTHER_HOTEL_FIELDS = ("booking", "reservation", "reason", "actor", "explanation")
+# what an entry of another hotel never shows (ADR-056 and its second review): which booking, the stay's
+# dates (reason, maturity, expiry), how its points were earned (explanation: rate × value) and who made it
+OTHER_HOTEL_FIELDS = loyalty.OTHER_HOTEL_FIELDS
 
 
 def _visible_guests(guests: set[str], props: set[str]) -> set[str]:
@@ -202,9 +202,10 @@ def _visible_guests(guests: set[str], props: set[str]) -> set[str]:
 @frappe.whitelist()
 def ledger(name: str, guest: str | None = None, entry_type: str | None = None, start=0, limit=50):
 	"""A program's ledger, newest first. The program reaches the viewer's hotels, the rows do not
-	all belong to them (a group program): an entry tied to a booking or stay at a hotel outside the
-	viewer's ``crm.view`` scope shows its points, status and dates only (``other_hotel``), and a
-	guest the viewer may not see is not named (ADR-056 review)."""
+	all belong to them (a group program): an entry of a hotel outside the viewer's ``crm.view`` scope
+	(its stay's or booking's, or the hotel a manual adjustment was made for) shows its points, status
+	and the month it was written only (``other_hotel``), and a guest the viewer may not see is not
+	named (ADR-056 and its second review)."""
 	prog = frappe.get_doc("TEX Loyalty Program", name)
 	_require(prog, "crm.view", every=False)
 	platform = scope.is_platform_admin()
@@ -220,7 +221,7 @@ def ledger(name: str, guest: str | None = None, entry_type: str | None = None, s
 		filters["entry_type"] = entry_type
 	rows = frappe.get_all("TEX Loyalty Ledger", filters=filters,
 	                      fields=["name", "guest", "entry_type", "points", "status", "available_on", "expires_on",
-	                              "booking", "reservation", "reason", "actor", "creation", "explanation"],
+	                              "booking", "reservation", "property", "reason", "actor", "creation", "explanation"],
 	                      order_by="creation desc", start=as_int(start, 0, lo=0), page_length=as_int(limit, 50, lo=1,
 	                                                                                                  hi=200))
 	where = loyalty._entry_hotels(rows)
@@ -229,13 +230,13 @@ def ledger(name: str, guest: str | None = None, entry_type: str | None = None, s
 	names = dict(frappe.get_all("Guest", filters={"name": ("in", list(seen))}, fields=["name", "full_name"],
 	                            as_list=True)) if seen else {}
 	for r in rows:
-		r["other_hotel"] = bool(not platform and where[r.name] and where[r.name] not in props)
+		for k in ("available_on", "expires_on", "creation"):
+			r[k] = str(r[k]) if r[k] else None
+		r["other_hotel"] = loyalty.other_hotel(where[r.name], None if platform else props, prog.property)
 		if r["other_hotel"]:
-			for k in OTHER_HOTEL_FIELDS:
-				r[k] = None
+			loyalty.mask_other_hotel(r)
+		r.pop("property", None)
 		if r.guest not in seen:
 			r["guest"] = None
 		r["guest_name"] = names.get(r.guest) if r.guest else None
-		for k in ("available_on", "expires_on", "creation"):
-			r[k] = str(r[k]) if r[k] else None
 	return {"rows": rows, "total": frappe.db.count("TEX Loyalty Ledger", filters)}

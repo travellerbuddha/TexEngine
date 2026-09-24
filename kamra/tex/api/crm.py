@@ -29,6 +29,13 @@ def update_guest(name: str, data, consent_source: str | None = None, consent_tex
 
 
 @frappe.whitelist(methods=["POST"])
+def merge_guests(source: str, target: str):
+	"""Merge the duplicate profile ``source`` into ``target`` (``crm.edit`` at every hotel either has
+	records at, one enterprise; rules in ``crm.service.merge_guests``)."""
+	return crm.merge_guests(text(source, 140) or "", text(target, 140) or "")
+
+
+@frappe.whitelist(methods=["POST"])
 def log_communication(guest: str, channel: str, direction: str = "Outbound", subject: str | None = None,
                       body: str | None = None, consent_basis: str = "Transactional", booking: str | None = None,
                       reservation: str | None = None, property: str | None = None):
@@ -99,9 +106,10 @@ def loyalty_summary(guest: str):
 
 
 @frappe.whitelist(methods=["POST"])
-def loyalty_adjust(guest: str, program: str, points, reason: str):
+def loyalty_adjust(guest: str, program: str, points, reason: str, property: str | None = None):
 	crm.require_guest(guest, "crm.edit")
-	return {"name": loyalty.adjust(guest, program, as_int(points, 0), text(reason, 500) or "")}
+	return {"name": loyalty.adjust(guest, program, as_int(points, 0), text(reason, 500) or "",
+	                               property=text(property, 140) or None)}
 
 
 @frappe.whitelist(methods=["POST"])

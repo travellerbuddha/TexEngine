@@ -156,9 +156,10 @@ export interface LoyaltyEntry {
   expires_on: string | null
   booking: string | null
   reason: string | null
+  /** a date-time; for another hotel's entry the month only ("2026-09") */
   creation: string | null
-  /** earned or spent at another hotel of a shared (group) program: its booking and reason stay
-   * with that hotel (ADR-056) */
+  /** earned, spent or adjusted at another hotel of a shared (group) program: its booking, reason and
+   * dates stay with that hotel (ADR-056 and its second review) */
   other_hotel?: boolean
 }
 
@@ -209,6 +210,23 @@ export interface GuestProfile {
   cancellations: CancellationStats
   consent_history: ConsentEvent[]
   hotels: string[]
+  /** other profiles the viewer may see with this one's phone or e-mail (ADR-056 second review) */
+  possible_duplicates: PossibleDuplicate[]
+}
+
+export interface PossibleDuplicate {
+  name: string
+  full_name: string | null
+  match: ("email" | "phone")[]
+}
+
+/** kamra.tex.api.crm.merge_guests */
+export interface MergeResult {
+  target: string
+  source: string
+  moved: Record<string, number>
+  filled: string[]
+  consent: Record<string, boolean>
 }
 
 export type FieldKind = "int" | "money" | "str" | "bool" | "list"
@@ -377,10 +395,11 @@ export interface LedgerRow {
   reservation: string | null
   reason: string | null
   actor: string | null
+  /** a date-time; for another hotel's entry the month only ("2026-09") */
   creation: string | null
   /** JSON of an earning: {lines: [{rule, rate?, points, note?}], tier, multiplier} */
   explanation: string | null
-  /** tied to a booking at a hotel outside the viewer's scope: points, status and dates only */
+  /** an entry of a hotel outside the viewer's scope: points, status and month only */
   other_hotel?: boolean
 }
 

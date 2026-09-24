@@ -199,6 +199,14 @@ TEX_INDEXES = (
 	("TEX Audit Event", ["action", "event_time"], "tex_audit_action_time"),            # ADR-047
 	("TEX Communication", ["status", "creation"], "tex_comm_status_created"),
 	("TEX Communication", ["email_queue", "status"], "tex_comm_queue_status"),
+	# a consent withdrawal reads the funnel rows it clears through these, never scanning (ADR-056 second
+	# review); the scheduler reads a session's events and case through them too
+	("TEX Funnel Event", ["email_hash", "session_id"], "tex_funnel_hash_session"),
+	("TEX Funnel Event", ["session_id", "occurred_at"], "tex_funnel_session_time"),
+	("TEX Abandoned Booking", ["session_id", "status"], "tex_abandoned_session"),
+	# a booking finds its guest by e-mail or phone within the enterprise; a profile its possible duplicates
+	("Guest", ["email", "tex_enterprise"], "tex_guest_email_ent"),
+	("Guest", ["phone", "tex_enterprise"], "tex_guest_phone_ent"),
 )
 
 

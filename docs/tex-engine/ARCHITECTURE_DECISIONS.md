@@ -2861,6 +2861,146 @@ three Low, fixed as follows.
   branch before its fix (the second e-mail joined the first profile). E2E `crm-profile.spec.ts`
   books with a unique phone per run and passes twice in a row.
 
+**Second review follow-up (second independent review of ADR-056, 2026-09-25; 1 High, 3 Medium, 9 Low;
+patch p45).**
+- *A withdrawal scanned the funnel under locks, and tracking swallowed deadlocks (High).* `forget_contact`
+  ran `UPDATE tabTEX Funnel Event … WHERE IFNULL(email_hash, '') != '' AND (email_hash IN … OR session_id
+  IN …)` inside the withdrawal's transaction: no index serves it, so InnoDB locked every funnel row (and
+  the gaps) until commit, and every booking in that window writes funnel events. `_track` caught every
+  exception, a `QueryDeadlockError` included: InnoDB had already rolled the booking's whole transaction
+  back, `retry_on_deadlock` never saw the error, and `book` answered with a booking that no longer
+  existed. Now:
+  - the rows a withdrawal clears are read through indexes and written by primary key
+    (`CASES_OF_GUEST`, `FUNNEL_BY_HASH`, `FUNNEL_BY_SESSION`, `FORGET_CASES`, `FORGET_EVENTS`: no
+    `IFNULL`, no `OR`); new composite indexes `(email_hash, session_id)`, `(session_id, occurred_at)` on
+    the funnel and `(session_id, status)` on cases (`setup.TEX_INDEXES`, p45); the funnel reads are
+    plain consistent reads, so the only rows locked are those cleared; the cases are read `FOR UPDATE`
+    so a case written while the withdrawal runs is seen once written. p40 reads the funnel once, without
+    locks, and writes by primary key (it no longer calls `forget_contact` per guest);
+  - `_track` re-raises `QueryDeadlockError` and `QueryTimeoutError` (`txn.TRANSACTION_LOST`): the booking
+    is retried by `retry_on_deadlock` or fails, never reported. The other best-effort steps inside a
+    booking's transaction do the same: the booking and payment e-mails (`notify._deliver`,
+    `booking_mail`, `booking_confirmed`, `payment_link`: each queues an Email Queue row and a TEX
+    Communication), a payment start (`payments.service.start_payment`, which records a failed gateway
+    call on the transaction) and the channel-manager push trigger on Reservation. `realtime.notify`
+    publishes after commit and writes nothing.
+- *An erasure left the person behind (Medium).* `kamra.api.anonymize_guest` blanked e-mail and phone but
+  kept `tex_consent_email` = 1, so no clean-up ran: cases kept their contact, funnel hashes stayed, and the
+  Desk form's history (Version rows) kept the old name, e-mail and phone. An erasure now withdraws every
+  consent (stamped and audited, source `erasure`), clears date of birth, gender, tags, preferences and the
+  identity documents (the attached files are deleted), forgets the cases and funnel data, replaces the
+  booker's name, e-mail and phone on the guest's TEX bookings and their payment links with the alias,
+  removes the profile's Version rows and masks those values in the Version rows of its bookings, payment
+  links and stays (no copy kept), and audits `guest.erase` (counts only). Clearing an e-mail or a phone in
+  any save (the CRM, the Desk form, REST) forgets the contact data it leaves behind, like a withdrawal.
+  p45 applies this to profiles erased before (every consent withdrawn, cases and funnel forgotten,
+  history removed). Audit events are immutable and keep what they recorded (a consent change names no
+  address; `guest.update` events keep the old and new values of an edit: a retention decision for the
+  owner, recorded in GO_LIVE_READINESS).
+- *Duplicates nothing could merge (Medium).* The identity rule (first review) creates a second profile
+  for a returning guest with a new e-mail, and the only merge was the legacy PMS endpoint: it repointed a
+  fixed list of legacy links, failed with `LinkExistsError` on `TEX Booking.booker_guest`, `TEX Loyalty
+  Ledger.guest`, `TEX Communication.guest` and `TEX Abandoned Booking.guest`, and left the points behind.
+  `crm.merge_guests(source, target)` (`kamra.tex.api.crm.merge_guests`, POST; the legacy endpoint now
+  calls it):
+  - who: staff who may edit both profiles (`crm.edit`, `require_guest`) and may edit guests at every
+    hotel either profile has any record at (every DocType linking to Guest whose rows name a hotel);
+    platform administrators; the legacy PMS endpoint keeps its own guard (ADR-027: an administrator
+    role, every stay of both profiles in the caller's scope, the PMS open to the caller) and then runs
+    this merge (a walk-in profile with no stay and no enterprise included, as the upstream eval harness
+    does); both profiles belong to one enterprise (or to none; a legacy profile without one takes the
+    other's);
+  - what moves: every Link to the duplicate found in the meta (TEX and legacy DocTypes, custom fields,
+    child tables), read and then written by primary key; its comments and other dynamic links, its
+    attachments and its change history. The audit trail is immutable and keeps the duplicate's name:
+    the merged profile's consent history includes the consent events of the profiles merged into it
+    (followed through the `guest.merge` events);
+  - loyalty: the ledger entries move, so a program has one balance and the tier follows the merged
+    lifetime (both computed from the ledger); the stored points and stay totals are recomputed;
+  - the profile that stays keeps its data and takes the duplicate's where it has none (names, e-mail,
+    phone, nationality, date of birth, gender, ID, address, language, country, market, notes,
+    preferences, documents); tags are joined; VIP and blacklist are kept if either has them;
+  - consent is the stricter of the two, per channel: it stays only where both profiles consented (a
+    withdrawal on either side wins; ADR-046 ties consent to a proven owner); a change is stamped
+    (`merge`) and audited, and without e-mail consent the moved cases lose their contact data;
+  - both Guest rows are locked in name order first; the duplicate is deleted without a Deleted Document
+    copy, and a link written by a concurrent booking after the move makes the delete fail (Frappe's link
+    check), so the merge rolls back rather than leave a dangling link;
+  - audited as `guest.merge` on the kept profile, seen at every hotel either profile had records at
+    (old: the duplicate's name and both consent states; new: what moved per DocType, which fields were
+    filled, the resulting consent; no contact data).
+  The profile lists *possible duplicates*: other profiles the viewer may see, of the same enterprise (or
+  none), with the same phone or e-mail (`possible_duplicates`, through the new `Guest (email,
+  tex_enterprise)` and `(phone, tex_enterprise)` indexes); the CRM profile shows them with a "Merge into
+  this profile" action, and a "Merge a duplicate" action takes any profile ID.
+- *The ledger in Desk / REST followed the program (Medium).* `perm.VIA_PARENT` scoped `TEX Loyalty
+  Ledger` by its program, so every Hotel Admin of a group read every entry of a group program, with its
+  booking, reason and actor. An entry now belongs to a hotel (`property`, new field): its stay's or
+  booking's, the program's hotel in a hotel's program, or for a manual adjustment the hotel it was made
+  for (`loyalty.adjust(property=)`; the only hotel of the program where the user may edit guests, else
+  the user chooses: the adjustment dialog asks). Desk / REST read an entry at its hotel only; an entry
+  of no hotel is its program's hotel's in a hotel's program and platform level in a group's. p45 gives
+  older entries their hotel (the stay's or booking's; for a manual adjustment of a group program, the
+  one hotel of the program where its author may edit guests, when there is exactly one).
+- *Low.*
+  - L1: the CRM read a consent sent as text with `bool()` (`"0"` was yes): `update_profile` uses
+    `booking.consent_given`.
+  - L2: a masked change history of a case or funnel event kept a copy of the e-mail and phone in a
+    `version.withheld` event, one more place contact data outlived a withdrawal: contact DocTypes
+    (`internals.CONTACT_DOCTYPES`) are masked without a copy; p45 removes the copies kept and masks the
+    Version rows written before (p37 masked fewer fields). Copies of pricing internals and of a guest's
+    totals stay.
+  - L3: an "anonymous" case at the payment step could be re-identified: its session (funnel events, whose
+    `payment_started` payload names the booking) and its quote (`TEX Quote.booking` → the booker) were
+    readable in Desk / REST, and the CRM listing showed the booking that recovered it. The case's
+    session, quote and recovery booking and the funnel event's session and payload are withheld (permlevel
+    1); a case keeps a quote only with contact data (the scheduler, the controller, a withdrawal and p45
+    clear it); the CRM listing shows the recovery booking only with the contact. "Anonymous" in this ADR
+    means: no contact data, and no link to the person in the CRM or in Desk / REST; the hotel's own
+    booking records of that stay are not changed.
+  - L4: another hotel's ledger entries showed their stay's maturity and expiry dates, and a manual
+    adjustment of another hotel its author and free-text reason. For another hotel's entry the profile and
+    the program ledger now show points, status and the month it was written only (no booking, stay,
+    reason, actor, explanation, maturity or expiry date); an entry of no known hotel in a group program
+    counts as another hotel's.
+  - L5: the browser's funnel fields were an allow-list of names, not of values: the hotel must be one of
+    the site's hotels, the room type and rate plan that hotel's, the board a known code, and each quote one
+    of the site's hotels made in the visitor's own session; anything else is dropped.
+  - L6: a phone found a profile even when several profiles shared it, and for anonymous booking-engine
+    bookers, whose phone nobody verified. The phone now finds a profile only for staff, and only when
+    exactly one profile of the enterprise has it (and no e-mail was given, or the profile has none);
+    otherwise a new profile is made and shown with its possible duplicates.
+  - L7: a withdrawal in the Desk form or REST wrote no `guest.consent` audit and left
+    `tex_consent_updated_at` / `source` as they were: `Guest.validate` stamps a consent change made
+    outside the CRM and the booking flows (source: `Desk`, `API`, `merge`, `erasure` …) and `on_update`
+    audits it; the CRM and the booking flows record their own (no double event).
+  - L8: the scheduler read the profile's consent and wrote the case later; a withdrawal committing in
+    between left a case with contact data. `TEX Abandoned Booking.validate` re-reads the consent with a
+    lock as the case is written (no consent: no profile, e-mail, phone or quote), and `forget_contact`
+    reads the cases with a lock, so either order ends anonymous.
+  - L9 (tests): the permission-script test checks that a platform administrator actually reads the
+    withheld values; p40 is covered on its own paths (a hash of a profile that never consented, with no
+    case; a case with contact data and no profile); a shared phone stays in the identity tests.
+- Tests: `test_crm_privacy_review` (28: H1 6, M1 2, M2 6, M3 and L4 4, L1–L8 8, p40 and p45 2; the patch
+  tests refuse commits until their rollback, as the G-76 review asks) and changes to `test_crm_privacy`
+  (the funnel allow-list and identity tests follow L5 and L6; p40's cases are written below the new
+  controller; the p40 tests refuse commits; L9); the p45 registry entry in `test_patches`. H1 is tested
+  on its statements (each uses its index, checked with `EXPLAIN` on tables given the rows of a live
+  funnel; no `IFNULL`, no `OR`), on two connections (a second connection writes funnel events as a
+  booking does, not committed, before and while the withdrawal runs; each side waits at most 2 s for a
+  lock) and on the booking (a deadlock while tracking is re-raised below the retry; through `book`, the
+  first attempt is the victim and the retry books once, for "booked" and for "payment_started"). On main
+  `b72b2a8` and its schema 27 of the 28 fail or error, each on its finding (the booking test: "booked:
+  reported a rolled-back booking"; the two-connection test: "Lock wait timeout exceeded", although the
+  new indexes were on the site: the old withdrawal's `UPDATE` is a locking read, which reaches the
+  booking's uncommitted event of the same address and waits for it, where the new plain read does not
+  see it; the others on the missing behaviour);
+  p40's own paths (L9, coverage) pass. Before the two-connection test, 26 of 27 failed on `9215991` and
+  on `b074527`. The three `test_crm_privacy` tests changed for L5 and L6 fail on the old code. E2E:
+  `crm-profile.spec.ts`, the new `crm-merge.spec.ts` (a shared phone shown as a possible duplicate,
+  merged from the profile), `crm-admin.spec.ts` and `booking.spec.ts` pass twice in a row on a server
+  running this tree.
+
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
 - A modification — staff, a guest on the manage page, a paid or approved guest change — only

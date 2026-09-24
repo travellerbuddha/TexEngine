@@ -170,7 +170,7 @@ def on_reservation_change(doc) -> None:
 		"doctype": "TEX Loyalty Ledger", "program": program, "guest": doc.guest, "entry_type": "Earn",
 		"points": points, "status": "Pending", "available_on": avail_on,
 		"expires_on": add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None,
-		"booking": doc.tex_booking, "reservation": doc.name,
+		"booking": doc.tex_booking, "reservation": doc.name, "property": doc.property,
 		"reason": f"stay {doc.check_in_date}→{doc.check_out_date}" + (f" · tier {tier.tier_name}" if tier else ""),
 		"stay_fingerprint": fingerprint,
 		"explanation": json.dumps({"lines": lines, "tier": tier.tier_name if tier else None,
@@ -190,7 +190,7 @@ def _reverse(entry, *, reason: str) -> None:
 	if was_final and before - int(src.points) < 0:
 		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": src.program, "guest": src.guest,
 		                "entry_type": "Adjust", "points": int(src.points) - before, "status": "Available",
-		                "booking": src.booking, "reservation": src.reservation,
+		                "booking": src.booking, "reservation": src.reservation, "property": src.property,
 		                "reason": f"{reason}: reversal limited to unspent points",
 		                "actor": frappe.session.user}).insert(ignore_permissions=True)
 
@@ -213,7 +213,7 @@ def mature_and_expire(today: date | None = None) -> dict:
 		matured += 1
 	for e in frappe.get_all("TEX Loyalty Ledger", filters={"status": "Available", "entry_type": "Earn",
 	                                                       "expires_on": ("<", today)},
-	                        fields=["name", "guest", "program", "points", "booking"]):
+	                        fields=["name", "guest", "program", "points", "booking", "property"]):
 		if frappe.db.exists("TEX Loyalty Ledger", {"entry_type": "Expire", "reason": f"expiry of {e.name}"}):
 			continue
 		bal = balances(e.guest, e.program)["available"]
@@ -221,6 +221,7 @@ def mature_and_expire(today: date | None = None) -> dict:
 		if take:
 			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": e.program, "guest": e.guest,
 			                "entry_type": "Expire", "points": -take, "status": "Expired", "booking": e.booking,
+			                "property": e.property,
 			                "reason": f"expiry of {e.name}"}).insert(ignore_permissions=True)
 			expired += take
 		_sync_guest(e.guest)
@@ -228,16 +229,42 @@ def mature_and_expire(today: date | None = None) -> dict:
 
 
 def _entry_hotels(entries: list[dict]) -> dict[str, str]:
-	"""Ledger entry → the hotel of the booking (or stay) it belongs to; entries without one
-	(a manual adjustment of the program) have none."""
-	bookings = {e["booking"] for e in entries if e.get("booking")}
-	stays = {e["reservation"] for e in entries if e.get("reservation") and not e.get("booking")}
+	"""Ledger entry → the hotel it belongs to: its own (``property``, second review of ADR-056), else
+	that of the booking (or stay) it belongs to; an older entry without either (a manual adjustment
+	of a group program before hotels were recorded) has none."""
+	bookings = {e["booking"] for e in entries if e.get("booking") and not e.get("property")}
+	stays = {e["reservation"] for e in entries if e.get("reservation") and not e.get("booking")
+	         and not e.get("property")}
 	hotel = dict(frappe.get_all("TEX Booking", filters={"name": ("in", list(bookings))}, fields=["name", "property"],
 	                            as_list=True)) if bookings else {}
 	if stays:
 		hotel |= dict(frappe.get_all("Reservation", filters={"name": ("in", list(stays))}, fields=["name", "property"],
 		                             as_list=True))
-	return {e["name"]: hotel.get(e.get("booking") or e.get("reservation")) for e in entries}
+	return {e["name"]: e.get("property") or hotel.get(e.get("booking") or e.get("reservation")) for e in entries}
+
+
+# what an entry of another hotel never shows (ADR-056 and its second review): which booking or stay,
+# the stay's dates (its reason, and when its points mature and expire), how its points were earned
+# and who made it; when it was written is shown by month only
+OTHER_HOTEL_FIELDS = ("booking", "reservation", "reason", "actor", "explanation", "available_on", "expires_on")
+
+
+def other_hotel(where: str | None, hotels: set[str] | None, program_hotel: str | None) -> bool:
+	"""Whether an entry belongs to another hotel than the viewer's (``hotels``; None: no masking). An
+	entry of no known hotel is the program's hotel's in a hotel's program, and nobody's to show in a
+	group's."""
+	if hotels is None:
+		return False
+	where = where or program_hotel
+	return not where or where not in hotels
+
+
+def mask_other_hotel(entry: dict) -> None:
+	for k in OTHER_HOTEL_FIELDS:
+		if k in entry:
+			entry[k] = None
+	if entry.get("creation"):
+		entry["creation"] = str(entry["creation"])[:7]
 
 
 def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> list[dict]:
@@ -245,9 +272,9 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 	or their group's; another tenant's program is never shown, G-65).
 
 	A program's balance is one balance wherever it was earned, so it is shown whole. ``hotels``
-	(the viewer's): an entry tied to a booking at another hotel of a shared (group) program shows
-	its points, status and dates, never that booking or its reason (ADR-056; as consent entries
-	made at another hotel, ADR-046)."""
+	(the viewer's): an entry of another hotel of a shared (group) program shows its points and
+	status and the month it was written, never its booking, reason, dates or who made it (ADR-056
+	and its second review; as consent entries made at another hotel, ADR-046)."""
 	out = []
 	for p in frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "program": ("in", list(programs) or [""])},
 	                        pluck="program", distinct=True, order_by="program asc"):
@@ -256,28 +283,38 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 		tier = tier_of(prog, b["lifetime_earned"])
 		entries = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "program": p},
 		                         fields=["name", "entry_type", "points", "status", "available_on", "expires_on",
-		                                 "booking", "reservation", "reason", "creation"],
+		                                 "booking", "reservation", "property", "reason", "creation"],
 		                         order_by="creation desc", limit=50)
 		where = _entry_hotels(entries)
 		for e in entries:
-			e.pop("reservation", None)
 			for k in ("available_on", "expires_on", "creation"):
 				e[k] = str(e[k]) if e[k] else None
-			e["other_hotel"] = bool(hotels is not None and where[e["name"]] and where[e["name"]] not in hotels)
+			e["other_hotel"] = other_hotel(where[e["name"]], hotels, prog.property)
 			if e["other_hotel"]:
-				e["booking"] = e["reason"] = None
+				mask_other_hotel(e)
+			e.pop("reservation", None)
+			e.pop("property", None)
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
 		            "value": to_str(quantize(db_dec(prog.point_value) * b["available"], prog.currency or "EUR")),
 		            "tier": tier.tier_name if tier else None, "entries": entries})
 	return out
 
 
-def adjust(guest: str, program: str, points: int, reason: str) -> str:
+def adjust(guest: str, program: str, points: int, reason: str, property: str | None = None) -> str:
+	"""A manual adjustment, made for one hotel of the program (``property``; the only one the user may
+	edit guests at when not given): the hotel it belongs to, whose staff see its reason and who made
+	it (ADR-056 second review)."""
 	prog = frappe.get_doc("TEX Loyalty Program", program)
 	props = [prog.property] if prog.property else frappe.get_all("Property", filters={
 		"tex_hotel_group": prog.hotel_group}, pluck="name")
-	if not any(scope.has_capability("crm.edit", p) and p in scope.permitted_properties() for p in props):
+	permitted = scope.permitted_properties()
+	editable = sorted(p for p in props if p in permitted and scope.has_capability("crm.edit", p))
+	if not editable or (property and property not in editable):
 		frappe.throw(_("Not permitted: {0}.").format("crm.edit"), frappe.PermissionError)
+	if not property:
+		if len(editable) > 1:
+			frappe.throw(_("Choose the hotel this adjustment is made for."))
+		property = editable[0]
 	if not (reason or "").strip():
 		frappe.throw(_("A reason is required."))
 	points = int(points)
@@ -287,10 +324,10 @@ def adjust(guest: str, program: str, points: int, reason: str) -> str:
 		frappe.throw(_("The balance cannot go negative."))
 	doc = frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": program, "guest": guest,
 	                      "entry_type": "Adjust", "points": points, "status": "Available", "reason": reason[:500],
-	                      "actor": frappe.session.user}).insert(ignore_permissions=True)
+	                      "property": property, "actor": frappe.session.user}).insert(ignore_permissions=True)
 	_sync_guest(guest)
 	audit("loyalty.adjust", reference_doctype="TEX Loyalty Ledger", reference_name=doc.name,
-	      property=prog.property, new={"guest": guest, "points": points}, reason=reason)
+	      property=property, new={"guest": guest, "points": points}, reason=reason)
 	return doc.name
 
 
@@ -346,7 +383,7 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	txn.insert(ignore_permissions=True)
 	pay.allocate(txn.name, booking=booking, amount=value, reason="loyalty redemption", _system=True)
 	led = frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": program, "guest": guest, "entry_type": "Burn",
-	                      "points": -points, "status": "Used", "booking": booking,
+	                      "points": -points, "status": "Used", "booking": booking, "property": b.property,
 	                      "reason": f"redeemed as {txn.name}", "actor": frappe.session.user}).insert(
 		ignore_permissions=True)
 	_sync_guest(guest)

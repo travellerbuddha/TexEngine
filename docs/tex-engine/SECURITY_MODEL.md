@@ -62,17 +62,27 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   change history masks their values and a generic write's response leaves them out
   (`kamra/tex/security/internals.py`). The TEX API serves pricing internals by `price.view_cost`
   at the hotel, and guest totals computed over the viewer's hotels and loyalty programs only.
-  Also withheld (ADR-056 review): an abandoned case's profile, e-mail and phone, a funnel event's
-  profile and e-mail hash. On customised role permissions (Custom DocPerm) System Manager keeps its
+  Also withheld (ADR-056 reviews): an abandoned case's profile, e-mail and phone, and what leads to
+  the person (its session, quote and recovery booking); a funnel event's profile, e-mail hash, session
+  and payload. On customised role permissions (Custom DocPerm) System Manager keeps its
   permlevel-1 row (p40, `ensure_custom_perms` in the permission scripts); a business role at
-  permlevel ≥ 1 is printed and audited by p40. A masked change history keeps its values in a
-  platform-level audit event (`version.withheld`) that the TEX audit log never shows in a record's
-  trail to anyone else. Only a generic write request's response is trimmed (never a `db_set`).
+  permlevel ≥ 1 is printed and audited by p40. A masked change history keeps the values of pricing
+  internals and guest totals in a platform-level audit event (`version.withheld`) that the TEX audit
+  log never shows in a record's trail to anyone else; contact data is masked without a copy (p45
+  removed the copies kept before). Only a generic write request's response is trimmed (never a
+  `db_set`).
 - **CRM tenancy** (ADR-036, ADR-040, ADR-056): stays, value, extras, cancellations, segment facts and
   loyalty come from the viewer's hotels; a guest's loyalty, in the profile and in the program
   ledger, shows only the programs that reach the viewer's hotels (their own or their group's),
-  another hotel's bookings in a shared program only as points, and never a guest the viewer may
-  not see.
+  another hotel's entries in a shared program only as points, status and month (no booking, stay,
+  dates, reason or author), and never a guest the viewer may not see. In Desk / REST a loyalty entry
+  is read at its own hotel only (`TEX Loyalty Ledger.property`: the stay's or booking's, or the hotel
+  a manual adjustment was made for; ADR-056 second review).
+- **Guest identity and duplicates** (ADR-056 reviews): a booking joins a profile by its e-mail; a phone
+  finds one only for staff, only when exactly one profile has it. Duplicates are merged by
+  `crm.merge_guests` (`crm.edit` at every hotel either profile has records at, one enterprise, consent
+  the stricter of the two, audited); an erasure withdraws every consent and removes contact data from
+  cases, funnel, bookings' booker fields and the change history.
 - `strict_tenancy` (default on): a non-admin user without any scope sees nothing.
 - Grants sync Frappe `User Permission` (Property, apply to all doctypes). Isolation does not rely
   on them: every hotel-bound TEX DocType and the 53 legacy Kamra DocTypes bound to a hotel by a
@@ -104,11 +114,11 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Embedding abuse (clickjacking) | Booking iframe allowed only for `allowed_embed_origins` via CSP `frame-ancestors` |
 | Uploads | Checked on the server (ADR-046 and review): TEX branding images by their bytes (PNG/JPEG/GIF/WebP, every frame decoded, 2 MB) through `admin.upload_site_image`; the public folder serves only an allow-list (images, video, audio, PDF, office documents, fonts, zip) judged on the name File stores, on every path, before anything is written (File controller extension); everything else is private |
 | Bearer tokens in URLs | Guest links carry tokens in the URL fragment (never sent to a server); token endpoints take POST bodies only; payment pages send no Referer (ADR-046); only token hashes are stored |
-| PII over-exposure | `crm.view` / `guest.export` capabilities; masked ID numbers (existing `_mask_id`); exports audited; a booking joins a guest profile by its e-mail, the phone only for a booking or profile without one, so one person's stays never land in another's profile (ADR-056 review) |
+| PII over-exposure | `crm.view` / `guest.export` capabilities; masked ID numbers (existing `_mask_id`); exports audited; a booking joins a guest profile by its e-mail, the phone only for a booking or profile without one, so one person's stays never land in another's profile (ADR-056 review); the phone only for staff and only when one profile has it; duplicates merged by staff who may edit every hotel's records of both, audited; an erasure leaves no contact data in cases, funnel, booker fields or history (ADR-056 second review) |
 | Open redirect through payment return URLs | Browser-supplied return URLs accepted only for the TEX host or a DNS-verified booking domain (ADR-021) |
 | Custom-domain takeover | `verified` set only by the DNS TXT check; editing a row resets it; a domain can belong to one site only |
 | Group-level records edited from one hotel | Booking sites serving a hotel group need the capability at every hotel of the group |
-| Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with the profile's own consent, and shown only while it holds; an anonymous booking never grants consent on an existing profile, it is recorded as a request (ADR-046); a funnel event keeps an e-mail hash only with the visitor's marketing consent and never keeps contact fields (ADR-056, p37 purged older hashes); a browser's funnel event keeps an allow-list of fields per event; a withdrawal of e-mail consent, on every path, makes the guest's abandoned cases and funnel hashes anonymous (p40 for older rows); a consent flag is yes only for true / 1 / "1" / "true" (ADR-056 review) |
+| Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with the profile's own consent, and shown only while it holds; an anonymous booking never grants consent on an existing profile, it is recorded as a request (ADR-046); a funnel event keeps an e-mail hash only with the visitor's marketing consent and never keeps contact fields (ADR-056, p37 purged older hashes); a browser's funnel event keeps an allow-list of fields per event; a withdrawal of e-mail consent, on every path, makes the guest's abandoned cases and funnel hashes anonymous (p40 for older rows); a consent flag is yes only for true / 1 / "1" / "true" (ADR-056 review); a withdrawal reads and writes only the rows it clears (indexes, primary keys) and a case written after it is anonymous; a consent change in Desk / REST is stamped and audited; a browser's funnel values must be the site's own hotels, room types, rate plans, boards and the session's quotes (ADR-056 second review) |
 | Pricing internals and cross-tenant totals through Desk / REST | Permlevel 1 (System Manager only) on the snapshot, cost, margin, FX rate, quote result, revision snapshots and a guest's stored totals; masked in the change history; left out of a generic write's response; the TEX API serves them by capability and scope (ADR-056) |
 
 ## 5. Logging rules
@@ -144,6 +154,11 @@ the guest's manage token.
   text read as yes, customised permissions dropping System Manager's permlevel-1 row, masking that
   destroyed the history, `db_set` marking documents) fixed with fail-first tests (ADR-056 review
   follow-up, p40).
+- 2026-09-25 second independent review of ADR-056: 1 High (a withdrawal's locking scan of the funnel,
+  and deadlocks swallowed by tracking, so a rolled-back booking could be reported), 3 Medium (an
+  erasure that kept consent and contact data; duplicates nothing could merge; the loyalty ledger in
+  Desk / REST scoped by program) and 9 Low fixed with fail-first tests (ADR-056 second review
+  follow-up, p45).
 
 ## 7. Known gaps (tracked)
 
@@ -161,10 +176,11 @@ in the path until they expire. The notes below predate that audit.
 - ADR-056 leaves open: `TEX Contract Version` (frozen payload and rate tables, i.e. contract
   cost) is readable in Desk by the Hotel Admin role at its hotels whatever the granted profile
   (G-11 covered the TEX API; G-97: child tables, shared child DocTypes, child-row history and
-  contract-edit audit diffs make it more than a permlevel change); a group loyalty program's ledger
-  is readable in Desk by the group's Hotel Admins, other hotels' bookings included (the TEX API
-  masks them); no per-hotel legitimate-interest basis for abandoned-booking contact exists
-  (owner/legal decision).
+  contract-edit audit diffs make it more than a permlevel change); no per-hotel legitimate-interest
+  basis for abandoned-booking contact exists (owner/legal decision). (The group loyalty ledger in Desk
+  is scoped by each entry's hotel since the ADR-056 second review.) Audit events are immutable:
+  `guest.update` events keep the old and new values of a profile edit after an erasure (retention is
+  an owner decision).
 - iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
   production-verified**; enabling a Production account requires the provider's sandbox
   certification with real merchant credentials.

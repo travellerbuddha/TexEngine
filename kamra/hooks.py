@@ -295,6 +295,8 @@ doc_events["Reservation"]["on_update"].append("kamra.tex.security.internals.hide
 # guest's abandoned cases and funnel data anonymous, whoever saves (ADR-056 review)
 doc_events.setdefault("Guest", {})["on_update"] = ["kamra.tex.security.internals.hide_after_write",
                                                   "kamra.tex.crm.service.guest_on_update"]
+# a consent change made in Desk / REST is stamped and audited like the CRM's (ADR-046, ADR-056 second review)
+doc_events["Guest"]["validate"] = "kamra.tex.crm.service.guest_validate"
 doc_events.setdefault("Version", {}).update({"before_insert": "kamra.tex.security.internals.mask_version",
                                              "after_insert": "kamra.tex.security.internals.keep_withheld_values"})
 doc_events["Property"] = {

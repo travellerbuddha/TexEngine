@@ -1866,57 +1866,21 @@ def _stays_in_scope_sql(alias: str) -> str:
 	return f" AND {alias}.property IN ({', '.join(frappe.db.escape(h) for h in hotels)})"
 
 
-_GUEST_LINKS = [  # every doctype that points at a Guest
-	("Reservation", "guest"), ("Folio", "guest"),
-	("Service Ticket", "guest"), ("Lost And Found Item", "guest"),
-	("Security Deposit", "guest"),
-	("Venue Booking", "customer"),  # banquet uses customer, not guest
-	("WhatsApp Message", "guest"),
-]
-
-
 @frappe.whitelist()
 @require_roles()
 def merge_guests(source: str, target: str):
 	"""Merge a duplicate profile into the surviving one: every linked
-	document is repointed, missing contact fields are copied over, and
-	the duplicate is deleted. Money is untouched - folios keep their
-	lines and totals."""
-	if source == target:
-		frappe.throw("Pick two different profiles to merge.")
-	src = frappe.get_doc("Guest", source)
-	dst = frappe.get_doc("Guest", target)
+	document is repointed (TEX bookings, loyalty entries, communications
+	and cases too: from the meta), missing contact fields are copied over,
+	consent becomes the stricter of the two, and the duplicate is deleted.
+	Money is untouched - folios keep their lines and totals. One merge for
+	the whole platform: the TEX CRM's (``kamra.tex.crm.service.merge_guests``,
+	its checks and its audit; ADR-056 second review)."""
+	from kamra.tex.crm import service as crm
 
-	moved = {}
-	for doctype, field in _GUEST_LINKS:
-		if not frappe.db.exists("DocType", doctype):
-			continue
-		if not frappe.get_meta(doctype).has_field(field):
-			continue
-		rows = frappe.get_all(doctype, filters={field: source}, pluck="name")
-		for name in rows:
-			frappe.db.set_value(doctype, name, field, target,
-			                    update_modified=False)
-		if rows:
-			moved[doctype] = len(rows)
-	# denormalized guest_name on stays and bills follows the survivor
-	for doctype in ("Reservation", "Folio"):
-		frappe.db.sql(  # nosemgrep: frappe-sql-format-injection -- values are parameterized; interpolated text is a constant or whitelisted identifier, not user input
-			f"UPDATE `tab{doctype}` SET guest_name = %s WHERE guest = %s",
-			(dst.full_name, target))
-
-	# fill the survivor's blanks from the duplicate; strictest flags win
-	for field in ("phone", "email", "id_type", "id_number", "nationality",
-	              "address_line", "city", "guest_notes"):
-		if not dst.get(field) and src.get(field):
-			dst.set(field, src.get(field))
-	if src.vip:
-		dst.vip = 1
-	if src.blacklisted:
-		dst.blacklisted = 1
-		dst.blacklist_reason = dst.blacklist_reason or src.blacklist_reason
-	dst.save(ignore_permissions=True)
-	frappe.delete_doc("Guest", source, ignore_permissions=True)
+	# require_roles and assert_scope (every stay of both profiles in scope) decided who may merge
+	out = crm.merge_guests(source, target, checked=True)
+	moved = out["moved"]
 
 	from kamra.savings import log_action
 	log_action("merge_guests", "Guest", target,
@@ -1931,13 +1895,19 @@ def anonymize_guest(guest: str):
 	"""Right-to-erasure: strip everything that identifies the person while
 	keeping stays and bills intact for the books. Irreversible."""
 	doc = frappe.get_doc("Guest", guest)
+	emails = (doc.email,)
 	alias = f"Guest {frappe.generate_hash(length=6).upper()}"
 	doc.update({
 		"first_name": alias, "last_name": "", "full_name": alias,
 		"phone": "", "email": "", "id_type": "", "id_number": "",
 		"nationality": "", "address_line": "", "city": "",
 		"guest_notes": "Profile anonymized on request.", "vip": 0,
+		# nothing may be sent to an erased person, and nothing kept about them (ADR-056 second review)
+		"tex_consent_email": 0, "tex_consent_sms": 0, "tex_consent_whatsapp": 0,
+		"date_of_birth": None, "gender": "", "tex_tags": "", "tex_preferences": "",
+		"id_file": "", "address_proof_file": "",
 	})
+	doc.flags.tex_consent_source = "erasure"
 	doc.save(ignore_permissions=True)
 	for doctype in ("Reservation", "Folio"):
 		frappe.db.sql(  # nosemgrep: frappe-sql-format-injection -- values are parameterized; interpolated text is a constant or whitelisted identifier, not user input
@@ -1955,6 +1925,10 @@ def anonymize_guest(guest: str):
 		if res.get("booked_by_phone"):
 			frappe.db.set_value("Reservation", r, "booked_by_phone", "",
 			                    update_modified=False)
+	# the TEX side: abandoned cases, funnel hashes, bookings' booker data, the change history
+	from kamra.tex.crm import service as crm
+
+	crm.erase_traces(guest, alias, emails=emails)
 
 	from kamra.savings import log_action
 	log_action("anonymize_guest", "Guest", guest,

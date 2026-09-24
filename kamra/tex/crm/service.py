@@ -267,7 +267,7 @@ def profile(guest: str) -> dict:
 	# made at another hotel (a booking there, its staff) stay with that hotel; profile-level
 	# changes (CRM, no hotel) are the consent record everyone sharing the profile relies on
 	consent_log = [c for c in frappe.get_all(
-		"TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": guest,
+		"TEX Audit Event", filters={"reference_doctype": "Guest", "reference_name": ("in", [guest, *merged_into(guest)]),
 		                            "action": ("in", ["guest.consent", "guest.consent_requested"])},
 		fields=["event_time", "action", "actor", "new_value", "reason", "source", "property"],
 		order_by="event_time desc", limit=200) if not c.property or c.property in via][:50]
@@ -280,7 +280,9 @@ def profile(guest: str) -> dict:
 	return {"guest": d, "stays": stays, "communications": comms, "segments": member_of,
 	        "loyalty": loyalty.summary(guest, loyalty.visible_programs(via), hotels=via),
 	        "extras": extras, "extras_summary": extras_summary, "cancellations": _cancellations(guest, via),
-	        "consent_history": consent_log, "hotels": sorted(via)}
+	        "consent_history": consent_log, "hotels": sorted(via),
+	        "possible_duplicates": possible_duplicates(guest, {p for p in scope.permitted_properties()
+	                                                           if scope.has_capability("crm.view", p)})}
 
 
 def _quantity(q) -> str:
@@ -359,16 +361,21 @@ def update_profile(guest: str, data: dict, *, consent_source: str = "staff",
 	for f in EDITABLE:
 		if f in data:
 			g.set(f, data[f] if data[f] not in ("",) else None)
+	from kamra.tex.services.booking import consent_given
+
 	consent_changed = {}
 	for f in CONSENT:
-		if f in data and bool(data[f]) != bool(g.get(f)):
-			g.set(f, 1 if data[f] else 0)
-			consent_changed[f] = [bool(before[f]), bool(data[f])]
+		# a consent sent as text means what it says ("0", "false": no), as in a booking (ADR-056)
+		if f in data and consent_given(data[f]) != bool(g.get(f)):
+			given = consent_given(data[f])
+			g.set(f, 1 if given else 0)
+			consent_changed[f] = [bool(before[f]), given]
 	if consent_changed:
 		g.tex_consent_updated_at = now_datetime()
 		g.tex_consent_source = consent_source[:140]
 		if consent_text_version:
 			g.tex_consent_text_version = consent_text_version[:140]
+	g.flags.tex_consent_recorded = True                  # audited below, with the source the caller named
 	g.save(ignore_permissions=True)
 	changed = {f: [str(before[f] or ""), str(g.get(f) or "")] for f in EDITABLE
 	           if str(before[f] or "") != str(g.get(f) or "")}
@@ -676,7 +683,9 @@ def detect_abandoned(now=None) -> dict:
 			"consent_marketing": 1 if consent else 0,
 			"value": D(qp.get("total") or 0), "currency": qp.get("currency"),
 			"check_in": sp.get("check_in"), "check_out": sp.get("check_out"),
-			"quote": qp.get("quote") if qp.get("quote") and frappe.db.exists("TEX Quote", qp.get("quote")) else None,
+			# the quote leads to the booking and its booker: kept only with the contact data (ADR-056)
+			"quote": qp.get("quote") if consent and qp.get("quote") and frappe.db.exists("TEX Quote", qp.get("quote"))
+			else None,
 			"last_event_at": s.last_at}).insert(ignore_permissions=True)
 		created += 1
 	# a case left at payment is recovered when its booking is paid, however long after its session
@@ -724,8 +733,9 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	                            pluck="name")) if guests else set()
 	for r in rows:
 		if not (r.consent_marketing and r.guest in agreed):
-			# anonymous, the profile link included: it would lead to the same contact data
-			r["email"] = r["phone"] = r["guest"] = None
+			# anonymous, the profile link and the booking that recovered it included: each leads to the
+			# person (ADR-056 and its second review)
+			r["email"] = r["phone"] = r["guest"] = r["recovered_booking"] = None
 			r["consent_marketing"] = 0
 		r["value"] = to_str(from_db(r["value"], r["currency"] or "EUR"))
 		for k in ("check_in", "check_out", "last_event_at"):
@@ -739,27 +749,102 @@ def email_hash(email: str | None) -> str | None:
 	return hashlib.sha256(email.encode()).hexdigest() if email else None
 
 
+# A withdrawal's statements (ADR-056 second review). The rows it clears are read through an index and
+# written by primary key, so a withdrawal locks those rows only: never a scan of the funnel, which every
+# visitor's tracking writes to inside a booking's transaction. The cases are read with a lock, so a case
+# the scheduler writes while the withdrawal runs is seen (and cleared) once written.
+CASES_OF_GUEST = "SELECT name, session_id FROM `tabTEX Abandoned Booking` WHERE guest = %(guest)s FOR UPDATE"
+FUNNEL_BY_HASH = "SELECT name FROM `tabTEX Funnel Event` WHERE email_hash IN %(hashes)s"
+FUNNEL_BY_SESSION = "SELECT name, email_hash FROM `tabTEX Funnel Event` WHERE session_id IN %(sessions)s"
+FORGET_CASES = """UPDATE `tabTEX Abandoned Booking` SET guest = NULL, email = NULL, phone = NULL, quote = NULL,
+	consent_marketing = 0 WHERE name IN %(names)s"""
+FORGET_EVENTS = "UPDATE `tabTEX Funnel Event` SET email_hash = NULL WHERE name IN %(names)s"
+BATCH = 500
+
+
+def _chunks(values) -> list[tuple]:
+	values = sorted(v for v in values if v)
+	return [tuple(values[i:i + BATCH]) for i in range(0, len(values), BATCH)]
+
+
 def forget_contact(guest: str, emails=()) -> None:
-	"""The guest withdrew marketing e-mail consent: their abandoned cases become anonymous (no
-	profile, e-mail or phone; no consent) and their funnel events lose the e-mail hash, those of the
-	cases' sessions and those of the guest's addresses (ADR-056 review). The profile itself, its
-	stays and its consent history stay."""
-	sessions = tuple(s for s in frappe.get_all("TEX Abandoned Booking", filters={"guest": guest}, pluck="session_id")
-	                 if s) or ("",)
-	frappe.db.sql("""UPDATE `tabTEX Abandoned Booking` SET guest = NULL, email = NULL, phone = NULL,
-		consent_marketing = 0 WHERE guest = %s""", guest)
-	hashes = tuple(h for h in {email_hash(e) for e in emails} if h) or ("",)
-	frappe.db.sql("""UPDATE `tabTEX Funnel Event` SET email_hash = NULL
-		WHERE IFNULL(email_hash, '') != '' AND (email_hash IN %(h)s OR session_id IN %(s)s)""",
-	              {"h": hashes, "s": sessions})
+	"""The guest withdrew marketing e-mail consent (or cleared their e-mail or phone, or was erased):
+	their abandoned cases become anonymous (no profile, e-mail, phone or quote; no consent) and their
+	funnel events lose the e-mail hash, those of the cases' sessions and those of the guest's addresses
+	(ADR-056 review). The profile itself, its stays and its consent history stay."""
+	cases = frappe.db.sql(CASES_OF_GUEST, {"guest": guest}, as_dict=True)
+	events = set()
+	hashes = {h for h in (email_hash(e) for e in emails) if h}
+	for chunk in _chunks(hashes):
+		events |= set(frappe.db.sql(FUNNEL_BY_HASH, {"hashes": chunk}, pluck=True))
+	for chunk in _chunks({c.session_id for c in cases}):
+		events |= {name for name, h in frappe.db.sql(FUNNEL_BY_SESSION, {"sessions": chunk}) if h}
+	for chunk in _chunks({c.name for c in cases}):
+		frappe.db.sql(FORGET_CASES, {"names": chunk})
+	for chunk in _chunks(events):
+		frappe.db.sql(FORGET_EVENTS, {"names": chunk})
+
+
+def guest_validate(doc, method=None) -> None:
+	"""``Guest.validate``, whoever saves: a consent change made outside the CRM and the booking flows
+	(the Desk form, REST, a merge, an erasure) is stamped as theirs are (when, and how: ADR-046) and
+	audited once saved (``guest_on_update``). The CRM and the booking flows record their own."""
+	if doc.flags.get("tex_consent_recorded"):
+		return
+	before = doc.get_doc_before_save()
+	changed = {f: bool(doc.get(f)) for f in CONSENT if bool(doc.get(f)) != bool(before.get(f) if before else 0)}
+	if not changed:
+		return
+	from kamra.tex.security.audit import source_of_request
+
+	how = (doc.flags.get("tex_consent_source") or source_of_request())[:140]
+	doc.tex_consent_updated_at = now_datetime()
+	doc.tex_consent_source = how
+	doc.flags.tex_consent_audit = (changed, how)
 
 
 def guest_on_update(doc, method=None) -> None:
-	"""``Guest.on_update``, whoever saves (the CRM, the Desk form, REST): a withdrawal of marketing
-	e-mail consent makes the guest's abandoned cases and funnel data anonymous."""
+	"""``Guest.on_update``, whoever saves (the CRM, the Desk form, REST): a consent change made outside
+	the CRM is audited; a withdrawal of marketing e-mail consent, or an e-mail or phone cleared, makes
+	the guest's abandoned cases and funnel data anonymous (ADR-056 and its second review)."""
+	pending = doc.flags.pop("tex_consent_audit", None)
+	if pending:
+		audit("guest.consent", reference_doctype="Guest", reference_name=doc.name, new=pending[0], reason=pending[1])
 	before = doc.get_doc_before_save()
-	if before and before.get("tex_consent_email") and not doc.get("tex_consent_email"):
+	if not before:
+		return
+	withdrawn = before.get("tex_consent_email") and not doc.get("tex_consent_email")
+	cleared = any(before.get(f) and not doc.get(f) for f in ("email", "phone"))
+	if withdrawn or cleared:
 		forget_contact(doc.name, emails={before.get("email"), doc.get("email")})
+
+
+def erase_traces(guest: str, alias: str, *, emails=()) -> dict:
+	"""Right to erasure (``kamra.api.anonymize_guest``), after the profile itself was blanked and its
+	consent withdrawn: its cases and funnel data are forgotten; its bookings and their payment links keep
+	the alias instead of the booker's name, e-mail and phone; the profile's change history goes, and that
+	of its bookings, links and stays keeps which field changed, never the value (ADR-056 second review)."""
+	from kamra.tex.security.internals import mask_history
+
+	forget_contact(guest, emails=emails)
+	bookings = frappe.get_all("TEX Booking", filters={"booker_guest": guest}, pluck="name")
+	links = frappe.get_all("TEX Payment Link", filters={"booking": ("in", bookings)}, pluck="name") if bookings else []
+	for chunk in _chunks(bookings):
+		frappe.db.sql("""UPDATE `tabTEX Booking` SET booker_name = %(a)s, booker_email = NULL, booker_phone = NULL
+			WHERE name IN %(n)s""", {"a": alias, "n": chunk})
+	for chunk in _chunks(links):
+		frappe.db.sql("UPDATE `tabTEX Payment Link` SET guest_name = %(a)s, guest_email = NULL WHERE name IN %(n)s",
+		              {"a": alias, "n": chunk})
+	frappe.db.delete("Version", {"ref_doctype": "Guest", "docname": guest})
+	masked = (mask_history("TEX Booking", bookings, ("booker_name", "booker_email", "booker_phone"))
+	          + mask_history("TEX Payment Link", links, ("guest_name", "guest_email"))
+	          + mask_history("Reservation", frappe.get_all("Reservation", filters={"guest": guest}, pluck="name"),
+	                         ("guest_name", "booked_by_phone")))
+	for f in frappe.get_all("File", filters={"attached_to_doctype": "Guest", "attached_to_name": guest}, pluck="name"):
+		frappe.delete_doc("File", f, ignore_permissions=True)            # identity documents
+	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked}
+	audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
+	return out
 
 
 def set_abandoned_status(name: str, status: str, note: str | None = None) -> None:
@@ -778,3 +863,176 @@ def purge_funnel(days: int = 180) -> int:
 	n = frappe.db.count("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
 	frappe.db.delete("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
 	return n
+
+
+# ─── duplicates and merging (ADR-056 second review) ─────────────────────
+
+# what a merged profile takes from the duplicate where it has nothing itself
+MERGE_FILL = ("first_name", "last_name", "email", "phone", "nationality", "date_of_birth", "gender", "id_type",
+              "id_number", "address_line", "city", "guest_notes", "tex_language", "tex_country", "tex_market",
+              "tex_preferences", "id_file", "address_proof_file")
+
+
+def possible_duplicates(guest: str, props: set[str]) -> list[dict]:
+	"""Other profiles the viewer may see, of the same enterprise (or none), with this profile's phone
+	or e-mail: the identity rule keeps a shared phone apart (``booking.resolve_guest``), so staff
+	decide, and merge (``merge_guests``)."""
+	g = frappe.db.get_value("Guest", guest, ["email", "phone", "tex_enterprise"], as_dict=True)
+	email, phone = (g.email or "").strip(), (g.phone or "").strip()
+	if not (email or phone) or not props:
+		return []
+	cond, params = _visible_guest_sql(props)
+	match = [c for c, v in (("g.email = %(email)s", email), ("g.phone = %(phone)s", phone)) if v]
+	tenant = "AND IFNULL(g.tex_enterprise, '') IN %(tenants)s" if g.tex_enterprise else ""
+	rows = frappe.db.sql(  # nosemgrep -- static conditions, values bound
+		f"""SELECT g.name, g.full_name, g.email, g.phone FROM `tabGuest` g
+		WHERE g.name != %(me)s AND ({" OR ".join(match)}) {tenant} AND {cond}
+		ORDER BY g.creation ASC, g.name ASC LIMIT 20""",
+		{**params, "me": guest, "email": email, "phone": phone, "tenants": (g.tex_enterprise or "", "")},
+		as_dict=True)
+	return [{"name": r.name, "full_name": r.full_name,
+	         "match": [f for f, v in (("email", email), ("phone", phone)) if v and (r[f] or "").strip().lower() == v.lower()]}
+	        for r in rows]
+
+
+def merged_into(guest: str) -> list[str]:
+	"""The profiles merged into this one (and into those, …): their consent record is this profile's."""
+	names, frontier = [], [guest]
+	for _depth in range(10):
+		found = []
+		for old in frappe.get_all("TEX Audit Event", filters={"action": "guest.merge", "reference_doctype": "Guest",
+		                                                      "reference_name": ("in", frontier)}, pluck="old_value"):
+			try:
+				source = (json.loads(old or "{}") or {}).get("source")
+			except (ValueError, AttributeError):
+				source = None
+			if source and source != guest and source not in names:
+				found.append(source)
+		if not found:
+			break
+		names += found
+		frontier = found
+	return names
+
+
+def _guest_links() -> list[tuple[str, str]]:
+	"""Every (DocType, field) linking to a Guest, from the meta (custom fields included)."""
+	from frappe.model.rename_doc import get_link_fields
+
+	return sorted({(f["parent"], f["fieldname"]) for f in get_link_fields("Guest")
+	               if not f.get("issingle") and frappe.db.table_exists(f["parent"])})
+
+
+def _records_hotels(guests: tuple[str, ...]) -> set[str]:
+	"""The hotels any record of these profiles belongs to (each linking DocType that names one)."""
+	hotels = set()
+	for parent, field in _guest_links():
+		if frappe.db.has_column(parent, "property"):
+			hotels |= set(frappe.db.sql(  # nosemgrep -- identifiers from the meta, values bound
+				f"SELECT DISTINCT property FROM `tab{parent}` WHERE `{field}` IN %(g)s AND IFNULL(property, '') != ''",
+				{"g": guests}, pluck=True))
+	return hotels
+
+
+def _repoint(source: str, target: str) -> dict[str, list[str]]:
+	"""Every link to ``source`` now names ``target``: read, then written by primary key."""
+	moved: dict[str, list[str]] = {}
+	for parent, field in _guest_links():
+		names = frappe.db.sql(f"SELECT name FROM `tab{parent}` WHERE `{field}` = %(g)s",  # nosemgrep
+		                      {"g": source}, pluck=True)
+		for chunk in _chunks(names):
+			frappe.db.sql(f"UPDATE `tab{parent}` SET `{field}` = %(t)s WHERE name IN %(n)s",  # nosemgrep
+			              {"t": target, "n": chunk})
+		if names:
+			moved.setdefault(parent, []).extend(names)
+	# comments, attachments and the change history follow the profile; the audit trail is immutable and
+	# keeps the duplicate's name (its consent events are read through the merge event: ``merged_into``)
+	from frappe.model.dynamic_links import get_dynamic_link_map
+
+	skip = set(frappe.get_hooks("ignore_links_on_delete"))
+	for df in get_dynamic_link_map().get("Guest", []):
+		if df.parent in skip or frappe.get_meta(df.parent).issingle:
+			continue
+		frappe.db.sql(  # nosemgrep -- identifiers from the meta, values bound
+			f"UPDATE `tab{df.parent}` SET `{df.fieldname}` = %(t)s WHERE `{df.options}` = 'Guest' AND `{df.fieldname}` = %(s)s",
+			{"t": target, "s": source})
+	frappe.db.sql("""UPDATE `tabFile` SET attached_to_name = %(t)s
+		WHERE attached_to_doctype = 'Guest' AND attached_to_name = %(s)s""", {"t": target, "s": source})
+	frappe.db.sql("UPDATE `tabVersion` SET docname = %(t)s WHERE ref_doctype = 'Guest' AND docname = %(s)s",
+	              {"t": target, "s": source})
+	return moved
+
+
+def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
+	"""Merge the duplicate profile ``source`` into ``target`` (ADR-056 second review).
+
+	Who: staff who may edit both profiles (``crm.edit``) and may edit guests at every hotel either
+	profile has a record at: its stays, bookings, communications, cases and loyalty entries go with it;
+	platform administrators. ``checked``: the legacy PMS endpoint decided already, by its own rule
+	(``kamra.authz``: an administrator role, every stay of both profiles in the caller's scope, the PMS
+	open to the caller). Both profiles belong to one enterprise (or to none). What moves: every link to the duplicate
+	(from the meta: TEX and legacy DocTypes, custom fields), its comments, attachments and history; its
+	loyalty entries, so the balance is one and the tier follows the merged lifetime. The profile that
+	stays keeps its own data and takes the duplicate's where it has none; VIP and blacklist are kept if
+	either has them. Consent is the stricter of the two: a channel stays consented only when both
+	profiles consented to it. The duplicate is then deleted; the merge is audited (no contact data)."""
+	if not source or not target or source == target:
+		frappe.throw(_("Pick two different profiles to merge."))
+	for g in (source, target):
+		if not frappe.db.exists("Guest", g):
+			frappe.throw(_("Guest not found."), frappe.DoesNotExistError)
+	decided = checked or scope.is_platform_admin()
+	if not decided:
+		require_guest(target, "crm.edit")
+		require_guest(source, "crm.edit")
+	# both rows locked in name order: two merges of the same profiles never deadlock
+	frappe.db.sql("SELECT name FROM `tabGuest` WHERE name IN %(g)s ORDER BY name FOR UPDATE", {"g": (source, target)})
+	hotels = _records_hotels((source, target))
+	if not decided:
+		allowed = {p for p in scope.permitted_properties() if scope.has_capability("crm.edit", p)}
+		if not hotels <= allowed:
+			frappe.throw(_("These profiles have records at hotels where you may not edit guests; someone who may "
+			               "edit guests at all of them can merge them."), frappe.PermissionError)
+	src, dst = frappe.get_doc("Guest", source), frappe.get_doc("Guest", target)
+	ents = {e for e in (src.tex_enterprise, dst.tex_enterprise) if e} | _enterprises(hotels)
+	if len(ents) > 1:
+		frappe.throw(_("Profiles of different enterprises cannot be merged."))
+	before = {g.name: {f: bool(g.get(f)) for f in CONSENT} for g in (src, dst)}
+	moved = _repoint(source, target)
+	filled = [f for f in MERGE_FILL if not dst.get(f) and src.get(f)]
+	for f in filled:
+		dst.set(f, src.get(f))
+	if src.vip and not dst.vip:
+		dst.vip = 1
+		filled.append("vip")
+	if src.blacklisted and not dst.blacklisted:
+		dst.blacklisted, dst.blacklist_reason = 1, dst.blacklist_reason or src.blacklist_reason
+		filled.append("blacklisted")
+	tags = [t for t in dict.fromkeys(x.strip() for x in f"{dst.tex_tags or ''},{src.tex_tags or ''}".split(","))
+	        if t]
+	if ",".join(tags) != (dst.tex_tags or ""):
+		dst.tex_tags = ",".join(tags)
+	if ents and not dst.tex_enterprise:
+		dst.tex_enterprise = next(iter(ents))
+		filled.append("tex_enterprise")
+	consent = {f: before[source][f] and before[target][f] for f in CONSENT}
+	for f, v in consent.items():
+		dst.set(f, 1 if v else 0)
+	dst.flags.tex_consent_source = "merge"             # a change is stamped and audited (``guest_validate``)
+	dst.save(ignore_permissions=True)
+	if not consent["tex_consent_email"]:
+		# the duplicate's cases came with the links; without consent they keep no contact data
+		forget_contact(target, emails={src.email, dst.email})
+	for doctype in ("Reservation", "Folio"):
+		if moved.get(doctype) and frappe.db.has_column(doctype, "guest_name"):
+			for chunk in _chunks(moved[doctype]):
+				frappe.db.sql(f"UPDATE `tab{doctype}` SET guest_name = %(n)s WHERE name IN %(r)s",  # nosemgrep
+				              {"n": dst.full_name, "r": chunk})
+	frappe.delete_doc("Guest", source, ignore_permissions=True, delete_permanently=True)
+	loyalty._sync_guest(target)
+	refresh_guest_stats(target)
+	counts = {dt: len(names) for dt, names in sorted(moved.items())}
+	audit("guest.merge", reference_doctype="Guest", reference_name=target, hotels=sorted(hotels),
+	      enterprise=next(iter(ents)) if ents else None,
+	      old={"source": source, "consent": before}, new={"moved": counts, "filled": sorted(filled), "consent": consent})
+	return {"target": target, "source": source, "moved": counts, "filled": sorted(filled), "consent": consent}

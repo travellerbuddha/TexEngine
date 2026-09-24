@@ -10,6 +10,10 @@ import frappe
 from frappe import _
 
 DEADLOCK_ATTEMPTS = 3
+# errors after which the request's transaction is gone (InnoDB rolled a deadlock victim back whole) or
+# must not go on (a lock wait timed out): a best-effort step (tracking, mailing) re-raises them, so the
+# request is retried or fails instead of reporting what was rolled back (ADR-056 second review)
+TRANSACTION_LOST = (frappe.QueryDeadlockError, frappe.QueryTimeoutError)
 
 
 def retry_on_deadlock(fn):
