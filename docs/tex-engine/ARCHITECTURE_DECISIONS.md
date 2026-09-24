@@ -1298,6 +1298,14 @@ refund in flight. The fixes remove paths rather than add states.
   key replays a refund already on record).
 - Schema: four indexes (above); patch p28.
 
+**G-51 review follow-up (ADR-054).** A request waiting for the hotel (Requested) still has no
+expiry, and staff still approve it at the price the guest was shown, re-derived as of its
+pricing time. But the approval is refused while the contract that priced it does not sell
+(suspended or archived): staff reject the request, or change the reservation themselves on a
+basis they choose. The request card shows that contract and its status now, and disables
+Approve while it does not sell. The paid path keeps its bounded window (the proposal's 30
+minutes plus 60).
+
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 *Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
 a suspend stops quotes and bookings in flight, and the scheduler isolates each record.*
@@ -2155,6 +2163,9 @@ the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as 
   fixture.
 
 ## ADR-054 Modifications and the simulator are deterministic: a sale time belongs to the basis, the past is read as it was then, a proposal belongs to whoever made it
+*Amended by the review follow-up (end of this ADR): a staff approval of a guest's request is
+refused while the contract that priced it does not sell; a sale time with a UTC offset is read in
+the site's time zone.*
 
 **Context.** G-51 (R-21, R-22).
 - *Sale times ignored.* `sale_at` was an editable field of a change and was dropped without a
@@ -2279,3 +2290,47 @@ the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as 
   `TestStatusAt` (4). All 24 integration modules pass (465 tests), among them `TestCouponLimits`,
   `TestHistoricalSimulator`, the G-41 product-change test (a colleague's token is now refused
   before its channel re-check), `test_fx_snapshot` HISTORICAL and the self-service suites.
+
+**Review follow-up (independent review of G-51).** No Critical or High finding. One Medium and
+three Low, fixed as follows.
+- *A staff approval never sells a stopped contract (Medium).* The status "as of the pricing
+  time" was used for every stored guest proposal, including a staff approval of a Requested
+  change. Such a request does not expire, so an extension priced at 13:30 and approved days
+  after a 14:00 suspend sold new nights on the stopped contract. Before G-51 the live status
+  made that approval fail.
+  - `apply()` still re-derives a stored proposal as of its pricing time and finds the contract
+    that priced it: that is the price the guest was shown (ADR-044).
+  - For a staff approval (stored, not paid), `apply()` then refuses while that contract is not
+    Active. It reads the status under the shared row lock a booking takes
+    (`modification.approval_refusal`, `ContractSuspended` / `ContractNotOnSale`). The message
+    reads "<code> no longer sells (Suspended): this change cannot be approved at the price the
+    guest was shown. Reject the request, or change the reservation yourself".
+  - The paid path keeps the status of the pricing time, bounded by the payment deadline (30 +
+    60 minutes, ADR-044).
+  - *Decision: requests do not expire,* and an approval is not re-priced live. Approving at the
+    price shown is a deliberate staff decision (ADR-044). The approver now sees the contract and
+    its status on the request card (`staff_row.contract`, `approve_blocked`; Approve disabled,
+    six languages), and a stopped contract blocks it.
+  - A shortening is refused the same way: one rule, as before G-51. Staff can still make the
+    change themselves with the basis they choose (ORIGINAL_VERSION needs no contract on sale)
+    and reject the request.
+- *A sale time with an offset (Low).* `past_sale_time` read "…Z" or "…+03:00" as an aware
+  datetime, and comparing it with the site's naive clock raised an HTTP 500. Such a time is now
+  converted to the site's time zone, the one every sale time is kept in: it is the same moment.
+- *The channel re-check on apply is tested (Low).* A B2B seller whose profile no longer sells
+  B2B cannot apply their own room-upgrade proposal (`test_channel_binding`). The proposer check
+  comes first, so this is the path where the check still decides.
+- *p34 is approximate by construction (Low).* A use released before p34 gets `modified` as its
+  release time. A row written after its release but before p34 (a Desk or data-import edit; TEX
+  never does it) is therefore counted a little longer in the simulator's coupon history. Uses
+  released since p34 carry their exact time.
+- *An override's revision says what was computed (minor).* The revision stays MANUAL at the
+  amount set, with `basis_sale_at` the sale time of the basis used. Its `changes.priced` now
+  holds that basis and the engine's total (the audit already did), and the revision list shows
+  "computed on <basis>: <total>". No schema change: `pricing_basis` keeps meaning "how the
+  amount charged was set".
+- Tests (fail-first commit `0326a55`): `test_approving_a_request_on_a_contract_stopped_since_is_refused`,
+  `test_an_archived_contract_blocks_approval_but_not_rejection`,
+  `test_a_sale_time_with_a_utc_offset_is_read_in_the_hotels_time_zone`, the override-on-a-historical-date
+  test extended (`priced`), and `test_the_proposer_needs_the_channel_again_when_applying`. All fail
+  on main 178d53c except the channel test, which covers a check that was already there.

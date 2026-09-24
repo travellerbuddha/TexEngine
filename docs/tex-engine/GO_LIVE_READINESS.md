@@ -229,3 +229,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   their proposer, hotel and booking; guest self-service is unchanged. R-21 and R-22 are
   COMPLETE; Pricing stays PARTIAL and a money blocker (G-72, G-84, G-92, deploy-time precedence
   report). At deploy, run the migration (p34). Verdict unchanged: NOT READY.
+- 2026-09-24: G-51 review follow-up (ADR-054 review section): no Critical or High finding. The
+  Medium is fixed: approving a guest's waiting request no longer sells on a contract suspended or
+  archived since. The approval is refused with the reason, and the request card shows the
+  contract's status and disables Approve; requests still do not expire, and the paid path keeps
+  its 90-minute window. Also fixed: a sale time with a UTC offset is read in the site's time zone
+  (it was an HTTP 500); the channel re-check on apply is tested; an override's revision shows the
+  basis and total the engine computed. No migration. Verdict unchanged: NOT READY.
