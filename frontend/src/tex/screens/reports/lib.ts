@@ -53,6 +53,11 @@ export function rangeProblem(from: string, to: string): string | null {
   return null
 }
 
+/** The report views (kamra/tex/reports/service.py VIEWS). "margin" is contract vs selling. */
+export const VIEWS = ["production", "margin", "promotion", "extras", "cancellation", "payment", "conversion"] as const
+export type ReportView = (typeof VIEWS)[number]
+
+/** Groupings of stays (production, contract vs selling, cancellations). */
 export const DIMENSIONS = [
   "channel",
   "market",
@@ -63,12 +68,40 @@ export const DIMENSIONS = [
   "agency",
   "country",
   "status",
+  "hotel",
+  "group",
   "month",
   "day",
 ] as const
 export type Dimension = (typeof DIMENSIONS)[number]
+/** Groupings of bookings (payments). */
+export const PAYMENT_DIMENSIONS = ["payment_status", "payment_method", "status", "channel", "market", "hotel", "group", "month", "day"] as const
+/** Groupings of booking-engine sessions (conversion). */
+export const CONVERSION_DIMENSIONS = ["day", "month", "site", "market", "hotel", "group"] as const
+export type AnyDimension = Dimension | (typeof PAYMENT_DIMENSIONS)[number] | (typeof CONVERSION_DIMENSIONS)[number]
 
-export const TIME_DIMENSIONS: Dimension[] = ["month", "day"]
+export const TIME_DIMENSIONS: AnyDimension[] = ["month", "day"]
+
+/** The groupings a view offers (none: its rows are the promotions / extras themselves). */
+export function viewDimensions(view: ReportView): readonly AnyDimension[] {
+  if (view === "payment") return PAYMENT_DIMENSIONS
+  if (view === "conversion") return CONVERSION_DIMENSIONS
+  if (view === "promotion" || view === "extras") return []
+  return DIMENSIONS
+}
+
+export const DEFAULT_GROUP: Record<ReportView, AnyDimension | null> = {
+  production: "channel",
+  margin: "channel",
+  cancellation: "channel",
+  payment: "payment_status",
+  conversion: "day",
+  promotion: null,
+  extras: null,
+}
+
+/** The row the server folds the tail of a very long result into. */
+export const OTHER_KEY = "__other__"
 
 type T = (key: string, params?: Record<string, string | number>) => string
 
@@ -87,23 +120,41 @@ function countryLabel(code: string, locale: string) {
   }
 }
 
-/** Human label for a production row key (the key itself is kept in CSV). */
-export function groupLabel(dim: Dimension, key: string, boot: Bootstrap, t: T, locale: string): string {
+const slug = (s: string) => s.toLowerCase().replace(/\s+/g, "_")
+
+/** A translation, or `fallback` when the catalog has none. */
+function tOr(t: T, key: string, fallback: string) {
+  const l = t(key)
+  return l === key ? fallback : l
+}
+
+/** Human label for a report row key (the key itself is kept in CSV). `labels`: the names the
+ * server sent for hotels, groups, room types, rate plans, contracts, agencies and sites. */
+export function groupLabel(
+  dim: AnyDimension,
+  key: string,
+  boot: Bootstrap,
+  t: T,
+  locale: string,
+  labels?: Record<string, string>,
+  view?: ReportView,
+): string {
+  if (key === OTHER_KEY) return t("reports.other")
   if (!key || key === "—") return t("reports.not_set")
+  if (labels?.[key]) return labels[key]
   switch (dim) {
     case "channel":
       return boot.channels.find((c) => c.name === key)?.channel_name ?? key
     case "market":
       return boot.markets.find((m) => m.name === key)?.market_name ?? key
-    case "board": {
-      const l = t(`reports.board.${key}`)
-      return l === `reports.board.${key}` ? key : l
-    }
-    case "status": {
-      const k = `reports.status.${key.toLowerCase().replace(/\s+/g, "_")}`
-      const l = t(k)
-      return l === k ? key : l
-    }
+    case "board":
+      return tOr(t, `reports.board.${key}`, key)
+    case "status":
+      return view === "payment" ? tOr(t, `payments.booking_status.${slug(key)}`, key) : tOr(t, `reports.status.${slug(key)}`, key)
+    case "payment_status":
+      return tOr(t, `payments.payment_status.${slug(key)}`, key)
+    case "payment_method":
+      return tOr(t, `payments.method.${slug(key)}`, key)
     case "month":
       return monthLabel(key, locale)
     case "day":

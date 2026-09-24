@@ -43,12 +43,16 @@ def scopes() -> dict:
 	                      order_by="property_name asc")
 	groups = sorted({r.tex_hotel_group for r in rows if r.tex_hotel_group})
 	ents = sorted({r.tex_enterprise for r in rows if r.tex_enterprise})
+	# one query per kind, never one per group or enterprise
+	group_names = dict(frappe.get_all("TEX Hotel Group", filters={"name": ("in", groups or [""])},
+	                                  fields=["name", "group_name"], as_list=True))
+	ent_names = dict(frappe.get_all("TEX Enterprise", filters={"name": ("in", ents or [""])},
+	                                fields=["name", "enterprise_name"], as_list=True))
 	return {
 		"hotels": [{"name": r.name, "label": r.property_name or r.name, "group": r.tex_hotel_group,
 		            "enterprise": r.tex_enterprise} for r in rows],
-		"groups": [{"name": g, "label": frappe.db.get_value("TEX Hotel Group", g, "group_name") or g} for g in groups],
-		"enterprises": [{"name": e, "label": frappe.db.get_value("TEX Enterprise", e, "enterprise_name") or e}
-		                for e in ents],
+		"groups": [{"name": g, "label": group_names.get(g) or g} for g in groups],
+		"enterprises": [{"name": e, "label": ent_names.get(e) or e} for e in ents],
 	}
 
 
@@ -242,13 +246,16 @@ def _restriction_alerts(hotels: list[str], today: date) -> list[dict]:
 		fields=["property", "restriction_date", "room_type", "stop_sell", "cta", "ctd", "market", "sales_channel",
 		        "channel_scope"],
 		order_by="restriction_date asc", limit=500)
+	room_names = dict(frappe.get_all("Room Type", filters={"name": ("in", list({r.room_type for r in rows
+	                                                                             if r.room_type}) or [""])},
+	                                 fields=["name", "room_type_name"], as_list=True))
 	out = []
 	for r in rows:
 		kind = "stop_sell" if r.stop_sell == "STOP" else "closed_to_arrival" if r.cta == "Yes" else "closed_to_departure"
 		out.append({"hotel": r.property, "hotel_name": names.get(r.property) or r.property,
 		            "date": str(r.restriction_date), "kind": kind, "room_type": r.room_type,
-		            "room_type_name": frappe.db.get_value("Room Type", r.room_type, "room_type_name") if r.room_type
-		            else None, "market": r.market, "channel": r.sales_channel,
+		            "room_type_name": room_names.get(r.room_type) if r.room_type else None, "market": r.market,
+		            "channel": r.sales_channel,
 		            # the Booking Engine, the Call Center or both (G-48): not every channel
 		            "channel_scope": r.channel_scope or None})
 	return out

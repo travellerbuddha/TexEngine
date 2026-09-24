@@ -3173,3 +3173,111 @@ three Low, fixed as follows.
     by p39);
   - updated: the p29 and p17 tests start from a site where the patch never ran, and p36's test
     expects a TEX hotel that TEX never sold to stay onboarding.
+
+## ADR-059 Reports reconcile: contract cost against the accommodation it was marked up to, money per currency, one selection for every view
+**Context.** G-46 (R-14, R-48). The production report set gross revenue (the stay's total:
+accommodation, extras and taxes added on top) against the margin the engine stores, which covers
+the accommodation only, and divided that margin by gross revenue: a stay with cost 750.00, an
+accommodation price of 802.50 (+7 % markup), a 40.00 transfer and 80.25 VAT on top showed a margin
+of 5.69 % (52.50 / 922.75) instead of 6.54 % (52.50 / 802.50), and "cost + margin" matched no column
+the report showed. The totals had no cost or margin. There were no promotion, cancellation, payment,
+extras or conversion views, no hotel or group view over several hotels, no market, channel, room or
+rate filter, and a stay and a sale window could not be combined. Grouping by guest country read each
+guest in its own query. One test covered the report.
+
+**Decision.**
+- *The margin, per stay TEX priced from a contract* (`tex_pricing_source = TEX`; channel, imported,
+  legacy and manual stays have no contract cost and are kept out of it):
+  - contract cost `C` = `tex_cost_amount`: the contract's accommodation cost after COST-stage
+    offers, converted into the selling currency at the rate the sale recorded (the same rate as the
+    selling price, ADR-051), so both sides are in one currency;
+  - accommodation selling price `A` = `C + tex_margin_amount` = the price-locked snapshot's
+    `totals.accommodation`: what the markup made of that cost, after accommodation promotions and
+    the room's share of booking-level coupons. A modification's manual override is part of it (its
+    difference is stored on the margin);
+  - margin `M = A − C`; margin % = `M / A × 100` (2 places, half up): over the selling net, never
+    over gross revenue;
+  - taxes: both sides are on the contract's price basis. The contract's rates, the markup and `A`
+    all include the VAT the contract's prices include (`prices_include_tax`, the default), or all
+    exclude it; taxes added on top of an exclusive price and fixed levies (always on top) are on
+    neither side. No side ever carries a tax the other lacks. Taking VAT out of an inclusive
+    contract's cost would need the tax on the cost, which no sale records; a percentage tax scales
+    both sides alike, so the margin % is the same on either basis;
+  - extras have no contract cost in TEX and are never in the margin; they are reported beside it:
+    extras `E` = the snapshot's `subtotal − accommodation` (after coupons, add-ons included);
+  - revenue `R` (what guests pay, `tex_total_amount`) = `A + E + T + N`: taxes added on top
+    `T = R − A − E` for a priced stay, and `N` the revenue of the stays without a contract cost.
+- *Rounding.* A row adds up its stays' exact amounts (prorated to the nights inside the stay
+  window: amount × nights inside ÷ nights) and is rounded once to its currency: `R` and `C` half up;
+  `A`, `E`, `T`, `N` by largest remainder so that they add up to the rounded `R`; `M = A − C` of the
+  rounded figures. A total is the sum of its rows. Every row and every total therefore satisfies
+  `C + M = A` and `A + E + T + N = R` to the cent. The database sums DECIMAL columns exactly and
+  returns text (`CAST(SUM(…) AS CHAR)`), read with `money.db_dec`; no float anywhere; the API
+  returns strings.
+- *Currency: grouped, never converted.* Each row has its selling currency (the stay's, else its
+  hotel's); totals are per currency and amounts in different currencies are never added. Converting
+  with each booking's FX snapshot was rejected: the snapshot records the contract → selling
+  currency rate, not a rate into a reporting currency, so a one-currency total would use rates no
+  sale recorded. ADR-051 applies where it holds: the cost is already in the selling currency at the
+  recorded rate.
+- *One selection for every view.*
+  - Hotels: one hotel, or a scope (enterprise, hotel group, all) narrowed to the hotels where the
+    viewer holds `report.view` (`portfolio.hotels_in`): a group or enterprise never widens the
+    scope, and a scope with none of the viewer's hotels is refused without confirming it exists.
+  - Dates: a stay window (the nights inside it), a sale window (the TEX sale time, else creation),
+    or both at once; at most 800 days each.
+  - Filters: market, channel, room type, rate plan, currency (at most 50 values each, always SQL
+    parameters, never formatted into SQL), and whether cancelled stays count. A filter a view
+    cannot apply is refused, never ignored.
+  - Results longer than 1000 rows fold their tail into one row per currency, so the rows still add
+    up to the totals.
+- *Views.*
+  - Production and contract vs selling (`margin`): prorated room nights and money, by any stay
+    dimension, the hotel, its group, the stay night (a row is the nights of that day or month; a stay
+    counts once, in the row of its first night in the window) or the sale day / month.
+  - Promotion: per applied promotion (the snapshot's applied `promotions`): applications, room
+    nights and revenue of those stays, and the discount given (the rounded DISCOUNT / COUPON lines).
+    A stay with two promotions counts under both, so only applications and discount are totalled.
+  - Extras: per extra (the snapshot's EXTRA lines, add-ons included): stays, quantity and amount as
+    sold, before booking-level coupons.
+  - Cancellation: every booked stay of the selection: cancelled and no-show stays, their nights and
+    value, the fees kept, net lost, the cancelled share and the days before arrival.
+  - Payment: the bookings with a stay in the selection, whatever that stay's status: value
+    (cancellation fees included), paid, balance = value − paid, and the succeeded, refunded and
+    pending transactions in the booking's currency; the succeeded payments by method and provider,
+    per currency.
+  - Conversion: booking-engine sessions in the sale window at the report's hotels: searched,
+    quoted, guest details, booked (a booking was made: payment started or booked) and confirmed (its
+    booking is Confirmed or Partially Cancelled now); conversion % = booked ÷ searched. It needs a
+    sale window; stay, channel, room, rate and currency filters are refused.
+  - Promotion, extras and cancellation count each selected stay whole; only production and
+    contract vs selling prorate.
+- *Permissions.* Every report endpoint declares `report.view` (`require_capability`). Cost, margin
+  and the accommodation / extras / taxes split are computed only when the viewer holds
+  `price.view_cost` at every hotel of the report: the SQL does not select them otherwise, the keys
+  are absent, and the contract-vs-selling view is refused. The fields stay at permlevel 1 (ADR-056);
+  reports read them on the server, in aggregate only.
+- *Performance.* Each view is one to three parameterised aggregate queries, whatever the number of
+  stays: `JSON_TABLE` over the price-locked snapshot for promotions and extras, a recursive calendar
+  for stay nights (bounded by the 800-day window, below MariaDB's default
+  `max_recursive_iterations` of 1000), the guest's country as a join. The portfolio's scope labels
+  and its restriction alerts' room names are read in one query each.
+
+**Consequences.**
+- A report's margin is the engine's margin of each stay, and for one stay its margin % is the
+  engine's `margin_percent`.
+- A hotel whose contracts differ in tax basis adds inclusive and exclusive accommodation prices in
+  one row. The margin % is unaffected; the amounts are each stay's own contract basis.
+- There is no one-currency (converted) total.
+- By stay date, a stay spanning two months is split by night between them (before, it was filed
+  under its arrival month).
+- Reports scan the report's hotels' reservations: `tabReservation` has no index that starts with
+  `property`. An index `(property, check_in_date)` is the next step for large tenants (a schema
+  change, not made here; no patch, no schema change in this ADR).
+- The dashboard's funnel (R-47) still counts only `booked` events, so bookings that started a
+  payment are not in its conversion %; the conversion view counts both.
+- Tests: `test_reports` (22). On the base commit 21 fail: margin % 5.69 instead of 6.54, the
+  country grouping ran 6 queries for 3 stays against 4 for 1, no endpoint declared a capability, and
+  18 errors because the views and filters did not exist. The old production endpoint's test passed
+  before and after. E2E `reports.spec.ts`: filters, a view switch, reconciled totals, cancellations
+  and 375 px without sideways scroll.

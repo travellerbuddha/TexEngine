@@ -1,45 +1,15 @@
 import { useMemo, useState } from "react"
-import { useSearchParams } from "react-router-dom"
-import { Download, Info } from "lucide-react"
+import { Download } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { date, money, num, pct } from "../../lib/format"
-import { useSiteToday } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
-import {
-  Button,
-  Card,
-  CardBody,
-  CardHeader,
-  Checkbox,
-  DataTable,
-  EmptyState,
-  ErrorState,
-  Field,
-  Money,
-  Notice,
-  Segmented,
-  Select,
-  Skeleton,
-  type Column,
-} from "../../ui"
+import { Button, Card, CardBody, CardHeader, DataTable, EmptyState, ErrorState, Money, Notice, Segmented, Skeleton, type Column } from "../../ui"
 import { cn } from "../../../lib/utils"
 import { BarChart, type ChartDatum } from "./components/BarChart"
-import { RangeFilter } from "./components/RangeFilter"
-import {
-  DIMENSIONS,
-  TIME_DIMENSIONS,
-  decimalSort,
-  downloadCsv,
-  groupLabel,
-  presetRange,
-  rangeProblem,
-  slugify,
-  toCsv,
-  type CsvColumn,
-  type Dimension,
-  type RangePreset,
-} from "./lib"
+import { ReportFilters } from "./components/ReportFilters"
+import { argsKey, filtersProblem, reportArgs, useReportFilters } from "./filters"
+import { TIME_DIMENSIONS, decimalSort, downloadCsv, groupLabel, slugify, toCsv, type CsvColumn, type Dimension } from "./lib"
 import { ReportsFrame } from "./ReportsFrame"
 
 interface ProdRow {
@@ -52,6 +22,7 @@ interface ProdRow {
   adr: string | null
   avg_los: string | null
   avg_lead_days: string | null
+  accommodation?: string
   cost?: string
   margin?: string
   margin_pct?: string | null
@@ -60,74 +31,51 @@ interface ProdRow {
 interface ProdTotal {
   bookings: number
   room_nights: number
+  guests: number
   revenue: string
   adr: string | null
+  avg_los: string | null
+  avg_lead_days: string | null
+  accommodation?: string
+  cost?: string
+  margin?: string
+  margin_pct?: string | null
 }
 
 interface ProdData {
-  property: string
-  from: string
-  to: string
+  scope: { level: string; name: string | null; hotels: string[] }
+  stay: { from: string; to: string } | null
+  sale: { from: string; to: string } | null
   basis: "stay" | "booking"
   group_by: Dimension
   cost_visible: boolean
   rows: ProdRow[]
   totals: Record<string, ProdTotal>
+  truncated: number
+  labels: Record<string, string>
 }
 
-type Basis = "stay" | "booking"
 type Metric = "room_nights" | "revenue"
 
-const PRESETS = ["this_month", "last_month", "next_month", "next_30", "next_90", "last_30", "ytd", "this_year", "last_year"] as const
 const HIDE = { sm: "hidden sm:table-cell", md: "hidden md:table-cell", lg: "hidden lg:table-cell" }
-
-function isPreset(v: string | null): v is RangePreset {
-  return !!v && ([...PRESETS, "custom"] as string[]).includes(v)
-}
 
 export default function ProductionReport() {
   const { t, locale } = useTexT()
-  const { boot, property } = useSession()
-  const [params, setParams] = useSearchParams()
-  const today = useSiteToday()
-
-  // filters live in the URL so a report view can be bookmarked or shared
-  const preset: RangePreset = isPreset(params.get("period")) ? (params.get("period") as RangePreset) : "this_month"
-  const [defFrom, defTo] = presetRange(preset === "custom" ? "this_month" : preset, today)
-  const from = preset === "custom" ? params.get("from") || defFrom : defFrom
-  const to = preset === "custom" ? params.get("to") || defTo : defTo
-  const groupBy: Dimension = (DIMENSIONS as readonly string[]).includes(params.get("group") ?? "") ? (params.get("group") as Dimension) : "channel"
-  const basis: Basis = params.get("basis") === "booking" ? "booking" : "stay"
-  const includeCancelled = params.get("cancelled") === "1"
-
-  const update = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params)
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === "") next.delete(k)
-      else next.set(k, v)
-    }
-    setParams(next, { replace: true })
-  }
-
-  const problem = rangeProblem(from, to)
-  const q = useTexQuery<ProdData>(
-    "reports",
-    "production",
-    { property: property?.name, date_from: from, date_to: to, group_by: groupBy, basis, include_cancelled: includeCancelled ? 1 : 0 },
-    [property?.name, from, to, groupBy, basis, includeCancelled],
-    !problem && !!property,
-  )
-  const d = q.data
+  const { boot } = useSession()
+  const { filters, update } = useReportFilters("production")
+  const problem = filtersProblem(filters)
+  const args = reportArgs("production", filters)
+  const q = useTexQuery<ProdData>("reports", "report", args, [argsKey(args)], !problem)
+  const d = problem ? undefined : q.data
+  const groupBy = (d?.group_by ?? filters.group ?? "channel") as Dimension
   const currencies = useMemo(() => (d ? Object.keys(d.totals).sort() : []), [d])
-  const [ccyFilter, setCcyFilter] = useState("")
-  const ccy = currencies.includes(ccyFilter) ? ccyFilter : ""
-  const rows = useMemo(() => (d ? d.rows.filter((r) => !ccy || r.currency === ccy) : undefined), [d, ccy])
-  const singleCcy = ccy || (currencies.length === 1 ? currencies[0] : "")
+  const rows = d?.rows
+  const singleCcy = currencies.length === 1 ? currencies[0] : ""
   const [metricPref, setMetric] = useState<Metric>("room_nights")
   const metric: Metric = singleCcy ? metricPref : "room_nights"
   const costVisible = Boolean(d?.cost_visible)
   const dimLabel = t(`reports.dim.${groupBy}`)
-  const label = (key: string) => groupLabel(groupBy, key, boot, t, locale)
+  const label = (key: string) => groupLabel(groupBy, key, boot, t, locale, d?.labels)
   const isTime = TIME_DIMENSIONS.includes(groupBy)
 
   const chartData: ChartDatum[] = useMemo(() => {
@@ -136,14 +84,14 @@ export default function ProductionReport() {
     // revenue bars only when one currency is in view (never compare across currencies)
     const list = base.map((r) => ({
       key: `${r.key}|${r.currency}`,
-      label: currencies.length > 1 && !ccy ? `${label(r.key)} · ${r.currency}` : label(r.key),
+      label: currencies.length > 1 ? `${label(r.key)} · ${r.currency}` : label(r.key),
       value: metric === "revenue" ? (decimalSort(r.revenue) ?? 0) : r.room_nights,
       display: metric === "revenue" ? money(r.revenue, r.currency) : num(r.room_nights),
     }))
     if (isTime) return list.slice(-62)
     return [...list].sort((a, b) => b.value - a.value).slice(0, 12)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, metric, isTime, locale, currencies.length, ccy, groupBy, boot])
+  }, [rows, metric, isTime, locale, currencies.length, groupBy, boot, d?.labels])
 
   const columns: Column<ProdRow>[] = [
     {
@@ -181,6 +129,14 @@ export default function ProductionReport() {
     },
     ...(costVisible
       ? ([
+          {
+            key: "accommodation",
+            header: t("reports.col.accommodation"),
+            align: "right",
+            hideBelow: "lg",
+            sortValue: (r) => decimalSort(r.accommodation),
+            cell: (r) => <Money amount={r.accommodation} currency={r.currency} />,
+          },
           { key: "cost", header: t("reports.col.cost"), align: "right", hideBelow: "md", sortValue: (r) => decimalSort(r.cost), cell: (r) => <Money amount={r.cost} currency={r.currency} muted /> },
           { key: "margin", header: t("reports.col.margin"), align: "right", hideBelow: "md", sortValue: (r) => decimalSort(r.margin), cell: (r) => <Money amount={r.margin} currency={r.currency} signed /> },
           { key: "margin_pct", header: t("reports.col.margin_pct"), align: "right", hideBelow: "md", sortValue: (r) => decimalSort(r.margin_pct), cell: (r) => pct(r.margin_pct) },
@@ -188,7 +144,7 @@ export default function ProductionReport() {
       : []),
   ]
 
-  const totalsInView = d ? currencies.filter((c) => !ccy || c === ccy).map((c) => [c, d.totals[c]] as const) : []
+  const totalsInView = d ? currencies.map((c) => [c, d.totals[c]] as const) : []
 
   const footer = totalsInView.length ? (
     <>
@@ -209,10 +165,24 @@ export default function ProductionReport() {
                 num(tot.bookings)
               ) : col.key === "room_nights" ? (
                 num(tot.room_nights)
+              ) : col.key === "guests" ? (
+                num(tot.guests)
               ) : col.key === "revenue" ? (
                 <Money amount={tot.revenue} currency={c} />
               ) : col.key === "adr" ? (
                 <Money amount={tot.adr} currency={c} />
+              ) : col.key === "avg_los" ? (
+                num(tot.avg_los)
+              ) : col.key === "avg_lead_days" ? (
+                num(tot.avg_lead_days)
+              ) : col.key === "accommodation" ? (
+                <Money amount={tot.accommodation} currency={c} />
+              ) : col.key === "cost" ? (
+                <Money amount={tot.cost} currency={c} muted />
+              ) : col.key === "margin" ? (
+                <Money amount={tot.margin} currency={c} signed />
+              ) : col.key === "margin_pct" ? (
+                pct(tot.margin_pct)
               ) : null
             return col.key === "key" ? (
               <th key={col.key} scope="row" className={cls}>
@@ -237,106 +207,41 @@ export default function ProductionReport() {
       { header: t("reports.col.currency"), value: (r) => r.currency, text: true },
       { header: t("reports.col.bookings"), value: (r) => r.bookings },
       { header: t("reports.col.room_nights"), value: (r) => r.room_nights },
-      { header: t("reports.col.guests"), value: (r) => (r._total ? "" : r.guests) },
+      { header: t("reports.col.guests"), value: (r) => r.guests },
       { header: t("reports.col.revenue"), value: (r) => r.revenue },
       { header: t("reports.col.adr"), value: (r) => r.adr },
       { header: t("reports.col.avg_los"), value: (r) => r.avg_los },
       { header: t("reports.col.avg_lead"), value: (r) => r.avg_lead_days },
       ...(costVisible
         ? [
+            { header: t("reports.col.accommodation"), value: (r: ProdRow) => r.accommodation },
             { header: t("reports.col.cost"), value: (r: ProdRow) => r.cost },
             { header: t("reports.col.margin"), value: (r: ProdRow) => r.margin },
             { header: t("reports.col.margin_pct"), value: (r: ProdRow) => r.margin_pct },
           ]
         : []),
     ]
-    const totalRows = totalsInView.map(([c, tot]) => ({
-      _total: true,
-      key: "TOTAL",
-      currency: c,
-      bookings: tot.bookings,
-      room_nights: tot.room_nights,
-      revenue: tot.revenue,
-      guests: 0,
-      adr: tot.adr,
-      avg_los: null,
-      avg_lead_days: null,
-    }))
+    const totalRows = totalsInView.map(([c, tot]) => ({ ...tot, _total: true, key: "TOTAL", currency: c }))
     const csv = toCsv(cols, [...rows, ...totalRows])
-    const name = ["production", slugify(property?.property_name ?? d.property), basis, groupBy, d.from, d.to, ccy && ccy.toLowerCase()]
+    const name = ["production", slugify(d.scope.name ?? d.scope.level), d.basis, groupBy, d.stay?.from, d.stay?.to, d.sale?.from, d.sale?.to]
       .filter(Boolean)
       .join("_")
     downloadCsv(`${name}.csv`, csv)
   }
 
+  const period = d?.stay ?? d?.sale
   return (
     <ReportsFrame
-      subtitle={d ? t("reports.production.subtitle", { hotel: property?.property_name ?? "", from: date(d.from), to: date(d.to) }) : property?.property_name}
+      subtitle={period ? t("reports.view.subtitle", { count: d?.scope.hotels.length ?? 1, from: date(period.from), to: date(period.to) }) : undefined}
       actions={
         <Button variant="secondary" icon={<Download className="size-4" aria-hidden />} onClick={exportCsv} disabled={!rows || rows.length === 0}>
           {t("reports.export_csv")}
         </Button>
       }
     >
-      <Card className="mb-4">
-        <CardBody className="space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <RangeFilter
-              presets={[...PRESETS]}
-              preset={preset}
-              from={from}
-              to={to}
-              error={problem ? t(problem, { max: 800 }) : null}
-              labels={{ from: basis === "stay" ? t("reports.filter.stay_from") : t("reports.filter.booked_from"), to: t("core.label.to") }}
-              onChange={(n) => update({ period: n.preset === "this_month" ? null : n.preset, from: n.preset === "custom" ? n.from : null, to: n.preset === "custom" ? n.to : null })}
-            />
-            <Field label={t("reports.filter.group_by")} className="w-full sm:w-48">
-              <Select
-                value={groupBy}
-                onChange={(e) => update({ group: e.target.value === "channel" ? null : e.target.value })}
-                options={DIMENSIONS.map((dm) => ({ value: dm, label: t(`reports.dim.${dm}`) }))}
-              />
-            </Field>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-zinc-800" aria-hidden>
-                {t("reports.filter.basis")}
-              </span>
-              <Segmented<Basis>
-                label={t("reports.filter.basis")}
-                value={basis}
-                onChange={(v) => update({ basis: v === "stay" ? null : v })}
-                options={[
-                  { value: "stay", label: t("reports.basis.stay") },
-                  { value: "booking", label: t("reports.basis.booking") },
-                ]}
-              />
-            </div>
-            <Checkbox
-              label={t("reports.filter.include_cancelled")}
-              checked={includeCancelled}
-              onChange={(e) => update({ cancelled: e.target.checked ? "1" : null })}
-            />
-            {currencies.length > 1 && (
-              <Field label={t("reports.filter.currency")} inline>
-                <Select
-                  value={ccy}
-                  onChange={(e) => setCcyFilter(e.target.value)}
-                  options={[{ value: "", label: t("reports.all_currencies") }, ...currencies.map((c) => ({ value: c, label: c }))]}
-                  className="w-auto"
-                />
-              </Field>
-            )}
-          </div>
-          <div className="flex items-start gap-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-            <Info className="mt-0.5 size-3.5 shrink-0 text-zinc-500" aria-hidden />
-            <p>{basis === "stay" ? t("reports.basis.stay_help") : t("reports.basis.booking_help")}</p>
-          </div>
-        </CardBody>
-      </Card>
+      <ReportFilters view="production" filters={filters} update={update} problem={problem} note={costVisible ? t("reports.margin.help") : undefined} />
 
-      {q.error ? (
+      {q.error && !problem ? (
         <Card>
           <ErrorState error={q.error} onRetry={q.reload} />
         </Card>
@@ -366,6 +271,8 @@ export default function ProductionReport() {
               </>
             )}
           </section>
+
+          {d && d.truncated > 0 && <Notice tone="info">{t("reports.truncated", { count: d.truncated })}</Notice>}
 
           {d && rows && rows.length > 0 && chartData.length > 1 && (
             <Card>
@@ -414,7 +321,7 @@ export default function ProductionReport() {
               description={costVisible ? `${t("reports.grouped_by", { dim: dimLabel })} · ${t("reports.cost_visible")}` : t("reports.grouped_by", { dim: dimLabel })}
             />
             <DataTable<ProdRow>
-              key={`${groupBy}-${basis}`}
+              key={`${groupBy}-${filters.basis}`}
               caption={t("reports.production.table_caption", { dim: dimLabel })}
               rows={rows}
               loading={q.loading}
@@ -434,9 +341,9 @@ export default function ProductionReport() {
 
 function TotalTile({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="px-4 py-3">
+    <Card className="min-w-0 px-4 py-3">
       <p className="text-xs font-medium text-zinc-500">{label}</p>
-      <p className="mt-0.5 text-xl font-semibold tracking-tight text-zinc-950">{value}</p>
+      <p className="mt-0.5 text-lg font-semibold tracking-tight break-words text-zinc-950 sm:text-xl">{value}</p>
     </Card>
   )
 }
