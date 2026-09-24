@@ -1,6 +1,7 @@
 // Dev server for the browser checks of the TEX design-system overlays (tests/dom): the real
 // components and styles (Tailwind scans the whole frontend), no bench and no API proxy.
-// Started by tests/dom/playwright.config.ts; open /tests/dom/overlays.html for a manual check.
+// Started by tests/dom/playwright.config.ts; open /tests/dom/overlays.html or /tests/dom/keyboard.html
+// for a manual check.
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath } from "node:url"
