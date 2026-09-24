@@ -51,3 +51,62 @@ Tests: `kamra/tex/tests/integration/test_migrations_notify.py`.
 2. Upgrade path: site with upstream data (eval harness seed) → `bench migrate` → counts preserved;
    `test_migrations.py` asserts voucher/extra copies and lock backfill.
 3. Upstream suites (eval harness, journey, banquet) stay green after migration.
+
+## 5. Booking imports (switch-over from another PMS)
+
+Two importers write reservations from another system: `kamra.migrate.preview_import` /
+`run_import` (a CSV export, Setup → import) and `kamra.api.import_bookings` (JSON rows, API /
+agent). ADR-028, ADR-052 and its review govern them.
+
+**Columns (CSV).** Headers are matched by synonyms, whatever the vendor calls them. Required:
+guest name, room type (code or name), arrival and departure dates. Optional: phone, e-mail,
+adults, children, amount (grand total, total amount, amount after tax…), currency (currency,
+currency code, ccy), status, channel. Dates are read day-first or month-first as detected
+(`preset`: `auto`, `ezee` day-first, `cloudbeds` month-first). JSON rows use `guest_name`,
+`phone`, `room_type_code`, `check_in`, `check_out`, `adults`, `children`, `amount_after_tax`,
+`currency`, `channel`, `status`.
+
+**Amounts are read strictly and never guessed** (`kamra.tex.importing`):
+- The decimal mark is the last `,` or `.` when one or two digits follow it: "150,00" is 150.00,
+  "1.250,50" and "1,250.50" are 1250.50, "10,500.50" is 10500.50.
+- Thousands may be grouped by the other mark, spaces or apostrophes, in groups of three (or the
+  Indian 2-2-3).
+- A single separator followed by exactly three digits is ambiguous ("1.500", "1,500") and the row
+  is refused. Give the file's decimal mark (`decimal` = "." or ",") and it is read.
+- Currency symbols and codes in the cell (€, £, ₺, TL, ₹, Rs., USD …) are stripped and must match
+  the row's currency.
+- The row is refused, with the reason, for:
+  - negative amounts, "-120" and "(120)" alike;
+  - more decimals than the currency has;
+  - anything else that is not an amount.
+- `preview_import` lists each row's parsed amount and currency before anything is written.
+
+**Currency.**
+- At a TEX hotel every row names its currency: a Currency column, else the currency chosen for
+  the whole import (`currency`). An unknown currency is refused.
+- At a hotel outside TEX, amounts are in the hotel's currency, and a row naming another currency
+  is refused.
+
+**What a row becomes.**
+- At a TEX hotel it is recorded as pricing source `Imported`, at the file's amount in its
+  currency, never auto-priced. It is price-locked and audited (`reservation.import`), and the
+  import needs `price.override` at the hotel. A live row (Confirmed, Checked In) needs an amount;
+  a history row may have none.
+- At a hotel outside TEX a row without an amount is priced by the legacy engine, as before.
+- Each row runs in its own savepoint. It is imported whole or not at all, and a failed row is
+  listed with its reason; a deadlock stops the whole import.
+- History rows (Checked Out, Cancelled, No Show) are records: stored without live validation,
+  holding no room.
+- Checked In rows are checked as live stays (TEX inventory at a TEX hotel; the arrival may be
+  past) and stamped Checked In.
+
+**Afterwards.**
+- A wrong imported amount or currency is corrected on the reservation page ("Correct imported
+  amount", `crs.correct_imported_amount`). The correction needs `price.override` and a reason and
+  is recorded as a revision and an audit event. It is refused once the folio has billed the
+  nights.
+- At check-out the legacy folio posts an imported stay's locked amount, split over its nights
+  (tax included; G-96).
+- A hotel joining TEX is onboarding until an administrator sets it live (`admin.set_hotel_live`;
+  patch p36 set every hotel already in TEX live). Import before or after going live: the rows are
+  recorded as Imported either way.
