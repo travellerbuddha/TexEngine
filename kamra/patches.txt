@@ -44,3 +44,4 @@ kamra.patches.tex.p27_inventory_cutoff_release
 kamra.patches.tex.p28_guest_change_refund_rows
 kamra.patches.tex.p29_channel_binding
 kamra.patches.tex.p31_g41_review
+kamra.patches.tex.p33_audit_scope

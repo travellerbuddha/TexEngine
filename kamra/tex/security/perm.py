@@ -27,8 +27,10 @@ PROPERTY_DOCTYPES = (
 )
 # belongs to a hotel or to a whole hotel group
 GROUP_DOCTYPES = ("TEX Promotion", "TEX Loyalty Program", "TEX Booking Site")
-# blank hotel means platform level: only platform administrators see those rows
-STRICT_DOCTYPES = ("TEX Audit Event",)
+# blank hotel means platform level: only platform administrators see those rows. An audit event
+# of a hotel group or an enterprise is seen at each hotel it reached (its TEX Audit Scope rows,
+# ADR-053); a scope row only at its own hotel, so no hotel reads another's name
+STRICT_DOCTYPES = ("TEX Audit Event", "TEX Audit Scope")
 # hotel known through a parent document
 VIA_PARENT = {
 	"TEX Reservation Revision": ("reservation", "Reservation"),
@@ -96,6 +98,9 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	if not props:
 		return "1=0"
 	t = f"`tab{doctype}`"
+	if doctype == "TEX Audit Event":
+		return (f"({t}.`property` in ({_sql_list(props)}) or {t}.`name` in (select s.`event` from "
+		        f"`tabTEX Audit Scope` s where s.`property` in ({_sql_list(props)})))")
 	if doctype in STRICT_DOCTYPES:
 		return f"{t}.`property` in ({_sql_list(props)})"
 	if doctype in GROUP_DOCTYPES:
@@ -161,6 +166,9 @@ def _doc_properties(doc) -> tuple[set[str] | None, bool]:
 	prop = doc.get("property")
 	if prop:
 		return {prop}, False
+	if dt == "TEX Audit Event" and doc.name:
+		reached = set(frappe.get_all("TEX Audit Scope", filters={"event": doc.name}, pluck="property"))
+		return (reached, False) if reached else (None, True)
 	if dt in SITE_DOCTYPES:
 		site = frappe.db.get_value("TEX Booking Site", doc.get("site"), ["property", "hotel_group"],
 		                           as_dict=True) if doc.get("site") else None
