@@ -17,7 +17,7 @@ from frappe.utils import add_to_date, now_datetime
 
 from kamra.tex.api import crs as crs_api
 from kamra.tex.api import policies as policy_api
-from kamra.tex.api import public
+from kamra.tex.api import public, ui_crs
 from kamra.tex.security import scope
 from kamra.tex.services import modification, notify
 from kamra.tex.tests.integration import fixtures as fx
@@ -96,6 +96,28 @@ class TestCostStageOffersStayInternal(TexTestCase):
 		self.assertEqual(cost_leaks(page), [])
 		self.assertTrue(sent)
 		self.assertEqual(cost_leaks(sent), [])
+		# the rooms of a booking quoted together answer as one room does
+		_res, again = self.guest_offer("g46r-web2")
+		rooms = self.as_user("Guest", public.quote_rooms, site=SLUG, rooms=[{"offer_key": again["rooms"][0]["offer_key"]}],
+		                     session_id="g46r-web2")
+		self.assertTrue(rooms["ok"], rooms)
+		self.assertEqual((cost_leaks(rooms), promo_ids(rooms["rooms"][0]["quote"]) & {NET, self.net_min}), ([], set()))
+
+	def test_the_reservation_records_only_what_the_guest_was_granted(self):
+		"""``tex_promotions`` (read in Desk by every role that reads reservations) names the promotions
+		of the selling price, never a cost-stage offer; the snapshot keeps it, with its stage, for cost
+		access. Also after a change."""
+		b = self.as_user("Guest", public.book, site=SLUG, quote_ids=[self._web_quote("g46r-rec")], guest=GUEST,
+		                 payment_method="Card", session_id="g46r-rec", idempotency_key="idem-g46r-rec")
+		name = b["rooms"][0]["reservation"]
+		snap = json.loads(frappe.db.get_value("Reservation", name, "tex_pricing_snapshot"))
+		self.assertIn((NET, True, "COST"), [(p["promo_id"], p["applied"], p.get("stage")) for p in snap["promotions"]])
+		self.assertNotIn(NET, frappe.db.get_value("Reservation", name, "tex_promotions") or "")
+		p = modification.propose(name, {"check_out": str(fx.d(6, 14))}, basis="ORIGINAL_VERSION")
+		modification.apply(p["proposal_token"], reason="one more night")
+		snap = json.loads(frappe.db.get_value("Reservation", name, "tex_pricing_snapshot"))
+		self.assertIn(NET, promo_ids(snap))
+		self.assertNotIn(NET, frappe.db.get_value("Reservation", name, "tex_promotions") or "")
 
 	def test_an_agent_never_sees_it_applied_or_refused(self):
 		res = self.as_user(self.agent, crs_api.search, properties=[fx.PROPERTY], check_in=str(fx.d(6, 10)),
@@ -118,6 +140,21 @@ class TestCostStageOffersStayInternal(TexTestCase):
 		                      basis="ORIGINAL_VERSION")
 		self.assertEqual(promo_ids(change.get("proposed")) & {NET, self.net_min}, set())
 		self.assertEqual(cost_leaks(change.get("proposed")), [])
+		# the screens' own endpoints, the rooms quoted together and the historical simulator
+		ui = self.as_user(self.agent, ui_crs.search, properties=[fx.PROPERTY], check_in=str(fx.d(6, 10)),
+		                  check_out=str(fx.d(6, 13)), rooms=[{"adults": 2, "children": [8]}], market="DE",
+		                  channel="CALL_CENTER")
+		self.assertEqual(cost_leaks(ui), [])
+		self.assertEqual({i for o in ui["properties"][0]["offers"] for r in o["rooms"] for i in promo_ids(r["quote"])}
+		                 & {NET, self.net_min}, set())
+		rooms = self.as_user(self.agent, crs_api.quote_rooms, rooms=[{"offer_key": offer["offer_key"]}])
+		self.assertEqual((cost_leaks(rooms), promo_ids(rooms["rooms"][0].get("quote")) & {NET, self.net_min}),
+		                 ([], set()))
+		detail = self.as_user(self.agent, ui_crs.reservation, name=name)
+		self.assertEqual((cost_leaks(detail), promo_ids(detail["pricing"]) & {NET, self.net_min}), ([], set()))
+		sim = self.as_user(self.agent, crs_api.simulate, reservation=name, sale_at=str(now_datetime()))
+		self.assertTrue(sim["simulated"]["sellable"], sim)
+		self.assertEqual((cost_leaks(sim), promo_ids(sim["simulated"]) & {NET, self.net_min}), ([], set()))
 		# the revenue manager sees both, each with its stage
 		rm = self.as_user(self.rm, crs_api.reservation, name=name)
 		stages = {p["promo_id"]: (p["applied"], p.get("stage")) for p in rm["pricing"]["promotions"]}

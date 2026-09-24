@@ -68,3 +68,14 @@ class TestCostStageOutcomes(unittest.TestCase):
 		for p in sell["promotions"]:
 			p.pop("stage", None)
 		self.assertEqual(ids(quoting.strip_internal(sell, staff=True)), {"EB15"})   # a selling offer stays
+
+	def test_what_a_reservation_records_as_its_promotions(self):
+		"""The promotions granted on the selling price: never a cost-stage offer, with or without
+		its stage recorded (the reservation's ``tex_promotions``, read in Desk)."""
+		full = quote(EB_COST, NET_MIN).to_dict(internal=True)
+		self.assertEqual(quoting.sold_promotions(full), [])
+		for p in full["promotions"]:
+			p.pop("stage", None)
+		self.assertEqual(quoting.sold_promotions(full), [])
+		sold = quote(EB).to_dict(internal=True)
+		self.assertEqual([p["promo_id"] for p in quoting.sold_promotions(sold)], ["EB15"])
