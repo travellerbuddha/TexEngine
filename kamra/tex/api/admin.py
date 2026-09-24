@@ -453,6 +453,11 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 		q = q.where(E.reference_doctype == reference_doctype)
 	if reference_name:
 		q = q.where(E.reference_name == reference_name)
+	if not scope.is_platform_admin():
+		# values withheld from every business role, kept for platform administrators (ADR-056 review)
+		from kamra.tex.security.internals import PLATFORM_ONLY_ACTIONS
+
+		q = q.where(E.action.notin(list(PLATFORM_ONLY_ACTIONS)))
 	if action:
 		q = q.where(E.action.like(f"{text(action, 60)}%"))
 	if actor:

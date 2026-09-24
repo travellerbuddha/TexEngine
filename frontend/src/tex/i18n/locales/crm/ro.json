@@ -243,6 +243,7 @@
  "crm.ledger.empty_hint": "Înregistrările apar când oaspeții acumulează sau utilizează puncte ori când punctele sunt ajustate.",
  "crm.ledger.explain": "Cum au fost calculate aceste puncte",
  "crm.ledger.filter": "Tip de înregistrare",
+ "crm.ledger.guest_elsewhere": "Un oaspete al altui hotel",
  "crm.ledger.hint": "Toate mișcările de puncte ale programului, cele mai noi primele.",
  "crm.ledger.no_lines": "Nicio regulă nu s-a aplicat acestui sejur.",
  "crm.ledger.no_tier": "Fără nivel · multiplicator {multiplier}",

@@ -239,6 +239,7 @@
  "crm.ledger.empty_hint": "Misafirler puan kazandığında veya kullandığında ya da puanlar düzeltildiğinde hareketler burada görünür.",
  "crm.ledger.explain": "Bu puanlar nasıl hesaplandı",
  "crm.ledger.filter": "Hareket türü",
+ "crm.ledger.guest_elsewhere": "Başka bir otelin misafiri",
  "crm.ledger.hint": "Programın tüm puan hareketleri, en yenisi önce.",
  "crm.ledger.no_lines": "Bu konaklamaya hiçbir kural uygulanmadı.",
  "crm.ledger.no_tier": "Seviye yok · çarpan {multiplier}",

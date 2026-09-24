@@ -239,6 +239,7 @@
  "crm.ledger.empty_hint": "Buchungen erscheinen, wenn Gäste Punkte sammeln oder einlösen oder Punkte korrigiert werden.",
  "crm.ledger.explain": "Wie diese Punkte berechnet wurden",
  "crm.ledger.filter": "Buchungsart",
+ "crm.ledger.guest_elsewhere": "Ein Gast eines anderen Hotels",
  "crm.ledger.hint": "Alle Punktbewegungen des Programms, neueste zuerst.",
  "crm.ledger.no_lines": "Auf diesen Aufenthalt traf keine Regel zu.",
  "crm.ledger.no_tier": "Keine Stufe · Multiplikator {multiplier}",

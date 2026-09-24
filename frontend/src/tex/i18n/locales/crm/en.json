@@ -239,6 +239,7 @@
  "crm.ledger.empty_hint": "Entries appear when guests earn or redeem points, or points are adjusted.",
  "crm.ledger.explain": "How these points were calculated",
  "crm.ledger.filter": "Entry type",
+ "crm.ledger.guest_elsewhere": "A guest of another hotel",
  "crm.ledger.hint": "Every point movement of the program, newest first.",
  "crm.ledger.no_lines": "No rule applied to this stay.",
  "crm.ledger.no_tier": "No tier · multiplier {multiplier}",

@@ -2782,6 +2782,85 @@ three Low, fixed as follows.
   right (another enterprise's viewer is refused, recovery by a later booking in the session, the
   TEX API's capability rule). E2E `crm-profile.spec.ts` (written and type-checked).
 
+**Review follow-up (independent review of ADR-056, 2026-09-25; 2 Medium, 5 Low; patch p40).**
+- *The program ledger followed the program, not the viewer (Medium).* `loyalty.ledger` needed
+  `crm.view` at any hotel of a group program and then returned every row of the group: the guest and
+  their name, the booking and stay, the reason (stay dates), the actor and the explanation (rate ×
+  points gives the stay's value). It now applies the profile's rule: an entry tied to a booking or
+  stay at a hotel outside the viewer's `crm.view` scope shows its points, status and dates only
+  (`other_hotel`; booking, reservation, reason, actor and explanation left out), a guest the viewer
+  may not see (the `require_guest` rule) is not named, and asking for such a guest's entries is
+  refused. The CRM → Loyalty ledger says "A guest of another hotel" / "At another hotel of the
+  program".
+- *A withdrawal left the case identifiable (Medium).* The TEX API masked e-mail and phone but kept
+  the profile link, which leads to the same contact data; Desk / REST showed a case's profile,
+  e-mail and phone to the Hotel Admin role without `crm.view` and whatever the consent; funnel
+  hashes stored with consent survived a withdrawal. Now:
+  - a withdrawal of marketing e-mail consent (1 → 0), on every path (the CRM, the Desk form, REST:
+    `Guest.on_update`), makes the guest's cases anonymous (no profile, e-mail or phone; consent 0)
+    and removes the e-mail hashes of the cases' sessions and of the guest's addresses
+    (`crm.forget_contact`); the profile, its stays and its consent history stay;
+  - the CRM listing leaves the profile link out too whenever it masks the contact;
+  - `TEX Abandoned Booking.guest` / `email` / `phone` and `TEX Funnel Event.guest` / `email_hash` are
+    withheld fields (permlevel 1, System Manager only), like the pricing internals;
+  - p40 makes older cases anonymous where the profile no longer consents and removes the funnel
+    hashes of profiles without e-mail consent.
+- *The browser's funnel payload was a denylist (Low).* Nested contact data and other spellings
+  (`e_mail`, `tel`) were stored. `public.track` now keeps an allow-list per event: `room_view`
+  hotel, room type, board, rate plan; `abandoned` its quote ids (at most 10, 64 characters each) and
+  hotel; text of at most 140 characters; nothing else, at any depth.
+- *A consent sent as text read as yes (Low).* `bool("0")` is true. A consent flag means yes only for
+  `True`, `1`, `"1"` or `"true"` (any case): `booking.consent_given`, used by the booking engine and
+  by `resolve_guest` for every booking path (CRS included).
+- *Customised role permissions dropped System Manager's permlevel-1 row (Low).* Frappe reads a
+  DocType's Custom DocPerm rows instead of its JSON rows once one exists, and Kamra's permission
+  scripts write them (`fix_perms_fields._grant`, used by `seed_rbac_v2` and `bootstrap_v4/8/9/10`;
+  `seed_users`): the withheld fields then failed closed for platform administrators too.
+  `internals.ensure_custom_perms` adds System Manager's permlevel-1 row where a DocType with withheld
+  fields has custom rows; the scripts call it after writing theirs (and `_grant` now updates the
+  role's document-level row, never its field-level one); p40 adds it once, at the upgrade
+  (`setup.ran_before`: a forced re-run never undoes an administrator's change). A business role
+  holding permlevel ≥ 1 of such a DocType is printed on every p40 run and audited once
+  (`permission.withheld_fields_exposed`, platform level) for an administrator to remove.
+- *Masking destroyed the change history for everyone (Low).* Of the two options (keep the values in
+  a record only platform administrators read, or mask at read time), the first is simpler and
+  robust: the Desk form's history comes from `frappe.desk.form.load.get_docinfo`, which several
+  endpoints call (form load, save, docinfo reload) and no hook reaches. `mask_version` masks the
+  values when a Version row is written and `keep_withheld_values` keeps them in a platform-level
+  audit event (`version.withheld`: the Version's name and each withheld field's old and new value;
+  no hotel, group or enterprise, so only platform administrators read it in Desk and the TEX audit
+  log, which now leaves the platform-only actions out of a record's own trail for everyone else).
+  p37 does the same for older rows; rows p37 masked before this change (dev sites) kept no copy.
+- *`db_set` marked documents (Low, latent).* Frappe runs `on_change` from `db_set`, so a non-System
+  Manager session's `db_set` marked the document and its `as_dict` (webhooks, `as_json`,
+  `copy_doc`) lost the fields. The mark is now set on `on_update` (a save or an insert, never a
+  `db_set`) and only while the request is a generic write that answers with the document
+  (`frappe.client.set_value / save / insert / submit / cancel`, `POST` / `PUT /api/resource`, `POST`
+  / `PUT` / `PATCH /api/v2/document`); code's own saves keep their document whole.
+- *Whose profile a booking joins (found by the E2E run on main).* `resolve_guest` fell back to the
+  phone whenever no profile had the booking's e-mail, so a booking with e-mail B and the phone of
+  profile A (a family member, a colleague, a travel agent's desk, a reused test number) joined A:
+  another person's stays, extras and cancellations in A's history, shown to staff as A's, and B
+  unfindable by their own e-mail. The e-mail is now the identity when one is given; the phone finds
+  a profile only for a booking without an e-mail, or a profile known by phone alone (no e-mail).
+  A returning guest who books with a new e-mail gets a second profile (staff may merge the two,
+  `merge_guests`, which needs every stay of both in their scope, ADR-027); that duplicate is the
+  lesser harm than one person's data in another's profile, and
+  consent stays tied to the address that gave it (ADR-046). Per-guest coupon limits are keyed by the
+  booking's own e-mail or phone, not the profile, and are unchanged.
+- *G-97 (contract cost in Desk) stays open.* It is not small: the rate tables are child tables whose
+  fields a direct child query reads unless each child field is withheld too; `TEX Occupancy Rule` and
+  `TEX Child Age Band` are shared with `TEX Pricing Policy`, whose parent would need the permlevel-1
+  row as well; a contract version tracks changes, so its Version rows carry child rows (added,
+  removed, row_changed) that `mask_diff` does not cover; `contract.version.save` audit events hold
+  compact rate diffs at the hotel, read by its Hotel Admins in Desk and by `settings.admin` in the
+  TEX audit log; markup rules are in the same position. Recorded in FINAL_GAP_AUDIT (#70a).
+- Tests: `test_crm_privacy` 29 (11 new; 2 extended: the listing drops the profile link, p37 keeps
+  the values) and the p40 registry entry in `test_patches`; on the merged base (main `665b6b9`) and
+  its schema the 12 review tests fail or error, one for each finding; the identity test fails on the
+  branch before its fix (the second e-mail joined the first profile). E2E `crm-profile.spec.ts`
+  books with a unique phone per run and passes twice in a row.
+
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
 - A modification — staff, a guest on the manage page, a paid or approved guest change — only

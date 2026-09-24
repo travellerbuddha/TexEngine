@@ -95,9 +95,14 @@ function Entry({ r }: { r: LedgerRow }) {
         <span className="ml-auto text-xs text-zinc-500">{dateTime(r.creation)}</span>
       </div>
       <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-600">
-        <Link to={`/tex/crm/guests/${encodeURIComponent(r.guest)}`} className="font-medium text-tex-700 hover:underline">
-          {r.guest_name || r.guest}
-        </Link>
+        {r.guest ? (
+          <Link to={`/tex/crm/guests/${encodeURIComponent(r.guest)}`} className="font-medium text-tex-700 hover:underline">
+            {r.guest_name || r.guest}
+          </Link>
+        ) : (
+          <span className="italic">{t("crm.ledger.guest_elsewhere")}</span>
+        )}
+        {r.other_hotel && <span className="italic">{t("crm.loyalty.other_hotel")}</span>}
         {r.booking && (
           <Link to={`/tex/reservations/booking/${encodeURIComponent(r.booking)}`} className="text-tex-700 hover:underline">
             {t("crm.loyalty.booking")} {r.booking}
