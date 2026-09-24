@@ -681,5 +681,6 @@
  "crm.comms.empty_hint": "Tu pojawiają się e-maile rezerwacyjne oraz rozmowy i notatki zapisywane przez personel w profilach gości.",
  "crm.comms.col.when": "Kiedy",
  "crm.comms.col.by": "Kto",
- "crm.comms.system": "TEX (automatycznie)"
+ "crm.comms.system": "TEX (automatycznie)",
+ "crm.comms.not_openable": "Brak rezerwacji w Twoich hotelach: profil nie jest Ci udostępniony"
 }

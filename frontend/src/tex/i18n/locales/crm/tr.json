@@ -661,5 +661,6 @@
  "crm.comms.empty_hint": "Rezervasyon e-postaları ile personelin misafir profillerine kaydettiği aramalar ve notlar burada görünür.",
  "crm.comms.col.when": "Zaman",
  "crm.comms.col.by": "Kaydeden",
- "crm.comms.system": "TEX (otomatik)"
+ "crm.comms.system": "TEX (otomatik)",
+ "crm.comms.not_openable": "Otellerinizde rezervasyonu yok: profil sizinle paylaşılmıyor"
 }

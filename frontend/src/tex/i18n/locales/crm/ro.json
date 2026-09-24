@@ -671,5 +671,6 @@
  "crm.comms.empty_hint": "Aici apar e-mailurile de rezervare și apelurile și notițele pe care personalul le înregistrează în profilurile oaspeților.",
  "crm.comms.col.when": "Când",
  "crm.comms.col.by": "De către",
- "crm.comms.system": "TEX (automat)"
+ "crm.comms.system": "TEX (automat)",
+ "crm.comms.not_openable": "Nicio rezervare la hotelurile dvs.: profilul nu vă este partajat"
 }

@@ -661,5 +661,6 @@
  "crm.comms.empty_hint": "Booking e-mails and the calls and notes staff log on guest profiles appear here.",
  "crm.comms.col.when": "When",
  "crm.comms.col.by": "By",
- "crm.comms.system": "TEX (automatic)"
+ "crm.comms.system": "TEX (automatic)",
+ "crm.comms.not_openable": "No booking at your hotels: the profile is not shared with you"
 }
