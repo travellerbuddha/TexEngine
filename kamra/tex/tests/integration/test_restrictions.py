@@ -259,6 +259,65 @@ class TestGuestSelfService(RestrictionCase):
 		self.assertIn("MIN_LOS", codes(up["warnings"]))
 
 
+class TestStoredProposals(RestrictionCase):
+	"""A guest's change applied later — approved by staff, or paid — is judged by the restrictions
+	as of when it was priced (G-48 review: the ``_proposal``, ``_from_payment`` and ``_sale_at``
+	paths)."""
+
+	def _money(self):
+		from kamra.tex.tests.integration import test_self_service_money as ssm
+
+		return ssm
+
+	def test_staff_approving_a_guest_request_is_refused_by_a_restriction_set_since(self):
+		ssm = self._money()
+		b = guest_books(session="g48-approve")
+		ssm.paid(b["payment"])
+		ssm.paid(public.pay_booking(token=b["manage_token"]))
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest leaves a day early: the hotel decides
+		down = public.manage_propose(token=b["manage_token"], reservation=res, changes={"check_out": str(fx.d(6, 12))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=down["proposal_token"])
+		self.assertEqual(out["status"], "requested")
+		self.cell(fx.d(6, 12), room_type=self.std, ctd="Yes")                   # then the hotel closes departures
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel approves the request
+		with self.assertRaisesRegex(frappe.ValidationError, "closed to departure"):
+			crs_api.resolve_guest_change(request=out["request"], action="approve", reason="ok", settlement="Refund")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_out_date"), self.co)
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", out["request"], "status"), "Requested")
+
+	def test_a_paid_change_the_restrictions_refuse_since_is_refunded(self):
+		ssm = self._money()
+		b = guest_books(session="g48-paid")
+		ssm.paid(b["payment"])
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest adds a night and pays for it
+		up = public.manage_propose(token=b["manage_token"], reservation=res, changes={"check_out": str(fx.d(6, 14))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=up["proposal_token"])
+		self.assertEqual(out["status"], "payment_required")
+		self.cell(self.co, room_type=self.std, stop_sell="STOP")                # the new night closes meanwhile
+		ssm.paid(out["payment"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read the outcome
+		req = frappe.get_doc("TEX Guest Change Request", out["request"])
+		self.assertEqual(req.status, "Failed")
+		self.assertIn("stop sale", (req.error or "").lower())
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_out_date"), self.co)
+		self.assertEqual([r[1] for r in ssm.refunds(b["booking"])], [ssm.D(out["amount"])])
+
+	def test_a_stored_proposal_is_judged_on_the_day_it_was_priced(self):
+		res = self.staff_books()
+		self.cell(self.co, room_type=self.std, book_to=self.today)             # the new night sells until today
+		token = modification.propose(res, {"check_out": str(fx.d(6, 14))}, _check_permission=False)["proposal_token"]
+		p = quoting.verify(token, kind="proposal")
+		tomorrow = add_days(now_datetime(), 1)
+		with mock.patch("kamra.tex.services.modification.now_datetime", return_value=tomorrow):
+			staff = modification.propose(res, {"check_out": str(fx.d(6, 14))})
+			self.assertIn("BOOKING_WINDOW", codes(staff["restrictions"]))       # sold tomorrow: refused
+			modification.apply(None, reason="guest paid", source="Guest", _guest_authorized=True, _proposal=p,
+			                   _from_payment=True, _paid_at=now_datetime())
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_out_date"), fx.d(6, 14))
+
+
 class TestChannelBookings(DistributionCase):
 	"""A channel's booking breaking a TEX restriction is still accepted (the guest holds the
 	channel's confirmation, ADR-039), with a warning and an audit event."""
@@ -314,6 +373,20 @@ class TestChannelBookings(DistributionCase):
 		self.assertEqual(dist.restriction_boundaries(today), 1)
 		p = json.loads(frappe.db.get_value("TEX Integration Outbox", self.jobs()[0], "payload"))
 		self.assertEqual((p["from"], p["to"]), (str(fx.d(6, 11)), str(fx.d(6, 11))))
+
+	def test_boundary_days_far_apart_are_queued_apart(self):
+		# review L5: two days months apart are two small jobs, never every day between them
+		from kamra.tex.distribution import repository as dist
+
+		today = getdate(now_datetime())
+		for day in (fx.d(6, 11), fx.d(6, 12), fx.d(8, 20)):
+			frappe.get_doc({"doctype": "TEX ARI Restriction", "property": fx.PROPERTY, "restriction_date": day,
+			                "book_from": today}).insert(ignore_permissions=True)
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		self.assertEqual(dist.restriction_boundaries(today), 2)
+		ranges = sorted((p["from"], p["to"]) for p in (json.loads(frappe.db.get_value("TEX Integration Outbox", j,
+		                                                                              "payload")) for j in self.jobs()))
+		self.assertEqual(ranges, [(str(fx.d(6, 11)), str(fx.d(6, 12))), (str(fx.d(8, 20)), str(fx.d(8, 20)))])
 
 
 @contextmanager
