@@ -3368,6 +3368,107 @@ guest in its own query. One test covered the report.
   before and after. E2E `reports.spec.ts`: filters, a view switch, reconciled totals, cancellations
   and 375 px without sideways scroll.
 
+**Review follow-up (2026-09-24, branch `fix-reports`, patch p46).** An independent review of
+G-46 found one High issue outside the reports, which predates them, and Medium and Low issues in
+the reports. Some claims above were stronger than the tests behind them. All are fixed as follows.
+- *High, pre-existing (G-98): contract cost leaked to guests and agents through cost-stage offers.*
+  A cost-stage offer lowers the contract cost, so its discount is a cost figure. Example: 49.50 is
+  15 % of a contract cost of 330.00. So is the basket it is compared with ("basket 330.00 EUR below
+  minimum …"). The guest view (`RoomQuote.to_dict(internal=False)`) kept applied cost-stage
+  outcomes. `quoting.strip_internal(staff=True)`, used by the CRS search and reservation for staff
+  without `price.view_cost`, kept them all, refused ones included.
+  - Every promotion outcome now carries its `stage` (`COST` / `SELL`).
+  - The guest view and `strip_internal` (guests and staff alike) drop cost-stage outcomes, applied
+    or not. A snapshot written before `stage` existed is judged by its explanation: steps of stage
+    `cost_offer` name them.
+  - Nothing else in the non-internal payload derives from cost. The nights show the selling price;
+    the lines hold only selling-stage discounts; the explanation, `fx` and the internal totals were
+    already stripped.
+  - Staff with `price.view_cost` see every outcome with its stage.
+- *M1 Totals did not depend on the stays alone.* Each row was rounded from exact prorated shares,
+  so the totals changed with the grouping, and a fold changed them again. For example, a stay of
+  100.00 over 3 nights gave 100.00 by channel but 99.99 by day; over 800 days the drift could reach
+  a few currency units. The "rounded once, largest remainder" rule above is withdrawn:
+  - each stay's amounts are split over its nights in whole minor units, as the folio bills a
+    locked stay (`money.split_evenly`: equal shares, the remainder on the last night);
+  - a row adds up whole units, so every grouping and every fold gives the same totals;
+  - the database does the split (integer `DIV` per stay, a numbers table as long as the longest
+    stay in the window for rows by night);
+  - revenue per night is that split of what the guest pays, so it equals the folio's night;
+  - extras, taxes, stays without a contract cost, fees and cost are split the same way;
+  - the accommodation of a night is revenue less the others, and margin = accommodation − cost.
+- *L6 Taxes are the reservation's own.* A manual price scales the reservation's tax
+  (`tax_amount`), but it adds the whole difference, tax included, to the stored margin. The report
+  took taxes from the snapshot, so an override from 1100 to 990 showed accommodation 890 and taxes
+  100 while the reservation holds 90. Now:
+  - taxes on top = the reservation's `tax_amount` (its added part, when the snapshot says only part
+    of it was added);
+  - accommodation = revenue − extras − taxes; margin = accommodation − cost;
+  - for an overridden stay this margin differs from the stored `tex_margin_amount`. The stored one
+    still holds the tax part of the override; the modification service is unchanged.
+- *L5 A cancelled stay counts only the fee it kept* (with cancelled stays included): as revenue
+  and as `cancellation_fees`, never as accommodation, cost or margin. The cancellation view shows
+  the fees too.
+- *M2 Cost-stage offers in the promotion view* are listed only with `price.view_cost` (the
+  outcome's `stage`, or the explanation for older snapshots), with their `cost_reduction`: the cost
+  discount converted at the rate the sale recorded, rounded per stay. `discount` stays the selling
+  discount.
+- *M3 Group booking sites.* A hotel-group site records its sessions without a hotel, so the
+  conversion view never counted them. Their sessions now count when the report covers every
+  enabled hotel of that group. So a viewer who reports on only some of its hotels does not see them,
+  and nothing leaks. By hotel, a session is filed under its booking's hotel, or "not set" before a
+  booking. The dashboard funnel (R-47) still counts only the hotel's own sites.
+- *L7 Conversion counts each session once.* A session counts in the window of its first event
+  (its events up to `SESSION_DAYS` = 2 around the window are read). A later stage implies the
+  earlier ones (a guest who quoted searched), so no stage exceeds the one before and conversion
+  never exceeds 100 %. A sale window starting more than 180 days back
+  (`crm.FUNNEL_RETENTION_DAYS`, the funnel's retention) is refused.
+- *M5 Full scans.*
+  - p46 adds `tex_res_prop_ci` (Reservation: property, check_in_date), `tex_funnel_prop_time`
+    (TEX Funnel Event: property, occurred_at) and `tex_funnel_site_time` (site, occurred_at) to
+    `TEX_INDEXES`. They are composite, so Frappe's sync keeps them, and a forced re-run creates
+    nothing.
+  - The by-night rows join a numbers table as long as the longest stay in the window, not an
+    800-day calendar per stay.
+  - Each user may run 60 reports a minute over HTTP (`report`, `production`, `portfolio`;
+    `RATE_LIMIT`).
+  - The query count per view stays fixed.
+- *L2 Payments per transaction currency.* A payment in another currency than its booking, or of
+  a booking without a currency, is in the row of its own currency, as in the payments by method.
+  The two now agree.
+- *L3 The payment view needs `payment.view` at every hotel of the report*, as the margin view
+  needs `price.view_cost`. The Payments tab is offered only with it.
+- *L4 Refused, not ignored:*
+  - `basis` outside production, contract vs selling and cancellations;
+  - cancelled stays outside production, contract vs selling, promotions and extras;
+  - a grouping for promotions and extras.
+
+  The booking-date help text now says that a stay window also set prorates the value.
+- *L1* A scope change clears the room-type and rate-plan filters (they belong to hotels).
+  *L8* `filter_options` says when a list was cut at `MAX_OPTIONS` (2000), and the UI says so.
+- *Corrections to the claims above:*
+  - rows are no longer rounded once by largest remainder: see M1;
+  - "every total reconciles" held only by construction: the first tests checked identities the
+    code built, and the month test passed only because a 3-night stay split 2 + 1 always rounds
+    back. The new tests compare with an independent whole-cent computation, several stays with odd
+    cents, every grouping and a fold;
+  - the payment view needed only `report.view` (now `payment.view`);
+  - "a filter a view cannot apply is refused" was not true for `basis` and cancelled stays
+    (now it is).
+- *Still open:*
+  - production by sale date files a stay, whole, on its original sale day, so a later modification
+    or add-on changes that past period;
+  - the dashboard funnel does not attribute group-site sessions to a hotel;
+  - `portfolio._inventory_alerts` still reads each room pool per hotel (optional L9, not done).
+- *Tests:*
+  - unit `test_cost_stage_privacy` (5);
+  - integration `test_cost_stage_privacy` (3: the booking engine search, quote, booking, manage
+    page and e-mail; an agent's CRS search, quote, reservation and proposed change; the revenue
+    manager);
+  - `test_reports` review classes (13 new; the existing ones updated for L3);
+  - `test_patches.TestP03Indexes.test_p46_creates_the_report_indexes`;
+  - e2e `reports.spec.ts` (a scope change clears the room filter).
+
 ## ADR-060 The entry screens say TEX Engine and offer the source; "/" leads to the admin app or sign-in; the navigation carries R-35's sub-sections
 **Context.** Two gaps of the 2026-09-23 audit.
 - G-60 (R-01, R-33). The sign-in page said "kamra PMS" and offered English and Arabic only. The
