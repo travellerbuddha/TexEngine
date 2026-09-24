@@ -21,6 +21,7 @@ from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import versions
 from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
+from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, guest_changes, modification, quoting, sites
 from kamra.tex.services.txn import retry_on_deadlock
@@ -66,7 +67,12 @@ def _site_properties(site) -> list[str]:
 
 
 def _channel(site) -> str:
-	return site.sales_channel or "DIRECT_WEB"
+	"""The site's web channel. A site stored with another channel (possible before the ADR-050
+	review) sells nothing: its prices are not the public's."""
+	channel = site.sales_channel or "DIRECT_WEB"
+	if channel not in WEB_CHANNELS:
+		frappe.throw(_("This booking site is not open for online booking."), frappe.PermissionError)
+	return channel
 
 
 def _csv(v) -> list[str]:
@@ -234,8 +240,9 @@ def extras_availability(site: str, hotel: str, check_in: str, check_out: str, se
 @rate_limit(**WRITE_LIMIT)
 def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None, session_id: str | None = None):
 	s = _site(site)
+	channel = _channel(s)
 	offer = quoting.verify(offer_key)
-	if offer["property"] not in _site_properties(s) or offer["channel"] != _channel(s):
+	if offer["property"] not in _site_properties(s) or offer["channel"] != channel:
 		frappe.throw(_("Invalid offer."))
 	from kamra.tex.commercial.context import listed_extras
 

@@ -76,20 +76,24 @@ PLATFORM_ROLES = ("System Manager", "Administrator")
 # ─── sales-channel entitlement (ADR-050) ─────────────────────────────────
 # A staff user prices and books only on the channels they are entitled to at a hotel: those
 # of their permission profiles there, the call centre for a profile that names none, every
-# channel with ``price.any_channel``. The request never decides.
+# channel with ``price.any_channel``. The request never decides. A profile's channels serve
+# only what that profile allows (review follow-up): pricing channels come from profiles that
+# may see prices, booking channels from profiles that may book.
 ANY_CHANNEL = "price.any_channel"
+PRICE = "price.view"
+BOOK = "reservation.create"
 STAFF_DEFAULT_CHANNELS = frozenset({"CALL_CENTER"})
-# the capabilities a channel entitlement qualifies: a profile without them prices nowhere
-PRICING_CAPS = frozenset({"price.view", "reservation.create"})
+# what a booking site sells on: the channels a guest may book on (ADR-050 review)
+WEB_CHANNELS = frozenset({"DIRECT_WEB", "META"})
 
 
-def profile_channels(caps, listed, every_channel) -> frozenset[str]:
+def profile_channels(caps, listed, every_channel, *, for_cap: str) -> frozenset[str]:
 	"""Channels one permission profile (or a user's Frappe role defaults, ``listed`` empty)
-	lets its holder price and book on. ``every_channel``: all channel codes known to the site.
-	A profile that can neither see prices nor book adds no channel."""
+	lets its holder use for ``for_cap`` (``PRICE`` or ``BOOK``). ``every_channel``: all channel
+	codes known to the site. A profile without ``for_cap`` adds no channel for it."""
 	every = frozenset(every_channel)
 	caps = frozenset(caps)
-	if not caps & PRICING_CAPS:
+	if for_cap not in caps:
 		return frozenset()
 	if ANY_CHANNEL in caps:
 		return every

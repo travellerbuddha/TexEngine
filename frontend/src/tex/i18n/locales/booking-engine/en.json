@@ -220,7 +220,7 @@
  "be.field.primary_color_hint": "Buttons and links.",
  "be.field.radius": "Button & field corners",
  "be.field.sales_channel": "Sales channel",
- "be.field.sales_channel_hint": "Bookings from this site are reported under this channel.",
+ "be.field.sales_channel_hint": "Bookings from this site are reported under this channel. A booking site sells on a web channel only.",
  "be.field.search_style": "Search bar",
  "be.field.self_service": "Guest self-service",
  "be.field.self_service_hint": "Guests can view and change their booking with the link in their confirmation.",

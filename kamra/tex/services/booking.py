@@ -26,6 +26,7 @@ from kamra.tex.commercial import contracts
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
+from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import quoting
 
 SOURCE_BY_CHANNEL = {"DIRECT_WEB": "Website", "CALL_CENTER": "Phone", "OTA": "OTA", "META": "Website"}
@@ -333,13 +334,16 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		frappe.throw(_("All rooms must share currency, market and channel."))
 	currency, market, channel = currencies.pop(), markets.pop(), channels.pop()
 
+	if booking_site or not staff:
+		# a booking site sells on a web channel only, whoever books on it: a guest, or a signed-in
+		# staff member at the price any guest gets there (ADR-050, review)
+		if channel not in WEB_CHANNELS:
+			frappe.throw(_("Not permitted."), frappe.PermissionError)
 	if staff:
 		scope.require("reservation.create", property)
 		if not booking_site:
-			# staff sell on their own channels only; a booking site sells on its own (ADR-050)
-			scope.require_channel(channel, property)
-	elif channel not in ("DIRECT_WEB", "META"):
-		frappe.throw(_("Not permitted."), frappe.PermissionError)
+			# staff book on the channels their profiles may book on (ADR-050)
+			scope.require_channel(channel, property, to="book")
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
 	# row lock makes a suspend wait for bookings in flight, and every booking after it see it
 	for contract in sorted({r[2]["contract"]["contract"] for r in rows}):
@@ -405,8 +409,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 
 	booking = frappe.get_doc({
 		"doctype": "TEX Booking", "property": property, "status": status, "sales_channel": channel,
-		"market": market, "created_via": CREATED_VIA.get(channel, "Desk") if not staff or channel != "DIRECT_WEB"
-		else "Desk", "sale_at": now, "booker_guest": guest_name,
+		# staff hands are "Desk" on the web channel, including on a booking site (reportable, audited below)
+		"market": market, "created_via": "Desk" if staff and (booking_site or channel == "DIRECT_WEB")
+		else CREATED_VIA.get(channel, "Desk"), "sale_at": now, "booker_guest": guest_name,
 		"booker_name": booker.get("name") or f"{guest['first_name']} {guest['last_name']}",
 		"booker_email": booker.get("email") or guest.get("email"),
 		"booker_phone": booker.get("phone") or guest.get("phone"), "language": language, "currency": currency,
@@ -418,6 +423,12 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		"booking_site": booking_site,
 	})
 	booking.insert(ignore_permissions=True)
+	if staff and booking_site:
+		# a signed-in staff member booked on a public booking site, at the web price any guest gets
+		# there: allowed, and reportable (created via Desk, owner, this event) (ADR-050 review)
+		audit("booking.staff_on_site", reference_doctype="TEX Booking", reference_name=booking.name,
+		      property=property, new={"booking_site": booking_site, "channel": channel, "total": to_str(total),
+		                              "currency": currency})
 	_record_consent(guest_name, booking.name, property, consent_granted, consent_requested, staff)
 
 	reservations = []

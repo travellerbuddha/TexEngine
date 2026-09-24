@@ -106,21 +106,24 @@ export function focusFirstInvalid(root: ParentNode = document) {
   window.setTimeout(() => root.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(), 0)
 }
 
+type ChannelHotel = { name: string; sales_channels?: string[]; booking_channels?: string[] }
+
 /**
- * Sales channels the user may sell on at any of the `selected` hotels (every hotel when none
- * is selected), from the session (ADR-050). `null`: the session does not say (an older
- * server), so every channel is offered and the server decides.
+ * Sales channels the user may sell on (price and book) at any of the `selected` hotels (every
+ * hotel when none is selected), from the session (ADR-050). `null`: the session does not say
+ * (an older server), so every channel is offered and the server decides.
  */
-export function sellableChannels(hotels: { name: string; sales_channels?: string[] }[], selected: string[] = []): string[] | null {
+export function sellableChannels(hotels: ChannelHotel[], selected: string[] = []): string[] | null {
   if (hotels.some((h) => !h.sales_channels)) return null
   const pool = selected.length ? hotels.filter((h) => selected.includes(h.name)) : hotels
   const out = new Set<string>()
-  for (const h of pool) for (const c of h.sales_channels ?? []) out.add(c)
+  for (const h of pool)
+    for (const c of h.sales_channels ?? []) if (!h.booking_channels || h.booking_channels.includes(c)) out.add(c)
   return [...out].sort()
 }
 
 /** `preferred` when the user may sell on it at one of `hotels`, else the first channel they may. */
-export function pickChannel(preferred: string | undefined, hotels: { name: string; sales_channels?: string[] }[], selected: string[] = []): string {
+export function pickChannel(preferred: string | undefined, hotels: ChannelHotel[], selected: string[] = []): string {
   const allowed = sellableChannels(hotels, selected)
   if (!allowed || (preferred && allowed.includes(preferred))) return preferred ?? "CALL_CENTER"
   return allowed[0] ?? preferred ?? "CALL_CENTER"

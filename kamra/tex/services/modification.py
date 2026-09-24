@@ -39,6 +39,9 @@ BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE", "CURR
 CAPACITY_REASONS = ("sold out on ", "only ", "closed on ")     # pricing.extras.capacity_refusal
 EDITABLE = ("check_in", "check_out", "room_type", "adults", "children", "board", "rate_plan", "market",
             "promo_codes", "extras", "sale_at", "drop_addons")
+# a change to another product sells it at the reservation's channel's prices: staff need the right
+# to book on that channel; dates, occupancy, extras and codes are servicing (ADR-050 review)
+PRODUCT_FIELDS = ("room_type", "rate_plan", "board", "market")
 
 
 def _snapshot(res) -> dict:
@@ -58,14 +61,34 @@ def _children(raw) -> tuple[ChildSpec, ...]:
 	return tuple(out)
 
 
+def product_changes(res, changes: dict) -> list[str]:
+	"""Which of room type, rate plan, board and market ``changes`` really change."""
+	req = _snapshot(res).get("request") or {}
+	out = []
+	for k in PRODUCT_FIELDS:
+		if k not in changes:
+			continue
+		new, old = changes[k], req.get(k)
+		if k == "market":
+			new, old = str(new or "").upper(), str(old or "").upper()
+		if (new or None) != (old or None):
+			out.append(k)
+	return out
+
+
+def require_product_channel(res, changes: dict) -> None:
+	"""A staff change to another product needs the right to book on the reservation's channel
+	at its hotel (ADR-050 review): a call-centre agent does not turn a B2B booking into another
+	stay at the B2B rate."""
+	if product_changes(res, changes):
+		channel = res.get("tex_sales_channel") or (_snapshot(res).get("request") or {}).get("channel")
+		scope.require_channel(channel, res.property, to="book")
+
+
 def build_changed_request(res, changes: dict, sale_at: datetime):
 	snap = _snapshot(res)
 	base = dict(snap["request"])
-	if {"channel", "sales_channel"} & set(changes):
-		# a change is priced on the channel the stay was sold on; selling it on another channel
-		# is a new sale on that channel, by someone entitled to it (ADR-050)
-		frappe.throw(_("A reservation keeps the sales channel it was sold on. To sell it on another channel, "
-		               "cancel it and book again on that channel."))
+	# the channel is not EDITABLE: a change is priced on the channel the stay was sold on (ADR-050)
 	unknown = set(changes) - set(EDITABLE)
 	if unknown:
 		frappe.throw(_("Cannot change: {0}").format(", ".join(sorted(unknown))))
@@ -167,6 +190,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		# its price and its stay are the channel's: changes arrive from the channel (G-69)
 		frappe.throw(_("This booking came from a channel: change it in the channel, and the change arrives here."))
 	changes = {k: v for k, v in (changes or {}).items() if v is not None}
+	if _check_permission:
+		require_product_channel(res, changes)
 	if "drop_addons" in changes:
 		raw = changes.pop("drop_addons")
 		ids = sorted({raw} if isinstance(raw, str) else {str(x) for x in raw or []})
@@ -286,6 +311,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)
 	else:
 		scope.require("reservation.modify", res.property)
+		# whoever applies a proposal needs the right to make it: a token carries the change,
+		# not the entitlement of whoever proposed it
+		require_product_channel(res, p["changes"])
 	if str(res.modified) != p["modified"]:
 		frappe.throw(_("The reservation changed since this proposal was made — review it again."))
 	if not (reason or "").strip():

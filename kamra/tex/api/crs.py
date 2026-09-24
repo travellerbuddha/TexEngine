@@ -26,9 +26,9 @@ INTERNAL_CHANNELS = ("CALL_CENTER", "B2B", "API", "DIRECT_WEB", "META", "OTA")
 def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CALL_CENTER",
            properties=None, hotel_group: str | None = None, destination: str | None = None,
            currency: str | None = None, promo_codes=None):
-	"""Group search across every hotel the agent may sell (R-24), on a channel the agent is
-	entitled to at each of them (ADR-050): hotels where they are not are left out, and a
-	channel they may sell nowhere among the chosen hotels is refused."""
+	"""Group search across every hotel the agent may sell (R-24), on a channel the agent may
+	price on at each of them (ADR-050): hotels where they may not are left out, and a channel
+	they may price nowhere among the chosen hotels is refused."""
 	if channel not in INTERNAL_CHANNELS:
 		frappe.throw(_("Unknown channel."))
 	allowed = scope.permitted_properties()
@@ -42,7 +42,7 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 		         or dest in p.lower()]
 	if not props:
 		frappe.throw(_("No hotel matches your access and filters."), frappe.PermissionError)
-	selling = [p for p in props if scope.may_sell_on(channel, p)]
+	selling = [p for p in props if scope.may_price_on(channel, p)]
 	if not selling:
 		frappe.throw(_("You may not sell on the {0} channel at the chosen hotels.").format(channel),
 		             frappe.PermissionError)
@@ -101,7 +101,7 @@ def require_quotes_sellable(quote_ids) -> None:
 def payment_methods(property: str, market: str | None = None, currency: str | None = None,
                     channel: str = "CALL_CENTER"):
 	scope.require("price.view", property)
-	scope.require_channel(channel, property)
+	scope.require_channel(channel, property, to="price")
 	from kamra.tex.payments import service as pay
 
 	return pay.payment_methods(property, market=market, currency=currency, channel=channel)

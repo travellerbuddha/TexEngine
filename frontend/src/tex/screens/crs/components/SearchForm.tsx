@@ -17,7 +17,7 @@ export interface SearchFormProps {
   onSubmit: () => void
   searching: boolean
   /** Properties the user may price at (price.view), with the channels they may sell on there. */
-  hotels: { name: string; property_name: string; city?: string; sales_channels?: string[] }[]
+  hotels: { name: string; property_name: string; city?: string; sales_channels?: string[]; booking_channels?: string[] }[]
   variant?: "full" | "compact"
   /** Visible, explicit suggestion (e.g. the caller's CRM market) — never auto-applied. */
   marketHint?: { code: string; label: string } | null

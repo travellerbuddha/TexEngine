@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.security.filetypes import safe_image_url
 from kamra.tex.services import sites
 
@@ -23,6 +24,12 @@ class TEXBookingSite(Document):
 			frappe.throw(_("{0} is reserved; choose another slug.").format(self.site_slug))
 		if not self.property and not self.hotel_group:
 			frappe.throw(_("A booking site serves a hotel or a hotel group."))
+		# a booking site is the public Booking Engine: anyone may book there, so it sells only on a
+		# web channel; B2B, OTA, API and call-centre prices are sold by entitled staff and connections
+		# (ADR-050 review)
+		if self.sales_channel and self.sales_channel not in WEB_CHANNELS:
+			frappe.throw(_("A booking site sells on a web channel ({0}), not on {1}.").format(
+				", ".join(sorted(WEB_CHANNELS)), self.sales_channel))
 		for f in ("primary_color", "accent_color", "background_color"):
 			if self.get(f) and not HEX.match(self.get(f)):
 				frappe.throw(_("{0} must be a #RRGGBB colour.").format(self.meta.get_label(f)))

@@ -228,7 +228,7 @@
  "be.field.primary_color_hint": "Przyciski i linki.",
  "be.field.radius": "Narożniki przycisków i pól",
  "be.field.sales_channel": "Kanał sprzedaży",
- "be.field.sales_channel_hint": "Rezerwacje z tej strony są raportowane w tym kanale.",
+ "be.field.sales_channel_hint": "Rezerwacje z tej strony są raportowane w tym kanale. Strona rezerwacji sprzedaje tylko w kanale internetowym.",
  "be.field.search_style": "Pasek wyszukiwania",
  "be.field.self_service": "Samoobsługa gości",
  "be.field.self_service_hint": "Goście mogą przeglądać i zmieniać rezerwację przez link z potwierdzenia.",
