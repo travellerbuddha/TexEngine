@@ -80,6 +80,12 @@ security or distribution blocker remains (owner rule). Several remain (§2).
    double opt-in e-mail (needs item 3), or stay "requested, not applied" until staff confirm.
 9. Monitoring: an uptime monitor for the ping, the alert recipients (TEX settings →
    Monitoring), and a log-shipping/APM stack.
+10. Legacy stays at a hotel that joins TEX (ADR-052): a stay the legacy engine sold before the
+    hotel joined TEX, or an imported one, cannot change its dates or room type outside TEX, and the
+    TEX modification service needs a TEX price snapshot, so staff cancel it and rebook it in TEX
+    (the current default). Confirm this, or ask for a "re-price into TEX" action for such stays.
+11. Booking sites stored on a non-web channel (ADR-050 review) sell nothing until the owner sets a
+    web channel or disables them; p31 lists them at deploy.
 
 ## 4. Platform notes
 
