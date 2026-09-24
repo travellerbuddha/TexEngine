@@ -51,6 +51,12 @@ export interface TxnDetail extends Txn {
   refund_currency: string
   /** Bookings holding part of this payment now, and how much (G-68). */
   booking_nets: Record<string, string>
+  /** A refund: its outcome may be recorded now (Pending, and its answer cannot come any more). */
+  can_finish?: boolean
+  /** A Pending refund: why its outcome cannot be recorded yet (the server decides). */
+  finish_blocked?: string | null
+  /** A refund made for a guest's change: "not refunded" makes TEX refund it again elsewhere. */
+  guest_change?: string | null
 }
 
 export type LinkStatus = "Draft" | "Active" | "Partially Paid" | "Paid" | "Expired" | "Cancelled"

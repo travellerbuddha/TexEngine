@@ -296,8 +296,15 @@ export interface GuestChangeRequest {
   penalty_terms: boolean
   /** the refund staff verify at the gateway now (still unconfirmed), if any */
   verify_refund: string | null
-  /** the money left to staff can be closed now (a refund to verify at once; the rest once TEX is done) */
+  /** the money left to staff can be closed now: a refund to verify once its answer cannot come
+   * any more, the rest once TEX is done refunding (the server decides) */
   can_close: boolean
+  /** why it cannot be closed now */
+  close_blocked: string | null
+  /** money left to staff and not settled by them yet (a refund to verify not included) */
+  staff_due: string
+  /** money left to staff that they already settled (refunded outside TEX or kept on the booking) */
+  staff_settled: string
   revision: string | null
   error: string | null
   note: string | null

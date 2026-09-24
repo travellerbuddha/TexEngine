@@ -318,5 +318,10 @@
  "res.gcr.verify_body": "Procesatorul de plăți nu a răspuns la rambursarea {refund}. Verificați acolo dacă a fost făcută, apoi înregistrați rezultatul: TEX rambursează apoi ce mai datorează modificarea.",
  "res.gcr.verify_choice": "Ce a făcut procesatorul de plăți",
  "res.gcr.verify_succeeded": "A rambursat banii",
- "res.gcr.verify_failed": "Nu a rambursat"
+ "res.gcr.verify_failed": "Nu a rambursat: TEX rambursează suma din altă plată sau o predă personalului",
+ "res.gcr.staff_money_choice": "Ce s-a întâmplat cu acești bani",
+ "res.gcr.staff_money.refunded": "Rambursat oaspetelui în afara TEX",
+ "res.gcr.staff_money.kept": "Lăsat pe rezervare",
+ "res.gcr.staff_money.refunded_hint": "TEX înregistrează rambursarea pe rezervare (o rambursare manuală) și o scade din ce a plătit oaspetele.",
+ "res.gcr.staff_money.kept_hint": "Banii rămân pe rezervare ca credit al oaspetelui."
 }

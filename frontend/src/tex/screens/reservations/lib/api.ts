@@ -76,8 +76,11 @@ export type RefundOutcome = "Succeeded" | "Failed"
 /** Approve / reject a request waiting for the hotel (reservation.modify; a refund also needs
  * payment.refund), or close money left to staff (payment.refund; a refund the gateway never
  * confirmed needs its outcome). The reason is audited. */
-export function resolveGuestChange(request: string, action: ResolveAction, reason: string, settlement?: ResolveSettlement, refund_outcome?: RefundOutcome) {
-  return tex<GuestChangeRequest>("crs", "resolve_guest_change", { request, action, reason, settlement, refund_outcome }, { post: true })
+/** What became of money left to staff, said when they close it (G-93). */
+export type StaffMoney = "Refunded outside TEX" | "Kept on the booking"
+
+export function resolveGuestChange(request: string, action: ResolveAction, reason: string, settlement?: ResolveSettlement, refund_outcome?: RefundOutcome, staff_money?: StaffMoney) {
+  return tex<GuestChangeRequest>("crs", "resolve_guest_change", { request, action, reason, settlement, refund_outcome, staff_money }, { post: true })
 }
 
 export function contractVersion(name: string) {

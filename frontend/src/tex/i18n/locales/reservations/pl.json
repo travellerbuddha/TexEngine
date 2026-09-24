@@ -329,5 +329,10 @@
  "res.gcr.verify_body": "Bramka płatności nie odpowiedziała na zwrot {refund}. Sprawdź w niej, czy został wykonany, i zapisz wynik: TEX zwróci następnie to, co zmiana jest jeszcze winna.",
  "res.gcr.verify_choice": "Co zrobiła bramka płatności",
  "res.gcr.verify_succeeded": "Zwróciła pieniądze",
- "res.gcr.verify_failed": "Nie zwróciła"
+ "res.gcr.verify_failed": "Nie zwróciła: TEX zwróci kwotę z innej płatności albo przekaże ją personelowi",
+ "res.gcr.staff_money_choice": "Co stało się z tymi pieniędzmi",
+ "res.gcr.staff_money.refunded": "Zwrócono gościowi poza TEX",
+ "res.gcr.staff_money.kept": "Zostawiono na rezerwacji",
+ "res.gcr.staff_money.refunded_hint": "TEX zapisuje zwrot na rezerwacji (zwrot ręczny) i odejmuje go od tego, co zapłacił gość.",
+ "res.gcr.staff_money.kept_hint": "Pieniądze zostają na rezerwacji jako środki gościa."
 }

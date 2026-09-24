@@ -276,6 +276,7 @@
  "settings.status.reason.payment_pending": "Card payments still pending: {count}, oldest started {minutes} min ago.",
  "settings.status.reason.redis_unreachable": "The background job queue (Redis) cannot be reached.",
  "settings.status.reason.refund_unknown": "Refunds the gateway never confirmed: {count}. Check them at the gateway before refunding again.",
+ "settings.status.reason.refund_conflict": "Refunds the gateway answered differently from the outcome recorded for them (last {days} days): {count}. Reconcile them at the gateway.",
  "settings.status.reason.scheduler_disabled": "The scheduler is disabled: no TEX job runs.",
  "settings.status.reason.scheduler_paused": "The scheduler is paused: no TEX job runs.",
  "settings.status.scope_hotels": "Your hotels: {hotels}",

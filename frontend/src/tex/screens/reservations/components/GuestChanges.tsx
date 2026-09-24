@@ -8,7 +8,7 @@ import { usePartyText } from "../../crs/components/PartyEditor"
 import { isPositive, isZero } from "../../crs/lib/party"
 import { useServerClock } from "../../crs/lib/serverClock"
 import { asApiError } from "../../crs/lib/useBookingFlow"
-import { resolveGuestChange, type RefundOutcome, type ResolveAction, type ResolveSettlement } from "../lib/api"
+import { resolveGuestChange, type RefundOutcome, type ResolveAction, type ResolveSettlement, type StaffMoney } from "../lib/api"
 import type { GuestChangeRequest } from "../lib/types"
 
 type Tone = "neutral" | "info" | "success" | "warning" | "danger"
@@ -133,8 +133,9 @@ export function GuestChangesCard({
                 {r.staff_open && (
                   <Notice tone={r.staff_reason === "Verify refund at gateway" ? "danger" : "warning"}>
                     <span className="font-medium">{t(`res.gcr.staff.${slug(r.staff_reason || "Refund by staff")}`)}</span>{" "}
-                    <Money amount={r.staff_amount} currency={ccy} className="font-semibold" />
+                    <Money amount={r.verify_refund ? r.staff_amount : r.staff_due} currency={ccy} className="font-semibold" />
                     {r.unknown_refund && <span className="block text-xs">{t("res.gcr.staff.unknown_refund", { refund: r.unknown_refund })}</span>}
+                    {!r.can_close && r.close_blocked && <span className="block text-xs">{r.close_blocked}</span>}
                   </Notice>
                 )}
                 {r.note && (
@@ -202,6 +203,7 @@ function ResolveDialog({
   const [reason, setReason] = useState("")
   const [settlement, setSettlement] = useState<ResolveSettlement>("Credit on booking")
   const [outcome, setOutcome] = useState<RefundOutcome | "">("")
+  const [staffMoney, setStaffMoney] = useState<StaffMoney | "">("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<TexApiError>()
   const row = target?.row
@@ -209,20 +211,30 @@ function ResolveDialog({
   const overpaid = action === "approve" && !!row?.overpaid_after && isPositive(row.overpaid_after)
   // a refund the gateway never confirmed: staff say what the gateway did before closing
   const verify = action === "close" && !!row?.verify_refund
+  // other money left to staff: say what became of it (refunded outside TEX is recorded on the booking)
+  const settleMoney = action === "close" && !verify
   useEffect(() => {
     if (!target) return
     setReason("")
     setError(undefined)
     setSettlement(canRefund ? "Refund" : "Credit on booking")
     setOutcome("")
+    setStaffMoney("")
   }, [target, canRefund])
 
   const submit = async () => {
-    if (!row || !action || !reason.trim() || (verify && !outcome)) return
+    if (!row || !action || !reason.trim() || (verify && !outcome) || (settleMoney && !staffMoney)) return
     setBusy(true)
     setError(undefined)
     try {
-      await resolveGuestChange(row.name, action, reason.trim(), overpaid ? settlement : undefined, verify && outcome ? outcome : undefined)
+      await resolveGuestChange(
+        row.name,
+        action,
+        reason.trim(),
+        overpaid ? settlement : undefined,
+        verify && outcome ? outcome : undefined,
+        settleMoney && staffMoney ? staffMoney : undefined,
+      )
       toast.success(t(`res.gcr.done.${action}`))
       onDone()
     } catch (e) {
@@ -243,7 +255,7 @@ function ResolveDialog({
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             {t("core.action.cancel")}
           </Button>
-          <Button loading={busy} disabled={!reason.trim() || (verify && !outcome)} variant={action === "reject" ? "danger" : "primary"} onClick={() => void submit()}>
+          <Button loading={busy} disabled={!reason.trim() || (verify && !outcome) || (settleMoney && !staffMoney)} variant={action === "reject" ? "danger" : "primary"} onClick={() => void submit()}>
             {action ? t(`res.gcr.${action}`) : ""}
           </Button>
         </>
@@ -281,6 +293,20 @@ function ResolveDialog({
                   { value: "Failed", label: t("res.gcr.verify_failed") },
                 ]}
               />
+            </div>
+          )}
+          {settleMoney && (
+            <div className="space-y-2">
+              <Segmented<StaffMoney | "">
+                label={t("res.gcr.staff_money_choice")}
+                value={staffMoney}
+                onChange={setStaffMoney}
+                options={[
+                  { value: "Refunded outside TEX", label: t("res.gcr.staff_money.refunded") },
+                  { value: "Kept on the booking", label: t("res.gcr.staff_money.kept") },
+                ]}
+              />
+              <p className="text-xs text-zinc-500">{t(staffMoney === "Kept on the booking" ? "res.gcr.staff_money.kept_hint" : "res.gcr.staff_money.refunded_hint")}</p>
             </div>
           )}
           <Field label={t("res.gcr.reason")} hint={t("core.hint.reason_audited")} required>

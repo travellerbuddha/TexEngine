@@ -46,6 +46,11 @@ function holdingBookings(txn: TxnDetail) {
   return Object.keys(txn.booking_nets ?? {})
 }
 
+type RefundMode = "gateway" | "outside"
+
+/** A payment the gateway cannot refund (entered by hand at the desk): refunded outside TEX only. */
+const outsideOnly = (txn: TxnDetail) => txn.provider === "Manual"
+
 export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; onClose: () => void; txn: TxnDetail; onDone: () => void }) {
   const { t } = useTexT()
   const toast = useToast()
@@ -54,6 +59,9 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
   const [amount, setAmount] = useState("")
   const [reason, setReason] = useState("")
   const [booking, setBooking] = useState("")
+  // refunded through the gateway, or already given back outside TEX (cash, bank transfer): G-93
+  const [mode, setMode] = useState<RefundMode>("gateway")
+  const [reference, setReference] = useState("")
   const bookings = useMemo(() => holdingBookings(txn), [txn])
   const ccy = txn.refund_currency || txn.currency
   const close = useEvent(() => {
@@ -65,16 +73,26 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
     setReason("")
     // no booking by default: the server refunds unallocated money first, then the one booking holding the rest
     setBooking("")
+    setMode(outsideOnly(txn) ? "outside" : "gateway")
+    setReference("")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
-  const valid = isPositiveAmount(amount) && reason.trim().length > 2
+  const outside = mode === "outside"
+  const valid = isPositiveAmount(amount) && reason.trim().length > 2 && (!outside || reference.trim().length > 0)
   const submit = async () => {
     if (!valid) return
     const r = await a.run(() =>
       tex<{ refund: string; status?: string; replay?: boolean }>(
         "payments",
-        "refund",
-        { transaction: txn.name, amount, reason: reason.trim(), idempotency_key: key, booking: booking || undefined },
+        outside ? "refund_outside" : "refund",
+        {
+          transaction: txn.name,
+          amount,
+          reason: reason.trim(),
+          idempotency_key: `${key}:${mode}`,
+          booking: booking || undefined,
+          ...(outside ? { reference: reference.trim() } : {}),
+        },
         { post: true },
       ),
     )
@@ -82,6 +100,7 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
     // a refund the gateway has not confirmed (a replay of an unanswered one) is never announced as done
     if (r.status === "Failed") toast.error(t("payments.refund.failed", { name: r.refund }))
     else if (r.status === "Pending") toast.info(t("payments.refund.pending", { name: r.refund }))
+    else if (outside) toast.success(t("payments.refund.outside_done", { name: r.refund }))
     else toast.success(r.replay ? t("payments.refund.replay", { name: r.refund }) : t("payments.refund.done", { name: r.refund }))
     onDone()
     onClose()
@@ -98,6 +117,18 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
         <p className="text-sm text-zinc-700">
           {t("payments.refund.refundable")} <Money amount={txn.refundable} currency={ccy} className="font-semibold" />
         </p>
+        {!outsideOnly(txn) && txn.status === "Succeeded" && (
+          <Segmented<RefundMode>
+            label={t("payments.refund.mode")}
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "gateway", label: t("payments.refund.mode_gateway") },
+              { value: "outside", label: t("payments.refund.mode_outside") },
+            ]}
+          />
+        )}
+        {outside && <Notice tone="info">{t("payments.refund.outside_desc")}</Notice>}
         <Field label={t("payments.amount")} required hint={t("payments.refund.amount_hint")}>
           <DecimalInput value={amount} onValueChange={setAmount} suffix={ccy} data-autofocus />
         </Field>
@@ -113,10 +144,15 @@ export function RefundDialog({ open, onClose, txn, onDone }: { open: boolean; on
             />
           </Field>
         )}
+        {outside && (
+          <Field label={t("payments.refund.reference")} required hint={t("payments.refund.reference_hint")}>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={140} autoComplete="off" />
+          </Field>
+        )}
         <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} />
         </Field>
-        {txn.provider === "Mock" && <Notice tone="warning">{t("payments.refund.sandbox")}</Notice>}
+        {txn.provider === "Mock" && !outside && <Notice tone="warning">{t("payments.refund.sandbox")}</Notice>}
         <InlineError error={a.error} />
       </div>
     </Dialog>
@@ -328,7 +364,8 @@ export function FinishRefundDialog({ open, onClose, txn, onDone }: { open: boole
           onChange={setOutcome}
           options={[
             { value: "Succeeded", label: t("payments.finish.succeeded") },
-            { value: "Failed", label: t("payments.finish.failed") },
+            // a guest change's refund not made is made again from another payment, or left to staff
+            { value: "Failed", label: t(txn.guest_change ? "payments.finish.failed_again" : "payments.finish.failed_stays") },
           ]}
         />
         <Notice tone="info">{t("payments.finish.effect")}</Notice>
@@ -344,14 +381,20 @@ export function FinishRefundDialog({ open, onClose, txn, onDone }: { open: boole
   )
 }
 
-/** A successful charge, or a Failed one whose capture TEX refused to count (the server reports it refundable). */
+/** A successful charge, or a Failed one whose capture TEX refused to count (the server reports it refundable).
+ * A payment entered by hand is refunded outside TEX only, and recorded here (G-93). */
 export const canRefund = (txn: TxnDetail) =>
-  txn.txn_type === "Charge" && (txn.status === "Succeeded" || txn.status === "Failed") && !isZero(txn.refundable) && txn.provider !== "Manual" && txn.provider !== "Loyalty"
+  txn.txn_type === "Charge" &&
+  (txn.status === "Succeeded" || (txn.status === "Failed" && !outsideOnly(txn))) &&
+  !isZero(txn.refundable) &&
+  txn.provider !== "Loyalty"
 export const canAllocate = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && !isZero(txn.unallocated)
 export const canTransfer = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.status === "Succeeded" && holdingBookings(txn).length > 0
 export const canConfirmTransfer = (txn: TxnDetail) => txn.provider === "Bank Transfer" && txn.status === "Pending"
-/** A refund still waiting for the gateway's answer (never confirmed, or left by a run that stopped). */
-export const canFinishRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending"
+/** A refund still Pending whose answer cannot come any more (the server decides: never while its call may run). */
+export const canFinishRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending" && !!txn.can_finish
+/** A refund still Pending, finished or not yet finishable. */
+export const isPendingRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending"
 /** Pending charges, and Failed or superseded (Cancelled) ones: a captured payment whose callback was lost can be recovered. */
 export const canReverify = (txn: TxnDetail) =>
   txn.txn_type === "Charge" && txn.status !== "Succeeded" && (txn.provider === "iyzico" || txn.provider === "Sipay")

@@ -29,6 +29,7 @@ import {
   canConfirmTransfer,
   canFinishRefund,
   canRefund,
+  isPendingRefund,
   canReverify,
   canTransfer,
   ConfirmTransferDialog,
@@ -146,9 +147,9 @@ export default function TransactionDetail() {
           {d.status === "Pending" && d.provider === "Bank Transfer" && <Notice tone="warning">{t("payments.detail.pending_bank")}</Notice>}
           {d.status === "Pending" && (d.provider === "iyzico" || d.provider === "Sipay") && <Notice tone="warning">{t("payments.detail.pending_gateway")}</Notice>}
           {d.status === "Failed" && canReverify(d) && <Notice tone="info">{t("payments.detail.failed_gateway")}</Notice>}
-          {canFinishRefund(d) && (
+          {isPendingRefund(d) && (
             <Notice tone="warning" title={t("payments.detail.pending_refund_title")}>
-              {[t("payments.detail.pending_refund"), d.error_message].filter(Boolean).join(" ")}
+              {[t("payments.detail.pending_refund"), d.error_message, d.can_finish ? null : d.finish_blocked].filter(Boolean).join(" ")}
             </Notice>
           )}
           {d.status === "Failed" && (d.error_message || d.error_code) && (
