@@ -19,11 +19,11 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 
 | Check | Command | Result |
 |---|---|---|
-| TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **419 passed** (2026-09-24, branch `fix-restr` with main `9215991`) |
-| TEX integration tests (34 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **695 OK**, 3 skipped (2026-09-24, branch `fix-restr` with main `9215991`, migrated with the branch; per module in the G-48 / G-84 review follow-up paragraph) |
-| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **46 of 47 pass** in the mode each spec is written for (2026-09-24, branch `shell-g60-g64` with main `b074527`, its own bench server and Vite dev server, RQ worker with the branch's code): the whole suite against Vite 41 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `restrictions-grid` fails the same way on main's own dev server (it expects "set at this scope", the catalog says "Set at this scope"; pre-existing on main). New: `entry-branding` ×5; `shell.spec` builds its paths with `texPath` |
-| Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-24, branch `fix-restr` with main `9215991`, its code and schema) |
-| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-24, branch `shell-g60-g64`; bundles not rebuilt on the branch) |
+| TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **419 passed** (2026-09-24, branch `fix-crmp2` with main `b72b2a8`) |
+| TEX integration tests (35 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **723 OK**, 3 skipped (2026-09-24, branch `fix-crmp2` with main `b72b2a8`, migrated with the branch and p45; the 3 skipped whole-site patch tests pass on a disposable site; per module in the ADR-056 second review follow-up paragraph) |
+| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **46 of 47 pass** in the mode each spec is written for (2026-09-24, branch `shell-g60-g64` with main `b074527`, its own bench server and Vite dev server, RQ worker with the branch's code): the whole suite against Vite 41 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `restrictions-grid` fails the same way on main's own dev server (it expects "set at this scope", the catalog says "Set at this scope"; pre-existing on main). New: `entry-branding` ×5; `shell.spec` builds its paths with `texPath`. Branch `fix-crmp2` with main `b72b2a8` (its own bench server and Vite dev server): `crm-profile`, the new `crm-merge`, `crm-admin` and `booking` (desktop and mobile) passed twice each |
+| Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-24, branch `fix-crmp2` with main `b72b2a8`, its code and schema) |
+| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-24, branch `fix-crmp2` with main `b72b2a8`; bundles not committed on the branch) |
 | Lint / static security | `ruff check kamra/tex kamra/patches/tex`; semgrep (Frappe rules, ERROR) | clean / 0 findings (semgrep 1.177, frappe/semgrep-rules + r/python.lang.correctness, ERROR; G-45's changed files re-scanned: 0) |
 
 **Coverage gaps.** Green tests do not prove absence of the defects below. The audit reproduced
@@ -279,8 +279,8 @@ fixed, with tests that fail first.
     harness 76/76, front-desk journey 13/13, banquet 101 OK (both).
   - 400 unit tests; ruff clean.
 
-**ADR-056 second review follow-up (2026-09-25, branch `fix-crmp2` on main `b074527`, main `9215991`
-merged in, patch p45).** A second independent review of the CRM privacy work found 1 High, 3 Medium and
+**ADR-056 second review follow-up (2026-09-25, branch `fix-crmp2` on main `b074527`, mains `9215991` and
+`b72b2a8` merged in, patch p45).** A second independent review of the CRM privacy work found 1 High, 3 Medium and
 9 Low issues. All are fixed, with tests that fail first (ADR-056, second review follow-up).
 - *H1:* a consent withdrawal read the funnel through `IFNULL`/`OR` (no index) inside its transaction,
   locking every funnel row a booking writes; tracking swallowed deadlocks, so a booking InnoDB had rolled
@@ -299,24 +299,32 @@ merged in, patch p45).** A second independent review of the CRM privacy work fou
   hotel's ledger entries without dates, reason or author; browser funnel values checked against what the
   site sells; the phone finds a profile only for staff and only when one profile has it; a Desk / REST
   consent change stamped and audited; a case written after a withdrawal anonymous; p40 on its own paths.
-- *Fail-first on main `9215991` (and on `b074527`):* `test_crm_privacy_review` 26 of 27 fail or error
-  (p40's own paths pass: coverage); the three `test_crm_privacy` tests changed for L5 and L6 fail.
-- *Runs:*
-  - Migrate, then all 35 integration modules on the shared site: **703 OK** (the 3 whole-site tests
-    skipped there): admin_markets 4, age_bands 11, audit_trail 15, channel_binding 27,
-    commercial_flows 53, concurrency 8, critical_journey 31, crm_privacy 29, crm_privacy_review 27,
-    crm_segments 7, custom_domains 9, distribution 21, entry_branding 15, extras_inventory 17,
-    fx_snapshot 5, grant_expiry 9, inventory 31, legacy_pricing 15, legacy_pricing_review 23,
-    loyalty_admin 7, migrations_notify 7, modification_determinism 27, money_fields 9, patches 31,
-    portfolio 2, post_booking_extras 12, pricing_policies 14, public_booking 17, reports 22,
-    restrictions 25, security_hygiene 14, security_regressions 59, self_service_money 75,
-    snapshot_integrity 13, system_status 12.
+- *Fail-first on main `b72b2a8` (its code and schema, the new tests added):* `test_crm_privacy_review`
+  27 of 28 fail or error (p40's own paths pass: coverage), among them the booking reported after its
+  rollback ("booked: reported a rolled-back booking") and the withdrawal waiting for a booking's funnel
+  event on a second connection ("Lock wait timeout exceeded", with the new indexes already on the site);
+  the three `test_crm_privacy` tests changed for L5 and L6 fail. Before the two-connection test was
+  added: 26 of 27 on `9215991` and on `b074527`.
+- *Runs (2026-09-24, main `b72b2a8` merged in, one hold of the bench-test lock):*
+  - Migrate, then all 35 integration modules on the shared site: **723 OK**, 3 skipped (the whole-site
+    tests): admin_markets 4, age_bands 11, audit_trail 15, channel_binding 27, commercial_flows 63,
+    concurrency 8, critical_journey 31, crm_privacy 29, crm_privacy_review 28, crm_segments 7,
+    custom_domains 9, distribution 21, entry_branding 15, extras_inventory 17, fx_snapshot 5,
+    grant_expiry 9, inventory 31, legacy_pricing 15, legacy_pricing_review 23, loyalty_admin 7,
+    migrations_notify 7, modification_determinism 27, money_fields 9, patches 31, portfolio 2,
+    post_booking_extras 12, pricing_policies 14, public_booking 17, reports 22, restrictions 33,
+    security_hygiene 14, security_regressions 59, self_service_money 76, snapshot_integrity 13,
+    system_status 12.
   - `test_patches` on a disposable site, the whole-site tests included (site made, tested, dropped):
     **31 OK** (none skipped).
-  - Upstream suites with the branch's code: UPSTREAM.
-  - E2E against the branch (own bench server and vite dev server): `crm-profile.spec.ts` and the new
-    `crm-merge.spec.ts` passed twice each.
-  - 400 unit tests; ruff clean; `tsc` and `npm run i18n:tex` clean (bundles not rebuilt on the branch).
+  - Upstream suites with the branch's code and schema: eval harness 76/76, front-desk journey 13/13,
+    banquet 101 OK.
+  - E2E against the branch (its own bench server on :8014 and Vite dev server on :5184, base
+    `http://test.localhost:5184`): `crm-profile`, the new `crm-merge` (a shared phone shown as a possible
+    duplicate, merged from the profile), `crm-admin` (loyalty programs and ledger) and `booking` (desktop
+    and mobile, 5 each) passed twice each.
+  - 419 unit tests; ruff clean; `tsc`, `npm run build` and `npm run i18n:tex` clean (bundles not
+    committed on the branch).
 
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.

@@ -2881,8 +2881,9 @@ patch p45).**
     is retried by `retry_on_deadlock` or fails, never reported. The other best-effort steps inside a
     booking's transaction do the same: the booking and payment e-mails (`notify._deliver`,
     `booking_mail`, `booking_confirmed`, `payment_link`: each queues an Email Queue row and a TEX
-    Communication) and the channel-manager push trigger on Reservation. `realtime.notify` publishes
-    after commit and writes nothing.
+    Communication), a payment start (`payments.service.start_payment`, which records a failed gateway
+    call on the transaction) and the channel-manager push trigger on Reservation. `realtime.notify`
+    publishes after commit and writes nothing.
 - *An erasure left the person behind (Medium).* `kamra.api.anonymize_guest` blanked e-mail and phone but
   kept `tex_consent_email` = 1, so no clean-up ran: cases kept their contact, funnel hashes stayed, and the
   Desk form's history (Version rows) kept the old name, e-mail and phone. An erasure now withdraws every
@@ -2980,15 +2981,25 @@ patch p45).**
   - L9 (tests): the permission-script test checks that a platform administrator actually reads the
     withheld values; p40 is covered on its own paths (a hash of a profile that never consented, with no
     case; a case with contact data and no profile); a shared phone stays in the identity tests.
-- Tests: `test_crm_privacy_review` (27: H1 5, M1 2, M2 6, M3 and L4 4, L1–L8 8, p40 and p45 2; the patch
+- Tests: `test_crm_privacy_review` (28: H1 6, M1 2, M2 6, M3 and L4 4, L1–L8 8, p40 and p45 2; the patch
   tests refuse commits until their rollback, as the G-76 review asks) and changes to `test_crm_privacy`
   (the funnel allow-list and identity tests follow L5 and L6; p40's cases are written below the new
-  controller; the p40 tests refuse commits; L9); the p45 registry entry in `test_patches`. On main
-  `9215991` and its schema 26 of the 27 fail or error, each on its finding (the booking test: "booked:
-  reported a rolled-back booking"; the others on the missing behaviour); p40's own paths (L9, coverage)
-  pass; on `b074527` also 26 of 27. The three `test_crm_privacy` tests changed for L5 and L6 fail on the
-  old code. E2E: `crm-profile.spec.ts` and the new `crm-merge.spec.ts` (a shared phone shown as a
-  possible duplicate, merged from the profile) pass twice in a row on a server running this tree.
+  controller; the p40 tests refuse commits; L9); the p45 registry entry in `test_patches`. H1 is tested
+  on its statements (each uses its index, checked with `EXPLAIN` on tables given the rows of a live
+  funnel; no `IFNULL`, no `OR`), on two connections (a second connection writes funnel events as a
+  booking does, not committed, before and while the withdrawal runs; each side waits at most 2 s for a
+  lock) and on the booking (a deadlock while tracking is re-raised below the retry; through `book`, the
+  first attempt is the victim and the retry books once, for "booked" and for "payment_started"). On main
+  `b72b2a8` and its schema 27 of the 28 fail or error, each on its finding (the booking test: "booked:
+  reported a rolled-back booking"; the two-connection test: "Lock wait timeout exceeded", although the
+  new indexes were on the site: the old withdrawal's `UPDATE` is a locking read, which reaches the
+  booking's uncommitted event of the same address and waits for it, where the new plain read does not
+  see it; the others on the missing behaviour);
+  p40's own paths (L9, coverage) pass. Before the two-connection test, 26 of 27 failed on `9215991` and
+  on `b074527`. The three `test_crm_privacy` tests changed for L5 and L6 fail on the old code. E2E:
+  `crm-profile.spec.ts`, the new `crm-merge.spec.ts` (a shared phone shown as a possible duplicate,
+  merged from the profile), `crm-admin.spec.ts` and `booking.spec.ts` pass twice in a row on a server
+  running this tree.
 
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
