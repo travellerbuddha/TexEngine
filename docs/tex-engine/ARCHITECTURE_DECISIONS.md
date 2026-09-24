@@ -4393,3 +4393,124 @@ for the matrix and the preview (live, 300 ms debounce), and the UI slices (S8, S
 validation bounded: at most one `validate_version` in flight per editor, a stale answer dropped,
 and a debounce that grows with the draft (1.2 s suits the realistic size, not the cap). A
 server-side concurrency guard for validation is not built (open).
+
+**Decision (implemented in S4: GAP-4, GAP-5).**
+- *Anchored issues (D9).* `validate.Issue` gains `ref: dict | None` as its last field. It is not
+  part of the issue's identity (`compare=False`), so issues compare and hash as before. `to_dict`
+  adds `"ref"` only when there is one. `_err` / `_warn` take the parts as keywords and keep only the
+  known ones (0 adults or children is known). What each issue names:
+  - `ROOM_CAPACITY`, `INCLUDED_ADULTS`: `room_type`;
+  - `PERIOD_DUPLICATE`, `PERIOD_RANGE`: `period`; `PERIOD_OVERLAP`: `period`, `other_period`;
+  - `ROOM_RULE_DUPLICATE`: `rule_id`, `rule_ids`, `room_type`, `period` (none for "all");
+    `ROOM_RULE_UNKNOWN_ROOM` / `_UNKNOWN_PERIOD` / `_NO_BASE`: the rule's `rule_id`, `room_type`,
+    `period`;
+  - `ROOM_NEGATIVE` and the `room_unit` errors (`NO_ROOM_PRICE`, `ROOM_DERIVATION_*`): the cell's
+    `room_type` and `period`, and `rule_id` of the rule that prices the cell (the first non-INHERIT
+    rule `room_unit` takes; none when the room has no rule there). A derived room whose base has no
+    price names its own formula;
+  - `AGE_BANDS`: `age_bands` = every band code of the terms, in their order (the message names
+    bands by code; `ages.band_problems` returns text, so the client replaces the codes it is
+    given), and `age_band` when the problem is about one band (an invalid range), not for an
+    overlap or gap between two. `ages.band_findings` is `band_problems` with the codes of each
+    problem; `band_problems` is now built from it, text unchanged;
+  - `OCC_UNKNOWN_*`, `OCC_INHERITED_*_UNUSED`, `OCC_COMBINATION_QUALIFIER`, `OCC_ADULT_BAND`,
+    `OCC_INHERITED_ADULT_BAND_UNUSED`, `OCC_NO_VALUE`: the rule's own scope (`rule_id`,
+    `room_type`, `period`, `age_band`, `adults`, `children`); `OCC_DUPLICATE`: the twins'
+    signature, `rule_id` + `rule_ids`; `OCC_AMBIGUOUS` and `OCC_POLICY_OVERRIDE_OUTRANKED`: both
+    rules (`rule_ids`) and the slot the message names (`room_type`, `period`, `age_band`,
+    `adults`, `children`), without a pricing policy's placeholders (`policy_issues`);
+    `OCC_INFANT_GENERIC`: the infant `age_band` and the band-less rules (`rule_ids`);
+  - the publish sweep (`NO_CHILD_RULE`, `AMBIGUOUS_OCCUPANCY_RULES`, …): `room_type`, `period`,
+    `adults`, `children`, `age_band`, and for a tie the tied rules (`Unsellable.params["rules"]`).
+    The sweep reports a combination once, so `period` is the first period it fails in;
+  - `BOARD_*` (below): `rule_id`, `board`, `room_type`, `period`; `BOARD_DUPLICATE` also `rule_ids`.
+  - None: `CURRENCY`, `NO_ROOMS`, `NO_PERIODS`, `SALE_WINDOW`, `STAY_WINDOW`, `AGE_BANDS_MIN_AGE`,
+    `NO_AGE_BANDS`, `NO_BASE_BOARD`, `RATE_PLAN_BOARD`, `OFFER_*` and `BUILD` (about the contract,
+    the selling terms, a rate plan or an offer, not a cell).
+
+  Rule ids are the saved row names, or `~<_key>` for rows sent unsaved (S2). Codes, levels, order
+  and every message are unchanged: 80 scenarios (223 issues, every code that gained a ref) give the same
+  `(level, code, message)` lists on the S3 tip and on S4, apart from the new BOARD_* codes. The
+  frontend `Issue` type gains `ref?: IssueRef`. `issueTab` is unchanged until S8, so BOARD_* issues
+  count under the default ("settings") group and are listed in the editor's issue list.
+- *Board rules (GAP-5).* After `NO_BASE_BOARD`, three new ERRORs, mirroring the room-rule checks:
+  `BOARD_UNKNOWN_ROOM` ("board rule {id} ({board}) names unknown room {room}"),
+  `BOARD_UNKNOWN_PERIOD` ("… names unknown period {period}") and `BOARD_DUPLICATE` ("board {board}
+  has {n} rules for the same room and period": one board, room and period, base rows included).
+  The engine is unchanged: `boards.board_rule` still breaks a tie by the greatest row name, but a
+  draft that has one can no longer be published.
+- *Unique row names in the overlay* (an open item of the S2 and S3 reviews, taken here because S4's
+  `rule_id` / `rule_ids` anchor on them). The overlay refuses a table in which two rows would get
+  the same name: the same `_key` twice, a key equal to a keyless row's `~<table>-<position>`, or two
+  keys equal after the 100-character cut. "<table>: two rows have the key <key>; each row needs its
+  own key." One key in two tables is allowed (the issue code says which table); `save_version`
+  drops the keys and is unchanged.
+
+**Deviations from the slice text, with reasons.**
+- `rule_ids` (not in the slice's key list) on the issues about several rules (`ROOM_RULE_DUPLICATE`,
+  `OCC_DUPLICATE`, `OCC_AMBIGUOUS`, `OCC_POLICY_OVERRIDE_OUTRANKED`, `OCC_INFANT_GENERIC`,
+  `BOARD_DUPLICATE`, the sweep's ties): `rule_id` can mark one row only; the twins all need fixing.
+  `rule_id` is the first of them (table order), so a client that reads only `rule_id` still anchors.
+- Occupancy-rule refs also carry the rule's `adults` / `children` (its combination) where it has
+  them, and `BOARD_UNKNOWN_ROOM` / `_PERIOD` carry the rule's other scope part: the whole scope of
+  the row, as the design's anchoring (§3.15) reads it.
+- `OCC_POLICY_OVERRIDE_OUTRANKED` gets a ref (the slice listed the other OCC_* codes; the design's
+  GAP-4 says OCC_*).
+- The duplicate-key refusal above (an overlay behaviour change, S2 code).
+
+**Consequences.**
+- Drafts with an orphan or duplicate board row can no longer be published; they were priced by
+  the row name's order or not at all. Published versions are frozen and price as before; a new
+  draft based on one with such rows has to be fixed before it publishes. A read-only scan of the
+  shared development site found none among its 273 contract versions with board rows. This
+  behaviour change is announced in `GO_LIVE_READINESS.md` (change log).
+- A published version's `validation_report` and `publish`'s `warnings` now carry the refs too
+  (additive; not part of the payload or its hash).
+
+**Rejected (S4).**
+- Server-side band labels in messages: the label's language is the viewer's, and the client
+  already has the labels; codes stay machine-readable.
+- Parsing band codes out of message text: `band_findings` returns them from the check itself.
+- Settling duplicate board rules in the engine: a pricing change for frozen versions; validation
+  makes new ones unpublishable instead.
+- Falling back to `~<table>-<position>` for a repeated key: the client could not map it back to the
+  row it meant; a refusal names the table and key.
+
+**Tests (S4).** Unit `test_validate_refs.py` (37, pure): the Issue shape (`ref` optional and last,
+`to_dict` without an empty or missing ref, still hashable); header issues without a ref; missing
+parts left out and 0 kept; the messages of `ROOM_RULE_DUPLICATE`, `OCC_DUPLICATE` and
+`PERIOD_OVERLAP` byte for byte (the `test_contracts_restrictions` scenarios); the reference contract
+still clean; the refs of every code listed above (room and period checks, the cell's rule for a
+negative, unpriced, derived-without-base and cyclic cell, an INHERIT row not taken as the cell's
+rule, age bands with every code and the single band, each OCC_* code, a tie's slot in the period it
+decides, a policy checked on its own without its placeholders, the sweep's party and tied rules);
+`BOARD_UNKNOWN_ROOM`, `BOARD_UNKNOWN_PERIOD` and `BOARD_DUPLICATE` (unscoped, scoped with three
+rows, two base rows) with messages and refs; the fixture boards (AI base, UAI) and one board's rules
+for different scopes clean; board errors after `NO_BASE_BOARD`. On the S3 tip `4575818` 31 of the
+37 fail (27 errors: no `ref`; 4 failures: no board issue); the 6 that pass pin the unchanged
+messages and the clean fixture. Nine mutants are killed (board twins keyed by board only, ref
+compared, 0 dropped, a band named for a pair, an INHERIT row as the cell's rule, a policy
+placeholder in a slot, no unknown-period check, the sweep's tie without rule ids, `to_dict` always
+adding `ref`). Integration `test_pricing_workspace_api` (+6, 37 in all): `validate_version`'s JSON
+anchors a duplicated room rule (`~key` ids unsaved, row names once saved); an issue about the
+contract as a whole has no ref; board rules for a room the draft no longer sells, an unknown period
+and a twin, with refs; publish refused for an orphan board period (the version stays Draft); the
+`create_contract` fixture still publishes, its warnings and stored `validation_report` in the new
+shape; the overlay refuses a key used twice and a key equal to a keyless row's name, in all three
+endpoints, allows one key in two tables, and a save of the same payload succeeds. On the S3 tip 3
+of the first 5 fail (no `ref`; board rows reported clean; publish not refused) and 2 pass (pinning
+the ref-less issue and the fixture's publish); the key test fails before the guard. Verification on
+branch `pw-backend` (main `1575c8b` already merged; no newer main), migrated with it: all 38
+integration modules 820 OK (10 skipped, as before); 480 unit tests; ruff; eval harness 76/76,
+front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`;
+`bench_pricing_workspace` 2 OK.
+
+**Performance after S4** (the same benchmark, best of three, seconds; S3's figures in brackets).
+Realistic 12 × 26: `validate_version` 1.92 saved / 2.14 unsaved (2.25 / 2.30), `price_matrix`
+unsaved 0.24 (0.25), `preview_price` unsaved 0.22 (0.24), the overlay alone 0.16 (0.17). Near the
+cap 12 × 40: validation 9.48 / 9.50 (10.0 / 9.9), matrix unsaved 0.68 (0.70). The refs cost nothing
+measurable (the realistic draft's 125 warnings all carry one); the duplicate-key check is one set
+per table. The S3 reading stands: validation is the cost, and the UI must keep one in flight.
+
+**O1–O5 after S4.** Unchanged: S4 is validation only. None of O1–O5 is implemented on `pw-backend`;
+they land in S1 (O1–O3, O5 parse), S5 + S9 (O4) and S13 (board cells), and stay owner input 13.

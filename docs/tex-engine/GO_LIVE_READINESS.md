@@ -446,3 +446,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   refused on save, and the price matrix names the rule behind each cell, the inherited bands and
   rules, the engine's defaults and sample-party totals. Performance measured (ADR-061). The O1–O5
   shorthand decisions are owner input 13. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace backend slice S4 on branch `pw-backend` (ADR-061): validation issues
+  say which rule, room, period, band, party or board they are about (messages unchanged).
+  **Behaviour change to announce to contract managers:** a draft with a board rule for a room or
+  period the contract does not have, or with two rules of one board for the same room and period,
+  can no longer be published (`BOARD_UNKNOWN_ROOM`, `BOARD_UNKNOWN_PERIOD`, `BOARD_DUPLICATE`);
+  such rows were priced by row order or never. Published versions are unchanged; none of the 273
+  versions with board rows on the development site is affected. No area status changes. Verdict
+  unchanged: NOT READY.
