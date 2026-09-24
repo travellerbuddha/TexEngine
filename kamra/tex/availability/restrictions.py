@@ -253,36 +253,42 @@ def evaluate(cells: list[RestrictionCell], scope: RestrictionScope, check_in: da
 
 
 def evaluate_change(cells: list[RestrictionCell], scope: RestrictionScope, check_in: date, check_out: date,
-                    sale_date: date, *, before: tuple[date, date] | None, min_los_basis: str = ARRIVAL
-                    ) -> tuple[list[Violation], dict[date, Effective]]:
+                    sale_date: date, *, before: tuple[date, date] | None, product_changed: bool = False,
+                    min_los_basis: str = ARRIVAL) -> tuple[list[Violation], dict[date, Effective]]:
 	"""Check a changed stay the way a new booking is checked, for what the change newly takes
-	(G-48, ADR-057). ``before``: the (arrival, departure) the reservation holds now, for the same
-	product (room type, contract, market, rate plan and channel); None for a new sale or a change
-	of product, which is checked in full.
+	(G-48, ADR-057). ``before``: the (arrival, departure) the reservation holds now; None for a
+	new sale, which is checked in full. ``product_changed``: the change sells another product
+	(room type, contract, market or rate plan; the channel never changes).
 
 	- a night the stay already holds is its own: a stop sell or a booking window on it never
-	  refuses the change (held nights are not recounted for inventory either, ADR-048); a new
-	  night is checked;
+	  refuses a change of the same product (held nights are not recounted for inventory either,
+	  ADR-048); a new night, or every night of another product, is checked;
 	- arrival rules (closed to arrival, arrival stop sell, release, minimum and maximum advance)
-	  apply only when the arrival changes; departure rules (closed to departure, departure stop
-	  sell) only when the departure changes;
-	- the length of stay (minimum / maximum) is judged on the new stay when its dates change.
-	An unchanged stay is never refused."""
+	  apply when the arrival changes or the product does; departure rules (closed to departure,
+	  departure stop sell) when the departure changes or the product does;
+	- the length of stay (minimum / maximum) is judged on the new stay when its dates change, or
+	  when another product is sold for a stay not begun yet;
+	- the past is not sold again: a night before the sale date is never judged, and neither is the
+	  arrival of a stay under way (an in-house guest moved to another room or rate).
+	An unchanged stay of the same product is never refused."""
 	violations, eff = evaluate(cells, scope, check_in, check_out, sale_date, min_los_basis=min_los_basis)
 	if before is None:
 		return violations, eff
-	held = set(stay_days(before[0], before[1])[:-1])
-	arrival_moved, departure_moved = check_in != before[0], check_out != before[1]
+	held = set() if product_changed else set(stay_days(before[0], before[1])[:-1])
+	arrival_moved = product_changed or check_in != before[0]
+	departure_moved = product_changed or check_out != before[1]
+	dates_moved = (check_in, check_out) != tuple(before)
+	begun = check_in < sale_date
 	out = []
 	for v in violations:
 		if v.code in NIGHT_CODES:
-			keep = v.day not in held
+			keep = v.day not in held and v.day >= sale_date
 		elif v.code in ARRIVAL_CODES:
-			keep = arrival_moved
+			keep = arrival_moved and not begun
 		elif v.code in DEPARTURE_CODES:
 			keep = departure_moved
 		elif v.code in LENGTH_CODES:
-			keep = arrival_moved or departure_moved
+			keep = dates_moved or (product_changed and not begun)
 		else:
 			keep = True
 		if keep:

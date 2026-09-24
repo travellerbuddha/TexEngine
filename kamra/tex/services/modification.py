@@ -261,13 +261,13 @@ def booked_price(res, version: str, req, **kw):
 	return quote, terms
 
 
-def restriction_violations(res, snap: dict, req, contract: str | None, today) -> list:
+def restriction_violations(res, snap: dict, req, contract: str | None, sale_date) -> list:
 	"""What the restrictions refuse in a change (G-48, ADR-057): the changed stay is checked like
-	a new booking of its scope for what it newly takes. With the same product (room type,
-	contract, market, rate plan; the channel never changes) the nights it holds are its own and
-	arrival, departure and length rules apply only when those change
-	(``restrictions.evaluate_change``); another product is a new sale of the stay, checked in
-	full. A change of neither dates nor product is never checked."""
+	a new booking of its scope, on ``sale_date``, for what it newly takes. With the same product
+	(room type, contract, market, rate plan; the channel never changes) the nights it holds are
+	its own and arrival, departure and length rules apply only when those change; another product
+	is a new sale of the stay, its past aside (``restrictions.evaluate_change``). A change of
+	neither dates nor product is never checked."""
 	old = snap.get("request") or {}
 	before = (getdate(res.check_in_date), getdate(res.check_out_date))
 	same_product = (req.room_type == (old.get("room_type") or res.room_type)
@@ -277,8 +277,8 @@ def restriction_violations(res, snap: dict, req, contract: str | None, today) ->
 	if same_product and (req.check_in, req.check_out) == before:
 		return []
 	sc = avail.scope_for(req.room_type, contract, req.market, req.rate_plan, req.channel)
-	return avail.check_restrictions(res.property, sc, req.check_in, req.check_out, today,
-	                                before=before if same_product else None)
+	return avail.check_restrictions(res.property, sc, req.check_in, req.check_out, sale_date, before=before,
+	                                product_changed=not same_product)
 
 
 PROPOSAL_TTL_MINUTES = 30
@@ -359,8 +359,10 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		                                      held=avail.held_nights(req.room_type, res))
 		if count < 1:
 			warnings.append({"code": "SOLD_OUT", "message": _("No availability for the new stay.")})
-	# restrictions refuse a change as they refuse a new booking, for what it newly takes (G-48)
-	violations = [v.to_dict() for v in restriction_violations(res, snap, req, terms.contract_id, now.date())]
+	# restrictions refuse a change as they refuse a new booking, for what it newly takes (G-48); a
+	# stored proposal (a guest's change paid or approved later) is judged as of when it was priced
+	sale_day = get_datetime(_sale_at).date() if _sale_at else now.date()
+	violations = [v.to_dict() for v in restriction_violations(res, snap, req, terms.contract_id, sale_day)]
 	warnings.extend(violations)
 	for e in quote.extras:
 		if not e.ok and e.reason.startswith(CAPACITY_REASONS):

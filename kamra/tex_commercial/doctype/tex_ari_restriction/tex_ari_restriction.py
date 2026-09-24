@@ -7,10 +7,12 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import getdate
 
+from kamra.tex.availability import restrictions as rs
+
 SCOPE = ("property", "room_type", "contract", "market", "rate_plan", "sales_channel", "restriction_date")
 VALUES = ("stop_sell", "stop_sell_mode", "min_los", "max_los", "cta", "ctd", "release_days", "min_advance",
           "max_advance", "book_from", "book_to")
-CHANNEL_SCOPES = ("Booking Engine", "Call Center", "Booking Engine + Call Center")
+CHANNEL_SCOPES = tuple(rs.CHANNEL_SCOPES)
 
 
 def scope_key(values: dict) -> str:

@@ -351,18 +351,24 @@ def restriction_boundaries(today: date | None = None) -> int:
 	today = getdate(today or now_datetime())
 	n = 0
 	for prop in channel_properties():
+		# only the cells with a sale-date rule
 		rows = frappe.get_all("TEX ARI Restriction", filters={"property": prop, "restriction_date": (">=", today)},
+		                      or_filters={"book_from": ("is", "set"), "book_to": ("is", "set"),
+		                                  "release_days": (">", 0), "min_advance": (">", 0), "max_advance": (">", 0)},
 		                      fields=["room_type", "restriction_date", "book_from", "book_to", "release_days",
 		                              "min_advance", "max_advance"])
+		due: dict[str | None, set[date]] = {}
 		for r in rows:
 			day = getdate(r.restriction_date)
 			lead = (day - today).days
-			if not ((r.book_from and getdate(r.book_from) == today)
+			if ((r.book_from and getdate(r.book_from) == today)
 			        or (r.book_to and getdate(r.book_to) == today - timedelta(days=1))
 			        or any(v and lead == int(v) - 1 for v in (r.release_days, r.min_advance))
 			        or (r.max_advance and lead == int(r.max_advance))):
-				continue
-			n += mark_dirty(prop, [r.room_type] if r.room_type else None, day, day, reason="restriction boundary")
+				due.setdefault(r.room_type or None, set()).add(day)
+		for room_type, days in due.items():
+			n += mark_dirty(prop, [room_type] if room_type else None, min(days), max(days),
+			                reason="restriction boundary")
 	return n
 
 

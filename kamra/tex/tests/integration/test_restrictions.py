@@ -188,6 +188,18 @@ class TestStaffModifications(RestrictionCase):
 		self.assertFalse(p["sellable"])
 		self.assertIn("STOP_SELL", codes(p["restrictions"]))
 
+	def test_an_upgrade_of_a_stay_under_way_is_not_judged_on_its_past(self):
+		res = self.staff_books()
+		self.cell(self.ci, room_type=self.dlx, cta="Yes", min_advance=400, stop_sell="STOP")
+		doc = frappe.get_doc("Reservation", res)
+		snap = json.loads(doc.tex_pricing_snapshot)
+		req, _s = modification.build_changed_request(doc, {"room_type": self.dlx}, now_datetime())
+		found = modification.restriction_violations(doc, snap, req, doc.tex_contract, self.today)
+		self.assertEqual(sorted(v.code for v in found), ["CTA", "MIN_ADVANCE", "STOP_SELL"])   # sold anew
+		# the same move on 11 June, the guest in house since the 10th: the arrival and the night slept
+		# are the past, not a sale
+		self.assertEqual(modification.restriction_violations(doc, snap, req, doc.tex_contract, fx.d(6, 11)), [])
+
 	def test_an_override_needs_restriction_edit_a_reason_and_is_audited(self):
 		res = self.staff_books()
 		self.cell(self.co, room_type=self.std, stop_sell="STOP")
@@ -347,6 +359,13 @@ class TestGridCells(RestrictionCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "booking window"):
 			grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[self.std],
 			                     restrictions={"book_from": str(fx.d(5, 2)), "book_to": str(fx.d(5, 1))})
+
+	def test_the_portfolio_alert_names_the_channel_scope(self):
+		from kamra.tex.reports import portfolio
+
+		self.cell(add_days(self.today, 1), channel_scope="Call Center", stop_sell="STOP")
+		alerts = [a for a in portfolio._restriction_alerts([fx.PROPERTY], self.today) if a["kind"] == "stop_sell"]
+		self.assertEqual([(a["channel"], a["channel_scope"]) for a in alerts], [(None, "Call Center")])
 
 	def test_existing_cells_keep_their_scope_key(self):
 		name = self.cell(self.ci, room_type=self.std, market="DE", min_los=2)

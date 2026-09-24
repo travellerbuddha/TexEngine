@@ -78,17 +78,19 @@ def _lock_and_check(property: str, room_type: str, ci, co, exclude: list[str]) -
 	return None if count >= 1 else f"{room_type} {ci}→{co}: accepted from the channel although TEX shows no room left"
 
 
-def _restriction_warning(property: str, m, ci, co, now, before=None) -> str | None:
+def _restriction_warning(property: str, m, ci, co, now, before=None, product_changed: bool = False) -> str | None:
 	"""A stay the channel sold although a TEX restriction of its scope refuses it (a stop sell,
 	CTA/CTD, a length of stay, the booking window …) is accepted like an overbooking: the guest
 	holds the channel's confirmation (ADR-039, G-48). ``before``: the stay a modification
-	replaces, of the same product: only what it newly takes is checked (ADR-057)."""
+	replaces (``product_changed``: now another room type, rate plan or market): only what it
+	newly takes is checked (ADR-057)."""
 	from kamra.tex.availability import repository as avail
 	from kamra.tex.distribution.repository import _contract_version
 
 	contract = m.contract or _contract_version(m, now)[0]
 	sc = avail.scope_for(m.room_type, contract, m.market, m.rate_plan, m.sales_channel)
-	found = avail.check_restrictions(property, sc, ci, co, now.date(), before=before)
+	found = avail.check_restrictions(property, sc, ci, co, now.date(), before=before,
+	                                 product_changed=product_changed)
 	if not found:
 		return None
 	return (f"{m.room_type} {ci}→{co}: accepted from the channel although TEX restrictions refuse it: "
@@ -264,7 +266,8 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			# the nights, arrival and departure the line already had are its own (ADR-057)
 			same = (res.room_type, res.rate_plan or None, res.tex_market) == (m.room_type, m.rate_plan or None, m.market)
 			restricted = _restriction_warning(prop, m, ci, co, now, before=(
-				getdate(res.check_in_date), getdate(res.check_out_date)) if same and res.status in LIVE else None)
+				getdate(res.check_in_date), getdate(res.check_out_date)) if res.status in LIVE else None,
+				product_changed=not same)
 			if restricted:
 				warnings.append(restricted)
 			old = D(str(res.tex_total_amount or 0))

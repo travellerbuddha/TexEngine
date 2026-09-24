@@ -17,8 +17,8 @@ def cell(cid, day, **kw):
 	return rs.RestrictionCell(cid, day, **kw)
 
 
-def codes(cells, scope=WEB, ci=CI, co=CO, sale=SALE, before=None):
-	v, _ = rs.evaluate_change(cells, scope, ci, co, sale, before=before)
+def codes(cells, scope=WEB, ci=CI, co=CO, sale=SALE, before=None, product_changed=False):
+	v, _ = rs.evaluate_change(cells, scope, ci, co, sale, before=before, product_changed=product_changed)
 	return sorted(x.code for x in v)
 
 
@@ -167,6 +167,24 @@ class TestChangedStay(unittest.TestCase):
 		self.assertEqual(codes([cell("l", CI, min_los=3)], co=date(2027, 7, 12), before=self.BEFORE), ["MIN_LOS"])
 		self.assertEqual(codes([cell("l", CI, max_los=4)], co=date(2027, 7, 15), before=self.BEFORE), ["MAX_LOS"])
 		self.assertEqual(codes([cell("l", CI, max_los=4)], before=self.BEFORE), [])      # dates unchanged
+
+	def test_another_product_is_a_new_sale_of_the_stay(self):
+		cells = [cell("s", date(2027, 7, 11), stop_sell="STOP"), cell("a", CI, cta=True, min_los=5)]
+		self.assertEqual(codes(cells, before=self.BEFORE, product_changed=True), ["CTA", "MIN_LOS", "STOP_SELL"])
+
+	def test_the_past_of_a_stay_under_way_is_not_sold_again(self):
+		# an in-house guest (arrived 10 July) moved to another room on 12 July
+		cells = [cell("s", date(2027, 7, 11), stop_sell="STOP"), cell("w", date(2027, 7, 10), book_to=date(2027, 7, 1)),
+		         cell("a", CI, cta=True, release_days=30, min_los=5)]
+		today = date(2027, 7, 12)
+		self.assertEqual(codes(cells, sale=today, before=self.BEFORE, product_changed=True), [])
+		# … but a night still to come is sold as the new product
+		cells.append(cell("n", date(2027, 7, 13), stop_sell="STOP"))
+		self.assertEqual(codes(cells, sale=today, before=self.BEFORE, product_changed=True), ["STOP_SELL"])
+		# a stay under way whose dates change is judged on its new length and its new nights
+		self.assertEqual(codes(cells[:3], sale=today, co=date(2027, 7, 13), before=self.BEFORE), ["MIN_LOS"])
+		self.assertEqual(codes([*cells[:3], cell("m", CO, stop_sell="STOP")], sale=today, co=date(2027, 7, 15),
+		                       before=self.BEFORE), ["STOP_SELL"])
 
 	def test_an_unchanged_stay_is_never_refused(self):
 		cells = [cell("x", CI, cta=True, min_los=9, stop_sell="STOP", book_to=date(2027, 1, 1)),

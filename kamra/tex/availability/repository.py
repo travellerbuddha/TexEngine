@@ -342,9 +342,12 @@ def scope_for(room_type: str | None, contract: str | None, market: str | None, r
 
 def check_restrictions(property: str, scope: rs.RestrictionScope, check_in: date, check_out: date,
                        sale_date: date, cells: list[rs.RestrictionCell] | None = None, *,
-                       before: tuple[date, date] | None = None) -> list[rs.Violation]:
-	"""Violations of a stay. ``before``: the stay a change replaces, of the same product: only what
-	the change newly takes is checked (``restrictions.evaluate_change``, ADR-057)."""
+                       before: tuple[date, date] | None = None, product_changed: bool = False
+                       ) -> list[rs.Violation]:
+	"""Violations of a stay. ``before``: the stay a change replaces (``product_changed``: sold as
+	another product): only what the change newly takes is checked (``restrictions.evaluate_change``,
+	ADR-057)."""
 	cells = cells if cells is not None else restriction_cells(property, check_in, check_out)
-	violations, _ = rs.evaluate_change(cells, scope, check_in, check_out, sale_date, before=before)
+	violations, _ = rs.evaluate_change(cells, scope, check_in, check_out, sale_date, before=before,
+	                                   product_changed=product_changed)
 	return violations

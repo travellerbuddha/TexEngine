@@ -239,7 +239,8 @@ def _restriction_alerts(hotels: list[str], today: date) -> list[dict]:
 	rows = frappe.get_all("TEX ARI Restriction", filters={
 		"property": ("in", hotels), "restriction_date": ("between", [today, add_days(today, ALERT_DAYS - 1)])},
 		or_filters={"stop_sell": "STOP", "cta": "Yes", "ctd": "Yes"},
-		fields=["property", "restriction_date", "room_type", "stop_sell", "cta", "ctd", "market", "sales_channel"],
+		fields=["property", "restriction_date", "room_type", "stop_sell", "cta", "ctd", "market", "sales_channel",
+		        "channel_scope"],
 		order_by="restriction_date asc", limit=500)
 	out = []
 	for r in rows:
@@ -247,5 +248,7 @@ def _restriction_alerts(hotels: list[str], today: date) -> list[dict]:
 		out.append({"hotel": r.property, "hotel_name": names.get(r.property) or r.property,
 		            "date": str(r.restriction_date), "kind": kind, "room_type": r.room_type,
 		            "room_type_name": frappe.db.get_value("Room Type", r.room_type, "room_type_name") if r.room_type
-		            else None, "market": r.market, "channel": r.sales_channel})
+		            else None, "market": r.market, "channel": r.sales_channel,
+		            # the Booking Engine, the Call Center or both (G-48): not every channel
+		            "channel_scope": r.channel_scope or None})
 	return out
