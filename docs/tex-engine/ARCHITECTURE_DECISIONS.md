@@ -1213,6 +1213,48 @@ overlap, and some money could be left with no one to settle it.
   its booking until staff record the outcome (they see it in the queue, on the payment screen
   and in the system status). A stay inside its penalty window cannot be moved later online.
 
+**Third review follow-up (G-45 re-review 3).** Recording an outcome could race the gateway
+call it was meant to replace, a run could lose its hold, and what a request refunded was a
+counter that a lost run never increased.
+- *An outcome is recorded only once no answer can come, and never overwritten (High).*
+  `payments.finish_refund` and the guest change card record a refund's outcome only when it is
+  Pending, stuck (`UNKNOWN`, or older than `REFUND_STUCK_MINUTES`) and no refund run holds the
+  request it was made for (`guest_changes.finish_block`, enforced under the locks; the payment
+  screen and the card show `can_finish` / `can_close` and the reason from the server). After
+  the gateway answered, `payments.service.refund` takes the locks again in **one order: the
+  booking (with the caller's request), the refund, its charge**, the order `verify_refund` and
+  `finish_unknown_refund` take, and reads the refund again: an outcome recorded meanwhile is
+  never overwritten. The same answer is taken as it stands (nothing applied twice; what was
+  refunded is counted from the refund rows); another answer, or none, is a `RefundConflict`,
+  audited `payment.refund_outcome_conflict` with the gateway's actual answer and failed in
+  the system status (`refund_conflict`). A refund run never takes a conflict as a failure: it
+  stops refunding that change for good, and what its books say the change still owes goes to
+  staff ("Verify refund at gateway", naming the refund) to reconcile. The payment callback's
+  order (the payment, then the booking) does not meet this one: a charge is refunded only once
+  it succeeded, and a replayed callback takes no booking lock.
+- *A run keeps its hold (Medium).* The hold is committed as soon as it is taken, and every
+  outcome (a refusal, money left to staff) is committed before the next refund: a refund that
+  fails before its own commit (a lock wait, a refusal) rolls back its work, not the hold, so
+  the run goes on to the next charge and ends with staff, never "busy" forever.
+- *What a request refunded is counted from the refunds it made (Low).* Every refund a request
+  asks for is named on it (`refund_rows`, on record with the refund); `refunded_amount` is the
+  sum of those that succeeded. A refund made by a run that lost its hold, or recorded by staff
+  during the call, is counted once. The lease is renewed before every gateway call.
+- *The channel's lock order (Low).* A channel modification locks the booking, its
+  reservations (by name), then the nights: a desk or PMS save of a reservation locks it, then
+  its nights, so they cannot wait on each other; a new room still takes no name before all
+  the nights are held (G-49).
+- *The payment job never raises (Low).* A transient error while marking a change failed leaves
+  it waiting ("retry"); the scheduler's sweep goes on.
+- *Money refunded outside TEX is recorded (G-93).* Closing money left to staff says what became
+  of it: "Refunded outside TEX" records Manual refunds of the payments holding the booking's
+  money (at most what it still holds over its total, `payments.refund_outside`, audited
+  `payment.refund_outside`), so it is no longer counted as paid nor offered as credit; "Kept on
+  the booking" leaves it as credit (`staff_settled` keeps what staff settled). The payment
+  screen records a refund made outside TEX for any payment (a payment entered by hand is
+  refunded that way only).
+- Schema: `refund_rows`, `staff_settled` on TEX Guest Change Request (no patch).
+
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 *Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
 a suspend stops quotes and bookings in flight, and the scheduler isolates each record.*
