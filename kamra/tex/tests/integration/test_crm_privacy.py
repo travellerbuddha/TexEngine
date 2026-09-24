@@ -252,13 +252,19 @@ class TestGuestIdentity(PrivacyCase):
 		                                                 "phone": "+49 170 5550001"}, property=fx.PROPERTY,
 		                                                market="DE", language="en", staff=True)
 		self.assertEqual(name, only)
-		# a profile known by phone alone takes the booking that now gives an e-mail too
+		# a profile known by phone alone takes the staff booking that now gives an e-mail too; an anonymous
+		# booker's phone is unverified and finds nobody (ADR-056 second review)
 		as_user("Administrator")
 		phoned = frappe.get_doc({"doctype": "Guest", "first_name": "Lena", "last_name": "Kraus",
 		                         "phone": "+49 170 5550002", "tex_enterprise": self.ent}).insert(
 			ignore_permissions=True).name
-		_b, again = self.booked_guest("g65-id-d", "g65-id-d@example.com", phone="+49 170 5550002")
-		self.assertEqual(again, phoned)
+		as_user(self.here)
+		name, _granted, _asked = booking.resolve_guest({"first_name": "Lena", "last_name": "Kraus",
+		                                                 "email": "g65-id-d@example.com", "phone": "+49 170 5550002"},
+		                                                property=fx.PROPERTY, market="DE", language="en", staff=True)
+		self.assertEqual(name, phoned)
+		_b, again = self.booked_guest("g65-id-e", "g65-id-e@example.com", phone="+49 170 5550002")
+		self.assertNotEqual(again, phoned)
 
 
 # ─── G-65: the guest list pages in SQL ───────────────────────────────────
@@ -371,12 +377,14 @@ class TestAbandonedPrivacy(PrivacyCase):
 		as_user("Administrator")
 		[ev] = funnel("g81-web")
 		self.assertEqual(ev.email_hash, None)
-		self.assertEqual(json.loads(ev.payload), {"quotes": ["q1"]})
+		self.assertEqual(json.loads(ev.payload), {})               # nor a quote id no quote has
 
 	def test_a_browser_event_keeps_only_its_allow_listed_fields(self):
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
 		as_user("Guest")
 		public.track(site=SLUG, session_id="g81-allow", event="room_view", payload=json.dumps({
-			"hotel": fx.PROPERTY, "room_type": "STD", "board": "AI", "rate_plan": "FLEX",
+			"hotel": fx.PROPERTY, "room_type": rt, "board": "AI", "rate_plan": rp,
 			"guest": {"email": "someone@example.com"}, "e_mail": "someone@example.com", "tel": "+49 30 2",
 			"note": "call me on +49 30 2", "hotel_extra": ["x"]}))
 		public.track(site=SLUG, session_id="g81-allow", event="abandoned", payload=json.dumps({
@@ -386,8 +394,7 @@ class TestAbandonedPrivacy(PrivacyCase):
 		             payload=json.dumps({"hotel": "h" * 500, "room_type": ["STD"]}))
 		as_user("Administrator")
 		payloads = [json.loads(e.payload) for e in funnel("g81-allow")]
-		self.assertEqual(payloads, [{"hotel": fx.PROPERTY, "room_type": "STD", "board": "AI", "rate_plan": "FLEX"},
-		                            {"quotes": ["q1"]}, {}])
+		self.assertEqual(payloads, [{"hotel": fx.PROPERTY, "room_type": rt, "board": "AI", "rate_plan": rp}, {}, {}])
 		self.assertEqual({e.email_hash for e in funnel("g81-allow")}, {None})
 
 	def test_a_consent_sent_as_text_means_what_it_says(self):
@@ -492,7 +499,7 @@ class TestAbandonedPrivacy(PrivacyCase):
 			frappe.client.get_list("TEX Abandoned Booking", fields=["name"], filters={"email": ("like", "%@%")})
 		frappe.clear_messages()
 		events = frappe.client.get_list("TEX Funnel Event", fields=["name", "email_hash"],
-		                                filters={"session_id": "g81-desk"}, limit_page_length=50)
+		                                filters={"property": fx.PROPERTY}, limit_page_length=500)
 		self.assertTrue(events)
 		self.assertEqual([e for e in events if e.get("email_hash")], [])
 
@@ -505,11 +512,12 @@ class TestAbandonedPrivacy(PrivacyCase):
 			ignore_permissions=True).name
 		cases, hashes = {}, {}
 		for guest, email in ((stale, "g81-stale@example.com"), (agreed, "g81-agrees@example.com")):
-			cases[guest] = frappe.get_doc({
+			case = frappe.get_doc({
 				"doctype": "TEX Abandoned Booking", "property": fx.PROPERTY, "session_id": f"p40-{guest}",
 				"stage_reached": "payment_started", "status": "Open", "guest": guest, "email": email,
-				"phone": "+49 30 1", "consent_marketing": 1, "last_event_at": now_datetime()}).insert(
-				ignore_permissions=True).name
+				"phone": "+49 30 1", "consent_marketing": 1, "last_event_at": now_datetime()})
+			case.db_insert()                                  # as stored before the consent was withdrawn
+			cases[guest] = case.name
 			hashes[guest] = frappe.get_doc({
 				"doctype": "TEX Funnel Event", "event": "guest_details", "occurred_at": now_datetime(), "site": SLUG,
 				"property": fx.PROPERTY, "session_id": f"p40-{guest}", "consent_marketing": 1,
@@ -811,3 +819,11 @@ class TestWithheldFieldPermissions(PrivacyCase):
 		                                                        "permlevel": 1}, "delete"), 0)
 		frappe.clear_cache(doctype="Guest")
 		self.assertTrue(internals.may_read("Guest", self.platform))
+		# and a platform administrator actually reads them (review follow-up, L9)
+		_b, guest = self.booked_guest("l9-perm", "l9-perm@example.com")
+		frappe.db.set_value("Guest", guest, {"tex_stays": 3, "tex_loyalty_points": 40})
+		as_user(self.platform)
+		read = frappe.client.get("Guest", guest)
+		self.assertEqual((read.get("tex_stays"), read.get("tex_loyalty_points")), (3, 40))
+		self.assertEqual(frappe.client.get_list("Guest", fields=["name", "tex_stays"], filters={"name": guest}),
+		                 [{"name": guest, "tex_stays": 3}])
