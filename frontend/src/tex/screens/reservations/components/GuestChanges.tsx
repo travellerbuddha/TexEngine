@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Check, CircleDollarSign, X } from "lucide-react"
 import type { TexApiError } from "../../../lib/api"
 import { date } from "../../../lib/format"
+import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, CardHeader, Dialog, Field, InlineError, Money, Notice, Segmented, Textarea, useToast } from "../../../ui"
 import { usePartyText } from "../../crs/components/PartyEditor"
@@ -121,6 +122,14 @@ export function GuestChangesCard({
                       </dd>
                     </div>
                   )}
+                  {r.status === "Requested" && r.contract && (
+                    <div className="flex justify-between gap-3" data-contract-status={r.contract.status}>
+                      <dt className="text-zinc-500">{t("res.gcr.contract")}</dt>
+                      <dd className={cn("text-right", !r.contract.on_sale && "font-medium text-amber-800")}>
+                        {r.contract.code} · {t(`rates.contract_status.${r.contract.status}`)}
+                      </dd>
+                    </div>
+                  )}
                   {r.status === "Awaiting Payment" && r.expires_at && (
                     <div className="flex justify-between gap-3">
                       <dt className="text-zinc-500">{t("res.gcr.expires")}</dt>
@@ -129,6 +138,9 @@ export function GuestChangesCard({
                   )}
                 </dl>
                 {r.status === "Requested" && r.penalty_terms && <p className="text-xs text-amber-800">{t("res.gcr.penalty_terms")}</p>}
+                {r.status === "Requested" && r.approve_blocked && (
+                  <Notice tone="warning">{t("res.gcr.contract_stopped", { code: r.contract?.code ?? "—" })}</Notice>
+                )}
                 {r.settle_pending && <p className="text-xs text-amber-800">{t(r.verify_refund ? "res.gcr.refund_waits" : "res.gcr.refund_pending")}</p>}
                 {r.staff_open && (
                   <Notice tone={r.staff_reason === "Verify refund at gateway" ? "danger" : "warning"}>
@@ -154,7 +166,12 @@ export function GuestChangesCard({
                   <div className="flex flex-wrap gap-2 pt-1">
                     {r.status === "Requested" && canDecide && (
                       <>
-                        <Button size="sm" icon={<Check className="size-4" aria-hidden />} onClick={() => setDialog({ row: r, action: "approve" })}>
+                        <Button
+                          size="sm"
+                          icon={<Check className="size-4" aria-hidden />}
+                          disabled={!!r.approve_blocked}
+                          onClick={() => setDialog({ row: r, action: "approve" })}
+                        >
                           {t("res.gcr.approve")}
                         </Button>
                         <Button size="sm" variant="secondary" icon={<X className="size-4" aria-hidden />} onClick={() => setDialog({ row: r, action: "reject" })}>

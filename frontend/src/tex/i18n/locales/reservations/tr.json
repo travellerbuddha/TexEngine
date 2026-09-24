@@ -168,6 +168,8 @@
  "res.gcr.close_body": "Otele bırakılan tutar iade edildikten veya TEX dışında kapatıldıktan sonra kullanın.",
  "res.gcr.close_title": "Ödemeyi kapatıldı olarak işaretle",
  "res.gcr.collect": "Önce online ödenecek",
+ "res.gcr.contract": "Kontrat",
+ "res.gcr.contract_stopped": "{code} artık satışta değil: bu değişiklik misafire gösterilen fiyatla onaylanamaz. Reddedin ya da rezervasyonu kendiniz değiştirin.",
  "res.gcr.done.approve": "Misafir değişikliği onaylandı",
  "res.gcr.done.close": "Kapatıldı olarak işaretlendi",
  "res.gcr.done.reject": "Misafir değişikliği reddedildi",

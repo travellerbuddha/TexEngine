@@ -184,6 +184,8 @@
  "res.gcr.close_body": "Użyj tego, gdy kwota pozostawiona hotelowi została zwrócona lub rozliczona poza TEX.",
  "res.gcr.close_title": "Oznacz kwotę jako rozliczoną",
  "res.gcr.collect": "Najpierw do zapłaty online",
+ "res.gcr.contract": "Umowa",
+ "res.gcr.contract_stopped": "{code} nie jest już w sprzedaży: tej zmiany nie można zatwierdzić po cenie pokazanej gościowi. Odrzuć ją albo zmień rezerwację samodzielnie.",
  "res.gcr.done.approve": "Zmiana gościa zatwierdzona",
  "res.gcr.done.close": "Oznaczono jako rozliczone",
  "res.gcr.done.reject": "Zmiana gościa odrzucona",

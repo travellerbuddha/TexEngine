@@ -168,6 +168,8 @@
  "res.gcr.close_body": "Use this once the money left to the hotel was refunded or settled outside TEX.",
  "res.gcr.close_title": "Mark the money as settled",
  "res.gcr.collect": "To pay online first",
+ "res.gcr.contract": "Contract",
+ "res.gcr.contract_stopped": "{code} no longer sells: this change cannot be approved at the price the guest was shown. Reject it, or change the reservation yourself.",
  "res.gcr.done.approve": "Guest change approved",
  "res.gcr.done.close": "Marked as settled",
  "res.gcr.done.reject": "Guest change rejected",

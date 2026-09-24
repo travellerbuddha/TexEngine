@@ -176,6 +176,8 @@
  "res.gcr.close_body": "Folosiți aceasta după ce suma lăsată hotelului a fost rambursată sau decontată în afara TEX.",
  "res.gcr.close_title": "Marchează suma ca decontată",
  "res.gcr.collect": "De plătit întâi online",
+ "res.gcr.contract": "Contract",
+ "res.gcr.contract_stopped": "{code} nu se mai vinde: această modificare nu poate fi aprobată la prețul arătat oaspetelui. Respingeți-o sau modificați rezervarea chiar dumneavoastră.",
  "res.gcr.done.approve": "Modificarea oaspetelui a fost aprobată",
  "res.gcr.done.close": "Marcat ca decontat",
  "res.gcr.done.reject": "Modificarea oaspetelui a fost respinsă",

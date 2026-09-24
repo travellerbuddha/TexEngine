@@ -321,4 +321,8 @@ export interface GuestChangeRequest {
   changes: { check_in?: string; check_out?: string; adults?: number; children?: (number | { age?: number | null })[] }
   /** Requested with a lower price: what approving it would leave paid above the new total */
   overpaid_after?: string
+  /** Requested: the contract that priced the change, as it is now (G-51 review) */
+  contract?: { contract: string; code: string; status: string; on_sale: boolean } | null
+  /** why approving is refused now (the contract no longer sells); rejecting stays possible */
+  approve_blocked?: string | null
 }

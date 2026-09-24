@@ -168,6 +168,8 @@
  "res.gcr.close_body": "Verwenden Sie dies, sobald der dem Hotel überlassene Betrag erstattet oder außerhalb von TEX abgerechnet wurde.",
  "res.gcr.close_title": "Betrag als abgerechnet markieren",
  "res.gcr.collect": "Zuerst online zu zahlen",
+ "res.gcr.contract": "Vertrag",
+ "res.gcr.contract_stopped": "{code} wird nicht mehr verkauft: Diese Änderung kann nicht zum dem Gast angezeigten Preis genehmigt werden. Lehnen Sie sie ab oder ändern Sie die Reservierung selbst.",
  "res.gcr.done.approve": "Änderung des Gastes genehmigt",
  "res.gcr.done.close": "Als abgerechnet markiert",
  "res.gcr.done.reject": "Änderung des Gastes abgelehnt",
