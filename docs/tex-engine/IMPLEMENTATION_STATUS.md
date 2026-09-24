@@ -88,7 +88,7 @@ system_status 12). `system-status.spec.ts` (4) passes.
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 0 High, 26 Medium, 7 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (recounted 2026-09-24, after G-92 was fixed). All nine Critical
+**Open gaps by severity:** 0 Critical, 1 High (G-96), 26 Medium, 7 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (recounted 2026-09-24, after G-92 was fixed). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 

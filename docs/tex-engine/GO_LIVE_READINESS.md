@@ -47,6 +47,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - ~~G-45 (guest change money)~~ fixed and reviewed four times (ADR-044; the fourth review's High in the G-93 path, 3 Medium and 3 Low fixed too); the third review's High (an outcome recorded while the gateway call runs), its Medium and 3 Low are fixed, and G-93 with them; its e2e `manage-money.spec.ts` must pass again;
   - ~~G-50 (contract header editable after publish)~~ fixed (ADR-045); its e2e step in `contract-admin.spec.ts` must pass;
   - ~~G-92 (a Desk/REST reservation at a TEX hotel is priced by the legacy engine, not TEX)~~ fixed (ADR-052): refused at a TEX hotel; migration imports keep their own amount as "Imported";
+  - G-92 review (2026-09-24): migration amounts in European/Turkish formats are parsed silently wrong and then price-locked (High); legacy check-out bills TEX-sold and Imported stays at the legacy room rate (G-96, High, pre-existing); being fixed;
   - payment provider certification.
 - **Security**:
   - ~~G-83 hygiene and the payment `api_key` field~~ fixed (ADR-046);
@@ -216,3 +217,4 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   `set_value`, `amend_stay`, `move_reservation` refused). Hotels outside TEX are unchanged.
   Removed from the money blockers; Pricing and Inventory stay PARTIAL (G-72, G-84, deploy-time
   republish; G-41, G-47, G-48). Verdict unchanged: NOT READY.
+- 2026-09-24: the G-92 review found 2 High money defects around it (import amount parsing; G-96 legacy check-out billing TEX stays at legacy rates) plus 3 Medium; money blockers until fixed.
