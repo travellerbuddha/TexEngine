@@ -21,8 +21,9 @@ import {
 } from "../../ui"
 import { cn } from "../../../lib/utils"
 import { SettingsFrame } from "./SettingsFrame"
-import { SENSITIVE, capLabel, groupCapabilities } from "./capabilities"
+import { ANY_CHANNEL, SENSITIVE, capLabel, channelSummary, groupCapabilities } from "./capabilities"
 import type { ProfilesData } from "./UsersAccess"
+import { useLabels } from "../crs/lib/labels"
 
 type Profile = ProfilesData["profiles"][number]
 
@@ -34,6 +35,8 @@ export default function Profiles() {
   const [editing, setEditing] = useState<Partial<Profile> | null>(null)
   const d = q.data
   const groups = useMemo(() => (d ? groupCapabilities(Object.keys(d.capabilities)) : []), [d])
+  const L = useLabels()
+  const channelText = (p: Profile) => channelSummary(t, L.channel, p)
 
   return (
     <SettingsFrame
@@ -148,6 +151,24 @@ export default function Profiles() {
                     ))}
                   </Fragment>
                 ))}
+                <tr>
+                  <th scope="colgroup" colSpan={d.profiles.length + 1} className="border-b border-zinc-100 bg-white px-3 pt-4 pb-1.5 text-left">
+                    <span className="sticky left-3 block max-w-[80vw]">
+                      <span className="block text-xs font-semibold tracking-wide text-tex-700 uppercase">{t("settings.profiles.channels")}</span>
+                      <span className="block text-xs font-normal text-zinc-500">{t("settings.profiles.channels_hint")}</span>
+                    </span>
+                  </th>
+                </tr>
+                <tr className="group">
+                  <th scope="row" className="sticky left-0 z-[1] border-b border-zinc-100 bg-white px-3 py-1.5 text-left font-normal group-hover:bg-zinc-50">
+                    {t("settings.profiles.channels_row")}
+                  </th>
+                  {d.profiles.map((p) => (
+                    <td key={p.name} data-profile-channels={p.name} className="border-b border-zinc-100 px-2 py-1.5 text-center text-xs text-zinc-700 group-hover:bg-zinc-50">
+                      {channelText(p)}
+                    </td>
+                  ))}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -189,14 +210,18 @@ function ProfileDrawer({
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [caps, setCaps] = useState<Set<string>>(new Set())
+  const [channels, setChannels] = useState<Set<string>>(new Set())
   const [touched, setTouched] = useState(false)
   const groups = useMemo(() => groupCapabilities(Object.keys(capabilities)), [capabilities])
+  const { boot } = useSession()
+  const L = useLabels()
 
   useEffect(() => {
     if (!profile) return
     setName(profile.profile_name ?? "")
     setDescription(profile.description ?? "")
     setCaps(new Set(profile.capabilities ?? []))
+    setChannels(new Set(profile.sales_channels ?? []))
     setTouched(false)
     save.clearError()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,7 +237,12 @@ function ProfileDrawer({
   const submit = async () => {
     setTouched(true)
     if (nameErr) return
-    const data: Record<string, unknown> = { profile_name: name.trim(), description: description.trim(), capabilities: [...caps].sort() }
+    const data: Record<string, unknown> = {
+      profile_name: name.trim(),
+      description: description.trim(),
+      capabilities: [...caps].sort(),
+      sales_channels: [...channels].sort(),
+    }
     if (profile?.name) data.name = profile.name
     try {
       await save.run({ data })
@@ -301,6 +331,42 @@ function ProfileDrawer({
             </fieldset>
           )
         })}
+        <fieldset className="rounded-lg border border-zinc-200">
+          <legend className="sr-only">{t("settings.profiles.channels")}</legend>
+          <div className="border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+            <p className="text-xs font-semibold tracking-wide text-tex-700 uppercase" aria-hidden>
+              {t("settings.profiles.channels")}
+            </p>
+            <p className="text-xs text-zinc-500">{t("settings.profiles.channels_edit_hint")}</p>
+          </div>
+          {caps.has(ANY_CHANNEL) && (
+            <div className="px-3 pt-2">
+              <Notice tone="info">{t("settings.profiles.channels_any_note")}</Notice>
+            </div>
+          )}
+          <ul className="divide-y divide-zinc-100">
+            {boot.channels.map((c) => (
+              <li key={c.name}>
+                <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-zinc-50">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-tex-600"
+                    checked={channels.has(c.name)}
+                    onChange={(e) => {
+                      const next = new Set(channels)
+                      if (e.target.checked) next.add(c.name)
+                      else next.delete(c.name)
+                      setChannels(next)
+                    }}
+                  />
+                  <span className="text-sm text-zinc-900">{L.channel(c.name) !== c.name ? L.channel(c.name) : c.channel_name || c.name}</span>
+                  <span className="font-mono text-[11px] text-zinc-400">{c.name}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {!channels.size && !caps.has(ANY_CHANNEL) && <p className="px-3 py-2 text-xs text-zinc-500">{t("settings.profiles.channels_default_note")}</p>}
+        </fieldset>
       </div>
     </Drawer>
   )

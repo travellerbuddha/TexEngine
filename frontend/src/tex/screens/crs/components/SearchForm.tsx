@@ -8,7 +8,7 @@ import { Button, Checkbox, Field, Input, Select } from "../../../ui"
 import { useLabels } from "../lib/labels"
 import { CodeChips } from "./controls"
 import { PartyEditor } from "./PartyEditor"
-import type { FieldErrors, SearchFormState } from "../lib/useBookingFlow"
+import { pickChannel, sellableChannels, type FieldErrors, type SearchFormState } from "../lib/useBookingFlow"
 
 export interface SearchFormProps {
   form: SearchFormState
@@ -16,8 +16,8 @@ export interface SearchFormProps {
   errors: FieldErrors
   onSubmit: () => void
   searching: boolean
-  /** Properties the user may price at (price.view). */
-  hotels: { name: string; property_name: string; city?: string }[]
+  /** Properties the user may price at (price.view), with the channels they may sell on there. */
+  hotels: { name: string; property_name: string; city?: string; sales_channels?: string[] }[]
   variant?: "full" | "compact"
   /** Visible, explicit suggestion (e.g. the caller's CRM market) — never auto-applied. */
   marketHint?: { code: string; label: string } | null
@@ -42,6 +42,11 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
     onSubmit()
   }
   const allHotels = form.properties.length === hotels.length
+  // only the channels the user may sell on at the chosen hotels (ADR-050); the server re-checks
+  const allowed = sellableChannels(hotels, form.properties)
+  const channels = allowed ? boot.channels.filter((c) => allowed.includes(c.name)) : boot.channels
+  // choosing hotels keeps the channel when it may still be sold there, else takes one that may
+  const setHotels = (properties: string[]) => set({ properties, channel: pickChannel(form.channel, hotels, properties) })
   // Stay length the agent chose (only check-out edits change it). Moving check-in keeps it,
   // also while a date is typed segment by segment (intermediate values are not choices).
   const stayNights = useRef(nights || 1)
@@ -101,7 +106,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
           <Select
             id={`${idPrefix}-channel`}
             value={form.channel}
-            options={boot.channels.map((c) => {
+            options={channels.map((c) => {
               const known = L.channel(c.name)
               return { value: c.name, label: known !== c.name ? known : c.channel_name || c.name }
             })}
@@ -144,7 +149,7 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
               <Checkbox
                 label={t("crs.search.all_hotels")}
                 checked={allHotels}
-                onChange={(e) => set({ properties: e.target.checked ? hotels.map((h) => h.name) : [] })}
+                onChange={(e) => setHotels(e.target.checked ? hotels.map((h) => h.name) : [])}
               />
               {hotels.map((h) => (
                 <Checkbox
@@ -152,11 +157,11 @@ export const SearchForm = forwardRef<HTMLInputElement, SearchFormProps>(function
                   label={h.city ? `${h.property_name} · ${h.city}` : h.property_name}
                   checked={form.properties.includes(h.name)}
                   onChange={(e) =>
-                    set({
-                      properties: e.target.checked
+                    setHotels(
+                      e.target.checked
                         ? hotels.filter((x) => x.name === h.name || form.properties.includes(x.name)).map((x) => x.name)
                         : form.properties.filter((p) => p !== h.name),
-                    })
+                    )
                   }
                 />
               ))}

@@ -251,6 +251,19 @@ class TestSelfService(TexTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			public.manage_cancel(token=token, reservation=other["rooms"][0]["reservation"])
 
+	def test_a_free_cancellation_penalty_keeps_its_decimals(self):
+		# money is a quantized string on every path, "0.00" as much as "84.25" (crs.cancellation_preview)
+		from kamra.tex.money import to_str
+
+		policy = {"rules": [{"days_before_arrival": 3, "penalty_type": "PERCENT", "penalty_value": "100"}]}
+		for rate_plan, rule in (({}, "no policy (free cancellation)"),
+		                        ({"cancellation_policy": policy}, "free cancellation window")):
+			res = frappe._dict(tex_pricing_snapshot=json.dumps({"currency": "EUR", "rate_plan": rate_plan}),
+			                   tex_currency="EUR", tex_total_amount="842.50", amount_after_tax=None,
+			                   check_in_date=fx.d(6, 10))
+			penalty, basis = booking.cancellation_penalty(res, today=fx.d(6, 1))
+			self.assertEqual((to_str(penalty), basis["rule"]), ("0.00", rule))
+
 	def test_guest_cancels_with_policy_penalty(self):
 		b = self._paid_booking("sess-cx")
 		out = public.manage_cancel(token=b["manage_token"], reservation=b["rooms"][0]["reservation"])
