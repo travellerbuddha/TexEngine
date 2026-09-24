@@ -4263,3 +4263,84 @@ overlay's defaults step or its stored-value normalisation makes the save-equival
 (checked). `test_security_regressions` G-11 now allows the three flags in an agent's catalogue
 answer and asserts they are false. Verification on branch `pw-backend`: all 38 integration modules
 800 OK (10 skipped, as on main), 425 unit tests, ruff.
+
+**Decision (implemented in S3: GAP-2, GAP-2b, GAP-3).**
+- *Pure read models* (`kamra/tex/pricing/matrix.py`, no frappe). Both call the engine's own
+  resolvers, so nothing is priced twice in two ways:
+  - `unit_source(terms, room, period)` runs `rooms.room_unit` with an `Explanation`. The last
+    `room` step is the requested room (the derivation recurses first). The winning rule is taken
+    among the room's rules in the order `room_unit` takes them (period rule first, then the rule for
+    all periods; INHERIT skipped), so two rows sharing an id still resolve to the right one. It
+    returns `{rule_id, scope: PERIOD | ALL, op, value, base_room_type, chain, overridden}`: `chain`
+    is the room and the rooms it is derived from (room first), `base_room_type` the next room in it
+    (none for an entered price), `overridden` the room's other rules including INHERIT rows.
+    `Unsellable` propagates (no price, a cycle).
+  - `party_total(terms, room, period, adults, band_codes)` builds the party as the publish sweep
+    does (`validate._sweep`): each child at its band's `from_months`, numbered in the contract's
+    child order (`ages.child_slots_in_order`, the ordering `classify_party` used inline, now
+    shared), reference date the period's start. It then runs the engine's own steps for a night:
+    `occupancy.check_capacity`, `rooms.room_unit`, `occupancy.price_occupancy`. It returns the
+    total and the slots `{target, position, age_band, amount, rule_id, included}`. An unknown band
+    code or a room outside the contract raises `PricingError`.
+  - `rule_value(v)`: a rule value as exact decimal text without trailing zeros (`to_str_min(v, 0)`:
+    `"1"`, `"1.15"`, `"245"`, `"0.333333333"`).
+- *`price_matrix` additions* (the existing keys are unchanged; a test compares them with the
+  pre-S3 computation for a draft, with `adults`, with parties and for a published version):
+  - `rooms[].sources{period: unit_source}`, none for a cell with an error;
+  - `rooms[].capacity{max_adults, max_children, max_occupants, min_adults, included_adults}` from the
+    built terms, i.e. the effective values (the room type's where the contract room sets 0);
+  - `age_bands[{code, label, from_months, to_months, is_infant, source}]` from the built terms
+    (the label equals the code when blank, as `age_bands_of` builds it). `source` is `version` when
+    the version has band rows, else the inherited policy's source (`policy:<id>/r<rev>/<scope>`)
+    from `svc.band_source`: the policy `inherit.band_layer` picks (the most specific one defining
+    bands, the choice `cascade` makes) among the policies live when the terms were built (now for a
+    draft, `effective_from` for a published version). If those policies no longer give the same
+    band set, it says `policy`;
+  - `inherited_rules`: the terms' occupancy rules whose source is not `version`, with `rule_id,
+    target, position, age_band, adults, children, room_type, period, op, value, is_override,
+    source`;
+  - `occupancy_defaults`: `adult` from `occupancy.GLOBAL_ADULT_DEFAULT` (`GLOBAL:ADULT`, ADULT,
+    MULTIPLY, `"1"`, `global-default`, its note); `child: null` (ADR-007);
+  - with `parties` (JSON, at most 12, each 1–12 adults and at most 8 band codes, upper-cased) and
+    `party_room` (a room of the built terms, else "… is not a room of this contract"): `party_cells`,
+    one per party in order, `{cells{period: total | null}, slots{period: […]}, errors{period:
+    message}}`. `Unsellable` and `PricingError` (an unknown band, over capacity, no price, no child
+    rule) are errors of their cell, not refusals.
+  - `adults` stays accepted and unused. The gates are unchanged (`price.view` + `_sees_cost`, the
+    overlay's with `data`). No rate limit: staff only, bounded (12 parties × the periods), called
+    debounced.
+- *Deviations from the slice text, with reasons.*
+  - Values use `rule_value` (`"1"`), not `to_str_rate` (`"1.000000"`): the design and the slice's
+    own test fix `value "1"`; both are exact, and the client compares decimals canonically.
+  - `party_total` runs the engine's capacity check first. The sweep only prices combinations the
+    room holds; a sample party the room cannot hold would otherwise get a total the engine never
+    charges. For a party the room holds the result is the sweep's.
+  - The frontend `PriceMatrix` type is split: `PriceMatrix` (the S3 keys) and
+    `PriceMatrixBuildError` (`{build_error, rooms: [], periods: []}`), union
+    `PriceMatrixResponse`, because the build-error answer has none of the other keys.
+
+**Rejected (S3).**
+- Recording each band's origin in the frozen payload: a payload and hash change for a display
+  need; the version's own rows and the policy revisions say it.
+- Summing slots or deriving the chain in the client: the engine already knows both.
+
+**Tests (S3).** Unit `test_matrix.py` (17): the fixture contract's sources (generic ×1.15 → ALL
+with chain [SUP, STD]; SUITE P3A 245 → PERIOD overriding the generic rule; the base room's own
+price; an INHERIT period row overridden while the generic rule wins; a chained derivation; two rows
+sharing an id; a cycle and a missing price unsellable); party totals equal to
+`engine.price_stay`'s occupancy for 2A + CHB, for both child orders, a derived room, a period
+override and ROOM basis; an unknown band, over capacity and a band without a rule refused;
+`band_layer`; `rule_value`. Integration `test_pricing_workspace_api` (+14, 31 in all): sources with
+saved row names and with `~key` ids, errored cells without a source, effective capacity (room type
+fallback, overlay values), the version's bands and the engine default, a band without a label
+(overlay and saved), bands and rules inherited from a live global policy (draft and published),
+the policy's rules cascading into a version with its own, sample parties (totals, slots and rule
+ids, the same total as a quote, an unknown band and over-capacity as cell errors, a period without
+a price), no `party_cells` without parties, the party room refused when not in the (unsaved)
+contract, malformed parties refused, Finance allowed and an agent refused, the old keys identical.
+On the S2 tip `19c6b72` `test_matrix` cannot import `pricing.matrix`, and the 14 new integration
+tests all fail (25 errors counting sub-tests: the unknown `parties` argument, the missing keys)
+while the 17 S2 tests pass; the old-keys test's draft and `adults` sub-tests pass there too, which
+pins the baseline. Verification on branch `pw-backend` (main `1575c8b` already merged), migrated
+with it: all 38 integration modules 814 OK (10 skipped, as before), 442 unit tests, ruff; eval
+harness 76/76, front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`.
