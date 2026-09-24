@@ -229,7 +229,7 @@ _TEX_SCOPED = (
 	"TEX Promotion Redemption", "TEX Inventory Day", "TEX Markup Rule", "TEX FX Policy", "TEX Pricing Policy",
 	"TEX Tax Policy", "TEX Extra Inventory Day", "TEX Extra Allocation",
 	"TEX Cancellation Policy", "TEX Payment Policy", "TEX Communication", "TEX Funnel Event", "TEX Promotion",
-	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Reservation Revision",
+	"TEX Loyalty Program", "TEX Booking Site", "TEX Audit Event", "TEX Audit Scope", "TEX Reservation Revision",
 	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation", "TEX Guest Segment",
 	"TEX Channel Mapping", "TEX Channel ARI Day", "TEX Channel Inbound",
 	"TEX Access Grant", "TEX Enterprise", "TEX Hotel Group", "TEX Guest Change Request",
@@ -296,6 +296,12 @@ for _dt in ("TEX Inventory Day", "TEX ARI Restriction", "TEX Allotment"):
 	                                       "on_trash": "kamra.tex.hooks.ari_source_changed"})
 doc_events.setdefault("TEX Channel Mapping", {})["on_update"] = "kamra.tex.hooks.mapping_changed"
 doc_events.setdefault("TEX Contract Version", {})["on_update"] = "kamra.tex.hooks.contract_version_changed"
+# payment rules are audited whatever path saves them: TEX API, Desk, REST (G-74, ADR-053)
+for _dt in ("TEX Payment Policy", "TEX Payment Provider Account", "TEX Payment Method Rule"):
+	doc_events.setdefault(_dt, {}).update({"validate": "kamra.tex.security.record_audit.capture_secrets",
+	                                       "after_insert": "kamra.tex.security.record_audit.after_insert",
+	                                       "on_update": "kamra.tex.security.record_audit.on_update",
+	                                       "on_trash": "kamra.tex.security.record_audit.on_trash"})
 
 # Scheduled Tasks
 # ---------------
@@ -358,7 +364,7 @@ extend_doctype_class = {"File": "kamra.tex.security.uploads.PublicFileGuard"}
 # ignore_links_on_delete = ["Communication", "ToDo"]
 # an audit trail never blocks deleting a draft, and it stays after the delete (G-20); every
 # other link still does (a provider account used by payments, a site with bookings…)
-ignore_links_on_delete = ["TEX Audit Event"]
+ignore_links_on_delete = ["TEX Audit Event", "TEX Audit Scope"]
 
 # Remote MCP + OAuth live at /mcp and /mcp/oauth/* (not the SPA).
 # a hotel's verified booking host serves its TEX booking engine (G-21, ADR-035)

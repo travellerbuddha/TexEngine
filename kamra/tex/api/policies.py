@@ -63,9 +63,25 @@ def _prop_of(doctype: str, doc) -> str | list[str] | None:
 	return doc.get("property") if doc.meta.has_field("property") else None
 
 
-def _audit_prop(doctype: str, doc) -> str | None:
+def _audit_scope(doctype: str, doc) -> dict:
+	"""A hotel's record belongs to its hotel; a group-level record (a group booking site or
+	promotion) to its group and the group's hotels, so each of them sees the change (ADR-053);
+	a global record stays platform-level."""
 	p = _prop_of(doctype, doc)
-	return p if isinstance(p, str) else None
+	if p and not isinstance(p, list):
+		return {"property": p}
+	group = doc.get("hotel_group") if doc.meta.has_field("hotel_group") else None
+	if not group:
+		return {"property": None}
+	hotels = p if isinstance(p, list) else frappe.get_all("Property", filters={"tex_hotel_group": group}, pluck="name")
+	return {"property": None, "hotel_group": group, "hotels": hotels}
+
+
+def _audited_by_record(doctype: str) -> bool:
+	"""Payment rules are audited by their record hooks, whatever path saves them (G-74)."""
+	from kamra.tex.security.record_audit import TRACKED
+
+	return doctype in TRACKED
 
 
 @frappe.whitelist()
@@ -137,8 +153,9 @@ def save_record(doctype: str, data):
 	_check(doctype, _prop_of(doctype, doc), write=True)
 	# authority is the TEX capability checked above (before and after the edit)
 	doc.save(ignore_permissions=True) if doc.name and not doc.is_new() else doc.insert(ignore_permissions=True)
-	audit(f"{doctype.lower().replace(' ', '_')}.save", reference_doctype=doctype, reference_name=doc.name,
-	      property=_audit_prop(doctype, doc), old=before, new=doc_dict(doc))
+	if not _audited_by_record(doctype):
+		audit(f"{doctype.lower().replace(' ', '_')}.save", reference_doctype=doctype, reference_name=doc.name,
+		      old=before, new=doc_dict(doc), **_audit_scope(doctype, doc))
 	return doc_dict(doc)
 
 
@@ -150,8 +167,9 @@ def delete_record(doctype: str, name: str):
 		frappe.throw(_("Live revisions are archived, not deleted."))
 	# audited while the record still exists (same transaction); then the record goes and its audit
 	# trail stays (hooks.ignore_links_on_delete); any other link still blocks the delete
-	audit(f"{doctype.lower().replace(' ', '_')}.delete", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc), old=doc_dict(doc))
+	if not _audited_by_record(doctype):
+		audit(f"{doctype.lower().replace(' ', '_')}.delete", reference_doctype=doctype, reference_name=name,
+		      old=doc_dict(doc), **_audit_scope(doctype, doc))
 	frappe.delete_doc(doctype, name, ignore_permissions=True)
 	return {"ok": True}
 
@@ -169,7 +187,7 @@ def activate(doctype: str, name: str, at: str | None = None):
 	doc = _rev_doc(doctype, name)
 	revisions.activate(doctype, name, at)   # never back-dated from here (G-20)
 	audit(f"{doctype.lower().replace(' ', '_')}.activate", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc), new={"active_from": str(frappe.db.get_value(doctype, name, "active_from"))})
+	      new={"active_from": str(frappe.db.get_value(doctype, name, "active_from"))}, **_audit_scope(doctype, doc))
 	return get_record(doctype, name)
 
 
@@ -188,7 +206,7 @@ def archive(doctype: str, name: str, reason: str | None = None):
 	doc = _rev_doc(doctype, name)
 	revisions.archive(doctype, name)
 	audit(f"{doctype.lower().replace(' ', '_')}.archive", reference_doctype=doctype, reference_name=name,
-	      property=_audit_prop(doctype, doc), reason=reason)
+	      reason=reason, **_audit_scope(doctype, doc))
 	return {"ok": True}
 
 

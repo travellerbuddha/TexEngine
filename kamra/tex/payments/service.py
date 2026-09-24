@@ -87,9 +87,23 @@ def ns_key(property: str, raw: str | None, kind: str) -> str | None:
 	return hashlib.sha256(f"{kind}|{property}|{raw}".encode()).hexdigest()
 
 
-def callback_signature(transaction: str) -> str:
-	"""Signs the gateway return URL so arbitrary transaction ids cannot be poked."""
-	return hmac.new(site_secret("tex-callback").encode(), transaction.encode(), hashlib.sha256).hexdigest()[:32]
+# how a gateway reaches the callback (G-74, ADR-053): the guest's browser coming back from the
+# payment page, or the gateway's own server-to-server notification. Signed with the id, so a
+# return address never passes for a notification.
+CALLBACK_SOURCES = {"return": "Gateway Return", "notify": "Webhook"}
+
+
+def callback_signature(transaction: str, via: str | None = None) -> str:
+	"""Signs the gateway return URL so arbitrary transaction ids cannot be poked. ``via`` (a key
+	of ``CALLBACK_SOURCES``) is signed with it; a URL issued before G-74 has none."""
+	msg = f"{transaction}|{via}" if via else transaction
+	return hmac.new(site_secret("tex-callback").encode(), msg.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def callback_url(transaction: str, via: str) -> str:
+	# gateways call back to the platform host, never to a host taken from the request (G-21)
+	return _platform_url(f"/api/method/kamra.tex.api.payments.callback?txn={transaction}&via={via}"
+	                     f"&cb={callback_signature(transaction, via)}")
 
 
 def allowed_return_hosts(property: str) -> set[str]:
@@ -304,13 +318,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
 		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation)
-	# gateways call back to the platform host, never to a host taken from the request (G-21)
-	callback = _platform_url(f"/api/method/kamra.tex.api.payments.callback?txn={txn.name}"
-	                         f"&cb={callback_signature(txn.name)}")
 	try:
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
 		                                           description=description, return_url=return_url,
-		                                           callback_url=callback, customer=customer, locale=locale))
+		                                           callback_url=callback_url(txn.name, "return"),
+		                                           notify_url=callback_url(txn.name, "notify"),
+		                                           customer=customer, locale=locale))
 	except Exception as e:
 		log_exception(f"TEX payment start failed {txn.name}")
 		if existing:
@@ -399,10 +412,11 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	txn.save(ignore_permissions=True)
 	if txn.status == "Succeeded":
 		_after_charge(txn)
+	# the source is how the outcome arrived: the caller says (the gateway's return or notification,
+	# staff re-verifying, the sandbox page), else the request itself (G-74)
 	audit("payment." + txn.status.lower(), reference_doctype="TEX Payment Transaction", reference_name=txn.name,
 	      property=txn.property, new={"amount": to_str(from_db(txn.amount, txn.currency)), "currency": txn.currency,
-	                                  "provider": txn.provider, "booking": txn.booking, "link": txn.payment_link},
-	      source="Webhook")
+	                                  "provider": txn.provider, "booking": txn.booking, "link": txn.payment_link})
 	return {"transaction": txn.name, "status": txn.status}
 
 
@@ -444,7 +458,7 @@ def _capture_refused(txn, captured: Outcome, checked: Outcome) -> None:
 	except (TypeError, ValueError, ArithmeticError):
 		amount = None
 	audit("payment.capture_mismatch", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
-	      property=txn.property, source="Webhook",
+	      property=txn.property,
 	      new={"code": checked.error_code, "provider_ref": ref, "amount": amount,
 	           "currency": str(captured.currency).strip().upper()[:8] if captured.currency else None,
 	           "expected_amount": to_str(from_db(txn.amount, txn.currency)), "expected_currency": txn.currency,
@@ -1292,14 +1306,19 @@ def link_by_token(token: str):
 
 
 def expire_links() -> int:
-	"""Scheduler: active links past their expiry become Expired."""
+	"""Scheduler: active links past their expiry become Expired (audited, G-74)."""
 	n = 0
 	for name in frappe.get_all("TEX Payment Link", filters={"status": ("in", ["Active", "Partially Paid"]),
 	                                                        "expires_at": ("<", now_datetime())}, pluck="name"):
 		link = frappe.get_doc("TEX Payment Link", name)
 		link.flags.tex_system_update = True
+		before = link.status
 		link.status = "Expired"
 		link.save(ignore_permissions=True)
+		audit("payment_link.expire", reference_doctype="TEX Payment Link", reference_name=name,
+		      property=link.property, old={"status": before},
+		      new={"status": "Expired", "expires_at": str(link.expires_at),
+		           "paid_amount": to_str(from_db(link.paid_amount, link.currency)), "currency": link.currency})
 		n += 1
 	return n
 

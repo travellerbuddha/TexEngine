@@ -51,6 +51,17 @@ class TEXContractVersion(Document):
 		                                 "name", order_by="version_no desc")
 		svc.set_selling(self, svc.version_selling(src).draft_values())
 
+	def on_update(self):
+		# every saved draft edit, whatever the path (TEX editor, grid rate change, Desk, REST), is
+		# audited old → new (G-74); publishing and the lifecycle are audited by the contract service
+		if self.flags.in_insert or self.flags.tex_lifecycle:
+			return
+		before = self.get_doc_before_save()
+		if before and before.status == "Draft" and self.status == "Draft":
+			from kamra.tex.commercial.contracts import audit_draft_save
+
+			audit_draft_save(before, self)
+
 	def on_trash(self):
 		if self.status != "Draft":
 			frappe.throw(_("Published contract versions cannot be deleted."))

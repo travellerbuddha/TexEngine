@@ -154,9 +154,14 @@ PLATFORM_SPECS = [
 		F("action", "Data", "Action", in_list_view=1, in_standard_filter=1),
 		F("actor", "Link", "Actor", "User", in_list_view=1, in_standard_filter=1),
 		F("actor_roles", "Small Text", "Actor roles"),
-		F("source", "Select", "Source", ["Desk", "API", "Guest", "System", "Webhook", "Scheduler", "Agent"]),
+		# how the action arrived (ADR-053, kamra.tex.security.audit.SOURCES)
+		F("source", "Select", "Source", ["Desk", "API", "Guest", "Gateway Return", "System", "Webhook", "Scheduler",
+		                                 "Agent"]),
 		CB(),
 		F("property", "Link", "Property", "Property", in_standard_filter=1),
+		# an event of a hotel group or an enterprise: the hotels it reached are its TEX Audit Scope rows
+		F("hotel_group", "Link", "Hotel group", "TEX Hotel Group", in_standard_filter=1),
+		F("enterprise", "Link", "Enterprise", "TEX Enterprise"),
 		F("reference_doctype", "Link", "Reference type", "DocType"),
 		F("reference_name", "Dynamic Link", "Reference", "reference_doctype"),
 		F("request_id", "Data", "Request id"),
@@ -165,7 +170,16 @@ PLATFORM_SPECS = [
 		F("old_value", "Code", "Old value", "JSON"),
 		F("new_value", "Code", "New value", "JSON"),
 	], perms=READONLY_AUDIT, autoname="AUD-.YYYY.-.#######", naming_rule="Expression (old style)",
-	   track_changes=False, sort_field="creation", in_create=True),
+	   track_changes=False, sort_field="creation", in_create=True,
+	   extra={"modified": "2026-09-26 00:00:00.000000"}),
+	# the hotels an audit event of a hotel group or an enterprise reached, as it happened (ADR-053):
+	# a separate record, scoped per hotel, so a hotel's staff never read the other hotels' names
+	dt("TEX Audit Scope", P, [
+		F("event", "Link", "Audit event", "TEX Audit Event", reqd=1, in_list_view=1, search_index=1),
+		F("property", "Link", "Hotel", "Property", reqd=1, in_list_view=1, in_standard_filter=1, search_index=1),
+	], perms=READONLY_AUDIT, autoname="hash", track_changes=False, sort_field="creation", in_create=True,
+	   description="A hotel reached by an audit event of a hotel group or an enterprise (ADR-053).",
+	   extra={"modified": "2026-09-26 00:00:00.000000"}),
 ]
 
 # ═══ TEX Commercial ═══════════════════════════════════════════════════════

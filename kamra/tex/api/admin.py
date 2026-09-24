@@ -428,10 +428,19 @@ def adapters():
 def audit_log(property: str | None = None, reference_doctype: str | None = None,
               reference_name: str | None = None, action: str | None = None, actor: str | None = None,
               date_from: str | None = None, date_to: str | None = None, start=0, limit=100):
-	filters: dict = {}
+	"""The audit trail, newest first. A hotel's trail holds its own events and the events of its
+	hotel group or enterprise that reached it (a group grant, ADR-053); such an event names only
+	the hotels the viewer may see, the others as a count."""
+	from frappe.query_builder import Order
+
+	E, S = frappe.qb.DocType("TEX Audit Event"), frappe.qb.DocType("TEX Audit Scope")
+	q = frappe.qb.from_(E).select(E.name, E.event_time, E.action, E.actor, E.actor_roles, E.source, E.property,
+	                              E.hotel_group, E.enterprise, E.reference_doctype, E.reference_name, E.reason,
+	                              E.old_value, E.new_value)
 	if property:
 		scope.require("settings.admin", property)
-		filters["property"] = property
+		q = q.where((E.property == property)
+		            | E.name.isin(frappe.qb.from_(S).select(S.event).where(S.property == property)))
 	elif reference_doctype and reference_name:
 		prop = scope.property_of(reference_doctype, reference_name)
 		if prop:
@@ -441,20 +450,24 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 	else:
 		_require_platform()
 	if reference_doctype:
-		filters["reference_doctype"] = reference_doctype
+		q = q.where(E.reference_doctype == reference_doctype)
 	if reference_name:
-		filters["reference_name"] = reference_name
+		q = q.where(E.reference_name == reference_name)
 	if action:
-		filters["action"] = ("like", f"{text(action, 60)}%")
+		q = q.where(E.action.like(f"{text(action, 60)}%"))
 	if actor:
-		filters["actor"] = actor
+		q = q.where(E.actor == actor)
 	if date_from and date_to:
-		filters["event_time"] = ("between", [date_from, f"{date_to} 23:59:59"])
-	rows = frappe.get_all("TEX Audit Event", filters=filters,
-	                      fields=["name", "event_time", "action", "actor", "actor_roles", "source", "property",
-	                              "reference_doctype", "reference_name", "reason", "old_value", "new_value"],
-	                      order_by="event_time desc", limit_start=as_int(start, 0, lo=0),
-	                      limit_page_length=as_int(limit, 100, lo=1, hi=500))
+		q = q.where(E.event_time.between(date_from, f"{date_to} 23:59:59"))
+	q = (q.orderby(E.event_time, order=Order.desc).orderby(E.name, order=Order.desc)
+	     .limit(as_int(limit, 100, lo=1, hi=500)).offset(as_int(start, 0, lo=0)))
+	rows = q.run(as_dict=True)
+	reached: dict[str, list[str]] = {}
+	wide = [r.name for r in rows if not r.property]
+	for s in frappe.get_all("TEX Audit Scope", filters={"event": ("in", wide)}, fields=["event", "property"],
+	                        order_by="property asc") if wide else ():
+		reached.setdefault(s.event, []).append(s.property)
+	visible = None if scope.is_platform_admin() else scope.permitted_properties()
 	for r in rows:
 		r["event_time"] = str(r["event_time"])
 		for k in ("old_value", "new_value"):
@@ -462,4 +475,7 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 				r[k] = json.loads(r[k]) if r[k] else None
 			except ValueError:
 				pass
+		hotels = reached.get(r.name, [])
+		r["hotels"] = hotels if visible is None else [h for h in hotels if h in visible]
+		r["other_hotels"] = len(hotels) - len(r["hotels"])
 	return rows

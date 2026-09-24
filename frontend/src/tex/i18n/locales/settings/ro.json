@@ -7,10 +7,54 @@
  "settings.audit.caption": "Evenimente de audit, cele mai noi primele. Extindeți un rând pentru a vedea valorile vechi și noi.",
  "settings.audit.change": "Modificare",
  "settings.audit.changes": "Modificări",
+ "settings.audit.coll.added": {
+  "one": "{count} adăugat",
+  "few": "{count} adăugate",
+  "other": "{count} adăugate"
+ },
+ "settings.audit.coll.also_changed": "S-au mai modificat",
+ "settings.audit.coll.changed": {
+  "one": "{count} modificat",
+  "few": "{count} modificate",
+  "other": "{count} modificate"
+ },
+ "settings.audit.coll.more": {
+  "one": "și încă {count}",
+  "few": "și încă {count}",
+  "other": "și încă {count}"
+ },
+ "settings.audit.coll.name.age_bands": "Vârste copii",
+ "settings.audit.coll.name.boards": "Tipuri de masă",
+ "settings.audit.coll.name.contract": "Condiții de contract",
+ "settings.audit.coll.name.inventory": "Stoc",
+ "settings.audit.coll.name.occupancy_rules": "Reguli de ocupare",
+ "settings.audit.coll.name.offers": "Oferte",
+ "settings.audit.coll.name.period_rates": "Prețuri camere",
+ "settings.audit.coll.name.periods": "Perioade",
+ "settings.audit.coll.name.rate_plans": "Planuri tarifare",
+ "settings.audit.coll.name.rates": "Prețuri de contract",
+ "settings.audit.coll.name.restrictions": "Restricții",
+ "settings.audit.coll.name.room_rules": "Prețuri camere",
+ "settings.audit.coll.name.rooms": "Camere",
+ "settings.audit.coll.name.settings": "Setări",
+ "settings.audit.coll.previous_values": "Valori înainte de modificare",
+ "settings.audit.coll.removed": {
+  "one": "{count} eliminat",
+  "few": "{count} eliminate",
+  "other": "{count} eliminate"
+ },
+ "settings.audit.coll.row": "Rând",
+ "settings.audit.coll.rows": "{before} → {after} rânduri",
+ "settings.audit.coll.unchanged": {
+  "one": "{count} avea deja această valoare",
+  "few": "{count} aveau deja această valoare",
+  "other": "{count} aveau deja această valoare"
+ },
  "settings.audit.details": "Detalii",
  "settings.audit.empty": "Niciun eveniment de audit nu corespunde acestor filtre",
  "settings.audit.empty_hint": "Lărgiți intervalul de date sau goliți filtrele de acțiune și utilizator.",
  "settings.audit.empty_value": "gol",
+ "settings.audit.enterprise": "Companie",
  "settings.audit.err.both_dates": "Alegeți atât data de început, cât și cea de sfârșit.",
  "settings.audit.err.order": "Data de sfârșit este înaintea datei de început.",
  "settings.audit.event_id": "ID eveniment",
@@ -18,6 +62,7 @@
  "settings.audit.filter_help": "„Acțiune” se potrivește cu începutul numelui evenimentului (contract. găsește toate evenimentele de contract). „Efectuat de” este adresa de e-mail exactă. Filtrul de date necesită ambele date.",
  "settings.audit.hide_unchanged": "Ascunde câmpurile nemodificate",
  "settings.audit.hotel": "Hotel",
+ "settings.audit.hotel_group": "Grup hotelier",
  "settings.audit.kind.added": "Adăugat",
  "settings.audit.kind.changed": "Modificat",
  "settings.audit.kind.removed": "Eliminat",
@@ -27,8 +72,14 @@
  "settings.audit.no_changes": "Niciun câmp nu s-a modificat.",
  "settings.audit.no_values": "Acest eveniment nu a înregistrat valori vechi sau noi.",
  "settings.audit.old": "Valoare veche",
+ "settings.audit.other_hotels": {
+  "one": "+{count} alt hotel",
+  "few": "+{count} alte hoteluri",
+  "other": "+{count} alte hoteluri"
+ },
  "settings.audit.reason": "Motiv",
  "settings.audit.reference": "Înregistrare",
+ "settings.audit.scope_hotels": "Hoteluri afectate",
  "settings.audit.show_unchanged": {
   "one": "Arată {count} câmp nemodificat",
   "few": "Arată {count} câmpuri nemodificate",
@@ -40,6 +91,14 @@
   "other": "{count} de evenimente afișate"
  },
  "settings.audit.source": "Sursă",
+ "settings.audit.source_label.agent": "Asistent AI",
+ "settings.audit.source_label.api": "API (token)",
+ "settings.audit.source_label.desk": "Personal (autentificat)",
+ "settings.audit.source_label.gateway_return": "Revenire de pe pagina de plată",
+ "settings.audit.source_label.guest": "Oaspete",
+ "settings.audit.source_label.scheduler": "Sarcină programată",
+ "settings.audit.source_label.system": "Sistem",
+ "settings.audit.source_label.webhook": "Webhook (notificare de la server)",
  "settings.audit.subtitle": "Cine a modificat ce, când, unde și de ce. Jurnalul poate fi doar citit.",
  "settings.audit.time": "Ora",
  "settings.audit.view_diff": "Arată modificările",

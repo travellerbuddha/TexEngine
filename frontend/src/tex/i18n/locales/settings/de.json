@@ -7,10 +7,49 @@
  "settings.audit.caption": "Audit-Ereignisse, neueste zuerst. Klappen Sie eine Zeile auf, um alte und neue Werte zu sehen.",
  "settings.audit.change": "Änderung",
  "settings.audit.changes": "Änderungen",
+ "settings.audit.coll.added": {
+  "one": "{count} hinzugefügt",
+  "other": "{count} hinzugefügt"
+ },
+ "settings.audit.coll.also_changed": "Ebenfalls geändert",
+ "settings.audit.coll.changed": {
+  "one": "{count} geändert",
+  "other": "{count} geändert"
+ },
+ "settings.audit.coll.more": {
+  "one": "und {count} weiterer",
+  "other": "und {count} weitere"
+ },
+ "settings.audit.coll.name.age_bands": "Kinderalter",
+ "settings.audit.coll.name.boards": "Verpflegung",
+ "settings.audit.coll.name.contract": "Vertragskonditionen",
+ "settings.audit.coll.name.inventory": "Bestand",
+ "settings.audit.coll.name.occupancy_rules": "Belegungsregeln",
+ "settings.audit.coll.name.offers": "Angebote",
+ "settings.audit.coll.name.period_rates": "Zimmerpreise",
+ "settings.audit.coll.name.periods": "Zeiträume",
+ "settings.audit.coll.name.rate_plans": "Ratenpläne",
+ "settings.audit.coll.name.rates": "Vertragspreise",
+ "settings.audit.coll.name.restrictions": "Restriktionen",
+ "settings.audit.coll.name.room_rules": "Zimmerpreise",
+ "settings.audit.coll.name.rooms": "Zimmer",
+ "settings.audit.coll.name.settings": "Einstellungen",
+ "settings.audit.coll.previous_values": "Werte vor der Änderung",
+ "settings.audit.coll.removed": {
+  "one": "{count} entfernt",
+  "other": "{count} entfernt"
+ },
+ "settings.audit.coll.row": "Zeile",
+ "settings.audit.coll.rows": "{before} → {after} Zeilen",
+ "settings.audit.coll.unchanged": {
+  "one": "{count} hatte diesen Wert schon",
+  "other": "{count} hatten diesen Wert schon"
+ },
  "settings.audit.details": "Details",
  "settings.audit.empty": "Keine Audit-Ereignisse für diese Filter",
  "settings.audit.empty_hint": "Erweitern Sie den Zeitraum oder leeren Sie die Filter für Aktion und Benutzer.",
  "settings.audit.empty_value": "leer",
+ "settings.audit.enterprise": "Unternehmen",
  "settings.audit.err.both_dates": "Wählen Sie ein Start- und ein Enddatum.",
  "settings.audit.err.order": "Das Enddatum liegt vor dem Startdatum.",
  "settings.audit.event_id": "Ereignis-ID",
@@ -18,6 +57,7 @@
  "settings.audit.filter_help": "„Aktion“ passt auf den Anfang des Ereignisnamens (contract. findet alle Vertragsereignisse). „Ausgeführt von“ ist die genaue E-Mail-Adresse. Für den Datumsfilter werden beide Daten benötigt.",
  "settings.audit.hide_unchanged": "Unveränderte Felder ausblenden",
  "settings.audit.hotel": "Hotel",
+ "settings.audit.hotel_group": "Hotelgruppe",
  "settings.audit.kind.added": "Hinzugefügt",
  "settings.audit.kind.changed": "Geändert",
  "settings.audit.kind.removed": "Entfernt",
@@ -27,8 +67,13 @@
  "settings.audit.no_changes": "Kein Feld wurde geändert.",
  "settings.audit.no_values": "Dieses Ereignis enthält keine alten oder neuen Werte.",
  "settings.audit.old": "Alter Wert",
+ "settings.audit.other_hotels": {
+  "one": "+{count} weiteres Hotel",
+  "other": "+{count} weitere Hotels"
+ },
  "settings.audit.reason": "Begründung",
  "settings.audit.reference": "Datensatz",
+ "settings.audit.scope_hotels": "Betroffene Hotels",
  "settings.audit.show_unchanged": {
   "one": "{count} unverändertes Feld anzeigen",
   "other": "{count} unveränderte Felder anzeigen"
@@ -38,6 +83,14 @@
   "other": "{count} Ereignisse angezeigt"
  },
  "settings.audit.source": "Quelle",
+ "settings.audit.source_label.agent": "KI-Assistent",
+ "settings.audit.source_label.api": "API (Token)",
+ "settings.audit.source_label.desk": "Mitarbeiter (angemeldet)",
+ "settings.audit.source_label.gateway_return": "Rückkehr von der Zahlungsseite",
+ "settings.audit.source_label.guest": "Gast",
+ "settings.audit.source_label.scheduler": "Geplanter Job",
+ "settings.audit.source_label.system": "System",
+ "settings.audit.source_label.webhook": "Webhook (Server-Benachrichtigung)",
  "settings.audit.subtitle": "Wer hat was, wann, wo und warum geändert. Das Protokoll kann nicht bearbeitet werden.",
  "settings.audit.time": "Zeit",
  "settings.audit.view_diff": "Änderungen anzeigen",

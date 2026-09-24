@@ -383,12 +383,15 @@ def extras_bulk_update(property: str, extra_codes, start: str, end: str, weekday
 	scope.require("inventory.edit", property)
 	from kamra.tex.availability import extras_repository as xinv
 	from kamra.tex.security.audit import audit
+	from kamra.tex.security.changes import cells_diff
 
 	out = xinv.bulk_update(property, parse(extra_codes, []), start, end, weekdays=parse(weekdays, None) or None,
 	                       capacity=capacity, closed=closed, note=(text(note, 140) or "") if note is not None else None)
+	# each day's old value next to the new one, bounded (G-74, ADR-053)
 	audit("extra_inventory.update", property=property,
 	      new={"extras": parse(extra_codes, []), "start": start, "end": end, "weekdays": parse(weekdays, None),
-	           "capacity": capacity, "closed": closed, "updated": out["updated"]})
+	           "capacity": capacity, "closed": closed, "updated": out["updated"],
+	           "collections": {"extra_inventory": cells_diff(out.pop("_cells"))}})
 	return out
 
 

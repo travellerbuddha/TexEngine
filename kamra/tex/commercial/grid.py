@@ -29,11 +29,13 @@ from kamra.tex.pricing.model import Unsellable
 from kamra.tex.pricing.ops import apply_op
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
+from kamra.tex.security.changes import SEP, cells_diff
 from kamra.tex_commercial.doctype.tex_ari_restriction.tex_ari_restriction import scope_key
 
 WD = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 RESTRICTION_EDIT = {"stop_sell", "stop_sell_mode", "min_los", "max_los", "cta", "ctd", "release_days",
                     "min_advance", "max_advance"}
+RESTRICTION_TEXT = {"stop_sell", "stop_sell_mode", "cta", "ctd"}      # blank = "", the others 0
 INVENTORY_EDIT = {"closed", "manual_adjustment", "oversell_limit"}
 
 
@@ -140,8 +142,12 @@ def _clean_restriction(changes: dict) -> dict:
 			v = int(v or 0)
 			if v < 0 or v > 365:
 				frappe.throw(_("{0} must be between 0 and 365.").format(k))
-		out[k] = v or ("" if k in ("stop_sell", "stop_sell_mode", "cta", "ctd") else 0)
+		out[k] = v or ("" if k in RESTRICTION_TEXT else 0)
 	return out
+
+
+def _blank_restriction(fields) -> dict:
+	return {f: "" if f in RESTRICTION_TEXT else 0 for f in fields}
 
 
 def bulk_update(property: str, start, end, *, room_types: list[str], weekdays: list[int] | None = None,
@@ -158,11 +164,13 @@ def bulk_update(property: str, start, end, *, room_types: list[str], weekdays: l
 		frappe.throw(_("The contract belongs to another hotel."))
 	dates = _days(start, end, weekdays)
 	summary = {"dates": len(dates), "rooms": len(room_types)}
+	# each cell's old value next to the new one, bounded (G-74, ADR-053)
+	collections = {}
 
 	if restrictions:
 		scope.require("restriction.edit", property)
 		changes = _clean_restriction(restrictions)
-		n = 0
+		cells = []
 		for rt in room_types:
 			for d in dates:
 				vals = {"property": property, "room_type": rt, "contract": contract, "market": market,
@@ -171,42 +179,49 @@ def bulk_update(property: str, start, end, *, room_types: list[str], weekdays: l
 				name = frappe.db.get_value("TEX ARI Restriction", {"scope_key": key})
 				doc = frappe.get_doc("TEX ARI Restriction", name) if name else frappe.get_doc(
 					{"doctype": "TEX ARI Restriction", **vals})
+				old = {f: doc.get(f) for f in changes} if name else _blank_restriction(changes)
 				doc.update(changes)
 				if name and all(not doc.get(f) for f in RESTRICTION_EDIT):
 					frappe.delete_doc("TEX ARI Restriction", name, ignore_permissions=True)
 				else:
 					doc.save(ignore_permissions=True) if name else doc.insert(ignore_permissions=True)
-				n += 1
-		summary["restriction_cells"] = n
+				cells.append((f"{rt}{SEP}{d}", old, changes))
+		summary["restriction_cells"] = len(cells)
 		summary["restrictions"] = changes
+		collections["restrictions"] = cells_diff(cells)
 
 	if inventory:
 		scope.require("inventory.edit", property)
 		from kamra.tex_commercial.doctype.tex_inventory_day.tex_inventory_day import inventory_day_name
 
+		edit = {k: int(v or 0) for k, v in inventory.items() if k in INVENTORY_EDIT}
 		pools = sorted({avail.pool_of(rt)[0] for rt in room_types})
+		cells = []
 		for pool in pools:
 			for d in dates:
 				name = inventory_day_name(pool, d)
 				doc = frappe.get_doc("TEX Inventory Day", name) if frappe.db.exists("TEX Inventory Day", name) \
 					else frappe.get_doc({"doctype": "TEX Inventory Day", "property": property, "room_type": pool,
 					                     "inventory_date": d})
-				for k, v in inventory.items():
-					if k in INVENTORY_EDIT:
-						doc.set(k, int(v or 0))
+				old = {k: int(doc.get(k) or 0) for k in edit}
+				for k, v in edit.items():
+					doc.set(k, v)
 				doc.save(ignore_permissions=True) if not doc.is_new() else doc.insert(ignore_permissions=True)
+				cells.append((f"{pool}{SEP}{d}", old, edit))
 		summary["inventory"] = {k: v for k, v in inventory.items() if k in INVENTORY_EDIT}
+		collections["inventory"] = cells_diff(cells)
 
 	if rate:
 		if not contract:
 			frappe.throw(_("Choose the contract whose rates you are editing."))
 		summary["rate"] = apply_rate_change(contract, room_types, start, end, weekdays, rate.get("op"),
 		                                    rate.get("value"))
+		collections["rates"] = cells_diff(summary["rate"].pop("_cells"))
 
 	audit("grid.bulk_update", property=property, new={"start": str(start), "end": str(end), "weekdays": weekdays,
 	                                                  "room_types": room_types, "contract": contract,
 	                                                  "market": market, "channel": channel,
-	                                                  "rate_plan": rate_plan, **summary})
+	                                                  "rate_plan": rate_plan, **summary, "collections": collections})
 	return summary
 
 
@@ -239,7 +254,7 @@ def apply_rate_change(contract: str, room_types: list[str], start: date, end: da
 		segments.append((p, seg_start, d))
 		d += timedelta(days=1)
 
-	created = []
+	created, cells = [], []
 	for idx, (p, s, e) in enumerate(segments):
 		code = f"G{s.strftime('%y%m%d')}{e.strftime('%m%d')}{'W' if mask else ''}{idx}"
 		n = 2
@@ -275,6 +290,12 @@ def apply_rate_change(contract: str, room_types: list[str], start: date, end: da
 				frappe.throw(_("A rate cannot be negative."))
 			v.append("period_rates", {"room_type": rt, "period_code": code, "op": "ABSOLUTE",
 			                          "value": quantize(new, terms.currency)})
+			# the draft's unit before and after, per room and date range (the audit's cells)
+			cells.append((f"{rt}{SEP}{s}/{e}", {"unit": to_str(quantize(current, terms.currency))},
+			              {"unit": to_str(quantize(new, terms.currency))}))
 		created.append(code)
+	v.flags.tex_audit_reason = "ARI grid rate change"
 	v.save(ignore_permissions=True)
-	return {"draft": draft, "periods": created, "note": _("Saved to the draft — publish to sell at the new rates.")}
+	# ``_cells`` is for the caller's audit only, never part of the response
+	return {"draft": draft, "periods": created, "note": _("Saved to the draft — publish to sell at the new rates."),
+	        "_cells": cells}

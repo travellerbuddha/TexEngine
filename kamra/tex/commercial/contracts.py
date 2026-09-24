@@ -17,6 +17,7 @@ import frappe
 from frappe import _
 from frappe.utils import get_datetime, getdate, now_datetime
 
+from kamra.tex.commercial import diffs
 from kamra.tex.money import D, D_or_none
 from kamra.tex.pricing import ages as age_math
 from kamra.tex.pricing import inherit, occupancy, serialize, validate, versions
@@ -46,7 +47,7 @@ from kamra.tex.pricing.model import (
 	RoomSpec,
 )
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, doc_values, row_values
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
@@ -149,6 +150,10 @@ def occupancy_rules_of(rows, *, base_level: Level, source: str,
 # change once a version was published (another market or currency is another contract).
 SELLING_FIELDS = ("sale_from", "sale_to", "stay_from", "stay_to", "priority", "sell_currency")
 FIXED_FIELDS = ("property", "market", "contract_currency", "pricing_basis")
+# what a draft edit changes besides its tables and selling terms (the editor's Settings tab)
+DRAFT_SETTINGS = ("child_ordering", "age_basis", "children_over_max_as_adults", "infants_count_as_occupants",
+                  "prices_include_tax", "stacking", "room_basis_extra_unit", "room_basis_children_fill_included",
+                  "change_note")
 
 
 def is_published(contract: str | None) -> bool:
@@ -475,6 +480,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 
 	# lock the contract row: two publishers can't race each other
 	frappe.db.get_value("TEX Contract", contract.name, "name", for_update=True)
+	previous = _previous_version(contract.name, name, eff)
 	terms = build_terms(version, at=eff)
 	issues = validate.validate_terms(terms)
 	errors = [i for i in issues if i.level == "ERROR"]
@@ -524,13 +530,48 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 		contract.status = "Active"
 	contract.flags.tex_lifecycle = True
 	contract.save(ignore_permissions=True)
+	# what was frozen, and how it differs from what sold before (G-74, ADR-053)
 	audit("contract.publish", reference_doctype="TEX Contract Version", reference_name=version.name,
 	      property=contract.property, old={"selling": selling_before},
-	      new={"payload_hash": digest, "effective_from": str(eff), "warnings": len(issues), "selling": selling},
+	      new={"payload_hash": digest, "effective_from": str(eff), "warnings": len(issues), "selling": selling,
+	           "previous": {"version": previous.name, "payload_hash": previous.payload_hash} if previous else None,
+	           "collections": diffs.payload_diff(json.loads(previous.payload) if previous else None, payload)},
 	      reason=change_note)
 	clear_terms_cache()
 	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff),
 	        "warnings": [i.to_dict() for i in issues]}
+
+
+def _previous_version(contract: str, publishing: str, at) -> frappe._dict | None:
+	"""The version a publish is compared with: the one selling at its effective time, else the
+	latest version published before (a withdrawn or superseded one); None for a first publish."""
+	live = active_version_header(contract, at)
+	name = live.version_id if live and live.version_id != publishing else frappe.db.get_value(
+		"TEX Contract Version", {"contract": contract, "status": ("!=", "Draft"), "name": ("!=", publishing),
+		                         "payload": ("is", "set")}, "name", order_by="version_no desc")
+	return frappe.db.get_value("TEX Contract Version", name, ["name", "payload", "payload_hash"], as_dict=True) \
+		if name else None
+
+
+def draft_state(version) -> dict:
+	"""A draft as the audit compares it: settings and selling terms, and its rows."""
+	fields = doc_values(version, (*DRAFT_SETTINGS, *SELLING_FIELDS))
+	fields["channels"] = sorted({c.sales_channel for c in version.get("channels") or []})
+	return {"fields": fields, "tables": {t: row_values(version.get(t)) for t in diffs.DRAFT_TABLES}}
+
+
+def audit_draft_save(before, after) -> None:
+	"""A saved draft edit, whatever the path (TEX editor, grid rate change, Desk, REST): the
+	settings that changed old → new and each table's rows by natural key, bounded (G-74,
+	ADR-053). A save that changed nothing records nothing."""
+	old, new, tables = diffs.draft_diff(draft_state(before), draft_state(after))
+	if not (old or tables):
+		return
+	if tables:
+		new["collections"] = tables
+	audit("contract.version.save", reference_doctype="TEX Contract Version", reference_name=after.name,
+	      property=frappe.db.get_value("TEX Contract", after.contract, "property"), old=old or None, new=new,
+	      reason=after.flags.tex_audit_reason)
 
 
 def withdraw(name: str, reason: str) -> None:

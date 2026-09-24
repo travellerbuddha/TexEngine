@@ -486,7 +486,11 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 	if outcome not in ("success", "fail") or not hmac.compare_digest(
 			mock_signature(pay._mock_secret(), transaction, outcome), str(sig or "")):
 		raise ProviderError("invalid mock signature")
-	out = pay.complete(transaction, params={"outcome": outcome, "sig": sig})
+	from kamra.tex.security.audit import audit_source
+
+	# the sandbox payment page stands in for a gateway's page: its answer is a gateway return (G-74)
+	with audit_source("Gateway Return"):
+		out = pay.complete(transaction, params={"outcome": outcome, "sig": sig})
 	txn = frappe.db.get_value("TEX Payment Transaction", transaction, ["booking", "payment_link", "return_url"],
 	                          as_dict=True)
 	return {**out, "booking": txn.booking, "return_url": txn.return_url}

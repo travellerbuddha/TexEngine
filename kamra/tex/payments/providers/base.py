@@ -18,9 +18,12 @@ class Intent:
 	currency: str
 	description: str
 	return_url: str           # where the guest lands after the provider
-	callback_url: str         # server-to-server / redirect callback
+	callback_url: str         # the guest's browser comes back here from the payment page
 	customer: dict = field(default_factory=dict)   # name, email, phone, ip, country (no card data)
 	locale: str = "en"
+	# a gateway's server-to-server notification lands here (same endpoint, recorded as a
+	# Webhook, G-74); a provider without one uses ``callback_url`` for both
+	notify_url: str | None = None
 
 
 @dataclass(frozen=True)

@@ -12,6 +12,8 @@
   "source",
   "column_10",
   "property",
+  "hotel_group",
+  "enterprise",
   "reference_doctype",
   "reference_name",
   "request_id",
@@ -51,7 +53,7 @@
    "fieldname": "source",
    "fieldtype": "Select",
    "label": "Source",
-   "options": "Desk\nAPI\nGuest\nSystem\nWebhook\nScheduler\nAgent"
+   "options": "Desk\nAPI\nGuest\nGateway Return\nSystem\nWebhook\nScheduler\nAgent"
   },
   {
    "fieldname": "column_10",
@@ -63,6 +65,19 @@
    "label": "Property",
    "options": "Property",
    "in_standard_filter": 1
+  },
+  {
+   "fieldname": "hotel_group",
+   "fieldtype": "Link",
+   "label": "Hotel group",
+   "options": "TEX Hotel Group",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "enterprise",
+   "fieldtype": "Link",
+   "label": "Enterprise",
+   "options": "TEX Enterprise"
   },
   {
    "fieldname": "reference_doctype",
@@ -105,7 +120,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-26 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Platform",
  "name": "TEX Audit Event",

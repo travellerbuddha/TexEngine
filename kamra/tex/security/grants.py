@@ -65,12 +65,29 @@ def remove_expired_grants() -> dict:
 	for g in ended:
 		if frappe.db.exists("TEX Audit Event", {"action": "grant.expired", "reference_name": g.name}):
 			continue
-		audit("grant.expired", reference_doctype="TEX Access Grant", reference_name=g.name,
-		      property=g.property or None, source="Scheduler",
+		audit("grant.expired", reference_doctype="TEX Access Grant", reference_name=g.name, source="Scheduler",
 		      old={f: str(g.get(f)) if g.get(f) is not None else None
 		           for f in ("user", "scope_level", "property", "hotel_group", "enterprise", "permission_profile",
-		                     "valid_until")})
+		                     "valid_until")}, **grant_scope(g))
 	return {"users": users, "grants": [g.name for g in ended]}
+
+
+def grant_scope(*versions) -> dict:
+	"""Where a grant event belongs (ADR-053): a hotel grant to its hotel; a hotel-group or
+	enterprise grant to that group / enterprise and every hotel it reaches now, so each of
+	those hotels' administrators see who was given (or lost) access to it. ``versions``: the
+	grant before and after a change - the hotels it left are told too. A platform grant stays
+	platform-level."""
+	versions = [v for v in versions if v]
+	last = versions[-1]
+	hotels: set[str] = set()
+	for v in versions:
+		if v.get("scope_level") in ("Hotel", "Hotel Group", "Enterprise"):
+			hotels.update(scope._grant_properties(v))
+	prop = last.get("property") if last.get("scope_level") == "Hotel" else None
+	return {"property": prop or None, "hotels": sorted(hotels - {prop}),
+	        "hotel_group": next((v.get("hotel_group") for v in reversed(versions) if v.get("hotel_group")), None),
+	        "enterprise": next((v.get("enterprise") for v in reversed(versions) if v.get("enterprise")), None)}
 
 
 def resync_for_properties(properties) -> None:
@@ -136,6 +153,5 @@ def audit_grant(grant, action: str) -> None:
 	fields = ("user", "scope_level", "property", "hotel_group", "enterprise", "permission_profile", "valid_until",
 	          "disabled")
 	audit(action, reference_doctype="TEX Access Grant", reference_name=grant.name,
-	      property=grant.property or None,
 	      old={f: before.get(f) for f in fields} if before else None,
-	      new={f: grant.get(f) for f in fields})
+	      new={f: grant.get(f) for f in fields}, **grant_scope(before, grant))

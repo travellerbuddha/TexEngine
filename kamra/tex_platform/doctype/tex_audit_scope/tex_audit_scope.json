@@ -1,0 +1,57 @@
+{
+ "actions": [],
+ "creation": "2026-09-24 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "event",
+  "property"
+ ],
+ "fields": [
+  {
+   "fieldname": "event",
+   "fieldtype": "Link",
+   "label": "Audit event",
+   "options": "TEX Audit Event",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "TEX Platform",
+ "name": "TEX Audit Scope",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Hotel Admin",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "row_format": "Dynamic",
+ "autoname": "hash",
+ "description": "A hotel reached by an audit event of a hotel group or an enterprise (ADR-053).",
+ "in_create": 1
+}

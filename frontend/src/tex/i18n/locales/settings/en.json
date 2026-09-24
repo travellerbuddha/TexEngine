@@ -7,10 +7,49 @@
  "settings.audit.caption": "Audit events, newest first. Expand a row to see the old and new values.",
  "settings.audit.change": "Change",
  "settings.audit.changes": "Changes",
+ "settings.audit.coll.added": {
+  "one": "{count} added",
+  "other": "{count} added"
+ },
+ "settings.audit.coll.also_changed": "Also changed",
+ "settings.audit.coll.changed": {
+  "one": "{count} changed",
+  "other": "{count} changed"
+ },
+ "settings.audit.coll.more": {
+  "one": "and {count} more",
+  "other": "and {count} more"
+ },
+ "settings.audit.coll.name.age_bands": "Child ages",
+ "settings.audit.coll.name.boards": "Boards",
+ "settings.audit.coll.name.contract": "Contract terms",
+ "settings.audit.coll.name.inventory": "Inventory",
+ "settings.audit.coll.name.occupancy_rules": "Occupancy rules",
+ "settings.audit.coll.name.offers": "Offers",
+ "settings.audit.coll.name.period_rates": "Room prices",
+ "settings.audit.coll.name.periods": "Periods",
+ "settings.audit.coll.name.rate_plans": "Rate plans",
+ "settings.audit.coll.name.rates": "Contract rates",
+ "settings.audit.coll.name.restrictions": "Restrictions",
+ "settings.audit.coll.name.room_rules": "Room prices",
+ "settings.audit.coll.name.rooms": "Rooms",
+ "settings.audit.coll.name.settings": "Settings",
+ "settings.audit.coll.previous_values": "Values before the change",
+ "settings.audit.coll.removed": {
+  "one": "{count} removed",
+  "other": "{count} removed"
+ },
+ "settings.audit.coll.row": "Row",
+ "settings.audit.coll.rows": "{before} → {after} rows",
+ "settings.audit.coll.unchanged": {
+  "one": "{count} already as set",
+  "other": "{count} already as set"
+ },
  "settings.audit.details": "Details",
  "settings.audit.empty": "No audit events match these filters",
  "settings.audit.empty_hint": "Widen the date range or clear the action and actor filters.",
  "settings.audit.empty_value": "empty",
+ "settings.audit.enterprise": "Enterprise",
  "settings.audit.err.both_dates": "Choose both a start and an end date.",
  "settings.audit.err.order": "The end date is before the start date.",
  "settings.audit.event_id": "Event id",
@@ -18,6 +57,7 @@
  "settings.audit.filter_help": "Action matches the beginning of the event name (contract. finds every contract event). Actor is the exact e-mail. Dates need both ends.",
  "settings.audit.hide_unchanged": "Hide unchanged fields",
  "settings.audit.hotel": "Hotel",
+ "settings.audit.hotel_group": "Hotel group",
  "settings.audit.kind.added": "Added",
  "settings.audit.kind.changed": "Changed",
  "settings.audit.kind.removed": "Removed",
@@ -27,8 +67,13 @@
  "settings.audit.no_changes": "No field changed.",
  "settings.audit.no_values": "This event recorded no old or new values.",
  "settings.audit.old": "Old value",
+ "settings.audit.other_hotels": {
+  "one": "+{count} other hotel",
+  "other": "+{count} other hotels"
+ },
  "settings.audit.reason": "Reason",
  "settings.audit.reference": "Record",
+ "settings.audit.scope_hotels": "Hotels reached",
  "settings.audit.show_unchanged": {
   "one": "Show {count} unchanged field",
   "other": "Show {count} unchanged fields"
@@ -38,6 +83,14 @@
   "other": "{count} events shown"
  },
  "settings.audit.source": "Source",
+ "settings.audit.source_label.agent": "AI assistant",
+ "settings.audit.source_label.api": "API (token)",
+ "settings.audit.source_label.desk": "Staff (signed in)",
+ "settings.audit.source_label.gateway_return": "Return from the payment page",
+ "settings.audit.source_label.guest": "Guest",
+ "settings.audit.source_label.scheduler": "Scheduled job",
+ "settings.audit.source_label.system": "System",
+ "settings.audit.source_label.webhook": "Webhook (server notification)",
  "settings.audit.subtitle": "Who changed what, when, where and why. The trail is read-only.",
  "settings.audit.time": "Time",
  "settings.audit.view_diff": "Show changes",

@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import frappe
 
-from kamra.tex.security.audit import log_exception
+from kamra.tex.security.audit import audit_source, log_exception
 
 
 def _run(path: str) -> None:
 	try:
-		frappe.get_attr(path)()
+		with audit_source("Scheduler"):           # what a job audits came from the scheduler (G-74)
+			frappe.get_attr(path)()
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- scheduler job boundary
 	except Exception:
 		frappe.db.rollback()

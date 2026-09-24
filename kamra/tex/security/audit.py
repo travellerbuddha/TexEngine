@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import contextmanager
 
 import frappe
 from frappe.utils import now_datetime
+
+from kamra.tex.security import changes
 
 SENSITIVE = re.compile(r"(pass(word)?|secret|token|cvv|cvc|pan|card_?number|authorization|api_?key|pin)$", re.I)
 
@@ -28,9 +31,23 @@ def _json(v) -> str | None:
 	return json.dumps(redact(v), default=str, ensure_ascii=False, sort_keys=True)
 
 
+# how an action reached TEX (ADR-053): Desk = a signed-in staff session (the TEX app included),
+# API = a token-authenticated call, Guest = an anonymous visitor, Gateway Return = the guest's
+# browser coming back from a payment page, Webhook = a server-to-server notification (payment
+# gateway, channel manager), Scheduler = a scheduled job, System = a queued job, a migration or
+# the console, Agent = the AI assistant
+SOURCES = ("Desk", "API", "Guest", "Gateway Return", "Webhook", "Scheduler", "System", "Agent")
+_SCHEDULED_JOB = "frappe.core.doctype.scheduled_job_type.scheduled_job_type.run_scheduled_job"
+
+
 def source_of_request() -> str:
 	if getattr(frappe.flags, "tex_source", None):
 		return frappe.flags.tex_source
+	job = getattr(frappe.local, "job", None)
+	if job:
+		# a background job acts after the request that queued it: never the guest's or staff's
+		return "Scheduler" if (job.get("method") == _SCHEDULED_JOB or getattr(frappe.flags, "in_scheduler", False)) \
+			else "System"
 	if frappe.session.user == "Guest":
 		return "Guest"
 	if getattr(frappe.flags, "in_scheduler", False):
@@ -41,11 +58,31 @@ def source_of_request() -> str:
 	return "API" if (frappe.get_request_header("Authorization") or "").lower().startswith("token") else "Desk"
 
 
+@contextmanager
+def audit_source(source: str):
+	"""Events audited inside the block record ``source`` (unless one names its own): the entry
+	point knows how the action arrived (a gateway's return or notification, the scheduler)."""
+	if source not in SOURCES:
+		raise ValueError(f"unknown audit source {source!r}")
+	before = frappe.flags.get("tex_source")
+	frappe.flags.tex_source = source
+	try:
+		yield
+	finally:
+		frappe.flags.tex_source = before
+
+
 def audit(action: str, *, reference_doctype: str | None = None, reference_name: str | None = None,
           property: str | None = None, old=None, new=None, reason: str | None = None,
-          source: str | None = None) -> str:
+          source: str | None = None, hotels=None, hotel_group: str | None = None,
+          enterprise: str | None = None) -> str:
 	"""Insert an immutable TEX Audit Event. Raises on failure: an unauditable
-	commercial action must not silently succeed."""
+	commercial action must not silently succeed.
+
+	``property`` is the hotel the event belongs to. An event of a hotel group or an enterprise
+	(a group grant, a group-level record) names the group / enterprise and ``hotels``: every
+	hotel it reached when it happened. Each of those hotels' staff see it (``TEX Audit Scope``,
+	ADR-053); a hotel it did not reach never does."""
 	user = frappe.session.user
 	doc = frappe.get_doc({
 		"doctype": "TEX Audit Event",
@@ -55,6 +92,8 @@ def audit(action: str, *, reference_doctype: str | None = None, reference_name: 
 		"actor_roles": ", ".join(sorted(r for r in frappe.get_roles(user) if r not in ("All", "Guest"))),
 		"source": source or source_of_request(),
 		"property": property,
+		"hotel_group": hotel_group,
+		"enterprise": enterprise,
 		"reference_doctype": reference_doctype,
 		"reference_name": reference_name,
 		"old_value": _json(old),
@@ -65,7 +104,62 @@ def audit(action: str, *, reference_doctype: str | None = None, reference_name: 
 	doc.flags.ignore_permissions = True
 	doc.flags.ignore_links = True          # history may name a record that was just deleted
 	doc.insert(ignore_permissions=True)
+	reached = sorted({h for h in (hotels or ()) if h} - {property})
+	if reached and frappe.db.table_exists("TEX Audit Scope"):
+		now = doc.creation
+		frappe.db.bulk_insert(
+			"TEX Audit Scope", fields=["name", "creation", "modified", "owner", "modified_by", "event", "property"],
+			values=[(frappe.generate_hash(length=12), now, now, user, user, doc.name, h) for h in reached])
 	return doc.name
+
+
+# ─── canonical values of a document (ADR-053) ────────────────────────────
+
+_NO_VALUE = frozenset({"Section Break", "Column Break", "Tab Break", "HTML", "Button", "Image", "Fold", "Heading",
+                       "Password", "Table", "Table MultiSelect"})
+_DECIMAL = frozenset({"Float", "Currency", "Percent"})
+_INT = frozenset({"Int", "Rating"})
+
+
+def field_value(df, value):
+	"""A field's value as the audit records it, whether it came from the database or from a
+	request: decimals as strings (never float), Int as int, Check as bool, dates ISO."""
+	ft = df.fieldtype if df else None
+	if ft == "Check":
+		return bool(frappe.utils.cint(value))
+	if value is None or value == "":
+		return None
+	if ft in _INT:
+		return frappe.utils.cint(value)
+	if ft in _DECIMAL:
+		return changes.dec_str(value)
+	if ft == "Date":
+		return str(frappe.utils.getdate(value))
+	if ft == "Datetime":
+		return str(frappe.utils.get_datetime(value))
+	return changes.canon(value)
+
+
+def doc_values(doc, fields=None, *, exclude=()) -> dict:
+	"""{field: canonical value} of a document's data fields (never a Password field, never a
+	child table: those are compared as collections)."""
+	meta = doc.meta
+	if fields is None:
+		fields = [df.fieldname for df in meta.fields if df.fieldtype not in _NO_VALUE]
+	out = {}
+	for f in fields:
+		if f in exclude:
+			continue
+		df = meta.get_field(f)
+		if df and df.fieldtype in ("Password",):
+			continue
+		out[f] = field_value(df, doc.get(f))
+	return out
+
+
+def row_values(rows, *, exclude=()) -> list[dict]:
+	"""Child rows as canonical dicts (no row ids, parents or timestamps)."""
+	return [doc_values(r, exclude=exclude) for r in rows or ()]
 
 
 def diff(before: dict | None, after: dict | None, fields) -> dict:

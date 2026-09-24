@@ -20,9 +20,7 @@ CONTRACT_FIELDS = ("contract_code", "contract_name", "market", "status", "pricin
                    "sell_currency", "priority", "is_bar", "sale_from", "sale_to", "stay_from", "stay_to", "notes")
 # fixed once a version was published (G-50, ADR-045): the controller refuses, the UI shows them read-only
 LOCKED_AFTER_PUBLISH = (*svc.FIXED_FIELDS, *svc.SELLING_FIELDS, "channels")
-VERSION_SETTINGS = ("child_ordering", "age_basis", "children_over_max_as_adults", "infants_count_as_occupants",
-                    "prices_include_tax", "stacking", "room_basis_extra_unit", "room_basis_children_fill_included",
-                    "change_note")
+VERSION_SETTINGS = svc.DRAFT_SETTINGS
 VERSION_TABLES = ("rooms", "periods", "period_rates", "age_bands", "occupancy_rules", "boards", "rate_plans",
                   "offers")
 
@@ -207,7 +205,9 @@ def _set_selling(v, selling) -> None:
 
 @frappe.whitelist(methods=["POST"])
 def save_version(name: str, data):
-	"""Replace the draft's settings, selling terms and child tables in one call (autosave-friendly)."""
+	"""Replace the draft's settings, selling terms and child tables in one call. The editor saves
+	on demand (Save, Ctrl+S), never per keystroke; each save that changes something is audited
+	old → new by the version's controller (G-74)."""
 	data = parse(data, {})
 	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)

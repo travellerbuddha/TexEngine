@@ -2268,6 +2268,112 @@ get around the guard. It found 2 High, 3 Medium and 3 Low issues around it, fixe
     and unit `test_import_amounts` (14, new module). The existing import tests now pass a
     currency, and the fixture hotel is live.
 
+## ADR-053 The audit trail records what changed (compact diffs), for which hotels, and how it arrived
+**Context.** G-74 (R-54): the audit trail missed changes and context. Draft contract edits
+(`save_version`) were not audited and a publish recorded only its payload hash; ARI bulk edits
+recorded only the values set; payment method rules were never audited, provider accounts only
+through the TEX API and without old values, and Desk / REST edits of payment rules not at all;
+a hotel-group or enterprise grant event had no hotel, so only platform administrators saw who
+was given access to a hotel; every payment outcome was recorded as coming from a "Webhook".
+
+**Decision.**
+- *Diff format.* Values are canonical before they are compared or stored
+  (`kamra.tex.security.changes.canon`, pure; `audit.field_value` by DocType field type):
+  decimals as plain strings (never float, "100" not "100.0"), Int as int, Check as bool,
+  dates ISO, blank = null, long text clipped at 300 characters. Single values keep the existing
+  shape: `old_value = {field: old}`, `new_value = {field: new}`, only the fields that changed.
+  Sets of rows go under `new_value.collections.<name>` as a *collection diff*: rows are known by
+  a natural key (`"<room type> · LOW"`, trailing blank key parts dropped, a duplicate key as
+  `"… #2"`), never by a row id (a draft's rows get new ids on every save):
+  `{count: [before, after], totals: {added, removed, changed}, added: [key…], removed: [key…],
+  changed: {key: {field: [old, new]}}, changed_keys: [key…], fields: {field: [old, new]}}`.
+  Everything is bounded: 50 keys per list, 25 rows (50 cells for the grid) recorded field by
+  field, the other changed rows by key only, the totals always complete. The keys per table are
+  `kamra.tex.commercial.diffs.DRAFT_TABLES` / `PAYLOAD_TABLES`.
+- *Draft edits* (`contract.version.save`) are audited by the TEX Contract Version controller
+  (`on_update` of a draft that stays a draft), so every path is covered: the contract editor,
+  a grid rate change (reason "ARI grid rate change"), Desk, REST. Settings and selling terms
+  old → new, each table as a collection. A save that changes nothing writes nothing. The editor
+  saves on demand (Save, Ctrl+S, only when dirty), never per keystroke, so no coalescing: one
+  event per save that changed something.
+- *Publish* (`contract.publish`) keeps the hash, effective time, warnings and selling terms and
+  adds `previous` (`{version, payload_hash}` of the version selling at the effective time, else
+  the latest version published before; null for a first publish) and `collections`: the frozen
+  payloads compared section by section (contract and settings as `fields`; rooms, periods, room
+  rates, occupancy rules, age bands, boards, rate plans, offers as collections; row ids
+  ignored). A first publish lists what it froze.
+- *ARI bulk edits* (`grid.bulk_update`) keep the summary they had and add `collections`
+  `restrictions`, `inventory`, `rates`: cells keyed `"<room type or pool> · <date>"` (rates:
+  `"<room type> · <from>/<to>"`, the draft's unit before and after), `unchanged` (cells already
+  at the new value) and `old_values`: per field, how many cells had each old value (10 values,
+  the rest as "…"), so the prior state is known beyond the 50 detailed cells. The limited-extras
+  grid (`extra_inventory.update`) records its days the same way (`"<extra> · <date>"`).
+- *Payment rules* (TEX Payment Policy, TEX Payment Provider Account, TEX Payment Method Rule)
+  are audited by record hooks (`kamra.tex.security.record_audit`, `doc_events`): one
+  `<payment_policy|payment_account|payment_rule>.<create|update|delete>` per change, whatever
+  path saved it; the TEX API no longer writes its own event for them. Password fields are never
+  read into the audit, not even masked (a mask gives the length away): secrets appear only as
+  `<field>_set` (create / delete, and on a change old and new) and `<field>_changed: true`. A
+  secret entered again unchanged is compared with the stored one (decrypted in memory, never
+  kept) and is no change. `redact()` still masks secret-like keys as a second line.
+- *Scope of group and enterprise events.* An audit event has a hotel (`property`) when it
+  belongs to one hotel. An event of a hotel group or an enterprise names it (`hotel_group`,
+  `enterprise` on TEX Audit Event) and the hotels it reached *when it happened*: one
+  `TEX Audit Scope` row (event, hotel) per hotel, written with the event
+  (`audit(..., hotels=…)`). Chosen over the group's current membership (a hotel that joins
+  later would see events that never concerned it; one that left would lose events that did) and
+  over one event per hotel (one action stays one event; an enterprise grant would multiply).
+  The rows are a separate DocType, not a child table, so Desk / REST scope them per hotel: a
+  hotel's staff read their own hotel's row and never another hotel's name. Visibility: a
+  non-platform user sees an event when its hotel or one of its scope rows is theirs
+  (`perm.query_conditions`, `has_permission`); an event with neither stays platform-level. The
+  audit viewer's hotel filter includes the events that reached the hotel and returns `hotels`
+  (the reached hotels the viewer may see) and `other_hotels` (a count), like the users screen
+  shows a grant's foreign hotels only as a count.
+  - Grant events: a hotel grant belongs to its hotel; a group or enterprise grant to its group
+    / enterprise and its hotels; a change reaches the hotels of the grant before and after (a
+    grant moved from group A to B is seen at both); create, change, delete and expiry alike
+    (`grants.grant_scope`). A platform grant stays platform-level.
+  - Group-level policy records (a group booking site or promotion) are audited with their
+    group and its hotels (`policies._audit_scope`); a global record stays platform-level.
+  - Patch p33 gives existing group / enterprise grant events their group / enterprise and the
+    hotels those have now (their membership at the time was not recorded); recorded old / new
+    values are not changed.
+- *Sources* (`audit.SOURCES`): Desk = a signed-in staff session (the TEX app), API = a
+  token-authenticated call, Guest = an anonymous visitor, Gateway Return = the guest's browser
+  coming back from a payment page, Webhook = a server-to-server notification (payment gateway,
+  channel manager), Scheduler = a scheduled job, System = a queued background job, a migration
+  or the console, Agent = the AI assistant. An entry point that knows how an action arrived sets
+  it for everything audited inside (`audit_source()`, restoring the previous value); otherwise
+  the request decides (`source_of_request`: a background job is Scheduler / System before the
+  session user is looked at).
+  - The gateway gets two callback addresses to the same endpoint, `via=return` (the browser:
+    iyzico `callbackUrl`, Sipay `return_url`, virtual POS `okUrl` / `failUrl`) and `via=notify`
+    (the virtual POS server `callbackUrl`, `Intent.notify_url`). `via` is signed with the
+    transaction (`callback_signature(txn, via)`), so a return address never passes for a
+    notification; the `via` parameter is not part of the provider's verified parameters. An
+    address issued before G-74 (no `via`, the old signature) is still accepted: a GET is the
+    guest's browser, a POST is taken as the gateway's notification.
+  - Staff re-verification records the staff request (Desk / API), the sandbox payment page
+    (`mock_pay`) a gateway return, TEX scheduled jobs Scheduler (`scheduler._run`). Payment
+    links that expire are audited (`payment_link.expire`).
+
+**Consequences.**
+- Audit payloads stay small: a 1,000-row draft edit records its counts and at most a few
+  hundred keys; no full payload is ever stored per save.
+- A new hotel-group or enterprise action passes `hotels=` / `hotel_group=` / `enterprise=` to
+  `audit()`; a new DocType whose every save path must be audited is added to
+  `record_audit.TRACKED` (with its secret fields) instead of auditing in each endpoint.
+- The audit trail screen renders collections row by row, the hotels reached (the viewer's,
+  the others as a count) and the source labels; the raw JSON stays one click away.
+- Residual: a hotel grant moved between two hotels names both hotels in its old / new values,
+  which the staff of either hotel see (whoever moved it administers both).
+- Tests: `test_audit_trail` (15: grant scope and visibility in the viewer, Desk / REST and
+  `has_permission`, expiry; draft saves, bounded summaries, publish diff; grid restrictions,
+  bounds, inventory and rates, limited extras; payment rules on API and Desk paths, no secret in any event,
+  one event per change; payment sources for gateway return, notification, a forged channel,
+  staff, sandbox page and scheduler), unit `test_audit_changes` (11).
+
 ## ADR-054 Modifications and the simulator are deterministic: a sale time belongs to the basis, the past is read as it was then, a proposal belongs to whoever made it
 *Amended by the review follow-up (end of this ADR): a staff approval of a guest's request is
 refused while the contract that priced it does not sell; a sale time with a UTC offset is read in

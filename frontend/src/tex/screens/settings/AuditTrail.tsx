@@ -7,6 +7,7 @@ import { useTexT } from "../../i18n"
 import { Badge, Button, Card, DescriptionList, EmptyState, ErrorState, Field, Input, Select, Skeleton } from "../../ui"
 import { cn } from "../../../lib/utils"
 import { SettingsFrame } from "./SettingsFrame"
+import { CollectionChanges, splitCollections } from "./components/CollectionDiff"
 import { JsonDiff } from "./components/JsonDiff"
 
 interface AuditRow {
@@ -17,6 +18,12 @@ interface AuditRow {
   actor_roles: string | null
   source: string | null
   property: string | null
+  /** an event of a hotel group or an enterprise (ADR-053): the hotels it reached that the
+   * viewer may see, and how many others */
+  hotel_group?: string | null
+  enterprise?: string | null
+  hotels?: string[]
+  other_hotels?: number
   reference_doctype: string | null
   reference_name: string | null
   reason: string | null
@@ -37,7 +44,13 @@ const ACTION_HINTS = [
   "booking.",
   "reservation.",
   "contract.",
+  "contract.version.save",
+  "grid.bulk_update",
   "payment.",
+  "payment_account.",
+  "payment_rule.",
+  "payment_policy.",
+  "payment_link.",
   "refund.",
   "profile.save",
   "settings.save",
@@ -107,6 +120,17 @@ export default function AuditTrail() {
   }, [load])
 
   const hotelName = useMemo(() => new Map(boot.properties.map((p) => [p.name, p.property_name])), [boot.properties])
+  const hotelsOf = (r: AuditRow) => {
+    if (r.property) return hotelName.get(r.property) ?? r.property
+    const names = (r.hotels ?? []).map((h) => hotelName.get(h) ?? h)
+    const others = r.other_hotels ? t("settings.audit.other_hotels", { count: r.other_hotels }) : ""
+    return [names.join(", "), others].filter(Boolean).join(" ") || "—"
+  }
+  const sourceLabel = (source: string) => {
+    const key = `settings.audit.source_label.${source.toLowerCase().replace(/\s+/g, "_")}`
+    const label = t(key)
+    return label === key ? source : label
+  }
   const toggle = (name: string) => {
     const next = new Set(open)
     if (next.has(name)) next.delete(name)
@@ -237,7 +261,10 @@ export default function AuditTrail() {
                             </td>
                             <td className="hidden border-b border-zinc-100 px-3 py-2 whitespace-nowrap text-zinc-700 sm:table-cell">{r.actor ?? "—"}</td>
                             <td className="hidden border-b border-zinc-100 px-3 py-2 text-zinc-700 md:table-cell">
-                              {r.property ? (hotelName.get(r.property) ?? r.property) : "—"}
+                              {hotelsOf(r)}
+                              {!r.property && (r.hotel_group || r.enterprise) && (
+                                <span className="block text-xs text-zinc-500">{r.hotel_group || r.enterprise}</span>
+                              )}
                             </td>
                             <td className="hidden border-b border-zinc-100 px-3 py-2 text-zinc-700 lg:table-cell">
                               {r.reference_name ? (
@@ -261,8 +288,10 @@ export default function AuditTrail() {
                                     cols={3}
                                     items={[
                                       { label: t("settings.audit.actor"), value: r.actor },
-                                      { label: t("settings.audit.source"), value: r.source ? <Badge tone="neutral">{r.source}</Badge> : "—" },
-                                      { label: t("settings.audit.hotel"), value: r.property ? (hotelName.get(r.property) ?? r.property) : "—" },
+                                      { label: t("settings.audit.source"), value: r.source ? <Badge tone="neutral">{sourceLabel(r.source)}</Badge> : "—" },
+                                      { label: r.property ? t("settings.audit.hotel") : t("settings.audit.scope_hotels"), value: hotelsOf(r) },
+                                      ...(r.hotel_group ? [{ label: t("settings.audit.hotel_group"), value: r.hotel_group }] : []),
+                                      ...(r.enterprise ? [{ label: t("settings.audit.enterprise"), value: r.enterprise }] : []),
                                       {
                                         label: t("settings.audit.reference"),
                                         value: r.reference_name ? `${r.reference_doctype} · ${r.reference_name}` : "—",
@@ -277,9 +306,9 @@ export default function AuditTrail() {
                                       <p className="mt-1 break-words">{r.actor_roles}</p>
                                     </details>
                                   )}
-                                  <div>
-                                    <p className="mb-1.5 text-xs font-semibold tracking-wide text-zinc-600 uppercase">{t("settings.audit.changes")}</p>
-                                    <JsonDiff before={r.old_value} after={r.new_value} />
+                                  <div className="space-y-3">
+                                    <p className="text-xs font-semibold tracking-wide text-zinc-600 uppercase">{t("settings.audit.changes")}</p>
+                                    <AuditChanges row={r} />
                                   </div>
                                 </div>
                               </td>
@@ -305,5 +334,17 @@ export default function AuditTrail() {
         </Card>
       )}
     </SettingsFrame>
+  )
+}
+
+/** Old / new values, with the collections of an event (contract tables, payload sections,
+ * ARI cells, ADR-053) shown row by row instead of as raw JSON. */
+function AuditChanges({ row }: { row: AuditRow }) {
+  const { rest, collections } = useMemo(() => splitCollections(row.new_value), [row.new_value])
+  return (
+    <>
+      {(!collections || row.old_value != null || rest != null) && <JsonDiff before={row.old_value} after={rest} />}
+      {collections && <CollectionChanges collections={collections} />}
+    </>
   )
 }
