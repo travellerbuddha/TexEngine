@@ -58,7 +58,7 @@ from kamra.tex.tests.integration.test_commercial_flows import (
 )
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 from kamra.tex.tests.integration.test_crm_segments import OTHER, agent, other_tenant
-from kamra.tex.tests.integration.test_patches import migrate, never_ran, rerun_changes
+from kamra.tex.tests.integration.test_patches import migrate, never_ran, refuse_commits, rerun_changes
 
 SISTER = "TEX Privacy Sister Hotel"
 INTERNAL = {
@@ -504,6 +504,7 @@ class TestAbandonedPrivacy(PrivacyCase):
 		self.assertEqual([e for e in events if e.get("email_hash")], [])
 
 	def test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds(self):
+		refuse_commits(self)                              # nothing commits until the rollback (G-76 review)
 		stale = frappe.get_doc({"doctype": "Guest", "first_name": "Stale", "last_name": "Consent",
 		                        "email": "g81-stale@example.com", "tex_consent_email": 0}).insert(
 			ignore_permissions=True).name
@@ -782,6 +783,7 @@ class TestWithheldFieldPermissions(PrivacyCase):
 		frappe.clear_cache(doctype=doctype)
 
 	def test_p40_gives_platform_admins_the_withheld_fields_on_customised_permissions(self):
+		refuse_commits(self)                              # nothing commits until the rollback (G-76 review)
 		# a site whose role permissions were customised (Kamra's bootstrap scripts): Frappe then reads
 		# only the Custom DocPerm rows, so the JSON's permlevel-1 row for System Manager is gone
 		self.custom("Guest", "System Manager", write=1, create=1, delete=1)

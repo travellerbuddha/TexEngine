@@ -54,7 +54,7 @@ from kamra.tex.tests.integration.test_crm_privacy import (
 	sister_hotel,
 )
 from kamra.tex.tests.integration.test_crm_segments import OTHER, agent
-from kamra.tex.tests.integration.test_patches import migrate, never_ran, rerun_changes
+from kamra.tex.tests.integration.test_patches import migrate, never_ran, refuse_commits, rerun_changes
 
 P40 = "p40_crm_privacy_review"
 P45 = "p45_crm_privacy_second_review"
@@ -573,6 +573,18 @@ class TestPrivacyDetails(PrivacyCase):
 		                           ["guest", "email", "phone", "consent_marketing", "quote"])
 		self.assertEqual(case, (None, None, None, 0, None))
 
+
+# ─── p40 and p45 ─────────────────────────────────────────────────────────
+
+
+class TestP45(PrivacyCase):
+	"""The patches of the reviews, run as ``bench migrate`` runs them (``migrate()``: schema steps stubbed),
+	on a connection that refuses to commit until the test has rolled back (``refuse_commits``)."""
+
+	def setUp(self):
+		refuse_commits(self)                     # before anything is written (review of G-76, C1)
+		super().setUp()
+
 	def test_p40_on_its_own_paths(self):
 		# a funnel hash of a profile that never consented, with no case at all
 		for first, email, consent in (("No", "l9-quiet@example.com", 0), ("Yes", "l9-agreed@example.com", 1)):
@@ -602,11 +614,6 @@ class TestPrivacyDetails(PrivacyCase):
 		self.assertEqual(frappe.db.get_value("TEX Funnel Event", events["l9-loose"], "email_hash"), None)
 		self.assertEqual(rerun_changes(P40), {})
 
-
-# ─── p45 ─────────────────────────────────────────────────────────────────
-
-
-class TestP45(PrivacyCase):
 	def old_version(self, doctype: str, docname: str, changed: list) -> str:
 		v = frappe.get_doc({"doctype": "Version", "ref_doctype": doctype, "docname": docname,
 		                    "data": json.dumps({"changed": changed})})
