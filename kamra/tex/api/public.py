@@ -24,7 +24,7 @@ from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, guest_changes, modification, quoting, sites
-from kamra.tex.services.txn import retry_on_deadlock
+from kamra.tex.services.txn import TRANSACTION_LOST, retry_on_deadlock
 
 
 def _limit(default: int, key: str):
@@ -646,6 +646,10 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 			"email_hash": hashlib.sha256(email.encode()).hexdigest() if email else None,
 			"consent_marketing": 1 if consent else 0,
 			"payload": json.dumps(payload or {}, default=str)[:4000]}).insert(ignore_permissions=True)
+	except TRANSACTION_LOST:
+		# the database rolled the request's transaction back (or it cannot go on): never carry on as if
+		# the booking it belongs to were written; the request is retried or fails (ADR-056 second review)
+		raise
 	except Exception:
 		log_exception("TEX funnel event")
 

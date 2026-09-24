@@ -708,19 +708,58 @@ def email_hash(email: str | None) -> str | None:
 	return hashlib.sha256(email.encode()).hexdigest() if email else None
 
 
+# A withdrawal's statements (ADR-056 second review). The rows it clears are read through an index and
+# written by primary key, so a withdrawal locks those rows only: never a scan of the funnel, which every
+# visitor's tracking writes to inside a booking's transaction. The cases are read with a lock, so a case
+# the scheduler writes while the withdrawal runs is seen (and cleared) once written.
+CASES_OF_GUEST = "SELECT name, session_id FROM `tabTEX Abandoned Booking` WHERE guest = %(guest)s FOR UPDATE"
+FUNNEL_BY_HASH = "SELECT name FROM `tabTEX Funnel Event` WHERE email_hash IN %(hashes)s"
+FUNNEL_BY_SESSION = "SELECT name, email_hash FROM `tabTEX Funnel Event` WHERE session_id IN %(sessions)s"
+FORGET_CASES = """UPDATE `tabTEX Abandoned Booking` SET guest = NULL, email = NULL, phone = NULL, quote = NULL,
+	consent_marketing = 0 WHERE name IN %(names)s"""
+FORGET_EVENTS = "UPDATE `tabTEX Funnel Event` SET email_hash = NULL WHERE name IN %(names)s"
+BATCH = 500
+
+
+def _chunks(values) -> list[tuple]:
+	values = sorted(v for v in values if v)
+	return [tuple(values[i:i + BATCH]) for i in range(0, len(values), BATCH)]
+
+
 def forget_contact(guest: str, emails=()) -> None:
-	"""The guest withdrew marketing e-mail consent: their abandoned cases become anonymous (no
-	profile, e-mail or phone; no consent) and their funnel events lose the e-mail hash, those of the
-	cases' sessions and those of the guest's addresses (ADR-056 review). The profile itself, its
-	stays and its consent history stay."""
-	sessions = tuple(s for s in frappe.get_all("TEX Abandoned Booking", filters={"guest": guest}, pluck="session_id")
-	                 if s) or ("",)
-	frappe.db.sql("""UPDATE `tabTEX Abandoned Booking` SET guest = NULL, email = NULL, phone = NULL,
-		consent_marketing = 0 WHERE guest = %s""", guest)
-	hashes = tuple(h for h in {email_hash(e) for e in emails} if h) or ("",)
-	frappe.db.sql("""UPDATE `tabTEX Funnel Event` SET email_hash = NULL
-		WHERE IFNULL(email_hash, '') != '' AND (email_hash IN %(h)s OR session_id IN %(s)s)""",
-	              {"h": hashes, "s": sessions})
+	"""The guest withdrew marketing e-mail consent (or cleared their e-mail or phone, or was erased):
+	their abandoned cases become anonymous (no profile, e-mail, phone or quote; no consent) and their
+	funnel events lose the e-mail hash, those of the cases' sessions and those of the guest's addresses
+	(ADR-056 review). The profile itself, its stays and its consent history stay."""
+	cases = frappe.db.sql(CASES_OF_GUEST, {"guest": guest}, as_dict=True)
+	events = set()
+	hashes = {h for h in (email_hash(e) for e in emails) if h}
+	for chunk in _chunks(hashes):
+		events |= set(frappe.db.sql(FUNNEL_BY_HASH, {"hashes": chunk}, pluck=True))
+	for chunk in _chunks({c.session_id for c in cases}):
+		events |= {name for name, h in frappe.db.sql(FUNNEL_BY_SESSION, {"sessions": chunk}) if h}
+	for chunk in _chunks({c.name for c in cases}):
+		frappe.db.sql(FORGET_CASES, {"names": chunk})
+	for chunk in _chunks(events):
+		frappe.db.sql(FORGET_EVENTS, {"names": chunk})
+
+
+def guest_validate(doc, method=None) -> None:
+	"""``Guest.validate``, whoever saves: a consent change made outside the CRM and the booking flows
+	(the Desk form, REST, a merge, an erasure) is stamped as theirs are (when, and how: ADR-046) and
+	audited once saved (``guest_on_update``). The CRM and the booking flows record their own."""
+	if doc.flags.get("tex_consent_recorded"):
+		return
+	before = doc.get_doc_before_save()
+	changed = {f: bool(doc.get(f)) for f in CONSENT if bool(doc.get(f)) != bool(before.get(f) if before else 0)}
+	if not changed:
+		return
+	from kamra.tex.security.audit import source_of_request
+
+	how = (doc.flags.get("tex_consent_source") or source_of_request())[:140]
+	doc.tex_consent_updated_at = now_datetime()
+	doc.tex_consent_source = how
+	doc.flags.tex_consent_audit = (changed, how)
 
 
 def guest_on_update(doc, method=None) -> None:

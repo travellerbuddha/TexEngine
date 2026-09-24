@@ -23,6 +23,7 @@ from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
+from kamra.tex.services.txn import TRANSACTION_LOST
 
 
 class AccountRefused(frappe.ValidationError):
@@ -324,6 +325,8 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		                                           callback_url=callback_url(txn.name, "return"),
 		                                           notify_url=callback_url(txn.name, "notify"),
 		                                           customer=customer, locale=locale))
+	except TRANSACTION_LOST:
+		raise                          # the request's transaction is gone: retried or failed, never recorded as here
 	except Exception as e:
 		log_exception(f"TEX payment start failed {txn.name}")
 		if existing:
