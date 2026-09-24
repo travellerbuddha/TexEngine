@@ -1827,9 +1827,11 @@ class TestFourthReview(GuestMoneyCase):
 		                                    reference="desk 6", idempotency_key="gcm4-p28-o", booking=b["booking"]))
 		frappe.db.set_value(DT, name, "refund_rows", None, update_modified=False)   # as before the field existed
 		from kamra.patches.tex import p28_guest_change_refund_rows as p28
+		from kamra.tex.tests.integration.test_patches import sandbox
 
-		p28.execute()
-		p28.execute()                                       # idempotent
+		with sandbox():                         # its DocType sync is DDL, which would commit this test
+			p28.execute()
+			p28.execute()                                   # idempotent
 		self.assertEqual(frappe.db.get_value(DT, name, "refund_rows"), row)
 
 	def test_a_refund_made_outside_tex_locks_the_booking_before_the_payment(self):

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { ArrowDownToLine, ArrowUpFromLine, Ban, CalendarClock, ChevronLeft, ChevronRight, Layers, Lock, PencilLine, Tag } from "lucide-react"
 import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
@@ -46,7 +46,14 @@ export default function AriGrid() {
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(property))
   // start null = the site's today (G-91): the grid follows the site's midnight until moved
   const today = useSiteToday()
-  const [picked, setStart] = useState<string | null>(null)
+  // deep links (G-64): ?start=YYYY-MM-DD opens that day (Rates & Contracts › Restrictions);
+  // ?bulk=1 opens the bulk editor (Rates & Contracts › Bulk editor)
+  const [params, setParams] = useSearchParams()
+  const startParam = /^\d{4}-\d{2}-\d{2}$/.test(params.get("start") ?? "") ? params.get("start") : null
+  const [picked, setStart] = useState<string | null>(startParam)
+  useEffect(() => {
+    if (startParam) setStart(startParam)
+  }, [startParam])
   const start = picked ?? today
   const [cellEdit, setCellEdit] = useState<{ row: GridRow; cell: GridCell } | null>(null)
   const [bulk, setBulk] = useState(false)
@@ -77,6 +84,18 @@ export default function AriGrid() {
   const scopeLabel = scopeText(t, scope, contract ? `${contract.contract_code}` : undefined, ratePlan?.rate_plan_name, channel?.channel_name)
   const metrics = prefs.metrics.filter((m) => m !== "rate" || Boolean(grid?.contract))
   const canEditAny = can("restriction.edit") || can("inventory.edit") || (can("contract.edit") && Boolean(scope.contract))
+  const wantsBulk = params.get("bulk") === "1"
+  useEffect(() => {
+    if (!wantsBulk || !grid) return
+    if (canEditAny) setBulk(true)
+    setParams(
+      (p) => {
+        p.delete("bulk")
+        return p
+      },
+      { replace: true },
+    )
+  }, [wantsBulk, grid, canEditAny, setParams])
 
   return (
     <>

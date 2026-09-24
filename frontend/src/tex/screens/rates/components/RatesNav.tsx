@@ -3,13 +3,17 @@ import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
 import { POLICY_KINDS } from "../policies/config"
 
-/** Sub-navigation of the Rates & Contracts area (R-35): contracts + selling policies. */
+/** Sub-navigation of the Rates & Contracts area (R-35): contracts (and their versions and
+ * tables, G-64), restrictions, selling policies. */
 export function RatesNav() {
   const { t } = useTexT()
   const { pathname } = useLocation()
   const path = pathname.replace(/\/+$/, "")
+  // contracts, their versions and the tables of versions are one section (ContractViews)
+  const contractViews = ["/tex/rates/contracts", "/tex/rates/versions", "/tex/rates/periods", "/tex/rates/occupancy", "/tex/rates/rate-plans"]
   const items = [
-    { to: "/tex/rates", label: t("rates.nav.contracts"), active: path.endsWith("/tex/rates") || path.includes("/tex/rates/contracts") },
+    { to: "/tex/rates", label: t("rates.nav.contracts"), active: path.endsWith("/tex/rates") || contractViews.some((v) => path.includes(v)) },
+    { to: "/tex/rates/restrictions", label: t("core.nav.sub.restrictions"), active: path.includes("/tex/rates/restrictions") },
     ...POLICY_KINDS.map((k) => {
       const to = `/tex/rates/policies/${k.slug}`
       return { to, label: t(k.navLabel), active: path.includes(to) }

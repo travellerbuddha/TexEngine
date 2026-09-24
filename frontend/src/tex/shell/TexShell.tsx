@@ -1,19 +1,32 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { NavLink, useLocation, useNavigate } from "react-router-dom"
-import { Building2, ExternalLink, LogOut, Menu, Moon, Rocket, Search, Sun, X } from "lucide-react"
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom"
+import { Building2, ChevronDown, ExternalLink, LogOut, Menu, Moon, Rocket, Search, Sun, X } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useAuth } from "../../lib/auth"
 import { getTheme, setTheme } from "../../lib/theme"
 import { toFullPath } from "../../lib/routing"
-import { NAV, NAV_GROUPS, type NavItem } from "./nav"
+import { childActive, childPath, childVisible, inArea, NAV, NAV_GROUPS, type NavChild, type NavItem } from "./nav"
+import { SourceNotice } from "./SourceNotice"
 import { tex, type TexApiError } from "../lib/api"
 import { useSession } from "../lib/session"
 import { setTexLang, TEX_LANGS, useTexT, type TexLang } from "../i18n"
 import { Badge, Button, Dialog, Field, IconButton, InlineError, Kbd, Notice, Textarea, useToast } from "../ui"
 
-function useVisibleNav(): NavItem[] {
+interface VisibleNavItem extends NavItem {
+  /** Sub-sections this user may open here (R-35, G-64). */
+  sub: NavChild[]
+}
+
+function useVisibleNav(): VisibleNavItem[] {
   const { can } = useSession()
-  return NAV.filter((n) => n.anyOf.some((c) => can(c)))
+  return useMemo(
+    () =>
+      NAV.filter((n) => n.anyOf.some((c) => can(c))).map((n) => ({
+        ...n,
+        sub: (n.children ?? []).filter((c) => childVisible(c, (cap) => can(cap))),
+      })),
+    [can],
+  )
 }
 
 function HotelSwitcher() {
@@ -132,61 +145,133 @@ function OnboardingBanner() {
   )
 }
 
+const navLinkCls = (active: boolean) =>
+  cn(
+    "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors",
+    active ? "bg-tex-50 text-tex-800" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950",
+  )
+
+/** An area with its sub-sections: open while the user is in the area, or when toggled. */
+function NavArea({ item, open, onToggle, onNavigate }: { item: VisibleNavItem; open: boolean; onToggle: () => void; onNavigate?: () => void }) {
+  const { t } = useTexT()
+  const { pathname } = useLocation()
+  const listId = `tex-nav-sub-${item.id}`
+  return (
+    <li>
+      <div className="flex items-center gap-0.5">
+        <NavLink to={item.to} end={item.to === "/tex" || item.id === "crs"} onClick={onNavigate} className={({ isActive }) => navLinkCls(isActive)}>
+          <item.icon className="size-4 shrink-0" aria-hidden />
+          <span className="truncate">{t(item.label)}</span>
+        </NavLink>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-label={t("core.nav.sections", { area: t(item.label) })}
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+        >
+          <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} aria-hidden />
+        </button>
+      </div>
+      {open && (
+        <ul id={listId} className="mt-0.5 mb-1.5 ml-[1.05rem] space-y-0.5 border-l border-zinc-200 pl-2">
+          {item.sub.map((c) => {
+            if (c.unavailable)
+              return (
+                <li key={c.id}>
+                  <span aria-disabled="true" className="block rounded-md px-2 py-1 text-[13px] text-zinc-500" data-testid={`tex-nav-${c.id}`}>
+                    <span className="block truncate">{t(c.label)}</span>
+                    <span className="block text-[11px] leading-tight">{t("core.nav.not_available")}</span>
+                  </span>
+                </li>
+              )
+            const active = childActive(c, item, pathname)
+            return (
+              <li key={c.id}>
+                <Link
+                  to={c.to}
+                  onClick={onNavigate}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "block truncate rounded-md px-2 py-1 text-[13px] transition-colors",
+                    active ? "bg-tex-50 font-medium text-tex-800" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950",
+                  )}
+                >
+                  {t(c.label)}
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </li>
+  )
+}
+
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const items = useVisibleNav()
   const { boot } = useSession()
   const { t } = useTexT()
+  const { pathname } = useLocation()
+  // areas open by hand; forgotten when the user moves to another area
+  const [toggled, setToggled] = useState<Record<string, boolean>>({})
+  const current = items.filter((n) => inArea(n, n.sub, pathname)).map((n) => n.id).join(",")
+  useEffect(() => setToggled({}), [current])
   return (
-    <nav aria-label={t("core.shell.main_nav")} className="flex h-full flex-col">
-      <div className="flex h-14 items-center gap-2 px-4">
-        <span className="grid size-8 place-items-center rounded-lg bg-tex-600 text-sm font-bold text-white dark:text-zinc-50" aria-hidden>
-          T
-        </span>
-        <span className="text-base font-semibold tracking-tight text-zinc-950">{boot.settings.brand_name || "TEX Engine"}</span>
-      </div>
-      <div className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
-        {NAV_GROUPS.map((g) => {
-          const groupItems = items.filter((i) => i.group === g.id)
-          if (!groupItems.length) return null
-          return (
-            <div key={g.id}>
-              <p className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-zinc-400 uppercase">{t(g.label)}</p>
-              <ul className="space-y-0.5">
-                {groupItems.map((n) => (
-                  <li key={n.id}>
-                    <NavLink
-                      to={n.to}
-                      end={n.to === "/tex" || n.id === "crs"}
-                      onClick={onNavigate}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors",
-                          isActive ? "bg-tex-50 text-tex-800" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950",
-                        )
-                      }
-                    >
-                      <n.icon className="size-4 shrink-0" aria-hidden />
-                      {t(n.label)}
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )
-        })}
-      </div>
-      {boot.settings.show_legacy_pms && (
-        <div className="border-t border-zinc-200 px-3 py-3">
-          <a
-            href={toFullPath("/today")}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
-          >
-            <ExternalLink className="size-4" aria-hidden />
-            {t("core.nav.legacy_pms")}
-          </a>
+    <div className="flex h-full flex-col">
+      <nav aria-label={t("core.shell.main_nav")} className="flex min-h-0 flex-1 flex-col">
+        <div className="flex h-14 items-center gap-2 px-4">
+          <span className="grid size-8 place-items-center rounded-lg bg-tex-600 text-sm font-bold text-white dark:text-zinc-50" aria-hidden>
+            T
+          </span>
+          <span className="truncate text-base font-semibold tracking-tight text-zinc-950">{boot.settings.brand_name || "TEX Engine"}</span>
         </div>
-      )}
-    </nav>
+        <div className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
+          {NAV_GROUPS.map((g) => {
+            const groupItems = items.filter((i) => i.group === g.id)
+            if (!groupItems.length) return null
+            return (
+              <div key={g.id}>
+                <p className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-zinc-500 uppercase">{t(g.label)}</p>
+                <ul className="space-y-0.5">
+                  {groupItems.map((n) =>
+                    n.sub.length ? (
+                      <NavArea
+                        key={n.id}
+                        item={n}
+                        open={toggled[n.id] ?? inArea(n, n.sub, pathname)}
+                        onToggle={() => setToggled((s) => ({ ...s, [n.id]: !(s[n.id] ?? inArea(n, n.sub, pathname)) }))}
+                        onNavigate={onNavigate}
+                      />
+                    ) : (
+                      <li key={n.id}>
+                        <NavLink to={n.to} end={n.to === "/tex" || n.id === "crs"} onClick={onNavigate} className={({ isActive }) => navLinkCls(isActive)}>
+                          <n.icon className="size-4 shrink-0" aria-hidden />
+                          <span className="truncate">{t(n.label)}</span>
+                        </NavLink>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </div>
+            )
+          })}
+        </div>
+        {boot.settings.show_legacy_pms && (
+          <div className="border-t border-zinc-200 px-3 py-3">
+            <a
+              href={toFullPath("/today")}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              <ExternalLink className="size-4" aria-hidden />
+              {t("core.nav.legacy_pms")}
+            </a>
+          </div>
+        )}
+      </nav>
+      <SourceNotice sourceUrl={boot.settings.source_url} className="border-t border-zinc-200 px-5 py-2.5 text-[11px]" />
+    </div>
   )
 }
 
@@ -194,6 +279,8 @@ interface Command {
   id: string
   label: string
   hint?: string
+  /** The area a sub-section belongs to, shown next to it. */
+  area?: string
   run: () => void
 }
 
@@ -206,12 +293,13 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   const input = useRef<HTMLInputElement>(null)
 
   const commands = useMemo<Command[]>(() => {
-    const base: Command[] = items.map((n) => ({
-      id: n.id,
-      label: t(n.label),
-      hint: n.keywords,
-      run: () => navigate(n.to),
-    }))
+    const base: Command[] = items.flatMap((n) => [
+      { id: n.id, label: t(n.label), hint: n.keywords, run: () => navigate(n.to) },
+      // sub-sections (R-35), except the one that is the area's own page
+      ...n.sub
+        .filter((c) => !c.unavailable && childPath(c) !== n.to)
+        .map((c) => ({ id: c.id, label: t(c.label), area: t(n.label), hint: `${c.keywords ?? ""} ${t(n.label)}`, run: () => navigate(c.to) })),
+    ])
     if (items.some((n) => n.id === "crs"))
       base.unshift({ id: "new-booking", label: t("core.cmd.new_booking"), hint: "book reserve", run: () => navigate("/tex/crs") })
     const term = q.trim()
@@ -298,9 +386,10 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
               aria-selected={i === active}
               onMouseEnter={() => setActive(i)}
               onClick={() => run(c)}
-              className={cn("cursor-pointer rounded-lg px-3 py-2 text-sm", i === active ? "bg-tex-50 text-tex-900" : "text-zinc-800")}
+              className={cn("flex cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm", i === active ? "bg-tex-50 text-tex-900" : "text-zinc-800")}
             >
-              {c.label}
+              <span className="truncate">{c.label}</span>
+              {c.area && <span className="shrink-0 text-xs text-zinc-500">{c.area}</span>}
             </li>
           ))}
           {!filtered.length && <li className="px-3 py-6 text-center text-sm text-zinc-500">{t("core.cmd.none")}</li>}
@@ -363,11 +452,16 @@ function UserMenu() {
 
 export function TexShell({ children }: { children: ReactNode }) {
   const { t } = useTexT()
+  const { boot } = useSession()
   const [mobileNav, setMobileNav] = useState(false)
   const [palette, setPalette] = useState(false)
   const location = useLocation()
 
   useEffect(() => setMobileNav(false), [location.pathname])
+  // the tab says the brand (TEX Settings), never the upstream product (G-60)
+  useEffect(() => {
+    document.title = boot.settings.brand_name || "TEX Engine"
+  }, [boot.settings.brand_name])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {

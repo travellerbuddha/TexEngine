@@ -6,6 +6,8 @@ import { Card, EmptyState, PageHeader } from "../../ui"
 import SitesList from "./SitesList"
 import SiteEditor from "./SiteEditor"
 import ContentTranslations from "./ContentTranslations"
+import Rooms from "./Rooms"
+import Analytics from "./Analytics"
 
 function NoAccess() {
   const { t } = useTexT()
@@ -29,6 +31,8 @@ export default function AreaRoutes() {
       <Route index element={<SitesList />} />
       <Route path="new" element={<SiteEditor key="new" isNew />} />
       <Route path="content" element={<ContentTranslations />} />
+      <Route path="rooms" element={<Rooms />} />
+      <Route path="analytics" element={<Analytics />} />
       <Route path=":name" element={<SiteEditor key="edit" />} />
       <Route path="*" element={<SitesList />} />
     </Routes>

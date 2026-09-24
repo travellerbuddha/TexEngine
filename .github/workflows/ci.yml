@@ -140,11 +140,14 @@ jobs:
       - name: Run TEX integration tests (every kamra/tex/tests/integration/test_*.py module)
         run: |
           cd frappe-bench
+          # this site is made for the run and thrown away with it: the tests that empty the site or
+          # run every patch over it (test_patches' whole-site tests, ADR-058 review) run here
+          bench --site test.localhost set-config -p tex_disposable_test_site 1
           # discovered, never listed: a new module can't be skipped silently
           for f in apps/kamra/kamra/tex/tests/integration/test_*.py; do
             m=$(basename "$f" .py)
             bench --site test.localhost run-tests --module kamra.tex.tests.integration.$m 2>&1 | tee tex_$m.out
-            grep -qE "^OK$" tex_$m.out
+            grep -qE "^OK( \(skipped=[0-9]+\))?$" tex_$m.out
           done
 
       - name: Run front-desk persona journey

@@ -9,6 +9,7 @@ const Segments = lazy(() => import("./Segments"))
 const Abandoned = lazy(() => import("./Abandoned"))
 const Programs = lazy(() => import("./loyalty/Programs"))
 const ProgramPage = lazy(() => import("./loyalty/ProgramPage"))
+const Communications = lazy(() => import("./Communications"))
 
 function NotFound() {
   const { t } = useTexT()
@@ -30,6 +31,7 @@ export default function AreaRoutes() {
       <Route path="loyalty" element={<Programs />} />
       <Route path="loyalty/new" element={<ProgramPage />} />
       <Route path="loyalty/:name" element={<ProgramPage />} />
+      <Route path="communications" element={<Communications />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   )

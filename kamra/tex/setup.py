@@ -159,11 +159,17 @@ def default_legacy_pms_visibility() -> None:
 
 
 def ran_before(patch: str) -> bool:
-	"""Whether the migration ran ``patch`` already (its Patch Log row, written by Frappe after the
-	patch succeeded). A step that converts data or grants a capability once, at the upgrade that
-	brings it, is skipped when an operator forces the patch again: a re-run never undoes what
-	administrators changed since (G-76, ADR-058)."""
-	return bool(frappe.db.exists("Patch Log", {"patch": patch}))
+	"""Whether the migration ran ``patch`` already: a Patch Log row Frappe wrote after the patch
+	succeeded. A step that converts data or grants a capability once, at the upgrade that brings it,
+	is skipped when an operator forces the patch again: a re-run never undoes what administrators
+	changed since (G-76, ADR-058).
+
+	As Frappe reads its log (review of G-76, H1): a row ``skipped`` by ``bench migrate
+	--skip-failing`` is a failed attempt, and Frappe runs the patch again next time, so that run is a
+	first run; a patch line re-issued with a suffix (``<module> #<date>``) is logged under that line."""
+	like = patch.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + " %"
+	return bool(frappe.db.sql("""SELECT 1 FROM `tabPatch Log` WHERE IFNULL(skipped, 0) = 0
+	                             AND (patch = %s OR patch LIKE %s) LIMIT 1""", (patch, like)))
 
 
 # composite indexes for availability, restrictions, FX, extras, CRM, channels and audit lookups:
@@ -201,9 +207,16 @@ TEX_INDEXES = (
 
 
 def missing_indexes() -> list[tuple]:
-	"""The ``TEX_INDEXES`` this site does not have yet (a read: no DDL)."""
-	return [(dt, fields, name) for dt, fields, name in TEX_INDEXES
-	        if not frappe.db.has_index(f"tab{dt}", name)]
+	"""The ``TEX_INDEXES`` this site does not have yet (a read: no DDL). An index whose table cannot
+	be read is logged and left out: one broken table never stops the others (review of G-76, L6)."""
+	out = []
+	for dt, fields, name in TEX_INDEXES:
+		try:
+			if not frappe.db.has_index(f"tab{dt}", name):
+				out.append((dt, fields, name))
+		except Exception:
+			frappe.log_error(title=f"TEX index {name}")
+	return out
 
 
 def ensure_indexes() -> None:

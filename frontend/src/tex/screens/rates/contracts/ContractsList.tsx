@@ -11,6 +11,7 @@ import { CONTRACT_STATUS, enumLabel, enumOptions } from "../lib/options"
 import type { ContractRow } from "../lib/types"
 import { versionLabel } from "../lib/util"
 import { ContractFormDialog, DuplicateDialog } from "./ContractDialogs"
+import { ContractViews } from "../lists/ContractViews"
 
 /** Contracts of the selected hotel with status / market filters (R-04). */
 export default function ContractsList() {
@@ -48,6 +49,7 @@ export default function ContractsList() {
           )
         }
       />
+      <ContractViews />
       <Toolbar>
         <Field label={t("core.action.search")} className="w-full sm:w-64">
           <div className="relative">

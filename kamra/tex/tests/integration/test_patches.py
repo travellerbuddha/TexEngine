@@ -215,6 +215,7 @@ LEGACY_ROWS = {"tabProperty": "", "tabReservation": "", "tabGuest": "", "tabUser
                "tabSingles": "WHERE doctype = 'TEX Settings' AND field NOT IN ('modified', 'modified_by')",
                "__Auth": "WHERE doctype LIKE 'TEX %%'"}
 IGNORED_COLUMNS = frozenset({"modified", "modified_by"})
+ROW_KEYS = {"__Auth": ("doctype", "name", "fieldname"), "tabSingles": ("doctype", "field")}
 _COLUMNS: dict[str, list[str]] = {}
 
 
@@ -241,9 +242,11 @@ def site_digest() -> dict[str, dict]:
 		if not cols:
 			continue
 		rows = frappe.db.sql("SELECT {} FROM `{}` {}".format(", ".join(f"`{c}`" for c in cols), table, where))
-		key = cols.index("name") if "name" in cols and table != "__Auth" else None
-		out[table] = {(row[key] if key is not None else repr(row)): hashlib.sha1(repr(row).encode()).hexdigest()
-		              for row in rows}
+		# a row is named by its key, never by a value (an encrypted password, a setting): the value
+		# is only hashed, and a failure message prints names (review of G-76, L1)
+		key = [cols.index(c) for c in ROW_KEYS.get(table, ("name",))]
+		out[table] = {(tuple(row[i] for i in key) if len(key) > 1 else row[key[0]]):
+		              hashlib.sha1(repr(row).encode()).hexdigest() for row in rows}
 	return out
 
 
@@ -264,9 +267,20 @@ def rerun_changes(patch: str) -> dict:
 	return digest_changes(before, site_digest())
 
 
+DISPOSABLE = "tex_disposable_test_site"
+
+
+def disposable_site() -> bool:
+	"""A site made for this test run and dropped after it (its site config says so)."""
+	return bool(frappe.conf.get(DISPOSABLE))
+
+
 def empty_site() -> None:
 	"""No hotel, stay, guest, legacy voucher or experience and no TEX record, as a site that never
-	ran TEX, in this transaction only (tearDown rolls it back; nothing here may commit)."""
+	ran TEX, in this transaction only (tearDown rolls it back; nothing may commit, ``refuse_commits``).
+	Only ever on a disposable site."""
+	if not disposable_site():
+		raise AssertionError(f"empty_site() runs only on a disposable site ({DISPOSABLE}); this is {frappe.local.site}")
 	with sandbox():
 		for t in tex_tables():
 			frappe.db.sql(f"DELETE FROM `{t}`")
@@ -283,6 +297,25 @@ def empty_site() -> None:
 	scope.clear_cache()
 
 
+def representative_site(case) -> None:
+	"""What the whole-site tests run the patches over: a published contract and a stay TEX sold
+	(price-locked, its snapshot and revisions), legacy stays, a voucher and an experience."""
+	from kamra.tex.services import booking, quoting
+
+	fx.create_contract(case.f, code="G76W")
+	offer = pick(search_std(fx.d(6, 10), fx.d(6, 12), [{"adults": 2}]))
+	q = quoting.create_quote(offer["rooms"][0]["offer_key"], extras=[{"code": "TRF"}])
+	assert q["ok"], q
+	booking.create_booking(quote_ids=[q["quote_id"]], guest={"first_name": "Gee", "last_name": "Whole",
+	                                                         "email": "g76w@example.com"},
+	                       payment_method="Card", confirm_without_payment=True)
+	hotel = kamra_hotel("G76 Whole Legacy", "TRY")
+	for status in ("Confirmed", "Checked Out", "Cancelled"):
+		kamra_stay(hotel, status, "900.00", days=(-9, -7) if status == "Checked Out" else (10, 12))
+	put("Discount Voucher", property=hotel, voucher_code="whole5", discount_type="Percent", value=5)
+	put("Experience", property=hotel, experience_name="Hamam", category="Spa", price=40)
+
+
 def run_chain(case) -> None:
 	"""Every TEX patch in migration order, as one ``bench migrate`` runs them; (c) after each."""
 	for patch in listed_patches():
@@ -291,7 +324,44 @@ def run_chain(case) -> None:
 		assert_sold_unchanged(case, before, sold_state(), patch)
 
 
+class CommitRefused(AssertionError):
+	"""A commit while a migration test holds its changes: it would make them (and the empty-site
+	tests' deletions) permanent on the site."""
+
+
+def refuse_commits(case) -> None:
+	"""From now until ``case`` has rolled back, this connection refuses to commit, whoever asks: a
+	patch, the test, or Frappe's ``run-tests`` after a Ctrl-C (C1, review of G-76). On
+	KeyboardInterrupt unittest skips tearDown and the cleanups, and ``_cleanup_after_tests`` then
+	commits the connection. So:
+	- ``commit()`` raises, and so do ``sql_ddl`` and ``add_index``, which commit first;
+	- a bare COMMIT statement raises;
+	- DDL or START TRANSACTION after a write raises already (Frappe's ``ImplicitCommitError``).
+	The refusal is lifted by a cleanup that runs after the test's rollback. An interrupted run never
+	reaches it: it ends on the refused commit, and MariaDB rolls the dropped connection back."""
+	db = frappe.local.db
+	real_sql = db.sql
+
+	def commit(*args, **kwargs):
+		raise CommitRefused("a migration test holds its changes: nothing is committed until it rolled back")
+
+	def sql(query, *args, **kwargs):
+		if get_query_type(str(query)) == "commit":
+			commit()
+		return real_sql(query, *args, **kwargs)
+
+	patches = [mock.patch.object(db, "commit", commit), mock.patch.object(db, "sql", sql)]
+	for p in patches:
+		p.start()
+	case.addCleanup(lambda: [p.stop() for p in reversed(patches)])
+	case.addCleanup(db.rollback)              # cleanups run last-in first-out: the rollback comes first
+
+
 class PatchCase(TexTestCase):
+	def setUp(self):
+		refuse_commits(self)                     # before anything is written (C1)
+		super().setUp()
+
 	def tearDown(self):
 		super().tearDown()                       # the rollback
 		frappe.local.db.value_cache.clear()
@@ -358,8 +428,73 @@ class TestEveryPatch(PatchCase):
 			if test:
 				self.assertTrue(callable(getattr(klass, test[0], None)), f"{patch}: {where}")
 
+	def test_no_test_runs_a_patchs_schema_sync_for_real(self):
+		"""M3 (review of G-76): a test that runs a patch whose first steps sync a DocType or create
+		an index stubs them (``sandbox()``, ``migrate()`` or a mocked ``reload_doc``): a real sync can
+		commit the test's rows into the site."""
+		import ast
+		import re
+
+		here = os.path.dirname(__file__)
+		ddl = {p for p in listed_patches()
+		       if re.search(r"reload_doc|ensure_indexes|add_index|create_custom_fields",
+		                    open(import_module(PREFIX + p).__file__).read())}
+		stubbed = ("sandbox(", "migrate(", "first_run(", "reload_doc")
+		offenders = []
+		for fname in sorted(f for f in os.listdir(here) if f.startswith("test_") and f.endswith(".py")):
+			src = open(os.path.join(here, fname)).read()
+			for cls in [n for n in ast.parse(src).body if isinstance(n, ast.ClassDef)]:
+				setup_src = "".join(ast.get_source_segment(src, f) for f in cls.body
+				                    if isinstance(f, ast.FunctionDef) and f.name == "setUp")
+				for fn in [f for f in cls.body if isinstance(f, ast.FunctionDef)]:
+					body = ast.get_source_segment(src, fn)
+					alias = {m.group(2) or m.group(1): m.group(1)
+					         for m in re.finditer(r"import (p\d\d_\w+)(?: as (\w+))?", body + src)}
+					ran = {alias.get(a, a) for a in re.findall(r"(\w+)\.execute\(", body)} & set(listed_patches())
+					if ran & ddl and not any(x in body or x in setup_src for x in stubbed):
+						offenders.append(f"{fname}::{cls.name}.{fn.name}: {sorted(ran & ddl)}")
+		self.assertEqual(offenders, [])
+
+	def test_the_digest_names_passwords_by_record_never_by_their_value(self):
+		"""L1 (review of G-76): an encrypted password is compared, never printed as a key."""
+		from frappe.utils.password import set_encrypted_password
+
+		conn = frappe.get_doc({"doctype": "TEX Integration Connection", "label": "G76 digest", "category": "PMS",
+		                       "adapter": "webhook", "enabled": 0}).insert(ignore_permissions=True)
+		set_encrypted_password("TEX Integration Connection", conn.name, "g76-digest-secret", "api_key")
+		stored = frappe.db.sql("SELECT password FROM `__Auth` WHERE doctype=%s AND name=%s AND fieldname='api_key'",
+		                       ("TEX Integration Connection", conn.name))[0][0]
+		before = site_digest()
+		self.assertIn(("TEX Integration Connection", conn.name, "api_key"), before["__Auth"])
+		self.assertNotIn(stored, repr(list(before["__Auth"])))
+		set_encrypted_password("TEX Integration Connection", conn.name, "g76-digest-other", "api_key")
+		self.assertEqual(digest_changes(before, site_digest()),
+		                 {"__Auth": {"added": [], "removed": [],
+		                             "changed": [("TEX Integration Connection", conn.name, "api_key")]}})
+
+
+
+# ─── tests that change the whole site: a disposable site only ────────────
+
+
+class WholeSiteCase(PatchCase):
+	"""Tests that run patches over the whole site or empty it. They run only on a disposable site
+	(``tex_disposable_test_site`` in its site config: CI's, or one made for the run by
+	``/home/user/bench/scratch/disposable_test.sh``), never on a shared one: even rolled back, their
+	deletes and whole-table updates hold locks other sessions wait on (M4, review of G-76), and they
+	must never be one commit away from wiping a site that others use (C1)."""
+
+	def setUp(self):
+		if not disposable_site():
+			self.skipTest(f"changes the whole site: runs only on a site with {DISPOSABLE} set")
+		super().setUp()
+
+
+class TestWholeSite(WholeSiteCase):
 	def test_each_patch_reruns_as_a_no_op_and_never_touches_what_was_sold(self):
-		"""(b) and (c) on this site's data: every patch forced again, in order."""
+		"""(b) and (c): every patch forced again, in order, over a site with a published contract, a
+		price-locked stay TEX sold, legacy stays, a voucher and an experience."""
+		representative_site(self)
 		for patch in listed_patches():
 			before = sold_state()
 			migrate(patch)
@@ -383,7 +518,7 @@ class TestEveryPatch(PatchCase):
 # ─── the upgrade of a Kamra database ─────────────────────────────────────
 
 
-class TestUpgradeFromKamra(PatchCase):
+class TestUpgradeFromKamra(WholeSiteCase):
 	def test_a_kamra_database_upgrades_to_tex(self):
 		empty_site()
 		beach, city = kamra_hotel("G76 Kamra Beach", "EUR"), kamra_hotel("G76 Kamra City", "TRY")
@@ -481,6 +616,11 @@ class TestUpgradeFromKamra(PatchCase):
 class TestP01Foundation(PatchCase):
 	def test_hotels_masters_profiles_and_settings(self):
 		orphan = kamra_hotel("G76 Orphan Hotel")
+		if frappe.db.count("TEX Enterprise") < 2:                  # a site of several tenants, on any site
+			ent = frappe.get_doc({"doctype": "TEX Enterprise", "enterprise_name": "G76 Second Tenant"}).insert(
+				ignore_permissions=True).name
+			frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "G76 Second Group",
+			                "enterprise": ent}).insert(ignore_permissions=True)
 		frappe.db.delete("TEX Profile Capability", {"parent": "Viewer", "parenttype": "TEX Permission Profile"})
 		frappe.db.delete("TEX Permission Profile", "Viewer")
 		frappe.db.delete("TEX Market", "PL")
@@ -504,9 +644,83 @@ class TestP01Foundation(PatchCase):
 			frappe.db.delete("TEX Hotel Group", {"enterprise": ent})
 			frappe.db.delete("TEX Enterprise", ent)
 		frappe.db.delete("TEX Hotel Group", {"name": ("!=", fx.GROUP)})
+		never_ran("p01_foundation")                                  # a first run on such a site
 		migrate("p01_foundation")
 		self.assertEqual(frappe.db.get_value("Property", orphan, ["tex_hotel_group", "tex_enterprise"]),
 		                 (fx.GROUP, fx.ENTERPRISE))
+
+	def test_a_forced_rerun_leaves_what_administrators_changed(self):
+		"""M2 (review of G-76): after the upgrade, markets and channels deleted, the brand name
+		cleared, the legacy PMS hidden and a hotel kept outside TEX stay as administrators left
+		them, whether the site has one tenant or several."""
+		log_patch("p01_foundation")
+		kamra_stay(fx.PROPERTY, "Checked In", "100.00", days=(-1, 1))     # the PMS is in use
+		kept_out = kamra_hotel("G76 Kept Outside")
+		for ent in frappe.get_all("TEX Enterprise", filters={"name": ("!=", fx.ENTERPRISE)}, pluck="name"):
+			frappe.db.delete("TEX Hotel Group", {"enterprise": ent})
+			frappe.db.delete("TEX Enterprise", ent)
+		frappe.db.delete("TEX Hotel Group", {"name": ("!=", fx.GROUP)})     # one tenant, one group
+		frappe.db.delete("TEX Market", "PL")
+		frappe.db.delete("TEX Sales Channel", "META")
+		frappe.db.set_single_value("TEX Settings", {"brand_name": None, "show_legacy_pms": 0})
+		self.assertRerunChangesNothing("p01_foundation")
+		self.assertFalse(frappe.db.exists("TEX Market", "PL") or frappe.db.exists("TEX Sales Channel", "META"))
+		self.assertEqual((frappe.db.get_single_value("TEX Settings", "brand_name") or None,
+		                  frappe.db.get_single_value("TEX Settings", "show_legacy_pms")), (None, 0))
+		self.assertEqual(frappe.db.get_value("Property", kept_out, ["tex_hotel_group", "tex_enterprise"]),
+		                 (None, None))
+		self.assertFalse(legacy.is_tex_hotel(kept_out))
+
+
+class TestRanBefore(PatchCase):
+	"""H1 (review of G-76): a run is a Patch Log row that is not ``skipped``, whether the line carries
+	a suffix or not. ``bench migrate --skip-failing`` logs a failed patch as skipped and runs it again
+	next time: that run is a first run."""
+
+	def test_the_patch_log_decides(self):
+		from kamra.tex import setup
+
+		name = PREFIX + "p04_lock_legacy_prices"
+		never_ran("p04_lock_legacy_prices")
+		frappe.db.delete("Patch Log", {"patch": ("like", name + "%")})
+		self.assertFalse(setup.ran_before(name))
+		put("Patch Log", patch=name, skipped=1)                                  # failed, skipped
+		put("Patch Log", patch=PREFIX + "p04XlockXlegacyXprices #x", skipped=0)  # "_" is no wildcard
+		put("Patch Log", patch=name + "X", skipped=0)                             # another patch
+		self.assertFalse(setup.ran_before(name))
+		put("Patch Log", patch=name + " #2026-10-01", skipped=0)                  # re-issued with a suffix
+		self.assertTrue(setup.ran_before(name))
+
+	def test_a_patch_skipped_by_a_failing_migration_runs_whole_next_time(self):
+		never_ran("p04_lock_legacy_prices")
+		put("Patch Log", patch=PREFIX + "p04_lock_legacy_prices", skipped=1)
+		stay = kamra_stay(kamra_hotel("G76 Skipped Once"), "Confirmed", "210.00")
+		migrate("p04_lock_legacy_prices")
+		self.assertEqual(frappe.db.get_value("Reservation", stay, ["tex_price_locked", "tex_pricing_source"]),
+		                 (1, "Legacy"))
+
+	def test_a_suffixed_patch_line_counts_as_run(self):
+		never_ran("p04_lock_legacy_prices")
+		put("Patch Log", patch=PREFIX + "p04_lock_legacy_prices #2026-10-01", skipped=0)
+		stay = kamra_stay(kamra_hotel("G76 Suffixed"), "Confirmed", "210.00")
+		migrate("p04_lock_legacy_prices", log=False)
+		self.assertEqual(frappe.db.get_value("Reservation", stay, "tex_price_locked"), 0)
+
+
+class TestP36GoLive(PatchCase):
+	def test_a_forced_rerun_leaves_a_hotel_set_back_to_onboarding(self):
+		"""M1 (review of G-76): an administrator put a hotel back to onboarding after the upgrade
+		(``legacy.set_live``, audited ``hotel.go_live_undo``): a forced re-run keeps it there."""
+		fx.create_contract(self.f, code="G76P36")                   # TEX sells the hotel
+		never_ran("p36_g92_review")
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_live_from", None)
+		self.first_run("p36_g92_review")                            # the upgrade sets it live
+		self.assertTrue(frappe.db.get_value("Property", fx.PROPERTY, "tex_live_from"))
+		log_patch("p36_g92_review")
+		legacy.set_live(fx.PROPERTY, False, "cut-over postponed")
+		self.assertRerunChangesNothing("p36_g92_review")
+		self.assertFalse(frappe.db.get_value("Property", fx.PROPERTY, "tex_live_from"))
+		self.assertEqual(legacy.tex_mode(fx.PROPERTY), "onboarding")
 
 
 class TestP02AccessGrants(PatchCase):
@@ -556,6 +770,25 @@ class TestP03Indexes(PatchCase):
 		                       side_effect=lambda table, index: index != "tex_inv_rt_date" and real(table, index)):
 			seen = migrate("p03_indexes")
 		self.assertEqual(seen["add_index"], [("TEX Inventory Day", ("room_type", "inventory_date"), "tex_inv_rt_date")])
+
+	def test_one_unreadable_index_does_not_stop_the_others(self):
+		"""L6 (review of G-76): an index whose table cannot be read is logged and skipped; the other
+		missing ones are still created (as before ``missing_indexes``)."""
+		from kamra.tex import setup
+
+		real = frappe.local.db.has_index
+
+		def has_index(table, index):
+			if index == "tex_ari_day_lookup":
+				raise frappe.db.ProgrammingError(1146, f"Table '{table}' doesn't exist")
+			return index != "tex_inv_rt_date" and real(table, index)
+
+		logged = frappe.db.count("Error Log", {"method": "TEX index tex_ari_day_lookup"})
+		with mock.patch.object(frappe.local.db, "has_index", side_effect=has_index):
+			self.assertEqual([i[2] for i in setup.missing_indexes()], ["tex_inv_rt_date"])
+			seen = migrate("p03_indexes")
+		self.assertEqual(seen["add_index"], [("TEX Inventory Day", ("room_type", "inventory_date"), "tex_inv_rt_date")])
+		self.assertEqual(frappe.db.count("Error Log", {"method": "TEX index tex_ari_day_lookup"}), logged + 2)
 
 	def test_p39_creates_the_lookup_indexes_that_survive_a_sync(self):
 		from kamra.tex import setup
@@ -750,6 +983,23 @@ class TestReportingPatches(PatchCase):
 		self.assertEqual(len(events), 1)
 		self.assertEqual(json.loads(events[0])["open_charges"], 0)
 
+	def test_p19_does_not_report_an_account_again_when_a_charge_is_touched(self):
+		"""L5 (review of G-76): the open charges are listed by name, not by when they were last
+		written, so touching one does not make the same report look new."""
+		acc = put("TEX Payment Provider Account", label="G76 mock charges", property=fx.PROPERTY,
+		          provider="Mock", environment="Production", enabled=1)
+		older, newer = add_to_date(now_datetime(), hours=-2), add_to_date(now_datetime(), hours=-1)
+		for name, at in (("G76-TXN-A", older), ("G76-TXN-B", newer)):
+			put("TEX Payment Transaction", name, provider_account=acc, property=fx.PROPERTY, txn_type="Charge",
+			    status="Pending", amount=D("10"), currency="EUR", modified=at)
+		self.first_run("p19_payments_go_live_check")
+		frappe.db.set_value("TEX Payment Transaction", "G76-TXN-A", "modified", now_datetime(),
+		                    update_modified=False)                  # a charge is touched after the report
+		self.assertRerunChangesNothing("p19_payments_go_live_check")
+		events = frappe.get_all("TEX Audit Event", filters={"action": "payment_account.gated", "reference_name": acc},
+		                        pluck="new_value")
+		self.assertEqual([json.loads(e)["open_charge_names"] for e in events], [["G76-TXN-A", "G76-TXN-B"]])
+
 	def test_p24_reports_public_active_content_and_site_images_once(self):
 		svg = put("File", file_name="g76-logo.svg", file_url="/files/g76-logo.svg", is_private=0, is_folder=0,
 		          folder="Home")
@@ -822,3 +1072,35 @@ class TestSmallPatches(PatchCase):
 		self.first_run("p34_redemption_released_at")
 		self.assertEqual(get_datetime(frappe.db.get_value("TEX Promotion Redemption", released, "released_at")), at)
 		self.assertIsNone(frappe.db.get_value("TEX Promotion Redemption", held, "released_at"))
+
+
+class TestCommitGuard(PatchCase):
+	"""C1 (review of G-76): nothing a migration test holds can be committed until it rolled back."""
+
+	def test_commits_are_refused_until_the_test_rolled_back(self):
+		for attempt in (frappe.db.commit, lambda: frappe.db.sql("COMMIT"),
+		                lambda: frappe.db.sql_ddl("ALTER TABLE `tabToDo` COMMENT ''")):
+			with self.assertRaises(CommitRefused):
+				attempt()
+		put("ToDo", description="C1 check", status="Open")               # a write: DDL would commit it
+		with self.assertRaises(frappe.exceptions.ImplicitCommitError):
+			frappe.db.sql("ALTER TABLE `tabToDo` COMMENT ''")             # refused before it runs (Frappe)
+
+
+if os.environ.get("TEX_C1_MARKER"):
+	class TestInterruptedRun(PatchCase):
+		"""C1: a run interrupted with Ctrl-C commits nothing. unittest skips tearDown and the
+		cleanups on KeyboardInterrupt, and Frappe's ``run-tests`` then commits the connection
+		(``_cleanup_after_tests``). Only the SIGINT simulation defines it
+		(``/home/user/bench/scratch/c1_sigint.sh`` sets ``TEX_C1_MARKER``): it writes one harmless
+		marker row and waits for the interrupt."""
+
+		def test_an_interrupted_run_commits_nothing(self):
+			import sys
+			import time
+
+			marker = os.environ["TEX_C1_MARKER"]
+			put("ToDo", marker, description=f"C1 marker {marker}", status="Open")
+			sys.__stdout__.write(f"C1-MARKER-READY {marker}\n")
+			sys.__stdout__.flush()
+			time.sleep(120)

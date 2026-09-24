@@ -28,7 +28,7 @@ export interface Bootstrap {
   user: { name: string; full_name: string; roles: string[]; platform_admin: boolean }
   properties: TexProperty[]
   capabilities: Record<string, string>
-  settings: { brand_name: string; show_legacy_pms: boolean; default_market?: string; default_sales_channel?: string }
+  settings: { brand_name: string; show_legacy_pms: boolean; default_market?: string; default_sales_channel?: string; source_url?: string }
   markets: { name: string; market_name: string; is_global: number; default_currency?: string; countries?: string }[]
   channels: { name: string; channel_name: string; channel_group?: string }[]
   currencies: string[]

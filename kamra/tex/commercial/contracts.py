@@ -656,7 +656,14 @@ _TERMS: dict[str, ContractTerms] = {}
 
 class PayloadMismatch(frappe.ValidationError):
 	"""A frozen payload is not the one it should be (G-73, ADR-058): it fails its own integrity
-	check, or it is not the payload a price-locked snapshot recorded (``expected_hash``)."""
+	check, or it is not the payload a price-locked snapshot recorded (``expected_hash``). It names
+	the version that failed and the hash on its row (review of G-73, L3): selection loads every
+	contract on sale, so the one that failed may not be the stay's."""
+
+	def __init__(self, message: str = "", *, version: str | None = None, found_hash: str | None = None):
+		super().__init__(message)
+		self.version = version
+		self.found_hash = found_hash
 
 
 def clear_terms_cache() -> None:
@@ -678,16 +685,17 @@ def load_terms(version_name: str, *, expected_hash: str | None = None) -> Contra
 		row = frappe.db.get_value("TEX Contract Version", version_name, ["payload", "payload_hash"], as_dict=True)
 		if not row or not row.payload:
 			frappe.throw(_("Contract version {0} is not published.").format(version_name),
-			             PayloadMismatch if expected_hash else frappe.ValidationError)
+			             PayloadMismatch(version=version_name) if expected_hash else frappe.ValidationError)
 		payload = json.loads(row.payload)
 		if serialize.payload_hash(payload) != row.payload_hash:
-			frappe.throw(_("Contract version {0} failed its integrity check.").format(version_name), PayloadMismatch)
+			frappe.throw(_("Contract version {0} failed its integrity check.").format(version_name),
+			             PayloadMismatch(version=version_name, found_hash=row.payload_hash))
 		terms = serialize.terms_from_payload(payload, row.payload_hash)
 		_TERMS[version_name] = terms
 	if expected_hash and terms.payload_hash != expected_hash:
 		frappe.throw(_("Contract version {0} is not the terms it was sold on: its payload hash is {1}…, the sale "
 		               "recorded {2}….").format(version_name, terms.payload_hash[:12], expected_hash[:12]),
-		             PayloadMismatch)
+		             PayloadMismatch(version=version_name, found_hash=terms.payload_hash))
 	return terms
 
 
