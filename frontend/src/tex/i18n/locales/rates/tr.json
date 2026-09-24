@@ -996,6 +996,8 @@
  "rates.ws.check.published_at": "Versiyon yayınlandığında ({at}) saklanan sunucu kontrolü.",
  "rates.ws.updating": "Güncelleniyor…",
  "rates.ws.unsaved_included": "Kaydedilmemiş değişiklikler dahil",
+ "rates.ws.saved_only": "Yalnızca kayıtlı taslak",
+ "rates.ws.over_cap": "Bu taslakta {max} satırdan fazla var, kaydedilmemiş değişiklikleri önizlemek için fazla: gösterilen fiyatlar ve kontroller kayıtlı taslağa ait. Değişikliklerinizi dahil etmek için kaydedin.",
  "rates.ws.build_error": "Taslak bu hâliyle fiyatlandırılamıyor",
  "rates.ws.info.title": "Bu versiyon hakkında",
  "rates.ws.info.version": "Versiyon",

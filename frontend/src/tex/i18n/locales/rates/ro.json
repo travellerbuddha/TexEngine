@@ -1007,6 +1007,8 @@
  "rates.ws.check.published_at": "Verificarea serverului, salvată la publicarea versiunii ({at}).",
  "rates.ws.updating": "Se actualizează…",
  "rates.ws.unsaved_included": "Inclusiv modificările nesalvate",
+ "rates.ws.saved_only": "Doar ciorna salvată",
+ "rates.ws.over_cap": "Această ciornă are peste {max} rânduri, prea multe pentru a previzualiza modificările nesalvate: prețurile și verificările afișate sunt ale ciornei salvate. Salvați pentru a include modificările.",
  "rates.ws.build_error": "Ciorna nu poate fi prețuită în forma actuală",
  "rates.ws.info.title": "Despre această versiune",
  "rates.ws.info.version": "Versiune",

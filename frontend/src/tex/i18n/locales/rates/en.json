@@ -996,6 +996,8 @@
  "rates.ws.check.published_at": "The server's check stored when the version was published ({at}).",
  "rates.ws.updating": "Updating…",
  "rates.ws.unsaved_included": "Unsaved changes included",
+ "rates.ws.saved_only": "Saved draft only",
+ "rates.ws.over_cap": "This draft has more than {max} rows, too many to preview unsaved changes: the prices and checks shown are the saved draft's. Save to include your changes.",
  "rates.ws.build_error": "The draft cannot be priced as it stands",
  "rates.ws.info.title": "About this version",
  "rates.ws.info.version": "Version",

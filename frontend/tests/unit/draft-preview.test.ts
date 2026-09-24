@@ -4,15 +4,23 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
+  alreadyChecked,
+  callState,
+  isTooLarge,
   latestOnly,
   matrixRequest,
   MATRIX_DEBOUNCE_MS,
+  overlayFits,
+  overlayRows,
+  previewKeys,
   previewMode,
+  previewSource,
   storedIssues,
   validateDelay,
   VALIDATE_DEBOUNCE_MAX_MS,
   VALIDATE_DEBOUNCE_MS,
   validationRequest,
+  type KeyInput,
 } from "../../src/tex/screens/rates/workspace/draftPreview.ts"
 
 test("the mode follows the server's flags: overlay for an editable draft, saved for other cost viewers, catalogue otherwise", () => {
@@ -176,4 +184,98 @@ test("a cancelled call that finishes late does not start what was asked after th
   c.calls[1].finish()
   await tick()
   assert.equal(f.busy(), false)
+})
+
+// ─── review follow-up: the saved draft by name (§3.15), the row cap and the call state ──────────
+
+test("the Check button and a clean state ask about the saved draft by name, with no data (§3.15)", () => {
+  const data = { rooms: [{ room_type: "STD", _key: "k1" }] }
+  // clean: what is on screen is the saved draft, so no payload (and no overlay row cap)
+  const clean = previewSource("overlay", { clean: true, rows: 3 })
+  assert.equal(clean, "saved")
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data, source: clean! }), { args: { version: "V-1" }, post: false })
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: clean! }), { args: { name: "V-1" }, post: false })
+  // the Check button (validateNow) validates the saved draft, whatever the editor shows
+  const now = previewSource("overlay", { clean: false, rows: 3, now: true })
+  assert.equal(now, "saved")
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: now! }), { args: { name: "V-1" }, post: false })
+  // unsaved changes the overlay takes: the payload, as before
+  const dirty = previewSource("overlay", { clean: false, rows: 3 })
+  assert.equal(dirty, "overlay")
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data, source: dirty! }), { args: { version: "V-1", data }, post: true })
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: dirty! }), { args: { name: "V-1", data }, post: true })
+  // the other modes are unchanged: saved never validates, the catalogue asks nothing
+  assert.equal(previewSource("saved", { clean: false, rows: 3 }), "saved")
+  assert.equal(validationRequest("saved", { version: "V-1", source: "saved" }), null)
+  assert.equal(previewSource("catalogue", { clean: true, rows: 3 }), null)
+})
+
+test("above the overlay's row cap the saved draft is asked by name; the server's typed refusal counts too", () => {
+  assert.equal(overlayRows({ rooms: [1, 2], periods: [1], period_rates: [], boards: [1, 2, 3] }), 6)
+  assert.equal(overlayRows({}), 0)
+  // the cap the server reports (get_version overlay_max_rows): up to it, the overlay
+  assert.equal(overlayFits({ rows: 5000, maxRows: 5000 }), true)
+  assert.equal(overlayFits({ rows: 5001, maxRows: 5000 }), false)
+  assert.equal(overlayFits({ rows: 6200 }), true, "no cap reported: the server decides")
+  assert.equal(previewSource("overlay", { clean: false, rows: 6200, maxRows: 5000 }), "saved")
+  // a refusal (OverlayTooLarge) of a state of n rows: no overlay again until it has fewer
+  assert.equal(overlayFits({ rows: 6200, refusedRows: 6200 }), false)
+  assert.equal(overlayFits({ rows: 6300, refusedRows: 6200 }), false)
+  assert.equal(overlayFits({ rows: 4000, refusedRows: 6200 }), true)
+  assert.equal(previewSource("overlay", { clean: false, rows: 6201, refusedRows: 6200 }), "saved")
+  assert.equal(isTooLarge({ type: "OverlayTooLarge", status: 417 }), true)
+  assert.equal(isTooLarge({ type: "ValidationError", status: 417 }), false, "a blank value is not a row cap")
+  assert.equal(isTooLarge(undefined), false)
+  assert.equal(isTooLarge(new Error("OverlayTooLarge")), false)
+})
+
+const K: KeyInput = { version: "V-1", modified: "m1", tick: 0, vtick: 0, parties: "", rowKeys: "a,b", key: "fp1", fits: true }
+
+test("answer keys: the content on screen while the overlay takes it, the saved revision when it does not", () => {
+  const k = previewKeys("overlay", K)
+  assert.ok(k.matrix && k.valid)
+  // a save of what is on screen (a new revision, same content and row keys) keeps the answers
+  assert.deepEqual(previewKeys("overlay", { ...K, modified: "m2" }), k)
+  // an edit, a reload (new row keys), a refresh or the Check button asks again
+  assert.notEqual(previewKeys("overlay", { ...K, key: "fp2" }).matrix, k.matrix)
+  assert.notEqual(previewKeys("overlay", { ...K, rowKeys: "c,d" }).valid, k.valid)
+  assert.notEqual(previewKeys("overlay", { ...K, tick: 1 }).matrix, k.matrix)
+  assert.notEqual(previewKeys("overlay", { ...K, vtick: 1 }).valid, k.valid)
+  assert.equal(previewKeys("overlay", { ...K, vtick: 1 }).matrix, k.matrix, "Check does not re-price")
+  // above the cap the answers are the saved draft's: edits do not ask again, a save does
+  const big = previewKeys("overlay", { ...K, fits: false })
+  assert.deepEqual(previewKeys("overlay", { ...K, fits: false, key: "fp2", rowKeys: "c,d" }), big)
+  assert.notEqual(previewKeys("overlay", { ...K, fits: false, modified: "m2" }).matrix, big.matrix)
+  assert.notEqual(previewKeys("overlay", { ...K, fits: false, modified: "m2" }).valid, big.valid)
+  assert.notEqual(previewKeys("overlay", { ...K, fits: false, vtick: 1 }).valid, big.valid)
+  assert.notEqual(big.matrix, k.matrix)
+  // saved mode: one matrix per revision, never a validation; the catalogue asks nothing
+  const saved = previewKeys("saved", K)
+  assert.equal(saved.valid, "")
+  assert.deepEqual(previewKeys("saved", { ...K, key: "fp2" }), saved)
+  assert.notEqual(previewKeys("saved", { ...K, modified: "m2" }).matrix, saved.matrix)
+  assert.deepEqual(previewKeys("catalogue", K), { matrix: "", valid: "" })
+})
+
+test("the call state: a refused call for the current key is failed, not busy", () => {
+  // the finding: an older answer, the current key refused, nothing running
+  assert.equal(callState({ key: "k2", answered: "k1", failed: "k2", running: false }), "failed")
+  assert.equal(callState({ key: "k2", failed: "k2", running: false }), "failed")
+  // waiting for the debounce, or a call in flight: busy
+  assert.equal(callState({ key: "k2", answered: "k1", running: false }), "busy")
+  assert.equal(callState({ key: "k2", answered: "k1", running: true }), "busy")
+  assert.equal(callState({ key: "k2", answered: "k1", failed: "k2", running: true }), "busy")
+  // an older failure says nothing about the current key
+  assert.equal(callState({ key: "k3", answered: "k1", failed: "k2", running: false }), "busy")
+  assert.equal(callState({ key: "k2", answered: "k2", failed: "k1", running: false }), "ready")
+  // nothing asked (catalogue, a published version's issues)
+  assert.equal(callState({ key: "", running: false }), "ready")
+})
+
+test("a state already checked is not checked again, unless a check of another state is in flight", () => {
+  assert.equal(alreadyChecked("k0", "k0", false), true)
+  assert.equal(alreadyChecked("k1", "k0", false), false)
+  assert.equal(alreadyChecked("k0", null, false), false)
+  // back to k0 while k1 is checked: k1's answer would replace k0's, so k0 is asked again after it
+  assert.equal(alreadyChecked("k0", "k0", true), false)
 })

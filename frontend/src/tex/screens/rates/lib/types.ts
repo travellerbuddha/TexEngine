@@ -168,6 +168,9 @@ export interface VersionDoc {
   can_edit_contract: boolean
   /** the contract's pricing basis is fixed: one of its versions was published */
   basis_locked?: boolean
+  /** editable drafts: the most rows the overlay previews with unsaved changes (above it the
+   * workspace shows the saved draft's prices and checks, ADR-061) */
+  overlay_max_rows?: number
   selling?: SellingTerms
   selling_source?: "frozen" | "version" | "header"
   selling_editable?: boolean

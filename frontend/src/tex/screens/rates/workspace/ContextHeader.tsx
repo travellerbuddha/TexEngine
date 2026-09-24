@@ -261,17 +261,20 @@ function SellingChip({
 
 /** The live check chip: the server's issue counts for what the editor shows (overlay), or the
  * report stored at publish ("Checked when published"); a click lists them. Hidden when there is
- * nothing to show (a catalogue, or a frozen version without a stored report). */
+ * nothing to show (a catalogue, or a frozen version without a stored report). When the check of
+ * the state on screen could not run, the chip says so (not older counts, not a spinner) and its
+ * popover gives the server's reason and Try again. */
 function LiveCheck({ preview }: { preview: DraftPreview }) {
   const { t } = useTexT()
   const ref = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   if (preview.issuesSource === "none") return null
   const live = preview.issuesSource === "live"
+  const failed = live && preview.issuesState === "failed"
+  const busy = live && preview.issuesState === "busy"
   const issues: Issue[] | undefined = preview.issues
   const errors = issues?.filter((i) => i.level === "ERROR").length ?? 0
   const warnings = (issues?.length ?? 0) - errors
-  const busy = live && (preview.validating || preview.issuesStale)
   const title = live ? t("rates.ws.check.live") : t("rates.ws.check.published")
   return (
     <>
@@ -285,15 +288,13 @@ function LiveCheck({ preview }: { preview: DraftPreview }) {
         onClick={() => setOpen(!open)}
       >
         <span className="text-xs text-zinc-500">{title}</span>
-        {!issues ? (
-          live && preview.issuesError && !busy ? (
-            <span className="inline-flex items-center gap-1 text-amber-800">
-              <AlertTriangle className="size-3.5" aria-hidden />
-              <span className="sr-only">{t("rates.ws.check.failed")}</span>
-            </span>
-          ) : (
-            <span className="text-zinc-500">…</span>
-          )
+        {failed ? (
+          <span className="inline-flex items-center gap-1 text-amber-800">
+            <AlertTriangle className="size-3.5" aria-hidden />
+            <span className="sr-only">{t("rates.ws.check.failed")}</span>
+          </span>
+        ) : !issues ? (
+          <span className="text-zinc-500">…</span>
         ) : errors + warnings === 0 ? (
           <span className="inline-flex items-center gap-1 text-emerald-800">
             <CheckCircle2 className="size-3.5 text-emerald-600" aria-hidden />
@@ -324,11 +325,17 @@ function LiveCheck({ preview }: { preview: DraftPreview }) {
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={ref} label={title} width="lg">
         <div className="max-h-[60vh] space-y-2">
+          {live && preview.savedOnly && <p className="text-xs text-zinc-600">{t("rates.ws.over_cap", { max: preview.maxRows ?? "" })}</p>}
           {busy && <p className="text-xs text-zinc-500">{t("rates.version.checking")}</p>}
-          {live && preview.issuesError && (
-            <p className="text-sm whitespace-pre-line text-amber-900" role="status">
-              {t("rates.ws.check.failed")}: {preview.issuesError.message}
-            </p>
+          {failed && (
+            <div className="space-y-2" role="status">
+              <p className="text-sm whitespace-pre-line text-amber-900">
+                {t("rates.ws.check.failed")}: {preview.issuesError?.message}
+              </p>
+              <Button variant="secondary" size="sm" icon={<RotateCcw className="size-4" aria-hidden />} onClick={preview.refetch}>
+                {t("core.action.retry")}
+              </Button>
+            </div>
           )}
           {issues && <IssueList issues={issues} emptyOk={t("rates.ws.check.clean")} />}
         </div>

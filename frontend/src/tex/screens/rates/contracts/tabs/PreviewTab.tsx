@@ -61,7 +61,7 @@ export function PriceTestPanel(props: TabProps & { layout?: "page" | "drawer" })
   if (!(doc.can_preview ?? can("price.view_cost", doc.contract_doc.property))) return <Notice tone="info">{t("rates.preview.needs_cost")}</Notice>
   return (
     <div className="space-y-4">
-      {doc.editable && props.dirty && <Notice tone="info">{t("rates.preview.priced_unsaved")}</Notice>}
+      {doc.editable && props.dirty && <Notice tone="info">{props.preview?.savedOnly ? t("rates.preview.unsaved") : t("rates.preview.priced_unsaved")}</Notice>}
       <Calculator_ {...props} />
     </div>
   )
@@ -74,7 +74,7 @@ function defaultDates(today: string, stayFrom?: string | null): [string, string]
   return [a, addDays(a, 3)]
 }
 
-function Calculator_({ doc, state, dirty, layout = "page" }: TabProps & { layout?: "page" | "drawer" }) {
+function Calculator_({ doc, state, dirty, preview, layout = "page" }: TabProps & { layout?: "page" | "drawer" }) {
   const { t } = useTexT()
   const { boot, can } = useSession()
   const canCost = doc.can_preview ?? can("price.view_cost", doc.contract_doc.property)
@@ -128,8 +128,9 @@ function Calculator_({ doc, state, dirty, layout = "page" }: TabProps & { layout
           currency: f.currency || null,
           sale_at: toFrappeDatetime(f.sale_at),
           promo_codes: splitCsv(f.promo).map((c) => c.toUpperCase()),
-          // unsaved edits are priced as shown, never saved (the read-only overlay, GAP-1)
-          ...(doc.editable && dirty ? { data: overlayPayloadOf(state) } : {}),
+          // unsaved edits are priced as shown, never saved (the read-only overlay, GAP-1); above
+          // the overlay's row cap the saved draft is priced, as the notice says
+          ...(doc.editable && dirty && !preview?.savedOnly ? { data: overlayPayloadOf(state) } : {}),
         },
         { post: true },
       )
@@ -488,6 +489,9 @@ export function MatrixCard({ preview, dirty }: { preview?: DraftPreview; dirty?:
   const { t } = useTexT()
   if (!preview || preview.mode === "catalogue") return null
   const m = preview.matrix
+  // an older matrix is dimmed while the one for the screen is on its way; when its call failed,
+  // the failure is shown with Try again instead (not an older matrix as if it were current)
+  const busy = preview.matrixState === "busy"
   return (
     <Card>
       <CardHeader
@@ -495,8 +499,9 @@ export function MatrixCard({ preview, dirty }: { preview?: DraftPreview; dirty?:
         description={m ? t(`rates.rates.unit.${m.basis}`, { ccy: m.currency }) : t("rates.preview.matrix_hint")}
         actions={
           <span className="flex flex-wrap items-center gap-2">
-            {preview.mode === "overlay" && dirty && <Badge tone="info">{t("rates.ws.unsaved_included")}</Badge>}
-            {m && preview.stale && (
+            {preview.mode === "overlay" && dirty && !preview.savedOnly && <Badge tone="info">{t("rates.ws.unsaved_included")}</Badge>}
+            {preview.savedOnly && dirty && <Badge tone="warning">{t("rates.ws.saved_only")}</Badge>}
+            {m && busy && (
               <span className="text-xs text-zinc-500" role="status">
                 {t("rates.ws.updating")}
               </span>
@@ -504,7 +509,12 @@ export function MatrixCard({ preview, dirty }: { preview?: DraftPreview; dirty?:
           </span>
         }
       />
-      {preview.error && !m ? (
+      {preview.savedOnly && dirty && (
+        <CardBody className="pb-0">
+          <Notice tone="warning">{t("rates.ws.over_cap", { max: preview.maxRows ?? "" })}</Notice>
+        </CardBody>
+      )}
+      {preview.matrixState === "failed" && preview.error ? (
         <ErrorState error={preview.error} onRetry={preview.refetch} />
       ) : preview.buildError && !preview.stale ? (
         <CardBody>
@@ -519,7 +529,7 @@ export function MatrixCard({ preview, dirty }: { preview?: DraftPreview; dirty?:
       ) : m.rooms.length === 0 ? (
         <EmptyState title={t("rates.rates.need_rooms_periods")} />
       ) : (
-        <div className={cn("max-h-[60vh] overflow-auto transition-opacity", preview.stale && "opacity-60")} aria-busy={preview.stale || undefined}>
+        <div className={cn("max-h-[60vh] overflow-auto transition-opacity", busy && "opacity-60")} aria-busy={busy || undefined}>
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <caption className="sr-only">{t("rates.preview.matrix")}</caption>
             <thead>
@@ -567,27 +577,43 @@ function IssuesCard({ doc, preview, dirty }: { doc: VersionDoc; preview?: DraftP
   const { t } = useTexT()
   if (!preview || preview.issuesSource === "none") return null
   const live = preview.issuesSource === "live"
+  const busy = live && preview.issuesState === "busy"
+  const failed = live && preview.issuesState === "failed"
+  const description = !live
+    ? doc.published_at
+      ? t("rates.ws.check.published_at", { at: dateTime(doc.published_at) })
+      : undefined
+    : preview.savedOnly && dirty
+      ? t("rates.ws.over_cap", { max: preview.maxRows ?? "" })
+      : dirty
+        ? t("rates.ws.check.live_unsaved")
+        : t("rates.ws.check.live_saved")
   return (
     <Card>
       <CardHeader
         title={live ? t("rates.ws.check.live") : t("rates.ws.check.published")}
-        description={live ? (dirty ? t("rates.ws.check.live_unsaved") : t("rates.ws.check.live_saved")) : doc.published_at ? t("rates.ws.check.published_at", { at: dateTime(doc.published_at) }) : undefined}
+        description={description}
         actions={
-          live &&
-          (preview.validating || preview.issuesStale) && (
+          busy && (
             <span className="text-xs text-zinc-500" role="status">
               {t("rates.version.checking")}
             </span>
           )
         }
       />
-      <CardBody className={cn("space-y-3", live && preview.issuesStale && "opacity-60")}>
-        {preview.issuesError && (
+      <CardBody className={cn("space-y-3", busy && preview.issuesStale && "opacity-60")}>
+        {failed ? (
           <Notice tone="warning" title={t("rates.ws.check.failed")}>
-            <span className="whitespace-pre-line">{preview.issuesError.message}</span>
+            <span className="block whitespace-pre-line">{preview.issuesError?.message}</span>
+            <Button variant="secondary" size="sm" className="mt-2" onClick={preview.refetch}>
+              {t("core.action.retry")}
+            </Button>
           </Notice>
+        ) : preview.issues ? (
+          <IssueList issues={preview.issues} emptyOk={t("rates.ws.check.clean")} />
+        ) : (
+          <Skeleton className="h-10 w-full" />
         )}
-        {preview.issues ? <IssueList issues={preview.issues} emptyOk={t("rates.ws.check.clean")} /> : !preview.issuesError && <Skeleton className="h-10 w-full" />}
       </CardBody>
     </Card>
   )

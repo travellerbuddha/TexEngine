@@ -1018,6 +1018,8 @@
  "rates.ws.check.published_at": "Kontrola serwera zapisana przy publikacji wersji ({at}).",
  "rates.ws.updating": "Aktualizowanie…",
  "rates.ws.unsaved_included": "Z niezapisanymi zmianami",
+ "rates.ws.saved_only": "Tylko zapisany szkic",
+ "rates.ws.over_cap": "Ten szkic ma ponad {max} wierszy, za dużo na podgląd niezapisanych zmian: widoczne ceny i kontrole dotyczą zapisanego szkicu. Zapisz, aby uwzględnić swoje zmiany.",
  "rates.ws.build_error": "Wersji roboczej w obecnej postaci nie można wycenić",
  "rates.ws.info.title": "O tej wersji",
  "rates.ws.info.version": "Wersja",

@@ -996,6 +996,8 @@
  "rates.ws.check.published_at": "Die Prüfung des Servers, gespeichert bei der Veröffentlichung ({at}).",
  "rates.ws.updating": "Wird aktualisiert…",
  "rates.ws.unsaved_included": "Ungespeicherte Änderungen inklusive",
+ "rates.ws.saved_only": "Nur gespeicherter Entwurf",
+ "rates.ws.over_cap": "Dieser Entwurf hat mehr als {max} Zeilen, zu viele für eine Vorschau ungespeicherter Änderungen: Die angezeigten Preise und Prüfungen sind die des gespeicherten Entwurfs. Speichern Sie, um Ihre Änderungen einzubeziehen.",
  "rates.ws.build_error": "Der Entwurf kann so nicht bepreist werden",
  "rates.ws.info.title": "Zu dieser Version",
  "rates.ws.info.version": "Version",

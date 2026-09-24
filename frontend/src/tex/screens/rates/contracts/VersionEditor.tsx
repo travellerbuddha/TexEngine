@@ -86,7 +86,7 @@ export default function VersionEditor() {
   const fp = useMemo(() => (state ? fingerprint(state) : ""), [state])
   const dirty = Boolean(state && editable && fp !== base)
   // the server's resolved prices and issues for what is on screen (overlay, saved or catalogue)
-  const preview = useDraftPreview(doc, state, { fingerprint: fp })
+  const preview = useDraftPreview(doc, state, { fingerprint: fp, base })
 
   const onSave = useCallback(async () => {
     // one save at a time (Ctrl+S while one is in flight waits for the next press)
