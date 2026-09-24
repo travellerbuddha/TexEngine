@@ -611,7 +611,10 @@ def simulate(reservation: str, sale_at) -> dict:
 	at = past_sale_time(sale_at, missing=_("Choose the sale time to simulate."),
 	                    future=_("A simulated sale time cannot be in the future."))
 	req = serialize.request_from_dict({**snap["request"], "sale_at": at.isoformat()})
-	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=True)
+	try:
+		cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=True)
+	except contracts.PayloadMismatch as e:        # a live payload failing its integrity check (G-73)
+		sold_terms.refuse(res, snap, e, use="simulate")
 	if not cands:
 		return {"sellable": False, "simulated_sale_at": str(at),
 		        "reasons": [{"code": "NO_CONTRACT", "message": _("No contract was on sale at that time.")}]}

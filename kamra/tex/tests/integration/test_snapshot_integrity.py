@@ -106,8 +106,12 @@ class TestPayloadHashChecked(SnapshotCase):
 
 	def test_a_payload_failing_its_integrity_check_is_refused_and_audited(self):
 		change_payload(self.c["version"], rehash=False)
+		sold_at = modification.original_priced_at(frappe.get_doc("Reservation", self.res), self.snap)
 		self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_VERSION"), "integrity")
-		self.assertEqual([r["basis"] for r in refusals(self.res)], ["ORIGINAL_VERSION"])
+		self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_SALE_DATE"), "integrity")
+		self.assertRefused(lambda: modification.simulate(self.res, str(sold_at)), "integrity")
+		self.assertEqual([(r["use"], r["basis"]) for r in refusals(self.res)],
+		                 [("reprice", "ORIGINAL_VERSION"), ("reprice", "ORIGINAL_SALE_DATE"), ("simulate", None)])
 		self.assertStillSold()
 
 	def test_the_simulator_and_add_ons_check_the_hash_too(self):
