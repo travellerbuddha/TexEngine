@@ -286,7 +286,14 @@ function LiveCheck({ preview }: { preview: DraftPreview }) {
       >
         <span className="text-xs text-zinc-500">{title}</span>
         {!issues ? (
-          <span className="text-zinc-500">…</span>
+          live && preview.issuesError && !busy ? (
+            <span className="inline-flex items-center gap-1 text-amber-800">
+              <AlertTriangle className="size-3.5" aria-hidden />
+              <span className="sr-only">{t("rates.ws.check.failed")}</span>
+            </span>
+          ) : (
+            <span className="text-zinc-500">…</span>
+          )
         ) : errors + warnings === 0 ? (
           <span className="inline-flex items-center gap-1 text-emerald-800">
             <CheckCircle2 className="size-3.5 text-emerald-600" aria-hidden />
