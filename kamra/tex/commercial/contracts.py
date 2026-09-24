@@ -117,6 +117,17 @@ def _policy_layers(property: str, market: str, at: datetime) -> list[inherit.Pol
 	return layers
 
 
+def band_source(version, terms: ContractTerms, at: datetime) -> str:
+	"""Where the age bands of ``terms`` (built from ``version`` as of ``at``) come from: the
+	version's own rows (``version``), else the policy they are inherited from, named by its
+	source (``policy:<id>/r<rev>/<scope>``), or ``policy`` when the policies live at ``at`` no
+	longer give that band set (ADR-061)."""
+	if version.get("age_bands"):
+		return "version"
+	layer = inherit.band_layer(_policy_layers(terms.property, terms.market, at))
+	return layer.source if layer is not None and tuple(layer.bands) == tuple(terms.age_bands) else "policy"
+
+
 def age_bands_of(rows) -> tuple[AgeBand, ...]:
 	"""Age bands from TEX Child Age Band rows (codes upper-cased, ages in exact months)."""
 	return tuple(

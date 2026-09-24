@@ -6,14 +6,14 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, getdate, now_datetime
+from frappe.utils import cint, get_datetime, getdate, now_datetime
 
 from kamra.tex import money
 from kamra.tex.api._util import as_int, doc_dict, parse, text
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts as svc
 from kamra.tex.commercial import decimals
-from kamra.tex.pricing import engine
+from kamra.tex.pricing import engine, matrix, occupancy
 from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -408,38 +408,130 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
 	return q.to_dict(internal=True)
 
 
+# sample parties priced by ``price_matrix`` (ADR-061, GAP-2b): at most this many, of at most so many
+# adults and children each
+MATRIX_PARTIES_MAX, PARTY_ADULTS_MAX, PARTY_CHILDREN_MAX = 12, 12, 8
+
+
+def _parties(raw) -> list[tuple[int, tuple[str, ...]]] | None:
+	"""The sample parties ``[{adults, children: [band code]}]`` of ``price_matrix``, checked;
+	None when none were asked for."""
+	if raw is None or raw == "":
+		return None
+	items = parse(raw, None)
+	if not isinstance(items, list) or len(items) > MATRIX_PARTIES_MAX:
+		frappe.throw(_("Sample parties are a list of at most {0} parties.").format(MATRIX_PARTIES_MAX))
+	out = []
+	for i, p in enumerate(items, 1):
+		adults = p.get("adults") if isinstance(p, dict) else None
+		kids = p.get("children", []) if isinstance(p, dict) else None
+		kids = [] if kids is None else kids
+		if (not isinstance(adults, int) or isinstance(adults, bool) or not 1 <= adults <= PARTY_ADULTS_MAX
+		        or not isinstance(kids, list) or len(kids) > PARTY_CHILDREN_MAX
+		        or not all(isinstance(k, str) and k.strip() for k in kids)):
+			frappe.throw(_("Sample party {0}: 1 to {1} adults and at most {2} children, each named by an age "
+			               "band code.").format(i, PARTY_ADULTS_MAX, PARTY_CHILDREN_MAX))
+		out.append((adults, tuple(k.strip().upper()[:40] for k in kids)))
+	return out
+
+
+def _rule_dict(r) -> dict:
+	"""An occupancy rule of the built terms, as the workspace shows an inherited one."""
+	return {"rule_id": r.rule_id, "target": r.target.value, "position": r.position, "age_band": r.age_band,
+	        "adults": r.adults, "children": r.children, "room_type": r.room_type, "period": r.period,
+	        "op": r.op.value, "value": matrix.rule_value(r.value), "is_override": r.is_override, "source": r.source}
+
+
+def _occupancy_defaults() -> dict:
+	"""What the engine assumes where no rule prices a slot (D12): every adult pays the full unit
+	(``occupancy.GLOBAL_ADULT_DEFAULT``); a child has no default (ADR-007: NO_CHILD_RULE)."""
+	a = occupancy.GLOBAL_ADULT_DEFAULT
+	return {"adult": {"rule_id": a.rule_id, "target": a.target.value, "op": a.op.value,
+	                  "value": matrix.rule_value(a.value), "source": a.source, "note": a.note},
+	        "child": None}
+
+
+def _party_cells(terms, room_type: str, parties) -> list[dict]:
+	out = []
+	for adults, kids in parties:
+		cell = {"cells": {}, "slots": {}, "errors": {}}
+		for p in terms.periods:
+			try:
+				total, slots = matrix.party_total(terms, room_type, p, adults, kids)
+			except (Unsellable, PricingError) as e:
+				cell["cells"][p.code] = None
+				cell["errors"][p.code] = getattr(e, "message", None) or str(e)
+				continue
+			cell["cells"][p.code] = money.to_str(total)
+			cell["slots"][p.code] = slots
+		out.append(cell)
+	return out
+
+
 @frappe.whitelist()
-def price_matrix(version: str, adults: int = 2, data=None):
+def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_room: str | None = None):
 	"""Nightly unit (base person / room price) per room × period for the editor grid. With
 	``data``: of the draft with those unsaved changes (ADR-061); a draft that cannot be built
-	answers ``build_error``."""
+	answers ``build_error``. ``adults`` is accepted for older callers and unused: the unit does
+	not depend on the party.
+
+	Besides the cells (ADR-061, GAP-2/2b/3): each cell's source (``rooms[].sources``, the rule that
+	priced it), each room's effective capacity, the age bands with their origin, the occupancy
+	rules inherited from pricing policies and the engine's defaults (``occupancy_defaults``); with
+	``parties`` (``[{adults, children: [band code]}]``) and ``party_room``, the occupancy total of
+	each sample party per period (``party_cells``)."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view", prop)
 	if not _sees_cost(prop):
 		frappe.throw(_("Not permitted: {0}.").format("price.view_cost"), frappe.PermissionError)
+	wanted = _parties(parties)
+	at = now_datetime()
 	if _has_data(data):
-		draft = _overlay(version, data)
+		doc = _overlay(version, data)
 		try:
-			terms = svc.build_terms(draft)
+			terms = svc.build_terms(doc, at=at)
 		except frappe.ValidationError as e:
 			return {"build_error": str(e), "rooms": [], "periods": []}
 	else:
-		terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v)
+		doc = v
+		if v.status != "Draft":
+			terms = svc.load_terms(version)
+			at = get_datetime(v.effective_from) if v.effective_from else at    # what the payload froze
+		else:
+			terms = svc.build_terms(v, at=at)
+	if wanted is not None and party_room not in terms.rooms:
+		frappe.throw(_("The sample parties' room {0} is not a room of this contract.").format(party_room or "—"))
 	from kamra.tex.pricing import rooms as room_math
 
 	out = []
 	for rt in sorted(terms.rooms):
-		row = {"room_type": rt, "name": terms.rooms[rt].name, "cells": {}}
+		spec = terms.rooms[rt]
+		row = {"room_type": rt, "name": spec.name, "cells": {}}
+		sources = {}
 		for p in terms.periods:
 			try:
 				row["cells"][p.code] = str(room_math.room_unit(terms, rt, p))
 			except Unsellable as u:
 				row["cells"][p.code] = None
 				row.setdefault("errors", {})[p.code] = u.message
+				continue
+			sources[p.code] = matrix.unit_source(terms, rt, p)
+		row["sources"] = sources
+		row["capacity"] = {"max_adults": spec.max_adults, "max_children": spec.max_children,
+		                   "max_occupants": spec.max_occupants, "min_adults": spec.min_adults,
+		                   "included_adults": spec.included_adults}
 		out.append(row)
-	return {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
-	                    for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency}
+	band_source = svc.band_source(doc, terms, at) if terms.age_bands else "version"
+	result = {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
+	                      for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency,
+	          "age_bands": [{"code": b.code, "label": b.label, "from_months": b.from_months, "to_months": b.to_months,
+	                         "is_infant": b.is_infant, "source": band_source} for b in terms.age_bands],
+	          "inherited_rules": [_rule_dict(r) for r in terms.occupancy_rules if r.source != "version"],
+	          "occupancy_defaults": _occupancy_defaults()}
+	if wanted is not None:
+		result["party_cells"] = _party_cells(terms, party_room, wanted)
+	return result
 
 
 @frappe.whitelist(methods=["POST"])

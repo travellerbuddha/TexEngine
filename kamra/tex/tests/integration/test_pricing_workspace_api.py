@@ -8,6 +8,15 @@
 * GAP-10: ``get_version`` says what the viewer may do (``can_preview``, ``can_publish``,
   ``can_edit_contract``), whether the pricing basis is locked and the contract currency's
   minor units.
+
+Slice S3:
+
+* GAP-2: ``price_matrix`` says which rule priced each cell (``rooms[].sources``): its scope, the
+  derivation chain and the rules it overrode.
+* GAP-2b: with ``parties`` and ``party_room`` it prices sample parties per period (``party_cells``).
+* GAP-3: it shows what the version inherits and what the engine assumes: the effective capacity
+  (``rooms[].capacity``), the age bands with their origin, the inherited occupancy rules and the
+  engine's adult default (``occupancy_defaults``).
 """
 
 import json
@@ -15,11 +24,14 @@ import json
 import frappe
 
 from kamra.tex.api import contracts as api
-from kamra.tex.commercial import contracts
+from kamra.tex.commercial import contracts, revisions
 from kamra.tex.money import D
+from kamra.tex.pricing import rooms as room_math
+from kamra.tex.pricing.model import Unsellable
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
+from kamra.tex.tests.integration.test_pricing_policies import INF, POLICY, child, policy
 from kamra.tex_commercial.doctype.tex_contract.tex_contract import header_values
 
 OTHER_HOTEL = "PW Other Hotel"
@@ -326,3 +338,224 @@ class TestPricingBasis(WorkspaceCase):
 			api.save_contract(data={"name": self.c["contract"], "pricing_basis": "ROOM"})
 		self.assertIn("cannot change", str(cm.exception))
 		self.assertEqual(frappe.db.get_value("TEX Contract", self.c["contract"], "pricing_basis"), "PERSON")
+
+
+# ─── slice S3: provenance, what is inherited, sample parties ───────────────
+
+
+def pre_s3_matrix(version: str) -> dict:
+	"""``price_matrix`` as it answered before S3 (its keys, computed its way): the baseline the
+	additive keys must leave alone."""
+	v = frappe.get_doc("TEX Contract Version", version)
+	terms = contracts.load_terms(version) if v.status != "Draft" else contracts.build_terms(v)
+	out = []
+	for rt in sorted(terms.rooms):
+		row = {"room_type": rt, "name": terms.rooms[rt].name, "cells": {}}
+		for p in terms.periods:
+			try:
+				row["cells"][p.code] = str(room_math.room_unit(terms, rt, p))
+			except Unsellable as u:
+				row["cells"][p.code] = None
+				row.setdefault("errors", {})[p.code] = u.message
+		out.append(row)
+	return {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
+	                    for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency}
+
+
+def old_keys(m: dict) -> dict:
+	return {"periods": m["periods"], "basis": m["basis"], "currency": m["currency"],
+	        "rooms": [{k: r[k] for k in ("room_type", "name", "cells", "errors") if k in r} for r in m["rooms"]]}
+
+
+class TestMatrixProvenance(WorkspaceCase):
+	def rate_name(self, room_type: str, period_code: str | None) -> str:
+		return find(api.get_version(self.v)["period_rates"], room_type=room_type, period_code=period_code)["name"]
+
+	def test_each_cell_names_the_rule_that_priced_it(self):
+		m = api.price_matrix(self.v)
+		std, dlx = find(m["rooms"], room_type=self.std), find(m["rooms"], room_type=self.dlx)
+		self.assertEqual(std["sources"]["LOW"], {
+			"rule_id": self.rate_name(self.std, "LOW"), "scope": "PERIOD", "op": "ABSOLUTE", "value": "100",
+			"base_room_type": None, "chain": [self.std], "overridden": []})
+		self.assertEqual(dlx["sources"]["HIGH"], {
+			"rule_id": self.rate_name(self.dlx, None), "scope": "ALL", "op": "MULTIPLY", "value": "1.35",
+			"base_room_type": self.std, "chain": [self.dlx, self.std], "overridden": []})
+
+	def test_unsaved_rows_are_named_by_their_keys_and_errored_cells_have_no_source(self):
+		data = self.payload()
+		high = find(data["period_rates"], room_type=self.std, period_code="HIGH")
+		data["period_rates"].remove(high)
+		dlx_high = {"room_type": self.dlx, "period_code": "LOW", "op": "ABSOLUTE", "value": "150", "_key": "fix"}
+		data["period_rates"].append(dlx_high)
+		m = api.price_matrix(self.v, data=data)
+		std, dlx = find(m["rooms"], room_type=self.std), find(m["rooms"], room_type=self.dlx)
+		self.assertEqual(std["sources"]["LOW"]["rule_id"], f"~{self.std_low(data)['_key']}")
+		generic = find(data["period_rates"], room_type=self.dlx, period_code=None)["_key"]
+		self.assertEqual((dlx["sources"]["LOW"]["rule_id"], dlx["sources"]["LOW"]["scope"]), ("~fix", "PERIOD"))
+		self.assertEqual(dlx["sources"]["LOW"]["overridden"], [f"~{generic}"])
+		self.assertIsNone(std["cells"]["HIGH"])                    # no price: an error, and no source
+		self.assertIsNone(dlx["cells"]["HIGH"])
+		self.assertNotIn("HIGH", std["sources"])
+		self.assertNotIn("HIGH", dlx["sources"])
+		self.assertIn("HIGH", std["errors"])
+
+	def test_capacity_is_the_effective_one(self):
+		m = api.price_matrix(self.v)
+		# the contract rooms set nothing: the room types' capacity (fixtures: STD 3+2, DLX 3+3, 2 included)
+		self.assertEqual(find(m["rooms"], room_type=self.std)["capacity"], {
+			"max_adults": 3, "max_children": 2, "max_occupants": 5, "min_adults": 1, "included_adults": 2})
+		self.assertEqual(find(m["rooms"], room_type=self.dlx)["capacity"], {
+			"max_adults": 3, "max_children": 3, "max_occupants": 6, "min_adults": 1, "included_adults": 2})
+		data = self.payload()
+		find(data["rooms"], room_type=self.dlx).update(max_adults=2, max_occupants=4, min_adults=2, included_adults=1)
+		m = api.price_matrix(self.v, data=data)
+		self.assertEqual(find(m["rooms"], room_type=self.dlx)["capacity"], {
+			"max_adults": 2, "max_children": 3, "max_occupants": 4, "min_adults": 2, "included_adults": 1})
+
+	def test_the_versions_own_bands_and_the_engine_default(self):
+		m = api.price_matrix(self.v)
+		self.assertEqual(m["age_bands"], [
+			{"code": "INF", "label": "Infant", "from_months": 0, "to_months": 36, "is_infant": True,
+			 "source": "version"},
+			{"code": "CHA", "label": "Child A", "from_months": 36, "to_months": 84, "is_infant": False,
+			 "source": "version"},
+			{"code": "CHB", "label": "Child B", "from_months": 84, "to_months": 144, "is_infant": False,
+			 "source": "version"}])
+		self.assertEqual(m["occupancy_defaults"], {
+			"adult": {"rule_id": "GLOBAL:ADULT", "target": "ADULT", "op": "MULTIPLY", "value": "1",
+			          "source": "global-default", "note": "every adult pays the full unit"},
+			"child": None})
+		self.assertTrue(all(r["source"] != "version" for r in m["inherited_rules"]))
+
+	def test_a_band_without_a_label_reports_its_code(self):
+		data = self.payload()
+		find(data["age_bands"], band_code="CHA")["label"] = ""
+		m = api.price_matrix(self.v, data=data)
+		self.assertEqual(find(m["age_bands"], code="CHA")["label"], "CHA")
+		api.save_version(self.v, as_json(data))
+		self.assertEqual(find(api.price_matrix(self.v)["age_bands"], code="CHA")["label"], "CHA")
+
+	def test_the_existing_keys_are_unchanged(self):
+		baseline = pre_s3_matrix(self.v)
+		for kw in ({}, {"adults": 3}, {"parties": [{"adults": 2, "children": ["CHB"]}], "party_room": self.std}):
+			with self.subTest(**{k: str(v) for k, v in kw.items()}):
+				self.assertEqual(old_keys(api.price_matrix(self.v, **kw)), baseline)
+		contracts.publish(self.v)
+		self.assertEqual(old_keys(api.price_matrix(self.v)), pre_s3_matrix(self.v))
+
+
+class TestInheritedTerms(WorkspaceCase):
+	def setUp(self):
+		super().setUp()
+		# only this test's policies are on sale (archived inside the test transaction, rolled back)
+		for name in frappe.get_all(POLICY, filters={"tex_status": ("in", ["Active", "Superseded"])}, pluck="name"):
+			revisions.archive(POLICY, name)
+		self.policy = policy("PW Global", bands=[INF, {"band_code": "CHD", "label": "", "from_age": 3,
+		                                                "to_age": 11.99}],
+		                     rules=[child("INF", "MULTIPLY", 0), child("CHD", "PERCENT_OF", 50),
+		                            {"target": "ADULT", "position": 3, "op": "MULTIPLY", "value": 0.8}])
+		rev = frappe.db.get_value(POLICY, self.policy, "revision_no") or 1
+		self.source = f"policy:{self.policy}/r{rev}/global"
+		self.inh = fx.create_contract(self.f, code="PW-S3-INH", age_bands=[], occupancy_rules=[], publish=False)
+
+	def test_bands_and_rules_inherited_from_a_policy(self):
+		m = api.price_matrix(self.inh["version"])
+		self.assertEqual(m["age_bands"], [
+			{"code": "INF", "label": "Infant", "from_months": 0, "to_months": 36, "is_infant": True,
+			 "source": self.source},
+			{"code": "CHD", "label": "CHD", "from_months": 36, "to_months": 144, "is_infant": False,
+			 "source": self.source}])
+		rules = m["inherited_rules"]
+		self.assertEqual(len(rules), 3)
+		self.assertEqual({r["source"] for r in rules}, {self.source})
+		adult = find(rules, target="ADULT")
+		self.assertEqual({k: adult[k] for k in ("position", "age_band", "adults", "children", "room_type", "period",
+		                                        "op", "value", "is_override")},
+		                 {"position": 3, "age_band": None, "adults": None, "children": None, "room_type": None,
+		                  "period": None, "op": "MULTIPLY", "value": "0.8", "is_override": False})
+		self.assertEqual(find(rules, age_band="CHD")["value"], "50")
+		# a published version keeps saying where its frozen bands came from
+		contracts.publish(self.inh["version"])
+		self.assertEqual({b["source"] for b in api.price_matrix(self.inh["version"])["age_bands"]}, {self.source})
+
+	def test_the_versions_own_rules_are_not_inherited(self):
+		m = api.price_matrix(self.v)
+		self.assertEqual({b["source"] for b in m["age_bands"]}, {"version"})
+		# the fixture draft names adult 3, INF, CHA and CHB itself; the policy's rules still cascade
+		self.assertEqual(len(m["inherited_rules"]), 3)
+		self.assertEqual({r["source"] for r in m["inherited_rules"]}, {self.source})
+
+
+# 2 adults; 2 adults + a CHB child (a code in any case); an unknown band; more children than STD holds
+PARTIES = ({"adults": 2, "children": []}, {"adults": 2, "children": ["chb"]}, {"adults": 1, "children": ["XX"]},
+           {"adults": 2, "children": ["CHA", "CHA", "CHB"]})
+
+
+class TestSampleParties(WorkspaceCase):
+	def test_sample_parties_are_priced_per_period(self):
+		m = api.price_matrix(self.v, parties=json.dumps(PARTIES), party_room=self.std)
+		two, family, unknown, crowded = m["party_cells"]
+		self.assertEqual({p: D(c) for p, c in two["cells"].items()}, {"LOW": D("200"), "HIGH": D("240")})
+		self.assertEqual(two["errors"], {})
+		self.assertEqual({p: D(c) for p, c in family["cells"].items()}, {"LOW": D("250"), "HIGH": D("300")})
+		kid = find(family["slots"]["LOW"], target="CHILD")
+		self.assertEqual((kid["position"], kid["age_band"], D(kid["amount"]), kid["included"]), (1, "CHB", D("50"), False))
+		chb = [r["name"] for r in api.get_version(self.v)["occupancy_rules"]
+		       if r["target"] == "CHILD" and r["age_band"] == "CHB" and not r["combination"]]
+		self.assertEqual([kid["rule_id"]], chb)
+		adults = [s for s in family["slots"]["LOW"] if s["target"] == "ADULT"]
+		self.assertEqual([(s["position"], s["rule_id"]) for s in adults], [(1, "GLOBAL:ADULT"), (2, "GLOBAL:ADULT")])
+		# the same total a quote of that party has
+		q = self.preview(children=json.dumps([8]))
+		self.assertEqual(D(q["nights"][0]["occupancy"]), D(family["cells"]["LOW"]))
+		# an unknown band and a party the room cannot host are errors of their cells
+		self.assertEqual(unknown["cells"], {"LOW": None, "HIGH": None})
+		self.assertEqual(set(unknown["errors"]), {"LOW", "HIGH"})
+		self.assertEqual(crowded["cells"], {"LOW": None, "HIGH": None})
+		self.assertIn("at most 2 children", crowded["errors"]["LOW"])
+
+	def test_a_period_without_a_price_is_an_error_of_its_cell(self):
+		data = self.payload()
+		data["period_rates"].remove(find(data["period_rates"], room_type=self.std, period_code="HIGH"))
+		m = api.price_matrix(self.v, data=data, parties=[{"adults": 2, "children": []}], party_room=self.dlx)
+		cell = m["party_cells"][0]
+		self.assertEqual(D(cell["cells"]["LOW"]), D("270"))            # 2 × 135
+		self.assertIsNone(cell["cells"]["HIGH"])
+		self.assertIn("no price", cell["errors"]["HIGH"])
+		self.assertNotIn("HIGH", cell["slots"])
+
+	def test_without_parties_there_are_no_party_cells(self):
+		self.assertNotIn("party_cells", api.price_matrix(self.v))
+		self.assertEqual(api.price_matrix(self.v, parties="[]", party_room=self.std)["party_cells"], [])
+
+	def test_the_party_room_must_be_in_the_contract(self):
+		parties = [{"adults": 2, "children": []}]
+		for room in ("PW no such room", None, ""):
+			with self.subTest(room=room), self.assertRaises(frappe.ValidationError) as cm:
+				api.price_matrix(self.v, parties=parties, party_room=room)
+			self.assertIn("is not a room of this contract", str(cm.exception))
+		# a room of the hotel the unsaved draft no longer contracts
+		data = self.payload()
+		data["rooms"].remove(find(data["rooms"], room_type=self.dlx))
+		data["period_rates"].remove(find(data["period_rates"], room_type=self.dlx))
+		with self.assertRaises(frappe.ValidationError) as cm:
+			api.price_matrix(self.v, data=data, parties=parties, party_room=self.dlx)
+		self.assertIn("is not a room of this contract", str(cm.exception))
+		self.assertEqual(len(api.price_matrix(self.v, parties=parties, party_room=self.dlx)["party_cells"]), 1)
+
+	def test_malformed_parties_are_refused(self):
+		for parties in ({"adults": 2}, [{"adults": 2}] * 13, [{"adults": 0, "children": []}],
+		                [{"adults": 13, "children": []}], [{"adults": "two", "children": []}],
+		                [{"adults": True, "children": []}], [{"adults": 2, "children": ["CHA"] * 9}],
+		                [{"adults": 2, "children": "CHA"}], [{"adults": 2, "children": [7]}], ["2A"], "not json"):
+			with self.subTest(parties=parties), self.assertRaises(frappe.ValidationError):
+				api.price_matrix(self.v, parties=parties if isinstance(parties, str) else json.dumps(parties),
+				                 party_room=self.std)
+
+	def test_the_gate_is_the_matrixs_own(self):
+		self.as_user(FINANCE)                                          # sees cost, does not edit contracts
+		m = api.price_matrix(self.v, parties=[{"adults": 2, "children": ["CHB"]}], party_room=self.std)
+		self.assertEqual(D(m["party_cells"][0]["cells"]["LOW"]), D("250"))
+		self.as_user(AGENT)
+		with self.assertRaises(frappe.PermissionError):
+			api.price_matrix(self.v, parties=[{"adults": 2, "children": []}], party_room=self.std)
