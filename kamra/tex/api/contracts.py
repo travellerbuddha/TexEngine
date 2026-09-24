@@ -279,8 +279,8 @@ def _overlay(name: str, data):
 	row cleaning, selling terms and settings), then checked as a save checks it: blank values,
 	decimal places, mandatory fields, select options and lengths. Each row is named after its
 	client key (``~<_key>``, else ``~<table>-<position>``), so the rule ids of an explanation or an
-	issue point back to the row. Only drafts, only for who may edit them; nothing is written or
-	audited."""
+	issue point back to the row; a name used twice in one table is refused. Only drafts, only for
+	who may edit them; nothing is written or audited."""
 	data = parse(data, {})
 	if not isinstance(data, dict):
 		frappe.throw(_("Invalid JSON payload."))
@@ -305,9 +305,17 @@ def _overlay(name: str, data):
 	for t in VERSION_TABLES:
 		if t in data:
 			keys = [text(row.get("_key"), 100) for row in data[t] or []]
+			names = [f"~{key}" if key else f"~{t}-{i + 1}" for i, key in enumerate(keys)]
+			# issue refs and matrix sources name a row by this: it must name one row of the table
+			seen: set[str] = set()
+			for row_name in names:
+				if row_name in seen:
+					frappe.throw(_("{0}: two rows have the key {1}; each row needs its own key.")
+					             .format(_(v.meta.get_field(t).label), row_name[1:]))
+				seen.add(row_name)
 			v.set(t, _clean_rows(data[t]))
-			for i, (child, key) in enumerate(zip(v.get(t), keys, strict=True)):
-				child.name = f"~{key}" if key else f"~{t}-{i + 1}"
+			for child, row_name in zip(v.get(t), names, strict=True):
+				child.name = row_name
 	_require_values(v)
 	# what a save runs before it writes, none of which writes: the DocType defaults, the decimal
 	# check (before_validate) and Frappe's own field checks

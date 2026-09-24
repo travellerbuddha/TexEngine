@@ -277,6 +277,28 @@ class TestOverlayRefusals(WorkspaceCase):
 			api.price_matrix(self.v, data=data)
 		self.assertIn("5000", str(cm.exception))
 
+	def test_a_row_name_used_twice_in_a_table_is_refused(self):
+		# issue refs and matrix sources name a row by its key: each must name one row (ADR-061, S4)
+		twice = self.payload()
+		twice["period_rates"][1]["_key"] = twice["period_rates"][0]["_key"]
+		shadow = self.payload()                          # a key equal to a keyless row's name
+		shadow["occupancy_rules"][0].pop("_key")
+		shadow["occupancy_rules"][1]["_key"] = "occupancy_rules-1"
+		for data, message in ((twice, f"Room prices: two rows have the key {twice['period_rates'][0]['_key']}"),
+		                      (shadow, "Occupancy rules: two rows have the key occupancy_rules-1")):
+			for name, call in self.calls(data):
+				with self.subTest(message=message, endpoint=name), self.assertRaises(frappe.ValidationError) as cm:
+					call()
+				self.assertIn(f"{message}; each row needs its own key.", str(cm.exception))
+		# one key in two tables names two rows of different kinds; keyless rows are named by position
+		data = self.payload()
+		data["boards"][0]["_key"] = data["period_rates"][0]["_key"]
+		for t in ("rooms", "periods"):
+			for r in data[t]:
+				r.pop("_key")
+		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+		api.save_version(self.v, as_json(twice))           # a save drops the keys
+
 	def test_a_build_error_is_answered_not_raised(self):
 		data = self.payload()
 		data["rooms"].append({"room_type": "PW no such room", "_key": "bad"})
