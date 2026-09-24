@@ -8,8 +8,8 @@ import { useTexT } from "../../i18n"
 import { Badge, Button, Checkbox, DescriptionList, Dialog, Field, FormGrid, InlineError, Input, Notice, useToast } from "../../ui"
 import { WeekdayNumbers } from "../rates/components/pickers"
 import { decText, isoWeekday, versionLabel } from "../rates/lib/util"
-import { ChangeForm, changesFromCell, describeChanges, emptyChanges, hasChanges, toPayload, type Changes } from "./ChangeForm"
-import type { BulkResult, Grid, GridCell, Scope } from "./types"
+import { ChangeForm, changesFromCell, describeChanges, emptyChanges, hasChanges, toPayload, windowInvalid, type Changes } from "./ChangeForm"
+import { channelArgs, SCOPE_PREFIX, type BulkResult, type Grid, type GridCell, type Scope } from "./types"
 
 type T = (k: string, p?: Record<string, string | number>) => string
 
@@ -17,12 +17,22 @@ export function scopeText(t: T, scope: Scope, contractLabel: string | undefined,
   return [
     scope.contract ? t("inventory.scope.contract", { c: contractLabel ?? scope.contract }) : t("inventory.scope.all_contracts"),
     scope.market ? t("inventory.scope.market", { m: scope.market }) : t("inventory.scope.all_markets"),
-    scope.channel ? t("inventory.scope.channel", { c: channelLabel ?? scope.channel }) : t("inventory.scope.all_channels"),
+    scope.channel.startsWith(SCOPE_PREFIX)
+      ? t("inventory.scope.channel_scope", { c: channelScopeLabel(t, scope.channel.slice(SCOPE_PREFIX.length)) })
+      : scope.channel
+        ? t("inventory.scope.channel", { c: channelLabel ?? scope.channel })
+        : t("inventory.scope.all_channels"),
     scope.rate_plan ? t("inventory.scope.rate_plan", { r: ratePlanLabel ?? scope.rate_plan }) : t("inventory.scope.all_rate_plans"),
   ].join(" · ")
 }
 
-async function applyBulk(property: string, scope: Scope, start: string, end: string, roomTypes: string[], weekdays: number[] | null, c: Changes) {
+/** "Booking Engine + Call Center" → its localised label. */
+export function channelScopeLabel(t: T, value: string) {
+  return t(`inventory.channel_scope.${value === "Booking Engine" ? "be" : value === "Call Center" ? "cc" : "both"}`)
+}
+
+/** ``roomTypes`` null: one hotel-level cell per date (no room type; hotel- or market-wide). */
+async function applyBulk(property: string, scope: Scope, start: string, end: string, roomTypes: string[] | null, weekdays: number[] | null, c: Changes) {
   const p = toPayload(c)
   return tex<BulkResult>(
     "crs",
@@ -31,11 +41,12 @@ async function applyBulk(property: string, scope: Scope, start: string, end: str
       property,
       start,
       end,
-      room_types: roomTypes,
+      room_types: roomTypes ?? [],
+      hotel_level: roomTypes === null ? 1 : 0,
       weekdays: weekdays && weekdays.length < 7 ? weekdays : null,
       contract: scope.contract || null,
       market: scope.market || null,
-      channel: scope.channel || null,
+      ...channelArgs(scope),
       rate_plan: scope.rate_plan || null,
       restrictions: p.restrictions ?? null,
       inventory: p.inventory ?? null,
@@ -97,7 +108,7 @@ export function CellDialog({
   onPublish,
 }: {
   grid: Grid
-  room: { room_type: string; name: string }
+  room: { room_type: string | null; name: string; level: "hotel" | "room" }
   cell: GridCell
   scope: Scope
   scopeLabel: string
@@ -112,13 +123,16 @@ export function CellDialog({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<TexApiError>()
   const [result, setResult] = useState<BulkResult>()
-  const canRate = perms.canRate && Boolean(scope.contract) && cell.rate !== undefined
-  const editable = perms.canRestrict || perms.canInventory || canRate
+  // the hotel-level row holds restrictions only: inventory and rates are per room type (G-48)
+  const hotel = room.level === "hotel"
+  const canRate = !hotel && perms.canRate && Boolean(scope.contract) && cell.rate !== undefined
+  const canInventory = !hotel && perms.canInventory
+  const editable = perms.canRestrict || canInventory || canRate
   const apply = async () => {
     setBusy(true)
     setErr(undefined)
     try {
-      const r = await applyBulk(grid.property, scope, cell.date, cell.date, [room.room_type], null, c)
+      const r = await applyBulk(grid.property, scope, cell.date, cell.date, hotel ? null : [room.room_type!], null, c)
       toast.success(t("inventory.saved"))
       onApplied()
       if (r.rate) setResult(r)
@@ -146,7 +160,7 @@ export function CellDialog({
               {t("core.action.cancel")}
             </Button>
             {editable && (
-              <Button onClick={() => void apply()} loading={busy} disabled={!hasChanges(c)}>
+              <Button onClick={() => void apply()} loading={busy} disabled={!hasChanges(c) || windowInvalid(c)}>
                 {t("core.action.save")}
               </Button>
             )}
@@ -160,14 +174,18 @@ export function CellDialog({
         <div className="space-y-5">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
             <p className="mb-2 text-xs font-semibold tracking-wide text-zinc-500 uppercase">{t("inventory.cell.current")}</p>
+            {hotel && <p className="mb-2 text-xs text-zinc-600">{t("inventory.cell.hotel_level_hint")}</p>}
             <DescriptionList
               cols={3}
               items={[
-                { label: t("inventory.metric.avail"), value: cell.closed ? t("inventory.v.closed_sale") : `${cell.available} / ${cell.capacity} (${t("inventory.cell.sold", { n: cell.sold })})` },
+                ...(hotel
+                  ? []
+                  : [{ label: t("inventory.metric.avail"), value: cell.closed ? t("inventory.v.closed_sale") : `${cell.available} / ${cell.capacity} (${t("inventory.cell.sold", { n: cell.sold ?? 0 })})` }]),
                 { label: t("inventory.f.stop_sell"), value: cell.stop_sell ? t("inventory.v.stop") : t("inventory.v.open") },
                 { label: t("inventory.metric.los"), value: `${cell.min_los ?? "–"} / ${cell.max_los ?? "–"}` },
                 { label: t("inventory.metric.arrdep"), value: [cell.cta && "CTA", cell.ctd && "CTD"].filter(Boolean).join(" · ") || "—" },
                 { label: t("inventory.f.release_days"), value: cell.release_days ?? "—" },
+                { label: t("inventory.metric.window"), value: windowText(t, cell) },
                 ...(cell.rate !== undefined
                   ? [
                       {
@@ -194,7 +212,7 @@ export function CellDialog({
               value={c}
               onChange={setC}
               canRestrict={perms.canRestrict}
-              canInventory={perms.canInventory}
+              canInventory={canInventory}
               canRate={canRate}
               ccy={ccy}
               rateNote={t("inventory.section.rate_hint_cell", { basis: t(`inventory.basis.${grid.basis ?? "PERSON"}`) })}
@@ -231,13 +249,19 @@ export function BulkDialog({
   const [from, setFrom] = useState(grid.dates[0])
   const [to, setTo] = useState(grid.dates[grid.dates.length - 1])
   const [wd, setWd] = useState<number[]>([0, 1, 2, 3, 4, 5, 6])
-  const [rooms, setRooms] = useState<string[]>(grid.rows.map((r) => r.room_type))
+  const roomRows = grid.rows.filter((r) => r.level !== "hotel")
+  const [rooms, setRooms] = useState<string[]>(roomRows.map((r) => r.room_type!))
+  // one hotel-level cell per date instead of one per room type: restrictions only (G-48)
+  const [hotelLevel, setHotelLevel] = useState(false)
   const [c, setC] = useState<Changes>(emptyChanges)
   const [step, setStep] = useState<"edit" | "review">("edit")
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<TexApiError>()
   const [result, setResult] = useState<BulkResult>()
-  const canRate = perms.canRate && Boolean(scope.contract)
+  const canRate = !hotelLevel && perms.canRate && Boolean(scope.contract)
+  const canInventory = !hotelLevel && perms.canInventory
+  const payload = hotelLevel ? { ...c, on: Object.fromEntries(Object.entries(c.on).filter(([k]) => !["closed", "manual_adjustment", "oversell_limit"].includes(k))), rateOn: false } : c
+  const cellCount = hotelLevel ? 1 : rooms.length
 
   const dayCount = useMemo(() => {
     if (!from || !to || to < from) return 0
@@ -246,14 +270,14 @@ export function BulkDialog({
     return n
   }, [from, to, wd])
   const rangeBad = !from || !to || to < from
-  const valid = !rangeBad && dayCount > 0 && rooms.length > 0 && hasChanges(c)
-  const lines = describeChanges(t, c, grid.currency)
+  const valid = !rangeBad && dayCount > 0 && cellCount > 0 && hasChanges(payload) && !windowInvalid(payload)
+  const lines = describeChanges(t, payload, grid.currency)
 
   const apply = async () => {
     setBusy(true)
     setErr(undefined)
     try {
-      const r = await applyBulk(grid.property, scope, from, to, rooms, wd, c)
+      const r = await applyBulk(grid.property, scope, from, to, hotelLevel ? null : rooms, wd, payload)
       setResult(r)
       toast.success(t("inventory.saved"))
       onApplied()
@@ -289,7 +313,7 @@ export function BulkDialog({
               {t("core.action.back")}
             </Button>
             <Button onClick={() => void apply()} loading={busy}>
-              {t("inventory.bulk.apply", { count: dayCount * rooms.length })}
+              {t("inventory.bulk.apply", { count: dayCount * cellCount })}
             </Button>
           </>
         )
@@ -313,18 +337,30 @@ export function BulkDialog({
           </div>
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium text-zinc-800">{t("inventory.bulk.rooms")}</legend>
+            {perms.canRestrict && (
+              <div className="pb-1">
+                <Checkbox
+                  label={<span className="font-medium">{t("inventory.bulk.hotel_level")}</span>}
+                  checked={hotelLevel}
+                  onChange={(e) => setHotelLevel(e.target.checked)}
+                />
+                <p className="pl-6 text-xs text-zinc-500">{t("inventory.bulk.hotel_level_hint")}</p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-x-5 gap-y-2">
               <Checkbox
                 label={<span className="font-medium">{t("inventory.bulk.all_rooms")}</span>}
-                checked={rooms.length === grid.rows.length}
-                onChange={(e) => setRooms(e.target.checked ? grid.rows.map((r) => r.room_type) : [])}
+                checked={rooms.length === roomRows.length}
+                disabled={hotelLevel}
+                onChange={(e) => setRooms(e.target.checked ? roomRows.map((r) => r.room_type!) : [])}
               />
-              {grid.rows.map((r) => (
+              {roomRows.map((r) => (
                 <Checkbox
                   key={r.room_type}
                   label={r.name}
-                  checked={rooms.includes(r.room_type)}
-                  onChange={(e) => setRooms(e.target.checked ? [...rooms, r.room_type] : rooms.filter((x) => x !== r.room_type))}
+                  disabled={hotelLevel}
+                  checked={rooms.includes(r.room_type!)}
+                  onChange={(e) => setRooms(e.target.checked ? [...rooms, r.room_type!] : rooms.filter((x) => x !== r.room_type))}
                 />
               ))}
             </div>
@@ -333,7 +369,7 @@ export function BulkDialog({
             value={c}
             onChange={setC}
             canRestrict={perms.canRestrict}
-            canInventory={perms.canInventory}
+            canInventory={canInventory}
             canRate={canRate}
             ccy={grid.currency}
             rateNote={scope.contract ? t("inventory.section.rate_hint_bulk", { basis: t(`inventory.basis.${grid.basis ?? "PERSON"}`) }) : undefined}
@@ -343,14 +379,14 @@ export function BulkDialog({
       ) : (
         <div className="space-y-4">
           <Notice tone="info" title={t("inventory.bulk.confirm_title")}>
-            {t("inventory.bulk.confirm_body", { days: dayCount, rooms: rooms.length, cells: dayCount * rooms.length })}
+            {t("inventory.bulk.confirm_body", { days: dayCount, rooms: cellCount, cells: dayCount * cellCount })}
           </Notice>
           <DescriptionList
             cols={2}
             items={[
               { label: t("inventory.bulk.period"), value: `${fmtDate(from)} – ${fmtDate(to)}` },
               { label: t("inventory.bulk.weekdays"), value: wd.length === 7 ? t("inventory.bulk.every_day") : wd.map((d) => weekday(addDays("2024-01-01", d))).join(", ") },
-              { label: t("inventory.bulk.rooms"), value: rooms.map((r) => grid.rows.find((x) => x.room_type === r)?.name ?? r).join(", ") },
+              { label: t("inventory.bulk.rooms"), value: hotelLevel ? t("inventory.bulk.hotel_level") : rooms.map((r) => grid.rows.find((x) => x.room_type === r)?.name ?? r).join(", ") },
               { label: t("inventory.scope.label"), value: scopeLabel },
             ]}
           />
@@ -362,7 +398,7 @@ export function BulkDialog({
               ))}
             </ul>
           </div>
-          {c.rateOn && (
+          {payload.rateOn && (
             <Notice tone="warning">
               <span className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -375,4 +411,14 @@ export function BulkDialog({
       )}
     </Dialog>
   )
+}
+
+/** The booking window and advance rules of a cell, in words (G-48). */
+export function windowText(t: T, c: GridCell): string {
+  const parts: string[] = []
+  if (c.book_from) parts.push(t("inventory.window.from", { d: fmtDate(c.book_from) }))
+  if (c.book_to) parts.push(t("inventory.window.to", { d: fmtDate(c.book_to) }))
+  if (c.min_advance) parts.push(t("inventory.window.min_advance", { n: c.min_advance }))
+  if (c.max_advance) parts.push(t("inventory.window.max_advance", { n: c.max_advance }))
+  return parts.join(" · ") || t("inventory.v.no_rule")
 }

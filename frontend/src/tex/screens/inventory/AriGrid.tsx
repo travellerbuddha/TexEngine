@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Link } from "react-router-dom"
-import { ArrowDownToLine, ArrowUpFromLine, Ban, ChevronLeft, ChevronRight, Layers, Lock, PencilLine, Tag } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, Ban, CalendarClock, ChevronLeft, ChevronRight, Layers, Lock, PencilLine, Tag } from "lucide-react"
 import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
@@ -10,10 +10,10 @@ import { getTexLang, intlLocale, useTexT } from "../../i18n"
 import { Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Notice, PageHeader, Segmented, Select, Skeleton, Toolbar } from "../../ui"
 import { decText, isoWeekday, useLookups, versionLabel, weekdayName } from "../rates/lib/util"
 import { PublishDialog } from "../rates/contracts/VersionActions"
-import { BulkDialog, CellDialog, scopeText } from "./Dialogs"
+import { BulkDialog, CellDialog, channelScopeLabel, scopeText, windowText } from "./Dialogs"
 import { InventoryNav } from "./InventoryNav"
 import { Legend } from "./Legend"
-import { METRICS, type Grid, type GridCell, type GridRow, type Metric, type Scope } from "./types"
+import { CHANNEL_SCOPES, channelArgs, HOTEL_METRICS, METRICS, SCOPE_PREFIX, type Grid, type GridCell, type GridRow, type Metric, type Scope } from "./types"
 
 const PREF = "tex-inv-grid"
 
@@ -29,7 +29,8 @@ function loadPrefs(property: string | undefined): Prefs {
     const raw = localStorage.getItem(`${PREF}:${property}`)
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<Prefs>
-    return { days: [7, 14, 28].includes(p.days ?? 0) ? p.days! : 14, scope: { ...fallback.scope, ...(p.scope ?? {}) }, metrics: p.metrics?.length ? p.metrics : METRICS }
+    const metrics = (p.metrics ?? []).filter((m) => METRICS.includes(m))
+    return { days: [7, 14, 28].includes(p.days ?? 0) ? p.days! : 14, scope: { ...fallback.scope, ...(p.scope ?? {}) }, metrics: metrics.length ? metrics : METRICS }
   } catch {
     return fallback
   }
@@ -61,10 +62,11 @@ export default function AriGrid() {
 
   const { days, scope } = prefs
   const setScope = (k: keyof Scope, v: string) => setPrefs((p) => ({ ...p, scope: { ...p.scope, [k]: v } }))
+  const ch = channelArgs(scope)
   const q = useTexQuery<Grid>(
     "crs",
     "ari_grid",
-    { property, start, days, contract: scope.contract || undefined, market: scope.market || undefined, channel: scope.channel || undefined, rate_plan: scope.rate_plan || undefined },
+    { property, start, days, contract: scope.contract || undefined, market: scope.market || undefined, channel: ch.channel || undefined, channel_scope: ch.channel_scope || undefined, rate_plan: scope.rate_plan || undefined },
     [property, start, days, scope.contract, scope.market, scope.channel, scope.rate_plan],
     Boolean(property),
   )
@@ -117,7 +119,15 @@ export default function AriGrid() {
           <Select value={scope.market} onChange={(e) => setScope("market", e.target.value)} options={boot.markets.map((m) => ({ value: m.name, label: m.name }))} placeholder={t("core.label.all")} />
         </Field>
         <Field label={t("rates.f.channel")} className="w-[calc(50%-0.375rem)] sm:w-44">
-          <Select value={scope.channel} onChange={(e) => setScope("channel", e.target.value)} options={boot.channels.map((c) => ({ value: c.name, label: c.channel_name }))} placeholder={t("core.label.all")} />
+          <Select
+            value={scope.channel}
+            onChange={(e) => setScope("channel", e.target.value)}
+            options={[
+              ...CHANNEL_SCOPES.map((v) => ({ value: `${SCOPE_PREFIX}${v}`, label: channelScopeLabel(t, v) })),
+              ...boot.channels.map((c) => ({ value: c.name, label: c.channel_name })),
+            ]}
+            placeholder={t("core.label.all")}
+          />
         </Field>
         <Field label={t("rates.f.rate_plan")} className="w-full sm:w-48">
           <Select value={scope.rate_plan} onChange={(e) => setScope("rate_plan", e.target.value)} options={(lookups.data?.rate_plans ?? []).map((r) => ({ value: r.name, label: r.rate_plan_name }))} placeholder={t("core.label.all")} />
@@ -233,7 +243,9 @@ function GridTable({
 }) {
   const { t } = useTexT()
   const table = useRef<HTMLTableElement>(null)
-  const flat = useMemo<FlatRow[]>(() => grid.rows.flatMap((row) => metrics.map((metric) => ({ row, metric }))), [grid.rows, metrics])
+  // the hotel-level row holds restrictions only (G-48)
+  const rowMetrics = useCallback((row: GridRow) => (row.level === "hotel" ? metrics.filter((m) => HOTEL_METRICS.includes(m)) : metrics), [metrics])
+  const flat = useMemo<FlatRow[]>(() => grid.rows.flatMap((row) => rowMetrics(row).map((metric) => ({ row, metric }))), [grid.rows, rowMetrics])
   const [pos, setPos] = useState({ r: 0, c: 0 })
   const r = Math.min(pos.r, Math.max(0, flat.length - 1))
   const c = Math.min(pos.c, grid.dates.length - 1)
@@ -269,10 +281,10 @@ function GridTable({
         if (e.ctrlKey) nr = last.r
         break
       case "PageDown":
-        nr = Math.min(last.r, ri + metrics.length)
+        nr = Math.min(last.r, ri + rowMetrics(flat[ri].row).length)
         break
       case "PageUp":
-        nr = Math.max(0, ri - metrics.length)
+        nr = Math.max(0, ri - rowMetrics(flat[ri].row).length)
         break
       case "Enter":
       case " ":
@@ -320,20 +332,23 @@ function GridTable({
           </tr>
         </thead>
         <tbody>
-          {grid.rows.map((row) =>
-            metrics.map((metric, mi) => {
+          {grid.rows.map((row) => {
+            const shown = rowMetrics(row)
+            return shown.map((metric, mi) => {
               const ri = flat.findIndex((f) => f.row === row && f.metric === metric)
               return (
-                <tr key={`${row.room_type}-${metric}`} role="row">
+                <tr key={`${row.room_type ?? "*"}-${metric}`} role="row" data-level={row.level}>
                   <th
                     role="rowheader"
                     scope="row"
                     className={cn(
-                      "sticky left-0 z-[1] border-r border-zinc-200 bg-white px-2 py-1 text-left align-middle font-normal",
-                      mi === metrics.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
+                      "sticky left-0 z-[1] border-r border-zinc-200 px-2 py-1 text-left align-middle font-normal",
+                      row.level === "hotel" ? "bg-zinc-50" : "bg-white",
+                      mi === shown.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
                     )}
                   >
                     {mi === 0 && <span className="block max-w-24 truncate text-[13px] font-semibold text-zinc-900 sm:max-w-40" title={row.name}>{row.name}</span>}
+                    {mi === 0 && row.level === "hotel" && <span className="block text-[10px] text-zinc-500">{t("inventory.hotel_row_hint")}</span>}
                     <span className="block text-[11px] text-zinc-500">
                       {t(`inventory.metric.${metric}`)}
                       {metric === "rate" && ccy && <span className="text-zinc-400"> · {ccy}</span>}
@@ -358,7 +373,7 @@ function GridTable({
                         aria-label={cellLabel(t, metric, cell, row.name, ccy)}
                         className={cn(
                           "relative h-9 cursor-default px-1 text-center align-middle tabular-nums outline-none focus-visible:z-[3] focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
-                          mi === metrics.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
+                          mi === shown.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
                           weekend && "bg-zinc-50/80",
                           editable && "cursor-pointer hover:bg-tex-50",
                           cellTone(metric, cell),
@@ -371,8 +386,8 @@ function GridTable({
                   })}
                 </tr>
               )
-            }),
-          )}
+            })
+          })}
         </tbody>
       </table>
     </div>
@@ -395,6 +410,8 @@ function isOwn(metric: Metric, c: GridCell): boolean {
       return o.cta !== null || o.ctd !== null
     case "release":
       return Boolean(o.release_days)
+    case "window":
+      return Boolean(o.book_from || o.book_to || o.min_advance || o.max_advance)
     default:
       return false
   }
@@ -404,8 +421,9 @@ function cellTone(metric: Metric, c: GridCell): string | false {
   if (metric === "avail") {
     if (c.closed) return "bg-zinc-200/70 text-zinc-600"
     if (c.available === 0) return "bg-rose-50 text-rose-800"
-    if (c.capacity > 0 && c.available * 5 <= c.capacity) return "bg-amber-50 text-amber-900"
+    if (c.capacity && c.available !== null && c.available * 5 <= c.capacity) return "bg-amber-50 text-amber-900"
   }
+  if (metric === "window" && (c.book_from || c.book_to)) return "bg-sky-50 text-sky-900"
   if (metric === "stop" && c.stop_sell) return "bg-rose-50 text-rose-800"
   if (metric === "arrdep" && (c.cta || c.ctd)) return "bg-amber-50 text-amber-900"
   return false
@@ -486,7 +504,31 @@ function CellContent({ metric, cell }: { metric: Metric; cell: GridCell }) {
       )
     case "release":
       return cell.release_days ? <span className="font-medium">{cell.release_days}</span> : <span className="text-zinc-300">·</span>
+    case "window":
+      return cell.book_from || cell.book_to || cell.min_advance || cell.max_advance ? (
+        <span className="inline-flex flex-col items-center text-[10px] leading-tight font-semibold">
+          {(cell.book_from || cell.book_to) && (
+            <span className="inline-flex items-center gap-0.5">
+              <CalendarClock className="size-3" aria-hidden />
+              {shortDay(cell.book_from)}–{shortDay(cell.book_to)}
+            </span>
+          )}
+          {(cell.min_advance || cell.max_advance) && (
+            <span>
+              {cell.min_advance ?? 0}–{cell.max_advance ?? "∞"}
+              {t("inventory.short.days")}
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="text-zinc-300">·</span>
+      )
   }
+}
+
+function shortDay(iso: string | null) {
+  if (!iso) return "…"
+  return new Intl.DateTimeFormat(intlLocale(getTexLang()), { day: "numeric", month: "short" }).format(new Date(`${iso}T12:00:00`))
 }
 
 function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string): string {
@@ -499,7 +541,7 @@ function cellLabel(t: (k: string, p?: Record<string, string | number>) => string
       if (c.promo) v += `, ${t("inventory.legend.promo")}`
       break
     case "avail":
-      v = c.closed ? t("inventory.v.closed_sale") : t("inventory.aria.avail", { a: c.available, cap: c.capacity, sold: c.sold })
+      v = c.closed ? t("inventory.v.closed_sale") : t("inventory.aria.avail", { a: c.available ?? 0, cap: c.capacity ?? 0, sold: c.sold ?? 0 })
       break
     case "stop":
       v = c.stop_sell ? t("inventory.v.stop") : t("inventory.v.open")
@@ -512,6 +554,9 @@ function cellLabel(t: (k: string, p?: Record<string, string | number>) => string
       break
     case "release":
       v = c.release_days ? t("inventory.v.days", { count: c.release_days }) : t("inventory.v.no_rule")
+      break
+    case "window":
+      v = windowText(t, c)
       break
   }
   const own = isOwn(metric, c) ? `, ${t("inventory.legend.own")}` : ""

@@ -10,13 +10,17 @@ export interface OwnRestriction {
   release_days: number | null
   min_advance: number | null
   max_advance: number | null
+  /** Booking window: the sale dates on which the night is sold (G-48). */
+  book_from: string | null
+  book_to: string | null
 }
 
 export interface GridCell {
   date: string
-  available: number
-  capacity: number
-  sold: number
+  /** null on the hotel-level row (restrictions only). */
+  available: number | null
+  capacity: number | null
+  sold: number | null
   closed: boolean
   manual_adjustment: number
   stop_sell: boolean
@@ -25,6 +29,10 @@ export interface GridCell {
   cta: boolean
   ctd: boolean
   release_days: number | null
+  min_advance: number | null
+  max_advance: number | null
+  book_from: string | null
+  book_to: string | null
   own: OwnRestriction | null
   promo: boolean
   rate?: string | null
@@ -32,8 +40,10 @@ export interface GridCell {
 }
 
 export interface GridRow {
-  room_type: string
+  /** null: the hotel-level row — cells without a room type (hotel- or market-wide). */
+  room_type: string | null
   name: string
+  level: "hotel" | "room"
   cells: GridCell[]
 }
 
@@ -43,6 +53,7 @@ export interface Grid {
   days: number
   dates: string[]
   contract: string | null
+  channel_scope: string | null
   version: string | null
   draft: string | null
   basis: "PERSON" | "ROOM" | null
@@ -59,14 +70,27 @@ export interface BulkResult {
   rate?: { draft: string; periods: string[]; note: string }
 }
 
-export type Metric = "rate" | "avail" | "stop" | "los" | "arrdep" | "release"
-export const METRICS: Metric[] = ["rate", "avail", "stop", "los", "arrdep", "release"]
+export type Metric = "rate" | "avail" | "stop" | "los" | "arrdep" | "release" | "window"
+export const METRICS: Metric[] = ["rate", "avail", "stop", "los", "arrdep", "release", "window"]
+/** What the hotel-level row shows: restrictions only (no pool, no rate). */
+export const HOTEL_METRICS: Metric[] = ["stop", "los", "arrdep", "release", "window"]
+
+/** Channel scopes of a restriction (G-48): a product surface instead of one sales channel. */
+export const CHANNEL_SCOPES = ["Booking Engine + Call Center", "Booking Engine", "Call Center"] as const
+export const SCOPE_PREFIX = "scope:"
 
 export interface Scope {
   contract: string
   market: string
+  /** a sales channel, or `scope:<channel scope>` */
   channel: string
   rate_plan: string
+}
+
+/** The API's channel / channel_scope for a grid scope. */
+export function channelArgs(scope: Scope): { channel: string | null; channel_scope: string | null } {
+  if (scope.channel.startsWith(SCOPE_PREFIX)) return { channel: null, channel_scope: scope.channel.slice(SCOPE_PREFIX.length) }
+  return { channel: scope.channel || null, channel_scope: null }
 }
 
 // Shapes of kamra/tex/availability/extras.py (limited extras, G-19).
