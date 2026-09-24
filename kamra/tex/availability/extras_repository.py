@@ -300,7 +300,7 @@ def reconcile_all() -> None:
 		backfill(prop)
 		drift = reconcile(prop)
 		if drift:
-			audit("extra_inventory.reconcile", property=prop, new={"drift": drift}, source="scheduler")
+			audit("extra_inventory.reconcile", property=prop, new={"drift": drift}, source="Scheduler")
 
 
 # ── administration ──────────────────────────────────────────────────────────

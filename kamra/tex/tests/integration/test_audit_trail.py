@@ -364,3 +364,93 @@ class TestPaymentRuleAudit(AuditCase):
 		policies_api.delete_record("TEX Payment Policy", name)
 		self.assertEqual(last_event("payment_policy.delete", name)["old"]["policy_name"], "G74 deposit")
 		self.assertEqual(frappe.db.count("TEX Audit Event", {"reference_name": name}), 4)   # no duplicates
+
+
+# ─── payment event sources ───────────────────────────────────────────────
+
+
+class TestPaymentSource(AuditCase):
+	"""A payment outcome records how it arrived: the guest's browser coming back from the
+	gateway, the gateway's own notification, staff, the scheduler or the guest."""
+
+	def setUp(self):
+		super().setUp()
+		self.p = setup_site_and_payments(self.f)
+
+	def iyzico(self) -> str:
+		return frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "G74 iyzico gateway",
+		                       "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox", "enabled": 1,
+		                       "currencies": "EUR", "api_key": "ak-test", "secret_key": "sk-test"}).insert(
+			ignore_permissions=True).name
+
+	def charge(self, account: str, key: str) -> str:
+		return pay.start_payment(property=fx.PROPERTY, amount="100", currency="EUR", provider_account=account,
+		                         description="test", customer={}, return_url=_return_url(),
+		                         idempotency_key=key)["transaction"]
+
+	def callback(self, txn: str, via: str, cb: str | None = None, **params) -> None:
+		form = {"txn": txn, "via": via, "cb": cb or pay.callback_signature(txn, via), **params}
+		as_user("Guest")                                                # (switching user clears form_dict)
+		frappe.form_dict.update(form)
+		try:
+			with mock.patch.object(frappe.db, "commit"):                # the endpoint commits its outcome
+				pay_api.callback(txn=txn)
+		finally:
+			for k in form:
+				frappe.form_dict.pop(k, None)
+			as_user("Administrator")
+
+	def status(self, txn: str) -> str:
+		return frappe.db.get_value("TEX Payment Transaction", txn, "status")
+
+	def test_a_gateway_return_and_a_notification_are_told_apart(self):
+		from kamra.tex.payments.providers import turkey
+
+		gw, acc = FakeIyzico(), self.iyzico()
+		with gw.patch():
+			t1 = self.charge(acc, "g74-return")
+			init = next(p for path, p in gw.calls if path == turkey.IyzicoProvider.INIT)
+			self.assertIn("via=return", init["callbackUrl"])             # the guest's browser comes back here
+			gw.answers["tok-1"] = lambda t: gw.paid(t, "P1")
+			self.callback(t1, "return", token="tok-1")
+			self.assertEqual(self.status(t1), "Succeeded")
+			self.assertEqual(last_event("payment.succeeded", t1)["source"], "Gateway Return")
+
+			t2 = self.charge(acc, "g74-notify")
+			gw.answers["tok-2"] = lambda t: gw.paid(t, "P2")
+			self.callback(t2, "notify", token="tok-2")
+			self.assertEqual(last_event("payment.succeeded", t2)["source"], "Webhook")
+
+			# the channel is signed: a return address never passes for a notification
+			t3 = self.charge(acc, "g74-forged")
+			gw.answers["tok-3"] = lambda t: gw.paid(t, "P3")
+			with self.assertRaises(frappe.DoesNotExistError):
+				self.callback(t3, "notify", cb=pay.callback_signature(t3, "return"), token="tok-3")
+			self.assertEqual(self.status(t3), "Pending")
+
+	def test_staff_guest_and_scheduler_sources(self):
+		gw, acc = FakeIyzico(), self.iyzico()
+		with gw.patch():
+			t = self.charge(acc, "g74-staff")
+			gw.answers["tok-1"] = lambda x: gw.paid(x, "P9")
+			# finance re-verifies it from the back office (a signed-in request)
+			with mock.patch.object(frappe.local, "request", SimpleNamespace(headers={}), create=True):
+				pay_api.reverify(transaction=t)
+		self.assertEqual(last_event("payment.succeeded", t)["source"], "Desk")
+
+		b = guest_books(session="g74-guest")                            # the sandbox payment page
+		txn = b["payment"]["transaction"]
+		public.mock_pay(transaction=txn, outcome="success", sig=b["payment"]["fields"]["success_sig"])
+		as_user("Administrator")
+		self.assertEqual(last_event("payment.succeeded", txn)["source"], "Gateway Return")
+
+		link = pay.create_link(property=fx.PROPERTY, amount="50", currency="EUR", description="deposit",
+		                       provider_account=self.p["account"], guest_name="G74 Guest")["link"]
+		frappe.db.set_value("TEX Payment Link", link, "expires_at", add_days(now_datetime(), -1))
+		from kamra.tex import scheduler
+
+		with mock.patch.object(frappe.db, "commit"):
+			scheduler._run("kamra.tex.payments.service.expire_links")
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", link, "status"), "Expired")
+		e = last_event("payment_link.expire", link)
+		self.assertEqual((e["source"], e["property"]), ("Scheduler", fx.PROPERTY))

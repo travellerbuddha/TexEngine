@@ -20,7 +20,7 @@ from kamra.tex.money import from_db, to_str
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.security import scope
-from kamra.tex.security.audit import log_exception
+from kamra.tex.security.audit import audit_source, log_exception
 from kamra.tex.security.scope import require_capability
 from kamra.tex.services.txn import retry_on_deadlock
 
@@ -47,19 +47,27 @@ def callback(txn: str | None = None, **_ignored):
 
 	name = text(txn or frappe.form_dict.get("txn"), 40)
 	cb = str(frappe.form_dict.get("cb") or "")
-	# the return URL we gave the gateway is signed: unknown or unsigned ids go nowhere
-	if not name or not hmac.compare_digest(pay.callback_signature(name), cb):
+	via = str(frappe.form_dict.get("via") or "")
+	via = via if via in pay.CALLBACK_SOURCES else None
+	# the return URL we gave the gateway is signed (with how it is used): unknown or unsigned ids
+	# go nowhere, and a return address never passes for a notification
+	if not name or not hmac.compare_digest(pay.callback_signature(name, via), cb):
 		frappe.throw(_("Unknown payment."), frappe.DoesNotExistError)
 	row = frappe.db.get_value("TEX Payment Transaction", name, ["name", "provider", "return_url", "booking"],
 	                          as_dict=True)
 	if not row or row.provider not in GATEWAYS:
 		frappe.throw(_("Unknown payment."), frappe.DoesNotExistError)
-	params = {k: v for k, v in frappe.form_dict.items() if k not in ("cmd", "txn", "cb")}
+	params = {k: v for k, v in frappe.form_dict.items() if k not in ("cmd", "txn", "cb", "via")}
 	req = getattr(frappe.local, "request", None)
 	headers = {k: v for k, v in req.headers.items()} if req is not None else {}
 	body = req.get_data(cache=True) if req is not None else b""
+	# how the outcome arrived (G-74): a URL issued before G-74 names no channel; a GET is the
+	# guest's browser (gateways notify with a POST), a POST is taken as the gateway's notification
+	source = pay.CALLBACK_SOURCES[via] if via else (
+		"Gateway Return" if req is not None and req.method == "GET" else "Webhook")
 	try:
-		out = pay.complete(row.name, params=params, headers=headers, body=body)
+		with audit_source(source):
+			out = pay.complete(row.name, params=params, headers=headers, body=body)
 		status = out["status"]
 	except ProviderError:
 		# forged or garbled callback: the transaction stays as it was

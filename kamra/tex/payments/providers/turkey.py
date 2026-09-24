@@ -328,7 +328,8 @@ class NestPayProvider(PaymentProvider):
 			"clientid": self.account.get("terminal_id"), "storetype": "3d_pay_hosting",
 			"amount": _money(intent.amount), "currency": ISO_NUMERIC.get(intent.currency, ""),
 			"oid": intent.transaction, "okUrl": intent.callback_url, "failUrl": intent.callback_url,
-			"callbackUrl": intent.callback_url, "rnd": secrets.token_hex(10),
+			# the bank's server-to-server callback (okUrl / failUrl: the guest's browser)
+			"callbackUrl": intent.notify_url or intent.callback_url, "rnd": secrets.token_hex(10),
 			"lang": "tr" if intent.locale == "tr" else "en", "TranType": "Auth", "hashAlgorithm": "ver3",
 			"Instalment": "",
 		}
