@@ -50,10 +50,14 @@ def by(rows, **match):
 	return next(r for r in rows if all(r.get(k) == v for k, v in match.items()))
 
 
-def _p35():
+def _p35(case):
+	"""Run p35 as the migration does. Its column re-sync is DDL, which would commit the test's
+	transaction (and leak its records into the site): here the schema must already be migrated."""
 	from kamra.patches.tex import p35_money_field_types
 
-	p35_money_field_types.execute()
+	with mock.patch.object(frappe, "reload_doc") as resync:
+		p35_money_field_types.execute()
+	case.assertFalse(resync.called, "the site's G-72 columns are narrower than 9 places: run the migration")
 
 
 class TestSchema(TexTestCase):
@@ -230,10 +234,10 @@ def by_id(rules, rule_id):
 
 class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 	def test_a_published_payload_keeps_its_hash_through_the_migration(self):
-		out = fx.create_contract(self.f, code="G72P")
+		out = fx.create_contract(self.f, code="G72PAYLOAD")
 		before = frappe.db.get_value("TEX Contract Version", out["version"],
 		                             ["payload", "payload_hash", "effective_from"], as_dict=True)
-		_p35()
+		_p35(self)
 		after = frappe.db.get_value("TEX Contract Version", out["version"], ["payload", "payload_hash"], as_dict=True)
 		self.assertEqual((after.payload, after.payload_hash), (before.payload, before.payload_hash))
 		self.assertEqual(serialize.payload_hash(json.loads(after.payload)), before.payload_hash)
@@ -255,7 +259,7 @@ class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 		self.assertEqual([r["sell_rate"] for r in sold["fx_rates"]], ["0.029412"])
 		self.assertEqual(sold["totals"]["total"], "4411.80")                   # 150,000 TRY × 0.029412
 
-		_p35()
+		_p35(self)
 		for basis in ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE"):
 			p = modification.propose(res, {}, basis=basis)
 			self.assertEqual(p["proposed"]["totals"]["total"], "4411.80", basis)
@@ -265,8 +269,7 @@ class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 		cur = modification.propose(res, {}, basis="CURRENT")["proposed"]
 		self.assertEqual([r["sell_rate"] for r in cur["fx_rates"]], ["0.02941176471"])
 		self.assertEqual(cur["totals"]["total"], "4411.76")                    # 150,000 / 34
-		offer = pick(self.search())
-		self.assertEqual(offer["total"], "4411.76")
+		self.assertEqual(self.offer()["total"], "4411.76")
 
 	def test_a_reservation_sold_at_ten_significant_digits_keeps_its_rate(self):
 		self.try_contract()
@@ -301,13 +304,14 @@ class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 		revisions.activate("TEX FX Policy", policy.name, at="2020-01-01 00:00:00", backdate=True)
 
 	def try_contract(self) -> None:
-		"""A TRY contract (25,000 TRY per person and night) sold in EUR."""
+		"""A TRY contract (25,000 TRY per person and night) sold in EUR; it outranks any other
+		contract of the hotel (priority), so its offer is the one listed."""
 		std = self.f["room_types"]["STD"]
 		c = frappe.get_doc({"doctype": "TEX Contract", "property": fx.PROPERTY, "contract_code": "G72TRY",
 		                    "contract_name": "TRY contract", "market": "DE", "contract_currency": "TRY",
 		                    "pricing_basis": "PERSON", "status": "Draft", "sale_from": add_days(now_datetime(), -30),
 		                    "sale_to": fx.STAY_TO, "stay_from": fx.STAY_FROM, "stay_to": fx.STAY_TO,
-		                    }).insert(ignore_permissions=True)
+		                    "priority": 9999}).insert(ignore_permissions=True)
 		v = frappe.get_doc({
 			"doctype": "TEX Contract Version", "contract": c.name, "prices_include_tax": 0,
 			"rooms": [{"room_type": std, "is_base": 1}],
@@ -319,14 +323,17 @@ class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 			"rate_plans": [{"rate_plan": self.f["rate_plans"]["FLEX"], "refundable": 1}],
 		}).insert(ignore_permissions=True)
 		contracts.publish(v.name)
+		self.contract = c.name
 
-	def search(self) -> dict:
+	def offer(self) -> dict:
+		"""The TRY contract's STD / AI / FLEX offer for 2 adults, 3 nights, sold in EUR."""
 		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
 		                     rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB", currency="EUR")
-		return res["properties"][0]
+		offers = [o for o in res["properties"][0]["offers"] if o["contract"] == self.contract]
+		return pick({"offers": offers})
 
 	def book(self) -> str:
-		q = quoting.create_quote(pick(self.search())["rooms"][0]["offer_key"])
+		q = quoting.create_quote(self.offer()["rooms"][0]["offer_key"])
 		self.assertTrue(q["ok"], q)
 		b = booking.create_booking(quote_ids=[q["quote_id"]], guest={
 			"first_name": "Ayla", "last_name": "Demir", "email": "ayla@example.com"}, payment_method="Card",
