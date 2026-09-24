@@ -38,6 +38,9 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      - name: Frontend pure unit tests (node --test)
+        run: npm run test:unit
+        working-directory: frontend
       - name: TEX i18n catalogs complete (en, tr, de, ru, ro, pl)
         run: npm run i18n:tex
         working-directory: frontend
