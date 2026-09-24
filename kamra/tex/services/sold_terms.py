@@ -44,26 +44,41 @@ def expected_hash(res, snap: dict, version: str | None) -> str | None:
 	return recorded_hash(res, snap) if version and version == sold_version(snap) else None
 
 
+# an audit of the same refusal (stay, use, basis, version and hash) at most once an hour: every
+# click on such a stay is refused, the audit trail says it once (review of G-73, L4)
+ONCE_PER = ("use", "basis", "version", "found_hash")
+
+
 def refuse(res, snap: dict, error: Exception, *, use: str, basis: str | None = None,
-           version: str | None = None):
+           version: str | None = None, guest: bool = False):
 	"""Refuse to price a sold stay on terms that are not the ones it was sold on: audited
 	(``reservation.reprice_refused``, written outside the refused transaction), never a silent
-	price on other terms. ``use``: reprice, simulate or add-on. ``version``: the version refused, when
-	known (the message names it in any case)."""
-	found = frappe.db.get_value("TEX Contract Version", version, "payload_hash") if version else None
+	price on other terms. ``use``: reprice, simulate or add-on. ``version``: the version that
+	failed; the error names it when it knows better (selection may fail on another contract's
+	version, review L3).
+
+	``guest``: the reason goes to a guest (the manage page, a guest's change applied later, whose
+	error is kept on the request, a guest's extras): "contact the hotel", never the version, its
+	hashes or what an administrator should do (review L2). Staff get the detail; so does the audit."""
+	version = getattr(error, "version", None) or version
+	found = getattr(error, "found_hash", None) or (
+		frappe.db.get_value("TEX Contract Version", version, "payload_hash") if version else None)
 	audit_refusal(REFUSED, reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	              new={"use": use, "basis": basis, "version": version, "sold_version": sold_version(snap),
 	                   "recorded_hash": recorded_hash(res, snap), "found_hash": found},
-	              reason=str(error)[:500])
-	frappe.throw(_("Reservation {0} cannot be priced: {1} Its price stays as sold. Ask an administrator to check "
-	               "the contract version before re-pricing it.").format(res.name, str(error)),
-	             contracts.PayloadMismatch)
+	              reason=str(error)[:500], once_per=ONCE_PER)
+	if guest:
+		msg = _("This booking cannot be changed online right now. Please contact the hotel.")
+	else:
+		msg = _("Reservation {0} cannot be priced: {1} Its price stays as sold. Ask an administrator to check "
+		        "the contract version before re-pricing it.").format(res.name, str(error))
+	frappe.throw(msg, contracts.PayloadMismatch(version=version, found_hash=found))
 
 
-def load(res, snap: dict, version: str, *, use: str):
+def load(res, snap: dict, version: str, *, use: str, guest: bool = False):
 	"""``contracts.load_terms`` for a sold stay: the recorded hash is required of the version it
 	was sold on (``expected_hash``); a refusal is ``refuse``d."""
 	try:
 		return contracts.load_terms(version, expected_hash=expected_hash(res, snap, version))
 	except contracts.PayloadMismatch as e:
-		refuse(res, snap, e, use=use, version=version)
+		refuse(res, snap, e, use=use, version=version, guest=guest)

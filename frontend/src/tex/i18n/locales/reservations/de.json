@@ -90,6 +90,8 @@
   "other": "{count} Zimmer"
  },
  "res.booking.title": "Buchung {name}",
+ "res.cancel.basket": "Enthält {amount}: den Rabatt, den die anderen Zimmer behalten ({promotion}, Mindestwarenkorb {minimum}). Wird mit der Gebühr nicht erlassen.",
+ "res.cancel.basket_credit": "Enthält eine Gutschrift von {amount}: zuvor auf einem anderen Zimmer für {promotion} berechnet.",
  "res.cancel.body": "{guest}, {from} – {to}. Die Reservierung wird freigegeben und die unten stehende Gebühr erfasst.",
  "res.cancel.button": "Reservierung stornieren",
  "res.cancel.confirm": "Reservierung stornieren",

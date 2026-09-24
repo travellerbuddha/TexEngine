@@ -433,6 +433,9 @@ class StayRequest:
 	# compared with it (G-84, ADR-057). None: the room is priced alone (its own basket)
 	booking_basket: Decimal | None = None
 	booking_rooms: int = 1
+	# per promotion with a minimum basket: (promotion, the basket of the booking's rooms it covers,
+	# how many), sorted — what its minimum is compared with (G-84 review M2)
+	booking_baskets: tuple[tuple[str, Decimal, int], ...] = ()
 
 
 # ─── context ─────────────────────────────────────────────────────────────

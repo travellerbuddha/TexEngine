@@ -250,10 +250,18 @@ export interface Simulation {
   reasons?: Reason[]
 }
 
+/** What a room carries for the other rooms of its booking once it is cancelled or changed below a
+ * promotion's minimum basket: the discount they keep, or a credit when negative (G-84 review H1). */
+export interface BasketClawback {
+  amount: string
+  currency: string
+  promotions: { promo_id: string; name: string; minimum: string | null; basket_after: string; amount: string; text: string }[]
+}
+
 export interface CancelPreview {
   penalty: string
   currency: string
-  basis: { rule: string | CancellationRule; days_before: number }
+  basis: { rule: string | CancellationRule; days_before: number; basket_clawback?: BasketClawback }
 }
 
 export interface CancelResult {

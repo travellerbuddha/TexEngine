@@ -48,9 +48,14 @@ class PromoContext:
 	sell_currency: str
 	fx: dict[str, FxSnapshot] | None = None   # promotion currency → sell_currency (thresholds)
 	# the whole booking's basket and its number of rooms, when the room is priced in a booking
-	# of several rooms: the minimum basket is compared with it (G-84, ADR-057)
+	# of several rooms (G-84, ADR-057)
 	booking_basket: Decimal | None = None
 	booking_rooms: int = 1
+	# per promotion, the basket of the booking's rooms it covers — the rooms eligible for it on
+	# every other check — and how many: its minimum basket is compared with it (G-84 review M2).
+	# A promotion absent here is compared with ``booking_basket`` (a request recorded before), or
+	# with this room's own basket when the room is priced alone
+	booking_baskets: dict[str, tuple[Decimal, int]] | None = None
 	# records the rates a threshold was converted with (G-56); not part of the context's identity
 	fx_log: FxLog | None = field(default=None, compare=False, hash=False)
 
@@ -134,8 +139,10 @@ def _eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None 
 	return _conditions(p, ctx, usage)
 
 
-def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None
+def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None, *, basket: bool = True
                 ) -> tuple[str | None, Decimal | None]:
+	"""The minimum basket is the last check: a promotion refused for it is eligible on every
+	other one (G-84 review M2). ``basket=False`` leaves it out."""
 	if p.code and p.code.upper() not in ctx.codes:
 		return "code not entered", None
 	if p.sale_from and ctx.sale_date < p.sale_from:
@@ -168,19 +175,6 @@ def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None
 		return "required package extras not selected", None
 	if p.member_only and not ctx.member:
 		return "members only", None
-	if p.min_basket is not None:
-		# the threshold is in the promotion's currency; the basket in the sell currency (G-08)
-		minimum = in_currency(p.min_basket, p.currency, ctx.sell_currency, ctx.fx, log=ctx.fx_log,
-		                      use=f"promotion:{p.promo_id}:min_basket")
-		if minimum is None:
-			return f"no FX to compare the minimum basket in {p.currency} with {ctx.sell_currency}", None
-		# the whole booking's basket when the room is priced in a booking of several rooms (G-84)
-		if ctx.booking_basket is not None:
-			if ctx.booking_basket < minimum:
-				return (f"booking basket {quantize(ctx.booking_basket, ctx.sell_currency)} {ctx.sell_currency} "
-				        f"({ctx.booking_rooms} rooms) below minimum {minimum}", minimum)
-		elif ctx.basket < minimum:
-			return f"basket {ctx.basket} {ctx.sell_currency} below minimum {minimum}", minimum
 	if usage is not None:
 		total, guest = usage
 		if p.usage_limit is not None and total >= p.usage_limit:
@@ -194,7 +188,57 @@ def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None
 			return "free-nights promotion misconfigured", None
 		if len(eligible_nights(p, ctx)) < p.free_nights_stay:
 			return f"needs {p.free_nights_stay} eligible nights", None
+	if basket and p.min_basket is not None:
+		return _min_basket(p, ctx)
 	return None, None
+
+
+def minimum_in_sell(p: Promotion, ctx: PromoContext) -> Decimal | None:
+	"""The minimum basket in the sell currency: the threshold is in the promotion's (G-08)."""
+	return in_currency(p.min_basket, p.currency, ctx.sell_currency, ctx.fx, log=ctx.fx_log,
+	                   use=f"promotion:{p.promo_id}:min_basket")
+
+
+def judged_basket(promo_id: str, ctx: PromoContext) -> tuple[Decimal, int, bool]:
+	"""(the basket a minimum is compared with, how many rooms make it, whether it is the
+	booking's): the basket of the booking's rooms the promotion covers (G-84 review M2), the whole
+	booking's (a request recorded before), or this room's own."""
+	if ctx.booking_baskets and promo_id in ctx.booking_baskets:
+		b, n = ctx.booking_baskets[promo_id]
+		return b, n, True
+	if ctx.booking_basket is not None:
+		return ctx.booking_basket, ctx.booking_rooms, True
+	return ctx.basket, 1, False
+
+
+def _min_basket(p: Promotion, ctx: PromoContext) -> tuple[str | None, Decimal | None]:
+	minimum = minimum_in_sell(p, ctx)
+	if minimum is None:
+		return f"no FX to compare the minimum basket in {p.currency} with {ctx.sell_currency}", None
+	basket, rooms, booking = judged_basket(p.promo_id, ctx)
+	if basket >= minimum:
+		return None, None
+	if booking:
+		return (f"booking basket {quantize(basket, ctx.sell_currency)} {ctx.sell_currency} ({rooms} rooms) "
+		        f"below minimum {minimum}", minimum)
+	return f"basket {basket} {ctx.sell_currency} below minimum {minimum}", minimum
+
+
+def basket_minimums(promos, ctx: PromoContext, usage: dict[str, tuple[int, int]] | None = None
+                    ) -> dict[str, Decimal]:
+	"""{promotion: its minimum basket in the sell currency} of the promotions with a minimum that
+	this room is eligible for on every other check: the rooms whose baskets make that promotion's
+	booking basket (G-84 review M2). A minimum without an FX rate is left out (the promotion is
+	refused for it)."""
+	usage = usage or {}
+	out: dict[str, Decimal] = {}
+	for p in promos:
+		if p.min_basket is None or invalid_value(p) or _conditions(p, ctx, usage.get(p.promo_id), basket=False)[0]:
+			continue
+		minimum = minimum_in_sell(p, ctx)
+		if minimum is not None:
+			out[p.promo_id] = minimum
+	return out
 
 
 def select(promos: tuple[Promotion, ...], ctx: PromoContext,
