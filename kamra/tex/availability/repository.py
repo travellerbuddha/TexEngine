@@ -302,8 +302,8 @@ def restriction_cells(property: str, start: date, end: date) -> list[rs.Restrict
 	rows = frappe.get_all("TEX ARI Restriction",
 	                      filters={"property": property, "restriction_date": ("between", [start, end])},
 	                      fields=["name", "restriction_date", "room_type", "contract", "market", "rate_plan",
-	                              "sales_channel", "stop_sell", "stop_sell_mode", "min_los", "max_los", "cta", "ctd",
-	                              "release_days", "min_advance", "max_advance"])
+	                              "sales_channel", "channel_scope", "stop_sell", "stop_sell_mode", "min_los", "max_los",
+	                              "cta", "ctd", "release_days", "min_advance", "max_advance", "book_from", "book_to"])
 
 	def tri(v):
 		return True if v == "Yes" else (False if v == "No" else None)
@@ -311,14 +311,43 @@ def restriction_cells(property: str, start: date, end: date) -> list[rs.Restrict
 	return [rs.RestrictionCell(
 		cell_id=r.name, day=getdate(r.restriction_date), room_type=r.room_type or None, contract=r.contract or None,
 		market=r.market or None, rate_plan=r.rate_plan or None, channel=r.sales_channel or None,
-		stop_sell=r.stop_sell or None, stop_sell_mode=r.stop_sell_mode or None,
+		channel_scope=r.channel_scope or None, stop_sell=r.stop_sell or None, stop_sell_mode=r.stop_sell_mode or None,
 		min_los=r.min_los or None, max_los=r.max_los or None, cta=tri(r.cta), ctd=tri(r.ctd),
 		release_days=r.release_days or None, min_advance=r.min_advance or None,
-		max_advance=r.max_advance or None) for r in rows]
+		max_advance=r.max_advance or None, book_from=getdate(r.book_from) if r.book_from else None,
+		book_to=getdate(r.book_to) if r.book_to else None) for r in rows]
+
+
+def channel_surface(channel: str | None) -> str | None:
+	"""The product surface a sales channel sells through (G-48, ADR-057): the Booking Engine for
+	the channels a booking site sells on (``WEB_CHANNELS``) and any channel grouped "Booking
+	Engine", the Call Center for a channel grouped "Call Center"; None for the others (API,
+	B2B, OTA …), which a Booking Engine / Call Center cell never restricts."""
+	if not channel:
+		return None
+	from kamra.tex.security.capabilities import WEB_CHANNELS
+
+	if channel in WEB_CHANNELS:
+		return rs.BOOKING_ENGINE
+	group = frappe.db.get_value("TEX Sales Channel", channel, "channel_group", cache=True)
+	return {"Booking Engine": rs.BOOKING_ENGINE, "Call Center": rs.CALL_CENTER}.get(group or "")
+
+
+def scope_for(room_type: str | None, contract: str | None, market: str | None, rate_plan: str | None,
+              channel: str | None) -> rs.RestrictionScope:
+	"""The restriction scope of a stay (or of a grid row) sold on ``channel``."""
+	return rs.RestrictionScope(room_type=room_type, contract=contract or None, market=market or None,
+	                           rate_plan=rate_plan or None, channel=channel or None, surface=channel_surface(channel))
 
 
 def check_restrictions(property: str, scope: rs.RestrictionScope, check_in: date, check_out: date,
-                       sale_date: date, cells: list[rs.RestrictionCell] | None = None) -> list[rs.Violation]:
+                       sale_date: date, cells: list[rs.RestrictionCell] | None = None, *,
+                       before: tuple[date, date] | None = None, product_changed: bool = False
+                       ) -> list[rs.Violation]:
+	"""Violations of a stay. ``before``: the stay a change replaces (``product_changed``: sold as
+	another product): only what the change newly takes is checked (``restrictions.evaluate_change``,
+	ADR-057)."""
 	cells = cells if cells is not None else restriction_cells(property, check_in, check_out)
-	violations, _ = rs.evaluate(cells, scope, check_in, check_out, sale_date)
+	violations, _ = rs.evaluate_change(cells, scope, check_in, check_out, sale_date, before=before,
+	                                   product_changed=product_changed)
 	return violations

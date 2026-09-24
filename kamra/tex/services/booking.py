@@ -20,7 +20,6 @@ from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datet
 
 from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.availability import repository as avail
-from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
 from kamra.tex.money import ZERO, D, db_dec, from_db, quantize, to_str
@@ -277,6 +276,60 @@ def _record_revision(reservation: str, booking: str | None, *, change_type: str,
 	return doc.name
 
 
+def room_basket(result: dict) -> D:
+	"""A priced room's basket (G-84): recorded with its price; a price recorded before G-84 has
+	its accommodation before promotions and its extras."""
+	if result.get("basket") not in (None, ""):
+		return D(result["basket"])
+	t = result.get("totals") or {}
+	return D(t.get("accommodation_gross") or 0) + D(t.get("extras") or 0)
+
+
+BASKET_NOT_TOGETHER = "The rooms of this booking were not priced together, and a promotion's minimum basket is " \
+                      "judged on the whole booking. Please quote the rooms of this booking together again."
+
+
+def check_booking_basket(rooms: list[tuple[dict, dict]]) -> None:
+	"""G-84 (ADR-057): a minimum basket is the whole booking's, so a booking is sold only at the
+	price its rooms have together. ``rooms``: (request, priced result) of each room.
+
+	A room priced in a booking of several rooms (``quoting.create_quotes``) records that
+	booking's basket and size: it is booked with rooms whose baskets add up to it, never with
+	fewer or others. A room priced alone records none; in a booking of several rooms it is
+	refused when a promotion its own basket missed (``rule`` MIN_BASKET) would qualify on this
+	booking's basket: its rooms must be quoted together."""
+	actual = sum((room_basket(result) for _req, result in rooms), ZERO)
+	for req, result in rooms:
+		recorded = req.get("booking_basket")
+		if recorded not in (None, ""):
+			if D(recorded) != actual or int(req.get("booking_rooms") or 0) != len(rooms):
+				frappe.throw(_(BASKET_NOT_TOGETHER))
+		elif len(rooms) > 1:
+			for p in result.get("promotions") or []:
+				if not p.get("applied") and p.get("rule") == "MIN_BASKET" and p.get("minimum") not in (None, "") \
+						and D(p["minimum"]) <= actual:
+					frappe.throw(_(BASKET_NOT_TOGETHER))
+
+
+def other_rooms_basket(res, currency: str) -> tuple[D, int]:
+	"""(the baskets of the other live rooms of ``res``'s booking in ``currency``, how many): what a
+	change of ``res`` is judged with, besides its own new basket (G-84, ADR-057). Each room counts
+	as it is priced now (its locked snapshot); a room TEX did not price counts for nothing."""
+	if not res.get("tex_booking"):
+		return ZERO, 0
+	rows = frappe.get_all("Reservation", filters={"tex_booking": res.tex_booking, "name": ("!=", res.name),
+	                                              "status": ("not in", ["Cancelled", "No Show"])},
+	                      fields=["tex_pricing_snapshot"], order_by="name asc")
+	total, n = ZERO, 0
+	for r in rows:
+		snap = json.loads(r.tex_pricing_snapshot or "{}")
+		if not snap.get("contract") or snap.get("source") == "channel" or snap.get("currency") != currency:
+			continue
+		total += room_basket(snap)
+		n += 1
+	return total, n
+
+
 def reservation_amounts(result: dict) -> dict:
 	t = result["totals"]
 	total = D(t["total"])
@@ -374,12 +427,12 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	cells = avail.restriction_cells(property, min(getdate(r[1]["check_in"]) for r in rows),
 	                                max(getdate(r[1]["check_out"]) for r in rows))
 	for _row, req, result in rows:
-		sc = RestrictionScope(room_type=req["room_type"], contract=result["contract"]["contract"], market=market,
-		                      rate_plan=req.get("rate_plan"), channel=channel)
+		sc = avail.scope_for(req["room_type"], result["contract"]["contract"], market, req.get("rate_plan"), channel)
 		v = avail.check_restrictions(property, sc, getdate(req["check_in"]), getdate(req["check_out"]), now.date(),
 		                             cells)
 		if v:
 			frappe.throw(_("This stay is no longer bookable: {0}").format(v[0].message))
+	check_booking_basket([(req, result) for _row, req, result in rows])
 
 	# ── limited extras: every room's units together, re-checked under the day locks (G-19) ──
 	extras_tracked = xinv.tracked(property)

@@ -261,6 +261,8 @@
  "res.mod.override_amount": "Final price",
  "res.mod.override_hint": "Replaces the calculated total. Audited.",
  "res.mod.override_invalid": "Enter an amount of zero or more.",
+ "res.mod.override_restrictions": "Sell despite the restrictions",
+ "res.mod.override_restrictions_hint": "This change breaks: {rules}. You may edit restrictions, so you may sell it anyway; the reason is recorded and audited.",
  "res.mod.recalculate": "Recalculate",
  "res.mod.repropose": "Review again",
  "res.mod.reset": "Undo my changes",

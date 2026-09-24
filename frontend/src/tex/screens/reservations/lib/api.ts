@@ -41,8 +41,8 @@ export function proposeModification(reservation: string, changes: Record<string,
   return tex<Proposal>("crs", "propose_modification", { reservation, changes, basis, basis_sale_at }, { post: true })
 }
 
-export function applyModification(proposal_token: string, reason: string, override_amount?: string) {
-  return tex<ApplyResult>("crs", "apply_modification", { proposal_token, reason, override_amount }, { post: true })
+export function applyModification(proposal_token: string, reason: string, override_amount?: string, override_restrictions = false) {
+  return tex<ApplyResult>("crs", "apply_modification", { proposal_token, reason, override_amount, override_restrictions: override_restrictions ? 1 : 0 }, { post: true })
 }
 
 export function simulate(reservation: string, sale_at: string) {

@@ -261,6 +261,8 @@
  "res.mod.override_amount": "Son fiyat",
  "res.mod.override_hint": "Hesaplanan toplamın yerine geçer. Denetim kaydına yazılır.",
  "res.mod.override_invalid": "Sıfır veya daha büyük bir tutar girin.",
+ "res.mod.override_restrictions": "Kısıtlamalara rağmen sat",
+ "res.mod.override_restrictions_hint": "Bu değişiklik şunları ihlal ediyor: {rules}. Kısıtlamaları düzenleme yetkiniz olduğu için yine de satabilirsiniz; gerekçe kaydedilir ve denetlenir.",
  "res.mod.recalculate": "Yeniden hesapla",
  "res.mod.repropose": "Yeniden incele",
  "res.mod.reset": "Değişikliklerimi geri al",

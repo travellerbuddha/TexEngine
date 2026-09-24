@@ -413,22 +413,23 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     const base = baseline ?? sels
     const failed = (error: FlowError): QuoteOutcome => ({ error, rejected: [] })
     if (!sels.length || sels.some((s) => !s)) return failed({ kind: "invalid", message: "" })
-    const results = await Promise.allSettled(
-      sels.map((s, i) =>
-        pub<QuoteResponse>("quote", {
-          site: site.slug,
-          offer_key: s!.offerKey,
-          extras: Object.values(flow.extras[i] ?? {}),
-          session_id: sessionId(),
-        }),
-      ),
-    )
+    // the rooms of a booking are quoted together: a coupon's minimum basket is the whole
+    // booking's (G-84), so every room is priced knowing the others
+    let results: QuoteResponse[]
+    try {
+      const out = await pub<{ ok: boolean; rooms: QuoteResponse[] }>("quote_rooms", {
+        site: site.slug,
+        rooms: sels.map((s, i) => ({ offer_key: s!.offerKey, extras: Object.values(flow.extras[i] ?? {}) })),
+        session_id: sessionId(),
+      })
+      results = out.rooms
+    } catch (e) {
+      return failed(toFlowError(e))
+    }
     const quotes: QuoteResponse[] = []
     const changes: PriceChange[] = []
     for (let i = 0; i < results.length; i++) {
-      const r = results[i]
-      if (r.status === "rejected") return failed({ ...toFlowError(r.reason), room: i })
-      const q = r.value
+      const q = results[i]
       if (!q.ok || !q.quote) {
         const code = q.reasons?.[0]?.code
         return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: q.reasons?.[0]?.message ?? "", room: i })

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { ArrowDownToLine, ArrowUpFromLine, Ban, Lock, PencilLine, Tag } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, Ban, CalendarClock, Lock, PencilLine, Tag } from "lucide-react"
 import { useTexT } from "../../i18n"
 import { Kbd } from "../../ui"
 
@@ -64,6 +64,13 @@ export function Legend() {
           t("inventory.legend.own"),
         )}
         {item(<span className="font-semibold">2/7</span>, t("inventory.legend.los"))}
+        {item(
+          <span className="inline-flex h-5 items-center gap-0.5 rounded bg-sky-50 px-1 font-semibold text-sky-900">
+            <CalendarClock className="size-3" aria-hidden />
+            1–31
+          </span>,
+          t("inventory.legend.window"),
+        )}
         <li className="flex items-center gap-1.5">
           <Kbd>←↑↓→</Kbd>
           <Kbd>Enter</Kbd>

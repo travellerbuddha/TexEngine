@@ -269,6 +269,8 @@
  "res.mod.override_amount": "Cena końcowa",
  "res.mod.override_hint": "Zastępuje wyliczoną sumę. Rejestrowane w audycie.",
  "res.mod.override_invalid": "Podaj kwotę równą zero lub większą.",
+ "res.mod.override_restrictions": "Sprzedaj mimo ograniczeń",
+ "res.mod.override_restrictions_hint": "Ta zmiana narusza: {rules}. Możesz edytować ograniczenia, więc możesz ją sprzedać; powód jest zapisywany w audycie.",
  "res.mod.recalculate": "Przelicz ponownie",
  "res.mod.repropose": "Sprawdź ponownie",
  "res.mod.reset": "Cofnij moje zmiany",

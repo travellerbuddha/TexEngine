@@ -262,6 +262,42 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	return guest_safe(out)                            # guests never see how many are left (G-19)
 
 
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str | None = None):
+	"""The rooms of one booking quoted together (G-84, ADR-057): a coupon's minimum basket is the
+	whole booking's. ``rooms``: [{"offer_key", "extras"}] of one search, in room order. → {"ok",
+	"rooms": one ``quote`` answer per room}."""
+	s = _site(site)
+	channel = _channel(s)
+	from kamra.tex.commercial.context import listed_extras
+
+	items = parse(rooms, []) or []
+	if not items or len(items) > quoting.MAX_ROOMS:
+		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
+	props = _site_properties(s)
+	for r in items:
+		offer = quoting.verify(str(r.get("offer_key") or ""))
+		if offer["property"] not in props or offer["channel"] != channel:
+			frappe.throw(_("Invalid offer."))
+		online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
+		if any(str(e.get("code", "")).upper() not in online for e in parse(r.get("extras"), []) or []):
+			frappe.throw(_("This extra cannot be booked online."))
+	out = quoting.create_quotes([{"offer_key": str(r.get("offer_key") or ""), "extras": parse(r.get("extras"), [])}
+	                             for r in items], promo_codes=[promo_code] if promo_code else None,
+	                            session_id=session_id)
+	loc = content.Localizer(content.guest_language())
+	rooms_out = []
+	for r in out["rooms"]:
+		if r.get("quote"):
+			loc.quote(r["quote"]["request"]["property"], r["quote"])
+		rooms_out.append(guest_safe(r))              # guests never see how many are left (G-19)
+		if r.get("ok"):
+			_track(s, session_id, "quote", {"quote": r["quote_id"], "total": r["quote"]["totals"]["total"],
+			                                "currency": r["quote"]["currency"]})
+	return {"ok": out["ok"], "rooms": rooms_out}
+
+
 def _session_hash(session_id: str | None) -> str | None:
 	return hashlib.sha256(session_id.encode()).hexdigest()[:32] if session_id else None
 
