@@ -2666,6 +2666,118 @@ three Low, fixed as follows.
   errored on the base commit and schema). `Reservation.tex_fx_rate` is written at its 9 places
   (`money.db_dec`), so the record in memory is the stored one. `test_markup_fx_tax` cross rate now 1.294117647 (was 1.294118).
 
+## ADR-056 CRM data follows the viewer's hotels; the funnel keeps no identity without consent; withheld fields never leave through Desk or REST
+**Context.** Three gaps of the 2026-09-23 audit.
+- G-65 (R-37). The guest profile called `loyalty.summary(guest)` over every program: another
+  tenant's program, its balance and its ledger (bookings, stay dates) were shown to anyone who
+  could see the guest. `Guest.tex_loyalty_points` (and `tex_stays`, `tex_lifetime_value`,
+  `tex_last_stay`) are totals over every tenant's programs and stays: the list and profile served
+  the stored points, the `loyalty_points` segment fact used them (a segment's membership told a
+  tenant another tenant's points), and Desk / REST showed all of them to whoever could read the
+  guest. `list_guests` read every visible guest and paged in Python. The profile had no extras
+  and no cancellation count or fees.
+- G-81 (R-38). A funnel event stored an e-mail hash (a pseudonymous identifier: personal data under
+  GDPR/KVKK) whether or not the visitor consented; a browser's funnel payload kept whatever
+  contact fields it carried. A case left at payment was never recovered when the guest paid later
+  (only a `booked` event in the same session recovered it), so staff could chase a guest who had
+  paid. The consented-contact and recovery paths had no test.
+- G-95 (R-14, R-43). The price-locked snapshot and related fields hold what only
+  `price.view_cost` may see in the TEX API (rule explanation, cost, margin, FX record with provider
+  rate and row, FX margin, policy): `Reservation.tex_pricing_snapshot`, `tex_cost_amount`,
+  `tex_margin_amount`, `tex_fx_rate`, `TEX Quote.result_json`,
+  `TEX Reservation Revision.snapshot_before` / `snapshot_after`. Desk and REST scoped them by
+  tenant only: any role with read on those DocTypes at the hotel read them.
+
+**Decision.**
+- *Loyalty follows the viewer's hotels* (`loyalty.summary(guest, programs, hotels=)`):
+  - a viewer sees only the programs that reach their hotels: a hotel's own program, or its
+    group's (`visible_programs`). Another hotel's own program is not shown, even inside the same
+    enterprise: guest identity is shared inside an enterprise (ADR-040), a hotel's program is not;
+  - a visible program's balance is shown whole (a group program is one balance, redeemable at the
+    viewer's hotel), tier and value included;
+  - a ledger entry tied to a booking or stay at a hotel outside the viewer's scope shows its points,
+    status and dates, never that booking or its reason (`other_hotel`), as consent entries made at
+    another hotel (ADR-046 review). Manual adjustments of the program (no booking) stay visible;
+  - `programs` is required: no caller can ask for "every program" by leaving it out;
+  - the stored totals are never served by the TEX API: the list, the profile and the segment facts
+    compute points from the viewer's programs (one grouped SQL per page), stays and value from the
+    viewer's hotels (as before, ADR-036).
+- *The guest list is read in SQL* inside the viewer's tenancy: `COUNT(*)` for the total and one
+  `LIMIT/OFFSET` page, in a stable order (`modified DESC, name DESC`), search typed literally
+  (`%`/`_` escaped). A segment filter is evaluated on the viewer's facts over the matching guests
+  read in batches of 500, keeping only the page: memory stays bounded, the work is still linear in
+  the tenant's guests (a stored fact table remains the next step, ADR-036).
+- *Profile completeness* (R-37), all at the viewer's hotels:
+  - `extras`: the extras on stays that were not cancelled or no-shows, from each stay's price-locked
+    snapshot (those sold with it and those added later), with quantity, amount and currency; only
+    what the guest pays is read, never cost, margin or rules. `extras_summary`: per extra and
+    currency, quantity, value and number of stays (never summed across currencies);
+  - `cancellations`: count, no-shows, fees per currency (the stay's currency, else the hotel's),
+    last cancellation day; each closed stay shows its fee.
+- *The funnel keeps no identity without consent* (G-81):
+  - `_track` keeps an e-mail hash only when the visitor ticked marketing consent in that same step;
+    contact fields (`email`, `phone`, names) never stay in any payload, whoever sent it;
+  - no legitimate-interest basis per hotel is built: the spec asks for funnel events "where legally
+    permitted" and keeps transactional apart from marketing consent (R-38), and ADR-046 makes
+    abandoned-payment contact depend on the profile's own consent. A per-hotel legitimate-interest
+    setting is a legal decision for the owner (recorded as an open item), not a default;
+  - contact data of a case is stored only with the profile's own e-mail consent (ADR-046) and
+    shown only while that consent holds: withdrawn later, the case stays, anonymous;
+  - a case is recovered when its session books, or when the booking it left at payment is paid
+    later (`Confirmed` / `Partially Cancelled`): at detection for sessions still in the window, and
+    by a sweep of open payment-stage cases of the last 60 days (a payment link's life);
+  - p37 removes hashes kept without consent.
+- *Withheld fields never leave through Desk / REST* (G-95, and the guest totals of G-65):
+  - the fields are at Frappe permlevel 1 in the DocType JSON (Reservation: snapshot, cost, margin,
+    FX rate; TEX Quote: result; TEX Reservation Revision: both snapshots; Guest: stays, lifetime
+    value and currency, last stay, loyalty points). Only System Manager (the platform
+    administrators) holds permlevel 1. Frappe then leaves them out of every generic read path for
+    everyone else (`frappe.client.get` / `get_list` / `get_value`, `/api/resource` and
+    `/api/v2/document` reads, the Desk form, report view, export, print, link fetches) and refuses a
+    filter, sort or aggregate on them (a legacy string aggregate is dropped from the query). A
+    withheld text field reads as empty and a withheld number as 0;
+  - two Frappe paths ignore field-level read permissions and are closed in
+    `kamra.tex.security.internals`: the change history (`Version`, shown in the Desk form to anyone
+    who may read the record) masks these fields' values when a row is written (`mask_version`;
+    which field changed stays on record; p37 masks older rows), and the document a generic write
+    returns (`frappe.client.set_value` / `save` / `insert`, `POST` / `PUT /api/resource`) leaves them
+    out when the save was checked against a user who may not read them (`hide_after_write` marks the
+    document on `on_change`, `HideInternalsAfterWrite.as_dict` honours the mark; TEX services save
+    with `ignore_permissions` and are never marked);
+  - the TEX API is the only way business users read them, by capability at the hotel:
+    `crs.reservation` with `price.view_cost` shows the explanation, cost and FX record, without it
+    `quoting.strip_internal` removes them (unchanged); reports show cost and margin with
+    `price.view_cost` only (unchanged).
+  - Why not a per-hotel read hook: a permlevel is role-based and cannot follow a per-hotel
+    capability, but a hook that strips values from `onload` / `as_dict` does not reach `get_list`
+    with fields, filters, sorting or aggregates, report views, exports, print or the change history,
+    each of which Frappe resolves in SQL or outside the document. Withholding the fields from every
+    business role is the only option Frappe enforces on every path. Moving the internals into a
+    separate record was rejected: every TEX service reads the snapshot, and the price-lock guard
+    (ADR-010) protects it where it is.
+
+**Consequences.**
+- Hotel staff, `price.view_cost` or not, no longer read snapshots, cost, margin or FX in Desk /
+  REST; the TEX reservation screen and reports show them with the capability. Scripts and
+  integrations that read these fields over REST need a platform (System Manager) account.
+- A save through Desk / REST by a user without permlevel 1 cannot change these fields (Frappe
+  resets them to the stored values), which the price lock (ADR-010) already required.
+- A site whose role permissions for these DocTypes were customised (Custom DocPerm) uses its own
+  rows instead of the JSON's: p37 lists such DocTypes so an administrator can check permlevel 1.
+- Not changed, open: `TEX Contract Version` (payload and rate tables, i.e. contract cost) is still
+  readable in Desk by the Hotel Admin role at its hotels whatever the granted profile (G-11 covered
+  the TEX API only); a group program's ledger is readable in Desk by the group's Hotel Admins
+  (`VIA_PARENT`), other hotels' bookings included; a very large tenant's segment filter scans its
+  guests in batches.
+- Tests: `test_crm_privacy` (18: loyalty programs, a group program's other-hotel entries, the
+  guest totals in the TEX API and in Desk / REST, segment facts, SQL paging and totals, extras and
+  cancellations, no hash without consent, browser payloads, p37 hashes, consented contact and its
+  withdrawal, recovery by a later payment and by a later booking, Desk / REST reads, a write's
+  response, the change history, the TEX API by capability, p37 history). Fail-first on the base
+  commit and schema: 15 of 18 failed or errored; the other three pin behaviour that was already
+  right (another enterprise's viewer is refused, recovery by a later booking in the session, the
+  TEX API's capability rule). E2E `crm-profile.spec.ts` (written and type-checked).
+
 ## ADR-058 A sold stay's contract terms are a verified reference; every TEX patch is tested and converts or grants once
 **Context.** G-73 (R-05) and G-76 (R-56).
 - G-73. A reservation's price-locked snapshot is the quote's result. It names its contract
@@ -2829,6 +2941,7 @@ three Low, fixed as follows.
   - G-73: `test_snapshot_integrity` (9; on the base commit 3 fail, 4 error and 2 pass, the
     back-compat and new-version cases);
   - G-76: `test_patches` (21). On the original patches 8 failed and 1 errored (the p03
-    restructure). With the fixes, the p03 test then found the two missing indexes (fixed by p39);
+    restructure). With the fixes, the p03 test then found the missing and fragile indexes (fixed
+    by p39);
   - updated: the p29 and p17 tests start from a site where the patch never ran, and p36's test
     expects a TEX hotel that TEX never sold to stay onboarding.

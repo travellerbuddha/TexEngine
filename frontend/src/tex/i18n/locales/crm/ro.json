@@ -264,6 +264,7 @@
  "crm.loyalty.col.reason": "Motiv",
  "crm.loyalty.col.status": "Stare",
  "crm.loyalty.col.type": "Tip",
+ "crm.loyalty.other_hotel": "La alt hotel al programului",
  "crm.loyalty.direction": "Ajustare",
  "crm.loyalty.empty": "Nicio activitate de fidelitate",
  "crm.loyalty.empty_hint": "Punctele se câștigă automat pentru sejururile confirmate. Puteți adăuga manual puncte de bunăvoință.",
@@ -312,15 +313,26 @@
  "crm.pager.prev": "Anterior",
  "crm.pager.range": "{from}–{to} din {total}",
  "crm.profile.contact": "Contact și preferințe",
+ "crm.profile.cancel_fees": "Taxe {amount}",
+ "crm.profile.cancellations": "Anulări",
  "crm.profile.edit": "Editează profilul",
+ "crm.profile.extras_caption": "Extra cumpărate",
  "crm.profile.kpis": "Indicatorii oaspetelui",
  "crm.profile.ltv_hint": "În moneda de rezervare folosită cel mai des",
  "crm.profile.manage_segments": "Gestionează segmentele",
  "crm.profile.no_segments": "Nu face parte din niciun segment.",
+ "crm.profile.no_extras": "Niciun extra la hotelurile dumneavoastră",
+ "crm.profile.no_extras_hint": "Extra-urile sejururilor anulate și ale neprezentărilor nu sunt numărate.",
+ "crm.profile.no_cancel_fees": "Nicio taxă percepută",
+ "crm.profile.no_shows": {
+  "one": "{count} neprezentare",
+  "few": "{count} neprezentări",
+  "other": "{count} de neprezentări"
+ },
  "crm.profile.no_stays": "Niciun sejur la hotelurile dvs.",
  "crm.profile.no_stays_hint": "Se afișează doar sejururile de la hotelurile la care aveți acces.",
  "crm.profile.no_tags": "Fără etichete",
- "crm.profile.points_hint": "Toate programele",
+ "crm.profile.points_hint": "Programele hotelurilor dumneavoastră",
  "crm.profile.sections": "Istoricul oaspetelui",
  "crm.profile.segments": "Segmente",
  "crm.profile.segments_hint": "Segmentele dinamice în care se încadrează azi oaspetele",
@@ -331,6 +343,7 @@
   "other": "{count} de active sau încheiate"
  },
  "crm.profile.tab.comms": "Comunicări",
+ "crm.profile.tab.extras": "Extra",
  "crm.profile.tab.loyalty": "Fidelitate",
  "crm.profile.tab.stays": "Sejururi",
  "crm.profile.title": "Profilul oaspetelui",
@@ -624,6 +637,7 @@
  "crm.seg.warn_currency": "O condiție de sumă nu are monedă. Alegeți moneda — până atunci segmentul nu include pe nimeni.",
  "crm.seg.warn_currency_short": "Fără monedă: nu include pe nimeni",
  "crm.stay.dates": "Date",
+ "crm.stay.fee": "Taxă {amount}",
  "crm.stay.pax": "{adults} adulți · {children} copii",
  "crm.stay.reservation": "Rezervare",
  "crm.stay.room": "Cameră · masă",
@@ -639,5 +653,15 @@
  "crm.stay.status.requested": "Cerută",
  "crm.stay.status.waitlist": "Listă de așteptare",
  "crm.vip": "VIP",
- "crm.comm.delivery_error": "Motiv: {reason}"
+ "crm.comm.delivery_error": "Motiv: {reason}",
+ "crm.extra.summary": "Extra pe tipuri",
+ "crm.extra.name": "Extra",
+ "crm.extra.quantity": "Cantitate",
+ "crm.extra.service_dates": "Date serviciu",
+ "crm.extra.added_later": "Adăugat după rezervare",
+ "crm.extra.stays": {
+  "one": "{count} sejur",
+  "few": "{count} sejururi",
+  "other": "{count} de sejururi"
+ }
 }

@@ -885,7 +885,8 @@
    "fieldtype": "Float",
    "label": "FX rate applied",
    "read_only": 1,
-   "precision": "9"
+   "precision": "9",
+   "permlevel": 1
   },
   {
    "fieldname": "tex_total_amount",
@@ -910,14 +911,16 @@
    "fieldtype": "Currency",
    "label": "Contract cost (sell ccy)",
    "options": "tex_currency",
-   "read_only": 1
+   "read_only": 1,
+   "permlevel": 1
   },
   {
    "fieldname": "tex_margin_amount",
    "fieldtype": "Currency",
    "label": "Margin",
    "options": "tex_currency",
-   "read_only": 1
+   "read_only": 1,
+   "permlevel": 1
   },
   {
    "fieldname": "tex_promotions",
@@ -951,13 +954,14 @@
    "fieldname": "tex_pricing_snapshot",
    "fieldtype": "Long Text",
    "label": "Pricing snapshot (JSON)",
-   "read_only": 1
+   "read_only": 1,
+   "permlevel": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-24 12:00:00.000000",
+ "modified": "2026-09-24 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Reservation",
@@ -1025,6 +1029,12 @@
    "report": 1,
    "role": "Kamra Agent",
    "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "write": 1,
+   "role": "System Manager"
   }
  ],
  "row_format": "Dynamic",

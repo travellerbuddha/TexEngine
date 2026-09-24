@@ -29,6 +29,7 @@ import { CommunicationsTimeline, LogCommunicationDialog } from "./profile/Commun
 import { ConsentPanel } from "./profile/ConsentPanel"
 import { ContactCard } from "./profile/ContactCard"
 import { EditGuestDrawer } from "./profile/EditGuestDrawer"
+import { ExtrasPanel } from "./profile/Extras"
 import { LoyaltyPanel } from "./profile/Loyalty"
 import type { GuestProfile as Profile, Stay } from "./types"
 
@@ -71,6 +72,9 @@ export default function GuestProfile() {
 
   const activeStays = d?.stays.filter((s) => s.status !== "Cancelled" && s.status !== "No Show").length ?? 0
   const loyaltyAvailable = d?.loyalty.reduce((s, a) => s + a.available, 0) ?? 0
+  const cxl = d?.cancellations
+  // fees per currency, never added up across currencies
+  const cxlFees = cxl?.fees.length ? cxl.fees.map((f) => money(f.amount, f.currency)).join(" · ") : null
 
   return (
     <>
@@ -127,11 +131,21 @@ export default function GuestProfile() {
         </div>
       ) : (
         <div className="space-y-5">
-          <section aria-label={t("crm.profile.kpis")} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <section aria-label={t("crm.profile.kpis")} className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <Stat label={t("crm.col.stays")} value={num(g.tex_stays ?? 0)} hint={t("crm.profile.stays_hint", { count: activeStays })} />
             <Stat label={t("crm.col.ltv")} value={g.tex_lifetime_currency ? money(g.tex_lifetime_value, g.tex_lifetime_currency) : "—"} hint={t("crm.profile.ltv_hint")} />
             <Stat label={t("crm.col.last_stay")} value={date(g.tex_last_stay)} />
             <Stat label={t("crm.loyalty.available")} value={num(loyaltyAvailable)} hint={t("crm.profile.points_hint")} />
+            <Stat
+              label={t("crm.profile.cancellations")}
+              value={num(cxl?.count ?? 0)}
+              hint={[
+                cxlFees ? t("crm.profile.cancel_fees", { amount: cxlFees }) : t("crm.profile.no_cancel_fees"),
+                cxl?.no_shows ? t("crm.profile.no_shows", { count: cxl.no_shows }) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            />
           </section>
 
           <div className="grid items-start gap-5 lg:grid-cols-3">
@@ -145,6 +159,7 @@ export default function GuestProfile() {
                   className="px-2"
                   tabs={[
                     { id: "stays", label: t("crm.profile.tab.stays"), badge: <Badge>{d.stays.length}</Badge> },
+                    { id: "extras", label: t("crm.profile.tab.extras"), badge: <Badge>{d.extras.length}</Badge> },
                     { id: "comms", label: t("crm.profile.tab.comms"), badge: <Badge>{d.communications.length}</Badge> },
                     { id: "loyalty", label: t("crm.profile.tab.loyalty") },
                   ]}
@@ -204,10 +219,25 @@ export default function GuestProfile() {
                             </div>
                           ),
                         },
-                        { key: "status", header: t("core.label.status"), hideBelow: "sm", cell: (s) => <Badge tone={statusTone(s.status)}>{t(`crm.stay.status.${s.status.toLowerCase().replace(/\s+/g, "_")}`)}</Badge> },
+                        {
+                          key: "status",
+                          header: t("core.label.status"),
+                          hideBelow: "sm",
+                          cell: (s) => (
+                            <div className="text-xs">
+                              <Badge tone={statusTone(s.status)}>{t(`crm.stay.status.${s.status.toLowerCase().replace(/\s+/g, "_")}`)}</Badge>
+                              {s.cancellation_fee && <p className="mt-1 whitespace-nowrap text-zinc-600">{t("crm.stay.fee", { amount: money(s.cancellation_fee, s.tex_currency) })}</p>}
+                            </div>
+                          ),
+                        },
                         { key: "total", header: t("core.label.total"), align: "right", cell: (s) => <Money amount={s.tex_total_amount} currency={s.tex_currency} /> },
                       ]}
                     />
+                  </TabPanel>
+                )}
+                {tab === "extras" && (
+                  <TabPanel id="extras" className="p-4">
+                    <ExtrasPanel lines={d.extras} summary={d.extras_summary} />
                   </TabPanel>
                 )}
                 {tab === "comms" && (

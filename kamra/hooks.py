@@ -282,6 +282,12 @@ doc_events["Reservation"]["validate"] = "kamra.tex.hooks.reservation_validate"
 # inventory days before the naming series, as a TEX booking locks them (G-49, ADR-048)
 doc_events["Reservation"]["before_insert"] = "kamra.tex.hooks.reservation_before_insert"
 doc_events["Reservation"]["on_update"].append("kamra.tex.hooks.reservation_on_update")
+# pricing internals stay out of Desk / REST for anyone who may not read them (G-95, ADR-056): the
+# document a generic write returns, and the change history
+doc_events["Reservation"]["on_change"] = "kamra.tex.security.internals.hide_after_write"
+# so do a guest's totals over every tenant (G-65, ADR-056)
+doc_events.setdefault("Guest", {})["on_change"] = "kamra.tex.security.internals.hide_after_write"
+doc_events.setdefault("Version", {})["before_insert"] = "kamra.tex.security.internals.mask_version"
 doc_events["Property"] = {
 	"validate": "kamra.tex.hooks.property_validate",
 	"on_update": "kamra.tex.hooks.property_on_update",
@@ -343,7 +349,10 @@ for _dt in ("TEX Contract Version", "TEX Pricing Policy", "TEX Markup Rule", "TE
 # }
 # no upload path puts HTML, SVG, XML or script into the public folder (G-83); checked before
 # File writes anything to disk
-extend_doctype_class = {"File": "kamra.tex.security.uploads.PublicFileGuard"}
+extend_doctype_class = {"File": "kamra.tex.security.uploads.PublicFileGuard",
+                        # a write's response leaves out withheld fields (G-95, G-65, ADR-056)
+                        "Reservation": "kamra.tex.security.internals.HideInternalsAfterWrite",
+                        "Guest": "kamra.tex.security.internals.HideInternalsAfterWrite"}
 
 # Overriding Methods
 # ------------------------------

@@ -16,8 +16,9 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_to_date, getdate, now_datetime, nowdate
 
+from kamra.tex.crm import loyalty
 from kamra.tex.crm import segments as seg
-from kamra.tex.money import ZERO, D, from_db, to_str
+from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 
@@ -30,6 +31,8 @@ LIST_FIELDS = ["name", "full_name", "first_name", "last_name", "email", "phone",
                "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points", "tex_consent_email", "tex_consent_sms",
                "tex_consent_whatsapp", "tex_enterprise"]
 ABANDON_AFTER_MINUTES = 45
+# how long an open case left at payment is watched for its booking's payment (a payment link's life)
+RECOVERY_DAYS = 60
 
 
 # ─── tenancy ─────────────────────────────────────────────────────────────
@@ -70,43 +73,83 @@ def require_guest(guest: str, cap: str = "crm.view") -> set[str]:
 # ─── guests ──────────────────────────────────────────────────────────────
 
 
-def list_guests(*, q: str | None = None, segment: str | None = None, vip: bool | None = None,
-                consent: str | None = None, property: str | None = None, start: int = 0,
-                limit: int = 50) -> dict:
-	props = {p for p in scope.permitted_properties() if scope.has_capability("crm.view", p)}
-	if property:
-		scope.require("crm.view", property)
-		props = {property}
+# a stable order: the most recently changed first, the name breaks ties (so a page never repeats
+# or skips a guest while the list is paged)
+LIST_ORDER = "g.`modified` DESC, g.`name` DESC"
+SEGMENT_BATCH = 500
+
+
+def _like(q: str) -> str:
+	"""``q`` as a literal LIKE pattern (``%`` and ``_`` typed by the user match themselves)."""
+	q = q.strip()[:80].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+	return f"%{q}%"
+
+
+def _guest_where(props: set[str], *, q: str | None, vip: bool | None, consent: str | None) -> tuple[str, dict]:
+	"""The list's WHERE clause (on ``tabGuest g``): the viewer's tenancy first, then the filters."""
 	cond, params = _visible_guest_sql(props)
 	where = [cond]
-	if q:
+	if q and q.strip():
 		where.append("(g.full_name LIKE %(q)s OR g.email LIKE %(q)s OR g.phone LIKE %(q)s OR g.name LIKE %(q)s)")
-		params["q"] = f"%{q.strip()[:80]}%"
+		params["q"] = _like(q)
 	if vip is not None:
 		where.append("g.vip = %(vip)s")
 		params["vip"] = 1 if vip else 0
 	if consent in CONSENT:
 		where.append(f"g.`{consent}` = 1")
+	return " AND ".join(where), params
+
+
+def _guest_rows(where: str, params: dict, *, start: int, limit: int) -> list:
 	cols = ", ".join(f"g.`{f}`" for f in LIST_FIELDS)
-	sql = f"SELECT {cols} FROM `tabGuest` g WHERE {' AND '.join(where)} ORDER BY g.modified DESC"  # nosemgrep
-	rows = frappe.db.sql(sql, params, as_dict=True)
+	return frappe.db.sql(  # nosemgrep -- static columns and conditions, values bound
+		f"SELECT {cols} FROM `tabGuest` g WHERE {where} ORDER BY {LIST_ORDER} LIMIT %(_limit)s OFFSET %(_start)s",
+		{**params, "_limit": int(limit), "_start": int(start)}, as_dict=True)
+
+
+def list_guests(*, q: str | None = None, segment: str | None = None, vip: bool | None = None,
+                consent: str | None = None, property: str | None = None, start: int = 0,
+                limit: int = 50) -> dict:
+	"""One page of the viewer's guests and the total, both from SQL inside the viewer's tenancy
+	(G-65). A segment's rules are evaluated on facts from the viewer's hotels, over the matching
+	guests read in batches, so only one batch and the page are ever held."""
+	props = {p for p in scope.permitted_properties() if scope.has_capability("crm.view", p)}
+	if property:
+		scope.require("crm.view", property)
+		props = {property}
+	where, params = _guest_where(props, q=q, vip=vip, consent=consent)
+	start, limit = max(int(start or 0), 0), max(int(limit or 0), 0)
 	today = getdate(nowdate())
 	if segment:
 		rules = _segment_rules(_segment(segment, "crm.view", props))
-		facts = facts_for(rows, props, today)
-		rows = [r for r in rows if seg.matches(facts[r.name], rules, today)]
-	total = len(rows)
-	page = rows[start:start + limit]
+		total, page, offset = 0, [], 0
+		while True:
+			batch = _guest_rows(where, params, start=offset, limit=SEGMENT_BATCH)
+			facts = facts_for(batch, props, today)
+			for r in batch:
+				if not seg.matches(facts[r.name], rules, today):
+					continue
+				if start <= total < start + limit:
+					page.append(r)
+				total += 1
+			if len(batch) < SEGMENT_BATCH:
+				break
+			offset += SEGMENT_BATCH
+	else:
+		total = frappe.db.sql(f"SELECT COUNT(*) FROM `tabGuest` g WHERE {where}", params)[0][0]  # nosemgrep
+		page = _guest_rows(where, params, start=start, limit=limit) if limit else []
 	facts = facts_for(page, props, today)
 	for r in page:
 		_stats(r, facts[r.name], today)
-	return {"total": total, "rows": page}
+	return {"total": int(total), "rows": page}
 
 
 def _stats(row: dict, f: dict, today) -> None:
-	"""The guest's stays and value at the viewer's hotels only (never another tenant's)."""
+	"""The guest's stays and value at the viewer's hotels, and points in the viewer's loyalty
+	programs, only (never another tenant's; the stored totals count every tenant)."""
 	ccy = f["lifetime_currency"]
 	row["tex_stays"] = f["stays"]
+	row["tex_loyalty_points"] = f["loyalty_points"]
 	row["tex_lifetime_currency"] = ccy
 	row["tex_lifetime_value"] = to_str(from_db(f["lifetime_value"].get(ccy, ZERO), ccy)) if ccy else "0"
 	row["tex_last_stay"] = str(today - timedelta(days=f["last_stay_days_ago"])) \
@@ -114,12 +157,21 @@ def _stats(row: dict, f: dict, today) -> None:
 
 
 def facts_for(rows: list[dict], props: set[str], today) -> dict[str, dict]:
-	"""Segment facts of each guest, from reservations and abandoned bookings at ``props``."""
+	"""Segment facts of each guest, from reservations and abandoned bookings at ``props`` and
+	the points in the loyalty programs of ``props`` (G-65)."""
 	names = [r["name"] for r in rows]
 	stays: dict[str, list] = {n: [] for n in names}
 	gave_up: dict[str, list] = {n: [] for n in names}
+	points: dict[str, int] = {n: 0 for n in names}
+	programs = loyalty.visible_programs(props) if names and props else set()
 	if names and props:
 		for chunk in (names[i:i + 500] for i in range(0, len(names), 500)):
+			if programs:
+				for g, pts in frappe.db.sql(
+					"""SELECT guest, SUM(points) FROM `tabTEX Loyalty Ledger`
+					   WHERE guest IN %(g)s AND program IN %(p)s AND status IN %(s)s GROUP BY guest""",
+						{"g": tuple(chunk), "p": tuple(programs), "s": loyalty.FINAL}):
+					points[g] = int(pts or 0)
 			for r in frappe.db.sql(
 				"""SELECT guest, status, check_in_date, check_out_date, children, tex_sale_at, creation, cancelled_on,
 				          tex_total_amount, amount_after_tax, tex_currency
@@ -140,7 +192,8 @@ def facts_for(rows: list[dict], props: set[str], today) -> dict[str, dict]:
 	need = [r["name"] for r in rows if "date_of_birth" not in r]
 	dobs = dict(frappe.db.sql("SELECT name, date_of_birth FROM `tabGuest` WHERE name IN %(g)s",
 	                          {"g": tuple(need)})) if need else {}
-	return {r["name"]: seg.derive_facts({**r, "date_of_birth": r.get("date_of_birth", dobs.get(r["name"]))},
+	return {r["name"]: seg.derive_facts({**r, "date_of_birth": r.get("date_of_birth", dobs.get(r["name"])),
+	                                     "tex_loyalty_points": points[r["name"]]},
 	                                    stays[r["name"]], gave_up[r["name"]], today) for r in rows}
 
 
@@ -160,11 +213,14 @@ def profile(guest: str) -> dict:
 	stays = frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via))},
 	                       fields=["name", "property", "status", "check_in_date", "check_out_date", "room_type",
 	                               "tex_board", "adults", "children", "tex_total_amount", "tex_currency",
-	                               "tex_booking", "tex_sales_channel", "tex_market"],
+	                               "tex_booking", "tex_sales_channel", "tex_market", "cancellation_fee"],
 	                       order_by="check_in_date desc", limit=200)
 	for s in stays:
 		s["check_in_date"], s["check_out_date"] = str(s["check_in_date"]), str(s["check_out_date"])
 		s["tex_total_amount"] = to_str(from_db(s["tex_total_amount"], s["tex_currency"] or "EUR"))
+		# the fee charged for a cancellation or no-show; none on a stay that is not closed
+		fee = from_db(s.pop("cancellation_fee") or 0, s["tex_currency"] or "EUR")
+		s["cancellation_fee"] = to_str(fee) if fee and s["status"] in seg.NOT_STAYED else None
 	comms = frappe.get_all("TEX Communication", filters={"guest": guest, "property": ("in", [*via, ""])},
 	                       fields=["name", "channel", "direction", "status", "consent_basis", "subject", "body",
 	                               "sent_at", "actor", "booking", "reservation", "creation", "delivery_error"],
@@ -172,8 +228,6 @@ def profile(guest: str) -> dict:
 	for c in comms:
 		c["sent_at"] = str(c["sent_at"]) if c["sent_at"] else None
 		c["creation"] = str(c["creation"])
-	from kamra.tex.crm import loyalty
-
 	member_of = [{"name": s.name, "segment_name": s.segment_name, "system_key": s.system_key}
 	             for s in visible_segments(via) if s.rules_json and _safe_match(facts, s.rules_json, today)]
 	# changes, and requests from online bookings that were not applied (ADR-046) for the hotel to confirm
@@ -190,8 +244,72 @@ def profile(guest: str) -> dict:
 		change = json.loads(c["new_value"] or "{}")
 		c["booking"] = change.pop("booking", None) if isinstance(change, dict) else None
 		c["new_value"] = json.dumps(change)
+	extras, extras_summary = _extras_bought(guest, via)
 	return {"guest": d, "stays": stays, "communications": comms, "segments": member_of,
-	        "loyalty": loyalty.summary(guest), "consent_history": consent_log, "hotels": sorted(via)}
+	        "loyalty": loyalty.summary(guest, loyalty.visible_programs(via), hotels=via),
+	        "extras": extras, "extras_summary": extras_summary, "cancellations": _cancellations(guest, via),
+	        "consent_history": consent_log, "hotels": sorted(via)}
+
+
+def _quantity(q) -> str:
+	return format(D(q or 0).normalize(), "f")
+
+
+def _extras_bought(guest: str, via: set[str]) -> tuple[list[dict], list[dict]]:
+	"""The extras on the guest's stays at the viewer's hotels (R-37), from each stay's price-locked
+	snapshot (the extras sold with it and those added later), and per extra and currency their
+	quantity, value and number of stays. A cancelled stay or a no-show bought nothing. Only what
+	the guest pays is read: never cost, margin or the rules that priced it."""
+	lines: list[dict] = []
+	for r in frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via)),
+	                                                 "status": ("not in", list(seg.NOT_STAYED | seg.NOT_SOLD))},
+	                        fields=["name", "property", "check_in_date", "tex_currency", "tex_pricing_snapshot"],
+	                        order_by="check_in_date desc, name desc", limit=200):
+		try:
+			snap = json.loads(r.tex_pricing_snapshot or "{}")
+		except ValueError:
+			continue
+		ccy = snap.get("currency") or r.tex_currency or "EUR"
+		for e in snap.get("extras") or []:
+			if not isinstance(e, dict) or not e.get("ok") or not e.get("code"):
+				continue
+			lines.append({"reservation": r.name, "property": r.property, "check_in": str(r.check_in_date),
+			              "code": e["code"], "name": e.get("name") or e["code"], "quantity": _quantity(e.get("quantity")),
+			              "amount": to_str(quantize(D(e.get("amount") or 0), ccy)), "currency": ccy,
+			              "service_dates": list(e.get("service_dates") or []), "added_later": bool(e.get("addon"))})
+	summary: dict[tuple[str, str], dict] = {}
+	for ln in lines:
+		row = summary.setdefault((ln["code"], ln["currency"]), {"code": ln["code"], "name": ln["name"],
+		                                                        "currency": ln["currency"], "quantity": ZERO,
+		                                                        "amount": ZERO, "stays": set()})
+		row["quantity"] += D(ln["quantity"])
+		row["amount"] += D(ln["amount"])
+		row["stays"].add(ln["reservation"])
+	return lines, [{**r, "quantity": _quantity(r["quantity"]), "amount": to_str(quantize(r["amount"], r["currency"])),
+	                "stays": len(r["stays"])} for _k, r in sorted(summary.items())]
+
+
+def _cancellations(guest: str, via: set[str]) -> dict:
+	"""Cancelled stays and no-shows at the viewer's hotels, with the fees charged for them per
+	currency (never summed across currencies) and the last cancellation day (R-37)."""
+	ccy_of = dict(frappe.get_all("Property", filters={"name": ("in", list(via))}, fields=["name", "currency"],
+	                             as_list=True))
+	counts = {"Cancelled": 0, "No Show": 0}
+	fees: dict = {}
+	last = None
+	for r in frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via)),
+	                                                 "status": ("in", list(counts))},
+	                        fields=["status", "property", "tex_currency", "cancellation_fee", "cancelled_on"]):
+		counts[r.status] += 1
+		if r.status == "Cancelled" and r.cancelled_on:
+			last = max(last, getdate(r.cancelled_on)) if last else getdate(r.cancelled_on)
+		ccy = r.tex_currency or ccy_of.get(r.property) or "EUR"
+		fee = from_db(r.cancellation_fee or 0, ccy)
+		if fee:
+			fees[ccy] = fees.get(ccy, ZERO) + fee
+	return {"count": counts["Cancelled"], "no_shows": counts["No Show"],
+	        "fees": [{"currency": c, "amount": to_str(quantize(fees[c], c))} for c in sorted(fees)],
+	        "last_cancelled_on": str(last) if last else None}
 
 
 def _safe_match(facts: dict, rules_json: str, today) -> bool:
@@ -470,7 +588,8 @@ STAGES = ("search", "room_view", "quote", "guest_details", "payment_started")
 def detect_abandoned(now=None) -> dict:
 	"""Scheduler: sessions that reached at least a quote, went quiet for
 	ABANDON_AFTER_MINUTES and never booked. Contact data is kept only with the guest's
-	marketing consent; otherwise the record is anonymous (value, dates, stage)."""
+	marketing consent; otherwise the record is anonymous (value, dates, stage). A case is
+	recovered when its session books, or when the booking it left at payment is paid later."""
 	now = now or now_datetime()
 	cutoff = add_to_date(now, minutes=-ABANDON_AFTER_MINUTES)
 	since = add_to_date(now, days=-3)
@@ -481,17 +600,19 @@ def detect_abandoned(now=None) -> dict:
 	created = recovered = 0
 	for s in sessions:
 		events = frappe.get_all("TEX Funnel Event", filters={"session_id": s.session_id},
-		                        fields=["event", "payload", "property", "email_hash", "consent_marketing",
-		                                "occurred_at"], order_by="occurred_at asc")
+		                        fields=["event", "payload", "property", "consent_marketing", "occurred_at"],
+		                        order_by="occurred_at asc")
 		names = [e.event for e in events]
 		existing = frappe.db.get_value("TEX Abandoned Booking", {"session_id": s.session_id},
 		                               ["name", "status"], as_dict=True)
-		if "booked" in names:
+		# booked in the session, or the booking left at payment was paid later (a payment link, a
+		# retry): nothing was abandoned; an open case is recovered by that booking (G-81)
+		booked = next((json.loads(e.payload or "{}").get("booking") for e in reversed(events)
+		               if e.event == "booked"), None) if "booked" in names else _paid_later(events)
+		if "booked" in names or booked:
 			if existing and existing.status in ("Open", "Contacted"):
-				booking = next((json.loads(e.payload or "{}").get("booking") for e in reversed(events)
-				                if e.event == "booked"), None)
 				frappe.db.set_value("TEX Abandoned Booking", existing.name,
-				                    {"status": "Recovered", "recovered_booking": booking})
+				                    {"status": "Recovered", "recovered_booking": booked})
 				recovered += 1
 			continue
 		if existing or not ({"quote", "guest_details", "payment_started"} & set(names)):
@@ -526,10 +647,38 @@ def detect_abandoned(now=None) -> dict:
 			"quote": qp.get("quote") if qp.get("quote") and frappe.db.exists("TEX Quote", qp.get("quote")) else None,
 			"last_event_at": s.last_at}).insert(ignore_permissions=True)
 		created += 1
+	# a case left at payment is recovered when its booking is paid, however long after its session
+	# went quiet (a payment link lives up to 60 days)
+	for a in frappe.get_all("TEX Abandoned Booking", filters={
+			"status": ("in", ["Open", "Contacted"]), "stage_reached": "payment_started",
+			"last_event_at": (">=", add_to_date(now, days=-RECOVERY_DAYS))}, fields=["name", "session_id"]):
+		booked = _paid_later(frappe.get_all("TEX Funnel Event", filters={"session_id": a.session_id,
+		                                                                  "event": "payment_started"},
+		                                    fields=["event", "payload"], order_by="occurred_at asc"))
+		if booked:
+			frappe.db.set_value("TEX Abandoned Booking", a.name, {"status": "Recovered", "recovered_booking": booked})
+			recovered += 1
 	return {"created": created, "recovered": recovered}
 
 
+# a booking whose payment arrived: the guest came back and completed it
+PAID_BOOKING = ("Confirmed", "Partially Cancelled")
+
+
+def _paid_later(events) -> str | None:
+	"""The booking a session left at the payment step, when it has been paid since."""
+	for e in reversed(events):
+		if e.event != "payment_started":
+			continue
+		booking = json.loads(e.payload or "{}").get("booking")
+		if booking and frappe.db.get_value("TEX Booking", booking, "status") in PAID_BOOKING:
+			return booking
+	return None
+
+
 def abandoned(property: str, *, status: str | None = None, days: int = 30) -> list[dict]:
+	"""The hotel's abandoned bookings. Contact data is shown only while the guest profile's own
+	e-mail consent holds (withdrawn later: the case stays, anonymous; ADR-046, ADR-056)."""
 	scope.require("crm.view", property)
 	filters = {"property": property, "last_event_at": (">=", add_to_date(now_datetime(), days=-days))}
 	if status:
@@ -538,7 +687,12 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	                      fields=["name", "site", "stage_reached", "status", "guest", "email", "phone",
 	                              "consent_marketing", "value", "currency", "check_in", "check_out",
 	                              "last_event_at", "recovered_booking"], order_by="last_event_at desc", limit=500)
+	guests = {r.guest for r in rows if r.guest}
+	agreed = set(frappe.get_all("Guest", filters={"name": ("in", list(guests)), "tex_consent_email": 1},
+	                            pluck="name")) if guests else set()
 	for r in rows:
+		if not (r.consent_marketing and r.guest in agreed):
+			r["email"] = r["phone"] = None
 		r["value"] = to_str(from_db(r["value"], r["currency"] or "EUR"))
 		for k in ("check_in", "check_out", "last_event_at"):
 			r[k] = str(r[k]) if r[k] else None

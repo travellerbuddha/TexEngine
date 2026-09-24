@@ -87,6 +87,7 @@ BEHAVIOUR = {
 	"p35_money_field_types": "test_money_fields.TestPublishedAndSoldTermsAreUnchanged."
 	                         "test_a_published_payload_keeps_its_hash_through_the_migration",
 	"p36_g92_review": "test_patches.TestUpgradeFromKamra",
+	"p37_crm_privacy": "test_crm_privacy.TestAbandonedPrivacy.test_p37_purges_hashes_kept_without_consent",
 	"p39_lookup_indexes": "test_patches.TestP03Indexes.test_p39_creates_the_lookup_indexes_that_survive_a_sync",
 }
 
@@ -206,7 +207,7 @@ def assert_sold_unchanged(case, before: dict, after: dict, what: str) -> None:
 # the legacy rows patches write, and which of them
 LEGACY_ROWS = {"tabProperty": "", "tabReservation": "", "tabGuest": "", "tabUser Permission": "",
                "tabDiscount Voucher": "", "tabExperience": "", "tabFile": "",
-               "tabVersion": "WHERE ref_doctype LIKE 'TEX %%'",
+               "tabVersion": "WHERE ref_doctype LIKE 'TEX %%' OR ref_doctype IN ('Reservation', 'Guest')",
                "tabSingles": "WHERE doctype = 'TEX Settings' AND field NOT IN ('modified', 'modified_by')",
                "__Auth": "WHERE doctype LIKE 'TEX %%'"}
 IGNORED_COLUMNS = frozenset({"modified", "modified_by"})
@@ -270,7 +271,7 @@ def empty_site() -> None:
 			frappe.db.sql(f"DELETE FROM `{t}`")
 		frappe.db.sql("DELETE FROM `tabUser Permission` WHERE allow = 'Property'")
 		frappe.db.sql("DELETE FROM `tabFile` WHERE is_folder = 0")
-		frappe.db.sql("DELETE FROM `tabVersion` WHERE ref_doctype LIKE 'TEX %%'")
+		frappe.db.sql("DELETE FROM `tabVersion` WHERE ref_doctype LIKE 'TEX %%' OR ref_doctype IN ('Reservation', 'Guest')")
 		frappe.db.sql("DELETE FROM `tabSingles` WHERE doctype = 'TEX Settings'")
 		frappe.db.sql("DELETE FROM `__Auth` WHERE doctype LIKE 'TEX %%'")
 		frappe.db.sql("DELETE FROM `tabPatch Log` WHERE patch LIKE 'kamra.patches.tex.%%'")
