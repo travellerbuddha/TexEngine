@@ -1389,7 +1389,7 @@ class TestThirdReview(GuestMoneyCase):
 		self.assertEqual((D(req.refunded_amount), req.settle_pending), (D("267.50"), 0))
 
 	def test_a_gateway_answer_after_a_recorded_outcome_is_a_conflict_never_a_failure(self):
-		b, name, _deposit, balance = self.shortened("gcm3-conflict")
+		_b, name, _deposit, balance = self.shortened("gcm3-conflict")
 		from kamra.tex.services import guest_changes
 
 		def recorded():
@@ -1440,7 +1440,7 @@ class TestThirdReview(GuestMoneyCase):
 	def test_after_the_gateway_answers_the_booking_is_locked_first(self):
 		import re
 
-		b, name, _deposit, balance = self.shortened("gcm3-order")
+		_b, name, _deposit, balance = self.shortened("gcm3-order")
 		from kamra.tex.services import guest_changes
 
 		after: list[str] = []
