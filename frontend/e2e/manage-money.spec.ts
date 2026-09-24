@@ -393,6 +393,10 @@ test("a fully paid booking is shortened under the refund policy: the page announ
     const refund = txns.find((x) => x.txn_type === "Refund")
     expect(refund, "the refund on record").toBeTruthy()
     expect(refund!).toMatchObject({ status: "Succeeded", amount: p.settlement!.amount })
+    // the payment screen offers no outcome to record for it (the server decides, third review)
+    const detail = await api<{ can_finish?: boolean; guest_change?: string | null }>(admin, "kamra.tex.api.payments.transaction", { name: refund!.name })
+    expect(detail.can_finish).toBe(false)
+    expect(detail.guest_change, "the refund is the guest change's").toBe(done.rooms[0].last_change!.request)
     const record = await admin.post("/api/method/kamra.tex.api.payments.finish_refund", {
       data: { refund: refund!.name, outcome: "Succeeded", reason: "E2E: the gateway already confirmed it" },
     })
