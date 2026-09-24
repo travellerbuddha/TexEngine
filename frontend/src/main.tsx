@@ -21,9 +21,9 @@ function setIcon(rel: string, href: string, type?: string) {
   if (type) link.type = type
   document.head.appendChild(link)
 }
-setIcon("icon", "kamra-mark.svg", "image/svg+xml")
-setIcon("icon", "favicon-32.png", "image/png")
-setIcon("apple-touch-icon", "apple-touch-180.png")
+setIcon("icon", "tex-mark.svg", "image/svg+xml")
+setIcon("icon", "tex-favicon-32.png", "image/png")
+setIcon("apple-touch-icon", "tex-apple-touch-180.png")
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
