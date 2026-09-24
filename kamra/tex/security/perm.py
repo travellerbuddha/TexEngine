@@ -43,8 +43,24 @@ SITE_DOCTYPES = ("TEX Funnel Event", "TEX Abandoned Booking")
 # the tenant structure itself: grants, enterprises and hotel groups are seen only inside the
 # tenant (G-26); a platform-scope grant only by platform administrators
 TENANT_DOCTYPES = ("TEX Access Grant", "TEX Enterprise", "TEX Hotel Group")
+# the legacy Kamra DocTypes bound to a hotel by a ``property`` link (G-94): their Desk / REST reads
+# follow the TEX scope (live grants and the user's own User Permissions), not only Frappe's User
+# Permission filter, which a user left without mirrored rows (a grant deleted or ended) escapes
+LEGACY_PROPERTY_DOCTYPES = (
+	"AI Assistant Settings", "Agent Action Log", "Banquet Checklist Template", "Banquet Dish",
+	"Banquet Function Task", "Banquet Menu", "Banquet Service Item", "Cancelled Invoice", "Cashier",
+	"Cashier Session", "Cashier Transaction", "Channel Manager Connection", "Channel Provider Connection",
+	"City Ledger Account", "City Ledger Entry", "Copilot Conversation", "Credit Note", "Discount Voucher",
+	"Exchange Rate", "Exchange Transaction", "Experience", "Folio Ledger Entry", "Folio Reprint",
+	"Housekeeping Task", "Hurdle Rate", "Ingredient", "Ingredient Stock", "Laundry Order", "Laundry Rate",
+	"Lost And Found Item", "Meal Plan", "Menu Item", "Night Audit Run", "POS Order", "POS Outlet",
+	"POS Table Reservation", "Payment Gateway Settings", "Petty Cash Voucher", "Proforma Folio",
+	"Rate Guardrail", "Revenue Budget", "Room Block", "Season", "Security Deposit", "Sellable Unit",
+	"Service Ticket", "Shift Handover", "Stock Ledger Entry", "Transaction Code", "Turnover Profile",
+	"Venue", "Venue Booking", "WhatsApp Message",
+)
 SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, "Guest",
-                   *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES)
+                   *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES, *LEGACY_PROPERTY_DOCTYPES)
 
 
 def _sql_list(values) -> str:

@@ -5,6 +5,9 @@ import { CheckboxGroup, FormSection } from "../../settings/components/common"
 import { SITE_LANGS, csv, normaliseSlug } from "../site"
 import type { TabProps } from "./common"
 
+/** The channels a booking site may sell on: anyone can book there (ADR-050). */
+const WEB_CHANNELS = ["DIRECT_WEB", "META"]
+
 export function GeneralTab({ site, set, err, isNew }: TabProps) {
   const { t } = useTexT()
   const { boot } = useSession()
@@ -170,7 +173,8 @@ export function GeneralTab({ site, set, err, isNew }: TabProps) {
                   placeholder={t("be.platform_default")}
                   onChange={(e) => set({ sales_channel: e.target.value || null })}
                   options={withCurrent(
-                    boot.channels.map((c) => ({ value: c.name, label: c.channel_name })),
+                    // a booking site sells on a web channel only; the server refuses any other (ADR-050)
+                    boot.channels.filter((c) => WEB_CHANNELS.includes(c.name)).map((c) => ({ value: c.name, label: c.channel_name })),
                     site.sales_channel,
                   )}
                 />

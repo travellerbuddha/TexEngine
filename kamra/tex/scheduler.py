@@ -48,9 +48,15 @@ def every_15_minutes() -> None:
 		_run(job)
 
 
+# just after the site's midnight: allotment releases and cutoffs that start today reach the
+# channels at once (G-49 review); grants that ended yesterday lose their mirrored rows (G-94)
+SITE_MIDNIGHT = ("kamra.tex.distribution.repository.allotment_boundaries",
+                 "kamra.tex.security.grants.remove_expired_grants")
+
+
 def site_midnight() -> None:
-	# allotment releases and cutoffs that start today reach the channels at once (G-49 review)
-	_run("kamra.tex.distribution.repository.allotment_boundaries")
+	for job in SITE_MIDNIGHT:
+		_run(job)
 
 
 def fx_daily() -> None:

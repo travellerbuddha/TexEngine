@@ -20,7 +20,7 @@ from functools import wraps
 import frappe
 from frappe import _
 
-from kamra.tex.security.capabilities import ALL, PLATFORM_ROLES, ROLE_DEFAULTS, profile_channels
+from kamra.tex.security.capabilities import ALL, BOOK, PLATFORM_ROLES, PRICE, ROLE_DEFAULTS, profile_channels
 
 _CACHE_KEY = "tex_scope_cache"
 
@@ -80,18 +80,34 @@ def _grant_properties(g) -> list[str]:
 	return []
 
 
+def _legacy_properties(user: str) -> list[str]:
+	"""Hotels of the user's own (manual) User Permission rows: the legacy Kamra scope. The rows
+	TEX mirrors from grants (``tex_managed``) are never read here: live grants alone decide, so
+	an expired grant whose rows were not re-synced yet grants nothing (G-94)."""
+	filters = {"user": user, "allow": "Property"}
+	if frappe.db.has_column("User Permission", "tex_managed"):
+		filters["tex_managed"] = 0
+	return frappe.get_all("User Permission", filters=filters, pluck="for_value")
+
+
+def _ever_granted(user: str) -> bool:
+	return frappe.db.table_exists("TEX Access Grant") and bool(frappe.db.exists("TEX Access Grant", {"user": user}))
+
+
 def _scope(user: str) -> dict:
 	"""{property: set(grant profiles)} for the user (cached per request)."""
 	cache = _cache()
 	if user in cache:
 		return cache[user]
 	scope: dict[str, set[str]] = {}
-	for p in frappe.get_all("User Permission", filters={"user": user, "allow": "Property"}, pluck="for_value"):
+	for p in _legacy_properties(user):
 		scope.setdefault(p, set())
 	for g in _grants(user):
 		for p in _grant_properties(g):
 			scope.setdefault(p, set()).add(g.permission_profile)
-	if not scope and not strict_tenancy():
+	# legacy (non-strict) mode opens every hotel only to users TEX never granted anything: one
+	# whose grants ended or were disabled keeps nothing (G-94)
+	if not scope and not strict_tenancy() and not _ever_granted(user):
 		scope = {p: set() for p in _all_properties()}
 	cache[user] = scope
 	return scope
@@ -167,11 +183,12 @@ def _profile_listed_channels(profile: str) -> frozenset[str]:
 	return cache[profile]
 
 
-def sales_channels(property: str | None, user: str | None = None) -> frozenset[str]:
-	"""Sales channels the user may price and book on at ``property`` (``None``: at any hotel in
-	scope): the channels of each permission profile granted there (the call centre when a
-	profile names none; every channel with ``price.any_channel``), or of the user's Frappe role
-	defaults where no profile is granted. Platform administrators: every channel."""
+def _channels(for_cap: str, property: str | None, user: str | None) -> frozenset[str]:
+	"""Channels the user may use for ``for_cap`` (``price.view`` or ``reservation.create``) at
+	``property`` (``None``: at any hotel in scope): the channels of each permission profile
+	granted there that holds ``for_cap`` (the call centre when it names none; every channel with
+	``price.any_channel``), or of the user's Frappe role defaults where no profile is granted.
+	Platform administrators: every channel."""
 	user = user or frappe.session.user
 	every = _every_channel()
 	if is_platform_admin(user):
@@ -184,10 +201,10 @@ def sales_channels(property: str | None, user: str | None = None) -> frozenset[s
 	def at(profiles) -> frozenset[str]:
 		granted = {p for p in profiles if p}
 		if not granted:                               # legacy scope: the roles decide (as for capabilities)
-			return profile_channels(role_caps, (), every)
+			return profile_channels(role_caps, (), every, for_cap=for_cap)
 		out: frozenset[str] = frozenset()
 		for prof in granted:
-			out |= profile_channels(_profile_caps(prof), _profile_listed_channels(prof), every)
+			out |= profile_channels(_profile_caps(prof), _profile_listed_channels(prof), every, for_cap=for_cap)
 		return out
 
 	if property is None:
@@ -200,15 +217,30 @@ def sales_channels(property: str | None, user: str | None = None) -> frozenset[s
 	return at(scope[property])
 
 
-def may_sell_on(channel: str | None, property: str, user: str | None = None) -> bool:
-	return bool(channel) and channel in sales_channels(property, user)
+def pricing_channels(property: str | None, user: str | None = None) -> frozenset[str]:
+	"""Channels the user may see prices of (search) at ``property``."""
+	return _channels(PRICE, property, user)
 
 
-def require_channel(channel: str | None, property: str) -> None:
-	"""Raise PermissionError unless the current user may price and book on ``channel`` at
-	``property``: the channel a search asks for, or the one a signed offer or stored quote
-	carries (never a channel the caller merely claims for it)."""
-	if not may_sell_on(channel, property):
+def booking_channels(property: str | None, user: str | None = None) -> frozenset[str]:
+	"""Channels the user may quote and book on at ``property``."""
+	return _channels(BOOK, property, user)
+
+
+def may_price_on(channel: str | None, property: str, user: str | None = None) -> bool:
+	return bool(channel) and channel in pricing_channels(property, user)
+
+
+def may_book_on(channel: str | None, property: str, user: str | None = None) -> bool:
+	return bool(channel) and channel in booking_channels(property, user)
+
+
+def require_channel(channel: str | None, property: str, *, to: str = "book") -> None:
+	"""Raise PermissionError unless the current user may ``to`` ("price" or "book") on
+	``channel`` at ``property``: the channel a search asks for, or the one a signed offer or
+	stored quote carries (never a channel the caller merely claims for it)."""
+	ok = may_price_on(channel, property) if to == "price" else may_book_on(channel, property)
+	if not ok:
 		frappe.throw(_("You may not sell on the {0} channel at {1}.").format(channel or "—", property),
 		             frappe.PermissionError)
 

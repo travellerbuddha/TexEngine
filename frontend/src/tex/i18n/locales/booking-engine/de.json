@@ -220,7 +220,7 @@
  "be.field.primary_color_hint": "Buttons und Links.",
  "be.field.radius": "Ecken von Buttons & Feldern",
  "be.field.sales_channel": "Vertriebskanal",
- "be.field.sales_channel_hint": "Buchungen über diese Seite werden unter diesem Kanal ausgewertet.",
+ "be.field.sales_channel_hint": "Buchungen über diese Seite werden unter diesem Kanal ausgewertet. Eine Buchungsseite verkauft nur über einen Web-Kanal.",
  "be.field.search_style": "Suchleiste",
  "be.field.self_service": "Gäste-Self-Service",
  "be.field.self_service_hint": "Gäste können ihre Buchung über den Link in der Bestätigung ansehen und ändern.",

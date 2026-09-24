@@ -224,7 +224,7 @@
  "be.field.primary_color_hint": "Butoane și linkuri.",
  "be.field.radius": "Colțurile butoanelor și câmpurilor",
  "be.field.sales_channel": "Canal de vânzare",
- "be.field.sales_channel_hint": "Rezervările de pe acest site sunt raportate pe acest canal.",
+ "be.field.sales_channel_hint": "Rezervările de pe acest site sunt raportate pe acest canal. Un site de rezervări vinde doar pe un canal web.",
  "be.field.search_style": "Bară de căutare",
  "be.field.self_service": "Autoservire pentru oaspeți",
  "be.field.self_service_hint": "Oaspeții își pot vedea și modifica rezervarea prin linkul din confirmare.",

@@ -23,13 +23,24 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   `payment.view`, `payment.link`, `payment.refund`, `inventory.edit`, `restriction.edit`,
   `crm.view`, `crm.edit`, `guest.export`, `report.view`, `booking_site.edit`, `connect.admin`,
   `settings.admin`, `user.admin`.
-- Sources: default profile per Frappe role + `TEX Access Grant` (user × scope × profile).
+- Sources: `TEX Access Grant` (user × scope × profile, live only: `valid_until` today or later,
+  not disabled); a user's own (hand-made) Frappe User Permissions on Property are the legacy
+  scope, where the Frappe role defaults apply. The User Permission rows TEX mirrors from grants
+  (`tex_managed`) are never read as scope: an ended grant grants nothing, and its rows are
+  removed just after the site's midnight (`grants.remove_expired_grants`, audited
+  `grant.expired`) (G-94). Legacy non-strict mode opens every hotel only to users TEX never
+  granted anything.
 - **Sales channels** (ADR-050): staff price and book only on the channels they are entitled to
   at a hotel: the channel list of each profile granted there (blank = the call centre), every
-  channel with `price.any_channel`. `scope.require_channel(channel, property)` checks the
-  channel a search asks for, and on quote, quote summary and booking the channel of the signed
-  offer or stored quote itself, in every CRS call and in `create_booking` for staff;
-  modifications keep the reservation's channel. Granting a profile needs its channels.
+  channel with `price.any_channel`. A profile's channels serve only its own capabilities:
+  pricing channels come from profiles with `price.view`, booking channels from profiles with
+  `reservation.create`. `scope.require_channel(channel, property, to=…)` checks the channel a
+  search asks for (pricing), and on quote, quote summary and booking the channel of the signed
+  offer or stored quote itself (booking), in every CRS call and in `create_booking` for staff.
+  Modifications keep the reservation's channel; a change of room, rate plan, board or market
+  needs booking entitlement for it. A booking site sells only on a web channel (DIRECT_WEB,
+  META), for guests and signed-in staff alike (staff bookings there are flagged and audited).
+  Granting a profile needs its channels.
 - `require_capability(cap, property)` on every TEX endpoint; list endpoints filter by
   `permitted_properties()`; document endpoints resolve the document's property first.
 - Legacy `require_roles` resolves `property` / `reservation` / `folio` / `room` / `room_type` /
@@ -42,15 +53,19 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   Desk/REST write access, and every hotel-bound TEX DocType (incl. parent-scoped ones and
   `Guest`) is read-scoped (ADR-022).
 - `strict_tenancy` (default on): a non-admin user without any scope sees nothing.
-- Grants sync Frappe `User Permission` (Property, apply to all doctypes) so Desk lists and
-  `frappe.get_list` are isolated too.
+- Grants sync Frappe `User Permission` (Property, apply to all doctypes). Isolation does not rely
+  on them: every hotel-bound TEX DocType and the 53 legacy Kamra DocTypes bound to a hotel by a
+  `property` link (`perm.LEGACY_PROPERTY_DOCTYPES`) have the TEX permission hooks, so Desk lists,
+  REST and `frappe.get_list` follow the TEX scope even for a user without any row (Frappe itself
+  does not restrict such a user).
 
 ## 4. Threats and controls
 | Threat | Control |
 |---|---|
 | Cross-tenant read/write (IDOR) | Capability + property scope on every endpoint; document→property resolution; integration tests per endpoint family |
 | Price tampering from client | Server prices from signed offer inputs; client totals ignored; HMAC offer keys with expiry; quotes persisted server-side |
-| Selling at another channel's prices | Channel entitlement per profile and hotel (ADR-050): the searched channel, and the offer's or quote's own channel on quote and book, are checked; a Booking Engine quote cannot be booked from the CRS; a modification never switches the channel |
+| Selling at another channel's prices | Channel entitlement per profile, capability and hotel (ADR-050): the searched channel, and the offer's or quote's own channel on quote and book, are checked; a Booking Engine quote cannot be booked from the CRS; a booking site sells only on a web channel; a modification never switches the channel and a change to another product needs the reservation's channel |
+| Access kept after a grant ends | Live grants are the only authority; mirrored User Permissions are ignored by the TEX scope and removed at the site's midnight; legacy hotel-bound DocTypes follow the TEX scope (G-94) |
 | Promotion/coupon abuse | Server-side eligibility; usage limits enforced with row locks; per-guest limits keyed by normalised email hash; rate limit on code checks |
 | Inventory race / double sell | `TEX Inventory Day` row locks + recount under lock; idempotency keys |
 | Replay / duplicate payments | Caller-namespaced idempotency keys (no cross-caller replay); `FOR UPDATE` on transactions and bookings |
@@ -106,9 +121,10 @@ on a known profile (needs SMTP), and payment links e-mailed before 2026-09-23 ke
 in the path until they expire. The notes below predate that audit.
 - Legacy PMS endpoints resolve every record argument (`order`, `outlet`, `task`, `function`,
   `guest`, generic `name` ...) to its hotel through `kamra.authz.RECORD_ARGS` (ADR-027). On Desk
-  and REST, legacy DocTypes with a Property link (POS, laundry, housekeeping, banquet) are
-  filtered by the User Permissions that grants mirror (`security/grants.py`; probed 2026-09-23:
-  a hotel GM reads its own POS orders and action logs, not another hotel's).
+  and REST, legacy DocTypes with a Property link (POS, laundry, housekeeping, banquet) follow
+  the TEX scope through the permission hooks (G-94; before, only the User Permissions that grants
+  mirror filtered them, which a user without any row escapes; probed 2026-09-23: a hotel GM reads
+  its own POS orders and action logs, not another hotel's).
 - iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
   production-verified**; enabling a Production account requires the provider's sandbox
   certification with real merchant credentials.

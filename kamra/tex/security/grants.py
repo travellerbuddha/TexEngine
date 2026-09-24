@@ -12,7 +12,7 @@ from frappe import _
 
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
-from kamra.tex.security.capabilities import profile_channels
+from kamra.tex.security.capabilities import BOOK, PRICE, profile_channels
 
 
 def _desired_properties(user: str) -> tuple[set[str], bool]:
@@ -50,6 +50,29 @@ def sync_user_permissions(user: str) -> dict:
 	return {"added": added, "removed": removed}
 
 
+def remove_expired_grants() -> dict:
+	"""Daily, just after the site's midnight (G-94): a grant that ended yesterday leaves no
+	mirrored User Permission behind (Frappe's own Desk/REST filters read them), and each ended
+	grant is audited once. The TEX scope already ignores mirrored rows (``scope._scope``)."""
+	today = frappe.utils.nowdate()
+	ended = frappe.get_all("TEX Access Grant", filters={"disabled": 0, "valid_until": ("<", today)},
+	                       fields=["name", "user", "scope_level", "property", "hotel_group", "enterprise",
+	                               "permission_profile", "valid_until"], order_by="name asc")
+	users = []
+	for u in sorted({g.user for g in ended}):
+		if sync_user_permissions(u).get("removed"):
+			users.append(u)
+	for g in ended:
+		if frappe.db.exists("TEX Audit Event", {"action": "grant.expired", "reference_name": g.name}):
+			continue
+		audit("grant.expired", reference_doctype="TEX Access Grant", reference_name=g.name,
+		      property=g.property or None, source="Scheduler",
+		      old={f: str(g.get(f)) if g.get(f) is not None else None
+		           for f in ("user", "scope_level", "property", "hotel_group", "enterprise", "permission_profile",
+		                     "valid_until")})
+	return {"users": users, "grants": [g.name for g in ended]}
+
+
 def resync_for_properties(properties) -> None:
 	"""A property moved between groups/enterprises: resync every group/enterprise grantee."""
 	users = set(frappe.get_all("TEX Access Grant", filters={"scope_level": ("in", ["Hotel Group", "Enterprise"]),
@@ -81,9 +104,11 @@ def manage_refusal(grant) -> tuple[str, type[Exception]] | None:
 		return _("The grant covers no hotel."), frappe.ValidationError
 	profile_caps = set(frappe.get_all("TEX Profile Capability",
 	                                  filters={"parent": grant.permission_profile}, pluck="capability"))
-	# the sales channels the profile sells on (ADR-050): handed out only by someone who sells on them
-	channels = profile_channels(profile_caps, scope._profile_listed_channels(grant.permission_profile),
-	                            scope._every_channel())
+	# the sales channels the profile prices and books on (ADR-050): handed out only by someone
+	# who prices and books on them
+	listed, every = scope._profile_listed_channels(grant.permission_profile), scope._every_channel()
+	pricing = profile_channels(profile_caps, listed, every, for_cap=PRICE)
+	booking = profile_channels(profile_caps, listed, every, for_cap=BOOK)
 	for p in props:
 		held = scope.capabilities(p, me)
 		if "user.admin" not in held:
@@ -93,7 +118,7 @@ def manage_refusal(grant) -> tuple[str, type[Exception]] | None:
 		if missing:
 			return (_("You cannot grant capabilities you don't hold: {0}.").format(", ".join(sorted(missing))),
 			        frappe.PermissionError)
-		missing = channels - scope.sales_channels(p, me)
+		missing = (pricing - scope.pricing_channels(p, me)) | (booking - scope.booking_channels(p, me))
 		if missing:
 			return (_("You cannot grant sales channels you don't sell on: {0}.").format(", ".join(sorted(missing))),
 			        frappe.PermissionError)

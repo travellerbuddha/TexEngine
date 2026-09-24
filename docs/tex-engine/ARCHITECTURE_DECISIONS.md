@@ -1794,12 +1794,12 @@ user to a channel.
   `crs.quote`: the signed offer's channel. `crs.book`, `ui_crs.book`, `ui_crs.quote_summary`:
   each quote's own `sales_channel` (a Booking Engine quote is not the agent's to book).
   `crs.payment_methods`: the channel asked about. `booking.create_booking`: for staff outside
-  a booking site (defence in depth; a booking site sells on its own channel, also for a signed-in
-  staff member browsing it).
+  a booking site (defence in depth; a booking site sells on its own web channel, also for a
+  signed-in staff member browsing it: see the review follow-up).
 - *Modifications keep the reservation's channel.* A change is priced on the channel the stay
   was sold on (its snapshot request), whoever makes it: a call-centre agent changing a web
   booking changes it at web prices, as the guest could through self-service. The channel is
-  never switched by a modification, for anyone (explicit refusal): selling the stay on another
+  never switched by a modification, for anyone (the channel is not an editable field): selling the stay on another
   channel is a cancellation and a new booking by someone entitled to that channel. Simulation
   and extras added after booking also use the reservation's channel.
 - *Anti-escalation.* Granting a profile requires, at every hotel of the grant, the profile's
@@ -1831,3 +1831,61 @@ user to a channel.
 - A group search on a channel silently leaves out the hotels where the user may not sell it;
   the picker only offers channels allowed at one of the chosen hotels.
 - Tests: `test_channel_binding` (16), unit `test_channel_entitlement` (6), e2e `crs-actions`.
+
+**Review follow-up (adversarial review of G-41; G-94).**
+- *A booking site sells on a web channel only.* A booking site is the public Booking Engine:
+  anyone may book there, so there is no "B2B portal" or "OTA site" product. `TEXBookingSite.
+  validate` accepts only DIRECT_WEB or META (blank = DIRECT_WEB) whoever edits the site, so a
+  desk with `booking_site.edit` can no longer open a site on B2B/OTA/API prices. A site stored
+  with another channel before (possible until now) sells nothing: `public._channel` refuses its
+  search, quote and basket (PermissionError), so its prices never reach the public; p31 reports
+  and audits such sites (`booking_site.non_web_channel`) and leaves them to the owner (a web
+  channel or disabling it) rather than putting them on sale at web prices. B2B, OTA and API
+  prices are sold by entitled staff in the CRS and by channel connections.
+- *Whoever books on a site books its web channel.* `create_booking` with a booking site accepts
+  only a web channel for everyone (the guest rule now also applies to staff); a signed-in staff
+  member may book there, at the price any guest gets, because refusing them would only make them
+  sign out. Such a booking is reportable: `created_via` "Desk", the staff member as owner, and
+  an audit event `booking.staff_on_site` (actor, hotel, site, channel, total). Staff outside a
+  site need booking entitlement for the quote's channel, as before.
+- *A profile's channels serve only what the profile allows.* Channels are no longer pooled
+  across a user's profiles: pricing channels come from the profiles that hold `price.view`,
+  booking channels from those that hold `reservation.create` (`profile_channels(..., for_cap)`;
+  `scope.pricing_channels` / `booking_channels`, `may_price_on` / `may_book_on`,
+  `require_channel(..., to="price"|"book")`). Search and payment methods use the pricing set;
+  quote, quote summary, book and `create_booking` the booking set. A price-only profile listing
+  OTA next to a call-centre profile lets its holder see OTA prices, not sell them. The session
+  returns both sets (`sales_channels` = pricing, `booking_channels`) and the picker offers the
+  channels that are in both. Granting a profile needs both of its sets.
+- *A change to another product needs the reservation's channel.* Dates, occupancy, extras,
+  promotion codes and dropping add-ons are servicing: `reservation.modify` suffices and the
+  change is priced on the reservation's channel. A change of room type, rate plan, board or
+  market (`PRODUCT_FIELDS`, compared with the sold request) sells another product at that
+  channel's prices, so staff need booking entitlement for the reservation's channel at its
+  hotel, on propose and again on apply (a proposal token carries the change, not the right to
+  make it): a call-centre agent cannot turn a B2B booking into another stay at the B2B rate, nor
+  move a web guest to another room (a web-entitled user or an administrator can). Guests change
+  only dates and occupancy; staff approving a guest's request are not bound. The explicit
+  "channel" refusal of the first version was redundant (the channel was never in `EDITABLE`)
+  and is removed; the test now pins `EDITABLE`.
+- *Payment methods for setup are not bound.* `payments.methods` (`payment.view`, the payment
+  setup screen and the link dialog) lists which payment methods apply for a hotel, market,
+  currency and channel: configuration, no price, no offer, nothing bookable. `crs.payment_methods`,
+  used while selling, checks the pricing channel.
+- *G-94: grants are the only authority for the rows mirrored from them.* `scope._scope` never
+  reads `tex_managed` User Permission rows: live grants decide (an ended grant whose mirrored
+  row had not been re-synced left the hotel in scope without a profile, so the user's Frappe
+  role defaults applied there: a Hotel Admin kept every capability). Rows an administrator made
+  by hand stay the legacy scope. Legacy (non-strict) tenancy opens every hotel only to users TEX
+  never granted anything. `grants.remove_expired_grants` runs just after the site's midnight
+  (`scheduler.SITE_MIDNIGHT`) and in p31: it re-syncs the mirrored rows of users with ended grants
+  and audits each ended grant once (`grant.expired`).
+- *Legacy hotel-bound DocTypes follow the TEX scope.* 53 legacy Kamra DocTypes bound to a hotel by
+  a `property` link (POS, cashier, city ledger, banquet, housekeeping, laundry, …) were isolated
+  in Desk/REST only by Frappe's User Permission filter, which a user with no row at all escapes
+  (Frappe then does not restrict): removing an ended grant's rows would have opened every hotel's
+  records to that user's roles. They are now under the TEX permission hooks
+  (`perm.LEGACY_PROPERTY_DOCTYPES`, hooks `_TEX_SCOPED`): their lists and documents follow the
+  TEX scope like TEX's own DocTypes (a blank `property` stays readable, as for TEX policies).
+- Tests: `test_channel_binding` (26: + web-only sites, staff on a site, p31, per-capability
+  channels, product changes), `test_grant_expiry` (9), unit `test_channel_entitlement` (7).

@@ -13,9 +13,11 @@ export interface TexProperty {
   enterprise?: string
   default_market?: string
   capabilities: string[]
-  /** Sales channels the user may price and book on at this hotel (ADR-050). The server
+  /** Sales channels the user may price on (search) at this hotel (ADR-050). The server
    * re-checks the channel of every search, quote and booking. */
   sales_channels?: string[]
+  /** Sales channels the user may quote and book on at this hotel (ADR-050 review). */
+  booking_channels?: string[]
 }
 
 export interface Bootstrap {
