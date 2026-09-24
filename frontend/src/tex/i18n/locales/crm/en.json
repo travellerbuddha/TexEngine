@@ -260,6 +260,7 @@
  "crm.loyalty.col.reason": "Reason",
  "crm.loyalty.col.status": "Status",
  "crm.loyalty.col.type": "Type",
+ "crm.loyalty.other_hotel": "At another hotel of the program",
  "crm.loyalty.direction": "Adjustment",
  "crm.loyalty.empty": "No loyalty activity",
  "crm.loyalty.empty_hint": "Points are earned automatically on confirmed stays. You can add goodwill points manually.",
@@ -308,15 +309,25 @@
  "crm.pager.prev": "Previous",
  "crm.pager.range": "{from}–{to} of {total}",
  "crm.profile.contact": "Contact & preferences",
+ "crm.profile.cancel_fees": "Fees {amount}",
+ "crm.profile.cancellations": "Cancellations",
  "crm.profile.edit": "Edit profile",
+ "crm.profile.extras_caption": "Extras bought",
  "crm.profile.kpis": "Guest key figures",
  "crm.profile.ltv_hint": "In the most used booking currency",
  "crm.profile.manage_segments": "Manage segments",
  "crm.profile.no_segments": "Not in any segment.",
+ "crm.profile.no_extras": "No extras at your hotels",
+ "crm.profile.no_extras_hint": "Extras of cancelled stays and no-shows are not counted.",
+ "crm.profile.no_cancel_fees": "No fees charged",
+ "crm.profile.no_shows": {
+  "one": "{count} no-show",
+  "other": "{count} no-shows"
+ },
  "crm.profile.no_stays": "No stays at your hotels",
  "crm.profile.no_stays_hint": "Only stays at hotels you have access to are shown.",
  "crm.profile.no_tags": "No tags",
- "crm.profile.points_hint": "All programs",
+ "crm.profile.points_hint": "Programs of your hotels",
  "crm.profile.sections": "Guest history",
  "crm.profile.segments": "Segments",
  "crm.profile.segments_hint": "Dynamic segments the guest matches today",
@@ -326,6 +337,7 @@
   "other": "{count} active or completed"
  },
  "crm.profile.tab.comms": "Communications",
+ "crm.profile.tab.extras": "Extras",
  "crm.profile.tab.loyalty": "Loyalty",
  "crm.profile.tab.stays": "Stays",
  "crm.profile.title": "Guest profile",
@@ -617,6 +629,7 @@
  "crm.seg.warn_currency": "A money condition has no currency. Choose the currency — the segment matches nobody until then.",
  "crm.seg.warn_currency_short": "No currency: matches nobody",
  "crm.stay.dates": "Dates",
+ "crm.stay.fee": "Fee {amount}",
  "crm.stay.pax": "{adults} adults · {children} children",
  "crm.stay.reservation": "Reservation",
  "crm.stay.room": "Room · board",
@@ -631,5 +644,14 @@
  "crm.stay.status.quoted": "Quoted",
  "crm.stay.status.requested": "Requested",
  "crm.stay.status.waitlist": "Waitlist",
- "crm.vip": "VIP"
+ "crm.vip": "VIP",
+ "crm.extra.summary": "Extras by type",
+ "crm.extra.name": "Extra",
+ "crm.extra.quantity": "Quantity",
+ "crm.extra.service_dates": "Service dates",
+ "crm.extra.added_later": "Added after booking",
+ "crm.extra.stays": {
+  "one": "{count} stay",
+  "other": "{count} stays"
+ }
 }
