@@ -291,6 +291,7 @@
  },
  "res.rev.n": "Revision {n}",
  "res.rev.none": "Keine Revisionen.",
+ "res.rev.computed": "berechnet nach {basis}:",
  "res.rev.override": "Manueller Preis",
  "res.rev.sold_at": "Verkauft für",
  "res.rev.subtitle": "Jede Änderung, wer sie gemacht hat und warum. Nichts wird überschrieben.",

@@ -291,6 +291,7 @@
  },
  "res.rev.n": "Revizyon {n}",
  "res.rev.none": "Revizyon yok.",
+ "res.rev.computed": "{basis} ile hesaplanan:",
  "res.rev.override": "Manuel fiyat",
  "res.rev.sold_at": "Satış fiyatı",
  "res.rev.subtitle": "Her değişiklik, kimin yaptığı ve nedeni. Hiçbir şeyin üzerine yazılmaz.",

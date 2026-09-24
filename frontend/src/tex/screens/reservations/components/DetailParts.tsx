@@ -81,6 +81,8 @@ export function RevisionTimeline({
         const dropped = droppedAddons(r)
         const original = r.change_type === "Original"
         const override = r.pricing_basis === "MANUAL" && r.override_amount && !isZero(r.override_amount)
+        // an override keeps what the engine computed and on which basis (G-51 review)
+        const priced = override ? (r.changes?.priced as { basis?: string; total?: string } | undefined) : undefined
         return (
           <li
             key={r.name}
@@ -130,6 +132,11 @@ export function RevisionTimeline({
                     </span>
                   )}
                   {override && <Badge tone="warning">{t("res.rev.override")}</Badge>}
+                  {priced?.basis && priced.total && (
+                    <span className="text-xs text-zinc-500">
+                      {t("res.rev.computed", { basis: L.basis(priced.basis) })} <Money amount={priced.total} currency={r.currency} muted />
+                    </span>
+                  )}
                 </>
               )}
             </div>

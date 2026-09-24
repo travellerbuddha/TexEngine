@@ -288,6 +288,7 @@
  },
  "res.rev.n": "Revizia {n}",
  "res.rev.none": "Nicio revizie.",
+ "res.rev.computed": "calculat pe {basis}:",
  "res.rev.override": "Preț manual",
  "res.rev.sold_at": "Vândut la",
  "res.rev.subtitle": "Fiecare modificare, cine a făcut-o și de ce. Nimic nu se suprascrie.",

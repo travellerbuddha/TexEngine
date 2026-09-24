@@ -299,6 +299,7 @@
  },
  "res.rev.n": "Rewizja {n}",
  "res.rev.none": "Brak rewizji.",
+ "res.rev.computed": "wyliczone wg {basis}:",
  "res.rev.override": "Cena ręczna",
  "res.rev.sold_at": "Sprzedano za",
  "res.rev.subtitle": "Każda zmiana, kto ją wprowadził i dlaczego. Nic nie jest nadpisywane.",
