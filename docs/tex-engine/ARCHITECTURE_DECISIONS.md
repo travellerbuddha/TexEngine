@@ -1858,3 +1858,36 @@ user to a channel.
   rate the price used, so a reprice never re-reads it.
 - A shared booking-engine link with a child given by date of birth asks for that child's age
   again in another tab or device.
+
+**Review follow-up (2026-09-24).** An independent review found no Critical or High issue and
+the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as follows.
+- *A date of birth stays where the price needs it* (the quote's request, the reservation's
+  `tex_child_ages` and snapshot, its revisions) *and nowhere else.* The funnel `search` event
+  stores each party as adults and ages on arrival (`quoting.Party.summary`); every funnel payload
+  loses `dob` / `date_of_birth` keys at any depth, a browser-sent one included
+  (`public._no_dob`). A guest change waiting for staff notes children as ages. No age message
+  names a date of birth, and an invalid one is not echoed.
+- *Searches are POST only* (`crs.search`, `ui_crs.search`, `public.search`): a party may carry
+  a date of birth, which must never sit in a URL or an access log. The CRS posts its search;
+  the booking engine already did. Modifications and the contract preview were POST already;
+  the simulator carries no party.
+- *A baby born after the pricing reference date* (the sale date of a BOOKING_DATE contract
+  repriced later on ORIGINAL_* or HISTORICAL terms, the arrival of a stay already in house) is
+  0 months old there (`ages.child_months`, `check_child_dob`), not an error and not "18 or
+  older". `quoting.price_request` turns any `PricingError` into an unsellable quote
+  (`PRICING_ERROR`) instead of an HTTP 500 whose Error Log would hold the request.
+- *Pre-G-56 snapshots pin their line rates too.* Besides the room rate (`fx`), such a snapshot
+  recorded each converted extra's rate (`extras[].fx_rate`, the currency is the extra
+  revision's) and a fixed levy's (`taxes[].fx_rate`, the tax policy's currency):
+  `fx.recorded(…, extra_currency, tax_currency)` makes them record entries of mode `RECORDED`
+  (no policy; "rate recorded on the sold line"), so ORIGINAL_* reprices of old bookings no
+  longer re-read the tables for extras and levies. A fixed promotion in a third currency
+  recorded no rate before G-56: it is still resolved as of the sale.
+- *Not changed:* the record's provider row, adjustment (the FX margin) and policy are readable
+  through Desk/REST wherever the snapshot is (with cost and margin, which were already there):
+  a field-level permission cannot express a per-hotel capability (`price.view_cost`), so this
+  is gap G-95 (Low). Rates below 1 keep 6 decimals, 4–5 significant digits for TRY → EUR: a
+  significant-digit (or inverse-rate) precision belongs to G-72.
+- Tests: integration `TestDateOfBirthPrivacy` (2), `TestDateOfBirthAfterTheReference` (3),
+  `test_a_snapshot_sold_before_g56_pins_its_line_rates`; unit
+  `TestDateOfBirthAfterTheReference` (3), `TestLegacySnapshotLinePins` (3).
