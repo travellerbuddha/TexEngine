@@ -14,9 +14,11 @@
 """
 
 import json
+from datetime import timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import frappe
-from frappe.utils import add_to_date, get_datetime, now_datetime
+from frappe.utils import add_to_date, get_datetime, get_system_timezone, now_datetime
 
 from kamra.tex.api import crs as crs_api
 from kamra.tex.api import policies as policy_api
@@ -152,6 +154,30 @@ class TestSaleTimeInputs(DeterminismCase):
 		                 "400.00")
 
 
+	def test_a_sale_time_with_a_utc_offset_is_read_in_the_hotels_time_zone(self):
+		# review L1: an ISO time with an offset ("Z", "+03:00") is the same moment in the site's
+		# time zone, never an HTTP 500 (an aware time compared with the site's naive clock)
+		res = sell()
+		sold_at = now_datetime()
+		site = sold_at.replace(tzinfo=ZoneInfo(get_system_timezone()))
+		in_utc = site.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+		in_istanbul = site.astimezone(timezone(timedelta(hours=3))).isoformat()
+		for value in (in_utc, in_istanbul):
+			with self.subTest(value=value):
+				sim = crs_api.simulate(reservation=res, sale_at=value)
+				self.assertEqual((get_datetime(sim["simulated_sale_at"]), sim["difference"]), (sold_at, "0.00"))
+		as_user(self.rm)
+		p = crs_api.propose_modification(reservation=res, changes=json.dumps({"check_out": str(fx.d(6, 13))}),
+		                                 basis="HISTORICAL_SALE_DATE", basis_sale_at=in_istanbul)
+		self.assertEqual(get_datetime(p["pricing_sale_at"]), sold_at)
+		later = add_to_date(site, hours=2).astimezone(timezone.utc).isoformat()
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot be in the future"):
+			crs_api.simulate(reservation=res, sale_at=later)
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot be in the future"):
+			crs_api.propose_modification(reservation=res, changes=json.dumps({"check_out": str(fx.d(6, 13))}),
+			                             basis="HISTORICAL_SALE_DATE", basis_sale_at=later)
+
+
 class TestHistoricalSaleDate(DeterminismCase):
 	"""HISTORICAL_SALE_DATE end to end: priced on the version live then, applied, recorded."""
 
@@ -261,6 +287,10 @@ class TestManualOverride(DeterminismCase):
 		rev = revision(out["revision"])
 		self.assertEqual((rev.pricing_basis, D(rev.override_amount), get_datetime(rev.basis_sale_at)),
 		                 ("MANUAL", D("590"), sold_at))
+		# the revision also says what the engine computed, and on which basis (review, minor)
+		self.assertEqual(json.loads(rev.changes_json)["priced"], {"basis": "HISTORICAL_SALE_DATE", "total": "600.00"})
+		listed = next(r for r in modification.revisions(res) if r["name"] == out["revision"])
+		self.assertEqual(listed["changes"]["priced"]["basis"], "HISTORICAL_SALE_DATE")
 		as_user("Administrator")
 		audit = last_audit("reservation.modify", res)
 		self.assertEqual((audit["basis"], audit["computed_total"], audit["total"]),
@@ -479,3 +509,54 @@ class TestGuestProposals(TexTestCase):
 		self.assertEqual(frappe.db.get_value(DT, out["request"], "status"), "Applied")
 		r = frappe.db.get_value("Reservation", res, ["check_out_date", "tex_total_amount"], as_dict=True)
 		self.assertEqual((str(r.check_out_date), D(r.tex_total_amount)), (str(fx.d(6, 14)), D(up["new_total"])))
+
+	def _requested_extension(self, session: str) -> tuple[dict, dict, str]:
+		"""A paid-deposit booking whose guest extends by a night while the hotel takes no card
+		online: the change waits for the hotel (Requested, settlement "staff")."""
+		b = self._booked(session)
+		as_user("Administrator")
+		frappe.db.set_value("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"}, "disabled", 1)
+		up = self._guest_propose(b, fx.d(6, 14))
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest accepts
+		out = public.manage_apply(token=b["manage_token"], proposal_token=up["proposal_token"])
+		self.assertEqual((out["status"], out["settlement"]["kind"]), ("requested", "staff"))
+		as_user("Administrator")
+		return b, up, out["request"]
+
+	def _listed(self, request: str) -> dict:
+		return next(r for r in crs_api.guest_change_requests(property=fx.PROPERTY, needs_staff=1)
+		            if r["name"] == request)
+
+	def test_approving_a_request_on_a_contract_stopped_since_is_refused(self):
+		# review M1: a request waits for the hotel without a time limit; approving it after a stop
+		# sale must not sell the stopped contract (ADR-045); the approver sees why beforehand
+		b, up, request = self._requested_extension("g51-approve-stopped")
+		res = b["rooms"][0]["reservation"]
+		contract = frappe.db.get_value("Reservation", res, "tex_contract")
+		code = frappe.db.get_value("TEX Contract", contract, "contract_code")
+		row = self._listed(request)
+		self.assertEqual(row["contract"], {"contract": contract, "code": code, "status": "Active", "on_sale": True})
+		self.assertIsNone(row["approve_blocked"])
+		contracts.set_status(contract, "suspend", "Overbooked")
+		row = self._listed(request)
+		self.assertEqual((row["contract"]["status"], row["contract"]["on_sale"]), ("Suspended", False))
+		self.assertIn("no longer sells", row["approve_blocked"])
+		with self.assertRaisesRegex(contracts.ContractSuspended, f"{code} no longer sells"):
+			crs_api.resolve_guest_change(request=request, action="approve", reason="collect at check-in")
+		self.assertEqual(frappe.db.get_value(DT, request, "status"), "Requested")
+		self.assertEqual(str(frappe.db.get_value("Reservation", res, "check_out_date")), str(fx.d(6, 13)))
+		# rejecting it stays possible; once the contract sells again it is approved at the price shown
+		contracts.set_status(contract, "resume", "Rooms back")
+		done = crs_api.resolve_guest_change(request=request, action="approve", reason="collect at check-in")
+		self.assertEqual(done["status"], "Approved")
+		r = frappe.db.get_value("Reservation", res, ["check_out_date", "tex_total_amount"], as_dict=True)
+		self.assertEqual((str(r.check_out_date), D(r.tex_total_amount)), (str(fx.d(6, 14)), D(up["new_total"])))
+
+	def test_an_archived_contract_blocks_approval_but_not_rejection(self):
+		b, _up, request = self._requested_extension("g51-approve-archived")
+		contract = frappe.db.get_value("Reservation", b["rooms"][0]["reservation"], "tex_contract")
+		contracts.set_status(contract, "archive", "Season over")
+		with self.assertRaises(contracts.ContractNotOnSale):
+			crs_api.resolve_guest_change(request=request, action="approve", reason="ok")
+		self.assertEqual(crs_api.resolve_guest_change(request=request, action="reject", reason="no longer sold")[
+			"status"], "Rejected")

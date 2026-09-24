@@ -32,6 +32,7 @@ ANY = "G41 Any Channel Seller"
 B2B_DESK = "G41 B2B Desk"
 CC_DESK = "G41 Call Centre Desk"
 DESK_ADMIN = "G41 Desk Admin"
+CC_SELLER = "G51 Call Centre Seller"      # every seller capability, the call centre only
 
 
 def as_user(user: str) -> None:
@@ -320,6 +321,24 @@ class TestModificationKeepsTheChannel(ChannelCase):
 		out = crs.apply_modification(proposal_token=p["proposal_token"], reason="upgrade")
 		self.assertEqual(frappe.db.get_value("Reservation", res, ["room_type", "tex_sales_channel"]), (dlx, "B2B"))
 		self.assertTrue(out["revision"])
+
+	def test_the_proposer_needs_the_channel_again_when_applying(self):
+		# G-51 review L2: a proposal token is the proposer's own (ADR-054), and applying it checks
+		# the channel entitlement again: a B2B seller who lost B2B since cannot apply their upgrade
+		res = self._b2b_reservation()
+		dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})
+		seller = self.seller
+		as_user(seller)
+		p = crs.propose_modification(reservation=res, changes={"room_type": dlx})
+		as_user("Administrator")               # the seller moves to the call centre desk
+		frappe.db.set_value("TEX Access Grant", {"user": seller, "permission_profile": ANY}, "disabled", 1)
+		profile(CC_SELLER, SELLER_CAPS)
+		grant(seller, fx.PROPERTY, CC_SELLER)
+		as_user(seller)
+		self.assertTrue(scope.has_capability("reservation.modify", fx.PROPERTY))
+		with self.assertRaisesRegex(frappe.PermissionError, "B2B"):
+			crs.apply_modification(proposal_token=p["proposal_token"], reason="upgrade")
+		self.assertNotEqual(frappe.db.get_value("Reservation", res, "room_type"), dlx)
 
 	def test_a_web_booking_is_changed_at_web_prices(self):
 		# the guest booked on the web; the call centre changes it on the web channel it was sold on
