@@ -174,6 +174,12 @@ class TestDateOfBirthPrivacy(TexTestCase):
 		# where the price needs it, it is kept: the reservation is priced (and repriced) from it
 		kids = json.loads(frappe.db.get_value("Reservation", b["rooms"][0]["reservation"], "tex_child_ages"))
 		self.assertEqual(kids[0]["dob"], dob)
+		# a guest's change waiting for staff is noted with ages, not dates
+		from kamra.tex.services import guest_changes
+
+		res_doc = frappe.get_doc("Reservation", b["rooms"][0]["reservation"])
+		self.assertEqual(guest_changes._note_changes(res_doc, {"adults": 2, "children": [{"dob": dob}, 7]}),
+		                 {"adults": 2, "children": [4, 7]})
 
 	def test_searches_carrying_a_party_refuse_get(self):
 		from types import SimpleNamespace
