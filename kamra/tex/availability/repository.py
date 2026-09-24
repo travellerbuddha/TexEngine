@@ -329,8 +329,7 @@ def channel_surface(channel: str | None) -> str | None:
 
 	if channel in WEB_CHANNELS:
 		return rs.BOOKING_ENGINE
-	group = frappe.get_cached_value("TEX Sales Channel", channel, "channel_group") if frappe.db.exists(
-		"TEX Sales Channel", channel) else None
+	group = frappe.db.get_value("TEX Sales Channel", channel, "channel_group", cache=True)
 	return {"Booking Engine": rs.BOOKING_ENGINE, "Call Center": rs.CALL_CENTER}.get(group or "")
 
 

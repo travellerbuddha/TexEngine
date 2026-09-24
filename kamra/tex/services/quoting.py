@@ -525,10 +525,9 @@ def create_quotes(rooms: list[dict], *, promo_codes=None, guest_email: str | Non
 	gkey = ctxmod.guest_key(guest_email)
 	items = []
 	for r in rooms:
-		offer, req, extras_req = _offer_request(str(r.get("offer_key") or ""), extras=r.get("extras"),
-		                                        promo_codes=promo_codes, now=now)
-		items.append({"key": r["offer_key"], "offer": offer, "req": req, "changed": bool(extras_req) or
-		              promo_codes is not None})
+		key = str(r.get("offer_key") or "")
+		offer, req, extras_req = _offer_request(key, extras=r.get("extras"), promo_codes=promo_codes, now=now)
+		items.append({"key": key, "offer": offer, "req": req, "changed": bool(extras_req) or promo_codes is not None})
 	keys = {(i["offer"]["property"], i["offer"]["currency"], i["offer"]["market"], i["offer"]["channel"]) for i in items}
 	indexes = [int(i["offer"].get("room_index") or 0) for i in items]
 	if len(keys) != 1 or len(set(indexes)) != len(indexes):

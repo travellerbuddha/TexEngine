@@ -52,6 +52,20 @@ class TestBookingWindow(unittest.TestCase):
 		self.assertEqual(codes(cells), ["BOOKING_WINDOW"])                       # sold 1 July, window closed 15 June
 
 
+class TestSaleDateHelpers(unittest.TestCase):
+	"""What the channels' ARI sends as of today's sale: a night outside its booking window is
+	closed; an arrival inside its release or outside its advance window is closed to arrival."""
+
+	def test_a_night_and_an_arrival_as_of_a_sale_date(self):
+		e = rs.Effective(day=CI, book_from=date(2027, 7, 5), book_to=date(2027, 7, 8), release_days=7, min_advance=3,
+		                 max_advance=30)
+		self.assertEqual([e.sale_closed(date(2027, 7, d)) for d in (4, 5, 8, 9)], [True, False, False, True])
+		self.assertTrue(e.arrival_closed(date(2027, 7, 4)))          # 6 days ahead: inside the 7-day release
+		self.assertFalse(e.arrival_closed(date(2027, 7, 3)))         # 7 days ahead
+		self.assertTrue(e.arrival_closed(date(2027, 6, 9)))          # 31 days ahead: beyond the maximum
+		self.assertFalse(rs.Effective(day=CI).arrival_closed(date(2027, 7, 9)))
+
+
 class TestLevelsAndChannelScopes(unittest.TestCase):
 	"""Cells without a room type are hotel- or market-level; a cell may be scoped to the Booking
 	Engine, the Call Center or both."""

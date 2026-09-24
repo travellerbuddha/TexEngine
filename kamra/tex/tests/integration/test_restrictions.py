@@ -354,6 +354,21 @@ class TestGridCells(RestrictionCase):
 		self.assertEqual(frappe.db.get_value("TEX ARI Restriction", name, "scope_key"),
 		                 hashlib.sha1(raw.encode()).hexdigest())
 
+	def test_p38_keeps_every_key_and_rekeys_only_a_wrong_one(self):
+		from unittest import mock
+
+		from kamra.patches.tex import p38_restriction_scope as p38
+
+		good = self.cell(self.ci, room_type=self.std, min_los=2)
+		scoped = self.cell(self.ci, room_type=self.std, channel_scope=BOTH, min_los=3)
+		bad = self.cell(self.co, room_type=self.std, min_los=2)
+		keys = {n: frappe.db.get_value("TEX ARI Restriction", n, "scope_key") for n in (good, scoped, bad)}
+		frappe.db.set_value("TEX ARI Restriction", bad, "scope_key", "x" * 40, update_modified=False)
+		with mock.patch.object(frappe, "reload_doc"):            # no schema sync inside a test
+			p38.execute()
+			p38.execute()                                          # re-runnable
+		self.assertEqual({n: frappe.db.get_value("TEX ARI Restriction", n, "scope_key") for n in keys}, keys)
+
 	def test_restrictions_are_edited_only_with_restriction_edit(self):
 		user = agent("g48-grid-agent@example.com", fx.PROPERTY)
 		frappe.set_user(user)  # nosemgrep: frappe-setuser -- an agent tries to edit the grid
