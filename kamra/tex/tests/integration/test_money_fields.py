@@ -247,15 +247,7 @@ class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 
 	def test_a_reservation_sold_at_six_places_reprices_to_its_total(self):
 		self.try_contract()
-		now = now_datetime()
-		frappe.db.delete("TEX FX Rate", {"provider": "TCMB", "base_currency": "EUR", "quote_currency": "TRY"})
-		frappe.get_doc({"doctype": "TEX FX Rate", "provider": "TCMB", "base_currency": "EUR", "quote_currency": "TRY",
-		                "rate_type": "FOREX_SELLING", "rate": 34, "rate_date": add_days(getdate(now), -1),
-		                "fetched_at": add_to_date(now, days=-1), "source_ref": "test"}).insert(ignore_permissions=True)
-		policy = frappe.get_doc({"doctype": "TEX FX Policy", "property": fx.PROPERTY, "from_currency": "TRY",
-		                         "to_currency": "EUR", "mode": "PROVIDER", "provider": "TCMB",
-		                         "rate_type": "FOREX_SELLING", "max_age_days": 4}).insert(ignore_permissions=True)
-		revisions.activate("TEX FX Policy", policy.name, at="2020-01-01 00:00:00", backdate=True)
+		self.try_rate()
 
 		with mock.patch.object(money, "FX_SIGNIFICANT", 0, create=True):      # sold before G-72: 6 places
 			res = self.book()
@@ -275,6 +267,38 @@ class TestPublishedAndSoldTermsAreUnchanged(TexTestCase):
 		self.assertEqual(cur["totals"]["total"], "4411.76")                    # 150,000 / 34
 		offer = pick(self.search())
 		self.assertEqual(offer["total"], "4411.76")
+
+	def test_a_reservation_sold_at_ten_significant_digits_keeps_its_rate(self):
+		self.try_contract()
+		self.try_rate()
+		res = self.book()
+		sold = json.loads(frappe.db.get_value("Reservation", res, "tex_pricing_snapshot"))
+		self.assertEqual([r["sell_rate"] for r in sold["fx_rates"]], ["0.02941176471"])
+		self.assertEqual(sold["totals"]["total"], "4411.76")
+		# the reservation's informational rate is kept at its column's 9 places; a plain save of
+		# the price-locked stay (the booking object still in memory) changes nothing commercial
+		self.assertEqual(stored("Reservation", "tex_fx_rate", res), "0.029411765")
+		frappe.get_doc("Reservation", res).save(ignore_permissions=True)
+		for basis in ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE"):
+			p = modification.propose(res, {}, basis=basis)
+			self.assertEqual((p["proposed"]["totals"]["total"], p["difference"]), ("4411.76", "0.00"), basis)
+			self.assertEqual([r["sell_rate"] for r in p["proposed"]["fx_rates"]], ["0.02941176471"], basis)
+		p = modification.propose(res, {"check_out": add_days(fx.d(6, 13), 1)}, basis="ORIGINAL_SALE_DATE")
+		modification.apply(p["proposal_token"], reason="one more night")
+		after = json.loads(frappe.db.get_value("Reservation", res, "tex_pricing_snapshot"))
+		self.assertEqual(after["totals"]["total"], "5882.35")                   # 200,000 / 34
+		self.assertEqual(stored("Reservation", "tex_fx_rate", res), "0.029411765")
+
+	def try_rate(self) -> None:
+		now = now_datetime()
+		frappe.db.delete("TEX FX Rate", {"provider": "TCMB", "base_currency": "EUR", "quote_currency": "TRY"})
+		frappe.get_doc({"doctype": "TEX FX Rate", "provider": "TCMB", "base_currency": "EUR", "quote_currency": "TRY",
+		                "rate_type": "FOREX_SELLING", "rate": 34, "rate_date": add_days(getdate(now), -1),
+		                "fetched_at": add_to_date(now, days=-1), "source_ref": "test"}).insert(ignore_permissions=True)
+		policy = frappe.get_doc({"doctype": "TEX FX Policy", "property": fx.PROPERTY, "from_currency": "TRY",
+		                         "to_currency": "EUR", "mode": "PROVIDER", "provider": "TCMB",
+		                         "rate_type": "FOREX_SELLING", "max_age_days": 4}).insert(ignore_permissions=True)
+		revisions.activate("TEX FX Policy", policy.name, at="2020-01-01 00:00:00", backdate=True)
 
 	def try_contract(self) -> None:
 		"""A TRY contract (25,000 TRY per person and night) sold in EUR."""
