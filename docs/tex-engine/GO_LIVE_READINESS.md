@@ -358,11 +358,13 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     discount (and a minimum basket compared with the cost) is a cost figure. Guests saw applied
     ones on the booking engine; agents without `price.view_cost` saw all of them, refused ones
     included, in the CRS. Now every promotion outcome carries its stage, and cost-stage ones reach
-    only staff with `price.view_cost`.
+    only staff with `price.view_cost`. A reservation's Desk-visible `tex_promotions` no longer
+    names them (reservations written before keep what they recorded).
   - Reports: each stay is split over its nights in whole cents, as the folio bills it, so totals
     no longer move with the grouping or a fold; taxes are the reservation's own; cancelled stays
     count only their fee; payments need `payment.view` and are per transaction currency; group
     booking sites count in conversion (whole group only), never above 100 %; filters a view
-    ignores are refused; indexes by hotel and date (p46), 60 reports a minute per user.
+    ignores are refused; indexes by hotel and date (p46), 60 report runs a minute per user
+    (views, dashboard, pace and portfolio together).
   - At deploy, run the migration (p46 creates the three indexes if missing).
   - No area status changes. Verdict unchanged: NOT READY.

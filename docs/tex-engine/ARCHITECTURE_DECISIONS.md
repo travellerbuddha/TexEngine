@@ -3476,7 +3476,16 @@ the reports. Some claims above were stronger than the tests behind them. All are
   - Nothing else in the non-internal payload derives from cost. The nights show the selling price;
     the lines hold only selling-stage discounts; the explanation, `fx` and the internal totals were
     already stripped.
+  - A reservation's `tex_promotions` (permlevel 0: read in Desk by every role that reads
+    reservations, Front Desk, Finance, Housekeeping included) named the cost-stage offer too. It now
+    lists the promotions of the selling price only (`quoting.sold_promotions`, the same test as
+    `strip_internal`), at booking and after a change. Reservations written before keep what they
+    recorded (no data patch: an offer's id is not a figure, and no site is live).
   - Staff with `price.view_cost` see every outcome with its stage.
+  - Paths checked: booking-engine search, quote, rooms quoted together, booking, manage page and
+    e-mails; the CRS search (also `ui_crs.search`), quote, rooms quoted together, reservation (also
+    `ui_crs.reservation`), a proposed change and the historical simulator; `quotes_summary`, the
+    audit trail and revisions carry no promotion outcome.
 - *M1 Totals did not depend on the stays alone.* Each row was rounded from exact prorated shares,
   so the totals changed with the grouping, and a fold changed them again. For example, a stay of
   100.00 over 3 nights gave 100.00 by channel but 99.99 by day; over 800 days the drift could reach
@@ -3522,8 +3531,9 @@ the reports. Some claims above were stronger than the tests behind them. All are
     nothing.
   - The by-night rows join a numbers table as long as the longest stay in the window, not an
     800-day calendar per stay.
-  - Each user may run 60 reports a minute over HTTP (`report`, `production`, `portfolio`;
-    `RATE_LIMIT`).
+  - Each user may run 60 reports a minute over HTTP (`report`, `production`, `portfolio`, and
+    since the final check of this branch the dashboard and `pace`, which also aggregate stays; one
+    budget, `RATE_LIMIT`).
   - The query count per view stays fixed.
 - *L2 Payments per transaction currency.* A payment in another currency than its booking, or of
   a booking without a currency, is in the row of its own currency, as in the payments by method.
@@ -3551,13 +3561,21 @@ the reports. Some claims above were stronger than the tests behind them. All are
   - production by sale date files a stay, whole, on its original sale day, so a later modification
     or add-on changes that past period;
   - the dashboard funnel does not attribute group-site sessions to a hotel;
-  - `portfolio._inventory_alerts` still reads each room pool per hotel (optional L9, not done).
+  - `portfolio._inventory_alerts` still reads each room pool per hotel (optional L9, not done: it
+    needs a batched pool read in the availability repository; a portfolio is bounded by the
+    viewer's hotels);
+  - a cost-stage *managed* promotion (TEX Promotion, stage COST) with a code or limit records its
+    redemption `amount` as the cost discount, in the contract's currency, under the booking's
+    currency (`booking._promotions_used`); only Hotel Admin and System Manager read redemptions,
+    and limits count redemptions, not amounts.
 - *Tests:*
-  - unit `test_cost_stage_privacy` (5);
-  - integration `test_cost_stage_privacy` (3: the booking engine search, quote, booking, manage
-    page and e-mail; an agent's CRS search, quote, reservation and proposed change; the revenue
-    manager);
-  - `test_reports` review classes (13 new; the existing ones updated for L3);
+  - unit `test_cost_stage_privacy` (6, one for `sold_promotions`);
+  - integration `test_cost_stage_privacy` (4: the booking engine search, quote, rooms quoted
+    together, booking, manage page and e-mail; an agent's CRS and `ui_crs` search, quote, rooms
+    quoted together, reservation, proposed change and simulator; `tex_promotions` after booking and
+    after a change; the revenue manager);
+  - `test_reports` review classes (14 new, one for the dashboard and pace throttle; the L2 test also
+    covers a booking and payment with no currency; the existing ones updated for L3);
   - `test_patches.TestP03Indexes.test_p46_creates_the_report_indexes`;
   - e2e `reports.spec.ts` (a scope change clears the room filter).
 
