@@ -13,7 +13,7 @@ import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor, childOk } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
 import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
-import type { BookingRoom, BookingSummary, ChangeOutcome, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
+import type { BasketClawback, BookingRoom, BookingSummary, ChangeOutcome, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
 import { Button, Field, Textarea } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -69,6 +69,21 @@ function payForChange(r: ChangeResult, ctx: { currency: string; hotel?: string }
   if (r.request) setItem(changeKey(p.transaction), r.request)
   const out = continuePayment(p, navigate)
   return out === "internal" || out === "external"
+}
+
+/** What a change or a cancellation carries for the guest's other rooms (G-84 review H1): the
+ * discount they keep once the booking is below a promotion's minimum basket, or a credit. */
+function basketText(i18n: I18nT, b: BasketClawback | null | undefined, kind: "change" | "cancel"): string | null {
+  if (!b || isZero(b.amount)) return null
+  const { t, money } = i18n
+  const promotion = b.promotions.map((p) => p.name).join(", ")
+  if (isNegative(b.amount)) return t("manage.basket.credit", { amount: money(b.amount.replace(/^-/, ""), b.currency), promotion })
+  const minimum = b.promotions.find((p) => p.minimum)?.minimum
+  return t(kind === "change" ? "manage.basket.change" : "manage.basket.cancel", {
+    amount: money(b.amount, b.currency),
+    promotion,
+    minimum: minimum ? money(minimum, b.currency) : "",
+  })
 }
 
 /** What happens to the money of a proposed change, in the guest's words (server figures only). */
@@ -210,12 +225,14 @@ function PendingChangeNotice({ room, change, currency, onPay, paying }: { room: 
 const EXTRAS_OPEN = new Set(["Confirmed", "Pending Payment", "Held"])
 
 function CancelDialog({ room, currency, token, onClose, onDone }: { room: BookingRoom; currency: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
-  const { t, money } = useI18n()
+  const i18n = useI18n()
+  const { t, money } = i18n
   const [reason, setReason] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fee = room.cancellation_fee_now ?? "0"
   const free = isZero(fee)
+  const basket = basketText(i18n, room.cancellation_basket, "cancel")
   const submit = async () => {
     setBusy(true)
     setError(null)
@@ -253,6 +270,7 @@ function CancelDialog({ room, currency, token, onClose, onDone }: { room: Bookin
           <p className="text-sm text-soft">{t("manage.feeLabel")}</p>
           <p className="text-2xl font-bold tabular-nums">{free ? t("manage.noFee") : money(fee, currency)}</p>
           <p className="mt-1 text-sm text-soft">{free ? t("manage.freeExplain") : room.refundable === false ? t("manage.nonRefExplain") : t("manage.feeExplain")}</p>
+          {basket && <p className="mt-1 text-sm text-soft">{basket}</p>}
         </div>
         <Field label={t("manage.reason")} optional={t("common.optional")}>
           <Textarea value={reason} onChange={(e) => setReason(e.target.value.slice(0, 300))} rows={3} />
@@ -357,6 +375,7 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
         ? t("manage.sendRequest")
         : t("manage.confirmChange")
   const explain = settlement ? settlementText(i18n, settlement, proposal?.difference ?? null) : null
+  const basket = basketText(i18n, proposal?.basket_clawback, "change")
   return (
     <Dialog
       open
@@ -439,6 +458,11 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
                   </div>
                 )}
               </dl>
+              {basket && (
+                <Alert tone="info" live={false}>
+                  {basket}
+                </Alert>
+              )}
               {!!proposal.warnings?.length && (
                 <Alert tone="warn" title={t("manage.warnings")}>
                   {proposal.warnings.map(warningText).join(" ")}

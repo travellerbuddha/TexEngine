@@ -13,6 +13,7 @@ import base64
 import hashlib
 import hmac
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 
@@ -255,11 +256,15 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 							continue
 						priced.append((idx, party, req, q))
 					alone = {i: q.total for i, _pa, _r, q in priced}      # each room priced on its own
+					# a room a promotion's minimum basket refused alone: quoted with other rooms, its
+					# price may be another (``_from_total``, review M1)
+					limited = {i: engine.basket_limited(q) for i, _pa, _r, q in priced}
 					if len(priced) == len(parties):
 						# every requested room in this offer: priced as one booking, so a minimum basket
 						# is the booking's (G-84, ADR-057); the quote step prices the rooms chosen together
 						quotes, _total = engine.price_together([r for _i, _pa, r, _q in priced], [q for *_x, q in priced],
-						                                       lambda _i, r: engine.price_stay(ctx_cache[key], r))
+						                                       lambda _i, r: engine.price_stay(ctx_cache[key], r),
+						                                       record=False)
 						kept = []
 						for (i, pa, _r, _q), q in zip(priced, quotes, strict=True):
 							if q.sellable:
@@ -276,7 +281,8 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						         "member": bool(member), "total": to_str(q.total), "room_index": idx,
 						         "exp": offer_exp.isoformat()}
 						rooms_out.append({"room_index": idx, "offer_key": sign(offer),
-						                  "quote": q.to_dict(internal=internal), "_alone": alone[idx]})
+						                  "quote": q.to_dict(internal=internal), "_alone": alone[idx],
+						                  "_limited": limited[idx]})
 					sellable = bool(rooms_out)
 					complete = len(rooms_out) == len(parties)
 					entry = {
@@ -342,6 +348,7 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	for o in result["offers"] + result["unavailable"]:
 		for r in o["rooms"]:
 			r.pop("_alone", None)
+			r.pop("_limited", None)
 	unplaced = [i for i in range(len(parties))
 	            if not any(i in o["room_indexes"] for o in result["offers"])]
 	if result["offers"] and unplaced:
@@ -357,24 +364,34 @@ def _offer_sort_total(o: dict):
 
 def _from_total(offers: list[dict], n_rooms: int) -> tuple[str | None, str | None]:
 	"""Cheapest way to place every requested room, in the currency of the first offer, at a price
-	that can be booked: an offer holding every room at its total (priced as one booking, G-84), or
-	the cheapest offer of each party priced on its own, summed (rooms may be of different types:
-	quoted together they can only cost less). (None, None) when a party fits nowhere."""
+	that can be booked (review M1):
+	- an offer holding every room at its total (priced as one booking, G-84), when its room type
+	  has that many rooms free;
+	- the cheapest offer of each party priced on its own, summed (rooms may be of different
+	  types), only when no promotion's minimum basket refused any of those rooms — quoted together
+	  their price could be another, higher too: an exclusive promotion granted on the booking's
+	  basket can replace a better one — and when each room type has that many rooms free.
+	(None, None) when a party fits nowhere or no such price is known."""
 	if not offers:
 		return None, None
 	ccy = offers[0]["currency"]
-	best: dict[int, object] = {}
-	for o in offers:
-		if o["currency"] != ccy:
-			continue
+	mine = [o for o in offers if o["currency"] == ccy]
+	best: dict[int, tuple] = {}
+	for o in mine:
 		for r in o["rooms"]:
 			t = D(r["_alone"])
-			if r["room_index"] not in best or t < best[r["room_index"]]:
-				best[r["room_index"]] = t
+			if r["room_index"] not in best or t < best[r["room_index"]][0]:
+				best[r["room_index"]] = (t, o, r)
 	if len(best) < n_rooms:
 		return None, None
-	whole = [D(o["total"]) for o in offers if o["currency"] == ccy and o.get("complete") and o.get("total")]
-	return to_str(min([sum(best.values()), *whole])), ccy
+	totals = []
+	per_type = Counter(o["room_type"] for _t, o, _r in best.values())
+	if not any(r.get("_limited") for _t, _o, r in best.values()) \
+			and all(int(o.get("available") or 0) >= per_type[o["room_type"]] for _t, o, _r in best.values()):
+		totals.append(sum((t for t, _o, _r in best.values()), D(0)))
+	totals += [D(o["total"]) for o in mine
+	           if o.get("complete") and o.get("total") and int(o.get("available") or 0) >= n_rooms]
+	return (to_str(min(totals)), ccy) if totals else (None, None)
 
 
 def search(*, properties: list[str], check_in, check_out, rooms, market: str, channel: str,
@@ -436,16 +453,58 @@ def price_request(version: str, req: StayRequest, *, gkey: str | None = None, ex
 		return engine.unsellable_quote(terms, req, Unsellable("PRICING_ERROR", str(e))), terms
 
 
-def _extras_list(extras) -> tuple[ExtraRequest, ...]:
-	if isinstance(extras, str):
-		extras = json.loads(extras or "[]")
+MAX_EXTRAS = 30
+
+
+def _json(value, default):
+	if isinstance(value, str):
+		try:
+			return json.loads(value or "null") or default
+		except ValueError:
+			frappe.throw(_("Invalid JSON payload."))
+	return default if value is None else value
+
+
+def extra_items(extras) -> list[dict]:
+	"""Extras as a caller sends them — [{"code", "quantity", "service_dates"}] — checked for their
+	shape: anything else is a clean refusal, never a server error with a log (G-84 review L2)."""
+	extras = _json(extras, [])
+	if not isinstance(extras, list) or len(extras) > MAX_EXTRAS:
+		frappe.throw(_("Invalid extras."))
+	for e in extras:
+		if not isinstance(e, dict) or not isinstance(e.get("code"), str) or not e["code"].strip() \
+				or not isinstance(e.get("quantity", 1), int | str | None) \
+				or not isinstance(e.get("service_dates") or [], list) \
+				or not all(isinstance(d, str) for d in e.get("service_dates") or []):
+			frappe.throw(_("Invalid extras."))
+	return extras
+
+
+def room_items(rooms) -> list[dict]:
+	"""The rooms of one booking as a caller sends them — [{"offer_key", "extras"}], 1 to
+	``MAX_ROOMS`` — checked for their shape (G-84 review L2)."""
+	rooms = _json(rooms, [])
+	if not isinstance(rooms, list) or not rooms or len(rooms) > MAX_ROOMS:
+		frappe.throw(_("Select between 1 and {0} rooms.").format(MAX_ROOMS))
 	out = []
-	for e in extras or []:
-		qty = int(e.get("quantity") or 1)
+	for r in rooms:
+		if not isinstance(r, dict) or not isinstance(r.get("offer_key"), str) or not r["offer_key"]:
+			frappe.throw(_("Invalid rooms."))
+		out.append({"offer_key": r["offer_key"], "extras": extra_items(r.get("extras"))})
+	return out
+
+
+def _extras_list(extras) -> tuple[ExtraRequest, ...]:
+	out = []
+	for e in extra_items(extras):
+		try:
+			qty = int(e.get("quantity") or 1)
+			days = tuple(getdate(d) for d in e.get("service_dates") or [])
+		except (TypeError, ValueError):
+			frappe.throw(_("Invalid extras."))
 		if qty < 1 or qty > 99:
 			frappe.throw(_("Invalid extra quantity."))
-		out.append(ExtraRequest(code=str(e["code"]).upper(), quantity=qty,
-		                        service_dates=tuple(getdate(d) for d in e.get("service_dates") or [])))
+		out.append(ExtraRequest(code=str(e["code"]).upper(), quantity=qty, service_dates=days))
 	return tuple(out)
 
 
@@ -527,20 +586,18 @@ def create_quotes(rooms: list[dict], *, promo_codes=None, guest_email: str | Non
                   session_id: str | None = None) -> dict:
 	"""The rooms of one booking quoted together (G-84, ADR-057): each ``{"offer_key", "extras"}``
 	is an offer of the same search (one hotel, currency, market and channel, distinct rooms).
-	Every room is priced alone, then — when a minimum basket refused a promotion — again with the
-	booking's basket (``engine.booking_pass``), which each quote records in its request; the
-	booking checks that its rooms are the ones priced together. → {"ok", "rooms": one
-	``create_quote`` answer per room, in order, "booking_basket"}. A room that cannot be sold
-	answers with its reasons; the others are quoted (priced alone when the booking cannot be)."""
-	if isinstance(rooms, str):
-		rooms = json.loads(rooms)
-	if not rooms or len(rooms) > MAX_ROOMS:
-		frappe.throw(_("Select between 1 and {0} rooms.").format(MAX_ROOMS))
+	Every room is priced alone, then as one booking (``engine.price_together``): each promotion's
+	minimum basket is compared with the basket of the rooms it covers, and each quote records the
+	booking in its request (review L3); the booking checks that its rooms are the ones priced
+	together. → {"ok", "rooms": one ``create_quote`` answer per room, in order, "booking_basket"}.
+	A room that cannot be sold answers with its reasons; the others are quoted (priced alone when
+	the booking cannot be)."""
+	rooms = room_items(rooms)
 	now = now_datetime()
 	gkey = ctxmod.guest_key(guest_email)
 	items = []
 	for r in rooms:
-		key = str(r.get("offer_key") or "")
+		key = r["offer_key"]
 		offer, req, extras_req = _offer_request(key, extras=r.get("extras"), promo_codes=promo_codes, now=now)
 		items.append({"key": key, "offer": offer, "req": req, "changed": bool(extras_req) or promo_codes is not None})
 	keys = {(i["offer"]["property"], i["offer"]["currency"], i["offer"]["market"], i["offer"]["channel"]) for i in items}

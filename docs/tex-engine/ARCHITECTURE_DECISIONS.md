@@ -3131,6 +3131,98 @@ patch p45).**
   (clients quote the rooms of a booking together); staff approving a guest's request cannot
   override restrictions (they make the change themselves).
 
+**Review follow-up (an independent review of G-48 / G-84 after merge; branch `fix-restr`).**
+The review found one High (money), two Medium and five Low findings; all are fixed, each with a
+test written first. No schema change: no patch (p44 unused).
+- *H1 — a discount kept on untouched rooms after the booking drops below the minimum.* Shortening
+  or cancelling room 2 (or removing an extra its basket counted) took the booking below a
+  promotion's minimum; room 2 lost the discount, room 1 kept it under its price lock, so the
+  booking was sold at a price its rooms do not have together (the old test asserted it).
+  **Decision: clawback, by default** (staff approval routing was considered: it leaves the same
+  question to a person, delays the guest's change and still needs the amount; the clawback is
+  deterministic, explained and shown before the guest confirms, and never reprices a locked room).
+  - A room granted a promotion only on the booking's basket (its own basket is below the minimum)
+    records what it would cost without it: `minimum_baskets[].forfeit` (total), `forfeit_net`
+    (before added tax) and `forfeit_tax`, priced by the engine without that one promotion,
+    everything else the same, never below zero (an exclusive promotion replaced by a better one
+    forfeits nothing), and explained (`BASKET_FORFEIT`).
+  - A change or a cancellation judges each promotion again on the basket of the live rooms it
+    covers after it. The untouched rooms keep their locked price; the changed (or cancelled) room
+    carries the forfeits of the rooms whose discount is no longer earned (`pricing.basket.clawback`,
+    pure): an explicit `BASKET` line naming the promotion, `totals.basket_clawback` (in total,
+    subtotal, tax and margin), one `BASKET_CLAWBACK` explanation step per promotion naming its
+    minimum and the covered basket before and after, the revision's `changes.basket_clawback` and
+    the audit event `reservation.basket_clawback`. A cancellation's charge is the rate's penalty on
+    the room's own price plus that share (`booking.cancellation_penalty`, its basis says so);
+    waiving the penalty does not waive the share.
+  - Every path: staff / CRS modifications, the manage page (`manage_propose` returns
+    `basket_clawback`, shown above the settlement; the cancel dialog shows it in the fee), guest
+    changes paid or approved later (they re-derive the proposal, so what is paid, or the refund,
+    includes it: a refund shrinks), an extras change counted in the basket, staff and guest
+    cancellations (the CRS cancel dialog says it is not waived). Add-ons are not in a basket. A
+    channel's booking is priced by the channel (ADR-039, G-69): not affected. The "rate's terms"
+    rule for a guest's lower price (`penalty_applies`) reads the rate's penalty only.
+  - A ledger keeps the booking whole: what a room carries per promotion is recorded with it
+    (`basket_clawback` in its snapshot; a cancelled room's with its cancellation charge), so each
+    promotion's forfeits are owed once per booking. A later change of any room charges what is owed
+    less what other rooms — live or cancelled — carry, and credits what they carry that is no longer
+    owed: the booking reaches the minimum again, the room paid for now pays its own full price, or
+    it is cancelled. A cancellation can therefore be a credit (a negative charge): cancelling both
+    rooms of a booking whose first cancellation carried the other's discount owes nothing.
+  - Limits, recorded: two minimum-basket promotions lost at once are each priced without that one
+    promotion (the other kept), so their sum can differ from the room priced without both (two
+    sequential percentages overlap); a no-show is not a change (the room leaves the
+    live rooms without a share of its own); a staff price override on a change keeps the share as
+    computed in the room's record.
+- *M1 — the "from" price could not be booked.* Priority and exclusivity decide which promotions
+  apply, so pricing the rooms together can raise a price: 5 % exclusive (priority 10) from 250 and
+  15 % (priority 1) cost 255 alone and 285 together. **The booking pass can raise a price** (the
+  hotel's promotion ranking decides, as for one room). The search's "from" price is the sum of the
+  cheapest room of each party priced alone only when no promotion's minimum refused any of those
+  rooms and their room types have that many rooms free; else the cheapest offer holding every room
+  at its total together, when its room type has that many rooms free (`quoting._from_total`).
+- *M2 — rooms a promotion does not cover counted in its minimum.* A minimum is now the last check
+  of a promotion (refused for its basket means eligible on every other check), and each promotion
+  is compared with the basket of the booking's rooms eligible for it
+  (`engine.eligible_baskets`): the request records it per promotion (`booking_baskets`, next to
+  the whole booking's `booking_basket` / `booking_rooms`), the explanation names it
+  (`BOOKING_BASKET_PROMOTION`), each quote lists its `minimum_baskets` (the promotions with a
+  minimum it is eligible for: minimum, basket judged, rooms, qualified, applied, forfeit), and the
+  booking check, the change path and the clawback use the same baskets.
+- *L1 — length rules refused changes toward compliance.* With the same product and arrival (or a
+  stay under way) a minimum stay refuses a change only when it shortens the stay, a maximum only
+  when it lengthens it; a minimum stay counted through a night the stay did not hold is that
+  night's rule, newly taken. Leaving early is not a sale: an in-house guest is never kept by a
+  minimum stay. A new arrival or another product not begun is judged in full, as before.
+- *L2 — `quote_rooms` input.* The rooms and their extras are checked for their shape
+  (`quoting.room_items`, `extra_items`): anything else is a clean validation error, never an HTTP
+  500 with an Error Log (also `public.quote` and `crs.quote_rooms`). Each room quoted together
+  counts as a quote against a per-visitor budget of `WRITE_LIMIT` rooms per window, besides the
+  request's own limit.
+- *L3 — "as recorded" depended on whether a second pass happened.* Every room of a booking of
+  several rooms records the booking in its request (total, rooms and per promotion), priced again
+  with it whenever a promotion with a minimum could see it, so a recorded request always prices to
+  its quote; the simulator reads the per-promotion baskets (a snapshot recorded before counts the
+  other rooms for every promotion, as it did).
+- *L4 — old snapshots counted add-ons in the basket.* A price recorded before G-84 has no
+  `basket`; its fallback now subtracts the extras of add-ons sold after booking.
+- *L5 — oversized ARI ranges.* `restriction_boundaries` queues boundary days in clusters (days at
+  most 7 apart), and a waiting ARI job takes in a new range only within 7 days of its own; a range
+  further away is a job of its own (`push_job` still pushes only days that changed).
+- *Test gaps closed:* restrictions on a staff approval of a guest's request (`_proposal`), on a
+  paid guest change applied by the job (`_from_payment`: Failed and refunded) and the `_sale_at`
+  pin (a stored proposal judged on the day it was priced); the H1 cases (shortened below the
+  minimum, a cancelled room, an extra removed, the fixed discount on room 1 charged to the cancelled
+  room 2, a change staying above the minimum charging nothing, the refund of a paid booking).
+- *E2E `restrictions-grid.spec.ts` on main:* clearing a cell that did not exist inserted an empty
+  scope-less duplicate, and a site whose table lacked a G-48 column dropped the value silently. A
+  clear now updates or deletes the existing cell (an all-empty cell is deleted, never left), the
+  scope key is computed from the document, and a value the table cannot hold is refused ("run
+  bench migrate"); the spec picks a free night and cleans up, so it can run again on a shared site.
+- Kept by the reviewer: server-only baskets, currency and market mixing, Decimal throughout, the
+  booked-apart refusal, ADR-029's room-1 rule, price locks, step splitting, override gating, the
+  site's day, channel-scope sources, grid tenancy, precedence, p38 and the ARI boundary maths.
+
 ## ADR-058 A sold stay's contract terms are a verified reference; every TEX patch is tested and converts or grants once
 **Context.** G-73 (R-05) and G-76 (R-56).
 - G-73. A reservation's price-locked snapshot is the quote's result. It names its contract

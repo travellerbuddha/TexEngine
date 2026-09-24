@@ -23,6 +23,11 @@ from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
 from kamra.tex.money import ZERO, D, db_dec, from_db, quantize, to_str
+from kamra.tex.pricing import basket as basket_math
+from kamra.tex.pricing import engine
+from kamra.tex.pricing.enums import LineKind
+from kamra.tex.pricing.explain import Explanation
+from kamra.tex.pricing.model import RuleRef
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 from kamra.tex.security.capabilities import WEB_CHANNELS
@@ -305,12 +310,26 @@ def _record_revision(reservation: str, booking: str | None, *, change_type: str,
 
 
 def room_basket(result: dict) -> D:
-	"""A priced room's basket (G-84): recorded with its price; a price recorded before G-84 has
-	its accommodation before promotions and its extras."""
+	"""A priced room's basket (G-84): recorded with its price. A price recorded before G-84 has
+	its accommodation before promotions and its extras — less the extras added after booking,
+	which its totals include and a basket never counts (review L4)."""
 	if result.get("basket") not in (None, ""):
 		return D(result["basket"])
 	t = result.get("totals") or {}
-	return D(t.get("accommodation_gross") or 0) + D(t.get("extras") or 0)
+	added = sum((D(((a.get("quote") or {}).get("totals") or {}).get("extras")) for a in result.get("addons") or []
+	             if isinstance(a, dict)), ZERO)
+	return D(t.get("accommodation_gross")) + D(t.get("extras")) - added
+
+
+def basket_terms(result: dict) -> list[dict]:
+	"""The promotions with a minimum basket a priced room is eligible for (``engine.BasketTerm``).
+	A price recorded before the G-84 review has none: a promotion it was granted, or refused for
+	its basket, stands for one (with no forfeit recorded, so nothing is ever charged for it)."""
+	if isinstance(result.get("minimum_baskets"), list):
+		return result["minimum_baskets"]
+	return [{"promo_id": p["promo_id"], "name": p.get("name"), "minimum": p.get("minimum") or "0",
+	         "applied": bool(p.get("applied"))} for p in result.get("promotions") or []
+	        if p.get("applied") or p.get("rule") == "MIN_BASKET"]
 
 
 BASKET_NOT_TOGETHER = "The rooms of this booking were not priced together, and a promotion's minimum basket is " \
@@ -318,44 +337,126 @@ BASKET_NOT_TOGETHER = "The rooms of this booking were not priced together, and a
 
 
 def check_booking_basket(rooms: list[tuple[dict, dict]]) -> None:
-	"""G-84 (ADR-057): a minimum basket is the whole booking's, so a booking is sold only at the
-	price its rooms have together. ``rooms``: (request, priced result) of each room.
+	"""G-84 (ADR-057): a minimum basket is the booking's, so a booking is sold only at the price
+	its rooms have together. ``rooms``: (request, priced result) of each room.
 
 	A room priced in a booking of several rooms (``quoting.create_quotes``) records that
 	booking's basket and size: it is booked with rooms whose baskets add up to it, never with
 	fewer or others. A room priced alone records none; in a booking of several rooms it is
-	refused when a promotion its own basket missed (``rule`` MIN_BASKET) would qualify on this
-	booking's basket: its rooms must be quoted together."""
+	refused when a promotion its own basket missed (``rule`` MIN_BASKET) would qualify on the
+	baskets of the booking's rooms that promotion covers (review M2): its rooms must be quoted
+	together."""
 	actual = sum((room_basket(result) for _req, result in rooms), ZERO)
-	for req, result in rooms:
+	for req, _result in rooms:
 		recorded = req.get("booking_basket")
-		if recorded not in (None, ""):
-			if D(recorded) != actual or int(req.get("booking_rooms") or 0) != len(rooms):
+		if recorded not in (None, "") and (D(recorded) != actual or int(req.get("booking_rooms") or 0) != len(rooms)):
+			frappe.throw(_(BASKET_NOT_TOGETHER))
+	if len(rooms) < 2:
+		return
+	covered = engine.eligible_baskets((room_basket(r), [t["promo_id"] for t in basket_terms(r)]) for _q, r in rooms)
+	for req, result in rooms:
+		if req.get("booking_basket") not in (None, ""):
+			continue
+		for p in result.get("promotions") or []:
+			if not p.get("applied") and p.get("rule") == "MIN_BASKET" and p.get("minimum") not in (None, "") \
+					and D(p["minimum"]) <= covered.get(p["promo_id"], (actual, 0))[0]:
 				frappe.throw(_(BASKET_NOT_TOGETHER))
-		elif len(rooms) > 1:
-			for p in result.get("promotions") or []:
-				if not p.get("applied") and p.get("rule") == "MIN_BASKET" and p.get("minimum") not in (None, "") \
-						and D(p["minimum"]) <= actual:
-					frappe.throw(_(BASKET_NOT_TOGETHER))
 
 
-def other_rooms_basket(res, currency: str) -> tuple[D, int]:
-	"""(the baskets of the other live rooms of ``res``'s booking in ``currency``, how many): what a
-	change of ``res`` is judged with, besides its own new basket (G-84, ADR-057). Each room counts
-	as it is priced now (its locked snapshot); a room TEX did not price counts for nothing."""
+NOT_LIVE = ("Cancelled", "No Show")
+
+
+def live_rooms(res, currency: str, *, live: bool = True) -> list[tuple[str, dict]]:
+	"""The other live rooms of ``res``'s booking TEX priced in ``currency``, with their locked
+	snapshots: what a change of ``res`` is judged with (G-84, ADR-057). A room a channel priced,
+	or TEX did not price, counts for nothing. ``live=False``: the other rooms that are no longer
+	live (cancelled, no-show) instead."""
 	if not res.get("tex_booking"):
-		return ZERO, 0
+		return []
 	rows = frappe.get_all("Reservation", filters={"tex_booking": res.tex_booking, "name": ("!=", res.name),
-	                                              "status": ("not in", ["Cancelled", "No Show"])},
-	                      fields=["tex_pricing_snapshot"], order_by="name asc")
-	total, n = ZERO, 0
+	                                              "status": ("not in" if live else "in", list(NOT_LIVE))},
+	                      fields=["name", "tex_pricing_snapshot"], order_by="name asc")
+	out = []
 	for r in rows:
 		snap = json.loads(r.tex_pricing_snapshot or "{}")
-		if not snap.get("contract") or snap.get("source") == "channel" or snap.get("currency") != currency:
-			continue
-		total += room_basket(snap)
-		n += 1
-	return total, n
+		if snap.get("contract") and snap.get("source") != "channel" and snap.get("currency") == currency:
+			out.append((r.name, snap))
+	return out
+
+
+def booked_room(name: str, snap: dict) -> basket_math.BookedRoom:
+	"""A priced room as the booking's basket sees it: its basket, its promotions with a minimum
+	and what it carries for the other rooms (its ``basket_clawback``, review H1)."""
+	carried = {e["promo_id"]: basket_math.Carried(D(e["amount"]), D(e.get("net") or e["amount"]), D(e.get("tax")))
+	           for e in (snap.get("basket_clawback") or {}).get("promotions") or []}
+	return basket_math.BookedRoom(name, room_basket(snap), tuple(basket_math.Term.from_dict(t)
+	                                                            for t in basket_terms(snap)), carried)
+
+
+def booking_others(res, currency: str) -> engine.BookingOthers:
+	"""The other live rooms of ``res``'s booking as they are priced now (their locked snapshots):
+	their baskets, and per promotion the baskets of those it covers (G-84 and its review M2)."""
+	rooms = [booked_room(n, s) for n, s in live_rooms(res, currency)]
+	return engine.BookingOthers(sum((r.basket for r in rooms), ZERO), len(rooms),
+	                            engine.eligible_baskets((r.basket, [t.promo_id for t in r.terms]) for r in rooms))
+
+
+def basket_clawback(res, new: dict | None, currency: str) -> basket_math.Clawback:
+	"""What ``res`` carries for the other live rooms of its booking once it is priced as ``new``
+	(a change), or cancelled (``new`` None): the discounts those rooms were granted only on the
+	booking's basket and no longer earn, less what another room carries already (G-84 review H1,
+	``basket.clawback``). The other rooms keep their locked price."""
+	others = [booked_room(n, s) for n, s in live_rooms(res, currency)]
+	# a cancelled room's charge carried its share for the others: it counts, its basket does not
+	settled = [booked_room(n, s) for n, s in live_rooms(res, currency, live=False) if s.get("basket_clawback")]
+	old = json.loads(res.tex_pricing_snapshot or "{}")
+	before = booked_room(res.name, old) if old.get("contract") else None
+	changed = booked_room(res.name, {k: v for k, v in new.items() if k != "basket_clawback"}) \
+		if new is not None else None
+	return basket_math.clawback(others, changed, currency, before=before, settled=settled)
+
+
+CLAWBACK_CODE = "BASKET_CLAWBACK"
+
+
+def carried(snap: dict) -> D:
+	"""What a room's price carries for the other rooms of its booking (review H1)."""
+	return D((snap.get("basket_clawback") or {}).get("amount"))
+
+
+def with_clawback(q: dict, claw: basket_math.Clawback) -> dict:
+	"""``q`` (a priced room, dict) carrying ``claw``: an explicit line before the taxes, its
+	totals, an explanation step per promotion and the record (``basket_clawback``) the next change
+	of any room of the booking reads. Unchanged when there is nothing to carry."""
+	if not claw.promotions:
+		return q
+	q = dict(q)
+	ccy = claw.currency
+	lines = list(q.get("lines") or [])
+	at = next((i for i, ln in enumerate(lines) if ln.get("kind") == "TAX"), len(lines))
+	names = ", ".join(p["name"] for p in claw.promotions)
+	text = (f"Minimum basket no longer reached ({names}): discount of the other rooms" if claw.amount > 0
+	        else f"Minimum basket ({names}): charged on another room, credited")
+	lines.insert(at, {"kind": LineKind.BASKET.value, "code": CLAWBACK_CODE, "description": text, "amount": to_str(claw.amount),
+	                  "quantity": "1", "category": "ACCOMMODATION", "included": False, "ref": None})
+	q["lines"] = lines
+	t = dict(q.get("totals") or {})
+	t["total"] = to_str(D(t.get("total")) + claw.amount)
+	t["subtotal"] = to_str(D(t.get("subtotal")) + claw.net)
+	t["tax_added"] = to_str(D(t.get("tax_added")) + claw.amount - claw.net)
+	t["tax"] = to_str(D(t.get("tax")) + claw.tax)
+	t["basket_clawback"] = to_str(claw.amount)
+	if "margin" in t:                       # revenue of this room, before tax: the hotel's, like the discount was
+		t["margin"] = to_str(D(t["margin"]) + claw.net)
+	q["totals"] = t
+	if isinstance(q.get("explanation"), list):
+		ex = Explanation()
+		for p in claw.promotions:
+			ex.add("booking", CLAWBACK_CODE, "{text}", after=D(p["amount"]), currency=ccy, text=p["text"],
+			       rule=RuleRef("promotion", p["promo_id"], None, "", p["name"]))
+		q["explanation"] = [*q["explanation"], *ex.to_list()]
+	q["basket_clawback"] = claw.to_dict()
+	return q
 
 
 def reservation_amounts(result: dict) -> dict:
@@ -746,7 +847,24 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 # ─── cancel ──────────────────────────────────────────────────────────────
 
 
-def cancellation_penalty(reservation, today=None) -> tuple[D, dict]:
+def cancellation_penalty(reservation, today=None, *, basket: bool = True) -> tuple[D, dict]:
+	"""What cancelling the room costs now: the rate's cancellation terms on the room's own price
+	and — ``basket`` — what the room carries for the other rooms of its booking once it is gone
+	(``basket_clawback``: the discount they keep but no longer earn; review H1), explained in the
+	basis. A room that carried such a discount for the others passes it on, or has it credited when
+	it is no longer owed; the charge is then below the rate's penalty, and may be a credit."""
+	pen, basis = _policy_penalty(reservation, today)
+	snap = json.loads(reservation.tex_pricing_snapshot or "{}")
+	if basket and snap.get("contract") and reservation.get("tex_booking") and snap.get("source") != "channel":
+		ccy = reservation.tex_currency or snap.get("currency") or "EUR"
+		claw = basket_clawback(reservation, None, ccy)
+		if claw.promotions:
+			pen = quantize(pen + claw.amount, ccy)
+			basis = {**basis, "basket_clawback": claw.to_dict()}
+	return pen, basis
+
+
+def _policy_penalty(reservation, today=None) -> tuple[D, dict]:
 	snap = json.loads(reservation.tex_pricing_snapshot or "{}")
 	if not snap:
 		# a stay TEX did not price (imported, legacy): the hotel's own policy on its locked
@@ -755,7 +873,8 @@ def cancellation_penalty(reservation, today=None) -> tuple[D, dict]:
 
 		return hotel_policy_penalty(reservation, today)
 	ccy = reservation.tex_currency or snap.get("currency") or "EUR"
-	total = from_db(reservation.tex_total_amount or reservation.amount_after_tax, ccy)
+	# the room's own price: what it carries for the other rooms is settled by ``basket_clawback``
+	total = from_db(reservation.tex_total_amount or reservation.amount_after_tax, ccy) - carried(snap)
 	rp = snap.get("rate_plan") or {}
 	policy = rp.get("cancellation_policy")
 	today = getdate(today or now_datetime())
@@ -798,10 +917,22 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	if not (reason or "").strip():
 		frappe.throw(_("A cancellation reason is required."))
 	penalty, basis = cancellation_penalty(res)
+	claw = basis.get("basket_clawback")
 	if waive_penalty:
+		# the rate's penalty is waived; what the room carries for the other rooms is the price of
+		# the discount they keep, not a penalty (G-84 review H1)
 		scope.require("price.override", res.property)
-		penalty = ZERO
+		penalty = D(claw["amount"]) if claw else ZERO
 	old_amount = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")
+	snap = json.loads(res.tex_pricing_snapshot or "{}")
+	if claw or snap.get("basket_clawback"):
+		# what the room carries for the others is now its cancellation charge's: the next change of
+		# any room of the booking reads it there (G-84 review H1)
+		if claw:
+			snap["basket_clawback"] = claw
+		else:
+			snap.pop("basket_clawback", None)
+		res.tex_pricing_snapshot = json.dumps(snap, sort_keys=True, ensure_ascii=False)
 	frappe.flags.kamra_cancelling = True
 	frappe.flags.kamra_status_transition = True
 	try:
@@ -820,6 +951,9 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	                 changes={"status": [res.get_doc_before_save().status if res.get_doc_before_save() else None,
 	                                     "Cancelled"], "penalty": to_str(penalty), "policy": basis},
 	                 source=source)
+	if claw:
+		audit("reservation.basket_clawback", reference_doctype="Reservation", reference_name=res.name,
+		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
 		_refresh_booking_after_change(res.tex_booking)
 	# a guest's change still waiting for this room is void; a payment of it arriving later is

@@ -4,6 +4,7 @@ loyalty, abandoned-booking detection, reports and tenant isolation."""
 
 import json
 from datetime import timedelta
+from unittest import mock
 
 import frappe
 from frappe.utils import add_to_date, get_datetime, now_datetime
@@ -21,7 +22,7 @@ from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.pricing.model import Unsellable
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
-from kamra.tex.services import booking, modification
+from kamra.tex.services import booking, modification, quoting
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 
@@ -609,18 +610,130 @@ class TestBookingBasket(TexTestCase):
 		self.assertTrue(up["sellable"], up["warnings"])
 		self.assertEqual(up["new_total"], "770.40")                      # 856.00 alone, less 10 % with room 1
 
-	def test_a_change_below_the_minimum_loses_the_discount_on_the_changed_room_only(self):
+	def test_a_change_below_the_minimum_charges_the_changed_room_the_discount_the_others_keep(self):
+		# review H1: room 2 shortened takes the booking below 1 100 (802.50 + 214.00 = 1 016.50); room 1
+		# keeps its locked 722.25, so room 2 carries the 80.25 room 1 no longer earns
 		self._big(minimum=1100)
 		b = self._booked("g84-drop")
-		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent shortens room 2
 		room1, room2 = (r["reservation"] for r in b["rooms"])
-		p = modification.propose(room2, {"check_out": str(fx.d(6, 12))})   # 802.50 + 214.00 = 1 016.50
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest sees it before confirming
+		up = public.manage_propose(token=b["manage_token"], reservation=room2, changes={"check_out": str(fx.d(6, 12))})
+		self.assertEqual((up["new_total"], up["basket_clawback"]["amount"]), ("294.25", "80.25"))
+		self.assertEqual([(ln["kind"], ln["amount"]) for ln in up["lines"] if ln["kind"] == "BASKET"],
+		                 [("BASKET", "80.25")])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent shortens room 2
+		p = modification.propose(room2, {"check_out": str(fx.d(6, 12))})
 		code = next(x for x in p["proposed"]["promotions"] if x["code"] == "BIG")
 		self.assertFalse(code["applied"])
 		self.assertIn("booking basket 1016.50 EUR (2 rooms)", code["reason"])
-		modification.apply(p["proposal_token"], reason="leaves a day early")
-		self.assertEqual(D(frappe.db.get_value("Reservation", room2, "tex_total_amount")), D("214.00"))
+		self.assertEqual((p["proposed"]["totals"]["total"], p["proposed"]["totals"]["basket_clawback"]),
+		                 ("294.25", "80.25"))
+		(promo,) = p["basket_clawback"]["promotions"]
+		self.assertEqual((promo["name"], promo["minimum"], promo["basket_before"], promo["basket_after"]),
+		                 ("Code BIG", "1100.00", "1123.50", "1016.50"))
+		self.assertEqual(promo["rooms"], [{"reservation": room1, "amount": "80.25"}])
+		step = next(x for x in p["proposed"]["explanation"] if x["code"] == "BASKET_CLAWBACK")
+		self.assertIn("80.25", step["text"])
+		out = modification.apply(p["proposal_token"], reason="leaves a day early")
+		self.assertEqual(D(frappe.db.get_value("Reservation", room2, "tex_total_amount")), D("294.25"))
 		self.assertEqual(D(frappe.db.get_value("Reservation", room1, "tex_total_amount")), D("722.25"))  # locked
+		# the booking costs what its rooms cost without the promotion they no longer earn
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D("1016.50"))
+		changes = json.loads(frappe.db.get_value("TEX Reservation Revision", out["revision"], "changes_json"))
+		self.assertEqual(changes["basket_clawback"]["amount"], "80.25")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "reservation.basket_clawback",
+		                                                     "reference_name": room2}))
+		# changed again, still below: charged once, never twice
+		again = modification.propose(room2, {"adults": 1, "check_out": str(fx.d(6, 12))})
+		self.assertEqual(again["proposed"]["totals"]["total"], "294.25")
+
+	def test_cancelling_a_room_charges_the_discount_the_other_rooms_keep(self):
+		from kamra.tex.api import crs as crs_api
+
+		self._big(minimum=1100)
+		b = self._booked("g84-cancel")
+		room1, room2 = (r["reservation"] for r in b["rooms"])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest sees the fee before cancelling
+		view = public.booking_status(token=b["manage_token"])["rooms"]
+		self.assertEqual([r["cancellation_fee_now"] for r in view], ["32.10", "80.25"])   # free cancellation else
+		self.assertEqual(view[1]["cancellation_basket"]["promotions"][0]["basket_after"], "802.50")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent cancels room 2
+		pre = crs_api.cancellation_preview(room2)
+		self.assertEqual((pre["penalty"], pre["basis"]["basket_clawback"]["amount"]), ("80.25", "80.25"))
+		# waiving the rate's penalty does not waive the discount the other room keeps
+		out = booking.cancel_reservation(room2, reason="one room is enough", waive_penalty=True)
+		self.assertEqual(out["penalty"], "80.25")
+		self.assertEqual(D(frappe.db.get_value("Reservation", room1, "tex_total_amount")), D("722.25"))  # locked
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D("802.50"))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "reservation.basket_clawback",
+		                                                     "reference_name": room2}))
+		# room 1 cancelled too: no room keeps the discount, and what room 2 paid for it comes back
+		self.assertEqual(booking.cancel_reservation(room1, reason="plans changed")["penalty"], "-80.25")
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D("0"))
+
+	def test_removing_an_extra_the_basket_counted_charges_the_other_rooms_discount(self):
+		self._big(minimum=1150)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor adds a transfer to room 1
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2, "children": [8]}, {"adults": 1}], market="DE", promo_code="BIG",
+		                    session_id="g84-extra")
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		offer = next(o for o in res["properties"][0]["offers"]
+		             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
+		rooms = sorted(offer["rooms"], key=lambda r: r["room_index"])
+		out = public.quote_rooms(site=SLUG, rooms=[{"offer_key": rooms[0]["offer_key"],
+		                                            "extras": [{"code": "TRF", "quantity": 1}]},
+		                                           {"offer_key": rooms[1]["offer_key"], "extras": []}],
+		                         promo_code="BIG", session_id="g84-extra")
+		self.assertEqual(self._discounts(out["rooms"]), [D("80.25"), D("32.10")])     # 842.50 + 321.00 ≥ 1 150
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in out["rooms"]], guest=GUEST,
+		                payment_method="Pay at Hotel", session_id="g84-extra", idempotency_key="idem-g84-extra")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent removes the transfer
+		p = modification.propose(b["rooms"][0]["reservation"], {"extras": []})
+		self.assertEqual((p["proposed"]["totals"]["total"], p["basket_clawback"]["amount"]), ("834.60", "32.10"))
+
+	def test_a_fixed_discount_granted_on_room_1_is_charged_to_the_cancelled_room(self):
+		# 50 off from 1 000, once per booking on room 1; room 2, with no discount of its own, is cancelled
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager sets up the code
+		doc = policy_api.save_record("TEX Promotion", {
+			"promotion_name": "Coupon FIFTY", "property": fx.PROPERTY, "trigger": "Code", "code": "FIFTY",
+			"value_type": "FIXED_STAY", "value": 50, "currency": "EUR", "applies_to": "TOTAL", "min_basket": 1000})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		quotes, _offer = two_rooms_quoted_together("g84-fifty", code="FIFTY")
+		self.assertEqual(self._discounts(quotes), [D("50.00"), D("0")])
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST,
+		                payment_method="Pay at Hotel", session_id="g84-fifty", idempotency_key="idem-g84-fifty")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent cancels room 2
+		out = booking.cancel_reservation(b["rooms"][1]["reservation"], reason="one room is enough")
+		self.assertEqual(out["penalty"], "50.00")
+
+	def test_a_change_that_keeps_the_booking_above_the_minimum_charges_nothing(self):
+		self._big(minimum=1000)
+		b = self._booked("g84-above")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent shortens room 2
+		p = modification.propose(b["rooms"][1]["reservation"], {"check_out": str(fx.d(6, 12))})   # 1 016.50
+		self.assertEqual(p["proposed"]["totals"]["total"], "192.60")
+		self.assertIsNone(p["basket_clawback"])
+		self.assertNotIn("BASKET", [ln["kind"] for ln in p["proposed"]["lines"]])
+
+	def test_every_room_of_a_booking_records_it(self):
+		# review L3: each room qualifies alone (no second pass), and still records the booking
+		promo = self._big(minimum=300)
+		quotes, _offer = two_rooms_quoted_together("g84-record", code="BIG")
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST,
+		                payment_method="Pay at Hotel", session_id="g84-record", idempotency_key="idem-g84-record")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was sold
+		snap = json.loads(frappe.db.get_value("Reservation", b["rooms"][1]["reservation"], "tex_pricing_snapshot"))
+		req = snap["request"]
+		self.assertEqual((req.get("booking_basket"), req.get("booking_rooms"), req.get("booking_baskets")),
+		                 ("1123.500000", 2, {promo: {"basket": "1123.500000", "rooms": 2}}))
+
+	def test_an_old_snapshot_does_not_count_extras_added_after_booking(self):
+		# review L4: a price recorded before G-84 has no basket; its totals include the add-ons
+		snap = {"totals": {"accommodation_gross": "802.50", "extras": "100.00"},
+		        "addons": [{"id": "A1", "quote": {"totals": {"extras": "60.00"}}}]}
+		self.assertEqual(booking.room_basket(snap), D("842.50"))
 
 	def test_a_change_is_judged_with_the_other_rooms_of_the_booking(self):
 		# each room qualifies alone (802.50 and 321.00 ≥ 300) and is booked with the discount; room 2
@@ -662,6 +775,83 @@ class TestBookingBasket(TexTestCase):
 		b = crs_api.book(quote_ids=[q["quote_id"] for q in out["rooms"]], guest=dict(GUEST),
 		                 payment_method="Pay at Hotel")
 		self.assertEqual(D(b["total"]), D("1011.15"))
+
+
+class TestBasketReviewInputs(TexTestCase):
+	"""G-84 review M1 and L2: the hotel's "from" price is a price that can be booked, and the
+	rooms quoted together are checked for their shape and count as quotes each."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def _promo(self, name: str, **kw) -> str:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager sets up the promotion
+		doc = policy_api.save_record("TEX Promotion", {"promotion_name": name, "property": fx.PROPERTY,
+		                                               "trigger": "Automatic", "value_type": "PERCENT",
+		                                               "applies_to": "ACCOMMODATION", "currency": "EUR", **kw})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		return doc["name"]
+
+	def test_the_from_price_is_the_price_the_rooms_book_at_together(self):
+		# review M1: 5 % exclusive from 1 000 replaces 15 % once the two rooms are priced together,
+		# so the rooms cost more together than alone: the "from" price is the price together
+		self._promo("Five from 1000", value=5, min_basket=1000, exclusive=1, priority=10)
+		self._promo("Fifteen", value=15, priority=1)
+		from kamra.tex.tests.integration.test_critical_journey import search_std
+
+		prop = search_std(fx.d(6, 10), fx.d(6, 13), [{"adults": 2, "children": [8]}, {"adults": 1}], internal=True)
+		together = min(D(o["total"]) for o in prop["offers"] if o["complete"] and o["available"] >= 2)
+		self.assertEqual(D(prop["from_total"]), together)
+		cheapest = next(o for o in prop["offers"] if D(o["total"]) == together)
+		fifteen = [x for r in cheapest["rooms"] for x in r["quote"]["promotions"] if x["name"] == "Fifteen"]
+		self.assertTrue(fifteen and not any(x["applied"] for x in fifteen))            # excluded together
+
+	def test_the_from_price_needs_that_many_rooms_free(self):
+		dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})   # 2 rooms
+		ci, co = fx.d(6, 10), fx.d(6, 13)
+		out = quoting.search_property(fx.PROPERTY, check_in=ci, check_out=co,
+		                              parties=quoting.parse_rooms([{"adults": 1}] * 3, arrival=ci), market="DE",
+		                              channel="DIRECT_WEB", currency="EUR", room_type=dlx)
+		self.assertTrue(out["offers"])
+		self.assertEqual((out["from_total"], out["from_currency"]), (None, None))
+
+	def test_rooms_that_are_not_rooms_are_refused_cleanly(self):
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- an API client sends junk
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)), rooms=[{"adults": 2}],
+		                    market="DE", session_id="l2-junk")
+		key = res["properties"][0]["offers"][0]["rooms"][0]["offer_key"]
+		for junk in ([1, 2], ["x"], [{"offer_key": 5}], [{"offer_key": key, "extras": ["TRF"]}],
+		             [{"offer_key": key, "extras": [{"code": "TRF", "quantity": [1]}]}],
+		             [{"offer_key": key, "extras": [{"code": "TRF", "service_dates": "2027-06-10"}]}],
+		             {"offer_key": key}, "[1]"):
+			with self.subTest(junk=junk), self.assertRaises(frappe.ValidationError):
+				public.quote_rooms(site=SLUG, rooms=junk, session_id="l2-junk")
+		with self.assertRaises(frappe.ValidationError):
+			public.quote(site=SLUG, offer_key=key, extras=[7], session_id="l2-junk")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the call centre sends junk too
+		with self.assertRaises(frappe.ValidationError):
+			crs_quote_rooms([1])
+
+	def test_each_room_quoted_together_counts_as_a_quote(self):
+		ip = f"198.51.100.{frappe.generate_hash(length=4)}"
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a visitor quoting eight rooms at a time
+		rooms = [{"offer_key": f"junk-{i}", "extras": []} for i in range(8)]
+		with mock.patch.object(public, "_visitor_ip", return_value=ip), \
+				mock.patch.dict(public.WRITE_LIMIT, {"limit": lambda: 20}):
+			for _ in range(2):                                 # 16 of 20: refused as offers, not by the limit
+				with self.assertRaises(frappe.ValidationError) as e:
+					public.quote_rooms(site=SLUG, rooms=rooms, session_id="l2-rate")
+				self.assertNotIsInstance(e.exception, frappe.RateLimitExceededError)
+			with self.assertRaises(frappe.RateLimitExceededError):
+				public.quote_rooms(site=SLUG, rooms=rooms, session_id="l2-rate")
+		frappe.cache.delete(frappe.cache.make_key(f"rl:tex.public.rooms_quoted:{ip}:600"))
+
+
+def crs_quote_rooms(rooms):
+	from kamra.tex.api import crs as crs_api
+
+	return crs_api.quote_rooms(rooms=rooms)
 
 
 class TestCouponLimits(TexTestCase):

@@ -241,13 +241,19 @@ def bulk_update(property: str, start, end, *, room_types: list[str], weekdays: l
 				vals = {"property": property, "room_type": rt, "contract": contract, "market": market,
 				        "rate_plan": rate_plan, "sales_channel": channel, "channel_scope": channel_scope,
 				        "restriction_date": d}
-				key = scope_key(vals)
-				name = frappe.db.get_value("TEX ARI Restriction", {"scope_key": key})
+				# the key the cell's controller stores (the same function, on the same values): a set
+				# or a clear finds the cell of this exact scope, whatever set it
+				name = frappe.db.get_value("TEX ARI Restriction", {"scope_key": scope_key(vals)})
+				if name is None and all(not v for v in changes.values()):
+					# a clear where no cell is set: nothing to clear, and no empty cell is written
+					cells.append((f"{rt or '*'}{SEP}{d}", _blank_restriction(changes), changes))
+					continue
 				doc = frappe.get_doc("TEX ARI Restriction", name) if name else frappe.get_doc(
 					{"doctype": "TEX ARI Restriction", **vals})
 				old = {f: doc.get(f) for f in changes} if name else _blank_restriction(changes)
 				doc.update(changes)
 				if name and all(not doc.get(f) for f in RESTRICTION_EDIT):
+					# every restriction of the cell blank: the cell goes (never left behind empty)
 					frappe.delete_doc("TEX ARI Restriction", name, ignore_permissions=True)
 				else:
 					doc.save(ignore_permissions=True) if name else doc.insert(ignore_permissions=True)

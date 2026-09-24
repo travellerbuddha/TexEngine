@@ -96,6 +96,8 @@
   "few": "{count} camere"
  },
  "res.booking.title": "Dosar de rezervare {name}",
+ "res.cancel.basket": "Include {amount}: reducerea pe care o păstrează celelalte camere ({promotion}, coș minim {minimum}). Nu se anulează odată cu penalizarea.",
+ "res.cancel.basket_credit": "Include un credit de {amount}: perceput anterior pe altă cameră pentru {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. Rezervarea este eliberată și penalizarea de mai jos este înregistrată.",
  "res.cancel.button": "Anulează rezervarea",
  "res.cancel.confirm": "Anulează rezervarea",

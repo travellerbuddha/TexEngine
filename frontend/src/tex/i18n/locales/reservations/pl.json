@@ -102,6 +102,8 @@
   "many": "{count} pokoi"
  },
  "res.booking.title": "Zamówienie {name}",
+ "res.cancel.basket": "Obejmuje {amount}: rabat, który zachowują pozostałe pokoje ({promotion}, minimalny koszyk {minimum}). Nie jest umarzany razem z opłatą.",
+ "res.cancel.basket_credit": "Obejmuje zwrot {amount}: naliczony wcześniej na innym pokoju za {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. Rezerwacja zostanie zwolniona, a poniższa opłata zapisana.",
  "res.cancel.button": "Anuluj rezerwację",
  "res.cancel.confirm": "Anuluj rezerwację",

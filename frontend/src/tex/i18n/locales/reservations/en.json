@@ -90,6 +90,8 @@
   "other": "{count} rooms"
  },
  "res.booking.title": "Booking {name}",
+ "res.cancel.basket": "Includes {amount}: the discount the other rooms keep ({promotion}, minimum basket {minimum}). Not waived with the penalty.",
+ "res.cancel.basket_credit": "Includes a credit of {amount}: charged earlier on another room for {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. The reservation is released and the penalty below is recorded.",
  "res.cancel.button": "Cancel reservation",
  "res.cancel.confirm": "Cancel reservation",
