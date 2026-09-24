@@ -254,15 +254,19 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 							room_reasons.extend({"room_index": idx} | dict(r) for r in q.reasons)
 							continue
 						priced.append((idx, party, req, q))
+					alone = {i: q.total for i, _pa, _r, q in priced}      # each room priced on its own
 					if len(priced) == len(parties):
-						# every room in this offer: priced as one booking, so a minimum basket is the
-						# booking's (G-84, ADR-057); the quote step prices the rooms chosen together
-						total = engine.booking_pass([q for *_x, q in priced])
-						if total is not None:
-							again = [(i, pa, engine.in_booking(r, total, len(priced))) for i, pa, r, _q in priced]
-							quotes = [engine.price_stay(ctx_cache[key], r) for _i, _pa, r in again]
-							if all(q.sellable for q in quotes):
-								priced = [(i, pa, r, q) for (i, pa, r), q in zip(again, quotes, strict=True)]
+						# every requested room in this offer: priced as one booking, so a minimum basket
+						# is the booking's (G-84, ADR-057); the quote step prices the rooms chosen together
+						quotes, _total = engine.price_together([r for _i, _pa, r, _q in priced], [q for *_x, q in priced],
+						                                       lambda _i, r: engine.price_stay(ctx_cache[key], r))
+						kept = []
+						for (i, pa, _r, _q), q in zip(priced, quotes, strict=True):
+							if q.sellable:
+								kept.append((i, pa, q.request, q))
+							else:
+								room_reasons.extend({"room_index": i} | dict(x) for x in q.reasons)
+						priced = kept
 					rooms_out = []
 					for idx, party, req, q in priced:
 						offer = {"v": 1, "property": property, "room_type": rt, "board": board, "rate_plan": rp,
@@ -272,7 +276,7 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						         "member": bool(member), "total": to_str(q.total), "room_index": idx,
 						         "exp": offer_exp.isoformat()}
 						rooms_out.append({"room_index": idx, "offer_key": sign(offer),
-						                  "quote": q.to_dict(internal=internal)})
+						                  "quote": q.to_dict(internal=internal), "_alone": alone[idx]})
 					sellable = bool(rooms_out)
 					complete = len(rooms_out) == len(parties)
 					entry = {
@@ -335,6 +339,9 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	result["offers"].sort(key=lambda o: (not o["complete"], _offer_sort_total(o), o["room_type"], o["board"],
 	                                     o.get("rate_plan") or ""))
 	result["from_total"], result["from_currency"] = _from_total(result["offers"], len(parties))
+	for o in result["offers"] + result["unavailable"]:
+		for r in o["rooms"]:
+			r.pop("_alone", None)
 	unplaced = [i for i in range(len(parties))
 	            if not any(i in o["room_indexes"] for o in result["offers"])]
 	if result["offers"] and unplaced:
@@ -349,9 +356,10 @@ def _offer_sort_total(o: dict):
 
 
 def _from_total(offers: list[dict], n_rooms: int) -> tuple[str | None, str | None]:
-	"""Cheapest way to place every requested room: the cheapest offer of each party,
-	summed (rooms may be of different types) in the currency of the first offer.
-	(None, None) when a party fits nowhere."""
+	"""Cheapest way to place every requested room, in the currency of the first offer, at a price
+	that can be booked: an offer holding every room at its total (priced as one booking, G-84), or
+	the cheapest offer of each party priced on its own, summed (rooms may be of different types:
+	quoted together they can only cost less). (None, None) when a party fits nowhere."""
 	if not offers:
 		return None, None
 	ccy = offers[0]["currency"]
@@ -360,12 +368,13 @@ def _from_total(offers: list[dict], n_rooms: int) -> tuple[str | None, str | Non
 		if o["currency"] != ccy:
 			continue
 		for r in o["rooms"]:
-			t = D(r["quote"]["totals"]["total"])
+			t = D(r["_alone"])
 			if r["room_index"] not in best or t < best[r["room_index"]]:
 				best[r["room_index"]] = t
 	if len(best) < n_rooms:
 		return None, None
-	return to_str(sum(best.values())), ccy
+	whole = [D(o["total"]) for o in offers if o["currency"] == ccy and o.get("complete") and o.get("total")]
+	return to_str(min([sum(best.values()), *whole])), ccy
 
 
 def search(*, properties: list[str], check_in, check_out, rooms, market: str, channel: str,
@@ -444,12 +453,16 @@ def _offer_request(offer_key: str, *, extras, promo_codes, now) -> tuple[dict, S
 	return offer, request_from_offer(offer, sale_at=now, extras=extras_req, promo_codes=promo_codes), extras_req
 
 
-def _on_sale(offer: dict, now) -> tuple[object | None, dict | None]:
+def _on_sale(offer: dict, now, *, refuse: bool = True) -> tuple[object | None, dict | None]:
 	"""(the contract version on sale now, None) or (None, the refusal). The offer's version might
-	have been superseded since the search: quotes always price on the version on sale NOW."""
+	have been superseded since the search: quotes always price on the version on sale NOW.
+	``refuse``: no version on sale is an error (one room's quote), else that room's refusal."""
 	live = contracts.active_version_header(offer["contract"], now)
 	if not live:
-		frappe.throw(_("This rate is no longer on sale — please search again."))
+		if refuse:
+			frappe.throw(_("This rate is no longer on sale — please search again."))
+		return None, {"ok": False, "reasons": [{"code": "NOT_ON_SALE",
+		                                        "message": _("This rate is no longer on sale — please search again.")}]}
 	stopped = contracts.not_on_sale(offer["contract"])        # suspended since the search (ADR-045)
 	if stopped:
 		return None, {"ok": False, "reasons": [{"code": stopped.code, "message": str(stopped)}]}
@@ -533,22 +546,20 @@ def create_quotes(rooms: list[dict], *, promo_codes=None, guest_email: str | Non
 	if len(keys) != 1 or len(set(indexes)) != len(indexes):
 		frappe.throw(_("The rooms of one booking must come from one search. Please search again."))
 	for i in items:
-		i["live"], i["out"] = _on_sale(i["offer"], now)
+		i["live"], i["out"] = _on_sale(i["offer"], now, refuse=False)
 		if i["out"] is None:
 			i["q"], i["terms"] = price_request(i["live"].version_id, i["req"], gkey=gkey)
 			if not i["q"].sellable:
 				i["out"] = {"ok": False, "reasons": i["q"].reasons}
 	total = None
 	if all(i["out"] is None for i in items):
-		total = engine.booking_pass([i["q"] for i in items])
-		if total is not None:
-			again = [price_request(i["live"].version_id, engine.in_booking(i["req"], total, len(items)), gkey=gkey)
-			         for i in items]
-			if all(q.sellable for q, _t in again):
-				for i, (q, t) in zip(items, again, strict=True):
-					i["q"], i["terms"], i["req"] = q, t, q.request
-			else:
-				total = None
+		quotes, total = engine.price_together(
+			[i["req"] for i in items], [i["q"] for i in items],
+			lambda n, r: price_request(items[n]["live"].version_id, r, gkey=gkey)[0])
+		for i, q in zip(items, quotes, strict=True):
+			i["q"], i["req"] = q, q.request
+			if not q.sellable:
+				i["out"] = {"ok": False, "reasons": q.reasons}
 	for i in items:
 		if i["out"] is None:
 			i["out"] = _stay_refusal(i["offer"], i["req"], now) or _persist(

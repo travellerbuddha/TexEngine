@@ -20,7 +20,7 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from kamra.tex.money import HUNDRED, ONE, ZERO, D
+from kamra.tex.money import HUNDRED, ONE, ZERO, D, quantize
 from kamra.tex.pricing.enums import PromoValueType, StackingMode, StayMatch
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import FxSnapshot, Promotion, RuleRef
@@ -131,8 +131,7 @@ def _eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None 
 	bad = invalid_value(p)
 	if bad:
 		return bad, None
-	reason, minimum = _conditions(p, ctx, usage)
-	return reason, minimum
+	return _conditions(p, ctx, usage)
 
 
 def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None
@@ -178,8 +177,8 @@ def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None
 		# the whole booking's basket when the room is priced in a booking of several rooms (G-84)
 		if ctx.booking_basket is not None:
 			if ctx.booking_basket < minimum:
-				return (f"booking basket {ctx.booking_basket} {ctx.sell_currency} ({ctx.booking_rooms} rooms) "
-				        f"below minimum {minimum}", minimum)
+				return (f"booking basket {quantize(ctx.booking_basket, ctx.sell_currency)} {ctx.sell_currency} "
+				        f"({ctx.booking_rooms} rooms) below minimum {minimum}", minimum)
 		elif ctx.basket < minimum:
 			return f"basket {ctx.basket} {ctx.sell_currency} below minimum {minimum}", minimum
 	if usage is not None:

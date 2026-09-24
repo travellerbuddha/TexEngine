@@ -245,20 +245,29 @@ def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[s
 	return pick[1], at, f"contract {pick[0].contract_code} on sale at {at}"
 
 
-def booked_price(res, version: str, req, **kw):
+def booked_price(res, version: str, req, *, others: tuple | None = None, **kw):
 	"""Price a room of a booking again (a change, the simulator): alone, then — when a minimum
-	basket refused a promotion and the booking has other live rooms — with the booking's basket:
-	this room's new basket plus the others' as they are priced now (G-84, ADR-057). Rooms that
-	are not changed keep their locked price; the change is judged on the booking it makes.
-	→ (quote, terms)."""
+	basket refused a promotion and the booking has other rooms — with the booking's basket: this
+	room's new basket plus the others'. ``others`` (their basket, how many): by default the other
+	live rooms as they are priced now — a change is judged on the booking it makes, and rooms that
+	are not changed keep their locked price (G-84, ADR-057). → (quote, terms)."""
 	quote, terms = quoting.price_request(version, req, **kw)
-	others, n = booking_svc.other_rooms_basket(res, quote.currency)
-	again = engine.booking_request(req, quote, others_basket=others, others_rooms=n)
+	total, n = others if others is not None else booking_svc.other_rooms_basket(res, quote.currency)
+	again = engine.booking_request(req, quote, others_basket=total, others_rooms=n)
 	if again is not None:
 		q2, t2 = quoting.price_request(version, again, **kw)
 		if q2.sellable:
 			return q2, t2
 	return quote, terms
+
+
+def recorded_others(snap: dict) -> tuple:
+	"""(basket, how many) of the other rooms of the booking a stay was last priced in, as its
+	snapshot records it (G-84): none when it was priced alone."""
+	req = snap.get("request") or {}
+	if req.get("booking_basket") in (None, ""):
+		return D(0), 0
+	return D(req["booking_basket"]) - booking_svc.room_basket(snap), int(req.get("booking_rooms") or 1) - 1
 
 
 def restriction_violations(res, snap: dict, req, contract: str | None, sale_date) -> list:
@@ -654,7 +663,8 @@ def simulate(reservation: str, sale_at) -> dict:
 	  and its frozen payload and selling terms (G-50);
 	- markups, promotions and their limits, extras, the tax policy, FX policies and rates (G-20);
 	- coupon uses held then: made by then and not given back by then, this booking's own excluded.
-	The stay itself is the reservation's (its request, channel and guest). Not checked:
+	The stay itself is the reservation's (its request, channel and guest), and so is its booking: a minimum
+	basket is judged with the other rooms as recorded with the stay (G-84). Not checked:
 	availability, restrictions and the capacity of limited extras (the stay is sold already).
 	``sale_at`` must be a valid time, not in the future; ``price.view`` and ``reservation.view``
 	at the hotel (it writes nothing: pricing a change as of a past time needs ``price.override``)."""
@@ -671,9 +681,11 @@ def simulate(reservation: str, sale_at) -> dict:
 		return {"sellable": False, "simulated_sale_at": str(at),
 		        "reasons": [{"code": "NO_CONTRACT", "message": _("No contract was on sale at that time.")}]}
 	pick = next((c for c in cands if c[0].name == snap["contract"]["contract"]), cands[0])
-	# a minimum basket is the booking's: with the other rooms as they are priced now (G-84)
-	quote, _terms = booked_price(res, pick[1], req, exclude_booking=res.tex_booking, check_capacity=False,
-	                             gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest), usage_at=at)
+	# a minimum basket is the booking's: with the other rooms as recorded with this stay when it was
+	# last priced, not as they are now, so the answer for a past moment never changes (G-51, G-84)
+	quote, _terms = booked_price(res, pick[1], req, others=recorded_others(snap), exclude_booking=res.tex_booking,
+	                             check_capacity=False, gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+	                             usage_at=at)
 	internal = scope.has_capability("price.view_cost", res.property)
 	actual = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")
 	return {

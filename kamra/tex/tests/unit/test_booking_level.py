@@ -6,7 +6,7 @@ import unittest
 from decimal import Decimal
 
 from kamra.tex.pricing import engine, serialize
-from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, PromoAppliesTo, PromoValueType
+from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, PromoAppliesTo, PromoStage, PromoValueType
 from kamra.tex.pricing.model import ExtraDef, ExtraRequest, FxSnapshot, Promotion
 from kamra.tex.tests.unit import fixtures as fx
 
@@ -214,7 +214,18 @@ class TestBookingBasket(unittest.TestCase):
 		b = engine.price_booking(self.rooms([self.promo()]))
 		self.assertEqual([q.explanation.to_list() for q in a], [q.explanation.to_list() for q in b])
 		self.assertEqual(serialize.request_from_dict(serialize.request_to_dict(a[1].request)), a[1].request)
-		self.assertEqual(a[1].to_dict()["basket"], "100.00")
+		self.assertEqual(a[1].to_dict()["basket"], "100.000000")               # recorded to 6 places
+
+	def test_a_cost_stage_minimum_stays_the_rooms_own(self):
+		# a contract offer on the supplier cost (contract currency) is never judged on the booking
+		offer = Promotion("CO", "Cost offer", PromoValueType.PERCENT, D("5"), min_basket=D("250"),
+		                  stage=PromoStage.COST)
+		rooms = self.rooms([offer])
+		alone = [engine.price_stay(c, r) for c, r in rooms]
+		out = next(p for p in alone[0].promotions if p.promo_id == "CO")
+		self.assertFalse(out.applied)
+		self.assertEqual((out.rule, engine.basket_limited(alone[0])), ("", False))
+		self.assertEqual([q.request.booking_basket for q in engine.price_booking(rooms)], [None, None])
 
 
 if __name__ == "__main__":

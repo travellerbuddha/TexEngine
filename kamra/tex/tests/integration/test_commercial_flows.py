@@ -550,7 +550,7 @@ class TestBookingBasket(TexTestCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was sold
 		snap = json.loads(frappe.db.get_value("Reservation", b["rooms"][1]["reservation"], "tex_pricing_snapshot"))
 		self.assertEqual((snap["request"]["booking_basket"], snap["request"]["booking_rooms"], snap["basket"]),
-		                 ("1123.50", 2, "321.00"))
+		                 ("1123.500000", 2, "321.000000"))                # recorded to 6 places
 		self.assertTrue(any(s["code"] == "BOOKING_BASKET" for s in snap["explanation"]))
 		reds = frappe.get_all("TEX Promotion Redemption", filters={"promotion": promo}, fields=["amount"])
 		self.assertEqual([D(r.amount) for r in reds], [D("112.35")])             # one use, both rooms' discount
@@ -602,7 +602,7 @@ class TestBookingBasket(TexTestCase):
 		code = next(x for x in p["proposed"]["promotions"] if x["code"] == "BIG")
 		self.assertTrue(code["applied"], code["reason"])
 		self.assertEqual(p["proposed"]["totals"]["total"], "577.80")
-		self.assertEqual(p["proposed"]["request"]["booking_basket"], "1444.50")
+		self.assertEqual(p["proposed"]["request"]["booking_basket"], "1444.500000")
 		modification.apply(p["proposal_token"], reason="second guest")
 		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest extends room 2 on the manage page
 		up = public.manage_propose(token=b["manage_token"], reservation=room2, changes={"check_out": str(fx.d(6, 14))})
@@ -633,6 +633,17 @@ class TestBookingBasket(TexTestCase):
 		code = next(x for x in p["proposed"]["promotions"] if x["code"] == "BIG")
 		self.assertTrue(code["applied"], code["reason"])
 		self.assertEqual(p["proposed"]["totals"]["total"], "192.60")
+
+	def test_the_simulator_judges_the_booking_as_recorded(self):
+		self._big()
+		b = self._booked("g84-sim")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a revenue manager simulates room 2
+		room1, room2 = (r["reservation"] for r in b["rooms"])
+		at = str(now_datetime())
+		first = modification.simulate(room2, at)
+		self.assertEqual(first["simulated"]["totals"]["total"], "288.90")   # 321.00 less 10 %, with room 1
+		booking.cancel_reservation(room1, reason="room 1 no longer needed")
+		self.assertEqual(modification.simulate(room2, at)["simulated"]["totals"]["total"], "288.90")  # the same answer
 
 	def test_the_call_center_quotes_the_rooms_of_a_booking_together(self):
 		from kamra.tex.api import crs as crs_api
