@@ -52,6 +52,8 @@ custom_domains 9, distribution 17, extras_inventory 17, loyalty_admin 7, migrati
 portfolio 2, post_booking_extras 12, public_booking 17, security_regressions 58,
 system_status 12). `system-status.spec.ts` (4) passes.
 
+**G-56 / G-52 (2026-09-24, ADR-051, branch `pricing-g56-g52` merged with main 09a2389).** New tests: unit `test_fx_record` 11 and `test_age_bands` 17 (315 unit tests in total), integration `test_fx_snapshot` 4 and `test_age_bands` 6 (fail-first on the base commit: 8/11, 8/17, 4/4, 4/6). All 21 integration modules OK on the merged branch (admin_markets 4, age_bands 6, commercial_flows 42, concurrency 8, critical_journey 31, crm_segments 7, custom_domains 9, distribution 20, extras_inventory 17, fx_snapshot 4, inventory 31, loyalty_admin 7, migrations_notify 7, portfolio 2, post_booking_extras 12, pricing_policies 14, public_booking 17, security_hygiene 14, security_regressions 59, self_service_money 54, system_status 12); `npx tsc -b`, `vite build`, `npm run i18n:tex`, ruff clean.
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
