@@ -3,7 +3,7 @@
 // admin UI (role/label locators only); the API is used for assertions and clean-up.
 // Helpers take a Page that is already logged in (see ../helpers.ts `login`).
 import { expect, type Locator, type Page } from "@playwright/test"
-import { byLabel, esc, isoDate, pageApi, texPath, uniqueRunId } from "../helpers"
+import { answerOf, byLabel, esc, isoDate, pageApi, texPath, uniqueRunId } from "../helpers"
 
 // shared helpers (moved to ../helpers.ts); re-exported for existing imports
 export { APP_PREFIX, byLabel, isoDate, pageApi, texPath, uniqueRunId } from "../helpers"
@@ -200,18 +200,25 @@ export async function openTab(page: Page, tab: VersionTab): Promise<Locator> {
   return page.getByRole("tabpanel")
 }
 
-/** Save the draft (Ctrl S button) and wait for the server to accept it. */
+/** Save the draft (Ctrl S button) and wait until the editor has taken the server's answer: the
+ * button is out of its busy state and, with nothing left unsaved, disabled. The answer itself is
+ * awaited first: a "Draft saved" toast may still be showing from the previous save (toasts stay
+ * 4.5 s), and a busy Save button is disabled too, so neither alone says this save is done. */
 export async function saveDraft(page: Page) {
   const save = page.getByRole("button", { name: /^Save/ })
   await expect(save).toBeEnabled()
+  const answered = answerOf(page, "kamra.tex.api.contracts.save_version")
   await save.click()
+  const res = await answered
+  if (!res.ok()) throw new Error(`save_version: HTTP ${res.status()} ${(await res.text()).slice(0, 400)}`)
   await expectSuccess(page, "Draft saved")
+  await expect(save).not.toHaveAttribute("aria-busy", "true")
   await expect(save).toBeDisabled()
 }
 
 /** Click a table editor's add button; returns the new row's 1-based number (controls
  * are labelled "<column> <n>"). */
-async function addRow(panel: Locator, addLabel: string, firstColumn: string): Promise<number> {
+export async function addRow(panel: Locator, addLabel: string, firstColumn: string): Promise<number> {
   const before = await panel.getByLabel(new RegExp(`^${esc(firstColumn)} \\d+$`)).count()
   await panel.getByRole("button", { name: addLabel, exact: true }).click()
   const n = before + 1
@@ -219,7 +226,8 @@ async function addRow(panel: Locator, addLabel: string, firstColumn: string): Pr
   return n
 }
 
-const cell = (panel: Locator, column: string, n: number) => byLabel(panel, `${column} ${n}`)
+/** Row `n`'s control in `column` of a table editor. */
+export const cell = (panel: Locator, column: string, n: number) => byLabel(panel, `${column} ${n}`)
 
 /** Rooms tab: add room types (labels as shown, e.g. "Standard Sea View"). The first
  * room added to an empty version becomes the base room. Saves. */

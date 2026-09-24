@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { FilePlus2, Lock, Rocket, RotateCcw, Save, ShieldCheck } from "lucide-react"
 import { tex, TexApiError, useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
+import { overSaved } from "../../../lib/edits"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, ErrorState, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
@@ -61,6 +62,25 @@ export default function VersionEditor() {
   useEffect(() => {
     if (q.data) load(q.data)
   }, [q.data, load])
+  /** A save came back: the saved version becomes the base, and what Discard returns to. What the
+   * user changed while the save was in flight (a setting, a table, the selling terms) stays on top
+   * of it: replacing the editor with the saved copy would drop those edits, and a later save would
+   * then send them away too. */
+  const settle = useCallback((d: VersionDoc, sent: EditorState) => {
+    const saved = stateFromDoc(d)
+    setDoc(d)
+    setBase(fingerprint(saved))
+    setState((cur) =>
+      cur
+        ? {
+            ...saved,
+            settings: overSaved(saved.settings, sent.settings, cur.settings),
+            tables: overSaved(saved.tables, sent.tables, cur.tables),
+            ...(JSON.stringify(cur.selling) !== JSON.stringify(sent.selling) ? { selling: cur.selling } : {}),
+          }
+        : saved,
+    )
+  }, [])
 
   const editable = Boolean(doc?.editable)
   const dirty = Boolean(state && editable && fingerprint(state) !== base)
@@ -82,10 +102,12 @@ export default function VersionEditor() {
   }, [validate])
 
   const onSave = useCallback(async () => {
-    if (!doc || !state || !dirty) return
+    // one save at a time (Ctrl+S while one is in flight waits for the next press)
+    if (!doc || !state || !dirty || save.pending) return
+    const sent = state
     try {
-      const d = await save.run({ name: doc.name, data: payloadOf(state) })
-      load(d)
+      const d = await save.run({ name: doc.name, data: payloadOf(sent) })
+      settle(d, sent)
       toast.success(t("rates.version.saved"))
       setChecking(true)
       tex<ValidationResult>("contracts", "validate_version", { name: d.name })
@@ -95,7 +117,7 @@ export default function VersionEditor() {
     } catch (e) {
       toast.error((e as Error).message)
     }
-  }, [doc, state, dirty, save, load, toast, t])
+  }, [doc, state, dirty, save, settle, toast, t])
 
   // Ctrl/Cmd+S saves; warn before leaving with unsaved edits
   useEffect(() => {
@@ -193,7 +215,7 @@ export default function VersionEditor() {
           doc &&
           (editable ? (
             <>
-              <Button variant="ghost" icon={<RotateCcw className="size-4" aria-hidden />} disabled={!dirty || save.pending} onClick={() => q.data && load(q.data)}>
+              <Button variant="ghost" icon={<RotateCcw className="size-4" aria-hidden />} disabled={!dirty || save.pending} onClick={() => doc && load(doc)}>
                 {t("rates.version.discard")}
               </Button>
               <Button variant="secondary" icon={<ShieldCheck className="size-4" aria-hidden />} loading={checking} disabled={dirty} onClick={() => void validate()} title={dirty ? t("rates.version.save_first") : undefined}>

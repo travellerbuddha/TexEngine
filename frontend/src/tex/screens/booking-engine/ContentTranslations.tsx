@@ -100,14 +100,26 @@ export default function ContentTranslations() {
   }
   const submit = async () => {
     if (!property) return
-    const rows = Object.entries(edits).map(([k, text]) => {
+    const sent = { ...edits }
+    // the stored texts the sent edits replace: a field typed back to one of them while the save is
+    // in flight still means "keep this text", although it no longer shows as an edit
+    const was: Record<string, string> = {}
+    const rows = Object.entries(sent).map(([k, text]) => {
       const [ref_doctype, ref_name, field, language] = k.split("\u001f")
+      const item = q.data?.items.find((i) => i.ref_doctype === ref_doctype && i.ref_name === ref_name)
+      was[k] = item?.translations[language]?.[field] ?? ""
       return { ref_doctype, ref_name, field, language, text }
     })
     try {
       const out = await save.run({ property: property.name, rows })
       toast.success(t("be.content.saved", { count: out.created + out.updated + out.deleted }))
-      setEdits({})
+      // what was sent is saved; what the user typed while the save was in flight stays an edit
+      setEdits((cur) => {
+        const next: Record<string, string> = {}
+        for (const [k, v] of Object.entries(cur)) if (sent[k] !== v) next[k] = v
+        for (const k of Object.keys(sent)) if (!(k in cur)) next[k] = was[k]
+        return next
+      })
       q.reload()
     } catch {
       /* shown inline */

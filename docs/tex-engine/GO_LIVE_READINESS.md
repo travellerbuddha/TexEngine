@@ -353,6 +353,14 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - Refusals name the version that failed. A Redis outage never replaces a refusal, and the
     same refusal is audited once an hour.
   - No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: editor saves (ADR-060 follow-up, branch `fix-editor`, frontend only).
+  - The contract version editor's Discard returns to the last save. Before, it returned to the
+    version as first opened, and the next save silently undid the earlier save.
+  - A save's answer keeps what the user changed while the save was in flight. This covers the
+    version, policy, booking-site, content and loyalty editors.
+  - `contract-admin.spec`'s intermittent failure is explained and fixed: `saveDraft` waits for
+    the save's answer.
+  - No area status changes. Verdict unchanged: NOT READY.
 - 2026-09-24: G-46 review follow-up (ADR-059 review section, branch `fix-reports`, p46).
   - G-98 (High, older than the reports): a cost-stage offer lowers the contract cost, so its
     discount (and a minimum basket compared with the cost) is a cost figure. Guests saw applied
