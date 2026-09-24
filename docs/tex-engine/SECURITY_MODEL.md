@@ -52,6 +52,20 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 - TEX DocTypes are written only through TEX services; business roles have no generic
   Desk/REST write access, and every hotel-bound TEX DocType (incl. parent-scoped ones and
   `Guest`) is read-scoped (ADR-022).
+- **Withheld fields** (ADR-056): pricing internals (`Reservation.tex_pricing_snapshot`,
+  `tex_cost_amount`, `tex_margin_amount`, `tex_fx_rate`, `TEX Quote.result_json`,
+  `TEX Reservation Revision.snapshot_before` / `snapshot_after`) and a guest's stored totals over
+  every tenant (`Guest.tex_stays`, `tex_lifetime_value`, `tex_lifetime_currency`, `tex_last_stay`,
+  `tex_loyalty_points`) are at Frappe permlevel 1, which only System Manager reads. Desk and REST
+  leave them out for every business role and refuse filters, sorting and aggregates on them (a
+  legacy string aggregate is dropped from the query); the
+  change history masks their values and a generic write's response leaves them out
+  (`kamra/tex/security/internals.py`). The TEX API serves pricing internals by `price.view_cost`
+  at the hotel, and guest totals computed over the viewer's hotels and loyalty programs only.
+- **CRM tenancy** (ADR-036, ADR-040, ADR-056): stays, value, extras, cancellations, segment facts and
+  loyalty come from the viewer's hotels; a guest's loyalty shows only the programs that reach the
+  viewer's hotels (their own or their group's), and another hotel's bookings in a shared program
+  only as points.
 - `strict_tenancy` (default on): a non-admin user without any scope sees nothing.
 - Grants sync Frappe `User Permission` (Property, apply to all doctypes). Isolation does not rely
   on them: every hotel-bound TEX DocType and the 53 legacy Kamra DocTypes bound to a hotel by a
@@ -87,7 +101,8 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
 | Open redirect through payment return URLs | Browser-supplied return URLs accepted only for the TEX host or a DNS-verified booking domain (ADR-021) |
 | Custom-domain takeover | `verified` set only by the DNS TXT check; editing a row resets it; a domain can belong to one site only |
 | Group-level records edited from one hotel | Booking sites serving a hotel group need the capability at every hotel of the group |
-| Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with the profile's own consent; an anonymous booking never grants consent on an existing profile, it is recorded as a request (ADR-046) |
+| Marketing without consent (GDPR/KVKK) | Separate consent fields with timestamp/source/text version; transactional ≠ marketing; abandoned-booking contact only with the profile's own consent, and shown only while it holds; an anonymous booking never grants consent on an existing profile, it is recorded as a request (ADR-046); a funnel event keeps an e-mail hash only with the visitor's marketing consent and never keeps contact fields (ADR-056, p37 purged older hashes) |
+| Pricing internals and cross-tenant totals through Desk / REST | Permlevel 1 (System Manager only) on the snapshot, cost, margin, FX rate, quote result, revision snapshots and a guest's stored totals; masked in the change history; left out of a generic write's response; the TEX API serves them by capability and scope (ADR-056) |
 
 ## 5. Logging rules
 Never log passwords, CVV, PAN, secrets or raw tokens. `kamra.tex.security.redact()` scrubs
@@ -112,6 +127,10 @@ the guest's manage token.
   Accepted as designed: audit trail of one reservation readable with `reservation.view`;
   loyalty redemption gated by `payment.link` (bounded to the booking's own guests and the
   program's max-% cap).
+- 2026-09-24 G-65 / G-81 / G-95 (ADR-056): another tenant's loyalty in the guest profile, stored
+  cross-tenant totals served and used as a segment fact, funnel e-mail hashes without consent, and
+  pricing internals readable through Desk / REST (reads, filters, the change history, a write's
+  response) closed with regression tests in `test_crm_privacy`.
 
 ## 7. Known gaps (tracked)
 
@@ -126,6 +145,11 @@ in the path until they expire. The notes below predate that audit.
   the TEX scope through the permission hooks (G-94; before, only the User Permissions that grants
   mirror filtered them, which a user without any row escapes; probed 2026-09-23: a hotel GM reads
   its own POS orders and action logs, not another hotel's).
+- ADR-056 leaves open: `TEX Contract Version` (frozen payload and rate tables, i.e. contract
+  cost) is readable in Desk by the Hotel Admin role at its hotels whatever the granted profile
+  (G-11 covered the TEX API); a group loyalty program's ledger is readable in Desk by the group's
+  Hotel Admins, other hotels' bookings included; no per-hotel legitimate-interest basis for
+  abandoned-booking contact exists (owner/legal decision).
 - iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
   production-verified**; enabling a Production account requires the provider's sandbox
   certification with real merchant credentials.

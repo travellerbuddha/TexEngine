@@ -260,6 +260,7 @@
  "crm.loyalty.col.reason": "Grund",
  "crm.loyalty.col.status": "Status",
  "crm.loyalty.col.type": "Art",
+ "crm.loyalty.other_hotel": "In einem anderen Hotel des Programms",
  "crm.loyalty.direction": "Anpassung",
  "crm.loyalty.empty": "Keine Treueaktivität",
  "crm.loyalty.empty_hint": "Punkte werden bei bestätigten Aufenthalten automatisch gesammelt. Kulanzpunkte können Sie manuell gutschreiben.",
@@ -308,15 +309,25 @@
  "crm.pager.prev": "Zurück",
  "crm.pager.range": "{from}–{to} von {total}",
  "crm.profile.contact": "Kontakt & Vorlieben",
+ "crm.profile.cancel_fees": "Gebühren {amount}",
+ "crm.profile.cancellations": "Stornierungen",
  "crm.profile.edit": "Profil bearbeiten",
+ "crm.profile.extras_caption": "Gebuchte Extras",
  "crm.profile.kpis": "Kennzahlen des Gastes",
  "crm.profile.ltv_hint": "In der meistgenutzten Buchungswährung",
  "crm.profile.manage_segments": "Segmente verwalten",
  "crm.profile.no_segments": "In keinem Segment.",
+ "crm.profile.no_extras": "Keine Extras in Ihren Hotels",
+ "crm.profile.no_extras_hint": "Extras stornierter Aufenthalte und No-Shows zählen nicht.",
+ "crm.profile.no_cancel_fees": "Keine Gebühren berechnet",
+ "crm.profile.no_shows": {
+  "one": "{count} No-Show",
+  "other": "{count} No-Shows"
+ },
  "crm.profile.no_stays": "Keine Aufenthalte in Ihren Hotels",
  "crm.profile.no_stays_hint": "Es werden nur Aufenthalte in Hotels angezeigt, auf die Sie Zugriff haben.",
  "crm.profile.no_tags": "Keine Tags",
- "crm.profile.points_hint": "Alle Programme",
+ "crm.profile.points_hint": "Programme Ihrer Hotels",
  "crm.profile.sections": "Gästehistorie",
  "crm.profile.segments": "Segmente",
  "crm.profile.segments_hint": "Dynamische Segmente, zu denen der Gast heute gehört",
@@ -326,6 +337,7 @@
   "other": "{count} aktiv oder abgeschlossen"
  },
  "crm.profile.tab.comms": "Kommunikation",
+ "crm.profile.tab.extras": "Extras",
  "crm.profile.tab.loyalty": "Treue",
  "crm.profile.tab.stays": "Aufenthalte",
  "crm.profile.title": "Gästeprofil",
@@ -617,6 +629,7 @@
  "crm.seg.warn_currency": "Eine Betragsbedingung hat keine Währung. Wählen Sie die Währung – bis dahin trifft das Segment auf niemanden zu.",
  "crm.seg.warn_currency_short": "Keine Währung: trifft auf niemanden zu",
  "crm.stay.dates": "Daten",
+ "crm.stay.fee": "Gebühr {amount}",
  "crm.stay.pax": "{adults} Erwachsene · {children} Kinder",
  "crm.stay.reservation": "Reservierung",
  "crm.stay.room": "Zimmer · Verpflegung",
@@ -631,5 +644,14 @@
  "crm.stay.status.quoted": "Angeboten",
  "crm.stay.status.requested": "Angefragt",
  "crm.stay.status.waitlist": "Warteliste",
- "crm.vip": "VIP"
+ "crm.vip": "VIP",
+ "crm.extra.summary": "Extras nach Art",
+ "crm.extra.name": "Extra",
+ "crm.extra.quantity": "Menge",
+ "crm.extra.service_dates": "Leistungstage",
+ "crm.extra.added_later": "Nach der Buchung hinzugefügt",
+ "crm.extra.stays": {
+  "one": "{count} Aufenthalt",
+  "other": "{count} Aufenthalte"
+ }
 }

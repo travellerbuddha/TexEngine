@@ -37,18 +37,19 @@ EXT = {
 		F("tex_revision_no", "Int", "Revision", read_only=1),
 		SB("TEX money"),
 		F("tex_currency", "Link", "Sell currency", "Currency", read_only=1),
-		F("tex_fx_rate", "Float", "FX rate applied", read_only=1, precision="9"),
+		F("tex_fx_rate", "Float", "FX rate applied", read_only=1, precision="9", permlevel=1),
 		F("tex_total_amount", "Currency", "Total (sell currency)", options="tex_currency", read_only=1),
 		F("tex_extras_amount", "Currency", "Extras", options="tex_currency", read_only=1),
 		CB(),
-		F("tex_cost_amount", "Currency", "Contract cost (sell ccy)", options="tex_currency", read_only=1),
-		F("tex_margin_amount", "Currency", "Margin", options="tex_currency", read_only=1),
+		# pricing internals: permlevel 1, read in Desk / REST by System Manager only (G-95, ADR-056)
+		F("tex_cost_amount", "Currency", "Contract cost (sell ccy)", options="tex_currency", read_only=1, permlevel=1),
+		F("tex_margin_amount", "Currency", "Margin", options="tex_currency", read_only=1, permlevel=1),
 		F("tex_promotions", "Small Text", "Promotions applied", read_only=1),
 		SB("Guest change"),
 		F("tex_guest_change_pending", "Check", "Guest change awaiting staff", in_standard_filter=1),
 		F("tex_guest_change_note", "Small Text", "Guest change note"),
 		SB("Pricing snapshot", collapsible=1),
-		F("tex_pricing_snapshot", "Long Text", "Pricing snapshot (JSON)", read_only=1),
+		F("tex_pricing_snapshot", "Long Text", "Pricing snapshot (JSON)", read_only=1, permlevel=1),
 	],
 	"property": [
 		TAB("TEX"),
@@ -107,11 +108,13 @@ EXT = {
 		F("tex_consent_source", "Data", "Consent source", read_only=1),
 		F("tex_consent_text_version", "Data", "Consent text version", read_only=1),
 		SB("TEX stats", collapsible=1),
-		F("tex_stays", "Int", "Stays", read_only=1),
-		F("tex_lifetime_value", "Currency", "Lifetime value", "tex_lifetime_currency", read_only=1),
-		F("tex_lifetime_currency", "Link", "Lifetime value currency", "Currency", read_only=1),
-		F("tex_last_stay", "Date", "Last stay", read_only=1),
-		F("tex_loyalty_points", "Int", "Loyalty points", read_only=1),
+		# totals over every tenant's stays and programs: permlevel 1, read in Desk / REST by System
+		# Manager only; the TEX CRM shows each viewer the totals of their own hotels (G-65, ADR-056)
+		F("tex_stays", "Int", "Stays", read_only=1, permlevel=1),
+		F("tex_lifetime_value", "Currency", "Lifetime value", "tex_lifetime_currency", read_only=1, permlevel=1),
+		F("tex_lifetime_currency", "Link", "Lifetime value currency", "Currency", read_only=1, permlevel=1),
+		F("tex_last_stay", "Date", "Last stay", read_only=1, permlevel=1),
+		F("tex_loyalty_points", "Int", "Loyalty points", read_only=1, permlevel=1),
 	],
 }
 

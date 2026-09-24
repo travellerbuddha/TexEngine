@@ -21,6 +21,9 @@ PLATFORM = [SM, HA_RO]
 GRANTS = [SM, HA]           # anti-escalation is enforced in the TEX Access Grant controller
 READONLY_AUDIT = [perm("System Manager", "readonly"), perm("Hotel Admin", "readonly")]
 IMMUTABLE_LOG = [perm("System Manager", "readonly"), HA_RO]
+# pricing internals (permlevel 1: snapshots, cost, margin, FX record) are read in Desk / REST by
+# platform administrators only; the TEX API serves them by price.view_cost (G-95, ADR-056)
+INTERNALS = {"permlevel": 1, "read": 1, "role": "System Manager"}
 
 BOARDS = ["RO", "BB", "HB", "FB", "AI", "UAI"]
 OPS_ROOM = ["ABSOLUTE", "MULTIPLY", "ADJUST_PERCENT", "PERCENT_OF", "ADD", "SUBTRACT", "INHERIT"]
@@ -807,8 +810,9 @@ BOOKING_SPECS = [
 		F("offer_hash", "Data", "Offer (hash)"),
 		SB("Content"),
 		F("request_json", "Code", "Request", "JSON"),
-		F("result_json", "Long Text", "Result"),
-	], perms=IMMUTABLE_LOG, autoname="hash", track_changes=False, sort_field="creation", in_create=True),
+		F("result_json", "Long Text", "Result", permlevel=1),          # pricing internals (G-95, ADR-056)
+	], perms=[*IMMUTABLE_LOG, INTERNALS], autoname="hash", track_changes=False, sort_field="creation",
+	   in_create=True),
 
 	dt("TEX Reservation Revision", B, [
 		F("reservation", "Link", "Reservation", "Reservation", reqd=1, in_list_view=1, in_standard_filter=1),
@@ -839,9 +843,9 @@ BOOKING_SPECS = [
 		F("reason", "Small Text", "Reason"),
 		SB("Detail"),
 		F("changes_json", "Code", "Field changes", "JSON"),
-		F("snapshot_before", "Long Text", "Pricing before"),
-		F("snapshot_after", "Long Text", "Pricing after"),
-	], perms=IMMUTABLE_LOG, autoname="REV-.######", naming_rule="Expression (old style)", track_changes=False,
+		F("snapshot_before", "Long Text", "Pricing before", permlevel=1),     # pricing internals (G-95, ADR-056)
+		F("snapshot_after", "Long Text", "Pricing after", permlevel=1),
+	], perms=[*IMMUTABLE_LOG, INTERNALS], autoname="REV-.######", naming_rule="Expression (old style)", track_changes=False,
 	   sort_field="creation", in_create=True),
 
 	# a guest's own change and how its money was settled (G-45, ADR-044): written only by

@@ -86,6 +86,42 @@ export interface Stay {
   tex_booking: string | null
   tex_sales_channel: string | null
   tex_market: string | null
+  /** the fee charged for a cancelled stay or a no-show (decimal string); null otherwise */
+  cancellation_fee?: string | null
+}
+
+/** An extra on one of the guest's stays at the viewer's hotels (from its price-locked snapshot). */
+export interface StayExtra {
+  reservation: string
+  property: string
+  check_in: string
+  code: string
+  name: string
+  /** decimal string, e.g. "1" or "2.5" */
+  quantity: string
+  amount: string
+  currency: string
+  service_dates: string[]
+  /** added after the booking (post-booking extras) */
+  added_later: boolean
+}
+
+/** Extras bought, per extra and currency (never summed across currencies). */
+export interface ExtraSummary {
+  code: string
+  name: string
+  currency: string
+  quantity: string
+  amount: string
+  stays: number
+}
+
+/** Cancellations and no-shows at the viewer's hotels; fees per currency. */
+export interface CancellationStats {
+  count: number
+  no_shows: number
+  fees: { currency: string; amount: string }[]
+  last_cancelled_on: string | null
 }
 
 export type CommChannel = "Email" | "SMS" | "WhatsApp" | "Phone" | "Note"
@@ -119,6 +155,9 @@ export interface LoyaltyEntry {
   booking: string | null
   reason: string | null
   creation: string | null
+  /** earned or spent at another hotel of a shared (group) program: its booking and reason stay
+   * with that hotel (ADR-056) */
+  other_hotel?: boolean
 }
 
 export interface LoyaltyAccount {
@@ -161,7 +200,11 @@ export interface GuestProfile {
   communications: Communication[]
   /** segments this guest is in, among the viewer's (presets and their enterprise's) */
   segments: { name: string; segment_name: string; system_key?: string | null }[]
+  /** the viewer's programs only (their hotels' own, or their group's) */
   loyalty: LoyaltyAccount[]
+  extras: StayExtra[]
+  extras_summary: ExtraSummary[]
+  cancellations: CancellationStats
   consent_history: ConsentEvent[]
   hotels: string[]
 }
