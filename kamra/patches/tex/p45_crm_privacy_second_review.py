@@ -14,7 +14,9 @@
    edit guests, when there is exactly one. Others stay without (platform level in Desk / REST; shown to
    hotels as another hotel's entry). Only entries without a hotel are touched.
 4. Profiles erased before an erasure withdrew consent (``kamra.api.anonymize_guest``): every consent is
-   withdrawn, their cases and funnel data forgotten, their change history removed.
+   withdrawn, their cases and funnel data forgotten, their change history removed. An erased profile is
+   one with the durable marker ``tex_erased_at`` (third review; the notes text is no proof); p48 marks
+   the profiles erased before the marker existed and finishes their erasure.
 5. Anonymous abandoned cases keep no quote (it leads to the booking and its booker).
 
 Re-runnable: each step touches only what is still to do. Never prints an e-mail address, a hash or a phone
@@ -32,7 +34,6 @@ from kamra.tex.security.audit import audit
 from kamra.tex.setup import ensure_indexes, missing_indexes
 
 BATCH = 500
-ERASED_NOTE = "Profile anonymized on request."
 
 
 def _mask_contact_history() -> int:
@@ -110,9 +111,15 @@ def _ledger_hotels() -> int:
 
 
 def _erased_profiles() -> int:
+	"""Erased profiles (their durable marker, ``tex_erased_at``: the notes text is no proof, a merge could
+	copy it into a live profile; third review) that still hold a consent. p48 marks the profiles erased
+	before the marker existed and finishes their erasure; this step runs before p48 on an upgrade and
+	then finds none."""
+	if not frappe.db.has_column("Guest", "tex_erased_at"):
+		return 0
 	consented = " OR ".join(f"IFNULL(`{f}`, 0) = 1" for f in CONSENT)
-	guests = frappe.db.sql(  # nosemgrep -- static condition, values bound
-		f"SELECT name FROM `tabGuest` WHERE guest_notes = %s AND ({consented})", ERASED_NOTE, pluck=True)
+	guests = frappe.db.sql(  # nosemgrep -- static condition
+		f"SELECT name FROM `tabGuest` WHERE tex_erased_at IS NOT NULL AND ({consented})", pluck=True)
 	for g in guests:
 		was = frappe.db.get_value("Guest", g, list(CONSENT), as_dict=True)
 		frappe.db.set_value("Guest", g, {**dict.fromkeys(CONSENT, 0), "tex_consent_updated_at": now_datetime(),

@@ -53,3 +53,4 @@ kamra.patches.tex.p38_restriction_scope
 kamra.patches.tex.p39_lookup_indexes
 kamra.patches.tex.p40_crm_privacy_review
 kamra.patches.tex.p45_crm_privacy_second_review
+kamra.patches.tex.p48_crm_privacy_third_review

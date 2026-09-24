@@ -94,6 +94,8 @@ BEHAVIOUR = {
 	                          "test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds",
 	"p45_crm_privacy_second_review": "test_crm_privacy_review.TestP45."
 	                                 "test_p45_indexes_history_ledger_hotels_erased_profiles_and_anonymous_cases",
+	"p48_crm_privacy_third_review": "test_crm_third_review.TestP48."
+	                                "test_p48_marks_earlier_erasures_and_removes_what_they_left",
 }
 
 
