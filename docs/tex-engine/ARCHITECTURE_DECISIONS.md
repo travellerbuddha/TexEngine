@@ -2922,6 +2922,10 @@ three Low, fixed as follows.
       creates them where missing.
     - Every entry of `TEX_INDEXES` has at least two columns (tested). An old single-column index
       still present is left to Frappe's next sync.
+    - Checked on the dev bench after the migration:
+      - p39 forced again created only the index still missing (`tex_xalloc_res_status`);
+      - a forced sync of Reservation, TEX Extra Allocation and TEX Communication
+        (`reload_doc(force=True)`) dropped `tex_xalloc_res` and kept every composite index.
 - *Not changed.* Patch order and names (p39 is new: three indexes, no DocType change). p05 and p35
   still write an Error Log line on each run for a voucher they cannot copy or a payload that
   fails its hash: a log, not data.
