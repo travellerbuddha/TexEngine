@@ -274,6 +274,15 @@ export interface NightLine {
   sell_contract: string
   sell: string
   final: string
+  /**
+   * The night's running totals for the Explain ladder (ADR-061 GAP-12), 6-dp strings: after the
+   * adults (ROOM basis: room price + extra adults), after the children (before a combination
+   * rule; `occupancy` is after it) and occupancy + board (before the period adjustment). Absent
+   * from quotes stored before GAP-12: the ladder then leaves those stages blank.
+   */
+  subtotal_adults?: string
+  subtotal_children?: string
+  subtotal_board?: string
 }
 
 export interface QuoteLine {
@@ -297,6 +306,42 @@ export interface PromoOutcome {
   value_added: string
   source: string
   code: string | null
+}
+
+/**
+ * A child of a price test (ADR-061 GAP-6): an age in whole years 0–17, or exactly — in months
+ * (0–215) or by date of birth (ISO `YYYY-MM-DD`, under 18 on arrival, never in the future).
+ */
+export type PreviewChild = number | { age_months: number } | { dob: string }
+
+/** What `contracts.preview_price` takes. */
+export interface PreviewRequest {
+  version: string
+  room_type: string
+  board: string
+  rate_plan?: string | null
+  check_in: string
+  check_out: string
+  adults: number
+  /** at most 12 */
+  children: PreviewChild[]
+  market?: string | null
+  channel?: string
+  currency?: string | null
+  sale_at?: string | null
+  promo_codes?: string[]
+  /** the editor's unsaved `save_version` payload (ADR-061 GAP-1): price the draft as shown */
+  data?: unknown
+}
+
+/**
+ * One entered price changed once by `contracts.apply_op_values` (ADR-061 GAP-7): the new price as
+ * exact decimal text in the contract currency, or null with why — `NO_VALUE` (no price was given)
+ * or `NEGATIVE` (the result would be below zero). One per value sent, in order.
+ */
+export interface ApplyOpResult {
+  value: string | null
+  error: null | "NO_VALUE" | "NEGATIVE"
 }
 
 export interface PreviewResult {
