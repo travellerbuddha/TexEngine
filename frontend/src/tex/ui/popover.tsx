@@ -23,7 +23,7 @@ import {
   type Ref,
   type RefObject,
 } from "react"
-import { createPortal } from "react-dom"
+import { createPortal, flushSync } from "react-dom"
 import { X } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useTexT } from "../i18n"
@@ -60,15 +60,30 @@ function portalTarget(anchor: HTMLElement | null): HTMLElement {
   return anchor?.closest<HTMLElement>('[aria-modal="true"]') ?? document.body
 }
 
+/** The scroll positions inside `panel` (itself included) that are not at the origin. */
+function scrollPositions(panel: HTMLElement): [Element, number, number][] {
+  const kept: [Element, number, number][] = []
+  for (const el of [panel, ...panel.querySelectorAll("*")]) {
+    if (el.scrollTop || el.scrollLeft) kept.push([el, el.scrollTop, el.scrollLeft])
+  }
+  return kept
+}
+
 /** Keep `panel` next to `anchor` (fixed position, flipped and clamped) while `open`. */
 function useFloatingPosition(open: boolean, anchorRef: ElementRef, panelRef: ElementRef, placement: FloatingPlacement, enabled = true) {
   useLayoutEffect(() => {
     const panel = panelRef.current
     if (!open || !enabled || !panel) return
-    const update = () => {
+    const update = (e?: Event) => {
       const anchor = anchorRef.current
       if (!anchor?.isConnected) return
-      // measure the natural size, then constrain it
+      // A scroll re-places the panel only when it moved the anchor: the scrolled box holds the
+      // anchor (the page, a Drawer body, a Popover body under a Menu). The panel's own scrolling
+      // (the wheel, focus moving to an item below the fold) and unrelated boxes leave it alone.
+      if (e?.type === "scroll" && e.target instanceof Node && !e.target.contains(anchor)) return
+      // Measure the natural size, then constrain it. Without the constraint nothing inside the
+      // panel overflows and the browser resets its scroll positions: keep them and put them back.
+      const scrolled = scrollPositions(panel)
       panel.style.maxHeight = ""
       panel.style.maxWidth = ""
       const a = anchor.getBoundingClientRect()
@@ -83,11 +98,15 @@ function useFloatingPosition(open: boolean, anchorRef: ElementRef, panelRef: Ele
       panel.style.maxHeight = `${pos.maxHeight}px`
       panel.style.maxWidth = `${pos.maxWidth}px`
       panel.dataset.placement = pos.placement
+      for (const [el, top, left] of scrolled) {
+        el.scrollTop = top
+        el.scrollLeft = left
+      }
     }
     update()
     window.addEventListener("resize", update)
     window.addEventListener("scroll", update, true)
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => update())
     observer?.observe(panel)
     if (anchorRef.current) observer?.observe(anchorRef.current)
     return () => {
@@ -104,11 +123,24 @@ function useFloatingPosition(open: boolean, anchorRef: ElementRef, panelRef: Ele
 
 // Open floating layers, oldest first. A Menu opened from inside a Popover is above it: a
 // pointerdown in the Menu is not "outside" the Popover, and Escape closes the Menu first.
-type Layer = { panel: HTMLElement; anchorRef: ElementRef }
+// A shown tooltip is a layer too, so Escape on its trigger only hides it (not the Popover,
+// Drawer or Dialog it sits in).
+type Layer = { panel: HTMLElement; anchorRef: ElementRef; tooltip?: boolean }
 const layers: Layer[] = []
 
 function owns(layer: Layer, node: Node): boolean {
-  return layer.panel.contains(node) || !!layer.anchorRef.current?.contains(node)
+  if (layer.panel.contains(node)) return true
+  const anchor = layer.anchorRef.current
+  // a tooltip's trigger exactly: an editor inside a grid cell with a tooltip is not the trigger
+  return !!anchor && (layer.tooltip ? anchor === node : anchor.contains(node))
+}
+
+/** The layer an Escape belongs to: the newest layer holding the key's target, else (nothing
+ * focused) the newest layer. */
+function escapeOwner(target: EventTarget | null): Layer | undefined {
+  const t = target instanceof Node && target !== document.body ? target : null
+  for (let i = layers.length - 1; i >= 0; i--) if (!t || owns(layers[i], t)) return layers[i]
+  return undefined
 }
 
 /** Escape (from inside the layer, its anchor, or with nothing focused) and an outside pointerdown close it. */
@@ -123,15 +155,16 @@ function useDismiss(open: boolean, onClose: () => void, anchorRef: ElementRef, p
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target
       if (!(t instanceof Node) || owns(me, t)) return
-      if (layers.slice(layers.indexOf(me) + 1).some((l) => owns(l, t))) return
+      // a layer above this one; a tooltip only by its bubble, and only when its trigger is here
+      const above = (l: Layer) =>
+        l.tooltip ? l.panel.contains(t) && !!l.anchorRef.current && owns(me, l.anchorRef.current) : owns(l, t)
+      if (layers.slice(layers.indexOf(me) + 1).some(above)) return
       closeRef.current()
     }
     // window + capture: runs before the document-level Escape of a Dialog/Drawer underneath
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.isComposing) return
-      const t = e.target instanceof Node && e.target !== document.body ? e.target : null
-      const owner = t ? [...layers].reverse().find((l) => owns(l, t)) : layers[layers.length - 1]
-      if (owner !== me) return
+      if (escapeOwner(e.target) !== me) return
       e.preventDefault()
       e.stopPropagation()
       closeRef.current()
@@ -147,6 +180,43 @@ function useDismiss(open: boolean, onClose: () => void, anchorRef: ElementRef, p
   }, [open, anchorRef, panelRef])
 }
 
+/** The panel's visible Tab stops in document order (a positive tabindex is not reordered). */
+function tabbables(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0)
+}
+
+/**
+ * Tab from the Popover's last element, or Shift+Tab from its first, leaves it as if the panel sat
+ * right after its trigger: it closes, and focus goes on from the trigger (Tab: to the element
+ * after it; Shift+Tab: to the trigger). Without this, focus left the page (the panel is portaled
+ * to the end of the body) or wrapped inside a Drawer while the Popover stayed open.
+ * Window + capture: runs before the Tab trap of a Dialog/Drawer underneath.
+ */
+function useTabOut(open: boolean, onClose: () => void, anchorRef: ElementRef, panelRef: ElementRef) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!open || !panel) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return
+      const t = e.target
+      const anchor = anchorRef.current
+      if (!(t instanceof Node) || !panel.contains(t) || !anchor?.isConnected) return
+      const items = tabbables(panel)
+      const leaving = e.shiftKey ? !items.length || t === panel || t === items[0] : !items.length || t === items[items.length - 1]
+      if (!leaving) return
+      if (e.shiftKey) e.preventDefault()
+      anchor.focus()
+      // unmount now, so the browser's Tab (and a Drawer's trap) moves on from the trigger
+      // without the panel in the page
+      flushSync(() => closeRef.current())
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [open, anchorRef, panelRef])
+}
+
 /** Focus moves into the panel on open and back to the anchor on close (unless the user has
  * already put it somewhere else, e.g. by clicking another control). */
 function useFocusInOut(open: boolean, anchorRef: ElementRef, panelRef: ElementRef, initial: () => HTMLElement | null | undefined) {
@@ -158,6 +228,9 @@ function useFocusInOut(open: boolean, anchorRef: ElementRef, panelRef: ElementRe
     const opener = anchorRef.current
     const target = initialRef.current() ?? panel.querySelector<HTMLElement>(FOCUSABLE) ?? panel
     target.focus({ preventScroll: true })
+    // an item below the fold of a scrolling panel (a Menu opened with ArrowUp starts on its last
+    // item): scroll the panel, which sits inside the viewport, to show it
+    if (target !== panel) target.scrollIntoView({ block: "nearest", inline: "nearest" })
     return () => {
       const now = document.activeElement
       if (now && now !== document.body && !panel.contains(now)) return
@@ -198,7 +271,8 @@ export interface PopoverProps {
 /**
  * Non-modal popover for routine edits (role="dialog" without aria-modal, no focus trap, no
  * backdrop). Escape or a pointerdown outside it and its trigger closes it; focus moves in on open
- * and returns to the trigger on close. Below 640 px it is a bottom sheet (still not modal).
+ * and returns to the trigger on close. Tab past its last element (Shift+Tab before its first)
+ * closes it and goes on from the trigger. Below 640 px it is a bottom sheet (still not modal).
  */
 export function Popover({
   open,
@@ -219,6 +293,7 @@ export function Popover({
   const sheet = useIsPhone()
   useFloatingPosition(open, anchorRef, panelRef, placement, !sheet)
   useDismiss(open, onClose, anchorRef, panelRef)
+  useTabOut(open, onClose, anchorRef, panelRef)
   useFocusInOut(open, anchorRef, panelRef, () => {
     const body = bodyRef.current
     return initialFocusRef?.current ?? body?.querySelector<HTMLElement>("[data-autofocus]") ?? body?.querySelector<HTMLElement>(FOCUSABLE)
@@ -499,7 +574,8 @@ function focusVisible(el: Element): boolean {
  * assistive technology without hovering.
  *
  * It shows after `delay` on mouse hover and on keyboard focus (:focus-visible), stays while the
- * pointer is over it, and hides on Escape, blur, pointer leave and press. It never shows on touch,
+ * pointer is over it, and hides on Escape, blur, pointer leave and press. Escape on its trigger
+ * only hides it (the Popover, Drawer or Dialog around it stays open). It never shows on touch,
  * so a tooltip must never be the only carrier of essential information.
  */
 export function useTooltip(content: ReactNode, { placement = "top", delay = 300, describe = true, disabled }: TooltipOptions = {}) {
@@ -533,15 +609,30 @@ export function useTooltip(content: ReactNode, { placement = "top", delay = 300,
   useEffect(() => {
     if (off) hide()
   }, [off, hide])
+  const visible = shown && !off
   useEffect(() => {
-    if (!shown) return
+    const bubble = bubbleRef.current
+    if (!visible || !bubble) return
+    const me: Layer = { panel: bubble, anchorRef, tooltip: true }
+    layers.push(me)
+    // Escape always hides it. On its trigger (or with nothing focused) the key stops here, so the
+    // Popover, Drawer or Dialog around it stays open; elsewhere the key goes on as well.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hide()
+      if (e.key !== "Escape" || e.isComposing) return
+      const mine = escapeOwner(e.target) === me
+      hide()
+      if (!mine) return
+      e.preventDefault()
+      e.stopPropagation()
     }
-    document.addEventListener("keydown", onKey, true)
-    return () => document.removeEventListener("keydown", onKey, true)
-  }, [shown, hide])
-  useFloatingPosition(shown && !off, anchorRef, bubbleRef, placement)
+    window.addEventListener("keydown", onKey, true)
+    return () => {
+      window.removeEventListener("keydown", onKey, true)
+      const i = layers.indexOf(me)
+      if (i >= 0) layers.splice(i, 1)
+    }
+  }, [visible, hide])
+  useFloatingPosition(visible, anchorRef, bubbleRef, placement)
 
   const ref = useCallback((el: HTMLElement | null) => {
     anchorRef.current = el
@@ -571,8 +662,7 @@ export function useTooltip(content: ReactNode, { placement = "top", delay = 300,
           {content}
         </span>
       )}
-      {shown &&
-        !off &&
+      {visible &&
         createPortal(
           <div
             ref={bubbleRef}
@@ -587,7 +677,7 @@ export function useTooltip(content: ReactNode, { placement = "top", delay = 300,
         )}
     </>
   )
-  return { triggerProps, tooltip, shown: shown && !off }
+  return { triggerProps, tooltip, shown: visible }
 }
 
 type TriggerElementProps = {

@@ -10,7 +10,8 @@
     "i18n:extract": "node scripts/i18n-extract.mjs",
     "i18n:import": "node scripts/i18n-import.mjs",
     "i18n:tex": "node scripts/tex-i18n-check.mjs",
-    "test:unit": "node --test --disable-warning=ExperimentalWarning \"tests/unit/**/*.test.ts\""
+    "test:unit": "node --test --disable-warning=ExperimentalWarning \"tests/unit/**/*.test.ts\"",
+    "test:dom": "playwright test -c tests/dom"
   },
   "dependencies": {
     "lucide-react": "^0.525.0",
