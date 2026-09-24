@@ -661,6 +661,12 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 
 def cancellation_penalty(reservation, today=None) -> tuple[D, dict]:
 	snap = json.loads(reservation.tex_pricing_snapshot or "{}")
+	if not snap:
+		# a stay TEX did not price (imported, legacy): the hotel's own policy on its locked
+		# amount (ADR-052 review M2), never "no policy"
+		from kamra.tex.legacy import hotel_policy_penalty
+
+		return hotel_policy_penalty(reservation, today)
 	ccy = reservation.tex_currency or snap.get("currency") or "EUR"
 	total = from_db(reservation.tex_total_amount or reservation.amount_after_tax, ccy)
 	rp = snap.get("rate_plan") or {}

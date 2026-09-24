@@ -51,7 +51,11 @@ def open_folio(reservation) -> str:
 		"status": "Open",
 		"opened_on": now_datetime(),
 	})
-	if reservation.discount_amount:
+	# TEX Engine (G-96): a price-locked stay's discount and cleaning fee are inside its
+	# locked price (or its TEX booking); the folio adds neither
+	from kamra.tex.legacy import is_tex_reservation
+	locked = is_tex_reservation(reservation)
+	if reservation.discount_amount and not locked:
 		folio.append("charges", {
 			"posting_date": nowdate(),
 			"charge_type": "Discount",
@@ -65,7 +69,8 @@ def open_folio(reservation) -> str:
 	_recalculate(folio)
 	folio.insert(ignore_permissions=True)
 	_post_addons(reservation, folio.name)
-	_post_cleaning_fee(reservation, folio.name)
+	if not locked:
+		_post_cleaning_fee(reservation, folio.name)
 	return folio.name
 
 
@@ -292,11 +297,21 @@ def post_room_night(reservation, date, folios=None) -> bool:
 	"""Post one night's room (and meal plan) charge, routed by the
 	company's billing rules. Skips dates already posted - safe to call
 	from both audit and checkout. Pass `folios` (a dict) to batch saves
-	across nights; when omitted the touched folios save immediately."""
+	across nights; when omitted the touched folios save immediately.
+
+	TEX Engine (G-96, ADR-052 review): a price-locked stay is never billed
+	at the legacy Room Type rate - see ``_post_locked_night``."""
 	date = str(date)
 	own_batch = folios is None
 	if own_batch:
 		folios = {}
+	from kamra.tex.legacy import locked_bill
+	bill = locked_bill(reservation)
+	if bill is not None:
+		posted = _post_locked_night(reservation, date, bill, folios)
+		if own_batch:
+			save_folios(folios)
+		return posted
 	posted = False
 
 	if not _charge_posted(reservation.name, "Room", date):
@@ -339,6 +354,36 @@ def post_room_night(reservation, date, folios=None) -> bool:
 	if own_batch:
 		save_folios(folios)
 	return posted
+
+
+def _post_locked_night(reservation, date: str, bill: dict, folios: dict) -> bool:
+	"""One night of a price-locked stay (``kamra.tex.legacy.locked_bill``):
+	sold through TEX - nothing (its TEX booking is the bill); locked in another
+	currency - one zero line saying so, on the first night; otherwise its share
+	of the locked amount (no meal plan line: the board is inside the price)."""
+	if bill.get("tex"):
+		return False
+	room_no = (reservation.room or "").split("-")[-1]
+	label = f"Room {room_no} · {reservation.room_type.split('-')[-1]}"
+	if bill.get("foreign"):
+		first = str(getdate(reservation.check_in_date))
+		if date == first and not _charge_posted(reservation.name, "Room", first):
+			_append_charge(folios, reservation, "Room", {
+				"posting_date": first, "charge_type": "Room", "reservation": reservation.name,
+				"description": f"{label} · not billed here: locked at {bill['total']} {bill['currency']}",
+				"qty": 1, "rate": 0, "amount": 0, "gst_rate": 0, "auto_posted": 1,
+			})
+		return False
+	amount = bill["nights"].get(getdate(date))
+	if amount is None or _charge_posted(reservation.name, "Room", date):
+		return False
+	_append_charge(folios, reservation, "Room", {
+		"posting_date": date, "charge_type": "Room", "reservation": reservation.name,
+		"description": f"{label} · locked price" + (" (tax included)" if not bill["gst_rate"] else ""),
+		"qty": 1, "rate": float(amount), "amount": float(amount), "gst_rate": float(bill["gst_rate"]),
+		"auto_posted": 1,
+	})
+	return True
 
 
 def save_folios(folios: dict):
@@ -503,7 +548,15 @@ def split_charge(from_folio: str, charge_row: str, to_folio: str,
 
 def policy_fee(reservation, basis: str) -> float:
 	"""₹ for a cancellation/no-show fee basis: 'First Night' or
-	'Full Stay' (pre-tax; GST rides on the folio line)."""
+	'Full Stay' (pre-tax; GST rides on the folio line).
+
+	TEX Engine (ADR-052 review M2): a price-locked stay's fee comes from its
+	locked amount, never the legacy rate or the empty legacy pre-tax total;
+	one the folio does not bill (sold through TEX) has no legacy fee."""
+	from kamra.tex.legacy import is_tex_reservation, locked_fee
+	if is_tex_reservation(reservation):
+		fee = locked_fee(reservation, basis)
+		return float(fee[0]) if fee else 0.0
 	if basis == "First Night":
 		return float(_nightly_room_rate(reservation,
 		                                reservation.check_in_date))
@@ -518,6 +571,8 @@ def post_policy_fee(reservation, basis: str, label: str) -> float:
 	amount = policy_fee(reservation, basis)
 	if amount <= 0:
 		return 0.0
+	from kamra.tex.legacy import locked_fee
+	locked = locked_fee(reservation, basis)
 	folio = frappe.get_doc("Folio", open_folio(reservation))
 	if folio.status == "Closed":
 		return 0.0
@@ -532,7 +587,7 @@ def post_policy_fee(reservation, basis: str, label: str) -> float:
 		"qty": 1,
 		"rate": amount,
 		"amount": amount,
-		"gst_rate": _room_gst(reservation),
+		"gst_rate": float(locked[1]) if locked else _room_gst(reservation),
 		"auto_posted": 1,
 	})
 	_recalculate(folio)

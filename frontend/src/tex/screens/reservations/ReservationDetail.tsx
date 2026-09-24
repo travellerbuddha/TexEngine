@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { Ban, Copy, History, Lock, MailCheck, PackagePlus, PencilLine, Star } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { date } from "../../lib/format"
+import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
 import {
   Badge,
@@ -27,7 +28,7 @@ import { usePartyText } from "../crs/components/PartyEditor"
 import { PriceBreakdown } from "../crs/components/PriceBreakdown"
 import { useLabels } from "../crs/lib/labels"
 import { copyText, shortCode } from "../crs/lib/party"
-import { AcknowledgeDialog, CancelDialog, ResendConfirmationDialog, SimulatorDialog } from "./components/ActionDialogs"
+import { AcknowledgeDialog, CancelDialog, CorrectImportDialog, ResendConfirmationDialog, SimulatorDialog } from "./components/ActionDialogs"
 import { AddExtrasDialog } from "./components/AddExtrasDialog"
 import { AddedExtrasCard } from "./components/AddonParts"
 import { GuestChangesCard } from "./components/GuestChanges"
@@ -37,7 +38,7 @@ import { ADDON_STATUSES } from "./lib/addons"
 import type { ReservationDetail as Detail, GuestChangeRequest } from "./lib/types"
 
 const TERMINAL = ["Cancelled", "No Show", "Checked Out"]
-type Dlg = "modify" | "simulate" | "cancel" | "ack" | "resend" | "addon" | null
+type Dlg = "modify" | "simulate" | "cancel" | "ack" | "resend" | "addon" | "correct" | null
 
 /** Reservation detail: stay, guest, locked price snapshot, revisions, payments (R-21–R-23, R-46). */
 export default function ReservationDetail() {
@@ -88,6 +89,7 @@ function DetailView({
   reload: () => void
 }) {
   const { t } = useTexT()
+  const { boot } = useSession()
   const L = useLabels()
   const toast = useToast()
   const partyText = usePartyText()
@@ -121,6 +123,9 @@ function DetailView({
   const canCost = caps.has("price.view_cost")
   // new manage link by e-mail: booking-level, not once everything is cancelled
   const canResend = Boolean(d.booking) && caps.has("reservation.modify") && d.status !== "Cancelled"
+  // an imported stay is locked at the amount its file carried: corrected with price.override (ADR-052 review)
+  const imported = d.pricing_source === "Imported"
+  const canCorrect = imported && caps.has("price.override")
   const snap = d.pricing
   const childAges = (d.child_ages ?? []).map((c) => c.age)
   const ratePlanName = snap?.rate_plan?.name ?? (d.rate_plan ? shortCode(d.rate_plan, d.property) : null)
@@ -148,6 +153,11 @@ function DetailView({
                 {t("res.detail.price_locked")}
               </Badge>
             )}
+            {imported && (
+              <Badge tone="info" title={t("res.imported.badge_hint")}>
+                {t("res.imported.badge")}
+              </Badge>
+            )}
             {d.revision_no ? <Badge tone="neutral">{t("res.rev.n", { n: d.revision_no })}</Badge> : null}
             {d.booking && (
               <Link to={`/tex/reservations/booking/${encodeURIComponent(d.booking)}`} className="text-sm font-medium text-tex-700 hover:underline">
@@ -161,6 +171,11 @@ function DetailView({
             {canResend && (
               <Button variant="ghost" icon={<MailCheck className="size-4" aria-hidden />} onClick={() => setDialog("resend")}>
                 {t("res.resend.button")}
+              </Button>
+            )}
+            {canCorrect && (
+              <Button variant="ghost" icon={<PencilLine className="size-4" aria-hidden />} onClick={() => setDialog("correct")}>
+                {t("res.imported.button")}
               </Button>
             )}
             {canSimulate && (
@@ -424,6 +439,18 @@ function DetailView({
       )}
       {canResend && d.booking && (
         <ResendConfirmationDialog open={dialog === "resend"} onClose={() => setDialog(null)} booking={d.booking} />
+      )}
+      {canCorrect && (
+        <CorrectImportDialog
+          open={dialog === "correct"}
+          onClose={() => setDialog(null)}
+          res={d}
+          currencies={boot.currencies}
+          onDone={() => {
+            setDialog(null)
+            reload()
+          }}
+        />
       )}
       <AcknowledgeDialog
         open={dialog === "ack"}

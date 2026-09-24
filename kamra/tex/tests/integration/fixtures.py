@@ -72,6 +72,10 @@ def base_setup() -> dict:
 		frappe.get_doc({"doctype": "Property", "property_name": PROPERTY, "city": "Antalya", "country": "Turkey",
 		                "currency": "EUR", "tex_hotel_group": grp, "tex_tax_profile": "Custom",
 		                "minimum_nights": 1}).insert(ignore_permissions=True)
+	if frappe.db.has_column("Property", "tex_live_from") and not frappe.db.get_value("Property", PROPERTY,
+	                                                                                 "tex_live_from"):
+		# the test hotel is sold through TEX (ADR-052 review: live in TEX, not onboarding)
+		frappe.db.set_value("Property", PROPERTY, "tex_live_from", "2020-01-01 00:00:00")
 	rts = {}
 	for code, name, base, rooms, adults, kids in (("STD", "Standard Room", 100, 6, 3, 2),
 	                                             ("DLX", "Deluxe Room", 135, 2, 3, 3)):

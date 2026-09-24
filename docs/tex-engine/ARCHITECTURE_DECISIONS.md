@@ -2162,6 +2162,112 @@ the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as 
   G-49 tests were adapted in `test_inventory`, `test_concurrency` and the G-04 night-audit
   fixture.
 
+**Review follow-up (2026-09-24; G-96).** An independent review found no way to forge a flag or
+get around the guard. It found 2 High, 3 Medium and 3 Low issues around it, fixed as follows.
+- *H1 Amounts are read strictly, shown before import, and correctable.* The importers stripped
+  everything but digits and dots, so "150,00" became 15000.00, "1.250,50" became 1.25, "TL 1.500"
+  became 1.50 and "-120" became 120. At a TEX hotel such a row is price-locked, so nobody could
+  correct it.
+  - One pure reader (`kamra.tex.importing`) serves `import_bookings`, `run_import` and
+    `preview_import`. The decimal mark is the last `,` or `.` when one or two digits follow it (or
+    four or more). A separator that appears more than once groups thousands, and so do spaces,
+    apostrophes and the Indian 2-2-3 grouping. A single separator followed by exactly three digits
+    ("1.500", "1,500") is ambiguous and is refused, unless the import says its decimal mark
+    (`decimal`: "." or ","). A cell that contradicts that setting is refused, never reinterpreted.
+  - Currency symbols and codes are stripped and reported ("$", "¥" and "kr" report every currency
+    they may be). Negatives, several currencies and anything else are refused, with the reason on
+    the row. An amount with more decimals than its currency has is refused, never rounded.
+  - The preview lists each row's parsed amount (a string) and currency before anything is
+    written; the Setup import screen shows them. "10,500.50" reads the same in both importers
+    (L2: `import_bookings` used to refuse it).
+  - `crs.correct_imported_amount` corrects an Imported stay's amount and currency. It needs
+    `price.override` at the hotel and a reason, and writes a `Price Override` revision (basis
+    MANUAL) and a `reservation.import_correct` audit event. It is refused once the folio has billed
+    the stay's nights, and for a stay TEX sold (that one changes through Modify reservation). The
+    reservation page offers it for Imported stays.
+- *H2 / G-96 The legacy folio never bills a price-locked stay at the legacy Room Type rate.* The
+  gap predates G-92. The legacy check-out, a Desk status change to Checked Out, and
+  `force_advance_bill` all posted every night at `Room Type` rates through `post_room_night`, the
+  same for a TEX-sold or an imported stay. `kamra.tex.legacy.locked_bill` now decides for a stay
+  that `is_tex_reservation`:
+  - *Sold through TEX (a TEX booking, a channel sale included): the folio posts none of its
+    nights.* No room, board, discount or cleaning lines, and advance billing is refused. We chose
+    "nothing" over posting the locked amount per night: TEX represents such a stay's money on its
+    TEX booking. The booking holds the total, the payments (card, link, pay at hotel recorded in
+    TEX) and the balance (`booking_summary`); cancellation penalties come from the frozen
+    rate-plan policy. The night audit already leaves these stays alone (ADR-028). Folio lines as
+    well would bill the guest twice and disagree with TEX's payments. The folio stays open for
+    incidentals (POS, minibar).
+  - *Price-locked without a TEX booking (Imported, or a legacy stay p04 locked at the upgrade):
+    the locked amount is split evenly over its nights.* The split is Decimal, with the remainder on
+    the last night (`money.split_evenly`). TEX holds no booking or payments for such a stay, so
+    the folio is its only bill. A stay that recorded its tax split posts the pre-tax share with
+    its own effective rate. An imported amount carries no split, so it is posted tax included
+    (rate 0). No board, discount or cleaning line is added: they are inside the locked price.
+  - *Locked in another currency than the hotel's:* the folio is in the hotel's currency and TEX
+    never converts a locked price silently. One zero line says so ("not billed here: locked at
+    250.00 USD").
+- *M1 An import row is all or nothing.* Each row of `import_bookings` and `run_import` runs in its
+  own savepoint (`legacy.import_savepoint`). The row's guest, reservation, audit event and
+  inventory rows roll back together, and a deadlock still stops the import. History rows
+  (Checked Out, Cancelled, No Show) are records: inserted without live validation, their status
+  stamped, holding no room. Checked In rows are checked as live stays (TEX inventory; the arrival
+  may be past, `allow_past_check_in`) and stamped Checked In without check-in side effects. Before,
+  an `import_bookings` Cancelled or Checked In row failed after its insert and left a €0 Confirmed
+  stay holding TEX inventory. The audit event records the final status.
+- *M2 The fee of a stay TEX did not price comes from its locked amount.* Before, the legacy
+  "Full Stay" fee used the empty `amount_before_tax`, "First Night" used the legacy rate, and the
+  TEX cancel found no snapshot and charged nothing.
+  - The legacy `policy_fee` of a price-locked stay uses `locked_fee`: the whole locked price, or
+    the first night's share, posted like its nights.
+  - `booking.cancellation_penalty` of a stay without a TEX snapshot applies the hotel's own
+    policy (free days, fee basis) to the locked amount after tax (`hotel_policy_penalty`).
+  - The legacy cancellation refuses a stay billed in TEX (TEX booking, or another currency):
+    "Cancel it in TEX", where its policy applies.
+- *M3 A hotel goes live in TEX when an administrator says so.* `is_tex_hotel` was true as soon as
+  a hotel had a group, an enterprise or any contract, even a draft, so the Desk stopped at once,
+  before the CRS could sell.
+  - New `Property.tex_live_from` (read-only), set by `admin.set_hotel_live` (`settings.admin`,
+    reason, audited `hotel.go_live` / `hotel.go_live_undo`; reversible for a rollback). The
+    Property controller refuses the field from the Desk form, REST or data import (in-process
+    flag, popped). `legacy.tex_live` = in TEX and live; `tex_mode` = live / onboarding / None.
+  - *What follows go-live:* the Desk / REST insert refusal, the change guard for stays TEX did not
+    price, and the legacy auto-price skip. While onboarding, the Desk sells the hotel at the
+    legacy price. TEX inventory still applies, and TEX may already sell with a live contract.
+  - *What keeps `is_tex_hotel` from the first moment* (nothing that protects TEX waits for
+    go-live): the ADR-028 refusal of the legacy online engine, staff dialog and channel manager;
+    TEX inventory as the only capacity rule (ADR-048); imports recorded as Imported with their
+    currency; the ADR-010 lock of what TEX sold; ARI; tax-policy seeding. The legacy night audit
+    and billing follow the stay (`is_tex_reservation`), not the hotel.
+  - Patch p36 sets every hotel already in TEX live (audited, reason "upgrade"), so nothing changes
+    for them.
+  - The TEX shell shows a "TEX live" / "Onboarding" badge, and a banner with "Go live" for
+    onboarding hotels. The legacy app shell and the Desk Reservation form (`session.hotel_mode`,
+    scoped) say when a hotel is sold through TEX or joining it.
+  - An in-house stay TEX did not price is told to "book the extra nights as a new TEX
+    reservation".
+  - *Not built: a "take over into TEX" action* that would give such a stay a TEX snapshot so the
+    modification service can serve it. A snapshot needs a market, channel, contract version, board
+    and rate plan chosen for a stay TEX never priced, and every later change would re-price
+    against that contract, not against the amount it was sold at. That is a commercial decision
+    for the owner (GO_LIVE_READINESS owner input 10), not a mechanical conversion.
+- *L1* `flags.tex_modification` covers one save: the `validate` doc event uses it up. The
+  request-wide `frappe.flags.tex_modification` bypass (nothing set it) is gone.
+- *L3 An import at a TEX hotel names its currency:* a Currency column, else the currency chosen
+  for the import. An unknown currency, or an amount naming another one, is refused.
+  `Property.currency` (default INR) is no longer assumed. A hotel outside TEX keeps its amounts
+  in the hotel's currency, and a row naming another currency is refused there too.
+- *Consequences.*
+  - Rolling a row back to its savepoint undoes its database writes, not callbacks already
+    queued for after the commit (realtime refresh, the WhatsApp confirmation). Such a callback
+    finds no reservation and does nothing.
+  - The folio invoice of an imported stay shows its amount tax included, because the file carried
+    no tax split.
+  - Only one field was added (`Property.tex_live_from`, p36); no money field changed type.
+  - Tests: `test_legacy_pricing_review` (23; 22 fail first on `45993df`: 16 errors, 6 failures)
+    and unit `test_import_amounts` (14, new module). The existing import tests now pass a
+    currency, and the fixture hotel is live.
+
 ## ADR-054 Modifications and the simulator are deterministic: a sale time belongs to the basis, the past is read as it was then, a proposal belongs to whoever made it
 *Amended by the review follow-up (end of this ADR): a staff approval of a guest's request is
 refused while the contract that priced it does not sell; a sale time with a UTC offset is read in

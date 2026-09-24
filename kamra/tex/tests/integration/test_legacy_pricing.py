@@ -147,7 +147,7 @@ class TestMigrationImports(LegacyPricingCase):
 		from kamra.api import import_bookings
 
 		with mock.patch("kamra.pricing.quote", side_effect=AssertionError("legacy pricing ran")):
-			out = import_bookings(fx.PROPERTY, [self.import_row(amount_after_tax="312.40")])
+			out = import_bookings(fx.PROPERTY, [self.import_row(amount_after_tax="312.40")], currency="EUR")
 		self.assertEqual(out["created"], 1, out)
 		res = frappe.get_doc("Reservation", out["reservations"][0])
 		self.assertEqual((res.tex_pricing_source, res.tex_price_locked, res.auto_price), ("Imported", 1, 0))
@@ -169,7 +169,7 @@ class TestMigrationImports(LegacyPricingCase):
 		from kamra.api import import_bookings
 
 		with mock.patch("kamra.pricing.quote", side_effect=AssertionError("legacy pricing ran")):
-			out = import_bookings(fx.PROPERTY, [self.import_row()])
+			out = import_bookings(fx.PROPERTY, [self.import_row()], currency="EUR")
 		self.assertEqual(out["created"], 0, out)
 		self.assertIn("amount", out["errors"][0]["error"])
 
@@ -184,7 +184,7 @@ class TestMigrationImports(LegacyPricingCase):
 		            f"Import Past,+49 30 5550194,DLX,{past_ci:%d/%m/%Y},{past_co:%d/%m/%Y},2,0,480.00,Checked Out\n"
 		            f"Import Cancelled,+49 30 5550195,DLX,{ci},{co},2,0,,Cancelled\n")
 		with mock.patch("kamra.pricing.quote", side_effect=AssertionError("legacy pricing ran")):
-			out = migrate.run_import(fx.PROPERTY, csv_text, "auto")
+			out = migrate.run_import(fx.PROPERTY, csv_text, "auto", currency="EUR")
 		self.assertEqual((out["created"], out["history"]), (3, 2), out)
 		rows = {r.guest_name: r for r in frappe.get_all(
 			"Reservation", filters={"name": ("in", out["reservations"])},
@@ -207,7 +207,7 @@ class TestMigrationImports(LegacyPricingCase):
 		admin = self.user("g92-hoteladmin@example.com", "Hotel Admin")
 		frappe.set_user(admin)  # nosemgrep: frappe-setuser -- a Hotel Admin with a sales profile here
 		self.assertFalse(scope.has_capability("price.override", fx.PROPERTY))
-		out = import_bookings(fx.PROPERTY, [self.import_row(amount_after_tax="200")])
+		out = import_bookings(fx.PROPERTY, [self.import_row(amount_after_tax="200")], currency="EUR")
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back to the test's user
 		self.assertEqual(out["created"], 0, out)
 

@@ -338,5 +338,17 @@
  "res.gcr.staff_money.refunded": "Возвращено гостю вне TEX",
  "res.gcr.staff_money.kept": "Оставлено на бронировании",
  "res.gcr.staff_money.refunded_hint": "TEX фиксирует возврат на бронировании (возврат вручную) и вычитает его из оплаченного гостем.",
- "res.gcr.staff_money.kept_hint": "Деньги остаются на бронировании как кредит гостя."
+ "res.gcr.staff_money.kept_hint": "Деньги остаются на бронировании как кредит гостя.",
+ "res.imported.badge": "Импортировано",
+ "res.imported.badge_hint": "Импортировано из другой системы по сумме из файла",
+ "res.imported.button": "Исправить импортированную сумму",
+ "res.imported.title": "Исправление импортированной суммы",
+ "res.imported.subtitle": "Проживание сохраняет импортированную сумму, пока вы её не исправите. Исправление записывается как ревизия и в журнал аудита.",
+ "res.imported.current": "Импортировано по",
+ "res.imported.amount": "Правильная сумма",
+ "res.imported.amount_hint": "Цифры с десятичной точкой, например 1250.50",
+ "res.imported.currency": "Валюта",
+ "res.imported.reason": "Причина",
+ "res.imported.confirm": "Исправить сумму",
+ "res.imported.done": "Сумма исправлена на {amount}"
 }

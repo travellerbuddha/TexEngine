@@ -252,6 +252,15 @@ SETTINGS_FIELDS = ("strict_tenancy", "show_legacy_pms", "brand_name", "support_e
                    "manage_link_days", "fx_provider_default", "fx_max_age_days", "status_alert_recipients")
 
 
+@frappe.whitelist(methods=["POST"])
+def set_hotel_live(property: str, live: int = 1, reason: str | None = None):
+	"""A TEX hotel goes live in TEX (the Desk stops selling it) or back to onboarding: needs
+	``settings.admin`` at the hotel and a reason; audited (ADR-052 review)."""
+	from kamra.tex.legacy import set_live
+
+	return set_live(property, bool(as_int(live, 1)), text(reason, 500) or "")
+
+
 @frappe.whitelist()
 def settings():
 	_require_platform()

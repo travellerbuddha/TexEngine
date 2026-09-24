@@ -68,5 +68,17 @@
  "core.shell.sign_out": "Çıkış yap",
  "core.shell.skip": "İçeriğe geç",
  "core.shell.theme_dark": "Koyu temaya geç",
- "core.shell.theme_light": "Açık temaya geç"
+ "core.shell.theme_light": "Açık temaya geç",
+ "core.shell.tex_live": "TEX'te canlı",
+ "core.shell.tex_live_hint": "Bu otel TEX üzerinden satılıyor: Desk artık konaklamalarını oluşturmuyor veya yeniden fiyatlandırmıyor.",
+ "core.shell.tex_onboarding": "Geçiş aşamasında",
+ "core.shell.tex_onboarding_hint": "Bu otel TEX'te ancak henüz canlı değil: Desk onu hâlâ eski fiyatla satıyor.",
+ "core.shell.onboarding_title": "{hotel} henüz TEX'te canlı değil",
+ "core.shell.onboarding_body": "Canlıya alınana kadar Desk bu oteli hâlâ eski fiyatla satar (TEX envanteri geçerlidir). Sözleşmeleri yayımlandığında ve ekip TEX'te rezervasyon yaptığında canlıya alın.",
+ "core.shell.go_live": "TEX'te canlıya al",
+ "core.shell.go_live_title": "{hotel} otelini TEX'te canlıya al",
+ "core.shell.go_live_body": "Bundan sonra Desk formu, REST ve veri içe aktarma bu otelin konaklamalarını oluşturmaz veya yeniden fiyatlandırmaz: rezervasyonlar TEX'te yapılır ve değiştirilir. Daha önce satılan konaklamalar koşullarını korur.",
+ "core.shell.go_live_reason": "Gerekçe",
+ "core.shell.go_live_confirm": "Canlıya al",
+ "core.shell.go_live_done": "{hotel} TEX'te canlı"
 }

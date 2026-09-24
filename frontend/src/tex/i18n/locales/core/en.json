@@ -69,5 +69,17 @@
  "core.shell.sign_out": "Sign out",
  "core.shell.skip": "Skip to content",
  "core.shell.theme_dark": "Switch to dark mode",
- "core.shell.theme_light": "Switch to light mode"
+ "core.shell.theme_light": "Switch to light mode",
+ "core.shell.tex_live": "TEX live",
+ "core.shell.tex_live_hint": "This hotel is sold through TEX: the Desk no longer creates or re-prices its stays.",
+ "core.shell.tex_onboarding": "Onboarding",
+ "core.shell.tex_onboarding_hint": "This hotel is in TEX but not live yet: the Desk still sells it at the legacy price.",
+ "core.shell.onboarding_title": "{hotel} is not live in TEX yet",
+ "core.shell.onboarding_body": "Until it goes live, the Desk still sells this hotel at the legacy price (TEX inventory applies). Set it live once its contracts are published and the team books in TEX.",
+ "core.shell.go_live": "Go live in TEX",
+ "core.shell.go_live_title": "Set {hotel} live in TEX",
+ "core.shell.go_live_body": "From now on the Desk form, REST and data import no longer create or re-price this hotel's stays: they are booked and changed in TEX. Stays sold before keep their terms.",
+ "core.shell.go_live_reason": "Reason",
+ "core.shell.go_live_confirm": "Go live",
+ "core.shell.go_live_done": "{hotel} is live in TEX"
 }

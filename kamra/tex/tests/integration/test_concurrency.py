@@ -176,7 +176,7 @@ class TestConcurrentDeskAndTexBooking(IntegrationTestCase):
 				doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
 				                      "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
 				                      "adults": 2, "status": "Confirmed", "amount_after_tax": 240})
-				flag_import(doc)
+				flag_import(doc, currency="EUR")
 				doc.insert()
 				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each racer is its own request
 				results["desk"] = "booked"

@@ -55,6 +55,9 @@ EXT = {
 		F("tex_enterprise", "Link", "Enterprise", "TEX Enterprise", read_only=1),
 		F("tex_hotel_group", "Link", "Hotel group", "TEX Hotel Group"),
 		F("tex_default_market", "Link", "Default market", "TEX Market"),
+		F("tex_live_from", "Datetime", "Live in TEX from", read_only=1,
+		  description="Sold through TEX from this moment: the Desk no longer creates or re-prices this hotel's "
+		              "stays. Set only in TEX (go live), by an administrator, with a reason."),
 		F("tex_self_service", "Check", "Guest self-service", default="1"),
 		CB(),
 		F("tex_inventory_mode", "Select", "Inventory source", ["Physical rooms", "Configured"],

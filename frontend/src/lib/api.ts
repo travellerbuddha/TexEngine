@@ -326,6 +326,9 @@ export interface PropertyRow {
   name: string
   property_name: string
   city: string | null
+  /** TEX Engine (ADR-052 review): "live" = sold through TEX, the Desk no longer creates or
+   * re-prices its stays; "onboarding" = joining TEX, the Desk still sells it; null = outside TEX */
+  tex_mode?: "live" | "onboarding" | null
 }
 
 export const myProperties = () =>

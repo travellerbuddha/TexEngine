@@ -11,7 +11,15 @@ import { PriceBreakdown } from "../../crs/components/PriceBreakdown"
 import { cmpDecimal, isZero } from "../../crs/lib/party"
 import { useServerClock } from "../../crs/lib/serverClock"
 import { asApiError } from "../../crs/lib/useBookingFlow"
-import { acknowledgeGuestChange, cancelReservation, cancellationPreview, resendConfirmation, simulate, type ResendResult } from "../lib/api"
+import {
+  acknowledgeGuestChange,
+  cancelReservation,
+  cancellationPreview,
+  correctImportedAmount,
+  resendConfirmation,
+  simulate,
+  type ResendResult,
+} from "../lib/api"
 import type { CancelPreview, CancelResult, ReservationDetail, Simulation } from "../lib/types"
 import { localToServer } from "./ModifyDrawer"
 
@@ -264,6 +272,90 @@ export function CancelDialog({
 }
 
 /** Acknowledge a change the guest made through self-service (optional note, audited). */
+/** Correct an imported stay's locked amount (and currency) — ADR-052 review. The server reads
+ * the amount strictly (no guessing of decimal marks), needs price.override and a reason, and
+ * records a revision and an audit event. */
+export function CorrectImportDialog({ open, onClose, res, currencies, onDone }: { open: boolean; onClose: () => void; res: ReservationDetail; currencies: string[]; onDone: () => void }) {
+  const { t } = useTexT()
+  const toast = useToast()
+  const [amount, setAmount] = useState("")
+  const [currency, setCurrency] = useState(res.currency)
+  const [reason, setReason] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<TexApiError>()
+  useEffect(() => {
+    if (open) {
+      setAmount(res.total ?? "")
+      setCurrency(res.currency)
+      setReason("")
+      setError(undefined)
+    }
+  }, [open, res.total, res.currency])
+  const options = currencies.includes(res.currency) ? currencies : [res.currency, ...currencies]
+  return (
+    <Dialog
+      open={open}
+      onClose={busy ? () => undefined : onClose}
+      size="sm"
+      title={t("res.imported.title")}
+      description={t("res.imported.subtitle")}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            {t("core.action.cancel")}
+          </Button>
+          <Button
+            loading={busy}
+            disabled={!amount.trim() || !reason.trim()}
+            onClick={async () => {
+              setBusy(true)
+              setError(undefined)
+              try {
+                const out = await correctImportedAmount(res.name, amount.trim(), reason.trim(), currency)
+                toast.success(t("res.imported.done", { amount: `${out.new_amount} ${out.currency}` }))
+                onDone()
+              } catch (e) {
+                setError(asApiError(e))
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {t("res.imported.confirm")}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Row label={t("res.imported.current")} value={<Money amount={res.total} currency={res.currency} />} />
+        <div className="grid grid-cols-[1fr_7rem] gap-3">
+          <Field label={t("res.imported.amount")} hint={t("res.imported.amount_hint")}>
+            <Input id="import-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-autofocus />
+          </Field>
+          <Field label={t("res.imported.currency")}>
+            <select
+              id="import-currency"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="h-9 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 focus:border-tex-500 focus:ring-2 focus:ring-tex-500/30 focus:outline-none"
+            >
+              {options.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label={t("res.imported.reason")} hint={t("core.hint.reason_audited")}>
+          <Textarea id="import-reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+        <InlineError error={error} />
+      </div>
+    </Dialog>
+  )
+}
+
 export function AcknowledgeDialog({ open, onClose, res, onDone }: { open: boolean; onClose: () => void; res: ReservationDetail; onDone: () => void }) {
   const { t } = useTexT()
   const toast = useToast()

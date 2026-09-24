@@ -338,5 +338,17 @@
  "res.gcr.staff_money.refunded": "Zwrócono gościowi poza TEX",
  "res.gcr.staff_money.kept": "Zostawiono na rezerwacji",
  "res.gcr.staff_money.refunded_hint": "TEX zapisuje zwrot na rezerwacji (zwrot ręczny) i odejmuje go od tego, co zapłacił gość.",
- "res.gcr.staff_money.kept_hint": "Pieniądze zostają na rezerwacji jako środki gościa."
+ "res.gcr.staff_money.kept_hint": "Pieniądze zostają na rezerwacji jako środki gościa.",
+ "res.imported.badge": "Zaimportowano",
+ "res.imported.badge_hint": "Zaimportowano z innego systemu z kwotą z pliku",
+ "res.imported.button": "Popraw zaimportowaną kwotę",
+ "res.imported.title": "Korekta zaimportowanej kwoty",
+ "res.imported.subtitle": "Pobyt zachowuje zaimportowaną kwotę, dopóki jej nie poprawisz. Korekta jest zapisywana jako rewizja i w dzienniku audytu.",
+ "res.imported.current": "Zaimportowano z kwotą",
+ "res.imported.amount": "Prawidłowa kwota",
+ "res.imported.amount_hint": "Cyfry z kropką dziesiętną, np. 1250.50",
+ "res.imported.currency": "Waluta",
+ "res.imported.reason": "Powód",
+ "res.imported.confirm": "Popraw kwotę",
+ "res.imported.done": "Kwotę poprawiono na {amount}"
 }

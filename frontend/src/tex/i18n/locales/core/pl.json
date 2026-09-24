@@ -71,5 +71,17 @@
  "core.shell.sign_out": "Wyloguj",
  "core.shell.skip": "Przejdź do treści",
  "core.shell.theme_dark": "Tryb ciemny",
- "core.shell.theme_light": "Tryb jasny"
+ "core.shell.theme_light": "Tryb jasny",
+ "core.shell.tex_live": "Aktywny w TEX",
+ "core.shell.tex_live_hint": "Ten hotel jest sprzedawany przez TEX: Desk nie tworzy już jego pobytów ani nie przelicza ich cen.",
+ "core.shell.tex_onboarding": "Wdrażanie",
+ "core.shell.tex_onboarding_hint": "Ten hotel jest w TEX, ale jeszcze nie aktywny: Desk nadal sprzedaje go po starej cenie.",
+ "core.shell.onboarding_title": "{hotel} nie jest jeszcze aktywny w TEX",
+ "core.shell.onboarding_body": "Do uruchomienia Desk nadal sprzedaje ten hotel po starej cenie (obowiązują stany TEX). Uruchom go, gdy umowy są opublikowane, a zespół rezerwuje w TEX.",
+ "core.shell.go_live": "Uruchom w TEX",
+ "core.shell.go_live_title": "Uruchom {hotel} w TEX",
+ "core.shell.go_live_body": "Od teraz formularz Desk, REST i import danych nie tworzą już pobytów tego hotelu ani nie przeliczają ich cen: rezerwuje się je i zmienia w TEX. Pobyty sprzedane wcześniej zachowują swoje warunki.",
+ "core.shell.go_live_reason": "Powód",
+ "core.shell.go_live_confirm": "Uruchom",
+ "core.shell.go_live_done": "{hotel} jest aktywny w TEX"
 }

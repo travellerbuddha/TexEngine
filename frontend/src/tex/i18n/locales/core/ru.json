@@ -71,5 +71,17 @@
  "core.shell.sign_out": "Выйти",
  "core.shell.skip": "Перейти к содержимому",
  "core.shell.theme_dark": "Тёмная тема",
- "core.shell.theme_light": "Светлая тема"
+ "core.shell.theme_light": "Светлая тема",
+ "core.shell.tex_live": "В TEX",
+ "core.shell.tex_live_hint": "Этот отель продаётся через TEX: Desk больше не создаёт и не переоценивает его проживания.",
+ "core.shell.tex_onboarding": "Подключение",
+ "core.shell.tex_onboarding_hint": "Этот отель уже в TEX, но ещё не запущен: Desk пока продаёт его по старой цене.",
+ "core.shell.onboarding_title": "{hotel} ещё не запущен в TEX",
+ "core.shell.onboarding_body": "До запуска Desk продаёт этот отель по старой цене (действует инвентарь TEX). Запустите его, когда договоры опубликованы и команда бронирует в TEX.",
+ "core.shell.go_live": "Запустить в TEX",
+ "core.shell.go_live_title": "Запустить {hotel} в TEX",
+ "core.shell.go_live_body": "С этого момента форма Desk, REST и импорт данных больше не создают и не переоценивают проживания этого отеля: их бронируют и меняют в TEX. Ранее проданные проживания сохраняют свои условия.",
+ "core.shell.go_live_reason": "Причина",
+ "core.shell.go_live_confirm": "Запустить",
+ "core.shell.go_live_done": "{hotel} запущен в TEX"
 }

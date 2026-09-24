@@ -70,5 +70,17 @@
  "core.shell.sign_out": "Deconectare",
  "core.shell.skip": "Salt la conținut",
  "core.shell.theme_dark": "Mod întunecat",
- "core.shell.theme_light": "Mod luminos"
+ "core.shell.theme_light": "Mod luminos",
+ "core.shell.tex_live": "Activ în TEX",
+ "core.shell.tex_live_hint": "Acest hotel se vinde prin TEX: Desk nu mai creează și nu mai recalculează prețul sejururilor sale.",
+ "core.shell.tex_onboarding": "În integrare",
+ "core.shell.tex_onboarding_hint": "Acest hotel este în TEX, dar nu este încă activ: Desk îl vinde încă la prețul vechi.",
+ "core.shell.onboarding_title": "{hotel} nu este încă activ în TEX",
+ "core.shell.onboarding_body": "Până la activare, Desk vinde încă acest hotel la prețul vechi (se aplică inventarul TEX). Activați-l după ce contractele sunt publicate și echipa rezervă în TEX.",
+ "core.shell.go_live": "Activează în TEX",
+ "core.shell.go_live_title": "Activează {hotel} în TEX",
+ "core.shell.go_live_body": "De acum formularul Desk, REST și importul de date nu mai creează și nu mai recalculează sejururile acestui hotel: ele se rezervă și se modifică în TEX. Sejururile vândute înainte își păstrează condițiile.",
+ "core.shell.go_live_reason": "Motiv",
+ "core.shell.go_live_confirm": "Activează",
+ "core.shell.go_live_done": "{hotel} este activ în TEX"
 }

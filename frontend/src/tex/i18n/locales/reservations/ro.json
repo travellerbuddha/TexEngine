@@ -327,5 +327,17 @@
  "res.gcr.staff_money.refunded": "Rambursat oaspetelui în afara TEX",
  "res.gcr.staff_money.kept": "Lăsat pe rezervare",
  "res.gcr.staff_money.refunded_hint": "TEX înregistrează rambursarea pe rezervare (o rambursare manuală) și o scade din ce a plătit oaspetele.",
- "res.gcr.staff_money.kept_hint": "Banii rămân pe rezervare ca credit al oaspetelui."
+ "res.gcr.staff_money.kept_hint": "Banii rămân pe rezervare ca credit al oaspetelui.",
+ "res.imported.badge": "Importat",
+ "res.imported.badge_hint": "Importat din alt sistem la suma din fișierul său",
+ "res.imported.button": "Corectează suma importată",
+ "res.imported.title": "Corectarea sumei importate",
+ "res.imported.subtitle": "Sejurul păstrează suma importată până când o corectați. Corectarea se înregistrează ca revizie și în jurnalul de audit.",
+ "res.imported.current": "Importat la",
+ "res.imported.amount": "Suma corectă",
+ "res.imported.amount_hint": "Cifre cu punct zecimal, de ex. 1250.50",
+ "res.imported.currency": "Monedă",
+ "res.imported.reason": "Motiv",
+ "res.imported.confirm": "Corectează suma",
+ "res.imported.done": "Suma a fost corectată la {amount}"
 }

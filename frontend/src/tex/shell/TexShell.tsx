@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { NavLink, useLocation, useNavigate } from "react-router-dom"
-import { Building2, ExternalLink, LogOut, Menu, Moon, Search, Sun, X } from "lucide-react"
+import { Building2, ExternalLink, LogOut, Menu, Moon, Rocket, Search, Sun, X } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useAuth } from "../../lib/auth"
 import { getTheme, setTheme } from "../../lib/theme"
 import { toFullPath } from "../../lib/routing"
 import { NAV, NAV_GROUPS, type NavItem } from "./nav"
+import { tex, type TexApiError } from "../lib/api"
 import { useSession } from "../lib/session"
 import { setTexLang, TEX_LANGS, useTexT, type TexLang } from "../i18n"
-import { IconButton, Kbd } from "../ui"
+import { Badge, Button, Dialog, Field, IconButton, InlineError, Kbd, Notice, Textarea, useToast } from "../ui"
 
 function useVisibleNav(): NavItem[] {
   const { can } = useSession()
@@ -42,6 +43,92 @@ function HotelSwitcher() {
         ))}
       </select>
     </label>
+  )
+}
+
+/** Whether the selected hotel is sold through TEX (ADR-052 review): "TEX live", or onboarding. */
+function TexModeBadge() {
+  const { property } = useSession()
+  const { t } = useTexT()
+  if (!property?.tex_mode) return null
+  return property.tex_mode === "live" ? (
+    <Badge tone="brand" className="hidden shrink-0 sm:inline-flex" title={t("core.shell.tex_live_hint")}>
+      {t("core.shell.tex_live")}
+    </Badge>
+  ) : (
+    <Badge tone="warning" className="hidden shrink-0 sm:inline-flex" title={t("core.shell.tex_onboarding_hint")}>
+      {t("core.shell.tex_onboarding")}
+    </Badge>
+  )
+}
+
+/** An onboarding hotel is still sold at the legacy Desk: say so, and let an administrator
+ * (settings.admin) set it live in TEX, with a reason (audited on the server). */
+function OnboardingBanner() {
+  const { property, can, reload } = useSession()
+  const { t } = useTexT()
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<TexApiError>()
+  if (property?.tex_mode !== "onboarding") return null
+  const admin = can("settings.admin")
+  const submit = async () => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await tex("admin", "set_hotel_live", { property: property.name, live: 1, reason: reason.trim() }, { post: true })
+      toast.success(t("core.shell.go_live_done", { hotel: property.property_name }))
+      setOpen(false)
+      await reload()
+    } catch (e) {
+      setError(e as TexApiError)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="mx-auto w-full max-w-[1400px] px-3 pt-4 sm:px-6">
+      <Notice tone="warning" title={t("core.shell.onboarding_title", { hotel: property.property_name })}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <p>{t("core.shell.onboarding_body")}</p>
+          {admin && (
+            <Button size="sm" icon={<Rocket className="size-4" aria-hidden />} onClick={() => {
+              setReason("")
+              setError(undefined)
+              setOpen(true)
+            }}>
+              {t("core.shell.go_live")}
+            </Button>
+          )}
+        </div>
+      </Notice>
+      <Dialog
+        open={open}
+        onClose={busy ? () => undefined : () => setOpen(false)}
+        size="sm"
+        title={t("core.shell.go_live_title", { hotel: property.property_name })}
+        description={t("core.shell.go_live_body")}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setOpen(false)} disabled={busy}>
+              {t("core.action.cancel")}
+            </Button>
+            <Button loading={busy} disabled={!reason.trim()} onClick={() => void submit()}>
+              {t("core.shell.go_live_confirm")}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label={t("core.shell.go_live_reason")} hint={t("core.hint.reason_audited")}>
+            <Textarea id="go-live-reason" value={reason} onChange={(e) => setReason(e.target.value)} data-autofocus />
+          </Field>
+          <InlineError error={error} />
+        </div>
+      </Dialog>
+    </div>
   )
 }
 
@@ -322,8 +409,9 @@ export function TexShell({ children }: { children: ReactNode }) {
       <div className="min-w-0 lg:pl-60">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-zinc-200 bg-white/90 px-3 backdrop-blur sm:px-5">
           <IconButton className="lg:hidden" label={t("core.shell.open_nav")} icon={<Menu className="size-5" />} onClick={() => setMobileNav(true)} />
-          <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <HotelSwitcher />
+            <TexModeBadge />
           </div>
           <button
             type="button"
@@ -337,6 +425,7 @@ export function TexShell({ children }: { children: ReactNode }) {
           <IconButton className="md:hidden" label={t("core.cmd.open")} icon={<Search className="size-4" />} onClick={() => setPalette(true)} />
           <UserMenu />
         </header>
+        <OnboardingBanner />
         <main id="tex-main" tabIndex={-1} className="mx-auto w-full max-w-[1400px] min-w-0 overflow-x-clip px-3 py-5 outline-none sm:px-6 sm:py-6">
           {children}
         </main>
