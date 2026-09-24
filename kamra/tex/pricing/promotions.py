@@ -71,13 +71,16 @@ class PromoOutcome:
 	# with was below ``minimum``, the threshold in the sell currency; G-84)
 	rule: str = ""
 	minimum: Decimal | None = None
+	# COST: a cost-stage offer (it lowers the contract cost: its discount, and a basket it was
+	# compared with, are cost figures, shown only with price.view_cost); SELL otherwise
+	stage: str = "SELL"
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
 
 		out = {"promo_id": self.promo_id, "name": self.name, "kind": self.kind, "applied": self.applied,
 		       "reason": self.reason, "discount": to_str6(self.discount), "nights": list(self.nights),
-		       "value_added": self.value_added, "source": self.source, "code": self.code}
+		       "value_added": self.value_added, "source": self.source, "code": self.code, "stage": self.stage}
 		if self.rule:
 			out.update(rule=self.rule, minimum=to_str6(self.minimum))
 		return out

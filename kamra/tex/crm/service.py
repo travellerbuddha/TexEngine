@@ -741,7 +741,10 @@ def set_abandoned_status(name: str, status: str, note: str | None = None) -> Non
 	      new={"status": status}, reason=note)
 
 
-def purge_funnel(days: int = 180) -> int:
+FUNNEL_RETENTION_DAYS = 180         # funnel events older than this are deleted (reports refuse older windows)
+
+
+def purge_funnel(days: int = FUNNEL_RETENTION_DAYS) -> int:
 	"""Data minimisation: funnel events older than ``days`` are deleted."""
 	cutoff = now_datetime() - timedelta(days=days)
 	n = frappe.db.count("TEX Funnel Event", {"occurred_at": ("<", cutoff)})

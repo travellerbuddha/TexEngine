@@ -7,11 +7,23 @@ at every hotel of the report.
 
 from __future__ import annotations
 
+from functools import wraps
+
 import frappe
 from frappe.utils import cint
 
 from kamra.tex.reports import service as rep
 from kamra.tex.security.scope import require_capability
+
+
+def throttled(fn):
+	"""Each user runs at most ``service.RATE_LIMIT`` reports a minute (G-46 review, M5)."""
+	@wraps(fn)
+	def wrapper(*args, **kwargs):
+		rep.throttle()
+		return fn(*args, **kwargs)
+
+	return wrapper
 
 
 @frappe.whitelist()
@@ -22,6 +34,7 @@ def dashboard(property: str, date_from: str | None = None, date_to: str | None =
 
 @frappe.whitelist()
 @require_capability("report.view")
+@throttled
 def production(property: str | None = None, date_from: str | None = None, date_to: str | None = None,
                group_by: str = "channel", basis: str = "stay", include_cancelled=0, level: str | None = None,
                name: str | None = None, stay_from: str | None = None, stay_to: str | None = None,
@@ -42,8 +55,9 @@ def production(property: str | None = None, date_from: str | None = None, date_t
 
 @frappe.whitelist()
 @require_capability("report.view")
+@throttled
 def report(view: str, property: str | None = None, level: str | None = None, name: str | None = None,
-           group_by: str | None = None, basis: str = "stay", stay_from: str | None = None, stay_to: str | None = None,
+           group_by: str | None = None, basis: str | None = None, stay_from: str | None = None, stay_to: str | None = None,
            sale_from: str | None = None, sale_to: str | None = None, market=None, channel=None, room_type=None,
            rate_plan=None, currency=None, include_cancelled=0):
 	"""One report view (production, margin, promotion, extras, cancellation, payment,
@@ -78,6 +92,7 @@ def portfolio_scopes():
 
 @frappe.whitelist()
 @require_capability("report.view", property_arg=None)
+@throttled
 def portfolio(level: str = "All", name: str | None = None, date_from: str | None = None,
               date_to: str | None = None):
 	"""The sales dashboard of a portfolio: every hotel of the scope where the user holds

@@ -193,6 +193,10 @@ TEX_INDEXES = (
 	("TEX Audit Event", ["action", "event_time"], "tex_audit_action_time"),            # ADR-047
 	("TEX Communication", ["status", "creation"], "tex_comm_status_created"),
 	("TEX Communication", ["email_queue", "status"], "tex_comm_queue_status"),
+	# reports read a hotel's stays by arrival and a hotel's (or group site's) funnel by time (G-46, p46)
+	("Reservation", ["property", "check_in_date"], "tex_res_prop_ci"),
+	("TEX Funnel Event", ["property", "occurred_at"], "tex_funnel_prop_time"),
+	("TEX Funnel Event", ["site", "occurred_at"], "tex_funnel_site_time"),
 )
 
 

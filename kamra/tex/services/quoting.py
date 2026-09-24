@@ -601,12 +601,28 @@ def _night_amount(n: dict, ccy: str) -> str | None:
 	return to_str(quantize(D(n["final"]), ccy)) if n.get("final") not in (None, "") and ccy else None
 
 
+def cost_stage_outcomes(q: dict) -> set[tuple[str, str]]:
+	"""(promotion id, source) of a quote dict's cost-stage outcomes, from its explanation: a
+	snapshot priced before outcomes named their stage (ADR-059 review) is told by it."""
+	out = set()
+	for step in q.get("explanation") or []:
+		rule = (step.get("rule") or {}) if isinstance(step, dict) else {}
+		if step.get("stage") == "cost_offer" and rule.get("rule_id"):
+			out.add((rule["rule_id"], rule.get("source") or ""))
+	return out
+
+
 def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 	"""Remove cost, margin, per-night cost and the rule explanation from a quote dict
 	(for users without price.view_cost and for guests). ``staff`` keeps the list of
-	promotions that did not apply (an agent may offer those codes to the caller)."""
+	promotions that did not apply (an agent may offer those codes to the caller); a cost-stage
+	offer, applied or not, is a cost figure and never kept (ADR-059 review)."""
 	if not q:
 		return q
+	if isinstance(q.get("promotions"), list):
+		cost_stage = cost_stage_outcomes(q)
+		q["promotions"] = [pr for pr in q["promotions"] if not (
+			pr.get("stage") == engine.COST if "stage" in pr else (pr.get("promo_id"), pr.get("source") or "") in cost_stage)]
 	q.pop("explanation", None)
 	q.pop("fx", None)
 	q.pop("fx_rates", None)                       # rates, providers and FX margins (G-56)

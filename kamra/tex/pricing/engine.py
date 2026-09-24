@@ -81,6 +81,7 @@ class QuoteLine:
 
 # totals only staff with cost access may see (supplier cost, margin)
 INTERNAL_TOTALS = ("cost", "margin", "margin_percent", "cost_contract_currency")
+COST = PromoStage.COST.value         # the stage of a promotion outcome only cost access may see
 
 
 @dataclass
@@ -129,7 +130,8 @@ class RoomQuote:
 			"contract": self.contract,
 			"rate_plan": self.rate_plan,
 			"lines": [ln.to_dict() for ln in self.lines],
-			"promotions": [p.to_dict() for p in self.promotions if internal or p.applied],
+			# a cost-stage outcome is a cost figure (ADR-059 review): internal only
+			"promotions": [p.to_dict() for p in self.promotions if internal or (p.applied and p.stage != COST)],
 			"extras": [e.to_dict() for e in self.extras],
 			"taxes": [t.to_dict() for t in self.taxes],
 			"totals": totals,
@@ -368,11 +370,11 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 		chosen, rejected = promotions.select(cost_promos, cost_ctx, ctx.coupon_usage)
 		# a cost-stage minimum is the room's supplier cost, in the contract's currency: never the
 		# booking's basket, so it never asks for the rooms to be priced together (G-84)
-		rejected = [replace(o, rule="", minimum=None) if o.rule else o for o in rejected]
+		rejected = [replace(o, rule="", minimum=None, stage=COST) for o in rejected]
 		promotions.explain_rejections(rejected, ex, "cost_offer")
 		cost_net, cost_outcomes = promotions.apply_promotions(chosen, costs, cost_ctx, t.stacking, t.currency,
 		                                                      explain=ex, stage="cost_offer")
-		q.promotions.extend(cost_outcomes)
+		q.promotions.extend(replace(o, stage=COST) for o in cost_outcomes)
 		q.promotions.extend(rejected)
 
 		# ── 9-10: markup and FX ──

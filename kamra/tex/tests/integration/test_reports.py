@@ -296,7 +296,8 @@ class TestViews(ReportCase):
 		row = out["rows"][0]
 		self.assertEqual((row["key"], row["currency"], row["applications"], row["room_nights"]), (promo, "EUR", 1, 3))
 		self.assertEqual(row["discount"], "80.25")                                # 10 % of 802.50
-		self.assertEqual(out["totals"]["EUR"], {"applications": 1, "discount": "80.25"})
+		# with cost access the total carries the contract-cost reduction of cost-stage offers (none here)
+		self.assertEqual(out["totals"]["EUR"], {"applications": 1, "discount": "80.25", "cost_reduction": "0.00"})
 
 	def test_extras_view(self):
 		sell("g46-x1")
