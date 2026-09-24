@@ -57,6 +57,9 @@ export interface TxnDetail extends Txn {
   finish_blocked?: string | null
   /** A refund made for a guest's change: "not refunded" makes TEX refund it again elsewhere. */
   guest_change?: string | null
+  /** A refund the gateway answered otherwise than the outcome recorded for it, until staff record
+   * what it actually did (G-45 re-review 4). */
+  conflict?: { recorded: string | null; gateway: string | null; gateway_ref: string | null } | null
 }
 
 export type LinkStatus = "Draft" | "Active" | "Partially Paid" | "Paid" | "Expired" | "Cancelled"

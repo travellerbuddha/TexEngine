@@ -285,7 +285,7 @@
  "settings.status.reason.payment_pending": "Noch ausstehende Kartenzahlungen: {count}, die älteste begann vor {minutes} Min.",
  "settings.status.reason.redis_unreachable": "Die Hintergrund-Warteschlange (Redis) ist nicht erreichbar.",
  "settings.status.reason.refund_unknown": "Vom Zahlungsanbieter nie bestätigte Erstattungen: {count}. Prüfen Sie sie dort, bevor Sie erneut erstatten.",
- "settings.status.reason.refund_conflict": "Erstattungen, auf die der Zahlungsanbieter anders antwortete als das für sie erfasste Ergebnis (letzte {days} Tage): {count}. Gleichen Sie sie beim Zahlungsanbieter ab.",
+ "settings.status.reason.refund_conflict": "Erstattungen, auf die der Zahlungsanbieter anders antwortete als das für sie erfasste Ergebnis: {count}. Prüfen Sie sie dort und erfassen Sie, was er tatsächlich getan hat.",
  "settings.status.reason.scheduler_disabled": "Der Scheduler ist deaktiviert: kein TEX-Job läuft.",
  "settings.status.reason.scheduler_paused": "Der Scheduler ist pausiert: kein TEX-Job läuft.",
  "settings.status.scope_hotels": "Ihre Hotels: {hotels}",

@@ -381,6 +381,73 @@ export function FinishRefundDialog({ open, onClose, txn, onDone }: { open: boole
   )
 }
 
+/** A refund the gateway answered otherwise than the outcome recorded for it: staff check it at the
+ * gateway and record what it actually did; the refund and the booking are put right (G-45 re-review 4). */
+export function ResolveConflictDialog({ open, onClose, txn, onDone }: { open: boolean; onClose: () => void; txn: TxnDetail; onDone: () => void }) {
+  const { t } = useTexT()
+  const toast = useToast()
+  const a = useAction(open)
+  const [outcome, setOutcome] = useState<RefundOutcome | "">("")
+  const [reference, setReference] = useState("")
+  const [reason, setReason] = useState("")
+  const close = useEvent(() => {
+    if (!a.pending) onClose()
+  })
+  useEffect(() => {
+    if (!open) return
+    setOutcome("")
+    setReference("")
+    setReason("")
+  }, [open])
+  const valid = Boolean(outcome) && reason.trim().length > 2
+  const submit = async () => {
+    if (!valid) return
+    const r = await a.run(() =>
+      tex<{ refund: string; status: string }>(
+        "payments",
+        "resolve_refund_conflict",
+        { refund: txn.name, outcome, reason: reason.trim(), reference: reference.trim() || undefined },
+        { post: true },
+      ),
+    )
+    if (!r) return
+    toast.success(t("payments.conflict.done", { name: r.refund }))
+    onDone()
+    onClose()
+  }
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title={t("payments.conflict.dialog_title")}
+      description={t("payments.conflict.desc")}
+      footer={<Footer onCancel={close} onConfirm={submit} pending={a.pending} disabled={!valid} label={t("payments.conflict.confirm")} />}
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-zinc-700">
+          {t("payments.finish.amount")} <Money amount={txn.amount} currency={txn.currency} className="font-semibold" />
+        </p>
+        <Segmented<RefundOutcome | "">
+          label={t("payments.conflict.outcome")}
+          value={outcome}
+          onChange={setOutcome}
+          options={[
+            { value: "Succeeded", label: t("payments.conflict.succeeded") },
+            { value: "Failed", label: t("payments.conflict.failed") },
+          ]}
+        />
+        <Field label={t("payments.finish.reference")} hint={t("payments.finish.reference_hint")}>
+          <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={140} autoComplete="off" />
+        </Field>
+        <Field label={t("core.field.reason")} required hint={t("core.hint.reason_audited")}>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={500} />
+        </Field>
+        <InlineError error={a.error} />
+      </div>
+    </Dialog>
+  )
+}
+
 /** A successful charge, or a Failed one whose capture TEX refused to count (the server reports it refundable).
  * A payment entered by hand is refunded outside TEX only, and recorded here (G-93). */
 export const canRefund = (txn: TxnDetail) =>
@@ -393,6 +460,8 @@ export const canTransfer = (txn: TxnDetail) => txn.txn_type === "Charge" && txn.
 export const canConfirmTransfer = (txn: TxnDetail) => txn.provider === "Bank Transfer" && txn.status === "Pending"
 /** A refund still Pending whose answer cannot come any more (the server decides: never while its call may run). */
 export const canFinishRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending" && !!txn.can_finish
+/** A refund whose gateway answer contradicted the recorded outcome, not yet put right. */
+export const hasConflict = (txn: TxnDetail) => txn.txn_type === "Refund" && !!txn.conflict
 /** A refund still Pending, finished or not yet finishable. */
 export const isPendingRefund = (txn: TxnDetail) => txn.txn_type === "Refund" && txn.status === "Pending"
 /** Pending charges, and Failed or superseded (Cancelled) ones: a captured payment whose callback was lost can be recovered. */
