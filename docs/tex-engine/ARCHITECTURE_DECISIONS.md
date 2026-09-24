@@ -2824,11 +2824,16 @@ three Low, fixed as follows.
   - the length of stay (minimum / maximum) is judged on the new stay when its dates change: a
     shortening below the minimum is refused;
   - another product (room type, rate plan, market or, on the CURRENT basis, another contract) is
-    a new sale of the stay and is checked in full;
+    a new sale of the stay: every night, its arrival, departure and length are checked;
+  - the past is not sold again: a night before the sale date is never judged, and neither is the
+    arrival of a stay under way — an in-house guest moved to another room or rate is judged on
+    the nights still to come (and on the length only when the dates change);
   - a change of neither dates nor product (occupancy, extras, a code) is not checked.
-  The proposal lists the `restrictions` it breaks and is not `sellable`. The guest's manage page,
-  a guest's submit, a paid guest change applied by the job (then Failed and refunded, like a stay
-  sold out since) and a staff approval of a guest's request are all refused.
+  The sale date is today's; a guest's stored change (paid, or approved by staff later) is judged
+  as of the time it was priced, like its price. The proposal lists the `restrictions` it breaks
+  and is not `sellable`. The guest's manage page, a guest's submit, a paid guest change applied by
+  the job (then Failed and refunded, like a stay sold out since) and a staff approval of a guest's
+  request are all refused.
 - *Override.* Staff applying their own proposal may sell it anyway with `override_restrictions`
   when they hold `restriction.edit` at the hotel — who may lift the restriction for every guest
   may lift it for one stay; no new capability. The reason is required, the revision's changes
@@ -2840,28 +2845,34 @@ three Low, fixed as follows.
   confirmation); a change is checked for what it newly takes. The ARI a channel gets closes a
   night outside its booking window as of today's sale and closes to arrival a day that release
   or the advance days refuse today; `restriction_boundaries` queues those days at the site's
-  midnight (the daily resync compares the horizon later anyway).
+  midnight (the daily resync compares the horizon later anyway). The portfolio's restriction
+  alerts name a cell's channel scope.
 - Legacy PMS writes at a TEX hotel stay outside restrictions (ADR-048, ADR-052: they are refused
   or imports).
 
 **Decision — minimum basket (G-84).**
 - *Basket.* A room's basket is its accommodation before promotions plus its extras, in the sell
-  currency, rounded to the currency's minor unit (the amounts the guest sees), recorded on the
-  quote (`basket`). A SELL-stage promotion or coupon compares its minimum (converted into the sell
-  currency and FX-recorded, ADR-051) with the booking's basket when the room is priced in a
-  booking of several rooms, else with the room's own. COST-stage contract offers stay per room:
-  they are supplier terms in the contract's currency and the rooms of one booking may be on
-  different contracts.
-- *Booking-level quote step.* `engine.price_booking` / `booking_pass` (pure): every room is
-  priced alone; when a minimum refused a promotion (`rule` MIN_BASKET, `minimum` recorded) and
-  every room is sellable in one currency, every room is priced again with the booking's basket —
-  the sum of the rooms' baskets — recorded in its request (`booking_basket`, `booking_rooms`) and
-  explained (`BOOKING_BASKET`). The basket is taken before promotions, so the second pass is
-  final. ADR-029 still holds: a fixed booking discount is granted once, on room 1; a percentage
-  is the same share of every room.
+  currency, as before; its quote records it to 6 places (`basket`). A SELL-stage promotion or
+  coupon compares its minimum (converted into the sell currency and FX-recorded, ADR-051) with the
+  booking's basket — the sum of the rooms' recorded baskets — when the room is priced in a booking
+  of several rooms, else with the room's own (exactly as before, so a single room's price never
+  changes). COST-stage contract offers stay per room: they are supplier terms in the contract's
+  currency and the rooms of one booking may be on different contracts, so their refusal never
+  asks for the rooms to be priced together.
+- *Booking-level quote step.* `engine.price_together` / `booking_pass` (pure; the one rule the
+  engine and the quoting service use): every room is priced alone; when a minimum refused a
+  SELL promotion (`rule` MIN_BASKET, `minimum` recorded) and every room is sellable in one
+  currency, every room is priced again with the booking's basket, recorded in its request
+  (`booking_basket`, `booking_rooms`) and explained (`BOOKING_BASKET`); those quotes are the
+  answer. The basket is taken before promotions, so the second pass is final. ADR-029 still
+  holds: a fixed booking discount is granted once, on room 1; a percentage is the same share of
+  every room.
 - *Where.* The booking engine and the CRS quote the rooms of a booking together
-  (`public.quote_rooms`, `crs.quote_rooms` → `quoting.create_quotes`); a search prices an offer
-  that holds every requested room on the booking's basket. `create_booking` sells only the price
+  (`public.quote_rooms`, `crs.quote_rooms` → `quoting.create_quotes`; a room that cannot be sold,
+  or whose rate is no longer on sale, answers with its reasons). A search prices an offer that
+  holds every requested room on the booking's basket; its "from" price is one that can be booked:
+  such an offer's total, or the cheapest room of each party priced on its own (a mixed choice,
+  quoted together, can only cost less). `create_booking` sells only the price
   the rooms have together (`booking.check_booking_basket`): rooms priced together are booked with
   exactly those rooms (their baskets must add up to the recorded one), and rooms priced alone (a
   client quoting one room at a time) are refused when a promotion their own basket missed would
@@ -2872,28 +2883,42 @@ three Low, fixed as follows.
   also used by the simulator). A change that keeps the booking above the minimum keeps the
   discount; one that takes it below loses it on the changed room. Rooms that are not changed keep
   their locked price, discount included: a change never reprices another room (price lock,
-  ADR-010), so cancelling or shortening room 2 never takes room 1's discount away. Add-ons sold
-  after the booking are priced on their own (ADR-034) and are not part of a basket.
+  ADR-010), so cancelling or shortening room 2 never takes room 1's discount away. The historical
+  simulator judges a room with the other rooms as recorded with it when it was last priced, so its
+  answer for a past moment never changes (ADR-054). Add-ons sold after the booking are priced on
+  their own (ADR-034) and are not part of a basket.
 
 **Consequences.**
 - A change the restrictions refuse now needs `restriction.edit` and a reason; a change the
   restrictions allow is unchanged. Proposals carry `restrictions`,
   `sellable_ignoring_restrictions` and `restriction_override` (the modify drawer offers "Sell
   despite the restrictions").
-- A room basket is rounded before it is compared: a single room exactly at a minimum after
-  rounding now qualifies (sub-cent difference).
 - A multi-room booking made from room quotes of an older client (one quote per room) books as
   before unless a refused minimum would qualify on the booking; then it is refused with the
   reason. Quotes made before the deploy carry no `basket`: their basket is read from their totals.
 - The channel ARI fingerprint changes where release or the advance days closed an arrival: those
   days are pushed once as closed to arrival.
-- Tests: unit `test_restriction_rules` (18: booking window, levels, channel scopes and their
-  ranking, the changed-stay rules, the ARI helpers; the 17 written first fail first) and `test_booking_level.TestBookingBasket`
-  (11; all fail first); integration `test_restrictions` (23: booking engine, CRS / Call Center,
-  each rule, the booking window, the scopes, staff changes, the override and its audit, guest
-  self-service, channel bookings and changes, the ARI and its midnight queue, the grid, p38; 18
-  of the first 22 fail first on `b2011bc`, the other 4 cover enforcement that already held) and
-  `test_commercial_flows.TestBookingBasket` (9: quoted together, below the minimum, the search,
-  rooms quoted alone or booked apart refused, changes keeping or losing the discount, the
-  unchanged room keeping it, the Call Center; all fail first). E2E `restrictions-grid.spec.ts`
-  (hotel-level booking-window cell for the Booking Engine + Call Center).
+- Tests: unit `test_restriction_rules` (20: booking window, levels, channel scopes and their
+  ranking, the changed-stay rules, a product change and a stay under way, the ARI helpers; the
+  17 written first fail first on `b2011bc`, the two added by the review error on the code before
+  it) and `test_booking_level.TestBookingBasket` (12; all fail first, the cost-stage one on the
+  code before the review); integration `test_restrictions` (25: booking engine, CRS / Call
+  Center, each rule, the booking window, the scopes, staff changes, an upgrade of a stay under
+  way, the override and its audit, guest self-service, channel bookings and changes, the ARI and
+  its midnight queue, the grid, the portfolio alert, p38; 18 of the first 22 fail first on
+  `b2011bc` — the other 4 cover enforcement that already held — and the review's two fail on the
+  code before it) and `test_commercial_flows.TestBookingBasket` (10: quoted together, below the
+  minimum, the search, rooms quoted alone or booked apart refused, changes keeping or losing the
+  discount, the unchanged room keeping it, the simulator's recorded booking, the Call Center; the
+  first 9 fail first on `b2011bc`, the simulator's on the code before the review). E2E
+  `restrictions-grid.spec.ts` (hotel-level booking-window cell for the Booking Engine + Call
+  Center).
+- Review (a code review of the branch before merge): a product change for an in-house guest was
+  judged on its past (fixed: the past is not sold again); a stored guest change was judged on the
+  day it was applied (fixed: as of its pricing time); a cost-stage minimum was treated as
+  booking-level (fixed); the search's "from" price could assume a basket no mixed choice reaches
+  (fixed); the simulator read the other rooms as they are now (fixed: as recorded); grid
+  keyboard and empty-state details and the portfolio alert's scope (fixed). Kept by decision: a
+  multi-room booking of rooms quoted one by one is refused when a refused minimum would qualify
+  (clients quote the rooms of a booking together); staff approving a guest's request cannot
+  override restrictions (they make the change themselves).
