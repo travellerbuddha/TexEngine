@@ -15,6 +15,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from kamra.tex.api import crs as crs_api
 from kamra.tex.api import payments as pay_api
+from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
 from kamra.tex.money import D
 from kamra.tex.payments import service as pay
@@ -26,6 +27,7 @@ from kamra.tex.tests.integration.test_commercial_flows import (
 	SLUG,
 	guest_books,
 	setup_site_and_payments,
+	two_rooms_quoted_together,
 )
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 from kamra.tex.tests.integration.test_security_regressions import OTHER, other_hotel_with_mock
@@ -1847,3 +1849,30 @@ class TestFourthReview(GuestMoneyCase):
 			out = as_staff(lambda: pay_api.refund(transaction=balance, amount="10.00", reason="goodwill",
 			                                      idempotency_key="gcm4-d1", booking=b["booking"]))
 		self.assertEqual(out, {"refund": "PTX-X", "status": "Succeeded"})
+
+
+class TestBasketClawbackMoney(GuestMoneyCase):
+	"""G-84 review H1: a guest's change that takes a paid booking below a promotion's minimum
+	basket carries the discount the other room keeps, so the refund shrinks by it."""
+
+	def test_the_refund_of_a_shortened_room_keeps_the_other_rooms_discount(self):
+		lower_price_policy("Refund automatically")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager sets up the code
+		doc = policy_api.save_record("TEX Promotion", {
+			"promotion_name": "Code BIG", "property": fx.PROPERTY, "trigger": "Code", "code": "BIG",
+			"value_type": "PERCENT", "value": 10, "applies_to": "ACCOMMODATION", "currency": "EUR", "min_basket": 1100})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		quotes, _offer = two_rooms_quoted_together("gcm-basket", code="BIG")        # 722.25 + 288.90
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST, payment_method="Card",
+		                session_id="gcm-basket", idempotency_key="idem-gcm-basket")
+		paid(b["payment"])
+		paid(public.pay_booking(token=b["manage_token"]))
+		self.assertEqual(money(b["booking"])[1], D("1011.15"))
+		# room 1 shortened: 535.00 + 321.00 = 856.00 is below 1 100, so room 1 pays room 2's 32.10
+		down = self.propose(b, (6, 12))
+		self.assertEqual((down["new_total"], down["basket_clawback"]["amount"]), ("567.10", "32.10"))
+		self.assertEqual((down["settlement"]["kind"], down["settlement"]["amount"]), ("refund", "155.15"))
+		out = self.accept(b, down)
+		self.assertEqual((out["status"], out["settlement"]["amount"]), ("applied", "155.15"))
+		self.assertEqual([r[1] for r in refunds(b["booking"])], [D("155.15")])
+		self.assertEqual(money(b["booking"]), (D("856.00"), D("856.00"), D("0.00")))

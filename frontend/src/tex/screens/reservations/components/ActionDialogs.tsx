@@ -20,7 +20,7 @@ import {
   simulate,
   type ResendResult,
 } from "../lib/api"
-import type { CancelPreview, CancelResult, ReservationDetail, Simulation } from "../lib/types"
+import type { BasketClawback, CancelPreview, CancelResult, ReservationDetail, Simulation } from "../lib/types"
 import { localToServer } from "./ModifyDrawer"
 
 /** "What would this stay have cost if sold on …?" — read-only (R-22). */
@@ -135,6 +135,20 @@ export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean
   )
 }
 
+/** The discount the other rooms of the booking keep, in the cancellation charge (G-84 review H1). */
+function BasketNote({ t, claw }: { t: (k: string, p?: Record<string, string | number>) => string; claw: BasketClawback }) {
+  const promotion = claw.promotions.map((p) => p.name).join(", ")
+  const minimum = claw.promotions.find((p) => p.minimum)?.minimum ?? ""
+  const credit = cmpDecimal(claw.amount, "0") < 0
+  return (
+    <p className="mt-1 text-xs text-zinc-600" title={claw.promotions.map((p) => p.text).join(" ")}>
+      {credit
+        ? t("res.cancel.basket_credit", { amount: `${claw.amount.replace(/^-/, "")} ${claw.currency}`, promotion })
+        : t("res.cancel.basket", { amount: `${claw.amount} ${claw.currency}`, promotion, minimum: minimum && `${minimum} ${claw.currency}` })}
+    </p>
+  )
+}
+
 function ruleText(t: (k: string, p?: Record<string, string | number>) => string, preview: CancelPreview) {
   const r = preview.basis.rule
   if (typeof r === "string") {
@@ -236,7 +250,8 @@ export function CancelDialog({
                   waive ? (
                     <span>
                       <Money amount={preview.penalty} currency={preview.currency} className="text-zinc-400 line-through" />{" "}
-                      <Money amount="0" currency={preview.currency} />
+                      {/* the rate's penalty is waived; what the room carries for the other rooms is not */}
+                      <Money amount={preview.basis.basket_clawback?.amount ?? "0"} currency={preview.currency} />
                     </span>
                   ) : (
                     <Money amount={preview.penalty} currency={preview.currency} />
@@ -246,6 +261,7 @@ export function CancelDialog({
               <p className="mt-1 text-xs text-zinc-600">
                 {ruleText(t, preview)} · {t("res.cancel.days_before", { count: preview.basis.days_before })}
               </p>
+              {preview.basis.basket_clawback && <BasketNote t={t} claw={preview.basis.basket_clawback} />}
             </>
           )}
         </div>

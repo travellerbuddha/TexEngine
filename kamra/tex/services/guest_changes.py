@@ -247,8 +247,10 @@ def penalty_applies(res) -> bool:
 	"""The rate is non-refundable, or cancelling the room now would cost a fee: a lower price
 	of it is never refunded or credited without the hotel (review of ADR-044, H1), and its
 	arrival is never moved later without the hotel either: moved out of the window, the stay
-	could then be shortened or cancelled without the fee (re-review F5)."""
-	penalty, _basis = booking_svc.cancellation_penalty(res)
+	could then be shortened or cancelled without the fee (re-review F5). The rate's terms only:
+	what a room carries for the other rooms of its booking (G-84 review H1) is in the change's
+	price, whatever its arrival."""
+	penalty, _basis = booking_svc.cancellation_penalty(res, basket=False)
 	return penalty > 0
 
 

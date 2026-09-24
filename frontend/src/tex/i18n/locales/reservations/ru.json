@@ -102,6 +102,8 @@
   "many": "{count} номеров"
  },
  "res.booking.title": "Заказ {name}",
+ "res.cancel.basket": "Включает {amount}: скидку, которую сохраняют другие номера ({promotion}, минимальная корзина {minimum}). Не списывается вместе со штрафом.",
+ "res.cancel.basket_credit": "Включает возврат {amount}: ранее начислено на другой номер за {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. Бронь будет снята, а указанный ниже штраф — записан.",
  "res.cancel.button": "Отменить бронирование",
  "res.cancel.confirm": "Отменить бронирование",
