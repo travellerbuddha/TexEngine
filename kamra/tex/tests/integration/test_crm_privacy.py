@@ -14,10 +14,19 @@ G-95 (R-14, R-43) · the price-locked snapshot, cost, margin, FX rate, a quote's
 revision's snapshots are never readable through Desk / REST by a business role (Frappe permlevel,
 also in a write's response and in the change history); the TEX API serves them with
 ``price.view_cost`` only.
+
+Review follow-up (ADR-056): the program ledger masks other hotels' entries and guests the viewer
+cannot see; a withdrawal of e-mail consent makes a guest's abandoned cases and funnel hashes
+anonymous, and the contact fields are withheld from Desk / REST (p40 for older rows); a browser's
+funnel event keeps only its allow-listed fields; a consent sent as text means what it says; p40 and
+the permission scripts keep platform administrators reading withheld fields on customised role
+permissions; a masked change history keeps its values for platform administrators; only a
+generic write's response leaves the withheld fields out (never ``db_set`` or code's own saves).
 """
 
 import hashlib
 import json
+from contextlib import contextmanager
 from unittest import mock
 
 import frappe
@@ -27,14 +36,18 @@ import frappe.client
 import frappe.desk.form.load
 from frappe.model.base_document import BaseDocument
 from frappe.utils import add_to_date, now_datetime
+from werkzeug.test import EnvironBuilder
+from werkzeug.wrappers import Request
 
+from kamra.tex.api import admin as admin_api
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import crs as crs_api
+from kamra.tex.api import loyalty as loyalty_api
 from kamra.tex.api import public
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
 from kamra.tex.money import D, quantize, to_str
-from kamra.tex.security import scope
+from kamra.tex.security import internals, scope
 from kamra.tex.services import booking, modification
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import (
@@ -45,6 +58,7 @@ from kamra.tex.tests.integration.test_commercial_flows import (
 )
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 from kamra.tex.tests.integration.test_crm_segments import OTHER, agent, other_tenant
+from kamra.tex.tests.integration.test_patches import migrate, never_ran, rerun_changes
 
 SISTER = "TEX Privacy Sister Hotel"
 INTERNAL = {
@@ -53,6 +67,17 @@ INTERNAL = {
 	"TEX Reservation Revision": ("snapshot_before", "snapshot_after"),
 	"Guest": ("tex_stays", "tex_lifetime_value", "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points"),
 }
+
+
+P40 = "p40_crm_privacy_review"
+
+
+@contextmanager
+def request_to(path: str, method: str = "POST"):
+	"""The request a generic write arrives in (REST, ``frappe.client``), in-process."""
+	env = EnvironBuilder(method=method, path=path).get_environ()
+	with mock.patch.object(frappe.local, "request", Request(env), create=True):
+		yield
 
 
 def as_user(user: str) -> None:
@@ -142,6 +167,33 @@ class TestLoyaltyTenancy(PrivacyCase):
 		                 (None, None, True))            # the sister hotel's booking and stay stay with it
 		self.assertEqual(crm_api.guest(guest)["loyalty"], [account])
 
+	def test_the_program_ledger_shows_another_hotels_entries_as_points_only(self):
+		b, guest = self.booked_guest("g65-led", "g65-led@example.com")
+		sister = sister_hotel(self.f["group"], self.ent)
+		club = self.program("Group Club", hotel_group=self.f["group"])
+		elsewhere = frappe.get_doc({"doctype": "TEX Booking", "property": sister, "status": "Confirmed",
+		                            "booker_guest": guest, "currency": "EUR"}).insert(ignore_permissions=True).name
+		self.points(club, guest, 200, booking=b["booking"], entry_type="Earn", reason="stay here")
+		theirs = self.points(club, guest, 300, booking=elsewhere, entry_type="Earn", reason="stay 2027-07-01→2027-07-05")
+		frappe.db.set_value("TEX Loyalty Ledger", theirs, {
+			"actor": "sister-desk@example.com",
+			"explanation": json.dumps({"lines": [{"rule": "MONEY", "rate": "1", "points": "300"}]})})
+		# a guest this hotel cannot see (no stay here, no enterprise) who collects in the group's club
+		hidden = frappe.get_doc({"doctype": "Guest", "first_name": "Hidden", "last_name": "Collector",
+		                         "email": "g65-hidden@example.com"}).insert(ignore_permissions=True).name
+		self.points(club, hidden, 50, booking=elsewhere, entry_type="Earn", reason="stay there")
+		as_user(self.here)
+		rows = {r["points"]: r for r in loyalty_api.ledger(club, limit=200)["rows"]}
+		self.assertEqual((rows[200]["booking"], rows[200]["reason"], rows[200]["guest"], rows[200]["other_hotel"]),
+		                 (b["booking"], "stay here", guest, False))
+		self.assertEqual({k: rows[300][k] for k in ("booking", "reservation", "reason", "actor", "explanation",
+		                                            "other_hotel", "guest")},
+		                 {"booking": None, "reservation": None, "reason": None, "actor": None, "explanation": None,
+		                  "other_hotel": True, "guest": guest})
+		self.assertEqual((rows[50]["guest"], rows[50]["guest_name"], rows[50]["booking"]), (None, None, None))
+		with self.assertRaises(frappe.PermissionError):              # nor by asking for that guest
+			loyalty_api.ledger(club, guest=hidden)
+
 	def test_desk_and_rest_never_show_a_guests_totals_over_every_tenant(self):
 		_b, guest = self.booked_guest("g65-desk", "g65-desk@example.com")
 		self.points(self.program("Other Club", property=OTHER), guest, 999)
@@ -162,7 +214,8 @@ class TestLoyaltyTenancy(PrivacyCase):
 		with self.assertRaises(frappe.PermissionError):                      # and never a filter
 			frappe.client.get_list("Guest", fields=["name"], filters={"tex_loyalty_points": (">", 500)})
 		frappe.clear_messages()
-		out = frappe.client.set_value("Guest", guest, "guest_notes", "Prefers a sea view")
+		with request_to("/api/method/frappe.client.set_value"):
+			out = frappe.client.set_value("Guest", guest, "guest_notes", "Prefers a sea view")
 		self.assertEqual([f for f in totals if out.get(f) not in (None, "", 0)], [])
 		as_user("Administrator")                            # kept as they were
 		self.assertEqual(frappe.db.get_value("Guest", guest, ["tex_loyalty_points", "tex_stays"]), (999, 3))
@@ -290,6 +343,31 @@ class TestAbandonedPrivacy(PrivacyCase):
 		self.assertEqual(ev.email_hash, None)
 		self.assertEqual(json.loads(ev.payload), {"quotes": ["q1"]})
 
+	def test_a_browser_event_keeps_only_its_allow_listed_fields(self):
+		as_user("Guest")
+		public.track(site=SLUG, session_id="g81-allow", event="room_view", payload=json.dumps({
+			"hotel": fx.PROPERTY, "room_type": "STD", "board": "AI", "rate_plan": "FLEX",
+			"guest": {"email": "someone@example.com"}, "e_mail": "someone@example.com", "tel": "+49 30 2",
+			"note": "call me on +49 30 2", "hotel_extra": ["x"]}))
+		public.track(site=SLUG, session_id="g81-allow", event="abandoned", payload=json.dumps({
+			"quotes": ["q1", {"email": "someone@example.com"}, "q" * 200, 5], "hotel": {"email": "a@b.c"},
+			"contact": ["someone@example.com"]}))
+		public.track(site=SLUG, session_id="g81-allow", event="room_view",
+		             payload=json.dumps({"hotel": "h" * 500, "room_type": ["STD"]}))
+		as_user("Administrator")
+		payloads = [json.loads(e.payload) for e in funnel("g81-allow")]
+		self.assertEqual(payloads, [{"hotel": fx.PROPERTY, "room_type": "STD", "board": "AI", "rate_plan": "FLEX"},
+		                            {"quotes": ["q1"]}, {}])
+		self.assertEqual({e.email_hash for e in funnel("g81-allow")}, {None})
+
+	def test_a_consent_sent_as_text_means_what_it_says(self):
+		for session, value, meant in (("g81-txt-0", "0", 0), ("g81-txt-f", "false", 0), ("g81-txt-no", "no", 0),
+		                              ("g81-txt-t", "TRUE", 1), ("g81-txt-1", 1, 1)):
+			_b, guest = self.booked_guest(session, f"{session}@example.com", consent_email=value)
+			self.assertEqual(frappe.db.get_value("Guest", guest, "tex_consent_email"), meant, f"{value!r}")
+			[ev] = funnel(session, "guest_details")
+			self.assertEqual((ev.consent_marketing, bool(ev.email_hash)), (meant, bool(meant)), f"{value!r}")
+
 	def test_p37_purges_hashes_kept_without_consent(self):
 		from kamra.patches.tex import p37_crm_privacy
 
@@ -333,11 +411,90 @@ class TestAbandonedPrivacy(PrivacyCase):
 		b, guest = self.booked_guest("g81-wd", "g81-wd@example.com", consent_email=1, phone="+49 30 99")
 		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
 		name = frappe.db.get_value("TEX Abandoned Booking", {"session_id": "g81-wd"})
+		# the case as a hotel sees it before the withdrawal, and a withdrawal the API cannot see: the
+		# stored case still names the guest, the listing never does once the consent is gone
+		frappe.db.set_value("Guest", guest, "tex_consent_email", 0, update_modified=False)
 		as_user(self.here)
-		crm_api.update_guest(guest, {"tex_consent_email": 0}, consent_source="guest asked by phone")
 		listed = next(r for r in crm_api.abandoned(fx.PROPERTY) if r["name"] == name)
-		self.assertEqual((listed["guest"], listed["email"], listed["phone"]), (guest, None, None))
+		self.assertEqual((listed["guest"], listed["email"], listed["phone"], listed["consent_marketing"]),
+		                 (None, None, None, 0))
 		self.assertTrue(b["payment"])
+
+	def test_a_withdrawal_makes_the_cases_and_the_funnel_anonymous(self):
+		sessions = {}
+		for session in ("g81-wd-crm", "g81-wd-desk"):
+			_b, sessions[session] = self.booked_guest(session, f"{session}@example.com", consent_email=1,
+			                                          phone="+49 30 55")
+		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
+		for session in sessions:
+			self.assertTrue(frappe.db.get_value("TEX Abandoned Booking", {"session_id": session}, "email"))
+			self.assertTrue([e for e in funnel(session) if e.email_hash])
+		as_user(self.here)                                          # withdrawn in the CRM
+		crm_api.update_guest(sessions["g81-wd-crm"], {"tex_consent_email": 0}, consent_source="guest asked")
+		as_user("Administrator")                                    # and in the Desk form
+		g = frappe.get_doc("Guest", sessions["g81-wd-desk"])
+		g.tex_consent_email = 0
+		g.save()
+		for session in sessions:
+			case = frappe.db.get_value("TEX Abandoned Booking", {"session_id": session},
+			                           ["guest", "email", "phone", "consent_marketing"])
+			self.assertEqual(case, (None, None, None, 0), session)
+			self.assertEqual({e.email_hash for e in funnel(session)}, {None}, session)
+		self.assertTrue(frappe.db.get_value("Guest", sessions["g81-wd-crm"], "email"))    # the profile stays
+
+	def test_case_contacts_and_funnel_hashes_are_withheld_from_desk_and_rest(self):
+		self.booked_guest("g81-desk", "g81-desk@example.com", consent_email=1, phone="+49 30 66")
+		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
+		case = frappe.db.get_value("TEX Abandoned Booking", {"session_id": "g81-desk"})
+		# a Desk user of this hotel who may not even view the CRM
+		viewer = fx.ensure_user("g81-viewer@example.com", ["Hotel Admin"])
+		fx.ensure("TEX Access Grant", {"user": viewer, "property": fx.PROPERTY},
+		          {"user": viewer, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": "Viewer"})
+		as_user(viewer)
+		self.assertFalse(scope.has_capability("crm.view", fx.PROPERTY))
+		self.assertTrue(frappe.has_permission("TEX Abandoned Booking", "read", doc=case))
+		shown = frappe.client.get("TEX Abandoned Booking", case)
+		self.assertEqual([f for f in ("guest", "email", "phone") if shown.get(f)], [])
+		listed = frappe.client.get_list("TEX Abandoned Booking", fields=["name", "guest", "email", "phone"],
+		                                filters={"name": case})
+		self.assertEqual(listed, [{"name": case}])
+		with self.assertRaises(frappe.PermissionError):
+			frappe.client.get_list("TEX Abandoned Booking", fields=["name"], filters={"email": ("like", "%@%")})
+		frappe.clear_messages()
+		events = frappe.client.get_list("TEX Funnel Event", fields=["name", "email_hash"],
+		                                filters={"session_id": "g81-desk"}, limit_page_length=50)
+		self.assertTrue(events)
+		self.assertEqual([e for e in events if e.get("email_hash")], [])
+
+	def test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds(self):
+		stale = frappe.get_doc({"doctype": "Guest", "first_name": "Stale", "last_name": "Consent",
+		                        "email": "g81-stale@example.com", "tex_consent_email": 0}).insert(
+			ignore_permissions=True).name
+		agreed = frappe.get_doc({"doctype": "Guest", "first_name": "Still", "last_name": "Agrees",
+		                         "email": "g81-agrees@example.com", "tex_consent_email": 1}).insert(
+			ignore_permissions=True).name
+		cases, hashes = {}, {}
+		for guest, email in ((stale, "g81-stale@example.com"), (agreed, "g81-agrees@example.com")):
+			cases[guest] = frappe.get_doc({
+				"doctype": "TEX Abandoned Booking", "property": fx.PROPERTY, "session_id": f"p40-{guest}",
+				"stage_reached": "payment_started", "status": "Open", "guest": guest, "email": email,
+				"phone": "+49 30 1", "consent_marketing": 1, "last_event_at": now_datetime()}).insert(
+				ignore_permissions=True).name
+			hashes[guest] = frappe.get_doc({
+				"doctype": "TEX Funnel Event", "event": "guest_details", "occurred_at": now_datetime(), "site": SLUG,
+				"property": fx.PROPERTY, "session_id": f"p40-{guest}", "consent_marketing": 1,
+				"payload": "{}"}).insert(ignore_permissions=True).name
+			frappe.db.set_value("TEX Funnel Event", hashes[guest], "email_hash",
+			                    hashlib.sha256(email.encode()).hexdigest())
+		never_ran(P40)
+		migrate(P40)
+		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", cases[stale],
+		                                     ["guest", "email", "phone", "consent_marketing"]), (None, None, None, 0))
+		self.assertEqual(frappe.db.get_value("TEX Funnel Event", hashes[stale], "email_hash"), None)
+		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", cases[agreed], ["guest", "consent_marketing"]),
+		                 (agreed, 1))
+		self.assertTrue(frappe.db.get_value("TEX Funnel Event", hashes[agreed], "email_hash"))
+		self.assertEqual(rerun_changes(P40), {})
 
 	def test_recovery_by_a_later_booking_in_the_same_session(self):
 		detected = {}
@@ -458,11 +615,13 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 	def test_a_write_through_rest_returns_no_pricing_internals(self):
 		before = frappe.db.get_value("Reservation", self.res, INTERNAL["Reservation"], as_dict=True)
 		as_user(self.clerk)
-		out = frappe.client.set_value("Reservation", self.res, "special_requests", "Late arrival")
+		with request_to("/api/method/frappe.client.set_value"):
+			out = frappe.client.set_value("Reservation", self.res, "special_requests", "Late arrival")
 		self.assertEqual(self.leaked("Reservation", out), [])
 		frappe.local.form_dict = frappe._dict({"data": json.dumps({"special_requests": "Quiet room"})})
 		try:
-			doc = frappe.api.v1.update_doc("Reservation", self.res)            # PUT /api/resource
+			with request_to(f"/api/resource/Reservation/{self.res}", "PUT"):
+				doc = frappe.api.v1.update_doc("Reservation", self.res)        # PUT /api/resource
 		finally:
 			frappe.local.form_dict = frappe._dict()
 		self.assertEqual(self.leaked("Reservation", doc), [])
@@ -470,6 +629,41 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 		as_user("Administrator")
 		self.assertEqual(frappe.db.get_value("Reservation", self.res, "special_requests"), "Quiet room")
 		self.assertEqual(frappe.db.get_value("Reservation", self.res, INTERNAL["Reservation"], as_dict=True), before)
+
+	def test_only_a_generic_write_response_leaves_them_out(self):
+		as_user(self.clerk)
+		doc = frappe.get_doc("Reservation", self.res)
+		doc.db_set("special_requests", "Needs a cot")              # code's own write: its object keeps them
+		self.assertEqual(self.leaked("Reservation", doc), list(INTERNAL["Reservation"]))
+		doc = frappe.get_doc("Reservation", self.res)
+		doc.special_requests = "Needs two cots"
+		doc.save()                                                 # a permission-checked save by code
+		self.assertEqual(self.leaked("Reservation", doc), list(INTERNAL["Reservation"]))
+		self.assertEqual(self.leaked("Reservation", frappe.copy_doc(doc)), list(INTERNAL["Reservation"]))
+		with request_to("/api/method/frappe.client.save"):         # what REST sends back
+			out = frappe.client.save(frappe.get_doc("Reservation", self.res).as_dict())
+		self.assertEqual(self.leaked("Reservation", out), [])
+
+	def test_the_withheld_values_stay_on_record_for_platform_admins(self):
+		before = frappe.get_doc("Reservation", self.res)
+		p = modification.propose(self.res, {"check_out": str(fx.d(6, 14))})
+		modification.apply(p["proposal_token"], reason="one more night")
+		after = frappe.get_doc("Reservation", self.res)
+		version = frappe.new_doc("Version")
+		self.assertTrue(version.update_version_info(before, after))
+		version.insert(ignore_permissions=True)
+		kept = {"action": "version.withheld", "reference_doctype": "Reservation", "reference_name": self.res}
+		as_user(self.platform)
+		[row] = frappe.get_list("TEX Audit Event", filters=kept, fields=["new_value", "property"])
+		self.assertEqual(row.property, None)                       # platform level: no hotel sees it
+		held = {r[0]: r[1:] for r in json.loads(row.new_value)["changed"]}
+		self.assertEqual(held["tex_pricing_snapshot"][1], after.tex_pricing_snapshot)
+		self.assertEqual(json.loads(row.new_value)["version"], version.name)
+		as_user(self.clerk)
+		self.assertEqual(frappe.get_list("TEX Audit Event", filters=kept, pluck="name"), [])
+		trail = admin_api.audit_log(reference_doctype="Reservation", reference_name=self.res, limit=500)
+		self.assertTrue(trail)                                     # the stay's own trail, without them
+		self.assertNotIn("version.withheld", {r["action"] for r in trail})
 
 	def test_the_change_history_never_shows_pricing_internals(self):
 		before = frappe.get_doc("Reservation", self.res)
@@ -518,3 +712,72 @@ class TestPricingInternalsOutsideTex(PrivacyCase):
 		kept = json.loads(frappe.db.get_value("Version", v.name, "data"))["changed"]
 		self.assertEqual(kept, [["tex_cost_amount", "*****", "*****"], ["special_requests", "", "Sea view"],
 		                        ["tex_pricing_snapshot", "*****", "*****"]])
+		# the values are kept for platform administrators (review follow-up)
+		[held] = frappe.get_all("TEX Audit Event", filters={"action": "version.withheld", "reference_name": self.res},
+		                        fields=["new_value", "property"])
+		self.assertEqual(held.property, None)
+		self.assertEqual(json.loads(held.new_value), {"version": v.name, "changed": [
+			["tex_cost_amount", "€ 300.00", "€ 400.00"],
+			["tex_pricing_snapshot", '{"totals": {"cost": "300"}}', '{"totals": {"cost": "400"}}']]})
+
+
+# ─── withheld fields on customised role permissions (review follow-up) ───
+
+WITHHELD = ("Reservation", "Guest", "TEX Quote", "TEX Reservation Revision", "TEX Abandoned Booking",
+            "TEX Funnel Event")
+
+
+class TestWithheldFieldPermissions(PrivacyCase):
+	def setUp(self):
+		super().setUp()
+		self.platform = fx.ensure_user("g95-platform@example.com", ["System Manager"])
+
+	def tearDown(self):
+		super().tearDown()                                         # the rollback
+		for dt in WITHHELD:                                        # nothing customised stays cached
+			frappe.clear_cache(doctype=dt)
+
+	def custom(self, doctype: str, role: str, permlevel: int = 0, **flags) -> None:
+		frappe.get_doc({"doctype": "Custom DocPerm", "parent": doctype, "parenttype": "DocType",
+		                "parentfield": "permissions", "role": role, "permlevel": permlevel,
+		                "read": 1, **flags}).insert(ignore_permissions=True)
+		frappe.clear_cache(doctype=doctype)
+
+	def test_p40_gives_platform_admins_the_withheld_fields_on_customised_permissions(self):
+		# a site whose role permissions were customised (Kamra's bootstrap scripts): Frappe then reads
+		# only the Custom DocPerm rows, so the JSON's permlevel-1 row for System Manager is gone
+		self.custom("Guest", "System Manager", write=1, create=1, delete=1)
+		self.custom("Guest", "Front Desk", write=1)
+		self.custom("Reservation", "System Manager", write=1)
+		self.custom("Reservation", "Front Desk", permlevel=1)       # a business role at permlevel 1
+		self.assertFalse(internals.may_read("Guest", self.platform))
+		never_ran(P40)
+		seen = migrate(P40)
+		for dt in ("Guest", "Reservation"):
+			self.assertTrue(frappe.db.exists("Custom DocPerm", {"parent": dt, "role": "System Manager",
+			                                                    "permlevel": 1, "read": 1}), dt)
+			frappe.clear_cache(doctype=dt)
+			self.assertTrue(internals.may_read(dt, self.platform), dt)
+		self.assertFalse(internals.may_read("Guest", fx.ensure_user("g95-desk@example.com", ["Front Desk"])))
+		self.assertEqual(frappe.get_all("TEX Audit Event", filters={"action": "permission.withheld_fields_exposed",
+		                                                           "reference_name": "Reservation"},
+		                                fields=["property"]), [{"property": None}])
+		self.assertIn("Front Desk", " ".join(str(c) for c in seen["print"].call_args_list))
+		self.assertEqual(rerun_changes(P40), {})
+		self.assertFalse(frappe.db.exists("Custom DocPerm", {"parent": "TEX Quote"}))   # an untouched DocType stays so
+
+	def test_the_permission_scripts_keep_platform_admins_reading_them(self):
+		from kamra.scripts import fix_perms_fields
+
+		self.assertFalse(frappe.db.exists("Custom DocPerm", {"parent": "Guest"}))
+		fix_perms_fields._grant("Guest", "Front Desk", 1, 1, 1)    # as seed_rbac_v2 / bootstrap_v* do
+		frappe.clear_cache(doctype="Guest")
+		self.assertTrue(frappe.db.exists("Custom DocPerm", {"parent": "Guest", "role": "System Manager",
+		                                                    "permlevel": 1, "read": 1}))
+		fix_perms_fields._grant("Guest", "System Manager", 1, 1, 1, delete=1)   # the level-0 row, not level 1
+		self.assertEqual(frappe.db.get_value("Custom DocPerm", {"parent": "Guest", "role": "System Manager",
+		                                                        "permlevel": 0}, "delete"), 1)
+		self.assertEqual(frappe.db.get_value("Custom DocPerm", {"parent": "Guest", "role": "System Manager",
+		                                                        "permlevel": 1}, "delete"), 0)
+		frappe.clear_cache(doctype="Guest")
+		self.assertTrue(internals.may_read("Guest", self.platform))
