@@ -4514,3 +4514,129 @@ per table. The S3 reading stands: validation is the cost, and the UI must keep o
 
 **O1–O5 after S4.** Unchanged: S4 is validation only. None of O1–O5 is implemented on `pw-backend`;
 they land in S1 (O1–O3, O5 parse), S5 + S9 (O4) and S13 (board cells), and stay owner input 13.
+
+**Decision (implemented in S5: GAP-6, GAP-7, GAP-12).** The last backend slice.
+- *Price-test ages (GAP-6).* `preview_price` reads `children` with `_child_specs(children,
+  check_in)` (`api/contracts.py`). Each child is one of:
+  - an age in whole years 0–17: an int, a digit-only string (surrounding spaces allowed, as `int()`
+    allowed them) or an integral float (`8.0`) → `ChildSpec(age=n)`, exactly as before;
+  - `{"age_months": n}`, an int 0–215 → `ChildSpec(age_months=n)`: the exact month a band starts or
+    ends at (95 months is 7y11m, in a 7–11.99 band);
+  - `{"dob": "YYYY-MM-DD"}` → checked as a booking checks one (`ages.check_child_dob` against
+    check-in and the site's today: not in the future, under 18 on arrival) → `ChildSpec(dob=…)`,
+    priced by the engine in completed months on its age basis.
+
+  Anything else is refused with "Child <n>: Child ages are whole years (0–17), {age_months} or
+  {dob}." (the braces are literal: the client shows its own localised hint), a date-of-birth
+  refusal with "Child <n>: <the check's message>"; no refusal repeats the date (the quote's
+  `request` records it for the staff user who typed it, as a booking quote does). More than 12
+  children: "A price test takes at most 12 children."
+- *`apply_op_values` (GAP-7, D2, O4's server half).* `POST contracts.apply_op_values(version,
+  values, op, value)`: `contract.edit` at the version's hotel, Draft only (the save's message),
+  `op` one of ABSOLUTE, MULTIPLY, PERCENT_OF, ADJUST_PERCENT, ADD, SUBTRACT, `value` typed as a TEX
+  decimal (`decimals.typed`, 9 places; blank refused), `values` a list of at most 500 items, each
+  None / "" or a TEX decimal. Each price goes through the pure `matrix.adjust_amount(current, op,
+  value, currency)`: ABSOLUTE is the value itself, any other op is `ops.apply_op` with the current
+  price as reference and running amount, exactly as the ARI grid's rate change computes a new unit
+  (`grid.py`), then `money.quantize` HALF_UP to the contract currency. → `[{value, error}]` in
+  order: the new price as exact text ("77.00", "1155", "13.580"), or None with `NO_VALUE` (no
+  price given, whatever the op) or `NEGATIVE` (the exact result is below zero). It reads the
+  version's status and contract and the contract's currency (no document or terms are loaded),
+  writes and audits nothing. No rate limit: staff only, 500 values at most, 7 ms for 500 on the
+  benchmark's drafts.
+- *Reported subtotals (GAP-12).* `occupancy.OccupancyResult` gains the keyword fields
+  `after_adults` (the base, i.e. the room price on ROOM basis, plus the adult slots) and
+  `after_children` (plus the child slots: the total before a whole-combination rule), both
+  defaulting to ZERO. `engine.NightPrice` gains `subtotal_adults`, `subtotal_children` and
+  `subtotal_board` (occupancy + board, the amount the period adjustment starts from), filled from
+  values the engine already held through the existing `partial` tuple; `to_dict` adds them with
+  `to_str6`. No price, total, explanation step, explanation text or `engine_version` changes (the
+  spec example's summary lines, steps, totals and night keys are pinned as captured before). The
+  guest view (`to_dict(internal=False)`) and `quoting.strip_internal` reduce `nights[]` to date and
+  amount, so only staff with cost access see them. A child above the child bands priced as an adult
+  is an adult slot, so it is in `subtotal_adults`; a child filling an included ROOM-basis place
+  adds 0. The Explain ladder's chain holds by construction and is tested per night: the
+  combination step's before is `subtotal_children` and its after `occupancy`; without one they
+  are equal; `subtotal_board` = `occupancy` + `board` and is the period adjustment's before (else
+  the rate plan's, else the night cost).
+
+**Deviations from the slice text, with reasons (S5).**
+- A whole-year age outside 0–17 is now refused (the slice's range). Before, `-1` was answered as a
+  pricing error and 18 or more priced as an adult or answered "no age band"; a guest's booking
+  already refuses them (`quoting.Party.parse`), and the price test should not price what cannot
+  be booked. Within 0–17 the quote is identical (tested against the pre-S5 body, published and
+  draft).
+- A child object must carry exactly one of `age_months` or `dob` (`{age}`, both keys or none are
+  refused): the slice lists the two shapes; a mixed one would be ambiguous.
+- The refusal names the child ("Child <n>: …"), so the drawer can mark the input.
+- The children are read before the terms are built, so a malformed child is refused even for a
+  draft that cannot be built (before, the BUILD answer came first).
+- `values` items are typed as TEX decimals (text; a JSON number is taken as `decimals.typed` takes
+  it; a JSON list or object is refused before it, as it would otherwise surface as a server
+  error); a malformed item refuses the call ("Price <n>: … is not a number."), not only its item:
+  it is a client error, not a per-cell outcome.
+
+**Consequences (S5).**
+- Quote snapshots of bookings priced after S5 carry the three keys in their internal `nights[]`;
+  older snapshots do not, and the ladder leaves those stages blank (design §3.13.1). A snapshot
+  refers to its contract by payload hash, not by the quote's bytes, so reprices and the integrity
+  check are unaffected.
+- The existing Preview tab still sends whole years and is unaffected; the months / date-of-birth
+  toggle and the ladder are S14, the base room's relative entry S9 and the bulk Adjust… S10.
+
+**Rejected (S5).**
+- Computing the adjusted price or the ladder's subtotals in the client (D2).
+- Reusing `grid.apply_rate_change`: it splits periods and saves the draft; the workspace needs the
+  number only, before anything is saved.
+- A new explanation step per subtotal: it would change the explanation (text, count, snapshots);
+  the values are fields of the night.
+
+**Tests (S5).** Unit `test_engine.TestReportedSubtotals` (7): the spec example unchanged (summary
+lines, steps, totals, night keys, engine version) and its subtotals (120 → 240 → 300 → 300); every
+night of four scenarios (a period adjustment, a supplement board, two periods with a rate plan and
+an infant, adults only) chains as above; a 2A+2C combination starts from the children's 275 and
+ends at 247.50; ROOM basis (room 200, 3 adults: 270; single use: 200 → 160); `OccupancyResult`'s
+running totals; the guest view and `strip_internal` without them. `test_matrix.TestAdjustAmount`
+(4): the owner's examples (70 +10 % = 77.00, 80.55 +10 % = 88.61 HALF_UP, 100 × 1.155 = 115.50,
+JPY 1155, KWD 13.580, −100 % = 0.00, 0 %, 50 %, ± amounts), ABSOLUTE, NEGATIVE, equality with
+`ops.apply_op` + `quantize`. Integration `test_pricing_workspace_api` (+11, 48 in all): whole
+years (`[8]`, `"[8]"`, `["8"]`, `[8.0]`) give the pre-S5 body's quote on a published fixture and
+on the draft (`[1]`, `[4]`, `[8, 1]`, `[11, 3]`), 96 months the same price; 95 and 83 months in
+their bands; a date of birth 8 years ago priced, the future and 18 on arrival refused, malformed
+dates refused without echo; 22 malformed children refused, 13 children refused, 12 answered;
+`apply_op_values` results (EUR, KWD 13.580), NO_VALUE, NEGATIVE, nothing written; a contract.edit-only
+profile allowed, an agent, Finance and another hotel's Revenue Manager refused; a published version
+refused; 500 values allowed, 501 and 16 malformed calls refused (lists and objects as prices
+included); the base room's 100 "+10 %" →
+110.00 saved as ABSOLUTE (matrix 110, the derived room 148.5); nights' 6-dp subtotals (2A + child 8
+on UAI: 100 → 200 → 250 = occupancy, board 50 → 300), equal from the unsaved draft, absent after
+`strip_internal`. Fail-first on the S4 tip `564014a`: 10 of the 11 new unit tests fail (the spec
+example's pin passes and pins the baseline), 10 of the 11 integration tests fail (the guest-view
+pin passes). Mutants killed: 7 in the unit tests (after-children taken after the combination,
+subtotal_board after the adjustment, HALF_EVEN, the adults' subtotal counting children,
+subtotal_adults = unit, no NEGATIVE, a missing key) and 4 in the integration tests (7.5 truncated,
+`price.view` as the gate, no Draft check, no date-of-birth check). Verification on branch
+`pw-backend` (main `1575c8b` already merged; no newer main), migrated with it: all 38 integration
+modules 831 OK (10 skipped, as before; `test_snapshot_integrity` 13, `test_modification_determinism`
+27, `test_security_regressions` 59, `test_pricing_workspace_api` 48); 491 unit tests; ruff; eval
+harness 76/76, front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`;
+`bench_pricing_workspace` 2 OK.
+
+**Performance after S5** (`bench_pricing_workspace`, which now also times `apply_op_values` at its
+cap and compares the nights' subtotals of the unsaved and saved quotes; best of three, seconds; S4
+in brackets). Realistic 12 × 26 (1,406 rows): the overlay alone 0.18 (0.16), `price_matrix`
+unsaved 0.24 (0.24), with 12 parties 0.30, `preview_price` unsaved 0.23 (0.22), `validate_version`
+2.06 saved / 2.12 unsaved (1.92 / 2.14), `apply_op_values` 500 prices 0.007, `save_version` 0.71.
+Near the cap 12 × 40 (4,539 rows): 0.50 (0.51), 0.70 (0.68), 0.93, 0.70 (0.64), 9.50 / 9.60
+(9.48 / 9.50), 0.007, 2.63. GAP-12 costs nothing measurable; validation remains the cost, and the
+UI must keep one `validate_version` in flight.
+
+**O1–O5 after S5.** O4's server half is implemented on `pw-backend`: `apply_op_values` changes the
+base room's entered price once by the parsed op and value (HALF_UP to the contract currency), and
+the workspace stores the result as ABSOLUTE (the integration test above saves it that way). The
+client half — the base-row cell committing `ABSOLUTE <server result>`, "70.00 → …" while pending,
+Ctrl/Cmd+Enter over a selection — is S9 and not built; if the owner chooses O4's alternative
+(refuse relative entries on the base room), the endpoint stays for the bulk Adjust… (§3.10, S10),
+which does not depend on O4. O1–O3 and O5 are unchanged: their parse is only in S1's `shorthand.ts` on
+branch `pricing-workspace`, not merged here, and the board cells are S13. All five stay owner
+input 13.

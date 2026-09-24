@@ -454,3 +454,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   such rows were priced by row order or never. Published versions are unchanged; none of the 273
   versions with board rows on the development site is affected. No area status changes. Verdict
   unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace backend slice S5 on branch `pw-backend` (ADR-061), the last backend
+  slice: the contract price test takes a child's age in months or by date of birth and refuses a
+  non-whole or adult age (it failed or truncated before); `apply_op_values` computes entered prices
+  changed once by an op (O4's server half, bulk Adjust…); each night of an internal quote reports its
+  subtotals after the adults, the children and the board (no price change; never shown to guests
+  or agents). O1–O5 remain owner input 13. No area status changes. Verdict unchanged: NOT READY.
