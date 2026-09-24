@@ -183,12 +183,38 @@ def delete_program(name: str):
 	return {"ok": True}
 
 
+# what an entry tied to another hotel's booking or stay never shows (ADR-056 review): which booking,
+# the stay's dates (reason), how its points were earned (explanation: rate × value) and who made it
+OTHER_HOTEL_FIELDS = ("booking", "reservation", "reason", "actor", "explanation")
+
+
+def _visible_guests(guests: set[str], props: set[str]) -> set[str]:
+	"""Of ``guests``, those the viewer may see through ``props`` (``crm.require_guest``'s rule)."""
+	if not guests or not props:
+		return set()
+	from kamra.tex.crm import service as crm
+
+	cond, params = crm._visible_guest_sql(props)
+	return set(frappe.db.sql(f"SELECT g.name FROM `tabGuest` g WHERE g.name IN %(names)s AND {cond}",  # nosemgrep
+	                         {**params, "names": tuple(guests)}, pluck=True))
+
+
 @frappe.whitelist()
 def ledger(name: str, guest: str | None = None, entry_type: str | None = None, start=0, limit=50):
+	"""A program's ledger, newest first. The program reaches the viewer's hotels, the rows do not
+	all belong to them (a group program): an entry tied to a booking or stay at a hotel outside the
+	viewer's ``crm.view`` scope shows its points, status and dates only (``other_hotel``), and a
+	guest the viewer may not see is not named (ADR-056 review)."""
 	prog = frappe.get_doc("TEX Loyalty Program", name)
 	_require(prog, "crm.view", every=False)
+	platform = scope.is_platform_admin()
+	props = _props("crm.view")
 	filters = {"program": name}
 	if guest:
+		if not platform:
+			from kamra.tex.crm import service as crm
+
+			crm.require_guest(guest)                       # never learn about a guest one may not see
 		filters["guest"] = guest
 	if entry_type in ("Earn", "Burn", "Adjust", "Expire", "Reverse"):
 		filters["entry_type"] = entry_type
@@ -197,9 +223,19 @@ def ledger(name: str, guest: str | None = None, entry_type: str | None = None, s
 	                              "booking", "reservation", "reason", "actor", "creation", "explanation"],
 	                      order_by="creation desc", start=as_int(start, 0, lo=0), page_length=as_int(limit, 50, lo=1,
 	                                                                                                  hi=200))
-	names = {g: frappe.db.get_value("Guest", g, "full_name") for g in {r.guest for r in rows}}
+	where = loyalty._entry_hotels(rows)
+	seen = {r.guest for r in rows if r.guest} if platform else _visible_guests({r.guest for r in rows if r.guest},
+	                                                                            props)
+	names = dict(frappe.get_all("Guest", filters={"name": ("in", list(seen))}, fields=["name", "full_name"],
+	                            as_list=True)) if seen else {}
 	for r in rows:
-		r["guest_name"] = names.get(r.guest)
+		r["other_hotel"] = bool(not platform and where[r.name] and where[r.name] not in props)
+		if r["other_hotel"]:
+			for k in OTHER_HOTEL_FIELDS:
+				r[k] = None
+		if r.guest not in seen:
+			r["guest"] = None
+		r["guest_name"] = names.get(r.guest) if r.guest else None
 		for k in ("available_on", "expires_on", "creation"):
 			r[k] = str(r[k]) if r[k] else None
 	return {"rows": rows, "total": frappe.db.count("TEX Loyalty Ledger", filters)}

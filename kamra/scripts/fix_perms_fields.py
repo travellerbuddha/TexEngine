@@ -105,23 +105,30 @@ def fix_reservation_fields():
 
 
 def _grant(doctype, role, read, write, create, delete=0):
+	# the role's document-level row (permlevel 0): a field-level row (permlevel 1, e.g. System
+	# Manager's for TEX's withheld fields) is not this grant
 	perm = frappe.db.get_value(
-		"Custom DocPerm", {"parent": doctype, "role": role}, "name"
+		"Custom DocPerm", {"parent": doctype, "role": role, "permlevel": 0}, "name"
 	)
 	if perm:
 		frappe.db.set_value("Custom DocPerm", perm, {
 			"read": read, "write": write, "create": create, "delete": delete,
 		})
-		return
-	frappe.get_doc({
-		"doctype": "Custom DocPerm",
-		"parent": doctype,
-		"parenttype": "DocType",
-		"parentfield": "permissions",
-		"role": role,
-		"read": read, "write": write, "create": create, "delete": delete,
-		"report": read, "email": read, "print": read, "export": read,
-	}).insert(ignore_permissions=True)
+	else:
+		frappe.get_doc({
+			"doctype": "Custom DocPerm",
+			"parent": doctype,
+			"parenttype": "DocType",
+			"parentfield": "permissions",
+			"role": role,
+			"read": read, "write": write, "create": create, "delete": delete,
+			"report": read, "email": read, "print": read, "export": read,
+		}).insert(ignore_permissions=True)
+	# custom rows replace the JSON's, System Manager's permlevel-1 row included: keep it, so platform
+	# administrators still read TEX's withheld fields (ADR-056 review)
+	from kamra.tex.security.internals import ensure_custom_perms
+
+	ensure_custom_perms([doctype])
 
 
 def fix_permissions():

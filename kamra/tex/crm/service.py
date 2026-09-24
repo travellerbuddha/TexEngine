@@ -9,6 +9,7 @@ matching consent (KVKK / GDPR); every consent change and export is audited.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import timedelta
 
@@ -692,11 +693,42 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	                            pluck="name")) if guests else set()
 	for r in rows:
 		if not (r.consent_marketing and r.guest in agreed):
-			r["email"] = r["phone"] = None
+			# anonymous, the profile link included: it would lead to the same contact data
+			r["email"] = r["phone"] = r["guest"] = None
+			r["consent_marketing"] = 0
 		r["value"] = to_str(from_db(r["value"], r["currency"] or "EUR"))
 		for k in ("check_in", "check_out", "last_event_at"):
 			r[k] = str(r[k]) if r[k] else None
 	return rows
+
+
+def email_hash(email: str | None) -> str | None:
+	"""The funnel's pseudonymous key of an e-mail address (``public._track``)."""
+	email = (email or "").strip().lower()
+	return hashlib.sha256(email.encode()).hexdigest() if email else None
+
+
+def forget_contact(guest: str, emails=()) -> None:
+	"""The guest withdrew marketing e-mail consent: their abandoned cases become anonymous (no
+	profile, e-mail or phone; no consent) and their funnel events lose the e-mail hash, those of the
+	cases' sessions and those of the guest's addresses (ADR-056 review). The profile itself, its
+	stays and its consent history stay."""
+	sessions = tuple(s for s in frappe.get_all("TEX Abandoned Booking", filters={"guest": guest}, pluck="session_id")
+	                 if s) or ("",)
+	frappe.db.sql("""UPDATE `tabTEX Abandoned Booking` SET guest = NULL, email = NULL, phone = NULL,
+		consent_marketing = 0 WHERE guest = %s""", guest)
+	hashes = tuple(h for h in {email_hash(e) for e in emails} if h) or ("",)
+	frappe.db.sql("""UPDATE `tabTEX Funnel Event` SET email_hash = NULL
+		WHERE IFNULL(email_hash, '') != '' AND (email_hash IN %(h)s OR session_id IN %(s)s)""",
+	              {"h": hashes, "s": sessions})
+
+
+def guest_on_update(doc, method=None) -> None:
+	"""``Guest.on_update``, whoever saves (the CRM, the Desk form, REST): a withdrawal of marketing
+	e-mail consent makes the guest's abandoned cases and funnel data anonymous."""
+	before = doc.get_doc_before_save()
+	if before and before.get("tex_consent_email") and not doc.get("tex_consent_email"):
+		forget_contact(doc.name, emails={before.get("email"), doc.get("email")})
 
 
 def set_abandoned_status(name: str, status: str, note: str | None = None) -> None:
