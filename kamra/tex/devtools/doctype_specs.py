@@ -858,6 +858,10 @@ BOOKING_SPECS = [
 		# gateway is asked), the payments already given back or left to staff, the run that holds
 		# the refunds (one at a time) and whether the rate's cancellation terms applied
 		F("refund_in_flight", "Link", "Refund being made", "TEX Payment Transaction", read_only=1),
+		# third review: every refund the request made (what it refunded is counted from them) and
+		# how much of the money left to staff they already settled
+		F("refund_rows", "Small Text", "Refunds made", read_only=1),
+		F("staff_settled", "Currency", "Settled by staff", options="currency", read_only=1),
 		F("returned_charges", "Small Text", "Payments given back", read_only=1,
 		  description="Payments of this change that were given back, or left to staff to give back"),
 		F("settle_claim", "Data", "Refund run", read_only=1, hidden=1),
@@ -872,9 +876,9 @@ BOOKING_SPECS = [
 		F("resolution", "Small Text", "Staff note"),
 	], perms=IMMUTABLE_LOG, autoname="GCR-.YYYY.-.#####", naming_rule="Expression (old style)",
 	   sort_field="creation", in_create=True,
-	   # the staff fields, then the refund-run fields, came after the first migration: a newer
-	   # stamp makes migrate load them
-	   extra={"modified": "2026-09-27 00:00:00.000000"}),
+	   # the staff fields, then the refund-run fields, then the refunds made, came after the first
+	   # migration: a newer stamp makes migrate load them
+	   extra={"modified": "2026-09-28 00:00:00.000000"}),
 
 	dt("TEX Booking Domain", B, [
 		F("domain", "Data", "Domain", reqd=1, in_list_view=1,

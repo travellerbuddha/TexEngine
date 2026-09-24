@@ -130,7 +130,16 @@ def transaction(name: str):
 	in_flight = pay.in_flight_of(name)
 	refundable = from_db(r.amount, r.currency) - pay.refunded_of(name) - in_flight if succeeded else (
 		capture["amount"] - pay.refunded_of(name) - in_flight if capture else None)
-	return {**_txn_row(r), "allocations": allocations, "refunds": [_txn_row(x) for x in refunds],
+	# a refund waiting for its answer: whether staff may record its outcome now, and why not
+	# (never while its gateway call may still be running, third review of ADR-044)
+	finish = {}
+	if r.txn_type == "Refund":
+		from kamra.tex.services import guest_changes
+
+		blocked = guest_changes.finish_block(name) if r.status == "Pending" else None
+		finish = {"can_finish": r.status == "Pending" and not blocked, "finish_blocked": blocked,
+		          "guest_change": guest_changes.request_of_refund(name)}
+	return {**_txn_row(r), **finish, "allocations": allocations, "refunds": [_txn_row(x) for x in refunds],
 	        "unallocated": to_str(from_db(r.amount, r.currency) - pay.allocated_of(name) - pay.refunded_of(name))
 	        if succeeded else "0",
 	        "refundable": to_str(refundable) if refundable is not None else "0",
@@ -199,6 +208,18 @@ def finish_refund(refund: str, outcome: str, reason: str, reference: str | None 
 		frappe.throw(_("Choose whether the gateway refunded it."))
 	return guest_changes.verify_refund(refund, outcome=outcome, reason=text(reason, 500) or "",
 	                                   reference=text(reference, 140))
+
+
+@frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
+@retry_on_deadlock
+def refund_outside(transaction: str, amount, reason: str, reference: str, idempotency_key: str,
+                   booking: str | None = None):
+	"""Record money the hotel gave back outside TEX (cash, a bank transfer, the card terminal):
+	a Manual refund of this payment, taken off the booking holding it (G-93). Audited."""
+	return pay.refund_outside(transaction, amount=amount, reason=text(reason, 500) or "",
+	                          reference=text(reference, 140) or "", booking=booking,
+	                          idempotency_key=text(idempotency_key, 140) or frappe.throw(_("Idempotency key required.")))
 
 
 @frappe.whitelist(methods=["POST"])

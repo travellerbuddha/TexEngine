@@ -33,6 +33,8 @@
   "staff_reason",
   "unknown_refund",
   "refund_in_flight",
+  "refund_rows",
+  "staff_settled",
   "returned_charges",
   "settle_claim",
   "settle_claimed_until",
@@ -232,6 +234,19 @@
    "read_only": 1
   },
   {
+   "fieldname": "refund_rows",
+   "fieldtype": "Small Text",
+   "label": "Refunds made",
+   "read_only": 1
+  },
+  {
+   "fieldname": "staff_settled",
+   "fieldtype": "Currency",
+   "label": "Settled by staff",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
    "fieldname": "returned_charges",
    "fieldtype": "Small Text",
    "label": "Payments given back",
@@ -292,7 +307,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-27 00:00:00.000000",
+ "modified": "2026-09-28 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Guest Change Request",
