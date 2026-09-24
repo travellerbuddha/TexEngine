@@ -615,6 +615,11 @@ class TestUpgradeFromKamra(WholeSiteCase):
 class TestP01Foundation(PatchCase):
 	def test_hotels_masters_profiles_and_settings(self):
 		orphan = kamra_hotel("G76 Orphan Hotel")
+		if frappe.db.count("TEX Enterprise") < 2:                  # a site of several tenants, on any site
+			ent = frappe.get_doc({"doctype": "TEX Enterprise", "enterprise_name": "G76 Second Tenant"}).insert(
+				ignore_permissions=True).name
+			frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "G76 Second Group",
+			                "enterprise": ent}).insert(ignore_permissions=True)
 		frappe.db.delete("TEX Profile Capability", {"parent": "Viewer", "parenttype": "TEX Permission Profile"})
 		frappe.db.delete("TEX Permission Profile", "Viewer")
 		frappe.db.delete("TEX Market", "PL")
