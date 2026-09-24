@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { login } from "../lib/api"
+import { login, sameOrigin } from "../lib/api"
 import { asset } from "../lib/asset"
 import { Button } from "../components/ui/button"
 import { getSiteInfo } from "../lib/siteInfo"
@@ -47,7 +47,16 @@ export default function Login(props: { onSuccess: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      await login(u, p)
+      const r = await login(u, p)
+      if (r.message !== "Logged In" && r.message !== "No App") {
+        // no session yet (two-factor code, expired password): Frappe's own sign-in page
+        // finishes it (TEX sign-in, ADR-060 review M1)
+        const back = encodeURIComponent(window.location.pathname)
+        window.location.assign(
+          (r.message === "Password Reset" && sameOrigin(r.redirect_to)) || `/login?redirect-to=${back}`,
+        )
+        return
+      }
       // Navigation + the production CSRF re-boot are handled by the /login
       // route (LoginPage.onSuccess).
       sessionStorage.removeItem("kamra_session_ended")
