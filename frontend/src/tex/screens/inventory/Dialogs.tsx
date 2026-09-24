@@ -8,7 +8,7 @@ import { useTexT } from "../../i18n"
 import { Badge, Button, Checkbox, DescriptionList, Dialog, Field, FormGrid, InlineError, Input, Notice, useToast } from "../../ui"
 import { WeekdayNumbers } from "../rates/components/pickers"
 import { decText, isoWeekday, versionLabel } from "../rates/lib/util"
-import { ChangeForm, changesFromCell, describeChanges, emptyChanges, hasChanges, toPayload, windowInvalid, type Changes } from "./ChangeForm"
+import { ChangeForm, changesFromCell, describeChanges, emptyChanges, hasChanges, I_FIELDS, toPayload, windowInvalid, type Changes } from "./ChangeForm"
 import { channelArgs, SCOPE_PREFIX, type BulkResult, type Grid, type GridCell, type Scope } from "./types"
 
 type T = (k: string, p?: Record<string, string | number>) => string
@@ -260,7 +260,7 @@ export function BulkDialog({
   const [result, setResult] = useState<BulkResult>()
   const canRate = !hotelLevel && perms.canRate && Boolean(scope.contract)
   const canInventory = !hotelLevel && perms.canInventory
-  const payload = hotelLevel ? { ...c, on: Object.fromEntries(Object.entries(c.on).filter(([k]) => !["closed", "manual_adjustment", "oversell_limit"].includes(k))), rateOn: false } : c
+  const payload = hotelLevel ? { ...c, on: Object.fromEntries(Object.entries(c.on).filter(([k]) => !(I_FIELDS as readonly string[]).includes(k))), rateOn: false } : c
   const cellCount = hotelLevel ? 1 : rooms.length
 
   const dayCount = useMemo(() => {

@@ -62,6 +62,8 @@ export interface RestrictionAlert extends AlertBase {
   kind: RestrictionKind
   market: string | null
   channel: string | null
+  /** the Booking Engine, the Call Center or both (G-48) */
+  channel_scope?: string | null
 }
 
 export type PortfolioAlert = InventoryAlert | RestrictionAlert

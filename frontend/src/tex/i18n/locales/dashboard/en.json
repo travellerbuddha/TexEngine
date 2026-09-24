@@ -26,6 +26,9 @@
  "dash.period": "{from} – {to}",
  "dash.pf.alert.all_rooms": "All room types",
  "dash.pf.alert.channel": "Channel: {channel}",
+ "dash.pf.scope.be": "Booking Engine",
+ "dash.pf.scope.cc": "Call Center",
+ "dash.pf.scope.both": "Booking Engine + Call Center",
  "dash.pf.alert.left": {
   "one": "{count} of {capacity} left",
   "other": "{count} of {capacity} left"

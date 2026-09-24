@@ -179,7 +179,7 @@ export default function AriGrid() {
               <Skeleton key={i} className="h-8 w-full" />
             ))}
           </div>
-        ) : grid.rows.length === 0 ? (
+        ) : grid.rows.every((r) => r.level === "hotel") ? (
           <EmptyState title={t("inventory.no_rooms")} />
         ) : (
           <GridTable grid={grid} metrics={metrics} today={today} loading={q.loading} editable={canEditAny} onOpen={(row, cell) => setCellEdit({ row, cell })} />
@@ -255,6 +255,16 @@ function GridTable({
     requestAnimationFrame(() => table.current?.querySelector<HTMLElement>(`[data-cell="${nr}:${nc}"]`)?.focus())
   }, [])
 
+  // PageDown / PageUp: the same metric of the next / previous room row (the hotel row shows fewer)
+  const jumpRow = (ri: number, dir: 1 | -1) => {
+    const from = flat[ri]
+    const at = grid.rows.indexOf(from.row) + dir
+    if (at < 0 || at >= grid.rows.length) return ri
+    const target = grid.rows[at]
+    const same = flat.findIndex((f) => f.row === target && f.metric === from.metric)
+    return same >= 0 ? same : flat.findIndex((f) => f.row === target)
+  }
+
   const onKey = (e: KeyboardEvent<HTMLTableCellElement>, ri: number, ci: number) => {
     const last = { r: flat.length - 1, c: grid.dates.length - 1 }
     let nr = ri
@@ -281,10 +291,10 @@ function GridTable({
         if (e.ctrlKey) nr = last.r
         break
       case "PageDown":
-        nr = Math.min(last.r, ri + rowMetrics(flat[ri].row).length)
+        nr = jumpRow(ri, 1)
         break
       case "PageUp":
-        nr = Math.max(0, ri - rowMetrics(flat[ri].row).length)
+        nr = jumpRow(ri, -1)
         break
       case "Enter":
       case " ":
