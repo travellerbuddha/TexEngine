@@ -2279,3 +2279,122 @@ the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as 
   `TestStatusAt` (4). All 24 integration modules pass (465 tests), among them `TestCouponLimits`,
   `TestHistoricalSimulator`, the G-41 product-change test (a colleague's token is now refused
   before its channel re-check), `test_fx_snapshot` HISTORICAL and the self-service suites.
+
+## ADR-055 TEX decimal fields keep 9 places and hold what was typed; FX rates keep 10 significant digits
+**Context.** G-72 (R-02, R-03).
+- The generic rule values of the commercial DocTypes were `Float` fields of precision 6. Frappe
+  v16 sizes a Float/Currency/Percent column by its precision (`DECIMAL(21, precision)`), so these
+  columns were `DECIMAL(21,6)`, not `DECIMAL(21,9)` as the gap assumed. A 7th decimal typed in the
+  TEX screens (an occupancy factor of a third, 0.333333333; a loyalty point worth 0.004999999)
+  was rounded away on save without a word.
+- Frappe hands a DECIMAL column to Python as a binary float (`CONVERSION_MAP`: NEWDECIMAL →
+  float), and writes a float through its `repr`. The loaders turned floats into Decimals with
+  `D()` in one place and `D(str())` in another; the TEX API returned these fields as JSON
+  floats.
+- An FX sell rate was rounded to 6 decimal places (`money.FX_PLACES`): TRY → EUR 1/34 became
+  0.029412, 5 significant digits. On 150,000 TRY that is 4,411.80 EUR instead of 4,411.76.
+
+**Decision.**
+- *Field types.* Frappe has no Decimal fieldtype: Float, Currency and Percent are all DECIMAL
+  columns and differ only in how Desk formats them. The type says what the value is; the
+  precision says how many places the column keeps, and it is 9 for every TEX commercial input:
+
+  | Field | Before | After | Why |
+  |---|---|---|---|
+  | TEX Price Period `adjustment_value` | Float p6 | Float p9 | %, factor or money by `adjustment_op` |
+  | TEX Period Rate `value` | Float p6 | Float p9 | money (ABSOLUTE/ADD) or factor/% by `op` |
+  | TEX Occupancy Rule `value` | Float p6 | Float p9 | factor, % or money by `op` |
+  | TEX Board Rule `adult_amount` | Float p6 | Float p9 | money (ADD/ABSOLUTE) or % (ADJUST_PERCENT) |
+  | TEX Board Rule `child_percent` | Float p6 | **Percent** p9 | always a percentage |
+  | TEX Contract Rate Plan `value` | Float p6 | Float p9 | % or factor or money by `op` |
+  | TEX Contract Offer `value` | Float p6 | Float p9 | %, money, multiplier by `value_type` |
+  | TEX Markup Rule `value` | Float p6 | Float p9 | % / factor / money by `op` |
+  | TEX Promotion `value` | Float p6 | Float p9 | %, money, multiplier by `value_type` |
+  | TEX Promotion `min_basket` | Currency | Currency, `options: currency` | money in the promotion's currency (column unchanged) |
+  | TEX FX Rate `rate`, TEX FX Policy `manual_rate` | Float p9 | unchanged | FX rates (already 9 places) |
+  | TEX FX Policy `adjustment` | Float p6 | Float p9 | % or fixed by `mode` |
+  | TEX Cancellation Rule `penalty_value`, Policy `no_show_value` | Float p6 | Float p9 | %, nights or money by type |
+  | TEX Payment Policy `deposit_value` | Float p6 | Float p9 | %, nights or money by type |
+  | TEX Tax Rule `rate` | Float p6 | **Percent** p9 | always a percentage |
+  | TEX Tax Rule `amount`, TEX Extra Price Rule amounts | Currency | Currency, `options: currency` (the parent's) | money (column unchanged) |
+  | TEX Loyalty Tier `earn_multiplier` | Float p6 | Float p9 | factor |
+  | TEX Loyalty Earn Rule `rate` | Float p6 | Float p9 | points per unit (a factor, not money) |
+  | TEX Loyalty Program `point_value` | Float p6 | **Currency** p9, `options: currency` | money in the program's currency; 9 places so a sub-cent point (0.005 EUR) is not rounded to 2 |
+  | TEX Loyalty Program `max_redeem_percent` | Percent | Percent p9 (explicit) | percentage |
+  | TEX Child Age Band `from_age`, `to_age` | Float p2 | unchanged | years, judged in whole months (ADR-051); not money |
+
+  A value whose meaning depends on its rule's operation stays Float: Currency would make Desk
+  format a factor or a percentage as money and round it to the currency's places. Money fields
+  get an explicit precision where the default (the system's currency precision, often 2) would
+  round a legitimate value (the loyalty point value). The DocType JSON is generated from
+  `devtools/doctype_specs.py` (`V = {"precision": "9"}`).
+- *Write: what is typed is what is stored, or it is refused.* `commercial.decimals.check_inputs`
+  runs `before_validate` on every TEX DocType users type decimals into (contract versions and
+  their tables, pricing policies, markups, promotions, FX rates and policies, cancellation,
+  payment and tax policies, extras, loyalty programs), whoever saves: the TEX API, Desk, a data
+  import or a script. Each decimal field of the record and its rows goes through
+  `money.db_input`:
+  - typed text is refused, naming the field and row, when it has more places than the field
+    keeps (trailing zeros aside), more than 15 significant digits (it would not survive the
+    binary float Frappe writes it through) or more than 12 integer digits;
+  - a binary float or Decimal from code has no typed digits: it is rounded half-up to the
+    field's places, as the column would round it, and refused only when it does not fit.
+
+  Every value of up to 15 significant digits crosses Python float → `repr` → MariaDB unchanged
+  (measured on the bench's MariaDB 10.11: a double is stored at its shortest round-trip text).
+  The manual FX rate endpoint checks the rate as typed the same way.
+- *Read: one helper.* Loaders read these fields with `money.db_dec` (pure): the shortest repr of
+  the float Frappe hands over is the stored decimal for every value of up to 15 significant
+  digits; anything a float carries beyond the column's 9 places (binary noise) is rounded off.
+  A clean value keeps the representation `D()` gave it (`"0.3"`, `"12.0"`), so payload text,
+  explanations and API output do not change for existing values. Used by the contract loaders
+  (`build_terms`, occupancy rules, cancellation and payment policies), the pricing context
+  (markups, promotions, FX policies and provider rates, tax rules, extras) and loyalty earning
+  and redemption.
+- *API: strings.* The TEX screens get these fields as exact decimal strings (`decimals.api_value`
+  in `doc_dict`/`rows`, policy lists, FX rates, loyalty programs), never JSON floats. The screens
+  already carried them as typed strings; they now accept 9 places (`DECIMAL_PLACES`).
+- *FX precision: significant digits, recorded as they are.* `money.quantize_rate` keeps at least
+  `FX_SIGNIFICANT` (10) significant digits and never fewer than 6 places: TRY → EUR
+  0.02941176471, GBP → USD via EUR 1.294117647, EUR → TRY 51.00000000. Storing sub-1 pairs as
+  their inverse was rejected: it would change the meaning of `sell_rate` ("1 from = rate to") in
+  every recorded snapshot. A quote records every digit (`money.to_str_rate`: at least 6 places,
+  no trailing zeros beyond): a rate recorded before at 6 places serialises byte-identically
+  ("51.000000", "0.029412"), so its pin, its explanation step and its record are the same text.
+  `Reservation.tex_fx_rate` is informational (DECIMAL(21,9)); the price-locked snapshot holds the
+  exact rate.
+- *Explanations.* A rule value is shown as stored (`describe_op` up to 9 places: "× 0.333333333";
+  params `to_str_param`: at least 6, exactly to 9). A value of up to 4 places (text) or 6 places
+  (params) explains exactly as before.
+- *Migration.* The DocType sync widens the columns from DECIMAL(21,6) to DECIMAL(21,9): every
+  stored value is kept (none has more than 6 places) and no stored value carries binary noise (a
+  DECIMAL column rounds what is written to it), so nothing is rewritten. p35 checks every column
+  is DECIMAL(21,9) (re-syncing a DocType left narrower) and that every published payload still
+  hashes to its recorded hash; payloads are never changed. On the dev bench: 20 fields at 9
+  places, 193 published payloads verified, none failed.
+
+**Consequences.**
+- Published payloads keep their bytes and hash: canonical serialisation is value-based
+  (`dec_str` normalises), and widening a column changes no value. A version rebuilt from its own
+  rows after the migration hashes to its frozen hash (`test_money_fields`).
+- Price-locked reservations reprice on their sold terms to their sold totals: ORIGINAL_VERSION
+  and ORIGINAL_SALE_DATE pin the rates their sale recorded (ADR-051), read back exactly as
+  recorded, 6 places or not. New quotes, CURRENT and HISTORICAL_SALE_DATE reprices and the
+  simulator resolve rates at the new precision, so a stay sold before and repriced on today's (or
+  a historical date's) terms can differ by a cent where a rate below 1 or a cross rate converts.
+  A quote made before the deploy books at its stored price and rate; an offer searched before
+  and quoted after is repriced, and a changed total is reported (`price_changed`).
+- More than 9 decimals, or a 16th significant digit, is now an error where it was silently
+  rounded (also an age band typed with 3 decimals). Scripts writing floats are unaffected.
+- Not changed: age bands stay 2-place years; the legacy Kamra PMS money fields and the legacy
+  pricing path of hotels outside TEX (ADR-028) are not TEX inputs.
+- Tests: unit `test_money_fields` (11: column round trips incl. 20,000 random 9-place and
+  money values, typed-input refusals, 10-significant-digit TRY → EUR, a 6-place pin reproducing
+  its old total 4,411.80 against 4,411.76 at the new precision, the explanation of a 9-place
+  factor; 11 failed or errored on the base commit); integration `test_money_fields` (9: the
+  schema, every G-72 field saved through the TEX API with 7+ decimals kept in the column, the
+  API and the loaders, refusals, a published payload through p35, a reservation sold at 6 places
+  repriced ORIGINAL_* to its total and CURRENT at 10 significant digits, a stay sold at 10
+  significant digits repriced and extended on its recorded rate; the first 8 all failed or
+  errored on the base commit and schema). `Reservation.tex_fx_rate` is written at its 9 places
+  (`money.db_dec`), so the record in memory is the stored one. `test_markup_fx_tax` cross rate now 1.294117647 (was 1.294118).
