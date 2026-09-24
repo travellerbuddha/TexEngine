@@ -3,13 +3,12 @@ import { useNavigate, useParams } from "react-router-dom"
 import { FilePlus2, Lock, Rocket, RotateCcw, Save, ShieldCheck } from "lucide-react"
 import { tex, TexApiError, useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
-import { overSaved } from "../../../lib/edits"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, CardBody, ErrorState, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
 import { IssueCount, IssueList, StatusBadge } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
-import { fingerprint, payloadOf, stateFromDoc, type EditorState, type SellingForm } from "../lib/tables"
+import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm } from "../lib/tables"
 import type { ContractBundle, Row, ValidationResult, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
 import { countIssues, useLookups, versionLabel } from "../lib/util"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
@@ -65,21 +64,13 @@ export default function VersionEditor() {
   /** A save came back: the saved version becomes the base, and what Discard returns to. What the
    * user changed while the save was in flight (a setting, a table, the selling terms) stays on top
    * of it: replacing the editor with the saved copy would drop those edits, and a later save would
-   * then send them away too. */
+   * then send them away too. Rows keep their client keys (keepKeys), so selection, focus and open
+   * panels survive the save. */
   const settle = useCallback((d: VersionDoc, sent: EditorState) => {
     const saved = stateFromDoc(d)
     setDoc(d)
     setBase(fingerprint(saved))
-    setState((cur) =>
-      cur
-        ? {
-            ...saved,
-            settings: overSaved(saved.settings, sent.settings, cur.settings),
-            tables: overSaved(saved.tables, sent.tables, cur.tables),
-            ...(JSON.stringify(cur.selling) !== JSON.stringify(sent.selling) ? { selling: cur.selling } : {}),
-          }
-        : saved,
-    )
+    setState((cur) => settleState(saved, sent, cur))
   }, [])
 
   const editable = Boolean(doc?.editable)

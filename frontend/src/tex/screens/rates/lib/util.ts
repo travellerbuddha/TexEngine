@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { tex, TexApiError, type TexModule } from "../../../lib/api"
 import { intlLocale, getTexLang } from "../../../i18n"
+import { newKey } from "./keys"
 import type { Issue, Lookups, Row } from "./types"
 
 /** Module name of the workstream-A helper endpoints (kamra/tex/api/ui_rates.py). */
@@ -26,18 +27,17 @@ export function strVal(v: unknown): string {
   return v === null || v === undefined ? "" : String(v)
 }
 
-let keySeq = 0
-export function newKey(): string {
-  keySeq += 1
-  return `r${Date.now().toString(36)}${keySeq}`
-}
+export { newKey }
 
 export type FieldKind = "text" | "int" | "decimal" | "check" | "select" | "date" | "csv" | "weekdays"
 
 /** Normalise a server row for the editor: decimals → strings, ints → numbers,
- * checks → 0/1, everything else → string. Frappe bookkeeping keys are dropped. */
+ * checks → 0/1, everything else → string. Frappe bookkeeping keys are dropped, except the
+ * server row name, kept as `_name` (the rule id of a saved row, for issue anchoring); fromRow,
+ * payloadOf and the fingerprint ignore it. */
 export function toRow(src: Record<string, unknown>, kinds: Record<string, FieldKind>): Row {
   const out: Row = { _key: newKey() }
+  if (typeof src.name === "string" && src.name) out._name = src.name
   for (const [k, kind] of Object.entries(kinds)) {
     const v = src[k]
     if (kind === "int") out[k] = intVal(v)
