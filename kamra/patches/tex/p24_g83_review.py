@@ -11,6 +11,8 @@
 3. ``TEX Payment Provider Account.api_key`` was a Data field with change tracking, so the
    change history (Version) kept plain keys. They are masked; since p22 the field is a
    Password, whose changes reach the history only as asterisks.
+
+Each report is audited once: a re-run writes an entry only for what changed since (G-76).
 """
 
 import json
@@ -18,7 +20,7 @@ import json
 import frappe
 
 from kamra.tex.security import filetypes as ft
-from kamra.tex.security.audit import audit, log_exception
+from kamra.tex.security.audit import audit, log_exception, recorded
 
 PRIVATISE = frozenset({"html", "htm", "xhtml", "xht", "shtml", "js", "mjs", "hta", "swf"})
 ACCOUNT = "TEX Payment Provider Account"
@@ -44,9 +46,10 @@ def _public_files() -> tuple[int, int]:
 				continue
 			except Exception:
 				log_exception(f"TEX p24: could not make {f.name} private")
-		audit("file.public_active_content", reference_doctype="File", reference_name=f.name, source="System",
-		      new={"file_url": url, "attached_to": [f.attached_to_doctype, f.attached_to_name]},
-		      reason="the public folder may no longer serve this type: replace it or make it private (G-83)")
+		new = {"file_url": url, "attached_to": [f.attached_to_doctype, f.attached_to_name]}
+		if not recorded("file.public_active_content", reference_doctype="File", reference_name=f.name, new=new):
+			audit("file.public_active_content", reference_doctype="File", reference_name=f.name, source="System",
+			      new=new, reason="the public folder may no longer serve this type: replace it or make it private (G-83)")
 		reported += 1
 	return privatised, reported
 
@@ -58,9 +61,12 @@ def _site_images() -> int:
 	for s in frappe.get_all("TEX Booking Site", fields=["name", "property", "logo", "hero_image"]):
 		bad = [f for f in ("logo", "hero_image") if s.get(f) and not ft.safe_image_url(s.get(f), own)]
 		if bad:
-			audit("booking_site.invalid_image", reference_doctype="TEX Booking Site", reference_name=s.name,
-			      property=s.property, source="System", new={f: s.get(f) for f in bad},
-			      reason="replace with an uploaded PNG, JPEG, GIF or WebP image (G-83); the site stays savable")
+			new = {f: s.get(f) for f in bad}
+			if not recorded("booking_site.invalid_image", reference_doctype="TEX Booking Site", reference_name=s.name,
+			                new=new):
+				audit("booking_site.invalid_image", reference_doctype="TEX Booking Site", reference_name=s.name,
+				      property=s.property, source="System", new=new,
+				      reason="replace with an uploaded PNG, JPEG, GIF or WebP image (G-83); the site stays savable")
 			n += 1
 	return n
 

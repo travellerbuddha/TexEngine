@@ -17,13 +17,13 @@ from frappe import _
 from frappe.utils import add_to_date, getdate, now_datetime
 
 from kamra.tex.availability import extras_repository as xinv
-from kamra.tex.commercial import context, contracts
+from kamra.tex.commercial import context
 from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import addons, extras, serialize
 from kamra.tex.pricing.model import ExtraRequest
 from kamra.tex.security.audit import audit
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import quoting
+from kamra.tex.services import quoting, sold_terms
 
 OPEN_STATUSES = ("Confirmed", "Pending Payment", "Held")     # not yet arrived, not cancelled
 PROPOSAL_TTL_MINUTES = 30
@@ -83,7 +83,8 @@ def price(res, raw_requests, *, guest: bool):
 	"""→ (AddonQuote, snapshot, requests). Priced now, on the booked stay as sold."""
 	snap = _snapshot(res)
 	req = serialize.request_from_dict(snap["request"])
-	terms = contracts.load_terms(res.tex_contract_version)
+	# the stay's own terms, only while its version's payload is the one the sale recorded (G-73)
+	terms = sold_terms.load(res, snap, res.tex_contract_version, use="add-on")
 	now = now_datetime()
 	requests = _requests(raw_requests)
 	catalog = _catalog(res, guest, now)

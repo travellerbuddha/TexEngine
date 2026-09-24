@@ -49,7 +49,7 @@ from kamra.tex.pricing.model import ChildSpec
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import quoting
+from kamra.tex.services import quoting, sold_terms
 
 BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE", "CURRENT")
 CAPACITY_REASONS = ("sold out on ", "only ", "closed on ")     # pricing.extras.capacity_refusal
@@ -131,8 +131,10 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 
 
 def priced_at(res, snap) -> datetime:
-	"""When the snapshot's price was computed: its quote's (or modification's) sale time."""
-	return get_datetime((snap.get("request") or {}).get("sale_at") or res.tex_sale_at or snap.get("accepted_at"))
+	"""When the snapshot's price was computed: its quote's (or modification's) sale time. Recorded
+	as ``priced_at`` since G-73; a snapshot written before holds it as its request's sale time."""
+	return get_datetime(snap.get("priced_at") or (snap.get("request") or {}).get("sale_at") or res.tex_sale_at
+	                    or snap.get("accepted_at"))
 
 
 def original_priced_at(res, snap) -> datetime:
@@ -142,7 +144,7 @@ def original_priced_at(res, snap) -> datetime:
 	if snap.get("original_priced_at"):
 		return get_datetime(snap["original_priced_at"])
 	if not snap.get("basis"):         # the booking's own snapshot, not a modification's
-		sale = (snap.get("request") or {}).get("sale_at")
+		sale = snap.get("priced_at") or (snap.get("request") or {}).get("sale_at")
 		if sale:
 			return get_datetime(sale)
 	return get_datetime(res.tex_sale_at or snap.get("accepted_at"))
@@ -345,14 +347,20 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 			changes["drop_addons"] = ids
 	placeholder_at = now_datetime()
 	req, snap = build_changed_request(res, changes, placeholder_at)
-	version, at, how = _resolve(res, snap, req, basis, basis_sale_at, _sale_at)
-	req, _s = build_changed_request(res, changes, at)
-	# the booking's own coupon uses never count against it when it is repriced (G-09); the
-	# ORIGINAL_* bases convert with the rates the sale recorded (G-56); a minimum basket is the
-	# booking's, with its other rooms as they are priced now (G-84)
-	quote, terms = booked_price(res, version, req, exclude_booking=res.tex_booking, exclude_reservation=res.name,
-	                            gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
-	                            fx_pins=fx_pins(res, snap, basis))
+	version = None
+	try:
+		version, at, how = _resolve(res, snap, req, basis, basis_sale_at, _sale_at)
+		req, _s = build_changed_request(res, changes, at)
+		# the booking's own coupon uses never count against it when it is repriced (G-09); the
+		# ORIGINAL_* bases convert with the rates the sale recorded (G-56); the version the stay
+		# was sold on prices it only while its payload is the one the sale recorded (G-73); a
+		# minimum basket is the booking's, with its other rooms as they are priced now (G-84)
+		quote, terms = booked_price(res, version, req, exclude_booking=res.tex_booking, exclude_reservation=res.name,
+		                            gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+		                            fx_pins=fx_pins(res, snap, basis),
+		                            expected_hash=sold_terms.expected_hash(res, snap, version))
+	except contracts.PayloadMismatch as e:
+		sold_terms.refuse(res, snap, e, use="reprice", basis=basis, version=version)
 	req = quote.request
 	old_ccy = res.tex_currency or snap.get("currency")
 	old_total = from_db(res.tex_total_amount or res.amount_after_tax, old_ccy or "EUR")
@@ -597,7 +605,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		"tex_contract": new["contract"]["contract"], "tex_contract_version": new["contract"]["version"],
 		"tex_payload_hash": new["contract"]["payload_hash"], "tex_currency": ccy,
 		"tex_fx_rate": db_dec((new.get("fx") or {}).get("sell_rate") or 1),   # 9 places, as stored (G-72)
+		# priced_at: the moment it was priced on its basis (G-73), next to when it was accepted
 		"tex_pricing_snapshot": json.dumps({**new, "accepted_at": str(now_datetime()),
+		                                    "priced_at": str(get_datetime(result["pricing_sale_at"])),
 		                                    "original_priced_at": str(original_priced_at(res, snap)),
 		                                    "original_fx_rates": original_fx(res, snap),
 		                                    "basis": p["basis"], "override_amount": to_str(final_total)
@@ -676,16 +686,22 @@ def simulate(reservation: str, sale_at) -> dict:
 	                    future=_("A simulated sale time cannot be in the future."))
 	req = serialize.request_from_dict({**snap["request"], "sale_at": at.isoformat(), "booking_basket": None,
 	                                    "booking_rooms": 1})
-	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=True)
+	try:
+		cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=True)
+	except contracts.PayloadMismatch as e:        # a live payload failing its integrity check (G-73)
+		sold_terms.refuse(res, snap, e, use="simulate")
 	if not cands:
 		return {"sellable": False, "simulated_sale_at": str(at),
 		        "reasons": [{"code": "NO_CONTRACT", "message": _("No contract was on sale at that time.")}]}
 	pick = next((c for c in cands if c[0].name == snap["contract"]["contract"]), cands[0])
 	# a minimum basket is the booking's: with the other rooms as recorded with this stay when it was
 	# last priced, not as they are now, so the answer for a past moment never changes (G-51, G-84)
-	quote, _terms = booked_price(res, pick[1], req, others=recorded_others(snap), exclude_booking=res.tex_booking,
-	                             check_capacity=False, gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
-	                             usage_at=at)
+	try:
+		quote, _terms = booked_price(res, pick[1], req, others=recorded_others(snap), exclude_booking=res.tex_booking,
+		                             check_capacity=False, gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+		                             usage_at=at, expected_hash=sold_terms.expected_hash(res, snap, pick[1]))
+	except contracts.PayloadMismatch as e:
+		sold_terms.refuse(res, snap, e, use="simulate", version=pick[1])
 	internal = scope.has_capability("price.view_cost", res.property)
 	actual = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")
 	return {

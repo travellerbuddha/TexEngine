@@ -5,13 +5,15 @@
   store (the column keeps asterisks, like every Password field).
 - Existing outbox rows are reservation events; channel-manager connections no longer
   receive reservation events (they get ARI).
-- channel.view / channel.manage for the default profiles that hold them.
+- channel.view / channel.manage for the default profiles that hold them, once, at the upgrade: a
+  forced re-run does not give back a capability removed since (G-76).
 """
 
 import frappe
 from frappe.utils.password import set_encrypted_password
 
 from kamra.tex.security.capabilities import DEFAULT_PROFILES
+from kamra.tex.setup import ran_before
 
 CAPS = ("channel.view", "channel.manage")
 
@@ -34,7 +36,7 @@ def execute():
 	frappe.db.sql("""UPDATE `tabTEX Integration Outbox` o JOIN `tabTEX Integration Connection` c ON c.name = o.connection
 	                 SET o.status='Dead', o.last_error='channel managers receive ARI, not reservation events (G-69)'
 	                 WHERE c.category='Channel Manager' AND o.kind='Reservation' AND o.status IN ('Pending', 'Failed')""")
-	for name, caps in DEFAULT_PROFILES.items():
+	for name, caps in DEFAULT_PROFILES.items() if not ran_before(__name__) else ():
 		if not frappe.db.exists("TEX Permission Profile", name):
 			continue
 		doc = frappe.get_doc("TEX Permission Profile", name)

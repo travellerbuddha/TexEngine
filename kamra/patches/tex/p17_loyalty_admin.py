@@ -8,11 +8,16 @@
   keep earning's behaviour and now also block redemption (``Both``).
 - Earnings made before G-24 get the fingerprint of their stay as it is now, so a later
   rule change does not rewrite them and a later change of the stay does.
+
+The capability and the 0 → 100 conversion happen once, at the upgrade (G-76): a forced re-run
+neither gives back a capability removed since nor turns a program set to "cannot redeem" (0)
+since into 100 %.
 """
 
 import frappe
 
 from kamra.tex.security.capabilities import DEFAULT_PROFILES
+from kamra.tex.setup import ran_before
 
 CAP = "loyalty.edit"
 
@@ -20,7 +25,8 @@ CAP = "loyalty.edit"
 def execute():
 	for dt in ("tex_loyalty_program", "tex_loyalty_blackout", "tex_loyalty_ledger"):
 		frappe.reload_doc("tex_crm", "doctype", dt)
-	for name, caps in DEFAULT_PROFILES.items():
+	first = not ran_before(__name__)
+	for name, caps in DEFAULT_PROFILES.items() if first else ():
 		if CAP not in caps or not frappe.db.exists("TEX Permission Profile", name):
 			continue
 		if frappe.db.exists("TEX Profile Capability", {"parent": name, "parenttype": "TEX Permission Profile",
@@ -29,8 +35,9 @@ def execute():
 		doc = frappe.get_doc("TEX Permission Profile", name)
 		doc.append("capabilities", {"capability": CAP})
 		doc.save(ignore_permissions=True)
-	frappe.db.sql("UPDATE `tabTEX Loyalty Program` SET max_redeem_percent=100 "
-	              "WHERE IFNULL(max_redeem_percent, 0) = 0")
+	if first:
+		frappe.db.sql("UPDATE `tabTEX Loyalty Program` SET max_redeem_percent=100 "
+		              "WHERE IFNULL(max_redeem_percent, 0) = 0")
 	frappe.db.sql("UPDATE `tabTEX Loyalty Blackout` SET applies_to='Both' WHERE IFNULL(applies_to, '') = ''")
 	from kamra.tex.crm.loyalty import stay_fingerprint
 

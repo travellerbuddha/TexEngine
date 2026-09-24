@@ -182,6 +182,8 @@ class TestLoyaltyMigration(LoyaltyCase):
 		prog.append("blackouts", {"date_from": add_days(fx.d(6, 1), 0), "date_to": fx.d(6, 2)})
 		prog.save(ignore_permissions=True)
 		frappe.db.sql("UPDATE `tabTEX Loyalty Blackout` SET applies_to=NULL WHERE parent=%s", name)
+		# the site as before the upgrade: the 0 → 100 conversion is the first run's only (G-76)
+		frappe.db.delete("Patch Log", {"patch": "kamra.patches.tex.p17_loyalty_admin"})
 		p17_loyalty_admin.execute()
 		self.assertEqual(D(frappe.db.get_value("TEX Loyalty Program", name, "max_redeem_percent")), D(100))
 		self.assertEqual(frappe.db.get_value("TEX Loyalty Blackout", {"parent": name}, "applies_to"), "Both")

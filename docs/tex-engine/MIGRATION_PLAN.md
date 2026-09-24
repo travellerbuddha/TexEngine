@@ -6,38 +6,75 @@ preserve IDs, keep compatibility, test the migration path, never casually delete
 ## 1. Mechanics
 - Schema: DocType JSON under `kamra/tex_*/doctype/` (new modules registered in
   `kamra/modules.txt`) and field additions to existing Kamra DocTypes' JSON.
-  `bench migrate` syncs them.
-- Data: patches under `kamra/patches/tex/` listed in `kamra/patches.txt` (`[post_model_sync]`),
-  each idempotent (`if frappe.db.exists(...)` / `has_column` guards), each with a test in
-  `kamra/tex/tests/integration/test_migrations.py`.
+  `bench migrate` syncs them before the patches run (`[post_model_sync]`).
+- Data: patches under `kamra/patches/tex/`, listed in `kamra/patches.txt` in number order. Frappe
+  runs each once and writes its Patch Log row after it succeeds.
+- A patch must be safe to run again. A failed migration is retried from the start of the patch
+  that failed, and an operator can force a patch (`bench run-patch --force`). So:
+  - every step is idempotent;
+  - a step that converts data or grants a capability once, at the upgrade that brings it, checks
+    `kamra.tex.setup.ran_before(__name__)`. A forced re-run then never undoes what administrators
+    changed since (ADR-058).
+- A patch never changes a published contract payload or its hash, nor a sold stay's amounts,
+  currency, commercial record, snapshot, revisions or price lock.
+- A patch never guesses a tenant, a market or a currency. When it cannot tell, it reports the
+  record and leaves it for an administrator.
+- A report a patch writes for the owner (an audit event) is written once per record and values.
 - No destructive DDL. Legacy columns stay; TEX fields are additive (`tex_` prefix on existing
   DocTypes to avoid collisions with upstream).
+- Tests: every patch has a behaviour test and is covered by `test_patches` (see §4).
 
-## 2. Ordered patches
+## 2. Patches
 
-Implemented as: `p01_foundation` (T1–T3), `p02_access_grants` (T4), `p03_indexes` (T10),
-`p04_lock_legacy_prices` (T9), `p05_vouchers_to_promotions` (T6), `p06_experiences_to_extras`
-(T7), `p07_forget_payment_link_urls` (security clean-up), `p08_confirm_unpaid_capability` (adds
-`reservation.confirm_unpaid` to the seeded admin/revenue/finance profiles, ADR-025) and
-`p09_guest_stats_completed_stays` (recomputes guest stats: completed stays only, lifetime value
-with its currency in the new `Guest.tex_lifetime_currency`). T8 is the opt-in API
-`kamra.tex.api.contracts.legacy_draft` (`kamra/tex/commercial/legacy.py`). T5 is not needed:
-TEX boards are contract-level codes (RO/BB/HB/FB/AI/UAI), independent of legacy Meal Plans.
-Tests: `kamra/tex/tests/integration/test_migrations_notify.py`.
+T1–T10 are the original migration tasks. p38 (restriction scope, G-48) came from a parallel branch. T5 was not needed (TEX boards are contract-level codes
+RO/BB/HB/FB/AI/UAI, independent of legacy Meal Plans). T8 is the opt-in API
+`kamra.tex.api.contracts.legacy_draft` (`kamra/tex/commercial/legacy.py`): a Draft "Legacy BAR"
+contract per hotel from its Room Type prices and Seasons, never auto-published. Numbers p26, p30
+and p32 were never released.
 
+"Once" means a forced re-run skips that step (§1). "Tested" names the behaviour test. Every patch
+is also covered by `test_patches.TestEveryPatch`: a second run changes nothing, sold prices and
+payloads are untouched, and the chain runs on an empty site. `TestUpgradeFromKamra` runs the
+whole chain on a Kamra database.
 
-| # | Patch | What it does | Reversible? |
+| Patch | What it does | Runs again | Tested |
 |---|---|---|---|
-| T1 | `tex.p01_settings_and_roles` | Creates `TEX Settings` singleton defaults (strict tenancy on, legacy PMS nav hidden), roles `Call Center Agent`, default `TEX Permission Profile`s | Yes (records only) |
-| T2 | `tex.p02_masters` | Seeds `TEX Market` (GLOBAL, TR, DE, UK, RO, PL, RU, CIS, DACH, EU with ISO country lists) and `TEX Sales Channel` (DIRECT_WEB, CALL_CENTER, API, B2B, META, OTA) | Yes |
-| T3 | `tex.p03_enterprise_backfill` | Creates one default `TEX Enterprise` + `TEX Hotel Group` and links every existing Property (keeps names) | Yes |
-| T4 | `tex.p04_access_grants_from_user_permissions` | For each existing `User Permission (Property)` creates a Hotel-level `TEX Access Grant` with the profile matching the user's roles — preserves current access exactly | Yes |
-| T5 | `tex.p05_board_codes` | Adds RO/BB/HB/FB/AI/UAI to Meal Plan options (JSON) — existing EP/CP/MAP/AP rows untouched | n/a |
-| T6 | `tex.p06_vouchers_to_promotions` | Copies each `Discount Voucher` to `TEX Promotion` (trigger=Code, same code, validity, limits, usage count); stores `legacy_voucher` link; legacy voucher kept | Yes |
-| T7 | `tex.p07_experiences_to_extras` | Copies `Experience` → `TEX Extra` (pricing mode Unit, same price/tax, `legacy_experience` link) | Yes |
-| T8 | `tex.p08_legacy_contracts` *(opt-in, per property)* | Generates a Draft "Legacy BAR" contract per property from Room Type base prices + Seasons (period per season range) so hotels can review and publish; never auto-published | Yes |
-| T9 | `tex.p09_reservation_lock_backfill` | Marks existing Confirmed/Checked In/Checked Out reservations `tex_price_locked=1` with `tex_pricing_source='legacy'` so later edits never reprice them | Yes (flag) |
-| T10 | `tex.p10_inventory_days` | No data creation needed (lazy); adds DB indexes for `TEX Inventory Day (room_type, date)` and `Reservation (room_type, status, check_in_date, check_out_date)` | Yes |
+| `p01_foundation` (T1–T3) | Adds the `User Permission.tex_managed` custom field. Seeds the permission profiles, markets and sales channels, and the TEX Settings defaults. Puts every hotel without a group in one: the Default Enterprise and Default Hotel Group when there is no enterprise, else the only group of the only enterprise; never on a guess (several tenants: reported). Shows the legacy PMS when it is in use. | idempotent | `test_patches.TestP01Foundation` |
+| `p02_access_grants` (T4) | Makes property access explicit: a manual User Permission becomes a Hotel grant, and a user with a Kamra role and no restriction gets a grant per hotel ("Scope Only"). Then switches strict tenancy on. | once | `TestP02AccessGrants` |
+| `p03_indexes` (T10) | Creates the composite indexes of `setup.TEX_INDEXES` that are missing. | idempotent | `TestP03Indexes` |
+| `p04_lock_legacy_prices` (T9) | Price-locks what the legacy engine sold that still stands (Confirmed, Checked In, Checked Out, No Show; pricing source Legacy) at its amount. | once | `TestP04LegacyPriceLock` |
+| `p05_vouchers_to_promotions` (T6) | Copies each legacy Discount Voucher to a Draft TEX Promotion (code, validity, limits, usage count; `legacy_voucher`). The voucher is kept. | idempotent (once per voucher) | `test_migrations_notify.TestLegacyMigrations` |
+| `p06_experiences_to_extras` (T7) | Copies each legacy Experience to a TEX Extra (unit price, category; `legacy_experience`). The Experience is kept. | idempotent (once per experience) | `test_migrations_notify.TestLegacyMigrations` |
+| `p07_forget_payment_link_urls` | Clears payment-link URLs, which carried the bearer token (ADR-017). | idempotent | `TestSmallPatches` |
+| `p08_confirm_unpaid_capability` | Gives `reservation.confirm_unpaid` to the seeded profiles that hold it (ADR-025). | once | `TestCapabilityPatches` |
+| `p09_guest_stats_completed_stays` | Recomputes guest stats: completed stays (sold, not cancelled or no-show, checked out) and the lifetime value in the guest's main currency; a legacy stay's currency is its hotel's. | idempotent | `TestP09GuestStats` |
+| `p10_scrub_link_return_urls` | Drops the payment-link token from transactions' return URLs (G-10). | idempotent | `test_security_regressions.TestPaymentLinkTokens` |
+| `p11_allocation_idempotency` | Syncs TEX Payment Allocation (idempotency key, G-14). | schema only | `TestSmallPatches` |
+| `p12_effective_dated_extras_and_taxes` | Makes extras live first revisions and gives `tax.edit` to its profiles, both on the first run only. Gives each TEX hotel a tax policy with the taxes it sells with today (G-20). | extras and capability once; policies idempotent | `test_migrations_notify.TestEffectiveDatingMigration`, `TestCapabilityPatches` |
+| `p13_extra_inventory` | Limited extras: stays already sold hold their units, and the day counters are rebuilt from the ledger (G-19). | idempotent | `TestP13ExtraInventory` |
+| `p14_post_booking_extras` | Gives extras without an order cut-off one of 0 hours; adds the ADD_ON revision basis (G-22). | idempotent | `TestSmallPatches` |
+| `p15_booking_hosts` | Booking domains are host names; a domain with a path is un-verified (G-21). | idempotent | `test_custom_domains.TestBookingHostMigration` |
+| `p16_crm_segments` | Seeds the CRM presets; gives each segment its enterprise when the site has one (G-23). | idempotent | `test_crm_segments.TestSegmentMigration` |
+| `p17_loyalty_admin` | Gives `loyalty.edit` to its profiles and turns a max-redeem share of 0 into 100 (0 now means "cannot redeem"), both on the first run only. Makes blackouts apply to both; fingerprints earlier earnings (G-24). | partly once | `test_loyalty_admin.TestLoyaltyMigration`, `TestCapabilityPatches` |
+| `p18_channel_distribution` | Moves connection API keys to the encrypted store; gives outbox rows a kind; marks channel-manager reservation events Dead; gives the channel capabilities to their profiles on the first run only (G-69). | capabilities once | `TestP18ChannelDistribution`, `TestCapabilityPatches` |
+| `p19_payments_go_live_check` | Reports each payment account that may not take new money, with its open charges (audited once per report). Changes nothing (G-67). | report once | `test_security_regressions.TestGoLivePaymentsReview`, `TestReportingPatches` |
+| `p20_guest_change_requests` | Syncs TEX Guest Change Request and the Property setting for a cheaper change (G-45). | schema only | `TestSmallPatches` |
+| `p21_contract_header_lock` | Gives drafts of published contracts the header's selling terms (G-50). | idempotent | `test_critical_journey.TestContractHeaderLock` |
+| `p22_payment_api_key_password` | Moves payment-provider API keys to the encrypted store (G-83). | idempotent | `test_security_hygiene.TestSecurityHygieneG83` |
+| `p23_system_status_alerts` | Gives `system.monitor` to its profiles on the first run only; links queued guest mails to their e-mail queue row; syncs their status (ADR-047). | capability once | `TestP23MailStatus`, `TestCapabilityPatches` |
+| `p24_g83_review` | Makes public HTML/script files private; reports other public active content and invalid booking-site images (audited once); masks API keys in the change history (G-83). | report once | `test_security_hygiene.TestSecurityHygieneG83Review`, `TestReportingPatches` |
+| `p25_contract_header_snapshot` | Versions frozen before G-50 take the header's selling terms; reports each contract whose header differs from its live payload (G-50 review). | idempotent | `test_critical_journey.TestContractHeaderLockReview` |
+| `p27_inventory_cutoff_release` | Allotment cutoff 0 and negative release days 0; reports release days above 365 (G-49). | idempotent | `test_inventory.TestAllotments` |
+| `p28_guest_change_refund_rows` | Names the refunds each guest change made (G-45). | idempotent | `test_self_service_money.TestFourthReview` |
+| `p29_channel_binding` | Gives `price.any_channel` to the seeded admin and revenue profiles and to custom profiles that publish contracts (G-41). | once | `test_channel_binding.TestGrantsAndProfiles`, `TestCapabilityPatches` |
+| `p31_g41_review` | Reports booking sites on a non-web channel (audited once); removes the mirrored rows of ended grants (G-41 review, G-94). | idempotent | `test_channel_binding.TestBookingSitesSellOnTheWeb` |
+| `p33_audit_scope` | Gives group and enterprise grant events their group or enterprise and the hotels they reach (G-74). | idempotent | `TestSmallPatches` |
+| `p34_redemption_released_at` | Dates each released coupon use from its last write (G-51). | idempotent | `TestSmallPatches` |
+| `p35_money_field_types` | Checks the 9-place decimal columns and every published payload's hash; changes nothing (G-72). | checks only | `test_money_fields.TestPublishedAndSoldTermsAreUnchanged` |
+| `p36_g92_review` | Sets live the TEX hotels TEX already sold (a published contract or a TEX booking); any other TEX hotel is onboarding until an administrator sets it live (G-92 review, ADR-058). | idempotent | `TestUpgradeFromKamra`, `test_legacy_pricing_review.TestGoLive` |
+| `p37_crm_privacy` | Removes funnel e-mail hashes kept without marketing consent. Masks the pricing internals and guest totals in the change history. Lists the DocTypes whose role permissions were customised, to check who reads permlevel 1 (G-81, G-95, ADR-056). | idempotent | `test_crm_privacy.TestAbandonedPrivacy`, `test_crm_privacy.TestPricingInternalsOutsideTex` |
+| `p38_restriction_scope` | Restriction cells gain a channel scope (Booking Engine, Call Center or both) and a booking window; the DocType sync adds the columns blank. Checks that every stored cell keeps its scope key (a key appends the channel scope only when set) and re-keys a wrong one (G-48, ADR-057). | idempotent | `test_restrictions.TestGridCells.test_p38_keeps_every_key_and_rekeys_only_a_wrong_one` |
+| `p39_lookup_indexes` | Creates the composite indexes that replace the single-column ones on `Reservation.tex_booking`, `TEX Extra Allocation.reservation` and `TEX Communication.email_queue`, which Frappe's schema sync drops (ADR-058). | idempotent | `TestP03Indexes` |
 
 ## 3. Compatibility shims
 - `kamra.pricing.quote` remains for legacy callers (folio night posting, channel push, legacy
@@ -47,10 +84,27 @@ Tests: `kamra/tex/tests/integration/test_migrations_notify.py`.
   `TEX Booking Site` exists for the property, else the legacy page.
 
 ## 4. Verification
-1. Fresh install: `bench new-site` + `install-app kamra` → all patches no-op or seed.
-2. Upgrade path: site with upstream data (eval harness seed) → `bench migrate` → counts preserved;
-   `test_migrations.py` asserts voucher/extra copies and lock backfill.
-3. Upstream suites (eval harness, journey, banquet) stay green after migration.
+1. Fresh install: `bench new-site` + `install-app kamra`. `after_install` seeds, and Frappe marks
+   every patch as run.
+2. Upgrade path: `test_patches.TestUpgradeFromKamra` builds a Kamra database in the test's
+   transaction and runs the whole chain in order. It has legacy hotels in two currencies, users
+   with and without a property restriction and a disabled one, legacy stays in six statuses, a
+   voucher and an experience, and no TEX structures. It checks what the upgrade leaves:
+   - one enterprise and hotel group;
+   - seeded masters and profiles;
+   - explicit access under strict tenancy;
+   - the legacy stays locked at their amounts;
+   - the copies;
+   - guest stats in their hotel's currency;
+   - the hotels onboarding;
+   - a second run that changes nothing.
+3. Every patch: `test_patches` (ADR-058):
+   - (a) its behaviour test (the `BEHAVIOUR` registry, checked);
+   - (b) a second run, at once or forced later, changes nothing;
+   - (c) no published payload, hash or sold price changes;
+   - (d) the chain runs on an empty site.
+   Tests never run a patch's DDL: `sandbox()` stubs it and refuses any commit on the shared site.
+4. Upstream suites (eval harness, journey, banquet) stay green after migration.
 
 ## 5. Booking imports (switch-over from another PMS)
 

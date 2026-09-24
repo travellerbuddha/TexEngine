@@ -78,23 +78,33 @@ def ensure_masters() -> None:
 		settings.save(ignore_permissions=True)
 
 
-def ensure_enterprise() -> None:
-	"""Every property belongs to a hotel group and an enterprise (backfill)."""
-	props = frappe.get_all("Property", fields=["name", "tex_hotel_group", "tex_enterprise"])
+def ensure_enterprise() -> list[str]:
+	"""Every property belongs to a hotel group and an enterprise (backfill), where that is not a
+	guess: a site without an enterprise (a Kamra upgrade) gets "Default Enterprise" with "Default
+	Hotel Group"; a site with one enterprise and at most one hotel group puts a hotel without a
+	group there. On a site of several tenants (or one with several groups) a hotel without a group
+	is never given to one of them: it is printed, stays outside TEX and is seen by platform
+	administrators only, until an administrator adds it to its hotel group (G-76). → the hotels
+	left without a group."""
+	props = frappe.get_all("Property", fields=["name", "tex_hotel_group", "tex_enterprise"], order_by="name asc")
 	orphans = [p for p in props if not p.tex_hotel_group]
 	if not orphans:
-		return
-	ent = frappe.db.get_value("TEX Enterprise", {}, "name")
-	if not ent:
-		ent = frappe.get_doc({"doctype": "TEX Enterprise", "enterprise_name": "Default Enterprise"}).insert(
-			ignore_permissions=True).name
-	grp = frappe.db.get_value("TEX Hotel Group", {"enterprise": ent}, "name")
-	if not grp:
-		grp = frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "Default Hotel Group",
-		                      "enterprise": ent}).insert(ignore_permissions=True).name
+		return []
+	ents = frappe.get_all("TEX Enterprise", pluck="name")
+	groups = frappe.get_all("TEX Hotel Group", filters={"enterprise": ents[0]}, pluck="name") if len(ents) == 1 else []
+	if len(ents) > 1 or len(groups) > 1:
+		names = [p.name for p in orphans]
+		print(f"TEX: {len(names)} hotel(s) without a hotel group on a site of several tenants or groups, left out "
+		      f"of TEX until an administrator adds each to its group: {', '.join(names)}")
+		return names
+	ent = ents[0] if ents else frappe.get_doc({"doctype": "TEX Enterprise", "enterprise_name": "Default Enterprise"}
+	                                          ).insert(ignore_permissions=True).name
+	grp = groups[0] if groups else frappe.get_doc({"doctype": "TEX Hotel Group", "group_name": "Default Hotel Group",
+	                                               "enterprise": ent}).insert(ignore_permissions=True).name
 	for p in orphans:
 		frappe.db.set_value("Property", p.name, {"tex_hotel_group": grp, "tex_enterprise": ent},
 		                    update_modified=False)
+	return []
 
 
 KAMRA_ROLES = ("Hotel Admin", "Front Desk", "Revenue Manager", "Finance", "Housekeeping", "Kamra Agent",
@@ -148,31 +158,54 @@ def default_legacy_pms_visibility() -> None:
 	frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1 if in_use else 0)
 
 
+def ran_before(patch: str) -> bool:
+	"""Whether the migration ran ``patch`` already (its Patch Log row, written by Frappe after the
+	patch succeeded). A step that converts data or grants a capability once, at the upgrade that
+	brings it, is skipped when an operator forces the patch again: a re-run never undoes what
+	administrators changed since (G-76, ADR-058)."""
+	return bool(frappe.db.exists("Patch Log", {"patch": patch}))
+
+
+# composite indexes for availability, restrictions, FX, extras, CRM, channels and audit lookups:
+# (doctype, columns, index name). Each has at least two columns: Frappe drops a single-column index
+# on a field without ``search_index`` whenever it syncs that DocType again (and ``add_index`` keeps
+# no property setter during a migration), so single-column ones did not survive (G-76, p39).
+TEX_INDEXES = (
+	("Reservation", ["room_type", "status", "check_in_date"], "tex_rt_status_ci"),
+	("Reservation", ["tex_booking", "tex_room_index"], "tex_booking_room"),
+	("TEX ARI Restriction", ["property", "restriction_date"], "tex_ari_prop_date"),
+	("TEX Inventory Day", ["room_type", "inventory_date"], "tex_inv_rt_date"),
+	("TEX FX Rate", ["provider", "base_currency", "quote_currency", "rate_date"], "tex_fx_lookup"),
+	("TEX Promotion", ["property", "tex_status"], "tex_promo_prop_status"),
+	("TEX Markup Rule", ["property", "tex_status"], "tex_markup_prop_status"),
+	("TEX Extra", ["property", "tex_status"], "tex_extra_prop_status"),
+	("TEX Tax Policy", ["property", "tex_status"], "tex_taxpol_prop_status"),
+	("TEX Extra Allocation", ["reservation", "status"], "tex_xalloc_res_status"),
+	("TEX Extra Allocation", ["property", "extra_code", "service_date"], "tex_xalloc_day"),
+	("TEX Extra Inventory Day", ["property", "extra_code", "service_date"], "tex_xday_lookup"),
+	("Reservation", ["guest", "property"], "tex_res_guest_prop"),              # CRM facts (G-23)
+	("TEX Abandoned Booking", ["guest", "property"], "tex_abandoned_guest"),
+	("TEX Channel ARI Day", ["mapping", "ari_date"], "tex_ari_day_lookup"),            # G-69
+	("TEX Channel Inbound", ["connection", "provider_ref"], "tex_inbound_ref"),
+	("TEX Channel Inbound", ["status", "next_attempt_at"], "tex_inbound_due"),
+	("TEX Integration Outbox", ["kind", "status", "next_attempt_at"], "tex_outbox_due"),
+	("TEX Booking", ["channel_connection", "external_ref"], "tex_booking_channel_ref"),
+	("TEX Audit Event", ["action", "event_time"], "tex_audit_action_time"),            # ADR-047
+	("TEX Communication", ["status", "creation"], "tex_comm_status_created"),
+	("TEX Communication", ["email_queue", "status"], "tex_comm_queue_status"),
+)
+
+
+def missing_indexes() -> list[tuple]:
+	"""The ``TEX_INDEXES`` this site does not have yet (a read: no DDL)."""
+	return [(dt, fields, name) for dt, fields, name in TEX_INDEXES
+	        if not frappe.db.has_index(f"tab{dt}", name)]
+
+
 def ensure_indexes() -> None:
-	for dt, fields, name in (
-		("Reservation", ["room_type", "status", "check_in_date"], "tex_rt_status_ci"),
-		("Reservation", ["tex_booking"], "tex_booking_idx"),
-		("TEX ARI Restriction", ["property", "restriction_date"], "tex_ari_prop_date"),
-		("TEX Inventory Day", ["room_type", "inventory_date"], "tex_inv_rt_date"),
-		("TEX FX Rate", ["provider", "base_currency", "quote_currency", "rate_date"], "tex_fx_lookup"),
-		("TEX Promotion", ["property", "tex_status"], "tex_promo_prop_status"),
-		("TEX Markup Rule", ["property", "tex_status"], "tex_markup_prop_status"),
-		("TEX Extra", ["property", "tex_status"], "tex_extra_prop_status"),
-		("TEX Tax Policy", ["property", "tex_status"], "tex_taxpol_prop_status"),
-		("TEX Extra Allocation", ["reservation"], "tex_xalloc_res"),
-		("TEX Extra Allocation", ["property", "extra_code", "service_date"], "tex_xalloc_day"),
-		("TEX Extra Inventory Day", ["property", "extra_code", "service_date"], "tex_xday_lookup"),
-		("Reservation", ["guest", "property"], "tex_res_guest_prop"),              # CRM facts (G-23)
-		("TEX Abandoned Booking", ["guest", "property"], "tex_abandoned_guest"),
-		("TEX Channel ARI Day", ["mapping", "ari_date"], "tex_ari_day_lookup"),            # G-69
-		("TEX Channel Inbound", ["connection", "provider_ref"], "tex_inbound_ref"),
-		("TEX Channel Inbound", ["status", "next_attempt_at"], "tex_inbound_due"),
-		("TEX Integration Outbox", ["kind", "status", "next_attempt_at"], "tex_outbox_due"),
-		("TEX Booking", ["channel_connection", "external_ref"], "tex_booking_channel_ref"),
-		("TEX Audit Event", ["action", "event_time"], "tex_audit_action_time"),            # ADR-047
-		("TEX Communication", ["status", "creation"], "tex_comm_status_created"),
-		("TEX Communication", ["email_queue"], "tex_comm_email_queue"),
-	):
+	"""Create the missing ``TEX_INDEXES``. Index creation is DDL, which commits: only what is missing
+	is created, so a site that has them all runs none (and a test never commits)."""
+	for dt, fields, name in missing_indexes():
 		try:
 			frappe.db.add_index(dt, fields, name)
 		except Exception:

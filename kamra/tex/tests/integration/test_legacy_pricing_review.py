@@ -418,12 +418,15 @@ class TestGoLive(ReviewCase):
 	def test_the_upgrade_keeps_todays_tex_hotels_live(self):
 		from kamra.patches.tex import p36_g92_review as p36
 
+		fx.create_contract(self.f, code="G92P36")                # TEX sells the test hotel
 		frappe.db.set_value("Property", fx.PROPERTY, "tex_live_from", None)
 		frappe.db.set_value("Property", ONBOARDING, "tex_live_from", None)
 		p36.execute()
 		p36.execute()                                        # runs again safely
 		self.assertTrue(frappe.db.get_value("Property", fx.PROPERTY, "tex_live_from"))
-		self.assertTrue(frappe.db.get_value("Property", ONBOARDING, "tex_live_from"))
+		# in TEX, but TEX never sold it (no published contract, no TEX booking): onboarding, its Desk
+		# sells it until an administrator sets it live (G-76, ADR-058)
+		self.assertFalse(frappe.db.get_value("Property", ONBOARDING, "tex_live_from"))
 		self.assertFalse(frappe.db.get_value("Property", self.legacy_hotel()["hotel"], "tex_live_from"))
 
 	def test_an_in_house_legacy_stay_books_its_extra_nights_in_tex(self):

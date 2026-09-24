@@ -411,18 +411,24 @@ def log_communication(guest: str, *, channel: str, direction: str, subject: str 
 
 
 def refresh_guest_stats(guest: str) -> None:
-	"""Completed stays, their value and the last stay, from reservations that were not
-	cancelled or no-shows and whose check-out has passed (upcoming bookings are not
-	stays yet). Money is never summed across currencies: lifetime value is the total in
-	the guest's most used currency (ties → alphabetical), stored with that currency."""
+	"""Completed stays, their value and the last stay, from reservations that were sold (not an
+	inquiry, quote or waitlist entry), not cancelled or no-shows, and whose check-out has passed
+	(upcoming bookings are not stays yet): the stays the CRM facts count (``segments``). Money is
+	never summed across currencies: lifetime value is the total in the guest's most used currency
+	(ties → alphabetical), stored with that currency. A stay the legacy engine priced (no TEX
+	currency) is in its hotel's currency, as Kamra kept it (G-76)."""
 	today = getdate(nowdate())
 	rows = [r for r in frappe.get_all("Reservation",
-	                                  filters={"guest": guest, "status": ("not in", ["Cancelled", "No Show"])},
-	                                  fields=["check_out_date", "tex_total_amount", "amount_after_tax", "tex_currency"])
+	                                  filters={"guest": guest, "status": ("not in", sorted(seg.NOT_STAYED | seg.NOT_SOLD))},
+	                                  fields=["property", "check_out_date", "tex_total_amount", "amount_after_tax",
+	                                          "tex_currency"])
 	        if r.check_out_date and getdate(r.check_out_date) <= today]
+	hotel_ccy: dict[str, str | None] = {}
 	by_ccy: dict[str, list] = {}
 	for r in rows:
-		by_ccy.setdefault(r.tex_currency or "EUR", []).append(r)
+		if not r.tex_currency and r.property not in hotel_ccy:
+			hotel_ccy[r.property] = frappe.db.get_value("Property", r.property, "currency")
+		by_ccy.setdefault(r.tex_currency or hotel_ccy.get(r.property) or "EUR", []).append(r)
 	main = min(by_ccy, key=lambda c: (-len(by_ccy[c]), c)) if by_ccy else None
 	value = sum((from_db(r.tex_total_amount or r.amount_after_tax or 0, main) for r in by_ccy.get(main, [])), ZERO)
 	frappe.db.set_value("Guest", guest, {"tex_stays": len(rows), "tex_lifetime_value": value,

@@ -10,13 +10,15 @@
 * Tax policies are a legal/finance setting: the new ``tax.edit`` capability goes to the
   seeded profiles that carry it (Hotel/Group/Enterprise Admin, Finance).
 
-Idempotent: the extras step runs on the first execution only (a draft made since is
-never put live by a re-run); hotels that already have a live tax policy are left alone.
+Idempotent: the extras step and the capability run on the first execution only (a draft made
+since is never put live by a re-run, a capability removed since is not given back, G-76);
+hotels that already have a live tax policy are left alone.
 """
 
 import frappe
 
 from kamra.tex.security.capabilities import DEFAULT_PROFILES
+from kamra.tex.setup import ran_before
 
 CAP = "tax.edit"
 
@@ -38,7 +40,7 @@ def execute():
 def _extras():
 	# a disabled extra stays a live revision with disabled=1: it is off sale, and a later
 	# revision can switch it back on in the same chain (translations and links follow)
-	if frappe.db.exists("Patch Log", {"patch": __name__}):
+	if ran_before(__name__):
 		return       # a forced re-run: the drafts made since the first run are never put live
 	frappe.db.sql("""UPDATE `tabTEX Extra` SET tex_status='Active', active_from=creation, active_to=NULL,
 	                 revision_no=1 WHERE IFNULL(tex_status, '') IN ('', 'Draft')
@@ -46,6 +48,8 @@ def _extras():
 
 
 def _capability():
+	if ran_before(__name__):
+		return       # a forced re-run: a capability removed since is not given back
 	for name, caps in DEFAULT_PROFILES.items():
 		if CAP not in caps or not frappe.db.exists("TEX Permission Profile", name):
 			continue
