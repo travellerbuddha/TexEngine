@@ -70,6 +70,8 @@ export interface MatrixRoom {
   defaultBase: string | null
   defaultRule: Row | null
   rows: MatrixRow[]
+  /** cellState of every column: "" (All periods) and each period code. */
+  cells: Record<string, RoomCell>
 }
 
 export interface MatrixPeriod {
@@ -134,10 +136,8 @@ export function roomRole(tables: Pick<Tables, "rooms" | "period_rates">, room: s
   return tables.period_rates.some((r) => roomOf(r) === room && isRelativeOp(r.op)) ? "derived" : "manual"
 }
 
-/** The state of a matrix cell (§3.3.3). The cell's state never changes how an entry is stored. */
-export function cellState(tables: Pick<Tables, "rooms" | "period_rates">, room: string, period: string): RoomCell {
-  const defaultRule = defaultRuleOf(tables, room)
-  const own = ownRule(cellRows(tables, room, period))
+/** The state of a cell from its own rows, the room's All-periods rule and the room's role. */
+function stateOf(own: Row | null, defaultRule: Row | null, period: string, derived: boolean): RoomCell {
   if (period === ALL_PERIODS) {
     if (!own) return { state: "empty", rule: null, defaultRule }
     if (str(own.op) === "INHERIT") return { state: "inherit-rule", rule: own, defaultRule }
@@ -145,23 +145,45 @@ export function cellState(tables: Pick<Tables, "rooms" | "period_rates">, room: 
   }
   if (own) {
     if (str(own.op) === "INHERIT") return { state: "inherit-rule", rule: own, defaultRule }
-    if (isEntered(own.op)) return { state: roomRole(tables, room) === "derived" ? "fixed-override" : "manual", rule: own, defaultRule }
+    if (isEntered(own.op)) return { state: derived ? "fixed-override" : "manual", rule: own, defaultRule }
     return { state: "period-override", rule: own, defaultRule }
   }
   return { state: defaultRule ? "inherited" : "empty", rule: null, defaultRule }
 }
 
-/** The matrix projection: one entry per contract room (in `rooms` order) with its role and rows,
- * and the period columns (in `periods` order; the All-periods column is implicit). */
+/** The state of one matrix cell (§3.3.3). The cell's state never changes how an entry is stored.
+ * For a whole grid use matrixModel's `cells`, which reads the tables once. */
+export function cellState(tables: Pick<Tables, "rooms" | "period_rates">, room: string, period: string): RoomCell {
+  return stateOf(ownRule(cellRows(tables, room, period)), defaultRuleOf(tables, room), period, roomRole(tables, room) === "derived")
+}
+
+/** The matrix projection: one entry per contract room (in `rooms` order) with its role, rows and
+ * the state of every cell, and the period columns (in `periods` order; the All-periods column is
+ * implicit). It reads period_rates once (grouped by cell), so it stays cheap on large contracts. */
 export function matrixModel(tables: Pick<Tables, "rooms" | "periods" | "period_rates">, basis: Basis): MatrixModel {
+  const baseRoom = baseRoomOf(tables)
+  const byCell = new Map<string, Row[]>()
+  const derivedRooms = new Set<string>()
+  for (const r of tables.period_rates) {
+    const k = `${roomOf(r)}\u0000${periodOf(r)}`
+    const list = byCell.get(k)
+    if (list) list.push(r)
+    else byCell.set(k, [r])
+    if (isRelativeOp(r.op)) derivedRooms.add(roomOf(r))
+  }
+  const codes = [ALL_PERIODS, ...tables.periods.map(periodOf).filter(Boolean)]
   const seen = new Set<string>()
   const rooms: MatrixRoom[] = []
   for (const r of tables.rooms) {
     const room = roomOf(r)
     if (!room || seen.has(room)) continue
     seen.add(room)
-    const role = roomRole(tables, room)
-    const defaultRule = defaultRuleOf(tables, room)
+    const role: RoomRole = room === baseRoom ? "base" : derivedRooms.has(room) ? "derived" : "manual"
+    const generic = byCell.get(`${room}\u0000`) ?? []
+    const defaultRule = generic.find((x) => str(x.op) !== "INHERIT") ?? null
+    const cells: Record<string, RoomCell> = {}
+    for (const code of codes) cells[code] = stateOf(ownRule(byCell.get(`${room}\u0000${code}`) ?? []), defaultRule, code, role === "derived")
+    const ownBase = str(defaultRule?.base_room_type)
     const resolved: MatrixRow = { kind: "resolved", editable: false, label: basis === "ROOM" ? "resolved_room" : "resolved_person" }
     const rows: MatrixRow[] =
       role === "base"
@@ -169,7 +191,7 @@ export function matrixModel(tables: Pick<Tables, "rooms" | "periods" | "period_r
         : role === "derived"
           ? [{ kind: "formula", editable: true, label: "formula" }, resolved]
           : [{ kind: "manual", editable: true, label: "manual" }, ...(defaultRule && isEntered(defaultRule.op) ? [resolved] : [])]
-    rooms.push({ room_type: room, key: r._key, role, defaultBase: defaultBase(tables, room), defaultRule, rows })
+    rooms.push({ room_type: room, key: r._key, role, defaultBase: ownBase || baseRoom, defaultRule, rows, cells })
   }
   const periods = tables.periods
     .filter((p) => periodOf(p))
@@ -182,7 +204,7 @@ export function matrixModel(tables: Pick<Tables, "rooms" | "periods" | "period_r
       adjusted: Boolean(str(p.adjustment_op)),
       key: p._key,
     }))
-  return { basis, baseRoom: baseRoomOf(tables), rooms, periods }
+  return { basis, baseRoom, rooms, periods }
 }
 
 // ─── entries (§3.3.2, D11) ──────────────────────────────────────────────

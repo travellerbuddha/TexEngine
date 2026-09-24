@@ -629,3 +629,43 @@ test("workspace modules and lib/keys.ts import at runtime only each other and sh
     }
   }
 })
+
+test("server decimal strings (9 places) compare canonically with typed entries", () => {
+  const t = tablesOf({
+    rooms: [r({ room_type: "STD", is_base: 1 }), r({ room_type: "SUP", is_base: 0 })],
+    periods: [r({ period_code: "P1" })],
+    period_rates: [rate("STD", "", "ABSOLUTE", "70.000000000"), rate("SUP", "", "MULTIPLY", "1.150000000", "STD"), rate("SUP", "P1", "MULTIPLY", "1.200000000", "STD")],
+    boards: [r({ board: "HB", is_base: 0, op: "ADD", adult_amount: "-20.000000000", child_percent: "50.000000000", infant_free: 1, room_type: "", period_code: "", label: "" })],
+  })
+  // typing the stored value again changes nothing (no history entry)
+  const same = applyRoomEntry(t, "SUP", "", sh("x1.15"))
+  assert.ok("tables" in same)
+  assert.equal(same.tables, t)
+  // a period entry equal to the server's default string is dropped
+  const drop = tablesAfter(applyRoomEntry(t, "SUP", "P1", sh("x1.15")))
+  assert.deepEqual(ratesOf(drop, "SUP"), ["*:MULTIPLY:1.150000000:STD"])
+  assert.deepEqual(applyRoomEntry(t, "STD", "P1", sh("+10%")), {
+    needsServer: { room: "STD", targetPeriod: "P1", op: "ADJUST_PERCENT", value: "10", current: "70.000000000" },
+  })
+  const board = applyBoardEntry(t, { board: "HB", room_type: "" }, "", sh("-20", "board"))
+  assert.ok("tables" in board)
+  assert.equal(board.tables, t)
+})
+
+test("matrixModel's cells equal cellState for every cell (one pass over the rates)", () => {
+  const variants: Tables[] = [
+    owner(),
+    tablesAfter(applyRoomEntry(owner(), "SUP", "P2", sh("=245"))),
+    tablesAfter(applyRoomEntry(owner(), "SUP", "", sh(""))),
+    upsertRoomRule(owner(), "DLX", "P1", { op: "INHERIT", value: "", base_room_type: "" }),
+    setBaseRoom(owner(), "DLX", { repoint: true }).tables,
+    { ...owner(), rooms: owner().rooms.map((x) => ({ ...x, is_base: 0 })) },
+  ]
+  for (const t of variants) {
+    const m = matrixModel(t, "PERSON")
+    for (const room of m.rooms) {
+      assert.deepEqual(room.defaultBase, defaultBase(t, room.room_type))
+      for (const code of ["", ...m.periods.map((p) => p.code)]) assert.deepEqual(room.cells[code], cellState(t, room.room_type, code), `${room.room_type} ${code}`)
+    }
+  }
+})
