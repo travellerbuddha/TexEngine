@@ -4177,8 +4177,14 @@ preview or publish rights, the basis lock or the currency's minor units (GAP-10)
   cost → Cost offers → Markup → FX → Promotion → Tax) and is a before → after chain in which every
   value is a server field.
 
-**Owner sign-off (O1–O5; implemented as proposed, on the owner's review checklist).** Each is a
-small, isolated change in `shorthand.ts` / `model.ts` if the owner decides otherwise.
+**Owner sign-off (O1–O5): provisional, pending the owner's sign-off** (owner input 13 in
+`GO_LIVE_READINESS.md`; corrected in S3, which said "implemented as proposed" before any of them
+was). The workspace is built with the proposed behaviour below; each is a small, isolated change in
+`shorthand.ts` / `model.ts` if the owner decides otherwise. Where each lands: the parse of O1–O3
+and O5 is S1's `shorthand.ts` (branch `pricing-workspace`, not merged with `pw-backend`); the board
+cells that apply O1–O3 are S13; O4's apply-once needs S5 (`apply_op_values`) and S9. None of them
+is on branch `pw-backend` after S3 (S2–S3 are backend read models and guards). Each is marked
+implemented when its slice lands, and its implemented behaviour is reported before the final run.
 - *O1* Board cell, bare `100` → ABSOLUTE 100, i.e. 100 per room per night (`boards.py`); the
   reading line says so before commit. Alternative: a bare number is ADD (per adult).
 - *O2* Board cell, `-20` → ADD −20 (SUBTRACT is not a board op).
@@ -4201,7 +4207,14 @@ small, isolated change in `shorthand.ts` / `model.ts` if the owner decides other
   - it is then checked as a save checks it, with the same messages: blank values (below), the
     DocType defaults (`_set_defaults`), the decimal check (`decimals.check_inputs`, the 9-place
     refusal), and Frappe's own side-effect-free checks (`_validate_mandatory`, and per document
-    `_validate_data_fields`, `_validate_selects`, `_validate_non_negative`, `_validate_length`);
+    `_validate_data_fields`, `_validate_selects`, `_validate_non_negative`, `_validate_length`).
+    Two checks of the save are not run (S2 review, recorded in S3): Frappe's link validation
+    (`_validate_links`: a row naming a rate plan, board or room type that does not exist) and the
+    version controller's window order ("Sale window ends before it starts."). The overlay prices,
+    validates and quotes such a draft as `build_terms` reads it (a missing rate plan validated
+    without an issue in the review's probe; a reversed sale window is reported as SALE_WINDOW),
+    and `save_version` refuses it. No figure differs from what the engine computes for those
+    values; the UI must not read "no issues" as "saves";
   - values are then normalised as a save stores and a load reads them (checks 0/1, integers,
     decimals as exact Decimals with blank = 0, blank dates none), so the overlay prices exactly what
     a save followed by a load would (tested by saving the same payload and comparing);
@@ -4344,3 +4357,33 @@ while the 17 S2 tests pass; the old-keys test's draft and `adults` sub-tests pas
 pins the baseline. Verification on branch `pw-backend` (main `1575c8b` already merged), migrated
 with it: all 38 integration modules 814 OK (10 skipped, as before), 442 unit tests, ruff; eval
 harness 76/76, front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`.
+
+**Performance of the server side (measured in S3; the pre-Final measurement asked for).**
+`kamra/tex/tests/integration/bench_pricing_workspace.py` is opt-in: it is not a `test_*` module, so
+the regression run leaves it out (`bench --site test.localhost run-tests --module
+kamra.tex.tests.integration.bench_pricing_workspace`). It saves a large ORS-shaped draft inside the
+test transaction (the base room priced per period; every other room derived by a formula, with its
+own price in every fourth period; occupancy rules and board supplements per room and period) and
+times each call the workspace makes, best of three, on the shared development bench, in seconds:
+
+| Call | Realistic: 12 rooms × 26 periods, 1,406 rows, 346 KB | Near the row cap: 12 × 40, 4,539 rows, 1.13 MB |
+|---|---|---|
+| `save_version` (once) | 0.86 | 2.93 |
+| the overlay alone (`_overlay`) | 0.17 | 0.52 |
+| `price_matrix`, saved draft: the pre-S3 keys / with the S3 keys | 0.06 / 0.08 | 0.15 / 0.16 |
+| `price_matrix`, unsaved data | 0.25 | 0.70 |
+| `price_matrix` + 12 sample parties, saved / unsaved | 0.15 / 0.33 | 0.42 / 0.93 |
+| `preview_price` (7 nights), saved / unsaved | 0.07 / 0.24 | 0.16 / 0.69 |
+| `validate_version`, saved / unsaved | 2.25 / 2.30 | 10.0 / 9.9 |
+
+The benchmark also asserts that the unsaved data answers what the same data saved answers (cells,
+sources with each row name mapped to its `~key`, party totals and errors, issue codes, quote
+totals), and loose ceilings (6–12 times these figures) that catch a change of order, not a slower
+machine. Reading: the overlay adds 0.2–0.5 s (parsing, cleaning and checking the payload); the S3
+sources add about 0.02 s to a matrix, twelve sample parties 0.1–0.3 s. `validate_version` is the
+cost, with or without data: its publish sweep prices every combination of every room and period,
+2.3 s on the realistic contract and 10 s near the row cap. So the "no rate limit" decision holds
+for the matrix and the preview (live, 300 ms debounce), and the UI slices (S8, S9, S15) must keep
+validation bounded: at most one `validate_version` in flight per editor, a stale answer dropped,
+and a debounce that grows with the draft (1.2 s suits the realistic size, not the cap). A
+server-side concurrency guard for validation is not built (open).

@@ -494,8 +494,12 @@ with `parties` and `party_room`, each sample party's occupancy total per period 
 capacity check). New `test_matrix` (17, pure); `test_pricing_workspace_api` 31 (+14; on the S2 tip
 all 14 fail). On the branch, migrated with it: all 38 integration modules **814 OK**, 10 skipped (as
 before); 442 unit tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b` and the build
-pass. No screen changes. The workspace UI (S6–S16) and backend slices S4–S5 are not built yet (R-04
-stays PARTIAL).
+pass. No screen changes. Performance measured with the opt-in `bench_pricing_workspace` (ADR-061):
+on 12 rooms × 26 periods (1,406 rows) the unsaved-data matrix takes 0.25 s (0.33 s with 12 sample
+parties), the preview 0.24 s, validation 2.3 s; near the 5,000-row cap 0.70 s, 0.69 s and 10 s
+(validation costs the same without data; the UI slices must keep one validation in flight). O1–O5
+are provisional owner decisions (GO_LIVE_READINESS owner input 13), none implemented on this
+branch. The workspace UI (S6–S16) and backend slices S4–S5 are not built yet (R-04 stays PARTIAL).
 
 ## 2. Summary
 
