@@ -21,9 +21,9 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 |---|---|---|
 | TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **419 passed** (2026-09-24, branch `fix-crmp2` with main `b72b2a8`) |
 | TEX integration tests (35 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **723 OK**, 3 skipped (2026-09-24, branch `fix-crmp2` with main `b72b2a8`, migrated with the branch and p45; the 3 skipped whole-site patch tests pass on a disposable site; per module in the ADR-056 second review follow-up paragraph) |
-| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **50 of 50 pass** in the mode each spec is written for (2026-09-24, branch `fix-editor` with main `b72b2a8`, its own bench server and Vite dev server, RQ worker with the branch's code, site migrated with the branch): the whole suite against Vite 45 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `contract-admin` passed 3 times in a row. New: `editor-edits` ×3 (ADR-060 editor-saves follow-up). Branch `fix-crmp2` (its own bench server and Vite dev server): `crm-profile`, the new `crm-merge`, `crm-admin` and `booking` (desktop and mobile) passed twice each with main `b72b2a8` |
+| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **50 of 50 pass** in the mode each spec is written for (2026-09-24, branch `fix-editor` with main `b72b2a8`, its own bench server and Vite dev server, RQ worker with the branch's code, site migrated with the branch): the whole suite against Vite 45 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `contract-admin` passed 3 times in a row. New: `editor-edits` ×3 (ADR-060 editor-saves follow-up). Branch `fix-crmp2` (its own bench server and Vite dev server): `crm-profile`, the new `crm-merge`, `crm-admin` and `booking` (desktop and mobile) passed twice each with main `b72b2a8`; with main `e78ba7b` (frontend and docs only since) `crm-profile`, `crm-merge`, `crm-admin` and `editor-edits` passed twice each |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-24, branch `fix-crmp2` with main `b72b2a8`, its code and schema) |
-| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-24, branch `fix-crmp2` with main `b72b2a8`; bundles not committed on the branch) |
+| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-24, branch `fix-crmp2` with main `e78ba7b`; bundles not committed on the branch) |
 | Lint / static security | `ruff check kamra/tex kamra/patches/tex`; semgrep (Frappe rules, ERROR) | clean / 0 findings (semgrep 1.177, frappe/semgrep-rules + r/python.lang.correctness, ERROR; G-45's changed files re-scanned: 0) |
 
 **Coverage gaps.** Green tests do not prove absence of the defects below. The audit reproduced
@@ -325,6 +325,9 @@ fixed, with tests that fail first.
     and mobile, 5 each) passed twice each.
   - 419 unit tests; ruff clean; `tsc`, `npm run build` and `npm run i18n:tex` clean (bundles not
     committed on the branch).
+  - Main `e78ba7b` merged after these runs (editor save fixes: frontend, e2e and docs, no Python): `tsc`,
+    build and i18n clean again; migrate, then `crm-profile`, `crm-merge`, `crm-admin` and `editor-edits`
+    passed twice each against the branch's servers.
 
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
