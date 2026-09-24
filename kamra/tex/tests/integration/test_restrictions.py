@@ -10,6 +10,8 @@ Center or both; the channels' ARI hears the booking window and the advance rules
 
 import hashlib
 import json
+from contextlib import contextmanager
+from unittest import mock
 
 import frappe
 from frappe.utils import add_days, getdate, now_datetime
@@ -257,6 +259,65 @@ class TestGuestSelfService(RestrictionCase):
 		self.assertIn("MIN_LOS", codes(up["warnings"]))
 
 
+class TestStoredProposals(RestrictionCase):
+	"""A guest's change applied later — approved by staff, or paid — is judged by the restrictions
+	as of when it was priced (G-48 review: the ``_proposal``, ``_from_payment`` and ``_sale_at``
+	paths)."""
+
+	def _money(self):
+		from kamra.tex.tests.integration import test_self_service_money as ssm
+
+		return ssm
+
+	def test_staff_approving_a_guest_request_is_refused_by_a_restriction_set_since(self):
+		ssm = self._money()
+		b = guest_books(session="g48-approve")
+		ssm.paid(b["payment"])
+		ssm.paid(public.pay_booking(token=b["manage_token"]))
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest leaves a day early: the hotel decides
+		down = public.manage_propose(token=b["manage_token"], reservation=res, changes={"check_out": str(fx.d(6, 12))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=down["proposal_token"])
+		self.assertEqual(out["status"], "requested")
+		self.cell(fx.d(6, 12), room_type=self.std, ctd="Yes")                   # then the hotel closes departures
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel approves the request
+		with self.assertRaisesRegex(frappe.ValidationError, "closed to departure"):
+			crs_api.resolve_guest_change(request=out["request"], action="approve", reason="ok", settlement="Refund")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_out_date"), self.co)
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", out["request"], "status"), "Requested")
+
+	def test_a_paid_change_the_restrictions_refuse_since_is_refunded(self):
+		ssm = self._money()
+		b = guest_books(session="g48-paid")
+		ssm.paid(b["payment"])
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest adds a night and pays for it
+		up = public.manage_propose(token=b["manage_token"], reservation=res, changes={"check_out": str(fx.d(6, 14))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=up["proposal_token"])
+		self.assertEqual(out["status"], "payment_required")
+		self.cell(self.co, room_type=self.std, stop_sell="STOP")                # the new night closes meanwhile
+		ssm.paid(out["payment"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read the outcome
+		req = frappe.get_doc("TEX Guest Change Request", out["request"])
+		self.assertEqual(req.status, "Failed")
+		self.assertIn("stop sale", (req.error or "").lower())
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_out_date"), self.co)
+		self.assertEqual([r[1] for r in ssm.refunds(b["booking"])], [ssm.D(out["amount"])])
+
+	def test_a_stored_proposal_is_judged_on_the_day_it_was_priced(self):
+		res = self.staff_books()
+		self.cell(self.co, room_type=self.std, book_to=self.today)             # the new night sells until today
+		token = modification.propose(res, {"check_out": str(fx.d(6, 14))}, _check_permission=False)["proposal_token"]
+		p = quoting.verify(token, kind="proposal")
+		tomorrow = add_days(now_datetime(), 1)
+		with mock.patch("kamra.tex.services.modification.now_datetime", return_value=tomorrow):
+			staff = modification.propose(res, {"check_out": str(fx.d(6, 14))})
+			self.assertIn("BOOKING_WINDOW", codes(staff["restrictions"]))       # sold tomorrow: refused
+			modification.apply(None, reason="guest paid", source="Guest", _guest_authorized=True, _proposal=p,
+			                   _from_payment=True, _paid_at=now_datetime())
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_out_date"), fx.d(6, 14))
+
+
 class TestChannelBookings(DistributionCase):
 	"""A channel's booking breaking a TEX restriction is still accepted (the guest holds the
 	channel's confirmation, ADR-039), with a warning and an audit event."""
@@ -313,9 +374,126 @@ class TestChannelBookings(DistributionCase):
 		p = json.loads(frappe.db.get_value("TEX Integration Outbox", self.jobs()[0], "payload"))
 		self.assertEqual((p["from"], p["to"]), (str(fx.d(6, 11)), str(fx.d(6, 11))))
 
+	def test_boundary_days_far_apart_are_queued_apart(self):
+		# review L5: two days months apart are two small jobs, never every day between them
+		from kamra.tex.distribution import repository as dist
+
+		today = getdate(now_datetime())
+		for day in (fx.d(6, 11), fx.d(6, 12), fx.d(8, 20)):
+			frappe.get_doc({"doctype": "TEX ARI Restriction", "property": fx.PROPERTY, "restriction_date": day,
+			                "book_from": today}).insert(ignore_permissions=True)
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		self.assertEqual(dist.restriction_boundaries(today), 2)
+		ranges = sorted((p["from"], p["to"]) for p in (json.loads(frappe.db.get_value("TEX Integration Outbox", j,
+		                                                                              "payload")) for j in self.jobs()))
+		self.assertEqual(ranges, [(str(fx.d(6, 11)), str(fx.d(6, 12))), (str(fx.d(8, 20)), str(fx.d(8, 20)))])
+
+
+@contextmanager
+def restriction_table_without(*missing: str):
+	"""The restriction DocType as a site sees it whose schema is behind its code (another tree's
+	migrate on a shared bench, a deploy that skipped ``bench migrate``): ``missing`` fields are not
+	columns, so Frappe writes a document without them. No DDL: only the meta is narrowed."""
+	real_get_meta = frappe.get_meta
+	meta = real_get_meta("TEX ARI Restriction")
+	gone = set(missing)
+
+	class Narrowed:
+		def __getattr__(self, k):
+			return getattr(meta, k)
+
+		def get_valid_fields(self):
+			return [f for f in meta.get_valid_fields() if f not in gone]
+
+		def get_valid_columns(self):
+			return [f for f in meta.get_valid_columns() if f not in gone]
+
+		def has_field(self, f):
+			return f not in gone and meta.has_field(f)
+
+		def get_field(self, f):
+			return None if f in gone else meta.get_field(f)
+
+		@property
+		def _fields(self):
+			return {k: v for k, v in meta._fields.items() if k not in gone}
+
+		@property
+		def fields(self):
+			return [f for f in meta.fields if f.fieldname not in gone]
+
+	narrowed = Narrowed()
+
+	def get_meta(doctype, *args, **kwargs):
+		return narrowed if doctype == "TEX ARI Restriction" else real_get_meta(doctype, *args, **kwargs)
+
+	with mock.patch.object(frappe, "get_meta", get_meta):
+		yield
+
 
 class TestGridCells(RestrictionCase):
 	"""Hotel- and market-level cells, channel scopes and the booking window in the grid."""
+
+	def cells(self) -> list:
+		return frappe.get_all("TEX ARI Restriction", filters={"property": fx.PROPERTY},
+		                      fields=["name", "room_type", "channel_scope", "book_from", "stop_sell", "scope_key"])
+
+	def test_clearing_a_cell_that_does_not_exist_writes_nothing(self):
+		"""A clear (every field it names set blank) on a date without a cell leaves no empty cell
+		behind, at hotel level with a channel scope as at room level."""
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the revenue manager clears cells
+		grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True, channel_scope=BOTH,
+		                     restrictions={"book_from": ""})
+		grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[self.std], restrictions={"min_los": 0,
+		                                                                                        "cta": ""})
+		self.assertEqual(self.cells(), [])
+
+	def test_a_scoped_hotel_level_cell_is_set_and_cleared_in_place(self):
+		"""The channel scope round-trips; the clear finds the cell it set and deletes it."""
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the revenue manager edits the grid
+		opens = add_days(self.today, 30)
+		for _again in range(2):                                 # a second set updates the same cell
+			grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True, channel_scope=BOTH,
+			                     restrictions={"book_from": str(opens)})
+		(cell,) = self.cells()
+		self.assertEqual((cell.room_type, cell.channel_scope, cell.book_from), (None, BOTH, opens))
+		g = grid_svc.grid(fx.PROPERTY, self.ci, 1, channel_scope=BOTH)
+		self.assertEqual(g["rows"][0]["cells"][0]["own"]["book_from"], str(opens))
+		grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True, channel_scope=BOTH,
+		                     restrictions={"book_from": ""})
+		self.assertEqual(self.cells(), [])
+
+	def test_a_site_whose_table_lacks_a_column_refuses_instead_of_dropping_the_value(self):
+		"""The failure seen on the shared bench: with ``channel_scope`` and ``book_from`` not columns
+		yet, a scoped hotel-level edit wrote an empty cell without its scope, under the scope-less
+		key; the clear of that edit then collided with it (a duplicate scope key). Now the edit is
+		refused with the reason and writes nothing, and the clear writes nothing either."""
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the revenue manager edits the grid
+		with restriction_table_without("channel_scope", "book_from", "book_to"):
+			with self.assertRaisesRegex(frappe.ValidationError, "migrate"):
+				grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True,
+				                     channel_scope=BOTH, restrictions={"book_from": str(add_days(self.today, 30))})
+			grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True, channel_scope=BOTH,
+			                     restrictions={"book_from": ""})
+			self.assertEqual(self.cells(), [])
+			# what the table holds still edits as before
+			grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True,
+			                     restrictions={"stop_sell": "STOP"})
+		(cell,) = self.cells()
+		self.assertEqual((cell.room_type, cell.channel_scope or None, cell.stop_sell), (None, None, "STOP"))
+
+	def test_an_empty_cell_left_by_an_old_edit_is_removed_by_its_clear(self):
+		"""A scope-less empty hotel-level cell (the leftover of the failure above) is removed by the
+		clear of its own scope, and a scoped clear on its date neither collides with it nor adds one."""
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the revenue manager tidies the grid
+		frappe.get_doc({"doctype": "TEX ARI Restriction", "property": fx.PROPERTY,
+		                "restriction_date": self.ci}).insert(ignore_permissions=True)
+		grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True, channel_scope=BOTH,
+		                     restrictions={"book_from": ""})
+		self.assertEqual([c.channel_scope or None for c in self.cells()], [None])
+		grid_svc.bulk_update(fx.PROPERTY, self.ci, self.ci, room_types=[], hotel_level=True,
+		                     restrictions={"book_from": ""})
+		self.assertEqual(self.cells(), [])
 
 	def test_hotel_and_market_level_cells(self):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the revenue manager edits the grid

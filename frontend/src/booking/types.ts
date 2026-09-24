@@ -269,6 +269,8 @@ export interface BookingRoom {
   lines?: QuoteLine[]
   extras?: ExtraOutcome[]
   cancellation_fee_now?: Money
+  /** in the fee: the discount the other rooms keep once this one is cancelled (G-84 review H1) */
+  cancellation_basket?: BasketClawback | null
   /** the guest's change of this room still waiting (for their payment or for the hotel), or
    * { status: "noted" } for a change the hotel has not reviewed yet (G-45) */
   pending_change?: PendingChange | null
@@ -425,6 +427,15 @@ export interface PaymentLinkInfo {
   methods: { method: string; provider_account: string; label: string; sandbox: boolean }[]
 }
 
+/** What a room carries for the other rooms of its booking once a change or a cancellation takes
+ * the booking below a promotion's minimum basket: the discount they keep (a credit when negative;
+ * G-84 review H1). Server figures only. */
+export interface BasketClawback {
+  amount: Money
+  currency: string
+  promotions: { name: string; minimum: Money | null; basket_after: Money; amount: Money }[]
+}
+
 export interface Proposal {
   sellable: boolean
   old_total: Money
@@ -433,6 +444,8 @@ export interface Proposal {
   currency: string
   warnings: Reason[]
   lines?: QuoteLine[]
+  /** in the new price: the discount the other rooms keep (G-84 review H1) */
+  basket_clawback?: BasketClawback | null
   /** how the change would be settled; null when it cannot be made */
   settlement?: Settlement | null
   proposal_token: string | null

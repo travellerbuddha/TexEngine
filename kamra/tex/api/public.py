@@ -37,6 +37,26 @@ SEARCH_LIMIT = {"limit": _limit(60, "tex_public_search_limit"), "seconds": 60}
 WRITE_LIMIT = {"limit": _limit(20, "tex_public_write_limit"), "seconds": 600}
 
 
+def _visitor_ip() -> str | None:
+	"""The visitor's address in a web request; None outside one (a job, a test, the console)."""
+	return getattr(frappe.local, "request_ip", None) if frappe.request else None
+
+
+def _charge_rooms(n: int) -> None:
+	"""Rooms quoted together cost what a quote each costs (two pricing passes and a stored quote
+	per room): a visitor's rooms count against a budget of ``WRITE_LIMIT`` quotes per window,
+	besides the request's own limit (G-84 review L2)."""
+	ip = _visitor_ip()
+	if not ip:
+		return
+	key = frappe.cache.make_key(f"rl:tex.public.rooms_quoted:{ip}:{WRITE_LIMIT['seconds']}")
+	if not frappe.cache.get(key):
+		frappe.cache.setex(key, WRITE_LIMIT["seconds"], 0)
+	if frappe.cache.incrby(key, n) > WRITE_LIMIT["limit"]():
+		frappe.throw(_("You hit the rate limit because of too many requests. Please try after sometime."),
+		             frappe.RateLimitExceededError)
+
+
 # ─── site ────────────────────────────────────────────────────────────────
 
 
@@ -249,8 +269,8 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	from kamra.tex.commercial.context import listed_extras
 
 	online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
-	requested = parse(extras, []) or []
-	if any(str(e.get("code", "")).upper() not in online for e in requested):
+	requested = quoting.extra_items(extras)
+	if any(e["code"].upper() not in online for e in requested):
 		frappe.throw(_("This extra cannot be booked online."))
 	out = quoting.create_quote(offer_key, extras=requested,
 	                           promo_codes=[promo_code] if promo_code else None, session_id=session_id)
@@ -267,25 +287,25 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str | None = None):
 	"""The rooms of one booking quoted together (G-84, ADR-057): a coupon's minimum basket is the
 	whole booking's. ``rooms``: [{"offer_key", "extras"}] of one search, in room order. → {"ok",
-	"rooms": one ``quote`` answer per room}."""
+	"rooms": one ``quote`` answer per room}.
+
+	Rooms that are not a list of {"offer_key", "extras"} are refused cleanly (review L2); each
+	room counts as a quote against the visitor's write limit (``_charge_rooms``)."""
 	s = _site(site)
 	channel = _channel(s)
 	from kamra.tex.commercial.context import listed_extras
 
-	items = parse(rooms, []) or []
-	if not items or len(items) > quoting.MAX_ROOMS:
-		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
+	items = quoting.room_items(rooms)
+	_charge_rooms(len(items))
 	props = _site_properties(s)
 	for r in items:
-		offer = quoting.verify(str(r.get("offer_key") or ""))
+		offer = quoting.verify(r["offer_key"])
 		if offer["property"] not in props or offer["channel"] != channel:
 			frappe.throw(_("Invalid offer."))
 		online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
-		if any(str(e.get("code", "")).upper() not in online for e in parse(r.get("extras"), []) or []):
+		if any(e["code"].upper() not in online for e in r["extras"]):
 			frappe.throw(_("This extra cannot be booked online."))
-	out = quoting.create_quotes([{"offer_key": str(r.get("offer_key") or ""), "extras": parse(r.get("extras"), [])}
-	                             for r in items], promo_codes=[promo_code] if promo_code else None,
-	                            session_id=session_id)
+	out = quoting.create_quotes(items, promo_codes=[promo_code] if promo_code else None, session_id=session_id)
 	loc = content.Localizer(content.guest_language())
 	rooms_out = []
 	for r in out["rooms"]:
@@ -696,6 +716,16 @@ def _pending_change(res) -> dict | None:
 	return {"status": "noted"} if res.tex_guest_change_pending else None
 
 
+def _basket_view(claw: dict | None) -> dict | None:
+	"""What a room carries for the other rooms of the booking, for the guest: the amount and the
+	promotions (name, minimum, the basket after), never the other rooms' own figures."""
+	if not claw:
+		return None
+	return {"amount": claw["amount"], "currency": claw["currency"],
+	        "promotions": [{"name": p["name"], "minimum": p["minimum"], "basket_after": p["basket_after"],
+	                        "amount": p["amount"]} for p in claw.get("promotions") or []]}
+
+
 def _guest_booking(b) -> dict:
 	summary = booking_svc.booking_summary(b.name)
 	loc = content.Localizer(content.guest_language() or content.guest_language(b.language))
@@ -703,7 +733,8 @@ def _guest_booking(b) -> dict:
 	for r in summary["rooms"]:
 		res = frappe.get_doc("Reservation", r["reservation"])
 		snap = loc.quote(b.property, json.loads(res.tex_pricing_snapshot or "{}")) or {}
-		penalty, _basis = booking_svc.cancellation_penalty(res) if res.status not in ("Cancelled",) else (D(0), {})
+		penalty, basis = booking_svc.cancellation_penalty(res) if res.status not in ("Cancelled",) else (D(0), {})
+		claw = basis.get("basket_clawback")
 		rooms.append({**r, "room_type_name": loc.room_type_name(
 			b.property, res.room_type, frappe.db.get_value("Room Type", res.room_type, "room_type_name")),
 		              "board": res.tex_board, "child_ages": json.loads(res.tex_child_ages or "[]"),
@@ -711,6 +742,8 @@ def _guest_booking(b) -> dict:
 		              "refundable": (snap.get("rate_plan") or {}).get("refundable", True),
 		              "lines": snap.get("lines"), "extras": [e for e in snap.get("extras") or [] if e.get("ok")],
 		              "cancellation_fee_now": to_str(penalty), "pending_change": _pending_change(res),
+		              # in the fee: the discount the other rooms keep once this one is gone (G-84 review H1)
+		              "cancellation_basket": _basket_view(claw),
 		              # the guest may change this room online (confirmed, not arrived yet)
 		              "can_change": guest_changes.room_changeable(res),
 		              "last_change": guest_changes.guest_outcome(last) if (last := guest_changes.last_request(res))
@@ -782,6 +815,8 @@ def manage_propose(token: str, reservation: str, changes):
 	return guest_safe({"sellable": sellable, "old_total": p["old"]["total"], "new_total": p["proposed"][
 		"totals"].get("total"), "difference": p["difference"], "currency": p["proposed"]["currency"],
 		"warnings": warnings, "lines": p["proposed"].get("lines"),
+		# in the new price: the discount the other rooms keep, shown before the guest confirms (G-84 review H1)
+		"basket_clawback": _basket_view(p.get("basket_clawback")),
 		"settlement": guest_changes.settlement_dict(settlement, b.currency), "proposal_token": proposal_token})
 
 
