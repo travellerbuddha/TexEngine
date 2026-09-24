@@ -102,6 +102,30 @@ def consent_given(value) -> bool:
 	return isinstance(value, str) and value.strip().lower() in ("1", "true")
 
 
+def _find_profile(g: dict, enterprise: str | None, staff: bool, *, lock: bool = False) -> str | None:
+	"""The profile a booking joins (``resolve_guest``): the e-mail's, when one is given; the phone's only
+	for staff, for a booking without an e-mail or a profile without one, and only when exactly one
+	profile of the enterprise (or of none) has it. The e-mail is the identity when given: another e-mail
+	on a shared phone (a family, a colleague, a travel agent's number) is another person, never their
+	stays or history (ADR-056 review). ``lock``: a locking read (the profile found is locked)."""
+	tail = " FOR UPDATE" if lock else ""
+	tenant = "(IFNULL(g.tex_enterprise, '') = '' OR g.tex_enterprise = %(ent)s)"
+	if g.get("email"):
+		found = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
+			f"""SELECT g.name FROM `tabGuest` g WHERE g.email = %(email)s AND {tenant}
+			ORDER BY g.creation ASC, g.name ASC LIMIT 1{tail}""", {"email": g["email"], "ent": enterprise or ""}, pluck=True)
+		if found:
+			return found[0]
+	if g.get("phone") and staff:
+		no_email = "AND IFNULL(g.email, '') = ''" if g.get("email") else ""
+		found = frappe.db.sql(  # nosemgrep -- constant clauses, values bound
+			f"""SELECT g.name FROM `tabGuest` g WHERE g.phone = %(phone)s AND {tenant} {no_email}
+			ORDER BY g.creation ASC, g.name ASC LIMIT 2{tail}""", {"phone": g["phone"], "ent": enterprise or ""},
+			pluck=True)
+		return found[0] if len(found) == 1 else None
+	return None
+
+
 def resolve_guest(g: dict, *, property: str, market: str | None, language: str | None,
                   staff: bool) -> tuple[str, list[str], list[str]]:
 	"""→ (guest profile, consent granted now, consent asked for but not applied).
@@ -120,24 +144,16 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 	ADR-056 second review). Otherwise a new profile is made, which the CRM shows with its possible
 	duplicates for staff to merge."""
 	enterprise = frappe.db.get_value("Property", property, "tex_enterprise")
-	existing = None
-	tenant = ("in", [enterprise, "", None])
-	if g.get("email"):
-		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": tenant},
-		                               order_by="creation asc")
-	if not existing and g.get("phone") and staff:
-		# the e-mail is the identity when given: a phone only finds a profile for a booking without
-		# an e-mail, or a profile known by phone alone. Another e-mail on a shared phone (a family, a
-		# colleague, a travel agent's number) is another person, never their stays or history
-		# (ADR-056 review)
-		by_phone = {"phone": g["phone"], "tex_enterprise": tenant}
-		if g.get("email"):
-			by_phone["email"] = ("is", "not set")
-		found = frappe.get_all("Guest", filters=by_phone, pluck="name", order_by="creation asc", limit=2)
-		existing = found[0] if len(found) == 1 else None
+	from kamra.tex.crm.service import lock_guest
+
+	existing = _find_profile(g, enterprise, staff)
+	if existing and not lock_guest(existing):
+		# merged into another profile (or removed) since this request began: this request's snapshot still
+		# shows it, so look again with a lock, which reads what is committed now (third review of ADR-056)
+		existing = _find_profile(g, enterprise, staff, lock=True)
 	asked = [k for k in CONSENT_FIELDS if consent_given(g.get(k.replace("tex_", "")))]
 	if existing:
-		doc = frappe.get_doc("Guest", existing)
+		doc = frappe.get_doc("Guest", existing, for_update=True)      # as committed now (it is locked)
 		changed = False
 		for f, v in (("tex_enterprise", enterprise), ("tex_language", language), ("tex_market", market),
 		             ("tex_country", g.get("country"))):

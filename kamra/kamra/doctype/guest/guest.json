@@ -44,6 +44,7 @@
   "tex_consent_updated_at",
   "tex_consent_source",
   "tex_consent_text_version",
+  "tex_erased_at",
   "tex_section_14",
   "tex_stays",
   "tex_lifetime_value",
@@ -258,6 +259,14 @@
    "read_only": 1
   },
   {
+   "fieldname": "tex_erased_at",
+   "fieldtype": "Datetime",
+   "label": "Erased at",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Set by the right to erasure (anonymize): an erased profile is never merged (ADR-056 third review)"
+  },
+  {
    "fieldname": "tex_section_14",
    "fieldtype": "Section Break",
    "label": "TEX stats",
@@ -304,7 +313,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-24 14:00:00.000000",
+ "modified": "2026-09-24 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Guest",

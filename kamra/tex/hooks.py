@@ -135,6 +135,10 @@ def reservation_on_update(doc, method=None):
 	if doc.guest:
 		from kamra.tex.crm import service as crm
 
+		# the profile the stay names is locked before its totals are written: a stay saved with a profile
+		# merged into another meanwhile (read before the merge committed) is refused, never left pointing
+		# at a deleted profile (third review of ADR-056)
+		crm.require_live_guest(doc.guest)
 		crm.refresh_guest_stats(doc.guest)
 	_channels_see(doc)
 	if not doc.get("tex_booking"):

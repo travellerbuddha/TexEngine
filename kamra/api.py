@@ -1878,7 +1878,9 @@ def merge_guests(source: str, target: str):
 	its checks and its audit; ADR-056 second review)."""
 	from kamra.tex.crm import service as crm
 
-	# require_roles and assert_scope (every stay of both profiles in scope) decided who may merge
+	# require_roles and assert_scope (every stay of both profiles in scope) decided who sees both profiles;
+	# the merge still checks the hotel of every record (crm.edit there) for anyone but a platform
+	# administrator (ADR-056 third review)
 	out = crm.merge_guests(source, target, checked=True)
 	moved = out["moved"]
 
@@ -1906,6 +1908,8 @@ def anonymize_guest(guest: str):
 		"tex_consent_email": 0, "tex_consent_sms": 0, "tex_consent_whatsapp": 0,
 		"date_of_birth": None, "gender": "", "tex_tags": "", "tex_preferences": "",
 		"id_file": "", "address_proof_file": "",
+		# the durable marker: an erased profile is never merged, either way (ADR-056 third review)
+		"tex_erased_at": frappe.utils.now_datetime(),
 	})
 	doc.flags.tex_consent_source = "erasure"
 	doc.save(ignore_permissions=True)

@@ -207,6 +207,22 @@ TEX_INDEXES = (
 	# a booking finds its guest by e-mail or phone within the enterprise; a profile its possible duplicates
 	("Guest", ["email", "tex_enterprise"], "tex_guest_email_ent"),
 	("Guest", ["phone", "tex_enterprise"], "tex_guest_phone_ent"),
+	# the daily purge reads old funnel events through this, never scanning the funnel (third review)
+	("TEX Funnel Event", ["occurred_at", "session_id"], "tex_funnel_time_session"),
+	# a redemption reads a guest's balance with a lock through this
+	("TEX Loyalty Ledger", ["guest", "program"], "tex_ledger_guest_program"),
+	# a merge reads and moves a profile's records with locking reads: every Link to Guest has an index
+	# that starts with it, so those reads lock the profile's rows only (third review of ADR-056)
+	("TEX Booking", ["booker_guest", "property"], "tex_booking_guest_prop"),
+	("TEX Communication", ["guest", "property"], "tex_comm_guest_prop"),
+	("TEX Funnel Event", ["guest", "property"], "tex_funnel_guest_prop"),
+	("Folio", ["guest", "property"], "tex_folio_guest_prop"),
+	("Security Deposit", ["guest", "property"], "tex_deposit_guest_prop"),
+	("Service Ticket", ["guest", "property"], "tex_ticket_guest_prop"),
+	("Lost And Found Item", ["guest", "property"], "tex_lost_guest_prop"),
+	("Exchange Transaction", ["guest", "property"], "tex_exchange_guest_prop"),
+	("Venue Booking", ["customer", "property"], "tex_venue_customer_prop"),
+	("WhatsApp Message", ["guest", "property"], "tex_whatsapp_guest_prop"),
 )
 
 
