@@ -287,6 +287,20 @@ class TestGridAudit(AuditCase):
 		self.assertEqual(set(out["rate"]), {"draft", "periods", "note"})  # the response is unchanged
 
 
+	def test_limited_extras_edits_keep_old_values(self):
+		from kamra.tex.api import crs as crs_api
+		from kamra.tex.tests.integration.test_extras_inventory import limited
+
+		limited("SPA", capacity=2)
+		d1, d2 = fx.d(6, 10), fx.d(6, 11)
+		crs_api.extras_bulk_update(fx.PROPERTY, ["SPA"], str(d1), str(d1), capacity=3)
+		out = crs_api.extras_bulk_update(fx.PROPERTY, ["SPA"], str(d1), str(d2), capacity=5, closed=1)
+		self.assertEqual(set(out), {"updated", "over_capacity"})           # the response is unchanged
+		x = last_event("extra_inventory.update", property=fx.PROPERTY)["new"]["collections"]["extra_inventory"]
+		self.assertEqual(x["changed"], {f"SPA · {d1}": {"capacity": [3, 5], "closed": [0, 1]},
+		                                f"SPA · {d2}": {"capacity": [0, 5], "closed": [0, 1]}})
+
+
 # ─── payment rules ───────────────────────────────────────────────────────
 
 

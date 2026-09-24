@@ -22,6 +22,7 @@ from frappe.utils import getdate, now_datetime
 
 from kamra.tex.pricing.enums import ExtraPricingMode as M
 from kamra.tex.pricing.model import ExtraDayAvailability
+from kamra.tex.security.changes import SEP
 
 Key = tuple[str, date]            # (extra code, service day)
 # a stay that happened keeps its units (the service was delivered); cancelled or no-show frees them
@@ -376,16 +377,23 @@ def bulk_update(property: str, codes, start, end, *, weekdays=None, capacity=Non
 		params["note"] = (note or "")[:140]
 	if not sets:
 		frappe.throw(_("Nothing to change."))
-	over = []
+	# what each day held before, for the audit (G-74): the edited fields only
+	edited = {"cap": "capacity", "closed": "closed", "note": "note"}
+	new = {edited[k]: v for k, v in params.items()}
+	over, cells = [], []
 	for code, d in sorted(keys):
 		name = _day_name(property, code, d)
+		before = frappe.db.get_value("TEX Extra Inventory Day", name, list(new), as_dict=True) or {}
 		frappe.db.sql(f"UPDATE `tabTEX Extra Inventory Day` SET {', '.join(sets)}, modified=NOW() "
 		              "WHERE name=%(name)s", {**params, "name": name})
 		row = frappe.db.get_value("TEX Extra Inventory Day", name, ["capacity", "sold"], as_dict=True)
 		cap = int(row.capacity or 0) or trk[code]["capacity"]
 		if int(row.sold or 0) > cap:
 			over.append({"extra_code": code, "date": str(d), "sold": int(row.sold), "capacity": cap})
-	return {"updated": len(keys), "over_capacity": over}
+		cells.append((f"{code}{SEP}{d}", {f: before.get(f) if f == "note" else int(before.get(f) or 0) for f in new},
+		              new))
+	# ``_cells`` is for the caller's audit only, never part of the response
+	return {"updated": len(keys), "over_capacity": over, "_cells": cells}
 
 
 def allocations(property: str, extra_code: str, day) -> list[dict]:
