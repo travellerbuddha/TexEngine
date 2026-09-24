@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeftRight, ClipboardCheck, Landmark, RefreshCw, RotateCcw, SquareArrowDownRight } from "lucide-react"
+import { ArrowLeftRight, ClipboardCheck, Landmark, RefreshCw, RotateCcw, Scale, SquareArrowDownRight } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
 import { dateTime } from "../../lib/format"
@@ -34,13 +34,15 @@ import {
   canTransfer,
   ConfirmTransferDialog,
   FinishRefundDialog,
+  hasConflict,
   RefundDialog,
+  ResolveConflictDialog,
   TransferDialog,
 } from "./detail/Actions"
 import { allocKey, methodKey, typeKey, useEvent } from "./lib"
 import type { Allocation, Txn, TxnDetail } from "./types"
 
-type Action = "refund" | "allocate" | "transfer" | "bank" | "finish" | null
+type Action = "refund" | "allocate" | "transfer" | "bank" | "finish" | "conflict" | null
 
 export default function TransactionDetail() {
   const { name = "" } = useParams()
@@ -106,6 +108,11 @@ export default function TransactionDetail() {
                   {t("payments.reverify.button")}
                 </Button>
               )}
+              {finance && hasConflict(d) && (
+                <Button variant="danger" icon={<Scale className="size-4" aria-hidden />} onClick={() => setAction("conflict")}>
+                  {t("payments.conflict.button")}
+                </Button>
+              )}
               {finance && canFinishRefund(d) && (
                 <Button icon={<ClipboardCheck className="size-4" aria-hidden />} onClick={() => setAction("finish")}>
                   {t("payments.finish.button")}
@@ -147,6 +154,14 @@ export default function TransactionDetail() {
           {d.status === "Pending" && d.provider === "Bank Transfer" && <Notice tone="warning">{t("payments.detail.pending_bank")}</Notice>}
           {d.status === "Pending" && (d.provider === "iyzico" || d.provider === "Sipay") && <Notice tone="warning">{t("payments.detail.pending_gateway")}</Notice>}
           {d.status === "Failed" && canReverify(d) && <Notice tone="info">{t("payments.detail.failed_gateway")}</Notice>}
+          {hasConflict(d) && (
+            <Notice tone="danger" title={t("payments.conflict.title")}>
+              {t("payments.conflict.body", {
+                recorded: t(`payments.status.${(d.conflict?.recorded || "pending").toLowerCase()}`),
+                gateway: d.conflict?.gateway === "no answer" ? t("payments.conflict.no_answer") : t(`payments.status.${(d.conflict?.gateway || "pending").toLowerCase()}`),
+              })}
+            </Notice>
+          )}
           {isPendingRefund(d) && (
             <Notice tone="warning" title={t("payments.detail.pending_refund_title")}>
               {[t("payments.detail.pending_refund"), d.error_message, d.can_finish ? null : d.finish_blocked].filter(Boolean).join(" ")}
@@ -303,6 +318,7 @@ export default function TransactionDetail() {
           <TransferDialog open={action === "transfer"} onClose={close} txn={d} onDone={q.reload} />
           <ConfirmTransferDialog open={action === "bank"} onClose={close} txn={d} onDone={q.reload} />
           <FinishRefundDialog open={action === "finish"} onClose={close} txn={d} onDone={q.reload} />
+          <ResolveConflictDialog open={action === "conflict"} onClose={close} txn={d} onDone={q.reload} />
         </div>
       )}
     </>

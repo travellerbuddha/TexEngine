@@ -115,8 +115,8 @@ REASONS: dict[str, str] = {
 	"capture_mismatch": "{count} gateway capture(s) did not match their charge in the last {days} days.",
 	"refund_unknown": "{count} refund(s) the gateway never confirmed: check them at the gateway before refunding "
 	                  "again, then record the outcome (Payments → the refund).",
-	"refund_conflict": "{count} refund(s) were answered by the gateway differently from the outcome recorded for them "
-	                   "in the last {days} days: reconcile them at the gateway (audit payment.refund_outcome_conflict).",
+	"refund_conflict": "{count} refund(s) were answered by the gateway differently from the outcome recorded for them: "
+	                   "check them at the gateway and record what it actually did (Payments → the refund).",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
@@ -288,7 +288,7 @@ def callbacks_check(*, errors: int, overpaid: int, mismatches: int, refunds_unkn
 	issues = []
 	if refund_conflicts:
 		# the books and the gateway disagree about money that left (third review of ADR-044)
-		issues.append(issue("refund_conflict", FAIL, count=refund_conflicts, days=PAYMENT_AUDIT_WINDOW_DAYS))
+		issues.append(issue("refund_conflict", FAIL, count=refund_conflicts))
 	if refunds_unknown:
 		# the money may be gone or not: nothing refunds it again until staff checked (ADR-044 review)
 		issues.append(issue("refund_unknown", FAIL, count=refunds_unknown))

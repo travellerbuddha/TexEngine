@@ -30,7 +30,8 @@
    "fieldtype": "Link",
    "label": "Transaction",
    "options": "TEX Payment Transaction",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "search_index": 1
   },
   {
    "fieldname": "allocation_type",
@@ -61,7 +62,8 @@
    "fieldtype": "Link",
    "label": "Booking",
    "options": "TEX Booking",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "search_index": 1
   },
   {
    "fieldname": "reservation",
@@ -95,7 +97,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-29 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Allocation",

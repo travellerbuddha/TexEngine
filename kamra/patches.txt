@@ -41,5 +41,6 @@ kamra.patches.tex.p23_system_status_alerts
 kamra.patches.tex.p24_g83_review
 kamra.patches.tex.p25_contract_header_snapshot
 kamra.patches.tex.p27_inventory_cutoff_release
+kamra.patches.tex.p28_guest_change_refund_rows
 kamra.patches.tex.p29_channel_binding
 kamra.patches.tex.p31_g41_review
