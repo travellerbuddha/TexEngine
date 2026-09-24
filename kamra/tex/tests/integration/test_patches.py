@@ -92,6 +92,7 @@ BEHAVIOUR = {
 	"p39_lookup_indexes": "test_patches.TestP03Indexes.test_p39_creates_the_lookup_indexes_that_survive_a_sync",
 	"p40_crm_privacy_review": "test_crm_privacy.TestAbandonedPrivacy."
 	                          "test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds",
+	"p47_g64_site_slugs": "test_patches.TestReportingPatches.test_p47_reports_sites_named_like_an_admin_page_once",
 }
 
 
@@ -990,6 +991,25 @@ class TestReportingPatches(PatchCase):
 		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "booking_site.invalid_image",
 		                                                      "reference_name": site}), 1)
 		self.assertEqual(frappe.db.get_value("File", svg, "is_private"), 0)       # reported, left to the owner
+
+
+	def test_p47_reports_sites_named_like_an_admin_page_once(self):
+		"""G-64 review M3: a booking site named like one of the admin area's pages (``rooms``,
+		``analytics``…) is reported for the owner, never renamed (its slug is its guests' address)."""
+		clash = put("TEX Booking Site", "rooms", site_slug="rooms", site_name="Rooms Hotel", property=fx.PROPERTY,
+		            enabled=1)
+		moved = put("TEX Booking Site", "g47-moved", site_slug="analytics", site_name="Moved", property=fx.PROPERTY,
+		            enabled=0)
+		fine = put("TEX Booking Site", "g47-fine", site_slug="g47-fine", site_name="Fine", property=fx.PROPERTY,
+		           enabled=1)
+		self.first_run("p47_g64_site_slugs")
+		self.assertRerunChangesNothing("p47_g64_site_slugs")
+		for site, slug in ((clash, "rooms"), (moved, "analytics")):
+			self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "booking_site.admin_slug",
+			                                                      "reference_name": site}), 1, site)
+			self.assertEqual(frappe.db.get_value("TEX Booking Site", site, "site_slug"), slug)   # never renamed
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking_site.admin_slug",
+		                                                      "reference_name": fine}))
 
 
 class TestSmallPatches(PatchCase):
