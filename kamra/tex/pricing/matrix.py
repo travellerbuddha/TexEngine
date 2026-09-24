@@ -7,14 +7,17 @@ never recomputes a price itself:
   own rule or the rule for every period, the rooms it was derived through and the rules it beat;
 * ``party_total``: the occupancy total of a sample party in a room and period, built the way the
   publish sweep builds one (each child at the lower edge of its age band).
+
+And the one computation the workspace asks the server for instead of doing it (GAP-7, D2):
+``adjust_amount``, an entered price changed once by an op, as the ARI grid's rate change does.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-from kamra.tex.money import to_str, to_str_min
-from kamra.tex.pricing import ages, occupancy, rooms
+from kamra.tex.money import ZERO, D, quantize, to_str, to_str_min
+from kamra.tex.pricing import ages, occupancy, ops, rooms
 from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import ContractTerms, Period, PricingError
@@ -87,3 +90,15 @@ def party_total(terms: ContractTerms, room_type: str, period: Period, adults: in
 	          "rule_id": s.rule.rule_id if s.rule else None, "included": s.included}
 	         for s in result.slots]
 	return result.total, slots
+
+
+def adjust_amount(current: Decimal, op: Op, value: Decimal, currency: str) -> Decimal:
+	"""An entered price ``current`` changed once by ``op`` ``value`` (ADR-061 GAP-7: a relative entry
+	on the base room, O4, and the bulk Adjust…), exactly as the ARI grid's rate change computes a
+	new unit (``grid.apply_rate_change``): ABSOLUTE is the value itself; any other op is applied with
+	the current price as both the reference and the running amount (``ops.apply_op``). The result is
+	rounded HALF_UP to ``currency``'s minor unit. A result below zero raises ``PricingError("NEGATIVE")``."""
+	new = D(value) if op == Op.ABSOLUTE else ops.apply_op(op, value, reference=current, current=current)
+	if new < ZERO:
+		raise PricingError("NEGATIVE")
+	return quantize(new, currency)

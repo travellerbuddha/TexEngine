@@ -1,12 +1,14 @@
 """Pricing Workspace read models (ADR-061, GAP-2, GAP-2b): where a room's unit comes from, and
-the occupancy total of a sample party, both from the engine's own resolvers."""
+the occupancy total of a sample party, both from the engine's own resolvers; and (GAP-7) an entered
+price adjusted once, as the ARI grid's rate change adjusts it."""
 
 import unittest
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
-from kamra.tex.pricing import engine, matrix
+from kamra.tex.money import quantize, to_str
+from kamra.tex.pricing import engine, matrix, ops
 from kamra.tex.pricing.enums import ChildOrdering, Op, PricingBasis
 from kamra.tex.pricing.model import ChildSpec, PricingError, RoomRule, Unsellable
 from kamra.tex.tests.unit import fixtures as fx
@@ -180,6 +182,56 @@ class TestRuleValue(unittest.TestCase):
 		self.assertEqual(matrix.rule_value(D("1E+2")), "100")
 		self.assertEqual(matrix.rule_value(D("-0.00")), "0")
 		self.assertIsNone(matrix.rule_value(None))
+
+
+class TestAdjustAmount(unittest.TestCase):
+	"""GAP-7 (ADR-061): an entered price changed once by a relative entry on the base room (O4) or by
+	the bulk Adjust…, computed as the ARI grid's rate change computes it (``grid.apply_rate_change``):
+	the op on the current price, rounded HALF_UP to the currency's minor unit."""
+
+	def text(self, current, op, value, currency="EUR"):
+		out = matrix.adjust_amount(D(current), op, D(value), currency)
+		self.assertIsInstance(out, Decimal)
+		return to_str(out)
+
+	def test_the_owners_examples(self):
+		cases = (
+			("70", Op.ADJUST_PERCENT, "10", "EUR", "77.00"),
+			("80.55", Op.ADJUST_PERCENT, "10", "EUR", "88.61"),         # 88.605: HALF_UP, not HALF_EVEN
+			("100", Op.MULTIPLY, "1.155", "EUR", "115.50"),
+			("1000", Op.MULTIPLY, "1.155", "JPY", "1155"),
+			("12.345", Op.ADJUST_PERCENT, "10", "KWD", "13.580"),       # 3 places
+			("99.99", Op.ADJUST_PERCENT, "-100", "EUR", "0.00"),
+			("70", Op.ADJUST_PERCENT, "0", "EUR", "70.00"),
+			("70", Op.PERCENT_OF, "50", "EUR", "35.00"),
+			("70", Op.ADD, "5", "EUR", "75.00"),
+			("70", Op.SUBTRACT, "5", "EUR", "65.00"),
+			("70", Op.ADJUST_PERCENT, "-10", "EUR", "63.00"),
+			("70", Op.MULTIPLY, "1.1", "EUR", "77.00"),
+		)
+		for current, op, value, currency, expected in cases:
+			with self.subTest(current=current, op=op, value=value, currency=currency):
+				self.assertEqual(self.text(current, op, value, currency), expected)
+
+	def test_absolute_is_the_value_whatever_the_current_price(self):
+		self.assertEqual(self.text("70", Op.ABSOLUTE, "82.5"), "82.50")
+		self.assertEqual(self.text("0", Op.ABSOLUTE, "82.555"), "82.56")
+		self.assertEqual(self.text("70", Op.ABSOLUTE, "82.5", "JPY"), "83")
+
+	def test_a_negative_result_is_refused(self):
+		for current, op, value in (("10", Op.SUBTRACT, "20"), ("10", Op.ADD, "-10.01"), ("10", Op.ABSOLUTE, "-1"),
+		                           ("10", Op.ADJUST_PERCENT, "-101"), ("10", Op.MULTIPLY, "-1")):
+			with self.subTest(op=op, value=value), self.assertRaises(PricingError) as cm:
+				matrix.adjust_amount(D(current), op, D(value), "EUR")
+			self.assertEqual(str(cm.exception), "NEGATIVE")
+
+	def test_the_op_is_applied_as_the_engine_applies_it(self):
+		# relative ops take the current price as both reference and running amount (grid.py)
+		for op, value in ((Op.MULTIPLY, "1.2345"), (Op.PERCENT_OF, "33.3"), (Op.ADJUST_PERCENT, "7.5"),
+		                  (Op.ADD, "0.004"), (Op.SUBTRACT, "0.005")):
+			with self.subTest(op=op):
+				exact = ops.apply_op(op, D(value), reference=D("123.45"), current=D("123.45"))
+				self.assertEqual(matrix.adjust_amount(D("123.45"), op, D(value), "EUR"), quantize(exact, "EUR"))
 
 
 if __name__ == "__main__":
