@@ -669,6 +669,22 @@ def cost_stage_outcomes(q: dict) -> set[tuple[str, str]]:
 	return out
 
 
+def _cost_stage(pr: dict, cost_stage: set[tuple[str, str]]) -> bool:
+	"""A promotion outcome of a quote dict is cost-stage: its stage says so, or (no stage recorded)
+	``cost_stage`` (``cost_stage_outcomes`` of its quote) names it."""
+	if "stage" in pr:
+		return pr.get("stage") == engine.COST
+	return (pr.get("promo_id"), pr.get("source") or "") in cost_stage
+
+
+def sold_promotions(q: dict) -> list[dict]:
+	"""The promotions a quote dict granted on the selling price: applied, never a cost-stage offer
+	(it lowered the contract cost, a cost figure; ADR-059 review). What a reservation records as
+	its promotions (``tex_promotions``, read in Desk by every role that reads reservations)."""
+	cost_stage = cost_stage_outcomes(q)
+	return [pr for pr in q.get("promotions") or [] if pr.get("applied") and not _cost_stage(pr, cost_stage)]
+
+
 def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 	"""Remove cost, margin, per-night cost and the rule explanation from a quote dict
 	(for users without price.view_cost and for guests). ``staff`` keeps the list of
@@ -678,8 +694,7 @@ def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 		return q
 	if isinstance(q.get("promotions"), list):
 		cost_stage = cost_stage_outcomes(q)
-		q["promotions"] = [pr for pr in q["promotions"] if not (
-			pr.get("stage") == engine.COST if "stage" in pr else (pr.get("promo_id"), pr.get("source") or "") in cost_stage)]
+		q["promotions"] = [pr for pr in q["promotions"] if not _cost_stage(pr, cost_stage)]
 	q.pop("explanation", None)
 	q.pop("fx", None)
 	q.pop("fx_rates", None)                       # rates, providers and FX margins (G-56)

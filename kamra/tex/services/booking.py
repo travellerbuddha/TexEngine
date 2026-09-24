@@ -632,7 +632,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 			"tex_accepted_at": now, "tex_quote": row.name, "tex_currency": currency,
 			# informational, at the column's 9 places; the snapshot holds the exact rate (G-72)
 			"tex_fx_rate": db_dec((result.get("fx") or {}).get("sell_rate") or 1),
-			"tex_promotions": ", ".join(p["promo_id"] for p in result.get("promotions") or [] if p["applied"]),
+			# the promotions of the selling price: a cost-stage offer is a cost figure (ADR-059 review)
+			"tex_promotions": ", ".join(p["promo_id"] for p in quoting.sold_promotions(result)),
 			"tex_pricing_snapshot": json.dumps(snapshot, sort_keys=True, ensure_ascii=False),
 			**amounts,
 		})

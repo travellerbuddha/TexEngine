@@ -634,7 +634,7 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		                                    "basis": p["basis"], "override_amount": to_str(final_total)
 		                                    if override_amount not in (None, "") else None},
 		                                   sort_keys=True, ensure_ascii=False),
-		"tex_promotions": ", ".join(x["promo_id"] for x in new.get("promotions") or [] if x["applied"]),
+		"tex_promotions": ", ".join(x["promo_id"] for x in quoting.sold_promotions(new)),   # never cost-stage
 		**amounts,
 	})
 	if res.room and before["room_type"] != res.room_type:
