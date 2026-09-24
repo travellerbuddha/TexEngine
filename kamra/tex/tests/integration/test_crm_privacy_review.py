@@ -28,6 +28,7 @@ consent record; a case written after a withdrawal keeps no contact; p40 on its o
 import hashlib
 import inspect
 import json
+from contextlib import contextmanager
 from unittest import mock
 
 import frappe
@@ -105,6 +106,37 @@ def tracked(event: str, *, at=None, rollback_to: str | None = None, error=frappe
 	return mock.patch.object(frappe, "get_doc", side_effect=get_doc), failed
 
 
+WAIT = 2                                        # seconds a connection waits for a lock in the H1 tests
+
+
+@contextmanager
+def own_connection():
+	"""A second connection to the site's database, as another request has (a visitor's booking): it
+	waits at most ``WAIT`` seconds for a lock, never commits, and is rolled back and closed after."""
+	import pymysql
+
+	c = frappe.conf
+	conn = pymysql.connect(host=c.db_host or "127.0.0.1", port=int(c.db_port or 3306), user=c.db_user or c.db_name,
+	                       password=c.db_password, database=c.db_name, charset="utf8mb4", autocommit=False)
+	try:
+		with conn.cursor() as cur:
+			cur.execute("SET SESSION innodb_lock_wait_timeout = %s", (WAIT,))
+		yield conn
+	finally:
+		conn.rollback()
+		conn.close()
+
+
+def visit(conn, session: str, email: str | None = None) -> None:
+	"""A funnel event written on ``conn`` as ``_track`` writes it inside a booking (not committed)."""
+	with conn.cursor() as cur:
+		cur.execute("""INSERT INTO `tabTEX Funnel Event` (name, creation, modified, owner, modified_by, docstatus, idx,
+			event, occurred_at, site, property, session_id, email_hash, consent_marketing, payload)
+			VALUES (%s, NOW(6), NOW(6), 'Guest', 'Guest', 0, 0, 'guest_details', NOW(6), %s, %s, %s, %s, %s, '{}')""",
+		            (frappe.generate_hash(length=10), SLUG, fx.PROPERTY, session,
+		             hashlib.sha256(email.encode()).hexdigest() if email else None, 1 if email else 0))
+
+
 # ─── H1: the withdrawal and the booking transaction ──────────────────────
 
 
@@ -126,6 +158,32 @@ class TestWithdrawalLocksOnlyItsRows(PrivacyCase):
 			if frappe.db.count(doctype) >= 1000:
 				self.assertEqual((plan.key, plan.type != "ALL"), (index, True), (sql, plan))
 		self.assertGreaterEqual(frappe.db.count("TEX Funnel Event"), 1000, "the test site's funnel")
+
+	def test_a_withdrawal_and_the_funnel_never_wait_for_each_other(self):
+		"""The review's case on two connections: the withdrawal's locking read of the funnel waited for a
+		booking's funnel event, and held the funnel so that bookings' tracking waited for it (a booking
+		in the middle of both is a deadlock victim, rolled back whole). Each side waits at most ``WAIT``
+		seconds here: a wait is a lock wait timeout, and the test fails."""
+		hashed = hashlib.sha256(b"h1-open@example.com").hexdigest()
+		_b, guest = self.booked_guest("h1-open", "h1-open@example.com", consent_email=1)
+		crm.detect_abandoned(now=later())
+		self.assertIn(hashed, {e.email_hash for e in funnel("h1-open")})
+		[(wait,)] = frappe.db.sql("SELECT @@SESSION.innodb_lock_wait_timeout")
+		frappe.db.sql("SET SESSION innodb_lock_wait_timeout = %s", (WAIT,))
+		self.addCleanup(frappe.db.sql, "SET SESSION innodb_lock_wait_timeout = %s", (int(wait),))
+		with own_connection() as booking_:
+			# a booking, not committed yet, tracks the same person in a new session
+			visit(booking_, "h1-open-again", "h1-open@example.com")
+			g = frappe.get_doc("Guest", guest)
+			g.tex_consent_email = 0
+			g.save()                                     # the withdrawal: it does not wait for that booking
+			self.assertEqual({e.email_hash for e in funnel("h1-open")}, {None})
+			self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", {"session_id": "h1-open"}, "email"), None)
+			# while the withdrawal is not committed, bookings keep tracking: another visitor, the same person
+			# again, and the withdrawn case's own session
+			for session, email in (("h1-other", "h1-other@example.com"), ("h1-open-again", "h1-open@example.com"),
+			                       ("h1-open", None)):
+				visit(booking_, session, email)
 
 	def test_a_deadlock_or_timeout_while_tracking_is_never_swallowed(self):
 		site = frappe.get_cached_doc("TEX Booking Site", frappe.db.get_value("TEX Booking Site", {"site_slug": SLUG}))
