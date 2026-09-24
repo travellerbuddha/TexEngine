@@ -113,6 +113,16 @@ def audit(action: str, *, reference_doctype: str | None = None, reference_name: 
 	return doc.name
 
 
+def recorded(action: str, *, reference_doctype: str, reference_name: str, new=None) -> bool:
+	"""Whether this event is on record already: the same action on the same record, with the same
+	new values when ``new`` is given. A report a migration writes is written once, however often
+	the migration runs (G-76)."""
+	filters = {"action": action, "reference_doctype": reference_doctype, "reference_name": reference_name}
+	if new is not None:
+		filters["new_value"] = _json(new)
+	return bool(frappe.db.exists("TEX Audit Event", filters))
+
+
 def audit_refusal(action: str, *, reference_doctype: str | None = None, reference_name: str | None = None,
                   property: str | None = None, old=None, new=None, reason: str | None = None,
                   source: str | None = None) -> None:

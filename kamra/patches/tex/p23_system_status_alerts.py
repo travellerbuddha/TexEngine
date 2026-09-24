@@ -1,7 +1,8 @@
 """System status, alerts and e-mail delivery status (ADR-047).
 
 - ``system.monitor`` is added to the seeded permission profiles that carry every capability
-  (Hotel Admin, Group Admin, Enterprise Admin); other profiles get it only when an
+  (Hotel Admin, Group Admin, Enterprise Admin), once, at the upgrade (a forced re-run does not
+  give it back where it was removed since, G-76); other profiles get it only when an
   administrator adds it.
 - TEX Settings gains ``status_alert_recipients``; TEX Communication gains ``email_queue`` and
   ``delivery_error`` (and indexes for the status sync).
@@ -13,6 +14,7 @@
 import frappe
 
 from kamra.tex.security.capabilities import DEFAULT_PROFILES
+from kamra.tex.setup import ran_before
 
 CAP = "system.monitor"
 
@@ -20,7 +22,7 @@ CAP = "system.monitor"
 def execute():
 	frappe.reload_doc("tex_platform", "doctype", "tex_settings")
 	frappe.reload_doc("tex_crm", "doctype", "tex_communication")
-	for name, caps in DEFAULT_PROFILES.items():
+	for name, caps in DEFAULT_PROFILES.items() if not ran_before(__name__) else ():
 		if CAP not in caps or not frappe.db.exists("TEX Permission Profile", name):
 			continue
 		if frappe.db.exists("TEX Profile Capability", {"parent": name, "parenttype": "TEX Permission Profile",

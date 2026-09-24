@@ -13,17 +13,22 @@ other channels loses it, and nobody gains anything:
   profile without a channel list). Administrators add channels to a profile where a desk sells
   on another one (e.g. a B2B desk).
 
-Re-runnable; prints what it changed.
+Once, at the upgrade (G-76): a forced re-run finds the patch logged and adds nothing, so a profile
+an administrator took ``price.any_channel`` from since keeps its channel list.
 """
 
 import frappe
 
 from kamra.tex.security.capabilities import ANY_CHANNEL, DEFAULT_PROFILES
+from kamra.tex.setup import ran_before
 
 
 def execute():
 	frappe.reload_doc("tex_platform", "doctype", "tex_profile_channel")
 	frappe.reload_doc("tex_platform", "doctype", "tex_permission_profile")
+	if ran_before(__name__):
+		print(f"p29: ran before; {ANY_CHANNEL} is not added again")
+		return
 	added = []
 	for name in frappe.get_all("TEX Permission Profile", pluck="name", order_by="name asc"):
 		caps = set(frappe.get_all("TEX Profile Capability",

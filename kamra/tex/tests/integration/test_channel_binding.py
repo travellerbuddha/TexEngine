@@ -396,6 +396,8 @@ class TestGrantsAndProfiles(ChannelCase):
 		plain = profile("G41 Plain Seller", ("price.view", "reservation.create"))
 		for name in ("Revenue Manager", "Hotel Admin"):
 			frappe.db.delete("TEX Profile Capability", {"parent": name, "capability": "price.any_channel"})
+		# the site as before the upgrade: p29 grants once, at its first run (G-76)
+		frappe.db.delete("Patch Log", {"patch": "kamra.patches.tex.p29_channel_binding"})
 		for _run in range(2):                                     # re-runnable
 			p29_channel_binding.execute()
 
