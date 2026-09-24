@@ -19,10 +19,10 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 
 | Check | Command | Result |
 |---|---|---|
-| TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **368 passed** (2026-09-24, branch `migrations-snapshot` with main `f3fcd33`) |
-| TEX integration tests (31 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **579 OK** (2026-09-24, branch `migrations-snapshot` with main `f3fcd33`, after migrate with p39; per module in the G-73/G-76 paragraph below) |
+| TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **400 passed** (2026-09-24, branch `reports-g46` with main `5e47867`) |
+| TEX integration tests (33 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **647 OK** (2026-09-24, branch `reports-g46` with main `5e47867`, after migrate with p38 and p40; per module in the G-46 paragraph below) |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **39 passed** (desktop + Pixel 7, RQ worker running): booking ×4 ×2, channels, contract-admin (G-50 step), critical-journey (R-58), crm-admin ×2, crs ×2, crs-actions ×3 (G-41), custom-host ×3, extras-inventory, manage-money ×3 (G-45), pay-link ×2 (G-83), policy-revisions, portfolio ×2, post-booking-extras ×2, shell, site-day ×2 (G-91), system-status ×4 |
-| Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-24, branch `migrations-snapshot` with main `f3fcd33`) |
+| Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-24, branch `reports-g46` with main `5e47867`, its code and schema) |
 | TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-24; bundles rebuilt on main) |
 | Lint / static security | `ruff check kamra/tex kamra/patches/tex`; semgrep (Frappe rules, ERROR) | clean / 0 findings (semgrep 1.177, frappe/semgrep-rules + r/python.lang.correctness, ERROR; G-45's changed files re-scanned: 0) |
 
@@ -194,6 +194,35 @@ fix), the upstream suites with the branch's code and schema (eval harness 76/76,
 e2e `crm-profile.spec.ts` passed twice in a row against the branch (own bench server and vite dev
 server; bundles not rebuilt on the branch).
 
+**G-46 (2026-09-24, ADR-059, branch `reports-g46` on main `665b6b9`, main `5e47867` merged in; no
+schema change).** Contract vs selling reconciles: per stay priced from a contract, contract cost +
+margin = the accommodation selling price the cost was marked up to (same currency at the recorded
+rate, same tax basis), and margin % is over that price (it was over gross revenue: 5.69 % instead of
+6.54 % on the test stay); revenue = accommodation + extras + taxes on top + stays without a contract
+cost; each row is rounded once, a total is the sum of its rows, per currency, never converted. New
+views: hotel, hotel group, promotion, cancellation, payment (with payments by method), extras,
+conversion; stay dates by night. New filters: scope (a hotel, a group, an enterprise or all,
+narrowed to the viewer's `report.view` hotels), market, channel, room, rate, currency, a stay and a
+sale window together. Every report endpoint declares `report.view`; cost and margin need
+`price.view_cost` at every hotel of the report. Each view is a fixed number of parameterised SQL
+aggregates (the guest-country N+1 is gone); the portfolio's scope labels and alert room names are read
+in one query each. Reports UI: one filter card kept in the URL across the views. New tests:
+integration `test_reports` 22 (on `665b6b9` 21 fail: 3 assertions (margin % over gross, 6 queries
+for 3 stays against 4 for 1, no endpoint declaring a capability) and 18 errors for the missing views
+and filters; the old production endpoint's test passes before and after); e2e `reports.spec.ts`. On
+the branch with its schema: all 33 integration modules **647 OK** (admin_markets 4, age_bands 11,
+audit_trail 15, channel_binding 27, commercial_flows 53, concurrency 8, critical_journey 31,
+crm_privacy 29, crm_segments 7, custom_domains 9, distribution 21, extras_inventory 17, fx_snapshot 5,
+grant_expiry 9, inventory 31, legacy_pricing 15, legacy_pricing_review 23, loyalty_admin 7,
+migrations_notify 7, modification_determinism 27, money_fields 9, patches 21, portfolio 2,
+post_booking_extras 12, pricing_policies 14, public_booking 17, reports 22, restrictions 25,
+security_hygiene 14, security_regressions 59, self_service_money 75, snapshot_integrity 9,
+system_status 12), the upstream suites with the branch's code and schema (eval harness 76/76,
+front-desk journey 13/13, banquet 101 OK), 400 unit tests, ruff clean, semgrep (Frappe rules, ERROR)
+0 findings on the changed Python files, `npx tsc -b`, `npm run build` (bundles not committed) and
+`npm run i18n:tex` clean; e2e `reports.spec.ts` and `portfolio.spec.ts` (3 tests) passed against the
+branch (own bench server and vite dev server, after a migrate with the branch).
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
@@ -201,12 +230,12 @@ server; bundles not rebuilt on the branch).
 
 | Status | Count | Requirements |
 |---|---|---|
-| COMPLETE | 23 | R-02, R-03, R-05, R-06, R-07, R-08, R-10, R-15, R-16, R-21, R-22, R-26, R-29, R-38, R-42, R-45, R-46, R-54, R-56, R-57, R-58, R-60 (process), R-61 (process) |
-| PARTIAL | 39 | all others; the gaps are listed per row |
+| COMPLETE | 24 | R-02, R-03, R-05, R-06, R-07, R-08, R-10, R-15, R-16, R-21, R-22, R-26, R-29, R-38, R-42, R-45, R-46, R-48, R-54, R-56, R-57, R-58, R-60 (process), R-61 (process) |
+| PARTIAL | 38 | all others; the gaps are listed per row |
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 0 High, 20 Medium, 4 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (unchanged by the ADR-056 review follow-up on branch `fix-crmp`, which fixed findings of resolved gaps; recounted 2026-09-24 on branch `restrictions-basket`: G-48 and G-84 fixed, ADR-057; before that on branch `migrations-snapshot`: G-76 and G-73 fixed; before that on `crm-privacy`: G-65, G-81 and G-95 fixed, G-97 found). All nine Critical
+**Open gaps by severity:** 0 Critical, 0 High, 19 Medium, 4 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (recounted 2026-09-24 on branch `reports-g46`: G-46 fixed, ADR-059; unchanged by the ADR-056 review follow-up on branch `fix-crmp`, which fixed findings of resolved gaps; recounted 2026-09-24 on branch `restrictions-basket`: G-48 and G-84 fixed, ADR-057; before that on branch `migrations-snapshot`: G-76 and G-73 fixed; before that on `crm-privacy`: G-65, G-81 and G-95 fixed, G-97 found). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -226,7 +255,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | 9 Payments | PARTIAL | sandbox end to end; link tokens never stored or leaked, allocations locked and idempotent (G-10, G-14 fixed); production certification BLOCKED |
 | 10 CRM | PARTIAL | guests, consent, segments, abandoned; 5 named segments not expressible (G-23), no loyalty admin UI (G-24) |
 | 11 Self-service | COMPLETE | view/pay/change/cancel; extras after booking (G-22 fixed); a change pays, then applies, refunds or keeps credit per the hotel's policy (G-45 fixed, ADR-044) |
-| 12 Reports | PARTIAL | production report; missing views/filters, margin does not reconcile (G-46) |
+| 12 Reports | PARTIAL | reports complete (R-48): every view and filter, contract vs selling reconciles (G-46 fixed, ADR-059); the dashboard (R-47) has no per-hotel time zones or reporting-currency conversion |
 | 13 Hardening | PARTIAL | this audit; all Critical items and G-10…G-20, G-85, G-86 fixed with regression tests; High G-21…G-25 open |
 
 ## 4. Requirements
@@ -246,7 +275,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-11 | Stay periods | PARTIAL | unlimited periods, weekday/priority, grid bulk rate change into a draft | No copy period; no bulk edit of occupancy/child/board across periods; `apply_rate_change` untested (G-47). |
 | R-12 | Sale vs stay date | PARTIAL | sale/stay windows, promotion booking-date/arrival/departure/LOS/through rules; extras and taxes effective-dated by sale time (G-20 fixed) · `test_sale_date_outside_eb_window`, `TestEligibility`, `TestEffectiveDatedExtrasAndTaxes` | Base rates/markups have no arrival/LOS/booking-date rules (G-54). |
 | R-13 | Markets | PARTIAL | `resolve_market` never guesses; Settings → Markets · `test_admin_markets`, market tests | Booking app silently drops a refused market link; guest country not reconciled with pricing market (G-55). |
-| R-14 | Contract vs selling price | PARTIAL | markup types/scopes/STACK; cost & margin stored; cost, rates and markups only with `price.view_cost` (G-11 fixed); the stored pricing internals (snapshot with explanation and FX record, cost, margin, FX rate, a quote's result, a revision's snapshots) never leave through Desk / REST: permlevel 1 for System Manager only, masked in the change history, left out of a generic write's response; the TEX API serves them by `price.view_cost` (G-95 fixed, ADR-056) · `TestMarkup` (1000+8%=1080), `test_g11_agents_never_see_contract_cost`, `test_crm_privacy.TestPricingInternalsOutsideTex` (5) | Margin % understated and untested (G-46). A contract version's rates stay readable in Desk by the Hotel Admin role whatever the profile (G-97, Low). |
+| R-14 | Contract vs selling price | PARTIAL | markup types/scopes/STACK; cost & margin stored; cost, rates and markups only with `price.view_cost` (G-11 fixed); the stored pricing internals (snapshot with explanation and FX record, cost, margin, FX rate, a quote's result, a revision's snapshots) never leave through Desk / REST: permlevel 1 for System Manager only, masked in the change history, left out of a generic write's response; the TEX API serves them by `price.view_cost` (G-95 fixed, ADR-056); margin reporting: per stay priced from a contract, contract cost + margin = the accommodation selling price it was marked up to (same currency, same tax basis), margin % over that price, extras and taxes on top reported beside it, per currency, only with `price.view_cost` at every hotel of the report (G-46 fixed, ADR-059) · `TestMarkup` (1000+8%=1080), `test_g11_agents_never_see_contract_cost`, `test_crm_privacy.TestPricingInternalsOutsideTex` (5), `test_reports.TestContractVsSelling` (3), e2e `reports.spec.ts` | A contract version's rates stay readable in Desk by the Hotel Admin role whatever the profile (G-97, Low). |
 | R-15 | Currency engine | **COMPLETE** | FX modes, TCMB/ECB adapters, as-of rates; every conversion a quote makes (room rate and cost, extras, fixed promotions and their thresholds, coupons, fixed levies) is recorded in the price-locked snapshot (`fx_rates`: exact rate, provider rate and date, adjustment, policy, sale time) and explained; ORIGINAL_* reprices reuse the recorded rates (G-56 fixed, ADR-051); rates keep at least 10 significant digits (TRY → EUR 0.02941176471) and a rate recorded at 6 places reads back as recorded (G-72 fixed, ADR-055) · `TestFx` (50+2%→51), unit `test_fx_record` (11), integration `test_fx_snapshot` (5: EUR contract sold in TRY with EUR/USD extras and a fixed EUR promotion; a pre-G-56 snapshot pins its line rates too, review follow-up) | — |
 | R-16 | Restrictions | **COMPLETE** | stop sell / open sale with check-in, check-out and stay-through modes, min/max LOS, CTA/CTD, release, min/max advance and the booking window (sale dates per night); scopes hotel, market, room, contract, rate plan, one sales channel or the Booking Engine / Call Center / both (G-48 fixed, ADR-057); calendar bulk editing in the Inventory grid with a hotel-level row; enforced on search, quote and booking (booking engine, CRS / Call Center) and on every change of a booked stay for what it newly takes (staff, guest self-service, paid or approved guest changes), overridable only with `restriction.edit`, a reason and an audit event; channel bookings accepted with a warning (ADR-039) and the booking window / advance days in the channels' ARI · unit `TestRestrictions`, `test_restriction_rules` (20), integration `test_restrictions` (25), e2e `restrictions-grid.spec.ts` | — (grid rows are room types, not room × rate plan: R-36, G-47) |
 | R-17 | Inventory | PARTIAL | pools, configured inventory, allotments with separate release and cutoff (a cutoff also gives the rooms back; Rates → Allotments; channels hear both at the site's midnight), explicit oversell limit, manual adjustment and closures (Inventory grid, audited), row locks; at a TEX hotel TEX inventory is the only capacity rule and every reservation write outside TEX (migration imports and status moves; a Desk/REST insert or change of nights is refused, G-92, ADR-052) takes the TEX lock and is checked against it; a change is checked only on the nights it newly takes; a reservation books only its own hotel's room types; hotels outside TEX keep the legacy check (G-49 fixed and reviewed, ADR-048); simultaneous bookings of different room types never deadlock, a deadlock victim is re-run or told to try again (G-85 fixed, ADR-032) · `test_inventory` (oversell, pools, configured, imports, held nights on staff and guest changes, allotment consumption, release, cutoff, room type ownership, deadlock handling, channel lock order), `test_concurrency` (last room, import vs TEX, room types side by side, retry), unit `TestInventoryMath` | Pools and configured inventory are set only in Desk (Room Type / Property), no TEX screen; inventory grid edits audit no old values (G-74); allotments have no channel dimension (G-41 remainder, deferred: ADR-050). |
@@ -280,7 +309,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-45 | Quote engine | **COMPLETE** | persisted TEX Quote (id, expiry, version, hash, request, breakdown, extras, promotions, tax, total); full internal explanation · `TestSpecExplanationExample`, `test_guest_quotes_never_carry_cost` | (multi-room charges tracked under R-19/R-20) |
 | R-46 | Price lock | COMPLETE | snapshot at booking; contract edits don't touch sold reservations; stored-value lock over the whole commercial record; only TEX services change a sold stay, the legacy night audit leaves it alone (G-01, G-04 fixed); the legacy check-out and cancellation fees never bill a locked stay at the legacy rate: a TEX-sold stay is billed on its TEX booking, an imported one posts its locked amount (G-96 fixed, ADR-052 review) · critical journey step 16 (UI shows the locked price), `TestPriceLock`, `TestLegacyNightAudit`, `TestLegacyCheckOut`, `TestImportedCancellationFee` | — |
 | R-47 | Dashboard | PARTIAL | `reports/service.dashboard`; portfolio across enterprise/group/hotels with sales, payment, abandonment KPIs per currency and inventory/restriction alerts (ADR-038, G-25 fixed) · `test_portfolio`, e2e `portfolio.spec.ts` | Per-hotel time zones; no reporting-currency conversion. |
-| R-48 | Reports | PARTIAL | production by stay/booking date, 11 groupings, CSV · 1 test | Missing views/filters; margin does not reconcile; N+1 on country (G-46). |
+| R-48 | Reports | **COMPLETE** | `kamra/tex/reports/service.py`, `api/reports.py` (`report`, `filter_options`), `screens/reports/*` (ADR-059): booking production by stay night or by sale date; by hotel, hotel group, room, market, channel, rate plan, board, contract, agency, guest country, status, day, month; promotion, cancellation, payment (with payments by method), extras and conversion views; contract vs selling and margin reconciling to the cent (cost + margin = accommodation; accommodation + extras + taxes on top + stays without a contract cost = revenue; totals = row sums); filters: one hotel or a hotel group / enterprise / all scope narrowed to the viewer's hotels, market, currency, channel, sale date and stay date together, room, rate; money per currency, never added across currencies; cost and margin only with `price.view_cost` at every hotel; every endpoint declares `report.view`; a fixed number of SQL aggregates per view, 800-day windows, long results folded; CSV per view (G-46 fixed) · `test_reports` (22), `test_portfolio`, `test_commercial_flows`, e2e `reports.spec.ts` | — (no one-currency converted total, by decision: ADR-059) |
 | R-49 | i18n | PARTIAL | 6-language UI catalogs (parity in CI), guest e-mails, hotel content translations | Server messages (226 `_()`) untranslated and UI language not sent; login page en/ar only; some hard-coded English (G-70). |
 | R-50 | Responsive | PARTIAL | no page overflow at 320–1920 on 11 screens; booking mobile e2e; staff date defaults start on the site's day in any browser time zone, and follow the site's midnight while a tab stays open (G-91 fixed: `session.bootstrap` `server.today`, `frontend/src/tex/lib/siteDay.ts` · `TestSessionSiteDay`, e2e `site-day`) | Content clipped at 320 px (inventory, reports); no admin responsive tests (G-80). |
 | R-51 | Accessibility | PARTIAL | skip link, focus, labels, dialogs, keyboard e2e | Contrast failures (sidebar 2.62:1, grid, weekend headers); no automated a11y tests (G-63). |
