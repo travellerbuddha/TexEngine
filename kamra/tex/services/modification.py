@@ -122,10 +122,31 @@ def original_fx(res, snap) -> list[dict]:
 	if isinstance(snap.get("original_fx_rates"), list):
 		return snap["original_fx_rates"]
 	if not snap.get("basis"):         # the booking's own snapshot, not a modification's
-		return fx_math.recorded(snap)
+		return _recorded(snap)
 	first = frappe.db.get_value("TEX Reservation Revision", {"reservation": res.name, "change_type": "Original"},
 	                            "snapshot_after", order_by="revision_no asc")
-	return fx_math.recorded(json.loads(first)) if first else []
+	return _recorded(json.loads(first)) if first else []
+
+
+def _recorded(snap: dict) -> list[dict]:
+	"""``fx.recorded``, told the currency of each converted line of a snapshot priced before
+	G-56: an extra's is its revision's, a fixed levy's its tax policy's (G-56 review)."""
+	if isinstance(snap.get("fx_rates"), list):
+		return fx_math.recorded(snap)
+	extra, tax = {}, {}
+	for e in snap.get("extras") or []:
+		rev = e.get("revision") if isinstance(e, dict) else None
+		if rev and e.get("fx_rate") not in (None, "") and rev not in extra:
+			ccy = frappe.db.get_value("TEX Extra", rev, "currency")
+			if ccy:
+				extra[rev] = ccy
+	for t in snap.get("taxes") or []:
+		src = (t.get("source") or "") if isinstance(t, dict) else ""
+		if src.startswith("tax_policy:") and t.get("fx_rate") not in (None, "") and src not in tax:
+			ccy = frappe.db.get_value("TEX Tax Policy", src.split(":", 1)[1], "currency")
+			if ccy:
+				tax[src] = ccy
+	return fx_math.recorded(snap, extra_currency=extra, tax_currency=tax)
 
 
 def fx_pins(res, snap, basis: str) -> dict | None:

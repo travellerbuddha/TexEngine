@@ -159,3 +159,21 @@ class TestCrossCurrencySnapshot(TexTestCase):
 		self.assertEqual(_rates(p["proposed"])[("EUR", "TRY")]["sell_rate"], "56.100000")   # the late import
 		self.assertEqual(_rates(p["proposed"])[("USD", "TRY")]["sell_rate"], "40.000000")   # revised later
 		self.assertNotIn("origin", _rates(p["proposed"])[("EUR", "TRY")])
+
+	def test_a_snapshot_sold_before_g56_pins_its_line_rates(self):
+		# a pre-G-56 snapshot recorded the room rate (``fx``) and each converted line's rate
+		# (``extras[].fx_rate`` with the extra revision); the tables then say something else about
+		# the sale time (the USD rate live then is corrected in place)
+		legacy = {k: v for k, v in self.sold.items() if k != "fx_rates"}
+		frappe.db.set_value("Reservation", self.res, "tex_pricing_snapshot", json.dumps(legacy),
+		                    update_modified=False)
+		frappe.db.set_value("TEX Reservation Revision", {"reservation": self.res, "change_type": "Original"},
+		                    "snapshot_after", json.dumps(legacy))
+		frappe.db.set_value("TEX FX Policy", self.usd_policy, "manual_rate", 45)
+		_rate("TCMB", "EUR", "TRY", 55, getdate(self.sold_at), add_to_date(self.sold_at, minutes=-1))
+		p = modification.propose(self.res, {}, basis="ORIGINAL_VERSION")
+		self.assertEqual(p["proposed"]["totals"]["total"], self.sold["totals"]["total"])
+		rates = _rates(p["proposed"])
+		self.assertEqual((rates[("EUR", "TRY")]["sell_rate"], rates[("USD", "TRY")]["sell_rate"]),
+		                 ("51.000000", "40.000000"))
+		self.assertEqual(rates[("USD", "TRY")]["mode"], "RECORDED")

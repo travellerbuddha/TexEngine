@@ -137,6 +137,8 @@ def describe(snap: FxSnapshot) -> str:
 		text = "same currency"
 	elif snap.mode == FxMode.MANUAL:
 		text = "manual rate"
+	elif snap.mode == FxMode.RECORDED:
+		text = "rate recorded on the sold line"
 	else:
 		text = f"{snap.provider or '?'} {to_str6(snap.provider_rate)}"
 		if snap.rate_date:
@@ -216,15 +218,50 @@ def from_dict(d: dict, *, origin: str | None = None) -> FxSnapshot:
 		origin=origin if origin is not None else d.get("origin"))
 
 
-def recorded(snapshot: dict) -> list[dict]:
-	"""The conversions a priced snapshot records: its ``fx_rates``; a snapshot priced before
-	G-56 recorded the contract → sell rate only (``fx``)."""
+def recorded(snapshot: dict, *, extra_currency: dict[str, str] | None = None,
+             tax_currency: dict[str, str] | None = None) -> list[dict]:
+	"""The conversions a priced snapshot records: its ``fx_rates``. A snapshot priced before
+	G-56 recorded the contract → sell rate in full (``fx``) and each converted line's rate:
+	``extras[].fx_rate`` (the extra's currency is its revision's: ``extra_currency`` maps the
+	revision, or the code, to it) and ``taxes[].fx_rate`` of a fixed levy (``tax_currency``
+	maps the line's source, e.g. "tax_policy:TXP-0003", to the policy's currency). A line
+	whose currency the caller cannot say is not recorded: that pair is resolved as of the sale.
+	Extras added after booking (``addon``) keep their own price and are never repriced."""
 	if isinstance(snapshot.get("fx_rates"), list):
 		return [r for r in snapshot["fx_rates"] if isinstance(r, dict)]
+	out: list[dict] = []
 	room = snapshot.get("fx")
 	if isinstance(room, dict) and room.get("from") and room.get("to") and room["from"] != room["to"]:
-		return [{**room, "used_for": ["accommodation"]}]
-	return []
+		out.append({**room, "used_for": ["accommodation"]})
+	sell = str(snapshot.get("currency") or (room or {}).get("to") or "").upper()
+
+	def line(ccy: str | None, rate, use: str) -> None:
+		ccy = str(ccy or "").upper()
+		if not ccy or not sell or ccy == sell or rate in (None, ""):
+			return
+		try:
+			rate = D(rate)
+		except ValueError:
+			return
+		if rate <= 0:
+			return
+		for r in out:
+			if (r["from"], r["to"]) == (ccy, sell):
+				if D(r["sell_rate"]) == rate and use not in r["used_for"]:
+					r["used_for"].append(use)
+				return            # one rate per pair; a differing line rate is not guessed between
+		out.append({"from": ccy, "to": sell, "mode": FxMode.RECORDED.value, "sell_rate": to_str6(rate),
+		            "provider": None, "provider_rate": None, "provider_rate_id": None, "rate_date": None,
+		            "adjustment": None, "policy_id": None, "as_of": None, "used_for": [use]})
+
+	for e in snapshot.get("extras") or []:
+		if isinstance(e, dict) and e.get("ok", True) and not e.get("addon") and e.get("fx_rate") not in (None, ""):
+			line((extra_currency or {}).get(e.get("revision") or e.get("code") or ""), e["fx_rate"],
+			     f"extra:{e.get('code')}")
+	for t in snapshot.get("taxes") or []:
+		if isinstance(t, dict) and t.get("fx_rate") not in (None, ""):
+			line((tax_currency or {}).get(t.get("source") or ""), t["fx_rate"], f"tax:{t.get('code')}")
+	return out
 
 
 def pins(record: list[dict], *, origin: str) -> dict[tuple[str, str], FxSnapshot]:

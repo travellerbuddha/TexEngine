@@ -156,3 +156,42 @@ class TestAddonsRecordTheirRates(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+class TestLegacySnapshotLinePins(unittest.TestCase):
+	"""Review of G-56: a snapshot sold before G-56 also recorded each converted extra's and
+	levy's rate on its line (``extras[].fx_rate`` with the extra revision, ``taxes[].fx_rate``
+	with the tax policy): those rates are pinned too, keyed by the currency the caller reads
+	from the revision / policy."""
+
+	def legacy(self):
+		sold = engine.price_stay(ctx(), req()).to_dict()
+		return {k: v for k, v in sold.items() if k != "fx_rates"}, sold
+
+	def test_line_rates_become_pins(self):
+		legacy, _sold = self.legacy()
+		record = fx.recorded(legacy, extra_currency={"EXT-00011": "USD"},
+		                     tax_currency={"tax_policy:TXP-00003": "EUR"})
+		pins = fx.pins(record, origin="reservation:RES-0")
+		self.assertEqual(set(pins), {("EUR", "TRY"), ("USD", "TRY")})
+		self.assertEqual(pins[("EUR", "TRY")], replace(EUR_TRY, origin="reservation:RES-0"))   # the full room rate
+		usd = pins[("USD", "TRY")]
+		self.assertEqual((usd.mode, usd.sell_rate, usd.policy_id), (FxMode.RECORDED, D("40"), None))
+		self.assertEqual(next(r for r in record if r["from"] == "USD")["used_for"], ["extra:SPA"])
+		self.assertIn("rate recorded on the sold line", fx.describe(usd))
+
+	def test_a_reprice_on_legacy_line_pins_gives_the_sold_price(self):
+		legacy, sold = self.legacy()
+		pins = fx.pins(fx.recorded(legacy, extra_currency={"EXT-00011": "USD"}), origin="reservation:RES-0")
+		eur, usd = pins[("EUR", "TRY")], pins[("USD", "TRY")]
+		again = engine.price_stay(ctx(fx=eur, extra_fx={"USD": usd}, promo_fx={"EUR": eur, "USD": usd},
+		                              tax_fx={"EUR": eur}), req())
+		self.assertEqual(again.to_dict()["totals"], sold["totals"])
+
+	def test_without_the_line_currency_nothing_is_guessed(self):
+		legacy, _sold = self.legacy()
+		self.assertEqual({(r["from"], r["to"]) for r in fx.recorded(legacy)}, {("EUR", "TRY")})
+		# an extra added after booking is carried at its own price, never repriced: not a pin
+		legacy["extras"] = [{**e, "addon": "ADD-1"} for e in legacy["extras"]]
+		self.assertEqual({(r["from"], r["to"]) for r in fx.recorded(legacy, extra_currency={"EXT-00011": "USD"})},
+		                 {("EUR", "TRY")})
