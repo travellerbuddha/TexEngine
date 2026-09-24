@@ -225,8 +225,10 @@ def gated_accounts(property: str | None = None) -> list[dict]:
 		problem = account_rule(a, "new")
 		if not problem:
 			continue
+		# by name, not by last write: the same open charges make the same report (p19 audits it once)
 		open_charges = frappe.get_all("TEX Payment Transaction", filters={
-			"provider_account": a.name, "txn_type": "Charge", "status": "Pending"}, pluck="name")
+			"provider_account": a.name, "txn_type": "Charge", "status": "Pending"}, pluck="name",
+			order_by="name asc")
 		out.append({"account": a.name, "label": a.label, "property": a.property, "provider": a.provider,
 		            "environment": a.environment, "enabled": bool(a.enabled), "problem": problem,
 		            "open_charges": len(open_charges), "open_charge_names": open_charges[:20]})

@@ -655,6 +655,13 @@
   "one": "{count} stay",
   "other": "{count} stays"
  },
+ "crm.comms.subtitle": "E-mails TEX sent and calls, notes and messages staff logged, for every guest. The message itself is on the guest's profile.",
+ "crm.comms.search_ph": "Guest, subject or booking",
+ "crm.comms.none_filtered": "Nothing matches these filters",
+ "crm.comms.empty_hint": "Booking e-mails and the calls and notes staff log on guest profiles appear here.",
+ "crm.comms.col.when": "When",
+ "crm.comms.col.by": "By",
+ "crm.comms.system": "TEX (automatic)",
  "crm.loyalty.adjust_hotel": "Hotel",
  "crm.loyalty.adjust_hotel_hint": "The adjustment belongs to this hotel: its staff see the reason and who made it.",
  "crm.loyalty.adjust_hotel_pick": "Choose a hotel",

@@ -655,6 +655,13 @@
   "one": "{count} konaklama",
   "other": "{count} konaklama"
  },
+ "crm.comms.subtitle": "TEX'in gönderdiği e-postalar ile personelin kaydettiği aramalar, notlar ve mesajlar; tüm misafirler için. Mesajın kendisi misafir profilindedir.",
+ "crm.comms.search_ph": "Misafir, konu veya rezervasyon",
+ "crm.comms.none_filtered": "Bu filtrelere uyan kayıt yok",
+ "crm.comms.empty_hint": "Rezervasyon e-postaları ile personelin misafir profillerine kaydettiği aramalar ve notlar burada görünür.",
+ "crm.comms.col.when": "Zaman",
+ "crm.comms.col.by": "Kaydeden",
+ "crm.comms.system": "TEX (otomatik)",
  "crm.loyalty.adjust_hotel": "Otel",
  "crm.loyalty.adjust_hotel_hint": "Düzeltme bu otele aittir: nedenini ve kimin yaptığını bu otelin personeli görür.",
  "crm.loyalty.adjust_hotel_pick": "Otel seçin",

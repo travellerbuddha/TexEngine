@@ -9,7 +9,8 @@ import {
   useOutletContext,
 } from "react-router-dom"
 import AppShell, { type ShellContext } from "./AppShell"
-const Login = lazy(() => import("./screens/Login"))
+// TEX sign-in (G-60): brand, the six TEX languages, the source offer
+const Login = lazy(() => import("./tex/screens/login/Login"))
 const TexApp = lazy(() => import("./tex/TexApp"))
 import { useAuth } from "./lib/auth"
 import { t, useT } from "./lib/i18n"

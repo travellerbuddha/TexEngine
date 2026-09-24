@@ -665,6 +665,13 @@
   "few": "{count} sejururi",
   "other": "{count} de sejururi"
  },
+ "crm.comms.subtitle": "E-mailurile trimise de TEX și apelurile, notițele și mesajele înregistrate de personal, pentru toți oaspeții. Mesajul propriu-zis este în profilul oaspetelui.",
+ "crm.comms.search_ph": "Oaspete, subiect sau rezervare",
+ "crm.comms.none_filtered": "Nimic nu corespunde acestor filtre",
+ "crm.comms.empty_hint": "Aici apar e-mailurile de rezervare și apelurile și notițele pe care personalul le înregistrează în profilurile oaspeților.",
+ "crm.comms.col.when": "Când",
+ "crm.comms.col.by": "De către",
+ "crm.comms.system": "TEX (automat)",
  "crm.loyalty.adjust_hotel": "Hotel",
  "crm.loyalty.adjust_hotel_hint": "Ajustarea aparține acestui hotel: personalul său vede motivul și cine a făcut-o.",
  "crm.loyalty.adjust_hotel_pick": "Alegeți un hotel",

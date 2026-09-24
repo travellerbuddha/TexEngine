@@ -12,7 +12,9 @@ an administrator sets it live. That is every hotel of a Kamra database upgraded 
 puts in a hotel group in the same migration: setting them live would stop their Desk before TEX
 could sell anything, what ADR-052 M3 set out to avoid. Hotels outside TEX are untouched.
 
-Re-runnable: a hotel that is live already is left as it is. Prints what it did.
+Once, at the upgrade (review of G-76, M1): an administrator may put a hotel back to onboarding
+afterwards (``legacy.set_live``, audited ``hotel.go_live_undo``), and a forced re-run leaves it
+there. Prints what it did.
 """
 
 import frappe
@@ -30,6 +32,11 @@ def sold_through_tex(property: str) -> bool:
 
 def execute():
 	if not frappe.db.has_column("Property", "tex_live_from"):
+		return
+	from kamra.tex.setup import ran_before
+
+	if ran_before(__name__):
+		print("p36: ran before; whether a hotel is live is its administrators' decision now")
 		return
 	from kamra.tex.legacy import is_tex_hotel
 	from kamra.tex.security.audit import audit

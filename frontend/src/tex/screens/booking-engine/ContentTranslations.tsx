@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Languages } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
@@ -19,6 +20,7 @@ import {
   Textarea,
   useToast,
 } from "../../ui"
+import { BeNav } from "./BeNav"
 
 interface Item {
   ref_doctype: string
@@ -61,7 +63,9 @@ export default function ContentTranslations() {
     "save",
   )
   const [lang, setLang] = useState("de")
-  const [kind, setKind] = useState<Kind>("rooms")
+  // ?kind=rooms: opened from Booking Engine › Rooms (G-64)
+  const [params] = useSearchParams()
+  const [kind, setKind] = useState<Kind>(() => (KINDS.includes(params.get("kind") as Kind) ? (params.get("kind") as Kind) : "rooms"))
   const [edits, setEdits] = useState<Record<string, string>>({})
 
   const items = useMemo(() => (q.data?.items ?? []).filter((i) => KIND_OF[i.ref_doctype] === kind), [q.data, kind])
@@ -118,6 +122,7 @@ export default function ContentTranslations() {
         subtitle={property ? t("be.content.subtitle", { hotel: property.property_name }) : undefined}
         crumbs={[{ label: t("core.nav.booking_engine"), to: "/tex/booking-engine" }, { label: t("be.content.title") }]}
       />
+      <BeNav />
       {!allowed ? (
         <Card>
           <EmptyState icon={<Languages className="size-5" />} title={t("core.error.permission")} description={t("be.content.no_access")} />

@@ -675,6 +675,13 @@
   "many": "{count} pobytów",
   "other": "{count} pobytu"
  },
+ "crm.comms.subtitle": "E-maile wysłane przez TEX oraz rozmowy, notatki i wiadomości zapisane przez personel, dla wszystkich gości. Sama wiadomość jest w profilu gościa.",
+ "crm.comms.search_ph": "Gość, temat lub rezerwacja",
+ "crm.comms.none_filtered": "Nic nie pasuje do tych filtrów",
+ "crm.comms.empty_hint": "Tu pojawiają się e-maile rezerwacyjne oraz rozmowy i notatki zapisywane przez personel w profilach gości.",
+ "crm.comms.col.when": "Kiedy",
+ "crm.comms.col.by": "Kto",
+ "crm.comms.system": "TEX (automatycznie)",
  "crm.loyalty.adjust_hotel": "Hotel",
  "crm.loyalty.adjust_hotel_hint": "Korekta należy do tego hotelu: jego personel widzi powód i autora.",
  "crm.loyalty.adjust_hotel_pick": "Wybierz hotel",

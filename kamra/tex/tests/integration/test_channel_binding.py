@@ -390,6 +390,7 @@ class TestGrantsAndProfiles(ChannelCase):
 
 	def test_p29_keeps_revenue_and_admin_profiles_on_every_channel(self):
 		from kamra.patches.tex import p29_channel_binding
+		from kamra.tex.tests.integration.test_patches import sandbox
 
 		as_user("Administrator")
 		publisher = profile("G41 Publisher", ("price.view", "contract.publish"))
@@ -398,8 +399,9 @@ class TestGrantsAndProfiles(ChannelCase):
 			frappe.db.delete("TEX Profile Capability", {"parent": name, "capability": "price.any_channel"})
 		# the site as before the upgrade: p29 grants once, at its first run (G-76)
 		frappe.db.delete("Patch Log", {"patch": "kamra.patches.tex.p29_channel_binding"})
-		for _run in range(2):                                     # re-runnable
-			p29_channel_binding.execute()
+		with sandbox():                         # its DocType sync is DDL, which would commit this test
+			for _run in range(2):                                 # re-runnable
+				p29_channel_binding.execute()
 
 		def caps(name):
 			return set(frappe.get_all("TEX Profile Capability", filters={"parent": name}, pluck="capability"))

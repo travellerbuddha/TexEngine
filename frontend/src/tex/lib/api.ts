@@ -17,6 +17,7 @@ export type TexModule =
   | "content"
   | "distribution"
   | "system"
+  | "lists"
   // area helper modules (kamra/tex/api/ui_<area>.py)
   | `ui_${string}`
 

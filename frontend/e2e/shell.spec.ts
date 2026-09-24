@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test"
-import { login, trackErrors } from "./helpers"
+import { login, texPath, trackErrors } from "./helpers"
 
 test("TEX shell: spec navigation, PMS hidden, hotel scope, language switch", async ({ page }) => {
   const noErrors = trackErrors(page)
   await login(page, "revenue@demo.tex")
-  await page.goto("/kamra/")
-  await expect(page).toHaveURL(/\/kamra\/tex$/)
+  await page.goto(texPath("/"))
+  await expect(page).toHaveURL(/\/tex$/)
   const nav = page.getByRole("navigation", { name: "Main navigation" })
   for (const item of ["Dashboard", "CRS", "Reservations", "Rates & Contracts", "Inventory", "Booking Engine", "CRM", "Reports"])
     await expect(nav.getByRole("link", { name: item, exact: true })).toBeVisible()
@@ -27,9 +27,9 @@ test("TEX shell: spec navigation, PMS hidden, hotel scope, language switch", asy
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/tex\/reservations/)
   // PMS screens are not reachable by URL either while the PMS is switched off (G-16)
-  for (const legacy of ["/kamra/today", "/kamra/pos", "/kamra/housekeeping", "/kamra/cashier"]) {
-    await page.goto(legacy)
-    await expect(page).toHaveURL(/\/kamra\/tex/)
+  for (const legacy of ["/today", "/pos", "/housekeeping", "/cashier"]) {
+    await page.goto(texPath(legacy))
+    await expect(page).toHaveURL(/\/tex/)
   }
   noErrors()
 })

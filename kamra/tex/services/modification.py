@@ -305,10 +305,12 @@ def payment_deadline(p: dict) -> datetime:
 
 def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURRENT", basis_sale_at=None,
             _check_permission: bool = True, _locked: bool = False, internal: bool | None = None,
-            _sale_at=None) -> dict:
+            _sale_at=None, _staff: bool = False) -> dict:
 	"""``internal`` (cost, margin, explanation) defaults to the caller's price.view_cost;
 	guest calls (``_check_permission=False``) never get it unless the service asks.
 	``_sale_at`` (internal only) prices CURRENT as of that moment instead of now.
+	``_staff``: a staff user applies their own proposal (``apply``), so a refusal may name what staff
+	need; any other call without the permission check is a guest's, told a guest-safe reason.
 
 	``basis_sale_at`` is the HISTORICAL_SALE_DATE basis's sale time and is refused with any
 	other basis; ``changes`` never carry a sale time (G-51). The proposal token names who
@@ -360,7 +362,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		                            fx_pins=fx_pins(res, snap, basis),
 		                            expected_hash=sold_terms.expected_hash(res, snap, version))
 	except contracts.PayloadMismatch as e:
-		sold_terms.refuse(res, snap, e, use="reprice", basis=basis, version=version)
+		sold_terms.refuse(res, snap, e, use="reprice", basis=basis, version=version,
+		                  guest=not (_check_permission or _staff))
 	req = quote.request
 	old_ccy = res.tex_currency or snap.get("currency")
 	old_total = from_db(res.tex_total_amount or res.amount_after_tax, old_ccy or "EUR")
@@ -555,7 +558,8 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	rt = changes.get("room_type") or req0["room_type"]
 	avail.lock_nights(res.property, [(rt, ci, co)])
 	result = propose(res.name, changes, basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
-	                 _check_permission=False, _locked=True, internal=True, _sale_at=pin)
+	                 _check_permission=False, _locked=True, internal=True, _sale_at=pin,
+	                 _staff=_proposal is None and not _guest_authorized)
 	overridden_restrictions = result["restrictions"] if override_restrictions and \
 		result["sellable_ignoring_restrictions"] else []
 	if not result["sellable"] and not overridden_restrictions:
