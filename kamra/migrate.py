@@ -19,6 +19,7 @@ import frappe
 from frappe import _
 
 from kamra.authz import require_roles
+from kamra.tex.money import D
 
 # who a header column really is, whatever the vendor called it
 SYNONYMS = {
@@ -224,7 +225,7 @@ def _normalize(property: str, csv_text: str, preset: str):
 			"check_in": ci, "check_out": co,
 			"adults": int(re.sub(r"\D", "", get("adults") or "") or 2) or 2,
 			"children": int(re.sub(r"\D", "", get("children") or "") or 0),
-			"amount_after_tax": float(amount) if amount else None,
+			"amount_after_tax": D(amount) if amount else None,     # money: never a float
 			"status": status,
 			"channel": get("channel").strip() or None,
 		})
@@ -256,8 +257,12 @@ def run_import(property: str, csv_text: str, preset: str = "auto"):
 	"""Import the file. Live rows (confirmed / in-house) go through the
 	full booking validation; history rows (checked-out / cancelled /
 	no-show) are stored as records with their status stamped directly, so
-	guest history survives the migration."""
+	guest history survives the migration.
+
+	TEX Engine (G-92, ADR-052): at a TEX hotel every row is recorded as
+	imported at its amount (never auto-priced; a live row needs one)."""
 	from kamra.api import _find_or_create_guest
+	from kamra.tex.legacy import flag_import
 	_headers, _mapping, rows, issues, _dayfirst = _normalize(
 		property, csv_text, preset)
 
@@ -283,6 +288,8 @@ def run_import(property: str, csv_text: str, preset: str = "auto"):
 			})
 			if row["amount_after_tax"]:
 				doc.amount_after_tax = row["amount_after_tax"]
+			# a migration, not a sale (ADR-028, ADR-052)
+			flag_import(doc, row["status"])
 			if row["status"] in HISTORY:
 				# a past stay is a record, not a live booking: skip live
 				# validation (overbooking guard, blacklist) and stamp the

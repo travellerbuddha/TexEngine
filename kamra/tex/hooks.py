@@ -52,18 +52,59 @@ def locked_changes(doc) -> list[str]:
 	return changed
 
 
-def reservation_validate(doc, method=None):
-	"""ADR-010: a price-locked reservation only changes commercially through the TEX
-	modification flow (proposal → revision → audit), never by editing fields — whatever the
-	caller (Desk, REST, legacy PMS code) and whatever the status change in the same save."""
+# At a TEX hotel no stay changes these outside the TEX services, whoever priced it (G-92): its
+# stay, party and price, the commercial record, and the hotel itself (a stay moved into a TEX
+# hotel would be a sale outside TEX; one moved out of it would be re-priced by the legacy engine).
+TEX_HOTEL_FIELDS = (*PRICING_INPUTS, *COMMERCIAL_RECORD, "property")
+
+
+def guard_commercial_change(doc) -> None:
+	"""A stay changes commercially only through the TEX services (modification, cancellation,
+	confirmation, add-ons, channel updates: ``flags.tex_modification``), whatever the caller —
+	the Desk form, REST (``PUT``, ``frappe.client.set_value``), legacy PMS actions
+	(``amend_stay``, ``move_reservation``) — and whatever the status change in the same save:
+
+	- a price-locked stay (ADR-010, G-01): its pricing inputs and commercial record;
+	- any stay that is at a TEX hotel, or was until this save (ADR-052, G-92), also one the
+	  legacy engine sold before the hotel joined TEX: its dates, room type, party, board, rate
+	  plan, price, commercial record and hotel. TEX re-prices only a stay it sold and the legacy
+	  engine never prices a TEX hotel, so such a stay keeps its terms; a new stay is booked in TEX.
+
+	``Reservation.validate`` calls this first, so nothing is locked or priced for a save that is
+	refused; the ``validate`` doc event checks the values the save will write again."""
 	if doc.is_new() or doc.flags.tex_modification or frappe.flags.tex_modification:
 		return
+	before = doc.get_doc_before_save()
+	if not before:
+		return
 	changed = locked_changes(doc)
-	if changed:
+	meta = doc.meta
+	at_hotel = [f for f in TEX_HOTEL_FIELDS if meta.has_field(f) and _differs(meta, before, doc, f)]
+	if not changed and not at_hotel:
+		return
+	from kamra.tex.legacy import is_tex_hotel
+
+	tex_hotel = next((p for p in dict.fromkeys((before.property, doc.property)) if is_tex_hotel(p)), None)
+	if tex_hotel:
+		changed = list(dict.fromkeys((*changed, *at_hotel)))
+	if not changed:
+		return
+	if tex_hotel and not before.get("tex_pricing_snapshot"):
 		frappe.throw(
-			_("Reservation {0} is price-locked. Use Modify reservation to change {1}; the price difference is "
-			  "proposed and recorded as a revision.").format(doc.name, ", ".join(changed)),
-			title=_("Price locked"))
+			_("Reservation {0} was not priced by TEX, and {1} is sold through TEX: its {2} cannot be changed here. "
+			  "Keep the stay as it is, or cancel it and book the new stay in TEX (Reservations → CRS or Call "
+			  "Center).").format(doc.name, tex_hotel, ", ".join(changed)),
+			title=_("Book it in TEX"))
+	frappe.throw(
+		_("Reservation {0} is price-locked. Use Modify reservation to change {1}; the price difference is "
+		  "proposed and recorded as a revision.").format(doc.name, ", ".join(changed)),
+		title=_("Price locked"))
+
+
+def reservation_validate(doc, method=None):
+	"""``validate`` doc event: the commercial guard on the values the save will write
+	(ADR-010, ADR-052). ``Reservation.validate`` already ran it before its own checks."""
+	guard_commercial_change(doc)
 
 
 def reservation_before_insert(doc, method=None):

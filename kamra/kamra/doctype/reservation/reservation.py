@@ -8,7 +8,16 @@ from frappe.utils import cint, date_diff, formatdate, now_datetime, today
 
 
 class Reservation(Document):
+	def before_insert(self):
+		# TEX Engine (G-92, ADR-052): a TEX hotel's reservation is created by TEX only (its
+		# booking service, a channel's sale) or by a flagged migration import - never by the
+		# Desk form, REST or data import, which would be priced by the legacy engine
+		from kamra.tex.legacy import guard_new_reservation
+		guard_new_reservation(self)
+
 	def after_insert(self):
+		from kamra.tex.legacy import record_import
+		record_import(self)       # an imported TEX-hotel stay is audited (ADR-052)
 		# every booking gets a pre-arrival check-in link
 		self.db_set(
 			"precheckin_token", frappe.generate_hash(length=24),
@@ -99,6 +108,11 @@ class Reservation(Document):
 					title=_("Overbooking limit"))
 
 	def validate(self):
+		# TEX Engine: a price-locked stay, or any stay at a TEX hotel, changes its stay or price
+		# only through the TEX modification service (ADR-010, G-92/ADR-052) - checked first, so
+		# nothing below locks inventory or prices for a save that is refused
+		from kamra.tex.hooks import guard_commercial_change
+		guard_commercial_change(self)
 		self.validate_dates()
 		self.validate_past_check_in()
 		self.nights = date_diff(self.check_out_date, self.check_in_date)
@@ -254,13 +268,19 @@ class Reservation(Document):
 		TEX Engine (ADR-010): reservations priced by TEX or price-locked are never
 		re-priced here - their commercial terms change only through the TEX
 		modification flow. Legacy reservations re-price only on insert or when a
-		pricing input changes, never silently on unrelated edits."""
+		pricing input changes, never silently on unrelated edits.
+
+		A TEX hotel is never priced here (G-92, ADR-052): its stays are priced by TEX,
+		or imported at the amount they were sold at."""
 		if not getattr(self, "auto_price", 0) or not self.room_type:
 			return
 		if self.get("tex_pricing_source") == "TEX" or self.get("tex_price_locked"):
 			return
+		from kamra.tex.legacy import is_tex_hotel
+		before = None if self.is_new() else self.get_doc_before_save()
+		if is_tex_hotel(self.property) or (before and is_tex_hotel(before.property)):
+			return
 		if not self.is_new():
-			before = self.get_doc_before_save()
 			ages = lambda d: [str(o.get("age") or "") for o in (d.get("occupants") or [])]  # noqa: E731
 			if before and ages(before) == ages(self) and not any(
 				str(before.get(f) or "") != str(self.get(f) or "")
