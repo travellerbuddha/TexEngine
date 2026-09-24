@@ -130,6 +130,18 @@ class TestPartyTotal(unittest.TestCase):
 		self.assertEqual([s["included"] for s in slots], [True, True, False])
 		self.assertIsNone(slots[0]["rule_id"])
 
+	def test_each_child_is_at_the_lower_edge_of_its_band_as_the_sweep_prices_it(self):
+		p = period(self.t, "P1")
+		for ordering, codes in ((ChildOrdering.OLDEST_FIRST, ["TEEN", "CHB", "INF"]),
+		                        (ChildOrdering.YOUNGEST_FIRST, ["INF", "CHB", "TEEN"])):
+			party = matrix.sample_party(replace(self.t, child_ordering=ordering), 2, ["chb", "INF", "TEEN"], p.start)
+			self.assertEqual([(s.position, s.band.code, s.months) for s in party.children],
+			                 [(i + 1, c, {"INF": 0, "CHB": 84, "TEEN": 144}[c]) for i, c in enumerate(codes)], ordering)
+			self.assertEqual([s.input_index for s in party.children],
+			                 [["CHB", "INF", "TEEN"].index(c) for c in codes])
+			self.assertEqual((party.adults, party.declared_adults, party.infants, party.reference_date),
+			                 (2, 2, 1, p.start))
+
 	def test_an_unknown_band_raises(self):
 		with self.assertRaises(PricingError):
 			matrix.party_total(self.t, "STD", period(self.t, "P1"), 2, ["XX"])
