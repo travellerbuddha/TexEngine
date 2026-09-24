@@ -4118,3 +4118,148 @@ each fix has a test written first (the fail-first counts are at the end).
   - 8/8 against the bench itself (custom-host, pay-link, manage-money). The dev bench serves
     `/assets/kamra` from main's checkout, so these ran the branch's server code with main's
     bundles.
+
+## ADR-061 Pricing Workspace
+*The Pricing Workspace is a UX over the existing contract-version tables. The server prices,
+validates and quotes the editor's unsaved state in memory (a read-only overlay) and never saves it;
+the client does no arithmetic on money. Design: `PRICING_WORKSPACE_UX.md` (revision 3). This ADR
+grows with the slices S1–S16; the implemented parts are marked.*
+
+**Context.** Entering an ORS-style contract in the version editor took about 100 clicks, 7 tab
+switches, 7 modal dialogs and a forced save before any price could be checked
+(`PRICING_WORKSPACE_UX.md` §1.3). The engine and the payload can already express every part of
+the target model. Missing were a workspace that matches how a revenue manager works and a few API
+gaps (§4 GAP-1…GAP-12). `price_matrix`, `validate_version` and `preview_price` read only the saved
+draft, so the rates grid hid every resolved price as soon as anything was unsaved (GAP-1). A blank
+rule value was saved as 0 and priced as 0 (GAP-8). The version said only `editable`: nothing about
+preview or publish rights, the basis lock or the currency's minor units (GAP-10).
+
+**Decision (the workspace; §0 of the design).**
+- *D1 Projection.* The workspace is a projection over the existing `EditorState` (settings, the
+  eight tables, selling). Every gesture becomes ordinary `period_rates`, `occupancy_rules`,
+  `age_bands`, `rooms`, `periods` or `boards` rows. The save payload, `payloadOf`, the fingerprint
+  and `save_version` stay as they are. No DocType, payload (`tex.contract.v1`), op, precedence or
+  lifecycle change.
+- *D2 No client money arithmetic.* Resolved prices, occupancy totals, price-test subtotals, bulk
+  adjustments and adjustments of entered base prices are computed by the server: the read-only
+  overlay (GAP-1), `apply_op_values` (GAP-7, S5) and the quote's `nights[]` subtotals (GAP-12, S5).
+  The client only parses, normalises and compares decimal strings; the only numbers it computes
+  are integers (counts, positions, capacity loops, date offsets).
+- *D3 No autosave.* Save stays explicit (button, Ctrl/Cmd+S), sends the whole payload, is audited
+  and keeps `settle()` / `overSaved`. Live feedback comes from the overlay, so the forced save
+  before a price check goes away. The pricing basis is a contract-header field, saved by its own
+  explicit Apply.
+- *D4* The shorthand parser is pure, deterministic and locale-independent (both decimal marks, no
+  grouping separators, currency-aware refusal of ambiguous input), tested with `node --test`.
+- *D5* Four sections (Pricing · Commercial rules · Offers & promotions · Preview & audit). The old
+  row editors stay as Advanced rule tables, so no capability is lost.
+- *D6* The base room stays a UI concept (`TEX Contract Room.is_base`), made exclusive by the UI and
+  used as the default `base_room_type` of new formulas; the engine follows each rule's
+  `base_room_type`.
+- *D7* A period cell replaces the room's all-periods rule for that period and never stacks on it
+  (ADR-006).
+- *D8* Special combinations are ordinary `TEX Occupancy Rule` rows (`combination`, `position`,
+  `age_band`); valid combinations come from room capacity, as in the publish sweep.
+- *D9* Validation issues gain an optional, additive `ref` (room, period, rule, band(s), party,
+  board); codes and messages do not change (GAP-4, S4).
+- *D10* Shorthand maps to ops by the owner's fixed table in every grid; the only per-context
+  differences are forced by the DocType op lists (O2, O3).
+- *D11 The row decides a relative entry in the room matrix, never the cell's state.* On the base
+  room (which derives from nothing) the server applies the entry once to the entered price and it
+  is stored as ABSOLUTE; on every other room it always writes a formula from the room's default
+  base.
+- *D12* Engine defaults are shown where no rule exists: "Adult ×1.00 (default)" from the server's
+  `occupancy_defaults`; a child band without a rule is "No rule · not sellable" (ADR-007).
+- *D13* Band codes never reach the screen where a label exists: labels are saved with the band,
+  and codes in server text are replaced by labels on display.
+- *D14 The Explain ladder follows the engine's order* (Base → Period (identification) → Room →
+  Occupancy (adults) → Child → Special combination → Board → Period adjustment → Rate plan → Night
+  cost → Cost offers → Markup → FX → Promotion → Tax) and is a before → after chain in which every
+  value is a server field.
+
+**Owner sign-off (O1–O5; implemented as proposed, on the owner's review checklist).** Each is a
+small, isolated change in `shorthand.ts` / `model.ts` if the owner decides otherwise.
+- *O1* Board cell, bare `100` → ABSOLUTE 100, i.e. 100 per room per night (`boards.py`); the
+  reading line says so before commit. Alternative: a bare number is ADD (per adult).
+- *O2* Board cell, `-20` → ADD −20 (SUBTRACT is not a board op).
+- *O3* Board cell, `50%` → ADJUST_PERCENT 50 (PERCENT_OF is not a board op; the engine treats both
+  alike). Alternative: refuse and require `+50%`.
+- *O4* Base room, relative entry → parsed by the owner's table, applied once by the server to the
+  entered price and stored as ABSOLUTE (D11). Alternative: refuse (OP_NOT_ALLOWED, "use Adjust…").
+- *O5* Currency-aware AMBIGUOUS: in 0- and 2-decimal currencies an amount with 1–3 integer digits
+  and exactly 3 fraction digits (`1.500`) is refused with what to type; accepted in 3-decimal
+  currencies (KWD, BHD, OMR, JOD, TND). Alternative: drop the guard.
+
+**Decision (implemented in S2: GAP-1, GAP-8, GAP-10).**
+- *The read-only overlay* (`api/contracts.py _overlay(name, data)`). `price_matrix(version,
+  adults, data=None)`, `validate_version(name, data=None)` and `preview_price(..., data=None)` take
+  the payload `save_version` takes. With `data`:
+  - the same gates as before, plus `contract.edit` at the version's hotel and Draft status (a
+    published version is refused: "Only draft versions can be previewed with unsaved changes.");
+  - the payload is applied to the loaded draft in memory exactly as `save_version` applies it: the
+    same row cleaning (`_clean_rows`, shared), `_set_selling`, the settings, each table replaced;
+  - it is then checked as a save checks it, with the same messages: blank values (below), the
+    DocType defaults (`_set_defaults`), the decimal check (`decimals.check_inputs`, the 9-place
+    refusal), and Frappe's own side-effect-free checks (`_validate_mandatory`, and per document
+    `_validate_data_fields`, `_validate_selects`, `_validate_non_negative`, `_validate_length`);
+  - values are then normalised as a save stores and a load reads them (checks 0/1, integers,
+    decimals as exact Decimals with blank = 0, blank dates none), so the overlay prices exactly what
+    a save followed by a load would (tested by saving the same payload and comparing);
+  - at most 5,000 rows over all tables;
+  - nothing is saved, inserted, `db_set` or audited (tested: `modified`, the audit events and the
+    child rows are unchanged).
+- *Rule ids.* Each overlaid row is named `~<_key>` (its client key), else `~<table>-<position>`, so
+  the rule ids in explanations, issues and (S3) matrix sources point back to the editor's row.
+  Tables the payload does not carry keep their saved row names; the client maps those by `_name`.
+- *Errors.* A refusal of the overlay (rights, status, blank value, decimals, mandatory, select,
+  row cap) is raised. A draft that cannot be built (e.g. an unknown room type) answers
+  `{build_error, rooms: [], periods: []}` from `price_matrix`, the existing `BUILD` issue from
+  `validate_version` (the body moved into `svc.validate_doc(version)`; `svc.validate_version` keeps
+  its gate and calls it) and the existing `BUILD` reason from `preview_price`.
+- *Blank values (GAP-8).* `_require_values(v)` runs in `save_version` (after the tables are set,
+  before the save) and in the overlay: a `period_rates` or `occupancy_rules` row whose op is not
+  INHERIT, or a non-base `boards` row, with a blank value is refused with "<table>, row <n>: a value
+  is required; clear the cell to remove the price." Rows already stored as 0 load as "0" and are
+  unaffected; the UI deletes a row when its cell is cleared.
+- *Flags (GAP-10).* `get_version` adds `can_preview` (`price.view_cost`), `can_publish`
+  (`contract.publish`), `can_edit_contract` (`contract.edit`, whatever the version's status), all
+  at the version's hotel; `basis_locked` (`svc.is_published(contract)`, the predicate the contract
+  controller's header lock uses) and `contract_doc.minor_units` (`money.minor_units` of the contract
+  currency). The catalogue answer (agents) carries the three capability flags as false. They only
+  tell the UI what to offer; every endpoint checks again.
+- *Pricing basis.* No backend change: `save_contract({name, pricing_basis})` changes only the basis
+  before the first publish, and the controller refuses it afterwards ("… cannot change"); an
+  integration test pins both.
+- *No rate limit* on the overlay endpoints: they are staff-only (`contract.edit`), called debounced
+  (300 ms matrix, 1,200 ms validation), and bounded by the row cap; the existing endpoints had none.
+
+**Consequences.**
+- Pricing semantics, the payload, `save_version`'s results and the endpoints' answers without
+  `data` are unchanged (the existing suites guard them). `save_version` is stricter in one way: a
+  blank rule value is refused instead of being stored as 0.
+- The client may show resolved prices, validation and quotes for unsaved edits without a save;
+  every figure is the server's.
+- Two users editing one draft is still last-writer-wins (`save_version` has no version token), as
+  before; out of scope (design §6).
+
+**Rejected.**
+- Saving a scratch copy of the draft to price it: it writes, audits and races the real draft.
+- Autosave: every keystroke would be an audited save and would break `settle()`.
+- Client-side pricing or arithmetic for live figures: two engines drifting apart, and float money.
+- `Document.run_method("validate")` in the overlay: wildcard `doc_events` hooks may have side
+  effects; only the side-effect-free checks named above run.
+
+**Tests (S2).** `kamra/tex/tests/integration/test_pricing_workspace_api.py` (17): the overlay's
+matrix, validation and quote of unsaved data with nothing written or audited; `~key` rule ids in
+the explanation; the overlay prices what a save stores (defaults, text-typed checks, INHERIT
+blanks); refusals (published version, no `contract.edit`, another hotel, blank values in save and
+overlay, 10 places with the save's message, the row cap, a build error answered); Finance reads
+the saved matrix but cannot validate; the flags per viewer (Revenue Manager, a contract.edit-only
+profile, Finance, an agent's catalogue), `basis_locked` before and after publish, `minor_units`
+2 (EUR) and 3 (KWD); the basis change alone before publish and its refusal after. On the base
+`1575c8b` 14 of the 17 fail (unknown `data` argument, missing flags, a blank value saved); the
+basis tests and Finance's saved-matrix read pass there and pin existing behaviour. Removing the
+overlay's defaults step or its stored-value normalisation makes the save-equivalence test fail
+(checked). `test_security_regressions` G-11 now allows the three flags in an agent's catalogue
+answer and asserts they are false. Verification on branch `pw-backend`: all 38 integration modules
+800 OK (10 skipped, as on main), 425 unit tests, ruff.
