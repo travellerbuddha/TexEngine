@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom"
+import { Link, NavLink, useHref, useLocation, useNavigate } from "react-router-dom"
 import { Building2, ChevronDown, ExternalLink, LogOut, Menu, Moon, Rocket, Search, Sun, X } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useAuth } from "../../lib/auth"
@@ -215,10 +215,23 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { boot } = useSession()
   const { t } = useTexT()
   const { pathname } = useLocation()
-  // areas open by hand; forgotten when the user moves to another area
-  const [toggled, setToggled] = useState<Record<string, boolean>>({})
-  const current = items.filter((n) => inArea(n, n.sub, pathname)).map((n) => n.id).join(",")
-  useEffect(() => setToggled({}), [current])
+  const base = useHref("/").replace(/\/$/, "")
+  const areasAt = (path: string) => items.filter((n) => inArea(n, n.sub, path)).map((n) => n.id).join(",")
+  const current = areasAt(pathname)
+  // areas opened or closed by hand, kept while the user stays in the areas they were in then and
+  // forgotten when they move to another. A toggle made while a navigation is still loading (the
+  // router shows the old location until the new screen's code is in) belongs to where the user is
+  // going: it was lost when that navigation landed (G-64 review, found by the e2e).
+  const [toggled, setToggled] = useState<{ at: string; open: Record<string, boolean> }>({ at: current, open: {} })
+  useEffect(() => setToggled((s) => (s.at === current ? s : { at: current, open: {} })), [current])
+  const byHand = toggled.at === current ? toggled.open : {}
+  const toggle = (n: VisibleNavItem) => {
+    const live = window.location.pathname
+    const going = live.startsWith(base) ? live.slice(base.length) || "/" : pathname
+    const at = areasAt(going)
+    const shown = byHand[n.id] ?? inArea(n, n.sub, pathname)
+    setToggled((s) => ({ at, open: { ...(s.at === at ? s.open : {}), [n.id]: !shown } }))
+  }
   return (
     <div className="flex h-full flex-col">
       <nav aria-label={t("core.shell.main_nav")} className="flex min-h-0 flex-1 flex-col">
@@ -241,8 +254,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                       <NavArea
                         key={n.id}
                         item={n}
-                        open={toggled[n.id] ?? inArea(n, n.sub, pathname)}
-                        onToggle={() => setToggled((s) => ({ ...s, [n.id]: !(s[n.id] ?? inArea(n, n.sub, pathname)) }))}
+                        open={byHand[n.id] ?? inArea(n, n.sub, pathname)}
+                        onToggle={() => toggle(n)}
                         onNavigate={onNavigate}
                       />
                     ) : (
