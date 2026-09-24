@@ -87,6 +87,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
    Erasure (ADR-056 second review): audit events are immutable, so the `guest.update` events of a
    profile keep the old and new values of its edits after the profile is erased; set a retention
    period for them (or approve keeping them as the legal record of the changes).
+   Guest merge (ADR-056 third review): the duplicate is kept as a Deleted Document (platform
+   administrators only) for 90 days after a merge (`MERGE_COPY_DAYS`), so a wrong merge can be undone
+   by hand, then deleted (an erasure deletes it at once); confirm or change the period.
 9. Monitoring: an uptime monitor for the ping, the alert recipients (TEX settings →
    Monitoring), and a log-shipping/APM stack.
 10. Legacy stays at a hotel that joins TEX (ADR-052 and its review): a stay the legacy engine
@@ -332,6 +335,20 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   keeps its values for platform administrators; only a generic write's response is trimmed; a
   booking joins a guest profile by its e-mail, the phone only without one (a shared phone had merged
   two people). G-97 stays open. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: ADR-056 third review follow-up (branch `fix-crmp3`, patch p48): a lock wait timeout in
+  a best-effort step of a booking (a funnel event, a guest e-mail, the channel-push trigger) undoes only
+  that step and the booking goes on (the second review's re-raise failed bookings behind the funnel
+  purge), a deadlock is still raised and the booking retried or refused; the purge deletes in small
+  committed batches through a new index; a guest merge reads what it moves with locking reads, so a
+  booking or a withdrawal committed while it ran is seen (its hotel checked) and a duplicate merged
+  elsewhere meanwhile is refused; bookings, loyalty entries, communications and stays lock the profile
+  they link to; a redemption reads its balance with a lock (two redemptions could spend the same
+  points); the duplicate's comments, mail, tasks and activity move instead of being deleted; an erased
+  profile is never merged (a durable marker, set on earlier erasures from their records by p48, which
+  also removes the contact data they left in bookings, payment links and the change history); the
+  merge event names every record moved and the duplicate is kept 90 days as a Deleted Document; the
+  legacy merge endpoint checks the hotel of every record too. Owner decision to confirm: the 90 days.
+  No area status changes. Verdict unchanged: NOT READY.
 - 2026-09-25: ADR-056 second review follow-up (branch `fix-crmp2`, patch p45): a consent withdrawal
   reads and writes only the rows it clears (new indexes, primary keys; it had locked the whole funnel)
   and a deadlock or lock timeout while tracking or mailing inside a booking is re-raised, so the

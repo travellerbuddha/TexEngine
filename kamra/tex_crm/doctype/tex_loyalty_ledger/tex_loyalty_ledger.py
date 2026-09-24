@@ -10,6 +10,13 @@ from kamra.tex.commercial.revisions import block_delete, guard_immutable
 class TEXLoyaltyLedger(Document):
 	def validate(self):
 		guard_immutable(self, allowed=("status",))
+		if self.is_new():
+			# the profile is locked before its entry is written: a merge (which locks both profiles) and this
+			# entry never pass each other, and a profile merged away meanwhile is refused (third review of
+			# ADR-056); exclusive, as the stored points total is written next (``loyalty._sync_guest``)
+			from kamra.tex.crm.service import require_live_guest
+
+			require_live_guest(self.guest)
 		if self.is_new() and not self.property:
 			# the hotel the entry belongs to: its booking's or stay's (ADR-056 second review); a manual
 			# adjustment names the hotel it was made for (``crm.loyalty.adjust``)

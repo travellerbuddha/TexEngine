@@ -107,6 +107,10 @@ EXT = {
 		F("tex_consent_updated_at", "Datetime", "Consent updated", read_only=1),
 		F("tex_consent_source", "Data", "Consent source", read_only=1),
 		F("tex_consent_text_version", "Data", "Consent text version", read_only=1),
+		# the right to erasure's durable marker: an erased profile is never merged (ADR-056 third review)
+		F("tex_erased_at", "Datetime", "Erased at", read_only=1, no_copy=1,
+		  description="Set by the right to erasure (anonymize): an erased profile is never merged "
+		              "(ADR-056 third review)"),
 		SB("TEX stats", collapsible=1),
 		# totals over every tenant's stays and programs: permlevel 1, read in Desk / REST by System
 		# Manager only; the TEX CRM shows each viewer the totals of their own hotels (G-65, ADR-056)

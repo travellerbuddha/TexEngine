@@ -55,3 +55,4 @@ kamra.patches.tex.p40_crm_privacy_review
 kamra.patches.tex.p45_crm_privacy_second_review
 kamra.patches.tex.p46_report_indexes
 kamra.patches.tex.p47_g64_site_slugs
+kamra.patches.tex.p48_crm_privacy_third_review

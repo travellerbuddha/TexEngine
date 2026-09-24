@@ -26,7 +26,7 @@ from frappe.utils import escape_html, validate_email_address
 from kamra.tex.lib_text import render
 from kamra.tex.money import from_db, to_str
 from kamra.tex.security.audit import log_exception
-from kamra.tex.services.txn import TRANSACTION_LOST
+from kamra.tex.services.txn import transaction_lost, undo_step
 
 LANGS = ("en", "tr", "de", "ru", "ro", "pl")
 
@@ -83,28 +83,33 @@ def _send(to: str, subject: str, html: str, *, reference: tuple[str, str], prope
 	return getattr(q, "name", None) or None
 
 
+SEND_SAVEPOINT, LOG_SAVEPOINT = "tex_mail_send", "tex_mail_log"
+
+
 def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], guest: str | None, property: str,
              template: str, booking: str | None, log_title: str, booking_site: str | None = None) -> dict:
 	"""Queue one guest e-mail and record what happened. Never raises for a mail problem:
-	{"queued": bool, "status": "Queued" | "Failed", "communication": name | None}. A deadlock or a
-	lock timeout is not a mail problem: the caller's transaction is gone, so it is raised (``txn``)."""
+	{"queued": bool, "status": "Queued" | "Failed", "communication": name | None}. Each step (the queue
+	row, the record) is undone to its savepoint when it fails, a lock wait timeout included, which undoes
+	only its statement. A deadlock is not a mail problem: the caller's transaction is gone, so it is
+	raised (``txn.undo_step``; ADR-056 second and third reviews)."""
 	messages = getattr(frappe.local, "message_log", None)
 	seen = len(messages) if isinstance(messages, list) else 0
+	frappe.db.savepoint(SEND_SAVEPOINT)
 	try:
 		queue, error = _send(to, subject, html, reference=reference, property=property,
 		                     booking_site=booking_site), None
-	except TRANSACTION_LOST:
-		raise
 	except Exception as e:
+		undo_step(e, SEND_SAVEPOINT)
 		log_exception(log_title)
 		if isinstance(messages, list):
 			del messages[seen:]              # the refusal is reported by the status, never shown to a guest
 		queue, error = None, type(e).__name__
+	frappe.db.savepoint(LOG_SAVEPOINT)
 	try:
 		comm = _log(guest, property, subject, template, booking=booking, email_queue=queue, error=error)
-	except TRANSACTION_LOST:
-		raise
-	except Exception:
+	except Exception as e:
+		undo_step(e, LOG_SAVEPOINT)
 		log_exception(log_title)
 		comm = None
 	return {"queued": bool(queue), "status": "Queued" if queue else "Failed", "communication": comm}
@@ -129,9 +134,9 @@ def booking_mail(booking: str, manage_token: str) -> dict:
 		subject, body = render(key, lang, hotel=escape_html(hotel), ref=escape_html(b.name),
 		                       name=escape_html(b.booker_name or ""), total=escape_html(_amount(b.total_amount, b.currency)),
 		                       link=link or "")
-	except TRANSACTION_LOST:
-		raise
-	except Exception:
+	except Exception as e:
+		if transaction_lost(e):
+			raise                            # reads only: nothing to undo, but the transaction is gone
 		log_exception(f"TEX booking e-mail {booking}")
 		return {"queued": False, "status": "Failed", "communication": None}
 	return _deliver(b.booker_email, subject, body, reference=("TEX Booking", b.name), guest=b.booker_guest,
@@ -151,9 +156,9 @@ def booking_confirmed(booking: str) -> None:
 		subject, body = render("payment_received", lang, hotel=escape_html(hotel), ref=escape_html(b.name),
 		                       name=escape_html(b.booker_name or ""), total=escape_html(_amount(b.total_amount, b.currency)),
 		                       link="")
-	except TRANSACTION_LOST:
-		raise
-	except Exception:
+	except Exception as e:
+		if transaction_lost(e):
+			raise                            # reads only: nothing to undo, but the transaction is gone
 		log_exception(f"TEX confirmation e-mail {booking}")
 		return
 	_deliver(b.booker_email, subject, body, reference=("TEX Booking", b.name), guest=b.booker_guest,
@@ -172,9 +177,9 @@ def payment_link(link_name: str, url: str, lang: str = "en") -> bool:
 		                       name=escape_html(link.guest_name or ""), total=escape_html(_amount(link.amount, link.currency)),
 		                       link=url)
 		guest = frappe.db.get_value("TEX Booking", link.booking, "booker_guest") if link.booking else None
-	except TRANSACTION_LOST:
-		raise
-	except Exception:
+	except Exception as e:
+		if transaction_lost(e):
+			raise                            # reads only: nothing to undo, but the transaction is gone
 		log_exception(f"TEX payment-link e-mail {link_name}")
 		return False
 	return _deliver(link.guest_email, subject, body, reference=("TEX Payment Link", link.name), guest=guest,

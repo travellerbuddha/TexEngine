@@ -82,7 +82,10 @@ credentials (provider keys, API keys, webhook secrets), audit trail integrity.
   finds one only for staff, only when exactly one profile has it. Duplicates are merged by
   `crm.merge_guests` (`crm.edit` at every hotel either profile has records at, one enterprise, consent
   the stricter of the two, audited); an erasure withdraws every consent and removes contact data from
-  cases, funnel, bookings' booker fields and the change history.
+  cases, funnel, bookings' booker fields and the change history. A merge locks both profiles and reads
+  what it moves with locking reads; whoever links a record to a profile locks it first; an erased
+  profile (`tex_erased_at`) is never merged; the legacy merge endpoint checks the hotel of every record
+  too; the duplicate is kept 90 days as a Deleted Document, System Manager only (ADR-056 third review).
 - `strict_tenancy` (default on): a non-admin user without any scope sees nothing.
 - Grants sync Frappe `User Permission` (Property, apply to all doctypes). Isolation does not rely
   on them: every hotel-bound TEX DocType and the 53 legacy Kamra DocTypes bound to a hotel by a
@@ -159,6 +162,12 @@ the guest's manage token.
   erasure that kept consent and contact data; duplicates nothing could merge; the loyalty ledger in
   Desk / REST scoped by program) and 9 Low fixed with fail-first tests (ADR-056 second review
   follow-up, p45).
+- 2026-09-25 third review of ADR-056 (the guest merge and the H1 fix): 1 High (the merge's stale
+  snapshot: bookings committed during a merge left on a deleted profile, their hotel unchecked;
+  concurrent redemptions spending the same points), 6 Medium (lock timeouts in best-effort steps
+  failing bookings behind the funnel purge; comments and mail deleted with the duplicate; an erasure
+  undone by a merge; a merge not reconstructible; the legacy endpoint's hotel check; p45 missing most
+  earlier erasures) and 3 Low fixed with fail-first tests (ADR-056 third review follow-up, p48).
 
 ## 7. Known gaps (tracked)
 
@@ -180,7 +189,9 @@ in the path until they expire. The notes below predate that audit.
   basis for abandoned-booking contact exists (owner/legal decision). (The group loyalty ledger in Desk
   is scoped by each entry's hotel since the ADR-056 second review.) Audit events are immutable:
   `guest.update` events keep the old and new values of a profile edit after an erasure (retention is
-  an owner decision).
+  an owner decision). A legacy PMS write of a record a merge moved (a Folio, a Security Deposit …),
+  read before the merge and saved after it, puts the duplicate back into that link (the merge does not
+  change `modified`; a Reservation's save and the TEX writers lock the profile and are refused).
 - iyzico / Sipay / NestPay adapters follow the public integration documents but are **not
   production-verified**; enabling a Production account requires the provider's sandbox
   certification with real merchant credentials.

@@ -220,10 +220,12 @@ def enqueue_property_push(property: str | None) -> None:
 			return
 		frappe.enqueue("kamra.channel_manager.push_all_ari", queue="long",
 		               enqueue_after_commit=True, property=property)
-	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
-		raise  # the booking's transaction is gone: it is retried or fails, never reported (ADR-056)
-	except Exception:
-		frappe.log_error(title="enqueue_property_push failed")
+	except Exception as e:
+		from kamra.tex.services.txn import transaction_lost
+
+		if transaction_lost(e):
+			raise  # a deadlock: the booking's transaction is gone, retried or failed, never reported (ADR-056)
+		frappe.log_error(title="enqueue_property_push failed")   # it writes nothing: the booking goes on
 
 
 def on_reservation_change(doc, method=None):

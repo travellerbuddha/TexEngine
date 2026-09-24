@@ -19,11 +19,11 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 
 | Check | Command | Result |
 |---|---|---|
-| TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **419 passed** (2026-09-24, branch `fix-crmp2` with main `b72b2a8`; again on branch `fix-shell` with main `9642228`) |
-| TEX integration tests (35 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **743 OK**, 3 skipped (2026-09-25, branch `fix-shell` with main `9642228`, migrated with the branch, p45 and p47; the 3 skipped whole-site patch tests passed on a disposable site, `test_patches` 32/32 through p47; per module in the ADR-060 review follow-up paragraph). Before: 723 OK on branch `fix-crmp2` with main `b72b2a8` |
-| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **59 of 59 pass** in the mode each spec is written for (2026-09-25, branch `fix-shell` with main `9642228`, its own bench server (:8015) and Vite dev server (:5185), RQ worker, site migrated with the branch, a real second factor for one test user and a `tex_source_url` set): every spec but custom-host and pay-link against Vite, desktop and mobile, 51 passed; custom-host ×3, pay-link ×2 and manage-money ×3 against the bench, 8 passed (the bench serves main's bundles). `entry-branding` now 10 tests. Before: **50 of 50 pass** (2026-09-24, branch `fix-editor` with main `b72b2a8`, its own bench server and Vite dev server, RQ worker with the branch's code, site migrated with the branch): the whole suite against Vite 45 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `contract-admin` passed 3 times in a row. New: `editor-edits` ×3 (ADR-060 editor-saves follow-up). Branch `fix-crmp2` (its own bench server and Vite dev server): `crm-profile`, the new `crm-merge`, `crm-admin` and `booking` (desktop and mobile) passed twice each with main `b72b2a8`; with main `e78ba7b` (frontend and docs only since) `crm-profile`, `crm-merge`, `crm-admin` and `editor-edits` passed twice each |
-| Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-25, branch `fix-shell` with main `9642228`, its code and schema; before: branch `fix-crmp2` with main `b72b2a8`) |
-| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-25, branch `fix-shell` with main `9642228`; bundles not committed on the branch) |
+| TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **419 passed** (2026-09-25, branch `fix-crmp3` with main `f855850`) |
+| TEX integration tests (36 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **754 OK**, 10 skipped (2026-09-25, branch `fix-crmp3` with main `f855850`, migrated with the branch, p47 and p48; the 10 skipped are the 3 whole-site patch tests and the 7 concurrency tests of the ADR-056 third review, which pass on a disposable site; per module in the ADR-056 third review follow-up paragraph) |
+| Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **59 of 59 pass** in the mode each spec is written for (2026-09-25, branch `fix-shell` with main `9642228`, its own bench server (:8015) and Vite dev server (:5185), RQ worker, site migrated with the branch, a real second factor for one test user and a `tex_source_url` set): every spec but custom-host and pay-link against Vite, desktop and mobile, 51 passed; custom-host ×3, pay-link ×2 and manage-money ×3 against the bench, 8 passed (the bench serves main's bundles). `entry-branding` now 10 tests. Before: **50 of 50 pass** (2026-09-24, branch `fix-editor` with main `b72b2a8`, its own bench server and Vite dev server, RQ worker with the branch's code, site migrated with the branch): the whole suite against Vite 45 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `contract-admin` passed 3 times in a row. New: `editor-edits` ×3 (ADR-060 editor-saves follow-up). Branch `fix-crmp2` (its own bench server and Vite dev server): `crm-profile`, the new `crm-merge`, `crm-admin` and `booking` (desktop and mobile) passed twice each with main `b72b2a8`; with main `e78ba7b` (frontend and docs only since) `crm-profile`, `crm-merge`, `crm-admin` and `editor-edits` passed twice each. Branch `fix-crmp3` with main `f855850` (its own bench server :8014 and Vite :5184): `crm-profile`, `crm-merge`, `crm-admin` and `booking` (desktop and mobile) passed twice each |
+| Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-25, branch `fix-crmp3` with main `f855850`, its code and schema) |
+| TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-25, branch `fix-crmp3` with main `f855850`; bundles not committed on the branch) |
 | Lint / static security | `ruff check kamra/tex kamra/patches/tex`; semgrep (Frappe rules, ERROR) | clean / 0 findings (semgrep 1.177, frappe/semgrep-rules + r/python.lang.correctness, ERROR; G-45's changed files re-scanned: 0) |
 
 **Coverage gaps.** Green tests do not prove absence of the defects below. The audit reproduced
@@ -331,6 +331,46 @@ fixed, with tests that fail first.
     build and i18n clean again; migrate, then `crm-profile`, `crm-merge`, `crm-admin` and `editor-edits`
     passed twice each against the branch's servers.
 
+**ADR-056 third review follow-up (2026-09-25, branch `fix-crmp3` on main `9642228`, main `f855850`
+merged in, patch p48).** A focused review of the guest merge and of the second review's H1 fix found 1
+High, 6 Medium and 3 Low issues. All are fixed, with tests that fail first (ADR-056, third review
+follow-up).
+- *M-6 (a regression of H1):* a lock wait timeout in tracking or a guest e-mail failed the booking; now
+  it undoes that step only (a savepoint) and the booking goes on; a deadlock is still raised. The funnel
+  purge deletes in small committed batches through a new index.
+- *H-1:* the merge read a stale snapshot; now it locks both profiles and reads what it moves with
+  locking reads; bookings, loyalty entries, communications and stays lock the profile they link to; a
+  redemption reads its balance with a lock (two could spend the same points).
+- *M-1–M-5:* the duplicate's comments, mail, tasks and activity move; an erased profile is never merged
+  (`Guest.tex_erased_at`); the merge event names every record moved and the duplicate is kept 90 days
+  as a Deleted Document; the legacy endpoint checks every record's hotel; p48 marks earlier erasures
+  from their records and removes what they left.
+- *Low:* names compared as stored; p45 reads the marker; a record naming no hotel needs a platform
+  administrator.
+- *Fail-first on main `f855850`:* `test_crm_third_review` 13 of the 14 that run on the shared site, and
+  all 7 concurrency tests on a disposable site made with main, fail or error; in `test_crm_privacy_review`
+  the 3 tests changed for M-6 and the Low fail.
+- *Runs (2026-09-25, one hold of the bench-test lock):*
+  - Migrate, then all 36 integration modules on the shared site: **754 OK**, 10 skipped (the 3
+    whole-site patch tests and the 7 concurrency tests): admin_markets 4, age_bands 11, audit_trail 15,
+    channel_binding 27, commercial_flows 63, concurrency 8, critical_journey 31, crm_privacy 29,
+    crm_privacy_review 28, crm_segments 7, crm_third_review 21 (7 skipped), custom_domains 9,
+    distribution 21, entry_branding 34, extras_inventory 17, fx_snapshot 5, grant_expiry 9, inventory 31,
+    legacy_pricing 15, legacy_pricing_review 23, loyalty_admin 7, migrations_notify 7,
+    modification_determinism 27, money_fields 9, patches 32 (3 skipped), portfolio 2,
+    post_booking_extras 12, pricing_policies 14, public_booking 17, reports 22, restrictions 33,
+    security_hygiene 14, security_regressions 59, self_service_money 76, snapshot_integrity 13,
+    system_status 12.
+  - On a disposable site made with the branch (made, tested, dropped): the concurrency tests **7 OK**,
+    `test_patches` **32 OK** (none skipped).
+  - Upstream suites with the branch's code and schema: eval harness 76/76, front-desk journey 13/13,
+    banquet 101 OK.
+  - E2E against the branch (its own bench server on :8014 and Vite dev server on :5184, base
+    `http://test.localhost:5184`): `crm-profile`, `crm-merge`, `crm-admin` and `booking` (desktop and
+    mobile) passed twice each.
+  - 419 unit tests; ruff clean; `tsc`, `npm run build` and `npm run i18n:tex` clean (bundles not
+    committed on the branch).
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
@@ -438,7 +478,7 @@ final run.
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 0 High, 17 Medium, 4 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (unchanged by the G-46 review follow-up on branch `fix-reports`: G-98 found and fixed; recounted 2026-09-25 on branch `fix-shell`: unchanged by the ADR-060 review follow-up, which fixed findings of resolved gaps G-60 and G-64; unchanged by the ADR-056 second review follow-up on branch `fix-crmp2`, which fixed findings of resolved gaps and the Desk part of #70a's ledger note; recounted 2026-09-24 on branch `shell-g60-g64`: G-60 and G-64 fixed, ADR-060, CRM Campaigns stays a not-started sub-item; on branch `reports-g46`: G-46 fixed, ADR-059; unchanged by the ADR-056 review follow-up on branch `fix-crmp`, which fixed findings of resolved gaps; recounted 2026-09-24 on branch `restrictions-basket`: G-48 and G-84 fixed, ADR-057; before that on branch `migrations-snapshot`: G-76 and G-73 fixed; before that on `crm-privacy`: G-65, G-81 and G-95 fixed, G-97 found). All nine Critical
+**Open gaps by severity:** 0 Critical, 0 High, 17 Medium, 4 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (unchanged by the G-46 review follow-up on branch `fix-reports`: G-98 found and fixed; unchanged by the ADR-056 third review follow-up on branch `fix-crmp3`, which fixed findings of resolved gaps; recounted 2026-09-25 on branch `fix-shell`: unchanged by the ADR-060 review follow-up, which fixed findings of resolved gaps G-60 and G-64; unchanged by the ADR-056 second review follow-up on branch `fix-crmp2`, which fixed findings of resolved gaps and the Desk part of #70a's ledger note; recounted 2026-09-24 on branch `shell-g60-g64`: G-60 and G-64 fixed, ADR-060, CRM Campaigns stays a not-started sub-item; on branch `reports-g46`: G-46 fixed, ADR-059; unchanged by the ADR-056 review follow-up on branch `fix-crmp`, which fixed findings of resolved gaps; recounted 2026-09-24 on branch `restrictions-basket`: G-48 and G-84 fixed, ADR-057; before that on branch `migrations-snapshot`: G-76 and G-73 fixed; before that on `crm-privacy`: G-65, G-81 and G-95 fixed, G-97 found). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 

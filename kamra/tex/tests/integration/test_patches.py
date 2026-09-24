@@ -96,6 +96,8 @@ BEHAVIOUR = {
 	                                 "test_p45_indexes_history_ledger_hotels_erased_profiles_and_anonymous_cases",
 	"p46_report_indexes": "test_patches.TestP03Indexes.test_p46_creates_the_report_indexes",
 	"p47_g64_site_slugs": "test_patches.TestReportingPatches.test_p47_reports_sites_named_like_an_admin_page_once",
+	"p48_crm_privacy_third_review": "test_crm_third_review.TestP48."
+	                                "test_p48_marks_earlier_erasures_and_removes_what_they_left",
 }
 
 

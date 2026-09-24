@@ -58,13 +58,17 @@ def visible_programs(props: set[str]) -> set[str]:
 	                          pluck="name"))
 
 
-def balances(guest: str, program: str) -> dict:
-	rows = frappe.db.sql("""SELECT status, SUM(points) pts FROM `tabTEX Loyalty Ledger`
-		WHERE guest=%s AND program=%s GROUP BY status""", (guest, program), as_dict=True)
+def balances(guest: str, program: str, *, lock: bool = False) -> dict:
+	"""A guest's points in a program. ``lock``: read with a shared lock through ``tex_ledger_guest_program``,
+	so the balance is what is committed now, not the request's snapshot (a redemption: third review of
+	ADR-056, H-1)."""
+	shared = " LOCK IN SHARE MODE" if lock else ""
+	rows = frappe.db.sql(f"""SELECT status, SUM(points) pts FROM `tabTEX Loyalty Ledger`
+		WHERE guest=%s AND program=%s GROUP BY status{shared}""", (guest, program), as_dict=True)  # nosemgrep
 	by = {r.status: int(r.pts or 0) for r in rows}
-	earned = frappe.db.sql("""SELECT COALESCE(SUM(points),0) FROM `tabTEX Loyalty Ledger`
-		WHERE guest=%s AND program=%s AND entry_type='Earn' AND status IN ('Available','Used','Expired')""",
-	                       (guest, program))[0][0]
+	earned = frappe.db.sql(f"""SELECT COALESCE(SUM(points),0) FROM `tabTEX Loyalty Ledger`
+		WHERE guest=%s AND program=%s AND entry_type='Earn' AND status IN ('Available','Used','Expired'){shared}""",
+	                       (guest, program))[0][0]  # nosemgrep -- a constant clause
 	return {"available": sum(by.get(s, 0) for s in FINAL), "pending": by.get("Pending", 0),
 	        "lifetime_earned": int(earned or 0)}
 
@@ -158,7 +162,7 @@ def on_reservation_change(doc) -> None:
 	if existing and all(e.stay_fingerprint in (fingerprint, None, "") for e in existing):
 		return                  # the stay is unchanged (an earning made before G-24 is kept as it was)
 	prog = frappe.get_cached_doc("TEX Loyalty Program", program)
-	tier = tier_of(prog, balances(doc.guest, program)["lifetime_earned"])
+	tier = tier_of(prog, balances(doc.guest, program, lock=True)["lifetime_earned"])
 	points, lines = points_for(prog, doc, tier.earn_multiplier if tier else 1)
 	for e in existing:
 		_reverse(e, reason="reservation modified")
@@ -184,7 +188,7 @@ def _reverse(entry, *, reason: str) -> None:
 	balance after reversal is max(0, balance − points), topped up by an Adjust entry."""
 	src = frappe.get_doc("TEX Loyalty Ledger", entry.name)
 	was_final = src.status in FINAL
-	before = balances(src.guest, src.program)["available"] if was_final else 0
+	before = balances(src.guest, src.program, lock=True)["available"] if was_final else 0
 	frappe.db.set_value("TEX Loyalty Ledger", src.name, {"status": "Reversed",
 	                                                    "reason": f"{src.reason or ''} · reversed: {reason}"[:500]})
 	if was_final and before - int(src.points) < 0:
@@ -196,9 +200,11 @@ def _reverse(entry, *, reason: str) -> None:
 
 
 def _sync_guest(guest: str) -> None:
+	"""The stored points total, from the ledger as it is committed now (locking reads)."""
 	total = 0
-	for p in frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest}, pluck="program", distinct=True):
-		total += balances(guest, p)["available"]
+	for p in frappe.db.sql("""SELECT DISTINCT program FROM `tabTEX Loyalty Ledger` WHERE guest = %s
+		LOCK IN SHARE MODE""", guest, pluck=True):
+		total += balances(guest, p, lock=True)["available"]
 	frappe.db.set_value("Guest", guest, "tex_loyalty_points", total, update_modified=False)
 
 
@@ -216,7 +222,7 @@ def mature_and_expire(today: date | None = None) -> dict:
 	                        fields=["name", "guest", "program", "points", "booking", "property"]):
 		if frappe.db.exists("TEX Loyalty Ledger", {"entry_type": "Expire", "reason": f"expiry of {e.name}"}):
 			continue
-		bal = balances(e.guest, e.program)["available"]
+		bal = balances(e.guest, e.program, lock=True)["available"]
 		take = max(0, min(int(e.points), bal))
 		if take:
 			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": e.program, "guest": e.guest,
@@ -320,7 +326,11 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 	points = int(points)
 	if points == 0:
 		frappe.throw(_("Points must not be zero."))
-	if points < 0 and balances(guest, program)["available"] + points < 0:
+	# the profile locked and its balance read with a lock, as a redemption does (third review of ADR-056)
+	from kamra.tex.crm.service import require_live_guest
+
+	require_live_guest(guest)
+	if points < 0 and balances(guest, program, lock=True)["available"] + points < 0:
 		frappe.throw(_("The balance cannot go negative."))
 	doc = frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": program, "guest": guest,
 	                      "entry_type": "Adjust", "points": points, "status": "Available", "reason": reason[:500],
@@ -366,8 +376,13 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	points = int(points)
 	if points < int(prog.min_redeem_points or 0) or points <= 0:
 		frappe.throw(_("At least {0} points must be redeemed.").format(prog.min_redeem_points or 1))
-	frappe.db.sql("SELECT name FROM `tabGuest` WHERE name=%s FOR UPDATE", guest)
-	if balances(guest, program)["available"] < points:
+	# the profile locked (whoever writes its ledger locks it too) and its balance read with a lock: what is
+	# committed now, not this request's snapshot, so two redemptions never spend the same points (third
+	# review of ADR-056, H-1); a profile merged into another meanwhile is gone
+	if not frappe.db.sql("SELECT name FROM `tabGuest` WHERE name=%s FOR UPDATE", guest):
+		frappe.throw(_("Guest {0} no longer exists: it was merged into another profile or removed.").format(guest),
+		             frappe.DoesNotExistError)
+	if balances(guest, program, lock=True)["available"] < points:
 		frappe.throw(_("Not enough points."))
 	value = quantize(db_dec(prog.point_value) * points, b.currency)
 	cap = quantize(from_db(b.total_amount, b.currency) * pct / 100, b.currency)

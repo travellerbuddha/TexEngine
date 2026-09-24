@@ -767,11 +767,12 @@ def _chunks(values) -> list[tuple]:
 	return [tuple(values[i:i + BATCH]) for i in range(0, len(values), BATCH)]
 
 
-def forget_contact(guest: str, emails=()) -> None:
+def forget_contact(guest: str, emails=()) -> int:
 	"""The guest withdrew marketing e-mail consent (or cleared their e-mail or phone, or was erased):
 	their abandoned cases become anonymous (no profile, e-mail, phone or quote; no consent) and their
 	funnel events lose the e-mail hash, those of the cases' sessions and those of the guest's addresses
-	(ADR-056 review). The profile itself, its stays and its consent history stay."""
+	(ADR-056 review). The profile itself, its stays and its consent history stay. → the cases and events
+	changed."""
 	cases = frappe.db.sql(CASES_OF_GUEST, {"guest": guest}, as_dict=True)
 	events = set()
 	hashes = {h for h in (email_hash(e) for e in emails) if h}
@@ -783,6 +784,26 @@ def forget_contact(guest: str, emails=()) -> None:
 		frappe.db.sql(FORGET_CASES, {"names": chunk})
 	for chunk in _chunks(events):
 		frappe.db.sql(FORGET_EVENTS, {"names": chunk})
+	return len(cases) + len(events)
+
+
+def lock_guest(guest: str | None, *, share: bool = False) -> bool:
+	"""Lock a guest profile's row (exclusive, or ``share``d) and say whether it exists now. A locking read
+	sees what is committed now, not the request's snapshot: a profile merged into another (or removed)
+	since the request began is gone here. Whoever writes a link to a profile locks it first, so a merge,
+	which locks both profiles, and a link to the profile it deletes never pass each other (third review
+	of ADR-056)."""
+	if not guest:
+		return False
+	return bool(frappe.db.sql(f"SELECT name FROM `tabGuest` WHERE name = %s {'LOCK IN SHARE MODE' if share else 'FOR UPDATE'}",
+	                          guest))  # nosemgrep -- a constant clause
+
+
+def require_live_guest(guest: str | None, *, share: bool = False) -> None:
+	"""``lock_guest``, refusing a profile that is gone (merged into another, or removed, meanwhile)."""
+	if guest and not lock_guest(guest, share=share):
+		frappe.throw(_("Guest {0} no longer exists: it was merged into another profile or removed. Reload and "
+		               "choose the guest again.").format(guest), frappe.DoesNotExistError)
 
 
 def guest_validate(doc, method=None) -> None:
@@ -819,31 +840,49 @@ def guest_on_update(doc, method=None) -> None:
 		forget_contact(doc.name, emails={before.get("email"), doc.get("email")})
 
 
-def erase_traces(guest: str, alias: str, *, emails=()) -> dict:
+def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True) -> dict:
 	"""Right to erasure (``kamra.api.anonymize_guest``), after the profile itself was blanked and its
 	consent withdrawn: its cases and funnel data are forgotten; its bookings and their payment links keep
 	the alias instead of the booker's name, e-mail and phone; the profile's change history goes, and that
-	of its bookings, links and stays keeps which field changed, never the value (ADR-056 second review)."""
+	of its bookings, links and stays keeps which field changed, never the value (ADR-056 second review);
+	the copies of the profiles merged into it (Deleted Documents, ``MERGE_COPY_DAYS``) go too (third
+	review). Re-runnable: → what it changed (``changed``: 0 when nothing was left); ``audit_event``:
+	``guest.erase`` is audited (p48 audits only a run that changed something)."""
 	from kamra.tex.security.internals import mask_history
 
-	forget_contact(guest, emails=emails)
+	forgotten = forget_contact(guest, emails=emails)
 	bookings = frappe.get_all("TEX Booking", filters={"booker_guest": guest}, pluck="name")
 	links = frappe.get_all("TEX Payment Link", filters={"booking": ("in", bookings)}, pluck="name") if bookings else []
+	named = 0
 	for chunk in _chunks(bookings):
-		frappe.db.sql("""UPDATE `tabTEX Booking` SET booker_name = %(a)s, booker_email = NULL, booker_phone = NULL
-			WHERE name IN %(n)s""", {"a": alias, "n": chunk})
+		stale = frappe.db.sql("""SELECT name FROM `tabTEX Booking` WHERE name IN %(n)s AND (IFNULL(booker_name, '') != %(a)s
+			OR IFNULL(booker_email, '') != '' OR IFNULL(booker_phone, '') != '')""", {"a": alias, "n": chunk}, pluck=True)
+		if stale:
+			frappe.db.sql("""UPDATE `tabTEX Booking` SET booker_name = %(a)s, booker_email = NULL, booker_phone = NULL
+				WHERE name IN %(n)s""", {"a": alias, "n": tuple(stale)})
+			named += len(stale)
 	for chunk in _chunks(links):
-		frappe.db.sql("UPDATE `tabTEX Payment Link` SET guest_name = %(a)s, guest_email = NULL WHERE name IN %(n)s",
-		              {"a": alias, "n": chunk})
+		stale = frappe.db.sql("""SELECT name FROM `tabTEX Payment Link` WHERE name IN %(n)s
+			AND (IFNULL(guest_name, '') != %(a)s OR IFNULL(guest_email, '') != '')""", {"a": alias, "n": chunk}, pluck=True)
+		if stale:
+			frappe.db.sql("UPDATE `tabTEX Payment Link` SET guest_name = %(a)s, guest_email = NULL WHERE name IN %(n)s",
+			              {"a": alias, "n": tuple(stale)})
+			named += len(stale)
+	history = frappe.db.count("Version", {"ref_doctype": "Guest", "docname": guest})
 	frappe.db.delete("Version", {"ref_doctype": "Guest", "docname": guest})
 	masked = (mask_history("TEX Booking", bookings, ("booker_name", "booker_email", "booker_phone"))
 	          + mask_history("TEX Payment Link", links, ("guest_name", "guest_email"))
 	          + mask_history("Reservation", frappe.get_all("Reservation", filters={"guest": guest}, pluck="name"),
 	                         ("guest_name", "booked_by_phone")))
-	for f in frappe.get_all("File", filters={"attached_to_doctype": "Guest", "attached_to_name": guest}, pluck="name"):
+	files = frappe.get_all("File", filters={"attached_to_doctype": "Guest", "attached_to_name": guest}, pluck="name")
+	for f in files:
 		frappe.delete_doc("File", f, ignore_permissions=True)            # identity documents
-	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked}
-	audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
+	copies = _drop_merge_copies(merged_into(guest))
+	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked,
+	       "history_rows_removed": history, "merge_copies_removed": copies}
+	out["changed"] = forgotten + named + history + masked + len(files) + copies
+	if audit_event:
+		audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
 	return out
 
 
@@ -857,15 +896,40 @@ def set_abandoned_status(name: str, status: str, note: str | None = None) -> Non
 	      new={"status": status}, reason=note)
 
 
+def _commit() -> None:
+	"""A scheduler job's batch is its own unit of work in production; tests keep one transaction."""
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- scheduler job batch boundary
+
+
+# The purge (third review of ADR-056, M-6): old events are read through ``tex_funnel_time_session`` without
+# a lock and deleted by primary key, PURGE_BATCH at a time, each batch committed. A DELETE on
+# ``occurred_at`` without that index locked every funnel row and gap until the job ended, and every booking's
+# tracking waited behind it.
+PURGE_BATCH = 500
+PURGE_OLD = """SELECT name FROM `tabTEX Funnel Event` WHERE occurred_at < %(cutoff)s
+	ORDER BY occurred_at LIMIT %(n)s"""
+PURGE_EVENTS = "DELETE FROM `tabTEX Funnel Event` WHERE name IN %(names)s"
+
+
 FUNNEL_RETENTION_DAYS = 180         # funnel events older than this are deleted (reports refuse older windows)
 
 
 def purge_funnel(days: int = FUNNEL_RETENTION_DAYS) -> int:
-	"""Data minimisation: funnel events older than ``days`` are deleted."""
+	"""Data minimisation: funnel events older than ``days`` are deleted, oldest first, in small committed
+	batches (``PURGE_OLD``, ``PURGE_EVENTS``). → how many."""
 	cutoff = now_datetime() - timedelta(days=days)
-	n = frappe.db.count("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
-	frappe.db.delete("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
-	return n
+	purged = 0
+	while True:
+		names = frappe.db.sql(PURGE_OLD, {"cutoff": cutoff, "n": PURGE_BATCH}, pluck=True)
+		if not names:
+			break
+		frappe.db.sql(PURGE_EVENTS, {"names": tuple(names)})
+		_commit()
+		purged += len(names)
+		if len(names) < PURGE_BATCH:
+			break
+	return purged
 
 
 # ─── duplicates and merging (ADR-056 second review) ─────────────────────
@@ -926,82 +990,170 @@ def _guest_links() -> list[tuple[str, str]]:
 	               if not f.get("issingle") and frappe.db.table_exists(f["parent"])})
 
 
-def _records_hotels(guests: tuple[str, ...]) -> set[str]:
-	"""The hotels any record of these profiles belongs to (each linking DocType that names one)."""
-	hotels = set()
-	for parent, field in _guest_links():
+# What Frappe links to any record by (DocType field, name field): ``delete_doc`` deletes or unlinks these
+# rows when the record goes, so a merge moves them first (third review of ADR-056, M-1). The audit trail is
+# immutable and keeps the duplicate's name (``merged_into`` reads through the merge event).
+DYNAMIC_LINKS = (("Comment", "reference_doctype", "reference_name"),
+                 ("Communication", "reference_doctype", "reference_name"),
+                 ("Communication Link", "link_doctype", "link_name"),
+                 ("ToDo", "reference_type", "reference_name"),
+                 ("Activity Log", "reference_doctype", "reference_name"),
+                 ("Activity Log", "timeline_doctype", "timeline_name"),
+                 ("DocShare", "share_doctype", "share_name"),
+                 ("Document Follow", "ref_doctype", "ref_docname"),
+                 ("Notification Log", "document_type", "document_name"),
+                 ("View Log", "reference_doctype", "reference_name"),
+                 ("Email Unsubscribe", "reference_doctype", "reference_name"),
+                 ("Tag Link", "document_type", "document_name"),
+                 ("File", "attached_to_doctype", "attached_to_name"),
+                 ("Version", "ref_doctype", "docname"))
+KEEP_LINKS = frozenset({"TEX Audit Event", "TEX Audit Scope"})
+
+
+def _dynamic_links() -> list[tuple[str, str, str]]:
+	"""Every (DocType, DocType field, name field) that may name a Guest: Frappe's own (``DYNAMIC_LINKS``) and
+	any Dynamic Link found in the meta, but the audit trail."""
+	from frappe.model.dynamic_links import get_dynamic_link_map
+
+	found = {(dt, dtf, nf) for dt, dtf, nf in DYNAMIC_LINKS
+	         if frappe.db.table_exists(dt) and frappe.db.has_column(dt, dtf) and frappe.db.has_column(dt, nf)}
+	for df in get_dynamic_link_map().get("Guest", []):
+		if df.parent not in KEEP_LINKS and not frappe.get_meta(df.parent).issingle:
+			found.add((df.parent, df.options, df.fieldname))
+	return sorted(found)
+
+
+def _records_hotels(guests: tuple[str, ...], links=None) -> tuple[set[str], set[str]]:
+	"""(the hotels any record of these profiles belongs to, the DocTypes holding a record of them that
+	names no hotel). Locking reads: what is committed now, rows committed after this request began
+	included, and none of them can change until the merge ends (third review of ADR-056, H-1)."""
+	hotels, unknown = set(), set()
+	for parent, field in _guest_links() if links is None else links:
 		if frappe.db.has_column(parent, "property"):
 			hotels |= set(frappe.db.sql(  # nosemgrep -- identifiers from the meta, values bound
-				f"SELECT DISTINCT property FROM `tab{parent}` WHERE `{field}` IN %(g)s AND IFNULL(property, '') != ''",
-				{"g": guests}, pluck=True))
-	return hotels
+				f"""SELECT DISTINCT property FROM `tab{parent}` WHERE `{field}` IN %(g)s AND IFNULL(property, '') != ''
+				LOCK IN SHARE MODE""", {"g": guests}, pluck=True))
+		elif frappe.db.sql(f"SELECT name FROM `tab{parent}` WHERE `{field}` IN %(g)s LIMIT 1 LOCK IN SHARE MODE",  # nosemgrep
+		                   {"g": guests}):
+			unknown.add(parent)
+	return hotels, unknown
 
 
-def _repoint(source: str, target: str) -> dict[str, list[str]]:
-	"""Every link to ``source`` now names ``target``: read, then written by primary key."""
+def _repoint(source: str, target: str, links=None, dynamic=None) -> dict[str, list[str]]:
+	"""Every link to ``source`` now names ``target``: its rows read with a lock (what is committed now; a
+	link written meanwhile waits for the merge), then written by primary key. → the records moved, by
+	DocType (the audit names them: third review, M-3)."""
 	moved: dict[str, list[str]] = {}
-	for parent, field in _guest_links():
-		names = frappe.db.sql(f"SELECT name FROM `tab{parent}` WHERE `{field}` = %(g)s",  # nosemgrep
+	for parent, field in _guest_links() if links is None else links:
+		names = frappe.db.sql(f"SELECT name FROM `tab{parent}` WHERE `{field}` = %(g)s FOR UPDATE",  # nosemgrep
 		                      {"g": source}, pluck=True)
 		for chunk in _chunks(names):
 			frappe.db.sql(f"UPDATE `tab{parent}` SET `{field}` = %(t)s WHERE name IN %(n)s",  # nosemgrep
 			              {"t": target, "n": chunk})
 		if names:
 			moved.setdefault(parent, []).extend(names)
-	# comments, attachments and the change history follow the profile; the audit trail is immutable and
-	# keeps the duplicate's name (its consent events are read through the merge event: ``merged_into``)
-	from frappe.model.dynamic_links import get_dynamic_link_map
-
-	skip = set(frappe.get_hooks("ignore_links_on_delete"))
-	for df in get_dynamic_link_map().get("Guest", []):
-		if df.parent in skip or frappe.get_meta(df.parent).issingle:
-			continue
-		frappe.db.sql(  # nosemgrep -- identifiers from the meta, values bound
-			f"UPDATE `tab{df.parent}` SET `{df.fieldname}` = %(t)s WHERE `{df.options}` = 'Guest' AND `{df.fieldname}` = %(s)s",
-			{"t": target, "s": source})
-	frappe.db.sql("""UPDATE `tabFile` SET attached_to_name = %(t)s
-		WHERE attached_to_doctype = 'Guest' AND attached_to_name = %(s)s""", {"t": target, "s": source})
-	frappe.db.sql("UPDATE `tabVersion` SET docname = %(t)s WHERE ref_doctype = 'Guest' AND docname = %(s)s",
-	              {"t": target, "s": source})
+	# comments, mail, tasks, shares, activity, attachments and the change history follow the profile
+	for doctype, dt_field, name_field in _dynamic_links() if dynamic is None else dynamic:
+		names = frappe.db.sql(  # nosemgrep -- identifiers from the meta or a constant list, values bound
+			f"SELECT name FROM `tab{doctype}` WHERE `{dt_field}` = 'Guest' AND `{name_field}` = %(g)s FOR UPDATE",
+			{"g": source}, pluck=True)
+		for chunk in _chunks(names):
+			frappe.db.sql(f"UPDATE `tab{doctype}` SET `{name_field}` = %(t)s WHERE name IN %(n)s",  # nosemgrep
+			              {"t": target, "n": chunk})
+		if names:
+			moved.setdefault(doctype, []).extend(n for n in names if n not in moved.get(doctype, []))
 	return moved
 
 
+def _assert_unlinked(source: str, links=None, dynamic=None) -> None:
+	"""Nothing points at ``source`` any more, read with a shared lock (committed rows included): a link
+	written meanwhile fails the merge, which rolls back, rather than point at a deleted profile."""
+	for parent, field in _guest_links() if links is None else links:
+		left = frappe.db.sql(f"SELECT name FROM `tab{parent}` WHERE `{field}` = %(g)s LIMIT 1 LOCK IN SHARE MODE",  # nosemgrep
+		                     {"g": source})
+		if left:
+			frappe.throw(_("{0} {1} still names the duplicate: nothing was merged. Please try again.").format(
+				_(parent), left[0][0]))
+	for doctype, dt_field, name_field in _dynamic_links() if dynamic is None else dynamic:
+		left = frappe.db.sql(  # nosemgrep -- identifiers from the meta or a constant list, values bound
+			f"""SELECT name FROM `tab{doctype}` WHERE `{dt_field}` = 'Guest' AND `{name_field}` = %(g)s LIMIT 1
+			LOCK IN SHARE MODE""", {"g": source})
+		if left:
+			frappe.throw(_("{0} {1} still names the duplicate: nothing was merged. Please try again.").format(
+				_(doctype), left[0][0]))
+
+
+def _lock_pair(source: str, target: str) -> tuple[str, str]:
+	"""Both profiles locked, in name order (two merges of the same profiles never deadlock), read as they
+	are committed now; → their names as stored. A name typed in another case (or with spaces) is the same
+	profile; a profile that is gone (merged elsewhere meanwhile) is not found (third review, H-1)."""
+	rows = frappe.db.sql("""SELECT name, name = %(s)s AS s, name = %(t)s AS t FROM `tabGuest`
+		WHERE name IN %(g)s ORDER BY name FOR UPDATE""", {"s": source, "t": target, "g": (source, target)}, as_dict=True)
+	if any(r.s and r.t for r in rows) or source.casefold() == target.casefold():
+		frappe.throw(_("Pick two different profiles to merge."))
+	src = [r.name for r in rows if r.s]
+	dst = [r.name for r in rows if r.t]
+	if len(src) != 1 or len(dst) != 1:
+		frappe.throw(_("Guest not found: it may have been merged into another profile meanwhile."),
+		             frappe.DoesNotExistError)
+	return src[0], dst[0]
+
+
+# the duplicate is kept as a Deleted Document (platform administrators only) for this many days after a
+# merge, so a merge can be reconstructed and undone by hand; then the daily job removes it, and an erasure
+# of the profile it went into removes it at once (third review of ADR-056, M-3; owner decision to confirm)
+MERGE_COPY_DAYS = 90
+
+
 def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
-	"""Merge the duplicate profile ``source`` into ``target`` (ADR-056 second review).
+	"""Merge the duplicate profile ``source`` into ``target`` (ADR-056 second and third reviews).
 
 	Who: staff who may edit both profiles (``crm.edit``) and may edit guests at every hotel either
 	profile has a record at: its stays, bookings, communications, cases and loyalty entries go with it;
-	platform administrators. ``checked``: the legacy PMS endpoint decided already, by its own rule
-	(``kamra.authz``: an administrator role, every stay of both profiles in the caller's scope, the PMS
-	open to the caller). Both profiles belong to one enterprise (or to none). What moves: every link to the duplicate
-	(from the meta: TEX and legacy DocTypes, custom fields), its comments, attachments and history; its
-	loyalty entries, so the balance is one and the tier follows the merged lifetime. The profile that
-	stays keeps its own data and takes the duplicate's where it has none; VIP and blacklist are kept if
-	either has them. Consent is the stricter of the two: a channel stays consented only when both
-	profiles consented to it. The duplicate is then deleted; the merge is audited (no contact data)."""
-	if not source or not target or source == target:
+	platform administrators. ``checked``: the legacy PMS endpoint decided whether the caller sees both
+	profiles by its own rule (``kamra.authz``); the hotels of every record are still checked here. A
+	record of a DocType that names no hotel is merged by a platform administrator only. Both profiles
+	belong to one enterprise (or to none); neither is erased (``tex_erased_at``).
+
+	Concurrency: both profiles are locked first, and everything the merge decides on or moves is read
+	with a lock, so it sees what is committed now (the request's snapshot may be older): a booking of the
+	duplicate committed meanwhile is moved and its hotel checked; a duplicate merged elsewhere meanwhile
+	is not found. Whoever writes a link to a profile locks it first (``lock_guest``).
+
+	What moves: every link to the duplicate (from the meta: TEX and legacy DocTypes, custom fields), its
+	comments, mail, tasks, shares, activity, attachments and history; its loyalty entries, so the balance
+	is one and the tier follows the merged lifetime. The profile that stays keeps its own data and takes
+	the duplicate's where it has none; VIP and blacklist are kept if either has them. Consent is the
+	stricter of the two: a channel stays consented only when both profiles consented to it. The duplicate
+	is then deleted and kept as a Deleted Document for ``MERGE_COPY_DAYS``; the merge is audited with
+	every record it moved (names, no contact data)."""
+	source, target = (source or "").strip(), (target or "").strip()
+	if not source or not target:
 		frappe.throw(_("Pick two different profiles to merge."))
-	for g in (source, target):
-		if not frappe.db.exists("Guest", g):
-			frappe.throw(_("Guest not found."), frappe.DoesNotExistError)
-	decided = checked or scope.is_platform_admin()
-	if not decided:
+	source, target = _lock_pair(source, target)
+	admin = scope.is_platform_admin()
+	if not (checked or admin):
 		require_guest(target, "crm.edit")
 		require_guest(source, "crm.edit")
-	# both rows locked in name order: two merges of the same profiles never deadlock
-	frappe.db.sql("SELECT name FROM `tabGuest` WHERE name IN %(g)s ORDER BY name FOR UPDATE", {"g": (source, target)})
-	hotels = _records_hotels((source, target))
-	if not decided:
+	src = frappe.get_doc("Guest", source, for_update=True)
+	dst = frappe.get_doc("Guest", target, for_update=True)
+	if src.get("tex_erased_at") or dst.get("tex_erased_at"):
+		frappe.throw(_("An erased profile is never merged: its stays stay anonymous, and nothing is copied into it."))
+	links, dynamic = _guest_links(), _dynamic_links()
+	hotels, unknown = _records_hotels((source, target), links)
+	if not admin:
+		if unknown:
+			frappe.throw(_("These profiles have records that name no hotel ({0}): a platform administrator can "
+			               "merge them.").format(", ".join(_(d) for d in sorted(unknown))), frappe.PermissionError)
 		allowed = {p for p in scope.permitted_properties() if scope.has_capability("crm.edit", p)}
 		if not hotels <= allowed:
 			frappe.throw(_("These profiles have records at hotels where you may not edit guests; someone who may "
 			               "edit guests at all of them can merge them."), frappe.PermissionError)
-	src, dst = frappe.get_doc("Guest", source), frappe.get_doc("Guest", target)
 	ents = {e for e in (src.tex_enterprise, dst.tex_enterprise) if e} | _enterprises(hotels)
 	if len(ents) > 1:
 		frappe.throw(_("Profiles of different enterprises cannot be merged."))
 	before = {g.name: {f: bool(g.get(f)) for f in CONSENT} for g in (src, dst)}
-	moved = _repoint(source, target)
+	moved = _repoint(source, target, links, dynamic)
 	filled = [f for f in MERGE_FILL if not dst.get(f) and src.get(f)]
 	for f in filled:
 		dst.set(f, src.get(f))
@@ -1031,11 +1183,46 @@ def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 			for chunk in _chunks(moved[doctype]):
 				frappe.db.sql(f"UPDATE `tab{doctype}` SET guest_name = %(n)s WHERE name IN %(r)s",  # nosemgrep
 				              {"n": dst.full_name, "r": chunk})
-	frappe.delete_doc("Guest", source, ignore_permissions=True, delete_permanently=True)
+	_assert_unlinked(source, links, dynamic)
+	frappe.delete_doc("Guest", source, ignore_permissions=True)
+	copy = frappe.db.get_value("Deleted Document", {"deleted_doctype": "Guest", "deleted_name": source}, "name",
+	                           order_by="creation desc")
+	if copy:
+		# the duplicate as it is committed now (read with its lock), not as the request's snapshot saw it
+		frappe.db.set_value("Deleted Document", copy, "data", src.as_json(), update_modified=False)
 	loyalty._sync_guest(target)
 	refresh_guest_stats(target)
 	counts = {dt: len(names) for dt, names in sorted(moved.items())}
+	records = {dt: sorted(names) for dt, names in sorted(moved.items())}
 	audit("guest.merge", reference_doctype="Guest", reference_name=target, hotels=sorted(hotels),
 	      enterprise=next(iter(ents)) if ents else None,
-	      old={"source": source, "consent": before}, new={"moved": counts, "filled": sorted(filled), "consent": consent})
-	return {"target": target, "source": source, "moved": counts, "filled": sorted(filled), "consent": consent}
+	      old={"source": source, "consent": before},
+	      new={"moved": counts, "records": records, "filled": sorted(filled), "consent": consent, "copy": copy,
+	           "copy_kept_days": MERGE_COPY_DAYS})
+	return {"target": target, "source": source, "moved": counts, "records": records, "filled": sorted(filled),
+	        "consent": consent}
+
+
+def _drop_merge_copies(sources) -> int:
+	"""Delete the Deleted Document copies of these merged profiles. → how many."""
+	names = frappe.get_all("Deleted Document", filters={"deleted_doctype": "Guest",
+	                                                    "deleted_name": ("in", list(sources) or [""])}, pluck="name")
+	for chunk in _chunks(names):
+		frappe.db.sql("DELETE FROM `tabDeleted Document` WHERE name IN %(n)s", {"n": chunk})
+	return len(names)
+
+
+def purge_merge_copies(days: int | None = None) -> int:
+	"""Scheduler (daily): the copies of profiles merged more than ``MERGE_COPY_DAYS`` ago are deleted
+	(the merge events keep which records moved, never the duplicate's contact data). → how many."""
+	before = add_days(now_datetime(), -(days if days is not None else MERGE_COPY_DAYS))
+	sources = set()
+	for old in frappe.get_all("TEX Audit Event", filters={"action": "guest.merge", "event_time": ("<", before)},
+	                          pluck="old_value"):
+		try:
+			source = (json.loads(old or "{}") or {}).get("source")
+		except (ValueError, AttributeError):
+			source = None
+		if source:
+			sources.add(source)
+	return _drop_merge_copies(sources) if sources else 0
