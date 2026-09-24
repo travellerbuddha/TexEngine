@@ -124,10 +124,13 @@ def promotions(property: str, at: datetime) -> tuple[Promotion, ...]:
 
 
 def coupon_usage(promos: tuple[Promotion, ...], gkey: str | None,
-                 exclude_booking: str | None = None) -> dict[str, tuple[int, int]]:
+                 exclude_booking: str | None = None, at: datetime | None = None) -> dict[str, tuple[int, int]]:
 	"""(uses, uses by this guest) per limited promotion. Repricing a booking does not count
-	the booking's own redemptions against it (G-09)."""
+	the booking's own redemptions against it (G-09). ``at``: the uses held at that moment
+	instead of now (a historical simulation, G-51)."""
 	limited = [p.promo_id for p in promos if p.usage_limit or p.per_guest_limit]
+	if at is not None:
+		return {pid: _usage_at(pid, gkey, exclude_booking, get_datetime(at)) for pid in limited}
 	out = {}
 	for pid in limited:
 		live = {"promotion": pid, "status": ("in", ["Reserved", "Committed"])}
@@ -137,6 +140,21 @@ def coupon_usage(promos: tuple[Promotion, ...], gkey: str | None,
 		mine = frappe.db.count("TEX Promotion Redemption", {**live, "guest_key": gkey}) if gkey else 0
 		out[pid] = (total, mine)
 	return out
+
+
+def _usage_at(pid: str, gkey: str | None, exclude_booking: str | None, at: datetime) -> tuple[int, int]:
+	"""The uses of ``pid`` held at ``at``: redemptions made by then and not released by then
+	(``released_at``; a row released before G-51 was last written when it was released, so its
+	``modified`` stands in). Later uses do not count; a use released since still does (G-51)."""
+	cond = ("promotion=%(p)s AND creation <= %(at)s AND (status IN ('Reserved', 'Committed') OR "
+	        "(status = 'Released' AND COALESCE(released_at, modified) > %(at)s))")
+	vals = {"p": pid, "at": at, "ex": exclude_booking, "g": gkey}
+	if exclude_booking:
+		cond += " AND IFNULL(booking, '') != %(ex)s"
+	sql = f"SELECT COUNT(*) FROM `tabTEX Promotion Redemption` WHERE {cond}"
+	total = frappe.db.sql(sql, vals)[0][0]  # nosemgrep -- static conditions, values bound
+	mine = frappe.db.sql(sql + " AND guest_key=%(g)s", vals)[0][0] if gkey else 0  # nosemgrep -- as above
+	return int(total), int(mine)
 
 
 # ─── FX ──────────────────────────────────────────────────────────────────
@@ -340,12 +358,14 @@ def _extra_availability(req: StayRequest, exclude_reservation: str | None):
 def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = None,
                   extras: dict[str, ExtraDef] | None = None, exclude_booking: str | None = None,
                   check_capacity: bool = True, exclude_reservation: str | None = None,
-                  fx_pins: dict[tuple[str, str], FxSnapshot] | None = None) -> PricingContext:
+                  fx_pins: dict[tuple[str, str], FxSnapshot] | None = None,
+                  usage_at: datetime | None = None) -> PricingContext:
 	"""``check_capacity``: whether limited extras are checked against what is left now (not in
 	a historical simulation); ``exclude_reservation``: the reservation being repriced, whose
 	own units count as available to it (G-19). ``fx_pins``: (from, to) → a rate recorded
 	when the reservation was sold (``fx.pins``), used instead of the FX tables for that pair
-	(G-56, ADR-051); any other pair is resolved as of ``req.sale_at``."""
+	(G-56, ADR-051); any other pair is resolved as of ``req.sale_at``. ``usage_at``: coupon uses
+	counted as held at that moment, not now (the historical simulator, G-51)."""
 	at = req.sale_at
 	sell = req.sell_currency.upper()
 	pinned = fx_pins or {}
@@ -389,5 +409,5 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 		extras=catalog,
 		extra_fx=extra_fx,
 		promo_fx=promo_fx,
-		coupon_usage=coupon_usage(promos, gkey, exclude_booking),
+		coupon_usage=coupon_usage(promos, gkey, exclude_booking, at=usage_at),
 	)
