@@ -168,6 +168,27 @@ class TestChangedStay(unittest.TestCase):
 		self.assertEqual(codes([cell("l", CI, max_los=4)], co=date(2027, 7, 15), before=self.BEFORE), ["MAX_LOS"])
 		self.assertEqual(codes([cell("l", CI, max_los=4)], before=self.BEFORE), [])      # dates unchanged
 
+	def test_a_change_toward_the_minimum_stay_is_not_refused(self):
+		# review L1: a 2-night stay held under a 5-night minimum (set after it was sold) may grow
+		short = (CI, date(2027, 7, 12))
+		mins = [cell("l", CI, min_los=5)]
+		self.assertEqual(codes(mins, co=date(2027, 7, 13), before=short), [])
+		self.assertEqual(codes(mins, co=date(2027, 7, 11), before=short), ["MIN_LOS"])     # shorter: refused
+		# … but a minimum stay through a night it did not hold is that night's, newly taken
+		through = [cell("t", date(2027, 7, 13), min_los=7)]
+		v, _ = rs.evaluate_change(through, WEB, CI, date(2027, 7, 14), SALE, before=short, min_los_basis=rs.STAY_THROUGH)
+		self.assertEqual([x.code for x in v], ["MIN_LOS"])
+		# … a new arrival is judged as one
+		moved = date(2027, 7, 11)
+		self.assertEqual(codes([cell("l", moved, min_los=5)], ci=moved, co=date(2027, 7, 14), before=short),
+		                 ["MIN_LOS"])
+
+	def test_a_change_toward_the_maximum_stay_is_not_refused(self):
+		long = (CI, date(2027, 7, 16))                                             # 6 nights, maximum 3
+		maxs = [cell("l", CI, max_los=3)]
+		self.assertEqual(codes(maxs, co=date(2027, 7, 15), before=long), [])
+		self.assertEqual(codes(maxs, co=date(2027, 7, 17), before=long), ["MAX_LOS"])      # longer: refused
+
 	def test_another_product_is_a_new_sale_of_the_stay(self):
 		cells = [cell("s", date(2027, 7, 11), stop_sell="STOP"), cell("a", CI, cta=True, min_los=5)]
 		self.assertEqual(codes(cells, before=self.BEFORE, product_changed=True), ["CTA", "MIN_LOS", "STOP_SELL"])
@@ -181,8 +202,11 @@ class TestChangedStay(unittest.TestCase):
 		# … but a night still to come is sold as the new product
 		cells.append(cell("n", date(2027, 7, 13), stop_sell="STOP"))
 		self.assertEqual(codes(cells, sale=today, before=self.BEFORE, product_changed=True), ["STOP_SELL"])
-		# a stay under way whose dates change is judged on its new length and its new nights
-		self.assertEqual(codes(cells[:3], sale=today, co=date(2027, 7, 13), before=self.BEFORE), ["MIN_LOS"])
+		# a stay under way whose dates change is judged on its new nights; leaving early is not a sale
+		# (review L1): the minimum stay does not keep an in-house guest
+		self.assertEqual(codes(cells[:3], sale=today, co=date(2027, 7, 13), before=self.BEFORE), [])
+		self.assertEqual(codes([cell("x", CI, max_los=4)], sale=today, co=date(2027, 7, 15), before=self.BEFORE),
+		                 ["MAX_LOS"])
 		self.assertEqual(codes([*cells[:3], cell("m", CO, stop_sell="STOP")], sale=today, co=date(2027, 7, 15),
 		                       before=self.BEFORE), ["STOP_SELL"])
 
