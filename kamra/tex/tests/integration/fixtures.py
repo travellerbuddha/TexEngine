@@ -129,9 +129,9 @@ def default_occupancy_rules() -> list[dict]:
 
 
 def create_contract(f: dict, *, code="DE-TEST", market="DE", base=100, publish=True, age_bands=None,
-                    occupancy_rules=None) -> dict:
+                    occupancy_rules=None, offers=None) -> dict:
 	"""``age_bands`` / ``occupancy_rules``: None → the defaults above; [] → none (the contract
-	inherits them from the pricing policies)."""
+	inherits them from the pricing policies). ``offers``: the version's contract offers."""
 	from kamra.tex.commercial import contracts
 
 	std, dlx = f["room_types"]["STD"], f["room_types"]["DLX"]
@@ -154,6 +154,7 @@ def create_contract(f: dict, *, code="DE-TEST", market="DE", base=100, publish=T
 		                                          "child_percent": 50}],
 		"rate_plans": [{"rate_plan": f["rate_plans"]["FLEX"], "refundable": 1},
 		               {"rate_plan": f["rate_plans"]["NRF"], "op": "ADJUST_PERCENT", "value": -10, "refundable": 0}],
+		"offers": offers or [],
 	}).insert(ignore_permissions=True)
 	out = {"contract": contract.name, "version": version.name}
 	if publish:

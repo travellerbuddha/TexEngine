@@ -92,6 +92,7 @@ BEHAVIOUR = {
 	"p39_lookup_indexes": "test_patches.TestP03Indexes.test_p39_creates_the_lookup_indexes_that_survive_a_sync",
 	"p40_crm_privacy_review": "test_crm_privacy.TestAbandonedPrivacy."
 	                          "test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds",
+	"p46_report_indexes": "test_patches.TestP03Indexes.test_p46_creates_the_report_indexes",
 }
 
 
@@ -572,6 +573,27 @@ class TestP03Indexes(PatchCase):
 		self.assertEqual(seen["add_index"], [("Reservation", ("tex_booking", "tex_room_index"), "tex_booking_room"),
 		                                     ("TEX Extra Allocation", ("reservation", "status"), "tex_xalloc_res_status"),
 		                                     ("TEX Communication", ("email_queue", "status"), "tex_comm_queue_status")])
+
+
+	def test_p46_creates_the_report_indexes(self):
+		"""G-46 review (M5): reports read reservations by hotel and arrival, funnel events by hotel or
+		booking site and time, instead of scanning every tenant's rows."""
+		from kamra.tex import setup
+
+		new = {"tex_res_prop_ci": ("Reservation", ("property", "check_in_date")),
+		       "tex_funnel_prop_time": ("TEX Funnel Event", ("property", "occurred_at")),
+		       "tex_funnel_site_time": ("TEX Funnel Event", ("site", "occurred_at"))}
+		have = {name: (dt, tuple(fields)) for dt, fields, name in setup.TEX_INDEXES}
+		self.assertEqual({k: have.get(k) for k in new}, new)
+		for name, (doctype, _fields) in new.items():
+			self.assertTrue(frappe.db.has_index(f"tab{doctype}", name), name)       # the migration made them
+		self.assertEqual(self.first_run("p46_report_indexes")["add_index"], [])     # nothing missing: no DDL
+		real = frappe.local.db.has_index
+		with mock.patch.object(frappe.local.db, "has_index",
+		                       side_effect=lambda table, index: index not in new and real(table, index)):
+			seen = migrate("p46_report_indexes")
+		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
+		self.assertRerunChangesNothing("p46_report_indexes")
 
 
 class TestP04LegacyPriceLock(PatchCase):

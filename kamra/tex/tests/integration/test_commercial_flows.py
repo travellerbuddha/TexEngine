@@ -29,8 +29,8 @@ SLUG = "tex-test-resort"
 GUEST = {"first_name": "Lena", "last_name": "Kraus", "email": "lena@example.com", "country": "Germany"}
 
 
-def setup_site_and_payments(f: dict) -> dict:
-	fx.create_contract(f, code="PAY")
+def setup_site_and_payments(f: dict, **contract) -> dict:
+	fx.create_contract(f, code="PAY", **contract)
 	fx.create_markup("DE", 7)
 	acc = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"},
 	                {"label": "Sandbox gateway", "property": fx.PROPERTY, "provider": "Mock",

@@ -23,7 +23,7 @@ from frappe.utils import add_days, add_to_date, getdate, now_datetime, nowdate
 from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
 from kamra.tex.api import reports as rep_api
-from kamra.tex.money import D
+from kamra.tex.money import D, split_evenly
 from kamra.tex.reports import service as rep
 from kamra.tex.security import scope
 from kamra.tex.services import booking
@@ -33,8 +33,10 @@ from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 from kamra.tex.tests.integration.test_crm_segments import OTHER, agent, other_tenant
 
 SIBLING = "TEX Test Resort B"          # a second hotel of the test hotel's group
-COST_KEYS = {"cost", "margin", "margin_pct", "accommodation", "extras", "taxes", "not_from_contract"}
-MONEY = ("revenue", "accommodation", "extras", "taxes", "not_from_contract", "cost", "margin")
+COST_KEYS = {"cost", "margin", "margin_pct", "accommodation", "extras", "taxes", "not_from_contract",
+             "cancellation_fees", "cost_reduction"}
+MONEY = ("revenue", "accommodation", "extras", "taxes", "not_from_contract", "cancellation_fees", "cost", "margin")
+PARTS = ("accommodation", "extras", "taxes", "not_from_contract", "cancellation_fees")
 
 
 def sell(session: str, *, room: str = "STD", rate: str = "FLEX", check_in=None, check_out=None, extras: bool = True,
@@ -131,6 +133,8 @@ class ReportCase(TexTestCase):
 		super().setUp()
 		setup_site_and_payments(self.f)
 		self.rm = agent("g46-rm@example.com", fx.PROPERTY, "Revenue Manager")
+		# payments need payment.view too (G-46 review, L3): a hotel administrator holds every capability
+		self.admin = agent("g46-admin@example.com", fx.PROPERTY, "Hotel Admin")
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
 
 	def report(self, view: str, user: str | None = None, **kw) -> dict:
@@ -150,7 +154,7 @@ class ReportCase(TexTestCase):
 		for row in [*report["rows"], *[{**t, "currency": c} for c, t in report["totals"].items()]]:
 			m = {k: D(row[k]) for k in MONEY}
 			self.assertEqual(m["cost"] + m["margin"], m["accommodation"], row)
-			self.assertEqual(m["accommodation"] + m["extras"] + m["taxes"] + m["not_from_contract"], m["revenue"], row)
+			self.assertEqual(sum((m[k] for k in PARTS), D(0)), m["revenue"], row)
 			if m["accommodation"]:
 				self.assertEqual(D(row["margin_pct"]), (m["margin"] / m["accommodation"] * 100).quantize(D("0.01")), row)
 		for ccy, total in report["totals"].items():
@@ -196,7 +200,7 @@ class TestContractVsSelling(ReportCase):
 		self.assertReconciles(out)
 		web_row = row_of(out, "DIRECT_WEB")
 		imp_total = D(frappe.db.get_value("Reservation", imp["reservation"], "tex_total_amount"))
-		self.assertEqual(D(web_row["not_from_contract"]), (imp_total / 2).quantize(D("0.01")))
+		self.assertEqual(D(web_row["not_from_contract"]), split_evenly(imp_total, 2, "EUR")[0])   # its 1st night
 		self.assertEqual(row_of(out, "CALL_CENTER")["room_nights"], 4)
 		self.assertEqual(web_row["room_nights"], 2 + 1)
 
@@ -322,7 +326,7 @@ class TestViews(ReportCase):
 	def test_payment_view(self):
 		paid, unpaid = sell("g46-p-paid"), sell("g46-p-open")
 		pay(paid)
-		out = self.report("payment", **self.june(group_by="payment_status"))
+		out = self.report("payment", self.admin, **self.june(group_by="payment_status"))
 		t = out["totals"]["EUR"]
 		value = sum((D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")) for b in (paid, unpaid)), D(0))
 		charged = D(frappe.db.get_value("TEX Booking", paid["booking"], "paid_amount"))
@@ -359,7 +363,7 @@ class TestTenancyAndCost(ReportCase):
 	def test_another_hotels_grant_sees_nothing_of_this_hotel(self):
 		sell("g46-t-here")
 		other_tenant()
-		there = agent("g46-there@example.com", OTHER, "Revenue Manager")
+		there = agent("g46-there@example.com", OTHER, "Hotel Admin")
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
 		ent = frappe.db.get_value("Property", fx.PROPERTY, "tex_enterprise")
 		grp = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
@@ -382,8 +386,8 @@ class TestTenancyAndCost(ReportCase):
 		frappe.db.set_value("Reservation", there["reservation"], "property", sibling)
 		grp = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
 		for view in ("production", "margin", "cancellation", "payment"):
-			out = self.report(view, level="Group", name=grp, stay_from=str(fx.d(6, 1)), stay_to=str(fx.d(6, 30)),
-			                  group_by="hotel")
+			out = self.report(view, self.admin, level="Group", name=grp, stay_from=str(fx.d(6, 1)),
+			                  stay_to=str(fx.d(6, 30)), group_by="hotel")
 			self.assertEqual(out["scope"]["hotels"], [fx.PROPERTY], view)          # the group has two, I see one
 			self.assertEqual({r["key"] for r in out["rows"]}, {fx.PROPERTY}, view)
 		for kw in ({"level": "Hotel", "name": sibling}, {"property": sibling}):
@@ -393,7 +397,7 @@ class TestTenancyAndCost(ReportCase):
 	def test_a_profile_without_cost_gets_selling_figures_only(self):
 		sell("g46-v")
 		viewer = agent("g46-viewer@example.com", fx.PROPERTY, "Viewer")
-		for view in ("production", "promotion", "extras", "cancellation", "payment"):
+		for view in ("production", "promotion", "extras", "cancellation"):
 			out = self.report(view, viewer, **self.june())
 			self.assertFalse(out["cost_visible"], view)
 			keys = set().union(*(set(r) for r in out["rows"]), *(set(t) for t in out["totals"].values()))
@@ -460,7 +464,7 @@ class TestPerformanceAndBounds(ReportCase):
 		def runs():
 			for view in rep.VIEWS:
 				args = {"property": fx.PROPERTY, "sale_from": today, "sale_to": today} if view == "conversion" else kw
-				yield view, lambda v=view, a=args: self.report(v, **a)
+				yield view, lambda v=view, a=args: self.report(v, self.admin, **a)
 
 		first = {v: self.count(call) for v, call in runs()}
 		for s in ("g46-q2", "g46-q3"):
@@ -505,3 +509,260 @@ class TestPerformanceAndBounds(ReportCase):
 		self.assertEqual((old["totals"]["EUR"]["room_nights"], old["totals"]["EUR"]["revenue"]), (2, "561.67"))
 		self.assertEqual((old["property"], old["from"], old["to"]), (fx.PROPERTY, str(fx.d(6, 11)), str(fx.d(6, 30))))
 		self.assertTrue(getdate(old["to"]))
+
+
+# ─── G-46 review follow-up (ADR-059 review) ─────────────────────────────────────────────────
+
+
+def stay_row(reservation: str) -> dict:
+	return frappe.db.get_value("Reservation", reservation, [
+		"name", "check_in_date", "check_out_date", "status", "tex_total_amount", "tex_cost_amount", "tex_margin_amount",
+		"tax_amount", "cancellation_fee", "tex_pricing_source", "tex_pricing_snapshot"], as_dict=True)
+
+
+def expected(reservations, stay_from, stay_to) -> dict:
+	"""The window's figures computed independently of the report: each stay's amounts split over its
+	nights in whole cents (``money.split_evenly``, the folio's rule: equal shares, the remainder on
+	the last night), the shares of the nights inside the window added up. Taxes on top are the
+	reservation's own tax (the test contract's prices exclude tax), extras the snapshot's."""
+	out = dict.fromkeys(MONEY, D(0))
+	a, b = getdate(stay_from), getdate(stay_to)
+	for name in reservations:
+		r = stay_row(name)
+		ci, co = getdate(r.check_in_date), getdate(r.check_out_date)
+		n = max(1, (co - ci).days)
+		inside = [i for i in range(n) if a <= add_days(ci, i) <= b]
+		t = json.loads(r.tex_pricing_snapshot or "{}").get("totals") or {}
+		closed = r.status in ("Cancelled", "No Show")
+		priced = r.tex_pricing_source == "TEX" and not closed
+		parts = {"revenue": D(r.cancellation_fee or 0) if closed else D(r.tex_total_amount),
+		         "cost": D(r.tex_cost_amount or 0) if priced else D(0),
+		         "extras": D(t["subtotal"]) - D(t["accommodation"]) if priced else D(0),
+		         "taxes": D(r.tax_amount or 0) if priced else D(0),
+		         "not_from_contract": D(r.tex_total_amount) if not priced and not closed else D(0),
+		         "cancellation_fees": D(r.cancellation_fee or 0) if closed else D(0)}
+		share = {k: sum((split_evenly(v, n, "EUR")[i] for i in inside), D(0)) if v >= 0 else
+		         -sum((split_evenly(-v, n, "EUR")[i] for i in inside), D(0)) for k, v in parts.items()}
+		accom = share["revenue"] - share["extras"] - share["taxes"] - share["not_from_contract"] \
+			- share["cancellation_fees"]
+		for k in ("revenue", "cost", "extras", "taxes", "not_from_contract", "cancellation_fees"):
+			out[k] += share[k]
+		out["accommodation"] += accom
+		out["margin"] += accom - share["cost"]
+	return {k: str(v.quantize(D("0.01"))) for k, v in out.items()}
+
+
+def money_totals(report: dict, ccy: str = "EUR") -> dict:
+	return {k: report["totals"][ccy][k] for k in MONEY}
+
+
+class TestReviewWholeCents(ReportCase):
+	"""M1, M4: a stay's amounts are split over its nights in whole cents, as the folio bills them;
+	every grouping and every fold gives the same totals, equal to an independent computation."""
+
+	def sell_three(self):
+		with_vat(10)
+		s1 = sell("g46r-s1")                                                        # 10–13 June
+		s2 = sell("g46r-s2", room="DLX", check_in=fx.d(6, 11), check_out=fx.d(6, 15))
+		s3 = sell("g46r-s3", rate="NRF", check_in=fx.d(6, 12), check_out=fx.d(6, 15))
+		frappe.db.set_value("Reservation", s2["reservation"], "tex_sales_channel", "CALL_CENTER")
+		return [s["reservation"] for s in (s1, s2, s3)]
+
+	def test_every_grouping_and_every_fold_give_the_same_totals(self):
+		stays = self.sell_three()
+		window = {"stay_from": str(fx.d(6, 11)), "stay_to": str(fx.d(6, 13))}      # cuts all three
+		want = expected(stays, fx.d(6, 11), fx.d(6, 13))
+		self.assertNotEqual(D(want["revenue"]) % 1, 0)                            # odd cents in play
+		reports = {g: self.report("margin", property=fx.PROPERTY, group_by=g, **window)
+		           for g in ("channel", "day", "month", "room_type", "rate_plan", "hotel")}
+		with patch.object(rep, "MAX_ROWS", 2):
+			reports["day, folded"] = self.report("margin", property=fx.PROPERTY, group_by="day", **window)
+		self.assertTrue(reports["day, folded"]["truncated"])
+		for g, out in reports.items():
+			self.assertEqual(money_totals(out), want, g)
+			self.assertEqual(out["totals"]["EUR"]["room_nights"], 2 + 3 + 2, g)
+			self.assertReconciles(out)
+		by_day = {r["key"]: D(r["revenue"]) for r in reports["day"]["rows"]}
+		night = {str(add_days(fx.d(6, 10), i)): D(0) for i in range(6)}
+		for name in stays:                                                        # the folio's nights
+			r = stay_row(name)
+			n = (getdate(r.check_out_date) - getdate(r.check_in_date)).days
+			for i, amount in enumerate(split_evenly(D(r.tex_total_amount), n, "EUR")):
+				day = str(add_days(r.check_in_date, i))
+				if day in night:
+					night[day] += amount
+		self.assertEqual(by_day, {d: v for d, v in night.items() if fx.d(6, 11) <= getdate(d) <= fx.d(6, 13)})
+
+	def test_whole_stays_report_the_stored_figures(self):
+		stays = self.sell_three()
+		out = self.report("margin", **self.june())
+		rows = [stay_row(s) for s in stays]
+		total = lambda f: str(sum((D(r[f]) for r in rows), D(0)).quantize(D("0.01")))  # noqa: E731
+		t = out["totals"]["EUR"]
+		self.assertEqual((t["revenue"], t["cost"], t["margin"], t["taxes"]),
+		                 (total("tex_total_amount"), total("tex_cost_amount"), total("tex_margin_amount"),
+		                  total("tax_amount")))
+
+	def test_a_three_night_stay_by_day_is_its_folio_split(self):
+		b = sell("g46r-days")
+		total = D(frappe.db.get_value("Reservation", b["reservation"], "tex_total_amount"))
+		out = self.report("production", **self.june(group_by="day"))
+		self.assertEqual([D(r["revenue"]) for r in out["rows"]], split_evenly(total, 3, "EUR"))
+
+
+class TestReviewMoney(ReportCase):
+	def test_an_override_moves_the_accommodation_and_the_tax_as_the_reservation_does(self):
+		"""L6: a manual price keeps the reservation's own tax; the report does not put the tax part of
+		the override into accommodation and margin."""
+		from kamra.tex.services import modification
+
+		with_vat(10)
+		b = sell("g46r-override")
+		res = b["reservation"]
+		p = modification.propose(res, {"check_out": str(fx.d(6, 14))}, basis="ORIGINAL_VERSION")
+		modification.apply(p["proposal_token"], reason="price agreed by phone", override_amount="1100.00")
+		r = stay_row(res)
+		self.assertEqual(D(r.tex_total_amount), D("1100.00"))
+		out = self.report("margin", **self.june())["totals"]["EUR"]
+		extras = D(json.loads(r.tex_pricing_snapshot)["totals"]["extras"])
+		self.assertEqual(D(out["taxes"]), D(r.tax_amount))                          # the reservation's tax
+		self.assertEqual(D(out["accommodation"]), D("1100.00") - extras - D(r.tax_amount))
+		self.assertEqual(D(out["margin"]), D(out["accommodation"]) - D(r.tex_cost_amount))
+
+	def test_a_cancelled_stay_counts_its_fee_not_its_margin(self):
+		"""L5: with cancelled stays included, a cancelled stay brings the fee it kept, no accommodation,
+		cost or margin."""
+		with_vat(10)
+		sell("g46r-kept")
+		gone = sell("g46r-gone", rate="NRF")
+		booking.cancel_reservation(gone["reservation"], reason="plans changed")
+		fee = D(frappe.db.get_value("Reservation", gone["reservation"], "cancellation_fee"))
+		self.assertGreater(fee, 0)
+		live = self.report("margin", **self.june())["totals"]["EUR"]
+		both = self.report("margin", **self.june(include_cancelled=1))["totals"]["EUR"]
+		for k in ("accommodation", "cost", "margin", "extras", "taxes"):
+			self.assertEqual(both[k], live[k], k)
+		self.assertEqual((D(both["cancellation_fees"]), D(both["revenue"]) - D(live["revenue"])), (fee, fee))
+
+	def test_payment_rows_and_payments_by_method_agree_per_currency(self):
+		"""L2: a payment in another currency than its booking is in the rows of its own currency."""
+		b = sell("g46r-ccy")
+		pay(b)
+		frappe.db.set_value("TEX Payment Transaction", {"booking": b["booking"], "txn_type": "Charge"}, "currency",
+		                    "GBP")
+		out = self.report("payment", self.admin, **self.june())
+		charged = {c: t["charged"] for c, t in out["totals"].items()}
+		by_method = {c: t["charged"] for c, t in out["method_totals"].items()}
+		self.assertEqual(charged.get("GBP"), by_method.get("GBP"))
+		self.assertEqual(D(charged.get("EUR", "0")), D(by_method.get("EUR", "0")))
+
+
+class TestReviewVisibility(ReportCase):
+	def test_the_promotion_view_shows_cost_stage_offers_only_with_cost_access(self):
+		"""M2: a cost-stage offer's figures are cost figures."""
+		doc = policy_api.save_record("TEX Promotion", {
+			"promotion_name": "Net ten", "property": fx.PROPERTY, "stage": "COST", "value_type": "PERCENT",
+			"value": 10, "applies_to": "ACCOMMODATION"})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		b = sell("g46r-net")
+		self.assertIn(doc["name"], [p["promo_id"] for p in snapshot(b["reservation"])["promotions"] if p["applied"]])
+		viewer = agent("g46r-viewer@example.com", fx.PROPERTY, "Viewer")
+		self.assertEqual(self.report("promotion", viewer, **self.june())["rows"], [])
+		rm = self.report("promotion", **self.june())
+		row = next(r for r in rm["rows"] if r["key"] == doc["name"])
+		self.assertEqual((row["stage"], row["discount"], row["cost_reduction"]), ("COST", "0.00", "75.00"))
+		# a snapshot written before outcomes named their stage: the explanation tells
+		snap = snapshot(b["reservation"])
+		for p in snap["promotions"]:
+			p.pop("stage", None)
+		frappe.db.set_value("Reservation", b["reservation"], "tex_pricing_snapshot", json.dumps(snap))
+		self.assertEqual(self.report("promotion", viewer, **self.june())["rows"], [])
+
+	def test_the_payment_view_needs_payment_view_at_every_hotel(self):
+		"""L3"""
+		sell("g46r-pv")
+		with self.assertRaises(frappe.PermissionError):
+			self.report("payment", **self.june())                                  # revenue manager
+		self.assertEqual(self.report("payment", self.admin, **self.june())["totals"]["EUR"]["bookings"], 1)
+
+	def test_views_refuse_what_they_cannot_apply(self):
+		"""L4"""
+		today = nowdate()
+		for view, kw in (("cancellation", {"include_cancelled": 1}), ("payment", {"include_cancelled": 1}),
+		                 ("payment", {"basis": "stay"}), ("conversion", {"include_cancelled": 1}),
+		                 ("conversion", {"basis": "stay"})):
+			dates = {"sale_from": today, "sale_to": today} if view == "conversion" else \
+				{"stay_from": str(fx.d(6, 1)), "stay_to": str(fx.d(6, 30))}
+			with self.assertRaises(frappe.ValidationError, msg=(view, kw)):
+				self.report(view, self.admin, property=fx.PROPERTY, **dates, **kw)
+
+	def test_filter_options_say_when_they_are_cut(self):
+		"""L8"""
+		frappe.set_user(self.rm)  # nosemgrep: frappe-setuser -- the viewer
+		scope.clear_cache()
+		with patch.object(rep, "MAX_OPTIONS", 1):
+			out = rep_api.filter_options(property=fx.PROPERTY)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertEqual((len(out["room_types"]), out["truncated"]["room_types"]), (1, True))
+
+	def test_reports_are_throttled_per_user(self):
+		"""M5: a viewer cannot run reports without pause; another viewer is not held back."""
+		sell("g46r-rate")
+		other = agent("g46r-rate2@example.com", fx.PROPERTY, "Revenue Manager")
+		with patch.object(rep, "RATE_LIMIT", (2, 60)), patch.object(frappe.local, "request", object(), create=True):
+			frappe.cache.delete_keys("tex_report_rate:")
+			for _i in range(2):
+				self.report("production", **self.june())
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self.report("production", **self.june())
+			self.report("production", other, **self.june())
+			frappe.cache.delete_keys("tex_report_rate:")
+
+
+class TestReviewConversion(ReportCase):
+	def event(self, session, event, at, **kw):
+		frappe.get_doc({"doctype": "TEX Funnel Event", "event": event, "occurred_at": at, "session_id": session,
+		                "payload": json.dumps(kw.pop("payload", {})), **kw}).insert(ignore_permissions=True)
+
+	def test_each_session_counts_once_from_its_first_event_and_never_above_100(self):
+		"""L7"""
+		today = getdate(nowdate())
+		kw = {"property": fx.PROPERTY, "sale_from": str(today), "sale_to": str(today)}
+		before = self.report("conversion", **kw)["totals"]
+		start = f"{today} 00:00:01"
+		site = {"site": SLUG, "property": fx.PROPERTY}
+		self.event("g46r-l7-a", "search", add_to_date(start, hours=-2), **site)   # searched yesterday …
+		self.event("g46r-l7-a", "payment_started", now_datetime(), **site)        # … booked today
+		self.event("g46r-l7-b", "quote", now_datetime(), **site)                  # a deep link: no search
+		self.event("g46r-l7-c", "search", now_datetime(), **site)
+		after = self.report("conversion", **kw)["totals"]
+		delta = {k: after[k] - before.get(k, 0) for k in ("sessions", "searched", "quoted", "booked")}
+		self.assertEqual(delta, {"sessions": 2, "searched": 2, "quoted": 1, "booked": 0})
+		self.assertLessEqual(after["booked"], after["searched"])
+		old = add_days(today, -(rep.FUNNEL_RETENTION_DAYS + 1))
+		with self.assertRaises(frappe.ValidationError):                         # the funnel keeps 180 days
+			self.report("conversion", property=fx.PROPERTY, sale_from=str(old), sale_to=str(today))
+
+	def test_a_group_sites_sessions_count_for_its_whole_group_only(self):
+		"""M3: a hotel-group booking site records no hotel; its sessions count for a viewer who
+		reports on every hotel of the group, and for no one else."""
+		grp = frappe.db.get_value("Property", fx.PROPERTY, "tex_hotel_group")
+		frappe.get_doc({"doctype": "TEX Booking Site", "site_name": "G46 Group Site", "site_slug": "g46-group-site",
+		                "enabled": 1, "hotel_group": grp, "default_market": "DE", "default_currency": "EUR",
+		                "currencies": "EUR"}).insert(ignore_permissions=True)
+		today = nowdate()
+		kw = {"level": "Group", "name": grp, "sale_from": today, "sale_to": today, "group_by": "site"}
+		before = self.report("conversion", **kw)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a visitor of the group's site
+		public.search(site="g46-group-site", check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		              rooms=[{"adults": 2}], market="DE", session_id="g46r-group-1")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertIsNone(frappe.db.get_value("TEX Funnel Event", {"session_id": "g46r-group-1"}, "property"))
+		after = self.report("conversion", **kw)
+		self.assertEqual(after["totals"]["searched"] - before["totals"]["searched"], 1)
+		self.assertIn("g46-group-site", {r["key"] for r in after["rows"]})
+		# a second hotel joins the group; the viewer does not report on it: the site is not theirs
+		sibling_hotel()
+		scope.clear_cache()
+		narrowed = self.report("conversion", **kw)
+		self.assertNotIn("g46-group-site", {r["key"] for r in narrowed["rows"]})
