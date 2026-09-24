@@ -814,7 +814,8 @@ class TestApplyOpValues(WorkspaceCase):
 		           {"values": ["70"], "op": "bogus"}, {"values": ["70"], "op": None}, {"values": ["70"], "value": ""},
 		           {"values": ["70"], "value": None}, {"values": ["70"], "value": "1.0000000001"},
 		           {"values": ["70"], "value": "ten"}, {"values": ["70.0000000001"]}, {"values": ["abc"]},
-		           {"values": [True]}, {"values": {"a": "70"}}, {"values": "70"}):
+		           {"values": [True]}, {"values": [["70"]]}, {"values": [{"v": "70"}]}, {"values": ["70"], "value": [10]},
+		           {"values": {"a": "70"}}, {"values": "70"}):
 			with self.subTest(**{k: str(v)[:40] for k, v in kw.items()}), self.assertRaises(frappe.ValidationError):
 				self.call(**kw)
 

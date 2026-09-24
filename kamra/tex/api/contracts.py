@@ -509,13 +509,13 @@ def apply_op_values(version: str, values, op: str, value):
 	if op not in {o.value for o in ADJUST_OPS}:
 		frappe.throw(_("An adjustment is an amount, a factor, a percentage or a change by an amount or a "
 		               "percentage."))
-	amount = decimals.typed(value, _("Value"))
+	amount = _typed(value, _("Value"))
 	if amount is None:
 		frappe.throw(_("Value: a value is required."))
 	items = parse(values, None)
 	if not isinstance(items, list) or len(items) > ADJUST_VALUES_MAX:
 		frappe.throw(_("Prices to adjust are a list of at most {0} values.").format(ADJUST_VALUES_MAX))
-	currents = [decimals.typed(v, _("Price {0}").format(i)) for i, v in enumerate(items, 1)]
+	currents = [_typed(v, _("Price {0}").format(i)) for i, v in enumerate(items, 1)]
 	currency = frappe.db.get_value("TEX Contract", row.contract, "contract_currency")
 	out = []
 	for current in currents:
@@ -530,6 +530,13 @@ def apply_op_values(version: str, values, op: str, value):
 				raise
 			out.append({"value": None, "error": "NEGATIVE"})
 	return out
+
+
+def _typed(value, label: str):
+	"""``decimals.typed`` for an argument of any JSON shape: a list or an object is not a number."""
+	if isinstance(value, (list, dict)):
+		frappe.throw(_("{0}: {1} is not a number.").format(label, json.dumps(value)[:40]), title=_("Invalid number"))
+	return decimals.typed(value, label)
 
 
 # sample parties priced by ``price_matrix`` (ADR-061, GAP-2b): at most this many, of at most so many
