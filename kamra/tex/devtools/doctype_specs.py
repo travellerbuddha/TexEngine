@@ -1062,10 +1062,12 @@ PAYMENT_SPECS = [
 		F("provider", "Data", "Provider"),
 		F("provider_ref", "Data", "Provider reference"),
 		F("idempotency_key", "Data", "Idempotency key", unique=1),
-		F("parent_transaction", "Link", "Original transaction", "TEX Payment Transaction"),
+		# indexed: the refunds of a payment are read with a locking read under its lock (the
+		# amounts deciding what may still be refunded), which must lock only them (G-45 re-review 4)
+		F("parent_transaction", "Link", "Original transaction", "TEX Payment Transaction", search_index=1),
 		SB("Links"),
 		F("payment_link", "Link", "Payment link", "TEX Payment Link"),
-		F("booking", "Link", "Booking", "TEX Booking"),
+		F("booking", "Link", "Booking", "TEX Booking", search_index=1),
 		F("reservation", "Link", "Reservation", "Reservation"),
 		CB(),
 		F("card_brand", "Data", "Card brand"),
@@ -1079,23 +1081,25 @@ PAYMENT_SPECS = [
 		F("reason", "Small Text", "Reason"),
 		F("return_url", "Small Text", "Return URL", read_only=1),
 	], perms=READONLY_AUDIT,
-	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
+	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
+	   extra={"modified": "2026-09-29 00:00:00.000000"}),         # the indexes above came later
 
 	dt("TEX Payment Allocation", PM, [
 		F("property", "Link", "Hotel", "Property"),
-		F("transaction", "Link", "Transaction", "TEX Payment Transaction", in_list_view=1),
+		F("transaction", "Link", "Transaction", "TEX Payment Transaction", in_list_view=1, search_index=1),
 		F("allocation_type", "Select", "Type", ["Allocate", "Transfer", "Refund", "Release"], in_list_view=1),
 		F("amount", "Currency", "Amount", options="currency", in_list_view=1),
 		F("currency", "Link", "Currency", "Currency"),
 		CB(),
-		F("booking", "Link", "Booking", "TEX Booking", in_list_view=1),
+		F("booking", "Link", "Booking", "TEX Booking", in_list_view=1, search_index=1),
 		F("reservation", "Link", "Reservation", "Reservation"),
 		F("payment_link", "Link", "Payment link", "TEX Payment Link"),
 		F("reason", "Small Text", "Reason"),
 		F("actor", "Link", "Actor", "User"),
 		F("idempotency_key", "Data", "Idempotency key", unique=1, read_only=1),
 	], perms=READONLY_AUDIT,
-	   autoname="PAL-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True),
+	   autoname="PAL-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
+	   extra={"modified": "2026-09-29 00:00:00.000000"}),         # indexed for the locking reads (re-review 4)
 ]
 
 # ═══ TEX CRM ══════════════════════════════════════════════════════════════

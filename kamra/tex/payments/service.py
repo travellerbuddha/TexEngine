@@ -552,11 +552,30 @@ def _after_charge(txn) -> None:
 		guest_changes.on_charge_succeeded(txn)
 
 
-def allocated_of(transaction: str) -> D:
-	rows = frappe.get_all("TEX Payment Allocation", filters={"transaction": transaction},
-	                      fields=["allocation_type", "amount", "currency"])
+def _share(lock: bool) -> str:
+	"""A locking read, once the payment is locked: it reads the rows as they are now, never an
+	older snapshot of the transaction, so an amount deciding a limit counts every refund and
+	allocation committed before the lock (ADR-032; G-45 re-review 4). Every writer of them holds
+	the payment's lock, and the columns read by are indexed, so it waits for no one else."""
+	return " LOCK IN SHARE MODE" if lock else ""
+
+
+def _allocations(transaction: str, lock: bool = False) -> list:
+	return frappe.db.sql(
+		f"""SELECT booking, allocation_type, amount, currency FROM `tabTEX Payment Allocation`
+		WHERE `transaction`=%s{_share(lock)}""", (transaction,), as_dict=True)  # nosemgrep -- constant SQL
+
+
+def _refunds_of(transaction: str, status: str, lock: bool = False) -> list:
+	return frappe.db.sql(
+		f"""SELECT name, booking, amount, currency FROM `tabTEX Payment Transaction`
+		WHERE parent_transaction=%s AND txn_type='Refund' AND status=%s{_share(lock)}""",
+		(transaction, status), as_dict=True)  # nosemgrep -- constant SQL
+
+
+def allocated_of(transaction: str, *, lock: bool = False) -> D:
 	total = ZERO
-	for r in rows:
+	for r in _allocations(transaction, lock):
 		a = from_db(r.amount, r.currency)
 		total += -a if r.allocation_type in ("Release", "Refund") else a
 	return total
@@ -568,10 +587,15 @@ def _lock(doctype: str, name: str) -> None:
 	frappe.db.sql(f"SELECT name FROM `tab{doctype}` WHERE name=%s FOR UPDATE", name)  # nosemgrep -- constant doctype
 
 
-def _replayed_allocation(property: str, key: str | None, kind: str) -> tuple[str | None, str | None]:
+def _replayed_allocation(property: str, key: str | None, kind: str,
+                         lock: bool = False) -> tuple[str | None, str | None]:
 	"""→ (namespaced key, allocation already made with it)."""
 	key = ns_key(property, key, kind)
-	return key, (frappe.db.get_value("TEX Payment Allocation", {"idempotency_key": key}, "name") if key else None)
+	if not key:
+		return key, None
+	done = frappe.db.sql(f"SELECT name FROM `tabTEX Payment Allocation` WHERE idempotency_key=%s{_share(lock)}",
+	                     (key,))  # nosemgrep -- constant SQL
+	return key, (done[0][0] if done else None)
 
 
 def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bool = False,
@@ -579,7 +603,7 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)    # locked, as it is now
 	if not _system:
 		scope.require("payment.refund", txn.property)
-	key, done = _replayed_allocation(txn.property, idempotency_key, "allocate")
+	key, done = _replayed_allocation(txn.property, idempotency_key, "allocate", lock=True)
 	if done:
 		return done
 	if txn.status != "Succeeded" or txn.txn_type != "Charge":
@@ -590,7 +614,9 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	if b.currency != txn.currency:
 		frappe.throw(_("Currency mismatch between payment and booking."))
 	amount = quantize(D(amount), txn.currency)
-	free = from_db(txn.amount, txn.currency) - allocated_of(transaction) - refunded_of(transaction)
+	# a refund still waiting for its answer takes the unallocated money first: it is not free
+	free = (from_db(txn.amount, txn.currency) - allocated_of(transaction, lock=True) - refunded_of(transaction, lock=True)
+	        - in_flight_of(transaction, lock=True))
 	if amount <= 0 or amount > free:
 		frappe.throw(_("Only {0} {1} of this payment is unallocated.").format(to_str(free), txn.currency))
 	doc = frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": transaction,
@@ -613,15 +639,18 @@ def release(transaction: str, *, booking: str, amount, reason: str, idempotency_
 	_lock("TEX Payment Transaction", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	scope.require("payment.refund", txn.property)
-	key, done = _replayed_allocation(txn.property, idempotency_key, "release")
+	key, done = _replayed_allocation(txn.property, idempotency_key, "release", lock=True)
 	if done:
 		return done
 	amount = quantize(D(amount), txn.currency)
-	on_booking = sum((from_db(r.amount, r.currency) * (1 if r.allocation_type == "Allocate" else -1)
-	                  for r in frappe.get_all("TEX Payment Allocation",
-	                                          filters={"transaction": transaction, "booking": booking},
-	                                          fields=["amount", "currency", "allocation_type"])), ZERO)
-	if amount <= 0 or amount > on_booking:
+	# what the booking holds of it, less refunds from it still waiting for their answer: money
+	# being refunded never moves to another booking (G-45 re-review 4)
+	on_booking = booking_nets(transaction, lock=True).get(booking, ZERO)
+	free = on_booking - in_flight_from(transaction, booking, lock=True)
+	if amount <= 0 or amount > free:
+		if free < on_booking:
+			frappe.throw(_("Only {0} of what this booking holds of this payment can move: {1} is being refunded.").format(
+				to_str(free), to_str(on_booking - free)))
 		frappe.throw(_("Only {0} is allocated to this booking.").format(to_str(on_booking)))
 	doc = frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": transaction,
 	                      "allocation_type": "Release", "amount": amount, "currency": txn.currency,
@@ -646,11 +675,8 @@ def transfer(transaction: str, *, from_booking: str, to_booking: str, amount, re
 	return {"released": rel, "allocated": alloc}
 
 
-def refunded_of(transaction: str) -> D:
-	rows = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": transaction,
-	                                                          "txn_type": "Refund", "status": "Succeeded"},
-	                      fields=["amount", "currency"])
-	return sum((from_db(r.amount, r.currency) for r in rows), ZERO)
+def refunded_of(transaction: str, *, lock: bool = False) -> D:
+	return sum((from_db(r.amount, r.currency) for r in _refunds_of(transaction, "Succeeded", lock)), ZERO)
 
 
 def pending_refunds(booking: str) -> list:
@@ -668,27 +694,31 @@ def stuck(row, now=None) -> bool:
 	return row.error_code == "UNKNOWN" or get_datetime(row.creation) < add_to_date(now, minutes=-REFUND_STUCK_MINUTES)
 
 
-def in_flight_of(transaction: str) -> D:
+def in_flight_of(transaction: str, *, lock: bool = False, exclude: str | None = None) -> D:
 	"""Refunds of this charge the gateway was asked for and has not confirmed (Pending): the
 	money may be gone, so it is never refunded or planned again (review of ADR-044)."""
-	rows = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": transaction,
-	                                                          "txn_type": "Refund", "status": "Pending"},
-	                      fields=["amount", "currency"])
-	return sum((from_db(r.amount, r.currency) for r in rows), ZERO)
+	return sum((from_db(r.amount, r.currency) for r in _refunds_of(transaction, "Pending", lock)
+	            if r.name != exclude), ZERO)
 
 
-def booking_nets(transaction: str) -> dict[str, D]:
+def in_flight_from(transaction: str, booking: str | None, *, lock: bool = False, exclude: str | None = None) -> D:
+	"""Of those, the refunds that come off ``booking`` (None: the payment's unallocated money)."""
+	return sum((from_db(r.amount, r.currency) for r in _refunds_of(transaction, "Pending", lock)
+	            if r.name != exclude and (r.booking or None) == (booking or None)), ZERO)
+
+
+def booking_nets(transaction: str, *, lock: bool = False) -> dict[str, D]:
 	"""What each booking holds of this payment now: Allocate +, Release −, Refund −."""
 	nets: dict[str, D] = {}
-	for r in frappe.get_all("TEX Payment Allocation", filters={"transaction": transaction},
-	                        fields=["booking", "allocation_type", "amount", "currency"]):
+	for r in _allocations(transaction, lock):
 		if r.booking:
 			a = from_db(r.amount, r.currency)
 			nets[r.booking] = nets.get(r.booking, ZERO) + (-a if r.allocation_type in ("Release", "Refund") else a)
 	return nets
 
 
-def _refund_source(txn, amount: D, booking: str | None) -> tuple[str | None, D]:
+def _refund_source(txn, amount: D, booking: str | None, *, lock: bool = False,
+                   exclude: str | None = None) -> tuple[str | None, D]:
 	"""Which booking a refund comes out of, and how much of it (G-68). → (booking or None,
 	amount taken off that booking).
 
@@ -696,10 +726,15 @@ def _refund_source(txn, amount: D, booking: str | None) -> tuple[str | None, D]:
 	comes off a booking, where the money sits *now* (after a transfer it is on the new
 	booking, not on ``txn.booking``): the named booking, at most what it holds; without a
 	name, the one booking holding money, and a question when several do. When nothing comes
-	off a booking, the refund names none."""
+	off a booking, the refund names none. Money other refunds still waiting for their answer
+	take (all but ``exclude``, the refund being settled) is not counted (re-review 4);
+	``lock``: read under the payment's lock (locking reads)."""
 	ccy = txn.currency
-	holding = {b: n for b, n in booking_nets(txn.name).items() if n > 0}
-	unallocated = from_db(txn.amount, ccy) - allocated_of(txn.name) - refunded_of(txn.name)
+	nets = booking_nets(txn.name, lock=lock)
+	holding = {b: n - in_flight_from(txn.name, b, lock=lock, exclude=exclude) for b, n in nets.items()}
+	holding = {b: n for b, n in holding.items() if n > 0}
+	unallocated = (from_db(txn.amount, ccy) - allocated_of(txn.name, lock=lock) - refunded_of(txn.name, lock=lock)
+	               - in_flight_from(txn.name, None, lock=lock, exclude=exclude))
 	rest = max(ZERO, amount - max(ZERO, unallocated))
 	if booking:
 		held = holding.get(booking, ZERO)
@@ -759,8 +794,35 @@ def booking_charges(booking: str) -> list[dict]:
 	return sorted(out, key=lambda c: (c["at"], c["transaction"]), reverse=True)
 
 
+def _by_key(key: str, lock: bool = False):
+	rows = frappe.db.sql(f"SELECT name, status FROM `tabTEX Payment Transaction` WHERE idempotency_key=%s{_share(lock)}",
+	                     (key,), as_dict=True)  # nosemgrep -- constant SQL
+	return rows[0] if rows else None
+
+
+def _take_off(txn, r, booking: str, amount: D, reason: str) -> None:
+	"""Refund ``r`` takes ``amount`` off ``booking``: an allocation keyed to the refund (a
+	correction finds it again) and the booking's paid amount."""
+	from kamra.tex.services import booking as booking_svc
+
+	frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
+	                "allocation_type": "Refund", "amount": amount, "currency": txn.currency, "booking": booking,
+	                "reason": reason, "actor": frappe.session.user,
+	                "idempotency_key": ns_key(txn.property, f"refund-of:{r.name}", "allocate")}).insert(
+		ignore_permissions=True)
+	booking_svc.apply_payment(booking, -amount, reference=f"refund {r.name}")
+
+
+def _taken_off(txn, refund_name: str) -> tuple[str | None, D]:
+	"""→ (booking, amount) refund ``refund_name`` took off a booking, if any."""
+	row = frappe.db.get_value("TEX Payment Allocation",
+	                          {"idempotency_key": ns_key(txn.property, f"refund-of:{refund_name}", "allocate")},
+	                          ["booking", "amount", "currency"], as_dict=True)
+	return (row.booking, from_db(row.amount, row.currency)) if row else (None, ZERO)
+
+
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
-           _system: bool = False, durable: bool = False, on_record=None, relock=None) -> dict:
+           _system: bool = False, durable: bool = False, on_record=None, relock=None, on_conflict=None) -> dict:
 	"""Refund a successful charge, or money a gateway captured that TEX refused to count
 	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
 	stated, against the captured payment, and never touches a booking.
@@ -784,7 +846,14 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	its booking, then its request), then the refund, then its charge: the order staff take to
 	record an outcome (``finish_unknown_refund``). The refund is read again as it is now: if an
 	outcome was recorded for it meanwhile, it is never overwritten: the same answer is taken as
-	it stands (``recorded``), another one (or none) is a ``RefundConflict``."""
+	it stands (``recorded``), another one (or none) is a ``RefundConflict``; ``on_conflict(refund)``
+	is called first, while every lock is held, so the caller stops whatever depends on it (a
+	guest change stops all its runs, re-review 4). Where the money comes off is decided again
+	then, under the locks: a transfer meanwhile cannot move money being refunded (``release``),
+	and the refund takes it off where it is.
+
+	Every amount deciding a limit is read with a locking read once the charge is locked
+	(``_share``), the idempotency key again too (re-review 4)."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	if _system:
 		if not booking:
@@ -803,13 +872,16 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	if done:
 		return {"refund": done.name, "replay": True, "status": done.status}
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)   # locked, as it is now
+	again = _by_key(idempotency_key, lock=True)                                      # another tab, just before
+	if again:
+		return {"refund": again.name, "replay": True, "status": again.status}
 	if txn.txn_type != "Charge":
 		frappe.throw(_("Only successful charges can be refunded."))
 	if txn.status == "Succeeded":
 		ccy, ref = txn.currency, txn.provider_ref
 		amount = quantize(D(amount), ccy)
 		# a refund the gateway never confirmed may have been made: it is not refundable again
-		refundable = from_db(txn.amount, ccy) - refunded_of(transaction) - in_flight_of(transaction)
+		refundable = from_db(txn.amount, ccy) - refunded_of(transaction, lock=True) - in_flight_of(transaction, lock=True)
 	else:
 		capture = refused_capture(txn)
 		if not capture:
@@ -821,10 +893,11 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 			               "panel.").format(capture["currency"]))
 		ccy, ref = capture["currency"], capture["provider_ref"]
 		amount = quantize(D(amount), ccy)
-		refundable = capture["amount"] - refunded_of(transaction) - in_flight_of(transaction)
+		refundable = capture["amount"] - refunded_of(transaction, lock=True) - in_flight_of(transaction, lock=True)
 	if amount <= 0 or amount > refundable:
 		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(refundable), ccy))
-	target, from_booking = _refund_source(txn, amount, booking) if txn.status == "Succeeded" else (None, ZERO)
+	target, from_booking = (_refund_source(txn, amount, booking, lock=True) if txn.status == "Succeeded"
+	                        else (None, ZERO))
 	provider = provider_for(txn.provider_account, purpose="settle", transaction=txn.name)
 	r = _new_txn(property=txn.property, txn_type="Refund", method=txn.method, amount=amount, currency=ccy,
 	             provider_account=txn.provider_account, provider=txn.provider, idempotency_key=idempotency_key,
@@ -850,8 +923,13 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 		now_status = frappe.db.get_value("TEX Payment Transaction", r.name, "status", for_update=True)
 		_lock("TEX Payment Transaction", txn.name)
 		if now_status != "Pending":
-			return _answered_after_record(r, txn, outcome, now_status, error, durable)
+			return _answered_after_record(r, txn, outcome, now_status, error, durable, on_conflict)
 		r.reload()
+		if outcome and outcome.status == "Succeeded" and txn.status == "Succeeded":
+			# where the money is now, under the locks (as a verification decides it): never a
+			# booking it was moved off meanwhile (re-review 4)
+			target, from_booking = _refund_source(txn, amount, booking, lock=True, exclude=r.name)
+			r.booking = target
 	if outcome is None:
 		_refund_unknown(r, txn, error or "", durable)
 	r.status = outcome.status
@@ -862,13 +940,7 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	r.save(ignore_permissions=True)
 	if r.status == "Succeeded" and target and from_booking > 0:
 		# only what comes off the booking is taken from it; the rest was unallocated money
-		frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
-		                "allocation_type": "Refund", "amount": from_booking, "currency": txn.currency,
-		                "booking": target, "reason": reason, "actor": frappe.session.user}).insert(
-			ignore_permissions=True)
-		from kamra.tex.services import booking as booking_svc
-
-		booking_svc.apply_payment(target, -from_booking, reference=f"refund {r.name}")
+		_take_off(txn, r, target, from_booking, reason)
 	audit("payment.refund", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "status": r.status,
 	                                  "booking": target, "from_booking": to_str(from_booking),
@@ -876,9 +948,11 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	return {"refund": r.name, "status": r.status}
 
 
-def _answered_after_record(r, txn, outcome, recorded: str, error: str | None, durable: bool) -> dict:
+def _answered_after_record(r, txn, outcome, recorded: str, error: str | None, durable: bool,
+                           on_conflict=None) -> dict:
 	"""The gateway answered a refund whose outcome was recorded meanwhile. The same answer: the
-	books already say it (nothing is applied twice). Another answer, or none: a conflict."""
+	books already say it (nothing is applied twice). Another answer, or none: a conflict, open
+	until staff record what the gateway actually did (``correct_refund``)."""
 	said = outcome.status if outcome else "no answer"
 	if said == recorded:
 		return {"refund": r.name, "status": recorded, "recorded": True}
@@ -888,6 +962,8 @@ def _answered_after_record(r, txn, outcome, recorded: str, error: str | None, du
 	                                  "gateway_error": ((outcome.error_message if outcome else error) or "")[:200],
 	                                  "amount": to_str(from_db(r.amount, r.currency)), "currency": r.currency,
 	                                  "booking": r.booking})
+	if on_conflict:
+		on_conflict(r.name)
 	if durable:
 		_durable_commit()
 	raise RefundConflict(_("The gateway answered refund {0} ({1}) after it was recorded as {2}: reconcile it at the "
@@ -933,8 +1009,8 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 		frappe.throw(_("A reason is required."))
 	txn = frappe.get_doc("TEX Payment Transaction", r.parent_transaction, for_update=True)
 	amount = from_db(r.amount, r.currency)
-	target, from_booking = (_refund_source(txn, amount, r.booking) if outcome == "Succeeded"
-	                        and txn.status == "Succeeded" else (None, ZERO))
+	target, from_booking = (_refund_source(txn, amount, r.booking, lock=True, exclude=r.name)
+	                        if outcome == "Succeeded" and txn.status == "Succeeded" else (None, ZERO))
 	r.flags.tex_system_update = True
 	r.status = outcome
 	r.raw_status = "VERIFIED BY STAFF"
@@ -943,13 +1019,7 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 	r.completed_at = now_datetime()
 	r.save(ignore_permissions=True)
 	if outcome == "Succeeded" and target and from_booking > 0:
-		frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
-		                "allocation_type": "Refund", "amount": from_booking, "currency": txn.currency,
-		                "booking": target, "reason": reason, "actor": frappe.session.user}).insert(
-			ignore_permissions=True)
-		from kamra.tex.services import booking as booking_svc
-
-		booking_svc.apply_payment(target, -from_booking, reference=f"refund {r.name}")
+		_take_off(txn, r, target, from_booking, reason)
 	audit("payment.refund_verified", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "outcome": outcome, "amount": to_str(amount),
 	                                "currency": r.currency, "booking": target, "from_booking": to_str(from_booking)},
@@ -963,9 +1033,16 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	terminal): recorded as a succeeded Manual refund of ``transaction`` and taken off the
 	booking holding it, so it is no longer counted as paid nor offered to the guest as credit
 	(G-93). No gateway is asked. Needs payment.refund (``_system``: a guest change's staff close,
-	already checked). Audited ``payment.refund_outside``; idempotent by key."""
-	if booking:
-		frappe.db.get_value("TEX Booking", booking, "name", for_update=True)     # the booking first
+	already checked). Audited ``payment.refund_outside``; idempotent by key.
+
+	With ``booking`` named, the money comes off that booking only: it was given back to that
+	booking's guest, never the payment's unallocated money nor another booking's (re-review 4).
+	Without, as any refund (the unallocated money first, then the one booking holding the rest).
+	The bookings are locked before the payment, the order of every refund; the amounts deciding
+	the limits are locking reads. → the refund, and ``from_booking``: what came off ``booking``."""
+	holding = [booking] if booking else sorted(b for b, n in booking_nets(transaction).items() if n > 0)
+	for name in holding:
+		frappe.db.get_value("TEX Booking", name, "name", for_update=True)       # the booking(s) first
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)
 	if not _system:
 		scope.require("payment.refund", txn.property)
@@ -978,17 +1055,28 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	key = ns_key(txn.property, idempotency_key, "refund-outside")
 	if not key:
 		frappe.throw(_("Idempotency key required."))
-	done = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": key}, ["name", "status"], as_dict=True)
+	done = _by_key(key, lock=True)
 	if done:
-		return {"refund": done.name, "replay": True, "status": done.status}
+		target, took = _taken_off(txn, done.name)
+		return {"refund": done.name, "replay": True, "status": done.status, "booking": target,
+		        "from_booking": to_str(took)}
 	if txn.txn_type != "Charge" or txn.status != "Succeeded":
 		frappe.throw(_("Only successful payments can be refunded."))
 	ccy = txn.currency
 	amount = quantize(D(amount), ccy)
-	refundable = from_db(txn.amount, ccy) - refunded_of(transaction) - in_flight_of(transaction)
+	refundable = from_db(txn.amount, ccy) - refunded_of(transaction, lock=True) - in_flight_of(transaction, lock=True)
 	if amount <= 0 or amount > refundable:
 		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(refundable), ccy))
-	target, from_booking = _refund_source(txn, amount, booking)
+	if booking:
+		held = booking_nets(transaction, lock=True).get(booking, ZERO) - in_flight_from(transaction, booking, lock=True)
+		if amount > held:
+			frappe.throw(_("Booking {0} holds {1} {2} of this payment: at most that can be recorded as given back to "
+			               "its guest.").format(booking, to_str(max(ZERO, held)), ccy))
+		target, from_booking = booking, amount
+	else:
+		target, from_booking = _refund_source(txn, amount, None, lock=True)
+		if target and target not in holding:
+			frappe.throw(_("The bookings holding this payment changed meanwhile: please try again."))
 	r = _new_txn(property=txn.property, txn_type="Refund", method="Manual", amount=amount, currency=ccy,
 	             provider="Manual", provider_ref=reference.strip()[:140], idempotency_key=key,
 	             parent_transaction=txn.name, booking=target, reason=reason.strip()[:500])
@@ -997,17 +1085,77 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	r.completed_at = now_datetime()
 	r.save(ignore_permissions=True)
 	if target and from_booking > 0:
-		frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
-		                "allocation_type": "Refund", "amount": from_booking, "currency": ccy, "booking": target,
-		                "reason": reason, "actor": frappe.session.user}).insert(ignore_permissions=True)
-		from kamra.tex.services import booking as booking_svc
-
-		booking_svc.apply_payment(target, -from_booking, reference=f"refund {r.name}")
+		_take_off(txn, r, target, from_booking, reason)
 	audit("payment.refund_outside", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "booking": target,
 	                                  "from_booking": to_str(from_booking), "reference": reference.strip()[:140]},
 	      reason=reason)
-	return {"refund": r.name, "status": r.status}
+	return {"refund": r.name, "status": r.status, "booking": target, "from_booking": to_str(from_booking)}
+
+
+def conflict_open(refund: str) -> dict | None:
+	"""The gateway's answer that contradicted the outcome recorded for this refund, while staff
+	have not recorded what it actually did: {"recorded", "gateway", ...}; None otherwise."""
+	row = frappe.db.get_value("TEX Audit Event", {"action": "payment.refund_outcome_conflict",
+	                                              "reference_name": refund}, "new_value", order_by="creation desc")
+	if not row or frappe.db.exists("TEX Audit Event", {"action": "payment.refund_conflict_resolved",
+	                                                   "reference_name": refund}):
+		return None
+	try:
+		return json.loads(row) or {}
+	except ValueError:
+		return {}
+
+
+def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str | None = None) -> dict:
+	"""Staff record what the gateway actually did with a refund whose recorded outcome its answer
+	contradicted (``payment.refund_outcome_conflict``), after checking it there: the refund and
+	the booking are put right, and the conflict is resolved (audited
+	``payment.refund_conflict_resolved``; the system status no longer fails on it). A refund
+	recorded as not made that was made comes off the booking (where the money is now, as any
+	refund); one recorded as made that was not goes back onto the booking it came off. The
+	outcome already recorded only resolves it. Needs payment.refund; the caller locks the
+	booking first (``guest_changes.resolve_conflict``)."""
+	r = frappe.get_doc("TEX Payment Transaction", refund_txn, for_update=True)
+	scope.require("payment.refund", r.property)
+	if r.txn_type != "Refund" or r.status not in ("Succeeded", "Failed") or not conflict_open(r.name):
+		frappe.throw(_("There is no open conflict on this refund."))
+	if outcome not in ("Succeeded", "Failed"):
+		frappe.throw(_("Choose whether the gateway refunded it."))
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required."))
+	txn = frappe.get_doc("TEX Payment Transaction", r.parent_transaction, for_update=True)
+	amount, recorded = from_db(r.amount, r.currency), r.status
+	booking, moved = r.booking, ZERO
+	if outcome != recorded:
+		if outcome == "Succeeded":
+			booking, moved = (_refund_source(txn, amount, r.booking, lock=True, exclude=r.name)
+			                  if txn.status == "Succeeded" else (None, ZERO))
+			if booking and moved > 0:
+				_take_off(txn, r, booking, moved, reason)
+		else:
+			booking, moved = _taken_off(txn, r.name)
+			if booking and moved > 0:
+				from kamra.tex.services import booking as booking_svc
+
+				frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
+				                "allocation_type": "Allocate", "amount": moved, "currency": txn.currency,
+				                "booking": booking, "reason": f"refund {r.name} was not made: {reason.strip()}"[:500],
+				                "actor": frappe.session.user,
+				                "idempotency_key": ns_key(txn.property, f"put-back:{r.name}", "allocate")}).insert(
+					ignore_permissions=True)
+				booking_svc.apply_payment(booking, moved, reference=f"refund {r.name} not made")
+		r.flags.tex_system_update = True
+		r.status = outcome
+		r.raw_status = "CORRECTED BY STAFF"
+		r.provider_ref = (reference or "").strip()[:140] or r.provider_ref
+		r.error_message = (f"{outcome} (the gateway's answer, recorded by {frappe.session.user} after it contradicted "
+		                   f"{recorded}): {reason.strip()}")[:500]
+		r.save(ignore_permissions=True)
+	audit("payment.refund_conflict_resolved", reference_doctype="TEX Payment Transaction", reference_name=r.name,
+	      property=r.property, new={"of": txn.name, "recorded": recorded, "outcome": outcome, "amount": to_str(amount),
+	                                "currency": r.currency, "booking": booking, "moved": to_str(moved)}, reason=reason)
+	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
 
 
 def mark_transfer_received(transaction: str, *, reference: str) -> dict:

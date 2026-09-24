@@ -235,10 +235,16 @@ def _payments_callbacks(props, now) -> dict:
 	unknown = [r.property for r in frappe.get_all("TEX Payment Transaction", filters=unknown_filters,
 	                                              fields=["property", "error_code", "creation"])
 	           if pay.stuck(r, now)]
-	# a gateway answer that contradicts the outcome recorded for a refund (third review)
-	conflicts = frappe.get_all("TEX Audit Event", filters={**audit_filters,
-	                                                       "action": "payment.refund_outcome_conflict"},
-	                           pluck="property")
+	# a gateway answer that contradicts the outcome recorded for a refund, at any age, until staff
+	# record what the gateway actually did (third and fourth review of ADR-044)
+	conflict_filters = {"action": "payment.refund_outcome_conflict"}
+	if props is not None:
+		conflict_filters["property"] = ("in", sorted(props) or [""])
+	resolved = set(frappe.get_all("TEX Audit Event", filters={"action": "payment.refund_conflict_resolved"},
+	                              pluck="reference_name"))
+	conflicts = [r.property for r in frappe.get_all("TEX Audit Event", filters=conflict_filters,
+	                                                fields=["property", "reference_name"])
+	             if r.reference_name not in resolved]
 	hotels = {p for p in (*errors, *mismatches, *overpaid, *unknown, *conflicts) if p}
 	return C.callbacks_check(errors=len(errors), overpaid=len(overpaid), mismatches=len(mismatches),
 	                         refunds_unknown=len(unknown), refund_conflicts=len(conflicts), properties=hotels)
