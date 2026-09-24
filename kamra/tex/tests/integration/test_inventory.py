@@ -2,9 +2,11 @@
 
 - A stay TEX sold is never refused afterwards by the legacy physical-room check: explicit
   oversell, shared (pooled) and configured inventory are TEX's to sell.
-- A reservation written outside TEX (Desk form, REST, legacy import, legacy PMS actions) for a
-  TEX hotel takes TEX's inventory lock and is counted against TEX's inventory, closures,
-  manual adjustments and withheld allotments: it never bypasses them.
+- A reservation written outside TEX for a TEX hotel takes TEX's inventory lock and is counted
+  against TEX's inventory, closures, manual adjustments and withheld allotments: it never
+  bypasses them. Since G-92 (ADR-052) the Desk form and REST cannot create one at all; what is
+  left outside TEX is a migration import and a status move into a live status (a stay waitlisted
+  before the hotel joined TEX).
 - A hotel outside TEX keeps the legacy overbooking check.
 - Allotments: consumption, release (rooms back to general sale) and the separate cutoff (the
   contract's booking deadline); oversell limit and manual adjustment.
@@ -71,11 +73,16 @@ class InventoryCase(TexTestCase):
 		return b["rooms"][0]["reservation"]
 
 	def desk(self, code: str = "DLX", check_in=None, check_out=None, **kw):
-		"""A reservation written outside TEX: what the Desk form, REST or an import insert."""
-		return frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
-		                       "room_type": self.rt(code), "check_in_date": check_in or self.ci,
-		                       "check_out_date": check_out or self.co, "adults": 2, "status": "Confirmed",
-		                       **kw}).insert()
+		"""A reservation written outside TEX. The Desk form and REST cannot create one at a TEX
+		hotel since G-92 (ADR-052): what is left is a migration import, at its own amount."""
+		from kamra.tex.legacy import flag_import
+
+		doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+		                      "room_type": self.rt(code), "check_in_date": check_in or self.ci,
+		                      "check_out_date": check_out or self.co, "adults": 2, "status": "Confirmed",
+		                      "amount_after_tax": 240, **kw})
+		flag_import(doc)
+		return doc.insert()
 
 	def set_inventory(self, code: str, start=None, end=None, **values):
 		"""The staff grid (inventory.edit), by default over every night of the stay."""
@@ -144,7 +151,8 @@ class TestTexSalesAreTexInventory(InventoryCase):
 
 
 class TestOutsideTexReservations(InventoryCase):
-	"""Desk, REST and imports never bypass a TEX hotel's inventory (G-49)."""
+	"""Writes outside TEX never bypass a TEX hotel's inventory (G-49). Since G-92 these are
+	migration imports and status moves; the Desk form and REST are refused before (ADR-052)."""
 
 	def test_a_desk_stay_is_counted_by_tex(self):
 		self.desk()
@@ -173,18 +181,22 @@ class TestOutsideTexReservations(InventoryCase):
 		self.assertEqual(order[:2], ["inventory", "name Reservation"])
 
 	def test_an_unknown_room_type_is_refused_cleanly(self):
+		from kamra.tex.legacy import flag_import
+
 		doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
 		                      "room_type": "G49 No Such Room Type", "check_in_date": self.ci,
-		                      "check_out_date": self.co, "adults": 2, "status": "Confirmed"})
+		                      "check_out_date": self.co, "adults": 2, "status": "Confirmed", "amount_after_tax": 240})
 		doc.flags.ignore_links = True                    # a write that skipped link validation
+		flag_import(doc)
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
 			doc.insert()
 
-	def test_a_closed_night_refuses_desk_and_rest(self):
+	def test_a_closed_night_refuses_an_import(self):
 		self.set_inventory("DLX", closed=1)
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
 			self.desk()
-		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
+		# a Desk or REST insert does not get this far: TEX hotels are booked in TEX (G-92)
+		with self.assertRaisesRegex(frappe.ValidationError, "sold through TEX"):
 			frappe.client.insert({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
 			                      "room_type": self.dlx, "check_in_date": str(self.ci),
 			                      "check_out_date": str(self.co), "adults": 2, "status": "Confirmed"})
@@ -215,16 +227,13 @@ class TestOutsideTexReservations(InventoryCase):
 		self.tex_book(who="partner")                     # and the contract still gets it
 		self.assertEqual(self.live(), 2)
 
-	def test_moving_a_desk_stay_takes_tex_inventory(self):
+	def test_a_stay_moving_into_a_live_status_takes_tex_inventory(self):
 		res = self.desk(check_in=fx.d(7, 20), check_out=fx.d(7, 22))
 		self.set_inventory("DLX", closed=1)
 		res.check_in_date, res.check_out_date = self.ci, self.co
-		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
-			res.save()
-		wait = self.desk(check_in=fx.d(7, 20), check_out=fx.d(7, 22), status="Waitlist")
-		wait.reload()
-		wait.update({"check_in_date": self.ci, "check_out_date": self.co})
-		wait.save()                                      # a waitlisted stay holds no room
+		with self.assertRaisesRegex(frappe.ValidationError, "sold through TEX"):
+			res.save()                                   # its nights change only through TEX (G-92)
+		wait = self.desk(status="Waitlist")              # a waitlisted stay holds no room
 		wait.status = "Confirmed"
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
 			wait.save()
@@ -385,17 +394,20 @@ class TestChangesKeepHeldNights(InventoryCase):
 		self.assertIn("SOLD_OUT", [w["code"] for w in cut["warnings"]])
 
 	def test_leaving_early_over_closed_nights_is_accepted(self):
-		"""M1: an outside-TEX stay covering closed or oversold nights may still be shortened, or
-		moved to another room type of the same pool; it takes no new night."""
-		res = self.desk(check_in=self.ci, check_out=add_days(self.ci, 5))
-		self.set_inventory("DLX", self.ci, add_days(self.ci, 4), closed=1)   # every night, after it was sold
-		res.check_out_date = add_days(self.ci, 2)                          # leaves after night 2
-		res.save()
+		"""M1: a stay covering closed or oversold nights may still be shortened, or moved to
+		another room type of the same pool; it takes no new night. Since G-92 (ADR-052) only TEX
+		changes a TEX hotel's stay: this is a staff modification."""
+		res = self.tex_book(who="early")
+		self.set_inventory("DLX", closed=1)                                # every night, after it was sold
+		shorter = modification.propose(res, {"check_out": add_days(self.ci, 1)})   # leaves after night 1
+		self.assertTrue(shorter["sellable"], shorter["warnings"])
+		modification.apply(shorter["proposal_token"], reason="leaves early")
 		self.pool()
-		self.set_inventory("DLX", self.ci, add_days(self.ci, 1), closed=1)   # the pool's row: both types
-		res.room_type = self.std
-		res.save()
-		self.assertEqual(frappe.db.get_value("Reservation", res.name, "room_type"), self.std)
+		self.set_inventory("DLX", self.ci, self.ci, closed=1)               # the pool's row: both types
+		other = modification.propose(res, {"room_type": self.std})
+		self.assertTrue(other["sellable"], other["warnings"])
+		modification.apply(other["proposal_token"], reason="moved to Standard")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "room_type"), self.std)
 
 
 class TestGuestChangeKeepsHeldNights(TexTestCase):
@@ -428,10 +440,14 @@ class TestRoomTypeBelongsToTheHotel(TestLegacyHotel):
 			frappe.get_doc({"doctype": "Reservation", "property": LEGACY_HOTEL, "guest": self.guest,
 			                "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
 			                "adults": 2, "status": "Confirmed"}).insert()
+		from kamra.tex.legacy import flag_import
+
+		doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+		                      "room_type": self.legacy_rt, "check_in_date": self.ci, "check_out_date": self.co,
+		                      "adults": 2, "status": "Confirmed", "amount_after_tax": 240})
+		flag_import(doc)                                 # a Desk insert is refused before (G-92)
 		with self.assertRaisesRegex(frappe.ValidationError, "does not belong to"):
-			frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
-			                "room_type": self.legacy_rt, "check_in_date": self.ci, "check_out_date": self.co,
-			                "adults": 2, "status": "Confirmed"}).insert()
+			doc.insert()
 		# nothing of the other hotel's inventory was created under this one
 		self.assertFalse(frappe.db.exists("TEX Inventory Day", {"property": fx.PROPERTY,
 		                                                        "room_type": self.legacy_rt}))
@@ -448,20 +464,24 @@ class TestReviewFollowUps(InventoryCase):
 		self.assertEqual(self.stay(None, self.ci - timedelta(days=20))[0], 1)   # before the cutoff: withheld
 
 	def test_the_service_flag_is_used_once(self):
-		"""L3: a document a TEX service marked as checked is checked again on its next save."""
+		"""L3: a document a TEX service marked as checked is checked again on its next save (here
+		a status move into a live status: its nights change only through TEX, G-92)."""
 		res = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
 		                      "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
-		                      "adults": 2, "status": "Confirmed"})
+		                      "adults": 2, "status": "Waitlist"})
+		res.flags.tex_sale = True                        # as the booking service marks it
 		res.flags.tex_inventory_checked = True
 		res.insert()
-		self.set_inventory("DLX", fx.d(7, 20), fx.d(7, 21), closed=1)
-		res.check_in_date, res.check_out_date = fx.d(7, 20), fx.d(7, 22)
+		self.assertNotIn("tex_sale", res.flags)            # each flag covers one save
+		self.assertNotIn("tex_inventory_checked", res.flags)
+		self.set_inventory("DLX", closed=1)
+		res.status = "Confirmed"
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
 			res.save()
 
 	def test_a_deadlock_asks_the_desk_to_try_again(self):
-		"""M2: a desk write chosen as a deadlock victim is told to try again (it cannot be re-run
-		for it, unlike the TEX endpoints)."""
+		"""M2: a write outside TEX chosen as a deadlock victim is told to try again (it cannot be
+		re-run for it, unlike the TEX endpoints)."""
 		from unittest import mock
 
 		with mock.patch.object(avail, "lock_nights", side_effect=frappe.QueryDeadlockError("1213 Deadlock")):
