@@ -288,7 +288,44 @@ def run_chain(case) -> None:
 		assert_sold_unchanged(case, before, sold_state(), patch)
 
 
+class CommitRefused(AssertionError):
+	"""A commit while a migration test holds its changes: it would make them (and the empty-site
+	tests' deletions) permanent on the site."""
+
+
+def refuse_commits(case) -> None:
+	"""From now until ``case`` has rolled back, this connection refuses to commit, whoever asks: a
+	patch, the test, or Frappe's ``run-tests`` after a Ctrl-C (C1, review of G-76). On
+	KeyboardInterrupt unittest skips tearDown and the cleanups, and ``_cleanup_after_tests`` then
+	commits the connection. So:
+	- ``commit()`` raises, and so do ``sql_ddl`` and ``add_index``, which commit first;
+	- a bare COMMIT statement raises;
+	- DDL or START TRANSACTION after a write raises already (Frappe's ``ImplicitCommitError``).
+	The refusal is lifted by a cleanup that runs after the test's rollback. An interrupted run never
+	reaches it: it ends on the refused commit, and MariaDB rolls the dropped connection back."""
+	db = frappe.local.db
+	real_sql = db.sql
+
+	def commit(*args, **kwargs):
+		raise CommitRefused("a migration test holds its changes: nothing is committed until it rolled back")
+
+	def sql(query, *args, **kwargs):
+		if get_query_type(str(query)) == "commit":
+			commit()
+		return real_sql(query, *args, **kwargs)
+
+	patches = [mock.patch.object(db, "commit", commit), mock.patch.object(db, "sql", sql)]
+	for p in patches:
+		p.start()
+	case.addCleanup(lambda: [p.stop() for p in reversed(patches)])
+	case.addCleanup(db.rollback)              # cleanups run last-in first-out: the rollback comes first
+
+
 class PatchCase(TexTestCase):
+	def setUp(self):
+		refuse_commits(self)                     # before anything is written (C1)
+		super().setUp()
+
 	def tearDown(self):
 		super().tearDown()                       # the rollback
 		frappe.local.db.value_cache.clear()
@@ -798,3 +835,31 @@ class TestSmallPatches(PatchCase):
 		self.first_run("p34_redemption_released_at")
 		self.assertEqual(get_datetime(frappe.db.get_value("TEX Promotion Redemption", released, "released_at")), at)
 		self.assertIsNone(frappe.db.get_value("TEX Promotion Redemption", held, "released_at"))
+
+
+class TestInterruptedRun(PatchCase):
+	"""C1 (review of G-76): a run interrupted with Ctrl-C commits nothing. unittest skips tearDown
+	and the cleanups on KeyboardInterrupt, and Frappe's ``run-tests`` then commits the connection
+	(``_cleanup_after_tests``). Driven by a script that sets ``TEX_C1_MARKER`` and sends SIGINT once
+	the harmless marker row is written (``/home/user/bench/scratch/c1_sigint.sh``); skipped otherwise."""
+
+	def test_commits_are_refused_until_the_test_rolled_back(self):
+		for attempt in (frappe.db.commit, lambda: frappe.db.sql("COMMIT"),
+		                lambda: frappe.db.sql_ddl("ALTER TABLE `tabToDo` COMMENT ''")):
+			with self.assertRaises(CommitRefused):
+				attempt()
+		put("ToDo", description="C1 check", status="Open")               # a write: DDL would commit it
+		with self.assertRaises(frappe.exceptions.ImplicitCommitError):
+			frappe.db.sql("ALTER TABLE `tabToDo` COMMENT ''")             # refused before it runs (Frappe)
+
+	def test_an_interrupted_run_commits_nothing(self):
+		import sys
+		import time
+
+		marker = os.environ.get("TEX_C1_MARKER")
+		if not marker:
+			self.skipTest("run by the SIGINT simulation only")
+		put("ToDo", marker, description=f"C1 marker {marker}", status="Open")
+		sys.__stdout__.write(f"C1-MARKER-READY {marker}\n")
+		sys.__stdout__.flush()
+		time.sleep(120)
