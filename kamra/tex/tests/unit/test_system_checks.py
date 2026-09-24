@@ -81,6 +81,10 @@ class TestVerdicts(unittest.TestCase):
 		unknown = c.callbacks_check(errors=0, overpaid=0, mismatches=0, refunds_unknown=2)
 		self.assertEqual((unknown["status"], unknown["issues"][0]["reason"], unknown["issues"][0]["params"]),
 		                 (c.FAIL, "refund_unknown", {"count": 2}))
+		# a gateway answer contradicting a recorded refund outcome fails it too (third review)
+		conflict = c.callbacks_check(errors=0, overpaid=0, mismatches=0, refund_conflicts=1)
+		self.assertEqual((conflict["status"], conflict["issues"][0]["reason"], conflict["issues"][0]["params"]),
+		                 (c.FAIL, "refund_conflict", {"count": 1, "days": c.PAYMENT_AUDIT_WINDOW_DAYS}))
 		self.assertEqual(c.pending_payments_check(2, NOW - timedelta(minutes=90), NOW)["issues"][0]["params"],
 		                 {"count": 2, "minutes": 90})
 

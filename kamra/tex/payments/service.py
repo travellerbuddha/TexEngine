@@ -51,6 +51,14 @@ class RefundUnknown(frappe.ValidationError):
 REFUND_STUCK_MINUTES = 5
 
 
+class RefundConflict(RefundUnknown):
+	"""The gateway answered a refund after an outcome was recorded for it (staff recorded what
+	they saw while the call ran) and says something else, or nothing. The record is kept, the
+	conflict audited (``payment.refund_outcome_conflict``) and shown in the system status; the
+	caller refunds nothing more on it: staff reconcile it at the gateway (third review of
+	ADR-044)."""
+
+
 def _durable_commit() -> None:
 	"""Put a money movement on record before a gateway is asked to make it, so that a crash or a
 	timeout after the gateway acted can never lose the record and repeat the movement. Tests
@@ -752,7 +760,7 @@ def booking_charges(booking: str) -> list[dict]:
 
 
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
-           _system: bool = False, durable: bool = False, on_record=None) -> dict:
+           _system: bool = False, durable: bool = False, on_record=None, relock=None) -> dict:
 	"""Refund a successful charge, or money a gateway captured that TEX refused to count
 	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
 	stated, against the captured payment, and never touches a booking.
@@ -769,7 +777,14 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	the key returns the refund as it is (``status``).
 
 	``on_record(refund)``: called with the new refund's name before it is committed, so the
-	caller's record of it (the guest change making it) is durable with it (G-45 re-review)."""
+	caller's record of it (the guest change making it) is durable with it (G-45 re-review).
+
+	After the gateway answered (``durable``), the locks are taken again in one order: the
+	booking (``relock()`` locks it and whatever the caller holds with it: a guest change locks
+	its booking, then its request), then the refund, then its charge: the order staff take to
+	record an outcome (``finish_unknown_refund``). The refund is read again as it is now: if an
+	outcome was recorded for it meanwhile, it is never overwritten: the same answer is taken as
+	it stands (``recorded``), another one (or none) is a ``RefundConflict``."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	if _system:
 		if not booking:
@@ -818,15 +833,27 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 		on_record(r.name)
 	if durable:
 		_durable_commit()                 # on record before the gateway acts (review of ADR-044)
+	error = None
 	try:
 		outcome = provider.refund(ref, amount, ccy, reference=r.name)
 	except ProviderError as e:
 		outcome = Outcome(status="Failed", error_code="PROVIDER", error_message=str(e))
 	except Exception as e:
-		_refund_unknown(r, txn, str(e), durable)
+		outcome, error = None, str(e)
 	if durable:
-		# the commit released the charge: locked again, as it is now, before the booking changes
+		# the commit released every lock: the booking first (with what the caller holds), then
+		# this refund as it is now, then its charge (third review of ADR-044)
+		if relock:
+			relock()
+		elif target:
+			frappe.db.get_value("TEX Booking", target, "name", for_update=True)
+		now_status = frappe.db.get_value("TEX Payment Transaction", r.name, "status", for_update=True)
 		_lock("TEX Payment Transaction", txn.name)
+		if now_status != "Pending":
+			return _answered_after_record(r, txn, outcome, now_status, error, durable)
+		r.reload()
+	if outcome is None:
+		_refund_unknown(r, txn, error or "", durable)
 	r.status = outcome.status
 	r.provider_ref = outcome.provider_ref
 	r.raw_status = outcome.raw_status
@@ -847,6 +874,24 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	                                  "booking": target, "from_booking": to_str(from_booking),
 	                                  "refused_capture": txn.status != "Succeeded"}, reason=reason)
 	return {"refund": r.name, "status": r.status}
+
+
+def _answered_after_record(r, txn, outcome, recorded: str, error: str | None, durable: bool) -> dict:
+	"""The gateway answered a refund whose outcome was recorded meanwhile. The same answer: the
+	books already say it (nothing is applied twice). Another answer, or none: a conflict."""
+	said = outcome.status if outcome else "no answer"
+	if said == recorded:
+		return {"refund": r.name, "status": recorded, "recorded": True}
+	audit("payment.refund_outcome_conflict", reference_doctype="TEX Payment Transaction", reference_name=r.name,
+	      property=txn.property, new={"of": txn.name, "recorded": recorded, "gateway": said,
+	                                  "gateway_ref": outcome.provider_ref if outcome else None,
+	                                  "gateway_error": ((outcome.error_message if outcome else error) or "")[:200],
+	                                  "amount": to_str(from_db(r.amount, r.currency)), "currency": r.currency,
+	                                  "booking": r.booking})
+	if durable:
+		_durable_commit()
+	raise RefundConflict(_("The gateway answered refund {0} ({1}) after it was recorded as {2}: reconcile it at the "
+	                       "gateway. TEX refunds nothing more on it.").format(r.name, said, recorded))
 
 
 def _refund_unknown(r, txn, error: str, durable: bool) -> None:
@@ -878,6 +923,10 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 	scope.require("payment.refund", r.property)
 	if r.txn_type != "Refund" or r.status != "Pending":
 		frappe.throw(_("Only a refund waiting for its outcome can be settled here ({0}).").format(r.status))
+	if not stuck(r):
+		# its gateway call may still be running: its answer would then be lost (third review)
+		frappe.throw(_("This refund was asked for a moment ago and the gateway's answer may still come: check again "
+		               "in a few minutes."))
 	if outcome not in ("Succeeded", "Failed"):
 		frappe.throw(_("Choose whether the gateway refunded it."))
 	if not (reason or "").strip():
@@ -906,6 +955,59 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 	                                "currency": r.currency, "booking": target, "from_booking": to_str(from_booking)},
 	      reason=reason)
 	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
+
+
+def refund_outside(transaction: str, *, amount, reason: str, reference: str, idempotency_key: str,
+                   booking: str | None = None, _system: bool = False) -> dict:
+	"""Money the hotel gave back outside TEX (cash at the desk, a bank transfer, the card
+	terminal): recorded as a succeeded Manual refund of ``transaction`` and taken off the
+	booking holding it, so it is no longer counted as paid nor offered to the guest as credit
+	(G-93). No gateway is asked. Needs payment.refund (``_system``: a guest change's staff close,
+	already checked). Audited ``payment.refund_outside``; idempotent by key."""
+	if booking:
+		frappe.db.get_value("TEX Booking", booking, "name", for_update=True)     # the booking first
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)
+	if not _system:
+		scope.require("payment.refund", txn.property)
+	if not (reason or "").strip():
+		frappe.throw(_("A refund reason is required."))
+	if not (reference or "").strip():
+		frappe.throw(_("Say how it was refunded (the receipt or transfer reference)."))
+	if booking and frappe.db.get_value("TEX Booking", booking, "property") != txn.property:
+		frappe.throw(_("The booking belongs to another hotel."))
+	key = ns_key(txn.property, idempotency_key, "refund-outside")
+	if not key:
+		frappe.throw(_("Idempotency key required."))
+	done = frappe.db.get_value("TEX Payment Transaction", {"idempotency_key": key}, ["name", "status"], as_dict=True)
+	if done:
+		return {"refund": done.name, "replay": True, "status": done.status}
+	if txn.txn_type != "Charge" or txn.status != "Succeeded":
+		frappe.throw(_("Only successful payments can be refunded."))
+	ccy = txn.currency
+	amount = quantize(D(amount), ccy)
+	refundable = from_db(txn.amount, ccy) - refunded_of(transaction) - in_flight_of(transaction)
+	if amount <= 0 or amount > refundable:
+		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(refundable), ccy))
+	target, from_booking = _refund_source(txn, amount, booking)
+	r = _new_txn(property=txn.property, txn_type="Refund", method="Manual", amount=amount, currency=ccy,
+	             provider="Manual", provider_ref=reference.strip()[:140], idempotency_key=key,
+	             parent_transaction=txn.name, booking=target, reason=reason.strip()[:500])
+	r.status = "Succeeded"
+	r.raw_status = "REFUNDED OUTSIDE TEX"
+	r.completed_at = now_datetime()
+	r.save(ignore_permissions=True)
+	if target and from_booking > 0:
+		frappe.get_doc({"doctype": "TEX Payment Allocation", "property": txn.property, "transaction": txn.name,
+		                "allocation_type": "Refund", "amount": from_booking, "currency": ccy, "booking": target,
+		                "reason": reason, "actor": frappe.session.user}).insert(ignore_permissions=True)
+		from kamra.tex.services import booking as booking_svc
+
+		booking_svc.apply_payment(target, -from_booking, reference=f"refund {r.name}")
+	audit("payment.refund_outside", reference_doctype="TEX Payment Transaction", reference_name=r.name,
+	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "booking": target,
+	                                  "from_booking": to_str(from_booking), "reference": reference.strip()[:140]},
+	      reason=reason)
+	return {"refund": r.name, "status": r.status}
 
 
 def mark_transfer_received(transaction: str, *, reference: str) -> dict:
