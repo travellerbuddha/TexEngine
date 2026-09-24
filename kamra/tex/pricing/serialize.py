@@ -12,7 +12,7 @@ import json
 from datetime import date, datetime
 from decimal import Decimal
 
-from kamra.tex.money import D, D_or_none, to_str
+from kamra.tex.money import D, D_or_none, to_str, to_str6
 from kamra.tex.pricing.enums import (
 	AgeBasis,
 	ChildOrdering,
@@ -318,6 +318,8 @@ def request_to_dict(r: StayRequest) -> dict:
 		# the request it always had
 		**({"booking_basket": to_str(r.booking_basket), "booking_rooms": r.booking_rooms}
 		   if r.booking_basket is not None else {}),
+		**({"booking_baskets": {p: {"basket": to_str6(b), "rooms": n} for p, b, n in r.booking_baskets}}
+		   if r.booking_baskets else {}),
 	}
 
 
@@ -338,4 +340,6 @@ def request_from_dict(d: dict) -> StayRequest:
 		room_index=int(d.get("room_index") or 0),
 		booking_basket=D(d["booking_basket"]) if d.get("booking_basket") not in (None, "") else None,
 		booking_rooms=int(d.get("booking_rooms") or 1),
+		booking_baskets=tuple(sorted((str(p), D(v["basket"]), int(v["rooms"]))
+		                             for p, v in (d.get("booking_baskets") or {}).items())),
 	)

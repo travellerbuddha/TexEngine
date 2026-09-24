@@ -148,3 +148,6 @@ class LineKind(StrEnum):
 	EXTRA = "EXTRA"
 	COUPON = "COUPON"
 	TAX = "TAX"
+	# a room's share of the booking: the discount the other rooms keep after a change took the
+	# booking below a promotion's minimum basket (G-84 review H1); never priced by the engine
+	BASKET = "BASKET"
