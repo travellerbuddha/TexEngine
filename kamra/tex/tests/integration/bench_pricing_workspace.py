@@ -9,7 +9,8 @@ It saves a large draft inside the test transaction (rolled back afterwards) and 
 three, the calls the workspace makes while a revenue manager types: the read-only overlay alone,
 ``price_matrix`` (saved draft and unsaved data, with and without sample parties),
 ``validate_version``, ``preview_price`` and (S5) ``apply_op_values`` at its 500-value cap; and
-``save_version`` once. Each run prints one
+``save_version`` once; and (S8 review follow-up) a draft above the overlay's row cap, which the
+workspace prices and validates by name (the overlay refuses it). Each run prints one
 ``PERF <case> {...}`` line (seconds). The workspace's answers for the unsaved data must equal
 those for the same data saved (cells, sources, party totals, issues, the quote and its nights'
 subtotals), so the figures
@@ -167,3 +168,48 @@ class BenchPricingWorkspace(WorkspaceCase):
 		self.run_case("near_cap_12x40", 12, 40, 6, 3, {
 			"overlay_only": 4, "matrix_overlay": 6, "matrix_overlay_12_parties": 12, "preview_overlay": 6,
 			"validate_overlay": 60, "apply_op_values_500": 1})
+
+	def test_above_the_row_cap(self):
+		"""12 rooms × 52 weekly periods, 6 occupancy rules and 3 board supplements per room and period:
+		more rows than the overlay takes (ADR-061, S8 review follow-up). The overlay refuses it before
+		any work (``OverlayTooLarge``); the workspace then asks for the saved draft by name, which has
+		no cap: its matrix, sample parties, quote and validation, and the version as the editor loads it."""
+		payload, rts, saved_in, _ids = self.large_draft(12, 52, 6, 3)
+		body = as_json(payload)
+		rows = sum(len(payload[t]) for t in api.VERSION_TABLES)
+		self.assertGreater(rows, api.OVERLAY_MAX_ROWS)
+		room = rts[3]
+		quote = {"room_type": room, "board": "UAI", "check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 17)),
+		         "adults": 3, "children": json.dumps([5]), "market": "DE", "rate_plan": self.f["rate_plans"]["FLEX"]}
+
+		def refused(call) -> bool:
+			try:
+				call()
+			except api.OverlayTooLarge:
+				return True
+			return False
+
+		r = {"rows": rows, "cells": 12 * 52, "json_kb": round(len(body) / 1024, 1), "save_version": saved_in}
+		r["get_version"], doc = best_of(lambda: api.get_version(self.v))
+		r["matrix_overlay_refused"], m_refused = best_of(lambda: refused(lambda: api.price_matrix(self.v, data=body)))
+		r["validate_overlay_refused"], v_refused = best_of(
+			lambda: refused(lambda: api.validate_version(self.v, data=body)))
+		r["matrix_saved"], m_saved = best_of(lambda: api.price_matrix(self.v))
+		r["matrix_saved_12_parties"], p_saved = best_of(
+			lambda: api.price_matrix(self.v, parties=json.dumps(PARTIES), party_room=room))
+		r["preview_saved"], q_saved = best_of(lambda: api.preview_price(self.v, **quote))
+		r["validate_saved"], v_saved = best_of(lambda: api.validate_version(self.v), n=1)
+		r["issues"] = len(v_saved["issues"])
+		print(f"PERF above_cap_12x52 {json.dumps(r)}")
+
+		self.assertEqual(doc["overlay_max_rows"], api.OVERLAY_MAX_ROWS)
+		self.assertTrue(m_refused and v_refused)
+		self.assertEqual(len(m_saved["rooms"]), 12)
+		self.assertTrue(all(len(x["sources"]) == 52 and all(x["cells"].values()) for x in m_saved["rooms"]))
+		self.assertTrue(any(v for c in p_saved["party_cells"] for v in c["cells"].values()))
+		self.assertTrue(q_saved["sellable"], q_saved.get("reasons"))
+		self.assertIn("ok", v_saved)
+		for key, ceiling in {"matrix_overlay_refused": 2, "validate_overlay_refused": 2, "matrix_saved": 6,
+		                     "matrix_saved_12_parties": 12, "preview_saved": 6, "validate_saved": 90,
+		                     "get_version": 5}.items():
+			self.assertLessEqual(r[key], ceiling, f"above_cap_12x52: {key} took {r[key]} s (ceiling {ceiling} s)")

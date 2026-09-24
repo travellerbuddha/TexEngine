@@ -34,6 +34,12 @@ ROW_BOOKKEEPING = ("name", "parent", "parenttype", "parentfield", "doctype", "id
 OVERLAY_MAX_ROWS = 5000
 
 
+class OverlayTooLarge(frappe.ValidationError):
+	"""The overlay's refusal of a draft above ``OVERLAY_MAX_ROWS`` (still a ValidationError, 417):
+	typed, so the workspace can tell it from any other refusal and ask for the saved draft by name,
+	which has no cap (ADR-061, S8 review follow-up)."""
+
+
 @frappe.whitelist()
 def list_contracts(property: str | None = None, status: str | None = None, market: str | None = None):
 	props = [property] if property else sorted(scope.permitted_properties())
@@ -174,6 +180,9 @@ def get_version(name: str):
 	out["can_edit_contract"] = scope.has_capability("contract.edit", prop)
 	# the header's pricing basis is fixed once a version was published (the controller's own test)
 	out["basis_locked"] = svc.is_published(v.contract)
+	if out["editable"]:
+		# what the workspace previews with unsaved changes; above it, it asks for the saved draft
+		out["overlay_max_rows"] = OVERLAY_MAX_ROWS
 	c = frappe.get_doc("TEX Contract", v.contract)
 	out["contract_doc"] = {f: c.get(f) for f in ("name", "property", "contract_code", "contract_name", "market",
 	                                             "pricing_basis", "contract_currency", "status")}
@@ -298,7 +307,7 @@ def _overlay(name: str, data):
 	total = sum(len(data[t] or []) if t in data else len(v.get(t) or []) for t in VERSION_TABLES)
 	if total > OVERLAY_MAX_ROWS:
 		frappe.throw(_("A draft previewed with unsaved changes has at most {0} rows; this one has {1}.")
-		             .format(OVERLAY_MAX_ROWS, total))
+		             .format(OVERLAY_MAX_ROWS, total), OverlayTooLarge)
 	if "selling" in data:
 		_set_selling(v, data["selling"])
 	for f in VERSION_SETTINGS:

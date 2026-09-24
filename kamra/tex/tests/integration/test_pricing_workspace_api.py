@@ -37,6 +37,7 @@ Slice S5:
 """
 
 import json
+from unittest import mock
 
 import frappe
 
@@ -286,6 +287,37 @@ class TestOverlayRefusals(WorkspaceCase):
 			api.price_matrix(self.v, data=data)
 		self.assertIn("5000", str(cm.exception))
 
+	def test_above_the_row_cap_the_saved_draft_still_answers_by_name(self):
+		"""The overlay refuses a draft above its row cap with a typed error the workspace can tell
+		from any other refusal (``OverlayTooLarge``: still a ValidationError, same message);
+		``save_version`` has no cap, and the saved draft is priced, validated and quoted by name as
+		before, which is where the workspace goes above the cap (ADR-061, S8 review follow-up)."""
+		data = self.payload()
+		rows = sum(len(data[t]) for t in api.VERSION_TABLES)
+		self.std_low(data).update(op="ABSOLUTE", value="123.45")
+		with mock.patch.object(api, "OVERLAY_MAX_ROWS", rows - 1):
+			self.assertEqual(api.get_version(self.v)["overlay_max_rows"], rows - 1)
+			for call in (lambda: api.price_matrix(self.v, data=as_json(data)),
+			             lambda: api.validate_version(self.v, data=as_json(data)),
+			             lambda: self.preview(data=as_json(data))):
+				with self.assertRaises(api.OverlayTooLarge) as cm:
+					call()
+				self.assertIsInstance(cm.exception, frappe.ValidationError)
+				self.assertEqual(str(cm.exception), f"A draft previewed with unsaved changes has at most {rows - 1} "
+				                                    f"rows; this one has {rows}.")
+			api.save_version(self.v, as_json(data))            # a save has no cap
+			m = api.price_matrix(self.v)
+			self.assertEqual(D(find(m["rooms"], room_type=self.std)["cells"]["LOW"]), D("123.45"))
+			self.assertTrue(api.validate_version(self.v)["ok"])
+			q = self.preview()
+			self.assertTrue(q["sellable"], q.get("reasons"))
+		# any other refusal keeps its own type (a blank value while a row is typed)
+		blank = self.payload()
+		self.std_low(blank)["value"] = ""
+		with self.assertRaises(frappe.ValidationError) as cm:
+			api.validate_version(self.v, data=as_json(blank))
+		self.assertNotIsInstance(cm.exception, api.OverlayTooLarge)
+
 	def test_a_row_name_used_twice_in_a_table_is_refused(self):
 		# issue refs and matrix sources name a row by its key: each must name one row (ADR-061, S4)
 		twice = self.payload()
@@ -335,6 +367,14 @@ class TestViewerFlags(WorkspaceCase):
 		doc = api.get_version(self.v)
 		self.assertTrue(doc["cost_hidden"])
 		self.assertEqual((doc["can_preview"], doc["can_publish"], doc["can_edit_contract"]), (False, False, False))
+
+	def test_an_editor_is_told_the_overlay_row_cap(self):
+		# what the workspace previews with unsaved changes; above it, it asks for the saved draft
+		for user, cap in ((RM, api.OVERLAY_MAX_ROWS), (EDITOR, api.OVERLAY_MAX_ROWS), (FINANCE, None), (AGENT, None)):
+			self.as_user(user)
+			with self.subTest(user=user):
+				self.assertEqual(api.get_version(self.v).get("overlay_max_rows"), cap)
+		self.assertEqual(api.OVERLAY_MAX_ROWS, 5000)
 
 	def test_finance_reads_the_saved_matrix_but_never_validates(self):
 		self.as_user(FINANCE)
