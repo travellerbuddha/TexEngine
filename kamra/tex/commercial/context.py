@@ -16,7 +16,7 @@ from frappe import _
 from frappe.utils import get_datetime, now_datetime
 
 from kamra.tex.commercial.revisions import as_of
-from kamra.tex.money import D, D_or_none
+from kamra.tex.money import D, D_or_none, db_dec, db_dec_or_none
 from kamra.tex.pricing import fx as fx_math
 from kamra.tex.pricing.enums import (
 	ExtraPricingMode,
@@ -70,7 +70,7 @@ def markups(property: str, at: datetime) -> tuple[MarkupRule, ...]:
 	          "stay_from", "stay_to", "op", "value", "currency", "combine", "priority", "label")
 	rows = [r for r in as_of("TEX Markup Rule", at, fields=fields) if not r.property or r.property == property]
 	return tuple(
-		MarkupRule(rule_id=r.name, op=Op(r.op), value=D(r.value), property=r.property or None,
+		MarkupRule(rule_id=r.name, op=Op(r.op), value=db_dec(r.value), property=r.property or None,
 		           market=r.market or None, contract=r.contract or None, room_type=r.room_type or None,
 		           channel=r.sales_channel or None, stay_from=_date(r.stay_from), stay_to=_date(r.stay_to),
 		           currency=r.currency or None, combine=MarkupCombine(r.combine or "REPLACE"),
@@ -94,7 +94,7 @@ def promotion_from_row(r) -> Promotion:
 	root = r.revision_of or r.name
 	return Promotion(
 		promo_id=root, name=r.promotion_name, kind=r.kind or "PROMOTION",
-		value_type=PromoValueType(r.value_type or "PERCENT"), value=D(r.value),
+		value_type=PromoValueType(r.value_type or "PERCENT"), value=db_dec(r.value),
 		stage=PromoStage(r.stage or "SELL"), applies_to=PromoAppliesTo(r.applies_to or "ACCOMMODATION"),
 		currency=r.currency or None, code=((r.code or "").upper() or None) if r.trigger == "Code" else None,
 		sale_from=_date(r.sale_from), sale_to=_date(r.sale_to), stay_from=_date(r.stay_from),
@@ -103,7 +103,7 @@ def promotion_from_row(r) -> Promotion:
 		min_lead_days=r.min_lead_days or None, max_lead_days=r.max_lead_days or None,
 		markets=_csv(r.markets), channels=_csv(r.channels), room_types=_csv(r.room_types), boards=_csv(r.boards),
 		rate_plans=_csv(r.rate_plans), contracts=_csv(r.contracts), requires_extras=_csv(r.requires_extras),
-		member_only=bool(r.member_only), min_basket=D_or_none(r.min_basket) if r.min_basket else None,
+		member_only=bool(r.member_only), min_basket=db_dec_or_none(r.min_basket) if r.min_basket else None,
 		stackable=bool(r.stackable), exclusive=bool(r.exclusive), priority=int(r.priority or 0),
 		group=r.promo_group or None, free_nights_stay=r.free_nights_stay or None,
 		free_nights_pay=r.free_nights_pay if r.value_type == "FREE_NIGHTS" else None,
@@ -169,9 +169,9 @@ def fx_policy(frm: str, to: str, property: str, at: datetime) -> fx_math.FxPolic
 		return None
 	r = sorted(rows, key=lambda r: (0 if r.property else 1, r.name))[0]
 	return fx_math.FxPolicy(policy_id=r.name, from_currency=frm, to_currency=to, mode=FxMode(r.mode),
-	                        manual_rate=D_or_none(r.manual_rate) if r.manual_rate else None,
+	                        manual_rate=db_dec_or_none(r.manual_rate) if r.manual_rate else None,
 	                        provider=r.provider, rate_type=r.rate_type or "FOREX_SELLING",
-	                        adjustment=D_or_none(r.adjustment), max_age_days=int(r.max_age_days or 4))
+	                        adjustment=db_dec_or_none(r.adjustment), max_age_days=int(r.max_age_days or 4))
 
 
 def provider_rates(provider: str, at: datetime, days: int = 10) -> tuple[fx_math.ProviderRate, ...]:
@@ -182,7 +182,7 @@ def provider_rates(provider: str, at: datetime, days: int = 10) -> tuple[fx_math
 	                               "fetched_at": ("<=", on)},
 	                      fields=["name", "provider", "base_currency", "quote_currency", "rate", "rate_date",
 	                              "rate_type"])
-	return tuple(fx_math.ProviderRate(r.name, r.provider, r.base_currency, r.quote_currency, D(r.rate),
+	return tuple(fx_math.ProviderRate(r.name, r.provider, r.base_currency, r.quote_currency, db_dec(r.rate),
 	                                  get_datetime(r.rate_date).date(), r.rate_type) for r in rows)
 
 
@@ -212,7 +212,7 @@ def _rule(d: dict, source: str | None = None, currency: str | None = None) -> Ta
 def _table_rules(rows, source: str, currency: str | None) -> tuple[TaxRule, ...]:
 	"""TEX Tax Rule rows (a tax policy's, or a hotel's legacy custom table)."""
 	return tuple(TaxRule(code=r.code, name=r.tax_name or r.code, kind=TaxKind(r.kind or "PERCENT"),
-	                     rate=D(r.rate), amount=D(r.amount), compound=bool(r.compound), order=int(r.sort_order or 0),
+	                     rate=db_dec(r.rate), amount=db_dec(r.amount), compound=bool(r.compound), order=int(r.sort_order or 0),
 	                     applies_to=frozenset(x.strip() for x in (r.applies_to or "ACCOMMODATION").split(",")
 	                                          if x.strip()), source=source, currency=currency or None)
 	             for r in rows or [])
@@ -317,13 +317,13 @@ def extras_catalog(property: str, *, online_only: bool = False, after_booking: b
 	out = {}
 	for row in live_extras(property, at=at, online_only=online_only, after_booking=after_booking):
 		e = frappe.get_cached_doc("TEX Extra", row.name)
-		child = D(e.child_amount) if e.child_pricing == "CUSTOM" else None
-		infant = (D(0) if e.infant_pricing == "FREE" else (D(e.infant_amount) if e.infant_pricing == "CUSTOM"
+		child = db_dec(e.child_amount) if e.child_pricing == "CUSTOM" else None
+		infant = (D(0) if e.infant_pricing == "FREE" else (db_dec(e.infant_amount) if e.infant_pricing == "CUSTOM"
 		                                                   else None))
 		rules = tuple(
-			ExtraPriceRule(rule_id=r.name, amount=D(r.amount),
-			               child_amount=D(r.child_amount) if r.custom_child_amounts else None,
-			               infant_amount=D(r.infant_amount) if r.custom_child_amounts else None,
+			ExtraPriceRule(rule_id=r.name, amount=db_dec(r.amount),
+			               child_amount=db_dec(r.child_amount) if r.custom_child_amounts else None,
+			               infant_amount=db_dec(r.infant_amount) if r.custom_child_amounts else None,
 			               market=r.market or None, room_type=r.room_type or None, channel=r.sales_channel or None,
 			               stay_from=_date(r.stay_from), stay_to=_date(r.stay_to), sale_from=_date(r.sale_from),
 			               sale_to=_date(r.sale_to), service_from=_date(r.service_from),
@@ -331,7 +331,7 @@ def extras_catalog(property: str, *, online_only: bool = False, after_booking: b
 			for r in e.price_rules)
 		out[e.extra_code] = ExtraDef(
 			code=e.extra_code, name=e.extra_name, pricing_mode=ExtraPricingMode(e.pricing_mode),
-			currency=e.currency, amount=D(e.amount), child_amount=child, infant_amount=infant,
+			currency=e.currency, amount=db_dec(e.amount), child_amount=child, infant_amount=infant,
 			category=e.category or "Service", tax_category=e.tax_category or "SERVICE",
 			mandatory=bool(e.is_mandatory), sale_from=_date(e.sale_from), sale_to=_date(e.sale_to),
 			service_from=_date(e.service_from), service_to=_date(e.service_to), markets=_csv(e.markets),

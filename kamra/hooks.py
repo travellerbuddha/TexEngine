@@ -296,6 +296,11 @@ for _dt in ("TEX Inventory Day", "TEX ARI Restriction", "TEX Allotment"):
 	                                       "on_trash": "kamra.tex.hooks.ari_source_changed"})
 doc_events.setdefault("TEX Channel Mapping", {})["on_update"] = "kamra.tex.hooks.mapping_changed"
 doc_events.setdefault("TEX Contract Version", {})["on_update"] = "kamra.tex.hooks.contract_version_changed"
+# decimal inputs hold exactly what was typed (up to 9 places) or are refused, whoever saves (G-72, ADR-055)
+for _dt in ("TEX Contract Version", "TEX Pricing Policy", "TEX Markup Rule", "TEX Promotion", "TEX FX Rate",
+            "TEX FX Policy", "TEX Cancellation Policy", "TEX Payment Policy", "TEX Tax Policy", "TEX Extra",
+            "TEX Loyalty Program"):
+	doc_events.setdefault(_dt, {})["before_validate"] = "kamra.tex.commercial.decimals.check_inputs"
 
 # Scheduled Tasks
 # ---------------

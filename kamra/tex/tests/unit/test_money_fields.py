@@ -87,6 +87,9 @@ class TestColumnValuesReadExactly(unittest.TestCase):
 		# a binary float (a script's number) has no typed digits: rounded as the column would
 		self.assertEqual(money.db_input(0.1 + 0.2), Decimal("0.3"))
 		self.assertEqual(money.db_input(0.12345678912), Decimal("0.123456789"))
+		self.assertEqual(money.db_input(1234567.123456789), Decimal("1234567.123456789"))
+		with self.assertRaises(money.DecimalInputError):
+			money.db_input(1e13)
 
 
 class TestFxSignificantDigits(unittest.TestCase):

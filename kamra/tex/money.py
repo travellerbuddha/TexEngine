@@ -165,7 +165,8 @@ def db_input(value, places: int = DB_PLACES, width: int = DB_WIDTH) -> Decimal |
 		return None
 	if isinstance(value, bool):
 		raise DecimalInputError("NOT_A_NUMBER", f"{value!r} is not a number")
-	if isinstance(value, str):
+	typed = isinstance(value, str)
+	if typed:
 		try:
 			d = Decimal(value.strip())
 		except InvalidOperation:
@@ -181,7 +182,7 @@ def db_input(value, places: int = DB_PLACES, width: int = DB_WIDTH) -> Decimal |
 		if not d.is_finite():
 			raise DecimalInputError("NOT_A_NUMBER", f"{value!r} is not a number")
 	if d != 0:
-		if len(d.normalize().as_tuple().digits) > DB_SAFE_DIGITS:
+		if typed and len(d.normalize().as_tuple().digits) > DB_SAFE_DIGITS:
 			raise DecimalInputError("DIGITS", f"{value} has more than {DB_SAFE_DIGITS} significant digits")
 		if d.adjusted() >= width - places:
 			raise DecimalInputError("RANGE", f"{value} is too large (at most {width - places} digits before "

@@ -242,9 +242,9 @@ def _guard_superseded_tax_rules(doc) -> None:
 	if any(str(before.get(f) or "") != str(doc.get(f) or "") for f in PACK_TAX_FIELDS):
 		frappe.msgprint(_("TEX prices at {0} use its tax policy (Rates → Taxes); this change does not "
 		                  "affect them.").format(doc.name), title=_("Taxes are effective-dated"), indicator="orange")
-	from kamra.tex.money import D
+	from kamra.tex.money import db_dec
 
-	strip = lambda rows: [(r.code, r.tax_name, r.kind, D(r.rate or 0), D(r.amount or 0), r.applies_to,  # noqa: E731
+	strip = lambda rows: [(r.code, r.tax_name, r.kind, db_dec(r.rate), db_dec(r.amount), r.applies_to,  # noqa: E731
 	                       int(r.compound or 0), int(r.sort_order or 0)) for r in rows or []]
 	if (before.get("tex_tax_profile") != doc.get("tex_tax_profile")
 			or strip(before.get("tex_tax_rules")) != strip(doc.get("tex_tax_rules"))):

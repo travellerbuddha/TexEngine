@@ -45,3 +45,4 @@ kamra.patches.tex.p28_guest_change_refund_rows
 kamra.patches.tex.p29_channel_binding
 kamra.patches.tex.p31_g41_review
 kamra.patches.tex.p34_redemption_released_at
+kamra.patches.tex.p35_money_field_types
