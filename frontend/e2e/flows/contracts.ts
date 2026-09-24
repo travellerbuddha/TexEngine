@@ -178,7 +178,18 @@ export async function openDraft(page: Page, contract: string): Promise<string> {
 
 // ─── version editor ──────────────────────────────────────────────────────
 
-const TAB_LABEL = {
+/** The version editor's four sections (PRICING_WORKSPACE_UX.md §2), tablist "Version sections". */
+const SECTION_LABEL = {
+  pricing: "Pricing",
+  rules: "Commercial rules",
+  offers: "Offers & promotions",
+  preview: "Preview & audit",
+} as const
+export type VersionSection = keyof typeof SECTION_LABEL
+
+/** The Advanced rule tables under Commercial rules (tablist "Rule tables"): the editors of the
+ * former ten tabs, unchanged. "Occupancy" also names the "Occupancy rules" tab. */
+const TABLE_LABEL = {
   rooms: "Rooms",
   periods: "Periods",
   rates: "Room prices",
@@ -186,18 +197,30 @@ const TAB_LABEL = {
   occupancy: "Occupancy",
   boards: "Boards",
   plans: "Rate plans",
-  offers: "Offers",
   settings: "Settings",
-  preview: "Price check",
 } as const
-export type VersionTab = keyof typeof TAB_LABEL
+export type VersionTab = keyof typeof TABLE_LABEL | "offers" | "preview"
 
-/** Select a version editor tab; returns its panel. */
-export async function openTab(page: Page, tab: VersionTab): Promise<Locator> {
-  const t = page.getByRole("tablist", { name: "Version sections" }).getByRole("tab", { name: new RegExp(`^${esc(TAB_LABEL[tab])}`) })
+async function selectTab(page: Page, tablist: string, label: string): Promise<Locator> {
+  const name = new RegExp(`^${esc(label)}`)
+  const t = page.getByRole("tablist", { name: tablist, exact: true }).getByRole("tab", { name })
   await t.click()
   await expect(t).toHaveAttribute("aria-selected", "true")
-  return page.getByRole("tabpanel")
+  return page.getByRole("tabpanel", { name })
+}
+
+/** Select a version editor section; returns its panel. */
+export async function openSection(page: Page, section: VersionSection): Promise<Locator> {
+  return selectTab(page, "Version sections", SECTION_LABEL[section])
+}
+
+/** Open what a version editor tab of the ten-tab editor held; returns its panel: "offers" and
+ * "preview" are sections of their own (Offers & promotions, Preview & audit), every table is an
+ * Advanced rule table under Commercial rules. */
+export async function openTab(page: Page, tab: VersionTab): Promise<Locator> {
+  if (tab === "offers" || tab === "preview") return openSection(page, tab)
+  await openSection(page, "rules")
+  return selectTab(page, "Rule tables", TABLE_LABEL[tab])
 }
 
 /** Save the draft (Ctrl S button) and wait until the editor has taken the server's answer: the
@@ -440,11 +463,11 @@ export interface PreviewResult {
   steps: string[]
 }
 
-/** Price check tab of the version on screen: prices a stay on the server exactly as
+/** Preview & audit section of the version on screen: prices a stay on the server exactly as
  * the booking engine would and returns the total and the explanation. */
 export async function previewPrice(page: Page, p: PreviewInput): Promise<PreviewResult> {
-  await openTab(page, "rooms") // leaving the tab resets the calculator
-  const panel = await openTab(page, "preview")
+  await openSection(page, "pricing") // leaving the section resets the calculator
+  const panel = await openSection(page, "preview")
   await byLabel(panel, "Room type").selectOption({ label: p.room })
   if (p.board) await byLabel(panel, "Board").selectOption(p.board)
   if (p.ratePlan) await byLabel(panel, "Rate plan").selectOption({ label: p.ratePlan })
