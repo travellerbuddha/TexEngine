@@ -35,6 +35,32 @@ def active_version(headers: list[VersionHeader], at: datetime) -> VersionHeader 
 
 
 @dataclass(frozen=True, slots=True)
+class StatusChange:
+	"""One recorded change of a contract's status (``contract.status`` in the audit trail)."""
+
+	at: datetime
+	old: str | None
+	new: str | None
+
+
+def status_at(changes: list[StatusChange], at: datetime, current: str | None) -> str | None:
+	"""A contract's status at ``at`` from its recorded status changes (G-51, ADR-054).
+
+	A change takes effect at its time: at or after it, the last such change's new status;
+	before every change, the first change's old status (the status it replaced held until
+	then); no change recorded, ``current`` (it never changed). ``changes`` may come in any
+	order; two at the same instant keep the order given.
+	"""
+	ordered = sorted(changes, key=lambda c: c.at)
+	before = [c for c in ordered if c.at <= at]
+	if before:
+		return before[-1].new
+	if ordered:
+		return ordered[0].old
+	return current
+
+
+@dataclass(frozen=True, slots=True)
 class MarketDef:
 	code: str
 	countries: frozenset[str]

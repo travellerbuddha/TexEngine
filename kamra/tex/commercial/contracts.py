@@ -645,16 +645,62 @@ def active_version_header(contract: str, at: datetime) -> versions.VersionHeader
 	return versions.active_version(version_headers(contract), get_datetime(at))
 
 
-def candidate_contracts(property: str, market: str, channel: str, at: datetime) -> list[tuple[dict, str]]:
+STATUS_AUDIT = "contract.status"       # every status change, on every path (TEXContract.on_update)
+
+
+def _audited_status(value) -> str | None:
+	try:
+		return (json.loads(value) or {}).get("status") if value else None
+	except (TypeError, ValueError, AttributeError):
+		return None
+
+
+def statuses_at(rows, at: datetime) -> dict[str, str | None]:
+	"""Each contract's status at ``at`` (G-51, ADR-054). ``rows``: contracts with their current
+	``status``. The history is the audit trail: the controller audits every status change
+	(publish, the status actions, any save) as ``contract.status`` in the same transaction, and
+	audit events are immutable; a contract with no recorded change still has its status."""
+	rows = list(rows)
+	if not rows:
+		return {}
+	events = frappe.get_all("TEX Audit Event",
+	                        filters={"action": STATUS_AUDIT, "reference_doctype": "TEX Contract",
+	                                 "reference_name": ("in", [r.name for r in rows])},
+	                        fields=["reference_name", "event_time", "old_value", "new_value"],
+	                        order_by="event_time asc, creation asc, name asc")
+	changes: dict[str, list[versions.StatusChange]] = {}
+	for e in events:
+		changes.setdefault(e.reference_name, []).append(versions.StatusChange(
+			get_datetime(e.event_time), _audited_status(e.old_value), _audited_status(e.new_value)))
+	at = get_datetime(at)
+	return {r.name: versions.status_at(changes.get(r.name, []), at, r.status) for r in rows}
+
+
+def candidate_contracts(property: str, market: str, channel: str, at: datetime, *,
+                        historical: bool = False) -> list[tuple[dict, str]]:
 	"""Contracts that can sell for this hotel/market/channel at sale time ``at``
 	→ [(contract row, version name)], highest priority first.
 
 	The header only says whether a contract sells at all (its status); market, channels, sale
 	window, priority and default sell currency are those of the version live at ``at``
 	(``selling_terms``: what it froze, narrowed by its header snapshot if it was frozen before
-	G-50), so selection is the same whenever it is re-run for ``at`` (G-50, ADR-045)."""
-	rows = frappe.get_all("TEX Contract", filters={"property": property, "status": "Active"},
-	                      fields=["name", "contract_code", "contract_name", "is_bar"], order_by="name asc")
+	G-50), so selection is the same whenever it is re-run for ``at`` (G-50, ADR-045).
+
+	``historical``: selection for a moment that has passed (the simulator, a reprice on the
+	original or a historical sale date, a guest's change re-derived as of its price): the status
+	is the one the contract had at ``at`` (``statuses_at``), so a contract archived or suspended
+	since is a candidate for a time it was Active, and one suspended then is not (G-51,
+	ADR-054). Otherwise the live status: a stop sale acts now (ADR-045)."""
+	fields = ["name", "contract_code", "contract_name", "is_bar", "status"]
+	if historical:
+		# a Draft contract never published a version: it never sold
+		rows = frappe.get_all("TEX Contract", filters={"property": property, "status": ("!=", "Draft")},
+		                      fields=fields, order_by="name asc")
+		then = statuses_at(rows, at)
+		rows = [r for r in rows if then.get(r.name) == "Active"]
+	else:
+		rows = frappe.get_all("TEX Contract", filters={"property": property, "status": "Active"},
+		                      fields=fields, order_by="name asc")
 	out = []
 	sale = getdate(at)
 	for r in rows:
@@ -670,9 +716,9 @@ def candidate_contracts(property: str, market: str, channel: str, at: datetime) 
 			continue
 		out.append((frappe._dict(
 			name=r.name, contract_code=r.contract_code, contract_name=r.contract_name, is_bar=r.is_bar,
-			market=t.market, specific=market in st.markets, contract_currency=t.currency, priority=st.priority,
-			sell_currency=st.sell_currency, channels=sorted(st.channels or ()), sale_from=st.sale_from,
-			sale_to=st.sale_to, stay_from=st.stay_from, stay_to=st.stay_to), h.version_id))
+			status_now=r.status, market=t.market, specific=market in st.markets, contract_currency=t.currency,
+			priority=st.priority, sell_currency=st.sell_currency, channels=sorted(st.channels or ()),
+			sale_from=st.sale_from, sale_to=st.sale_to, stay_from=st.stay_from, stay_to=st.stay_to), h.version_id))
 	# a market-specific contract beats the GLOBAL fallback; then priority
 	out.sort(key=lambda x: (not x[0].specific, -(x[0].priority or 0), x[0].name))
 	return out
