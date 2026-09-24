@@ -105,7 +105,8 @@ class TestBestEffortUnderLocks(PrivacyCase):
 		account = frappe.db.get_value("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"})
 		provider = type(pay.provider_for(account))
 		args = {"property": fx.PROPERTY, "amount": D("10.00"), "currency": "EUR", "provider_account": account,
-		        "description": "m6", "customer": {"name": "M6"}, "return_url": "https://example.com/r", "method": "Card"}
+		        "description": "m6", "customer": {"name": "M6"}, "method": "Card",
+		        "return_url": f"http://{sorted(pay.allowed_return_hosts(fx.PROPERTY))[0]}/r"}
 		with mock.patch.object(provider, "create_checkout", side_effect=frappe.QueryTimeoutError("lock")), \
 				self.assertRaises(frappe.ValidationError) as ctx:
 			pay.start_payment(**args, idempotency_key="m6-timeout")
@@ -343,6 +344,14 @@ class TestMergeUnderConcurrency(PrivacyCase):
 
 
 class TestMergeRecords(PrivacyCase):
+	def test_every_link_to_a_profile_is_indexed(self):
+		"""The merge's locking reads lock a profile's rows only when an index starts with the link (else a
+		locking read holds the whole table until the merge ends): a new Link to Guest needs its index in
+		``setup.TEX_INDEXES``."""
+		for parent, field in crm._guest_links():
+			first = frappe.db.sql(f"SHOW INDEX FROM `tab{parent}` WHERE Seq_in_index = 1 AND Column_name = %s", field)
+			self.assertTrue(first, f"{parent}.{field} has no index that starts with it")
+
 	def pair(self, tag: str) -> tuple[str, str, dict]:
 		kept_b, kept = self.booked_guest(f"{tag}-a", f"{tag}-a@example.com", phone="+49 30 3330")
 		dup_b, dup = self.booked_guest(f"{tag}-b", f"{tag}-b@example.com", phone="+49 30 3331")
