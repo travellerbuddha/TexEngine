@@ -14,6 +14,7 @@ import {
   Checkbox,
   ConfirmDialog,
   DataTable,
+  DECIMAL_PLACES,
   DecimalInput,
   Dialog,
   Drawer,
@@ -469,7 +470,7 @@ function FieldControl({
     case "decimal":
       return (
         <Field {...common}>
-          <DecimalInput disabled={readOnly} value={String(v ?? "")} onValueChange={onChange} decimals={f.decimals ?? 6} allowNegative={f.allowNegative} suffix={f.suffix?.(doc) || undefined} />
+          <DecimalInput disabled={readOnly} value={String(v ?? "")} onValueChange={onChange} decimals={f.decimals ?? DECIMAL_PLACES} allowNegative={f.allowNegative} suffix={f.suffix?.(doc) || undefined} />
         </Field>
       )
     case "select":

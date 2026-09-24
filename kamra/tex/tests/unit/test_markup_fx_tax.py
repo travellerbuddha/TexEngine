@@ -114,7 +114,7 @@ class TestFx(unittest.TestCase):
 		self.assertEqual(cross.provider_rate_id, "t3/t1")
 		ecb = (rate("e1", "EUR", "USD", "1.10", provider="ECB"), rate("e2", "EUR", "GBP", "0.85", provider="ECB"))
 		c2 = fx.resolve_fx("GBP", "USD", fx.FxPolicy("p", "GBP", "USD", FxMode.PROVIDER, provider="ECB"), ecb, AS_OF)
-		self.assertEqual(c2.sell_rate, D("1.294118"))          # 1.10 / 0.85 via EUR
+		self.assertEqual(c2.sell_rate, D("1.294117647"))       # 1.10 / 0.85 via EUR, 10 significant digits (G-72)
 
 	def test_refusals(self):
 		with self.assertRaises(Unsellable) as cm:

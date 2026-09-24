@@ -11,6 +11,7 @@ from frappe import _
 
 from kamra.tex.api._util import doc_dict, parse, text
 from kamra.tex.commercial import revisions
+from kamra.tex.commercial.decimals import api_fields, api_value, typed
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 
@@ -102,8 +103,8 @@ def list_records(doctype: str, property: str | None = None, include_archived: in
 	                                                                        "revision_of", "active_from", "active_to")]
 	if meta.has_field("hotel_group"):
 		fields.append("hotel_group")
-	rows = frappe.get_all(doctype, filters=filters, fields=list(dict.fromkeys(fields)), order_by="modified desc",
-	                      limit=500)
+	rows = [api_fields(r, meta) for r in frappe.get_all(doctype, filters=filters, fields=list(dict.fromkeys(fields)),
+	                                                     order_by="modified desc", limit=500)]
 	allowed = scope.permitted_properties()
 	groups = {g for g in frappe.get_all("Property", filters={"name": ("in", list(allowed) or [""])},
 	                                    pluck="tex_hotel_group") if g}
@@ -265,9 +266,10 @@ def fx_rates(provider: str = "TCMB", days: int = 14, base: str | None = None):
 	filters = {"provider": provider, "rate_date": (">=", add_days(nowdate(), -int(days)))}
 	if base:
 		filters["base_currency"] = base
-	return frappe.get_all("TEX FX Rate", filters=filters,
+	rows = frappe.get_all("TEX FX Rate", filters=filters,
 	                      fields=["name", "provider", "base_currency", "quote_currency", "rate_type", "rate",
 	                              "rate_date", "fetched_at"], order_by="rate_date desc, base_currency asc", limit=500)
+	return [r | {"rate": api_value(r.rate)} for r in rows]      # the exact rate, never a float (G-72)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -284,13 +286,11 @@ def fetch_fx(provider: str = "TCMB"):
 def add_manual_rate(base_currency: str, quote_currency: str, rate: str, rate_date: str):
 	if not scope.is_platform_admin():
 		frappe.throw(_("Only platform administrators manage shared FX rates."), frappe.PermissionError)
-	from kamra.tex.money import D_or_none
-
-	value = D_or_none(str(rate))
+	value = typed(str(rate if rate is not None else ""), _("Rate"))     # as typed, up to 9 places (G-72)
 	if value is None or value <= 0:
 		frappe.throw(_("The rate must be a positive number."))
 	doc = frappe.get_doc({"doctype": "TEX FX Rate", "provider": "MANUAL", "base_currency": text(base_currency, 3),
-	                      "quote_currency": text(quote_currency, 3), "rate": value, "rate_date": rate_date,
+	                      "quote_currency": text(quote_currency, 3), "rate": str(value), "rate_date": rate_date,
 	                      "fetched_at": frappe.utils.now_datetime(), "source_ref": frappe.session.user})
 	doc.insert(ignore_permissions=True)
 	audit("fx.manual_rate", reference_doctype="TEX FX Rate", reference_name=doc.name,

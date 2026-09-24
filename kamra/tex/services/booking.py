@@ -23,7 +23,7 @@ from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
-from kamra.tex.money import ZERO, D, from_db, quantize, to_str
+from kamra.tex.money import ZERO, D, db_dec, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 from kamra.tex.security.capabilities import WEB_CHANNELS
@@ -450,7 +450,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 			"tex_sales_channel": channel, "tex_board": req["board"], "tex_child_ages": json.dumps(kids),
 			"tex_pricing_source": "TEX", "tex_price_locked": 1, "tex_locked_at": now, "tex_sale_at": now,
 			"tex_accepted_at": now, "tex_quote": row.name, "tex_currency": currency,
-			"tex_fx_rate": D((result.get("fx") or {}).get("sell_rate") or 1),
+			# informational, at the column's 9 places; the snapshot holds the exact rate (G-72)
+			"tex_fx_rate": db_dec((result.get("fx") or {}).get("sell_rate") or 1),
 			"tex_promotions": ", ".join(p["promo_id"] for p in result.get("promotions") or [] if p["applied"]),
 			"tex_pricing_snapshot": json.dumps({**result, "accepted_at": str(now), "quote_id": row.name},
 			                                   sort_keys=True, ensure_ascii=False),

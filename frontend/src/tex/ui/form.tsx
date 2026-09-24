@@ -118,6 +118,10 @@ export const Select = forwardRef<
   )
 })
 
+/** Decimal places a TEX decimal field keeps (DECIMAL(21,9), G-72): rates, occupancy values,
+ * board amounts, promotion and markup values, FX rates, loyalty values. The server refuses more. */
+export const DECIMAL_PLACES = 9
+
 /** Decimal input that keeps the typed string (money never becomes a float). */
 export const DecimalInput = forwardRef<
   HTMLInputElement,

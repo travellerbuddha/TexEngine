@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import frappe
 
+from kamra.tex.commercial.decimals import api_value
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
 from kamra.tex.security import scope
@@ -34,6 +35,6 @@ def loyalty_programs(guest: str):
 			"currency": prog.currency,
 			"property": prop,
 			"min_redeem_points": int(prog.min_redeem_points or 0),
-			"max_redeem_percent": str(prog.max_redeem_percent or 100),
+			"max_redeem_percent": api_value(prog.max_redeem_percent if prog.max_redeem_percent is not None else 100),
 		}
 	return list(out.values())

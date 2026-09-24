@@ -4,7 +4,7 @@ import { cn } from "../../../../../lib/utils"
 import { useTexQuery } from "../../../../lib/api"
 import { date as fmtDate, money } from "../../../../lib/format"
 import { useTexT } from "../../../../i18n"
-import { Badge, Button, DecimalInput, Dialog, Field, IconButton, Notice, Select } from "../../../../ui"
+import { Badge, Button, DECIMAL_PLACES, DecimalInput, Dialog, Field, IconButton, Notice, Select } from "../../../../ui"
 import { DERIVED_OPS, enumLabel, enumOptions, OPS_ROOM, opText, PERCENT_OPS } from "../../lib/options"
 import type { PriceMatrix, Row } from "../../lib/types"
 import { newKey } from "../../lib/util"
@@ -256,7 +256,7 @@ function RuleDialog({
         </Field>
         {needsValue && (
           <Field label={t("rates.f.value")} required hint={op === "ABSOLUTE" ? t("rates.rates.abs_hint", { ccy }) : undefined}>
-            <DecimalInput value={value} onValueChange={setValue} decimals={6} allowNegative={op === "ADJUST_PERCENT"} suffix={suffix} />
+            <DecimalInput value={value} onValueChange={setValue} decimals={DECIMAL_PLACES} allowNegative={op === "ADJUST_PERCENT"} suffix={suffix} />
           </Field>
         )}
         {derived && (

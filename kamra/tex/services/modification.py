@@ -42,7 +42,7 @@ from frappe.utils import add_to_date, convert_utc_to_system_timezone, get_dateti
 from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import contracts
-from kamra.tex.money import D, from_db, quantize, to_str
+from kamra.tex.money import D, db_dec, from_db, quantize, to_str
 from kamra.tex.pricing import addons, serialize
 from kamra.tex.pricing import fx as fx_math
 from kamra.tex.pricing.extras import guest_reason
@@ -526,7 +526,7 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		"tex_board": req["board"], "tex_market": req["market"], "tex_child_ages": json.dumps(req.get("children") or []),
 		"tex_contract": new["contract"]["contract"], "tex_contract_version": new["contract"]["version"],
 		"tex_payload_hash": new["contract"]["payload_hash"], "tex_currency": ccy,
-		"tex_fx_rate": D((new.get("fx") or {}).get("sell_rate") or 1),
+		"tex_fx_rate": db_dec((new.get("fx") or {}).get("sell_rate") or 1),   # 9 places, as stored (G-72)
 		"tex_pricing_snapshot": json.dumps({**new, "accepted_at": str(now_datetime()),
 		                                    "original_priced_at": str(original_priced_at(res, snap)),
 		                                    "original_fx_rates": original_fx(res, snap),

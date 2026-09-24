@@ -2,6 +2,7 @@
 // strings and are only compared exactly (scaled BigInt) to mirror the server's checks
 // (TEXLoyaltyProgram.validate); the server validates again.
 import { intlLocale } from "../../../i18n"
+import { DECIMAL_PLACES } from "../../../ui"
 import { isInteger } from "../lib"
 import type {
   BlackoutPurpose,
@@ -15,8 +16,8 @@ type T = (k: string, p?: Record<string, string | number>) => string
 
 const DEC = /^\d+(\.\d+)?$/
 
-/** Non-negative decimal string with at most `max` decimals. */
-export function isPlainDecimal(s: string, max = 6) {
+/** Non-negative decimal string with at most `max` decimals (a TEX decimal field keeps 9, G-72). */
+export function isPlainDecimal(s: string, max = DECIMAL_PLACES) {
   const v = s.trim()
   return DEC.test(v) && (v.split(".")[1]?.length ?? 0) <= max
 }

@@ -40,13 +40,21 @@ def as_int(value, default=0, *, lo=None, hi=None) -> int:
 
 
 def rows(doc, table: str) -> list[dict]:
-	return [{k: v for k, v in r.as_dict().items()
-	         if k not in ("owner", "creation", "modified", "modified_by", "parent", "parentfield", "parenttype",
-	                      "docstatus", "doctype")} for r in (doc.get(table) or [])]
+	"""A child table's rows; decimal fields as exact decimal strings (G-72), never floats."""
+	from kamra.tex.commercial.decimals import api_fields
+
+	return [api_fields({k: v for k, v in r.as_dict().items()
+	                    if k not in ("owner", "creation", "modified", "modified_by", "parent", "parentfield",
+	                                 "parenttype", "docstatus", "doctype")}, r.meta)
+	        for r in (doc.get(table) or [])]
 
 
 def doc_dict(doc, exclude=()) -> dict:
-	d = doc.as_dict(no_default_fields=False)
+	"""A record for the TEX screens: tables as ``rows``, decimal fields as exact decimal strings
+	(G-72, ADR-055), no password."""
+	from kamra.tex.commercial.decimals import api_fields
+
+	d = api_fields(doc.as_dict(no_default_fields=False), doc.meta)
 	for k in ("owner", "docstatus", "doctype", "idx", "_user_tags", "_comments", "_assign", "_liked_by", *exclude):
 		d.pop(k, None)
 	for df in doc.meta.fields:

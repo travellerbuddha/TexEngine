@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from kamra.tex.money import ONE, D, display_pct, pct, quantize_rate, to_str6
+from kamra.tex.money import DB_PLACES, ONE, D, display_pct, pct, quantize_rate, to_str_rate
 from kamra.tex.pricing.enums import FxMode
 from kamra.tex.pricing.model import FxSnapshot, RuleRef, Unsellable
 
@@ -140,13 +140,13 @@ def describe(snap: FxSnapshot) -> str:
 	elif snap.mode == FxMode.RECORDED:
 		text = "rate recorded on the sold line"
 	else:
-		text = f"{snap.provider or '?'} {to_str6(snap.provider_rate)}"
+		text = f"{snap.provider or '?'} {to_str_rate(snap.provider_rate)}"
 		if snap.rate_date:
 			text += f" of {snap.rate_date.isoformat()}"
 		if snap.mode == FxMode.PROVIDER_PERCENT and adj is not None:
-			text += f" {'+' if adj >= 0 else '−'}{display_pct(abs(adj))}%"
+			text += f" {'+' if adj >= 0 else '−'}{display_pct(abs(adj), DB_PLACES)}%"
 		elif snap.mode == FxMode.PROVIDER_FIXED and adj is not None:
-			text += f" {'+' if adj >= 0 else '−'} {to_str6(abs(adj))}"
+			text += f" {'+' if adj >= 0 else '−'} {to_str_rate(abs(adj))}"
 	if snap.policy_id:
 		text += f", policy {snap.policy_id}"
 	if snap.origin:
@@ -192,11 +192,11 @@ def explain_new(log: FxLog | None, explain) -> None:
 		rule = RuleRef("fx_policy", snap.policy_id, None, f"fx_policy:{snap.policy_id}",
 		               f"{snap.from_currency}→{snap.to_currency}") if snap.policy_id else None
 		explain.add("fx", "FX", "{use}: 1 {from} = {rate} {to} ({source})", rule=rule, use=use,
-		            **{"from": snap.from_currency}, to=snap.to_currency, rate=to_str6(snap.sell_rate),
-		            mode=snap.mode.value, provider=snap.provider, provider_rate=to_str6(snap.provider_rate),
+		            **{"from": snap.from_currency}, to=snap.to_currency, rate=to_str_rate(snap.sell_rate),
+		            mode=snap.mode.value, provider=snap.provider, provider_rate=to_str_rate(snap.provider_rate),
 		            provider_rate_id=snap.provider_rate_id,
 		            rate_date=snap.rate_date.isoformat() if snap.rate_date else None,
-		            adjustment=to_str6(snap.adjustment), policy=snap.policy_id,
+		            adjustment=to_str_rate(snap.adjustment), policy=snap.policy_id,
 		            as_of=snap.as_of.isoformat() if snap.as_of else None, origin=snap.origin,
 		            source=describe(snap))
 
@@ -250,7 +250,7 @@ def recorded(snapshot: dict, *, extra_currency: dict[str, str] | None = None,
 				if D(r["sell_rate"]) == rate and use not in r["used_for"]:
 					r["used_for"].append(use)
 				return            # one rate per pair; a differing line rate is not guessed between
-		out.append({"from": ccy, "to": sell, "mode": FxMode.RECORDED.value, "sell_rate": to_str6(rate),
+		out.append({"from": ccy, "to": sell, "mode": FxMode.RECORDED.value, "sell_rate": to_str_rate(rate),
 		            "provider": None, "provider_rate": None, "provider_rate_id": None, "rate_date": None,
 		            "adjustment": None, "policy_id": None, "as_of": None, "used_for": [use]})
 

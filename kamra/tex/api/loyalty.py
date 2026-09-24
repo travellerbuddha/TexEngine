@@ -11,8 +11,9 @@ import frappe
 from frappe import _
 
 from kamra.tex.api._util import as_int, parse, text
+from kamra.tex.commercial.decimals import api_value
 from kamra.tex.crm import loyalty
-from kamra.tex.money import D, quantize, to_str
+from kamra.tex.money import db_dec, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 
@@ -51,7 +52,7 @@ def _stats(name: str, point_value, currency) -> dict:
 	available = int(row.available or 0)
 	return {"members": int(row.members or 0), "available_points": available, "pending_points": int(row.pending or 0),
 	        # what the points in guests' hands are worth: the program's liability
-	        "liability": to_str(quantize(D(str(point_value or 0)) * available, currency or "EUR"))}
+	        "liability": to_str(quantize(db_dec(point_value) * available, currency or "EUR"))}
 
 
 @frappe.whitelist()
@@ -65,8 +66,8 @@ def programs():
 	edit = _props("loyalty.edit")
 	for r in rows:
 		r.update(_stats(r.name, r.point_value, r.currency))
-		r["point_value"] = str(D(str(r.point_value or 0)))
-		r["max_redeem_percent"] = str(D(str(r.max_redeem_percent or 0)))
+		r["point_value"] = api_value(r.point_value or 0)
+		r["max_redeem_percent"] = api_value(r.max_redeem_percent or 0)
 		hotels = loyalty.program_properties(r)
 		r["hotels"] = hotels
 		r["can_edit"] = scope.is_platform_admin() or (bool(hotels) and set(hotels) <= edit)
@@ -91,15 +92,15 @@ def program(name: str):
 	prog = frappe.get_doc("TEX Loyalty Program", name)
 	hotels = _require(prog, "crm.view", every=False)
 	out = {f: prog.get(f) for f in ("name", *FIELDS)}
-	out["point_value"] = str(D(str(prog.point_value or 0)))
-	out["max_redeem_percent"] = str(D(str(prog.max_redeem_percent or 0)))
+	out["point_value"] = api_value(prog.point_value or 0)
+	out["max_redeem_percent"] = api_value(prog.max_redeem_percent or 0)
 	for table, cols in CHILDREN.items():
 		out[table] = [{c: (str(r.get(c)) if c.startswith("date") and r.get(c) else r.get(c)) for c in cols}
 		              for r in prog.get(table) or []]
 	for r in out["earn_rules"]:
-		r["rate"] = str(D(str(r["rate"] or 0)))
+		r["rate"] = api_value(r["rate"] or 0)
 	for t in out["tiers"]:
-		t["earn_multiplier"] = str(D(str(t["earn_multiplier"] if t["earn_multiplier"] is not None else 1)))
+		t["earn_multiplier"] = api_value(t["earn_multiplier"] if t["earn_multiplier"] is not None else 1)
 	out.update(_stats(prog.name, prog.point_value, prog.currency))
 	out["hotels"] = hotels
 	out["can_edit"] = scope.is_platform_admin() or set(hotels) <= _props("loyalty.edit")

@@ -18,7 +18,7 @@ from frappe import _
 from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.commercial import diffs
-from kamra.tex.money import D, D_or_none
+from kamra.tex.money import D, D_or_none, db_dec, db_dec_or_none
 from kamra.tex.pricing import ages as age_math
 from kamra.tex.pricing import inherit, occupancy, serialize, validate, versions
 from kamra.tex.pricing.engine import GLOBAL_MARKET
@@ -134,7 +134,7 @@ def occupancy_rules_of(rows, *, base_level: Level, source: str,
 		adults, children = parse_combination(r.combination)
 		out.append(OccupancyRule(
 			rule_id=r.name, target=OccTarget(r.target), op=Op(r.op),
-			value=None if r.op == "INHERIT" else D(r.value),
+			value=None if r.op == "INHERIT" else db_dec(r.value),
 			position=_nz(r.position), age_band=(r.age_band or "").strip().upper() or None,
 			room_type=r.room_type or None, period=(r.period_code or "").strip() or None,
 			adults=adults, children=children, is_override=bool(r.is_override), base_level=base_level,
@@ -305,9 +305,9 @@ def _cancellation_policy(name: str | None) -> dict | None:
 	p = frappe.get_doc("TEX Cancellation Policy", name)
 	return {"id": p.name, "name": p.policy_name, "refundable": bool(p.refundable),
 	        "rules": [{"days_before_arrival": int(r.days_before_arrival or 0), "penalty_type": r.penalty_type,
-	                   "penalty_value": serialize.dec_str(D(r.penalty_value))}
+	                   "penalty_value": serialize.dec_str(db_dec(r.penalty_value))}
 	                  for r in sorted(p.rules, key=lambda r: -(r.days_before_arrival or 0))],
-	        "no_show": {"type": p.no_show_type, "value": serialize.dec_str(D(p.no_show_value))},
+	        "no_show": {"type": p.no_show_type, "value": serialize.dec_str(db_dec(p.no_show_value))},
 	        "description": p.description or ""}
 
 
@@ -316,7 +316,7 @@ def _payment_policy(name: str | None) -> dict | None:
 		return None
 	p = frappe.get_doc("TEX Payment Policy", name)
 	return {"id": p.name, "name": p.policy_name, "deposit_type": p.deposit_type,
-	        "deposit_value": serialize.dec_str(D(p.deposit_value)), "balance_due_days": int(p.balance_due_days or 0),
+	        "deposit_value": serialize.dec_str(db_dec(p.deposit_value)), "balance_due_days": int(p.balance_due_days or 0),
 	        "allow_pay_at_hotel": bool(p.allow_pay_at_hotel), "description": p.description or ""}
 
 
@@ -346,13 +346,13 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		Period(code=p.period_code.strip(), name=p.period_name or p.period_code, start=get_datetime(p.start_date).date(),
 		       end=get_datetime(p.end_date).date(), weekdays=parse_weekdays(p.weekdays),
 		       adjustment_op=Op(p.adjustment_op) if p.adjustment_op else None,
-		       adjustment_value=D_or_none(p.adjustment_value) if p.adjustment_op else None,
+		       adjustment_value=db_dec_or_none(p.adjustment_value) if p.adjustment_op else None,
 		       priority=int(p.priority or 0))
 		for p in version.periods)
 
 	room_rules = tuple(
 		RoomRule(rule_id=r.name, room_type=r.room_type, period=(r.period_code or "").strip() or None, op=Op(r.op),
-		         value=None if r.op == "INHERIT" else D(r.value), base_room_type=r.base_room_type or None)
+		         value=None if r.op == "INHERIT" else db_dec(r.value), base_room_type=r.base_room_type or None)
 		for r in version.period_rates)
 
 	# the version's own bands and rules, then every applicable pricing policy's (G-30, ADR-043)
@@ -365,7 +365,8 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 
 	board_rules = tuple(
 		BoardRule(rule_id=b.name, board=b.board, is_base=bool(b.is_base), op=Op(b.op or "ADD"),
-		          adult_amount=D(b.adult_amount), child_percent=D(b.child_percent if b.child_percent is not None else 50),
+		          adult_amount=db_dec(b.adult_amount),
+		          child_percent=db_dec(b.child_percent if b.child_percent is not None else 50),
 		          infant_free=bool(b.infant_free), room_type=b.room_type or None,
 		          period=(b.period_code or "").strip() or None, label=b.label or "")
 		for b in version.boards)
@@ -377,7 +378,7 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		                              "tex_payment_policy"], as_dict=True) or {}
 		rate_plans[rp.rate_plan] = RatePlanTerms(
 			code=rp.rate_plan, name=rp_doc.get("rate_plan_name") or rp.rate_plan,
-			op=Op(rp.op) if rp.op else None, value=D_or_none(rp.value) if rp.op else None,
+			op=Op(rp.op) if rp.op else None, value=db_dec_or_none(rp.value) if rp.op else None,
 			refundable=bool(rp.refundable), boards=_csv(rp.boards),
 			cancellation_policy=_cancellation_policy(rp.cancellation_policy or rp_doc.get("tex_cancellation_policy")),
 			payment_policy=_payment_policy(rp.payment_policy or rp_doc.get("tex_payment_policy")),
@@ -385,7 +386,7 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 
 	offers = tuple(
 		Promotion(promo_id=o.offer_code.strip().upper(), name=o.offer_name or o.offer_code, kind=o.kind,
-		          value_type=PromoValueType(o.value_type), value=D(o.value), stage=PromoStage(o.stage or "SELL"),
+		          value_type=PromoValueType(o.value_type), value=db_dec(o.value), stage=PromoStage(o.stage or "SELL"),
 		          sale_from=o.sale_from and get_datetime(o.sale_from).date(),
 		          sale_to=o.sale_to and get_datetime(o.sale_to).date(),
 		          stay_from=o.stay_from and get_datetime(o.stay_from).date(),

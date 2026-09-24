@@ -76,6 +76,7 @@
    "fieldname": "amount",
    "fieldtype": "Currency",
    "label": "Amount",
+   "options": "currency",
    "in_list_view": 1
   },
   {
@@ -86,12 +87,14 @@
   {
    "fieldname": "child_amount",
    "fieldtype": "Currency",
-   "label": "Child amount"
+   "label": "Child amount",
+   "options": "currency"
   },
   {
    "fieldname": "infant_amount",
    "fieldtype": "Currency",
-   "label": "Infant amount"
+   "label": "Infant amount",
+   "options": "currency"
   },
   {
    "fieldname": "priority",

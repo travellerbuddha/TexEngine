@@ -41,7 +41,7 @@
    "fieldname": "deposit_value",
    "fieldtype": "Float",
    "label": "Value",
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "column_55",

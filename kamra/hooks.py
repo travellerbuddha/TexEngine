@@ -302,6 +302,11 @@ for _dt in ("TEX Payment Policy", "TEX Payment Provider Account", "TEX Payment M
 	                                       "after_insert": "kamra.tex.security.record_audit.after_insert",
 	                                       "on_update": "kamra.tex.security.record_audit.on_update",
 	                                       "on_trash": "kamra.tex.security.record_audit.on_trash"})
+# decimal inputs hold exactly what was typed (up to 9 places) or are refused, whoever saves (G-72, ADR-055)
+for _dt in ("TEX Contract Version", "TEX Pricing Policy", "TEX Markup Rule", "TEX Promotion", "TEX FX Rate",
+            "TEX FX Policy", "TEX Cancellation Policy", "TEX Payment Policy", "TEX Tax Policy", "TEX Extra",
+            "TEX Loyalty Program"):
+	doc_events.setdefault(_dt, {})["before_validate"] = "kamra.tex.commercial.decimals.check_inputs"
 
 # Scheduled Tasks
 # ---------------

@@ -63,7 +63,7 @@
    "fieldtype": "Float",
    "label": "Value",
    "in_list_view": 1,
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "stage",

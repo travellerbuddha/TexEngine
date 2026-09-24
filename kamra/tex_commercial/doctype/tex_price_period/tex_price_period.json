@@ -58,7 +58,7 @@
    "fieldname": "adjustment_value",
    "fieldtype": "Float",
    "label": "Adjustment value",
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "priority",

@@ -18,7 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_months, getdate, now_datetime, nowdate
 
-from kamra.tex.money import D, from_db, quantize, to_str
+from kamra.tex.money import D, db_dec, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 
@@ -109,7 +109,7 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 			continue
 		if r.date_to and ci > getdate(r.date_to):
 			continue
-		rate = D(str(r.rate or 0))
+		rate = db_dec(r.rate)
 		if r.basis == "MONEY":
 			if program_doc.currency and ccy != program_doc.currency:
 				lines.append({"rule": "MONEY", "points": 0, "note": f"currency {ccy} ≠ program {program_doc.currency}"})
@@ -131,7 +131,7 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 			pts = rate * qty
 		total += pts
 		lines.append({"rule": r.basis, "rate": str(rate), "points": str(pts)})
-	total = total * D(str(multiplier or 1))
+	total = total * db_dec(multiplier or 1)
 	return int(total.to_integral_value(rounding=ROUND_FLOOR)), lines
 
 
@@ -174,7 +174,7 @@ def on_reservation_change(doc) -> None:
 		"reason": f"stay {doc.check_in_date}→{doc.check_out_date}" + (f" · tier {tier.tier_name}" if tier else ""),
 		"stay_fingerprint": fingerprint,
 		"explanation": json.dumps({"lines": lines, "tier": tier.tier_name if tier else None,
-		                           "multiplier": str(tier.earn_multiplier) if tier else "1"}, default=str),
+		                           "multiplier": str(db_dec(tier.earn_multiplier)) if tier else "1"}, default=str),
 		"actor": frappe.session.user}).insert(ignore_permissions=True)
 	_sync_guest(doc.guest)
 
@@ -243,7 +243,7 @@ def summary(guest: str, programs: set[str] | None = None) -> list[dict]:
 			for k in ("available_on", "expires_on", "creation"):
 				e[k] = str(e[k]) if e[k] else None
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
-		            "value": to_str(quantize(D(str(prog.point_value or 0)) * b["available"], prog.currency or "EUR")),
+		            "value": to_str(quantize(db_dec(prog.point_value) * b["available"], prog.currency or "EUR")),
 		            "tier": tier.tier_name if tier else None, "entries": entries})
 	return out
 
@@ -283,7 +283,7 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	prog = frappe.get_doc("TEX Loyalty Program", program)
 	if prog.currency and prog.currency != b.currency:
 		frappe.throw(_("Points can only be redeemed on {0} bookings.").format(prog.currency))
-	pct = D(str(prog.max_redeem_percent if prog.max_redeem_percent is not None else 100))
+	pct = db_dec(prog.max_redeem_percent if prog.max_redeem_percent is not None else 100)
 	if pct <= 0:
 		frappe.throw(_("Points cannot be redeemed in this program."))
 	for r in frappe.get_all("Reservation", filters={"tex_booking": booking, "status": ("not in", ["Cancelled",
@@ -308,7 +308,7 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	frappe.db.sql("SELECT name FROM `tabGuest` WHERE name=%s FOR UPDATE", guest)
 	if balances(guest, program)["available"] < points:
 		frappe.throw(_("Not enough points."))
-	value = quantize(D(str(prog.point_value or 0)) * points, b.currency)
+	value = quantize(db_dec(prog.point_value) * points, b.currency)
 	cap = quantize(from_db(b.total_amount, b.currency) * pct / 100, b.currency)
 	if value > cap:
 		frappe.throw(_("Points can cover at most {0} {1} of this booking.").format(to_str(cap), b.currency))
