@@ -159,7 +159,7 @@ test("sign-in: a two-factor account gives its code before it is signed in", asyn
   // the password was right, but Frappe made no session: the page asks for the code (M1)
   await expect(page.getByRole("heading", { name: "Verification code" })).toBeVisible()
   await expect(page.getByText("Enter the code your authenticator app shows.")).toBeVisible()
-  const code = page.getByLabel("Code")
+  const code = page.getByRole("textbox", { name: "Code" })
   await expect(code).toBeFocused()
   expect(await sessionUser(page)).toBeNull()
   await expect(page).toHaveURL(/\/login$/)

@@ -27,6 +27,7 @@ KEPT = "tex_e2e_2fa_before"
 
 def enable(password: str) -> dict:
 	import pyotp
+	from frappe import twofactor
 	from frappe.utils.password import encrypt, update_password
 
 	others = frappe.get_all("Role", filters={"two_factor_auth": 1, "name": ("!=", ROLE)}, pluck="name")
@@ -46,8 +47,9 @@ def enable(password: str) -> dict:
 		                "roles": [{"role": ROLE}]}).insert(ignore_permissions=True)
 	update_password(USER, password)
 	secret = pyotp.random_base32()
-	frappe.db.set_default(f"{USER}_otpsecret", encrypt(secret), parent="__default")
-	frappe.db.set_default(f"{USER}_otplogin", 1, parent="__default")         # the app is set up
+	# where Frappe keeps a user's authenticator secret, and that its set-up is done (frappe.twofactor)
+	twofactor.set_default(f"{USER}_otpsecret", encrypt(secret))
+	twofactor.set_default(f"{USER}_otplogin", 1)
 	frappe.db.set_single_value("System Settings", {"enable_two_factor_auth": 1, "two_factor_method": "OTP App"})
 	frappe.db.commit()
 	frappe.clear_cache()
@@ -59,8 +61,9 @@ def disable() -> dict:
 	frappe.db.set_single_value("System Settings", {
 		"enable_two_factor_auth": before.get("enable_two_factor_auth") or 0,
 		"two_factor_method": before.get("two_factor_method") or "OTP App"})
-	for key in (KEPT, f"{USER}_otpsecret", f"{USER}_otplogin"):
-		frappe.db.sql("DELETE FROM `tabDefaultValue` WHERE parent = '__default' AND defkey = %s", key)
+	frappe.db.sql("DELETE FROM `tabDefaultValue` WHERE parent = '__default' AND defkey = %s", KEPT)
+	frappe.db.sql("DELETE FROM `tabDefaultValue` WHERE defkey IN %s",
+	              ((f"{USER}_otpsecret", f"{USER}_otplogin"),))
 	if frappe.db.exists("User", USER):
 		frappe.delete_doc("User", USER, ignore_permissions=True, force=True)
 	if frappe.db.exists("Role", ROLE):

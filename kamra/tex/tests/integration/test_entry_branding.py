@@ -379,9 +379,12 @@ class TestCommunicationList(ListCase):
 		guest = frappe.get_doc({"doctype": "Guest", "first_name": "Ada", "last_name": "Actorrule",
 		                        "email": "ada.actorrule@example.com",
 		                        "tex_enterprise": self.f["enterprise"]}).insert(ignore_permissions=True).name
-		frappe.db.set_value("User", self.rev, {"first_name": "Rita", "last_name": "Revenue"})
+		staff = "entry-actor@example.com"
+		if not frappe.db.exists("User", staff):
+			frappe.get_doc({"doctype": "User", "email": staff, "first_name": "Rita", "last_name": "Revenue",
+			                "send_welcome_email": 0}).insert(ignore_permissions=True)
 		for actor, subject in (("Guest", "Booking confirmed"), ("Administrator", "Reminder"),
-		                       (self.rev, "Called about the transfer"), (None, "Imported")):
+		                       (staff, "Called about the transfer"), (None, "Imported")):
 			self.comm(guest, actor, subject)
 		expected = {"Booking confirmed": None, "Reminder": None, "Called about the transfer": "Rita Revenue",
 		            "Imported": None}
@@ -660,10 +663,13 @@ class TestSignInContract(TexTestCase):
 		self.plain = fx.ensure_user("entry-expired@example.com", ["Revenue Manager"])
 		for u in (self.user, self.plain):
 			update_password(u, self.PASSWORD)
+		from frappe import twofactor
+
 		self.secret = pyotp.random_base32()
-		frappe.db.set_default(f"{self.user}_otpsecret", encrypt(self.secret), parent="__default")
-		frappe.db.set_default(f"{self.user}_otplogin", 1, parent="__default")   # the app is set up
-		self.addCleanup(frappe.defaults.clear_cache, "__default")
+		twofactor.set_default(f"{self.user}_otpsecret", encrypt(self.secret))
+		twofactor.set_default(f"{self.user}_otplogin", 1)                     # the app is set up
+		# the defaults read from this transaction are cached: forget them after the rollback
+		self.addCleanup(frappe.client_cache.delete_value, f"defaults::{twofactor.PARENT_FOR_DEFAULTS}")
 		self.settings = {"enable_two_factor_auth": 1, "two_factor_method": "OTP App"}
 		real = frappe.get_system_settings
 		settings = mock.patch("frappe.get_system_settings",
@@ -704,20 +710,28 @@ class TestSignInContract(TexTestCase):
 		finally:
 			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back to the test's user
 
-	def test_a_two_factor_account_has_no_session_until_its_code(self):
+	def code(self) -> str:
+		"""The authenticator's code now; a code about to expire is not risked (Frappe accepts only the
+		current 30 s step)."""
+		import time
+
 		import pyotp
 
+		if time.time() % 30 > 26:
+			time.sleep(30.2 - time.time() % 30)
+		return pyotp.TOTP(self.secret).now()
+
+	def test_a_two_factor_account_has_no_session_until_its_code(self):
 		first = self.sign_in(usr=self.user, pwd=self.PASSWORD)
 		self.assertNotIn(first.get("message"), ("Logged In", "No App"))
 		self.assertEqual(first["verification"], {"method": "OTP App", "setup": True})
 		self.assertTrue(first["tmp_id"])
 		self.assertEqual(self.sessions, [])                                  # the page must not call this signed in
-		code = pyotp.TOTP(self.secret).now()
-		wrong = f"{(int(code) + 1) % 1_000_000:06d}"
+		wrong = f"{(int(self.code()) + 1) % 1_000_000:06d}"
 		with self.assertRaises(frappe.AuthenticationError):
 			self.sign_in(otp=wrong, tmp_id=first["tmp_id"])
 		self.assertEqual(self.sessions, [])
-		self.sign_in(otp=pyotp.TOTP(self.secret).now(), tmp_id=first["tmp_id"])
+		self.sign_in(otp=self.code(), tmp_id=first["tmp_id"])
 		self.assertEqual(self.sessions, [self.user])                         # the code, with the tmp_id, signs in
 
 	def test_only_the_two_factor_account_is_asked_for_a_code(self):
@@ -753,7 +767,8 @@ class TestBookingSiteSlugs(TexTestCase):
 
 	def test_an_existing_site_keeps_its_slug_but_none_moves_to_one(self):
 		now = frappe.utils.now_datetime()
-		old = self.site("analytics", name="analytics", creation=now, modified=now)
+		old = self.site("analytics", name="analytics", creation=now, modified=now, owner="Administrator",
+		                modified_by="Administrator")
 		old.db_insert()                                                          # saved before the rule
 		doc = frappe.get_doc("TEX Booking Site", "analytics")
 		doc.site_name = "Analytics Beach"
