@@ -2904,8 +2904,11 @@ patch p45).**
   calls it):
   - who: staff who may edit both profiles (`crm.edit`, `require_guest`) and may edit guests at every
     hotel either profile has any record at (every DocType linking to Guest whose rows name a hotel);
-    platform administrators; both profiles belong to one enterprise (or to none; a legacy profile
-    without one takes the other's);
+    platform administrators; the legacy PMS endpoint keeps its own guard (ADR-027: an administrator
+    role, every stay of both profiles in the caller's scope, the PMS open to the caller) and then runs
+    this merge (a walk-in profile with no stay and no enterprise included, as the upstream eval harness
+    does); both profiles belong to one enterprise (or to none; a legacy profile without one takes the
+    other's);
   - what moves: every Link to the duplicate found in the meta (TEX and legacy DocTypes, custom fields,
     child tables), read and then written by primary key; its comments and other dynamic links, its
     attachments and its change history. The audit trail is immutable and keeps the duplicate's name:
@@ -2977,11 +2980,15 @@ patch p45).**
   - L9 (tests): the permission-script test checks that a platform administrator actually reads the
     withheld values; p40 is covered on its own paths (a hash of a profile that never consented, with no
     case; a case with contact data and no profile); a shared phone stays in the identity tests.
-- Tests: `test_crm_privacy_review` (NEW_TESTS) and changes to `test_crm_privacy` (the funnel allow-list and
-  identity tests follow L5 and L6; p40's cases are written below the new controller; L9); the p45 registry
-  entry in `test_patches`. FAIL_FIRST. E2E: `crm-profile.spec.ts` and the new `crm-merge.spec.ts` (a shared
-  phone shown as a possible duplicate, merged from the profile) pass twice in a row on a server running
-  this tree.
+- Tests: `test_crm_privacy_review` (27: H1 5, M1 2, M2 6, M3 and L4 4, L1–L8 8, p40 and p45 2; the patch
+  tests refuse commits until their rollback, as the G-76 review asks) and changes to `test_crm_privacy`
+  (the funnel allow-list and identity tests follow L5 and L6; p40's cases are written below the new
+  controller; the p40 tests refuse commits; L9); the p45 registry entry in `test_patches`. On main
+  `9215991` and its schema 26 of the 27 fail or error, each on its finding (the booking test: "booked:
+  reported a rolled-back booking"; the others on the missing behaviour); p40's own paths (L9, coverage)
+  pass; on `b074527` also 26 of 27. The three `test_crm_privacy` tests changed for L5 and L6 fail on the
+  old code. E2E: `crm-profile.spec.ts` and the new `crm-merge.spec.ts` (a shared phone shown as a
+  possible duplicate, merged from the profile) pass twice in a row on a server running this tree.
 
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).

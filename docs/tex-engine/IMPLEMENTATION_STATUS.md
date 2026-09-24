@@ -20,7 +20,7 @@ Otherwise it is **PARTIAL** (the missing parts are named), **NOT STARTED**, or *
 | Check | Command | Result |
 |---|---|---|
 | TEX pure unit tests | `python -m unittest discover -s kamra/tex/tests/unit -t .` (bench Python) | **400 passed** (2026-09-24, branch `shell-g60-g64` with main `b074527`) |
-| TEX integration tests (34 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **662 OK** (2026-09-24, branch `shell-g60-g64` with main `b074527`, after migrate; per module in the G-60/G-64 paragraph below) |
+| TEX integration tests (35 modules) | `bench --site test.localhost run-tests --module kamra.tex.tests.integration.<m>` | **703 OK** (2026-09-25, branch `fix-crmp2` with main `9215991`, after migrate with p45; the 3 whole-site patch tests on a disposable site; per module in the ADR-056 second review paragraph below) |
 | Browser E2E (Playwright) | `cd frontend && npx playwright test -c e2e` | **46 of 47 pass** in the mode each spec is written for (2026-09-24, branch `shell-g60-g64` with main `b074527`, its own bench server and Vite dev server, RQ worker with the branch's code): the whole suite against Vite 41 passed; custom-host ×3 and pay-link ×2, which need the bench to serve the page (hosts, headers), passed against the bench with manage-money ×3; `restrictions-grid` fails the same way on main's own dev server (it expects "set at this scope", the catalog says "Set at this scope"; pre-existing on main). New: `entry-branding` ×5; `shell.spec` builds its paths with `texPath` |
 | Upstream Kamra suites | `run_baseline.sh` | eval harness **76/76**, front-desk journey **13/13**, banquet **101 OK** (2026-09-24, branch `shell-g60-g64` with main `b074527`, its code and schema) |
 | TypeScript / build / i18n parity | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean (2026-09-24, branch `shell-g60-g64`; bundles not rebuilt on the branch) |
@@ -279,6 +279,45 @@ fixed, with tests that fail first.
     harness 76/76, front-desk journey 13/13, banquet 101 OK (both).
   - 400 unit tests; ruff clean.
 
+**ADR-056 second review follow-up (2026-09-25, branch `fix-crmp2` on main `b074527`, main `9215991`
+merged in, patch p45).** A second independent review of the CRM privacy work found 1 High, 3 Medium and
+9 Low issues. All are fixed, with tests that fail first (ADR-056, second review follow-up).
+- *H1:* a consent withdrawal read the funnel through `IFNULL`/`OR` (no index) inside its transaction,
+  locking every funnel row a booking writes; tracking swallowed deadlocks, so a booking InnoDB had rolled
+  back could be reported. The rows are read through new indexes and written by primary key; a deadlock
+  or lock timeout while tracking, mailing, starting a payment or triggering the channel push is re-raised
+  (the booking is retried or fails).
+- *M1:* an erasure kept the e-mail consent and left contact data in cases, funnel hashes, bookings'
+  booker fields and the change history; now it withdraws every consent and removes them (p45 for older
+  erasures). Clearing an e-mail or phone does the same for what it leaves behind.
+- *M2:* duplicate profiles are merged in the CRM (and by the legacy endpoint through it): every link from
+  the meta, the loyalty ledger (one balance, tier from the merged lifetime), stricter consent, audited;
+  a profile lists its possible duplicates (same phone or e-mail).
+- *M3:* the loyalty ledger in Desk / REST is read at each entry's hotel (new `property`), not the program's.
+- *L1–L9:* consent text read strictly in the CRM; no copies of contact data from the change history;
+  a case's session, quote and recovery booking and a funnel event's session and payload withheld; another
+  hotel's ledger entries without dates, reason or author; browser funnel values checked against what the
+  site sells; the phone finds a profile only for staff and only when one profile has it; a Desk / REST
+  consent change stamped and audited; a case written after a withdrawal anonymous; p40 on its own paths.
+- *Fail-first on main `9215991` (and on `b074527`):* `test_crm_privacy_review` 26 of 27 fail or error
+  (p40's own paths pass: coverage); the three `test_crm_privacy` tests changed for L5 and L6 fail.
+- *Runs:*
+  - Migrate, then all 35 integration modules on the shared site: **703 OK** (the 3 whole-site tests
+    skipped there): admin_markets 4, age_bands 11, audit_trail 15, channel_binding 27,
+    commercial_flows 53, concurrency 8, critical_journey 31, crm_privacy 29, crm_privacy_review 27,
+    crm_segments 7, custom_domains 9, distribution 21, entry_branding 15, extras_inventory 17,
+    fx_snapshot 5, grant_expiry 9, inventory 31, legacy_pricing 15, legacy_pricing_review 23,
+    loyalty_admin 7, migrations_notify 7, modification_determinism 27, money_fields 9, patches 31,
+    portfolio 2, post_booking_extras 12, pricing_policies 14, public_booking 17, reports 22,
+    restrictions 25, security_hygiene 14, security_regressions 59, self_service_money 75,
+    snapshot_integrity 13, system_status 12.
+  - `test_patches` on a disposable site, the whole-site tests included (site made, tested, dropped):
+    **31 OK** (none skipped).
+  - Upstream suites with the branch's code: UPSTREAM.
+  - E2E against the branch (own bench server and vite dev server): `crm-profile.spec.ts` and the new
+    `crm-merge.spec.ts` passed twice each.
+  - 400 unit tests; ruff clean; `tsc` and `npm run i18n:tex` clean (bundles not rebuilt on the branch).
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
@@ -291,7 +330,7 @@ fixed, with tests that fail first.
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 0 High, 17 Medium, 4 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (recounted 2026-09-24 on branch `shell-g60-g64`: G-60 and G-64 fixed, ADR-060, CRM Campaigns stays a not-started sub-item; on branch `reports-g46`: G-46 fixed, ADR-059; unchanged by the ADR-056 review follow-up on branch `fix-crmp`, which fixed findings of resolved gaps; recounted 2026-09-24 on branch `restrictions-basket`: G-48 and G-84 fixed, ADR-057; before that on branch `migrations-snapshot`: G-76 and G-73 fixed; before that on `crm-privacy`: G-65, G-81 and G-95 fixed, G-97 found). All nine Critical
+**Open gaps by severity:** 0 Critical, 0 High, 17 Medium, 4 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (unchanged by the ADR-056 second review follow-up on branch `fix-crmp2`, which fixed findings of resolved gaps and the Desk part of #70a's ledger note; recounted 2026-09-24 on branch `shell-g60-g64`: G-60 and G-64 fixed, ADR-060, CRM Campaigns stays a not-started sub-item; on branch `reports-g46`: G-46 fixed, ADR-059; unchanged by the ADR-056 review follow-up on branch `fix-crmp`, which fixed findings of resolved gaps; recounted 2026-09-24 on branch `restrictions-basket`: G-48 and G-84 fixed, ADR-057; before that on branch `migrations-snapshot`: G-76 and G-73 fixed; before that on `crm-privacy`: G-65, G-81 and G-95 fixed, G-97 found). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
