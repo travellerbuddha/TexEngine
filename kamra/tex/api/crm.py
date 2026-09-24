@@ -99,9 +99,10 @@ def loyalty_summary(guest: str):
 
 
 @frappe.whitelist(methods=["POST"])
-def loyalty_adjust(guest: str, program: str, points, reason: str):
+def loyalty_adjust(guest: str, program: str, points, reason: str, property: str | None = None):
 	crm.require_guest(guest, "crm.edit")
-	return {"name": loyalty.adjust(guest, program, as_int(points, 0), text(reason, 500) or "")}
+	return {"name": loyalty.adjust(guest, program, as_int(points, 0), text(reason, 500) or "",
+	                               property=text(property, 140) or None)}
 
 
 @frappe.whitelist(methods=["POST"])

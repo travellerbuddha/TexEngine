@@ -1253,6 +1253,9 @@ CRM_SPECS = [
 		F("expires_on", "Date", "Expires on"),
 		F("booking", "Link", "Booking", "TEX Booking"),
 		F("reservation", "Link", "Reservation", "Reservation"),
+		F("property", "Link", "Hotel", "Property", in_standard_filter=1,
+		  description="The hotel the entry belongs to: its stay's or booking's, or the hotel a manual "
+		              "adjustment was made for (ADR-056)"),
 		F("reason", "Small Text", "Reason"),
 		F("actor", "Link", "Actor", "User"),
 		F("stay_fingerprint", "Data", "Stay fingerprint", read_only=1,
