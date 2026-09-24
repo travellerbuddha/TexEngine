@@ -5,6 +5,7 @@ import { useSession } from "../../lib/session"
 import { dateTime } from "../../lib/format"
 import { useTexT } from "../../i18n"
 import { Badge, Button, Card, CardHeader, DataTable, EmptyState, ErrorState, PageHeader } from "../../ui"
+import { BeNav } from "./BeNav"
 
 interface SiteRow {
   name: string
@@ -38,6 +39,7 @@ export default function SitesList() {
           </>
         }
       />
+      <BeNav />
       <Card>
         <CardHeader title={t("be.list.title")} description={t("be.list.hint")} />
         {q.error ? (

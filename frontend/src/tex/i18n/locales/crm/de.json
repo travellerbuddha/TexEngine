@@ -653,5 +653,12 @@
  "crm.extra.stays": {
   "one": "{count} Aufenthalt",
   "other": "{count} Aufenthalte"
- }
+ },
+ "crm.comms.subtitle": "Von TEX gesendete E-Mails sowie von Mitarbeitenden erfasste Anrufe, Notizen und Nachrichten für alle Gäste. Die Nachricht selbst steht im Gästeprofil.",
+ "crm.comms.search_ph": "Gast, Betreff oder Buchung",
+ "crm.comms.none_filtered": "Nichts entspricht diesen Filtern",
+ "crm.comms.empty_hint": "Buchungs-E-Mails sowie Anrufe und Notizen, die Mitarbeitende in Gästeprofilen erfassen, erscheinen hier.",
+ "crm.comms.col.when": "Wann",
+ "crm.comms.col.by": "Von",
+ "crm.comms.system": "TEX (automatisch)"
 }
