@@ -3546,7 +3546,11 @@ the reports. Some claims above were stronger than the tests behind them. All are
   - a grouping for promotions and extras.
 
   The booking-date help text now says that a stay window also set prorates the value.
-- *L1* A scope change clears the room-type and rate-plan filters (they belong to hotels).
+- *L1* A scope change clears the room-type and rate-plan filters (they belong to hotels). Found
+  by the branch's E2E run: a date typed while the report loaded was sent with the render's other
+  date (a filter change re-renders as a router transition that waits for the report), so "from"
+  went back to the start of the month once "to" was typed (`reports.spec` failed 2 of 3 runs). A
+  typed date now changes that date only; the other is read from the live URL.
   *L8* `filter_options` says when a list was cut at `MAX_OPTIONS` (2000), and the UI says so.
 - *Corrections to the claims above:*
   - rows are no longer rounded once by largest remainder: see M1;
@@ -3578,6 +3582,9 @@ the reports. Some claims above were stronger than the tests behind them. All are
     covers a booking and payment with no currency; the existing ones updated for L3);
   - `test_patches.TestP03Indexes.test_p46_creates_the_report_indexes`;
   - e2e `reports.spec.ts` (a scope change clears the room filter).
+- *Run (branch with main `e78ba7b` merged):* 35 integration modules, 714 OK (the 3 whole-site patch
+  tests pass on a disposable site, `test_patches` 32/32); 425 unit tests; upstream suites 76/76,
+  13/13, banquet 101; Playwright `reports`, `portfolio`, `booking`, `crs`, `manage-money` 16/16.
 
 ## ADR-060 The entry screens say TEX Engine and offer the source; "/" leads to the admin app or sign-in; the navigation carries R-35's sub-sections
 **Context.** Two gaps of the 2026-09-23 audit.
