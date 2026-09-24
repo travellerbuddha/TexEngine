@@ -49,4 +49,6 @@ kamra.patches.tex.p34_redemption_released_at
 kamra.patches.tex.p35_money_field_types
 kamra.patches.tex.p36_g92_review
 kamra.patches.tex.p37_crm_privacy
+kamra.patches.tex.p38_restriction_scope
 kamra.patches.tex.p39_lookup_indexes
+kamra.patches.tex.p40_crm_privacy_review

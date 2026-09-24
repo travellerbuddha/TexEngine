@@ -95,7 +95,7 @@ def ensure_roles():
 			print(f"created role: {role}")
 		for doctype, (read, write, create) in grants.items():
 			perm = frappe.db.get_value(
-				"Custom DocPerm", {"parent": doctype, "role": role}, "name"
+				"Custom DocPerm", {"parent": doctype, "role": role, "permlevel": 0}, "name"
 			)
 			if perm:
 				frappe.db.set_value("Custom DocPerm", perm, {
@@ -112,6 +112,11 @@ def ensure_roles():
 				"report": read, "email": read, "print": read,
 			}).insert(ignore_permissions=True)
 		print(f"granted {role} perms on {len(grants)} doctypes")
+	# custom rows replace the JSON's: keep System Manager's permlevel-1 row on TEX's withheld
+	# fields (ADR-056 review)
+	from kamra.tex.security.internals import ensure_custom_perms
+
+	ensure_custom_perms()
 
 
 def ensure_users():

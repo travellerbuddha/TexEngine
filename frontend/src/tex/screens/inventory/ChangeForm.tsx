@@ -1,10 +1,13 @@
 import type { ReactNode } from "react"
 import { cn } from "../../../lib/utils"
 import { useTexT } from "../../i18n"
+import { date as fmtDate } from "../../lib/format"
 import { DecimalInput, Input, Select } from "../../ui"
 import type { GridCell } from "./types"
 
-export const R_FIELDS = ["stop_sell", "stop_sell_mode", "min_los", "max_los", "cta", "ctd", "release_days", "min_advance", "max_advance"] as const
+export const R_FIELDS = ["stop_sell", "stop_sell_mode", "min_los", "max_los", "cta", "ctd", "release_days", "min_advance", "max_advance", "book_from", "book_to"] as const
+/** Booking window fields: sale dates, blank = no rule (G-48). */
+const DATE_FIELDS = new Set<string>(["book_from", "book_to"])
 export const I_FIELDS = ["closed", "manual_adjustment", "oversell_limit"] as const
 export type RField = (typeof R_FIELDS)[number]
 export type IField = (typeof I_FIELDS)[number]
@@ -33,6 +36,8 @@ export function emptyChanges(): Changes {
       release_days: "0",
       min_advance: "0",
       max_advance: "0",
+      book_from: "",
+      book_to: "",
       closed: "1",
       manual_adjustment: "0",
       oversell_limit: "0",
@@ -62,6 +67,8 @@ export function changesFromCell(c: GridCell): Changes {
       release_days: n(o?.release_days),
       min_advance: n(o?.min_advance),
       max_advance: n(o?.max_advance),
+      book_from: o?.book_from ?? "",
+      book_to: o?.book_to ?? "",
       closed: c.closed ? "1" : "0",
       manual_adjustment: n(c.manual_adjustment),
       oversell_limit: "0",
@@ -81,7 +88,7 @@ export function toPayload(c: Changes): BulkPayload {
   for (const f of R_FIELDS) {
     if (!c.on[f]) continue
     const v = c.v[f]
-    r[f] = f === "stop_sell" || f === "stop_sell_mode" || f === "cta" || f === "ctd" ? v : parseInt(v || "0", 10) || 0
+    r[f] = f === "stop_sell" || f === "stop_sell_mode" || f === "cta" || f === "ctd" || DATE_FIELDS.has(f) ? v : parseInt(v || "0", 10) || 0
   }
   if (Object.keys(r).length) out.restrictions = r
   const inv: Record<string, number> = {}
@@ -94,6 +101,11 @@ export function toPayload(c: Changes): BulkPayload {
 export function hasChanges(c: Changes) {
   const p = toPayload(c)
   return Boolean(p.restrictions || p.inventory || p.rate)
+}
+
+/** The booking window ends before it starts (the server refuses it too). */
+export function windowInvalid(c: Changes) {
+  return Boolean(c.on.book_from && c.on.book_to && c.v.book_from && c.v.book_to && c.v.book_to < c.v.book_from)
 }
 
 type T = (k: string, p?: Record<string, string | number>) => string
@@ -109,6 +121,9 @@ export function valueText(t: T, f: FieldKey, v: string): string {
       return v === "Yes" ? t("inventory.v.closed") : v === "No" ? t("inventory.v.open_override") : t("inventory.v.no_rule")
     case "closed":
       return v === "1" ? t("inventory.v.closed_sale") : t("inventory.v.open_sale")
+    case "book_from":
+    case "book_to":
+      return v ? fmtDate(v) : t("inventory.v.no_rule")
     case "manual_adjustment": {
       const x = parseInt(v || "0", 10) || 0
       return t("inventory.v.rooms_delta", { n: x > 0 ? `+${x}` : String(x) })
@@ -179,6 +194,9 @@ export function ChangeForm({
       className="w-28"
     />
   )
+  const dateInput = (f: FieldKey) => (
+    <Input type="date" aria-label={t(`inventory.f.${f}`)} value={value.v[f]} onChange={(e) => setV(f, e.target.value)} className="w-44" />
+  )
   const sel = (f: FieldKey, opts: { value: string; label: string }[]) => (
     <Select aria-label={t(`inventory.f.${f}`)} value={value.v[f]} onChange={(e) => setV(f, e.target.value)} options={opts} className="sm:max-w-64" />
   )
@@ -219,6 +237,9 @@ export function ChangeForm({
           {row("release_days", intInput("release_days"), t("inventory.h.release"))}
           {row("min_advance", intInput("min_advance"), t("inventory.h.min_advance"))}
           {row("max_advance", intInput("max_advance"), t("inventory.h.max_advance"))}
+          {row("book_from", dateInput("book_from"), t("inventory.h.book_from"))}
+          {row("book_to", dateInput("book_to"), t("inventory.h.book_to"))}
+          {windowInvalid(value) && <p className="px-2 text-xs font-medium text-rose-700">{t("inventory.v.window_invalid")}</p>}
         </fieldset>
       )}
       {canInventory && (

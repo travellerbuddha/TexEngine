@@ -66,18 +66,21 @@
    "fieldname": "guest",
    "fieldtype": "Link",
    "label": "Guest",
-   "options": "Guest"
+   "options": "Guest",
+   "permlevel": 1
   },
   {
    "fieldname": "email",
    "fieldtype": "Data",
    "label": "Email",
-   "options": "Email"
+   "options": "Email",
+   "permlevel": 1
   },
   {
    "fieldname": "phone",
    "fieldtype": "Data",
-   "label": "Phone"
+   "label": "Phone",
+   "permlevel": 1
   },
   {
    "fieldname": "consent_marketing",
@@ -126,7 +129,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-25 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Abandoned Booking",
@@ -148,6 +151,12 @@
    "role": "Hotel Admin",
    "read": 1,
    "report": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "write": 1,
+   "role": "System Manager"
   }
  ],
  "sort_field": "modified",

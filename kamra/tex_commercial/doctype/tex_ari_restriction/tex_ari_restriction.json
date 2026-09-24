@@ -12,6 +12,7 @@
   "market",
   "rate_plan",
   "sales_channel",
+  "channel_scope",
   "column_48",
   "stop_sell",
   "stop_sell_mode",
@@ -22,6 +23,8 @@
   "release_days",
   "min_advance",
   "max_advance",
+  "book_from",
+  "book_to",
   "scope_key",
   "note"
  ],
@@ -72,6 +75,12 @@
    "fieldtype": "Link",
    "label": "Sales channel",
    "options": "TEX Sales Channel"
+  },
+  {
+   "fieldname": "channel_scope",
+   "fieldtype": "Select",
+   "label": "Channel scope",
+   "options": "\nBooking Engine\nCall Center\nBooking Engine + Call Center"
   },
   {
    "fieldname": "column_48",
@@ -129,6 +138,16 @@
    "label": "Max advance days"
   },
   {
+   "fieldname": "book_from",
+   "fieldtype": "Date",
+   "label": "Bookable from (sale date)"
+  },
+  {
+   "fieldname": "book_to",
+   "fieldtype": "Date",
+   "label": "Bookable until (sale date)"
+  },
+  {
    "fieldname": "scope_key",
    "fieldtype": "Data",
    "label": "Scope key",
@@ -143,7 +162,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-10-02 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX ARI Restriction",

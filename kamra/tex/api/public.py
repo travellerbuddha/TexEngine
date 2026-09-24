@@ -262,6 +262,42 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 	return guest_safe(out)                            # guests never see how many are left (G-19)
 
 
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str | None = None):
+	"""The rooms of one booking quoted together (G-84, ADR-057): a coupon's minimum basket is the
+	whole booking's. ``rooms``: [{"offer_key", "extras"}] of one search, in room order. → {"ok",
+	"rooms": one ``quote`` answer per room}."""
+	s = _site(site)
+	channel = _channel(s)
+	from kamra.tex.commercial.context import listed_extras
+
+	items = parse(rooms, []) or []
+	if not items or len(items) > quoting.MAX_ROOMS:
+		frappe.throw(_("Select between 1 and {0} rooms.").format(quoting.MAX_ROOMS))
+	props = _site_properties(s)
+	for r in items:
+		offer = quoting.verify(str(r.get("offer_key") or ""))
+		if offer["property"] not in props or offer["channel"] != channel:
+			frappe.throw(_("Invalid offer."))
+		online = {e.extra_code for e in listed_extras(offer["property"], online_only=True)}
+		if any(str(e.get("code", "")).upper() not in online for e in parse(r.get("extras"), []) or []):
+			frappe.throw(_("This extra cannot be booked online."))
+	out = quoting.create_quotes([{"offer_key": str(r.get("offer_key") or ""), "extras": parse(r.get("extras"), [])}
+	                             for r in items], promo_codes=[promo_code] if promo_code else None,
+	                            session_id=session_id)
+	loc = content.Localizer(content.guest_language())
+	rooms_out = []
+	for r in out["rooms"]:
+		if r.get("quote"):
+			loc.quote(r["quote"]["request"]["property"], r["quote"])
+		rooms_out.append(guest_safe(r))              # guests never see how many are left (G-19)
+		if r.get("ok"):
+			_track(s, session_id, "quote", {"quote": r["quote_id"], "total": r["quote"]["totals"]["total"],
+			                                "currency": r["quote"]["currency"]})
+	return {"ok": out["ok"], "rooms": rooms_out}
+
+
 def _session_hash(session_id: str | None) -> str | None:
 	return hashlib.sha256(session_id.encode()).hexdigest()[:32] if session_id else None
 
@@ -338,8 +374,9 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 	guest_clean["special_requests"] = text(g.get("special_requests"), 1000)
 	guest_clean["country"] = _country(g.get("country"))
 	guest_clean["nationality"] = _country(g.get("nationality"))
-	guest_clean.update({k: bool(g.get(k)) for k in ("consent_email", "consent_sms", "consent_whatsapp")})
-	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=bool(g.get("consent_email")))
+	guest_clean.update({k: booking_svc.consent_given(g.get(k)) for k in ("consent_email", "consent_sms",
+	                                                                     "consent_whatsapp")})
+	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=guest_clean["consent_email"])
 	method = payment_method or "Card"
 	# a retry key only counts within the visitor's own session (no cross-visitor replay)
 	result = booking_svc.create_booking(quote_ids=ids, guest=guest_clean, payment_method=method,
@@ -565,8 +602,31 @@ def _no_dob(value):
 	return value
 
 
-# contact data never stays in a funnel payload, whoever sent it (a browser's event may carry anything)
+# contact data never stays in a funnel payload the server writes
 FUNNEL_CONTACT_KEYS = frozenset({"email", "phone", "mobile", "first_name", "last_name", "name", "full_name"})
+# what a browser's event may carry (ADR-056 review): these fields only, scalar text or numbers of
+# bounded size (the quotes of a basket: their ids); anything else is dropped, never stored
+BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel")}
+BROWSER_TEXT_MAX = 140
+BROWSER_QUOTES_MAX = 10
+BROWSER_QUOTE_ID_MAX = 64
+
+
+def _browser_payload(event: str, payload) -> dict:
+	"""A browser's funnel payload reduced to the event's own fields (an allow-list, not a list of
+	what to drop: anything a caller sends beyond it, contact data of anyone included, is not kept)."""
+	if not isinstance(payload, dict):
+		return {}
+	out = {}
+	for key in BROWSER_EVENT_FIELDS.get(event, ()):
+		v = payload.get(key)
+		if key == "quotes":
+			ids = [q for q in v if isinstance(q, str) and 0 < len(q) <= BROWSER_QUOTE_ID_MAX] if isinstance(v, list) else []
+			if ids:
+				out[key] = ids[:BROWSER_QUOTES_MAX]
+		elif isinstance(v, str) and 0 < len(v) <= BROWSER_TEXT_MAX:
+			out[key] = v
+	return out
 
 
 def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
@@ -593,9 +653,9 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=120, seconds=60)
 def track(site: str, session_id: str, event: str, payload=None):
-	if event not in ("room_view", "abandoned"):
+	if event not in BROWSER_EVENT_FIELDS:
 		frappe.throw(_("Unknown event."))
-	_track(_site(site), session_id, event, parse(payload, {}) or {})
+	_track(_site(site), session_id, event, _browser_payload(event, parse(payload, {})))
 	return {"ok": True}
 
 

@@ -37,7 +37,7 @@ interface ProfileResponse {
 type Offers = { properties: { offers: { refundable: boolean; rooms: { offer_key: string }[] }[] }[] }
 
 /** A Flexible (refundable) stay through the public booking API, paid at the hotel. */
-async function bookStay(req: APIRequestContext, run: string, label: string, email: string, extras: { code: string; quantity: number }[]): Promise<Booked> {
+async function bookStay(req: APIRequestContext, run: string, label: string, email: string, phone: string, extras: { code: string; quantity: number }[]): Promise<Booked> {
   const session_id = `e2e-crm-${label}-${run.toLowerCase()}`
   for (let attempt = 0; attempt < 5; attempt++) {
     const { checkIn, checkOut } = stayDates(200, 3)
@@ -61,7 +61,7 @@ async function bookStay(req: APIRequestContext, run: string, label: string, emai
     const b = await api<{ booking: string; rooms: { reservation: string }[] }>(req, "kamra.tex.api.public.book", {
       site: SLUG,
       quote_ids: [q.quote_id],
-      guest: { first_name: "Ines", last_name: `Profile ${run}`, email, phone: "+49 170 5550000", country: "DE" },
+      guest: { first_name: "Ines", last_name: `Profile ${run}`, email, phone, country: "DE" },
       payment_method: "Pay at Hotel",
       idempotency_key: `e2e-crm-${label}-${run}`,
       session_id,
@@ -96,8 +96,11 @@ test("the guest profile shows extras and cancellations at the viewer's hotels; R
   test.setTimeout(180_000)
   const run = uniqueRunId()
   const email = `ines.${run.toLowerCase()}@example.com`
-  const first = await bookStay(request, run, "a", email, [{ code: TRANSFER.code, quantity: 1 }])
-  const second = await bookStay(request, run, "b", email, [])
+  // this run's own guest: a phone shared with an earlier run's guest must not matter (the e-mail is
+  // the identity, ADR-056 review), but a unique one keeps runs independent on any server
+  const phone = `+49 170 ${String(Date.now()).slice(-7)}`
+  const first = await bookStay(request, run, "a", email, phone, [{ code: TRANSFER.code, quantity: 1 }])
+  const second = await bookStay(request, run, "b", email, phone, [])
 
   const agent = await staff(browser, AGENT, opened)
   const noErrors = trackErrors(agent)

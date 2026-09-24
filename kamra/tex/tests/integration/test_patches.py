@@ -88,7 +88,10 @@ BEHAVIOUR = {
 	                         "test_a_published_payload_keeps_its_hash_through_the_migration",
 	"p36_g92_review": "test_patches.TestUpgradeFromKamra",
 	"p37_crm_privacy": "test_crm_privacy.TestAbandonedPrivacy.test_p37_purges_hashes_kept_without_consent",
+	"p38_restriction_scope": "test_restrictions.TestGridCells.test_p38_keeps_every_key_and_rekeys_only_a_wrong_one",
 	"p39_lookup_indexes": "test_patches.TestP03Indexes.test_p39_creates_the_lookup_indexes_that_survive_a_sync",
+	"p40_crm_privacy_review": "test_crm_privacy.TestAbandonedPrivacy."
+	                          "test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds",
 }
 
 

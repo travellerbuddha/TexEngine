@@ -217,6 +217,11 @@ export interface Proposal {
   /** `addons`: the earlier add-ons carried over (those not dropped). */
   proposed: QuoteDict & { addons?: AddonEntry[] }
   sellable: boolean
+  /** Restrictions the change breaks (G-48): refused unless overridden. */
+  restrictions: Reason[]
+  sellable_ignoring_restrictions: boolean
+  /** The caller may sell it anyway (restriction.edit), with the reason, audited. */
+  restriction_override: boolean
   difference: string | null
   currency_changed: boolean
   warnings: Reason[]

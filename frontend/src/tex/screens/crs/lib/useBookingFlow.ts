@@ -11,7 +11,7 @@ import {
   bookQuotes,
   extrasAvailability as fetchExtrasAvailability,
   paymentMethods as fetchPaymentMethods,
-  quoteOffer,
+  quoteRooms,
   quoteSummary,
   searchOffers,
   type ExtraRequest,
@@ -505,19 +505,19 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       const roomExtras = sel.property === selection?.property ? extras : {}
       const sig = JSON.stringify({ selection: sel, extras: roomExtras, promo: [...quotePromo].sort() })
       try {
-        const res = await Promise.all(
-          sel.picks.map((id, i) => {
-            const o = findOffer(sel.property, id)
-            const room = o?.rooms.find((r) => r.room_index === i)
-            if (!room) throw new TexApiError(t("crs.err.offer_missing"), 0, "Error")
-            const ex: ExtraRequest[] = Object.entries(roomExtras[i] ?? {})
-              .filter(([, c]) => c.quantity > 0)
-              .map(([code, c]) =>
-                c.service_dates.length ? { code, quantity: c.quantity, service_dates: c.service_dates } : { code, quantity: c.quantity },
-              )
-            return quoteOffer(room.offer_key, ex, promoChanged ? quotePromo : undefined)
-          }),
-        )
+        // the rooms of a booking are quoted together: a minimum basket is the booking's (G-84)
+        const rooms = sel.picks.map((id, i) => {
+          const o = findOffer(sel.property, id)
+          const room = o?.rooms.find((r) => r.room_index === i)
+          if (!room) throw new TexApiError(t("crs.err.offer_missing"), 0, "Error")
+          const ex: ExtraRequest[] = Object.entries(roomExtras[i] ?? {})
+            .filter(([, c]) => c.quantity > 0)
+            .map(([code, c]) =>
+              c.service_dates.length ? { code, quantity: c.quantity, service_dates: c.service_dates } : { code, quantity: c.quantity },
+            )
+          return { offer_key: room.offer_key, extras: ex }
+        })
+        const res = await quoteRooms(rooms, promoChanged ? quotePromo : undefined)
         // the summary (total, due now) follows from the effect on the quote ids
         setQuotes(res)
         setQuotedSig(sig)

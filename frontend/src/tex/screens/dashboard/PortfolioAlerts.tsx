@@ -34,6 +34,8 @@ function AlertLine({ alert }: { alert: PortfolioAlert }) {
       parts.push(t("dash.pf.alert.market", { market: boot.markets.find((m) => m.name === alert.market)?.market_name ?? alert.market }))
     if (alert.channel)
       parts.push(t("dash.pf.alert.channel", { channel: boot.channels.find((c) => c.name === alert.channel)?.channel_name ?? alert.channel }))
+    else if (alert.channel_scope)
+      parts.push(t("dash.pf.alert.channel", { channel: t(`dash.pf.scope.${alert.channel_scope === "Booking Engine" ? "be" : alert.channel_scope === "Call Center" ? "cc" : "both"}`) }))
   }
   return (
     <li className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">

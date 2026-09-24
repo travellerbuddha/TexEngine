@@ -267,6 +267,7 @@ export interface AbandonedRow {
   site: string | null
   stage_reached: FunnelStage
   status: AbandonedStatus
+  /** profile, e-mail and phone: only while the profile's own e-mail consent holds (ADR-056) */
   guest: string | null
   email: string | null
   phone: string | null
@@ -362,7 +363,8 @@ export interface ProgramDetail extends ProgramFields, ProgramStats {
 
 export interface LedgerRow {
   name: string
-  guest: string
+  /** null: a guest the viewer may not see (another hotel's, ADR-056 review) */
+  guest: string | null
   guest_name: string | null
   entry_type: LedgerType
   points: number
@@ -376,6 +378,8 @@ export interface LedgerRow {
   creation: string | null
   /** JSON of an earning: {lines: [{rule, rate?, points, note?}], tier, multiplier} */
   explanation: string | null
+  /** tied to a booking at a hotel outside the viewer's scope: points, status and dates only */
+  other_hotel?: boolean
 }
 
 export interface LedgerPage {

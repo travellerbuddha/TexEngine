@@ -40,10 +40,9 @@ from frappe import _
 from frappe.utils import add_to_date, convert_utc_to_system_timezone, get_datetime, getdate, now_datetime
 
 from kamra.tex.availability import repository as avail
-from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, db_dec, from_db, quantize, to_str
-from kamra.tex.pricing import addons, serialize
+from kamra.tex.pricing import addons, engine, serialize
 from kamra.tex.pricing import fx as fx_math
 from kamra.tex.pricing.extras import guest_reason
 from kamra.tex.pricing.model import ChildSpec
@@ -101,6 +100,9 @@ def require_product_channel(res, changes: dict) -> None:
 def build_changed_request(res, changes: dict, sale_at: datetime):
 	snap = _snapshot(res)
 	base = dict(snap["request"])
+	# the booking's basket is judged again with the rooms as they are now (G-84): ``booked_price``
+	base.pop("booking_basket", None)
+	base.pop("booking_rooms", None)
 	# the channel is not EDITABLE: a change is priced on the channel the stay was sold on (ADR-050)
 	unknown = set(changes) - set(EDITABLE)
 	if unknown:
@@ -245,6 +247,51 @@ def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[s
 	return pick[1], at, f"contract {pick[0].contract_code} on sale at {at}"
 
 
+def booked_price(res, version: str, req, *, others: tuple | None = None, **kw):
+	"""Price a room of a booking again (a change, the simulator): alone, then — when a minimum
+	basket refused a promotion and the booking has other rooms — with the booking's basket: this
+	room's new basket plus the others'. ``others`` (their basket, how many): by default the other
+	live rooms as they are priced now — a change is judged on the booking it makes, and rooms that
+	are not changed keep their locked price (G-84, ADR-057). → (quote, terms)."""
+	quote, terms = quoting.price_request(version, req, **kw)
+	total, n = others if others is not None else booking_svc.other_rooms_basket(res, quote.currency)
+	again = engine.booking_request(req, quote, others_basket=total, others_rooms=n)
+	if again is not None:
+		q2, t2 = quoting.price_request(version, again, **kw)
+		if q2.sellable:
+			return q2, t2
+	return quote, terms
+
+
+def recorded_others(snap: dict) -> tuple:
+	"""(basket, how many) of the other rooms of the booking a stay was last priced in, as its
+	snapshot records it (G-84): none when it was priced alone."""
+	req = snap.get("request") or {}
+	if req.get("booking_basket") in (None, ""):
+		return D(0), 0
+	return D(req["booking_basket"]) - booking_svc.room_basket(snap), int(req.get("booking_rooms") or 1) - 1
+
+
+def restriction_violations(res, snap: dict, req, contract: str | None, sale_date) -> list:
+	"""What the restrictions refuse in a change (G-48, ADR-057): the changed stay is checked like
+	a new booking of its scope, on ``sale_date``, for what it newly takes. With the same product
+	(room type, contract, market, rate plan; the channel never changes) the nights it holds are
+	its own and arrival, departure and length rules apply only when those change; another product
+	is a new sale of the stay, its past aside (``restrictions.evaluate_change``). A change of
+	neither dates nor product is never checked."""
+	old = snap.get("request") or {}
+	before = (getdate(res.check_in_date), getdate(res.check_out_date))
+	same_product = (req.room_type == (old.get("room_type") or res.room_type)
+	                and (req.rate_plan or None) == (old.get("rate_plan") or None)
+	                and str(req.market or "").upper() == str(old.get("market") or res.tex_market or "").upper()
+	                and contract == ((snap.get("contract") or {}).get("contract") or res.tex_contract))
+	if same_product and (req.check_in, req.check_out) == before:
+		return []
+	sc = avail.scope_for(req.room_type, contract, req.market, req.rate_plan, req.channel)
+	return avail.check_restrictions(res.property, sc, req.check_in, req.check_out, sale_date, before=before,
+	                                product_changed=not same_product)
+
+
 PROPOSAL_TTL_MINUTES = 30
 # a guest's change that waits for its payment keeps the accepted price this long after the
 # proposal expired: the guest may still be on the gateway's page (G-45, ADR-044)
@@ -306,14 +353,15 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		req, _s = build_changed_request(res, changes, at)
 		# the booking's own coupon uses never count against it when it is repriced (G-09); the
 		# ORIGINAL_* bases convert with the rates the sale recorded (G-56); the version the stay
-		# was sold on prices it only while its payload is the one the sale recorded (G-73)
-		quote, terms = quoting.price_request(version, req, exclude_booking=res.tex_booking,
-		                                     exclude_reservation=res.name,
-		                                     gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
-		                                     fx_pins=fx_pins(res, snap, basis),
-		                                     expected_hash=sold_terms.expected_hash(res, snap, version))
+		# was sold on prices it only while its payload is the one the sale recorded (G-73); a
+		# minimum basket is the booking's, with its other rooms as they are priced now (G-84)
+		quote, terms = booked_price(res, version, req, exclude_booking=res.tex_booking, exclude_reservation=res.name,
+		                            gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+		                            fx_pins=fx_pins(res, snap, basis),
+		                            expected_hash=sold_terms.expected_hash(res, snap, version))
 	except contracts.PayloadMismatch as e:
 		sold_terms.refuse(res, snap, e, use="reprice", basis=basis, version=version)
+	req = quote.request
 	old_ccy = res.tex_currency or snap.get("currency")
 	old_total = from_db(res.tex_total_amount or res.amount_after_tax, old_ccy or "EUR")
 
@@ -328,10 +376,11 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		                                      held=avail.held_nights(req.room_type, res))
 		if count < 1:
 			warnings.append({"code": "SOLD_OUT", "message": _("No availability for the new stay.")})
-		sc = RestrictionScope(room_type=req.room_type, contract=terms.contract_id, market=req.market,
-		                      rate_plan=req.rate_plan, channel=req.channel)
-		for v in avail.check_restrictions(res.property, sc, req.check_in, req.check_out, now.date()):
-			warnings.append(v.to_dict())
+	# restrictions refuse a change as they refuse a new booking, for what it newly takes (G-48); a
+	# stored proposal (a guest's change paid or approved later) is judged as of when it was priced
+	sale_day = get_datetime(_sale_at).date() if _sale_at else now.date()
+	violations = [v.to_dict() for v in restriction_violations(res, snap, req, terms.contract_id, sale_day)]
+	warnings.extend(violations)
 	for e in quote.extras:
 		if not e.ok and e.reason.startswith(CAPACITY_REASONS):
 			# a limited extra left: the change is shown, and the extra is dropped only if applied (G-19)
@@ -361,6 +410,9 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		for k in quoting.INTERNAL_TOTALS:
 			old_totals.pop(k, None)
 	diff = (new_total - old_total) if quote.sellable and quote.currency == old_ccy else None
+	# sellable but for the restrictions: what staff who may edit restrictions can override (G-48)
+	sellable_otherwise = quote.sellable and not any(w.get("code") == "SOLD_OUT" for w in warnings) \
+		and not (not _check_permission and any(w.get("code") == "ADDON_OUTSIDE_STAY" for w in warnings))
 	proposal = {
 		"reservation": res.name, "modified": str(res.modified), "changes": changes, "basis": basis,
 		"basis_sale_at": basis_sale_at, "version": version,
@@ -378,8 +430,13 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		"old": {"total": to_str(old_total), "currency": old_ccy, "request": snap["request"],
 		        "contract": snap.get("contract"), "lines": snap.get("lines"), "totals": old_totals},
 		"proposed": new,
-		"sellable": quote.sellable and not any(w.get("code") == "SOLD_OUT" for w in warnings)
-		and not (not _check_permission and any(w.get("code") == "ADDON_OUTSIDE_STAY" for w in warnings)),
+		"sellable": sellable_otherwise and not violations,
+		# the restrictions the change breaks; staff with ``restriction.edit`` may override them when
+		# applying (with the reason, audited); a guest never (G-48, ADR-057)
+		"restrictions": violations,
+		"sellable_ignoring_restrictions": sellable_otherwise,
+		"restriction_override": bool(violations) and sellable_otherwise and _check_permission
+		and scope.has_capability("restriction.edit", res.property),
 		"difference": to_str(diff) if diff is not None else None,
 		"currency_changed": quote.currency != old_ccy,
 		"warnings": warnings,
@@ -416,8 +473,8 @@ def require_proposer(p: dict, *, guest: bool) -> None:
 
 
 def apply(proposal_token: str | None, *, reason: str, override_amount=None, source: str = "Desk",
-          _guest_authorized: bool = False, _proposal: dict | None = None, _from_payment: bool = False,
-          _paid_at=None) -> dict:
+          override_restrictions: bool = False, _guest_authorized: bool = False, _proposal: dict | None = None,
+          _from_payment: bool = False, _paid_at=None) -> dict:
 	"""``_guest_authorized``: set only by the self-service API after verifying the
 	guest's manage token owns the proposal's reservation. Guests can never override.
 
@@ -432,6 +489,11 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	hotel here too, whoever proposed the change; guests apply only CURRENT proposals. A stored
 	proposal approved by staff (not paid) is refused while its contract does not sell
 	(``approval_refusal``; G-51 review).
+
+	A change the restrictions refuse is refused (G-48, ADR-057). ``override_restrictions``: staff
+	applying their own proposal who hold ``restriction.edit`` sell it anyway; the reason is
+	required, the revision records the restrictions overridden and an audit event
+	(``reservation.restriction_override``) names them. Never on a guest's path.
 
 	Locks: the booking, then the reservation, then the inventory days: the order every path that
 	changes a TEX booking takes (review of ADR-044)."""
@@ -472,6 +534,11 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 			# a price no longer on sale is an override of today's: checked again here, not only on
 			# propose (G-51); a manual override amount is checked below
 			scope.require("price.override", res.property)
+	if override_restrictions:
+		# only staff applying their own proposal, who may change the restrictions themselves (G-48)
+		if _guest_authorized or _proposal is not None:
+			frappe.throw(_("Restrictions cannot be overridden here."), frappe.PermissionError)
+		scope.require("restriction.edit", res.property)
 	if str(res.modified) != p["modified"]:
 		frappe.throw(_("The reservation changed since this proposal was made — review it again."))
 	if not (reason or "").strip():
@@ -489,7 +556,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	avail.lock_nights(res.property, [(rt, ci, co)])
 	result = propose(res.name, changes, basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
 	                 _check_permission=False, _locked=True, internal=True, _sale_at=pin)
-	if not result["sellable"]:
+	overridden_restrictions = result["restrictions"] if override_restrictions and \
+		result["sellable_ignoring_restrictions"] else []
+	if not result["sellable"] and not overridden_restrictions:
 		why = "; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")
 		frappe.throw(_("The modified stay cannot be sold: {0}").format(
 			guest_reason(str(why)) if _guest_authorized else why))
@@ -574,9 +643,13 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		res.name, res.tex_booking, change_type=change_type, old_amount=old_total, new_amount=final_total,
 		currency=ccy, basis="MANUAL" if overridden else p["basis"],
 		basis_sale_at=result["pricing_sale_at"], reason=reason,
-		changes=changed_fields | {"requested": changes} | priced,
+		changes=changed_fields | {"requested": changes} | priced
+		| ({"restrictions_overridden": overridden_restrictions} if overridden_restrictions else {}),
 		before=snap, after=json.loads(res.tex_pricing_snapshot), source=source,
 		override=final_total if overridden else None)
+	if overridden_restrictions:
+		audit("reservation.restriction_override", reference_doctype="Reservation", reference_name=res.name,
+		      property=res.property, new={"restrictions": overridden_restrictions, "revision": rev}, reason=reason)
 	if res.tex_booking:
 		booking_svc.sync_redemptions(res.tex_booking)
 		booking_svc._refresh_booking_after_change(res.tex_booking)
@@ -600,7 +673,8 @@ def simulate(reservation: str, sale_at) -> dict:
 	  and its frozen payload and selling terms (G-50);
 	- markups, promotions and their limits, extras, the tax policy, FX policies and rates (G-20);
 	- coupon uses held then: made by then and not given back by then, this booking's own excluded.
-	The stay itself is the reservation's (its request, channel and guest). Not checked:
+	The stay itself is the reservation's (its request, channel and guest), and so is its booking: a minimum
+	basket is judged with the other rooms as recorded with the stay (G-84). Not checked:
 	availability, restrictions and the capacity of limited extras (the stay is sold already).
 	``sale_at`` must be a valid time, not in the future; ``price.view`` and ``reservation.view``
 	at the hotel (it writes nothing: pricing a change as of a past time needs ``price.override``)."""
@@ -610,7 +684,8 @@ def simulate(reservation: str, sale_at) -> dict:
 	snap = _snapshot(res)
 	at = past_sale_time(sale_at, missing=_("Choose the sale time to simulate."),
 	                    future=_("A simulated sale time cannot be in the future."))
-	req = serialize.request_from_dict({**snap["request"], "sale_at": at.isoformat()})
+	req = serialize.request_from_dict({**snap["request"], "sale_at": at.isoformat(), "booking_basket": None,
+	                                    "booking_rooms": 1})
 	try:
 		cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=True)
 	except contracts.PayloadMismatch as e:        # a live payload failing its integrity check (G-73)
@@ -619,10 +694,12 @@ def simulate(reservation: str, sale_at) -> dict:
 		return {"sellable": False, "simulated_sale_at": str(at),
 		        "reasons": [{"code": "NO_CONTRACT", "message": _("No contract was on sale at that time.")}]}
 	pick = next((c for c in cands if c[0].name == snap["contract"]["contract"]), cands[0])
+	# a minimum basket is the booking's: with the other rooms as recorded with this stay when it was
+	# last priced, not as they are now, so the answer for a past moment never changes (G-51, G-84)
 	try:
-		quote, _terms = quoting.price_request(pick[1], req, exclude_booking=res.tex_booking, check_capacity=False,
-		                                      gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
-		                                      usage_at=at, expected_hash=sold_terms.expected_hash(res, snap, pick[1]))
+		quote, _terms = booked_price(res, pick[1], req, others=recorded_others(snap), exclude_booking=res.tex_booking,
+		                             check_capacity=False, gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+		                             usage_at=at, expected_hash=sold_terms.expected_hash(res, snap, pick[1]))
 	except contracts.PayloadMismatch as e:
 		sold_terms.refuse(res, snap, e, use="simulate", version=pick[1])
 	internal = scope.has_capability("price.view_cost", res.property)

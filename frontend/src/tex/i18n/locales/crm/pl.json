@@ -248,6 +248,7 @@
  "crm.ledger.empty_hint": "Operacje pojawią się, gdy goście zbiorą lub wykorzystają punkty albo punkty zostaną skorygowane.",
  "crm.ledger.explain": "Jak obliczono te punkty",
  "crm.ledger.filter": "Rodzaj operacji",
+ "crm.ledger.guest_elsewhere": "Gość innego hotelu",
  "crm.ledger.hint": "Wszystkie operacje na punktach programu, od najnowszych.",
  "crm.ledger.no_lines": "Do tego pobytu nie zastosowano żadnej zasady.",
  "crm.ledger.no_tier": "Brak poziomu · mnożnik {multiplier}",

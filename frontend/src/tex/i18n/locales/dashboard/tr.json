@@ -25,6 +25,9 @@
  "dash.period": "{from} – {to}",
  "dash.pf.alert.all_rooms": "Tüm oda tipleri",
  "dash.pf.alert.channel": "Kanal: {channel}",
+ "dash.pf.scope.be": "Rezervasyon motoru",
+ "dash.pf.scope.cc": "Çağrı merkezi",
+ "dash.pf.scope.both": "Rezervasyon motoru + çağrı merkezi",
  "dash.pf.alert.left": {
   "other": "{capacity} odadan {count} kaldı"
  },

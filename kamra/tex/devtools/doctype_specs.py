@@ -24,6 +24,7 @@ IMMUTABLE_LOG = [perm("System Manager", "readonly"), HA_RO]
 # pricing internals (permlevel 1: snapshots, cost, margin, FX record) are read in Desk / REST by
 # platform administrators only; the TEX API serves them by price.view_cost (G-95, ADR-056)
 INTERNALS = {"permlevel": 1, "read": 1, "role": "System Manager"}
+INTERNALS_RW = {"permlevel": 1, "read": 1, "write": 1, "role": "System Manager"}
 
 BOARDS = ["RO", "BB", "HB", "FB", "AI", "UAI"]
 OPS_ROOM = ["ABSOLUTE", "MULTIPLY", "ADJUST_PERCENT", "PERCENT_OF", "ADD", "SUBTRACT", "INHERIT"]
@@ -545,6 +546,9 @@ COMMERCIAL_SPECS = [
 		F("market", "Link", "Market", "TEX Market"),
 		F("rate_plan", "Link", "Rate plan", "Rate Plan"),
 		F("sales_channel", "Link", "Sales channel", "TEX Sales Channel"),
+		# a product surface instead of one sales channel (G-48, ADR-057); never both
+		F("channel_scope", "Select", "Channel scope", ["", "Booking Engine", "Call Center",
+		                                               "Booking Engine + Call Center"]),
 		CB(),
 		F("stop_sell", "Select", "Stop sell", ["", "STOP", "OPEN"], in_list_view=1),
 		F("stop_sell_mode", "Select", "Stop sell mode", ["", "STAY_THROUGH", "ARRIVAL", "DEPARTURE"]),
@@ -555,6 +559,9 @@ COMMERCIAL_SPECS = [
 		F("release_days", "Int", "Release days"),
 		F("min_advance", "Int", "Min advance days"),
 		F("max_advance", "Int", "Max advance days"),
+		# the booking window: the sale dates on which this night is sold (G-48, ADR-057)
+		F("book_from", "Date", "Bookable from (sale date)"),
+		F("book_to", "Date", "Bookable until (sale date)"),
 		F("scope_key", "Data", "Scope key", read_only=1, unique=1, hidden=1),
 		F("note", "Data", "Note"),
 	], perms=COMMERCIAL, autoname="hash", sort_field="restriction_date"),
@@ -995,13 +1002,14 @@ BOOKING_SPECS = [
 		F("property", "Link", "Property", "Property", in_standard_filter=1),
 		CB(),
 		F("session_id", "Data", "Session"),
-		F("guest", "Link", "Guest", "Guest"),
-		F("email_hash", "Data", "Email (hash)"),
+		# who the visitor is: withheld from Desk / REST (ADR-056 review)
+		F("guest", "Link", "Guest", "Guest", permlevel=1),
+		F("email_hash", "Data", "Email (hash)", permlevel=1),
 		F("consent_marketing", "Check", "Marketing consent"),
 		F("value", "Currency", "Value", options="currency"),
 		F("currency", "Link", "Currency", "Currency"),
 		F("payload", "Code", "Payload", "JSON"),
-	], perms=READONLY_AUDIT, autoname="hash", track_changes=False,
+	], perms=[*READONLY_AUDIT, INTERNALS], autoname="hash", track_changes=False,
 	   sort_field="creation", in_create=True),
 ]
 
@@ -1175,9 +1183,10 @@ CRM_SPECS = [
 		F("status", "Select", "Status", ["Open", "Contacted", "Recovered", "Dismissed"], default="Open",
 		  in_list_view=1, in_standard_filter=1),
 		CB(),
-		F("guest", "Link", "Guest", "Guest"),
-		F("email", "Data", "Email", options="Email"),
-		F("phone", "Data", "Phone"),
+		# contact data: kept only with the profile's consent, withheld from Desk / REST (ADR-056 review)
+		F("guest", "Link", "Guest", "Guest", permlevel=1),
+		F("email", "Data", "Email", options="Email", permlevel=1),
+		F("phone", "Data", "Phone", permlevel=1),
 		F("consent_marketing", "Check", "Marketing consent"),
 		F("value", "Currency", "Value", options="currency", in_list_view=1),
 		F("currency", "Link", "Currency", "Currency"),
@@ -1186,7 +1195,7 @@ CRM_SPECS = [
 		F("quote", "Link", "Quote", "TEX Quote"),
 		F("last_event_at", "Datetime", "Last activity"),
 		F("recovered_booking", "Link", "Recovered booking", "TEX Booking"),
-	], perms=CRM, autoname="ABN-.YYYY.-.#####", naming_rule="Expression (old style)"),
+	], perms=[*CRM, INTERNALS_RW], autoname="ABN-.YYYY.-.#####", naming_rule="Expression (old style)"),
 
 	dt("TEX Loyalty Tier", R, [
 		F("tier_name", "Data", "Tier", reqd=1, in_list_view=1),
