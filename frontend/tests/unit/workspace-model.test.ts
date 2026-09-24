@@ -615,7 +615,11 @@ test("periodDependents and deletePeriod count and remove the dependent rows", ()
 test("workspace modules and lib/keys.ts import at runtime only each other and shorthand.ts", async () => {
   const { readFileSync, readdirSync } = await import("node:fs")
   const root = new URL("../../src/tex/screens/rates/", import.meta.url)
-  const files = [...readdirSync(new URL("workspace/", root)).filter((f) => f.endsWith(".ts")).map((f) => `workspace/${f}`), "lib/keys.ts"]
+  // React bindings (`use<Name>.ts`, e.g. useDraftPreview, S8) are not pure and are not checked here;
+  // they are not in `allowed` either, so no pure module may import one
+  const binding = (f: string) => /^use[A-Z]\w*\.ts$/.test(f)
+  const files = [...readdirSync(new URL("workspace/", root)).filter((f) => f.endsWith(".ts") && !binding(f)).map((f) => `workspace/${f}`), "lib/keys.ts"]
+  assert.ok(files.includes("workspace/draftPreview.ts") && files.includes("workspace/sections.ts"), "the S8 pure modules are checked")
   const allowed = new Set([...files, "lib/shorthand.ts"])
   for (const file of files) {
     const src = readFileSync(new URL(file, root), "utf8")
