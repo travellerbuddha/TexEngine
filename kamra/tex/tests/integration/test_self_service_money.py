@@ -1405,16 +1405,15 @@ class TestThirdReview(GuestMoneyCase):
 		self.assertEqual(frappe.db.get_value(TXN, row, "status"), "Failed")   # the record is not overwritten
 		self.assertEqual(audits("payment.refund_outcome_conflict", row), 1)
 		req = frappe.get_doc(DT, name)
+		# the change stops and names the refund; no money moves to staff until they record what the
+		# gateway actually did (re-review 4: before, what the books said was owed went to staff)
 		self.assertEqual((req.settle_pending, req.staff_open, req.staff_reason, req.unknown_refund, D(req.staff_amount)),
-		                 (0, 1, "Verify refund at gateway", row, D("267.50")))
+		                 (0, 1, "Verify refund at gateway", row, D("0")))
 		from kamra.tex.ops import status as system_status
 
 		check = next(c for c in as_staff(lambda: system_status.collect(properties=[fx.PROPERTY]))
 		             if c["key"] == "payments.callbacks")
-		from kamra.tex.ops import checks
-
-		self.assertIn(("refund_conflict", {"count": 1, "days": checks.PAYMENT_AUDIT_WINDOW_DAYS}),
-		              [(i["reason"], i["params"]) for i in check["issues"]])
+		self.assertIn(("refund_conflict", {"count": 1}), [(i["reason"], i["params"]) for i in check["issues"]])
 
 	def test_an_outcome_recorded_during_the_call_is_counted_once(self):
 		b, name, _deposit, balance = self.shortened("gcm3-twice")
@@ -1621,3 +1620,230 @@ class TestRefundedOutsideTex(GuestMoneyCase):
 		self.assertEqual(money(b["booking"])[1], D("792.50"))
 		self.assertEqual(audits("payment.refund_outside", first["refund"]), 1)
 		self.assertEqual(pay_api.transaction(name=balance)["refundable"], "539.75")
+
+
+# ─── fourth review (G-45 re-review 4) ──────────────────────────────────
+
+
+def outside_refunds(booking: str) -> list[tuple[str, D]]:
+	"""Refunds recorded as made outside TEX, of the payments of ``booking``: [(payment, amount)]."""
+	rows = frappe.get_all(TXN, filters={"txn_type": "Refund", "raw_status": "REFUNDED OUTSIDE TEX",
+	                                    "parent_transaction": ("in", charges(booking) or [""])},
+	                      fields=["parent_transaction", "amount"], order_by="creation asc")
+	return [(r.parent_transaction, D(r.amount)) for r in rows]
+
+
+def limit_reads(run, charge: str) -> list[str]:
+	"""The reads of refunds, allocations and idempotency keys ``run`` makes after it locked
+	``charge``: they decide what may still be refunded or moved."""
+	import re
+
+	reads: list[str] = []
+	on = {"locked": False}
+	real = frappe.db.sql
+
+	def sql(query, *args, **kwargs):
+		q = " ".join(str(query).split())
+		values = f"{args!r} {kwargs!r}"
+		if not on["locked"] and re.search(r"FROM `tabTEX Payment Transaction`.*FOR UPDATE", q) and charge in values:
+			on["locked"] = True
+		elif on["locked"] and q.upper().startswith("SELECT") and (
+				"parent_transaction" in q or "`tabTEX Payment Allocation`" in q or "idempotency_key" in q):
+			reads.append(q)
+		return real(query, *args, **kwargs)
+
+	with mock.patch.object(frappe.db, "sql", side_effect=sql):
+		run()
+	return reads
+
+
+class TestFourthReview(GuestMoneyCase):
+	"""Fourth review: money given back outside TEX is recorded against the payments it came from,
+	limits are read with locking reads, money being refunded cannot move, a conflict stops every
+	run and staff record the truth, p28 names the refunds made, one lock order."""
+
+	def close_outside(self, name: str):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance refunded it at the desk
+		return crs_api.resolve_guest_change(request=name, action="close", reason="refunded in cash at the desk",
+		                                    staff_money="Refunded outside TEX")
+
+	def test_a_change_payment_returned_at_the_desk_is_recorded_on_a_partly_paid_booking(self):
+		b = self.deposit_paid("gcm4-deposit")
+		res = b["rooms"][0]["reservation"]
+		out = self.accept(b, self.propose(b, (6, 14)))
+		txn = out["payment"]["transaction"]
+		prop = as_staff(lambda: modification.propose(res, {"check_out": str(fx.d(6, 12))}))
+		as_staff(lambda: modification.apply(prop["proposal_token"], reason="guest phoned"))   # it cannot apply
+		_calls, gateway = gateway_calls({txn: "Failed"})
+		with gateway:
+			paid(out["payment"])                           # the change fails; the gateway refuses its refund
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual((req.status, req.staff_open, req.staff_reason, D(req.staff_amount)),
+		                 ("Failed", 1, "Refund by staff", D("80.25")))
+		self.assertEqual(money(b["booking"])[:2], (D("575.00"), D("333.00")))   # still counted as paid
+		self.assertFalse(self.close_outside(req.name)["staff_open"])
+		self.assertEqual(outside_refunds(b["booking"]), [(txn, D("80.25"))])
+		self.assertEqual(money(b["booking"])[1], D("252.75"))
+
+	def test_a_late_change_payment_returned_at_the_desk_is_recorded(self):
+		b = self.deposit_paid("gcm4-late")
+		out = self.accept(b, self.propose(b, (6, 14)))
+		txn = out["payment"]["transaction"]
+		from kamra.tex.services import guest_changes
+
+		with at(120):
+			guest_changes.expire_awaiting()                # its payment did not come in time
+		_calls, gateway = gateway_calls({txn: "Failed"})
+		with gateway:
+			paid(out["payment"])                           # the old checkout is paid after all
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual((req.status, req.staff_open, D(req.staff_amount)), ("Expired", 1, D("80.25")))
+		self.close_outside(req.name)
+		self.assertEqual(outside_refunds(b["booking"]), [(txn, D("80.25"))])
+		self.assertEqual(money(b["booking"])[1], D("252.75"))
+
+	def test_a_second_payment_of_an_applied_change_returned_at_the_desk_is_recorded(self):
+		b = self.deposit_paid("gcm4-second")
+		up = self.propose(b, (6, 14))
+		first = self.accept(b, up)
+		declined(first["payment"])
+		paid(self.accept(b, up)["payment"])               # the retry pays it: applied
+		txn = first["payment"]["transaction"]
+		_calls, gateway = gateway_calls({txn: "Failed"})
+		with gateway:
+			paid(first["payment"])                         # the declined tab is paid after all
+		self.assertEqual(money(b["booking"])[:2], (D("1110.00"), D("413.25")))
+		self.close_outside(first["request"])
+		self.assertEqual(outside_refunds(b["booking"]), [(txn, D("80.25"))])
+		self.assertEqual(money(b["booking"])[1], D("333.00"))
+
+	def test_money_refunded_outside_tex_comes_off_the_booking_named(self):
+		b = self.fully_paid("gcm4-unallocated")
+		_deposit, balance = charges(b["booking"])
+		as_staff(lambda: pay.release(balance, booking=b["booking"], amount="100.00", reason="belongs elsewhere"))
+		self.assertEqual(money(b["booking"])[1], D("742.50"))
+		out = as_staff(lambda: pay.refund_outside(balance, amount="50.00", reason="cash back", reference="desk 4",
+		                                          idempotency_key="gcm4-u1", booking=b["booking"]))
+		self.assertEqual(out["from_booking"], "50.00")    # the booking's money, not the unallocated 100
+		self.assertEqual(money(b["booking"])[1], D("692.50"))
+		self.assertEqual(as_staff(lambda: pay_api.transaction(name=balance))["unallocated"], "100.00")
+
+	def test_limits_are_read_with_locking_reads_once_the_payment_is_locked(self):
+		b = self.fully_paid("gcm4-reads")
+		_deposit, balance = charges(b["booking"])
+		runs = {"outside": lambda: pay.refund_outside(balance, amount="10.00", reason="cash", reference="desk 5",
+		                                              idempotency_key="gcm4-r1", booking=b["booking"]),
+		        "gateway": lambda: pay.refund(balance, amount="10.00", reason="goodwill", idempotency_key="gcm4-r2",
+		                                      booking=b["booking"], durable=True),
+		        "release": lambda: pay.release(balance, booking=b["booking"], amount="10.00", reason="move"),
+		        "allocate": lambda: pay.allocate(balance, booking=b["booking"], amount="10.00", reason="back")}
+		for what, run in runs.items():
+			with self.subTest(what):
+				reads = as_staff(lambda r=run: limit_reads(r, balance))
+				self.assertTrue(reads, what)
+				for q in reads:
+					self.assertRegex(q, "LOCK IN SHARE MODE|FOR UPDATE", f"{what}: {q}")
+
+	def test_money_being_refunded_cannot_be_moved_to_another_booking(self):
+		b = self.fully_paid("gcm4-move")
+		other = self.deposit_paid("gcm4-move-2")
+		_deposit, balance = charges(b["booking"])
+		seen: dict = {}
+
+		def move():
+			try:
+				as_staff(lambda: pay.transfer(balance, from_booking=b["booking"], to_booking=other["booking"],
+				                              amount="589.75", reason="wrong booking"))
+			except frappe.ValidationError as e:
+				seen["refused"] = str(e)
+
+		_calls, gateway = gateway_during(move)
+		with gateway:
+			as_staff(lambda: pay_api.refund(transaction=balance, amount="100.00", reason="goodwill",
+			                                idempotency_key="gcm4-m1", booking=b["booking"]))
+		self.assertIn("489.75", seen.get("refused", ""))     # only what no refund is taking can move
+		self.assertEqual(money(b["booking"])[1], D("742.50"))
+		self.assertEqual(money(other["booking"])[1], D("252.75"))
+
+	def test_a_conflict_stops_every_run_and_names_its_refund_until_staff_record_the_truth(self):
+		lower_price_policy("Refund automatically")
+		b = self.fully_paid("gcm4-conflict")
+		_deposit, balance = charges(b["booking"])
+		from kamra.tex.payments.providers.base import Outcome
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import guest_changes
+
+		with settle_queued():
+			name = self.accept(b, self.propose(b, (6, 12)))["request"]
+		calls: list[str] = []
+
+		def refund(self_, provider_ref, amount, currency, **_kw):
+			calls.append(provider_ref)
+			if len(calls) == 1:
+				# the run is paused far past its hold; staff find nothing at the gateway yet and record
+				# "not refunded": TEX runs the refunds again (the deposit's refund is declined) …
+				clock, pay_clock = at_both(guest_changes.SETTLE_LEASE_MINUTES + 1)
+				with clock, pay_clock:
+					as_staff(lambda: pay_api.finish_refund(refund=refund_row(balance), outcome="Failed",
+					                                       reason="nothing at the gateway yet"))
+				# … and then the gateway answers the first call: it did refund
+				return Outcome(status="Succeeded", provider_ref=f"{provider_ref}-R", amount=amount, currency=currency,
+				               raw_status="REFUNDED")
+			return Outcome(status="Failed", error_code="DECLINED", error_message="refund declined")
+
+		with mock.patch.object(MockProvider, "refund", refund):
+			guest_changes.settle(name)
+		row = refund_row(balance)
+		self.assertEqual((frappe.db.get_value(TXN, row, "status"), audits("payment.refund_outcome_conflict", row)),
+		                 ("Failed", 1))
+		req = frappe.get_doc(DT, name)
+		self.assertEqual((req.settle_pending, req.staff_open, req.staff_reason, req.unknown_refund),
+		                 (0, 1, "Verify refund at gateway", row))
+		more, gateway = gateway_calls()
+		with gateway:
+			guest_changes.settle(name)
+		self.assertEqual(more, [])                          # no run refunds anything more
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance checked the gateway again
+		pay_api.resolve_refund_conflict(refund=row, outcome="Succeeded", reason="the gateway shows it refunded")
+		self.assertEqual(frappe.db.get_value(TXN, row, "status"), "Succeeded")
+		self.assertEqual(money(b["booking"]), (D("575.00"), D("575.00"), D("0.00")))
+		self.assertEqual(audits("payment.refund_conflict_resolved", row), 1)
+		req.reload()
+		self.assertEqual((D(req.refunded_amount), req.staff_open, req.settle_pending, req.unknown_refund),
+		                 (D("267.50"), 0, 0, None))
+		from kamra.tex.ops import status as system_status
+
+		check = next(c for c in system_status.collect(properties=[fx.PROPERTY]) if c["key"] == "payments.callbacks")
+		self.assertNotIn("refund_conflict", [i["reason"] for i in check["issues"]])
+
+	def test_p28_names_the_refunds_each_change_made(self):
+		lower_price_policy("Refund automatically")
+		b = self.fully_paid("gcm4-p28")
+		_deposit, balance = charges(b["booking"])
+		name = self.accept(b, self.propose(b, (6, 12)))["request"]
+		row = refund_row(balance)
+		# money of the same change the hotel gave back at the desk is not one of its card refunds
+		as_staff(lambda: pay.refund_outside(balance, amount="5.00", reason=f"Guest change {name}: cash",
+		                                    reference="desk 6", idempotency_key="gcm4-p28-o", booking=b["booking"]))
+		frappe.db.set_value(DT, name, "refund_rows", None, update_modified=False)   # as before the field existed
+		from kamra.patches.tex import p28_guest_change_refund_rows as p28
+
+		p28.execute()
+		p28.execute()                                       # idempotent
+		self.assertEqual(frappe.db.get_value(DT, name, "refund_rows"), row)
+
+	def test_a_refund_made_outside_tex_locks_the_booking_before_the_payment(self):
+		b = self.fully_paid("gcm4-order")
+		_deposit, balance = charges(b["booking"])
+		seen = as_staff(lambda: locks_during(lambda: pay.refund_outside(
+			balance, amount="10.00", reason="cash", reference="desk 7", idempotency_key="gcm4-o1")))
+		self.assertLess(seen.index("tabTEX Booking"), seen.index("tabTEX Payment Transaction"), seen)
+
+	def test_the_staff_refund_endpoint_runs_a_deadlock_victim_again(self):
+		b = self.fully_paid("gcm4-deadlock")
+		_deposit, balance = charges(b["booking"])
+		answers = [frappe.QueryDeadlockError("Deadlock found"), {"refund": "PTX-X", "status": "Succeeded"}]
+		with mock.patch.object(pay, "refund", side_effect=answers), mock.patch.object(frappe.db, "rollback"):
+			out = as_staff(lambda: pay_api.refund(transaction=balance, amount="10.00", reason="goodwill",
+			                                      idempotency_key="gcm4-d1", booking=b["booking"]))
+		self.assertEqual(out, {"refund": "PTX-X", "status": "Succeeded"})
