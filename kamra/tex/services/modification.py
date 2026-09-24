@@ -63,6 +63,11 @@ def _children(raw, arrival=None) -> tuple[ChildSpec, ...]:
 def build_changed_request(res, changes: dict, sale_at: datetime):
 	snap = _snapshot(res)
 	base = dict(snap["request"])
+	if {"channel", "sales_channel"} & set(changes):
+		# a change is priced on the channel the stay was sold on; selling it on another channel
+		# is a new sale on that channel, by someone entitled to it (ADR-050)
+		frappe.throw(_("A reservation keeps the sales channel it was sold on. To sell it on another channel, "
+		               "cancel it and book again on that channel."))
 	unknown = set(changes) - set(EDITABLE)
 	if unknown:
 		frappe.throw(_("Cannot change: {0}").format(", ".join(sorted(unknown))))

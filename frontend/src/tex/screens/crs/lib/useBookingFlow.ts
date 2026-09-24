@@ -106,6 +106,26 @@ export function focusFirstInvalid(root: ParentNode = document) {
   window.setTimeout(() => root.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(), 0)
 }
 
+/**
+ * Sales channels the user may sell on at any of the `selected` hotels (every hotel when none
+ * is selected), from the session (ADR-050). `null`: the session does not say (an older
+ * server), so every channel is offered and the server decides.
+ */
+export function sellableChannels(hotels: { name: string; sales_channels?: string[] }[], selected: string[] = []): string[] | null {
+  if (hotels.some((h) => !h.sales_channels)) return null
+  const pool = selected.length ? hotels.filter((h) => selected.includes(h.name)) : hotels
+  const out = new Set<string>()
+  for (const h of pool) for (const c of h.sales_channels ?? []) out.add(c)
+  return [...out].sort()
+}
+
+/** `preferred` when the user may sell on it at one of `hotels`, else the first channel they may. */
+export function pickChannel(preferred: string | undefined, hotels: { name: string; sales_channels?: string[] }[], selected: string[] = []): string {
+  const allowed = sellableChannels(hotels, selected)
+  if (!allowed || (preferred && allowed.includes(preferred))) return preferred ?? "CALL_CENTER"
+  return allowed[0] ?? preferred ?? "CALL_CENTER"
+}
+
 /** A new search: tomorrow on the site's calendar (`today` from lib/siteDay, G-91), two nights. */
 export function defaultSearchForm(today: string, properties: string[], channel = "CALL_CENTER"): SearchFormState {
   const ci = addDays(today, 1)
@@ -157,11 +177,13 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     [boot.properties],
   )
 
+  // the channel the page sells on, if the user may sell on it; else one they may (ADR-050)
+  const defaultChannel = useMemo(() => pickChannel(opts.channel, sellable), [opts.channel, sellable])
   const [form, setForm] = useState<SearchFormState>(() =>
     defaultSearchForm(
       clock.today(),
       sellable.map((p) => p.name),
-      opts.channel,
+      defaultChannel,
     ),
   )
   const [formErrors, setFormErrors] = useState<FieldErrors>({})
@@ -652,7 +674,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     (keepSearch = false) => {
       clearDownstream()
       if (!keepSearch) {
-        setForm(defaultSearchForm(clock.today(), sellable.map((p) => p.name), opts.channel))
+        setForm(defaultSearchForm(clock.today(), sellable.map((p) => p.name), defaultChannel))
         setResult(undefined)
         setLastArgs(undefined)
         setFormErrors({})
@@ -664,7 +686,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       setGuestErrors({})
       setNotes("")
     },
-    [clearDownstream, sellable, opts.channel, lang, clock],
+    [clearDownstream, sellable, defaultChannel, lang, clock],
   )
 
   return {

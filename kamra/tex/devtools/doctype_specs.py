@@ -117,12 +117,22 @@ PLATFORM_SPECS = [
 		F("capability", "Data", "Capability", reqd=1, in_list_view=1),
 	], istable=True),
 
+	# a sales channel a profile's holders may price and book on (ADR-050)
+	dt("TEX Profile Channel", P, [
+		F("sales_channel", "Link", "Sales channel", "TEX Sales Channel", reqd=1, in_list_view=1),
+	], istable=True),
+
 	dt("TEX Permission Profile", P, [
 		F("profile_name", "Data", "Profile", reqd=1, unique=1, in_list_view=1),
 		F("description", "Small Text", "Description"),
 		F("is_system", "Check", "System profile", read_only=1),
 		SB("Capabilities"),
 		F("capabilities", "Table", "Capabilities", "TEX Profile Capability"),
+		# an explicit name: SB() numbers sections globally, a new one would rename every later section
+		F("section_sales_channels", "Section Break", "Sales channels"),
+		F("sales_channels", "Table MultiSelect", "Sales channels", "TEX Profile Channel",
+		  description="Channels this profile prices and books on. Blank = the call centre only. "
+		              "The capability price.any_channel admits every channel (ADR-050)."),
 	], perms=PLATFORM, autoname="field:profile_name", naming_rule="By fieldname"),
 
 	dt("TEX Access Grant", P, [

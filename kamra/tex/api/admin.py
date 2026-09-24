@@ -124,6 +124,8 @@ def profiles():
 	for r in rows:
 		r["capabilities"] = sorted(frappe.get_all("TEX Profile Capability", filters={"parent": r["name"]},
 		                                          pluck="capability"))
+		# blank = the call centre only; price.any_channel = every channel (ADR-050)
+		r["sales_channels"] = sorted(scope._profile_listed_channels(r["name"]))
 	return {"profiles": rows, "capabilities": CAPABILITIES}
 
 
@@ -135,16 +137,24 @@ def save_profile(data):
 	unknown = [c for c in caps if c not in CAPABILITIES]
 	if unknown:
 		frappe.throw(_("Unknown capabilities: {0}").format(", ".join(unknown)))
+	channels = sorted({str(c) for c in d.get("sales_channels") or []})
+	unknown = [c for c in channels if not frappe.db.exists("TEX Sales Channel", c)]
+	if unknown:
+		frappe.throw(_("Unknown sales channels: {0}").format(", ".join(unknown)))
 	doc = frappe.get_doc("TEX Permission Profile", d["name"]) if d.get("name") else frappe.new_doc(
 		"TEX Permission Profile")
-	before = sorted(r.capability for r in doc.get("capabilities") or [])
+	before = {"capabilities": sorted(r.capability for r in doc.get("capabilities") or []),
+	          "sales_channels": sorted(r.sales_channel for r in doc.get("sales_channels") or [])}
 	doc.profile_name = text(d.get("profile_name"), 140) or doc.profile_name
 	doc.description = text(d.get("description"), 500)
 	doc.set("capabilities", [{"capability": c} for c in caps])
+	if "sales_channels" in d:
+		doc.set("sales_channels", [{"sales_channel": c} for c in channels])
 	doc.save(ignore_permissions=True)
 	scope.clear_cache()
 	audit("profile.save", reference_doctype="TEX Permission Profile", reference_name=doc.name,
-	      old={"capabilities": before}, new={"capabilities": caps})
+	      old=before, new={"capabilities": caps,
+	                       "sales_channels": sorted(r.sales_channel for r in doc.get("sales_channels") or [])})
 	return {"name": doc.name}
 
 

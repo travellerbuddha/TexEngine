@@ -28,7 +28,8 @@ import {
   type Tone,
 } from "../../ui"
 import { SettingsFrame } from "./SettingsFrame"
-import { SCOPE_LEVELS, capLabel, scopeKey, type ScopeLevel } from "./capabilities"
+import { SCOPE_LEVELS, capLabel, channelSummary, scopeKey, type ScopeLevel } from "./capabilities"
+import { useLabels } from "../crs/lib/labels"
 
 export interface Grant {
   name: string
@@ -62,7 +63,15 @@ interface UsersData {
 }
 
 export interface ProfilesData {
-  profiles: { name: string; profile_name: string; description: string | null; is_system: number; capabilities: string[] }[]
+  profiles: {
+    name: string
+    profile_name: string
+    description: string | null
+    is_system: number
+    capabilities: string[]
+    /** Channels the profile sells on; empty = the call centre only (ADR-050). */
+    sales_channels: string[]
+  }[]
   capabilities: Record<string, string>
 }
 
@@ -333,6 +342,7 @@ function GrantDrawer({
   profileNames: string[]
 }) {
   const { t } = useTexT()
+  const L = useLabels()
   const toast = useToast()
   const { boot } = useSession()
   const platform = boot.user.platform_admin
@@ -488,6 +498,9 @@ function GrantDrawer({
                 </li>
               ))}
             </ul>
+            <p className="mt-2 text-xs text-zinc-600">
+              <span className="font-medium">{t("settings.profiles.channels_row")}:</span> {channelSummary(t, L.channel, selectedProfile)}
+            </p>
           </div>
         )}
         <FormGrid>

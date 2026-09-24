@@ -1726,9 +1726,71 @@ server for its first day.
 - Tests: `TestSessionSiteDay`, `test_transactions_filter_on_either_date_bound`, e2e `site-day`
   (browser in Pacific/Honolulu pinned just after the site's midnight).
 
-## ADR-051 Every FX rate a price used is recorded with it; ORIGINAL_* reprices reuse the record; child ages are judged in months (bands and dates of birth)
-(ADR-050 is reserved for G-41.)
+## ADR-050 Staff price and book only on the sales channels they are entitled to at a hotel
+**Context.** G-41 (R-25): the sales channel is a pricing dimension (markups, promotions,
+restrictions and contracts can differ per channel), but the CRS took it from the request. Any
+agent with `reservation.create` could search, quote and book on DIRECT_WEB, OTA or API prices
+from the call centre, and a Booking Engine quote could be booked from the CRS. Nothing bound a
+user to a channel.
+**Decision.**
+- *Entitlement.* A user's channels at a hotel are the union, over the permission profiles
+  granted to them there, of the profile's channel list (`TEX Permission Profile.sales_channels`,
+  child `TEX Profile Channel`); a profile without a list sells on the call centre
+  (`STAFF_DEFAULT_CHANNELS`). The capability `price.any_channel` admits every channel. A
+  profile that holds neither `price.view` nor `reservation.create` adds no channel. Where a user
+  has no granted profile (legacy User Permission scope) the Frappe role defaults decide, as for
+  capabilities. Platform administrators sell on every channel. The pure rule is
+  `capabilities.profile_channels`; `scope.sales_channels(property)`, `may_sell_on` and
+  `require_channel` apply it.
+- *Per-grant vs per-profile.* The list lives on the profile, like capabilities: a grant stays
+  "user × scope × profile", and a desk that sells on other channels (a B2B desk) is a profile.
+  A per-grant list was rejected: it would split what a profile allows across grants and make
+  the anti-escalation check two-dimensional.
+- *Enforcement: the channel comes from what is sold, never from who asks.* `crs.search` /
+  `ui_crs.search`: hotels where the requested channel is not the user's are left out, and a
+  channel the user may sell at none of the chosen hotels is refused (PermissionError).
+  `crs.quote`: the signed offer's channel. `crs.book`, `ui_crs.book`, `ui_crs.quote_summary`:
+  each quote's own `sales_channel` (a Booking Engine quote is not the agent's to book).
+  `crs.payment_methods`: the channel asked about. `booking.create_booking`: for staff outside
+  a booking site (defence in depth; a booking site sells on its own channel, also for a signed-in
+  staff member browsing it).
+- *Modifications keep the reservation's channel.* A change is priced on the channel the stay
+  was sold on (its snapshot request), whoever makes it: a call-centre agent changing a web
+  booking changes it at web prices, as the guest could through self-service. The channel is
+  never switched by a modification, for anyone (explicit refusal): selling the stay on another
+  channel is a cancellation and a new booking by someone entitled to that channel. Simulation
+  and extras added after booking also use the reservation's channel.
+- *Anti-escalation.* Granting a profile requires, at every hotel of the grant, the profile's
+  capabilities (as before) and its channels.
+- *Not selling, so not bound.* The contract editor's test price (`contracts.preview_price`,
+  `price.view_cost`) prices any channel for revenue work; it returns no offer key, so nothing it
+  prices can be quoted or booked. The public Booking Engine sells on its site's channel.
+- *Defaults and upgrade (p29).* `price.any_channel` is in the Hotel/Group/Enterprise Admin
+  (every capability) and Revenue Manager defaults; Reservations Agent, Finance, Viewer, Front
+  Desk, Call Center Agent and Kamra Agent sell on the call centre. p29 adds `price.any_channel`
+  to the existing seeded profiles whose defaults carry it and to custom profiles holding
+  `contract.publish` (they already set every channel's prices); every other profile keeps its
+  capabilities and sells on the call centre. Nothing widens: before G-41 every price viewer
+  priced on every channel.
+- *UI.* `session.bootstrap` returns each hotel's `sales_channels`; the CRS / Call Center
+  channel picker lists only the channels allowed at the chosen hotels and starts on the call
+  centre when it is allowed. Settings → Permission profiles shows and edits each profile's
+  channels (`price.any_channel` is marked sensitive); the grant form says where a profile sells.
+- *Inventory stays per contract.* Allotments are not given a channel dimension now. Channel-bound
+  selling does not need one for correctness: allotments are consumed per contract, a contract
+  sells only on its own channels (`CHANNEL_NOT_ALLOWED`), and restrictions already have a
+  channel scope. "Inventory rules differ by channel by configuration" (R-25) is expressed today
+  with a contract per channel and its own (guaranteed) allotment, or with channel-scoped stop
+  sells. A per-channel split of one multi-channel contract's allotment needs sold counts per
+  channel in `availability/repository.py`; it stays a remaining item of G-41.
+**Consequences.**
+- A profile created in Desk without a channel list sells on the call centre; an administrator
+  adds channels (or `price.any_channel`) for desks that sell elsewhere.
+- A group search on a channel silently leaves out the hotels where the user may not sell it;
+  the picker only offers channels allowed at one of the chosen hotels.
+- Tests: `test_channel_binding` (16), unit `test_channel_entitlement` (6), e2e `crs-actions`.
 
+## ADR-051 Every FX rate a price used is recorded with it; ORIGINAL_* reprices reuse the record; child ages are judged in months (bands and dates of birth)
 **Context.** Two pricing gaps.
 - G-56 (R-15): a quote kept only the contract → sell currency rate (`fx`). Extras in another
   currency (`extra_fx`), fixed promotions and their minimum-basket thresholds (`promo_fx`),

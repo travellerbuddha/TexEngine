@@ -12,6 +12,7 @@ from frappe import _
 
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
+from kamra.tex.security.capabilities import profile_channels
 
 
 def _desired_properties(user: str) -> tuple[set[str], bool]:
@@ -80,6 +81,9 @@ def manage_refusal(grant) -> tuple[str, type[Exception]] | None:
 		return _("The grant covers no hotel."), frappe.ValidationError
 	profile_caps = set(frappe.get_all("TEX Profile Capability",
 	                                  filters={"parent": grant.permission_profile}, pluck="capability"))
+	# the sales channels the profile sells on (ADR-050): handed out only by someone who sells on them
+	channels = profile_channels(profile_caps, scope._profile_listed_channels(grant.permission_profile),
+	                            scope._every_channel())
 	for p in props:
 		held = scope.capabilities(p, me)
 		if "user.admin" not in held:
@@ -88,6 +92,10 @@ def manage_refusal(grant) -> tuple[str, type[Exception]] | None:
 		missing = profile_caps - held
 		if missing:
 			return (_("You cannot grant capabilities you don't hold: {0}.").format(", ".join(sorted(missing))),
+			        frappe.PermissionError)
+		missing = channels - scope.sales_channels(p, me)
+		if missing:
+			return (_("You cannot grant sales channels you don't sell on: {0}.").format(", ".join(sorted(missing))),
 			        frappe.PermissionError)
 	return None
 

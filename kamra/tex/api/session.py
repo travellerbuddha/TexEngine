@@ -30,6 +30,8 @@ def bootstrap():
 			"currency": rows[p].currency, "hotel_group": rows[p].tex_hotel_group, "enterprise": rows[p].tex_enterprise,
 			"default_market": rows[p].tex_default_market,
 			"capabilities": sorted(scope.capabilities(p, user)),
+			# the channels the user may price and book on there: the CRS channel picker (ADR-050)
+			"sales_channels": sorted(scope.sales_channels(p, user)),
 		} for p in props if p in rows],
 		"capabilities": CAPABILITIES,
 		"settings": {"brand_name": settings.brand_name or "TEX Engine",

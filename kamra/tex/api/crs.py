@@ -26,7 +26,9 @@ INTERNAL_CHANNELS = ("CALL_CENTER", "B2B", "API", "DIRECT_WEB", "META", "OTA")
 def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CALL_CENTER",
            properties=None, hotel_group: str | None = None, destination: str | None = None,
            currency: str | None = None, promo_codes=None):
-	"""Group search across every hotel the agent may sell (R-24)."""
+	"""Group search across every hotel the agent may sell (R-24), on a channel the agent is
+	entitled to at each of them (ADR-050): hotels where they are not are left out, and a
+	channel they may sell nowhere among the chosen hotels is refused."""
 	if channel not in INTERNAL_CHANNELS:
 		frappe.throw(_("Unknown channel."))
 	allowed = scope.permitted_properties()
@@ -40,6 +42,11 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 		         or dest in p.lower()]
 	if not props:
 		frappe.throw(_("No hotel matches your access and filters."), frappe.PermissionError)
+	selling = [p for p in props if scope.may_sell_on(channel, p)]
+	if not selling:
+		frappe.throw(_("You may not sell on the {0} channel at the chosen hotels.").format(channel),
+		             frappe.PermissionError)
+	props = selling
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=market,
 	                     channel=channel, currency=currency, promo_codes=parse(promo_codes, []) or (),
 	                     internal=True)
@@ -56,6 +63,8 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 def quote(offer_key: str, extras=None, promo_codes=None):
 	offer = quoting.verify(offer_key)
 	scope.require("reservation.create", offer["property"])
+	# the signed offer names its channel: a Booking Engine or OTA offer is not the agent's to sell
+	scope.require_channel(offer.get("channel"), offer["property"])
 	return quoting.create_quote(offer_key, extras=parse(extras, []), promo_codes=parse(promo_codes, None))
 
 
@@ -66,8 +75,7 @@ def book(quote_ids, guest, payment_method: str | None = None, confirm_without_pa
 	ids = parse(quote_ids, [])
 	if not ids:
 		frappe.throw(_("Select at least one room."))
-	prop = frappe.db.get_value("TEX Quote", ids[0], "property")
-	scope.require("reservation.create", prop)
+	require_quotes_sellable(ids)
 	out = booking_svc.create_booking(quote_ids=ids, guest=parse(guest, {}), payment_method=payment_method,
 	                                 confirm_without_payment=bool(int(confirm_without_payment or 0)),
 	                                 notes=text(notes, 2000), idempotency_key=text(idempotency_key, 140),
@@ -77,10 +85,23 @@ def book(quote_ids, guest, payment_method: str | None = None, confirm_without_pa
 	return out
 
 
+def require_quotes_sellable(quote_ids) -> None:
+	"""The caller may book every one of these quotes: ``reservation.create`` at each quote's
+	hotel and the quote's own channel among their channels there (ADR-050). A quote made on the
+	Booking Engine or on another channel is never the agent's to book."""
+	for qid in quote_ids:
+		row = frappe.db.get_value("TEX Quote", str(qid), ["property", "sales_channel"], as_dict=True)
+		if not row:
+			frappe.throw(_("Quote {0} not found.").format(qid), frappe.DoesNotExistError)
+		scope.require("reservation.create", row.property)
+		scope.require_channel(row.sales_channel, row.property)
+
+
 @frappe.whitelist()
 def payment_methods(property: str, market: str | None = None, currency: str | None = None,
                     channel: str = "CALL_CENTER"):
 	scope.require("price.view", property)
+	scope.require_channel(channel, property)
 	from kamra.tex.payments import service as pay
 
 	return pay.payment_methods(property, market=market, currency=currency, channel=channel)
