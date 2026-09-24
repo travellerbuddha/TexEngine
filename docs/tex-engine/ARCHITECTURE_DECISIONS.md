@@ -3838,8 +3838,8 @@ the reports. Some claims above were stronger than the tests behind them. All are
     covers a booking and payment with no currency; the existing ones updated for L3);
   - `test_patches.TestP03Indexes.test_p46_creates_the_report_indexes`;
   - e2e `reports.spec.ts` (a scope change clears the room filter).
-- *Run (branch with main `f855850` merged; patches p45, p46, p47 in order):* 36 integration modules,
-  762 OK (the 3 whole-site patch tests pass on a disposable site, `test_patches` 33/33); 425 unit
+- *Run (branch with main `23767cb` merged; patches p45–p48 in order):* 37 integration modules,
+  783 OK (the 3 whole-site patch tests pass on a disposable site, `test_patches` 33/33); 425 unit
   tests; upstream suites 76/76, 13/13, banquet 101; Playwright `reports`, `portfolio`, `booking`,
   `crs`, `manage-money` 16/16 (after `demo_seed.release_test_bookings` released 645 test-run stays
   that had sold the shared demo hotel out on the specs' random dates).

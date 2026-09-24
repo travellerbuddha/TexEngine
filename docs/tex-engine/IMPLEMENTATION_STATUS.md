@@ -435,7 +435,7 @@ harness 76/76, front-desk journey 13/13, banquet 101 OK); 419 unit tests; ruff c
 Pixel 7).
 
 **G-46 review follow-up and G-98 (2026-09-24, branch `fix-reports` on main `b074527`, main `b72b2a8`,
-`e78ba7b`, `9642228` and `f855850` merged in; ADR-059 review follow-up; patch p46, between p45 and p47).** The review's High, older than the reports
+`e78ba7b`, `9642228`, `f855850` and `23767cb` merged in; ADR-059 review follow-up; patch p46, between p45 and p47).** The review's High, older than the reports
 (G-98): contract cost reached guests and agents through cost-stage offers (their discount and a basket
 compared with the cost). Every promotion outcome now carries its stage; the guest view and the staff
 view without `price.view_cost` drop cost-stage outcomes (older snapshots judged by their explanation);
@@ -450,11 +450,14 @@ lost "from" when "to" was typed while the report loaded (router transition): fix
 `b074527` unit `test_cost_stage_privacy` 3 failures and 3 errors of 6, integration
 `test_cost_stage_privacy` 2 of 3 and `test_reports` 17 of 35 failed, `test_patches` 2 (p46 missing);
 on the merged branch before their fixes, the `tex_promotions` test (1 of 4) and the dashboard / pace
-throttle test (1 of 36) failed. With the branch's code and schema (main `f855850` merged, migrated, one
-hold of the bench lock): all 36 integration modules **762 OK** (3 whole-site patch tests skipped here; on
-a disposable site `test_patches` 33/33 OK, p45, p46 and p47 in order) — admin_markets 4, age_bands 11,
+throttle test (1 of 36) failed. With the branch's code and schema (main `23767cb` merged, migrated, one
+hold of the bench lock): all 37 integration modules **783 OK** (skipped: 3 whole-site patch tests and 7
+second-connection tests of `crm_third_review`, which run on a disposable site only; there `test_patches`
+33/33 OK with p45–p48 in order, while `crm_third_review` errors on the disposable site for want of a
+signing key in its site config, `SigningKeyMissing`, not a code fault) — admin_markets 4, age_bands 11,
 audit_trail 15, channel_binding 27, commercial_flows 63, concurrency 8, cost_stage_privacy 4,
-critical_journey 31, crm_privacy 29, crm_privacy_review 28, crm_segments 7, custom_domains 9,
+critical_journey 31, crm_privacy 29, crm_privacy_review 28, crm_segments 7, crm_third_review 21,
+custom_domains 9,
 distribution 21, entry_branding 34, extras_inventory 17, fx_snapshot 5, grant_expiry 9, inventory 31,
 legacy_pricing 15, legacy_pricing_review 23, loyalty_admin 7, migrations_notify 7,
 modification_determinism 27, money_fields 9, patches 33,
@@ -466,8 +469,8 @@ front-desk journey 13/13, banquet 101 OK); 425 unit tests; ruff clean; `npx tsc 
 server, RQ worker and Vite dev server): `reports`, `portfolio`, `booking`, `crs` and `manage-money`
 specs 16/16 (desktop and Pixel 7) on the final tree. Earlier runs on the shared site found the demo
 hotel sold out on the specs' random stay dates (a search without rates, `booking.spec`); the dev tool
-`demo_seed.release_test_bookings` released 645 future test-run stays under the bench lock before the
-final run.
+`demo_seed.release_test_bookings` released 645 future test-run stays under the bench lock (and 10
+more before the last run).
 
 ## 2. Summary
 
