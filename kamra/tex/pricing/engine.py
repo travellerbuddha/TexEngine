@@ -241,19 +241,31 @@ def basket_limited(q: RoomQuote) -> bool:
 	return any(not p.applied and p.rule == promotions.MIN_BASKET for p in q.promotions)
 
 
+def booking_pass(quotes: list[RoomQuote]) -> Decimal | None:
+	"""The booking basket to price the rooms of one booking again with — the sum of the rooms'
+	own baskets — when a minimum basket refused a promotion on any room and every room is
+	sellable in one sell currency; else None: the rooms priced alone are the answer. The basket
+	is taken before promotions, so pricing again with it is final."""
+	if len(quotes) < 2 or not any(basket_limited(q) for q in quotes):
+		return None
+	if not all(q.sellable and q.basket is not None for q in quotes) or len({q.currency for q in quotes}) != 1:
+		return None                       # not one booking that can be sold: each room answers alone
+	return sum((q.basket for q in quotes), ZERO)
+
+
+def in_booking(req: StayRequest, total: Decimal, rooms: int) -> StayRequest:
+	return replace(req, booking_basket=total, booking_rooms=rooms)
+
+
 def price_booking(rooms: list[tuple[PricingContext, StayRequest]]) -> list[RoomQuote]:
-	"""Price the rooms of one booking together. Each room is priced alone first; when a minimum
-	basket refused a promotion on any room and every room is sellable in one sell currency,
-	every room is priced again with the booking's basket — the sum of the rooms' own baskets —
-	recorded in its request (``booking_basket``, ``booking_rooms``). The basket does not depend
-	on promotions (it is taken before them), so the second pass is final. Deterministic."""
+	"""Price the rooms of one booking together. Each room is priced alone first; when
+	``booking_pass`` finds a booking basket, every room is priced again with it, recorded in its
+	request (``booking_basket``, ``booking_rooms``) and explained. Deterministic."""
 	first = [price_stay(ctx, req) for ctx, req in rooms]
-	if len(rooms) < 2 or not any(basket_limited(q) for q in first):
+	total = booking_pass(first)
+	if total is None:
 		return first
-	if not all(q.sellable and q.basket is not None for q in first) or len({q.currency for q in first}) != 1:
-		return first                      # not one booking that can be sold: each room answers alone
-	total = sum((q.basket for q in first), ZERO)
-	return [price_stay(ctx, replace(req, booking_basket=total, booking_rooms=len(rooms))) for ctx, req in rooms]
+	return [price_stay(ctx, in_booking(req, total, len(rooms))) for ctx, req in rooms]
 
 
 def booking_request(req: StayRequest, quote: RoomQuote, *, others_basket: Decimal, others_rooms: int
@@ -264,7 +276,7 @@ def booking_request(req: StayRequest, quote: RoomQuote, *, others_basket: Decima
 	alone is the answer)."""
 	if others_rooms < 1 or not quote.sellable or quote.basket is None or not basket_limited(quote):
 		return None
-	return replace(req, booking_basket=quote.basket + others_basket, booking_rooms=others_rooms + 1)
+	return in_booking(req, quote.basket + others_basket, others_rooms + 1)
 
 
 def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuote:

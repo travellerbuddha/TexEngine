@@ -21,7 +21,6 @@ from frappe import _
 from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.availability import repository as avail
-from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, quantize, to_str
@@ -228,20 +227,19 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 			pending: list[tuple[bool, dict]] = []
 			boards = _boards_of(terms)
 			for rp in rate_plans:
-				scope = RestrictionScope(room_type=rt, contract=contract_row.name, market=market, rate_plan=rp,
-				                         channel=channel)
+				scope = avail.scope_for(rt, contract_row.name, market, rp, channel)
 				violations = avail.check_restrictions(property, scope, check_in, check_out, sale_date, cells)
 				for board in boards:
 					# R-29: every party is priced on its own, so a room type that fits room 1
 					# but not room 2 is still offered for room 1 (``room_indexes``)
-					rooms_out = []
 					room_reasons = []
+					key = (version, sell_ccy, rt)
+					priced: list[tuple[int, Party, StayRequest, object]] = []
 					for idx, party in enumerate(parties):
 						req = build_request(property=property, room_type=rt, board=board, rate_plan=rp,
 						                    check_in=check_in, check_out=check_out, party=party, sale_at=sale_at,
 						                    market=market, channel=channel, currency=sell_ccy,
 						                    promo_codes=promo_codes, member=member, room_index=idx)
-						key = (version, sell_ccy, rt)
 						try:
 							if key not in ctx_cache:
 								ctx_cache[key] = ctxmod.build_context(terms, req, extras={})
@@ -255,6 +253,18 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						if not q.sellable:
 							room_reasons.extend({"room_index": idx} | dict(r) for r in q.reasons)
 							continue
+						priced.append((idx, party, req, q))
+					if len(priced) == len(parties):
+						# every room in this offer: priced as one booking, so a minimum basket is the
+						# booking's (G-84, ADR-057); the quote step prices the rooms chosen together
+						total = engine.booking_pass([q for *_x, q in priced])
+						if total is not None:
+							again = [(i, pa, engine.in_booking(r, total, len(priced))) for i, pa, r, _q in priced]
+							quotes = [engine.price_stay(ctx_cache[key], r) for _i, _pa, r in again]
+							if all(q.sellable for q in quotes):
+								priced = [(i, pa, r, q) for (i, pa, r), q in zip(again, quotes, strict=True)]
+					rooms_out = []
+					for idx, party, req, q in priced:
 						offer = {"v": 1, "property": property, "room_type": rt, "board": board, "rate_plan": rp,
 						         "contract": contract_row.name, "version": version, "check_in": check_in.isoformat(),
 						         "check_out": check_out.isoformat(), "party": party.key(), "market": market,
@@ -428,34 +438,38 @@ def _extras_list(extras) -> tuple[ExtraRequest, ...]:
 	return tuple(out)
 
 
-def create_quote(offer_key: str, *, extras=None, promo_codes=None, guest_email: str | None = None,
-                 session_id: str | None = None) -> dict:
+def _offer_request(offer_key: str, *, extras, promo_codes, now) -> tuple[dict, StayRequest, tuple]:
 	offer = verify(offer_key)
-	now = now_datetime()
 	extras_req = _extras_list(extras)
-	req = request_from_offer(offer, sale_at=now, extras=extras_req, promo_codes=promo_codes)
-	gkey = ctxmod.guest_key(guest_email)
-	# the offer's contract version might have been superseded since the search:
-	# quotes always price on the version on sale NOW
+	return offer, request_from_offer(offer, sale_at=now, extras=extras_req, promo_codes=promo_codes), extras_req
+
+
+def _on_sale(offer: dict, now) -> tuple[object | None, dict | None]:
+	"""(the contract version on sale now, None) or (None, the refusal). The offer's version might
+	have been superseded since the search: quotes always price on the version on sale NOW."""
 	live = contracts.active_version_header(offer["contract"], now)
 	if not live:
 		frappe.throw(_("This rate is no longer on sale — please search again."))
 	stopped = contracts.not_on_sale(offer["contract"])        # suspended since the search (ADR-045)
 	if stopped:
-		return {"ok": False, "reasons": [{"code": stopped.code, "message": str(stopped)}]}
-	q, terms = price_request(live.version_id, req, gkey=gkey)
-	if not q.sellable:
-		return {"ok": False, "reasons": q.reasons}
+		return None, {"ok": False, "reasons": [{"code": stopped.code, "message": str(stopped)}]}
+	return live, None
+
+
+def _stay_refusal(offer: dict, req: StayRequest, now) -> dict | None:
+	"""Why the stay cannot be sold now: no room left, or a restriction of its scope."""
 	avail_count, _days = avail.stay_availability(req.property, req.room_type, offer["contract"], req.check_in,
 	                                            req.check_out, now.date())
 	if avail_count < 1:
 		return {"ok": False, "reasons": [{"code": "SOLD_OUT", "message": _("This room has just sold out.")}]}
-	scope = RestrictionScope(room_type=req.room_type, contract=offer["contract"], market=req.market,
-	                         rate_plan=req.rate_plan, channel=req.channel)
+	scope = avail.scope_for(req.room_type, offer["contract"], req.market, req.rate_plan, req.channel)
 	violations = avail.check_restrictions(req.property, scope, req.check_in, req.check_out, now.date())
 	if violations:
 		return {"ok": False, "reasons": [v.to_dict() for v in violations]}
+	return None
 
+
+def _persist(offer_key: str, offer: dict, req: StayRequest, q, terms, live, now, *, session_id, changed_inputs) -> dict:
 	result = q.to_dict(internal=True)
 	doc = frappe.get_doc({
 		"doctype": "TEX Quote", "property": req.property, "status": "Open", "sales_channel": req.channel,
@@ -468,10 +482,81 @@ def create_quote(offer_key: str, *, extras=None, promo_codes=None, guest_email: 
 		"result_json": json.dumps(result, sort_keys=True, ensure_ascii=False),
 	})
 	doc.insert(ignore_permissions=True)
-	price_changed = to_str(q.total) != offer.get("total") and not extras_req and promo_codes is None
+	price_changed = to_str(q.total) != offer.get("total") and not changed_inputs
 	return {"ok": True, "quote_id": doc.name, "expires_at": str(doc.expires_at), "price_changed": price_changed,
 	        "previous_total": offer.get("total"), "quote": q.to_dict(internal=False),
 	        "room_index": offer.get("room_index", 0)}
+
+
+def create_quote(offer_key: str, *, extras=None, promo_codes=None, guest_email: str | None = None,
+                 session_id: str | None = None) -> dict:
+	"""One room priced on its own. The rooms of a booking are quoted together (``create_quotes``):
+	a minimum basket is the whole booking's (G-84)."""
+	now = now_datetime()
+	offer, req, extras_req = _offer_request(offer_key, extras=extras, promo_codes=promo_codes, now=now)
+	gkey = ctxmod.guest_key(guest_email)
+	live, refusal = _on_sale(offer, now)
+	if refusal:
+		return refusal
+	q, terms = price_request(live.version_id, req, gkey=gkey)
+	if not q.sellable:
+		return {"ok": False, "reasons": q.reasons}
+	refusal = _stay_refusal(offer, req, now)
+	if refusal:
+		return refusal
+	return _persist(offer_key, offer, req, q, terms, live, now, session_id=session_id,
+	                changed_inputs=bool(extras_req) or promo_codes is not None)
+
+
+def create_quotes(rooms: list[dict], *, promo_codes=None, guest_email: str | None = None,
+                  session_id: str | None = None) -> dict:
+	"""The rooms of one booking quoted together (G-84, ADR-057): each ``{"offer_key", "extras"}``
+	is an offer of the same search (one hotel, currency, market and channel, distinct rooms).
+	Every room is priced alone, then — when a minimum basket refused a promotion — again with the
+	booking's basket (``engine.booking_pass``), which each quote records in its request; the
+	booking checks that its rooms are the ones priced together. → {"ok", "rooms": one
+	``create_quote`` answer per room, in order, "booking_basket"}. A room that cannot be sold
+	answers with its reasons; the others are quoted (priced alone when the booking cannot be)."""
+	if isinstance(rooms, str):
+		rooms = json.loads(rooms)
+	if not rooms or len(rooms) > MAX_ROOMS:
+		frappe.throw(_("Select between 1 and {0} rooms.").format(MAX_ROOMS))
+	now = now_datetime()
+	gkey = ctxmod.guest_key(guest_email)
+	items = []
+	for r in rooms:
+		offer, req, extras_req = _offer_request(str(r.get("offer_key") or ""), extras=r.get("extras"),
+		                                        promo_codes=promo_codes, now=now)
+		items.append({"key": r["offer_key"], "offer": offer, "req": req, "changed": bool(extras_req) or
+		              promo_codes is not None})
+	keys = {(i["offer"]["property"], i["offer"]["currency"], i["offer"]["market"], i["offer"]["channel"]) for i in items}
+	indexes = [int(i["offer"].get("room_index") or 0) for i in items]
+	if len(keys) != 1 or len(set(indexes)) != len(indexes):
+		frappe.throw(_("The rooms of one booking must come from one search. Please search again."))
+	for i in items:
+		i["live"], i["out"] = _on_sale(i["offer"], now)
+		if i["out"] is None:
+			i["q"], i["terms"] = price_request(i["live"].version_id, i["req"], gkey=gkey)
+			if not i["q"].sellable:
+				i["out"] = {"ok": False, "reasons": i["q"].reasons}
+	total = None
+	if all(i["out"] is None for i in items):
+		total = engine.booking_pass([i["q"] for i in items])
+		if total is not None:
+			again = [price_request(i["live"].version_id, engine.in_booking(i["req"], total, len(items)), gkey=gkey)
+			         for i in items]
+			if all(q.sellable for q, _t in again):
+				for i, (q, t) in zip(items, again, strict=True):
+					i["q"], i["terms"], i["req"] = q, t, q.request
+			else:
+				total = None
+	for i in items:
+		if i["out"] is None:
+			i["out"] = _stay_refusal(i["offer"], i["req"], now) or _persist(
+				i["key"], i["offer"], i["req"], i["q"], i["terms"], i["live"], now, session_id=session_id,
+				changed_inputs=i["changed"])
+	return {"ok": all(i["out"]["ok"] for i in items), "rooms": [i["out"] for i in items],
+	        "booking_basket": to_str(total) if total is not None else None}
 
 
 def load_quote(quote_id: str, *, for_update: bool = False) -> tuple[dict, dict, dict]:
