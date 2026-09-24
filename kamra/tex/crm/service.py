@@ -826,12 +826,37 @@ def set_abandoned_status(name: str, status: str, note: str | None = None) -> Non
 	      new={"status": status}, reason=note)
 
 
+def _commit() -> None:
+	"""A scheduler job's batch is its own unit of work in production; tests keep one transaction."""
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- scheduler job batch boundary
+
+
+# The purge (third review of ADR-056, M-6): old events are read through ``tex_funnel_time_session`` without
+# a lock and deleted by primary key, PURGE_BATCH at a time, each batch committed. A DELETE on
+# ``occurred_at`` without that index locked every funnel row and gap until the job ended, and every booking's
+# tracking waited behind it.
+PURGE_BATCH = 500
+PURGE_OLD = """SELECT name FROM `tabTEX Funnel Event` WHERE occurred_at < %(cutoff)s
+	ORDER BY occurred_at LIMIT %(n)s"""
+PURGE_EVENTS = "DELETE FROM `tabTEX Funnel Event` WHERE name IN %(names)s"
+
+
 def purge_funnel(days: int = 180) -> int:
-	"""Data minimisation: funnel events older than ``days`` are deleted."""
+	"""Data minimisation: funnel events older than ``days`` are deleted, oldest first, in small committed
+	batches (``PURGE_OLD``, ``PURGE_EVENTS``). → how many."""
 	cutoff = now_datetime() - timedelta(days=days)
-	n = frappe.db.count("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
-	frappe.db.delete("TEX Funnel Event", {"occurred_at": ("<", cutoff)})
-	return n
+	purged = 0
+	while True:
+		names = frappe.db.sql(PURGE_OLD, {"cutoff": cutoff, "n": PURGE_BATCH}, pluck=True)
+		if not names:
+			break
+		frappe.db.sql(PURGE_EVENTS, {"names": tuple(names)})
+		_commit()
+		purged += len(names)
+		if len(names) < PURGE_BATCH:
+			break
+	return purged
 
 
 # ─── duplicates and merging (ADR-056 second review) ─────────────────────

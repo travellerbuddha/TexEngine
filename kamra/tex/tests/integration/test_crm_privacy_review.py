@@ -250,8 +250,10 @@ class TestWithdrawalLocksOnlyItsRows(PrivacyCase):
 			frappe.db.savepoint("h1_book")
 			patch, failed = tracked(event, rollback_to="h1_book")
 			real_rollback = frappe.db.rollback
-			with patch, mock.patch.object(frappe.local.db, "rollback",
-			                              side_effect=lambda **kw: real_rollback(save_point="h1_book")):
+			# the retry's full rollback stands in for InnoDB's, back to before this booking; a step's rollback to
+			# its own savepoint (a mail that could not be queued) stays what it is
+			with patch, mock.patch.object(frappe.local.db, "rollback", side_effect=lambda save_point=None, **kw:
+			                              real_rollback(save_point=save_point or "h1_book")):
 				as_user("Guest")
 				out = public.book(site=SLUG, quote_ids=[q["quote_id"]], guest={**GUEST, "email": f"{session}@example.com"},
 				                  payment_method=method, session_id=session, idempotency_key=f"idem-{session}")

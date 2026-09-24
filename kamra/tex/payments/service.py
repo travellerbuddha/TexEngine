@@ -23,7 +23,7 @@ from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
-from kamra.tex.services.txn import TRANSACTION_LOST
+from kamra.tex.services.txn import undo_step
 
 
 class AccountRefused(frappe.ValidationError):
@@ -279,6 +279,9 @@ def _new_txn(**kw) -> frappe.model.document.Document:
 	return doc
 
 
+CHECKOUT_SAVEPOINT = "tex_checkout"
+
+
 def start_payment(*, property: str, amount, currency: str, provider_account: str, booking: str | None = None,
                   payment_link: str | None = None, description: str, customer: dict, return_url: str,
                   idempotency_key: str, method: str = "Card", locale: str = "en",
@@ -321,15 +324,18 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
 		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation)
+	frappe.db.savepoint(CHECKOUT_SAVEPOINT)
 	try:
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
 		                                           description=description, return_url=return_url,
 		                                           callback_url=callback_url(txn.name, "return"),
 		                                           notify_url=callback_url(txn.name, "notify"),
 		                                           customer=customer, locale=locale))
-	except TRANSACTION_LOST:
-		raise                          # the request's transaction is gone: retried or failed, never recorded as here
 	except Exception as e:
+		# a deadlock: the request's transaction is gone, raised for the retry, never recorded as here; anything
+		# else (a lock wait timeout undoes only its statement) is a failed start, recorded below (ADR-056
+		# second and third reviews)
+		undo_step(e, CHECKOUT_SAVEPOINT)
 		log_exception(f"TEX payment start failed {txn.name}")
 		if existing:
 			# the gateway may refuse a second checkout for the same order; a new charge gets a

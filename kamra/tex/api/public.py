@@ -24,7 +24,7 @@ from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
 from kamra.tex.services import content, guest_changes, modification, quoting, sites
-from kamra.tex.services.txn import TRANSACTION_LOST, retry_on_deadlock
+from kamra.tex.services.txn import retry_on_deadlock, undo_step
 
 
 def _limit(default: int, key: str):
@@ -678,6 +678,9 @@ def _own_quotes(site, ids: list[str], session_id: str | None) -> list[str]:
 	return [q for q in dict.fromkeys(ids) if q in ok]
 
 
+TRACK_SAVEPOINT = "tex_funnel_event"
+
+
 def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
 	"""One funnel event (R-38). Analytics need no identity: an e-mail hash (the only link to a
 	person) is kept only when the visitor ticked marketing consent in that same step, and no
@@ -688,6 +691,7 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 	email = payload.get("email")
 	payload = {k: v for k, v in payload.items() if str(k).lower() not in FUNNEL_CONTACT_KEYS}
 	email = email.strip().lower() if consent and isinstance(email, str) and email.strip() else None
+	frappe.db.savepoint(TRACK_SAVEPOINT)
 	try:
 		frappe.get_doc({
 			"doctype": "TEX Funnel Event", "event": event, "occurred_at": now_datetime(), "site": site.name,
@@ -695,11 +699,11 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 			"email_hash": hashlib.sha256(email.encode()).hexdigest() if email else None,
 			"consent_marketing": 1 if consent else 0,
 			"payload": json.dumps(payload or {}, default=str)[:4000]}).insert(ignore_permissions=True)
-	except TRANSACTION_LOST:
-		# the database rolled the request's transaction back (or it cannot go on): never carry on as if
-		# the booking it belongs to were written; the request is retried or fails (ADR-056 second review)
-		raise
-	except Exception:
+	except Exception as e:
+		# a deadlock rolled the request's transaction back: raised, so the booking it belongs to is retried
+		# or fails, never reported (ADR-056 second review). Anything else, a lock wait timeout included
+		# (it undoes only its statement), undoes this event alone and the request goes on (third review)
+		undo_step(e, TRACK_SAVEPOINT)
 		log_exception("TEX funnel event")
 
 
