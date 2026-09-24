@@ -3281,3 +3281,124 @@ guest in its own query. One test covered the report.
   18 errors because the views and filters did not exist. The old production endpoint's test passed
   before and after. E2E `reports.spec.ts`: filters, a view switch, reconciled totals, cancellations
   and 375 px without sideways scroll.
+
+## ADR-060 The entry screens say TEX Engine and offer the source; "/" leads to the admin app or sign-in; the navigation carries R-35's sub-sections
+**Context.** Two gaps of the 2026-09-23 audit.
+- G-60 (R-01, R-33). The sign-in page said "kamra PMS" and offered English and Arabic only. The
+  browser tab said "Kamra PMS", the Desk apps tile "Kamra", and `hooks.py` `app_title` /
+  `app_description` described a PMS. `/` was blank: the site's home page is the SPA boot page
+  (`kamra`, set by `kamra.install`), whose router is mounted at `/kamra`, so at `/` it rendered
+  nothing.
+- AGPL-3.0 section 13. TEX Engine is a network service derived from Kamra PMS. Users who
+  interact with it remotely must be offered its complete corresponding source. No screen did.
+- G-64 (R-35). The navigation had the eleven areas only. Missing: Contract versions, Price
+  periods, Occupancy rules, Rate plans, Restrictions and Bulk editor under Rates & Contracts;
+  Rooms and Analytics under Booking Engine; Loyalty and Communications as CRM sections;
+  Campaigns does not exist.
+
+**Decision.**
+- *Names (ADR-001 kept).* Unchanged: the app name `kamra`, the Python package, the Frappe
+  modules, DocTypes, the routes (`/kamra`, `/book`), `app_publisher`, the apps-screen route
+  `/kamra` (`marketplace_install_check`), `license.txt`, `NOTICE.md` and every copyright header.
+  Only display strings change:
+  - `app_title` "TEX Engine"; a description of the commercial platform "derived from Kamra
+    (AGPL-3.0)";
+  - the Desk logo and the apps-screen tile: the TEX mark (`/assets/kamra/tex-mark.svg`), titled
+    "TEX Engine";
+  - `index.html`: title and description; the favicons are the TEX mark.
+- *The name shown* is TEX Settings > Brand name (default "TEX Engine"), a platform setting read
+  on the server (`kamra.tex.entry.brand_name`: whitespace collapsed, at most 60 characters).
+  - `kamra/www/kamra.py` writes it, escaped, into the page `<title>`.
+  - The sign-in page gets it from `kamra.tex.api.session.entry`: guest, GET only, 60 requests a
+    minute per IP. It returns the product, the brand, the source URL, the upstream and the
+    licence, and nothing about the site's hotels or users.
+  - `session.bootstrap` returns the same brand and the source URL for the admin app.
+  - No user-supplied CSS or JS anywhere.
+- *Sign-in page.* A TEX page (`tex/screens/login`) built from the TEX design system.
+  - The six TEX languages (en, tr, de, ru, ro, pl). The choice is the admin app's language
+    (`tex-lang`).
+  - Arabic is not offered: the TEX UI has no Arabic catalogs. The legacy PMS keeps its own
+    language switch, and the legacy housekeeping app keeps its own login (`screens/Login.tsx`).
+  - Kamra's public-playground demo buttons stay behind `kamra_demo_mode`, translated.
+- *Source offer (section 13).* The sign-in footer and the foot of the admin navigation (every
+  admin screen) show "Based on Kamra PMS · AGPL-3.0 · Source code".
+  - "Kamra PMS" links the upstream repository; "AGPL-3.0" the licence text.
+  - "Source code" links `kamra.tex.entry.source_url()`: the site config's `tex_source_url` when
+    it is an https URL (an operator who offers the source elsewhere, e.g. a tag of the release
+    they run), else the TEX repository (`https://github.com/travellerbuddha/TexEngine`).
+  - The operator keeps that URL serving the source of the version they run (GO_LIVE_READINESS
+    §3).
+  - The guest booking engine shows no such link: it is white-labelled per hotel. Whether and
+    how guests are offered the source is an owner decision.
+- *"/".* `kamra/www/kamra.py` answers any request outside its mount with a 302 (the page is
+  never cached):
+  - a Desk (System) user → `/kamra/tex`;
+  - a visitor → `/kamra/login`;
+  - a signed-in user without Desk access → `/me` (Frappe's portal).
+
+  This applies only while the site's home page is the SPA (as `kamra.install` sets it); a home
+  page a hotelier chose is never overridden. A verified custom booking host is unaffected:
+  `BookingHostRenderer` is a page renderer and claims `/` before the page is rendered (tested).
+  Rejected:
+  - `website_redirects`: they run before page renderers (a custom host's `/` would be
+    redirected), they are cached, and they cannot depend on the user;
+  - a `get_website_user_home_page` hook: it would override a hotelier's home page.
+- *Navigation (G-64).* Each area in `nav.ts` lists its sub-sections. The sidebar opens them while
+  the user is in the area, or with the area's toggle. The command palette reaches them, and each
+  area keeps its own tab strip. Every entry opens a working screen, or a real part of one:
+  - Rates & Contracts:
+    - Contracts (the list);
+    - Contract versions, Price periods, Occupancy rules and Rate plans: new lists across
+      contracts (`lists.versions`, `lists.version_rows`), from the current versions (drafts
+      and published) or all; a row opens its version on the matching tab;
+    - Markets (Settings → Markets), Promotions (the policy list), Currency (FX rates);
+    - Restrictions: a new list (`lists.restrictions`); consecutive days of one scope with the
+      same values read as one range, with the G-48 fields when the schema has them; a row
+      opens the grid on its first day (`/tex/inventory?start=`);
+    - Bulk editor: the grid with its bulk editor open (`/tex/inventory?bulk=1`).
+  - Booking Engine:
+    - Sites (configuration; a site's branding, widgets, domains and policies are its tabs);
+    - Rooms: new (`lists.rooms`), each room as the engine shows it, gaps flagged (no picture,
+      no description, no live contract), the live contracts that sell it and its translations;
+      texts are translated in Content (`content?kind=rooms`);
+    - Content;
+    - Analytics: a new screen on the existing `reports.dashboard` funnel, with tracking ids per site
+      and a link to Reports › Conversion (G-46, ADR-059).
+  - CRM: Guests, Segments, Loyalty, Abandoned bookings, Communications (new,
+    `lists.communications`: paged and filtered; no message body, which stays on the profile).
+  - Campaigns is not started. The sidebar lists it as "Not available yet": not a link, and not
+    in the command palette. This was chosen over leaving it out, so that R-35's structure and
+    the missing piece stay visible.
+- *Capabilities.* An entry is shown when the user holds, at the selected hotel, what its screen's
+  endpoints require. The endpoints enforce it:
+  - Each list declares its capability with `require_capability`. It then covers the named hotel
+    (checked) or every hotel where the capability is held; another hotel's rows never leave.
+  - Versions, rate plans and restrictions: `price.view`, as `contracts.get_contract` and the
+    grid.
+  - Periods and occupancy rules are cost: `price.view` and `price.view_cost` or `contract.edit`,
+    as `contracts.get_version`. A rate plan's adjustment is returned only where cost is seen
+    (G-11).
+  - Rooms: `booking_site.edit` at the hotel. Communications: `crm.view`, and the
+    communication's hotel must be one of the viewer's.
+  - Analytics: `report.view` (its endpoint's). The bulk editor: the grid's `price.view` and
+    `restriction.edit` or `inventory.edit`.
+  - A list offers "this hotel / all my hotels" when more than one hotel qualifies.
+
+**Consequences.**
+- `/` leads somewhere for everyone; links to `/kamra` keep working.
+- Existing sites keep their Website Settings favicon (`kamra-mark.svg`) on the pages Frappe
+  renders (Desk); an administrator changes it there. Frappe's own `/login` says "Login to
+  Frappe" (System Settings) with the TEX logo; TEX users are sent to `/kamra/login`.
+- Kept on purpose (legacy PMS, hidden while it is switched off): the housekeeping app's login,
+  and the AI assistant and MCP server texts that name Kamra PMS.
+- Sidebar group labels now meet 4.5:1 (part of G-63's contrast finding; G-63 stays open).
+- Tests:
+  - `test_entry_branding` (15). On the base commit `665b6b9`, 3 fail and 9 error. The 3 that
+    pass guard what must not change: the custom host's `/`, the SPA below its mount, and the
+    existing endpoints' refusals.
+  - e2e `entry-branding.spec` (5): sign-in page, site root, every new entry for revenue, the
+    agent's hidden entries and 403s, 375 px.
+- Open:
+  - CRM Campaigns (R-37, not started);
+  - the guest-facing source offer (owner decision);
+  - `tex_source_url`, or a public repository, kept reachable (owner).
