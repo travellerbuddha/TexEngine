@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, now_datetime
+from frappe.utils import cint, get_datetime, getdate, now_datetime
 
+from kamra.tex import money
 from kamra.tex.api._util import as_int, doc_dict, parse, text
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts as svc
-from kamra.tex.pricing import engine
+from kamra.tex.commercial import decimals
+from kamra.tex.pricing import ages, engine, matrix, occupancy
+from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -23,6 +27,11 @@ LOCKED_AFTER_PUBLISH = (*svc.FIXED_FIELDS, *svc.SELLING_FIELDS, "channels")
 VERSION_SETTINGS = svc.DRAFT_SETTINGS
 VERSION_TABLES = ("rooms", "periods", "period_rates", "age_bands", "occupancy_rules", "boards", "rate_plans",
                   "offers")
+# what a posted row carries that is not its content: the server's bookkeeping (client keys start with "_")
+ROW_BOOKKEEPING = ("name", "parent", "parenttype", "parentfield", "doctype", "idx", "creation", "modified", "owner",
+                   "modified_by", "docstatus")
+# the most rows a draft previewed with unsaved changes may have, over all its tables (ADR-061)
+OVERLAY_MAX_ROWS = 5000
 
 
 @frappe.whitelist()
@@ -145,6 +154,7 @@ def _catalogue(v, prop: str) -> dict:
 		"rate_plan_options": frappe.get_all("Rate Plan", filters={"property": prop, "disabled": 0},
 		                                    fields=["name", "rate_plan_name", "code", "tex_refundable"]),
 		"contract_doc": dict(c or {}), "editable": False, "cost_hidden": True,
+		"can_preview": False, "can_publish": False, "can_edit_contract": False,
 	}
 
 
@@ -158,9 +168,16 @@ def get_version(name: str):
 	out = doc_dict(v, exclude=("payload",))
 	out["validation_report"] = json.loads(v.validation_report) if v.validation_report else None
 	out["editable"] = v.status == "Draft" and scope.has_capability("contract.edit", prop)
+	# what the workspace may offer this viewer (ADR-061); the endpoints check again
+	out["can_preview"] = scope.has_capability("price.view_cost", prop)
+	out["can_publish"] = scope.has_capability("contract.publish", prop)
+	out["can_edit_contract"] = scope.has_capability("contract.edit", prop)
+	# the header's pricing basis is fixed once a version was published (the controller's own test)
+	out["basis_locked"] = svc.is_published(v.contract)
 	c = frappe.get_doc("TEX Contract", v.contract)
 	out["contract_doc"] = {f: c.get(f) for f in ("name", "property", "contract_code", "contract_name", "market",
 	                                             "pricing_basis", "contract_currency", "status")}
+	out["contract_doc"]["minor_units"] = money.minor_units(c.contract_currency)
 	out.update(_selling(v, c))
 	out["room_types"] = frappe.get_all("Room Type", filters={"property": c.property, "disabled": 0},
 	                                   fields=["name", "room_type_name", "adults_capacity", "children_capacity",
@@ -221,19 +238,127 @@ def save_version(name: str, data):
 			v.set(f, data[f])
 	for t in VERSION_TABLES:
 		if t in data:
-			clean = []
-			for row in data[t] or []:
-				row = {k: val for k, val in row.items() if not k.startswith("_") and k not in
-				       ("name", "parent", "parenttype", "parentfield", "doctype", "idx", "creation", "modified",
-				        "owner", "modified_by", "docstatus")}
-				clean.append(row)
-			v.set(t, clean)
+			v.set(t, _clean_rows(data[t]))
+	_require_values(v)
 	v.save(ignore_permissions=True)
 	return get_version(name)
 
 
+def _clean_rows(rows) -> list[dict]:
+	"""A posted table's rows without the client's keys (``_*``) and the server's bookkeeping."""
+	return [{k: val for k, val in row.items() if not k.startswith("_") and k not in ROW_BOOKKEEPING}
+	        for row in rows or []]
+
+
+def _blank(value) -> bool:
+	return value is None or (isinstance(value, str) and not value.strip())
+
+
+# (table, value field, whether a row needs a value) — GAP-8
+_VALUE_REQUIRED = (
+	("period_rates", "value", lambda r: (r.op or "").strip() != "INHERIT"),
+	("occupancy_rules", "value", lambda r: (r.op or "").strip() != "INHERIT"),
+	("boards", "adult_amount", lambda r: not cint(r.is_base)),
+)
+
+
+def _require_values(v) -> None:
+	"""A rule's value is never left blank (GAP-8, ADR-061): Frappe would store a blank as 0 and
+	the draft would price it as 0. INHERIT rules and the included board have no value; to remove
+	a price the editor removes its row."""
+	for table, field, needs in _VALUE_REQUIRED:
+		for row in v.get(table) or []:
+			if needs(row) and _blank(row.get(field)):
+				label = _(v.meta.get_field(table).label)
+				frappe.throw(_("{0}, row {1}: a value is required; clear the cell to remove the price.")
+				             .format(label, row.idx))
+
+
+def _overlay(name: str, data):
+	"""The draft ``name`` with the editor's unsaved ``data`` applied in memory, never saved
+	(GAP-1, ADR-061): the Pricing Workspace prices, validates and quotes what it shows before
+	anyone saves. ``data`` is what ``save_version`` takes and is applied the same way (the same
+	row cleaning, selling terms and settings), then checked as a save checks it: blank values,
+	decimal places, mandatory fields, select options and lengths. Each row is named after its
+	client key (``~<_key>``, else ``~<table>-<position>``), so the rule ids of an explanation or an
+	issue point back to the row; a name used twice in one table is refused. Only drafts, only for
+	who may edit them; nothing is written or audited."""
+	data = parse(data, {})
+	if not isinstance(data, dict):
+		frappe.throw(_("Invalid JSON payload."))
+	v = frappe.get_doc("TEX Contract Version", name)
+	prop = scope.property_of("TEX Contract Version", name)
+	scope.require("contract.edit", prop)
+	if v.status != "Draft":
+		frappe.throw(_("Only draft versions can be previewed with unsaved changes."))
+	for t in VERSION_TABLES:
+		rows = data.get(t)
+		if t in data and rows is not None and not (isinstance(rows, list) and all(isinstance(r, dict) for r in rows)):
+			frappe.throw(_("Invalid JSON payload."))
+	total = sum(len(data[t] or []) if t in data else len(v.get(t) or []) for t in VERSION_TABLES)
+	if total > OVERLAY_MAX_ROWS:
+		frappe.throw(_("A draft previewed with unsaved changes has at most {0} rows; this one has {1}.")
+		             .format(OVERLAY_MAX_ROWS, total))
+	if "selling" in data:
+		_set_selling(v, data["selling"])
+	for f in VERSION_SETTINGS:
+		if f in data:
+			v.set(f, data[f])
+	for t in VERSION_TABLES:
+		if t in data:
+			keys = [text(row.get("_key"), 100) for row in data[t] or []]
+			names = [f"~{key}" if key else f"~{t}-{i + 1}" for i, key in enumerate(keys)]
+			# issue refs and matrix sources name a row by this: it must name one row of the table
+			seen: set[str] = set()
+			for row_name in names:
+				if row_name in seen:
+					frappe.throw(_("{0}: two rows have the key {1}; each row needs its own key.")
+					             .format(_(v.meta.get_field(t).label), row_name[1:]))
+				seen.add(row_name)
+			v.set(t, _clean_rows(data[t]))
+			for child, row_name in zip(v.get(t), names, strict=True):
+				child.name = row_name
+	_require_values(v)
+	# what a save runs before it writes, none of which writes: the DocType defaults, the decimal
+	# check (before_validate) and Frappe's own field checks
+	v._set_defaults()
+	decimals.check_inputs(v)
+	v._validate_mandatory()
+	for d in (v, *v.get_all_children()):
+		d._validate_data_fields()
+		d._validate_selects()
+		d._validate_non_negative()
+		d._validate_length()
+	for d in (v, *v.get_all_children()):
+		_as_stored(d)
+	return v
+
+
+def _as_stored(d) -> None:
+	"""``d``'s values as a save stores them and a load reads them back: checks 0/1, integers,
+	decimals as the exact Decimal (a blank one is 0), a blank date none. The overlay then prices
+	what a save would."""
+	for df in d.meta.fields:
+		f, value = df.fieldname, d.get(df.fieldname)
+		if df.fieldtype == "Check":
+			d.set(f, 1 if cint(value) else 0)
+		elif df.fieldtype == "Int":
+			d.set(f, cint(value))
+		elif df.fieldtype in decimals.FLOAT_LIKE:
+			d.set(f, money.db_input(value, places=decimals.places_of(df)) or money.ZERO)
+		elif df.fieldtype in ("Date", "Datetime") and value == "":
+			d.set(f, None)
+
+
+def _has_data(data) -> bool:
+	return data is not None and data != ""
+
+
 @frappe.whitelist()
-def validate_version(name: str):
+def validate_version(name: str, data=None):
+	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061)."""
+	if _has_data(data):
+		return svc.validate_doc(_overlay(name, data))
 	return svc.validate_version(name)
 
 
@@ -263,18 +388,25 @@ def withdraw_version(name: str, reason: str):
 @frappe.whitelist(methods=["POST"])
 def preview_price(version: str, room_type: str, board: str, check_in: str, check_out: str, adults: int = 2,
                   children=None, rate_plan: str | None = None, market: str | None = None, channel: str = "DIRECT_WEB",
-                  currency: str | None = None, sale_at: str | None = None, promo_codes=None):
+                  currency: str | None = None, sale_at: str | None = None, promo_codes=None, data=None):
 	"""Price a stay on any version — including an unpublished draft — with the full
-	explanation (contract editor 'test price' panel; also answers 'which rule won')."""
+	explanation (contract editor 'test price' panel; also answers 'which rule won'). With
+	``data``: on the draft with those unsaved changes (ADR-061). ``children``: each an age in
+	whole years, ``{age_months}`` or ``{dob}`` (``_child_specs``). Each night of the quote reports
+	the running totals the Explain ladder shows (``subtotal_*``, GAP-12)."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view_cost", prop)
 	at = frappe.utils.get_datetime(sale_at) if sale_at else now_datetime()
+	kids = _child_specs(children, getdate(check_in))
+	draft = _overlay(version, data) if _has_data(data) else None
 	try:
-		terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v, at=at)
+		if draft is not None:
+			terms = svc.build_terms(draft, at=at)
+		else:
+			terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v, at=at)
 	except frappe.ValidationError as e:
 		return {"sellable": False, "reasons": [{"code": "BUILD", "message": str(e)}]}
-	kids = tuple(ChildSpec(age=int(a)) for a in (parse(children, []) or []))
 	req = StayRequest(property=prop, room_type=room_type, board=board, rate_plan=rate_plan or None,
 	                  check_in=getdate(check_in), check_out=getdate(check_out), adults=as_int(adults, 2, lo=1, hi=12),
 	                  children=kids, sale_at=at, market=(market or terms.market).upper(), channel=channel,
@@ -288,29 +420,249 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
 	return q.to_dict(internal=True)
 
 
+# the most children a preview prices (ADR-061 GAP-6); ages the way a guest's are given (0–17 years)
+PREVIEW_CHILDREN_MAX = 12
+CHILD_MONTHS_MAX = (ages.MAX_CHILD_AGE + 1) * 12 - 1      # 215: 17 years and 11 months
+
+
+def _child_specs(children, check_in: date) -> tuple[ChildSpec, ...]:
+	"""The preview's children (ADR-061 GAP-6), each one of:
+
+	* an age in whole years 0–17: an int, a digit-only string or an integral float (as before);
+	* ``{"age_months": n}``, an int 0–215, for the exact month a band starts or ends at;
+	* ``{"dob": "YYYY-MM-DD"}``, checked as a booking checks it (``ages.check_child_dob``: not in the
+	  future, under 18 on ``check_in``) and priced in completed months by the engine.
+
+	Anything else (a bool, ``7.5``, ``"7.5"``, a negative or adult age, another key) is refused, and
+	so are more than 12 children. A refusal never repeats a date of birth."""
+	items = parse(children, [])
+	if items is None:
+		items = []
+	if not isinstance(items, list):
+		frappe.throw(_("Child ages are whole years (0–17), {age_months} or {dob}."))
+	if len(items) > PREVIEW_CHILDREN_MAX:
+		frappe.throw(_("A price test takes at most {0} children.").format(PREVIEW_CHILDREN_MAX))
+	return tuple(_child_spec(item, n, check_in) for n, item in enumerate(items, 1))
+
+
+def _child_spec(item, n: int, check_in: date) -> ChildSpec:
+	years = None
+	if isinstance(item, bool):
+		years = None
+	elif isinstance(item, int):
+		years = item
+	elif isinstance(item, float) and item.is_integer():
+		years = int(item)
+	elif isinstance(item, str) and item.strip().isascii() and item.strip().isdigit():
+		years = int(item.strip())
+	elif isinstance(item, dict) and set(item) == {"age_months"}:
+		months = item["age_months"]
+		if isinstance(months, int) and not isinstance(months, bool) and 0 <= months <= CHILD_MONTHS_MAX:
+			return ChildSpec(age_months=months)
+	elif isinstance(item, dict) and set(item) == {"dob"}:
+		dob = _iso_date(item["dob"])
+		if dob is not None:
+			try:
+				ages.check_child_dob(dob, check_in, today=getdate())
+			except PricingError as e:
+				frappe.throw(_("Child {0}: {1}").format(n, str(e)))
+			return ChildSpec(dob=dob)
+	if years is not None and 0 <= years <= ages.MAX_CHILD_AGE:
+		return ChildSpec(age=years)
+	frappe.throw(_("Child {0}: {1}").format(n, _("Child ages are whole years (0–17), {age_months} or {dob}.")))
+
+
+def _iso_date(value) -> date | None:
+	"""``YYYY-MM-DD`` → the date; anything else None (never echoed: a date of birth is personal)."""
+	if not isinstance(value, str) or len(value.strip()) != 10:
+		return None
+	try:
+		return date.fromisoformat(value.strip())
+	except ValueError:
+		return None
+
+
+# the ops an entered price is adjusted by (ADR-061 GAP-7: the base room's relative entry, O4, and the
+# bulk Adjust…), and the most prices one call adjusts
+ADJUST_OPS = (Op.ABSOLUTE, Op.MULTIPLY, Op.PERCENT_OF, Op.ADJUST_PERCENT, Op.ADD, Op.SUBTRACT)
+ADJUST_VALUES_MAX = 500
+
+
+@frappe.whitelist(methods=["POST"])
+def apply_op_values(version: str, values, op: str, value):
+	"""Entered prices of a draft changed once by ``op`` ``value`` (ADR-061 GAP-7, D2): the workspace
+	never computes money, so a relative entry on the base room (O4: "+10%" on 70.00 is stored as
+	ABSOLUTE 77.00) and the bulk Adjust… preview ask the server. Each value is computed as the ARI
+	grid's rate change computes one (``matrix.adjust_amount``: the op on the price, HALF_UP to the
+	contract currency). Read-only: nothing is written or audited.
+
+	``values``: at most 500 decimal strings (None or "" for a cell without a price). → one
+	``{value, error}`` per value, in order: the new price as exact decimal text, or None with
+	``NO_VALUE`` (no price given) or ``NEGATIVE`` (the result would be below zero)."""
+	row = frappe.db.get_value("TEX Contract Version", version, ["contract", "status"], as_dict=True)
+	if not row:
+		frappe.throw(_("{0} {1} not found").format(_("TEX Contract Version"), version), frappe.DoesNotExistError)
+	prop = scope.property_of("TEX Contract Version", version)
+	scope.require("contract.edit", prop)
+	if row.status != "Draft":
+		frappe.throw(_("Only draft versions can be edited — create a new draft."))
+	if op not in {o.value for o in ADJUST_OPS}:
+		frappe.throw(_("An adjustment is an amount, a factor, a percentage or a change by an amount or a "
+		               "percentage."))
+	amount = _typed(value, _("Value"))
+	if amount is None:
+		frappe.throw(_("Value: a value is required."))
+	items = parse(values, None)
+	if not isinstance(items, list) or len(items) > ADJUST_VALUES_MAX:
+		frappe.throw(_("Prices to adjust are a list of at most {0} values.").format(ADJUST_VALUES_MAX))
+	currents = [_typed(v, _("Price {0}").format(i)) for i, v in enumerate(items, 1)]
+	currency = frappe.db.get_value("TEX Contract", row.contract, "contract_currency")
+	out = []
+	for current in currents:
+		if current is None:
+			out.append({"value": None, "error": "NO_VALUE"})
+			continue
+		try:
+			out.append({"value": money.to_str(matrix.adjust_amount(current, Op(op), amount, currency)),
+			            "error": None})
+		except PricingError as e:
+			if str(e) != "NEGATIVE":
+				raise
+			out.append({"value": None, "error": "NEGATIVE"})
+	return out
+
+
+def _typed(value, label: str):
+	"""``decimals.typed`` for an argument of any JSON shape: a list or an object is not a number."""
+	if isinstance(value, (list, dict)):
+		frappe.throw(_("{0}: {1} is not a number.").format(label, json.dumps(value)[:40]), title=_("Invalid number"))
+	return decimals.typed(value, label)
+
+
+# sample parties priced by ``price_matrix`` (ADR-061, GAP-2b): at most this many, of at most so many
+# adults and children each
+MATRIX_PARTIES_MAX, PARTY_ADULTS_MAX, PARTY_CHILDREN_MAX = 12, 12, 8
+
+
+def _parties(raw) -> list[tuple[int, tuple[str, ...]]] | None:
+	"""The sample parties ``[{adults, children: [band code]}]`` of ``price_matrix``, checked;
+	None when none were asked for."""
+	if raw is None or raw == "":
+		return None
+	items = parse(raw, None)
+	if not isinstance(items, list) or len(items) > MATRIX_PARTIES_MAX:
+		frappe.throw(_("Sample parties are a list of at most {0} parties.").format(MATRIX_PARTIES_MAX))
+	out = []
+	for i, p in enumerate(items, 1):
+		adults = p.get("adults") if isinstance(p, dict) else None
+		kids = p.get("children", []) if isinstance(p, dict) else None
+		kids = [] if kids is None else kids
+		if (not isinstance(adults, int) or isinstance(adults, bool) or not 1 <= adults <= PARTY_ADULTS_MAX
+		        or not isinstance(kids, list) or len(kids) > PARTY_CHILDREN_MAX
+		        or not all(isinstance(k, str) and k.strip() for k in kids)):
+			frappe.throw(_("Sample party {0}: 1 to {1} adults and at most {2} children, each named by an age "
+			               "band code.").format(i, PARTY_ADULTS_MAX, PARTY_CHILDREN_MAX))
+		out.append((adults, tuple(k.strip().upper()[:40] for k in kids)))
+	return out
+
+
+def _rule_dict(r) -> dict:
+	"""An occupancy rule of the built terms, as the workspace shows an inherited one."""
+	return {"rule_id": r.rule_id, "target": r.target.value, "position": r.position, "age_band": r.age_band,
+	        "adults": r.adults, "children": r.children, "room_type": r.room_type, "period": r.period,
+	        "op": r.op.value, "value": matrix.rule_value(r.value), "is_override": r.is_override, "source": r.source}
+
+
+def _occupancy_defaults() -> dict:
+	"""What the engine assumes where no rule prices a slot (D12): every adult pays the full unit
+	(``occupancy.GLOBAL_ADULT_DEFAULT``); a child has no default (ADR-007: NO_CHILD_RULE)."""
+	a = occupancy.GLOBAL_ADULT_DEFAULT
+	return {"adult": {"rule_id": a.rule_id, "target": a.target.value, "op": a.op.value,
+	                  "value": matrix.rule_value(a.value), "source": a.source, "note": a.note},
+	        "child": None}
+
+
+def _party_cells(terms, room_type: str, parties) -> list[dict]:
+	out = []
+	for adults, kids in parties:
+		cell = {"cells": {}, "slots": {}, "errors": {}}
+		for p in terms.periods:
+			try:
+				total, slots = matrix.party_total(terms, room_type, p, adults, kids)
+			except (Unsellable, PricingError) as e:
+				cell["cells"][p.code] = None
+				cell["errors"][p.code] = getattr(e, "message", None) or str(e)
+				continue
+			cell["cells"][p.code] = money.to_str(total)
+			cell["slots"][p.code] = slots
+		out.append(cell)
+	return out
+
+
 @frappe.whitelist()
-def price_matrix(version: str, adults: int = 2):
-	"""Nightly unit (base person / room price) per room × period for the editor grid."""
+def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_room: str | None = None):
+	"""Nightly unit (base person / room price) per room × period for the editor grid. With
+	``data``: of the draft with those unsaved changes (ADR-061); a draft that cannot be built
+	answers ``build_error``. ``adults`` is accepted for older callers and unused: the unit does
+	not depend on the party.
+
+	Besides the cells (ADR-061, GAP-2/2b/3): each cell's source (``rooms[].sources``, the rule that
+	priced it), each room's effective capacity, the age bands with their origin, the occupancy
+	rules inherited from pricing policies and the engine's defaults (``occupancy_defaults``); with
+	``parties`` (``[{adults, children: [band code]}]``) and ``party_room``, the occupancy total of
+	each sample party per period (``party_cells``)."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view", prop)
 	if not _sees_cost(prop):
 		frappe.throw(_("Not permitted: {0}.").format("price.view_cost"), frappe.PermissionError)
-	terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v)
+	wanted = _parties(parties)
+	at = now_datetime()
+	if _has_data(data):
+		doc = _overlay(version, data)
+		try:
+			terms = svc.build_terms(doc, at=at)
+		except frappe.ValidationError as e:
+			return {"build_error": str(e), "rooms": [], "periods": []}
+	else:
+		doc = v
+		if v.status != "Draft":
+			terms = svc.load_terms(version)
+			at = get_datetime(v.effective_from) if v.effective_from else at    # what the payload froze
+		else:
+			terms = svc.build_terms(v, at=at)
+	if wanted is not None and party_room not in terms.rooms:
+		frappe.throw(_("The sample parties' room {0} is not a room of this contract.").format(party_room or "—"))
 	from kamra.tex.pricing import rooms as room_math
 
 	out = []
 	for rt in sorted(terms.rooms):
-		row = {"room_type": rt, "name": terms.rooms[rt].name, "cells": {}}
+		spec = terms.rooms[rt]
+		row = {"room_type": rt, "name": spec.name, "cells": {}}
+		sources = {}
 		for p in terms.periods:
 			try:
 				row["cells"][p.code] = str(room_math.room_unit(terms, rt, p))
 			except Unsellable as u:
 				row["cells"][p.code] = None
 				row.setdefault("errors", {})[p.code] = u.message
+				continue
+			sources[p.code] = matrix.unit_source(terms, rt, p)
+		row["sources"] = sources
+		row["capacity"] = {"max_adults": spec.max_adults, "max_children": spec.max_children,
+		                   "max_occupants": spec.max_occupants, "min_adults": spec.min_adults,
+		                   "included_adults": spec.included_adults}
 		out.append(row)
-	return {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
-	                    for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency}
+	band_source = svc.band_source(doc, terms, at) if terms.age_bands else "version"
+	result = {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
+	                      for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency,
+	          "age_bands": [{"code": b.code, "label": b.label, "from_months": b.from_months, "to_months": b.to_months,
+	                         "is_infant": b.is_infant, "source": band_source} for b in terms.age_bands],
+	          "inherited_rules": [_rule_dict(r) for r in terms.occupancy_rules if r.source != "version"],
+	          "occupancy_defaults": _occupancy_defaults()}
+	if wanted is not None:
+		result["party_cells"] = _party_cells(terms, party_room, wanted)
+	return result
 
 
 @frappe.whitelist(methods=["POST"])

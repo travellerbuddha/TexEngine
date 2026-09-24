@@ -472,6 +472,69 @@ hotel sold out on the specs' random stay dates (a search without rates, `booking
 `demo_seed.release_test_bookings` released 645 future test-run stays under the bench lock (and 10
 more before the last run).
 
+**Pricing Workspace, slice S2 (2026-09-24, ADR-061, branch `pw-backend` on main `1575c8b`).**
+Backend only: `price_matrix`, `validate_version` and `preview_price` take the editor's unsaved
+`data` and work on the draft in memory (the read-only overlay: `contract.edit` and Draft only, the
+save's own checks, `~<_key>` rule ids, at most 5,000 rows, nothing saved or audited); a blank rule
+value is refused by `save_version` (it was stored and priced as 0); `get_version` adds
+`can_preview`, `can_publish`, `can_edit_contract`, `basis_locked` and `contract_doc.minor_units`.
+New `test_pricing_workspace_api` (17; on the base, 14 fail and 3 pass: the basis change before and
+after publish and Finance's saved-matrix read pin existing behaviour); `test_security_regressions`
+G-11 allows the three flags in an agent's catalogue answer (false). On the branch, migrated with
+it: all 38 integration modules **800 OK**, 10 skipped (the 3 whole-site patch tests and the 7
+concurrency tests of the ADR-056 third review, as before); 425 unit tests; ruff clean. No frontend
+change in this slice. The workspace UI and the other backend slices are not built yet (R-04).
+
+**Pricing Workspace, slice S3 (2026-09-24, ADR-061, branch `pw-backend`).** Backend and frontend
+types: `price_matrix` keeps its keys and adds, from the engine's own resolvers (pure
+`pricing/matrix.py`), the rule behind each cell (`rooms[].sources`: scope, derivation chain,
+overridden rules), each room's effective capacity, the age bands with their origin (the version or
+the pricing policy), the occupancy rules inherited from policies, the engine's adult default, and,
+with `parties` and `party_room`, each sample party's occupancy total per period (after the engine's
+capacity check). New `test_matrix` (18, pure); `test_pricing_workspace_api` 31 (+14; on the S2 tip
+all 14 fail). On the branch, migrated with it: all 38 integration modules **814 OK**, 10 skipped (as
+before); 443 unit tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b` and the build
+pass. No screen changes. Performance measured with the opt-in `bench_pricing_workspace` (ADR-061):
+on 12 rooms × 26 periods (1,406 rows) the unsaved-data matrix takes 0.25 s (0.33 s with 12 sample
+parties), the preview 0.24 s, validation 2.3 s; near the 5,000-row cap 0.70 s, 0.69 s and 10 s
+(validation costs the same without data; the UI slices must keep one validation in flight). O1–O5
+are provisional owner decisions (GO_LIVE_READINESS owner input 13), none implemented on this
+branch. The workspace UI (S6–S16) and backend slices S4–S5 are not built yet (R-04 stays PARTIAL).
+
+**Pricing Workspace, slice S4 (2026-09-24, ADR-061, branch `pw-backend`).** Backend and frontend
+types: each validation issue says what it is about in an optional `ref` (the rule or rules, room,
+period, other period, age band(s), party and board; row names, or `~<_key>` for unsaved rows), so
+the workspace can mark the cell or row and show band labels; codes and messages are unchanged
+(80 scenarios compared). New publish errors for board rules: an unknown room or period, and two
+rules of one board for the same room and period (`BOARD_UNKNOWN_ROOM`, `BOARD_UNKNOWN_PERIOD`,
+`BOARD_DUPLICATE`); drafts with such rows can no longer be published (announced in
+GO_LIVE_READINESS; none on the development site). The draft overlay refuses two rows of one table
+with the same key (S2/S3 review item). New `test_validate_refs` (37, pure; 31 fail on the S3 tip);
+`test_pricing_workspace_api` 37 (+6; 4 fail on the S3 tip, 2 pin existing behaviour). On the
+branch, migrated with it: all 38 integration modules **820 OK**, 10 skipped (as before); 480 unit
+tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b`, the build and `i18n:tex` pass. `bench_pricing_workspace`: validation with refs 1.9 s saved / 2.1 s unsaved on 12 rooms × 26 periods, 9.5 s near the cap (S3: 2.3 s, 10 s), so no slowdown. O1–O5 are unchanged by S4
+(none on this branch; owner input 13). The workspace UI (S6–S16) and backend slice S5 are not built
+yet (R-04 stays PARTIAL).
+
+**Pricing Workspace, slice S5 (2026-09-24, ADR-061, branch `pw-backend`).** The last backend slice,
+with frontend types. The price test (`preview_price`) takes each child as an age in whole years
+(unchanged quotes: compared with the pre-S5 code on a published and a draft version), in months or
+by date of birth (checked as a booking checks it), and refuses anything else instead of failing or
+truncating (`7.5`, adult ages, more than 12 children). `apply_op_values` changes up to 500 entered
+prices of a draft once by an op, as the ARI grid's rate change does (HALF_UP to the contract
+currency; read-only; `contract.edit`): the server half of O4 and of the bulk Adjust…. **GAP-12:**
+each night of an internal quote reports `subtotal_adults`, `subtotal_children` and `subtotal_board`,
+running totals the engine already held (reported only, internal only: no price, total,
+explanation or engine version changes; the guest view and `strip_internal` never carry them).
+Tests: `test_engine` `TestReportedSubtotals` (7) and `test_matrix` `TestAdjustAmount` (4), 10 of the
+11 failing on the S4 tip; `test_pricing_workspace_api` 48 (+11, 10 failing on the S4 tip); 11
+mutants killed. On the branch, migrated with it: all 38 integration modules **831 OK**, 10 skipped
+(as before); 491 unit tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b`, the build and `i18n:tex` pass. `bench_pricing_workspace`: `apply_op_values`
+0.007 s for 500 prices; the overlay, matrix, preview and validation as after S4 (validation 2.1 s
+realistic, 9.6 s near the cap). O4's server half is on this branch (its cell commit is S9); O1–O3 and
+O5 are unchanged (S1, S13); all five stay owner input 13. The backend slices S2–S5 are done; the
+workspace UI (S6–S16) is not built yet (R-04 stays PARTIAL).
+
 ## 2. Summary
 
 | Status | Count | Requirements |
@@ -511,7 +574,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-01 | Source & identity | **COMPLETE** | AGPL notices, `NOTICE.md`, baseline 418ed1a in history; TEX shell branding; entry screens say TEX Engine: sign-in page in the six TEX languages with the brand from TEX Settings, tab title, favicons, Desk logo and apps tile, `hooks.py` title and description (app name, package, modules and routes unchanged, ADR-001); every entry screen offers the source, "Based on Kamra PMS · AGPL-3.0 · Source code" (G-60 fixed, ADR-060); review follow-up: guests (every booking-engine page, the widget's modal, the legacy guest pages) and Desk (Help › About) are offered it too, always the running version's source (`/tree/<commit>` or `tex_source_url` with `{commit}`, never with credentials), carried by the served pages; the sign-in page asks a two-factor account for its code and takes no other answer for a session; release pipelines guarded to the upstream repository (G-61 fixed) · `test_entry_branding` (G-60: 8; review follow-up: `TestSourceOffer`, `TestEntryOverHttp`, `TestSignInContract`), e2e `entry-branding.spec`, `shell.spec` | The legacy PMS is closed to hotel users while switched off (G-16 fixed, ADR-030); the legacy booking engine refuses TEX hotels and the legacy night audit leaves TEX stays alone (G-03, G-04 fixed, ADR-028); a Desk, REST or data-import reservation at a TEX hotel is refused, migration imports keep their amount as "Imported" (G-92 fixed, ADR-052); a hotel joining TEX is onboarding, and its Desk sells until an administrator sets it live in TEX (audited; TEX-mode banners in the TEX shell, the legacy shell and the Desk form; ADR-052 review). Kept on purpose (legacy PMS, hidden while off): the housekeeping app's login, AI assistant / MCP texts. Owner items (not spec bullets, GO_LIVE_READINESS §3, input 12): the repository public with every deployed commit pushed, or `tex_source_url` (and `tex_source_commit` for an install without its git checkout). |
 | R-02 | Architecture principles | **COMPLETE** | `kamra/tex/pricing` has no frappe import (`TestPurity`); no import cycles; the frontend only formats decimal strings, and the TEX API returns decimal fields as exact strings, never floats; loyalty money is Decimal from a Currency field read exactly (G-72 fixed, ADR-055) · `TestPurity`, unit and integration `test_money_fields` | — (the legacy float pricing path remains only for hotels outside TEX, ADR-028: `Reservation.apply_pricing` never runs for a TEX hotel, G-92 fixed, ADR-052, `test_legacy_pricing`) |
 | R-03 | Pricing engine | **COMPLETE** | modular resolvers in `kamra/tex/pricing/*`; Decimal (`money.calc`); explanation trace; extras and taxes as of the sale time, every EXTRA/TAX step names its revision (G-20 fixed, ADR-031); decimal DB fields of 9 places that hold what was typed (refused otherwise) and are read as the exact Decimal (`money.db_dec`), FX rates to 10 significant digits, rule values explained as stored (G-72 fixed, ADR-055) · `test_engine.py`, `TestPayload`, `TestEffectiveDatedSources`, `TestEffectiveDatedExtrasAndTaxes`, unit `test_money_fields` (11), integration `test_money_fields` (9) | — |
-| R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `tex_contract.py`, `screens/rates/contracts/*`; the version editor's Discard returns to the last save, and a save's answer keeps what was edited while it was in flight (ADR-060 follow-up, branch `fix-editor`; also the policy, booking-site, content and loyalty editors) · `TestContractSelection`, `TestContractHeaderLock`, e2e `contract-admin`, `editor-edits` (3; all fail on main `b72b2a8`) | The e2e step for the header lock and status actions (G-50) passes in `contract-admin.spec.ts`. (Fixed: header lock G-50, ADR-045: a published contract's hotel, market, currency and basis are fixed, windows, channels, priority and sell currency are versioned, selection reads the frozen version, status moves through audited actions; review follow-up: versions frozen before G-50 keep their header narrowings (p25 snapshot and report), a suspend stops quotes and bookings in flight, the scheduler isolates each record, `TestContractHeaderLockReview`; contract selection G-17; cost visibility G-11.) |
+| R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `tex_contract.py`, `screens/rates/contracts/*`; the version editor's Discard returns to the last save, and a save's answer keeps what was edited while it was in flight (ADR-060 follow-up, branch `fix-editor`; also the policy, booking-site, content and loyalty editors) · `TestContractSelection`, `TestContractHeaderLock`, e2e `contract-admin`, `editor-edits` (3; all fail on main `b72b2a8`); Pricing Workspace backend, slice S2 (ADR-061, branch `pw-backend`): `price_matrix`, `validate_version` and `preview_price` price, validate and quote the editor's unsaved draft in memory (a read-only overlay: `contract.edit` and Draft only, the save's own checks except link validation and the window order, `~<_key>` rule ids, at most 5,000 rows, nothing saved or audited), a blank rule value is refused on save instead of being stored as 0, `get_version` says `can_preview` / `can_publish` / `can_edit_contract` / `basis_locked` and the currency's `minor_units`; slice S3: `price_matrix` names the rule behind each cell (scope, derivation chain, overridden rules; pure `pricing/matrix.py`), the effective room capacity, the age bands with their origin, the rules inherited from pricing policies and the engine's adult default, and prices sample parties per period (`parties`, `party_room`); slice S4: validation issues carry a `ref` to the rule(s), room, period, band(s), party and board they are about (messages unchanged), board rules for an unknown room or period and twin board rules are publish errors, the overlay refuses a row key used twice; slice S5: the price test takes a child's age in whole years, months or by date of birth (checked as a booking checks it) and refuses anything else, `apply_op_values` changes entered prices of a draft once by an op as the ARI grid does (read-only; the base room's relative entry, O4, and the bulk Adjust…), and each night of an internal quote reports its running subtotals after the adults, the children and the board (GAP-12, reported only: no price, explanation or engine version change; never in the guest view) · `test_pricing_workspace_api` (48), `test_matrix` (22), `test_validate_refs` (37), `test_engine` `TestReportedSubtotals` (7) | The Pricing Workspace UI (ADR-061, slices S6–S16) is not built yet; the backend slices S2–S5 are done. The e2e step for the header lock and status actions (G-50) passes in `contract-admin.spec.ts`. (Fixed: header lock G-50, ADR-045: a published contract's hotel, market, currency and basis are fixed, windows, channels, priority and sell currency are versioned, selection reads the frozen version, status moves through audited actions; review follow-up: versions frozen before G-50 keep their header narrowings (p25 snapshot and report), a suspend stops quotes and bookings in flight, the scheduler isolates each record, `TestContractHeaderLockReview`; contract selection G-17; cost visibility G-11.) |
 | R-05 | Versioning & snapshot | **COMPLETE** | immutable versions, frozen payload + hash verified on load (`tex_contract_version.py`, `revisions.py`); the price-locked snapshot keeps its periods and rules as a verified reference (version + payload hash): every reprice, the simulator and add-ons refuse, audited, a payload that is not the one the sale recorded, and the locked price never moves; the snapshot records when it was priced (`priced_at`, the quote's sale time) and accepted (G-73 fixed, ADR-058) · `TestContractImmutability`, `test_payload_integrity_is_checked`, `test_snapshot_integrity` (9), e2e | — (The REST lock bypass G-01 is fixed, `TestPriceLock`. At a TEX hotel every stay, TEX-priced or not, changes its stay or price only through the TEX services, and imported stays are price-locked: G-92 fixed, ADR-052.) |
 | R-06 | Base pricing modes | **COMPLETE** | `occupancy.py` PERSON/ROOM · `TestRoomBasis`, `TestPersonBasis`; basis select in `ContractDialogs.tsx` | — |
 | R-07 | Occupancy formula engine | **COMPLETE** | slot model, combinations not hardcoded (`occupancy.py`, `contracts.parse_combination`); every live pricing policy (global, hotel, market, hotel + market) cascades into a contract at publish, rule origin ranked before qualifiers, an infant priced by its band rule first, ambiguous rules refused at publish where the tie decides a price, a pricing policy checked on its own before it goes live, legacy payloads priced as sold (occupancy precedence v2, ADR-043, G-30/G-31 fixed and reviewed); policy and contract occupancy editors (`screens/rates`; a policy rule can name the bands of the policies it cascades with) · spec examples reproduced (270; 2A+1C 250 vs 1A+1C 200), `TestPrecedenceV2`, `test_policy_cascade`, `test_pricing_policies` (14) | — |

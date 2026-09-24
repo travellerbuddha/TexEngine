@@ -11,11 +11,19 @@ contract's own version names wrongly (unknown band, room or period, an adult rul
 a band) is an ERROR; a rule inherited from a pricing policy that this contract cannot
 use simply never applies and is a WARNING (``OCC_INHERITED_*_UNUSED``). A pricing
 policy is checked on its own before it goes live (``policy_issues``).
+
+Board rules (ADR-061, GAP-5) are checked like room rules: a rule naming a room or period the
+contract does not have, and two rules of one board for the same room and period (the engine
+would settle them by row name), are ERRORs.
+
+Each issue may carry a ``ref`` (ADR-061 D9, GAP-4): what it is about - the rule(s), room,
+period, age band(s), party and board - so the workspace can mark the cell or row and show band
+labels for the codes in the message. Codes and messages do not depend on it.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from kamra.tex.money import ZERO, D
@@ -38,17 +46,41 @@ class Issue:
 	level: str   # ERROR / WARNING
 	code: str
 	message: str
+	# what the issue is about (ADR-061 D9): rule_id, rule_ids (every rule an issue about several
+	# names, rule_id the first), room_type, period, other_period, age_band, age_bands (every band
+	# code of the contract, for AGE_BANDS), adults, children (the party), board. Only the parts the
+	# issue has; None when it is about the contract as a whole. Not part of the issue's identity.
+	ref: dict | None = field(default=None, compare=False)
 
 	def to_dict(self) -> dict:
-		return {"level": self.level, "code": self.code, "message": self.message}
+		out = {"level": self.level, "code": self.code, "message": self.message}
+		if self.ref:
+			out["ref"] = dict(self.ref)
+		return out
 
 
-def _err(code, msg):
-	return Issue("ERROR", code, msg)
+def _ref(**parts) -> dict | None:
+	"""The parts that are known (0 adults or children is known), or None."""
+	return {k: v for k, v in parts.items() if v is not None} or None
 
 
-def _warn(code, msg):
-	return Issue("WARNING", code, msg)
+def _err(code, msg, **ref):
+	return Issue("ERROR", code, msg, _ref(**ref))
+
+
+def _warn(code, msg, **ref):
+	return Issue("WARNING", code, msg, _ref(**ref))
+
+
+def _rule_ref(r: OccupancyRule) -> dict:
+	"""An occupancy rule's own scope."""
+	return dict(rule_id=r.rule_id, room_type=r.room_type, period=r.period, age_band=r.age_band, adults=r.adults,
+	            children=r.children)
+
+
+def _cell_rule(t: ContractTerms, room_type: str, period: Period) -> str | None:
+	"""The rule that prices ``room_type`` in ``period``: the one ``rooms.room_unit`` takes."""
+	return next((r.rule_id for r in rooms._candidates(t, room_type, period) if r.op != Op.INHERIT), None)
 
 
 def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_warnings: int = 200) -> list[Issue]:
@@ -66,19 +98,21 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 
 	for r in t.rooms.values():
 		if r.max_adults < 1 or r.max_occupants < 1:
-			issues.append(_err("ROOM_CAPACITY", f"{r.room_type}: capacity must allow at least one adult"))
+			issues.append(_err("ROOM_CAPACITY", f"{r.room_type}: capacity must allow at least one adult",
+			                   room_type=r.room_type))
 		if r.max_occupants < r.max_adults:
-			issues.append(_err("ROOM_CAPACITY", f"{r.room_type}: max occupants below max adults"))
+			issues.append(_err("ROOM_CAPACITY", f"{r.room_type}: max occupants below max adults", room_type=r.room_type))
 		if t.basis == PricingBasis.ROOM and not (1 <= r.included_adults <= r.max_adults):
-			issues.append(_err("INCLUDED_ADULTS", f"{r.room_type}: included adults must be 1..max adults"))
+			issues.append(_err("INCLUDED_ADULTS", f"{r.room_type}: included adults must be 1..max adults",
+			                   room_type=r.room_type))
 
 	# periods
 	codes = [p.code for p in t.periods]
 	for c in sorted({c for c in codes if codes.count(c) > 1}):
-		issues.append(_err("PERIOD_DUPLICATE", f"period code {c} is used twice"))
+		issues.append(_err("PERIOD_DUPLICATE", f"period code {c} is used twice", period=c))
 	for p in t.periods:
 		if p.start > p.end:
-			issues.append(_err("PERIOD_RANGE", f"period {p.code} ends before it starts"))
+			issues.append(_err("PERIOD_RANGE", f"period {p.code} ends before it starts", period=p.code))
 	for i, a in enumerate(t.periods):
 		for b in t.periods[i + 1:]:
 			if a.start <= b.end and b.start <= a.end:
@@ -86,31 +120,41 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 				days_overlap = a.weekdays is None or b.weekdays is None or bool(a.weekdays & b.weekdays)
 				if same_kind and days_overlap and a.priority == b.priority:
 					issues.append(_err("PERIOD_OVERLAP",
-					                   f"periods {a.code} and {b.code} overlap with equal priority"))
+					                   f"periods {a.code} and {b.code} overlap with equal priority",
+					                   period=a.code, other_period=b.code))
 
 	# room rules
 	keys = [(r.room_type, r.period) for r in t.room_rules]
 	for k in sorted({k for k in keys if keys.count(k) > 1}, key=str):
-		issues.append(_err("ROOM_RULE_DUPLICATE", f"room {k[0]} has two rules for period {k[1] or 'all'}"))
+		ids = [r.rule_id for r in t.room_rules if (r.room_type, r.period) == k]
+		issues.append(_err("ROOM_RULE_DUPLICATE", f"room {k[0]} has two rules for period {k[1] or 'all'}",
+		                   rule_id=ids[0], rule_ids=ids, room_type=k[0], period=k[1]))
 	for r in t.room_rules:
+		where = dict(rule_id=r.rule_id, room_type=r.room_type, period=r.period)
 		if r.room_type not in t.rooms:
-			issues.append(_err("ROOM_RULE_UNKNOWN_ROOM", f"rule {r.rule_id} prices unknown room {r.room_type}"))
+			issues.append(_err("ROOM_RULE_UNKNOWN_ROOM", f"rule {r.rule_id} prices unknown room {r.room_type}", **where))
 		if r.period and r.period not in codes:
-			issues.append(_err("ROOM_RULE_UNKNOWN_PERIOD", f"rule {r.rule_id} names unknown period {r.period}"))
+			issues.append(_err("ROOM_RULE_UNKNOWN_PERIOD", f"rule {r.rule_id} names unknown period {r.period}",
+			                   **where))
 		if r.op not in (Op.ABSOLUTE, Op.FIXED, Op.INHERIT) and not r.base_room_type:
-			issues.append(_err("ROOM_RULE_NO_BASE", f"rule {r.rule_id} derives a price but names no base room"))
+			issues.append(_err("ROOM_RULE_NO_BASE", f"rule {r.rule_id} derives a price but names no base room",
+			                   **where))
 	for p in t.periods:
 		for rt in sorted(t.rooms):
 			try:
 				unit = rooms.room_unit(t, rt, p)
 				if unit < ZERO:
-					issues.append(_err("ROOM_NEGATIVE", f"{rt} prices below zero in {p.code}"))
+					issues.append(_err("ROOM_NEGATIVE", f"{rt} prices below zero in {p.code}",
+					                   room_type=rt, period=p.code, rule_id=_cell_rule(t, rt, p)))
 			except Unsellable as u:
-				issues.append(_err(u.code, f"{rt} / {p.code}: {u.message}"))
+				issues.append(_err(u.code, f"{rt} / {p.code}: {u.message}",
+				                   room_type=rt, period=p.code, rule_id=_cell_rule(t, rt, p)))
 
 	# age bands, on the month scale pricing uses: a gap leaves a child unsellable (G-52)
-	for problem in ages.band_problems(t.age_bands):
-		issues.append(_err("AGE_BANDS", problem))
+	for problem, involved in ages.band_findings(t.age_bands):
+		# every code: the message names bands by code, and the workspace shows their labels
+		issues.append(_err("AGE_BANDS", problem, age_bands=[b.code for b in t.age_bands],
+		                   age_band=involved[0] if len(involved) == 1 else None))
 	young = ages.youngest_uncovered(t.age_bands)
 	if young and any(r.max_children > 0 for r in t.rooms.values()):
 		issues.append(_warn("AGE_BANDS_MIN_AGE", f"no age band covers {ages.months_span(*young)}: children that "
@@ -129,34 +173,37 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 			if not unknown:
 				continue
 			if r.base_level >= Level.CONTRACT:
-				issues.append(_err(f"OCC_UNKNOWN_{code}", f"rule {r.rule_id} names unknown {what}"))
+				issues.append(_err(f"OCC_UNKNOWN_{code}", f"rule {r.rule_id} names unknown {what}", **_rule_ref(r)))
 			else:   # inherited from a pricing policy: it simply never applies to this contract
 				issues.append(_warn(f"OCC_INHERITED_{code}_UNUSED",
 				                    f"pricing-policy rule {r.rule_id} ({r.source}) names {what}, which this "
-				                    "contract does not have; it never applies here"))
+				                    "contract does not have; it never applies here", **_rule_ref(r)))
 		if r.target == OccTarget.COMBINATION and r.adults is None and r.children is None:
 			# inherited too: it would reprice every combination of the contract
-			issues.append(_err("OCC_COMBINATION_QUALIFIER", f"combination rule {r.rule_id} needs adults/children"))
+			issues.append(_err("OCC_COMBINATION_QUALIFIER", f"combination rule {r.rule_id} needs adults/children",
+			                   **_rule_ref(r)))
 		if r.target == OccTarget.ADULT and r.age_band:
 			if r.base_level >= Level.CONTRACT:
-				issues.append(_err("OCC_ADULT_BAND", f"adult rule {r.rule_id} cannot name an age band"))
+				issues.append(_err("OCC_ADULT_BAND", f"adult rule {r.rule_id} cannot name an age band", **_rule_ref(r)))
 			else:   # the runtime never applies it
 				issues.append(_warn("OCC_INHERITED_ADULT_BAND_UNUSED",
 				                    f"pricing-policy adult rule {r.rule_id} ({r.source}) names age band "
-				                    f"{r.age_band}; an adult rule has no band, so it never applies"))
+				                    f"{r.age_band}; an adult rule has no band, so it never applies", **_rule_ref(r)))
 		if r.op != Op.INHERIT and r.value is None:
-			issues.append(_err("OCC_NO_VALUE", f"rule {r.rule_id} has no value"))
+			issues.append(_err("OCC_NO_VALUE", f"rule {r.rule_id} has no value", **_rule_ref(r)))
 	# twin rules of the version are an error; twins of one pricing policy only where they decide a price
 	twins = _duplicates([r for r in t.occupancy_rules if r.base_level >= Level.CONTRACT])
-	issues.extend(_twin_issue(ids) for ids in twins.values())
-	for a, b, where in _ambiguous_pairs(t, reported=twins):
+	issues.extend(_twin_issue(sig, ids) for sig, ids in twins.items())
+	for a, b, where, slot in _ambiguous_pairs(t, reported=twins):
 		issues.append(_err("OCC_AMBIGUOUS", f"rules {a.rule_id} and {b.rule_id} both price {where} at the same "
-		                   "precedence with different values; make one more specific or remove one"))
-	for r, top, where in _outranked_overrides(t):
+		                   "precedence with different values; make one more specific or remove one",
+		                   rule_id=a.rule_id, rule_ids=[a.rule_id, b.rule_id], **slot))
+	for r, top, where, slot in _outranked_overrides(t):
 		issues.append(_warn("OCC_POLICY_OVERRIDE_OUTRANKED",
 		                    f"pricing-policy override {r.rule_id} ({r.source}) no longer prices {where}: "
 		                    f"{top.rule_id} ({top.source}) does - a contract's own rule, a more specific "
-		                    "policy's rule and a rule naming an infant's band rank before any policy override"))
+		                    "policy's rule and a rule naming an infant's band rank before any policy override",
+		                    rule_id=r.rule_id, rule_ids=[r.rule_id, top.rule_id], **slot))
 	generic = sorted(r.rule_id for r in t.occupancy_rules
 	                 if r.target == OccTarget.CHILD and r.age_band is None and r.op != Op.INHERIT)
 	for band in t.age_bands:
@@ -165,11 +212,28 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 				for r in t.occupancy_rules):
 			issues.append(_warn("OCC_INFANT_GENERIC",
 			                    f"no rule names infant band {band.code}: infants are priced by the band-less child "
-			                    f"rules ({', '.join(generic)}) — add a {band.code} rule if infants stay free"))
+			                    f"rules ({', '.join(generic)}) — add a {band.code} rule if infants stay free",
+			                    age_band=band.code, rule_id=generic[0], rule_ids=list(generic)))
 
 	# boards
 	if not any(b.is_base for b in t.boards):
 		issues.append(_err("NO_BASE_BOARD", "no base board is included in the room price"))
+	for b in t.boards:
+		where = dict(rule_id=b.rule_id, board=b.board, room_type=b.room_type, period=b.period)
+		if b.room_type and b.room_type not in t.rooms:
+			issues.append(_err("BOARD_UNKNOWN_ROOM", f"board rule {b.rule_id} ({b.board}) names unknown room "
+			                   f"{b.room_type}", **where))
+		if b.period and b.period not in codes:
+			issues.append(_err("BOARD_UNKNOWN_PERIOD", f"board rule {b.rule_id} ({b.board}) names unknown period "
+			                   f"{b.period}", **where))
+	# one rule per board, room and period: the engine would take the one with the greatest row name
+	same_scope: dict[tuple, list[str]] = {}
+	for b in t.boards:
+		same_scope.setdefault((b.board, b.room_type, b.period), []).append(b.rule_id)
+	for (board, rt, period), ids in sorted(same_scope.items(), key=lambda kv: str(kv[0])):
+		if len(ids) > 1:
+			issues.append(_err("BOARD_DUPLICATE", f"board {board} has {len(ids)} rules for the same room and period",
+			                   rule_id=ids[0], rule_ids=ids, board=board, room_type=rt, period=period))
 	board_codes = {b.board for b in t.boards}
 	for rp in t.rate_plans.values():
 		for bd in sorted(rp.boards or ()):
@@ -202,9 +266,11 @@ def _duplicates(rules) -> dict[tuple, list[str]]:
 	return {s: ids for s, ids in sorted(by_sig.items(), key=lambda kv: str(kv[0])) if len(ids) > 1}
 
 
-def _twin_issue(ids: list[str]) -> Issue:
+def _twin_issue(sig: tuple, ids: list[str]) -> Issue:
+	_target, _position, band, room_type, period, adults, children = sig[:7]
 	return _err("OCC_DUPLICATE", f"rules {', '.join(ids)} share the same scope (target, position, band, room, "
-	            "period, combination, override); keep one")
+	            "period, combination, override); keep one", rule_id=ids[0], rule_ids=list(ids), room_type=room_type,
+	            period=period, age_band=band, adults=adults, children=children)
 
 
 # ─── occupancy slots ─────────────────────────────────────────────────────
@@ -317,12 +383,21 @@ def _describe(target: OccTarget, pos, band: AgeBand | None, spec: RoomSpec, adul
 	return where + (f" in {period}" if period not in (None, ANY) else "")
 
 
-def _deciding_slot(t: ContractTerms, a: OccupancyRule, b: OccupancyRule, *, whole: bool) -> str | None:
+def _slot_ref(band: AgeBand | None, spec: RoomSpec, adults: int, children: int, period) -> dict:
+	"""The ``ref`` parts of the slot ``_describe`` names; a pricing policy's placeholders are left out."""
+	return dict(room_type=None if spec.room_type == ANY else spec.room_type,
+	            period=None if period in (None, ANY) else period,
+	            age_band=None if band is None or band.code.startswith(ANY) else band.code,
+	            adults=adults, children=children)
+
+
+def _deciding_slot(t: ContractTerms, a: OccupancyRule, b: OccupancyRule, *,
+                   whole: bool) -> tuple[str, dict] | None:
 	"""A slot both rules price where no higher-ranked rule does, so the tie decides the price
-	(the runtime refuses to guess: AMBIGUOUS_OCCUPANCY_RULES), or None. The rules have the same
-	target, rank, room, period, position and band; their combinations may be partial ('2+*'
-	and '*+2' meet at 2A+2C). ``whole``: ``t`` has every rule of the contract, so a slot the
-	runtime never gets to (a child before it has no rule) is no tie."""
+	(the runtime refuses to guess: AMBIGUOUS_OCCUPANCY_RULES), as (description, ref parts), or
+	None. The rules have the same target, rank, room, period, position and band; their
+	combinations may be partial ('2+*' and '*+2' meet at 2A+2C). ``whole``: ``t`` has every rule
+	of the contract, so a slot the runtime never gets to (a child before it has no rule) is no tie."""
 	adults = a.adults if a.adults is not None else b.adults
 	children = a.children if a.children is not None else b.children
 	same = [x for x in t.occupancy_rules if x.op != Op.INHERIT and x.target == a.target]
@@ -335,14 +410,15 @@ def _deciding_slot(t: ContractTerms, a: OccupancyRule, b: OccupancyRule, *, whol
 			continue   # a higher-ranked rule prices this slot
 		if whole and not _reached(t, spec, period, n_a, n_c, a.target, pos):
 			continue
-		return _describe(a.target, pos, band, spec, n_a, n_c, period)
+		return _describe(a.target, pos, band, spec, n_a, n_c, period), _slot_ref(band, spec, n_a, n_c, period)
 	return None
 
 
 def _ambiguous_pairs(t: ContractTerms, *, reported=(), whole: bool = True) -> list[tuple[OccupancyRule,
-                                                                                            OccupancyRule, str]]:
+                                                                                            OccupancyRule, str, dict]]:
 	"""Pairs of non-INHERIT rules with the same rank that decide some slot with different
-	values. Twins whose signature is in ``reported`` are left to OCC_DUPLICATE."""
+	values, with that slot (description, ref parts). Twins whose signature is in ``reported``
+	are left to OCC_DUPLICATE."""
 	rules = [r for r in t.occupancy_rules if r.op != Op.INHERIT]
 	rank = {id(r): occupancy.specificity(r, precedence=t.occupancy_precedence) for r in rules}
 	out = []
@@ -357,16 +433,16 @@ def _ambiguous_pairs(t: ContractTerms, *, reported=(), whole: bool = True) -> li
 			if (a.adults is not None and b.adults is not None and a.adults != b.adults) or \
 					(a.children is not None and b.children is not None and a.children != b.children):
 				continue
-			where = _deciding_slot(t, a, b, whole=whole)
-			if where:
-				out.append((a, b, where))
+			slot = _deciding_slot(t, a, b, whole=whole)
+			if slot:
+				out.append((a, b, *slot))
 	return out
 
 
-def _outranked_overrides(t: ContractTerms) -> list[tuple[OccupancyRule, OccupancyRule, str]]:
+def _outranked_overrides(t: ContractTerms) -> list[tuple[OccupancyRule, OccupancyRule, str, dict]]:
 	"""Pricing-policy "specific override" rules that a rule of a higher origin (or, for an
 	infant, a rule naming its band) now beats with another value, although the legacy
-	ranking let the override win: (override, winner, first such slot)."""
+	ranking let the override win: (override, winner, first such slot, its ref parts)."""
 	if t.occupancy_precedence != occupancy.CASCADE:
 		return []
 	rules = [r for r in t.occupancy_rules if r.op != Op.INHERIT]
@@ -386,7 +462,8 @@ def _outranked_overrides(t: ContractTerms) -> list[tuple[OccupancyRule, Occupanc
 			top = max(found, key=lambda x, infant=infant: _key(t, x, infant))
 			if (top.op, top.value) != (r.op, r.value) and \
 					occupancy.specificity(top, precedence=occupancy.LEGACY) <= legacy:
-				out.append((r, top, _describe(r.target, pos, band, spec, n_a, n_c, period)))
+				out.append((r, top, _describe(r.target, pos, band, spec, n_a, n_c, period),
+				            _slot_ref(band, spec, n_a, n_c, period)))
 				break
 	return out
 
@@ -400,13 +477,14 @@ def policy_issues(bands: tuple[AgeBand, ...], rules: tuple[OccupancyRule, ...]) 
 	issues: list[Issue] = []
 	for r in rules:
 		if r.target == OccTarget.COMBINATION and r.adults is None and r.children is None:
-			issues.append(_err("OCC_COMBINATION_QUALIFIER", f"combination rule {r.rule_id} needs adults/children"))
+			issues.append(_err("OCC_COMBINATION_QUALIFIER", f"combination rule {r.rule_id} needs adults/children",
+			                   **_rule_ref(r)))
 		if r.target == OccTarget.ADULT and r.age_band:
-			issues.append(_err("OCC_ADULT_BAND", f"adult rule {r.rule_id} cannot name an age band"))
+			issues.append(_err("OCC_ADULT_BAND", f"adult rule {r.rule_id} cannot name an age band", **_rule_ref(r)))
 		if r.op != Op.INHERIT and r.value is None:
-			issues.append(_err("OCC_NO_VALUE", f"rule {r.rule_id} has no value"))
+			issues.append(_err("OCC_NO_VALUE", f"rule {r.rule_id} has no value", **_rule_ref(r)))
 	twins = _duplicates(rules)
-	issues.extend(_twin_issue(ids) for ids in twins.values())
+	issues.extend(_twin_issue(sig, ids) for sig, ids in twins.items())
 	size = max([2, *(n for r in rules for n in (r.adults, r.children, r.position) if n)])
 	room = RoomSpec(ANY, "any room", max_adults=size, max_children=size, max_occupants=2 * size)
 	named = sorted({r.age_band for r in rules if r.age_band} - {b.code for b in bands})
@@ -420,16 +498,18 @@ def policy_issues(bands: tuple[AgeBand, ...], rules: tuple[OccupancyRule, ...]) 
 		           AgeBand(ANY + "INF", "an infant", 0, 1, is_infant=True)),
 		boards=(), rate_plans={})
 	# the contract's own rules are unknown here: every party counts
-	for a, b, where in _ambiguous_pairs(t, reported=twins, whole=False):
+	for a, b, where, slot in _ambiguous_pairs(t, reported=twins, whole=False):
 		issues.append(_err("OCC_AMBIGUOUS", f"rules {a.rule_id} and {b.rule_id} both price {where} at the same "
-		                   "precedence with different values; make one more specific or remove one"))
+		                   "precedence with different values; make one more specific or remove one",
+		                   rule_id=a.rule_id, rule_ids=[a.rule_id, b.rule_id], **slot))
 	return issues
 
 
 def _sweep(t: ContractTerms, limit: int) -> list[Issue]:
 	"""Price every valid combination (all children in one band) once per period and
 	report the ones that cannot be priced. Ambiguous rules are an ERROR (the runtime
-	refuses to guess); a combination without a rule only makes that offer unsellable."""
+	refuses to guess); a combination without a rule only makes that offer unsellable.
+	A combination is reported once, in the first period where it fails (``ref.period``)."""
 	out: list[Issue] = []
 	seen: set[tuple] = set()
 	for rt, spec in sorted(t.rooms.items()):
@@ -454,8 +534,12 @@ def _sweep(t: ContractTerms, limit: int) -> list[Issue]:
 								continue
 							seen.add(key)
 							level = "ERROR" if u.code == "AMBIGUOUS_OCCUPANCY_RULES" else "WARNING"
+							tied = list(u.params.get("rules") or ()) or None
 							out.append(Issue(level, u.code, f"{rt} {a}A+{c}C"
-							                 f"{' [' + band.code + ']' if band else ''}: {u.message}"))
+							                 f"{' [' + band.code + ']' if band else ''}: {u.message}",
+							                 _ref(room_type=rt, period=p.code, adults=a, children=c,
+							                      age_band=band.code if band else None,
+							                      rule_id=tied[0] if tied else None, rule_ids=tied)))
 							if len(out) >= limit:
 								return out
 	return out

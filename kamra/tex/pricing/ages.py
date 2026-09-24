@@ -77,21 +77,27 @@ def months_span(lo: int, hi: int) -> str:
 def band_problems(bands: tuple[AgeBand, ...]) -> list[str]:
 	"""What makes a band set unusable, on the month scale pricing uses: an invalid range,
 	two bands covering the same months, months between two bands that no band covers."""
+	return [message for message, _codes in band_findings(bands)]
+
+
+def band_findings(bands: tuple[AgeBand, ...]) -> list[tuple[str, tuple[str, ...]]]:
+	"""``band_problems`` with the codes of the band(s) each problem is about (one for an invalid
+	range, two for an overlap or a gap), for the validation issue's ``ref`` (ADR-061 D9)."""
 	out = []
 	ordered = sorted(bands, key=lambda b: (b.from_months, b.to_months, b.code))
 	for b in ordered:
 		if b.from_months < 0 or b.to_months <= b.from_months:
-			out.append(f"age band {b.code} has an invalid range ({b.from_months}–{b.to_months} months)")
+			out.append((f"age band {b.code} has an invalid range ({b.from_months}–{b.to_months} months)", (b.code,)))
 	valid = [b for b in ordered if 0 <= b.from_months < b.to_months]
 	for a, b in pairwise(valid):
 		if b.from_months < a.to_months:
-			out.append(f"age bands {a.code} and {b.code} overlap at "
-			           f"{months_span(b.from_months, min(a.to_months, b.to_months))}")
+			out.append((f"age bands {a.code} and {b.code} overlap at "
+			            f"{months_span(b.from_months, min(a.to_months, b.to_months))}", (a.code, b.code)))
 		elif b.from_months > a.to_months:
-			out.append(f"age bands {a.code} and {b.code} leave a gap at {months_span(a.to_months, b.from_months)}: "
-			           f"a child of that age matches no band and cannot be sold ({a.code} covers "
-			           f"{months_span(a.from_months, a.to_months)}, {b.code} starts at {b.from_months} months); "
-			           f"end {a.code} where {b.code} starts")
+			out.append((f"age bands {a.code} and {b.code} leave a gap at {months_span(a.to_months, b.from_months)}: "
+			            f"a child of that age matches no band and cannot be sold ({a.code} covers "
+			            f"{months_span(a.from_months, a.to_months)}, {b.code} starts at {b.from_months} months); "
+			            f"end {a.code} where {b.code} starts", (a.code, b.code)))
 	return out
 
 
@@ -161,6 +167,18 @@ class Party:
 		return self.adults + len(self.children)
 
 
+def child_slots_in_order(children: list[tuple[int, int, AgeBand]], ordering: ChildOrdering) -> tuple[ChildSlot, ...]:
+	"""Children given as (input index, months, band), numbered into slots in the contract's order:
+	oldest first or youngest first (ties in input order), or as entered."""
+	ordered = list(children)
+	if ordering == ChildOrdering.OLDEST_FIRST:
+		ordered.sort(key=lambda s: (-s[1], s[0]))
+	elif ordering == ChildOrdering.YOUNGEST_FIRST:
+		ordered.sort(key=lambda s: (s[1], s[0]))
+	return tuple(ChildSlot(position=i + 1, months=m, band=b, input_index=idx)
+	             for i, (idx, m, b) in enumerate(ordered))
+
+
 def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec, ...],
                    check_in: date, sale_date: date) -> Party:
 	"""Map declared children to age bands and order them into child slots."""
@@ -184,15 +202,7 @@ def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec,
 			                 child=idx + 1)
 		slots.append((idx, months, band))
 
-	if terms.child_ordering == ChildOrdering.OLDEST_FIRST:
-		slots.sort(key=lambda s: (-s[1], s[0]))
-	elif terms.child_ordering == ChildOrdering.YOUNGEST_FIRST:
-		slots.sort(key=lambda s: (s[1], s[0]))
-
-	child_slots = tuple(
-		ChildSlot(position=i + 1, months=m, band=b, input_index=idx)
-		for i, (idx, m, b) in enumerate(slots)
-	)
+	child_slots = child_slots_in_order(slots, terms.child_ordering)
 	return Party(
 		adults=adults + len(as_adults),
 		declared_adults=adults,

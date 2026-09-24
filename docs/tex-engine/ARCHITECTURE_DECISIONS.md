@@ -4118,3 +4118,525 @@ each fix has a test written first (the fail-first counts are at the end).
   - 8/8 against the bench itself (custom-host, pay-link, manage-money). The dev bench serves
     `/assets/kamra` from main's checkout, so these ran the branch's server code with main's
     bundles.
+
+## ADR-061 Pricing Workspace
+*The Pricing Workspace is a UX over the existing contract-version tables. The server prices,
+validates and quotes the editor's unsaved state in memory (a read-only overlay) and never saves it;
+the client does no arithmetic on money. Design: `PRICING_WORKSPACE_UX.md` (revision 3). This ADR
+grows with the slices S1–S16; the implemented parts are marked.*
+
+**Context.** Entering an ORS-style contract in the version editor took about 100 clicks, 7 tab
+switches, 7 modal dialogs and a forced save before any price could be checked
+(`PRICING_WORKSPACE_UX.md` §1.3). The engine and the payload can already express every part of
+the target model. Missing were a workspace that matches how a revenue manager works and a few API
+gaps (§4 GAP-1…GAP-12). `price_matrix`, `validate_version` and `preview_price` read only the saved
+draft, so the rates grid hid every resolved price as soon as anything was unsaved (GAP-1). A blank
+rule value was saved as 0 and priced as 0 (GAP-8). The version said only `editable`: nothing about
+preview or publish rights, the basis lock or the currency's minor units (GAP-10).
+
+**Decision (the workspace; §0 of the design).**
+- *D1 Projection.* The workspace is a projection over the existing `EditorState` (settings, the
+  eight tables, selling). Every gesture becomes ordinary `period_rates`, `occupancy_rules`,
+  `age_bands`, `rooms`, `periods` or `boards` rows. The save payload, `payloadOf`, the fingerprint
+  and `save_version` stay as they are. No DocType, payload (`tex.contract.v1`), op, precedence or
+  lifecycle change.
+- *D2 No client money arithmetic.* Resolved prices, occupancy totals, price-test subtotals, bulk
+  adjustments and adjustments of entered base prices are computed by the server: the read-only
+  overlay (GAP-1), `apply_op_values` (GAP-7, S5) and the quote's `nights[]` subtotals (GAP-12, S5).
+  The client only parses, normalises and compares decimal strings; the only numbers it computes
+  are integers (counts, positions, capacity loops, date offsets).
+- *D3 No autosave.* Save stays explicit (button, Ctrl/Cmd+S), sends the whole payload, is audited
+  and keeps `settle()` / `overSaved`. Live feedback comes from the overlay, so the forced save
+  before a price check goes away. The pricing basis is a contract-header field, saved by its own
+  explicit Apply.
+- *D4* The shorthand parser is pure, deterministic and locale-independent (both decimal marks, no
+  grouping separators, currency-aware refusal of ambiguous input), tested with `node --test`.
+- *D5* Four sections (Pricing · Commercial rules · Offers & promotions · Preview & audit). The old
+  row editors stay as Advanced rule tables, so no capability is lost.
+- *D6* The base room stays a UI concept (`TEX Contract Room.is_base`), made exclusive by the UI and
+  used as the default `base_room_type` of new formulas; the engine follows each rule's
+  `base_room_type`.
+- *D7* A period cell replaces the room's all-periods rule for that period and never stacks on it
+  (ADR-006).
+- *D8* Special combinations are ordinary `TEX Occupancy Rule` rows (`combination`, `position`,
+  `age_band`); valid combinations come from room capacity, as in the publish sweep.
+- *D9* Validation issues gain an optional, additive `ref` (room, period, rule, band(s), party,
+  board); codes and messages do not change (GAP-4, S4).
+- *D10* Shorthand maps to ops by the owner's fixed table in every grid; the only per-context
+  differences are forced by the DocType op lists (O2, O3).
+- *D11 The row decides a relative entry in the room matrix, never the cell's state.* On the base
+  room (which derives from nothing) the server applies the entry once to the entered price and it
+  is stored as ABSOLUTE; on every other room it always writes a formula from the room's default
+  base.
+- *D12* Engine defaults are shown where no rule exists: "Adult ×1.00 (default)" from the server's
+  `occupancy_defaults`; a child band without a rule is "No rule · not sellable" (ADR-007).
+- *D13* Band codes never reach the screen where a label exists: labels are saved with the band,
+  and codes in server text are replaced by labels on display.
+- *D14 The Explain ladder follows the engine's order* (Base → Period (identification) → Room →
+  Occupancy (adults) → Child → Special combination → Board → Period adjustment → Rate plan → Night
+  cost → Cost offers → Markup → FX → Promotion → Tax) and is a before → after chain in which every
+  value is a server field.
+
+**Owner sign-off (O1–O5): provisional, pending the owner's sign-off** (owner input 13 in
+`GO_LIVE_READINESS.md`; corrected in S3, which said "implemented as proposed" before any of them
+was). The workspace is built with the proposed behaviour below; each is a small, isolated change in
+`shorthand.ts` / `model.ts` if the owner decides otherwise. Where each lands: the parse of O1–O3
+and O5 is S1's `shorthand.ts` (branch `pricing-workspace`, not merged with `pw-backend`); the board
+cells that apply O1–O3 are S13; O4's apply-once needs S5 (`apply_op_values`) and S9. None of them
+is on branch `pw-backend` after S3 (S2–S3 are backend read models and guards). Each is marked
+implemented when its slice lands, and its implemented behaviour is reported before the final run.
+- *O1* Board cell, bare `100` → ABSOLUTE 100, i.e. 100 per room per night (`boards.py`); the
+  reading line says so before commit. Alternative: a bare number is ADD (per adult).
+- *O2* Board cell, `-20` → ADD −20 (SUBTRACT is not a board op).
+- *O3* Board cell, `50%` → ADJUST_PERCENT 50 (PERCENT_OF is not a board op; the engine treats both
+  alike). Alternative: refuse and require `+50%`.
+- *O4* Base room, relative entry → parsed by the owner's table, applied once by the server to the
+  entered price and stored as ABSOLUTE (D11). Alternative: refuse (OP_NOT_ALLOWED, "use Adjust…").
+- *O5* Currency-aware AMBIGUOUS: in 0- and 2-decimal currencies an amount with 1–3 integer digits
+  and exactly 3 fraction digits (`1.500`) is refused with what to type; accepted in 3-decimal
+  currencies (KWD, BHD, OMR, JOD, TND). Alternative: drop the guard.
+
+**Decision (implemented in S2: GAP-1, GAP-8, GAP-10).**
+- *The read-only overlay* (`api/contracts.py _overlay(name, data)`). `price_matrix(version,
+  adults, data=None)`, `validate_version(name, data=None)` and `preview_price(..., data=None)` take
+  the payload `save_version` takes. With `data`:
+  - the same gates as before, plus `contract.edit` at the version's hotel and Draft status (a
+    published version is refused: "Only draft versions can be previewed with unsaved changes.");
+  - the payload is applied to the loaded draft in memory exactly as `save_version` applies it: the
+    same row cleaning (`_clean_rows`, shared), `_set_selling`, the settings, each table replaced;
+  - it is then checked as a save checks it, with the same messages: blank values (below), the
+    DocType defaults (`_set_defaults`), the decimal check (`decimals.check_inputs`, the 9-place
+    refusal), and Frappe's own side-effect-free checks (`_validate_mandatory`, and per document
+    `_validate_data_fields`, `_validate_selects`, `_validate_non_negative`, `_validate_length`).
+    Two checks of the save are not run (S2 review, recorded in S3): Frappe's link validation
+    (`_validate_links`: a row naming a rate plan, board or room type that does not exist) and the
+    version controller's window order ("Sale window ends before it starts."). The overlay prices,
+    validates and quotes such a draft as `build_terms` reads it (a missing rate plan validated
+    without an issue in the review's probe; a reversed sale window is reported as SALE_WINDOW),
+    and `save_version` refuses it. No figure differs from what the engine computes for those
+    values; the UI must not read "no issues" as "saves";
+  - values are then normalised as a save stores and a load reads them (checks 0/1, integers,
+    decimals as exact Decimals with blank = 0, blank dates none), so the overlay prices exactly what
+    a save followed by a load would (tested by saving the same payload and comparing);
+  - at most 5,000 rows over all tables;
+  - nothing is saved, inserted, `db_set` or audited (tested: `modified`, the audit events and the
+    child rows are unchanged).
+- *Rule ids.* Each overlaid row is named `~<_key>` (its client key), else `~<table>-<position>`, so
+  the rule ids in explanations, issues and (S3) matrix sources point back to the editor's row.
+  Tables the payload does not carry keep their saved row names; the client maps those by `_name`.
+- *Errors.* A refusal of the overlay (rights, status, blank value, decimals, mandatory, select,
+  row cap) is raised. A draft that cannot be built (e.g. an unknown room type) answers
+  `{build_error, rooms: [], periods: []}` from `price_matrix`, the existing `BUILD` issue from
+  `validate_version` (the body moved into `svc.validate_doc(version)`; `svc.validate_version` keeps
+  its gate and calls it) and the existing `BUILD` reason from `preview_price`.
+- *Blank values (GAP-8).* `_require_values(v)` runs in `save_version` (after the tables are set,
+  before the save) and in the overlay: a `period_rates` or `occupancy_rules` row whose op is not
+  INHERIT, or a non-base `boards` row, with a blank value is refused with "<table>, row <n>: a value
+  is required; clear the cell to remove the price." Rows already stored as 0 load as "0" and are
+  unaffected; the UI deletes a row when its cell is cleared.
+- *Flags (GAP-10).* `get_version` adds `can_preview` (`price.view_cost`), `can_publish`
+  (`contract.publish`), `can_edit_contract` (`contract.edit`, whatever the version's status), all
+  at the version's hotel; `basis_locked` (`svc.is_published(contract)`, the predicate the contract
+  controller's header lock uses) and `contract_doc.minor_units` (`money.minor_units` of the contract
+  currency). The catalogue answer (agents) carries the three capability flags as false. They only
+  tell the UI what to offer; every endpoint checks again.
+- *Pricing basis.* No backend change: `save_contract({name, pricing_basis})` changes only the basis
+  before the first publish, and the controller refuses it afterwards ("… cannot change"); an
+  integration test pins both.
+- *No rate limit* on the overlay endpoints: they are staff-only (`contract.edit`), called debounced
+  (300 ms matrix, 1,200 ms validation), and bounded by the row cap; the existing endpoints had none.
+
+**Consequences.**
+- Pricing semantics, the payload, `save_version`'s results and the endpoints' answers without
+  `data` are unchanged (the existing suites guard them). `save_version` is stricter in one way: a
+  blank rule value is refused instead of being stored as 0.
+- The client may show resolved prices, validation and quotes for unsaved edits without a save;
+  every figure is the server's.
+- Two users editing one draft is still last-writer-wins (`save_version` has no version token), as
+  before; out of scope (design §6).
+
+**Rejected.**
+- Saving a scratch copy of the draft to price it: it writes, audits and races the real draft.
+- Autosave: every keystroke would be an audited save and would break `settle()`.
+- Client-side pricing or arithmetic for live figures: two engines drifting apart, and float money.
+- `Document.run_method("validate")` in the overlay: wildcard `doc_events` hooks may have side
+  effects; only the side-effect-free checks named above run.
+
+**Tests (S2).** `kamra/tex/tests/integration/test_pricing_workspace_api.py` (17): the overlay's
+matrix, validation and quote of unsaved data with nothing written or audited; `~key` rule ids in
+the explanation; the overlay prices what a save stores (defaults, text-typed checks, INHERIT
+blanks); refusals (published version, no `contract.edit`, another hotel, blank values in save and
+overlay, 10 places with the save's message, the row cap, a build error answered); Finance reads
+the saved matrix but cannot validate; the flags per viewer (Revenue Manager, a contract.edit-only
+profile, Finance, an agent's catalogue), `basis_locked` before and after publish, `minor_units`
+2 (EUR) and 3 (KWD); the basis change alone before publish and its refusal after. On the base
+`1575c8b` 14 of the 17 fail (unknown `data` argument, missing flags, a blank value saved); the
+basis tests and Finance's saved-matrix read pass there and pin existing behaviour. Removing the
+overlay's defaults step or its stored-value normalisation makes the save-equivalence test fail
+(checked). `test_security_regressions` G-11 now allows the three flags in an agent's catalogue
+answer and asserts they are false. Verification on branch `pw-backend`: all 38 integration modules
+800 OK (10 skipped, as on main), 425 unit tests, ruff.
+
+**Decision (implemented in S3: GAP-2, GAP-2b, GAP-3).**
+- *Pure read models* (`kamra/tex/pricing/matrix.py`, no frappe). Both call the engine's own
+  resolvers, so nothing is priced twice in two ways:
+  - `unit_source(terms, room, period)` runs `rooms.room_unit` with an `Explanation`. The last
+    `room` step is the requested room (the derivation recurses first). The winning rule is taken
+    among the room's rules in the order `room_unit` takes them (period rule first, then the rule for
+    all periods; INHERIT skipped), so two rows sharing an id still resolve to the right one. It
+    returns `{rule_id, scope: PERIOD | ALL, op, value, base_room_type, chain, overridden}`: `chain`
+    is the room and the rooms it is derived from (room first), `base_room_type` the next room in it
+    (none for an entered price), `overridden` the room's other rules including INHERIT rows.
+    `Unsellable` propagates (no price, a cycle).
+  - `party_total(terms, room, period, adults, band_codes)` builds the party as the publish sweep
+    does (`validate._sweep`): each child at its band's `from_months`, numbered in the contract's
+    child order (`ages.child_slots_in_order`, the ordering `classify_party` used inline, now
+    shared), reference date the period's start. It then runs the engine's own steps for a night:
+    `occupancy.check_capacity`, `rooms.room_unit`, `occupancy.price_occupancy`. It returns the
+    total and the slots `{target, position, age_band, amount, rule_id, included}`. An unknown band
+    code or a room outside the contract raises `PricingError`.
+  - `rule_value(v)`: a rule value as exact decimal text without trailing zeros (`to_str_min(v, 0)`:
+    `"1"`, `"1.15"`, `"245"`, `"0.333333333"`).
+- *`price_matrix` additions* (the existing keys are unchanged; a test compares them with the
+  pre-S3 computation for a draft, with `adults`, with parties and for a published version):
+  - `rooms[].sources{period: unit_source}`, none for a cell with an error;
+  - `rooms[].capacity{max_adults, max_children, max_occupants, min_adults, included_adults}` from the
+    built terms, i.e. the effective values (the room type's where the contract room sets 0);
+  - `age_bands[{code, label, from_months, to_months, is_infant, source}]` from the built terms
+    (the label equals the code when blank, as `age_bands_of` builds it). `source` is `version` when
+    the version has band rows, else the inherited policy's source (`policy:<id>/r<rev>/<scope>`)
+    from `svc.band_source`: the policy `inherit.band_layer` picks (the most specific one defining
+    bands, the choice `cascade` makes) among the policies live when the terms were built (now for a
+    draft, `effective_from` for a published version). If those policies no longer give the same
+    band set, it says `policy`;
+  - `inherited_rules`: the terms' occupancy rules whose source is not `version`, with `rule_id,
+    target, position, age_band, adults, children, room_type, period, op, value, is_override,
+    source`;
+  - `occupancy_defaults`: `adult` from `occupancy.GLOBAL_ADULT_DEFAULT` (`GLOBAL:ADULT`, ADULT,
+    MULTIPLY, `"1"`, `global-default`, its note); `child: null` (ADR-007);
+  - with `parties` (JSON, at most 12, each 1–12 adults and at most 8 band codes, upper-cased) and
+    `party_room` (a room of the built terms, else "… is not a room of this contract"): `party_cells`,
+    one per party in order, `{cells{period: total | null}, slots{period: […]}, errors{period:
+    message}}`. `Unsellable` and `PricingError` (an unknown band, over capacity, no price, no child
+    rule) are errors of their cell, not refusals.
+  - `adults` stays accepted and unused. The gates are unchanged (`price.view` + `_sees_cost`, the
+    overlay's with `data`). No rate limit: staff only, bounded (12 parties × the periods), called
+    debounced.
+- *Deviations from the slice text, with reasons.*
+  - Values use `rule_value` (`"1"`), not `to_str_rate` (`"1.000000"`): the design and the slice's
+    own test fix `value "1"`; both are exact, and the client compares decimals canonically.
+  - `party_total` runs the engine's capacity check first. The sweep only prices combinations the
+    room holds; a sample party the room cannot hold would otherwise get a total the engine never
+    charges. For a party the room holds the result is the sweep's.
+  - The frontend `PriceMatrix` type is split: `PriceMatrix` (the S3 keys) and
+    `PriceMatrixBuildError` (`{build_error, rooms: [], periods: []}`), union
+    `PriceMatrixResponse`, because the build-error answer has none of the other keys.
+
+**Rejected (S3).**
+- Recording each band's origin in the frozen payload: a payload and hash change for a display
+  need; the version's own rows and the policy revisions say it.
+- Summing slots or deriving the chain in the client: the engine already knows both.
+
+**Tests (S3).** Unit `test_matrix.py` (18): the fixture contract's sources (generic ×1.15 → ALL
+with chain [SUP, STD]; SUITE P3A 245 → PERIOD overriding the generic rule; the base room's own
+price; an INHERIT period row overridden while the generic rule wins; a chained derivation; two rows
+sharing an id; a cycle and a missing price unsellable); party totals equal to
+`engine.price_stay`'s occupancy for 2A + CHB, for both child orders, a derived room, a period
+override and ROOM basis; the sample party's children at the lower edge of their bands, in the
+contract's order, with its infants (added in S3's re-verification: a mutant placing them at the
+upper edge priced the same and survived the other tests); an unknown band, over capacity and a band
+without a rule refused; `band_layer`; `rule_value`. Integration `test_pricing_workspace_api` (+14,
+31 in all): sources with saved row names and with `~key` ids, errored cells without a source,
+effective capacity (room type fallback, overlay values), the version's bands and the engine default, a band without a label
+(overlay and saved), bands and rules inherited from a live global policy (draft and published),
+the policy's rules cascading into a version with its own, sample parties (totals, slots and rule
+ids, the same total as a quote, an unknown band and over-capacity as cell errors, a period without
+a price), no `party_cells` without parties, the party room refused when not in the (unsaved)
+contract, malformed parties refused, Finance allowed and an agent refused, the old keys identical.
+On the S2 tip `19c6b72` `test_matrix` cannot import `pricing.matrix`, and the 14 new integration
+tests all fail (25 errors counting sub-tests: the unknown `parties` argument, the missing keys)
+while the 17 S2 tests pass; the old-keys test's draft and `adults` sub-tests pass there too, which
+pins the baseline. Verification on branch `pw-backend` (main `1575c8b` already merged), migrated
+with it: all 38 integration modules 814 OK (10 skipped, as before), 442 unit tests, ruff; eval
+harness 76/76, front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`.
+Re-verified after the benchmark, the unit test for the sample party and the documentation
+corrections below (tip `404a3e4`, main `1575c8b` merged, migrated with it): all 38 integration
+modules 814 OK (10 skipped), 443 unit tests, ruff; eval 76/76, journey 13/13, banquet 101 OK;
+`tsc -b`, `npm run build`, `i18n:tex`; `bench_pricing_workspace` 2 OK.
+
+**Performance of the server side (measured in S3; the pre-Final measurement asked for).**
+`kamra/tex/tests/integration/bench_pricing_workspace.py` is opt-in: it is not a `test_*` module, so
+the regression run leaves it out (`bench --site test.localhost run-tests --module
+kamra.tex.tests.integration.bench_pricing_workspace`). It saves a large ORS-shaped draft inside the
+test transaction (the base room priced per period; every other room derived by a formula, with its
+own price in every fourth period; occupancy rules and board supplements per room and period) and
+times each call the workspace makes, best of three, on the shared development bench, in seconds:
+
+| Call | Realistic: 12 rooms × 26 periods, 1,406 rows, 346 KB | Near the row cap: 12 × 40, 4,539 rows, 1.13 MB |
+|---|---|---|
+| `save_version` (once) | 0.86 | 2.93 |
+| the overlay alone (`_overlay`) | 0.17 | 0.52 |
+| `price_matrix`, saved draft: the pre-S3 keys / with the S3 keys | 0.06 / 0.08 | 0.15 / 0.16 |
+| `price_matrix`, unsaved data | 0.25 | 0.70 |
+| `price_matrix` + 12 sample parties, saved / unsaved | 0.15 / 0.33 | 0.42 / 0.93 |
+| `preview_price` (7 nights), saved / unsaved | 0.07 / 0.24 | 0.16 / 0.69 |
+| `validate_version`, saved / unsaved | 2.25 / 2.30 | 10.0 / 9.9 |
+
+The benchmark also asserts that the unsaved data answers what the same data saved answers (cells,
+sources with each row name mapped to its `~key`, party totals and errors, issue codes, quote
+totals), and loose ceilings (6–12 times these figures) that catch a change of order, not a slower
+machine. Reading: the overlay adds 0.2–0.5 s (parsing, cleaning and checking the payload); the S3
+sources add about 0.02 s to a matrix, twelve sample parties 0.1–0.3 s. `validate_version` is the
+cost, with or without data: its publish sweep prices every combination of every room and period,
+2.3 s on the realistic contract and 10 s near the row cap. So the "no rate limit" decision holds
+for the matrix and the preview (live, 300 ms debounce), and the UI slices (S8, S9, S15) must keep
+validation bounded: at most one `validate_version` in flight per editor, a stale answer dropped,
+and a debounce that grows with the draft (1.2 s suits the realistic size, not the cap). A
+server-side concurrency guard for validation is not built (open).
+
+**Decision (implemented in S4: GAP-4, GAP-5).**
+- *Anchored issues (D9).* `validate.Issue` gains `ref: dict | None` as its last field. It is not
+  part of the issue's identity (`compare=False`), so issues compare and hash as before. `to_dict`
+  adds `"ref"` only when there is one. `_err` / `_warn` take the parts as keywords and keep only the
+  known ones (0 adults or children is known). What each issue names:
+  - `ROOM_CAPACITY`, `INCLUDED_ADULTS`: `room_type`;
+  - `PERIOD_DUPLICATE`, `PERIOD_RANGE`: `period`; `PERIOD_OVERLAP`: `period`, `other_period`;
+  - `ROOM_RULE_DUPLICATE`: `rule_id`, `rule_ids`, `room_type`, `period` (none for "all");
+    `ROOM_RULE_UNKNOWN_ROOM` / `_UNKNOWN_PERIOD` / `_NO_BASE`: the rule's `rule_id`, `room_type`,
+    `period`;
+  - `ROOM_NEGATIVE` and the `room_unit` errors (`NO_ROOM_PRICE`, `ROOM_DERIVATION_*`): the cell's
+    `room_type` and `period`, and `rule_id` of the rule that prices the cell (the first non-INHERIT
+    rule `room_unit` takes; none when the room has no rule there). A derived room whose base has no
+    price names its own formula;
+  - `AGE_BANDS`: `age_bands` = every band code of the terms, in their order (the message names
+    bands by code; `ages.band_problems` returns text, so the client replaces the codes it is
+    given), and `age_band` when the problem is about one band (an invalid range), not for an
+    overlap or gap between two. `ages.band_findings` is `band_problems` with the codes of each
+    problem; `band_problems` is now built from it, text unchanged;
+  - `OCC_UNKNOWN_*`, `OCC_INHERITED_*_UNUSED`, `OCC_COMBINATION_QUALIFIER`, `OCC_ADULT_BAND`,
+    `OCC_INHERITED_ADULT_BAND_UNUSED`, `OCC_NO_VALUE`: the rule's own scope (`rule_id`,
+    `room_type`, `period`, `age_band`, `adults`, `children`); `OCC_DUPLICATE`: the twins'
+    signature, `rule_id` + `rule_ids`; `OCC_AMBIGUOUS` and `OCC_POLICY_OVERRIDE_OUTRANKED`: both
+    rules (`rule_ids`) and the slot the message names (`room_type`, `period`, `age_band`,
+    `adults`, `children`), without a pricing policy's placeholders (`policy_issues`);
+    `OCC_INFANT_GENERIC`: the infant `age_band` and the band-less rules (`rule_ids`);
+  - the publish sweep (`NO_CHILD_RULE`, `AMBIGUOUS_OCCUPANCY_RULES`, …): `room_type`, `period`,
+    `adults`, `children`, `age_band`, and for a tie the tied rules (`Unsellable.params["rules"]`).
+    The sweep reports a combination once, so `period` is the first period it fails in;
+  - `BOARD_*` (below): `rule_id`, `board`, `room_type`, `period`; `BOARD_DUPLICATE` also `rule_ids`.
+  - None: `CURRENCY`, `NO_ROOMS`, `NO_PERIODS`, `SALE_WINDOW`, `STAY_WINDOW`, `AGE_BANDS_MIN_AGE`,
+    `NO_AGE_BANDS`, `NO_BASE_BOARD`, `RATE_PLAN_BOARD`, `OFFER_*` and `BUILD` (about the contract,
+    the selling terms, a rate plan or an offer, not a cell).
+
+  Rule ids are the saved row names, or `~<_key>` for rows sent unsaved (S2). Codes, levels, order
+  and every message are unchanged: 80 scenarios (223 issues, every code that gained a ref) give the same
+  `(level, code, message)` lists on the S3 tip and on S4, apart from the new BOARD_* codes. The
+  frontend `Issue` type gains `ref?: IssueRef`. `issueTab` is unchanged until S8, so BOARD_* issues
+  count under the default ("settings") group and are listed in the editor's issue list.
+- *Board rules (GAP-5).* After `NO_BASE_BOARD`, three new ERRORs, mirroring the room-rule checks:
+  `BOARD_UNKNOWN_ROOM` ("board rule {id} ({board}) names unknown room {room}"),
+  `BOARD_UNKNOWN_PERIOD` ("… names unknown period {period}") and `BOARD_DUPLICATE` ("board {board}
+  has {n} rules for the same room and period": one board, room and period, base rows included).
+  The engine is unchanged: `boards.board_rule` still breaks a tie by the greatest row name, but a
+  draft that has one can no longer be published.
+- *Unique row names in the overlay* (an open item of the S2 and S3 reviews, taken here because S4's
+  `rule_id` / `rule_ids` anchor on them). The overlay refuses a table in which two rows would get
+  the same name: the same `_key` twice, a key equal to a keyless row's `~<table>-<position>`, or two
+  keys equal after the 100-character cut. "<table>: two rows have the key <key>; each row needs its
+  own key." One key in two tables is allowed (the issue code says which table); `save_version`
+  drops the keys and is unchanged.
+
+**Deviations from the slice text, with reasons.**
+- `rule_ids` (not in the slice's key list) on the issues about several rules (`ROOM_RULE_DUPLICATE`,
+  `OCC_DUPLICATE`, `OCC_AMBIGUOUS`, `OCC_POLICY_OVERRIDE_OUTRANKED`, `OCC_INFANT_GENERIC`,
+  `BOARD_DUPLICATE`, the sweep's ties): `rule_id` can mark one row only; the twins all need fixing.
+  `rule_id` is the first of them (table order), so a client that reads only `rule_id` still anchors.
+- Occupancy-rule refs also carry the rule's `adults` / `children` (its combination) where it has
+  them, and `BOARD_UNKNOWN_ROOM` / `_PERIOD` carry the rule's other scope part: the whole scope of
+  the row, as the design's anchoring (§3.15) reads it.
+- `OCC_POLICY_OVERRIDE_OUTRANKED` gets a ref (the slice listed the other OCC_* codes; the design's
+  GAP-4 says OCC_*).
+- The duplicate-key refusal above (an overlay behaviour change, S2 code).
+
+**Consequences.**
+- Drafts with an orphan or duplicate board row can no longer be published; they were priced by
+  the row name's order or not at all. Published versions are frozen and price as before; a new
+  draft based on one with such rows has to be fixed before it publishes. A read-only scan of the
+  shared development site found none among its 273 contract versions with board rows. This
+  behaviour change is announced in `GO_LIVE_READINESS.md` (change log).
+- A published version's `validation_report` and `publish`'s `warnings` now carry the refs too
+  (additive; not part of the payload or its hash).
+
+**Rejected (S4).**
+- Server-side band labels in messages: the label's language is the viewer's, and the client
+  already has the labels; codes stay machine-readable.
+- Parsing band codes out of message text: `band_findings` returns them from the check itself.
+- Settling duplicate board rules in the engine: a pricing change for frozen versions; validation
+  makes new ones unpublishable instead.
+- Falling back to `~<table>-<position>` for a repeated key: the client could not map it back to the
+  row it meant; a refusal names the table and key.
+
+**Tests (S4).** Unit `test_validate_refs.py` (37, pure): the Issue shape (`ref` optional and last,
+`to_dict` without an empty or missing ref, still hashable); header issues without a ref; missing
+parts left out and 0 kept; the messages of `ROOM_RULE_DUPLICATE`, `OCC_DUPLICATE` and
+`PERIOD_OVERLAP` byte for byte (the `test_contracts_restrictions` scenarios); the reference contract
+still clean; the refs of every code listed above (room and period checks, the cell's rule for a
+negative, unpriced, derived-without-base and cyclic cell, an INHERIT row not taken as the cell's
+rule, age bands with every code and the single band, each OCC_* code, a tie's slot in the period it
+decides, a policy checked on its own without its placeholders, the sweep's party and tied rules);
+`BOARD_UNKNOWN_ROOM`, `BOARD_UNKNOWN_PERIOD` and `BOARD_DUPLICATE` (unscoped, scoped with three
+rows, two base rows) with messages and refs; the fixture boards (AI base, UAI) and one board's rules
+for different scopes clean; board errors after `NO_BASE_BOARD`. On the S3 tip `4575818` 31 of the
+37 fail (27 errors: no `ref`; 4 failures: no board issue); the 6 that pass pin the unchanged
+messages and the clean fixture. Nine mutants are killed (board twins keyed by board only, ref
+compared, 0 dropped, a band named for a pair, an INHERIT row as the cell's rule, a policy
+placeholder in a slot, no unknown-period check, the sweep's tie without rule ids, `to_dict` always
+adding `ref`). Integration `test_pricing_workspace_api` (+6, 37 in all): `validate_version`'s JSON
+anchors a duplicated room rule (`~key` ids unsaved, row names once saved); an issue about the
+contract as a whole has no ref; board rules for a room the draft no longer sells, an unknown period
+and a twin, with refs; publish refused for an orphan board period (the version stays Draft); the
+`create_contract` fixture still publishes, its warnings and stored `validation_report` in the new
+shape; the overlay refuses a key used twice and a key equal to a keyless row's name, in all three
+endpoints, allows one key in two tables, and a save of the same payload succeeds. On the S3 tip 3
+of the first 5 fail (no `ref`; board rows reported clean; publish not refused) and 2 pass (pinning
+the ref-less issue and the fixture's publish); the key test fails before the guard. Verification on
+branch `pw-backend` (main `1575c8b` already merged; no newer main), migrated with it: all 38
+integration modules 820 OK (10 skipped, as before); 480 unit tests; ruff; eval harness 76/76,
+front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`;
+`bench_pricing_workspace` 2 OK.
+
+**Performance after S4** (the same benchmark, best of three, seconds; S3's figures in brackets).
+Realistic 12 × 26: `validate_version` 1.92 saved / 2.14 unsaved (2.25 / 2.30), `price_matrix`
+unsaved 0.24 (0.25), `preview_price` unsaved 0.22 (0.24), the overlay alone 0.16 (0.17). Near the
+cap 12 × 40: validation 9.48 / 9.50 (10.0 / 9.9), matrix unsaved 0.68 (0.70). The refs cost nothing
+measurable (the realistic draft's 125 warnings all carry one); the duplicate-key check is one set
+per table. The S3 reading stands: validation is the cost, and the UI must keep one in flight.
+
+**O1–O5 after S4.** Unchanged: S4 is validation only. None of O1–O5 is implemented on `pw-backend`;
+they land in S1 (O1–O3, O5 parse), S5 + S9 (O4) and S13 (board cells), and stay owner input 13.
+
+**Decision (implemented in S5: GAP-6, GAP-7, GAP-12).** The last backend slice.
+- *Price-test ages (GAP-6).* `preview_price` reads `children` with `_child_specs(children,
+  check_in)` (`api/contracts.py`). Each child is one of:
+  - an age in whole years 0–17: an int, a digit-only string (surrounding spaces allowed, as `int()`
+    allowed them) or an integral float (`8.0`) → `ChildSpec(age=n)`, exactly as before;
+  - `{"age_months": n}`, an int 0–215 → `ChildSpec(age_months=n)`: the exact month a band starts or
+    ends at (95 months is 7y11m, in a 7–11.99 band);
+  - `{"dob": "YYYY-MM-DD"}` → checked as a booking checks one (`ages.check_child_dob` against
+    check-in and the site's today: not in the future, under 18 on arrival) → `ChildSpec(dob=…)`,
+    priced by the engine in completed months on its age basis.
+
+  Anything else is refused with "Child <n>: Child ages are whole years (0–17), {age_months} or
+  {dob}." (the braces are literal: the client shows its own localised hint), a date-of-birth
+  refusal with "Child <n>: <the check's message>"; no refusal repeats the date (the quote's
+  `request` records it for the staff user who typed it, as a booking quote does). More than 12
+  children: "A price test takes at most 12 children."
+- *`apply_op_values` (GAP-7, D2, O4's server half).* `POST contracts.apply_op_values(version,
+  values, op, value)`: `contract.edit` at the version's hotel, Draft only (the save's message),
+  `op` one of ABSOLUTE, MULTIPLY, PERCENT_OF, ADJUST_PERCENT, ADD, SUBTRACT, `value` typed as a TEX
+  decimal (`decimals.typed`, 9 places; blank refused), `values` a list of at most 500 items, each
+  None / "" or a TEX decimal. Each price goes through the pure `matrix.adjust_amount(current, op,
+  value, currency)`: ABSOLUTE is the value itself, any other op is `ops.apply_op` with the current
+  price as reference and running amount, exactly as the ARI grid's rate change computes a new unit
+  (`grid.py`), then `money.quantize` HALF_UP to the contract currency. → `[{value, error}]` in
+  order: the new price as exact text ("77.00", "1155", "13.580"), or None with `NO_VALUE` (no
+  price given, whatever the op) or `NEGATIVE` (the exact result is below zero). It reads the
+  version's status and contract and the contract's currency (no document or terms are loaded),
+  writes and audits nothing. No rate limit: staff only, 500 values at most, 7 ms for 500 on the
+  benchmark's drafts.
+- *Reported subtotals (GAP-12).* `occupancy.OccupancyResult` gains the keyword fields
+  `after_adults` (the base, i.e. the room price on ROOM basis, plus the adult slots) and
+  `after_children` (plus the child slots: the total before a whole-combination rule), both
+  defaulting to ZERO. `engine.NightPrice` gains `subtotal_adults`, `subtotal_children` and
+  `subtotal_board` (occupancy + board, the amount the period adjustment starts from), filled from
+  values the engine already held through the existing `partial` tuple; `to_dict` adds them with
+  `to_str6`. No price, total, explanation step, explanation text or `engine_version` changes (the
+  spec example's summary lines, steps, totals and night keys are pinned as captured before). The
+  guest view (`to_dict(internal=False)`) and `quoting.strip_internal` reduce `nights[]` to date and
+  amount, so only staff with cost access see them. A child above the child bands priced as an adult
+  is an adult slot, so it is in `subtotal_adults`; a child filling an included ROOM-basis place
+  adds 0. The Explain ladder's chain holds by construction and is tested per night: the
+  combination step's before is `subtotal_children` and its after `occupancy`; without one they
+  are equal; `subtotal_board` = `occupancy` + `board` and is the period adjustment's before (else
+  the rate plan's, else the night cost).
+
+**Deviations from the slice text, with reasons (S5).**
+- A whole-year age outside 0–17 is now refused (the slice's range). Before, `-1` was answered as a
+  pricing error and 18 or more priced as an adult or answered "no age band"; a guest's booking
+  already refuses them (`quoting.Party.parse`), and the price test should not price what cannot
+  be booked. Within 0–17 the quote is identical (tested against the pre-S5 body, published and
+  draft).
+- A child object must carry exactly one of `age_months` or `dob` (`{age}`, both keys or none are
+  refused): the slice lists the two shapes; a mixed one would be ambiguous.
+- The refusal names the child ("Child <n>: …"), so the drawer can mark the input.
+- The children are read before the terms are built, so a malformed child is refused even for a
+  draft that cannot be built (before, the BUILD answer came first).
+- `values` items are typed as TEX decimals (text; a JSON number is taken as `decimals.typed` takes
+  it; a JSON list or object is refused before it, as it would otherwise surface as a server
+  error); a malformed item refuses the call ("Price <n>: … is not a number."), not only its item:
+  it is a client error, not a per-cell outcome.
+
+**Consequences (S5).**
+- Quote snapshots of bookings priced after S5 carry the three keys in their internal `nights[]`;
+  older snapshots do not, and the ladder leaves those stages blank (design §3.13.1). A snapshot
+  refers to its contract by payload hash, not by the quote's bytes, so reprices and the integrity
+  check are unaffected.
+- The existing Preview tab still sends whole years and is unaffected; the months / date-of-birth
+  toggle and the ladder are S14, the base room's relative entry S9 and the bulk Adjust… S10.
+
+**Rejected (S5).**
+- Computing the adjusted price or the ladder's subtotals in the client (D2).
+- Reusing `grid.apply_rate_change`: it splits periods and saves the draft; the workspace needs the
+  number only, before anything is saved.
+- A new explanation step per subtotal: it would change the explanation (text, count, snapshots);
+  the values are fields of the night.
+
+**Tests (S5).** Unit `test_engine.TestReportedSubtotals` (7): the spec example unchanged (summary
+lines, steps, totals, night keys, engine version) and its subtotals (120 → 240 → 300 → 300); every
+night of four scenarios (a period adjustment, a supplement board, two periods with a rate plan and
+an infant, adults only) chains as above; a 2A+2C combination starts from the children's 275 and
+ends at 247.50; ROOM basis (room 200, 3 adults: 270; single use: 200 → 160); `OccupancyResult`'s
+running totals; the guest view and `strip_internal` without them. `test_matrix.TestAdjustAmount`
+(4): the owner's examples (70 +10 % = 77.00, 80.55 +10 % = 88.61 HALF_UP, 100 × 1.155 = 115.50,
+JPY 1155, KWD 13.580, −100 % = 0.00, 0 %, 50 %, ± amounts), ABSOLUTE, NEGATIVE, equality with
+`ops.apply_op` + `quantize`. Integration `test_pricing_workspace_api` (+11, 48 in all): whole
+years (`[8]`, `"[8]"`, `["8"]`, `[8.0]`) give the pre-S5 body's quote on a published fixture and
+on the draft (`[1]`, `[4]`, `[8, 1]`, `[11, 3]`), 96 months the same price; 95 and 83 months in
+their bands; a date of birth 8 years ago priced, the future and 18 on arrival refused, malformed
+dates refused without echo; 22 malformed children refused, 13 children refused, 12 answered;
+`apply_op_values` results (EUR, KWD 13.580), NO_VALUE, NEGATIVE, nothing written; a contract.edit-only
+profile allowed, an agent, Finance and another hotel's Revenue Manager refused; a published version
+refused; 500 values allowed, 501 and 16 malformed calls refused (lists and objects as prices
+included); the base room's 100 "+10 %" →
+110.00 saved as ABSOLUTE (matrix 110, the derived room 148.5); nights' 6-dp subtotals (2A + child 8
+on UAI: 100 → 200 → 250 = occupancy, board 50 → 300), equal from the unsaved draft, absent after
+`strip_internal`. Fail-first on the S4 tip `564014a`: 10 of the 11 new unit tests fail (the spec
+example's pin passes and pins the baseline), 10 of the 11 integration tests fail (the guest-view
+pin passes). Mutants killed: 7 in the unit tests (after-children taken after the combination,
+subtotal_board after the adjustment, HALF_EVEN, the adults' subtotal counting children,
+subtotal_adults = unit, no NEGATIVE, a missing key) and 4 in the integration tests (7.5 truncated,
+`price.view` as the gate, no Draft check, no date-of-birth check). Verification on branch
+`pw-backend` (main `1575c8b` already merged; no newer main), migrated with it: all 38 integration
+modules 831 OK (10 skipped, as before; `test_snapshot_integrity` 13, `test_modification_determinism`
+27, `test_security_regressions` 59, `test_pricing_workspace_api` 48); 491 unit tests; ruff; eval
+harness 76/76, front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`;
+`bench_pricing_workspace` 2 OK.
+
+**Performance after S5** (`bench_pricing_workspace`, which now also times `apply_op_values` at its
+cap and compares the nights' subtotals of the unsaved and saved quotes; best of three, seconds; S4
+in brackets). Realistic 12 × 26 (1,406 rows): the overlay alone 0.18 (0.16), `price_matrix`
+unsaved 0.24 (0.24), with 12 parties 0.30, `preview_price` unsaved 0.23 (0.22), `validate_version`
+2.06 saved / 2.12 unsaved (1.92 / 2.14), `apply_op_values` 500 prices 0.007, `save_version` 0.71.
+Near the cap 12 × 40 (4,539 rows): 0.50 (0.51), 0.70 (0.68), 0.93, 0.70 (0.64), 9.50 / 9.60
+(9.48 / 9.50), 0.007, 2.63. GAP-12 costs nothing measurable; validation remains the cost, and the
+UI must keep one `validate_version` in flight.
+
+**O1–O5 after S5.** O4's server half is implemented on `pw-backend`: `apply_op_values` changes the
+base room's entered price once by the parsed op and value (HALF_UP to the contract currency), and
+the workspace stores the result as ABSOLUTE (the integration test above saves it that way). The
+client half — the base-row cell committing `ABSOLUTE <server result>`, "70.00 → …" while pending,
+Ctrl/Cmd+Enter over a selection — is S9 and not built; if the owner chooses O4's alternative
+(refuse relative entries on the base room), the endpoint stays for the bulk Adjust… (§3.10, S10),
+which does not depend on O4. O1–O3 and O5 are unchanged: their parse is only in S1's `shorthand.ts` on
+branch `pricing-workspace`, not merged here, and the board cells are S13. All five stay owner
+input 13.

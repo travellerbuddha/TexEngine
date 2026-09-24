@@ -117,6 +117,17 @@ def _policy_layers(property: str, market: str, at: datetime) -> list[inherit.Pol
 	return layers
 
 
+def band_source(version, terms: ContractTerms, at: datetime) -> str:
+	"""Where the age bands of ``terms`` (built from ``version`` as of ``at``) come from: the
+	version's own rows (``version``), else the policy they are inherited from, named by its
+	source (``policy:<id>/r<rev>/<scope>``), or ``policy`` when the policies live at ``at`` no
+	longer give that band set (ADR-061)."""
+	if version.get("age_bands"):
+		return "version"
+	layer = inherit.band_layer(_policy_layers(terms.property, terms.market, at))
+	return layer.source if layer is not None and tuple(layer.bands) == tuple(terms.age_bands) else "policy"
+
+
 def age_bands_of(rows) -> tuple[AgeBand, ...]:
 	"""Age bands from TEX Child Age Band rows (codes upper-cased, ages in exact months)."""
 	return tuple(
@@ -424,6 +435,12 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 def validate_version(name: str) -> dict:
 	version = frappe.get_doc("TEX Contract Version", name)
 	scope.require("contract.edit", scope.property_of("TEX Contract Version", name))
+	return validate_doc(version)
+
+
+def validate_doc(version) -> dict:
+	"""Validation of a version document as it is: a loaded draft, or a draft with unsaved changes
+	applied in memory (ADR-061). The caller checks who may validate it."""
 	try:
 		terms = build_terms(version)
 	except frappe.ValidationError as e:

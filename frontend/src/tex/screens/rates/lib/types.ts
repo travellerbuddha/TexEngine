@@ -157,6 +157,13 @@ export interface VersionDoc {
   room_basis_children_fill_included: number
   validation_report: { ok?: boolean; issues?: Issue[] } | null | number
   editable: boolean
+  // what the Pricing Workspace may offer this viewer (ADR-061); the endpoints check again.
+  // An agent's catalogue carries the three can_* flags as false and no basis_locked.
+  can_preview: boolean
+  can_publish: boolean
+  can_edit_contract: boolean
+  /** the contract's pricing basis is fixed: one of its versions was published */
+  basis_locked?: boolean
   selling?: SellingTerms
   selling_source?: "frozen" | "version" | "header"
   selling_editable?: boolean
@@ -169,6 +176,8 @@ export interface VersionDoc {
     pricing_basis: "PERSON" | "ROOM"
     contract_currency: string
     status: string
+    /** decimal places of the contract currency (2 EUR, 0 JPY, 3 KWD); not in an agent's catalogue */
+    minor_units?: number
   }
   room_types: RoomTypeOpt[]
   rate_plan_options: RatePlanOpt[]
@@ -183,10 +192,31 @@ export interface VersionDoc {
   modified?: string
 }
 
+/**
+ * What a validation issue is about (ADR-061 D9, GAP-4): only the parts it has. Rule ids are the
+ * saved row names, or `~<_key>` for rows sent unsaved to `validate_version(name, data)`.
+ * `rule_ids` lists every rule of an issue about several (twins, ties); `rule_id` is the first.
+ * `age_bands` (AGE_BANDS) is every band code of the contract, so the message's codes can be
+ * shown as labels. The sweep reports a combination once, with the first period it fails in.
+ */
+export interface IssueRef {
+  rule_id?: string
+  rule_ids?: string[]
+  room_type?: string
+  period?: string
+  other_period?: string
+  age_band?: string
+  age_bands?: string[]
+  adults?: number
+  children?: number
+  board?: string
+}
+
 export interface Issue {
   level: "ERROR" | "WARNING"
   code: string
   message: string
+  ref?: IssueRef
 }
 
 export interface ValidationResult {
@@ -244,6 +274,15 @@ export interface NightLine {
   sell_contract: string
   sell: string
   final: string
+  /**
+   * The night's running totals for the Explain ladder (ADR-061 GAP-12), 6-dp strings: after the
+   * adults (ROOM basis: room price + extra adults), after the children (before a combination
+   * rule; `occupancy` is after it) and occupancy + board (before the period adjustment). Absent
+   * from quotes stored before GAP-12: the ladder then leaves those stages blank.
+   */
+  subtotal_adults?: string
+  subtotal_children?: string
+  subtotal_board?: string
 }
 
 export interface QuoteLine {
@@ -269,6 +308,42 @@ export interface PromoOutcome {
   code: string | null
 }
 
+/**
+ * A child of a price test (ADR-061 GAP-6): an age in whole years 0–17, or exactly — in months
+ * (0–215) or by date of birth (ISO `YYYY-MM-DD`, under 18 on arrival, never in the future).
+ */
+export type PreviewChild = number | { age_months: number } | { dob: string }
+
+/** What `contracts.preview_price` takes. */
+export interface PreviewRequest {
+  version: string
+  room_type: string
+  board: string
+  rate_plan?: string | null
+  check_in: string
+  check_out: string
+  adults: number
+  /** at most 12 */
+  children: PreviewChild[]
+  market?: string | null
+  channel?: string
+  currency?: string | null
+  sale_at?: string | null
+  promo_codes?: string[]
+  /** the editor's unsaved `save_version` payload (ADR-061 GAP-1): price the draft as shown */
+  data?: unknown
+}
+
+/**
+ * One entered price changed once by `contracts.apply_op_values` (ADR-061 GAP-7): the new price as
+ * exact decimal text in the contract currency, or null with why — `NO_VALUE` (no price was given)
+ * or `NEGATIVE` (the result would be below zero). One per value sent, in order.
+ */
+export interface ApplyOpResult {
+  value: string | null
+  error: null | "NO_VALUE" | "NEGATIVE"
+}
+
 export interface PreviewResult {
   sellable: boolean
   reasons: { code: string; message: string }[]
@@ -291,9 +366,120 @@ export interface PreviewResult {
   explanation?: ExplainStep[]
 }
 
+// ─── price_matrix (ADR-061: GAP-2 sources, GAP-2b sample parties, GAP-3 inherited terms) ───
+
+/** The rule that priced a room's unit in a period (matrix.unit_source). */
+export interface CellSource {
+  rule_id: string
+  /** PERIOD: the period's own rule; ALL: the room's rule for every period */
+  scope: "PERIOD" | "ALL"
+  op: string
+  /** exact decimal text without trailing zeros ("1.15", "245") */
+  value: string | null
+  base_room_type: string | null
+  /** the room, then the rooms it is derived from */
+  chain: string[]
+  /** rules of the room that did not win (a generic rule, an INHERIT row) */
+  overridden: string[]
+}
+
+/** Effective capacity: the contract room's values, else the room type's. */
+export interface RoomCapacity {
+  max_adults: number
+  max_children: number
+  max_occupants: number
+  min_adults: number
+  included_adults: number
+}
+
+export interface MatrixRoom {
+  room_type: string
+  name: string
+  cells: Record<string, string | null>
+  errors?: Record<string, string>
+  /** per period code; a cell with an error has none */
+  sources: Record<string, CellSource>
+  capacity: RoomCapacity
+}
+
+export interface MatrixAgeBand {
+  code: string
+  /** as built: equals the code when the band has no label */
+  label: string
+  from_months: number
+  to_months: number
+  is_infant: boolean
+  /** "version", or the pricing policy the bands are inherited from ("policy:<id>/r<rev>/<scope>") */
+  source: string
+}
+
+/** An occupancy rule the version inherits from a pricing policy. */
+export interface InheritedOccupancyRule {
+  rule_id: string
+  target: "ADULT" | "CHILD" | "COMBINATION"
+  position: number | null
+  age_band: string | null
+  adults: number | null
+  children: number | null
+  room_type: string | null
+  period: string | null
+  op: string
+  value: string | null
+  is_override: boolean
+  source: string
+}
+
+/** The engine's own default for a slot no rule prices (D12). */
+export interface OccupancyDefault {
+  rule_id: string
+  target: "ADULT"
+  op: string
+  value: string
+  source: string
+  note: string
+}
+
+/** A sample party posted as price_matrix(parties): each child named by its age band code. */
+export interface SampleParty {
+  adults: number
+  children: string[]
+}
+
+export interface PartySlot {
+  target: "ADULT" | "CHILD"
+  position: number
+  age_band: string | null
+  amount: string
+  /** null for a place included in a ROOM-basis price */
+  rule_id: string | null
+  included: boolean
+}
+
+/** One sample party priced per period code (occupancy total of one night in party_room). */
+export interface PartyCell {
+  cells: Record<string, string | null>
+  slots: Record<string, PartySlot[]>
+  errors: Record<string, string>
+}
+
 export interface PriceMatrix {
   periods: { code: string; name: string; start: string; end: string }[]
-  rooms: { room_type: string; name: string; cells: Record<string, string | null>; errors?: Record<string, string> }[]
+  rooms: MatrixRoom[]
   basis: "PERSON" | "ROOM"
   currency: string
+  age_bands: MatrixAgeBand[]
+  inherited_rules: InheritedOccupancyRule[]
+  occupancy_defaults: { adult: OccupancyDefault; child: null }
+  /** only when parties were posted, in their order */
+  party_cells?: PartyCell[]
+  build_error?: undefined
 }
+
+/** price_matrix with unsaved data that cannot be built (a room of another hotel, ambiguous policies). */
+export interface PriceMatrixBuildError {
+  build_error: string
+  rooms: []
+  periods: []
+}
+
+export type PriceMatrixResponse = PriceMatrix | PriceMatrixBuildError
