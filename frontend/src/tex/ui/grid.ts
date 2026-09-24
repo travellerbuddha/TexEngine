@@ -30,6 +30,7 @@ import {
   type GridEditable,
   type GridSelection,
 } from "./grid-model"
+import { shortcutLetter } from "./keys"
 
 export interface GridSelectionOptions {
   rows: number
@@ -227,7 +228,9 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
         selection.clear()
         return
       default:
-        if (selection && mod && !e.altKey && (e.key === "a" || e.key === "A")) {
+        // by letter on any layout (Russian: key "ф", code "KeyA"); later Ctrl/Cmd+letter
+        // shortcuts use shortcutLetter too
+        if (selection && mod && !e.altKey && shortcutLetter(e) === "a") {
           e.preventDefault()
           selection.selectAll()
           return
