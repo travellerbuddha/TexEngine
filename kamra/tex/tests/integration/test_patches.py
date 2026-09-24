@@ -994,22 +994,25 @@ class TestReportingPatches(PatchCase):
 
 
 	def test_p47_reports_sites_named_like_an_admin_page_once(self):
-		"""G-64 review M3: a booking site named like one of the admin area's pages (``rooms``,
-		``analytics``…) is reported for the owner, never renamed (its slug is its guests' address)."""
+		"""G-64 review M3: a booking site named like one of the admin area's pages (an old link to it
+		opened that page) is reported for the owner, never renamed (its name is its first slug)."""
 		clash = put("TEX Booking Site", "rooms", site_slug="rooms", site_name="Rooms Hotel", property=fx.PROPERTY,
 		            enabled=1)
-		moved = put("TEX Booking Site", "g47-moved", site_slug="analytics", site_name="Moved", property=fx.PROPERTY,
-		            enabled=0)
+		moved = put("TEX Booking Site", "Analytics", site_slug="analytics-beach", site_name="Moved",
+		            property=fx.PROPERTY, enabled=0)                     # named so, its slug changed since
+		slug_only = put("TEX Booking Site", "g47-slug", site_slug="content", site_name="Slug only",
+		                property=fx.PROPERTY, enabled=1)                # opens at its name: no clash
 		fine = put("TEX Booking Site", "g47-fine", site_slug="g47-fine", site_name="Fine", property=fx.PROPERTY,
 		           enabled=1)
 		self.first_run("p47_g64_site_slugs")
 		self.assertRerunChangesNothing("p47_g64_site_slugs")
-		for site, slug in ((clash, "rooms"), (moved, "analytics")):
+		for site, slug in ((clash, "rooms"), (moved, "analytics-beach")):
 			self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "booking_site.admin_slug",
 			                                                      "reference_name": site}), 1, site)
 			self.assertEqual(frappe.db.get_value("TEX Booking Site", site, "site_slug"), slug)   # never renamed
-		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking_site.admin_slug",
-		                                                      "reference_name": fine}))
+		for site in (slug_only, fine):
+			self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking_site.admin_slug",
+			                                                      "reference_name": site}), site)
 
 
 class TestSmallPatches(PatchCase):
