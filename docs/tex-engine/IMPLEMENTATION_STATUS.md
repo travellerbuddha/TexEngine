@@ -248,6 +248,37 @@ branch's code (76/76, 13/13, banquet 101), 400 unit tests, ruff and semgrep (ERR
 changed files, `npx tsc -b`, `npm run build` and `npm run i18n:tex` clean; Playwright as in the
 table above.
 
+**ADR-058 review follow-up (2026-09-25, branch `fix-mig` on main `84cf85a`, main `5e47867` merged in).**
+An independent review of G-73 / G-76 found 1 Critical, 1 High, 4 Medium and 6 Low issues. All are
+fixed, with tests that fail first.
+- *C1:* an interrupted migration test run could commit an emptied site. Every migration test now
+  refuses commits until its own rollback; the SIGINT simulation's marker row was committed before
+  and not after. The tests that empty the site or run every patch over it run only on a disposable
+  site (M4 as well).
+- *H1:* `ran_before` reads skipped and suffixed Patch Log rows as Frappe does.
+- *M1–M3:* p01 and p36 run once; no test runs a real DocType sync.
+- *L1–L6:* the digest names passwords by record; guests get a guest-safe refusal; refusals name
+  the version that failed, survive a queue outage and are audited once an hour; p19 lists charges
+  by name; one unreadable index table stops nothing.
+- *Fail-first on `aa742c0`:* `test_patches` 8 fail and 1 error; `test_snapshot_integrity` 5 fail and
+  1 error.
+- *Runs:*
+  - Migrate, then all 32 integration modules on the shared site: **639 OK** (the 3 whole-site tests
+    skipped there): admin_markets 4, age_bands 11, audit_trail 15, channel_binding 27,
+    commercial_flows 53, concurrency 8, critical_journey 31, crm_privacy 29, crm_segments 7,
+    custom_domains 9, distribution 21, extras_inventory 17, fx_snapshot 5, grant_expiry 9,
+    inventory 31, legacy_pricing 15, legacy_pricing_review 23, loyalty_admin 7,
+    migrations_notify 7, modification_determinism 27, money_fields 9, patches 31, portfolio 2,
+    post_booking_extras 12, pricing_policies 14, public_booking 17, restrictions 25,
+    security_hygiene 14, security_regressions 59, self_service_money 75, snapshot_integrity 13,
+    system_status 12.
+  - `test_patches` and `test_snapshot_integrity` on a disposable site, the whole-site tests
+    included (`disposable_test.sh`: site made, tested, dropped): patches **31 OK** (none skipped),
+    snapshot_integrity **13 OK**.
+  - Upstream suites after the migrate, with the branch's code and with the shared tree's: eval
+    harness 76/76, front-desk journey 13/13, banquet 101 OK (both).
+  - 400 unit tests; ruff clean.
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
@@ -342,7 +373,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-53 | Security | PARTIAL | TEX endpoints scoped (115, 34 probed), legacy record arguments resolved to their hotel (G-02 fixed, ADR-027), REST/Desk isolation, CSRF, parameterised SQL, escaped e-mail, rate limits, hashed tokens, fail-closed callbacks; G-83 hygiene fixed and reviewed (ADR-046 with its review follow-up): communication links checked for guest and hotel, no consent granted on a known profile by an anonymous booking or by staff without `crm.edit`, the consent history kept to the viewer's hotels, uploads checked on the server with images decoded whole, the public folder serving only an allow-list judged on the stored name, bearer tokens only in URL fragments and POST bodies (payment pages send no Referer), the PMS webhook never sends unsigned, payment API keys encrypted and masked in the change history (p22, p24) · `test_security_regressions`, `test_security_hygiene` (14), unit `test_filetypes`, e2e `pay-link.spec.ts` (2, passes); the system status is capability- and hotel-scoped and the guest ping answers booleans only, with no secret in either payload (ADR-047, `test_system_status`) | (G-10…G-16, G-26, G-83 fixed.) Owner decisions left from G-83: a double opt-in e-mail for consent asked for on a known profile (needs SMTP); payment links e-mailed before G-83 keep their token in the path on their first request until they expire. SECURITY.md, pentest (GO_LIVE_READINESS). |
 | R-54 | Audit trail | **COMPLETE** | immutable `TEX Audit Event` (actor, roles, hotel, source, old/new, reason); compact bounded diffs (ADR-053): every saved draft contract edit on every path (settings old → new, table rows by natural key), a publish's commercial difference against the version it replaces, ARI and limited-extras bulk edits with each cell's old value, payment policies / provider accounts / method rules on the TEX API, Desk and REST paths (secrets only as set / changed booleans); group and enterprise events name their group / enterprise and the hotels they reached (`TEX Audit Scope`, p33), seen by each of those hotels' staff and by no other hotel (viewer, Desk, REST); each payment outcome's real source (gateway return, gateway notification, staff, scheduler); Settings → Audit trail renders row changes, hotels reached and sources (G-74 fixed) · `test_audit_trail` (15), unit `test_audit_changes` (11) | — |
 | R-55 | UX productivity | PARTIAL | Ctrl+K, shortcuts, quick booking, duplicate contract, bulk edit, quick payment link | No global search, recent reservations, copy period/restrictions, saved filters (G-75). |
-| R-56 | Migrations | **COMPLETE** | p01–p39 in `patches.txt`, each listed with what it does in `MIGRATION_PLAN.md`; every patch tested for its behaviour on pre-patch data, a second run that changes nothing (at once or forced later: conversions and capability grants run once), no change to published payloads or sold prices, and an empty site; the upgrade of a Kamra database runs the whole chain (G-76 fixed, ADR-058: `test_patches` 21); the tests found and fixed re-run hazards in p02, p04, p08, p12, p17, p18, p23, p29, a guessed tenant in p01, legacy stays summed in the wrong currency by p09, repeated reports in p19/p24, Kamra hotels set live by p36 and indexes dropped by Frappe's schema sync (p39); the booking importers read amounts strictly (decimal mark, currency, never guessed), preview each row's amount, import each row all or nothing, and an imported amount is corrected with `price.override` (ADR-052 review, `test_legacy_pricing_review`, unit `test_import_amounts`); p36 (today's TEX hotels stay live) tested; p37 (funnel e-mail hashes kept without consent removed, withheld fields masked in the change history; re-runnable) tested in `test_crm_privacy` | — (A TEX-native importer for future bookings, guests and contracts is a go-live item: GO_LIVE_READINESS "Data migration".) |
+| R-56 | Migrations | **COMPLETE** | p01–p40 in `patches.txt`, each listed with what it does in `MIGRATION_PLAN.md`; a patch skipped by a failing migration runs whole next time, one-time steps (p01, p02, p04, p36, the capability grants, p12, p17) never undo an administrator's change on a forced re-run, and the migration tests commit nothing even when interrupted, with the whole-site tests on a disposable site (ADR-058 review); every patch tested for its behaviour on pre-patch data, a second run that changes nothing (at once or forced later: conversions and capability grants run once), no change to published payloads or sold prices, and an empty site; the upgrade of a Kamra database runs the whole chain (G-76 fixed, ADR-058: `test_patches` 21); the tests found and fixed re-run hazards in p02, p04, p08, p12, p17, p18, p23, p29, a guessed tenant in p01, legacy stays summed in the wrong currency by p09, repeated reports in p19/p24, Kamra hotels set live by p36 and indexes dropped by Frappe's schema sync (p39); the booking importers read amounts strictly (decimal mark, currency, never guessed), preview each row's amount, import each row all or nothing, and an imported amount is corrected with `price.override` (ADR-052 review, `test_legacy_pricing_review`, unit `test_import_amounts`); p36 (today's TEX hotels stay live) tested; p37 (funnel e-mail hashes kept without consent removed, withheld fields masked in the change history; re-runnable) tested in `test_crm_privacy` | — (A TEX-native importer for future bookings, guests and contracts is a go-live item: GO_LIVE_READINESS "Data migration".) |
 | R-57 | Testing | **COMPLETE** | every category in the spec list maps to tests (occupancy, bands, boundaries, combinations, precedence, overrides, versions, historical, periods, FX, markup, promotions, restrictions, concurrency, revisions, permissions, tenancy, payments) | New regression tests are required with each gap fix (FINAL_GAP_AUDIT §4). |
 | R-58 | E2E (Playwright) | **COMPLETE** | `frontend/e2e/critical-journey.spec.ts` (19 steps via UI), `booking.spec.ts` desktop + mobile | Low: step 17 changes dates, not occupancy (G-82). |
 | R-59 | Visual QA | PARTIAL | manual QA at 320–1920 in tr/en/de | Contrast, 320 px clipping, blank `/`, Kamra login, English system segment names; no visual regression tests (G-80). |

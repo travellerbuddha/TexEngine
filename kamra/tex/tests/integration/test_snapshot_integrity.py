@@ -98,8 +98,8 @@ class TestPayloadHashChecked(SnapshotCase):
 		# a proposal made before the change
 		self.assertRefused(lambda: modification.apply(early["proposal_token"], reason="guest extends"), msg="apply")
 		seen = refusals(self.res)
-		self.assertEqual([r["basis"] for r in seen], ["ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "CURRENT",
-		                                             "ORIGINAL_VERSION"])
+		# the apply's refusal repeats the first one (same basis, version and hash): audited once an hour
+		self.assertEqual([r["basis"] for r in seen], ["ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "CURRENT"])
 		self.assertEqual({(r["version"], r["recorded_hash"], r["found_hash"]) for r in seen},
 		                 {(self.c["version"], recorded, found)})
 		self.assertStillSold()                                    # the locked price never moved
@@ -110,8 +110,24 @@ class TestPayloadHashChecked(SnapshotCase):
 		self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_VERSION"), "integrity")
 		self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_SALE_DATE"), "integrity")
 		self.assertRefused(lambda: modification.simulate(self.res, str(sold_at)), "integrity")
-		self.assertEqual([(r["use"], r["basis"]) for r in refusals(self.res)],
+		seen = refusals(self.res)
+		self.assertEqual([(r["use"], r["basis"]) for r in seen],
 		                 [("reprice", "ORIGINAL_VERSION"), ("reprice", "ORIGINAL_SALE_DATE"), ("simulate", None)])
+		# L3 (review): the version that failed is named even when selection failed on it
+		row_hash = frappe.db.get_value("TEX Contract Version", self.c["version"], "payload_hash")
+		self.assertEqual({(r["version"], r["found_hash"]) for r in seen}, {(self.c["version"], row_hash)})
+		self.assertStillSold()
+
+	def test_another_contracts_failing_payload_is_named_as_the_one_that_failed(self):
+		"""L3 (review of G-76): selection loads every contract on sale; the refusal names the version
+		that failed (here another contract's), not the stay's."""
+		other = fx.create_contract(self.f, code="G73B")
+		change_payload(other["version"], rehash=False)
+		self.assertRefused(lambda: modification.propose(self.res, {}, basis="CURRENT"), "integrity")
+		(r,) = refusals(self.res)
+		self.assertEqual((r["version"], r["sold_version"], r["found_hash"]),
+		                 (other["version"], self.c["version"],
+		                  frappe.db.get_value("TEX Contract Version", other["version"], "payload_hash")))
 		self.assertStillSold()
 
 	def test_the_simulator_and_add_ons_check_the_hash_too(self):
@@ -170,6 +186,62 @@ class TestPayloadHashChecked(SnapshotCase):
 		self.assertEqual((kw["action"], kw["reference_name"], kw["source"]), (REFUSED, self.res, "System"))
 		audit_mod.record_refusal(**{k: v for k, v in kw.items() if k not in ("queue", "now", "enqueue_after_commit")})
 		self.assertEqual(len(refusals(self.res)), 1)
+
+
+class TestRefusalReview(SnapshotCase):
+	"""Review of G-73 (ADR-058 review follow-up): what guests are told, a queue that is down, and a
+	refusal repeated by every click."""
+
+	def test_a_guest_is_told_to_contact_the_hotel_and_staff_keep_the_detail(self):
+		"""L2: the version, its hashes and "ask an administrator" are staff detail. A guest's change
+		(manage page, a paid change applied later: its error is stored on the request) and a guest's
+		extras are refused with a reason a guest may read."""
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest proposes on the manage page
+		early = modification.propose(self.res, {"check_out": fx.d(6, 13)}, basis="CURRENT", _check_permission=False)
+		change_payload(self.c["version"])
+		guest_paths = {
+			"propose": lambda: modification.propose(self.res, {"check_out": fx.d(6, 13)}, basis="CURRENT",
+			                                        _check_permission=False),
+			"apply": lambda: modification.apply(early["proposal_token"], reason="guest change", source="Guest",
+			                                    _guest_authorized=True),
+			"add-on": lambda: addon_svc.propose(self.res, [{"code": "TRF"}], guest=True),
+		}
+		for what, fn in guest_paths.items():
+			with self.assertRaises(frappe.ValidationError, msg=what) as cm:
+				fn()
+			text = str(cm.exception)
+			self.assertEqual(type(cm.exception).__name__, "PayloadMismatch", what)
+			self.assertIn("contact the hotel", text, what)
+			for detail in (self.c["version"], "hash", "administrator", self.snap["contract"]["payload_hash"][:12]):
+				self.assertNotIn(detail, text, what)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_VERSION"),
+		                   self.c["version"])                                  # staff keep the detail
+		self.assertTrue(all(r["recorded_hash"] and r["found_hash"] for r in refusals(self.res)))
+
+	def test_a_queue_that_is_down_never_replaces_the_refusal(self):
+		"""L4: the audit job cannot be queued (Redis down): the refusal is still the answer, and the
+		failure to audit is logged without the stay's details."""
+		change_payload(self.c["version"])
+		logged = frappe.db.count("Error Log", {"method": "TEX refusal audit not queued"})
+		with mock.patch.object(frappe, "enqueue", side_effect=ConnectionError("redis down")):
+			self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_VERSION"))
+		self.assertEqual(frappe.db.count("Error Log", {"method": "TEX refusal audit not queued"}), logged + 1)
+		self.assertFalse(refusals(self.res))
+
+	def test_a_repeated_refusal_is_audited_once_an_hour(self):
+		"""L4: every staff click on a stay whose terms changed is refused; the audit trail records it
+		once per stay, use, basis, version and hash each hour."""
+		change_payload(self.c["version"])
+		sold_at = modification.original_priced_at(frappe.get_doc("Reservation", self.res), self.snap)
+		for _ in range(3):
+			self.assertRefused(lambda: modification.simulate(self.res, str(sold_at)))
+			self.assertRefused(lambda: modification.propose(self.res, {}, basis="ORIGINAL_VERSION"))
+		self.assertEqual([r["use"] for r in refusals(self.res)], ["simulate", "reprice"])
+		frappe.db.sql("""UPDATE `tabTEX Audit Event` SET event_time = event_time - INTERVAL 2 HOUR
+		                 WHERE action = %s AND reference_name = %s""", (REFUSED, self.res))
+		self.assertRefused(lambda: modification.simulate(self.res, str(sold_at)))
+		self.assertEqual([r["use"] for r in refusals(self.res)], ["simulate", "reprice", "simulate"])
 
 
 class TestSaleTimeRecorded(SnapshotCase):

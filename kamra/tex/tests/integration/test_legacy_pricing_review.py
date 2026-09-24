@@ -419,6 +419,8 @@ class TestGoLive(ReviewCase):
 		from kamra.patches.tex import p36_g92_review as p36
 
 		fx.create_contract(self.f, code="G92P36")                # TEX sells the test hotel
+		# the site as before the upgrade: p36 sets hotels live on its first run only (ADR-058 review)
+		frappe.db.delete("Patch Log", {"patch": "kamra.patches.tex.p36_g92_review"})
 		frappe.db.set_value("Property", fx.PROPERTY, "tex_live_from", None)
 		frappe.db.set_value("Property", ONBOARDING, "tex_live_from", None)
 		p36.execute()

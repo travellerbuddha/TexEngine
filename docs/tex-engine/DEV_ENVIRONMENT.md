@@ -42,6 +42,22 @@ bench --site test.localhost run-tests --module kamra.tex.tests.integration.test_
 cd frontend && npm ci && npm run build
 ```
 
+**Tests that change the whole site** (`test_patches`: an empty site, every patch over the site, the
+Kamra upgrade; ADR-058 review) run only on a disposable site, whose site config sets
+`tex_disposable_test_site`. On a shared site they are skipped: even rolled back, they hold locks
+that other sessions wait on. Make one for the run and drop it after:
+```bash
+bench new-site texmig.localhost --db-root-password root --admin-password admin \
+  --install-app payments --install-app kamra
+bench --site texmig.localhost set-config allow_tests true
+bench --site texmig.localhost set-config -p tex_disposable_test_site 1
+bench --site texmig.localhost run-tests --module kamra.tex.tests.integration.test_patches
+bench drop-site texmig.localhost --db-root-password root --force --no-backup
+```
+On the cloud-session bench, `/home/user/bench/scratch/disposable_test.sh <tree> <outdir> [modules]`
+does all of this under the bench-test lock (about 40 s to make the site). Every migration test also
+refuses commits until it rolled back, so a run stopped with Ctrl-C commits nothing.
+
 ## Demo data and browser E2E
 ```bash
 # demo enterprise, hotels, contracts, users (revenue@, agent@, finance@, beach.gm@demo.tex)
