@@ -10,8 +10,19 @@ Calculation bases:
   ORIGINAL_VERSION      the contract version the reservation was sold on, selling
                         policies as of the original sale time
   ORIGINAL_SALE_DATE    whatever contract/policies were on sale at the original sale time
-  HISTORICAL_SALE_DATE  as if sold at a chosen past moment (needs price.override)
+  HISTORICAL_SALE_DATE  as if sold at a chosen past moment (needs price.override, on propose and
+                        on apply)
   CURRENT               today's contracts and policies
+
+The sale time is the basis's: a change never carries one of its own, and a chosen historical
+sale date is checked on the server (given, valid, not in the future). A past sale time selects
+the contracts that were Active then (their audited status, G-51, ADR-054); CURRENT reads the
+live status. Coupon uses are counted as they are now: a code a change keeps or adds is recorded
+under today's limits (G-09); the simulator alone counts them as held at its sale time.
+
+A proposal token is bound to whoever proposed it (G-51, ADR-054): staff apply only their own
+proposals at the hotel they were made for; a guest's proposal is applied only through the manage
+page of its booking.
 
 FX (G-56, ADR-051): the ORIGINAL_* bases convert with the rates the original sale recorded
 (``original_fx``), never the FX tables, for every pair the sale converted; a pair it did not
@@ -44,7 +55,7 @@ from kamra.tex.services import quoting
 BASES = ("ORIGINAL_VERSION", "ORIGINAL_SALE_DATE", "HISTORICAL_SALE_DATE", "CURRENT")
 CAPACITY_REASONS = ("sold out on ", "only ", "closed on ")     # pricing.extras.capacity_refusal
 EDITABLE = ("check_in", "check_out", "room_type", "adults", "children", "board", "rate_plan", "market",
-            "promo_codes", "extras", "sale_at", "drop_addons")
+            "promo_codes", "extras", "drop_addons")
 # a change to another product sells it at the reservation's channel's prices: staff need the right
 # to book on that channel; dates, occupancy, extras and codes are servicing (ADR-050 review)
 PRODUCT_FIELDS = ("room_type", "rate_plan", "board", "market")
@@ -111,7 +122,7 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 			base[k] = str(v).upper()
 		elif k == "rate_plan":
 			base[k] = v or None
-		elif k not in ("sale_at", "drop_addons"):
+		elif k != "drop_addons":
 			base[k] = v
 	base["sale_at"] = sale_at.isoformat()
 	return serialize.request_from_dict(base), snap
@@ -179,9 +190,34 @@ def fx_pins(res, snap, basis: str) -> dict | None:
 	return fx_math.pins(original_fx(res, snap), origin=f"reservation:{res.name}")
 
 
+def past_sale_time(value, *, missing: str, future: str) -> datetime:
+	"""A sale time a price is computed as of (a historical sale date, the simulator), checked on
+	the server: given, a valid date and time, not in the future (G-51). ``missing`` and
+	``future`` are the messages."""
+	if value in (None, ""):
+		frappe.throw(missing)
+	try:
+		at = get_datetime(value)
+	except (ValueError, TypeError, OverflowError):
+		at = None
+	if not isinstance(at, datetime):
+		frappe.throw(_("The sale time is not a valid date and time."))
+	if at > now_datetime():
+		frappe.throw(future)
+	return at
+
+
+def historical_sale_at(value) -> datetime:
+	return past_sale_time(value, missing=_("Choose the historical sale date."),
+	                      future=_("A historical sale date cannot be in the future."))
+
+
 def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[str, datetime, str]:
 	"""→ (contract version, effective sale time, how decided). ``sale_at`` pins CURRENT to the
-	moment a proposal was priced (a guest's paid change applies at the price they accepted)."""
+	moment a proposal was priced (a guest's paid change applies at the price they accepted).
+
+	A sale time in the past (the original or a historical sale date, a pinned CURRENT) selects
+	among the contracts Active then; CURRENT now reads the live status (G-51, ADR-054)."""
 	original_sale = original_priced_at(res, snap)
 	if basis == "ORIGINAL_VERSION":
 		return snap["contract"]["version"], original_sale, "original contract version"
@@ -190,14 +226,11 @@ def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[s
 	elif basis == "ORIGINAL_SALE_DATE":
 		at = original_sale
 	elif basis == "HISTORICAL_SALE_DATE":
-		if not basis_sale_at:
-			frappe.throw(_("Choose the historical sale date."))
-		at = get_datetime(basis_sale_at)
-		if at > now_datetime():
-			frappe.throw(_("A historical sale date cannot be in the future."))
+		at = historical_sale_at(basis_sale_at)
 	else:
 		frappe.throw(_("Unknown pricing basis {0}.").format(basis))
-	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at)
+	historical = basis != "CURRENT" or bool(sale_at)
+	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=historical)
 	same = [c for c in cands if c[0].name == snap["contract"]["contract"]]
 	pick = (same or cands or [None])[0]
 	if not pick:
@@ -221,7 +254,11 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
             _sale_at=None) -> dict:
 	"""``internal`` (cost, margin, explanation) defaults to the caller's price.view_cost;
 	guest calls (``_check_permission=False``) never get it unless the service asks.
-	``_sale_at`` (internal only) prices CURRENT as of that moment instead of now."""
+	``_sale_at`` (internal only) prices CURRENT as of that moment instead of now.
+
+	``basis_sale_at`` is the HISTORICAL_SALE_DATE basis's sale time and is refused with any
+	other basis; ``changes`` never carry a sale time (G-51). The proposal token names who
+	proposed it, for which hotel and booking (``apply`` checks it)."""
 	res = frappe.get_doc("Reservation", reservation)
 	if internal is None:
 		internal = _check_permission and scope.has_capability("price.view_cost", res.property)
@@ -231,12 +268,22 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 			scope.require("price.override", res.property)
 	if basis not in BASES:
 		frappe.throw(_("Unknown pricing basis {0}.").format(basis))
+	if basis == "HISTORICAL_SALE_DATE":
+		basis_sale_at = str(historical_sale_at(basis_sale_at))
+	elif basis_sale_at not in (None, ""):
+		# never silently ignored: a sale date prices only on the historical sale date basis
+		frappe.throw(_("A sale date is used only with the historical sale date basis."))
+	else:
+		basis_sale_at = None
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("A {0} reservation cannot be modified.").format(res.status.lower()))
 	if res.get("tex_pricing_source") == "Channel":
 		# its price and its stay are the channel's: changes arrive from the channel (G-69)
 		frappe.throw(_("This booking came from a channel: change it in the channel, and the change arrives here."))
 	changes = {k: v for k, v in (changes or {}).items() if v is not None}
+	if "sale_at" in changes:
+		frappe.throw(_("A change has no sale time of its own: to price it as if sold at another time, "
+		               "choose the historical sale date basis and its date."))
 	if _check_permission:
 		require_product_channel(res, changes)
 	if "drop_addons" in changes:
@@ -302,10 +349,14 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	diff = (new_total - old_total) if quote.sellable and quote.currency == old_ccy else None
 	proposal = {
 		"reservation": res.name, "modified": str(res.modified), "changes": changes, "basis": basis,
-		"basis_sale_at": str(basis_sale_at) if basis_sale_at else None, "version": version,
+		"basis_sale_at": basis_sale_at, "version": version,
 		"new_total": to_str(new_total) if quote.sellable else None, "currency": quote.currency,
 		# the moment the price was computed: a paid guest change re-derives it as of then (G-45)
 		"pricing_sale_at": str(at),
+		# who may apply it (G-51): staff only their own proposal at this hotel; a guest's only
+		# through the manage page of this booking
+		"origin": "staff" if _check_permission else "guest", "by": frappe.session.user,
+		"property": res.property, "booking": res.tex_booking,
 	}
 	return {
 		"reservation": res.name,
@@ -323,6 +374,20 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	}
 
 
+def require_proposer(p: dict, *, guest: bool) -> None:
+	"""A proposal token is applied only by whoever made it (G-51, ADR-054): through the guest
+	path only a guest's own proposal (the manage token proves the booking); by staff only the
+	user who proposed it (``apply`` also checks the hotel and booking). A token made before
+	G-51 names nobody and is refused: it expired within ``PROPOSAL_TTL_MINUTES`` anyway."""
+	if guest:
+		if p.get("origin") != "guest":
+			frappe.throw(_("This change was not proposed on your booking page."), frappe.PermissionError)
+		return
+	if p.get("origin") != "staff" or p.get("by") != frappe.session.user:
+		frappe.throw(_("This proposal was made by another user: propose the change again."),
+		             frappe.PermissionError)
+
+
 def apply(proposal_token: str | None, *, reason: str, override_amount=None, source: str = "Desk",
           _guest_authorized: bool = False, _proposal: dict | None = None, _from_payment: bool = False,
           _paid_at=None) -> dict:
@@ -334,6 +399,10 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	applied (G-45). ``_from_payment``: the guest paid for it (at ``_paid_at``, when the gateway
 	confirmed the charge); a payment made by the proposal's payment deadline (its expiry plus
 	``PAYMENT_GRACE_MINUTES``) applies it, whenever the job applying it runs.
+
+	A proposal token is applied only by whoever proposed it (``require_proposer``; G-51). The
+	HISTORICAL_SALE_DATE basis and a manual ``override_amount`` need ``price.override`` at the
+	hotel here too, whoever proposed the change; guests apply only CURRENT proposals.
 
 	Locks: the booking, then the reservation, then the inventory days: the order every path that
 	changes a TEX booking takes (review of ADR-044)."""
@@ -348,6 +417,7 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		if _from_payment:
 			frappe.throw(_("A paid change applies from its stored proposal."))
 		p = quoting.verify(proposal_token, kind="proposal")
+		require_proposer(p, guest=_guest_authorized)
 		pin = None
 	# the booking first, then the reservation as it is now (a locking read, not the caller's
 	# snapshot of it): the lock order of every change to a TEX booking
@@ -355,14 +425,24 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	if booking:
 		frappe.db.get_value("TEX Booking", booking, "name", for_update=True)
 	res = frappe.get_doc("Reservation", p["reservation"], for_update=True)
+	if _proposal is None and (p.get("property") != res.property or p.get("booking") != res.tex_booking):
+		frappe.throw(_("This proposal was made for another reservation: propose the change again."),
+		             frappe.PermissionError)
 	if _guest_authorized:
 		if override_amount not in (None, ""):
 			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)
+		if p["basis"] != "CURRENT":
+			# a guest changes the stay at today's prices, the only basis the manage page proposes
+			frappe.throw(_("This change cannot be made online. Please contact the hotel."), frappe.PermissionError)
 	else:
 		scope.require("reservation.modify", res.property)
 		# whoever applies a proposal needs the right to make it: a token carries the change,
 		# not the entitlement of whoever proposed it
 		require_product_channel(res, p["changes"])
+		if p["basis"] == "HISTORICAL_SALE_DATE":
+			# a price no longer on sale is an override of today's: checked again here, not only on
+			# propose (G-51); a manual override amount is checked below
+			scope.require("price.override", res.property)
 	if str(res.modified) != p["modified"]:
 		frappe.throw(_("The reservation changed since this proposal was made — review it again."))
 	if not (reason or "").strip():
@@ -440,6 +520,8 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		types.add("Extras")
 	if "promo_codes" in changes:
 		types.add("Discount")
+	if p["basis"] == "HISTORICAL_SALE_DATE":
+		types.add("Sale Date")          # priced as if sold at another time
 	if override_amount not in (None, ""):
 		types.add("Price Override")
 	change_type = types.pop() if len(types) == 1 else ("Multiple" if types else "Guest Request"
@@ -457,29 +539,47 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	audit("reservation.modify", reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	      old={"total": to_str(old_total), **{k: v[0] for k, v in changed_fields.items()}},
 	      new={"total": to_str(final_total), **{k: v[1] for k, v in changed_fields.items()}, "revision": rev,
-	           "basis": p["basis"]}, reason=reason)
+	           "basis": p["basis"], "pricing_sale_at": result["pricing_sale_at"],
+	           # an override records what the engine computed next to the amount staff set
+	           **({"computed_total": to_str(new_total), "override": True}
+	              if override_amount not in (None, "") else {})}, reason=reason)
 	return {"reservation": res.name, "revision": rev, "old_total": to_str(old_total),
 	        "new_total": to_str(final_total), "difference": to_str(final_total - old_total), "currency": ccy}
 
 
 def simulate(reservation: str, sale_at) -> dict:
-	"""What would this exact stay have cost if sold at ``sale_at``? Read-only (R-22)."""
+	"""What would this exact stay have cost if sold at ``sale_at``? Read-only (R-22).
+
+	Deterministic (G-51, ADR-054): everything it reads is as of ``sale_at``, so the answer for a
+	past moment does not change with what happened since:
+	- the contracts Active then (``candidate_contracts(historical=True)``), the version live then
+	  and its frozen payload and selling terms (G-50);
+	- markups, promotions and their limits, extras, the tax policy, FX policies and rates (G-20);
+	- coupon uses held then: made by then and not given back by then, this booking's own excluded.
+	The stay itself is the reservation's (its request, channel and guest). Not checked:
+	availability, restrictions and the capacity of limited extras (the stay is sold already).
+	``sale_at`` must be a valid time, not in the future; ``price.view`` and ``reservation.view``
+	at the hotel (it writes nothing: pricing a change as of a past time needs ``price.override``)."""
 	res = frappe.get_doc("Reservation", reservation)
 	scope.require("price.view", res.property)
+	scope.require("reservation.view", res.property)
 	snap = _snapshot(res)
-	at = get_datetime(sale_at)
+	at = past_sale_time(sale_at, missing=_("Choose the sale time to simulate."),
+	                    future=_("A simulated sale time cannot be in the future."))
 	req = serialize.request_from_dict({**snap["request"], "sale_at": at.isoformat()})
-	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at)
+	cands = contracts.candidate_contracts(res.property, req.market, req.channel, at, historical=True)
 	if not cands:
-		return {"sellable": False, "reasons": [{"code": "NO_CONTRACT",
-		                                        "message": _("No contract was on sale at that time.")}]}
+		return {"sellable": False, "simulated_sale_at": str(at),
+		        "reasons": [{"code": "NO_CONTRACT", "message": _("No contract was on sale at that time.")}]}
 	pick = next((c for c in cands if c[0].name == snap["contract"]["contract"]), cands[0])
 	quote, _terms = quoting.price_request(pick[1], req, exclude_booking=res.tex_booking, check_capacity=False,
-	                                      gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest))
+	                                      gkey=booking_svc.booking_guest_key(res.tex_booking, res.guest),
+	                                      usage_at=at)
 	internal = scope.has_capability("price.view_cost", res.property)
 	actual = from_db(res.tex_total_amount or res.amount_after_tax, res.tex_currency or "EUR")
 	return {
 		"reservation": res.name, "simulated_sale_at": str(at), "contract_version": pick[1],
+		"contract": {"contract": pick[0].name, "code": pick[0].contract_code, "status_now": pick[0].status_now},
 		"actual": {"total": to_str(actual), "currency": res.tex_currency, "sale_at": str(res.tex_sale_at),
 		           "priced_at": str(priced_at(res, snap)), "version": snap["contract"]["version"]},
 		"simulated": quote.to_dict(internal=internal),

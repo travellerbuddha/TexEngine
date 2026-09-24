@@ -177,7 +177,8 @@ class TestHistoricalSaleDate(DeterminismCase):
 		rev = revision(out["revision"])
 		self.assertEqual((rev.pricing_basis, get_datetime(rev.basis_sale_at), rev.change_type, rev.actor),
 		                 ("HISTORICAL_SALE_DATE", sold_at, "Multiple", self.rm))       # dates + sale date
-		self.assertEqual((D(rev.old_amount), D(rev.new_amount), rev.override_amount), (D("400"), D("600"), None))
+		self.assertEqual((D(rev.old_amount), D(rev.new_amount)), (D("400"), D("600")))
+		self.assertFalse(rev.override_amount)
 		self.assertEqual(json.loads(rev.snapshot_after)["basis"], "HISTORICAL_SALE_DATE")
 		as_user("Administrator")
 		audit = last_audit("reservation.modify", res)

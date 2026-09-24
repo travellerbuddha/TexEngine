@@ -435,6 +435,9 @@ def submit(b, proposal_token: str, *, note: str | None = None, return_url: str |
 	existing = frappe.db.get_value(DT, {"proposal_hash": ("in", keys)}, "name")
 	if existing:
 		return _replay(existing, p, return_url)
+	# only a proposal made on the manage page: never a staff proposal (another basis, another
+	# user's entitlement) brought to the guest path (G-51)
+	modification.require_proposer(p, guest=True)
 	quoting.require_fresh(p)
 	# one change of a booking at a time, read as it is now: the booking, then the reservation
 	b = frappe.get_doc("TEX Booking", b.name, for_update=True)
