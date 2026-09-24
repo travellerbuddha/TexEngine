@@ -656,10 +656,10 @@ def cancellation_penalty(reservation, today=None) -> tuple[D, dict]:
 	if rp and not rp.get("refundable", True):
 		return quantize(total, ccy), {"rule": "non-refundable", "days_before": days}
 	if not policy:
-		return ZERO, {"rule": "no policy (free cancellation)", "days_before": days}
+		return quantize(ZERO, ccy), {"rule": "no policy (free cancellation)", "days_before": days}
 	applicable = [r for r in policy.get("rules") or [] if days < int(r["days_before_arrival"])]
 	if not applicable:
-		return ZERO, {"rule": "free cancellation window", "days_before": days}
+		return quantize(ZERO, ccy), {"rule": "free cancellation window", "days_before": days}
 	rule = min(applicable, key=lambda r: int(r["days_before_arrival"]))
 	v = D(rule["penalty_value"])
 	if rule["penalty_type"] == "PERCENT":
