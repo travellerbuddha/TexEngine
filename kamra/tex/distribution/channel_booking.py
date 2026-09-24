@@ -11,9 +11,10 @@ rooms equal to the message (by the channel's room line id), ``cancelled`` cancel
 room. The same message is applied once (the inbound idempotency key); a modification
 for a booking TEX has not seen is applied as new.
 
-A modification or cancellation locks the booking, then each reservation, then its nights: the
-order every change to a TEX booking takes (ADR-044), and a guest change still waiting for a
-room the channel changed or cancelled is void (G-45 re-review F8).
+A modification or cancellation locks the booking, then its reservations (by name), then the
+nights: the order every change to a TEX booking takes (ADR-044) and the order of a desk save of
+a room, and a guest change still waiting for a room the channel changed or cancelled is void
+(G-45 re-review F8, third review).
 """
 
 from __future__ import annotations
@@ -196,6 +197,11 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # the booking first
 	prop = b.property
+	# then its rooms, by name, then every night: a desk or PMS save of a room locks the room, then
+	# its nights, so the two never wait on each other in a cycle; a new room still takes no name
+	# before all the nights are held (G-49). Third review of ADR-044.
+	for name in sorted(row.reservation for row in b.rooms):
+		frappe.db.get_value("Reservation", name, "name", for_update=True)
 	_lock_all(prop, mapped)
 	lines = {}
 	for row in b.rooms:
@@ -227,7 +233,7 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			                             new_amount=res.tex_total_amount, currency=ccy, basis="EXTERNAL",
 			                             reason=f"room added by the channel ({ref})", source="Channel")
 		else:
-			res = frappe.get_doc("Reservation", name, for_update=True)      # then the room, then its nights
+			res = frappe.get_doc("Reservation", name, for_update=True)      # locked above: read as it is now
 			before = {f: str(res.get(f) or "") for f in values if f != "tex_pricing_snapshot"}
 			if all(before[f] == str(values[f] or "") for f in before) and res.status in LIVE:
 				continue

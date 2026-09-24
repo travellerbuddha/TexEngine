@@ -268,6 +268,18 @@ class TestInbound(DistributionCase):
 				self.assertEqual(frappe.db.get_value("TEX Guest Change Request", gcr.name, "status"), "Superseded")
 		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
 
+	def test_a_channel_change_locks_its_rooms_before_their_nights(self):
+		"""G-45 re-review 3: a desk or PMS save of a reservation locks the reservation, then its
+		nights; the channel's modification takes them in the same order (after the booking)."""
+		from kamra.tex.tests.integration.test_self_service_money import locks_during
+
+		self.send(message(ref="OTA-910"))
+		self.apply_all()
+		self.send(message(ref="OTA-910", status="modified", co=fx.d(6, 14), total="600.00"))
+		seen = locks_during(self.apply_all)
+		self.assertLess(seen.index("tabTEX Booking"), seen.index("tabReservation"), seen)
+		self.assertLess(seen.index("tabReservation"), seen.index("tabTEX Inventory Day"), seen)
+
 	def test_a_bookings_messages_apply_in_order(self):
 		self.send(message(ref="OTA-400"))
 		self.send(message(ref="OTA-400", status="modified", total="500.00"))
