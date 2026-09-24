@@ -4337,15 +4337,17 @@ answer and asserts they are false. Verification on branch `pw-backend`: all 38 i
   need; the version's own rows and the policy revisions say it.
 - Summing slots or deriving the chain in the client: the engine already knows both.
 
-**Tests (S3).** Unit `test_matrix.py` (17): the fixture contract's sources (generic ×1.15 → ALL
+**Tests (S3).** Unit `test_matrix.py` (18): the fixture contract's sources (generic ×1.15 → ALL
 with chain [SUP, STD]; SUITE P3A 245 → PERIOD overriding the generic rule; the base room's own
 price; an INHERIT period row overridden while the generic rule wins; a chained derivation; two rows
 sharing an id; a cycle and a missing price unsellable); party totals equal to
 `engine.price_stay`'s occupancy for 2A + CHB, for both child orders, a derived room, a period
-override and ROOM basis; an unknown band, over capacity and a band without a rule refused;
-`band_layer`; `rule_value`. Integration `test_pricing_workspace_api` (+14, 31 in all): sources with
-saved row names and with `~key` ids, errored cells without a source, effective capacity (room type
-fallback, overlay values), the version's bands and the engine default, a band without a label
+override and ROOM basis; the sample party's children at the lower edge of their bands, in the
+contract's order, with its infants (added in S3's re-verification: a mutant placing them at the
+upper edge priced the same and survived the other tests); an unknown band, over capacity and a band
+without a rule refused; `band_layer`; `rule_value`. Integration `test_pricing_workspace_api` (+14,
+31 in all): sources with saved row names and with `~key` ids, errored cells without a source,
+effective capacity (room type fallback, overlay values), the version's bands and the engine default, a band without a label
 (overlay and saved), bands and rules inherited from a live global policy (draft and published),
 the policy's rules cascading into a version with its own, sample parties (totals, slots and rule
 ids, the same total as a quote, an unknown band and over-capacity as cell errors, a period without
@@ -4357,6 +4359,10 @@ while the 17 S2 tests pass; the old-keys test's draft and `adults` sub-tests pas
 pins the baseline. Verification on branch `pw-backend` (main `1575c8b` already merged), migrated
 with it: all 38 integration modules 814 OK (10 skipped, as before), 442 unit tests, ruff; eval
 harness 76/76, front-desk journey 13/13, banquet 101 OK; `tsc -b`, `npm run build`, `i18n:tex`.
+Re-verified after the benchmark, the unit test for the sample party and the documentation
+corrections below (tip `404a3e4`, main `1575c8b` merged, migrated with it): all 38 integration
+modules 814 OK (10 skipped), 443 unit tests, ruff; eval 76/76, journey 13/13, banquet 101 OK;
+`tsc -b`, `npm run build`, `i18n:tex`; `bench_pricing_workspace` 2 OK.
 
 **Performance of the server side (measured in S3; the pre-Final measurement asked for).**
 `kamra/tex/tests/integration/bench_pricing_workspace.py` is opt-in: it is not a `test_*` module, so
