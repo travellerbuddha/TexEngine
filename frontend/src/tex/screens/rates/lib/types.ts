@@ -157,6 +157,13 @@ export interface VersionDoc {
   room_basis_children_fill_included: number
   validation_report: { ok?: boolean; issues?: Issue[] } | null | number
   editable: boolean
+  // what the Pricing Workspace may offer this viewer (ADR-061); the endpoints check again.
+  // An agent's catalogue carries the three can_* flags as false and no basis_locked.
+  can_preview: boolean
+  can_publish: boolean
+  can_edit_contract: boolean
+  /** the contract's pricing basis is fixed: one of its versions was published */
+  basis_locked?: boolean
   selling?: SellingTerms
   selling_source?: "frozen" | "version" | "header"
   selling_editable?: boolean
@@ -169,6 +176,8 @@ export interface VersionDoc {
     pricing_basis: "PERSON" | "ROOM"
     contract_currency: string
     status: string
+    /** decimal places of the contract currency (2 EUR, 0 JPY, 3 KWD); not in an agent's catalogue */
+    minor_units?: number
   }
   room_types: RoomTypeOpt[]
   rate_plan_options: RatePlanOpt[]
@@ -291,9 +300,120 @@ export interface PreviewResult {
   explanation?: ExplainStep[]
 }
 
+// ─── price_matrix (ADR-061: GAP-2 sources, GAP-2b sample parties, GAP-3 inherited terms) ───
+
+/** The rule that priced a room's unit in a period (matrix.unit_source). */
+export interface CellSource {
+  rule_id: string
+  /** PERIOD: the period's own rule; ALL: the room's rule for every period */
+  scope: "PERIOD" | "ALL"
+  op: string
+  /** exact decimal text without trailing zeros ("1.15", "245") */
+  value: string | null
+  base_room_type: string | null
+  /** the room, then the rooms it is derived from */
+  chain: string[]
+  /** rules of the room that did not win (a generic rule, an INHERIT row) */
+  overridden: string[]
+}
+
+/** Effective capacity: the contract room's values, else the room type's. */
+export interface RoomCapacity {
+  max_adults: number
+  max_children: number
+  max_occupants: number
+  min_adults: number
+  included_adults: number
+}
+
+export interface MatrixRoom {
+  room_type: string
+  name: string
+  cells: Record<string, string | null>
+  errors?: Record<string, string>
+  /** per period code; a cell with an error has none */
+  sources: Record<string, CellSource>
+  capacity: RoomCapacity
+}
+
+export interface MatrixAgeBand {
+  code: string
+  /** as built: equals the code when the band has no label */
+  label: string
+  from_months: number
+  to_months: number
+  is_infant: boolean
+  /** "version", or the pricing policy the bands are inherited from ("policy:<id>/r<rev>/<scope>") */
+  source: string
+}
+
+/** An occupancy rule the version inherits from a pricing policy. */
+export interface InheritedOccupancyRule {
+  rule_id: string
+  target: "ADULT" | "CHILD" | "COMBINATION"
+  position: number | null
+  age_band: string | null
+  adults: number | null
+  children: number | null
+  room_type: string | null
+  period: string | null
+  op: string
+  value: string | null
+  is_override: boolean
+  source: string
+}
+
+/** The engine's own default for a slot no rule prices (D12). */
+export interface OccupancyDefault {
+  rule_id: string
+  target: "ADULT"
+  op: string
+  value: string
+  source: string
+  note: string
+}
+
+/** A sample party posted as price_matrix(parties): each child named by its age band code. */
+export interface SampleParty {
+  adults: number
+  children: string[]
+}
+
+export interface PartySlot {
+  target: "ADULT" | "CHILD"
+  position: number
+  age_band: string | null
+  amount: string
+  /** null for a place included in a ROOM-basis price */
+  rule_id: string | null
+  included: boolean
+}
+
+/** One sample party priced per period code (occupancy total of one night in party_room). */
+export interface PartyCell {
+  cells: Record<string, string | null>
+  slots: Record<string, PartySlot[]>
+  errors: Record<string, string>
+}
+
 export interface PriceMatrix {
   periods: { code: string; name: string; start: string; end: string }[]
-  rooms: { room_type: string; name: string; cells: Record<string, string | null>; errors?: Record<string, string> }[]
+  rooms: MatrixRoom[]
   basis: "PERSON" | "ROOM"
   currency: string
+  age_bands: MatrixAgeBand[]
+  inherited_rules: InheritedOccupancyRule[]
+  occupancy_defaults: { adult: OccupancyDefault; child: null }
+  /** only when parties were posted, in their order */
+  party_cells?: PartyCell[]
+  build_error?: undefined
 }
+
+/** price_matrix with unsaved data that cannot be built (a room of another hotel, ambiguous policies). */
+export interface PriceMatrixBuildError {
+  build_error: string
+  rooms: []
+  periods: []
+}
+
+export type PriceMatrixResponse = PriceMatrix | PriceMatrixBuildError
