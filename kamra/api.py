@@ -1878,7 +1878,8 @@ def merge_guests(source: str, target: str):
 	its checks and its audit; ADR-056 second review)."""
 	from kamra.tex.crm import service as crm
 
-	out = crm.merge_guests(source, target)
+	# require_roles and assert_scope (every stay of both profiles in scope) decided who may merge
+	out = crm.merge_guests(source, target, checked=True)
 	moved = out["moved"]
 
 	from kamra.savings import log_action

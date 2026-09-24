@@ -932,12 +932,14 @@ def _repoint(source: str, target: str) -> dict[str, list[str]]:
 	return moved
 
 
-def merge_guests(source: str, target: str) -> dict:
+def merge_guests(source: str, target: str, *, checked: bool = False) -> dict:
 	"""Merge the duplicate profile ``source`` into ``target`` (ADR-056 second review).
 
 	Who: staff who may edit both profiles (``crm.edit``) and may edit guests at every hotel either
-	profile has a record at: its stays, bookings, communications, cases and loyalty entries go with it.
-	Both profiles belong to one enterprise (or to none). What moves: every link to the duplicate
+	profile has a record at: its stays, bookings, communications, cases and loyalty entries go with it;
+	platform administrators. ``checked``: the legacy PMS endpoint decided already, by its own rule
+	(``kamra.authz``: an administrator role, every stay of both profiles in the caller's scope, the PMS
+	open to the caller). Both profiles belong to one enterprise (or to none). What moves: every link to the duplicate
 	(from the meta: TEX and legacy DocTypes, custom fields), its comments, attachments and history; its
 	loyalty entries, so the balance is one and the tier follows the merged lifetime. The profile that
 	stays keeps its own data and takes the duplicate's where it has none; VIP and blacklist are kept if
@@ -948,12 +950,14 @@ def merge_guests(source: str, target: str) -> dict:
 	for g in (source, target):
 		if not frappe.db.exists("Guest", g):
 			frappe.throw(_("Guest not found."), frappe.DoesNotExistError)
-	require_guest(target, "crm.edit")
-	require_guest(source, "crm.edit")
+	decided = checked or scope.is_platform_admin()
+	if not decided:
+		require_guest(target, "crm.edit")
+		require_guest(source, "crm.edit")
 	# both rows locked in name order: two merges of the same profiles never deadlock
 	frappe.db.sql("SELECT name FROM `tabGuest` WHERE name IN %(g)s ORDER BY name FOR UPDATE", {"g": (source, target)})
 	hotels = _records_hotels((source, target))
-	if not scope.is_platform_admin():
+	if not decided:
 		allowed = {p for p in scope.permitted_properties() if scope.has_capability("crm.edit", p)}
 		if not hotels <= allowed:
 			frappe.throw(_("These profiles have records at hotels where you may not edit guests; someone who may "

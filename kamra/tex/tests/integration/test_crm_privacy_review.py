@@ -341,6 +341,14 @@ class TestGuestMerge(PrivacyCase):
 		self.assertFalse(frappe.db.exists("Guest", dup))
 		self.assertEqual(frappe.db.get_value("TEX Booking", rec["dup_booking"], "booker_guest"), kept)
 		self.assertEqual(frappe.db.get_value("Guest", kept, "tex_loyalty_points"), 350)
+		# into a legacy walk-in profile (no stay, no enterprise), as the upstream eval harness does
+		walk_in = frappe.get_doc({"doctype": "Guest", "first_name": "Walk", "last_name": "In",
+		                          "phone": "+49 30 8889"}).insert(ignore_permissions=True).name
+		frappe.db.set_value("Guest", walk_in, "tex_enterprise", None)
+		api.merge_guests(source=kept, target=walk_in)
+		self.assertEqual(frappe.db.get_value("TEX Booking", rec["dup_booking"], "booker_guest"), walk_in)
+		self.assertEqual(frappe.db.get_value("Guest", walk_in, ["tex_enterprise", "tex_loyalty_points"]),
+		                 (self.ent, 350))
 
 	def test_possible_duplicates_are_only_those_the_viewer_may_see(self):
 		kept, dup, _rec = self.pair("m2-dups")
