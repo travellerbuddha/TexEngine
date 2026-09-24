@@ -57,6 +57,17 @@ export function cancelReservation(reservation: string, reason: string, waive_pen
   return tex<CancelResult>("crs", "cancel", { reservation, reason, waive_penalty: waive_penalty ? 1 : 0 }, { post: true })
 }
 
+/** Correct the amount (and currency) an imported stay was locked at: price.override, a reason,
+ * a revision and an audit event (ADR-052 review). Amounts travel as strings. */
+export function correctImportedAmount(reservation: string, amount: string, reason: string, currency?: string) {
+  return tex<{ reservation: string; revision: string; old_amount: string; new_amount: string; currency: string }>(
+    "crs",
+    "correct_imported_amount",
+    { reservation, amount, reason, currency },
+    { post: true },
+  )
+}
+
 export function acknowledgeGuestChange(reservation: string, note?: string) {
   return tex<{ ok: boolean }>("crs", "acknowledge_guest_change", { reservation, note }, { post: true })
 }

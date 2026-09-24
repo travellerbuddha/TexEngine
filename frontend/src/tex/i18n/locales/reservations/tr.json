@@ -313,5 +313,17 @@
  "res.snap.hash": "Veri özeti (hash)",
  "res.snap.override": "Fiyat elle şu tutara ayarlandı:",
  "res.snap.promotions": "Promosyonlar",
- "res.snap.title": "Kilitli fiyat"
+ "res.snap.title": "Kilitli fiyat",
+ "res.imported.badge": "İçe aktarıldı",
+ "res.imported.badge_hint": "Başka bir sistemden, dosyasındaki tutarla içe aktarıldı",
+ "res.imported.button": "İçe aktarılan tutarı düzelt",
+ "res.imported.title": "İçe aktarılan tutarı düzeltin",
+ "res.imported.subtitle": "Konaklama, siz düzeltene kadar içe aktarıldığı tutarı korur. Düzeltme bir revizyon olarak ve denetim kaydına yazılır.",
+ "res.imported.current": "İçe aktarılan tutar",
+ "res.imported.amount": "Doğru tutar",
+ "res.imported.amount_hint": "Ondalık nokta ile rakamlar, örn. 1250.50",
+ "res.imported.currency": "Para birimi",
+ "res.imported.reason": "Gerekçe",
+ "res.imported.confirm": "Tutarı düzelt",
+ "res.imported.done": "Tutar {amount} olarak düzeltildi"
 }

@@ -27,6 +27,7 @@ import {
   type PropertyRow,
 } from "./lib/api"
 import { asset } from "./lib/asset"
+import { toFullPath } from "./lib/routing"
 import { useAuth } from "./lib/auth"
 import { subscribeRealtime } from "./lib/realtime"
 import { getTheme, setTheme } from "./lib/theme"
@@ -229,6 +230,9 @@ export default function AppShell() {
       .catch(() => setModules(undefined))
   }, [property])
 
+  // TEX Engine (ADR-052 review): say when this hotel is sold through TEX (or joining it)
+  const texMode = properties.find((p) => p.name === property)?.tex_mode ?? null
+
   const apps = visibleApps(roles, modules)
   const routeApp = appForPath(location.pathname)
   const currentApp = apps.some((a) => a.id === routeApp.id) ? routeApp : apps[0]
@@ -283,6 +287,23 @@ export default function AppShell() {
             className="underline underline-offset-2 hover:text-black"
           >
             {t("Get your own Kamra →")}
+          </a>
+        </div>
+      )}
+      {texMode && !kiosk && (
+        <div
+          role="status"
+          className={cn(
+            "px-4 py-1.5 text-center text-xs font-medium",
+            texMode === "live" ? "bg-sky-100 text-sky-950" : "bg-amber-100 text-amber-950",
+          )}
+        >
+          {texMode === "live"
+            ? t("This hotel is sold through TEX: create and change its reservations in TEX (Reservations → CRS or Call Center).")
+            : t("This hotel is joining TEX: the Desk still sells it at its current prices until an administrator sets it live in TEX.")}
+          {" "}
+          <a href={toFullPath("/tex/crs")} className="underline underline-offset-2 hover:text-black">
+            {t("Open TEX →")}
           </a>
         </div>
       )}

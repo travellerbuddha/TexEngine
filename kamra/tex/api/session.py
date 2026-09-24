@@ -57,3 +57,13 @@ def bootstrap():
 	now = now_datetime()
 	out["server"] = {"time_zone": get_system_timezone(), "now": now.isoformat(), "today": now.date().isoformat()}
 	return out
+
+
+@frappe.whitelist()
+def hotel_mode(property: str):
+	"""Whether a hotel in the caller's scope is sold through TEX: the Desk Reservation form says
+	so before anyone types a stay the server would refuse (ADR-052 review)."""
+	from kamra.tex.legacy import tex_mode
+
+	scope.assert_property(property)
+	return {"property": property, "tex_mode": tex_mode(property)}

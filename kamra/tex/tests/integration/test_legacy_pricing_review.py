@@ -408,6 +408,12 @@ class TestGoLive(ReviewCase):
 
 		legacy = {p["name"]: p.get("tex_mode") for p in my_properties()}
 		self.assertEqual(legacy[ONBOARDING], "live")
+		# the Desk form asks for one hotel, in the caller's scope only
+		self.assertEqual(session.hotel_mode(fx.PROPERTY)["tex_mode"], "live")
+		self.assertIsNone(session.hotel_mode(self.legacy_hotel()["hotel"])["tex_mode"])
+		frappe.set_user(self.desk_user)  # nosemgrep: frappe-setuser -- granted at the TEX hotel only
+		with self.assertRaises(frappe.PermissionError):
+			session.hotel_mode(ONBOARDING)
 
 	def test_the_upgrade_keeps_todays_tex_hotels_live(self):
 		from kamra.patches.tex import p36_g92_review as p36

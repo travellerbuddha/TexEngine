@@ -313,5 +313,17 @@
  "res.snap.hash": "Payload hash",
  "res.snap.override": "Price set manually to",
  "res.snap.promotions": "Promotions",
- "res.snap.title": "Locked price"
+ "res.snap.title": "Locked price",
+ "res.imported.badge": "Imported",
+ "res.imported.badge_hint": "Imported from another system at the amount its file carried",
+ "res.imported.button": "Correct imported amount",
+ "res.imported.title": "Correct the imported amount",
+ "res.imported.subtitle": "The stay keeps the amount it was imported at until you correct it. The correction is recorded as a revision and in the audit trail.",
+ "res.imported.current": "Imported at",
+ "res.imported.amount": "Correct amount",
+ "res.imported.amount_hint": "Digits with a decimal point, e.g. 1250.50",
+ "res.imported.currency": "Currency",
+ "res.imported.reason": "Reason",
+ "res.imported.confirm": "Correct amount",
+ "res.imported.done": "Amount corrected to {amount}"
 }

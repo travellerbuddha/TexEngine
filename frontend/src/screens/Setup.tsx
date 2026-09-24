@@ -69,6 +69,10 @@ export default function Setup() {
     errors: { row: number; guest: string; error: string }[]
   } | null>(null)
   const [preset, setPreset] = useState("auto")
+  // amounts are read strictly (TEX Engine, ADR-052 review): "1.500" needs the file's decimal
+  // mark; a TEX hotel's import names the currency of its amounts
+  const [decimal, setDecimal] = useState("")
+  const [currency, setCurrency] = useState("")
   const [preview, setPreview] = useState<{
     mapping: Record<string, string>
     unmapped: string[]
@@ -76,6 +80,8 @@ export default function Setup() {
     ok: number
     skipped: number
     issues: { row: number; guest: string; error: string }[]
+    sample: { guest_name: string; check_in: string; check_out: string; status: string; amount: string | null; currency: string | null }[]
+    needs_currency?: boolean
   } | null>(null)
 
   const [prop, setProp] = useState({
@@ -201,6 +207,8 @@ export default function Setup() {
         property: createdProperty,
         csv_text: csv,
         preset,
+        decimal: decimal || undefined,
+        currency: currency.trim() || undefined,
       })
       setPreview(res)
     } catch (e) {
@@ -222,6 +230,8 @@ export default function Setup() {
         property: createdProperty,
         csv_text: csv,
         preset,
+        decimal: decimal || undefined,
+        currency: currency.trim() || undefined,
       })
       setImportReport(res)
       setPreview(null)
@@ -732,6 +742,30 @@ export default function Setup() {
                   <option value="ezee">{t("eZee export")}</option>
                   <option value="cloudbeds">{t("Cloudbeds export")}</option>
                 </select>
+                <select
+                  className={cn(inputCls, "w-auto")}
+                  value={decimal}
+                  onChange={(e) => {
+                    setDecimal(e.target.value)
+                    setPreview(null)
+                  }}
+                  aria-label={t("Decimal mark of the amounts")}
+                >
+                  <option value="">{t("Decimal mark: from the file")}</option>
+                  <option value=".">{t("Decimal point (1,250.50)")}</option>
+                  <option value=",">{t("Decimal comma (1.250,50)")}</option>
+                </select>
+                <input
+                  className={cn(inputCls, "w-28 uppercase")}
+                  value={currency}
+                  maxLength={3}
+                  placeholder={t("Currency")}
+                  aria-label={t("Currency of the amounts")}
+                  onChange={(e) => {
+                    setCurrency(e.target.value.toUpperCase())
+                    setPreview(null)
+                  }}
+                />
                 <label className="cursor-pointer rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:border-brand-400">
                   {t("Upload CSV file")}
                   <input
@@ -797,6 +831,27 @@ export default function Setup() {
                       {iss.guest ? ` (${iss.guest})` : ""}: {iss.error}
                     </p>
                   ))}
+                  {preview.sample.length > 0 && (
+                    <table className="w-full text-xs">
+                      <caption className="pb-1 text-left text-zinc-500">
+                        {t("As it will be imported (first rows)")}
+                      </caption>
+                      <tbody>
+                        {preview.sample.map((r, i) => (
+                          <tr key={i} className="border-t border-zinc-200">
+                            <td className="py-1 pr-2">{r.guest_name}</td>
+                            <td className="py-1 pr-2 text-zinc-500">
+                              {r.check_in} → {r.check_out}
+                            </td>
+                            <td className="py-1 pr-2 text-zinc-500">{t(r.status)}</td>
+                            <td className="py-1 text-right tabular-nums">
+                              {r.amount ? `${r.amount} ${r.currency ?? ""}` : t("no amount")}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )}
               {importReport && (

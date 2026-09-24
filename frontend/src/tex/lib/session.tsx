@@ -18,6 +18,10 @@ export interface TexProperty {
   sales_channels?: string[]
   /** Sales channels the user may quote and book on at this hotel (ADR-050 review). */
   booking_channels?: string[]
+  /** "live": sold through TEX, the Desk no longer sells it; "onboarding": in TEX, the Desk still
+   * sells it at the legacy price until an administrator sets it live; null: outside TEX
+   * (ADR-052 review). */
+  tex_mode?: "live" | "onboarding" | null
 }
 
 export interface Bootstrap {

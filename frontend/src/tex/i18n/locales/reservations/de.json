@@ -313,5 +313,17 @@
  "res.snap.hash": "Payload-Hash",
  "res.snap.override": "Preis manuell festgelegt auf",
  "res.snap.promotions": "Aktionen",
- "res.snap.title": "Festgeschriebener Preis"
+ "res.snap.title": "Festgeschriebener Preis",
+ "res.imported.badge": "Importiert",
+ "res.imported.badge_hint": "Aus einem anderen System mit dem Betrag aus seiner Datei importiert",
+ "res.imported.button": "Importierten Betrag korrigieren",
+ "res.imported.title": "Importierten Betrag korrigieren",
+ "res.imported.subtitle": "Der Aufenthalt behält den importierten Betrag, bis Sie ihn korrigieren. Die Korrektur wird als Revision und im Prüfprotokoll erfasst.",
+ "res.imported.current": "Importiert mit",
+ "res.imported.amount": "Richtiger Betrag",
+ "res.imported.amount_hint": "Ziffern mit Dezimalpunkt, z. B. 1250.50",
+ "res.imported.currency": "Währung",
+ "res.imported.reason": "Grund",
+ "res.imported.confirm": "Betrag korrigieren",
+ "res.imported.done": "Betrag auf {amount} korrigiert"
 }

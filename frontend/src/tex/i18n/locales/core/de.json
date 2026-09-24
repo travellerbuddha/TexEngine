@@ -69,5 +69,17 @@
  "core.shell.sign_out": "Abmelden",
  "core.shell.skip": "Zum Inhalt springen",
  "core.shell.theme_dark": "Dunkles Design",
- "core.shell.theme_light": "Helles Design"
+ "core.shell.theme_light": "Helles Design",
+ "core.shell.tex_live": "Live in TEX",
+ "core.shell.tex_live_hint": "Dieses Hotel wird über TEX verkauft: Der Desk legt seine Aufenthalte nicht mehr an und bepreist sie nicht neu.",
+ "core.shell.tex_onboarding": "Im Onboarding",
+ "core.shell.tex_onboarding_hint": "Dieses Hotel ist in TEX, aber noch nicht live: Der Desk verkauft es noch zum alten Preis.",
+ "core.shell.onboarding_title": "{hotel} ist noch nicht live in TEX",
+ "core.shell.onboarding_body": "Bis zum Go-live verkauft der Desk dieses Hotel noch zum alten Preis (das TEX-Inventar gilt). Schalten Sie es live, sobald seine Verträge veröffentlicht sind und das Team in TEX bucht.",
+ "core.shell.go_live": "In TEX live schalten",
+ "core.shell.go_live_title": "{hotel} in TEX live schalten",
+ "core.shell.go_live_body": "Ab jetzt legen das Desk-Formular, REST und der Datenimport keine Aufenthalte dieses Hotels mehr an und bepreisen sie nicht neu: Sie werden in TEX gebucht und geändert. Bereits verkaufte Aufenthalte behalten ihre Konditionen.",
+ "core.shell.go_live_reason": "Grund",
+ "core.shell.go_live_confirm": "Live schalten",
+ "core.shell.go_live_done": "{hotel} ist live in TEX"
 }
