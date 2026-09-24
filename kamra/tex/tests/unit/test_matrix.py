@@ -1,0 +1,174 @@
+"""Pricing Workspace read models (ADR-061, GAP-2, GAP-2b): where a room's unit comes from, and
+the occupancy total of a sample party, both from the engine's own resolvers."""
+
+import unittest
+from dataclasses import replace
+from datetime import date
+from decimal import Decimal
+
+from kamra.tex.pricing import engine, matrix
+from kamra.tex.pricing.enums import ChildOrdering, Op, PricingBasis
+from kamra.tex.pricing.model import ChildSpec, PricingError, RoomRule, Unsellable
+from kamra.tex.tests.unit import fixtures as fx
+
+D = Decimal
+
+
+def period(t, code):
+	return next(p for p in t.periods if p.code == code)
+
+
+def engine_occupancy(t, room, check_in, adults, *kid_ages):
+	"""The occupancy total ``engine.price_stay`` computes for one night."""
+	q = engine.price_stay(fx.ctx(t), fx.req(room_type=room, check_in=check_in,
+	                                         check_out=date.fromordinal(check_in.toordinal() + 1), adults=adults,
+	                                         children=tuple(ChildSpec(age=a) for a in kid_ages)))
+	assert q.sellable, q.reasons
+	return q.nights[0].occupancy
+
+
+class TestUnitSource(unittest.TestCase):
+	def setUp(self):
+		self.t = fx.terms()
+
+	def test_a_generic_formula_is_the_source_for_every_period(self):
+		src = matrix.unit_source(self.t, "SUP", period(self.t, "P2"))
+		self.assertEqual(src, {"rule_id": "R-SUP", "scope": "ALL", "op": "MULTIPLY", "value": "1.15",
+		                       "base_room_type": "STD", "chain": ["SUP", "STD"], "overridden": []})
+
+	def test_a_period_price_overrides_the_generic_formula(self):
+		src = matrix.unit_source(self.t, "SUITE", period(self.t, "P3A"))
+		self.assertEqual(src["rule_id"], "R-SUITE-P3A")
+		self.assertEqual(src["scope"], "PERIOD")
+		self.assertEqual((src["op"], src["value"]), ("ABSOLUTE", "245"))
+		self.assertIsNone(src["base_room_type"])
+		self.assertEqual(src["chain"], ["SUITE"])
+		self.assertEqual(src["overridden"], ["R-SUITE"])
+		# elsewhere the generic formula still prices the suite
+		self.assertEqual(matrix.unit_source(self.t, "SUITE", period(self.t, "P3"))["rule_id"], "R-SUITE")
+
+	def test_the_base_rooms_own_price(self):
+		src = matrix.unit_source(self.t, "STD", period(self.t, "P1"))
+		self.assertEqual(src, {"rule_id": "R-STD-P1", "scope": "PERIOD", "op": "ABSOLUTE", "value": "100",
+		                       "base_room_type": None, "chain": ["STD"], "overridden": []})
+
+	def test_an_inherit_period_row_is_overridden_and_the_generic_rule_wins(self):
+		t = replace(self.t, room_rules=(*self.t.room_rules, RoomRule("R-SUP-P1", "SUP", "P1", Op.INHERIT, None)))
+		src = matrix.unit_source(t, "SUP", period(t, "P1"))
+		self.assertEqual((src["rule_id"], src["scope"]), ("R-SUP", "ALL"))
+		self.assertEqual(src["overridden"], ["R-SUP-P1"])
+
+	def test_a_chained_derivation_names_every_room(self):
+		t = replace(self.t, room_rules=tuple(
+			RoomRule("R-DLX", "DLX", None, Op.MULTIPLY, D("1.10"), "SUP") if r.rule_id == "R-DLX" else r
+			for r in self.t.room_rules))
+		src = matrix.unit_source(t, "DLX", period(t, "P1"))
+		self.assertEqual(src["chain"], ["DLX", "SUP", "STD"])
+		self.assertEqual((src["base_room_type"], src["value"]), ("SUP", "1.1"))
+
+	def test_rows_sharing_an_id_are_told_apart_as_room_unit_picks_them(self):
+		# two unsaved rows posted with one client key (a client bug) share their rule id
+		t = replace(self.t, room_rules=(*(r for r in self.t.room_rules if r.room_type != "SUP"),
+		                                RoomRule("~dup", "SUP", None, Op.MULTIPLY, D("1.2"), "STD"),
+		                                RoomRule("~dup", "SUP", "P1", Op.ABSOLUTE, D("200"))))
+		p1, p2 = matrix.unit_source(t, "SUP", period(t, "P1")), matrix.unit_source(t, "SUP", period(t, "P2"))
+		self.assertEqual((p1["scope"], p1["op"], p1["value"]), ("PERIOD", "ABSOLUTE", "200"))
+		self.assertEqual((p2["scope"], p2["op"], p2["value"]), ("ALL", "MULTIPLY", "1.2"))
+
+	def test_a_derivation_cycle_is_unsellable(self):
+		t = replace(self.t, room_rules=tuple(
+			RoomRule("R-STD-P1", "STD", "P1", Op.MULTIPLY, D("0.9"), "SUP") if r.rule_id == "R-STD-P1" else r
+			for r in self.t.room_rules))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.unit_source(t, "SUP", period(t, "P1"))
+		self.assertEqual(cm.exception.code, "ROOM_DERIVATION_CYCLE")
+
+	def test_no_price_is_unsellable(self):
+		t = replace(self.t, room_rules=tuple(r for r in self.t.room_rules if r.rule_id != "R-STD-P2"))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.unit_source(t, "STD", period(t, "P2"))
+		self.assertEqual(cm.exception.code, "NO_ROOM_PRICE")
+
+
+class TestPartyTotal(unittest.TestCase):
+	def setUp(self):
+		self.t = fx.terms()
+
+	def test_two_adults_and_a_child_equal_the_engines_occupancy(self):
+		total, slots = matrix.party_total(self.t, "STD", period(self.t, "P1"), 2, ["CHB"])
+		self.assertEqual(total, D("250"))
+		self.assertEqual(total, engine_occupancy(self.t, "STD", date(2027, 6, 2), 2, 7))
+		self.assertEqual(slots, [
+			{"target": "ADULT", "position": 1, "age_band": None, "amount": "100.00", "rule_id": "O-A1",
+			 "included": False},
+			{"target": "ADULT", "position": 2, "age_band": None, "amount": "100.00", "rule_id": "O-A2",
+			 "included": False},
+			{"target": "CHILD", "position": 1, "age_band": "CHB", "amount": "50", "rule_id": "O-CHB",
+			 "included": False},
+		])
+
+	def test_children_are_ordered_as_the_contract_orders_them(self):
+		p = period(self.t, "P1")
+		for ordering, expected in ((ChildOrdering.OLDEST_FIRST, D("275")), (ChildOrdering.YOUNGEST_FIRST, D("250"))):
+			t = replace(self.t, child_ordering=ordering)
+			total, slots = matrix.party_total(t, "STD", p, 2, ["cha", "CHB"])
+			self.assertEqual(total, expected, ordering)
+			self.assertEqual(total, engine_occupancy(t, "STD", date(2027, 6, 2), 2, 3, 7), ordering)
+			first = next(s for s in slots if s["target"] == "CHILD" and s["position"] == 1)
+			self.assertEqual(first["age_band"], "CHB" if ordering == ChildOrdering.OLDEST_FIRST else "CHA")
+
+	def test_a_derived_room_and_a_period_override(self):
+		for room, code, day in (("SUP", "P2", date(2027, 6, 20)), ("SUITE", "P3A", date(2027, 8, 3))):
+			total, _slots = matrix.party_total(self.t, room, period(self.t, code), 3, ["INF"])
+			self.assertEqual(total, engine_occupancy(self.t, room, day, 3, 1), room)
+
+	def test_room_basis(self):
+		t = replace(self.t, basis=PricingBasis.ROOM)
+		total, slots = matrix.party_total(t, "STD", period(t, "P1"), 3, [])
+		self.assertEqual(total, D("135"))                      # room 100 + adult 3 ×0.70 of 50
+		self.assertEqual(total, engine_occupancy(t, "STD", date(2027, 6, 2), 3))
+		self.assertEqual([s["included"] for s in slots], [True, True, False])
+		self.assertIsNone(slots[0]["rule_id"])
+
+	def test_an_unknown_band_raises(self):
+		with self.assertRaises(PricingError):
+			matrix.party_total(self.t, "STD", period(self.t, "P1"), 2, ["XX"])
+
+	def test_a_room_that_cannot_host_the_party_is_unsellable(self):
+		with self.assertRaises(Unsellable) as cm:
+			matrix.party_total(self.t, "STD", period(self.t, "P1"), 2, ["CHA", "CHA", "CHB"])
+		self.assertEqual(cm.exception.code, "MAX_CHILDREN")
+
+	def test_a_child_band_without_a_rule_is_unsellable(self):
+		t = replace(self.t, occupancy_rules=tuple(r for r in self.t.occupancy_rules if r.rule_id != "O-TEEN"))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.party_total(t, "STD", period(t, "P1"), 2, ["TEEN"])
+		self.assertEqual(cm.exception.code, "NO_CHILD_RULE")
+
+
+class TestBandLayer(unittest.TestCase):
+	"""Where a contract without bands of its own takes them from (``price_matrix`` names it)."""
+
+	def test_the_most_specific_policy_defining_bands(self):
+		from kamra.tex.pricing import inherit
+		from kamra.tex.tests.unit.test_policy_cascade import GLOBAL, HOTEL, LAYERS, MARKET
+
+		self.assertIs(inherit.band_layer(LAYERS), MARKET)
+		self.assertIs(inherit.band_layer((GLOBAL, HOTEL)), GLOBAL)
+		self.assertIsNone(inherit.band_layer((HOTEL,)))
+		self.assertEqual(inherit.cascade((), (), LAYERS)[0], inherit.band_layer(LAYERS).bands)
+		self.assertEqual(MARKET.source, "policy:POL-M/r1/market")
+
+
+class TestRuleValue(unittest.TestCase):
+	def test_exact_text_without_trailing_zeros(self):
+		self.assertEqual(matrix.rule_value(D("1")), "1")
+		self.assertEqual(matrix.rule_value(D("1.150000000")), "1.15")
+		self.assertEqual(matrix.rule_value(D("0.333333333")), "0.333333333")
+		self.assertEqual(matrix.rule_value(D("1E+2")), "100")
+		self.assertEqual(matrix.rule_value(D("-0.00")), "0")
+		self.assertIsNone(matrix.rule_value(None))
+
+
+if __name__ == "__main__":
+	unittest.main()

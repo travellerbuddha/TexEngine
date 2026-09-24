@@ -161,6 +161,18 @@ class Party:
 		return self.adults + len(self.children)
 
 
+def child_slots_in_order(children: list[tuple[int, int, AgeBand]], ordering: ChildOrdering) -> tuple[ChildSlot, ...]:
+	"""Children given as (input index, months, band), numbered into slots in the contract's order:
+	oldest first or youngest first (ties in input order), or as entered."""
+	ordered = list(children)
+	if ordering == ChildOrdering.OLDEST_FIRST:
+		ordered.sort(key=lambda s: (-s[1], s[0]))
+	elif ordering == ChildOrdering.YOUNGEST_FIRST:
+		ordered.sort(key=lambda s: (s[1], s[0]))
+	return tuple(ChildSlot(position=i + 1, months=m, band=b, input_index=idx)
+	             for i, (idx, m, b) in enumerate(ordered))
+
+
 def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec, ...],
                    check_in: date, sale_date: date) -> Party:
 	"""Map declared children to age bands and order them into child slots."""
@@ -184,15 +196,7 @@ def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec,
 			                 child=idx + 1)
 		slots.append((idx, months, band))
 
-	if terms.child_ordering == ChildOrdering.OLDEST_FIRST:
-		slots.sort(key=lambda s: (-s[1], s[0]))
-	elif terms.child_ordering == ChildOrdering.YOUNGEST_FIRST:
-		slots.sort(key=lambda s: (s[1], s[0]))
-
-	child_slots = tuple(
-		ChildSlot(position=i + 1, months=m, band=b, input_index=idx)
-		for i, (idx, m, b) in enumerate(slots)
-	)
+	child_slots = child_slots_in_order(slots, terms.child_ordering)
 	return Party(
 		adults=adults + len(as_adults),
 		declared_adults=adults,

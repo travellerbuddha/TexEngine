@@ -79,11 +79,22 @@ class PolicyAmbiguous(PricingError):
 	code = "PRICING_POLICY_AMBIGUOUS"
 
 
+def _ordered(layers) -> list[PolicyLayer]:
+	"""Most specific policy first."""
+	return sorted(layers, key=lambda x: (-x.weight, x.policy_id))
+
+
+def band_layer(layers) -> PolicyLayer | None:
+	"""The policy whose age bands a contract without bands of its own takes: the most specific
+	one that defines bands (None: no policy does)."""
+	return next((x for x in _ordered(layers) if x.bands), None)
+
+
 def cascade(version_bands: tuple[AgeBand, ...], version_rules: tuple[OccupancyRule, ...],
             layers) -> tuple[tuple[AgeBand, ...], tuple[OccupancyRule, ...]]:
 	"""→ (age bands, occupancy rules) of a contract: the version's rules first, then every
 	policy's rules, most specific policy first."""
-	ordered = sorted(layers, key=lambda x: (-x.weight, x.policy_id))
+	ordered = _ordered(layers)
 	seen: dict[int, PolicyLayer] = {}
 	for layer in ordered:
 		other = seen.get(layer.weight)
@@ -93,6 +104,7 @@ def cascade(version_bands: tuple[AgeBand, ...], version_rules: tuple[OccupancyRu
 				f"{scope_label(layer.weight)} scope ({layer.property or '*'} / {layer.market or '*'}); "
 				"archive one of them")
 		seen[layer.weight] = layer
-	bands = tuple(version_bands) or next((tuple(x.bands) for x in ordered if x.bands), ())
+	inherited = band_layer(ordered)
+	bands = tuple(version_bands) or (tuple(inherited.bands) if inherited else ())
 	rules = tuple(version_rules) + tuple(r for x in ordered for r in x.scoped_rules())
 	return bands, rules
