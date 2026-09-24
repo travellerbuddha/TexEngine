@@ -231,6 +231,36 @@ class TestLoyaltyTenancy(PrivacyCase):
 		self.assertNotIn(guest, {r["name"] for r in crm_api.guests(segment=seg, limit=200)["rows"]})
 
 
+# ─── G-65 / G-81 review: who a booking belongs to ────────────────────────
+
+
+class TestGuestIdentity(PrivacyCase):
+	def test_an_email_is_the_identity_and_a_phone_only_a_fallback(self):
+		phone = "+49 170 5550000"
+		_b, first = self.booked_guest("g65-id-a", "g65-id-a@example.com", phone=phone)
+		_b, second = self.booked_guest("g65-id-b", "g65-id-b@example.com", phone=phone)
+		# another e-mail is another person, whoever shares their phone: never their stays, extras or history
+		self.assertNotEqual(first, second)
+		self.assertEqual(frappe.db.get_value("Guest", second, ["email", "phone"]), ("g65-id-b@example.com", phone))
+		as_user(self.here)
+		self.assertEqual(crm_api.guests(q="g65-id-a@example.com")["total"], 1)
+		self.assertEqual(crm_api.guests(q="g65-id-b@example.com")["total"], 1)
+		# no e-mail given: the phone finds the profile (staff take a phone booking)
+		_b, only = self.booked_guest("g65-id-c", "g65-id-c@example.com", phone="+49 170 5550001")
+		as_user(self.here)
+		name, _granted, _asked = booking.resolve_guest({"first_name": "Lena", "last_name": "Kraus",
+		                                                 "phone": "+49 170 5550001"}, property=fx.PROPERTY,
+		                                                market="DE", language="en", staff=True)
+		self.assertEqual(name, only)
+		# a profile known by phone alone takes the booking that now gives an e-mail too
+		as_user("Administrator")
+		phoned = frappe.get_doc({"doctype": "Guest", "first_name": "Lena", "last_name": "Kraus",
+		                         "phone": "+49 170 5550002", "tex_enterprise": self.ent}).insert(
+			ignore_permissions=True).name
+		_b, again = self.booked_guest("g65-id-d", "g65-id-d@example.com", phone="+49 170 5550002")
+		self.assertEqual(again, phoned)
+
+
 # ─── G-65: the guest list pages in SQL ───────────────────────────────────
 
 

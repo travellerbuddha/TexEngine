@@ -107,13 +107,24 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 	else who types the e-mail or phone of an EXISTING profile (an anonymous booker, or staff
 	who may only sell) does not change that profile's consent: the request is returned for the
 	caller to keep on record, and the hotel confirms it on a verified channel (CRM). Nothing
-	here ever withdraws consent."""
+	here ever withdraws consent.
+
+	Which profile: the e-mail's, when one is given; the phone's only for a booking without an
+	e-mail or a profile without one (ADR-056 review)."""
 	enterprise = frappe.db.get_value("Property", property, "tex_enterprise")
 	existing = None
+	tenant = ("in", [enterprise, "", None])
 	if g.get("email"):
-		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": ("in", [enterprise, "", None])})
+		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": tenant})
 	if not existing and g.get("phone"):
-		existing = frappe.db.get_value("Guest", {"phone": g["phone"], "tex_enterprise": ("in", [enterprise, "", None])})
+		# the e-mail is the identity when given: a phone only finds a profile for a booking without
+		# an e-mail, or a profile known by phone alone. Another e-mail on a shared phone (a family, a
+		# colleague, a travel agent's number) is another person, never their stays or history
+		# (ADR-056 review)
+		by_phone = {"phone": g["phone"], "tex_enterprise": tenant}
+		if g.get("email"):
+			by_phone["email"] = ("is", "not set")
+		existing = frappe.db.get_value("Guest", by_phone)
 	asked = [k for k in CONSENT_FIELDS if consent_given(g.get(k.replace("tex_", "")))]
 	if existing:
 		doc = frappe.get_doc("Guest", existing)
