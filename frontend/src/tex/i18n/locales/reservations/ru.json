@@ -304,6 +304,7 @@
  "res.rev.to": "на",
  "res.sim.actual": "Фактически · продано {date}",
  "res.sim.button": "Смоделировать",
+ "res.sim.contract_now": "Сейчас этот контракт: {status}; так он продавал тогда.",
  "res.sim.difference_hint": "Модель минус факт",
  "res.sim.not_sellable": "На тот момент недоступно для продажи",
  "res.sim.readonly": "Только просмотр: ничего не сохраняется и не меняется.",

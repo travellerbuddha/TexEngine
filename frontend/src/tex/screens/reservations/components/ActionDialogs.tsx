@@ -93,7 +93,12 @@ export function SimulatorDialog({ open, onClose, res, canCost }: { open: boolean
                 <p className="text-lg font-semibold">
                   {s.simulated.sellable ? <Money amount={s.simulated.totals.total} currency={s.simulated.currency} /> : t("res.sim.not_sellable")}
                 </p>
-                <p className="text-xs text-zinc-500">{s.contract_version}</p>
+                <p className="text-xs text-zinc-500">{s.contract ? `${s.contract.code} · ${s.contract_version}` : s.contract_version}</p>
+                {s.contract && s.contract.status_now !== "Active" && (
+                  <p className="text-xs text-amber-700">
+                    {t("res.sim.contract_now", { status: t(`rates.contract_status.${s.contract.status_now}`) })}
+                  </p>
+                )}
               </div>
               <div className={cn("rounded-lg border p-3", dir > 0 ? "border-amber-200 bg-amber-50" : dir < 0 ? "border-emerald-200 bg-emerald-50" : "border-zinc-200")}>
                 <p className="text-xs text-zinc-500">{t("res.cmp.difference")}</p>

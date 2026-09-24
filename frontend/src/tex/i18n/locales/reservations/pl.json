@@ -304,6 +304,7 @@
  "res.rev.to": "na",
  "res.sim.actual": "Faktycznie · sprzedano {date}",
  "res.sim.button": "Symuluj",
+ "res.sim.contract_now": "Ta umowa ma teraz status {status}; tak sprzedawała wtedy.",
  "res.sim.difference_hint": "Symulacja minus faktyczna",
  "res.sim.not_sellable": "Wtedy niedostępne do sprzedaży",
  "res.sim.readonly": "Tylko do odczytu: nic nie jest zapisywane ani zmieniane.",

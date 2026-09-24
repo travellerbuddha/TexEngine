@@ -293,6 +293,7 @@
  "res.rev.to": "la",
  "res.sim.actual": "Real · vândut {date}",
  "res.sim.button": "Simulează",
+ "res.sim.contract_now": "Acest contract este acum {status}; acesta este prețul de atunci.",
  "res.sim.difference_hint": "Simulat minus real",
  "res.sim.not_sellable": "Nu se putea vinde atunci",
  "res.sim.readonly": "Doar citire: nimic nu se salvează sau modifică.",
