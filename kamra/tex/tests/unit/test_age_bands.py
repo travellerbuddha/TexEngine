@@ -14,6 +14,7 @@ import unittest
 from datetime import date
 
 from kamra.tex.pricing import ages, inherit, validate
+from kamra.tex.pricing.enums import AgeBasis
 from kamra.tex.pricing.model import AgeBand, ChildSpec, PricingError, Unsellable
 from kamra.tex.tests.unit import fixtures as fx
 
@@ -178,3 +179,28 @@ class TestChildAgeFromDateOfBirth(unittest.TestCase):
 
 if __name__ == "__main__":
 	unittest.main()
+
+
+class TestDateOfBirthAfterTheReference(unittest.TestCase):
+	"""Review of G-52: a child born after the pricing reference date (the sale date of a
+	BOOKING_DATE contract repriced later, or the arrival of a stay already in house) is 0
+	months old there, never an error; no message ever carries a date of birth."""
+
+	def test_a_baby_born_after_the_sale_date_is_an_infant_on_a_booking_date_contract(self):
+		t = fx.terms(age_basis=AgeBasis.BOOKING_DATE, age_bands=LAYER_BANDS["market"])
+		baby = ChildSpec(dob=date(2027, 3, 10))
+		p = ages.classify_party(t, 2, (baby,), date(2027, 6, 2), date(2027, 3, 1))     # sold 1 March
+		self.assertEqual([(c.months, c.band.code) for c in p.children], [(0, "INF")])
+		self.assertEqual(ages.child_months(baby, date(2027, 3, 1)), 0)
+
+	def test_a_newborn_on_a_stay_in_house_is_0_months_not_an_adult(self):
+		self.assertEqual(ages.check_child_dob(date(2027, 6, 5), date(2027, 6, 2), today=date(2027, 6, 6)), 0)
+
+	def test_no_message_names_the_date_of_birth(self):
+		for dob, arrival in ((date(2027, 1, 16), date(2027, 6, 2)), (date(2009, 6, 2), date(2027, 6, 2))):
+			with self.assertRaises(PricingError) as cm:
+				ages.check_child_dob(dob, arrival, today=date(2027, 1, 15))
+			self.assertNotIn(dob.isoformat(), str(cm.exception))
+		with self.assertRaises(PricingError) as cm:
+			ages.completed_months(date(2027, 1, 2), date(2027, 1, 1))
+		self.assertNotIn("2027-01-02", str(cm.exception))

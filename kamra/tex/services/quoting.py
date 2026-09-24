@@ -81,7 +81,7 @@ def parse_dob(value) -> date:
 	try:
 		return date.fromisoformat(str(value).strip()[:10])
 	except ValueError:
-		frappe.throw(_("Invalid date of birth: {0}.").format(str(value)[:20]))
+		frappe.throw(_("Invalid date of birth."))       # never echoed: personal data
 
 
 def checked_dob(dob: date, arrival: date, n: int) -> int:
@@ -132,6 +132,11 @@ class Party:
 	def key(self) -> dict:
 		return {"adults": self.adults, "children": [{"age": c.age, "dob": c.dob.isoformat() if c.dob else None}
 		                                            for c in self.children]}
+
+	def summary(self) -> dict:
+		"""The party without dates of birth, for analytics and notes: each child's age in whole
+		years (on arrival, for one given by date of birth)."""
+		return {"adults": self.adults, "children": [c.age for c in self.children]}
 
 
 def parse_rooms(rooms, *, arrival: date | None = None) -> list[Party]:
@@ -401,7 +406,12 @@ def price_request(version: str, req: StayRequest, *, gkey: str | None = None, ex
 		                           fx_pins=fx_pins)
 	except Unsellable as u:          # no FX rate, an ambiguous or missing tax policy…
 		return engine.unsellable_quote(terms, req, u), terms
-	return engine.price_stay(ctx, req), terms
+	try:
+		return engine.price_stay(ctx, req), terms
+	except PricingError as e:
+		# an input the engine refuses (a missing rate plan, a stay too long…): a reason on the
+		# quote, never an HTTP 500 whose Error Log would hold the request's guest data
+		return engine.unsellable_quote(terms, req, Unsellable("PRICING_ERROR", str(e))), terms
 
 
 def _extras_list(extras) -> tuple[ExtraRequest, ...]:

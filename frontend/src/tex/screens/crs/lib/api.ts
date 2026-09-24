@@ -27,8 +27,9 @@ export interface SearchArgs {
   properties?: string[]
 }
 
+/** POST: a party may carry a child's date of birth, which never goes into a URL (G-52 review). */
 export function searchOffers(args: SearchArgs, signal?: AbortSignal) {
-  return tex<SearchResult>(UI_CRS, "search", { ...args }, { signal })
+  return tex<SearchResult>(UI_CRS, "search", { ...args }, { signal, post: true })
 }
 
 /** An extra of a quote request: SERVICE_DATE extras need at least one date; the others may

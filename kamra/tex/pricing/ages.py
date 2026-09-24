@@ -29,9 +29,9 @@ from kamra.tex.pricing.model import AgeBand, ChildSpec, ContractTerms, PricingEr
 
 def completed_months(dob: date, on: date) -> int:
 	"""Whole months lived from ``dob`` to ``on`` (a birthday on 29 Feb is reached on
-	1 Mar in non-leap years)."""
+	1 Mar in non-leap years). Messages never carry the date of birth (it is personal data)."""
 	if dob > on:
-		raise PricingError(f"date of birth {dob.isoformat()} is after {on.isoformat()}")
+		raise PricingError("a date of birth is after the date the age is taken on")
 	months = (on.year - dob.year) * 12 + (on.month - dob.month)
 	if on.day < dob.day:
 		months -= 1
@@ -53,7 +53,9 @@ def child_months(spec: ChildSpec, reference: date) -> int:
 			raise PricingError("child age cannot be negative")
 		return int(spec.age_months)
 	if spec.dob is not None:
-		return completed_months(spec.dob, reference)
+		# born after the reference date (the sale date of a BOOKING_DATE contract repriced
+		# later, the arrival of a stay already in house): 0 months old there, an infant
+		return completed_months(spec.dob, reference) if spec.dob <= reference else 0
 	if spec.age is None:
 		raise PricingError("every child needs an age or a date of birth")
 	if int(spec.age) < 0:
@@ -111,13 +113,13 @@ def youngest_uncovered(bands: tuple[AgeBand, ...]) -> tuple[int, int] | None:
 
 def check_child_dob(dob: date, reference: date, *, today: date) -> int:
 	"""A child's date of birth, checked: not in the future, and under ``MAX_CHILD_AGE`` + 1
-	years on ``reference`` (arrival). → completed months on ``reference``."""
+	years on ``reference`` (arrival). → completed months on ``reference`` (0 for a baby born
+	after it, e.g. during a stay already in house). Messages never carry the date."""
 	if dob > today:
-		raise PricingError(f"a child's date of birth ({dob.isoformat()}) is in the future")
-	months = completed_months(dob, reference)
+		raise PricingError("a child's date of birth is in the future")
+	months = completed_months(dob, reference) if dob <= reference else 0
 	if months >= (MAX_CHILD_AGE + 1) * 12:
-		raise PricingError(f"a guest born on {dob.isoformat()} is {MAX_CHILD_AGE + 1} or older on arrival: "
-		                   "book them as an adult")
+		raise PricingError(f"a child is {MAX_CHILD_AGE + 1} or older on arrival: book them as an adult")
 	return months
 
 

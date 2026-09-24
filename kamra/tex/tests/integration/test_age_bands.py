@@ -6,6 +6,8 @@ to a band from 3 years a child of 2y11m has no band. Publishing (and saving a pr
 policy) refuses such a gap and names the months. A contract takes the version's bands,
 else those of the most specific live pricing policy that defines bands (ADR-043)."""
 
+import json
+
 import frappe
 from frappe.utils import add_days, add_months, getdate, now_datetime
 
@@ -14,7 +16,7 @@ from kamra.tex.money import D
 from kamra.tex.pricing.model import ChildSpec, StayRequest
 from kamra.tex.services import quoting
 from kamra.tex.tests.integration import fixtures as fx
-from kamra.tex.tests.integration.test_critical_journey import pick
+from kamra.tex.tests.integration.test_critical_journey import TexTestCase, pick
 from kamra.tex.tests.integration.test_pricing_policies import INF, PolicyCase, child, policy
 
 INF_295 = {"band_code": "INF", "label": "Infant", "from_age": 0, "to_age": 2.95, "is_infant": 1}
@@ -132,3 +134,111 @@ class TestChildDateOfBirth(PolicyCase):
 			self.search({"dob": "31.02.2020"})
 		# the day before the 18th birthday, still a child
 		self.assertTrue(self.search({"dob": str(add_days(eighteen_on_arrival, 1))})["properties"])
+
+
+class TestDateOfBirthPrivacy(TexTestCase):
+	"""Review of G-52: a child's date of birth is kept where the price needs it (the quote's
+	request, the reservation) and nowhere else: not in funnel analytics, not in the audit
+	trail, not in a GET query string."""
+
+	def test_no_funnel_event_or_audit_row_holds_a_date_of_birth(self):
+		from kamra.tex.api import public
+		from kamra.tex.tests.integration.test_commercial_flows import GUEST, SLUG, setup_site_and_payments
+
+		setup_site_and_payments(self.f)
+		start = now_datetime()
+		ci, co = fx.d(6, 10), fx.d(6, 13)
+		dob = str(add_months(ci, -50))                                    # 4y2m on arrival
+		session = "g52-dob-privacy"
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- an anonymous booking-engine visitor
+		res = public.search(site=SLUG, check_in=str(ci), check_out=str(co),
+		                    rooms=[{"adults": 2, "children": [{"dob": dob}]}], market="DE", session_id=session)
+		offer = next(o for o in res["properties"][0]["offers"] if o["board"] == "AI")
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id=session)
+		self.assertTrue(q["ok"], q)
+		public.track(site=SLUG, session_id=session, event="abandoned",
+		             payload={"quotes": [q["quote_id"]], "rooms": [{"adults": 2, "children": [{"dob": dob}]}]})
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"]], guest=GUEST, payment_method="Card",
+		                session_id=session, idempotency_key=f"idem-{session}")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was stored
+		events = frappe.get_all("TEX Funnel Event", filters={"session_id": session}, fields=["event", "payload"])
+		self.assertTrue({e.event for e in events} >= {"search", "quote", "abandoned", "payment_started"}, events)
+		for e in events:
+			self.assertNotIn(dob, e.payload or "", e.event)
+			self.assertNotIn('"dob"', e.payload or "", e.event)
+		search = json.loads(next(e.payload for e in events if e.event == "search"))
+		self.assertEqual(search["rooms"], [{"adults": 2, "children": [4]}])     # ages on arrival only
+		for a in frappe.get_all("TEX Audit Event", filters={"creation": (">=", start)},
+		                        fields=["action", "old_value", "new_value", "reason"]):
+			self.assertNotIn(dob, f"{a.old_value} {a.new_value} {a.reason}", a.action)
+		# where the price needs it, it is kept: the reservation is priced (and repriced) from it
+		kids = json.loads(frappe.db.get_value("Reservation", b["rooms"][0]["reservation"], "tex_child_ages"))
+		self.assertEqual(kids[0]["dob"], dob)
+
+	def test_searches_carrying_a_party_refuse_get(self):
+		from types import SimpleNamespace
+
+		from frappe import handler
+
+		from kamra.tex.api import crs, public, ui_crs
+
+		had = hasattr(frappe.local, "request")
+		saved = getattr(frappe.local, "request", None)
+		try:
+			for fn in (crs.search, ui_crs.search, public.search):
+				frappe.local.request = SimpleNamespace(method="GET")
+				with self.assertRaises(frappe.PermissionError, msg=fn.__module__):
+					handler.is_valid_http_method(fn)
+				frappe.local.request = SimpleNamespace(method="POST")
+				handler.is_valid_http_method(fn)
+		finally:
+			if had:
+				frappe.local.request = saved
+			else:
+				del frappe.local.request
+
+
+class TestDateOfBirthAfterTheReference(PolicyCase):
+	"""Review of G-52: a baby born after the pricing reference date is 0 months old there."""
+
+	def test_a_newborn_on_a_stay_in_house_is_a_baby_not_an_adult(self):
+		today = getdate(now_datetime())
+		p = quoting.Party.parse({"adults": 2, "children": [{"dob": str(today)}]}, arrival=add_days(today, -2))
+		self.assertEqual(p.children[0].age, 0)
+
+	def test_a_baby_born_after_the_sale_is_added_on_the_original_terms(self):
+		from kamra.tex.services import booking, modification
+
+		c = fx.create_contract(self.f, code="BKD", publish=False)
+		frappe.db.set_value("TEX Contract Version", c["version"], "age_basis", "BOOKING_DATE")
+		contracts.publish(c["version"])
+		ci, co = fx.d(6, 10), fx.d(6, 12)
+		res = quoting.search(properties=[fx.PROPERTY], check_in=ci, check_out=co, rooms=[{"adults": 2}],
+		                     market="DE", channel="DIRECT_WEB", currency="EUR")
+		q = quoting.create_quote(pick(res["properties"][0])["rooms"][0]["offer_key"])
+		b = booking.create_booking(quote_ids=[q["quote_id"]], guest={"first_name": "N", "last_name": "B",
+		                                                              "email": "nb@example.com"},
+		                           payment_method="Card", confirm_without_payment=True, idempotency_key="g52-bkd")
+		name = b["rooms"][0]["reservation"]
+		# sold ten days ago (a BOOKING_DATE contract prices ages on that day); the baby came after
+		snap = json.loads(frappe.db.get_value("Reservation", name, "tex_pricing_snapshot"))
+		sold = add_days(now_datetime(), -10)
+		snap["request"]["sale_at"] = sold.isoformat()
+		frappe.db.set_value("Reservation", name, {"tex_pricing_snapshot": json.dumps(snap), "tex_sale_at": sold},
+		                    update_modified=False)
+		baby = str(add_days(getdate(now_datetime()), -3))
+		errors_before = frappe.db.count("Error Log")
+		p = modification.propose(name, {"children": [{"dob": baby}]}, basis="ORIGINAL_VERSION")
+		self.assertTrue(p["sellable"], p)
+		slot = next(s for s in p["proposed"]["explanation"] if s["code"] == "CHILD_SLOT")
+		self.assertIn("Child 1 (0y, Infant)", slot["text"])
+		self.assertEqual(frappe.db.count("Error Log"), errors_before)
+
+	def test_a_pricing_error_is_an_unsellable_quote_not_a_crash(self):
+		c = fx.create_contract(self.f, code="PERR")
+		req = StayRequest(property=fx.PROPERTY, room_type=self.std, board="AI", check_in=fx.d(6, 10),
+		                  check_out=fx.d(6, 11), adults=2, sale_at=now_datetime(), market="DE",
+		                  channel="DIRECT_WEB", sell_currency="EUR")               # no rate plan: an input error
+		q, _terms = quoting.price_request(c["version"], req, check_capacity=False)
+		self.assertFalse(q.sellable)
+		self.assertEqual(q.reasons[0]["code"], "PRICING_ERROR")

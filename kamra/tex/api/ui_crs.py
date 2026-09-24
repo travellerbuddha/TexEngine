@@ -40,7 +40,7 @@ def _per_night(total, nights: int, currency: str) -> str | None:
 	return to_str(quantize(D(total) / nights, currency))
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])   # a party may carry a child's date of birth
 def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CALL_CENTER",
            properties=None, hotel_group: str | None = None, destination: str | None = None,
            currency: str | None = None, promo_codes=None):
