@@ -37,7 +37,7 @@ from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
+from frappe.utils import add_to_date, convert_utc_to_system_timezone, get_datetime, getdate, now_datetime
 
 from kamra.tex.availability import repository as avail
 from kamra.tex.availability.restrictions import RestrictionScope
@@ -193,7 +193,8 @@ def fx_pins(res, snap, basis: str) -> dict | None:
 def past_sale_time(value, *, missing: str, future: str) -> datetime:
 	"""A sale time a price is computed as of (a historical sale date, the simulator), checked on
 	the server: given, a valid date and time, not in the future (G-51). ``missing`` and
-	``future`` are the messages."""
+	``future`` are the messages. A time with a UTC offset ("…Z", "…+03:00") is that moment in
+	the site's time zone, which every sale time is kept in (G-51 review)."""
 	if value in (None, ""):
 		frappe.throw(missing)
 	try:
@@ -202,6 +203,8 @@ def past_sale_time(value, *, missing: str, future: str) -> datetime:
 		at = None
 	if not isinstance(at, datetime):
 		frappe.throw(_("The sale time is not a valid date and time."))
+	if at.tzinfo is not None:
+		at = convert_utc_to_system_timezone(at).replace(tzinfo=None)
 	if at > now_datetime():
 		frappe.throw(future)
 	return at
@@ -217,7 +220,9 @@ def _resolve(res, snap, req, basis: str, basis_sale_at, sale_at=None) -> tuple[s
 	moment a proposal was priced (a guest's paid change applies at the price they accepted).
 
 	A sale time in the past (the original or a historical sale date, a pinned CURRENT) selects
-	among the contracts Active then; CURRENT now reads the live status (G-51, ADR-054)."""
+	among the contracts Active then; CURRENT now reads the live status (G-51, ADR-054). A pinned
+	CURRENT finds the contract that priced the guest's change; ``apply`` then refuses a staff
+	approval on a contract that no longer sells (G-51 review M1)."""
 	original_sale = original_priced_at(res, snap)
 	if basis == "ORIGINAL_VERSION":
 		return snap["contract"]["version"], original_sale, "original contract version"
@@ -374,6 +379,19 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 	}
 
 
+def approval_refusal(contract: str | None, *, lock: bool = False) -> contracts.ContractNotOnSale | None:
+	"""Why staff cannot approve a guest's change priced on ``contract`` now: the contract is not
+	Active (suspended, archived), or None (G-51 review M1). ``lock``: read under a shared row
+	lock (``contracts.not_on_sale``)."""
+	stopped = contracts.not_on_sale(contract, lock=lock) if contract else None
+	if not stopped:
+		return None
+	code, status = frappe.db.get_value("TEX Contract", contract, ["contract_code", "status"]) or (contract, None)
+	return type(stopped)(_("{0} no longer sells ({1}): this change cannot be approved at the price the guest "
+	                       "was shown. Reject the request, or change the reservation yourself.").format(
+		code, _(status or "—")))
+
+
 def require_proposer(p: dict, *, guest: bool) -> None:
 	"""A proposal token is applied only by whoever made it (G-51, ADR-054): through the guest
 	path only a guest's own proposal (the manage token proves the booking); by staff only the
@@ -402,7 +420,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 
 	A proposal token is applied only by whoever proposed it (``require_proposer``; G-51). The
 	HISTORICAL_SALE_DATE basis and a manual ``override_amount`` need ``price.override`` at the
-	hotel here too, whoever proposed the change; guests apply only CURRENT proposals.
+	hotel here too, whoever proposed the change; guests apply only CURRENT proposals. A stored
+	proposal approved by staff (not paid) is refused while its contract does not sell
+	(``approval_refusal``; G-51 review).
 
 	Locks: the booking, then the reservation, then the inventory days: the order every path that
 	changes a TEX booking takes (review of ADR-044)."""
@@ -465,6 +485,14 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		frappe.throw(_("The modified stay cannot be sold: {0}").format(
 			guest_reason(str(why)) if _guest_authorized else why))
 	new = result["proposed"]
+	if _proposal is not None and not _from_payment:
+		# staff approving a guest's request (ADR-044), maybe days later: at the price the guest
+		# was shown, on the contract that priced it, and only while that contract sells; a stop
+		# sale since is never bypassed (ADR-045; G-51 review M1). The paid path is bounded by its
+		# payment deadline instead. A shared lock, as a booking takes: a suspend waits for it.
+		stopped = approval_refusal(new["contract"]["contract"], lock=True)
+		if stopped:
+			frappe.throw(str(stopped), type(stopped))
 	if new["totals"]["total"] != p["new_total"]:
 		frappe.throw(_("The price moved since this proposal was made — review it again."))
 	# limited extras: give back the old units and take the new ones under the day locks (G-19)
@@ -527,12 +555,17 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	change_type = types.pop() if len(types) == 1 else ("Multiple" if types else "Guest Request"
 	                                                    if source == "Guest" else "Multiple")
 	old_total = D(result["old"]["total"])
+	overridden = override_amount not in (None, "")
+	# an override's revision is MANUAL at the amount set; "priced" keeps the basis and the total the
+	# engine computed (basis_sale_at is that basis's sale time), so the revision alone says both
+	priced = {"priced": {"basis": p["basis"], "total": to_str(new_total)}} if overridden else {}
 	rev = booking_svc._record_revision(
 		res.name, res.tex_booking, change_type=change_type, old_amount=old_total, new_amount=final_total,
-		currency=ccy, basis="MANUAL" if override_amount not in (None, "") else p["basis"],
-		basis_sale_at=result["pricing_sale_at"], reason=reason, changes=changed_fields | {"requested": changes},
+		currency=ccy, basis="MANUAL" if overridden else p["basis"],
+		basis_sale_at=result["pricing_sale_at"], reason=reason,
+		changes=changed_fields | {"requested": changes} | priced,
 		before=snap, after=json.loads(res.tex_pricing_snapshot), source=source,
-		override=final_total if override_amount not in (None, "") else None)
+		override=final_total if overridden else None)
 	if res.tex_booking:
 		booking_svc.sync_redemptions(res.tex_booking)
 		booking_svc._refresh_booking_after_change(res.tex_booking)

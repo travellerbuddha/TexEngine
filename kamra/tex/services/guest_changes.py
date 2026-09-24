@@ -1395,8 +1395,26 @@ def staff_row(row) -> dict:
 	           else None) if out["staff_open"] else None
 	out["can_close"] = out["staff_open"] and not blocked
 	out["close_blocked"] = blocked
-	out["changes"] = json.loads(row.get("proposal") or "{}").get("changes") or {}
+	proposal = json.loads(row.get("proposal") or "{}")
+	out["changes"] = proposal.get("changes") or {}
+	# a request waiting for the hotel: the contract that priced it, as it is now; approving it
+	# is refused while that contract does not sell (G-51 review M1)
+	out["contract"] = _contract_now(proposal) if row.get("status") == "Requested" else None
+	stopped = modification.approval_refusal(out["contract"]["contract"]) \
+		if out["contract"] and not out["contract"]["on_sale"] else None
+	out["approve_blocked"] = str(stopped) if stopped else None
 	return out
+
+
+def _contract_now(proposal: dict) -> dict | None:
+	"""The contract whose version priced ``proposal``, with its status now."""
+	version = proposal.get("version")
+	contract = frappe.db.get_value("TEX Contract Version", version, "contract") if version else None
+	row = frappe.db.get_value("TEX Contract", contract, ["name", "contract_code", "status"], as_dict=True) \
+		if contract else None
+	if not row:
+		return None
+	return {"contract": row.name, "code": row.contract_code, "status": row.status, "on_sale": row.status == "Active"}
 
 
 def staff_list(properties: list[str], *, status: str | None = None, reservation: str | None = None,
