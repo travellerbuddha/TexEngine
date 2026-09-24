@@ -84,6 +84,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
    Abandoned bookings (ADR-056): recovery contact needs the profile's own marketing consent; say
    whether any hotel may contact on a legitimate-interest basis instead (a legal decision per
    market; not built).
+   Erasure (ADR-056 second review): audit events are immutable, so the `guest.update` events of a
+   profile keep the old and new values of its edits after the profile is erased; set a retention
+   period for them (or approve keeping them as the legal record of the changes).
 9. Monitoring: an uptime monitor for the ping, the alert recipients (TEX settings →
    Monitoring), and a log-shipping/APM stack.
 10. Legacy stays at a hotel that joins TEX (ADR-052 and its review): a stay the legacy engine
@@ -324,6 +327,22 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   keeps its values for platform administrators; only a generic write's response is trimmed; a
   booking joins a guest profile by its e-mail, the phone only without one (a shared phone had merged
   two people). G-97 stays open. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: ADR-056 second review follow-up (branch `fix-crmp2`, patch p45): a consent withdrawal
+  reads and writes only the rows it clears (new indexes, primary keys; it had locked the whole funnel)
+  and a deadlock or lock timeout while tracking or mailing inside a booking is re-raised, so the
+  booking is retried or fails instead of being reported after its rollback; an erasure withdraws every
+  consent and leaves no contact data in cases, funnel, bookings' booker fields or the change history
+  (p45 for older erasures); duplicate guest profiles are merged in the CRM (staff who may edit every
+  hotel's records of both, one enterprise, the loyalty ledger moves, consent the stricter of the two,
+  audited) and a profile shows its possible duplicates; the loyalty ledger in Desk / REST is read at
+  each entry's hotel; a case's session, quote and recovery booking and a funnel event's session and
+  payload are withheld; no copy of contact data is kept from the change history; another hotel's
+  loyalty entries show no dates, reason or author; browser funnel values are checked against what the
+  site sells; the phone finds a profile only for staff and only when one profile has it; a consent
+  change in Desk / REST is stamped and audited; a case written after a withdrawal is anonymous.
+  Owner decision recorded: audit events are immutable, so `guest.update` events keep the old and new
+  values of a profile edit after an erasure (a retention period for them is to be set). No area status
+  changes. Verdict unchanged: NOT READY.
 - 2026-09-24: G-46 closed in code (ADR-059, branch `reports-g46`, no schema change). Reports: contract vs selling
   compares, per stay priced from a contract, the contract cost with the accommodation selling price it was marked up
   to (same currency at the recorded rate, same tax basis), margin % over that price (it was over gross revenue); every

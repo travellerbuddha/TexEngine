@@ -26,6 +26,7 @@ from frappe.utils import escape_html, validate_email_address
 from kamra.tex.lib_text import render
 from kamra.tex.money import from_db, to_str
 from kamra.tex.security.audit import log_exception
+from kamra.tex.services.txn import TRANSACTION_LOST
 
 LANGS = ("en", "tr", "de", "ru", "ro", "pl")
 
@@ -85,12 +86,15 @@ def _send(to: str, subject: str, html: str, *, reference: tuple[str, str], prope
 def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], guest: str | None, property: str,
              template: str, booking: str | None, log_title: str, booking_site: str | None = None) -> dict:
 	"""Queue one guest e-mail and record what happened. Never raises for a mail problem:
-	{"queued": bool, "status": "Queued" | "Failed", "communication": name | None}."""
+	{"queued": bool, "status": "Queued" | "Failed", "communication": name | None}. A deadlock or a
+	lock timeout is not a mail problem: the caller's transaction is gone, so it is raised (``txn``)."""
 	messages = getattr(frappe.local, "message_log", None)
 	seen = len(messages) if isinstance(messages, list) else 0
 	try:
 		queue, error = _send(to, subject, html, reference=reference, property=property,
 		                     booking_site=booking_site), None
+	except TRANSACTION_LOST:
+		raise
 	except Exception as e:
 		log_exception(log_title)
 		if isinstance(messages, list):
@@ -98,6 +102,8 @@ def _deliver(to: str, subject: str, html: str, *, reference: tuple[str, str], gu
 		queue, error = None, type(e).__name__
 	try:
 		comm = _log(guest, property, subject, template, booking=booking, email_queue=queue, error=error)
+	except TRANSACTION_LOST:
+		raise
 	except Exception:
 		log_exception(log_title)
 		comm = None
@@ -123,6 +129,8 @@ def booking_mail(booking: str, manage_token: str) -> dict:
 		subject, body = render(key, lang, hotel=escape_html(hotel), ref=escape_html(b.name),
 		                       name=escape_html(b.booker_name or ""), total=escape_html(_amount(b.total_amount, b.currency)),
 		                       link=link or "")
+	except TRANSACTION_LOST:
+		raise
 	except Exception:
 		log_exception(f"TEX booking e-mail {booking}")
 		return {"queued": False, "status": "Failed", "communication": None}
@@ -143,6 +151,8 @@ def booking_confirmed(booking: str) -> None:
 		subject, body = render("payment_received", lang, hotel=escape_html(hotel), ref=escape_html(b.name),
 		                       name=escape_html(b.booker_name or ""), total=escape_html(_amount(b.total_amount, b.currency)),
 		                       link="")
+	except TRANSACTION_LOST:
+		raise
 	except Exception:
 		log_exception(f"TEX confirmation e-mail {booking}")
 		return
@@ -162,6 +172,8 @@ def payment_link(link_name: str, url: str, lang: str = "en") -> bool:
 		                       name=escape_html(link.guest_name or ""), total=escape_html(_amount(link.amount, link.currency)),
 		                       link=url)
 		guest = frappe.db.get_value("TEX Booking", link.booking, "booker_guest") if link.booking else None
+	except TRANSACTION_LOST:
+		raise
 	except Exception:
 		log_exception(f"TEX payment-link e-mail {link_name}")
 		return False

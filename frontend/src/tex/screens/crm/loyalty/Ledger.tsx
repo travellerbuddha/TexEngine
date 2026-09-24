@@ -2,7 +2,7 @@ import { useId, useState } from "react"
 import { Link } from "react-router-dom"
 import { ListTree } from "lucide-react"
 import { useTexQuery } from "../../../lib/api"
-import { dateTime, date as fmtDate, num } from "../../../lib/format"
+import { dateTime, date as fmtDate, month, num } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, EmptyState, ErrorState, Field, Select, Skeleton, statusTone } from "../../../ui"
 import { Pager } from "../components/common"
@@ -92,7 +92,7 @@ function Entry({ r }: { r: LedgerRow }) {
           {num(r.points)}
         </span>
         <Badge tone={tone}>{t(statusKey(r.status))}</Badge>
-        <span className="ml-auto text-xs text-zinc-500">{dateTime(r.creation)}</span>
+        <span className="ml-auto text-xs text-zinc-500">{r.other_hotel ? month(r.creation) : dateTime(r.creation)}</span>
       </div>
       <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-600">
         {r.guest ? (

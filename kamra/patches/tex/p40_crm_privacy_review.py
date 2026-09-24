@@ -14,12 +14,13 @@
    withholds from every business role: each is printed on every run and audited once
    (``permission.withheld_fields_exposed``, platform level) for an administrator to remove.
 
-Re-runnable. Never prints an e-mail address, a hash or a phone number.
+Re-runnable. Never prints an e-mail address, a hash or a phone number. The funnel is read once, without
+locks, and written by primary key (second review of ADR-056: never one locking scan per guest).
 """
 
 import frappe
 
-from kamra.tex.crm.service import email_hash, forget_contact
+from kamra.tex.crm.service import email_hash
 from kamra.tex.security import internals
 from kamra.tex.setup import ran_before
 
@@ -27,29 +28,43 @@ PATCH = "kamra.patches.tex.p40_crm_privacy_review"
 BATCH = 1000
 
 
+def _by_name(table: str, sets: str, names) -> None:
+	names = sorted(names)
+	for i in range(0, len(names), BATCH):
+		frappe.db.sql(f"UPDATE `{table}` SET {sets} WHERE name IN %(n)s",  # nosemgrep -- static statement
+		              {"n": tuple(names[i:i + BATCH])})
+
+
+def _hashed_events() -> list:
+	"""(name, email_hash, session_id) of every funnel event that keeps a hash: one unlocked read."""
+	return frappe.db.sql("""SELECT name, email_hash, session_id FROM `tabTEX Funnel Event`
+		WHERE email_hash IS NOT NULL AND email_hash != ''""")
+
+
 def _stale_cases() -> int:
-	"""Cases still holding contact data (or a consent) whose profile no longer consents."""
-	rows = frappe.db.sql("""SELECT a.name, a.guest, a.session_id, g.email
+	"""Cases still holding contact data (or a consent) whose profile no longer consents: anonymous (no
+	profile, e-mail, phone or quote; no consent), and the funnel hashes of their sessions and addresses
+	removed."""
+	rows = frappe.db.sql("""SELECT a.name, a.session_id, g.email
 		FROM `tabTEX Abandoned Booking` a LEFT JOIN `tabGuest` g ON g.name = a.guest
 		WHERE (IFNULL(a.guest, '') != '' OR IFNULL(a.email, '') != '' OR IFNULL(a.phone, '') != ''
 		       OR IFNULL(a.consent_marketing, 0) = 1)
 		  AND IFNULL(g.tex_consent_email, 0) = 0""", as_dict=True)
-	for guest in {r.guest for r in rows if r.guest}:
-		forget_contact(guest, emails=[r.email for r in rows if r.guest == guest])
-	loose = [r.name for r in rows if not r.guest]
-	if loose:
-		sessions = tuple(r.session_id for r in rows if not r.guest and r.session_id) or ("",)
-		frappe.db.sql("""UPDATE `tabTEX Abandoned Booking` SET email = NULL, phone = NULL, consent_marketing = 0
-			WHERE name IN %(n)s""", {"n": tuple(loose)})
-		frappe.db.sql("""UPDATE `tabTEX Funnel Event` SET email_hash = NULL
-			WHERE IFNULL(email_hash, '') != '' AND session_id IN %(s)s""", {"s": sessions})
+	if not rows:
+		return 0
+	_by_name("tabTEX Abandoned Booking",
+	         "guest = NULL, email = NULL, phone = NULL, quote = NULL, consent_marketing = 0", {r.name for r in rows})
+	sessions = {r.session_id for r in rows if r.session_id}
+	hashes = {h for h in (email_hash(r.email) for r in rows) if h}
+	_by_name("tabTEX Funnel Event", "email_hash = NULL",
+	         {name for name, h, session in _hashed_events() if h in hashes or session in sessions})
 	return len(rows)
 
 
 def _hashes_without_consent() -> int:
 	"""Funnel e-mail hashes of profiles that do not (or no longer) consent to marketing e-mail."""
-	stored = set(frappe.db.sql_list("""SELECT DISTINCT email_hash FROM `tabTEX Funnel Event`
-		WHERE IFNULL(email_hash, '') != ''"""))
+	events = _hashed_events()
+	stored = {h for _name, h, _session in events}
 	if not stored:
 		return 0
 	stale, offset = set(), 0
@@ -60,9 +75,7 @@ def _hashes_without_consent() -> int:
 		if len(emails) < BATCH:
 			break
 		offset += BATCH
-	if stale:
-		frappe.db.sql("UPDATE `tabTEX Funnel Event` SET email_hash = NULL WHERE email_hash IN %(h)s",
-		              {"h": tuple(stale)})
+	_by_name("tabTEX Funnel Event", "email_hash = NULL", {name for name, h, _session in events if h in stale})
 	return len(stale)
 
 

@@ -97,6 +97,8 @@ class TestNamedSegments(SegmentCase):
 		self.assertIn(guest, self.members("CANCELLED", self.here))
 		self.assertNotIn(guest, self.members("CANCELLED", self.there))     # another tenant sees none of it
 		self.assertNotIn(guest, self.members("ABANDONED", self.here))
+		# a case names its guest only while the guest consents to marketing e-mail (ADR-046, ADR-056)
+		frappe.db.set_value("Guest", guest, "tex_consent_email", 1)
 		frappe.get_doc({"doctype": "TEX Abandoned Booking", "property": fx.PROPERTY, "session_id": "g23-ab",
 		                "stage_reached": "quote", "status": "Open", "guest": guest, "consent_marketing": 1,
 		                "last_event_at": add_days(nowdate(), -2)}).insert(ignore_permissions=True)

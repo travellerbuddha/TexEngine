@@ -15,6 +15,7 @@
   "expires_on",
   "booking",
   "reservation",
+  "property",
   "reason",
   "actor",
   "stay_fingerprint",
@@ -84,6 +85,14 @@
    "options": "Reservation"
   },
   {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "label": "Hotel",
+   "options": "Property",
+   "in_standard_filter": 1,
+   "description": "The hotel the entry belongs to: its stay's or booking's, or the hotel a manual adjustment was made for (ADR-056)"
+  },
+  {
    "fieldname": "reason",
    "fieldtype": "Small Text",
    "label": "Reason"
@@ -110,7 +119,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-26 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX CRM",
  "name": "TEX Loyalty Ledger",

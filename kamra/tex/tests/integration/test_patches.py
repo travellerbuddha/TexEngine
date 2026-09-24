@@ -92,6 +92,8 @@ BEHAVIOUR = {
 	"p39_lookup_indexes": "test_patches.TestP03Indexes.test_p39_creates_the_lookup_indexes_that_survive_a_sync",
 	"p40_crm_privacy_review": "test_crm_privacy.TestAbandonedPrivacy."
 	                          "test_p40_makes_cases_anonymous_where_the_consent_no_longer_holds",
+	"p45_crm_privacy_second_review": "test_crm_privacy_review.TestP45."
+	                                 "test_p45_indexes_history_ledger_hotels_erased_profiles_and_anonymous_cases",
 	"p46_report_indexes": "test_patches.TestP03Indexes.test_p46_creates_the_report_indexes",
 }
 
