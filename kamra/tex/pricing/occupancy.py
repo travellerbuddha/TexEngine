@@ -163,6 +163,11 @@ class OccupancyResult:
 	slot_unit: Decimal
 	slots: tuple[SlotPrice, ...]
 	combination_rule: RuleRef | None = None
+	# running totals of the computation, reported for the Explain ladder (ADR-061 GAP-12), never
+	# priced from: the base (ROOM basis: the room price) + the adult slots, then + the child slots
+	# (before a whole-combination rule; ``total`` is after it)
+	after_adults: Decimal = ZERO
+	after_children: Decimal = ZERO
 
 
 def check_capacity(spec: RoomSpec, party: Party, infants_count: bool) -> None:
@@ -225,6 +230,8 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 			            night=night, after=amount, rule=ref, overridden=overridden,
 			            pos=pos, op=describe_op(winner.op, winner.value), unit=slot_unit, amount=amount)
 
+	after_adults = base_total + sum((s.amount for s in slots), ZERO)     # reported only (GAP-12)
+
 	# ── children ──
 	fill = max(0, included_adults - party.adults) if terms.basis == PricingBasis.ROOM \
 		and terms.room_basis_children_fill_included else 0
@@ -256,6 +263,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 			            label=label, op=describe_op(winner.op, winner.value), unit=slot_unit, amount=amount)
 
 	total = base_total + sum((s.amount for s in slots), ZERO)
+	after_children = total                                               # reported only (GAP-12)
 
 	# ── whole-combination rules ──
 	combo_cands = [r for r in rules if slot_matches(r, OccTarget.COMBINATION, None, None)]
@@ -281,4 +289,4 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 	if total < ZERO:
 		raise Unsellable("NEGATIVE_OCCUPANCY_PRICE", "occupancy rules produce a negative price")
 	return OccupancyResult(total=total, unit=unit, slot_unit=slot_unit, slots=tuple(slots),
-	                       combination_rule=combo_ref)
+	                       combination_rule=combo_ref, after_adults=after_adults, after_children=after_children)
