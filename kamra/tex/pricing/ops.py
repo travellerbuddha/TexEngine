@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from kamra.tex.money import HUNDRED, ONE, ZERO, D, display, display_pct
+from kamra.tex.money import DB_PLACES, HUNDRED, ONE, ZERO, D, display, display_pct
 from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.model import PricingError
 
@@ -36,17 +36,19 @@ def apply_op(op: Op, value: Decimal | None, *, reference: Decimal, current: Deci
 
 
 def describe_op(op: Op, value: Decimal | None) -> str:
+	"""A rule's operation as the explanation shows it, with the rule value exactly as stored
+	(up to the 9 places of a TEX decimal column, G-72): "× 1.35", "× 0.333333333", "+7.5%"."""
 	v = D(value)
-	s = display(v)
+	s = display(v, DB_PLACES)
 	match op:
 		case Op.ABSOLUTE | Op.FIXED:
 			return f"= {s}"
 		case Op.MULTIPLY:
 			return f"× {s}"
 		case Op.PERCENT_OF:
-			return f"{display_pct(v)}% of"
+			return f"{display_pct(v, DB_PLACES)}% of"
 		case Op.ADJUST_PERCENT:
-			return f"{'+' if v >= ZERO else ''}{display_pct(v)}%"
+			return f"{'+' if v >= ZERO else ''}{display_pct(v, DB_PLACES)}%"
 		case Op.ADD:
 			return f"+ {s}"
 		case Op.SUBTRACT:

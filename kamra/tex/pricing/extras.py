@@ -47,14 +47,14 @@ class ExtraOutcome:
 	usage: tuple[tuple[str, int], ...] = ()   # (ISO day, units) it consumes of a limited capacity (G-19)
 
 	def to_dict(self) -> dict:
-		from kamra.tex.money import to_str6
+		from kamra.tex.money import to_str6, to_str_rate
 
 		return {"code": self.code, "name": self.name, "ok": self.ok, "reason": self.reason,
 		        "quantity": to_str6(self.quantity), "amount": to_str6(self.amount), "currency": self.currency,
 		        "tax_category": self.tax_category, "mandatory": self.mandatory,
 		        "pricing_mode": self.pricing_mode, "service_dates": list(self.service_dates),
 		        "rule_id": self.rule_id, "detail": self.detail, "revision": self.revision,
-		        "fx_rate": to_str6(self.fx_rate) if self.fx_rate is not None else None,
+		        "fx_rate": to_str_rate(self.fx_rate) if self.fx_rate is not None else None,
 		        "usage": [{"date": d, "units": u} for d, u in self.usage]}
 
 

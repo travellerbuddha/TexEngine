@@ -304,14 +304,15 @@ class FxSnapshot:
 	origin: str | None = None
 
 	def to_dict(self) -> dict:
-		from kamra.tex.money import to_str6
+		from kamra.tex.money import to_str_rate
 
+		# every digit of the rate (G-72): a rate recorded at 6 places before reads back as recorded
 		out = {
 			"from": self.from_currency, "to": self.to_currency, "mode": self.mode.value,
-			"sell_rate": to_str6(self.sell_rate), "provider": self.provider,
-			"provider_rate": to_str6(self.provider_rate), "provider_rate_id": self.provider_rate_id,
+			"sell_rate": to_str_rate(self.sell_rate), "provider": self.provider,
+			"provider_rate": to_str_rate(self.provider_rate), "provider_rate_id": self.provider_rate_id,
 			"rate_date": self.rate_date.isoformat() if self.rate_date else None,
-			"adjustment": to_str6(self.adjustment), "policy_id": self.policy_id,
+			"adjustment": to_str_rate(self.adjustment), "policy_id": self.policy_id,
 			"as_of": self.as_of.isoformat() if self.as_of else None,
 		}
 		if self.origin:

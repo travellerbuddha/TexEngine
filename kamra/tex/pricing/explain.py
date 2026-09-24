@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from kamra.tex.money import display, to_str6
+from kamra.tex.money import display, to_str6, to_str_param
 from kamra.tex.pricing.model import RuleRef
 
 
@@ -42,7 +42,7 @@ class Step:
 			"text": self.render(),
 			"code": self.code,
 			"message": self.message,
-			"params": {k: (to_str6(v) if isinstance(v, Decimal) else v) for k, v in self.params.items()},
+			"params": {k: (to_str_param(v) if isinstance(v, Decimal) else v) for k, v in self.params.items()},
 			"night": self.night,
 			"before": to_str6(self.before),
 			"after": to_str6(self.after),
