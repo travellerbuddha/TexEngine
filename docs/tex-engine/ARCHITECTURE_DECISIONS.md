@@ -4825,3 +4825,179 @@ while the server stores a list; `issueTab` counts BOARD_* under settings until S
 S7 review items noted above (`displayText`'s comment, the restored-focus tooltip, four no-op edits
 that return new tables, the base room keeping its own formulas, the missing test of a formula base
 cell answering BASE_NO_PRICE, `npm run test:unit` needing Node ≥ 22.18).
+
+**Decision (implemented in S8: the four sections, the context header, the live preview).** Branch
+`pricing-workspace`, frontend only; no endpoint, payload, price or rule changes.
+- *Sections and hashes (D5, §2).* The version editor's outer tablist keeps its name "Version
+  sections" and holds Pricing (default), Commercial rules, Offers & promotions and Preview & audit.
+  The pure `workspace/sections.ts` parses a hash into a place: the new `#pricing`, `#rules`,
+  `#rules/<table>`, `#offers`, `#preview`, and the old tab ids as aliases (`#rooms`, `#periods`,
+  `#rates` → Pricing; `#ages`, `#occupancy`, `#boards` → Pricing with that region named, so S11 and
+  S13 can open it; `#plans`, `#settings` → Commercial rules with that inner tab). A hash that names
+  nothing leaves the default. Loading never rewrites the hash (a `#plans` link stays `#plans`); the
+  tabs write the canonical hash with `replaceState` (`#pricing`, `#rules/<table>`, …), and
+  Commercial rules remembers its inner tab. The cross-contract lists open `#pricing`,
+  `#occupancy` and `#plans`.
+- *Commercial rules* is an inner tablist "Rule tables" with the ten-tab editor's own editors,
+  unchanged: rate plans, settings, rooms, periods, room prices, child ages, occupancy rules (label
+  `rates.tab.occupancy_rules`; `rates.tab.*` are kept for the policy editor) and boards, each with
+  its row count and the issues its editor lists. *Offers & promotions* is the OffersTab. *Preview &
+  audit* is the price test, the price matrix, every issue (the live check, or the report stored at
+  publish) and the version's facts. *Pricing* hosts the existing room price grid until S9; for a
+  viewer without cost (`doc.cost_hidden`) it lists rooms, boards and rate plans under "Amounts are
+  not shown to your role".
+- *Issue sections.* `issueTab` now answers the section (`sections.issueSection`, §2): Pricing for
+  ROOM_*, PERIOD_*, NO_PERIODS, NO_ROOMS, INCLUDED_ADULTS, AGE_BANDS*, OCC_*, NO_BASE_BOARD and
+  BOARD_* (the S4 review's open item); Offers for OFFER_*; Commercial rules for RATE_PLAN_BOARD,
+  SALE_WINDOW, STAY_WINDOW, CURRENCY, BUILD and anything else. Two cases §2 does not name are read
+  as Pricing because the user fixes them there: NO_AGE_BANDS (about the bands, though it does not
+  start with AGE_BANDS) and an issue whose `ref` names a party (the publish sweep reports under the
+  engine's own codes, e.g. NO_CHILD_RULE, AMBIGUOUS_OCCUPANCY_RULES). The Rule tables keep the old
+  per-table lists (`issueTable`), with BOARD_* on Boards, NO_AGE_BANDS on Child ages and a sweep
+  party on Occupancy rules; each table's issues lie in its section's count (tested).
+- *The live preview, `useDraftPreview(doc, state, {fingerprint?, parties?, partyRoom?})`* (§3.14).
+  The request policy is the pure `workspace/draftPreview.ts`; the hook binds it to React. The mode
+  comes from the server's flags only: *overlay* when `doc.editable` (POST `price_matrix` and
+  `validate_version` with `data = overlayPayloadOf(state)`), *saved* when not editable and not
+  `cost_hidden` (one GET of `price_matrix` per `doc.modified`, never `validate_version`; the issues
+  are `validation_report`, "Checked when published"), *catalogue* when `cost_hidden` (no request
+  at all). In overlay mode:
+  - the matrix is asked 300 ms after the last edit (the first at once), and a newer edit aborts the
+    call it makes stale;
+  - at most one `validate_version` runs (`latestOnly`): an edit made while one runs waits, only the
+    newest waits, and it is sent after the running one ends; the running call is not aborted (the
+    server would finish it anyway). Validation waits ≥ 1.2 s after the last edit and at least as
+    long as the previous one took (at most 10 s), so a large draft is not checked more often than
+    it can be; the first check of a draft runs at once;
+  - results are tagged with the fingerprint of the state they were computed for (`forKey`,
+    `issuesForKey`); `stale` / `issuesStale` say they describe another state, a refresh is on its
+    way or the contract header changed (`refetch`). The request key also holds the rows' client
+    keys, because the rule ids of an overlay answer are `~<_key>` and the fingerprint ignores keys:
+    a reload of the version (new keys, same content) asks again; a save (keys kept) does not;
+  - a save no longer triggers its own validation: the overlay answer for the saved content stands,
+    and the next edit is checked as usual.
+  Nothing is computed from the answers: cells, totals and counts are the server's strings and
+  lists.
+- *The Check button* runs the live check at once (`validateNow`), through the same single flight.
+  It stays enabled only when nothing is unsaved ("Save your changes first"), so what it checks is
+  exactly the saved draft; it sends the payload like the live check, so its issues carry the same
+  `~<_key>` rule ids. Publish runs its own server check, as before.
+- *The context header* (§3.2, `workspace/ContextHeader.tsx`) is sticky under the shell header from
+  768 px (on phones it scrolls, and its chips fold behind "Details" so the page never scrolls
+  sideways). It shows the version and status (with "Read-only" and "Unsaved changes"), the live
+  check chip (counts; a click lists the issues in a Popover; hidden in catalogue mode and for a
+  frozen version without a stored report), contract, market, contract and selling currency, pricing
+  basis, base room, base occupancy (PERSON: per person; ROOM: the base room's effective
+  `included_adults` from the matrix's capacity), and the sale and stay windows. The page header's
+  actions moved here with their names and states (Price test, Discard, Check, Publish, Save with
+  Ctrl S and `aria-busy`; on a frozen version "Open draft Vn" / "Create new draft from this
+  version"). The selling windows and selling currency are edited in a Popover when the draft owns
+  them (`selling_editable`); they are ordinary draft state, saved with Save. The section tablist
+  sits in the sticky header.
+- *The basis popover* (§3.2.1, `workspace/BasisPopover.tsx`): the chip is a button
+  (`aria-haspopup="dialog"`, "Pricing basis: Per person") only while `can_edit_contract &&
+  !basis_locked`; locked, it is a read-only chip with a lock and the description "Fixed after the
+  first publish"; without the right, plain text; an agent's catalogue carries no basis, so no chip.
+  The Popover (non-modal) has a Segmented Per person / Per room, the consequence line and the notice
+  that it saves the contract header at once; Apply calls `save_contract({name, pricing_basis})`
+  (which re-checks `contract.edit` and the publish lock); the answer patches
+  `doc.contract_doc.pricing_basis` without touching `EditorState` or the save base, then the
+  preview refreshes; a refusal shows the server's message in the Popover.
+- *The price test* (`PriceTestPanel`, the existing calculator) is shown when `doc.can_preview`
+  (else `can('price.view_cost', <the version's hotel>)`, no longer the shell's hotel), full size in
+  Preview & audit and in a Drawer from the header's "Price test". With unsaved edits it sends
+  `data` and says "Priced with your unsaved changes."; no save is made. Its result view is S14's.
+- *One matrix call per page.* The room price grid (Pricing and the Rule tables) and the Preview &
+  audit matrix read the live preview instead of fetching `price_matrix` themselves; the grid still
+  hides resolved prices while there are unsaved edits (S9 replaces it).
+- *Types.* `VersionDoc.cost_hidden`; `validation_report` is typed as the list the server stores
+  (an older `{issues}` object is still read: `storedIssues`), the S4 review's open item.
+
+**Deviations from the slice text, with reasons (S8).**
+1. NO_AGE_BANDS and sweep-party issues count on Pricing (above): §2 does not name them, and
+   Commercial rules would send the user to the wrong section, the S4 review's objection to BOARD_*.
+2. The Check button sends the payload (the saved draft's own, since it is enabled only without
+   unsaved changes) instead of validating by name, so there is one kind of issue and one flight.
+3. The room price grid (`RatesTab`, not in the slice's file list) takes the preview's matrix
+   through `TabProps.preview` and fetches only without it. Otherwise the page would make a second
+   `price_matrix` call ("once per doc.modified") and an agent's Rule tables would make a refused
+   one (the catalogue check).
+4. The Price test drawer is the existing `Drawer`, which is modal; §3.13 wants it non-modal on
+   desktop. S14 rebuilds the drawer and must make it non-modal for S16's zero-modal budget.
+5. The workspace import guard (S6's test) leaves out React bindings named `use<Name>.ts`
+   (`useDraftPreview.ts` is in the slice's file list, and S9's `useWorkspaceHistory.ts` will be
+   too); they are not in its allowed set either, so no pure module can import one. The request
+   policy the hook applies is the pure, guarded and unit-tested `draftPreview.ts`.
+6. The E2E flow `openTab` keeps its ids and gains `openSection`; its panel is found by name
+   (the section and the Rule table are both tab panels). `entry-branding`'s server-rendered source
+   check needs `TEX_E2E_BENCH` set to the tree's own bench when it runs against a Vite dev server
+   (its default is the :8000 server, which runs another commit); no spec was changed.
+
+**Tests (S8).** `npm run test:unit` 143 (121 + 22): `sections.test.ts` (10: the sections and
+Rule tables, new hashes, `#rules/<table>`, the aliases, hashes that name nothing, the canonical
+hash round trip, §2's code map with BOARD_*, NO_AGE_BANDS and sweep parties, the per-table map,
+each table's issues inside its section's count) and `draft-preview.test.ts` (12: the three modes,
+the requests of each (overlay POSTs with data, saved a GET and no validation, catalogue none,
+parties only with a room), the stored report as a list or an object, the debounces, and the single
+flight: one call at a time, only the newest waiting, the running key not queued again, a refused
+call freeing the flight, cancel, a late cancelled call). Fail-first: both files fail on the
+unchanged tree (`ERR_MODULE_NOT_FOUND`: 123 tests, 121 pass, 2 fail). The S6 import guard failed on
+the new hook (runtime import of `react`) until it left out React bindings.
+
+**Verification (S8).** `tsc -b`, `npm run build`, `npm run i18n:tex` (43 new keys in the six
+languages), `npm run test:unit` 143, `npm run test:dom` 24, Python unit 491, ruff. The pricing,
+contract, booking and security integration modules, migrated with this tree (S8 changes no server
+code): `test_pricing_workspace_api` 48, `test_commercial_flows` 63, `test_critical_journey` 31,
+`test_security_regressions` 59, `test_age_bands` 11, `test_money_fields` 9,
+`test_snapshot_integrity` 13, `test_audit_trail` 15, `test_concurrency` 8, `test_pricing_policies`
+14: 271 OK. The full regression and the upstream suites were last run at the lane merge (831 OK;
+76/76, 13/13, banquet 101) and are due again at the final slice. Playwright
+against the tree's own servers (bench :8016, Vite :5186): `contract-admin`, `critical-journey`,
+`editor-edits` (3, with the Discard and in-flight-save tests), `entry-branding` (9, #plans selects
+"Rate plans"; 1 skipped as before, no two-factor user), `policy-revisions`, `restrictions-grid`:
+all pass, with no spec changed. The slice's manual checks were run as a browser script against the
+same servers (not committed; S16 owns the workspace specs), 7/7: old hashes land on their section
+and the tabs write canonical hashes; the basis popover switches a ROOM contract to PERSON and back
+with no modal, `get_contract` agrees, the chip and the grid's unit badge follow, the draft stays
+clean, and an unsaved price survives the switch, with no `save_version`; the Price test drawer
+prices an unsaved price (the quote's night unit is the unsaved 300) with `data` and no save; two
+twin HB board rows count an error on the Pricing badge and on the Boards table, not on Commercial
+rules, and the live check lists BOARD_DUPLICATE; after publish the basis chip has no trigger and a
+lock described "Fixed after the first publish", nothing is editable, one GET `price_matrix` and no
+`validate_version` are made, and the page does not scroll sideways at 375 px; with `can_preview`
+false there is no Price test button and Preview & audit shows the permission notice; an agent sees
+the catalogue with no `price_matrix`, `validate_version` or `preview_price` request and no 403.
+
+**Performance after S8** (the first slice whose screen calls the overlay while the user types).
+- *In the browser*, on a large draft saved in the shared site (3 rooms × 52 weekly periods, 6
+  occupancy rules and 3 board supplements per room and period: 1,543 rows, a 296 KB payload),
+  through the Vite proxy to the tree's bench, times from request start to response end, three runs:
+  on opening the version `price_matrix` with data 0.49–0.53 s and the first `validate_version`
+  1.39–1.45 s; a burst of 20 keystrokes 80 ms apart (3.0–3.2 s) made exactly one `price_matrix`
+  (0.24–0.27 s) and one `validate_version` (1.09–1.12 s) after the pause, and everything had
+  answered 2.45–2.48 s after the last key; 7 keystrokes typed while a validation ran made two
+  validations in all (the running one, then one for the newest state, started after the first
+  ended) and never two at once. `save_version` of that draft: 0.92–0.98 s.
+- *On the server* (`bench_pricing_workspace` on this tree, best of three, seconds; realistic 12
+  rooms × 26 periods, 1,406 rows, 346 KB / near the row cap 12 × 40, 4,539 rows, 1.13 MB): the
+  overlay alone 0.16 / 0.54; `price_matrix` with unsaved data 0.24 / 0.67 (0.29 / 0.92 with 12
+  sample parties); `preview_price` with unsaved data 0.23 / 0.64; `validate_version` saved /
+  unsaved 2.00 / 2.21 and 9.53 / 9.90; `apply_op_values` (500 prices) 0.007; `save_version` 0.74 /
+  2.40. The equivalence checks pass. The figures match the lane merge's: S8 changes no server code.
+- Reading: the matrix answers well inside the time a user pauses; validation stays the cost, and
+  the client now bounds it (one in flight, the debounce as long as the last check took). The server
+  still has no guard of its own against several editors (or tabs) validating at once (open).
+
+**O1–O5 after S8** (all five provisional, owner input 13): unchanged by S8, which builds no entry
+cell and parses no shorthand. As after the lane merge: O1–O3 are in the parser and the model (the
+board cells are S13), O4 in the parser, the model and `apply_op_values` (the base-row cell commit is
+S9), O5 in the parser (its message in the six languages is S9 / S15).
+
+**Open after S8.** The Price test drawer is modal until S14 (deviation 4). `#ages`, `#occupancy`
+and `#boards` land on Pricing without opening anything until S11 and S13, so the "Occupancy rules"
+list opens the room price grid meanwhile. §3.2's base room select and ROOM base-occupancy stepper
+are read-only chips (the "Set as base" action is S9's; no slice builds the stepper yet). The live
+check lists issues without anchoring them (S15). `rates.preview.unsaved` is no longer used (kept
+in the catalogues). Still open from before: the overlay skips `_validate_links` and the window
+order; the cross-hotel rate plan / policy gap in `build_terms`; party cells in full precision; no
+server-side validation concurrency guard; the S1, S6 and S7 review items listed above.

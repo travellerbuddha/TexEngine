@@ -467,3 +467,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   integration modules 831 OK, upstream suites 76/76, 13/13, banquet 101, Playwright 15/15 for the
   contract, editor, journey, policy, booking and restrictions specs; performance re-measured
   (ADR-061). O1–O5 remain owner input 13. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace slice S8 on branch `pricing-workspace` (ADR-061): the contract version
+  editor is reorganised into four sections under a sticky context header; the former editors stay
+  as "Rule tables" and old links still land. Editors now see the server's prices and checks of
+  unsaved edits as they type (a read-only overlay; nothing is saved), with at most one validation
+  in flight per editor; the Price test prices unsaved edits; the pricing basis can be switched in
+  the editor before the first publish (the existing header save, audited). BOARD_* publish errors
+  count on Pricing. No server change; no area status changes. O1–O5 remain owner input 13.
+  Verdict unchanged: NOT READY.
