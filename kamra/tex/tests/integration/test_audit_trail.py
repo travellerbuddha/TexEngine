@@ -232,3 +232,56 @@ class TestContractAudit(AuditCase):
 		self.assertEqual(cols["settings"]["fields"], {"prices_include_tax": [False, True]})
 		for untouched in ("rooms", "periods", "age_bands", "occupancy_rules", "rate_plans", "offers"):
 			self.assertNotIn(untouched, cols)
+
+
+# ─── ARI grid bulk edits ─────────────────────────────────────────────────
+
+
+class TestGridAudit(AuditCase):
+	"""A bulk edit keeps each cell's old value next to the new one, bounded."""
+
+	def setUp(self):
+		super().setUp()
+		self.c = fx.create_contract(self.f, code="GRID")
+		self.std, self.dlx = self.f["room_types"]["STD"], self.f["room_types"]["DLX"]
+
+	def latest(self) -> dict:
+		return last_event("grid.bulk_update", property=fx.PROPERTY)
+
+	def test_restriction_edits_keep_each_cells_old_value(self):
+		d1, d2, d3 = fx.d(7, 1), fx.d(7, 2), fx.d(7, 3)
+		grid.bulk_update(fx.PROPERTY, d1, d1, room_types=[self.std], restrictions={"min_los": 2})
+		grid.bulk_update(fx.PROPERTY, d1, d3, room_types=[self.std, self.dlx],
+		                 restrictions={"min_los": 3, "cta": "Yes"})
+		e = self.latest()
+		self.assertEqual(e["new"]["restrictions"], {"min_los": 3, "cta": "Yes"})   # what was set, as before
+		r = e["new"]["collections"]["restrictions"]
+		self.assertEqual(r["changed"][f"{self.std} · {d1}"], {"min_los": [2, 3], "cta": [None, "Yes"]})
+		self.assertEqual(r["changed"][f"{self.dlx} · {d2}"], {"min_los": [0, 3], "cta": [None, "Yes"]})
+		self.assertEqual(r["totals"]["changed"], 6)
+		self.assertEqual(r["old_values"]["min_los"], {"0": 5, "2": 1})
+		grid.bulk_update(fx.PROPERTY, d1, d3, room_types=[self.std, self.dlx],
+		                 restrictions={"min_los": 3, "cta": "Yes"})
+		r = self.latest()["new"]["collections"]["restrictions"]
+		self.assertEqual((r["totals"]["changed"], r["unchanged"]), (0, 6))
+
+	def test_a_wide_edit_is_bounded(self):
+		grid.bulk_update(fx.PROPERTY, fx.d(8, 1), fx.d(9, 9), room_types=[self.std, self.dlx],
+		                 restrictions={"stop_sell": "STOP"})
+		r = self.latest()["new"]["collections"]["restrictions"]
+		self.assertEqual(r["totals"]["changed"], 80)
+		self.assertEqual(len(r["changed"]), 50)                          # cells detailed up to a bound
+		self.assertEqual(r["old_values"], {"stop_sell": {"": 80}})       # every old value still counted
+
+	def test_inventory_and_rate_edits_keep_old_values(self):
+		day = fx.d(7, 1)
+		grid.bulk_update(fx.PROPERTY, day, day, room_types=[self.std], inventory={"manual_adjustment": -1})
+		grid.bulk_update(fx.PROPERTY, day, day, room_types=[self.std], inventory={"manual_adjustment": 1})
+		inv = self.latest()["new"]["collections"]["inventory"]
+		self.assertEqual(inv["changed"], {f"{self.std} · {day}": {"manual_adjustment": [-1, 1]}})
+
+		out = grid.bulk_update(fx.PROPERTY, fx.d(7, 1), fx.d(7, 5), room_types=[self.std],
+		                       contract=self.c["contract"], rate={"op": "ABSOLUTE", "value": "150"})
+		rates = self.latest()["new"]["collections"]["rates"]
+		self.assertEqual(rates["changed"], {f"{self.std} · {fx.d(7, 1)}/{fx.d(7, 5)}": {"unit": ["120.00", "150.00"]}})
+		self.assertEqual(set(out["rate"]), {"draft", "periods", "note"})  # the response is unchanged
