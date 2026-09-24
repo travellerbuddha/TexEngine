@@ -285,3 +285,82 @@ class TestGridAudit(AuditCase):
 		rates = self.latest()["new"]["collections"]["rates"]
 		self.assertEqual(rates["changed"], {f"{self.std} · {fx.d(7, 1)}/{fx.d(7, 5)}": {"unit": ["120.00", "150.00"]}})
 		self.assertEqual(set(out["rate"]), {"draft", "periods", "note"})  # the response is unchanged
+
+
+# ─── payment rules ───────────────────────────────────────────────────────
+
+
+class TestPaymentRuleAudit(AuditCase):
+	"""Payment policies, provider accounts and method rules are audited whichever path saves
+	them (TEX API, Desk, REST): non-secret fields old → new, secrets only as set / changed."""
+
+	def setUp(self):
+		super().setUp()
+		self.p = setup_site_and_payments(self.f)
+
+	def assert_no_secret(self, reference_name: str) -> None:
+		rows = frappe.get_all("TEX Audit Event", filters={"reference_name": reference_name},
+		                      fields=["old_value", "new_value", "reason"])
+		text = json.dumps(rows, default=str)
+		for s in SECRETS:
+			self.assertNotIn(s, text)
+
+	def test_method_rules_are_audited_on_every_path(self):
+		name = pay_api.save_rule(property=fx.PROPERTY, data={"method": "Bank Transfer", "priority": 1})["name"]
+		c = last_event("payment_rule.create", name)
+		self.assertEqual((c["property"], c["new"]["method"], c["new"]["priority"]), (fx.PROPERTY, "Bank Transfer", 1))
+		pay_api.save_rule(property=fx.PROPERTY, data={"name": name, "priority": 5})
+		u = last_event("payment_rule.update", name)
+		self.assertEqual((u["old"], u["new"]), ({"priority": 1}, {"priority": 5}))
+		doc = frappe.get_doc("TEX Payment Method Rule", name)          # Desk / REST
+		doc.disabled = 1
+		doc.save()
+		u = last_event("payment_rule.update", name)
+		self.assertEqual((u["old"], u["new"]), ({"disabled": False}, {"disabled": True}))
+		n = len(events("payment_rule.update", name))
+		doc.save()                                                      # nothing changed: nothing recorded
+		self.assertEqual(len(events("payment_rule.update", name)), n)
+		frappe.delete_doc("TEX Payment Method Rule", name)
+		self.assertEqual(last_event("payment_rule.delete", name)["old"]["method"], "Bank Transfer")
+
+	def test_provider_accounts_record_secret_changes_never_secrets(self):
+		ak, sk, rotated = SECRETS
+		name = pay_api.save_account(property=fx.PROPERTY, data={"label": "G74 iyzico", "provider": "iyzico",
+		                                          "environment": "Sandbox", "enabled": 1, "currencies": "EUR",
+		                                          "api_key": ak, "secret_key": sk})["name"]
+		c = last_event("payment_account.create", name)
+		self.assertEqual((c["property"], c["new"]["label"], c["new"]["provider"]), (fx.PROPERTY, "G74 iyzico", "iyzico"))
+		self.assertEqual((c["new"]["api_key_set"], c["new"]["secret_key_set"], c["new"]["store_key_set"]),
+		                 (True, True, False))
+		self.assertEqual(len(events("payment_account.create", name)), 1)    # one record per save
+		pay_api.save_account(property=fx.PROPERTY, data={"name": name, "secret_key": rotated})
+		u = last_event("payment_account.update", name)
+		self.assertEqual((u["old"], u["new"]), ({"secret_key_set": True},
+		                                        {"secret_key_set": True, "secret_key_changed": True}))
+		n = len(events("payment_account.update", name))
+		pay_api.save_account(property=fx.PROPERTY, data={"name": name, "secret_key": rotated, "label": "G74 iyzico"})
+		self.assertEqual(len(events("payment_account.update", name)), n)    # the same secret again: no change
+		doc = frappe.get_doc("TEX Payment Provider Account", name)         # Desk / REST
+		doc.enabled = 0
+		doc.save()
+		u = last_event("payment_account.update", name)
+		self.assertEqual((u["old"], u["new"]), ({"enabled": True}, {"enabled": False}))
+		self.assertFalse(frappe.get_all("TEX Audit Event", filters={"reference_name": name,
+		                                                            "action": "payment_account.save"}))
+		self.assert_no_secret(name)
+
+	def test_payment_policies_are_audited_once_per_change(self):
+		name = policies_api.save_record("TEX Payment Policy", {"property": fx.PROPERTY, "policy_name": "G74 deposit",
+		                                                       "deposit_type": "PERCENT", "deposit_value": 30})["name"]
+		self.assertEqual(last_event("payment_policy.create", name)["new"]["deposit_value"], "30")
+		policies_api.save_record("TEX Payment Policy", {"name": name, "deposit_value": 50})
+		u = last_event("payment_policy.update", name)
+		self.assertEqual((u["old"], u["new"]), ({"deposit_value": "30"}, {"deposit_value": "50"}))
+		doc = frappe.get_doc("TEX Payment Policy", name)                 # Desk / REST
+		doc.allow_pay_at_hotel = 1
+		doc.save()
+		u = last_event("payment_policy.update", name)
+		self.assertEqual((u["old"], u["new"]), ({"allow_pay_at_hotel": False}, {"allow_pay_at_hotel": True}))
+		policies_api.delete_record("TEX Payment Policy", name)
+		self.assertEqual(last_event("payment_policy.delete", name)["old"]["policy_name"], "G74 deposit")
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"reference_name": name}), 4)   # no duplicates

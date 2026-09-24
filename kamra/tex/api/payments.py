@@ -390,13 +390,9 @@ def save_account(property: str, data):
 		if d.get(f):          # blank = keep the stored secret
 			doc.set(f, d[f])
 	# the controller refuses an enabled account that could not take new money (ADR-041, ADR-042);
-	# a disabled one can always be saved
+	# a disabled one can always be saved. Audited by its record hooks, secrets as set / changed
+	# only (``kamra.tex.security.record_audit``, G-74)
 	doc.save(ignore_permissions=True)
-	from kamra.tex.security.audit import audit
-
-	audit("payment_account.save", reference_doctype="TEX Payment Provider Account", reference_name=doc.name,
-	      property=property, new={"provider": doc.provider, "environment": doc.environment, "enabled": doc.enabled,
-	                              "secrets_changed": [f for f in _SECRETS if d.get(f)]})
 	return {"name": doc.name}
 
 
@@ -420,5 +416,5 @@ def save_rule(property: str, data):
 	if doc.provider_account and frappe.db.get_value("TEX Payment Provider Account", doc.provider_account,
 	                                                "property") != property:
 		frappe.throw(_("That payment account belongs to another hotel."))
-	doc.save(ignore_permissions=True)
+	doc.save(ignore_permissions=True)                 # audited by its record hooks (G-74)
 	return {"name": doc.name}

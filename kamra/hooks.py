@@ -296,6 +296,12 @@ for _dt in ("TEX Inventory Day", "TEX ARI Restriction", "TEX Allotment"):
 	                                       "on_trash": "kamra.tex.hooks.ari_source_changed"})
 doc_events.setdefault("TEX Channel Mapping", {})["on_update"] = "kamra.tex.hooks.mapping_changed"
 doc_events.setdefault("TEX Contract Version", {})["on_update"] = "kamra.tex.hooks.contract_version_changed"
+# payment rules are audited whatever path saves them: TEX API, Desk, REST (G-74, ADR-053)
+for _dt in ("TEX Payment Policy", "TEX Payment Provider Account", "TEX Payment Method Rule"):
+	doc_events.setdefault(_dt, {}).update({"validate": "kamra.tex.security.record_audit.capture_secrets",
+	                                       "after_insert": "kamra.tex.security.record_audit.after_insert",
+	                                       "on_update": "kamra.tex.security.record_audit.on_update",
+	                                       "on_trash": "kamra.tex.security.record_audit.on_trash"})
 
 # Scheduled Tasks
 # ---------------
