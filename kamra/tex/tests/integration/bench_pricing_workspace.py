@@ -8,9 +8,11 @@ module) leaves it out. Run it on its own::
 It saves a large draft inside the test transaction (rolled back afterwards) and times, best of
 three, the calls the workspace makes while a revenue manager types: the read-only overlay alone,
 ``price_matrix`` (saved draft and unsaved data, with and without sample parties),
-``validate_version`` and ``preview_price``; and ``save_version`` once. Each run prints one
+``validate_version``, ``preview_price`` and (S5) ``apply_op_values`` at its 500-value cap; and
+``save_version`` once. Each run prints one
 ``PERF <case> {...}`` line (seconds). The workspace's answers for the unsaved data must equal
-those for the same data saved (cells, sources, party totals, issues, the quote), so the figures
+those for the same data saved (cells, sources, party totals, issues, the quote and its nights'
+subtotals), so the figures
 are of calls that did their whole job.
 
 The ceilings are loose on purpose (several times the measured figures, ADR-061): they catch a
@@ -119,6 +121,9 @@ class BenchPricingWorkspace(WorkspaceCase):
 			lambda: api.price_matrix(self.v, data=body, parties=parties, party_room=room))
 		r["preview_saved"], q_saved = best_of(lambda: api.preview_price(self.v, **quote))
 		r["preview_overlay"], q_overlay = best_of(lambda: api.preview_price(self.v, data=body, **quote))
+		prices = json.dumps([f"{100 + i % 50}.55" for i in range(api.ADJUST_VALUES_MAX)])
+		r["apply_op_values_500"], adjusted = best_of(
+			lambda: api.apply_op_values(self.v, values=prices, op="ADJUST_PERCENT", value="7.5"))
 		r["validate_saved"], v_saved = best_of(lambda: api.validate_version(self.v), n=1)
 		r["validate_overlay"], v_overlay = best_of(lambda: api.validate_version(self.v, data=body), n=1)
 		r["issues"] = len(v_saved["issues"])
@@ -141,6 +146,11 @@ class BenchPricingWorkspace(WorkspaceCase):
 		self.assertTrue(q_saved["sellable"], q_saved.get("reasons"))
 		self.assertTrue(q_overlay["sellable"], q_overlay.get("reasons"))
 		self.assertEqual({k: D(v) for k, v in q_overlay["totals"].items()}, {k: D(v) for k, v in q_saved["totals"].items()})
+		subtotals = ("subtotal_adults", "subtotal_children", "subtotal_board")
+		self.assertEqual([{k: D(n[k]) for k in subtotals} for n in q_overlay["nights"]],
+		                 [{k: D(n[k]) for k in subtotals} for n in q_saved["nights"]])
+		self.assertEqual(len(adjusted), api.ADJUST_VALUES_MAX)
+		self.assertEqual(adjusted[0], {"value": "108.09", "error": None})           # 100.55 × 1.075 = 108.09125
 
 		for key, ceiling in ceilings.items():
 			self.assertLessEqual(r[key], ceiling, f"{label}: {key} took {r[key]} s (ceiling {ceiling} s)")
@@ -150,10 +160,10 @@ class BenchPricingWorkspace(WorkspaceCase):
 		"""12 rooms × 26 weekly periods, 3 occupancy rules and a board supplement per room and period."""
 		self.run_case("realistic_12x26", 12, 26, 3, 1, {
 			"overlay_only": 2, "matrix_overlay": 3, "matrix_overlay_12_parties": 6, "preview_overlay": 3,
-			"validate_overlay": 15})
+			"validate_overlay": 15, "apply_op_values_500": 1})
 
 	def test_near_the_row_cap(self):
 		"""12 rooms × 40 periods, 6 occupancy rules and 3 board supplements per room and period."""
 		self.run_case("near_cap_12x40", 12, 40, 6, 3, {
 			"overlay_only": 4, "matrix_overlay": 6, "matrix_overlay_12_parties": 12, "preview_overlay": 6,
-			"validate_overlay": 60})
+			"validate_overlay": 60, "apply_op_values_500": 1})
