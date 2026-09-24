@@ -48,3 +48,4 @@ kamra.patches.tex.p33_audit_scope
 kamra.patches.tex.p34_redemption_released_at
 kamra.patches.tex.p35_money_field_types
 kamra.patches.tex.p36_g92_review
+kamra.patches.tex.p37_crm_privacy
