@@ -682,6 +682,7 @@
  "crm.comms.col.when": "Kiedy",
  "crm.comms.col.by": "Kto",
  "crm.comms.system": "TEX (automatycznie)",
+ "crm.comms.not_openable": "Brak rezerwacji w Twoich hotelach: profil nie jest Ci udostępniony",
  "crm.loyalty.adjust_hotel": "Hotel",
  "crm.loyalty.adjust_hotel_hint": "Korekta należy do tego hotelu: jego personel widzi powód i autora.",
  "crm.loyalty.adjust_hotel_pick": "Wybierz hotel",

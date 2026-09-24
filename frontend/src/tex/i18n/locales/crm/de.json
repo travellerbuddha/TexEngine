@@ -662,6 +662,7 @@
  "crm.comms.col.when": "Wann",
  "crm.comms.col.by": "Von",
  "crm.comms.system": "TEX (automatisch)",
+ "crm.comms.not_openable": "Keine Buchung in Ihren Hotels: das Profil ist nicht für Sie freigegeben",
  "crm.loyalty.adjust_hotel": "Hotel",
  "crm.loyalty.adjust_hotel_hint": "Die Korrektur gehört zu diesem Hotel: Nur dessen Team sieht den Grund und wer sie vorgenommen hat.",
  "crm.loyalty.adjust_hotel_pick": "Hotel wählen",

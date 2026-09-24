@@ -25,6 +25,8 @@ interface CommRow {
   creation: string
   actor: string | null
   actor_name: string | null
+  /** The viewer may open the guest's profile (a booking at one of their hotels). */
+  guest_openable: boolean
   booking: string | null
   reservation: string | null
   delivery_error: string | null
@@ -102,6 +104,7 @@ export default function Communications() {
               loading={list.loading}
               rowKey={(r) => r.name}
               onRowClick={(r) => navigate(`/tex/crm/guests/${encodeURIComponent(r.guest)}`)}
+              rowClickable={(r) => r.guest_openable}
               empty={<EmptyState icon={<MessagesSquare className="size-5" />} title={filtered ? t("crm.comms.none_filtered") : t("crm.comm.empty")} description={filtered ? undefined : t("crm.comms.empty_hint")} />}
               columns={[
                 {
@@ -116,6 +119,7 @@ export default function Communications() {
                   cell: (r) => (
                     <span className="min-w-0">
                       <span className="font-medium text-zinc-900">{r.guest_name || r.guest}</span>
+                      {!r.guest_openable && <span className="block text-xs text-zinc-500">{t("crm.comms.not_openable")}</span>}
                       <span className="block text-xs whitespace-nowrap text-zinc-500 sm:hidden">{dateTime(r.sent_at || r.creation)}</span>
                       {hotels.all && <span className="block text-xs text-zinc-500">{hotels.hotelName(r.property)}</span>}
                     </span>

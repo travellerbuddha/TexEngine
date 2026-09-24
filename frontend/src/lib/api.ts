@@ -67,11 +67,44 @@ async function doFetch(path: string, init?: RequestInit) {
   return res.json()
 }
 
-export async function login(usr: string, pwd: string) {
-  await doFetch("/api/method/login", {
+/** Frappe's answer to /api/method/login. Only `message: "Logged In"` (a Desk user) or
+ * `"No App"` (a website user, sent to `home_page`) means a session was made. A two-factor
+ * account gets `verification` + `tmp_id` (the code is then posted with `loginOtp`), an expired
+ * password `message: "Password Reset"` + `redirect_to` (frappe/auth.py LoginManager.login). */
+export interface LoginResult {
+  message?: string
+  home_page?: string
+  redirect_to?: string
+  tmp_id?: string
+  verification?: { method?: string; prompt?: string | false; setup?: boolean; token_delivery?: boolean } | null
+}
+
+export async function login(usr: string, pwd: string): Promise<LoginResult> {
+  return (await doFetch("/api/method/login", {
     method: "POST",
     body: JSON.stringify({ usr, pwd }),
-  })
+  })) as LoginResult
+}
+
+/** The second step of a two-factor sign-in: the code for `tmp_id` (Frappe keeps the user and
+ * password for it, a few minutes). */
+export async function loginOtp(otp: string, tmp_id: string): Promise<LoginResult> {
+  return (await doFetch("/api/method/login", {
+    method: "POST",
+    body: JSON.stringify({ otp, tmp_id }),
+  })) as LoginResult
+}
+
+/** `url` when it is a path or address on this site (an answer's `redirect_to` / `home_page` is
+ * followed only then). */
+export function sameOrigin(url: string | undefined | null): string | null {
+  if (!url) return null
+  try {
+    const u = new URL(url, window.location.origin)
+    return u.origin === window.location.origin && (u.protocol === "https:" || u.protocol === "http:") ? u.href : null
+  } catch {
+    return null
+  }
 }
 
 export async function logout() {

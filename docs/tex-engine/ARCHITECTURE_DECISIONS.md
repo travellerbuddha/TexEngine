@@ -3704,6 +3704,10 @@ guest in its own query. One test covered the report.
   and 375 px without sideways scroll.
 
 ## ADR-060 The entry screens say TEX Engine and offer the source; "/" leads to the admin app or sign-in; the navigation carries R-35's sub-sections
+*Amended by the review follow-up (end of this ADR): guests and Desk users are offered the source
+too, always of the running version; the sign-in page reads Frappe's answer (two-factor accounts);
+a booking site opens under `/tex/booking-engine/sites/`.*
+
 **Context.** Two gaps of the 2026-09-23 audit.
 - G-60 (R-01, R-33). The sign-in page said "kamra PMS" and offered English and Arabic only. The
   browser tab said "Kamra PMS", the Desk apps tile "Kamra", and `hooks.py` `app_title` /
@@ -3749,8 +3753,11 @@ guest in its own query. One test covered the report.
     they run), else the TEX repository (`https://github.com/travellerbuddha/TexEngine`).
   - The operator keeps that URL serving the source of the version they run (GO_LIVE_READINESS
     §3).
-  - The guest booking engine shows no such link: it is white-labelled per hotel. Whether and
-    how guests are offered the source is an owner decision.
+  - ~~The guest booking engine shows no such link: it is white-labelled per hotel. Whether and
+    how guests are offered the source is an owner decision.~~ Wrong (review M2): section 13 covers
+    every user who interacts with the program remotely, guests included, and white-labelling is no
+    exception; the engine's footer already said "Booking engine by TEX Engine". Guests are offered
+    the source (review follow-up).
 - *"/".* `kamra/www/kamra.py` answers any request outside its mount with a 302 (the page is
   never cached):
   - a Desk (System) user → `/kamra/tex`;
@@ -3821,7 +3828,7 @@ guest in its own query. One test covered the report.
     agent's hidden entries and 403s, 375 px.
 - Open:
   - CRM Campaigns (R-37, not started);
-  - the guest-facing source offer (owner decision);
+  - ~~the guest-facing source offer (owner decision)~~ done by the review follow-up;
   - `tex_source_url`, or a public repository, kept reachable (owner).
 
 **Follow-up: editor saves (branch `fix-editor`, 2026-09-24).** A decision on how the admin
@@ -3852,3 +3859,121 @@ editors treat a save; recorded here as the latest admin-UI ADR.
 - Open: the TEX settings form still takes the saved copy whole (and reloads it after a save).
   The booking site editor remounts after a create, so text typed while the create is in flight
   is dropped.
+
+### ADR-060 review follow-up (branch `fix-shell`)
+An independent review of G-60 and G-64 found 3 Medium and 9 Low issues. All are fixed or answered;
+each fix has a test written first (the fail-first counts are at the end).
+
+- *M1: the sign-in page took any answer for a session.*
+  - The failure: Frappe answers `/api/method/login` with 200 without a session too
+    (`frappe/auth.py`). A two-factor account gets `verification` and `tmp_id`; an expired password
+    gets `message: "Password Reset"` and `redirect_to`. The page reloaded on any 200: the user
+    stayed a visitor, saw no error, and each try sent another code.
+  - Now only `message: "Logged In"` signs in to the admin app. A two-factor account gets a code
+    step: the code is posted with the `tmp_id`, a wrong or expired code is told, "Back" returns to
+    the form. The prompt follows Frappe's method (app, SMS, e-mail; an authenticator app's first
+    sign-in is answered as e-mail, with the set-up instructions).
+  - An expired password follows `redirect_to` only when it is on this site, else the page says so.
+    A website user ("No App") goes to the portal (`/me`), as `/` sends them. Anything else is told.
+  - "Forgot password?" (`/login#forgot`) and "Other sign-in options"
+    (`/login?redirect-to=/kamra/tex`, where single sign-on or LDAP live) lead to Frappe's page. The
+    legacy housekeeping sign-in hands any answer without a session to that page.
+  - Tests: `TestSignInContract` pins Frappe's answers with a second factor on for one test user only
+    (a role of its own in the test's transaction; the site switch read as on, never written; commits
+    refused; the step that makes a session is recorded, not run, because it commits). The e2e runs
+    against a real second factor for one user: `kamra.tex.devtools.e2e_two_factor.enable` marks a
+    role of its own and sets the site switch directly (saving System Settings would mark the role
+    "All", i.e. everyone), refuses when another role is marked, and `disable` restores both; run
+    under the bench-test lock.
+- *M2: guests were not offered the source, and nobody got the running version's.*
+  - The offer is now the source of the version that runs. It is the TEX repository at the running
+    commit (`/tree/<sha>`), or the site config's `tex_source_url`, whose `{commit}` is replaced by
+    that commit. An operator's address without `{commit}` is shown as it is (for a release tag).
+  - The running commit: the site config's `tex_source_commit` (an install without its git
+    checkout), else the app checkout's HEAD, read from `.git` without running git (a worktree's
+    `gitdir:` file and `packed-refs` included), once per process. With neither: the repository.
+  - The bundles carry their build commit (a Vite `define`), for a page that has no other address.
+  - Guests: "Booking engine by TEX Engine · AGPL-3.0 · Source code" on every booking-engine page
+    (the site, booking, confirmation, manage, payment and error pages) and in the widget's modal
+    (the framed page shows it without the hotel footer). It comes from TEX, not from the site's
+    settings: no site setting removes it.
+  - The legacy guest pages still served (`/kamra/book`, `stay`, `checkin`, `menu`, the housekeeping
+    app) show the admin app's notice.
+  - Desk: Help › About adds a TEX Engine row with Kamra PMS, the licence and the source
+    (`public/js/tex_source.js`, loaded by `app_include_js`; the address comes with the boot,
+    `extend_bootinfo`). Opened again, the dialog is reused and the row is not repeated. Frappe's own
+    `/login` page and Desk's footer carry no offer (Desk users reach About from every page).
+- *M3: a booking site named like an admin page opened that page.*
+  - A site opened at `/tex/booking-engine/<name>`, next to the area's pages `new`, `content`,
+    `rooms` and `analytics`. The server reserved only `pay`, `api`, `assets`, `manage`, `widget`.
+  - A site now opens at `/tex/booking-engine/sites/<name>`, whatever its name. An old link
+    `/tex/booking-engine/<name>` is redirected there (query and hash kept). The new-site form
+    stays at `/tex/booking-engine/new`, and "Sites" is the current entry on both.
+  - `new`, `sites`, `content`, `rooms` and `analytics` are refused as the slug of a new site (its
+    name is its first slug) or of a site moved to another slug, on the server and in the form. A
+    site that has one keeps it and stays savable.
+  - p47 reports each existing site named like an admin page (`booking_site.admin_slug`, audited
+    once). It never renames one: the name is the site's first slug, which guests, widgets and
+    campaigns may use. The owner decides whether to create the site again under another slug.
+- *L1: `session.entry` over HTTP.* A guest's GET through Frappe's WSGI application (its own
+  thread and connection) answers the five keys only; POST, PUT and DELETE are refused; one
+  address gets 60 answers a minute, then 429, while another address still gets its own.
+- *L2:* `tex_source_url` is offered only as an https URL with a host, no spaces, at most 300
+  characters, and no user name or password (an operator's token would reach every visitor).
+- *L3: the pages carry the offer.* The pages the server renders (the admin app's page, the booking
+  engine's, a booking site's own host) carry the source address and the brand as `<meta>`, escaped.
+  The sign-in page and every notice read them first, so a rate-limited or failing `session.entry`
+  never falls back to another address (or the brand to "TEX Engine"). A page served without them
+  (the dev server) asks `session.entry` once.
+- *L4:* CRM › Communications and the guest profile name the actor by one rule
+  (`crm.service.actor_name`): an online booking's visitor ("Guest") and the system (Administrator:
+  the scheduler, a migration) are TEX itself, staff by their full name (the profile showed the
+  user id).
+- *L5:* `lists.version_rows` reads the versions most recently changed first (it was unordered)
+  and their rows in that order (a join on the version), so a cut keeps the recent ones; `truncated`
+  is set when the 2000-version cap is hit too, not only the 5000-row cap.
+- *L6:* a Communications row links its guest's profile only when the viewer may open it, as
+  `require_guest` judges (a booking at one of their hotels, or a profile of their enterprise:
+  `crm.service.openable_guests`). The other rows say "No booking at your hotels: the profile is not
+  shared with you" and are plain rows (`DataTable.rowClickable`).
+- *L7:* Rates' tab strip shows Restrictions only with `price.view`, as the navigation and the
+  endpoint; an area toggle names its list (`aria-controls`) only while the list exists; the sign-in
+  page starts in its form; its error is tied to the fields (`aria-describedby`) and marks them
+  invalid when they hold the fault (not for an expired password).
+- *L8:* the FINAL_GAP_AUDIT G-60 row said "3 fail, 4 error": on `665b6b9` the 8 G-60 tests gave 3
+  failures, 3 errors and 2 passes (as this ADR's 15-test count already said).
+- *L9:* tests for the portal branch of `/` (a website user goes to `/me`) and for mixed per-hotel
+  cost (`price.view` at two hotels, cost at one: the cost tables cover that hotel only, and only its
+  rate plans carry an adjustment).
+- *Found by the e2e: an area opened while a navigation loads.* The sidebar forgets areas opened by
+  hand when the user moves to another area. The router keeps the old location until the new
+  screen's code is in (a React transition), so an area opened in that time closed again when the
+  navigation landed. `entry-branding.spec`'s navigation test failed this way on the Vite dev server
+  (slow chunks), on the base commit too. A toggle now belongs to the areas of the location the
+  browser is already at, and is forgotten only when the user moves on from there.
+- *Unchanged:* no DocType change. p47 only reports (audit rows). p47 follows p45 (main).
+- *Tests, fail first on the base `9215991` with the new tests (`36e3fd7`, corrected in `79a9800`):*
+  - `test_entry_branding` (15 → 34 tests): on the base, 8 failures and 3 errors (M3 ×2, L4, L5,
+    L6, and six of the source offer: the running commit, credentials, the served meta, Desk,
+    reading `.git`, and the https test's new default), 1 skipped (the base copy has no git
+    checkout), 22 pass. Those that pass on the base pin behaviour that was right but untested:
+    `session.entry` over HTTP (L1, 3), the portal branch and mixed per-hotel cost (L9, 2), and
+    Frappe's sign-in answers the page must read (M1, 3).
+  - `test_patches`: on the base, the registry test fails and the p47 test errors (p47 missing).
+  - e2e `entry-branding.spec` on the base (its code and frontend): 7 of 10 fail. They are the two
+    sign-in tests (M1: no code step; an answer without a session taken for one), the sign-in
+    page's focus and error wiring (L7), the source offer for guests and for Desk (M2), the admin
+    site URL (M3), and the navigation test (the race above). The site root, the restricted user
+    and 375 px pass.
+- *Verification (main `9642228` merged):* 35 integration modules, 743 tests OK (3 skipped in
+  `test_patches`: the whole-site tests, which passed on a disposable site, `test_patches` 32/32 with
+  every patch through p47); the upstream suites 76/76, 13/13,
+  banquet 101; 419 unit tests; ruff; semgrep (Frappe rules, ERROR) 0 findings on the branch's
+  Python files; `npx tsc -b`, `npm run build` (bundles not committed) and `npm run i18n:tex`.
+  Playwright:
+  - 51/51 against the branch's Vite dev server and bench server (every spec but custom-host and
+    pay-link, desktop and mobile), with a real second factor for one test user
+    (`e2e_two_factor`) and a `tex_source_url` with `{commit}` set;
+  - 8/8 against the bench itself (custom-host, pay-link, manage-money). The dev bench serves
+    `/assets/kamra` from main's checkout, so these ran the branch's server code with main's
+    bundles.

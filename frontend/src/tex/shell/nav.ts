@@ -98,7 +98,7 @@ export const NAV: NavItem[] = [
     // R-35: Configuration, Rooms, Content, Branding, Widgets, Domains, Policies, Analytics
     // (a site's branding, widgets, domains and policies are tabs of the site)
     children: [
-      { id: "be-sites", to: "/tex/booking-engine", label: "core.nav.sub.sites", anyOf: ["booking_site.edit"], allOf: PRICE, keywords: "configuration branding widgets domains policies" },
+      { id: "be-sites", to: "/tex/booking-engine", label: "core.nav.sub.sites", anyOf: ["booking_site.edit"], allOf: PRICE, match: ["/tex/booking-engine/sites", "/tex/booking-engine/new"], keywords: "configuration branding widgets domains policies" },
       { id: "be-rooms", to: "/tex/booking-engine/rooms", label: "core.nav.sub.rooms", anyOf: ["booking_site.edit"], keywords: "room types photos" },
       { id: "be-content", to: "/tex/booking-engine/content", label: "core.nav.sub.content", anyOf: ["booking_site.edit"], keywords: "translations languages" },
       { id: "be-analytics", to: "/tex/booking-engine/analytics", label: "core.nav.sub.analytics", anyOf: ["report.view"], allOf: ["booking_site.edit"], keywords: "funnel conversion" },

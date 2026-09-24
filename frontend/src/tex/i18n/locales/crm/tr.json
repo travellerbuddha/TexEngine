@@ -662,6 +662,7 @@
  "crm.comms.col.when": "Zaman",
  "crm.comms.col.by": "Kaydeden",
  "crm.comms.system": "TEX (otomatik)",
+ "crm.comms.not_openable": "Otellerinizde rezervasyonu yok: profil sizinle paylaşılmıyor",
  "crm.loyalty.adjust_hotel": "Otel",
  "crm.loyalty.adjust_hotel_hint": "Düzeltme bu otele aittir: nedenini ve kimin yaptığını bu otelin personeli görür.",
  "crm.loyalty.adjust_hotel_pick": "Otel seçin",

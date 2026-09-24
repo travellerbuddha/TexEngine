@@ -64,6 +64,9 @@ export const HEADER_LAYOUTS = ["left", "center", "split"] as const
 export const SEARCH_STYLES = ["inline", "card", "overlay"] as const
 export const WIDGET_MODES = ["search", "button", "modal", "redirect"] as const
 export const RESERVED_SLUGS = ["pay", "api", "assets", "manage", "widget"]
+/** The admin area's own pages (/tex/booking-engine/<page>): refused as the slug of a new site or a
+ * site moved to another slug (G-64 review M3; kamra TEX Booking Site.ADMIN_SLUGS). */
+export const ADMIN_SLUGS = ["new", "sites", "content", "rooms", "analytics"]
 
 /** Keys of the per-language custom texts the guest booking pages read. */
 export const TEXT_KEYS = ["headline", "tagline", "search_button", "confirmation_note", "footer_note"] as const
@@ -199,7 +202,7 @@ export function validateSite(s: Site, saved?: Site | null): Errors {
   if (!s.site_name.trim()) e.site_name = "be.err.required"
   const slug = normaliseSlug(s.site_slug)
   if (!slug) e.site_slug = "be.err.required"
-  else if (RESERVED_SLUGS.includes(slug)) e.site_slug = "be.err.slug_reserved"
+  else if (RESERVED_SLUGS.includes(slug) || (ADMIN_SLUGS.includes(slug) && slug !== saved?.site_slug)) e.site_slug = "be.err.slug_reserved"
   if (!s.property && !s.hotel_group) e.scope = "be.err.scope"
   const langs = csv(s.languages)
   if (!langs.length) e.languages = "be.err.languages"

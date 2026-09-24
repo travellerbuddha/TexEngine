@@ -1,7 +1,21 @@
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+import { execFileSync } from "node:child_process"
 import { resolve } from "node:path"
 import { defineConfig } from "vite"
+
+/** The commit being built (TEX_BUILD_COMMIT, else git): the bundles' source offer links the
+ * source of exactly this version when the server cannot tell its own (AGPL-3.0 §13, ADR-060). */
+export function buildCommit(): string {
+  const env = (process.env.TEX_BUILD_COMMIT || "").trim().toLowerCase()
+  if (/^[0-9a-f]{7,40}$/.test(env)) return env
+  try {
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: __dirname, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
+    return /^[0-9a-f]{40}$/.test(sha) ? sha : ""
+  } catch {
+    return ""
+  }
+}
 
 // Dev (`vite`): served at / on :5173, proxying /api to the Frappe bench.
 // Build (`vite build`): emits into the Frappe app's public/ folder, which
@@ -9,6 +23,7 @@ import { defineConfig } from "vite"
 // (see the router basename in main.tsx and website_route_rules in hooks.py).
 export default defineConfig(({ command }) => ({
   base: command === "build" ? "/assets/kamra/frontend/" : "/",
+  define: { __TEX_BUILD_COMMIT__: JSON.stringify(buildCommit()) },
   plugins: [
     react(),
     tailwindcss(),

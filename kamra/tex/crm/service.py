@@ -15,7 +15,7 @@ from datetime import timedelta
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, getdate, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, get_fullname, getdate, now_datetime, nowdate
 
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import segments as seg
@@ -36,6 +36,18 @@ ABANDON_AFTER_MINUTES = 45
 RECOVERY_DAYS = 60
 
 
+# who sent or logged a message, as staff read it: no one for the visitor of an online booking
+# ("Guest") or the system (Administrator: the scheduler, a migration); the screens show those as
+# TEX itself. One rule for the Communications list and the guest profile (G-64 review L4).
+SYSTEM_ACTORS = frozenset({"Guest", "Administrator"})
+
+
+def actor_name(user: str | None) -> str | None:
+	if not user or user in SYSTEM_ACTORS:
+		return None
+	return get_fullname(user)
+
+
 # ─── tenancy ─────────────────────────────────────────────────────────────
 
 
@@ -54,6 +66,24 @@ def _visible_guest_sql(props: set[str]) -> tuple[str, dict]:
 		cond += " OR g.tex_enterprise IN %(ents)s"
 	cond += ")"
 	return cond, {"props": tuple(props), "ents": tuple(ents) or ("",)}
+
+
+def openable_guests(guests, cap: str = "crm.view") -> set[str]:
+	"""Which of ``guests`` the user may open (``require_guest`` would let through): a booking at
+	one of the hotels where the user holds ``cap``, or a profile of one of their enterprises."""
+	guests = {g for g in guests if g}
+	if not guests:
+		return set()
+	props = {p for p in scope.permitted_properties() if scope.has_capability(cap, p)}
+	if not props:
+		return set()
+	seen = set(frappe.get_all("Reservation", filters={"guest": ("in", list(guests)), "property": ("in", list(props))},
+	                          pluck="guest", distinct=True))
+	ents = _enterprises(props)
+	if ents and guests - seen:
+		seen |= set(frappe.get_all("Guest", filters={"name": ("in", list(guests - seen)),
+		                                            "tex_enterprise": ("in", list(ents))}, pluck="name"))
+	return seen
 
 
 def require_guest(guest: str, cap: str = "crm.view") -> set[str]:
@@ -229,6 +259,7 @@ def profile(guest: str) -> dict:
 	for c in comms:
 		c["sent_at"] = str(c["sent_at"]) if c["sent_at"] else None
 		c["creation"] = str(c["creation"])
+		c["actor_name"] = actor_name(c["actor"])
 	member_of = [{"name": s.name, "segment_name": s.segment_name, "system_key": s.system_key}
 	             for s in visible_segments(via) if s.rules_json and _safe_match(facts, s.rules_json, today)]
 	# changes, and requests from online bookings that were not applied (ADR-046) for the hotel to confirm

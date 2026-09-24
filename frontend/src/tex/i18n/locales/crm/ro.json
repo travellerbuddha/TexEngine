@@ -672,6 +672,7 @@
  "crm.comms.col.when": "Când",
  "crm.comms.col.by": "De către",
  "crm.comms.system": "TEX (automat)",
+ "crm.comms.not_openable": "Nicio rezervare la hotelurile dvs.: profilul nu vă este partajat",
  "crm.loyalty.adjust_hotel": "Hotel",
  "crm.loyalty.adjust_hotel_hint": "Ajustarea aparține acestui hotel: personalul său vede motivul și cine a făcut-o.",
  "crm.loyalty.adjust_hotel_pick": "Alegeți un hotel",

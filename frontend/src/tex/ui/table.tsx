@@ -23,6 +23,8 @@ export interface DataTableProps<T> {
   rowKey: (row: T) => string
   loading?: boolean
   onRowClick?: (row: T) => void
+  /** Rows that open with onRowClick (default: all); the others are plain rows. */
+  rowClickable?: (row: T) => boolean
   empty?: ReactNode
   caption?: string
   dense?: boolean
@@ -42,6 +44,7 @@ export function DataTable<T>({
   rowKey,
   loading,
   onRowClick,
+  rowClickable,
   empty,
   caption,
   dense,
@@ -127,24 +130,26 @@ export function DataTable<T>({
                   ))}
                 </tr>
               ))
-            : sorted?.map((row) => (
+            : sorted?.map((row) => {
+                const open = onRowClick && (!rowClickable || rowClickable(row)) ? onRowClick : undefined
+                return (
                 <tr
                   key={rowKey(row)}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onClick={open ? () => open(row) : undefined}
                   onKeyDown={
-                    onRowClick
+                    open
                       ? (e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault()
-                            onRowClick(row)
+                            open(row)
                           }
                         }
                       : undefined
                   }
-                  tabIndex={onRowClick ? 0 : undefined}
+                  tabIndex={open ? 0 : undefined}
                   className={cn(
                     "group",
-                    onRowClick && "cursor-pointer hover:bg-tex-50/60 focus-visible:bg-tex-50",
+                    open && "cursor-pointer hover:bg-tex-50/60 focus-visible:bg-tex-50",
                     rowClassName?.(row),
                   )}
                 >
@@ -163,7 +168,8 @@ export function DataTable<T>({
                     </td>
                   ))}
                 </tr>
-              ))}
+                )
+              })}
         </tbody>
         {footer && <tfoot>{footer}</tfoot>}
       </table>

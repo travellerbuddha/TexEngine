@@ -50,7 +50,7 @@ export default function SitesList() {
             rows={q.data}
             loading={q.loading}
             rowKey={(r) => r.name}
-            onRowClick={(r) => navigate(`/tex/booking-engine/${encodeURIComponent(r.name)}`)}
+            onRowClick={(r) => navigate(`/tex/booking-engine/sites/${encodeURIComponent(r.name)}`)}
             initialSort={{ key: "site_name", dir: "asc" }}
             empty={
               <EmptyState
