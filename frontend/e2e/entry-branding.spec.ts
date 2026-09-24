@@ -490,14 +490,15 @@ test("source offer: guests and staff are offered the running version's source; t
     })
 
     await test.step("the admin shell", async () => {
-      const staff = await browser.newPage()
+      const context = await browser.newContext({ baseURL: BASE, locale: "en-US" })
+      const staff = await context.newPage()
       await english(staff)
       await login(staff, "revenue@demo.tex")
       await staff.goto(texPath("/tex"))
       const nav = staff.getByRole("navigation", { name: "Main navigation" })
       await expect(nav).toBeVisible()
       await expect(staff.getByTestId("tex-source-notice").getByRole("link", { name: "Source code" }).first()).toHaveAttribute("href", source)
-      await staff.close()
+      await context.close()
     })
   } finally {
     await settings({ brand_name: before.brand_name || "TEX Engine" })
