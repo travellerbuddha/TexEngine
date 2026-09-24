@@ -167,7 +167,8 @@ function NavArea({ item, open, onToggle, onNavigate }: { item: VisibleNavItem; o
           type="button"
           onClick={onToggle}
           aria-expanded={open}
-          aria-controls={listId}
+          // the list exists only while open: point at it only then
+          aria-controls={open ? listId : undefined}
           aria-label={t("core.nav.sections", { area: t(item.label) })}
           className="grid size-8 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
         >
