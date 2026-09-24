@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Award, Gift, SlidersHorizontal } from "lucide-react"
 import { tex, useTexMutation, useTexQuery, type TexModule } from "../../../lib/api"
-import { useSession } from "../../../lib/session"
-import { date, num, pct } from "../../../lib/format"
+import { useProperty, useSession } from "../../../lib/session"
+import { date, month, num, pct } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, DataTable, Dialog, EmptyState, Field, InlineError, Input, Money, Notice, Select, statusTone, useToast } from "../../../ui"
 import { isInteger, useEvent, useIntentKey } from "../lib"
@@ -32,6 +32,7 @@ export function LoyaltyPanel({
 }) {
   const { t } = useTexT()
   const { can } = useSession()
+  const current = useProperty()
   const [adjust, setAdjust] = useState<string | null>(null)
   const [redeem, setRedeem] = useState(false)
   // programs this guest can collect in (also when the ledger is still empty)
@@ -112,7 +113,8 @@ export function LoyaltyPanel({
                   rowKey={(e) => e.name}
                   empty={<EmptyState title={t("crm.loyalty.no_entries")} />}
                   columns={[
-                    { key: "creation", header: t("crm.loyalty.col.date"), cell: (e) => date(e.creation) },
+                    // another hotel's entry: the month only (ADR-056 second review)
+                    { key: "creation", header: t("crm.loyalty.col.date"), cell: (e) => (e.other_hotel ? month(e.creation) : date(e.creation)) },
                     { key: "type", header: t("crm.loyalty.col.type"), cell: (e) => t(entryKey(e.entry_type)) },
                     {
                       key: "points",
@@ -156,6 +158,9 @@ export function LoyaltyPanel({
         open={adjust !== null}
         program={adjust ?? ""}
         programs={programOptions}
+        programHotels={Object.fromEntries((programs.data ?? []).map((p) => [p.program, p.property]))}
+        hotels={hotels.filter((h) => can("crm.edit", h))}
+        defaultHotel={current}
         accounts={accounts}
         guest={guest.name}
         onClose={closeAdjust}
@@ -178,6 +183,9 @@ function AdjustDialog({
   open,
   program: initialProgram,
   programs,
+  programHotels,
+  hotels,
+  defaultHotel,
   accounts,
   guest,
   onClose,
@@ -186,6 +194,11 @@ function AdjustDialog({
   open: boolean
   program: string
   programs: { value: string; label: string }[]
+  /** program → its hotel (empty for a hotel group's program) */
+  programHotels: Record<string, string | null | undefined>
+  /** the hotels through which the user may edit this guest */
+  hotels: string[]
+  defaultHotel: string | null | undefined
   accounts: LoyaltyAccount[]
   guest: string
   onClose: () => void
@@ -197,7 +210,15 @@ function AdjustDialog({
   const [direction, setDirection] = useState<"add" | "remove">("add")
   const [points, setPoints] = useState("")
   const [reason, setReason] = useState("")
-  const m = useTexMutation<{ guest: string; program: string; points: number; reason: string }, { name: string }>("crm", "loyalty_adjust")
+  // an adjustment belongs to one hotel of the program, whose staff see its reason (ADR-056 second review)
+  const own = programHotels[program]
+  const hotelOptions = own ? [own] : hotels
+  const [hotel, setHotel] = useState("")
+  const chosenHotel = hotelOptions.includes(hotel) ? hotel : hotelOptions.length === 1 ? hotelOptions[0] : ""
+  const m = useTexMutation<{ guest: string; program: string; points: number; reason: string; property?: string }, { name: string }>(
+    "crm",
+    "loyalty_adjust",
+  )
   const close = useEvent(() => {
     if (!m.pending) onClose()
   })
@@ -207,18 +228,19 @@ function AdjustDialog({
       setDirection("add")
       setPoints("")
       setReason("")
+      setHotel(defaultHotel && hotels.includes(defaultHotel) ? defaultHotel : "")
       m.clearError()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   const available = accounts.find((a) => a.program === program)?.available ?? 0
   const validPoints = isInteger(points) && Number(points) > 0
-  const valid = validPoints && reason.trim().length > 2 && Boolean(program)
+  const valid = validPoints && reason.trim().length > 2 && Boolean(program) && (Boolean(chosenHotel) || hotelOptions.length === 0)
   const submit = async () => {
     if (!valid) return
     const signed = direction === "add" ? Number(points) : -Number(points)
     try {
-      await m.run({ guest, program, points: signed, reason: reason.trim() })
+      await m.run({ guest, program, points: signed, reason: reason.trim(), ...(chosenHotel ? { property: chosenHotel } : {}) })
       toast.success(t("crm.loyalty.adjusted", { points: num(signed) }))
       onDone()
       onClose()
@@ -247,6 +269,15 @@ function AdjustDialog({
         {programs.length > 1 && (
           <Field label={t("crm.loyalty.program")}>
             <Select value={program} onChange={(e) => setProgram(e.target.value)} options={programs} />
+          </Field>
+        )}
+        {hotelOptions.length > 1 && (
+          <Field label={t("crm.loyalty.adjust_hotel")} required hint={t("crm.loyalty.adjust_hotel_hint")}>
+            <Select
+              value={chosenHotel}
+              onChange={(e) => setHotel(e.target.value)}
+              options={[{ value: "", label: t("crm.loyalty.adjust_hotel_pick") }, ...hotelOptions.map((h) => ({ value: h, label: h }))]}
+            />
           </Field>
         )}
         <fieldset>

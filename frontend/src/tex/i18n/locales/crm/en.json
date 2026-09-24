@@ -654,5 +654,24 @@
  "crm.extra.stays": {
   "one": "{count} stay",
   "other": "{count} stays"
- }
+ },
+ "crm.loyalty.adjust_hotel": "Hotel",
+ "crm.loyalty.adjust_hotel_hint": "The adjustment belongs to this hotel: its staff see the reason and who made it.",
+ "crm.loyalty.adjust_hotel_pick": "Choose a hotel",
+ "crm.merge.action": "Merge a duplicate",
+ "crm.merge.duplicates": "Possible duplicates",
+ "crm.merge.duplicates_hint": "Profiles you can see with this guest's phone or e-mail. A shared phone never joins profiles by itself: check, then merge.",
+ "crm.merge.same_email": "Same e-mail",
+ "crm.merge.same_phone": "Same phone",
+ "crm.merge.merge_here": "Merge into this profile",
+ "crm.merge.title": "Merge a duplicate into {name}",
+ "crm.merge.desc": "The duplicate's records move to this profile and the duplicate is deleted.",
+ "crm.merge.source": "Duplicate profile",
+ "crm.merge.source_hint": "Its ID, e.g. G-00123. You need guest edit rights at every hotel either profile has records at.",
+ "crm.merge.what_title": "What merging does",
+ "crm.merge.what_moves": "Stays, bookings, communications, abandoned bookings and loyalty points move here; the points become one balance and the tier follows it.",
+ "crm.merge.what_consent": "Consent becomes the stricter of the two: a channel stays allowed only if both profiles allowed it.",
+ "crm.merge.what_final": "This profile keeps its own details and takes the duplicate's only where it has none. The merge is audited and cannot be undone.",
+ "crm.merge.confirm": "Merge and delete the duplicate",
+ "crm.merge.done": "{source} merged into this profile"
 }

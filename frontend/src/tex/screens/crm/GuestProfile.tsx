@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { Crown, Lock, MessageSquarePlus, Pencil, ShieldAlert, Users } from "lucide-react"
+import { Crown, GitMerge, Lock, MessageSquarePlus, Pencil, ShieldAlert, Users } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
 import { date, money, nightsBetween, num } from "../../lib/format"
@@ -28,6 +28,7 @@ import { segmentLabel } from "./segments/meta"
 import { CommunicationsTimeline, LogCommunicationDialog } from "./profile/Communications"
 import { ConsentPanel } from "./profile/ConsentPanel"
 import { ContactCard } from "./profile/ContactCard"
+import { DuplicatesCard, MergeDialog } from "./profile/Duplicates"
 import { EditGuestDrawer } from "./profile/EditGuestDrawer"
 import { ExtrasPanel } from "./profile/Extras"
 import { LoyaltyPanel } from "./profile/Loyalty"
@@ -47,8 +48,11 @@ export default function GuestProfile() {
   const [tab, setTab] = useState("stays")
   const [editing, setEditing] = useState(false)
   const [logging, setLogging] = useState(false)
+  // the duplicate being merged into this profile ("": typed in the dialog; null: closed)
+  const [merging, setMerging] = useState<string | null>(null)
   const closeEdit = useEvent(() => setEditing(false))
   const closeLog = useEvent(() => setLogging(false))
+  const closeMerge = useEvent(() => setMerging(null))
   const d = q.data
   const g = d?.guest
   const canEdit = Boolean(d?.hotels.some((h) => can("crm.edit", h)))
@@ -109,6 +113,9 @@ export default function GuestProfile() {
             <>
               <Button variant="secondary" icon={<MessageSquarePlus className="size-4" aria-hidden />} onClick={() => setLogging(true)}>
                 {t("crm.comm.log")}
+              </Button>
+              <Button variant="secondary" icon={<GitMerge className="size-4" aria-hidden />} onClick={() => setMerging("")}>
+                {t("crm.merge.action")}
               </Button>
               <Button icon={<Pencil className="size-4" aria-hidden />} onClick={() => setEditing(true)}>
                 {t("crm.profile.edit")}
@@ -254,6 +261,7 @@ export default function GuestProfile() {
             </div>
 
             <div className="min-w-0 space-y-5">
+              <DuplicatesCard duplicates={d.possible_duplicates ?? []} canEdit={canEdit} onMerge={setMerging} />
               <ConsentPanel guest={g} history={d.consent_history} canEdit={canEdit} onSaved={q.reload} />
               <Card>
                 <CardHeader title={t("crm.profile.segments")} description={t("crm.profile.segments_hint")} />
@@ -288,6 +296,7 @@ export default function GuestProfile() {
             </div>
           </div>
           <EditGuestDrawer guest={g} open={editing} onClose={closeEdit} onSaved={q.reload} />
+          <MergeDialog open={merging !== null} guest={g} source={merging ?? ""} onClose={closeMerge} onMerged={q.reload} />
           <LogCommunicationDialog
             open={logging}
             onClose={closeLog}

@@ -654,5 +654,24 @@
  "crm.extra.stays": {
   "one": "{count} konaklama",
   "other": "{count} konaklama"
- }
+ },
+ "crm.loyalty.adjust_hotel": "Otel",
+ "crm.loyalty.adjust_hotel_hint": "Düzeltme bu otele aittir: nedenini ve kimin yaptığını bu otelin personeli görür.",
+ "crm.loyalty.adjust_hotel_pick": "Otel seçin",
+ "crm.merge.action": "Mükerrer profili birleştir",
+ "crm.merge.duplicates": "Olası mükerrer profiller",
+ "crm.merge.duplicates_hint": "Bu misafirin telefonuna veya e-postasına sahip, görebildiğiniz profiller. Ortak bir telefon profilleri kendiliğinden birleştirmez: kontrol edin, sonra birleştirin.",
+ "crm.merge.same_email": "Aynı e-posta",
+ "crm.merge.same_phone": "Aynı telefon",
+ "crm.merge.merge_here": "Bu profille birleştir",
+ "crm.merge.title": "Mükerrer profili {name} ile birleştir",
+ "crm.merge.desc": "Mükerrer profilin kayıtları bu profile taşınır ve mükerrer profil silinir.",
+ "crm.merge.source": "Mükerrer profil",
+ "crm.merge.source_hint": "Kimliği, ör. G-00123. İki profilin de kaydı bulunan her otelde misafir düzenleme yetkiniz olmalıdır.",
+ "crm.merge.what_title": "Birleştirme ne yapar",
+ "crm.merge.what_moves": "Konaklamalar, rezervasyonlar, iletişimler, yarım kalan rezervasyonlar ve sadakat puanları buraya taşınır; puanlar tek bakiye olur ve seviye buna göre belirlenir.",
+ "crm.merge.what_consent": "İzin, ikisinden daha kısıtlayıcı olanı olur: bir kanal ancak iki profil de izin verdiyse izinli kalır.",
+ "crm.merge.what_final": "Bu profil kendi bilgilerini korur ve yalnızca boş olan alanlarda mükerrer profilinkileri alır. Birleştirme denetim kaydına geçer ve geri alınamaz.",
+ "crm.merge.confirm": "Birleştir ve mükerrer profili sil",
+ "crm.merge.done": "{source} bu profille birleştirildi"
 }

@@ -654,5 +654,24 @@
  "crm.extra.stays": {
   "one": "{count} Aufenthalt",
   "other": "{count} Aufenthalte"
- }
+ },
+ "crm.loyalty.adjust_hotel": "Hotel",
+ "crm.loyalty.adjust_hotel_hint": "Die Korrektur gehört zu diesem Hotel: Nur dessen Team sieht den Grund und wer sie vorgenommen hat.",
+ "crm.loyalty.adjust_hotel_pick": "Hotel wählen",
+ "crm.merge.action": "Duplikat zusammenführen",
+ "crm.merge.duplicates": "Mögliche Duplikate",
+ "crm.merge.duplicates_hint": "Profile, die Sie sehen können, mit der Telefonnummer oder E-Mail dieses Gastes. Eine geteilte Nummer führt Profile nie von selbst zusammen: prüfen, dann zusammenführen.",
+ "crm.merge.same_email": "Gleiche E-Mail",
+ "crm.merge.same_phone": "Gleiche Telefonnummer",
+ "crm.merge.merge_here": "In dieses Profil zusammenführen",
+ "crm.merge.title": "Duplikat in {name} zusammenführen",
+ "crm.merge.desc": "Die Datensätze des Duplikats wandern in dieses Profil, das Duplikat wird gelöscht.",
+ "crm.merge.source": "Duplikat",
+ "crm.merge.source_hint": "Seine ID, z. B. G-00123. Sie brauchen Bearbeitungsrechte für Gäste in jedem Hotel, in dem eines der Profile Datensätze hat.",
+ "crm.merge.what_title": "Was das Zusammenführen bewirkt",
+ "crm.merge.what_moves": "Aufenthalte, Buchungen, Kommunikation, abgebrochene Buchungen und Treuepunkte wandern hierher; die Punkte werden ein Saldo, die Stufe richtet sich danach.",
+ "crm.merge.what_consent": "Die Einwilligung wird die strengere der beiden: Ein Kanal bleibt nur erlaubt, wenn beide Profile ihn erlaubt haben.",
+ "crm.merge.what_final": "Dieses Profil behält seine eigenen Angaben und übernimmt die des Duplikats nur, wo es keine hat. Das Zusammenführen wird protokolliert und kann nicht rückgängig gemacht werden.",
+ "crm.merge.confirm": "Zusammenführen und Duplikat löschen",
+ "crm.merge.done": "{source} in dieses Profil zusammengeführt"
 }
