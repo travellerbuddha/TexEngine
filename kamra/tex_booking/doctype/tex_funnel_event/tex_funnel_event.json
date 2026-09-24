@@ -54,7 +54,8 @@
   {
    "fieldname": "session_id",
    "fieldtype": "Data",
-   "label": "Session"
+   "label": "Session",
+   "permlevel": 1
   },
   {
    "fieldname": "guest",
@@ -90,11 +91,12 @@
    "fieldname": "payload",
    "fieldtype": "Code",
    "label": "Payload",
-   "options": "JSON"
+   "options": "JSON",
+   "permlevel": 1
   }
  ],
  "links": [],
- "modified": "2026-09-25 10:00:00.000000",
+ "modified": "2026-09-26 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Funnel Event",

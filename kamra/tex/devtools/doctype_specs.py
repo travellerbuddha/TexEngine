@@ -1001,14 +1001,14 @@ BOOKING_SPECS = [
 		F("site", "Link", "Site", "TEX Booking Site"),
 		F("property", "Link", "Property", "Property", in_standard_filter=1),
 		CB(),
-		F("session_id", "Data", "Session"),
-		# who the visitor is: withheld from Desk / REST (ADR-056 review)
+		# who the visitor is, and what leads to them: withheld from Desk / REST (ADR-056 reviews)
+		F("session_id", "Data", "Session", permlevel=1),
 		F("guest", "Link", "Guest", "Guest", permlevel=1),
 		F("email_hash", "Data", "Email (hash)", permlevel=1),
 		F("consent_marketing", "Check", "Marketing consent"),
 		F("value", "Currency", "Value", options="currency"),
 		F("currency", "Link", "Currency", "Currency"),
-		F("payload", "Code", "Payload", "JSON"),
+		F("payload", "Code", "Payload", "JSON", permlevel=1),
 	], perms=[*READONLY_AUDIT, INTERNALS], autoname="hash", track_changes=False,
 	   sort_field="creation", in_create=True),
 ]
@@ -1177,7 +1177,7 @@ CRM_SPECS = [
 	dt("TEX Abandoned Booking", R, [
 		F("property", "Link", "Hotel", "Property", in_standard_filter=1),
 		F("site", "Link", "Site", "TEX Booking Site"),
-		F("session_id", "Data", "Session"),
+		F("session_id", "Data", "Session", permlevel=1),              # withheld: leads to the person (ADR-056)
 		F("stage_reached", "Select", "Stage", ["search", "room_view", "quote", "guest_details",
 		                                       "payment_started"], in_list_view=1),
 		F("status", "Select", "Status", ["Open", "Contacted", "Recovered", "Dismissed"], default="Open",
@@ -1192,9 +1192,9 @@ CRM_SPECS = [
 		F("currency", "Link", "Currency", "Currency"),
 		F("check_in", "Date", "Check-in"),
 		F("check_out", "Date", "Check-out"),
-		F("quote", "Link", "Quote", "TEX Quote"),
+		F("quote", "Link", "Quote", "TEX Quote", permlevel=1),
 		F("last_event_at", "Datetime", "Last activity"),
-		F("recovered_booking", "Link", "Recovered booking", "TEX Booking"),
+		F("recovered_booking", "Link", "Recovered booking", "TEX Booking", permlevel=1),
 	], perms=[*CRM, INTERNALS_RW], autoname="ABN-.YYYY.-.#####", naming_rule="Expression (old style)"),
 
 	dt("TEX Loyalty Tier", R, [

@@ -328,11 +328,15 @@ def update_profile(guest: str, data: dict, *, consent_source: str = "staff",
 	for f in EDITABLE:
 		if f in data:
 			g.set(f, data[f] if data[f] not in ("",) else None)
+	from kamra.tex.services.booking import consent_given
+
 	consent_changed = {}
 	for f in CONSENT:
-		if f in data and bool(data[f]) != bool(g.get(f)):
-			g.set(f, 1 if data[f] else 0)
-			consent_changed[f] = [bool(before[f]), bool(data[f])]
+		# a consent sent as text means what it says ("0", "false": no), as in a booking (ADR-056)
+		if f in data and consent_given(data[f]) != bool(g.get(f)):
+			given = consent_given(data[f])
+			g.set(f, 1 if given else 0)
+			consent_changed[f] = [bool(before[f]), given]
 	if consent_changed:
 		g.tex_consent_updated_at = now_datetime()
 		g.tex_consent_source = consent_source[:140]
@@ -645,7 +649,9 @@ def detect_abandoned(now=None) -> dict:
 			"consent_marketing": 1 if consent else 0,
 			"value": D(qp.get("total") or 0), "currency": qp.get("currency"),
 			"check_in": sp.get("check_in"), "check_out": sp.get("check_out"),
-			"quote": qp.get("quote") if qp.get("quote") and frappe.db.exists("TEX Quote", qp.get("quote")) else None,
+			# the quote leads to the booking and its booker: kept only with the contact data (ADR-056)
+			"quote": qp.get("quote") if consent and qp.get("quote") and frappe.db.exists("TEX Quote", qp.get("quote"))
+			else None,
 			"last_event_at": s.last_at}).insert(ignore_permissions=True)
 		created += 1
 	# a case left at payment is recovered when its booking is paid, however long after its session
@@ -693,8 +699,9 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	                            pluck="name")) if guests else set()
 	for r in rows:
 		if not (r.consent_marketing and r.guest in agreed):
-			# anonymous, the profile link included: it would lead to the same contact data
-			r["email"] = r["phone"] = r["guest"] = None
+			# anonymous, the profile link and the booking that recovered it included: each leads to the
+			# person (ADR-056 and its second review)
+			r["email"] = r["phone"] = r["guest"] = r["recovered_booking"] = None
 			r["consent_marketing"] = 0
 		r["value"] = to_str(from_db(r["value"], r["currency"] or "EUR"))
 		for k in ("check_in", "check_out", "last_event_at"):

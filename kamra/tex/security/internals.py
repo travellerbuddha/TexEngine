@@ -7,7 +7,9 @@
   every tenant's hotels and programs. The TEX CRM shows each viewer the totals of their own hotels.
 - Who a booking-engine visitor is (G-81 review): an abandoned case's profile, e-mail and phone,
   a funnel event's profile and e-mail hash. The TEX CRM shows them with ``crm.view``, and only
-  while the profile's own e-mail consent holds.
+  while the profile's own e-mail consent holds. With them, what leads to the person (second
+  review): a case's session, quote and recovery booking (the quote and the booking name their
+  booker), a funnel event's session and payload (a payment step names its booking).
 
 These fields are at Frappe permlevel 1 (DocType JSON), which only System Manager (the platform
 administrators) may read. Frappe then leaves them out of every generic read path for everyone
@@ -22,9 +24,11 @@ so platform administrators keep reading these fields (p40, ``kamra.scripts.fix_p
 Two Frappe paths ignore field-level read permissions and are closed here:
 
 - the change history (``Version``), which the Desk form shows to whoever may read the record:
-  the values of these fields are masked when the row is written (``mask_version``; p37 masked
-  rows written before), and kept for platform administrators in a platform-level audit event
-  (``version.withheld``, no hotel: only platform administrators read it);
+  the values of these fields are masked when the row is written (``mask_version``; p37 and p45
+  masked rows written before). Pricing internals and a guest's totals are kept for platform
+  administrators in a platform-level audit event (``version.withheld``, no hotel: only platform
+  administrators read it); contact data is not kept anywhere (``CONTACT_DOCTYPES``: a copy would be
+  one more place a person's e-mail or phone outlives a withdrawal or an erasure, second review);
 - the document a generic write sends back (``frappe.client.set_value / save / insert / submit /
   cancel``, REST ``POST`` / ``PUT /api/resource``, ``POST /api/v2/document``): when such a request
   saves or inserts the document for a user who may not read these fields, the document is marked
@@ -45,9 +49,11 @@ INTERNAL_FIELDS: dict[str, tuple[str, ...]] = {
 	"TEX Quote": ("result_json",),
 	"TEX Reservation Revision": ("snapshot_before", "snapshot_after"),
 	"Guest": ("tex_stays", "tex_lifetime_value", "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points"),
-	"TEX Abandoned Booking": ("guest", "email", "phone"),
-	"TEX Funnel Event": ("guest", "email_hash"),
+	"TEX Abandoned Booking": ("guest", "email", "phone", "session_id", "quote", "recovered_booking"),
+	"TEX Funnel Event": ("guest", "email_hash", "session_id", "payload"),
 }
+# withheld fields that say who a person is: masked in the change history without a copy
+CONTACT_DOCTYPES = frozenset({"TEX Abandoned Booking", "TEX Funnel Event"})
 PERMLEVEL = 1
 MASK = "*****"
 PLATFORM_ROLE = "System Manager"
@@ -73,10 +79,10 @@ def may_read(doctype: str, user: str | None = None) -> bool:
 # ─── the change history ──────────────────────────────────────────────────
 
 
-def mask_diff(doctype: str, data: dict) -> list[list]:
-	"""Mask the withheld fields' values in a Version diff (in place). → their rows as they were
-	(empty: nothing to mask)."""
-	fields = INTERNAL_FIELDS.get(doctype) or ()
+def mask_diff(doctype: str, data: dict, fields=None) -> list[list]:
+	"""Mask the withheld fields' values (or ``fields``') in a Version diff (in place). → their rows as
+	they were (empty: nothing to mask)."""
+	fields = INTERNAL_FIELDS.get(doctype) or () if fields is None else fields
 	kept = []
 	for row in data.get("changed") or []:
 		if isinstance(row, list | tuple) and len(row) >= 3 and row[0] in fields:
@@ -91,8 +97,9 @@ def mask_diff(doctype: str, data: dict) -> list[list]:
 
 def keep(doctype: str, docname: str, version: str | None, rows: list[list]) -> None:
 	"""The values a Version no longer shows, kept for platform administrators: a platform-level
-	audit event (no hotel, group or enterprise: only platform administrators read it)."""
-	if not rows:
+	audit event (no hotel, group or enterprise: only platform administrators read it). Never contact
+	data (``CONTACT_DOCTYPES``)."""
+	if not rows or doctype in CONTACT_DOCTYPES:
 		return
 	from kamra.tex.security.audit import audit
 
@@ -114,7 +121,27 @@ def mask_version(doc, method=None) -> None:
 	kept = mask_diff(doc.ref_doctype, data)
 	if kept:
 		doc.data = frappe.as_json(data, indent=None, separators=(",", ":"))
-		doc.flags.tex_withheld = kept
+		if doc.ref_doctype not in CONTACT_DOCTYPES:
+			doc.flags.tex_withheld = kept
+
+
+def mask_history(doctype: str, names, fields) -> int:
+	"""Mask ``fields``' values in the change history of these records, keeping no copy (an erasure,
+	p45). → the Version rows changed."""
+	names = sorted({n for n in names if n})
+	masked = 0
+	for i in range(0, len(names), 500):
+		for v in frappe.db.sql("""SELECT name, data FROM `tabVersion` WHERE ref_doctype = %(dt)s AND docname IN %(n)s""",
+		                       {"dt": doctype, "n": tuple(names[i:i + 500])}, as_dict=True):
+			try:
+				data = json.loads(v.data or "{}")
+			except ValueError:
+				continue
+			if isinstance(data, dict) and mask_diff(doctype, data, fields):
+				frappe.db.set_value("Version", v.name, "data", frappe.as_json(data, indent=None, separators=(",", ":")),
+				                    update_modified=False)
+				masked += 1
+	return masked
 
 
 def keep_withheld_values(doc, method=None) -> None:

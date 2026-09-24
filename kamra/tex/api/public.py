@@ -604,29 +604,58 @@ def _no_dob(value):
 
 # contact data never stays in a funnel payload the server writes
 FUNNEL_CONTACT_KEYS = frozenset({"email", "phone", "mobile", "first_name", "last_name", "name", "full_name"})
-# what a browser's event may carry (ADR-056 review): these fields only, scalar text or numbers of
-# bounded size (the quotes of a basket: their ids); anything else is dropped, never stored
+# what a browser's event may carry (ADR-056 review): these fields only, and only values the site
+# itself sells (second review): one of its hotels, a room type and a rate plan of that hotel, a board
+# code, the quotes of the visitor's own session. Anything else is dropped, never stored: a name, a
+# phone number or an address typed into a field is not a room type
 BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel")}
 BROWSER_TEXT_MAX = 140
 BROWSER_QUOTES_MAX = 10
 BROWSER_QUOTE_ID_MAX = 64
+BOARD_CODES = frozenset({"RO", "BB", "HB", "FB", "AI", "UAI"})
 
 
-def _browser_payload(event: str, payload) -> dict:
+def _text(v) -> str | None:
+	return v if isinstance(v, str) and 0 < len(v) <= BROWSER_TEXT_MAX else None
+
+
+def _browser_payload(site, session_id: str | None, event: str, payload) -> dict:
 	"""A browser's funnel payload reduced to the event's own fields (an allow-list, not a list of
-	what to drop: anything a caller sends beyond it, contact data of anyone included, is not kept)."""
+	what to drop: anything a caller sends beyond it, contact data of anyone included, is not kept),
+	each checked against what the site sells."""
 	if not isinstance(payload, dict):
 		return {}
+	fields = BROWSER_EVENT_FIELDS.get(event, ())
 	out = {}
-	for key in BROWSER_EVENT_FIELDS.get(event, ()):
-		v = payload.get(key)
-		if key == "quotes":
-			ids = [q for q in v if isinstance(q, str) and 0 < len(q) <= BROWSER_QUOTE_ID_MAX] if isinstance(v, list) else []
-			if ids:
-				out[key] = ids[:BROWSER_QUOTES_MAX]
-		elif isinstance(v, str) and 0 < len(v) <= BROWSER_TEXT_MAX:
-			out[key] = v
-	return out
+	hotel = _text(payload.get("hotel"))
+	if hotel and hotel in _site_properties(site):
+		out["hotel"] = hotel
+	if "room_type" in fields and out.get("hotel"):
+		rt = _text(payload.get("room_type"))
+		if rt and frappe.db.exists("Room Type", {"name": rt, "property": out["hotel"]}):
+			out["room_type"] = rt
+	if "board" in fields and payload.get("board") in BOARD_CODES:
+		out["board"] = payload["board"]
+	if "rate_plan" in fields and out.get("hotel"):
+		rp = _text(payload.get("rate_plan"))
+		if rp and frappe.db.exists("Rate Plan", {"name": rp, "property": out["hotel"]}):
+			out["rate_plan"] = rp
+	if "quotes" in fields and isinstance(payload.get("quotes"), list):
+		ids = [q for q in payload["quotes"] if isinstance(q, str) and 0 < len(q) <= BROWSER_QUOTE_ID_MAX]
+		ids = _own_quotes(site, ids[:BROWSER_QUOTES_MAX], session_id)
+		if ids:
+			out["quotes"] = ids
+	return {k: out[k] for k in fields if k in out}
+
+
+def _own_quotes(site, ids: list[str], session_id: str | None) -> list[str]:
+	"""Of ``ids``, the quotes of this site's hotels made in the caller's session."""
+	if not ids:
+		return []
+	rows = frappe.get_all("TEX Quote", filters={"name": ("in", ids)}, fields=["name", "property", "session_hash"])
+	props, mine = set(_site_properties(site)), _session_hash(session_id)
+	ok = {r.name for r in rows if r.property in props and (not r.session_hash or r.session_hash == mine)}
+	return [q for q in dict.fromkeys(ids) if q in ok]
 
 
 def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
@@ -659,7 +688,8 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 def track(site: str, session_id: str, event: str, payload=None):
 	if event not in BROWSER_EVENT_FIELDS:
 		frappe.throw(_("Unknown event."))
-	_track(_site(site), session_id, event, _browser_payload(event, parse(payload, {})))
+	s = _site(site)
+	_track(s, session_id, event, _browser_payload(s, session_id, event, parse(payload, {})))
 	return {"ok": True}
 
 
