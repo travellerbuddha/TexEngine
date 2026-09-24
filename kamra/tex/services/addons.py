@@ -84,7 +84,7 @@ def price(res, raw_requests, *, guest: bool):
 	snap = _snapshot(res)
 	req = serialize.request_from_dict(snap["request"])
 	# the stay's own terms, only while its version's payload is the one the sale recorded (G-73)
-	terms = sold_terms.load(res, snap, res.tex_contract_version, use="add-on")
+	terms = sold_terms.load(res, snap, res.tex_contract_version, use="add-on", guest=guest)
 	now = now_datetime()
 	requests = _requests(raw_requests)
 	catalog = _catalog(res, guest, now)

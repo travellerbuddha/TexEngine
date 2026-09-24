@@ -212,6 +212,7 @@ LEGACY_ROWS = {"tabProperty": "", "tabReservation": "", "tabGuest": "", "tabUser
                "tabSingles": "WHERE doctype = 'TEX Settings' AND field NOT IN ('modified', 'modified_by')",
                "__Auth": "WHERE doctype LIKE 'TEX %%'"}
 IGNORED_COLUMNS = frozenset({"modified", "modified_by"})
+ROW_KEYS = {"__Auth": ("doctype", "name", "fieldname"), "tabSingles": ("doctype", "field")}
 _COLUMNS: dict[str, list[str]] = {}
 
 
@@ -238,9 +239,11 @@ def site_digest() -> dict[str, dict]:
 		if not cols:
 			continue
 		rows = frappe.db.sql("SELECT {} FROM `{}` {}".format(", ".join(f"`{c}`" for c in cols), table, where))
-		key = cols.index("name") if "name" in cols and table != "__Auth" else None
-		out[table] = {(row[key] if key is not None else repr(row)): hashlib.sha1(repr(row).encode()).hexdigest()
-		              for row in rows}
+		# a row is named by its key, never by a value (an encrypted password, a setting): the value
+		# is only hashed, and a failure message prints names (review of G-76, L1)
+		key = [cols.index(c) for c in ROW_KEYS.get(table, ("name",))]
+		out[table] = {(tuple(row[i] for i in key) if len(key) > 1 else row[key[0]]):
+		              hashlib.sha1(repr(row).encode()).hexdigest() for row in rows}
 	return out
 
 
@@ -654,7 +657,7 @@ class TestP01Foundation(PatchCase):
 		frappe.db.set_single_value("TEX Settings", {"brand_name": None, "show_legacy_pms": 0})
 		self.assertRerunChangesNothing("p01_foundation")
 		self.assertFalse(frappe.db.exists("TEX Market", "PL") or frappe.db.exists("TEX Sales Channel", "META"))
-		self.assertEqual((frappe.db.get_single_value("TEX Settings", "brand_name"),
+		self.assertEqual((frappe.db.get_single_value("TEX Settings", "brand_name") or None,
 		                  frappe.db.get_single_value("TEX Settings", "show_legacy_pms")), (None, 0))
 		self.assertEqual(frappe.db.get_value("Property", kept_out, ["tex_hotel_group", "tex_enterprise"]),
 		                 (None, None))
