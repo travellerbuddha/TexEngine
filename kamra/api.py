@@ -1931,13 +1931,19 @@ def anonymize_guest(guest: str):
 	"""Right-to-erasure: strip everything that identifies the person while
 	keeping stays and bills intact for the books. Irreversible."""
 	doc = frappe.get_doc("Guest", guest)
+	emails = (doc.email,)
 	alias = f"Guest {frappe.generate_hash(length=6).upper()}"
 	doc.update({
 		"first_name": alias, "last_name": "", "full_name": alias,
 		"phone": "", "email": "", "id_type": "", "id_number": "",
 		"nationality": "", "address_line": "", "city": "",
 		"guest_notes": "Profile anonymized on request.", "vip": 0,
+		# nothing may be sent to an erased person, and nothing kept about them (ADR-056 second review)
+		"tex_consent_email": 0, "tex_consent_sms": 0, "tex_consent_whatsapp": 0,
+		"date_of_birth": None, "gender": "", "tex_tags": "", "tex_preferences": "",
+		"id_file": "", "address_proof_file": "",
 	})
+	doc.flags.tex_consent_source = "erasure"
 	doc.save(ignore_permissions=True)
 	for doctype in ("Reservation", "Folio"):
 		frappe.db.sql(  # nosemgrep: frappe-sql-format-injection -- values are parameterized; interpolated text is a constant or whitelisted identifier, not user input
@@ -1955,6 +1961,10 @@ def anonymize_guest(guest: str):
 		if res.get("booked_by_phone"):
 			frappe.db.set_value("Reservation", r, "booked_by_phone", "",
 			                    update_modified=False)
+	# the TEX side: abandoned cases, funnel hashes, bookings' booker data, the change history
+	from kamra.tex.crm import service as crm
+
+	crm.erase_traces(guest, alias, emails=emails)
 
 	from kamra.savings import log_action
 	log_action("anonymize_guest", "Guest", guest,

@@ -342,6 +342,7 @@ def update_profile(guest: str, data: dict, *, consent_source: str = "staff",
 		g.tex_consent_source = consent_source[:140]
 		if consent_text_version:
 			g.tex_consent_text_version = consent_text_version[:140]
+	g.flags.tex_consent_recorded = True                  # audited below, with the source the caller named
 	g.save(ignore_permissions=True)
 	changed = {f: [str(before[f] or ""), str(g.get(f) or "")] for f in EDITABLE
 	           if str(before[f] or "") != str(g.get(f) or "")}
@@ -770,11 +771,47 @@ def guest_validate(doc, method=None) -> None:
 
 
 def guest_on_update(doc, method=None) -> None:
-	"""``Guest.on_update``, whoever saves (the CRM, the Desk form, REST): a withdrawal of marketing
-	e-mail consent makes the guest's abandoned cases and funnel data anonymous."""
+	"""``Guest.on_update``, whoever saves (the CRM, the Desk form, REST): a consent change made outside
+	the CRM is audited; a withdrawal of marketing e-mail consent, or an e-mail or phone cleared, makes
+	the guest's abandoned cases and funnel data anonymous (ADR-056 and its second review)."""
+	pending = doc.flags.pop("tex_consent_audit", None)
+	if pending:
+		audit("guest.consent", reference_doctype="Guest", reference_name=doc.name, new=pending[0], reason=pending[1])
 	before = doc.get_doc_before_save()
-	if before and before.get("tex_consent_email") and not doc.get("tex_consent_email"):
+	if not before:
+		return
+	withdrawn = before.get("tex_consent_email") and not doc.get("tex_consent_email")
+	cleared = any(before.get(f) and not doc.get(f) for f in ("email", "phone"))
+	if withdrawn or cleared:
 		forget_contact(doc.name, emails={before.get("email"), doc.get("email")})
+
+
+def erase_traces(guest: str, alias: str, *, emails=()) -> dict:
+	"""Right to erasure (``kamra.api.anonymize_guest``), after the profile itself was blanked and its
+	consent withdrawn: its cases and funnel data are forgotten; its bookings and their payment links keep
+	the alias instead of the booker's name, e-mail and phone; the profile's change history goes, and that
+	of its bookings, links and stays keeps which field changed, never the value (ADR-056 second review)."""
+	from kamra.tex.security.internals import mask_history
+
+	forget_contact(guest, emails=emails)
+	bookings = frappe.get_all("TEX Booking", filters={"booker_guest": guest}, pluck="name")
+	links = frappe.get_all("TEX Payment Link", filters={"booking": ("in", bookings)}, pluck="name") if bookings else []
+	for chunk in _chunks(bookings):
+		frappe.db.sql("""UPDATE `tabTEX Booking` SET booker_name = %(a)s, booker_email = NULL, booker_phone = NULL
+			WHERE name IN %(n)s""", {"a": alias, "n": chunk})
+	for chunk in _chunks(links):
+		frappe.db.sql("UPDATE `tabTEX Payment Link` SET guest_name = %(a)s, guest_email = NULL WHERE name IN %(n)s",
+		              {"a": alias, "n": chunk})
+	frappe.db.delete("Version", {"ref_doctype": "Guest", "docname": guest})
+	masked = (mask_history("TEX Booking", bookings, ("booker_name", "booker_email", "booker_phone"))
+	          + mask_history("TEX Payment Link", links, ("guest_name", "guest_email"))
+	          + mask_history("Reservation", frappe.get_all("Reservation", filters={"guest": guest}, pluck="name"),
+	                         ("guest_name", "booked_by_phone")))
+	for f in frappe.get_all("File", filters={"attached_to_doctype": "Guest", "attached_to_name": guest}, pluck="name"):
+		frappe.delete_doc("File", f, ignore_permissions=True)            # identity documents
+	out = {"bookings": len(bookings), "payment_links": len(links), "history_rows_masked": masked}
+	audit("guest.erase", reference_doctype="Guest", reference_name=guest, new=out)
+	return out
 
 
 def set_abandoned_status(name: str, status: str, note: str | None = None) -> None:
