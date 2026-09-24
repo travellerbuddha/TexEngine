@@ -107,6 +107,17 @@ def tracked(event: str, *, at=None, rollback_to: str | None = None, error=frappe
 
 
 WAIT = 2                                        # seconds a connection waits for a lock in the H1 tests
+ROWS = 1000                                     # rows a table has at least when its query plan is checked
+
+
+def at_least(doctype: str, rows: int, fields: tuple[str, ...], row) -> None:
+	"""``doctype`` holds at least ``rows`` rows in this transaction: the missing ones are ``row(i)``."""
+	missing = rows - frappe.db.count(doctype)
+	if missing > 0:
+		now = now_datetime()
+		frappe.db.bulk_insert(doctype, ("name", "creation", "modified", "owner", "modified_by", *fields),
+		                      [(frappe.generate_hash(length=12), now, now, "Administrator", "Administrator", *row(i))
+		                       for i in range(missing)])
 
 
 @contextmanager
@@ -149,15 +160,20 @@ class TestWithdrawalLocksOnlyItsRows(PrivacyCase):
 			(crm.FORGET_CASES, {"names": ("none",)}, "PRIMARY", "TEX Abandoned Booking"),
 			(crm.FORGET_EVENTS, {"names": ("none",)}, "PRIMARY", "TEX Funnel Event"),
 		)
-		for sql, params, index, doctype in statements:
+		# the optimizer may read a table of a few rows whole: both tables get at least ROWS rows (in this
+		# transaction), as a live funnel has, whatever the site running the test holds
+		at_least("TEX Funnel Event", ROWS, ("event", "occurred_at", "property", "session_id", "consent_marketing",
+		                                    "payload"), lambda i: ("search", now_datetime(), fx.PROPERTY, f"h1-fill-{i}",
+		                                                           0, "{}"))
+		at_least("TEX Abandoned Booking", ROWS, ("property", "session_id", "stage_reached", "status",
+		                                         "consent_marketing", "last_event_at"),
+		         lambda i: (fx.PROPERTY, f"h1-fill-{i}", "quote", "Open", 0, now_datetime()))
+		for sql, params, index, _doctype in statements:
 			self.assertNotIn("IFNULL", sql.upper())
 			self.assertNotIn(" OR ", sql.upper())
 			[plan] = frappe.db.sql(f"EXPLAIN {sql}", params, as_dict=True)
 			self.assertIn(index, (plan.possible_keys or "").split(","), (sql, plan))
-			# the optimizer may read a table of a few rows whole; the funnel is never that small for long
-			if frappe.db.count(doctype) >= 1000:
-				self.assertEqual((plan.key, plan.type != "ALL"), (index, True), (sql, plan))
-		self.assertGreaterEqual(frappe.db.count("TEX Funnel Event"), 1000, "the test site's funnel")
+			self.assertEqual((plan.key, plan.type != "ALL"), (index, True), (sql, plan))
 
 	def test_a_withdrawal_and_the_funnel_never_wait_for_each_other(self):
 		"""The review's case on two connections: the withdrawal's locking read of the funnel waited for a
