@@ -5,8 +5,10 @@
    with consent keep theirs.
 2. G-95: the change history (``Version``) of reservations, quotes and revisions kept the values
    of the pricing internals (snapshot, cost, margin, FX rate), which the Desk form shows to whoever
-   may read the record. Those values are masked; which field changed stays on record. From now
-   on ``kamra.tex.security.internals.mask_version`` masks them as a row is written.
+   may read the record. Those values are masked; which field changed stays on record, and the
+   values are kept for platform administrators in a platform-level audit event
+   (``version.withheld``, ADR-056 review). From now on
+   ``kamra.tex.security.internals.mask_version`` does the same as a row is written.
 3. The fields themselves are at permlevel 1 (DocType JSON, synced before this patch). A site
    whose role permissions for these DocTypes were customised (Custom DocPerm) uses its own rows
    instead of the JSON's: those DocTypes are listed so an administrator can check who reads
@@ -19,7 +21,7 @@ import json
 
 import frappe
 
-from kamra.tex.security.internals import INTERNAL_FIELDS, mask_diff
+from kamra.tex.security.internals import INTERNAL_FIELDS, keep, mask_diff
 
 BATCH = 500
 
@@ -41,7 +43,7 @@ def _mask_history() -> int:
 		last = ""
 		while True:
 			rows = frappe.db.sql(  # nosemgrep -- static condition, values bound
-				f"""SELECT name, data FROM `tabVersion` WHERE ref_doctype = %s AND name > %s AND ({like})
+				f"""SELECT name, docname, data FROM `tabVersion` WHERE ref_doctype = %s AND name > %s AND ({like})
 				ORDER BY name LIMIT {BATCH}""", (doctype, last, *(f'%"{f}"%' for f in fields)), as_dict=True)
 			if not rows:
 				break
@@ -50,7 +52,9 @@ def _mask_history() -> int:
 					data = json.loads(v.data or "{}")
 				except ValueError:
 					continue
-				if isinstance(data, dict) and mask_diff(doctype, data):
+				kept = mask_diff(doctype, data) if isinstance(data, dict) else []
+				if kept:
+					keep(doctype, v.docname, v.name, kept)             # for platform administrators
 					frappe.db.set_value("Version", v.name, "data",
 					                    frappe.as_json(data, indent=None, separators=(",", ":")), update_modified=False)
 					masked += 1

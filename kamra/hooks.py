@@ -283,11 +283,15 @@ doc_events["Reservation"]["validate"] = "kamra.tex.hooks.reservation_validate"
 doc_events["Reservation"]["before_insert"] = "kamra.tex.hooks.reservation_before_insert"
 doc_events["Reservation"]["on_update"].append("kamra.tex.hooks.reservation_on_update")
 # pricing internals stay out of Desk / REST for anyone who may not read them (G-95, ADR-056): the
-# document a generic write returns, and the change history
-doc_events["Reservation"]["on_change"] = "kamra.tex.security.internals.hide_after_write"
-# so do a guest's totals over every tenant (G-65, ADR-056)
-doc_events.setdefault("Guest", {})["on_change"] = "kamra.tex.security.internals.hide_after_write"
-doc_events.setdefault("Version", {})["before_insert"] = "kamra.tex.security.internals.mask_version"
+# document a generic write returns (on a save or insert, never a db_set: ADR-056 review), and the
+# change history, whose values are kept for platform administrators
+doc_events["Reservation"]["on_update"].append("kamra.tex.security.internals.hide_after_write")
+# so do a guest's totals over every tenant (G-65, ADR-056); a withdrawal of e-mail consent makes the
+# guest's abandoned cases and funnel data anonymous, whoever saves (ADR-056 review)
+doc_events.setdefault("Guest", {})["on_update"] = ["kamra.tex.security.internals.hide_after_write",
+                                                  "kamra.tex.crm.service.guest_on_update"]
+doc_events.setdefault("Version", {}).update({"before_insert": "kamra.tex.security.internals.mask_version",
+                                             "after_insert": "kamra.tex.security.internals.keep_withheld_values"})
 doc_events["Property"] = {
 	"validate": "kamra.tex.hooks.property_validate",
 	"on_update": "kamra.tex.hooks.property_on_update",
