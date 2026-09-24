@@ -35,6 +35,16 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
 **2026-09-23.** The work paused at the owner's request is merged: G-30/G-31 occupancy precedence v2 (ADR-043) and G-45 self-service money flows (ADR-044). G-50 contract header lock (ADR-045) and G-83 security hygiene (ADR-046) are merged too, and TEX operations monitoring (ADR-047). Root `SECURITY.md` is rewritten for TEX (the security contact is still an owner input).
 
+**G-74 audit gaps (2026-09-24, branch `audit-g74`).** Closed in code (ADR-053, patch p33, new DocType
+`TEX Audit Scope`). On the branch: all 24 integration modules **456 OK** (admin_markets 4, age_bands 11,
+audit_trail 15, channel_binding 26, commercial_flows 43, concurrency 8, critical_journey 31,
+crm_segments 7, custom_domains 9, distribution 21, extras_inventory 17, fx_snapshot 5, grant_expiry 9,
+inventory 31, loyalty_admin 7, migrations_notify 7, portfolio 2, post_booking_extras 12,
+pricing_policies 14, public_booking 17, security_hygiene 14, security_regressions 59,
+self_service_money 75, system_status 12; the 15 `test_audit_trail` tests fail on `db47abb`),
+339 unit tests, ruff clean, semgrep ERROR rules add no finding in the changed files, `npx tsc -b` and
+`npm run i18n:tex` clean (bundles not rebuilt on the branch).
+
 **G-45 fourth review (2026-09-24, branch `fix4-g45`).** The fourth review's High (G-93 path), three
 Medium and three Low findings are fixed (ADR-044 fourth review section; patch p28; four indexes). On
 the branch: all 20 integration modules **406 OK** (admin_markets 4, channel_binding 16,
@@ -81,12 +91,12 @@ system_status 12). `system-status.spec.ts` (4) passes.
 
 | Status | Count | Requirements |
 |---|---|---|
-| COMPLETE | 14 | R-06, R-07, R-08, R-10, R-15, R-26, R-38, R-42, R-45, R-46, R-57, R-58, R-60 (process), R-61 (process) |
-| PARTIAL | 48 | all others; the gaps are listed per row |
+| COMPLETE | 15 | R-06, R-07, R-08, R-10, R-15, R-26, R-38, R-42, R-45, R-46, R-54, R-57, R-58, R-60 (process), R-61 (process) |
+| PARTIAL | 47 | all others; the gaps are listed per row |
 | NOT STARTED | 0 whole requirements | sub-items not started: CRM Campaigns (R-35/R-37), SMS / WhatsApp adapters (R-44), booking-window restriction (R-16), bundled extras (R-19), package coupons (R-20) |
 | BLOCKED | 0 whole requirements | blocked sub-items: production certification of iyzico / Sipay / NestPay (R-40, merchant credentials); channel-manager provider certification (R-44, provider credentials); outgoing e-mail delivery (SMTP account); PR + CI on GitHub (base branch) |
 
-**Open gaps by severity:** 0 Critical, 1 High (G-92), 26 Medium, 7 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (recounted 2026-09-24). All nine Critical
+**Open gaps by severity:** 0 Critical, 1 High (G-92), 25 Medium, 7 Low (+3 blocked items), counted from the FINAL_GAP_AUDIT tables (recounted 2026-09-24, after G-74). All nine Critical
 gaps (G-01…G-09) were fixed after the audit; G-84 (Medium) was found while fixing G-06 (FINAL_GAP_AUDIT, "Resolved since the audit"). Details are in
 FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
@@ -166,7 +176,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-51 | Accessibility | PARTIAL | skip link, focus, labels, dialogs, keyboard e2e | Contrast failures (sidebar 2.62:1, grid, weekend headers); no automated a11y tests (G-63). |
 | R-52 | Performance | PARTIAL | lazy areas/languages, caches on immutable terms | 295 KB legacy shell in admin bundle; per-room-type availability queries; guest quotes carry contract internals; no budgets (G-71). |
 | R-53 | Security | PARTIAL | TEX endpoints scoped (115, 34 probed), legacy record arguments resolved to their hotel (G-02 fixed, ADR-027), REST/Desk isolation, CSRF, parameterised SQL, escaped e-mail, rate limits, hashed tokens, fail-closed callbacks; G-83 hygiene fixed and reviewed (ADR-046 with its review follow-up): communication links checked for guest and hotel, no consent granted on a known profile by an anonymous booking or by staff without `crm.edit`, the consent history kept to the viewer's hotels, uploads checked on the server with images decoded whole, the public folder serving only an allow-list judged on the stored name, bearer tokens only in URL fragments and POST bodies (payment pages send no Referer), the PMS webhook never sends unsigned, payment API keys encrypted and masked in the change history (p22, p24) · `test_security_regressions`, `test_security_hygiene` (14), unit `test_filetypes`, e2e `pay-link.spec.ts` (2, passes); the system status is capability- and hotel-scoped and the guest ping answers booleans only, with no secret in either payload (ADR-047, `test_system_status`) | (G-10…G-16, G-26, G-83 fixed.) Owner decisions left from G-83: a double opt-in e-mail for consent asked for on a known profile (needs SMTP); payment links e-mailed before G-83 keep their token in the path on their first request until they expire. SECURITY.md, pentest (GO_LIVE_READINESS). |
-| R-54 | Audit trail | PARTIAL | immutable `TEX Audit Event` (actor, roles, hotel, source, old/new, reason) | Draft/rate edits, grid bulk old values, payment rules not audited; group grant events lack hotel (G-74). |
+| R-54 | Audit trail | **COMPLETE** | immutable `TEX Audit Event` (actor, roles, hotel, source, old/new, reason); compact bounded diffs (ADR-053): every saved draft contract edit on every path (settings old → new, table rows by natural key), a publish's commercial difference against the version it replaces, ARI and limited-extras bulk edits with each cell's old value, payment policies / provider accounts / method rules on the TEX API, Desk and REST paths (secrets only as set / changed booleans); group and enterprise events name their group / enterprise and the hotels they reached (`TEX Audit Scope`, p33), seen by each of those hotels' staff and by no other hotel (viewer, Desk, REST); each payment outcome's real source (gateway return, gateway notification, staff, scheduler); Settings → Audit trail renders row changes, hotels reached and sources (G-74 fixed) · `test_audit_trail` (15), unit `test_audit_changes` (11) | — |
 | R-55 | UX productivity | PARTIAL | Ctrl+K, shortcuts, quick booking, duplicate contract, bulk edit, quick payment link | No global search, recent reservations, copy period/restrictions, saved filters (G-75). |
 | R-56 | Migrations | PARTIAL | p01–p09 idempotent, in `patches.txt` · p05/p06 tested | p01–p04, p07–p09 untested; no end-to-end upgrade test (G-76). |
 | R-57 | Testing | **COMPLETE** | every category in the spec list maps to tests (occupancy, bands, boundaries, combinations, precedence, overrides, versions, historical, periods, FX, markup, promotions, restrictions, concurrency, revisions, permissions, tenancy, payments) | New regression tests are required with each gap fix (FINAL_GAP_AUDIT §4). |
