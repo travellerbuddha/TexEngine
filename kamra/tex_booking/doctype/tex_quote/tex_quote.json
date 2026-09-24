@@ -114,11 +114,12 @@
   {
    "fieldname": "result_json",
    "fieldtype": "Long Text",
-   "label": "Result"
+   "label": "Result",
+   "permlevel": 1
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-24 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Quote",
@@ -133,6 +134,11 @@
    "role": "Hotel Admin",
    "read": 1,
    "report": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager"
   }
  ],
  "sort_field": "creation",
