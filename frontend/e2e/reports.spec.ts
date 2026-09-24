@@ -137,6 +137,16 @@ test("revenue manager: filters, view switch, reconciled totals, cancellations, 3
     await expect(totals).toContainText(await moneyText(page, String(t.fees), c))
   }
 
+  // a room type belongs to a hotel: choosing another scope clears it (a hidden filter would empty the report)
+  const room = page.getByLabel("Room type", { exact: true })
+  const firstRoom = await room.locator("option").nth(1).getAttribute("value")
+  expect(firstRoom, "the group has room types").toBeTruthy()
+  await room.selectOption(firstRoom!)
+  await expect(page).toHaveURL(/[?&]room=/)
+  await page.getByLabel("Report on", { exact: true }).selectOption({ label: "Aurora City Hotel" })
+  await expect(page).not.toHaveURL(/[?&]room=/)
+  await expect(page.getByLabel("Room type", { exact: true })).toHaveValue("")
+
   // a phone: filters and tables fit, nothing scrolls sideways
   await page.setViewportSize({ width: 375, height: 812 })
   for (const path of ["/tex/reports/margin", "/tex/reports"]) {

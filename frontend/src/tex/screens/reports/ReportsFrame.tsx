@@ -24,7 +24,7 @@ export function ReportsFrame({ subtitle, actions, children }: { subtitle?: React
           { to: `/tex/reports/promotions${q}`, label: t("reports.nav.promotion") },
           { to: `/tex/reports/extras${q}`, label: t("reports.nav.extras") },
           { to: `/tex/reports/cancellations${q}`, label: t("reports.nav.cancellation") },
-          { to: `/tex/reports/payments${q}`, label: t("reports.nav.payment") },
+          ...(canAnywhere("payment.view") ? [{ to: `/tex/reports/payments${q}`, label: t("reports.nav.payment") }] : []),
           { to: `/tex/reports/conversion${q}`, label: t("reports.nav.conversion") },
           { to: "/tex/reports/pace", label: t("reports.nav.pace") },
         ]}

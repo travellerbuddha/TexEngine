@@ -12,6 +12,9 @@ interface Options {
   scope: { level: string; name: string | null; hotels: string[] }
   room_types: { name: string; label: string; hotel: string }[]
   rate_plans: { name: string; label: string; hotel: string }[]
+  /** A list was cut at `limit` entries. */
+  truncated?: { room_types?: boolean; rate_plans?: boolean }
+  limit?: number
 }
 
 const rangePatch = (suffix: string, r: Range) => ({
@@ -76,7 +79,14 @@ export function ReportFilters({
       <CardBody className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <Field label={t("reports.filter.scope")} className="w-full sm:w-64">
-            <Select value={scopeValue} onChange={(e) => update({ scope: e.target.value })} options={scopeOptions} groups={scopeGroups} />
+            <Select
+              value={scopeValue}
+              // a room type or rate plan belongs to a hotel: another scope clears them (a hidden
+              // filter would empty the report)
+              onChange={(e) => update({ scope: e.target.value, room: null, rate: null })}
+              options={scopeOptions}
+              groups={scopeGroups}
+            />
           </Field>
           {stayed && (
             <div className="w-full space-y-1.5 sm:w-auto">
@@ -186,6 +196,10 @@ export function ReportFilters({
             </Field>
           )}
         </div>
+
+        {stayed && (opts?.truncated?.room_types || opts?.truncated?.rate_plans) && (
+          <p className="text-xs text-zinc-500">{t("reports.filter.options_cut", { count: opts?.limit ?? 0 })}</p>
+        )}
 
         {(view === "production" || view === "margin" || view === "promotion" || view === "extras") && (
           <Checkbox label={t("reports.filter.include_cancelled")} checked={f.cancelled} onChange={(e) => update({ cancelled: e.target.checked ? "1" : null })} />

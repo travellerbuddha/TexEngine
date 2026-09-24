@@ -11,7 +11,7 @@ import { argsKey, filtersProblem, reportArgs, useReportFilters } from "./filters
 import { decimalSort, downloadCsv, groupLabel, OTHER_KEY, slugify, TIME_DIMENSIONS, toCsv, type CsvColumn, type ReportView } from "./lib"
 import { ReportsFrame } from "./ReportsFrame"
 
-type Row = Record<string, unknown> & { key: string; currency?: string; name?: string | null }
+type Row = Record<string, unknown> & { key: string; currency?: string; name?: string | null; stage?: string | null }
 type Totals = Record<string, Record<string, unknown>>
 
 interface ViewData {
@@ -66,7 +66,7 @@ const TILES: Record<TableView, string[]> = {
   conversion: ["searched", "booked", "conversion_pct", "confirmed"],
 }
 
-function useSpecs(view: TableView): Spec[] {
+function useSpecs(view: TableView, costVisible: boolean): Spec[] {
   const { t } = useTexT()
   const c = (k: string) => t(`reports.col.${k}`)
   switch (view) {
@@ -78,6 +78,7 @@ function useSpecs(view: TableView): Spec[] {
         { key: "extras", label: c("extras"), kind: "money", hide: "md" },
         { key: "taxes", label: c("taxes"), kind: "money", hide: "md" },
         { key: "not_from_contract", label: c("not_from_contract"), kind: "money", hide: "lg" },
+        { key: "cancellation_fees", label: c("cancellation_fees"), kind: "money", hide: "lg" },
         { key: "cost", label: c("cost"), kind: "money", muted: true },
         { key: "margin", label: c("margin"), kind: "money", signed: true },
         { key: "margin_pct", label: c("margin_pct"), kind: "pct" },
@@ -88,6 +89,8 @@ function useSpecs(view: TableView): Spec[] {
         { key: "room_nights", label: c("room_nights"), kind: "count", hide: "sm", total: false },
         { key: "revenue", label: c("stay_revenue"), kind: "money", hide: "sm", total: false },
         { key: "discount", label: c("discount"), kind: "money" },
+        // a cost-stage offer lowers the contract cost: only with cost access (the server sends it)
+        ...(costVisible ? [{ key: "cost_reduction", label: c("cost_reduction"), kind: "money" as const, hide: "sm" as const }] : []),
       ]
     case "extras":
       return [
@@ -163,7 +166,7 @@ export default function ViewReport({ view }: { view: TableView }) {
   const args = reportArgs(view, filters)
   const q = useTexQuery<ViewData>("reports", "report", args, [argsKey(args)], !problem)
   const d = problem ? undefined : q.data
-  const specs = useSpecs(view)
+  const specs = useSpecs(view, Boolean(q.data?.cost_visible))
   const hasMoney = view !== "conversion"
   const totals = (d?.totals ?? {}) as Totals
   const currencies = useMemo(() => (d && hasMoney ? Object.keys(totals).sort() : []), [d, hasMoney, totals])
@@ -173,7 +176,7 @@ export default function ViewReport({ view }: { view: TableView }) {
     r.key === OTHER_KEY
       ? t("reports.other")
       : view === "promotion" || view === "extras"
-        ? (r.name ?? r.key)
+        ? `${r.name ?? r.key}${r.stage === "COST" ? ` · ${t("reports.promotion.cost_stage")}` : ""}`
         : groupLabel((dim ?? "channel") as never, r.key, boot, t, locale, d?.labels, view)
   const isTime = !!dim && TIME_DIMENSIONS.includes(dim as never)
 

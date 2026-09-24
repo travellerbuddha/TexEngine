@@ -119,7 +119,8 @@ export function reportArgs(view: ReportView, f: ReportFilters): Record<string, s
   return {
     view,
     ...scopeArgs(f.scope),
-    basis: f.basis,
+    // only the views with stay or sale day / month rows take a date basis (the server refuses it elsewhere)
+    basis: view === "production" || view === "margin" || view === "cancellation" ? f.basis : undefined,
     group_by: f.group ?? undefined,
     stay_from: stay?.from,
     stay_to: stay?.to,
