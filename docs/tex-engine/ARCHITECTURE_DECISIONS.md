@@ -1255,6 +1255,49 @@ counter that a lost run never increased.
   refunded that way only).
 - Schema: `refund_rows`, `staff_settled` on TEX Guest Change Request (no patch).
 
+**Fourth review follow-up (G-45 re-review 4).** The lease and the order of outcome recording
+held; the defects were in the money given back outside TEX and in reads and moves around a
+refund in flight. The fixes remove paths rather than add states.
+- *Money given back outside TEX comes off where it came from (High, G-93).* A guest change's
+  own payments handed back to staff (a change that did not apply, a late or second payment)
+  are recorded as given back against exactly those payments, at most what the booking still
+  holds of them, on any booking (a deposit-only booking holds no money over its total, and
+  the old cap recorded nothing). A lower price refunded by staff is recorded, as before, from
+  the payments holding the booking's money, at most what it holds over its total.
+  `payments.refund_outside` with a booking named takes the money off that booking only, never
+  the payment's unallocated money, and says what came off (`from_booking`); nothing more is
+  counted.
+- *Limits are locking reads (Medium).* Once a payment is locked, every amount deciding a limit
+  (refunded, in flight, allocated, what a booking holds, the idempotency key) is read with a
+  locking read (`LOCK IN SHARE MODE`), never from a snapshot taken before the lock (ADR-032's
+  rule). Every writer of those rows holds the payment's lock, and the columns are indexed
+  (`parent_transaction`, `booking` on TEX Payment Transaction; `transaction`, `booking` on TEX
+  Payment Allocation), so the reads lock only the payment's own rows.
+- *Money being refunded never moves (Medium).* `release` (and so a transfer) and `allocate`
+  leave out money that refunds still waiting for their answer take; after the gateway answered,
+  the refund decides again under the locks where the money comes off. A refund can no longer
+  leave one booking negative and another holding money already back on the card.
+- *A conflict stops the change, not the run (Low).* The payments service calls the guest
+  change back while it holds the booking, the request, the refund and its charge: whichever
+  run got the contradicting answer, the request stops (`settle_pending` 0, any run's hold
+  taken away), names the refund and moves no money; closing is refused. Staff check the refund
+  at the gateway and record what it actually did (`payments.resolve_refund_conflict`, audited
+  `payment.refund_conflict_resolved`): the refund and the booking are put right (a refund's
+  allocation is keyed to it, so it can be taken back), the change goes on from the truth, and
+  money left to staff is never more than the change still owes. The system status fails on
+  unresolved conflicts only, at any age. (A second run started by a verification recorded
+  while the first run's call was still going — possible only once a worker stalled past its
+  lease — can still have refunded from another payment first; the conflict then shows it to
+  staff, and nothing refunds on that change until they put it right.)
+- *Refunds made, named on old requests (Low).* Patch p28 fills `refund_rows` from the refunds
+  on record: the gateway refunds reasoned `Guest change <request>: …` (the idempotency keys
+  are hashed and cannot be matched by prefix) and the request's refund in flight or to
+  verify; refunds recorded as made outside TEX are left out. It can run again.
+- *One lock order (Low).* `refund_outside` locks the booking(s) holding the payment before the
+  payment, as every refund does; the staff refund endpoint runs a deadlock victim again (its
+  key replays a refund already on record).
+- Schema: four indexes (above); patch p28.
+
 ## ADR-045 A published contract's commercial terms are fixed; selling terms are versioned and selection reads the frozen version
 *Amended by the G-50 review follow-up: header narrowings made before the upgrade survive it (p25),
 a suspend stops quotes and bookings in flight, and the scheduler isolates each record.*
