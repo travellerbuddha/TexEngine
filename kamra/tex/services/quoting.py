@@ -397,10 +397,12 @@ def request_from_offer(offer: dict, *, sale_at: datetime, extras=(), promo_codes
 
 def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None,
                   exclude_booking: str | None = None, check_capacity: bool = True,
-                  exclude_reservation: str | None = None, fx_pins=None, usage_at=None):
+                  exclude_reservation: str | None = None, fx_pins=None, usage_at=None, expected_hash=None):
 	"""``fx_pins``: rates recorded at the original sale, reused for their pairs (G-56).
-	``usage_at``: coupon uses counted as held at that moment (the historical simulator, G-51)."""
-	terms = contracts.load_terms(version)
+	``usage_at``: coupon uses counted as held at that moment (the historical simulator, G-51).
+	``expected_hash``: the payload hash a sold stay recorded for ``version`` (G-73): anything else
+	is refused (``contracts.PayloadMismatch``)."""
+	terms = contracts.load_terms(version, expected_hash=expected_hash)
 	try:
 		ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog, exclude_booking=exclude_booking,
 		                           check_capacity=check_capacity, exclude_reservation=exclude_reservation,

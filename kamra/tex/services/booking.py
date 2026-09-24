@@ -432,10 +432,15 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	_record_consent(guest_name, booking.name, property, consent_granted, consent_requested, staff)
 
 	reservations = []
-	priced: list[tuple[dict, str]] = []
+	sold: list[tuple[dict, str]] = []
 	for idx, (row, req, result) in enumerate(rows):
 		amounts = reservation_amounts(result)
 		kids = req.get("children") or []
+		# the price-locked snapshot: the quote's result, when it was priced (the quote's sale time,
+		# G-73) and when it was accepted; its contract terms stay a reference to the version's frozen
+		# payload by version and hash (ADR-058)
+		priced = get_datetime(result["request"]["sale_at"])
+		snapshot = {**result, "accepted_at": str(now), "priced_at": str(priced), "quote_id": row.name}
 		res = frappe.get_doc({
 			"doctype": "Reservation", "property": property, "guest": guest_name, "room_type": req["room_type"],
 			"check_in_date": req["check_in"], "check_out_date": req["check_out"], "adults": int(req["adults"]),
@@ -453,8 +458,7 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 			# informational, at the column's 9 places; the snapshot holds the exact rate (G-72)
 			"tex_fx_rate": db_dec((result.get("fx") or {}).get("sell_rate") or 1),
 			"tex_promotions": ", ".join(p["promo_id"] for p in result.get("promotions") or [] if p["applied"]),
-			"tex_pricing_snapshot": json.dumps({**result, "accepted_at": str(now), "quote_id": row.name},
-			                                   sort_keys=True, ensure_ascii=False),
+			"tex_pricing_snapshot": json.dumps(snapshot, sort_keys=True, ensure_ascii=False),
 			**amounts,
 		})
 		res.flags.ignore_permissions = True
@@ -468,7 +472,7 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		booking.append("rooms", {"reservation": res.name, "room_type": req["room_type"], "check_in": req["check_in"],
 		                         "check_out": req["check_out"], "adults": int(req["adults"]), "children": len(kids),
 		                         "amount": amounts["amount_after_tax"], "status": status, "quote": row.name})
-		priced.append((result, res.name))
+		sold.append((result, res.name))
 		if extras_need:
 			xinv.allocate(property, booking.name, res.name, result, "Confirmed" if confirm else "Held",
 			              trk=extras_tracked)
@@ -476,10 +480,11 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		q.status = "Used"
 		q.booking = booking.name
 		q.save(ignore_permissions=True)
+		# the Original revision keeps the same record; its basis priced it at the quote's sale time
 		_record_revision(res.name, booking.name, change_type="Original", old_amount=None,
 		                 new_amount=amounts["amount_after_tax"], currency=currency, basis="CURRENT",
-		                 basis_sale_at=now, after=result, source="Guest" if not staff else "Desk")
-	_record_redemptions(priced, booking.name, property, guest.get("email") or guest.get("phone"), committed=confirm)
+		                 basis_sale_at=priced, after=snapshot, source="Guest" if not staff else "Desk")
+	_record_redemptions(sold, booking.name, property, guest.get("email") or guest.get("phone"), committed=confirm)
 	booking.save(ignore_permissions=True)
 	audit("booking.create", reference_doctype="TEX Booking", reference_name=booking.name, property=property,
 	      new={"reservations": reservations, "total": to_str(total), "currency": currency, "status": status,

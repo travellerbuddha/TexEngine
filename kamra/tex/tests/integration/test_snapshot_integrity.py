@@ -184,8 +184,11 @@ class TestSaleTimeRecorded(SnapshotCase):
 		snap = json.loads(frappe.db.get_value("Reservation", self.res, "tex_pricing_snapshot"))
 		rev = frappe.db.get_value("TEX Reservation Revision", out["revision"], ["basis_sale_at", "snapshot_after"],
 		                          as_dict=True)
-		self.assertEqual(get_datetime(snap["priced_at"]), get_datetime(p["pricing_sale_at"]))
+		# CURRENT is re-derived when applied: priced at the apply's sale time, the revision's basis time
 		self.assertEqual(get_datetime(snap["priced_at"]), get_datetime(rev.basis_sale_at))
+		self.assertEqual(get_datetime(snap["priced_at"]), get_datetime(snap["request"]["sale_at"]))
+		self.assertLessEqual(get_datetime(p["pricing_sale_at"]), get_datetime(snap["priced_at"]))
+		self.assertLessEqual(get_datetime(snap["priced_at"]), get_datetime(snap["accepted_at"]))
 		self.assertEqual(get_datetime(snap["original_priced_at"]), get_datetime(self.snap["priced_at"]))
 		self.assertEqual(json.loads(rev.snapshot_after)["priced_at"], snap["priced_at"])
 		# the modification's hash is checked in turn, on its own version

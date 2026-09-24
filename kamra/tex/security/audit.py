@@ -113,6 +113,23 @@ def audit(action: str, *, reference_doctype: str | None = None, reference_name: 
 	return doc.name
 
 
+def audit_refusal(action: str, *, reference_doctype: str | None = None, reference_name: str | None = None,
+                  property: str | None = None, old=None, new=None, reason: str | None = None,
+                  source: str | None = None) -> None:
+	"""Audit a refusal the caller raises next (G-73, ADR-058). The refused request is rolled back,
+	and an event written in its transaction would go with it; so a job writes the event in a
+	transaction of its own. It is queued now, not after a commit that never comes, and runs as
+	the refused user. Tests keep one transaction: the job runs inline there."""
+	frappe.enqueue("kamra.tex.security.audit.record_refusal", queue="short", now=bool(frappe.flags.in_test),
+	               action=action, reference_doctype=reference_doctype, reference_name=reference_name,
+	               property=property, old=old, new=new, reason=reason, source=source or source_of_request())
+
+
+def record_refusal(action: str, **kw) -> str:
+	"""The job of ``audit_refusal``."""
+	return audit(action, **kw)
+
+
 # ─── canonical values of a document (ADR-053) ────────────────────────────
 
 _NO_VALUE = frozenset({"Section Break", "Column Break", "Tab Break", "HTML", "Button", "Image", "Fold", "Heading",

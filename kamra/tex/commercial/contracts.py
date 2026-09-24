@@ -654,24 +654,40 @@ def roll_version_statuses() -> None:
 _TERMS: dict[str, ContractTerms] = {}
 
 
+class PayloadMismatch(frappe.ValidationError):
+	"""A frozen payload is not the one it should be (G-73, ADR-058): it fails its own integrity
+	check, or it is not the payload a price-locked snapshot recorded (``expected_hash``)."""
+
+
 def clear_terms_cache() -> None:
 	_TERMS.clear()
 
 
-def load_terms(version_name: str) -> ContractTerms:
-	"""Frozen terms of a published version (safe to cache: payloads are immutable)."""
+def load_terms(version_name: str, *, expected_hash: str | None = None) -> ContractTerms:
+	"""Frozen terms of a published version (safe to cache: payloads are immutable).
+
+	``expected_hash``: the payload hash a price-locked snapshot recorded for this version (G-73).
+	A snapshot keeps its periods and rules by reference (version and hash), so whoever reprices,
+	simulates or re-explains it from that version passes the hash: the terms are refused
+	(``PayloadMismatch``) unless the payload still hashes to it."""
 	digest = frappe.db.get_value("TEX Contract Version", version_name, "payload_hash")
 	cached = _TERMS.get(version_name)
 	if digest and cached and cached.payload_hash == digest:
-		return cached       # selection loads every live version: the payload is read only on a miss
-	row = frappe.db.get_value("TEX Contract Version", version_name, ["payload", "payload_hash"], as_dict=True)
-	if not row or not row.payload:
-		frappe.throw(_("Contract version {0} is not published.").format(version_name))
-	payload = json.loads(row.payload)
-	if serialize.payload_hash(payload) != row.payload_hash:
-		frappe.throw(_("Contract version {0} failed its integrity check.").format(version_name))
-	terms = serialize.terms_from_payload(payload, row.payload_hash)
-	_TERMS[version_name] = terms
+		terms = cached      # selection loads every live version: the payload is read only on a miss
+	else:
+		row = frappe.db.get_value("TEX Contract Version", version_name, ["payload", "payload_hash"], as_dict=True)
+		if not row or not row.payload:
+			frappe.throw(_("Contract version {0} is not published.").format(version_name),
+			             PayloadMismatch if expected_hash else frappe.ValidationError)
+		payload = json.loads(row.payload)
+		if serialize.payload_hash(payload) != row.payload_hash:
+			frappe.throw(_("Contract version {0} failed its integrity check.").format(version_name), PayloadMismatch)
+		terms = serialize.terms_from_payload(payload, row.payload_hash)
+		_TERMS[version_name] = terms
+	if expected_hash and terms.payload_hash != expected_hash:
+		frappe.throw(_("Contract version {0} is not the terms it was sold on: its payload hash is {1}…, the sale "
+		               "recorded {2}….").format(version_name, terms.payload_hash[:12], expected_hash[:12]),
+		             PayloadMismatch)
 	return terms
 
 
