@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { Archive, CirclePlay, GitBranch, History, Lock, Save, Trash2 } from "lucide-react"
 import { tex, TexApiError, useTexQuery, useTexMutation } from "../../../lib/api"
 import { useProperty, useSession } from "../../../lib/session"
+import { overSaved } from "../../../lib/edits"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import {
@@ -85,6 +86,16 @@ function payload(kind: PolicyKind, d: Doc): Doc {
   return out
 }
 
+/** The saved record, with the fields the user edited while its save was in flight (those that
+ * differ in `cur` from the `sent` doc) laid over it. */
+function withEdits(kind: PolicyKind, saved: Doc, sent: Doc, cur: Doc | undefined): Doc {
+  if (!cur) return saved
+  const editable = Object.values(fieldKinds(kind))
+    .filter((f) => !f.readOnly)
+    .map((f) => f.key)
+  return overSaved(saved, sent, cur, editable)
+}
+
 /** An age band of another live pricing policy this one cascades with (rules cascade by band code). */
 interface InheritedBand {
   code: string
@@ -151,6 +162,8 @@ export default function PolicyEditor() {
   const bandArgs = { property: String(doc?.property || "") || null, market: String(doc?.market || "") || null, exclude: isNew ? null : name }
   const inheritedBands = useTexQuery<InheritedBand[]>("policies", "pricing_policy_bands", bandArgs, [pricing, bandArgs.property, bandArgs.market, bandArgs.exclude], Boolean(pricing && doc))
 
+  // a record just created here, and the payload that created it, until it loads
+  const created = useRef<{ name: string; sent: Doc } | null>(null)
   useEffect(() => {
     if (!kind) return
     if (isNew) {
@@ -158,13 +171,17 @@ export default function PolicyEditor() {
       setDoc(d)
       setBase(JSON.stringify(payload(kind, d)))
       setTouched(false)
-    } else if (q.data) {
+    } else if (q.data && String(q.data.name) === name) {
+      // (until the record at this address arrives, the query still holds the one shown before)
       const d = normalise(kind, q.data)
-      setDoc(d)
+      // what the user typed while the create was in flight is kept
+      const c = created.current?.name === d.name ? created.current : null
+      if (c) created.current = null
+      setDoc((cur) => (c ? withEdits(kind, d, c.sent, cur) : d))
       setBase(JSON.stringify(payload(kind, d)))
       setTouched(false)
     }
-  }, [kind, isNew, q.data, property])
+  }, [kind, isNew, name, q.data, property])
 
   const status = String(doc?.tex_status || "")
   const recProp = String(doc?.property || "") || undefined
@@ -199,20 +216,26 @@ export default function PolicyEditor() {
   const title = doc ? (typeof kind.titleField === "function" ? kind.titleField(doc) : String(doc[kind.titleField] || "")) : ""
 
   const onSave = async () => {
-    if (!doc) return
+    // one save at a time (Enter in a field submits the form)
+    if (!doc || save.pending) return
     setTouched(true)
     if (missing.length) {
       toast.error(t("rates.v.fix_required"))
       return
     }
+    const sent = doc
     try {
-      const saved = await save.run({ doctype: kind.doctype, data: payload(kind, doc) })
+      const saved = await save.run({ doctype: kind.doctype, data: payload(kind, sent) })
       invalidateLookups(String(saved.property || property || ""))
       toast.success(t("core.saved"))
-      if (isNew) navigate(`${listPath}/${encodeURIComponent(String(saved.name))}`, { replace: true })
-      else {
+      if (isNew) {
+        created.current = { name: String(saved.name), sent }
+        navigate(`${listPath}/${encodeURIComponent(String(saved.name))}`, { replace: true })
+      } else {
+        // the saved record is the new base; what the user edited while the save was in flight
+        // stays on top of it
         const d = normalise(kind, saved)
-        setDoc(d)
+        setDoc((cur) => withEdits(kind, d, sent, cur))
         setBase(JSON.stringify(payload(kind, d)))
       }
     } catch {

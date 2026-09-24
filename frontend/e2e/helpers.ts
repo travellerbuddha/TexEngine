@@ -73,3 +73,31 @@ export async function pageApi<T = unknown>(page: Page, method: string, args: Rec
   const body = (await r.json().catch(() => ({}))) as { message?: T }
   return { ok: r.ok(), status: r.status(), body, message: body.message as T }
 }
+
+const isMethod = (url: string, method: string) => new URL(url).pathname.endsWith(`/api/method/${method}`)
+
+/** The page's next call to `method` (a whitelisted path such as "kamra.tex.api.contracts.save_version")
+ * answered. Start waiting before the action that sends it. */
+export function answerOf(page: Page, method: string) {
+  return page.waitForResponse((r) => isMethod(r.url(), method))
+}
+
+/** Hold the page's next call to `method` in flight: the server does the work at once, the page
+ * hears back only on `release()`. `held` resolves once the server has answered. */
+export async function holdNext(page: Page, method: string) {
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  let arrived!: () => void
+  const held = new Promise<void>((r) => (arrived = r))
+  await page.route(
+    (url) => isMethod(url.href, method),
+    async (route) => {
+      const response = await route.fetch()
+      arrived()
+      await gate
+      await route.fulfill({ response })
+    },
+    { times: 1 },
+  )
+  return { held, release }
+}

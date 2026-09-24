@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Ban, Eye, Plus, Power, RotateCcw, Save, Trash2 } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
+import { overSaved } from "../../../lib/edits"
 import { num } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import {
@@ -120,10 +121,19 @@ export default function ProgramPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, scopes])
-  // an existing one is (re)loaded from the server after every save
+  // the draft the last save sent, until the program is reloaded after it
+  const sentRef = useRef<ProgramDraft | null>(null)
+  // an existing one is (re)loaded from the server after every save; what the user changed while
+  // the save was in flight stays on top of it, never replaced by the saved copy
   useEffect(() => {
     if (p) {
-      setState({ for: p.name, draft: draftFromProgram(p) })
+      const sent = sentRef.current
+      sentRef.current = null
+      const saved = draftFromProgram(p)
+      setState((s) => ({
+        for: p.name,
+        draft: sent && s && (s.for === p.name || s.for === "new") ? overSaved(saved, sent, s.draft) : saved,
+      }))
       setAttempted(false)
     }
   }, [p])
@@ -176,6 +186,7 @@ export default function ProgramPage() {
     if (hasErrors) return
     try {
       const r = await save.run({ data: { ...(isNew ? {} : { name }), ...payloadOf(draft, isNew) } })
+      sentRef.current = draft
       toast.success(isNew ? t("crm.program.created") : t("crm.program.saved"))
       if (isNew) navigate(`/tex/crm/loyalty/${encodeURIComponent(r.name)}`, { replace: true })
       else prog.reload()
