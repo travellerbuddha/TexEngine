@@ -4185,6 +4185,8 @@ and O5 is S1's `shorthand.ts` (branch `pricing-workspace`, not merged with `pw-b
 cells that apply O1–O3 are S13; O4's apply-once needs S5 (`apply_op_values`) and S9. None of them
 is on branch `pw-backend` after S3 (S2–S3 are backend read models and guards). Each is marked
 implemented when its slice lands, and its implemented behaviour is reported before the final run.
+(The lanes are now merged; the state after the merge is "O1–O5 after the lane merge", at the end
+of this ADR.)
 - *O1* Board cell, bare `100` → ABSOLUTE 100, i.e. 100 per room per night (`boards.py`); the
   reading line says so before commit. Alternative: a bare number is ADD (per adult).
 - *O2* Board cell, `-20` → ADD −20 (SUBTRACT is not a board op).
@@ -4640,3 +4642,186 @@ Ctrl/Cmd+Enter over a selection — is S9 and not built; if the owner chooses O4
 which does not depend on O4. O1–O3 and O5 are unchanged: their parse is only in S1's `shorthand.ts` on
 branch `pricing-workspace`, not merged here, and the board cells are S13. All five stay owner
 input 13.
+
+**Decision (implemented on the frontend lane: S1, S7, S6; recorded at the lane merge).** The
+frontend slices ran on branch `pricing-workspace`, which had no ADR-061 until `pw-backend` was
+merged into it, so their decisions are recorded here, next to the backend's.
+- *S1: the shorthand parser (D4, D10; the parse of O1–O3 and O5).*
+  `frontend/src/tex/screens/rates/lib/shorthand.ts` is pure (no runtime imports, erasable syntax
+  only, no `parseFloat` / `Number` / `parseInt`). `parseShorthand(input, ctx, {minorUnits})` for the
+  contexts `room`, `occupancy`, `board` and `period_adjust` answers `{kind: "rule", op, value}`,
+  `{kind: "clear"}`, `{kind: "base"}` (boards only) or `{ok: false, code, op?}`; the value is
+  canonical decimal text, never `-0`. The points the design left open are read as follows:
+  - the checks run in the order SYNTAX, OP_NOT_ALLOWED (an op outside the context's
+    `OPS_BY_CONTEXT`), the number limits PLACES (9), RANGE (12 integer digits), DIGITS (15
+    significant), then AMBIGUOUS; so `1234567890123` in `period_adjust` is OP_NOT_ALLOWED(ABSOLUTE),
+    not RANGE. Every error except SYNTAX carries the op;
+  - AMBIGUOUS (O5) applies to amount ops in currencies with fewer than 3 minor units; the integer
+    part is judged by its value (`001.500` and `0001.500` are refused like `1.500`), the fraction
+    as typed;
+  - the 40-character limit counts after character mapping and trimming ASCII spaces; tabs and line
+    breaks are refused on the raw input;
+  - `AMOUNT_OPS.occupancy` includes FIXED (a fixed slot price is an amount), with `isAmountOp(ctx,
+    op)`; the parser never produces FIXED or INHERIT (advanced popover only);
+  - `editText(op | "BASE", value, ctx, {decimalMark, minorUnits})` canonicalises the stored value
+    (`245.000000000` → `245`) and adds one trailing zero where the stored value has the ambiguous
+    shape (`12.345` in a 2-decimal currency → `12.3450`), so every value's edit text parses back to
+    it; `displayText` never pads, so its text parses back only in 3-decimal currencies or without
+    that shape. The clipboard (S10) copies `editText`, never `displayText` (the doc comment on
+    `displayText` says otherwise: open);
+  - stored pairs the parser cannot produce never read back as a different calculation: room ADD −5
+    edits as `-5` (read back as SUBTRACT 5: the same arithmetic, another op label, so S9 must not
+    re-commit an unchanged edit text), and a negative ABSOLUTE, FIXED, MULTIPLY or PERCENT_OF edits
+    as text the parser refuses (SYNTAX), not as another op;
+  - `normaliseDecimal` also takes a leading sign, for S14's comparison of server strings; exponent
+    notation is SYNTAX; a server string beyond the limits is an error, which S14 must treat as
+    unreadable, not as a mismatch.
+- *S7: design-system primitives* (`frontend/src/tex/ui`: `grid-model.ts`, `grid.ts`,
+  `placement.ts`, `keys.ts`, `popover.tsx`; AriGrid and ExtrasGrid unchanged; no new dependency):
+  - no positioning library: `placement.ts` (pure) flips and clamps; below 640 px a Popover is a
+    bottom sheet;
+  - the overlays form one layer stack: Escape closes the innermost layer first (a shown tooltip is
+    a layer), a pointerdown in a child layer does not close its parent, and panels are portaled
+    into an `aria-modal` ancestor (a Menu inside a Drawer);
+  - Tab past a Popover's last field (Shift+Tab before its first) closes it and continues from its
+    trigger;
+  - tooltips show only on hover or keyboard focus (`:focus-visible`) after 300 ms, never on touch or
+    after a click, and never carry essential information. Known: after an icon-only Menu is closed
+    from the keyboard, focus put back on its button matches `:focus-visible` in Chromium, so the
+    button's label tooltip shows (it repeats the accessible name; the code comment says it does
+    not: open);
+  - Ctrl/Cmd+letter shortcuts read `shortcutLetter(e)` (the physical key), so they work on every
+    keyboard layout;
+  - the keyboard grid (`useGridSelection`, `useGridNavigation`) has one tab stop, selects only
+    editable cells, and Escape clears only a multi-cell selection. Caveat: inside a Drawer or
+    Dialog, `useModal` takes Escape first (document capture phase), so a grid placed there could
+    not clear its selection with Escape; no planned view puts one there, and one that does must
+    register the selection as a layer.
+- *S6: the pure workspace model* (`frontend/src/tex/screens/rates/workspace/{model, occupancy,
+  periods, bands, history, rows}.ts`, `lib/keys.ts`; runtime imports only among themselves and
+  `shorthand.ts`, pinned by a test). Every edit writes ordinary rows (D1) and computes no money:
+  - a cell entry leaves the cell with exactly one row: the first is updated in place and keeps its
+    `_key` / `_name`, its twins are removed, and clear removes every row of the cell (the design's
+    "at most one row per identity"; ROOM_RULE_DUPLICATE, OCC_DUPLICATE and BOARD_DUPLICATE stay the
+    server's backstop);
+  - a room's period row equal to its All-periods rule (canonical decimal comparison) is dropped,
+    because `rooms._candidates` then falls back to exactly that rule (the same price). Never for
+    occupancy: under occupancy precedence v2 (ADR-043) a PERIOD rule outranks room-scoped rules,
+    so dropping one could change a price;
+  - D11 and O4's client half: a relative op on the base room returns `needsServer {room,
+    targetPeriod, op, value, current}` (the entered ABSOLUTE or FIXED price the cell resolves to)
+    and computes nothing; `applyAdjustResults` writes the server's `apply_op_values` answer as
+    ABSOLUTE; without an entered price the answer is BASE_NO_PRICE. On any other room a relative op
+    writes a formula from the room's default base (NO_BASE_ROOM without one);
+  - boards: a priced entry clears `is_base` (the engine ignores a base row's amount, so the typed
+    value would be lost); a new period- or room-scoped row copies `child_percent` and `infant_free`
+    from the row it overrides; BASE is exclusive across boards; a previous base board without an
+    amount is left blank and non-base, and the save's blank-value guard (GAP-8) then asks for its
+    price instead of storing 0;
+  - `setBaseRoom` is exclusive (D6) and keeps the new base room's own formulas: the engine prices
+    them as before, but the matrix then shows a formula on the base row and a relative entry there
+    answers BASE_NO_PRICE (S9 warns or offers to convert: open);
+  - the occupancy ladder is scope-local ("All rooms" shows the rules without a room, a room scope
+    that room's rules) and does not re-rank across scopes or precedence levels; the server's
+    resolved line is the truth;
+  - `nextBandCode` skips codes that orphan occupancy rules still name, so a new band never picks
+    them up;
+  - `toRow` keeps the saved row name as `_name` (the saved rule id); `keepKeys` keeps client keys
+    across a save (`tables.settleState`: `keepKeys`, then `overSaved`, then the selling terms, the
+    logic `VersionEditor` had, now shared); `overlayPayloadOf` is `payloadOf` plus `_key` on every
+    row, the fingerprint unchanged.
+
+  Client model timings (node, 40 rooms × 40 periods, 859 rates, 480 occupancy rules): `matrixModel`
+  with all 1,640 cells 1–2 ms, `ladderModel` 2–3 ms, `groupCombinations` ≤ 2 ms, `boardModel`
+  0.3 ms, `applyRoomEntry` 0.1 ms.
+
+**Tests (S1, S7, S6).** `npm run test:unit` (`node --test`, Node ≥ 22.18; CI runs it on Node 24):
+`shorthand` (23: every accepted, refused and AMBIGUOUS example of the design, the §3.4.4 table in
+all four contexts, the round trip of every parser-producible pair with both decimal marks and
+minor units 0, 2 and 3), `grid-selection`, `placement`, `keys` (24 together), `workspace-model` (37),
+`workspace-occupancy` (14), `bands` (10), `history` (8), `edits` (5): 121. `npm run test:dom`
+(Playwright on a harness page, in CI): 24 checks of the overlays and the keyboard behaviour of
+Popover, Menu, Tooltip and the grid hooks, at 1200 × 800 and on a 375 × 700 touch phone.
+
+**The lane merge.** `pw-backend` (S2–S5) merged into `pricing-workspace` (S1, S7, S6); both lanes
+start from main `1575c8b` (no newer main). The lanes touch disjoint files, so there were no textual
+conflicts; this section is where their decisions meet. The contract between them, checked on the
+merged tree:
+- the overlay payload: `overlayPayloadOf` sends `_key` on every row of every table; the server
+  names each overlaid row `~<_key>` and refuses a key used twice in one table (S4); `newKey()` is
+  unique per page load, and `keepKeys` and `copyRow` never repeat a key;
+- rule ids: `~<_key>` for unsaved data, the saved row name (`_name`, kept by `toRow`) otherwise;
+- O4 end to end: the model's `needsServer {op, value, current}` is `apply_op_values(values:
+  [current], op, value)`, and its answer is written back as ABSOLUTE. On the merged tree, the base
+  room STD with an entered 100 and `+10%` in P1 gives `needsServer {op: "ADJUST_PERCENT", value:
+  "10", current: "100"}`; the S5 integration test answers `110.00` for that call and saves it as
+  ABSOLUTE; `applyAdjustResults` writes P1 = ABSOLUTE `110.00` and leaves the All-periods 100;
+- the frontend types of S2–S5 (`lib/types.ts`) type-check with the S6 model and the S1 parser
+  (`tsc -b`).
+
+**Verification of the merged tree** (merge `37a400b`, migrated with it): all 38 integration modules
+**831 OK** (10 skipped, as before the merge; among them `test_pricing_workspace_api` 48,
+`test_commercial_flows` 63, `test_critical_journey` 31, `test_security_regressions` 59,
+`test_age_bands` 11, `test_money_fields` 9, `test_snapshot_integrity` 13,
+`test_modification_determinism` 27); 491 Python unit tests; ruff; `npm run test:unit` 121;
+`npm run test:dom` 24; `tsc -b`, `npm run build`, `i18n:tex`; eval harness 76/76, front-desk
+journey 13/13, banquet 101 OK; Playwright against the merged tree's own servers: `contract-admin`,
+`editor-edits`, `critical-journey`, `policy-revisions`, `booking` (desktop and mobile) and
+`restrictions-grid`, 15/15. The editor E2E is the first run of the existing version editor against
+the S2 blank-value guard; it passes (its flows always type a value).
+
+**Performance of the server-side draft overlay on the merged tree** (`bench_pricing_workspace`,
+best of three, seconds; the same large ORS-shaped drafts as in S3–S5):
+
+| Call | Realistic: 12 rooms × 26 periods, 1,406 rows, 346 KB | Near the row cap: 12 × 40, 4,539 rows, 1.13 MB |
+|---|---|---|
+| `save_version` (once) | 0.71 | 2.52 |
+| the overlay alone (`_overlay`) | 0.16 | 0.49 |
+| `price_matrix`, saved draft: the pre-S3 keys / all keys | 0.05 / 0.07 | 0.14 / 0.16 |
+| `price_matrix`, unsaved data | 0.23 | 0.66 |
+| `price_matrix` + 12 sample parties, saved / unsaved | 0.13 / 0.29 | 0.39 / 0.96 |
+| `preview_price` (7 nights), saved / unsaved | 0.06 / 0.22 | 0.16 / 0.69 |
+| `validate_version`, saved / unsaved | 2.03 / 2.11 | 9.36 / 9.80 |
+| `apply_op_values`, 500 prices | 0.007 | 0.007 |
+
+The benchmark's equivalence checks pass (the unsaved data answers what the same data saved
+answers: cells, sources, party totals and errors, issue codes, quote totals and the nights'
+subtotals). The figures match S5's: the frontend lane adds no server work. The reading stands: the
+overlay costs 0.2–0.5 s per call; the matrix and the price test answer within a 300 ms debounce's
+budget on the realistic contract (0.2–0.3 s) and within a second near the cap; validation is the
+cost (2.1 s realistic, 9.8 s near the cap, with or without data), so the workspace (S8, S9, S15)
+must keep at most one `validate_version` in flight per editor, drop stale answers and lengthen the
+debounce with the draft. No server-side concurrency guard exists (open).
+
+**O1–O5 after the lane merge** (all five provisional, owner input 13 in `GO_LIVE_READINESS.md`;
+none changes how the engine prices: each maps an entry onto an op the engine already has). Checked
+on the merged tree by the unit suites and a probe of `parseShorthand` + the model:
+- *O1*, implemented in the parser and the model: a board cell's bare `100` or `=100` →
+  ABSOLUTE 100, stored in the board row's `adult_amount` with `is_base` 0; the engine
+  (`boards.py`) reads an ABSOLUTE board amount as a price per room per night. Not built: the board
+  cells and the reading line that says so before commit (S13).
+- *O2*, implemented in the parser and the model: a board cell's `-20` → ADD −20 (per adult).
+  Not built: the board cells (S13).
+- *O3*, implemented in the parser and the model: a board cell's `50%` → ADJUST_PERCENT 50 (`+5%`
+  → ADJUST_PERCENT 5). Not built: the board cells (S13).
+- *O4*, implemented in all three layers that exist: the parser reads `+10%` in a room cell as
+  ADJUST_PERCENT 10; the model turns a relative entry on the base room into `needsServer` with the
+  entered price it resolves to (BASE_NO_PRICE without one) and never computes; `apply_op_values`
+  applies it once, HALF_UP to the contract currency; the model writes the answer as ABSOLUTE for
+  that period only. Not built: the base-row cell commit, the pending "70.00 → …" and
+  Ctrl/Cmd+Enter over a selection (S9).
+- *O5*, implemented in the parser: an amount with the shape `1.500` (`1.500`, `+1.500`, `-1.500`:
+  the ops of `AMOUNT_OPS` in each context) is refused as AMBIGUOUS, with the op, in 0- and
+  2-decimal currencies and read as 1.5 in 3-decimal ones; a factor (`x1.500`) or a percentage is
+  not an amount and is unaffected, as are `1500` and `1,5`; the model passes the error back and
+  stores nothing. Not built: the message "Is this 1500 or 1.5? …" in the six languages (S9 / S15).
+
+**Open after the merge** (none introduced by it): the overlay does not run `_validate_links` or the
+sale/stay window-order check, so "no issues" does not mean "saves"; the cross-hotel rate plan /
+policy gap in `build_terms` (tenant isolation, needs its own fix and a `test_security_regressions`
+case); party cells are full-precision decimal strings while the quote uses 6 places; no
+server-side concurrency guard for validation; `VersionDoc.validation_report` is typed as an object
+while the server stores a list; `issueTab` counts BOARD_* under settings until S8; the S1, S6 and
+S7 review items noted above (`displayText`'s comment, the restored-focus tooltip, four no-op edits
+that return new tables, the base room keeping its own formulas, the missing test of a formula base
+cell answering BASE_NO_PRICE, `npm run test:unit` needing Node ≥ 22.18).

@@ -460,3 +460,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   changed once by an op (O4's server half, bulk Adjust…); each night of an internal quote reports its
   subtotals after the adults, the children and the board (no price change; never shown to guests
   or agents). O1–O5 remain owner input 13. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace lanes merged on branch `pricing-workspace` (ADR-061): the backend
+  slices S2–S5 with the shorthand parser (S1), the design-system Popover / Menu / Tooltip and keyboard
+  grid hooks (S7) and the pure workspace model (S6). The parse and storage of O1–O5 are on the branch
+  (reported per item in ADR-061); no workspace screen uses them yet (S8–S16). On the merged tree: 38
+  integration modules 831 OK, upstream suites 76/76, 13/13, banquet 101, Playwright 15/15 for the
+  contract, editor, journey, policy, booking and restrictions specs; performance re-measured
+  (ADR-061). O1–O5 remain owner input 13. No area status changes. Verdict unchanged: NOT READY.
