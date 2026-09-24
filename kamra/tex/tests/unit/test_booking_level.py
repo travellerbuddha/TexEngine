@@ -1,10 +1,11 @@
-"""Booking-level money (G-05, G-06, G-08): terms that belong to the whole booking are
-charged or granted once per booking, and thresholds compare amounts in one currency."""
+"""Booking-level money (G-05, G-06, G-08, G-84): terms that belong to the whole booking are
+charged or granted once per booking, thresholds compare amounts in one currency, and a minimum
+basket is the whole booking's."""
 
 import unittest
 from decimal import Decimal
 
-from kamra.tex.pricing import engine
+from kamra.tex.pricing import engine, serialize
 from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, PromoAppliesTo, PromoValueType
 from kamra.tex.pricing.model import ExtraDef, ExtraRequest, FxSnapshot, Promotion
 from kamra.tex.tests.unit import fixtures as fx
@@ -114,6 +115,106 @@ class TestBookingCoupons(unittest.TestCase):
 		self.assertEqual(first.totals["discounts"], (first.totals["subtotal"] + first.totals["discounts"]) / 10)
 		self.assertEqual(second.totals["discounts"], (second.totals["subtotal"] + second.totals["discounts"]) / 10)
 		self.assertGreater(second.totals["discounts"], D("0"))
+
+
+class TestBookingBasket(unittest.TestCase):
+	"""G-84 (ADR-057): a promotion's minimum basket is compared with the whole booking's basket
+	(every room's accommodation and extras, in the sell currency), not with each room's. The
+	rooms of one booking are priced together: alone first, then — when a minimum refused a
+	promotion — again with the booking's basket, which each room's request records."""
+
+	def promo(self, minimum="250", **kw):
+		return Promotion("MB", "10 % from 250", PromoValueType.PERCENT, D("10"), min_basket=D(minimum), **kw)
+
+	def rooms(self, promos=(), ctx=None, **kw):
+		c = fx.ctx(promotions=tuple(promos), **(ctx or {}))
+		return [(c, fx.req(**kw)), (c, fx.req(room_index=1, adults=1, **kw))]         # 200 and 100 EUR
+
+	def test_rooms_that_qualify_together_get_the_promotion(self):
+		rooms = self.rooms([self.promo()])
+		alone = [engine.price_stay(c, r) for c, r in rooms]
+		self.assertEqual([applied(q, "MB") for q in alone], [None, None])          # 200 and 100: each below 250
+		together = engine.price_booking(rooms)
+		self.assertEqual([applied(q, "MB").discount for q in together], [D("20"), D("10")])
+		self.assertEqual([q.totals["total"] for q in together], [D("180.00"), D("90.00")])
+		self.assertEqual([q.basket for q in together], [D("200.00"), D("100.00")])
+		self.assertEqual([(q.request.booking_basket, q.request.booking_rooms) for q in together],
+		                 [(D("300.00"), 2)] * 2)
+
+	def test_the_explanation_names_the_booking_basket(self):
+		q = engine.price_booking(self.rooms([self.promo()]))[1]
+		step = next(s for s in q.explanation.to_list() if s["code"] == "BOOKING_BASKET")
+		self.assertIn("300.00", step["text"])
+		self.assertIn("2 rooms", step["text"])
+
+	def test_a_booking_below_the_minimum_is_still_refused(self):
+		together = engine.price_booking(self.rooms([self.promo(minimum="300.01")]))
+		self.assertEqual([applied(q, "MB") for q in together], [None, None])
+		out = next(p for p in together[0].promotions if p.promo_id == "MB")
+		self.assertIn("booking basket 300.00 EUR (2 rooms) below minimum 300.01", out.reason)
+		self.assertEqual((out.rule, out.minimum), ("MIN_BASKET", D("300.01")))
+
+	def test_a_fixed_booking_coupon_is_still_granted_once(self):
+		c = Promotion("C", "50 off", PromoValueType.FIXED_STAY, D("50"), code="SAVE", applies_to=PromoAppliesTo.TOTAL,
+		              currency="EUR", min_basket=D("250"))
+		alone = [engine.price_stay(x, r) for x, r in self.rooms([c], promo_codes=("SAVE",))]
+		self.assertEqual([q.totals["discounts"] for q in alone], [D("0"), D("0")])
+		together = engine.price_booking(self.rooms([c], promo_codes=("SAVE",)))
+		self.assertEqual([q.totals["discounts"] for q in together], [D("50.00"), D("0")])
+		self.assertIn("once per booking", next(p.reason for p in together[1].promotions if p.promo_id == "C"))
+
+	def test_one_room_is_its_own_booking(self):
+		c = fx.ctx(promotions=(self.promo(minimum="150"),))
+		one = engine.price_booking([(c, fx.req())])[0]
+		self.assertIsNone(one.request.booking_basket)
+		self.assertEqual(one.to_dict(), engine.price_stay(c, fx.req()).to_dict())
+
+	def test_rooms_are_priced_alone_when_no_minimum_refused_anything(self):
+		together = engine.price_booking(self.rooms([self.promo(minimum="100")]))
+		self.assertEqual([q.request.booking_basket for q in together], [None, None])
+		self.assertTrue(all(applied(q, "MB") for q in together))
+
+	def test_the_basket_counts_extras_and_a_per_booking_extra_once(self):
+		ctx = {"extras": {"FEE": FEE}}
+		self.assertEqual([q.basket for q in engine.price_booking(self.rooms([self.promo("340")], ctx=ctx))],
+		                 [D("240.00"), D("100.00")])
+		self.assertTrue(applied(engine.price_booking(self.rooms([self.promo("340")], ctx=ctx))[1], "MB"))
+		self.assertIsNone(applied(engine.price_booking(self.rooms([self.promo("340.01")], ctx=ctx))[1], "MB"))
+
+	def test_a_threshold_in_another_currency_is_converted_and_recorded(self):
+		usd = {"USD": FxSnapshot("USD", "EUR", FxMode.MANUAL, D("0.9"))}
+		together = engine.price_booking(self.rooms([self.promo("330", currency="USD")], ctx={"promo_fx": usd}))
+		self.assertTrue(applied(together[0], "MB"))                                 # 330 USD = 297 EUR ≤ 300
+		uses = [u for r in together[0].fx_rates for u in r["used_for"]]
+		self.assertIn("promotion:MB:min_basket", uses)
+		self.assertIsNone(applied(engine.price_booking(self.rooms([self.promo("334", currency="USD")],
+		                                                          ctx={"promo_fx": usd}))[0], "MB"))
+
+	def test_rooms_in_different_currencies_are_judged_alone(self):
+		c = fx.ctx(promotions=(self.promo(),))
+		t = fx.ctx(promotions=(self.promo(currency="EUR"),), fx=FxSnapshot("EUR", "TRY", FxMode.MANUAL, D("50")),
+		           promo_fx={"EUR": FxSnapshot("EUR", "TRY", FxMode.MANUAL, D("50"))})
+		mixed = engine.price_booking([(c, fx.req()), (t, fx.req(room_index=1, adults=1, sell_currency="TRY"))])
+		self.assertEqual([q.request.booking_basket for q in mixed], [None, None])
+
+	def test_a_changed_room_is_judged_with_the_other_rooms(self):
+		c = fx.ctx(promotions=(self.promo(),))
+		req = fx.req(room_index=1, adults=1)
+		alone = engine.price_stay(c, req)
+		again = engine.booking_request(req, alone, others_basket=D("200.00"), others_rooms=1)
+		self.assertEqual((again.booking_basket, again.booking_rooms), (D("300.00"), 2))
+		self.assertEqual(applied(engine.price_stay(c, again), "MB").discount, D("10"))
+		# nothing refused for its minimum, or no other room: the room is its own booking
+		self.assertIsNone(engine.booking_request(req, engine.price_stay(fx.ctx(), req), others_basket=D("200.00"),
+		                                         others_rooms=1))
+		self.assertIsNone(engine.booking_request(req, alone, others_basket=D("0"), others_rooms=0))
+
+	def test_booking_pricing_is_deterministic_and_the_request_round_trips(self):
+		a = engine.price_booking(self.rooms([self.promo()]))
+		b = engine.price_booking(self.rooms([self.promo()]))
+		self.assertEqual([q.explanation.to_list() for q in a], [q.explanation.to_list() for q in b])
+		self.assertEqual(serialize.request_from_dict(serialize.request_to_dict(a[1].request)), a[1].request)
+		self.assertEqual(a[1].to_dict()["basket"], "100.00")
 
 
 if __name__ == "__main__":

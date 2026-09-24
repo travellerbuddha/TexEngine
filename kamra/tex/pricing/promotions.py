@@ -44,9 +44,13 @@ class PromoContext:
 	member: bool
 	codes: frozenset[str]
 	extras: frozenset[str]
-	basket: Decimal                 # accommodation (+extras) value used for min_basket
+	basket: Decimal                 # this room's accommodation (+extras) value used for min_basket
 	sell_currency: str
 	fx: dict[str, FxSnapshot] | None = None   # promotion currency → sell_currency (thresholds)
+	# the whole booking's basket and its number of rooms, when the room is priced in a booking
+	# of several rooms: the minimum basket is compared with it (G-84, ADR-057)
+	booking_basket: Decimal | None = None
+	booking_rooms: int = 1
 	# records the rates a threshold was converted with (G-56); not part of the context's identity
 	fx_log: FxLog | None = field(default=None, compare=False, hash=False)
 
@@ -63,13 +67,23 @@ class PromoOutcome:
 	value_added: str = ""
 	source: str = ""
 	code: str | None = None
+	# why it was refused, when a later step must know it: MIN_BASKET (the basket it was compared
+	# with was below ``minimum``, the threshold in the sell currency; G-84)
+	rule: str = ""
+	minimum: Decimal | None = None
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
 
-		return {"promo_id": self.promo_id, "name": self.name, "kind": self.kind, "applied": self.applied,
-		        "reason": self.reason, "discount": to_str6(self.discount), "nights": list(self.nights),
-		        "value_added": self.value_added, "source": self.source, "code": self.code}
+		out = {"promo_id": self.promo_id, "name": self.name, "kind": self.kind, "applied": self.applied,
+		       "reason": self.reason, "discount": to_str6(self.discount), "nights": list(self.nights),
+		       "value_added": self.value_added, "source": self.source, "code": self.code}
+		if self.rule:
+			out.update(rule=self.rule, minimum=to_str6(self.minimum))
+		return out
+
+
+MIN_BASKET = "MIN_BASKET"
 
 
 def promo_ref(p: Promotion) -> RuleRef:
@@ -107,63 +121,81 @@ def invalid_value(p: Promotion) -> str | None:
 
 def check_eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None = None) -> str | None:
 	"""None when eligible, else the rejection reason."""
+	return _eligibility(p, ctx, usage)[0]
+
+
+def _eligibility(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None = None
+                 ) -> tuple[str | None, Decimal | None]:
+	"""→ (rejection reason or None, the minimum basket in the sell currency when the basket was
+	what refused it)."""
 	bad = invalid_value(p)
 	if bad:
-		return bad
+		return bad, None
+	reason, minimum = _conditions(p, ctx, usage)
+	return reason, minimum
+
+
+def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None
+                ) -> tuple[str | None, Decimal | None]:
 	if p.code and p.code.upper() not in ctx.codes:
-		return "code not entered"
+		return "code not entered", None
 	if p.sale_from and ctx.sale_date < p.sale_from:
-		return f"sale date {ctx.sale_date} before {p.sale_from}"
+		return f"sale date {ctx.sale_date} before {p.sale_from}", None
 	if p.sale_to and ctx.sale_date > p.sale_to:
-		return f"sale date {ctx.sale_date} after {p.sale_to}"
+		return f"sale date {ctx.sale_date} after {p.sale_to}", None
 	n = len(ctx.nights)
 	if p.min_nights and n < p.min_nights:
-		return f"stay of {n} nights is shorter than {p.min_nights}"
+		return f"stay of {n} nights is shorter than {p.min_nights}", None
 	if p.max_nights and n > p.max_nights:
-		return f"stay of {n} nights is longer than {p.max_nights}"
+		return f"stay of {n} nights is longer than {p.max_nights}", None
 	lead = (ctx.check_in - ctx.sale_date).days
 	if p.min_lead_days is not None and lead < p.min_lead_days:
-		return f"booked {lead} days before arrival; needs at least {p.min_lead_days}"
+		return f"booked {lead} days before arrival; needs at least {p.min_lead_days}", None
 	if p.max_lead_days is not None and lead > p.max_lead_days:
-		return f"booked {lead} days before arrival; allowed at most {p.max_lead_days}"
+		return f"booked {lead} days before arrival; allowed at most {p.max_lead_days}", None
 	if p.markets is not None and ctx.market not in p.markets:
-		return f"market {ctx.market} not eligible"
+		return f"market {ctx.market} not eligible", None
 	if p.channels is not None and ctx.channel not in p.channels:
-		return f"channel {ctx.channel} not eligible"
+		return f"channel {ctx.channel} not eligible", None
 	if p.room_types is not None and ctx.room_type not in p.room_types:
-		return f"room {ctx.room_type} not eligible"
+		return f"room {ctx.room_type} not eligible", None
 	if p.boards is not None and ctx.board not in p.boards:
-		return f"board {ctx.board} not eligible"
+		return f"board {ctx.board} not eligible", None
 	if p.rate_plans is not None and (ctx.rate_plan or "") not in p.rate_plans:
-		return f"rate plan {ctx.rate_plan} not eligible"
+		return f"rate plan {ctx.rate_plan} not eligible", None
 	if p.contracts is not None and ctx.contract not in p.contracts:
-		return "contract not eligible"
+		return "contract not eligible", None
 	if p.requires_extras is not None and not p.requires_extras <= ctx.extras:
-		return "required package extras not selected"
+		return "required package extras not selected", None
 	if p.member_only and not ctx.member:
-		return "members only"
+		return "members only", None
 	if p.min_basket is not None:
 		# the threshold is in the promotion's currency; the basket in the sell currency (G-08)
 		minimum = in_currency(p.min_basket, p.currency, ctx.sell_currency, ctx.fx, log=ctx.fx_log,
 		                      use=f"promotion:{p.promo_id}:min_basket")
 		if minimum is None:
-			return f"no FX to compare the minimum basket in {p.currency} with {ctx.sell_currency}"
-		if ctx.basket < minimum:
-			return f"basket {ctx.basket} {ctx.sell_currency} below minimum {minimum}"
+			return f"no FX to compare the minimum basket in {p.currency} with {ctx.sell_currency}", None
+		# the whole booking's basket when the room is priced in a booking of several rooms (G-84)
+		if ctx.booking_basket is not None:
+			if ctx.booking_basket < minimum:
+				return (f"booking basket {ctx.booking_basket} {ctx.sell_currency} ({ctx.booking_rooms} rooms) "
+				        f"below minimum {minimum}", minimum)
+		elif ctx.basket < minimum:
+			return f"basket {ctx.basket} {ctx.sell_currency} below minimum {minimum}", minimum
 	if usage is not None:
 		total, guest = usage
 		if p.usage_limit is not None and total >= p.usage_limit:
-			return "usage limit reached"
+			return "usage limit reached", None
 		if p.per_guest_limit is not None and guest >= p.per_guest_limit:
-			return "per-guest limit reached"
+			return "per-guest limit reached", None
 	if not eligible_nights(p, ctx):
-		return "stay dates outside the promotion window"
+		return "stay dates outside the promotion window", None
 	if p.value_type == PromoValueType.FREE_NIGHTS:
 		if not p.free_nights_stay or p.free_nights_pay is None or p.free_nights_pay >= p.free_nights_stay:
-			return "free-nights promotion misconfigured"
+			return "free-nights promotion misconfigured", None
 		if len(eligible_nights(p, ctx)) < p.free_nights_stay:
-			return f"needs {p.free_nights_stay} eligible nights"
-	return None
+			return f"needs {p.free_nights_stay} eligible nights", None
+	return None, None
 
 
 def select(promos: tuple[Promotion, ...], ctx: PromoContext,
@@ -174,9 +206,10 @@ def select(promos: tuple[Promotion, ...], ctx: PromoContext,
 	eligible: list[Promotion] = []
 	rejected: list[PromoOutcome] = []
 	for p in ordered:
-		reason = check_eligibility(p, ctx, usage.get(p.promo_id))
+		reason, minimum = _eligibility(p, ctx, usage.get(p.promo_id))
 		if reason:
-			rejected.append(PromoOutcome(p.promo_id, p.name, p.kind, False, reason, source=p.source, code=p.code))
+			rejected.append(PromoOutcome(p.promo_id, p.name, p.kind, False, reason, source=p.source, code=p.code,
+			                             rule=MIN_BASKET if minimum is not None else "", minimum=minimum))
 		else:
 			eligible.append(p)
 
