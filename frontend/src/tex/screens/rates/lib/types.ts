@@ -155,8 +155,12 @@ export interface VersionDoc {
   stacking: string
   room_basis_extra_unit: string
   room_basis_children_fill_included: number
-  validation_report: { ok?: boolean; issues?: Issue[] } | null | number
+  /** The issues the server stored at publish: the list of issues (an older `{issues}` object is
+   * read too; use workspace/draftPreview.storedIssues). */
+  validation_report: Issue[] | { ok?: boolean; issues?: Issue[] } | null
   editable: boolean
+  /** An agent's catalogue (price.view without cost): rooms, boards and rate plans, no amounts. */
+  cost_hidden?: boolean
   // what the Pricing Workspace may offer this viewer (ADR-061); the endpoints check again.
   // An agent's catalogue carries the three can_* flags as false and no basis_locked.
   can_preview: boolean

@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react"
 import { tex, TexApiError, type TexModule } from "../../../lib/api"
 import { intlLocale, getTexLang } from "../../../i18n"
+import { editorHash, issueSection, issueTable, parseEditorHash, type SectionId } from "../workspace/sections.ts"
 import { newKey } from "./keys"
-import type { Issue, Lookups, Row } from "./types"
+import type { Issue, IssueRef, Lookups, Row } from "./types"
 
 /** Module name of the workstream-A helper endpoints (kamra/tex/api/ui_rates.py). */
 export const UI_RATES = "ui_rates" as TexModule
@@ -121,29 +122,40 @@ export function toFrappeDatetime(v: string): string | null {
   return v.replace("T", " ") + (v.length === 16 ? ":00" : "")
 }
 
-/** Which version-editor tab a validation issue belongs to. */
-export function issueTab(code: string): string {
-  if (code.startsWith("OCC_")) return "occupancy"
-  if (code.startsWith("OFFER_")) return "offers"
-  if (code.startsWith("PERIOD_") || code === "NO_PERIODS") return "periods"
-  if (code.startsWith("ROOM_RULE") || code === "ROOM_NEGATIVE") return "rates"
-  if (code === "ROOM_CAPACITY" || code === "INCLUDED_ADULTS" || code === "NO_ROOMS") return "rooms"
-  if (code.startsWith("AGE_BANDS")) return "ages"   // AGE_BANDS (gaps, overlaps), AGE_BANDS_MIN_AGE (G-52)
-  if (code === "NO_BASE_BOARD") return "boards"
-  if (code === "RATE_PLAN_BOARD") return "plans"
-  return "settings"
+/** Which version-editor section (Pricing, Commercial rules, Offers, Preview & audit) a validation
+ * issue belongs to (PRICING_WORKSPACE_UX.md §2): BOARD_* and the child ages are Pricing, the
+ * selling windows and the currency Commercial rules. The Advanced rule tables list their own
+ * issues by `issueTable`. */
+export function issueTab(code: string, ref?: IssueRef): SectionId {
+  return issueSection(code, ref)
 }
 
-export function countIssues(issues: Issue[] | undefined, tab: string) {
+/** Errors and warnings of one section (the section badges). */
+export function countIssues(issues: Issue[] | undefined, section: string) {
   let errors = 0
   let warnings = 0
   for (const i of issues ?? []) {
-    if (issueTab(i.code) !== tab) continue
+    if (issueSection(i.code, i.ref) !== section) continue
     if (i.level === "ERROR") errors += 1
     else warnings += 1
   }
   return { errors, warnings }
 }
+
+/** Errors and warnings listed by one Advanced rule table (the inner tab badges). */
+export function countTableIssues(issues: Issue[] | undefined, table: string) {
+  let errors = 0
+  let warnings = 0
+  for (const i of issues ?? []) {
+    if (issueTable(i.code, i.ref) !== table) continue
+    if (i.level === "ERROR") errors += 1
+    else warnings += 1
+  }
+  return { errors, warnings }
+}
+
+// the section hashes and their aliases (#rates, #occupancy, #plans …)
+export { editorHash, issueTable, parseEditorHash }
 
 /** Version number from a name like "CTR-00019-V2"; falls back to the name. */
 export function versionLabel(name: string | null | undefined, versionNo?: number): string {

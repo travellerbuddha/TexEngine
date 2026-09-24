@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react"
 import { Calculator, CheckCircle2, Minus, Plus, XCircle } from "lucide-react"
 import { cn } from "../../../../../lib/utils"
-import { tex, TexApiError, useTexQuery } from "../../../../lib/api"
+import { tex, TexApiError } from "../../../../lib/api"
 import { useSession } from "../../../../lib/session"
-import { addDays, date as fmtDate, money, nightsBetween, weekday } from "../../../../lib/format"
+import { addDays, date as fmtDate, dateTime, money, nightsBetween, weekday } from "../../../../lib/format"
 import { useSiteClock } from "../../../../lib/siteDay"
 import { useTexT } from "../../../../i18n"
 import {
@@ -13,6 +13,7 @@ import {
   CardBody,
   CardHeader,
   DataTable,
+  DescriptionList,
   EmptyState,
   ErrorState,
   Field,
@@ -26,23 +27,42 @@ import {
   Skeleton,
 } from "../../../../ui"
 import { BOARDS, enumLabel, enumOptions } from "../../lib/options"
-import type { ExplainStep, NightLine, PreviewResult, PriceMatrix } from "../../lib/types"
+import { IssueList } from "../../components/common"
+import { overlayPayloadOf } from "../../lib/tables"
+import type { ExplainStep, NightLine, PreviewResult, VersionDoc } from "../../lib/types"
 import { decText, splitCsv, toFrappeDatetime, versionLabel } from "../../lib/util"
+import type { DraftPreview } from "../../workspace/useDraftPreview"
 import { contractRoomOptions, TabIntro, type TabProps } from "./shared"
 
 const LEVELS = ["GLOBAL", "HOTEL", "MARKET", "CONTRACT", "VERSION", "ROOM", "PERIOD", "COMBINATION", "OVERRIDE"]
 
-/** "Why this price": server-side price preview on this version (preview_price) and
- * the nightly unit matrix (price_matrix). Nothing is priced in the browser. */
+/** Preview & audit (PRICING_WORKSPACE_UX.md §2): the full Price test, the resolved price matrix,
+ * every issue and the version's facts. Nothing is priced in the browser. */
 export function PreviewTab(props: TabProps) {
   const { t } = useTexT()
-  const { can } = useSession()
   return (
     <div className="space-y-5">
-      <TabIntro title={t("rates.tab.preview")}>{t("rates.preview.intro")}</TabIntro>
-      {props.dirty && <Notice tone="warning">{t("rates.preview.unsaved")}</Notice>}
-      {can("price.view_cost") ? <Calculator_ {...props} /> : <Notice tone="info">{t("rates.preview.needs_cost")}</Notice>}
-      <MatrixCard version={props.doc.name} modified={props.doc.modified} />
+      <TabIntro title={t("rates.section.preview")}>{t("rates.preview.intro")}</TabIntro>
+      <PriceTestPanel {...props} />
+      <MatrixCard preview={props.preview} dirty={props.dirty} />
+      <IssuesCard doc={props.doc} preview={props.preview} dirty={props.dirty} />
+      <VersionInfo doc={props.doc} />
+    </div>
+  )
+}
+
+/** The price test ("Why this price", preview_price): shown when the server says the viewer may see
+ * contract cost on this version's hotel (`can_preview`, GAP-10); an editor's unsaved changes are
+ * priced as shown (the read-only overlay, GAP-1), without a save. */
+export function PriceTestPanel(props: TabProps & { layout?: "page" | "drawer" }) {
+  const { t } = useTexT()
+  const { can } = useSession()
+  const { doc } = props
+  if (!(doc.can_preview ?? can("price.view_cost", doc.contract_doc.property))) return <Notice tone="info">{t("rates.preview.needs_cost")}</Notice>
+  return (
+    <div className="space-y-4">
+      {doc.editable && props.dirty && <Notice tone="info">{t("rates.preview.priced_unsaved")}</Notice>}
+      <Calculator_ {...props} />
     </div>
   )
 }
@@ -54,9 +74,10 @@ function defaultDates(today: string, stayFrom?: string | null): [string, string]
   return [a, addDays(a, 3)]
 }
 
-function Calculator_({ doc, state }: TabProps) {
+function Calculator_({ doc, state, dirty, layout = "page" }: TabProps & { layout?: "page" | "drawer" }) {
   const { t } = useTexT()
   const { boot, can } = useSession()
+  const canCost = doc.can_preview ?? can("price.view_cost", doc.contract_doc.property)
   const clock = useSiteClock()
   const rooms = contractRoomOptions(doc, state)
   const boardCodes = Array.from(new Set(state.tables.boards.map((b) => String(b.board)).filter(Boolean)))
@@ -107,6 +128,8 @@ function Calculator_({ doc, state }: TabProps) {
           currency: f.currency || null,
           sale_at: toFrappeDatetime(f.sale_at),
           promo_codes: splitCsv(f.promo).map((c) => c.toUpperCase()),
+          // unsaved edits are priced as shown, never saved (the read-only overlay, GAP-1)
+          ...(doc.editable && dirty ? { data: overlayPayloadOf(state) } : {}),
         },
         { post: true },
       )
@@ -130,7 +153,7 @@ function Calculator_({ doc, state }: TabProps) {
               void run()
             }}
           >
-            <FormGrid cols={4}>
+            <FormGrid cols={layout === "drawer" ? 2 : 4}>
               <Field label={t("rates.f.room_type")} required>
                 <Select value={f.room_type} onChange={(e) => set("room_type", e.target.value)} options={rooms} placeholder={rooms.length ? undefined : t("rates.common.choose")} />
               </Field>
@@ -205,7 +228,7 @@ function Calculator_({ doc, state }: TabProps) {
           </form>
         </CardBody>
       </Card>
-      {res && <PreviewResultView res={res} canCost={can("price.view_cost")} />}
+      {res && <PreviewResultView res={res} canCost={canCost} />}
     </>
   )
 }
@@ -458,15 +481,37 @@ function StepItem({ s }: { s: ExplainStep }) {
   )
 }
 
-function MatrixCard({ version, modified }: { version: string; modified?: string }) {
+/** The server's nightly unit per room and period (price_matrix), from the editor's live preview:
+ * unsaved changes included for an editor (overlay), the stored version otherwise; never fetched
+ * for a viewer without cost (catalogue). */
+export function MatrixCard({ preview, dirty }: { preview?: DraftPreview; dirty?: boolean }) {
   const { t } = useTexT()
-  const q = useTexQuery<PriceMatrix>("contracts", "price_matrix", { version }, [version, modified])
-  const m = q.data
+  if (!preview || preview.mode === "catalogue") return null
+  const m = preview.matrix
   return (
     <Card>
-      <CardHeader title={t("rates.preview.matrix")} description={m ? t(`rates.rates.unit.${m.basis}`, { ccy: m.currency }) : t("rates.preview.matrix_hint")} />
-      {q.error ? (
-        <ErrorState error={q.error} onRetry={q.reload} />
+      <CardHeader
+        title={t("rates.preview.matrix")}
+        description={m ? t(`rates.rates.unit.${m.basis}`, { ccy: m.currency }) : t("rates.preview.matrix_hint")}
+        actions={
+          <span className="flex flex-wrap items-center gap-2">
+            {preview.mode === "overlay" && dirty && <Badge tone="info">{t("rates.ws.unsaved_included")}</Badge>}
+            {m && preview.stale && (
+              <span className="text-xs text-zinc-500" role="status">
+                {t("rates.ws.updating")}
+              </span>
+            )}
+          </span>
+        }
+      />
+      {preview.error && !m ? (
+        <ErrorState error={preview.error} onRetry={preview.refetch} />
+      ) : preview.buildError && !preview.stale ? (
+        <CardBody>
+          <Notice tone="warning" title={t("rates.ws.build_error")}>
+            <span className="whitespace-pre-line">{preview.buildError}</span>
+          </Notice>
+        </CardBody>
       ) : !m ? (
         <CardBody>
           <Skeleton className="h-24 w-full" />
@@ -474,7 +519,7 @@ function MatrixCard({ version, modified }: { version: string; modified?: string 
       ) : m.rooms.length === 0 ? (
         <EmptyState title={t("rates.rates.need_rooms_periods")} />
       ) : (
-        <div className="max-h-[60vh] overflow-auto">
+        <div className={cn("max-h-[60vh] overflow-auto transition-opacity", preview.stale && "opacity-60")} aria-busy={preview.stale || undefined}>
           <table className="min-w-full border-separate border-spacing-0 text-sm">
             <caption className="sr-only">{t("rates.preview.matrix")}</caption>
             <thead>
@@ -513,6 +558,61 @@ function MatrixCard({ version, modified }: { version: string; modified?: string 
           </table>
         </div>
       )}
+    </Card>
+  )
+}
+
+/** Every issue: the live check of what the editor shows, or the report stored at publish. */
+function IssuesCard({ doc, preview, dirty }: { doc: VersionDoc; preview?: DraftPreview; dirty: boolean }) {
+  const { t } = useTexT()
+  if (!preview || preview.issuesSource === "none") return null
+  const live = preview.issuesSource === "live"
+  return (
+    <Card>
+      <CardHeader
+        title={live ? t("rates.ws.check.live") : t("rates.ws.check.published")}
+        description={live ? (dirty ? t("rates.ws.check.live_unsaved") : t("rates.ws.check.live_saved")) : doc.published_at ? t("rates.ws.check.published_at", { at: dateTime(doc.published_at) }) : undefined}
+        actions={
+          live &&
+          (preview.validating || preview.issuesStale) && (
+            <span className="text-xs text-zinc-500" role="status">
+              {t("rates.version.checking")}
+            </span>
+          )
+        }
+      />
+      <CardBody className={cn("space-y-3", live && preview.issuesStale && "opacity-60")}>
+        {preview.issuesError && (
+          <Notice tone="warning" title={t("rates.ws.check.failed")}>
+            <span className="whitespace-pre-line">{preview.issuesError.message}</span>
+          </Notice>
+        )}
+        {preview.issues ? <IssueList issues={preview.issues} emptyOk={t("rates.ws.check.clean")} /> : !preview.issuesError && <Skeleton className="h-10 w-full" />}
+      </CardBody>
+    </Card>
+  )
+}
+
+/** What the version is: number and status, when it sells from, who published it, what it was copied from. */
+function VersionInfo({ doc }: { doc: VersionDoc }) {
+  const { t } = useTexT()
+  const items = [
+    { label: t("rates.ws.info.version"), value: versionLabel(doc.name, doc.version_no) },
+    { label: t("rates.ws.info.status"), value: t(`rates.version_status.${doc.status}`) },
+  ]
+  if (doc.effective_from) items.push({ label: t("rates.version.sells_from"), value: dateTime(doc.effective_from) })
+  if (doc.active_to) items.push({ label: t("rates.version.sells_until"), value: dateTime(doc.active_to) })
+  if (doc.published_at) items.push({ label: t("rates.ws.info.published_at"), value: dateTime(doc.published_at) })
+  if (doc.published_by) items.push({ label: t("rates.version.published_by"), value: doc.published_by })
+  if (doc.based_on) items.push({ label: t("rates.ws.info.based_on"), value: versionLabel(doc.based_on) })
+  if (doc.change_note) items.push({ label: t("rates.f.change_note"), value: doc.change_note })
+  if (doc.payload_hash) items.push({ label: t("rates.ws.info.payload_hash"), value: doc.payload_hash.slice(0, 12) })
+  return (
+    <Card>
+      <CardHeader title={t("rates.ws.info.title")} />
+      <CardBody>
+        <DescriptionList cols={3} items={items} />
+      </CardBody>
     </Card>
   )
 }

@@ -3,7 +3,8 @@ import type { Option } from "../../../../ui"
 import { IssueList } from "../../components/common"
 import type { EditorState, SellingForm } from "../../lib/tables"
 import type { Issue, Lookups, Row, VersionDoc, VersionSetting, VersionTable } from "../../lib/types"
-import { issueTab } from "../../lib/util"
+import { issueTable } from "../../lib/util"
+import type { DraftPreview } from "../../workspace/useDraftPreview"
 
 export interface TabProps {
   doc: VersionDoc
@@ -18,6 +19,9 @@ export interface TabProps {
   /** Whether the editor has unsaved edits (server previews use the saved draft). */
   dirty: boolean
   onSave?: () => void
+  /** The editor's live preview (useDraftPreview): the resolved prices shown instead of fetching
+   * them again, and no cost call for a viewer who may not make it. */
+  preview?: DraftPreview
 }
 
 export function roomOptions(doc: VersionDoc): Option[] {
@@ -48,8 +52,9 @@ export function bandOptions(state: EditorState): Option[] {
     })
 }
 
+/** The issues an Advanced rule table (or Offers) lists: its own, as the ten-tab editor did. */
 export function TabIssues({ issues, tab }: { issues: Issue[] | undefined; tab: string }) {
-  const mine = issues?.filter((i) => issueTab(i.code) === tab)
+  const mine = issues?.filter((i) => issueTable(i.code, i.ref) === tab)
   if (!mine?.length) return null
   return <IssueList issues={mine} />
 }
