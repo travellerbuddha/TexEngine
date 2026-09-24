@@ -17,7 +17,8 @@ from kamra.tex.security.scope import require_capability
 
 
 def throttled(fn):
-	"""Each user runs at most ``service.RATE_LIMIT`` reports a minute (G-46 review, M5)."""
+	"""Each user runs at most ``service.RATE_LIMIT`` reports a minute, whichever endpoint aggregates
+	them (production, a view, the dashboard, pace, the portfolio; G-46 review, M5)."""
 	@wraps(fn)
 	def wrapper(*args, **kwargs):
 		rep.throttle()
@@ -28,6 +29,7 @@ def throttled(fn):
 
 @frappe.whitelist()
 @require_capability("report.view")
+@throttled
 def dashboard(property: str, date_from: str | None = None, date_to: str | None = None):
 	return rep.dashboard(property, date_from, date_to)
 
@@ -77,6 +79,7 @@ def filter_options(property: str | None = None, level: str | None = None, name: 
 
 @frappe.whitelist()
 @require_capability("report.view")
+@throttled
 def pace(property: str, stay_from: str, stay_to: str):
 	return rep.pace(property, stay_from, stay_to)
 
