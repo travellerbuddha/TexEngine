@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ExternalLink } from "lucide-react"
 import { useTexMutation, useTexQuery } from "../../lib/api"
 import { useSession } from "../../lib/session"
+import { overSaved } from "../../lib/edits"
 import { dateTime } from "../../lib/format"
 import { useTexT } from "../../i18n"
 import { Badge, Button, Card, ErrorState, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast, type TabDef } from "../../ui"
@@ -40,6 +41,24 @@ function toDraft(d: Site & Record<string, unknown>): Site {
   }))
   for (const k of ["property", "hotel_group", "default_currency", "currencies", "default_market", "sales_channel", "logo", "hero_image"]) out[k] = d[k] ?? null
   return out as unknown as Site
+}
+
+/** The saved site, with the fields the admin changed while its save was in flight (those that
+ * differ in `cur` from the `sent` draft) laid over it. The name, save time and each saved
+ * domain's token and DNS checks stay the server's. */
+function withEdits(saved: Site, sent: Site, cur: Site | null): Site {
+  if (!cur) return saved
+  const keys = (Object.keys(cur) as (keyof Site)[]).filter((k) => k !== "name" && k !== "modified")
+  const next = overSaved(saved, sent, cur, keys)
+  if (next.domains === saved.domains) return next
+  const owned = new Map(saved.domains.map((x) => [x.domain, x]))
+  return {
+    ...next,
+    domains: next.domains.map((x) => {
+      const s = owned.get(normaliseDomain(x.domain))
+      return s ? { ...s, domain: x.domain, is_primary: x.is_primary } : x
+    }),
+  }
 }
 
 export default function SiteEditor({ isNew = false }: { isNew?: boolean }) {
@@ -108,10 +127,13 @@ export default function SiteEditor({ isNew = false }: { isNew?: boolean }) {
     }
     delete data.modified
     if (isNew) delete data.name
+    const sent = draft
     try {
       const saved = await save.run({ doctype: DOCTYPE, data })
+      // the saved site is the new base (what Discard returns to); edits made while the save was
+      // in flight are kept, never replaced by the saved copy
       const d = toDraft(saved)
-      setDraft(d)
+      setDraft((cur) => withEdits(d, sent, cur))
       setBase(d)
       setAttempted(false)
       toast.success(isNew ? t("be.created") : t("core.saved"))

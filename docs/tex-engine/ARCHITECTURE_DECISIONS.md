@@ -3580,3 +3580,32 @@ guest in its own query. One test covered the report.
   - CRM Campaigns (R-37, not started);
   - the guest-facing source offer (owner decision);
   - `tex_source_url`, or a public repository, kept reachable (owner).
+
+**Follow-up: editor saves (branch `fix-editor`, 2026-09-24).** A decision on how the admin
+editors treat a save; recorded here as the latest admin-UI ADR.
+- *Discard returns to the last save.* The contract version editor's Discard reloaded the version
+  as the page first fetched it. After a save it showed the pre-save tables and took them as the
+  base, so the next edit and Save sent them and silently undid the earlier save on the server.
+  Discard now returns to the copy the last load or save produced. The other editors' Discard
+  or Reset already did.
+- *A save's answer does not overwrite what the user changed while it was in flight.* The saved
+  copy becomes the base. What the user changed meanwhile stays on top of it, still unsaved, and
+  goes out with the next save. The unit is a field: a policy's, a booking site's or a loyalty
+  program's fields, a version's settings and its selling terms. For a version's tables the unit
+  is the whole table. There is no row-level merge, because rows have no identity on the client
+  (their keys are made anew at every load). Everything the user did not change takes the
+  server's copy, with its normalised and server-filled values.
+  (`frontend/src/tex/lib/edits.ts` `overSaved`; `VersionEditor`, `PolicyEditor` for every policy
+  kind, `SiteEditor`, `ContentTranslations`, loyalty `ProgramPage`.)
+- *One save at a time* in the version and policy editors: Ctrl+S or Enter while a save is in
+  flight does nothing.
+- *Why.* Before this, a save's answer replaced the whole editor. This also caused a flaky
+  `contract-admin.spec`: `saveDraft` could return while `save_version` was still in flight. It
+  waited for a "Draft saved" toast, and the previous save's toast was still showing (toasts stay
+  4.5 s). It also waited for a disabled Save button, and a busy button is disabled too. The late
+  answer then wiped the board row that `addBoard` had just added. `saveDraft` now waits for the
+  save's answer, and the editor would keep the row anyway.
+- Tests: e2e `editor-edits.spec` (3). All three fail on main `b72b2a8`'s frontend.
+- Open: the TEX settings form still takes the saved copy whole (and reloads it after a save).
+  The booking site editor remounts after a create, so text typed while the create is in flight
+  is dropped.
