@@ -3173,3 +3173,89 @@ three Low, fixed as follows.
     by p39);
   - updated: the p29 and p17 tests start from a site where the patch never ran, and p36's test
     expects a TEX hotel that TEX never sold to stay onboarding.
+
+### ADR-058 review follow-up (branch `fix-mig`)
+An independent review of G-73 and G-76 found 1 Critical, 1 High, 4 Medium and 6 Low issues. All
+are fixed, each with a test that fails first.
+
+- *C1 (Critical): an interrupted migration test could commit a wiped site.*
+  - The failure: on Ctrl-C, unittest skips tearDown and the cleanups, and Frappe's `run-tests`
+    then commits the connection (`_cleanup_after_tests`). The empty-site tests had deleted every
+    TEX table, hotel, stay and guest in that transaction, and the per-patch tests had deleted
+    profiles, markets and Patch Log rows. All of it would have been committed to the shared site
+    (the review found the site data intact: it never happened).
+  - Fix, part 1 (`test_patches.refuse_commits`): every migration test (`PatchCase`) refuses to
+    commit from its setUp until its own rollback, whoever asks:
+    - `commit()` raises, and so do `sql_ddl` and `add_index`, which commit first;
+    - a bare COMMIT statement raises;
+    - DDL or START TRANSACTION after a write raises already (Frappe's `ImplicitCommitError`).
+    A cleanup lifts the refusal after the rollback. An interrupted run never reaches it: it ends
+    on the refused commit, and MariaDB rolls the dropped connection back.
+  - Fix, part 2: the tests that change the whole site (empty it, run every patch over it, the
+    Kamra upgrade) run only on a disposable site. This also fixes M4.
+    - The site config must set `tex_disposable_test_site`, and `empty_site()` refuses to run
+      anywhere else.
+    - On the dev bench, `/home/user/bench/scratch/disposable_test.sh` creates a site (38 s),
+      runs the modules there and drops it. CI's site is made for the run, so CI sets the flag.
+  - Proof: `/home/user/bench/scratch/c1_sigint.sh` writes one harmless marker ToDo row in a
+    `PatchCase` test and sends SIGINT to the run's Python process.
+    - Before the fix, the marker was committed; the script deleted it again.
+    - After the fix, it was not committed: the run ended with `CommitRefused` in
+      `_cleanup_after_tests`.
+- *H1: `setup.ran_before` read the Patch Log differently from Frappe.*
+  - `bench migrate --skip-failing` logs a failed patch as `skipped`, and Frappe runs it again next
+    time. `ran_before` saw that row, so the re-run did nothing, and Frappe then logged it as a
+    success. p02's grants, p04's locks, the capability grants, p12's extras and p17's conversion
+    were silently never done.
+  - A patch line re-issued with a suffix (`<module> #<date>`) is logged under that line, and
+    `ran_before` missed it.
+  - Now a run is a row with `skipped = 0` whose patch is the module or the module followed by a
+    space (`LIKE` with `_` and `%` escaped).
+- *M1: p36 runs once.* A hotel an administrator put back to onboarding (`legacy.set_live`,
+  audited `hotel.go_live_undo`) stays there on a forced re-run.
+- *M2: p01's data steps run once.* These are the profiles, markets and channels, TEX Settings,
+  the enterprise backfill and the PMS visibility. On a re-run only the custom field is ensured.
+  A forced re-run had recreated deleted markets and channels (which changes market resolution),
+  reset the brand name and the PMS visibility, and on a single-tenant site pulled a hotel kept
+  outside TEX into the tenant's group, giving that group's and enterprise's grants access to it.
+- *M3: no test runs a real DocType sync.* The p28 and p29 tests ran `reload_doc` for real. When
+  a DocType's JSON differs from its `migration_hash`, that sync runs DDL and commits the test's
+  rows. Both now run in `sandbox()`. A static test (`test_no_test_runs_a_patchs_schema_sync_for_real`)
+  finds any test that runs a patch with a schema step outside `sandbox()`, `migrate()` or a
+  mocked `reload_doc`.
+- *M4: whole-site tests on a disposable site only* (see C1). On a shared site, even rolled back,
+  their deletes and whole-table updates held next-key locks that other sessions' saves waited on.
+  The per-patch tests stay on the shared site: each is a short transaction on the rows it needs.
+- *L1:* the migration digest names `__Auth` rows by (doctype, name, fieldname) and Singles rows by
+  (doctype, field). A value, such as an encrypted password, is only hashed; failure messages
+  print names.
+- *L2: guests get a guest-safe refusal.*
+  - Guests reach the refusal through the manage page's change and extras. It is also stored as
+    the error of a guest's change applied later (`guest_changes._fail`).
+  - They are now told "This booking cannot be changed online right now. Please contact the
+    hotel."
+  - Staff (the permission-checked propose, their own proposal's apply, the simulator, staff
+    extras) and the audit event keep the version, the hashes and "ask an administrator".
+  - A staff approval of a guest's stored request gets the guest-safe text; the detail is in the
+    audit trail.
+- *L3: `PayloadMismatch` names the version that failed and its row hash.* Contract selection
+  loads every contract on sale, so the version that failed can be another contract's. The audit
+  records it (`version`, `found_hash`) next to the stay's `sold_version`.
+- *L4: the refusal audit is resilient and throttled.*
+  - A queue that cannot be reached (Redis down) no longer replaces the refusal with a 500. It is
+    logged (the action and the record only, in the file log and the Error Log).
+  - The same refusal (stay, use, basis, version, hash) is audited once an hour. This is checked
+    before queueing and again in the job, so repeated clicks on a refused stay are not one job
+    and one event each.
+- *L5:* `payments.gated_accounts` lists open charges by name, so p19 does not report an account
+  again when a charge is touched.
+- *L6:* `setup.missing_indexes` logs and skips an index whose table cannot be read. One broken
+  table no longer stops p03, p12, p13, p16, p18, p23, p39 or `after_install`.
+- *Unchanged.* No schema change and no new patch (p43 not needed). p40, from main, uses
+  `ran_before` and keeps its re-run test.
+- *First run on a fresh site:* it found one test relying on the shared site's data (the p01
+  multi-tenant test assumed two enterprises; it now creates its second tenant).
+- *Tests (fail first on `aa742c0`):*
+  - `test_patches`: 8 fail, 1 error (H1 ×3, M1, M2, M3, L1, L5; L6);
+  - `test_snapshot_integrity`: 5 fail, 1 error (L2; L3 ×2; L4 ×3: the throttle twice, the queue error);
+  - C1: the SIGINT simulation, before and after.
