@@ -2665,3 +2665,170 @@ three Low, fixed as follows.
   significant digits repriced and extended on its recorded rate; the first 8 all failed or
   errored on the base commit and schema). `Reservation.tex_fx_rate` is written at its 9 places
   (`money.db_dec`), so the record in memory is the stored one. `test_markup_fx_tax` cross rate now 1.294117647 (was 1.294118).
+
+## ADR-058 A sold stay's contract terms are a verified reference; every TEX patch is tested and converts or grants once
+**Context.** G-73 (R-05) and G-76 (R-56).
+- G-73. A reservation's price-locked snapshot is the quote's result. It names its contract
+  version and the version's payload hash (`contract.version`, `contract.payload_hash`, also
+  `Reservation.tex_payload_hash`) and holds the explanation, night by night. It does not copy
+  the periods and occupancy rules that priced the stay. Nothing compared the recorded hash when
+  the version was loaded again. `load_terms` only checked that a payload hashes to its own row's
+  hash, so a payload edited below the controller with its hash recomputed (a hand edit, a restore
+  of another backup) repriced a sold stay on other terms. Probe on the base commit: a stay sold
+  at 400.00, its version's room prices doubled and rehashed; the ORIGINAL_VERSION reprice and
+  the simulator priced it at 800.00. The quote's sale time was known only as `request.sale_at`.
+- G-76. Only p05/p06 and later feature patches had tests. p01–p04, p07–p09, p11, p13, p14, p18,
+  p20, p23, p33 and p34 had none, and no test ran the chain from a Kamra database. Patches run on
+  a shared dev site in tests. DDL there (`reload_doc`, `add_index`, the custom-field sync)
+  commits the open transaction and leaked test rows once.
+
+**Decision (G-73).**
+- *References, not copies.* Measured on the dev bench: 202 published payloads average 2.8 KB
+  (largest 8.2 KB); 705 snapshots average 14.4 KB (largest 22.6 KB), most of it the explanation.
+  - The explanation already records, for each night, the period (code, name) and every rule
+    that won (id, level, source, label, values). The sold price is re-explained from the snapshot
+    alone.
+  - A copy would add only the definitions (period dates and weekdays; a rule's target, position,
+    band and combination). Repricing a changed stay (other nights, room or party) needs the rest
+    of the payload anyway.
+  - Copying whole payloads would add 3–8 KB per reservation here, far more for large contracts,
+    and duplicate an immutable record. A copy would still need the hash to show it is the
+    published one.
+  - So the snapshot keeps the reference, and the reference is made safe:
+    - published versions cannot be edited or deleted (controller);
+    - `load_terms` refuses a payload that does not hash to its row's hash;
+    - `load_terms(version, expected_hash=…)` now refuses one that is not the payload the sale
+      recorded.
+- *Where the recorded hash is required.* Whatever loads the snapshot's own version for a sold
+  stay passes the recorded hash (`services/sold_terms.py`: the snapshot's `payload_hash`, else the
+  reservation's column for the same version):
+  - a reprice on any basis (ORIGINAL_VERSION and ORIGINAL_SALE_DATE; CURRENT and
+    HISTORICAL_SALE_DATE while the version picked is still the sold one), on propose and on apply;
+  - the historical simulator;
+  - extras added after booking.
+  A new version is not the sold one. It has no recorded hash to match and prices on its own
+  frozen, integrity-checked payload.
+- *Refusal.*
+  - `contracts.PayloadMismatch` (a `ValidationError`). The message names the reservation, the
+    version and both hashes, and says the price stays as sold. The locked price never moves.
+  - A payload failing its own integrity check is the same refusal. Before, it was a plain
+    `ValidationError`, never audited.
+  - Each refusal is audited as `reservation.reprice_refused`: use, basis, version, sold version,
+    recorded hash, found hash, reason.
+  - The refused request is rolled back (Frappe rolls back on an exception; a GET never commits),
+    and an event written in its transaction would go with it. So `audit.audit_refusal` queues a
+    job at once (not after a commit that never comes). The job writes the event in its own
+    transaction, as the refused user. Tests run it inline.
+- *The sale time is explicit.*
+  - A booking snapshot records `priced_at` (the quote's sale time, when the engine priced it)
+    next to `accepted_at` (when the booking took it).
+  - A modification's snapshot records its basis's sale time as `priced_at`, next to
+    `original_priced_at`.
+  - The Original revision keeps the same record. Its `basis_sale_at` is the quote's sale time
+    (before: the booking time), like every later revision's, whose basis time is its pricing
+    time.
+  - `priced_at()` and `original_priced_at()` read the key first. A snapshot written before falls
+    back to its request's sale time.
+- *No schema change and no data change for G-73.* Existing snapshots keep repricing unchanged. Their hashes are checked the same way (every TEX snapshot has always
+  carried `contract.payload_hash`). A channel's snapshot names no TEX contract; it is not
+  repriced by TEX (unchanged).
+
+**Decision (G-76).**
+- *Every patch, four properties.* `test_patches` checks each patch `patches.txt` lists:
+  - (a) its behaviour on representative pre-patch data. The `BEHAVIOUR` registry names the test,
+    here or in the patch's feature module. A meta-test fails for a patch without one, a patch
+    file not listed, or a list out of order.
+  - (b) running it again changes nothing, whether at once (a failed migration retried) or forced
+    later over what administrators changed since. Every TEX table, and the legacy rows patches
+    write, is digested between runs; `modified` is ignored.
+  - (c) it never changes a published payload or hash, nor a sold stay's amounts, currency,
+    commercial record, snapshot, revisions or lock.
+  - (d) the whole chain runs on an empty site, twice.
+- *The upgrade test.* `TestUpgradeFromKamra` builds a Kamra-shaped database inside the test's
+  transaction: two legacy hotels (EUR, TRY) with no group, users with and without a property
+  restriction and a disabled one, legacy stays in six statuses, a voucher and an experience. It
+  runs the chain in order and checks what the upgrade leaves:
+  - one Default Enterprise and hotel group; seeded masters; profiles equal to their defaults;
+  - access made explicit, then strict tenancy: nobody gains or loses a hotel, and a new user
+    sees none;
+  - the standing legacy stays locked at their amounts, and the lock holds;
+  - the voucher a draft promotion, the experience a live extra;
+  - guest stats in the hotel's currency;
+  - both hotels onboarding;
+  - a second chain run changes nothing.
+- *Safety.* The patches' DDL never runs in a test. `sandbox()` stubs `reload_doc`, `add_index`
+  and the custom-field sync. It refuses (and records, in case a patch swallows the error) any
+  commit, DDL or transaction statement. File is kept from moving files on disk. The empty-site
+  deletes run under the same guard inside the test's transaction. After the rollback, cached
+  documents are dropped.
+- *Patch changes: once, never by guess.* Found by the tests, each fixed:
+  - First-run-only steps (`setup.ran_before(__name__)`; Frappe writes the Patch Log row after a
+    patch succeeds and never re-runs a logged one unless an operator forces it). A forced re-run
+    no longer changes what administrators changed since. The first run is unchanged.
+    - p02: a re-run gave every hotel to a user added after the upgrade without a property
+      restriction.
+    - p04: a re-run locked stays that hotels outside TEX sold at their Desk after the upgrade.
+    - p08, p12, p17, p18, p23, p29: a re-run gave back a capability an administrator had
+      removed. p29 also gave back `price.any_channel`, which binds staff to channels (ADR-050).
+    - p17: a re-run turned a loyalty program set to "cannot redeem" (0) into 100 %.
+    - p12's extras step was guarded already.
+  - p01 (`setup.ensure_enterprise`) attached a hotel without a hotel group to whichever
+    enterprise the database returned first. On the dev bench that was the demo tenant's group.
+    Now the backfill never guesses:
+    - no enterprise: Default Enterprise and Default Hotel Group;
+    - one enterprise with at most one group: that group;
+    - otherwise the hotel is printed and stays outside TEX until an administrator adds it to its
+      group.
+  - p09 (`crm.refresh_guest_stats`) counted the legacy stays of a TRY hotel as EUR and summed
+    them with EUR money. It also counted inquiries, quotes and waitlist entries as stays. A stay
+    now counts as the CRM facts count it (not Inquiry, Waitlist, Quoted, Cancelled or No Show).
+    A legacy stay's amount is in its hotel's currency.
+  - p19 and p24 audited their reports again on every run. A report is now written once per record
+    and values (`audit.recorded`).
+  - p36 set every hotel in TEX live, including every hotel of a Kamra database that p01 puts in
+    a hotel group in the same migration. That stopped their Desk before TEX could sell anything,
+    what ADR-052 M3 set out to avoid. p36 now sets live only the hotels TEX sold (a published
+    contract version, or a TEX booking). A hotel in TEX that TEX never sold is onboarding until
+    an administrator sets it live. This amends ADR-052's "every hotel already in TEX": p36 ran
+    already on the sites that had TEX, so it changes nothing there.
+  - p03, restructured for testing, same behaviour: `setup.TEX_INDEXES`, `missing_indexes()` (a
+    read) and `ensure_indexes()`, which creates only the missing ones. `add_index` skipped
+    existing indexes before too. A test checks every index's columns exist and that this
+    migrated site has them all.
+  - That test found two indexes gone from the dev bench and a third about to go:
+    - `tex_booking_idx` (`Reservation.tex_booking`, from p03): gone;
+    - `tex_comm_email_queue` (`TEX Communication.email_queue`, from p23): gone;
+    - `tex_xalloc_res` (`TEX Extra Allocation.reservation`, from p13): still there only because
+      that DocType has not been synced since.
+    - Cause: Frappe drops a single-column index on a field without `search_index` whenever it
+      syncs that DocType again. `add_index` keeps no property setter during a migration. So
+      p18's reload of Reservation, and every later migration that synced these DocTypes, removed
+      them.
+    - Fix: the three are composite now: `tex_booking` + `tex_room_index` (`tex_booking_room`),
+      `reservation` + `status` (`tex_xalloc_res_status`), `email_queue` + `status`
+      (`tex_comm_queue_status`). Frappe's sync leaves a composite index alone. The new patch p39
+      creates them where missing.
+    - Every entry of `TEX_INDEXES` has at least two columns (tested). An old single-column index
+      still present is left to Frappe's next sync.
+- *Not changed.* Patch order and names (p39 is new: three indexes, no DocType change). p05 and p35
+  still write an Error Log line on each run for a voucher they cannot copy or a payload that
+  fails its hash: a log, not data.
+
+**Consequences.**
+- A payload that no longer hashes to what a sale recorded stops repricing, simulating and
+  add-ons for that stay, audited, until an administrator restores it. New sales on a version
+  whose row hash was recomputed are not affected by this check. A published version's payload
+  cannot be changed through the application.
+- An operator can force a TEX patch again safely. A first run still does everything it did.
+- A Kamra site upgrading to TEX keeps selling at its Desk; each hotel goes live in TEX when an
+  administrator says so. A site with several tenants reports hotels without a group instead of
+  placing them.
+- `MIGRATION_PLAN.md` lists every patch with what it does, whether it runs once and where it is
+  tested.
+- Tests:
+  - G-73: `test_snapshot_integrity` (9; on the base commit 3 fail, 4 error and 2 pass, the
+    back-compat and new-version cases);
+  - G-76: `test_patches` (21). On the original patches 8 failed and 1 errored (the p03
+    restructure). With the fixes, the p03 test then found the two missing indexes (fixed by p39);
+  - updated: the p29 and p17 tests start from a site where the patch never ran, and p36's test
+    expects a TEX hotel that TEX never sold to stay onboarding.
