@@ -156,3 +156,79 @@ class TestGrantScope(AuditCase):
 		self.assertEqual(e["source"], "Scheduler")
 		self.assertEqual(frappe.db.get_value("TEX Audit Event", e["name"], "hotel_group"), self.f["group"])
 		self.assertIn(fx.PROPERTY, scope_hotels(e["name"]))
+
+
+# ─── contract drafts and publishing ──────────────────────────────────────
+
+
+class TestContractAudit(AuditCase):
+	"""Every saved draft edit is on record as old → new (rows by their natural key); a publish
+	says what it froze and how it differs from the version that sold before."""
+
+	TABLES = ("rooms", "periods", "period_rates", "age_bands", "occupancy_rules", "boards", "rate_plans", "offers")
+
+	def setUp(self):
+		super().setUp()
+		self.c = fx.create_contract(self.f, code="AUD")
+		self.v2 = contracts.new_draft(self.c["contract"])
+		self.std, self.dlx = self.f["room_types"]["STD"], self.f["room_types"]["DLX"]
+
+	def draft(self) -> dict:
+		v = contracts_api.get_version(self.v2)
+		return {t: v[t] for t in self.TABLES}
+
+	def uplift(self) -> dict:
+		data = self.draft()
+		for r in data["period_rates"]:
+			if r["room_type"] == self.std and r["period_code"] == "LOW":
+				r["value"] = 110
+		data["boards"].append({"board": "HB", "op": "ADD", "adult_amount": 15, "child_percent": 50})
+		data["prices_include_tax"] = 1
+		data["change_note"] = "summer uplift"
+		return data
+
+	def test_a_draft_save_records_what_changed(self):
+		data = self.uplift()
+		contracts_api.save_version(self.v2, data)
+		e = last_event("contract.version.save", self.v2)
+		self.assertEqual(e["property"], fx.PROPERTY)
+		self.assertEqual((e["old"]["prices_include_tax"], e["new"]["prices_include_tax"]), (False, True))
+		self.assertEqual((e["old"]["change_note"], e["new"]["change_note"]), (None, "summer uplift"))
+		rates = e["new"]["collections"]["period_rates"]
+		self.assertEqual(rates["changed"], {f"{self.std} · LOW": {"value": ["100", "110"]}})
+		self.assertEqual(rates["totals"], {"added": 0, "removed": 0, "changed": 1})
+		self.assertEqual(rates["count"], [3, 3])
+		self.assertEqual(e["new"]["collections"]["boards"]["added"], ["HB"])
+		self.assertNotIn("rooms", e["new"]["collections"])               # untouched tables are not repeated
+		n = len(events("contract.version.save", self.v2))
+		again = {**self.draft(), "prices_include_tax": 1, "change_note": "summer uplift"}
+		contracts_api.save_version(self.v2, again)                      # the same draft again: nothing changed
+		self.assertEqual(len(events("contract.version.save", self.v2)), n)
+
+	def test_a_large_edit_is_summarised(self):
+		data = self.draft()
+		data["periods"] += [{"period_code": f"X{i:02d}", "period_name": f"Extra {i}", "start_date": str(fx.d(5, 1)),
+		                     "end_date": str(fx.d(5, 2))} for i in range(60)]
+		contracts_api.save_version(self.v2, data)
+		p = last_event("contract.version.save", self.v2)["new"]["collections"]["periods"]
+		self.assertEqual(p["count"], [2, 62])
+		self.assertEqual(p["totals"]["added"], 60)
+		self.assertEqual(len(p["added"]), 50)                            # keys listed up to a bound
+		self.assertEqual(p["added"][0], "X00")
+
+	def test_publish_records_the_commercial_difference(self):
+		first = last_event("contract.publish", self.c["version"])
+		self.assertIsNone(first["new"]["previous"])
+		self.assertEqual(first["new"]["collections"]["rooms"]["totals"]["added"], 2)
+		contracts_api.save_version(self.v2, self.uplift())
+		out = contracts.publish(self.v2, change_note="summer uplift")
+		e = last_event("contract.publish", self.v2)
+		self.assertEqual(e["new"]["payload_hash"], out["payload_hash"])
+		self.assertEqual(e["new"]["effective_from"], out["effective_from"])
+		self.assertEqual(e["new"]["previous"], {"version": self.c["version"], "payload_hash": self.c["payload_hash"]})
+		cols = e["new"]["collections"]
+		self.assertEqual(cols["room_rules"]["changed"], {f"{self.std} · LOW": {"value": ["100", "110"]}})
+		self.assertEqual(cols["boards"]["added"], ["HB"])
+		self.assertEqual(cols["settings"]["fields"], {"prices_include_tax": [False, True]})
+		for untouched in ("rooms", "periods", "age_bands", "occupancy_rules", "rate_plans", "offers"):
+			self.assertNotIn(untouched, cols)
