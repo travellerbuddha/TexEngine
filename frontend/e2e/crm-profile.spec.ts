@@ -8,8 +8,8 @@
 // - the Stays tab shows the cancelled stay;
 // - the loyalty accounts are programs of the agent's own hotels only (the API agrees).
 // The revenue manager (price.view_cost) reads the stay's price explanation through the TEX API,
-// while REST (/api/resource) withholds the snapshot, cost and margin and refuses to filter on
-// them. Both stays are cancelled at the end (free under the Flexible rate).
+// while REST (/api/resource) withholds the snapshot, cost and margin (a list leaves them out) and
+// refuses to filter on them. Both stays are cancelled at the end (free under the Flexible rate).
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e crm-profile
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test"
 import { api, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
@@ -160,10 +160,18 @@ test("the guest profile shows extras and cancellations at the viewer's hotels; R
       expect(data.tex_pricing_snapshot ?? null, "the snapshot is withheld").toBeNull()
       for (const f of ["tex_cost_amount", "tex_margin_amount"]) expect(Number(data[f] ?? 0), `${f} is withheld`).toBe(0)
 
+      // a list leaves the cost out; filtering on it (an oracle) is refused
       const list = await rm.request.get("/api/resource/Reservation", {
         params: { fields: JSON.stringify(["name", "tex_cost_amount"]), filters: JSON.stringify([["name", "=", first.reservation]]) },
       })
-      expect(list.status(), "a list of cost is refused").toBe(403)
+      expect(list.ok(), `REST list: ${list.status()}`).toBeTruthy()
+      const rows = ((await list.json()) as { data: Record<string, unknown>[] }).data
+      expect(rows.map((r) => r.name)).toEqual([first.reservation])
+      expect(Number(rows[0].tex_cost_amount ?? 0), "the cost is left out of a list").toBe(0)
+      const oracle = await rm.request.get("/api/resource/Reservation", {
+        params: { fields: JSON.stringify(["name"]), filters: JSON.stringify([["tex_cost_amount", ">", 0]]) },
+      })
+      expect(oracle.status(), "a filter on the cost is refused").toBe(403)
     })
     noErrors()
   } finally {
