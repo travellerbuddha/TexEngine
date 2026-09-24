@@ -2153,3 +2153,129 @@ the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as 
 
   G-49 tests were adapted in `test_inventory`, `test_concurrency` and the G-04 night-audit
   fixture.
+
+## ADR-054 Modifications and the simulator are deterministic: a sale time belongs to the basis, the past is read as it was then, a proposal belongs to whoever made it
+
+**Context.** G-51 (R-21, R-22).
+- *Sale times ignored.* `sale_at` was an editable field of a change and was dropped without a
+  word. `basis_sale_at` was accepted with every basis and used only by HISTORICAL_SALE_DATE. The
+  simulator accepted any `sale_at`: a future one priced "what it will cost", an empty one failed
+  with an HTTP 500.
+- *Untested money paths.* HISTORICAL_SALE_DATE and the manual override had no end-to-end test.
+  `apply()` checked `price.override` for an override amount but not for the HISTORICAL basis,
+  which only `propose()` checked: a user whose right was withdrawn between the two still applied
+  a price no longer on sale.
+- *The simulator read two things live.* Extras and taxes (G-20), markups, promotions and FX
+  (revisions and rate tables as of the sale time) and the market, channels and sale window of the
+  version live then (G-50) were already as of the sale time. The contract status was not:
+  `candidate_contracts` kept only contracts Active now, so a contract archived since could not be
+  simulated for a time it sold, and one suspended at that time was simulated as selling. Coupon
+  usage was not either: a use given back later made a code apply that did not apply then, and a
+  use made later made it fail. The same status problem hit the ORIGINAL_SALE_DATE basis: after a
+  stop sale or an archive, the contract that sold the stay was no longer a candidate.
+- *Proposal tokens were bearer tokens.* Any user with `reservation.modify` at the hotel could
+  apply another user's proposal. Staff could apply a guest's proposal. A guest could submit a
+  staff proposal on the manage page, where it was re-derived on its own basis. With
+  HISTORICAL_SALE_DATE, that meant a price no longer on sale, paid online, with no
+  `price.override` check on the guest's side.
+
+**Decision.**
+- *A sale time belongs to the basis.* A change carries none: `sale_at` is not in `EDITABLE`, and a
+  change naming one is refused with the way to do it (choose the historical sale date basis).
+  `basis_sale_at` is refused with any basis but HISTORICAL_SALE_DATE. The historical sale date
+  and the simulator's sale time are checked on the server (`modification.past_sale_time`): given,
+  a valid date and time, not in the future. "Modify the sale date" (R-21) is therefore a change
+  priced on HISTORICAL_SALE_DATE. Its revision is of type *Sale Date* (or *Multiple* with other
+  changes), and it records the basis and its sale time. The reservation's own `tex_sale_at` (when
+  it was sold) never moves.
+- *Who may price as of another time.* Pricing a change as if sold at another moment sets what the
+  guest pays at a price that is not on sale today. That is an override, so it needs
+  `price.override` at the hotel, on propose and again on apply: a token carries the change, not
+  the right (as ADR-050 does for product changes). A manual amount also needs `price.override` on
+  apply, and a reason. No new capability: the spec ties the historical basis to the override
+  right, and a separate capability would be granted to the same revenue managers. The simulator
+  writes nothing: it needs `price.view` and, because it shows the reservation's actual total and
+  sale time, `reservation.view` (new). It does not need `price.override`.
+- *A contract's status at a past moment* comes from the audit trail. `TEXContract.on_update`
+  audits every status change as `contract.status` (old and new status), on every path (publish,
+  the status actions, any save), in the same transaction, and has done so since the first
+  release. Audit events are immutable: they cannot be edited or deleted. `versions.status_at`
+  (pure) reads them:
+  - the new status of the last change at or before the moment;
+  - before every change, the old status of the first one (what it replaced);
+  - with no change recorded, the current status.
+
+  A status-history table would duplicate these rows and need a backfill from them, so none was
+  added. `contracts.statuses_at` loads the changes of a hotel's contracts in one query.
+- *Where the past status applies.* `candidate_contracts(historical=True)` keeps the contracts that
+  were Active at the sale time (a never-published Draft never sold). It is used by:
+  - the simulator;
+  - ORIGINAL_SALE_DATE and HISTORICAL_SALE_DATE;
+  - CURRENT re-derived at the moment it was priced (a guest's paid or approved change, ADR-044).
+
+  Live selection keeps the live status (search, quotes, bookings, channels, a staff CURRENT
+  change): a stop sale acts now (ADR-045, unchanged). A guest who accepted a price and paid by its
+  deadline therefore gets the change even if the contract was suspended in between. ADR-045 keeps
+  modifications of sold stays out of a stop sale; availability and restrictions are still checked
+  live under the locks.
+- *Coupon uses at a past moment* (simulator only): a limited promotion's uses are those held
+  then. That is every redemption made by then and not released by then; the booking's own uses
+  are still excluded (G-09). `TEX Promotion Redemption.released_at` is new (patch p34). The
+  controller writes it once, when a use is released, and refuses to take a released use again (a
+  new use is a new redemption). p34 copies `modified` into it for uses released before, because
+  nothing writes a released row. A row without it falls back to `modified`. Modifications count
+  uses as they are now: a code a change keeps or adds is recorded under today's limits by
+  `sync_redemptions` (G-09), so pricing it on a past count would promise a discount the apply then
+  refuses.
+- *What "as of the sale time" covers in the simulator:*
+  - the contracts Active then; the version live then, its frozen payload and selling terms (G-50);
+  - markups, promotions and their limits, extras, the tax policy, FX policies and provider rates
+    (G-20, ADR-031);
+  - coupon uses held then.
+
+  Not as of then:
+  - the stay itself: the reservation's current request, channel and guest (the booking's coupon
+    key, else the guest's e-mail or phone now);
+  - the hotel's group, which decides whether group-wide promotions apply;
+  - availability, restrictions and the capacity of limited extras, which are not checked (the
+    stay is sold already).
+
+  The answer names the contract that sold then and its status now; the simulator dialog says when
+  that contract no longer sells.
+- *A proposal belongs to whoever made it.* A proposal token names:
+  - its `origin` (`staff`, or `guest` for the manage page);
+  - its proposer (`by`);
+  - its hotel and booking.
+
+  Staff apply only their own proposals (`require_proposer`), at the hotel and booking named:
+  another user's is refused, a guest's too, and so is a token re-pointed at another reservation.
+  The manage page accepts only a guest's proposal (`guest_changes.submit`, after the booking's own
+  guards, so a booking waiting for its payment still says so first), and its booking is proven by
+  the manage token (`_own_reservation`, and `submit` checks the reservation's booking).
+  The guest path applies only CURRENT proposals. Stored proposals (`TEX Guest Change Request`:
+  verified and stored by the server when the guest submitted) apply on payment or staff approval
+  as before. A token made before this change names nobody and is refused. It expires within
+  `PROPOSAL_TTL_MINUTES` (30) anyway. ADR-044's lock order (booking → reservation → inventory) is
+  unchanged: the proposer check needs no lock, and the hotel and booking check reads the locked
+  reservation.
+- *Explained.* The `reservation.modify` audit adds the pricing sale time. For an override it also
+  records the computed total next to the amount set (`computed_total`, `override`).
+
+**Consequences.**
+- Historical selection depends on the `contract.status` audit rows. A status written behind the
+  controller (a direct DB write) is invisible to it, as it is to the audit: such writes are not
+  supported. The G-74 audit work must keep `contract.status` as it is (action, reference, old and
+  new status).
+- The simulator's answer for a past moment no longer changes with later archives, stop sales or
+  coupon uses. Its answer for "now" is the live one.
+- Staff cannot hand a proposal to a colleague. The colleague proposes again, at the same price if
+  nothing moved.
+- Not changed: add-on proposals (ADR-034) are bound to guest or staff but not to the staff user.
+  They price at today's rates and need `reservation.modify`, so the risk is lower; binding them
+  the same way is a follow-up.
+- The simulator refuses a future sale time. `test_pricing_policies` simulated one hour after a
+  version scheduled for tomorrow; it now publishes that version now and simulates the present.
+- Tests: integration `test_modification_determinism` (24; 21 fail on the base commit), unit
+  `TestStatusAt` (4). All 24 integration modules pass (465 tests), among them `TestCouponLimits`,
+  `TestHistoricalSimulator`, the G-41 product-change test (a colleague's token is now refused
+  before its channel re-check), `test_fx_snapshot` HISTORICAL and the self-service suites.

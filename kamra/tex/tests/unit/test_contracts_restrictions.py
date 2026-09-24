@@ -127,6 +127,41 @@ class TestVersions(unittest.TestCase):
 		self.assertIsNone(versions.active_version(h, datetime(2027, 2, 2)))
 
 
+class TestStatusAt(unittest.TestCase):
+	"""G-51 (ADR-054): a contract's status at a past moment, from its recorded status changes."""
+
+	def setUp(self):
+		C = versions.StatusChange
+		# published on 1 Jan, suspended on 1 Mar, resumed on 1 Apr, archived on 1 Jun (any order)
+		self.history = [C(datetime(2027, 6, 1), "Active", "Archived"), C(datetime(2027, 1, 1), "Draft", "Active"),
+		                C(datetime(2027, 3, 1), "Active", "Suspended"),
+		                C(datetime(2027, 4, 1), "Suspended", "Active")]
+
+	def at(self, *a):
+		return versions.status_at(self.history, datetime(*a), "Archived")
+
+	def test_the_status_then_not_now(self):
+		self.assertEqual(self.at(2026, 12, 31), "Draft")        # before the first change: what it replaced
+		self.assertEqual(self.at(2027, 2, 1), "Active")         # archived now, on sale then
+		self.assertEqual(self.at(2027, 3, 15), "Suspended")     # a stop sale then stays a stop sale
+		self.assertEqual(self.at(2027, 4, 15), "Active")
+		self.assertEqual(self.at(2027, 7, 1), "Archived")
+
+	def test_a_change_takes_effect_at_its_time(self):
+		self.assertEqual(self.at(2027, 3, 1), "Suspended")
+		self.assertEqual(self.at(2027, 2, 28, 23, 59, 59, 999999), "Active")
+
+	def test_no_change_recorded_is_the_current_status(self):
+		self.assertEqual(versions.status_at([], datetime(2027, 1, 1), "Active"), "Active")
+		self.assertIsNone(versions.status_at([], datetime(2027, 1, 1), None))
+
+	def test_changes_at_the_same_instant_keep_their_order(self):
+		t = datetime(2027, 5, 1)
+		two = [versions.StatusChange(t, "Active", "Suspended"), versions.StatusChange(t, "Suspended", "Active")]
+		self.assertEqual(versions.status_at(two, t, "Active"), "Active")
+		self.assertEqual(versions.status_at(list(reversed(two)), t, "Active"), "Suspended")
+
+
 class TestMarket(unittest.TestCase):
 	M = (versions.MarketDef("DE", frozenset({"DE"})), versions.MarketDef("DACH", frozenset({"DE", "AT", "CH"})),
 	     versions.MarketDef("EU", frozenset({"DE", "AT", "FR", "RO", "PL"})),

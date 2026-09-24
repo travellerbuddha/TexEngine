@@ -236,6 +236,8 @@ export interface Simulation {
   reservation?: string
   simulated_sale_at?: string
   contract_version?: string
+  /** the contract that sold then (as of the sale time, G-51) and its status now */
+  contract?: { contract: string; code: string; status_now: string }
   actual?: { total: string; currency: string; sale_at: string; version: string }
   simulated?: QuoteDict
   difference?: string | null
