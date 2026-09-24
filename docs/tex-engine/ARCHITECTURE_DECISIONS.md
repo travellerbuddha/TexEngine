@@ -3102,7 +3102,20 @@ Medium, 3 Low; patch p48).**
   p48 registry entry in `test_patches`. The concurrency tests of H-1 need a second connection that
   commits what another request would commit meanwhile, after this transaction's snapshot: they run only
   on a disposable site (`tex_disposable_test_site`: CI's throwaway site, `disposable_test.sh`) and are
-  skipped on the shared one. FAIL_FIRST_THIRD.
+  skipped on the shared one. Fail-first on main `f855850` and its schema (the new tests added): on the
+  shared site 13 of the 14 that run there fail or error, each on its finding (a booking while the funnel
+  is held: "Lock wait timeout exceeded" out of `search`; the comments: "Comment was deleted with the
+  duplicate"; the legacy merge and the record naming no hotel: "PermissionError not raised"; the erased
+  profile: never marked; the purge, the records, the merge copies and p48: missing); the index test
+  passes there only because the site kept the indexes of an earlier migrate with the fix. On a
+  disposable site made with main, all 7 concurrency tests fail: the booking committed during the merge
+  stays on the deleted duplicate; its hotel is not checked; a duplicate merged elsewhere meanwhile is
+  merged again; a redemption spends points spent meanwhile ("ValidationError not raised"); a profile
+  gone meanwhile is redeemed against as "Not enough points"; `resolve_guest` and a ledger insert take no
+  lock; a booking for a profile merged meanwhile gets the deleted profile. In `test_crm_privacy_review`
+  the tracking and mailing tests (a timeout raised) and p45 (the look-alike loses its consent) fail. E2E:
+  `crm-profile`, `crm-merge`, `crm-admin` and `booking` pass twice in a row on a server running this
+  tree.
 
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
