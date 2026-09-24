@@ -28,7 +28,11 @@ def booking_html() -> str:
 	if not os.path.exists(path):
 		frappe.throw(frappe._("The booking engine is not built."), title="TEX booking not built")
 	with open(path, encoding="utf-8") as f:  # nosemgrep: frappe-security-file-traversal -- fixed app path, not user input
-		return f.read()
+		page = f.read()
+	# the guests' source offer (AGPL-3.0 section 13, ADR-060 review): in the page, not behind an API
+	from kamra.tex import entry
+
+	return page.replace("</head>", entry.source_meta() + "</head>", 1)
 
 
 # payment pages send no Referer at all: a payment link e-mailed before G-83 carries its token

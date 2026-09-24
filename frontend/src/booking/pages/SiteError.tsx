@@ -6,6 +6,7 @@ import type { ApiError } from "../lib/api"
 import { PINNED } from "../lib/mount"
 import { Button } from "../ui/controls"
 import { EmptyState } from "../ui/feedback"
+import { SourceLine } from "../site/SourceLine"
 
 function LangSelect() {
   const { t, lang, setLang } = useI18n()
@@ -48,6 +49,9 @@ export function PlainShell({ title, children, badge }: { title: string; children
       <main id="bk-main" tabIndex={-1} className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 outline-none sm:px-6">
         {children}
       </main>
+      <footer className="mx-auto w-full max-w-3xl px-4 pb-6 sm:px-6">
+        <SourceLine />
+      </footer>
     </div>
   )
 }

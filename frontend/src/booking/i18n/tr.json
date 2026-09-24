@@ -17,6 +17,8 @@
   "footer.policies": "Otel kuralları",
   "footer.cookies": "Çerez ayarları",
   "footer.poweredBy": "Rezervasyon altyapısı: TEX Engine",
+  "footer.source": "Kaynak kod",
+  "footer.sourceHint": "Özgür yazılım (AGPL-3.0): kaynak kodunu edinebilir, inceleyebilir ve değiştirebilirsiniz",
 
   "consent.title": "Analiz çerezleri",
   "consent.body": "{name}, bu rezervasyon sitesinin nasıl kullanıldığını anlamak için analiz çerezleri kullanmak istiyor. Siz onay vermedikçe hiçbir şey yüklenmez; rezervasyonunuz her iki durumda da çalışır.",

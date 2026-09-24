@@ -17,6 +17,8 @@
   "footer.policies": "Zasady hotelu",
   "footer.cookies": "Ustawienia plików cookie",
   "footer.poweredBy": "System rezerwacji TEX Engine",
+  "footer.source": "Kod źródłowy",
+  "footer.sourceHint": "Wolne oprogramowanie (AGPL-3.0): możesz pobrać, przeglądać i zmieniać kod źródłowy",
 
   "consent.title": "Analityczne pliki cookie",
   "consent.body": "{name} chce używać analitycznych plików cookie, aby zrozumieć, jak korzystasz z tej strony rezerwacji. Bez Twojej zgody nic nie jest ładowane, a rezerwacja działa w każdym przypadku.",
