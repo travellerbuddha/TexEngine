@@ -148,6 +148,15 @@ def visit(conn, session: str, email: str | None = None) -> None:
 		             hashlib.sha256(email.encode()).hexdigest() if email else None, 1 if email else 0))
 
 
+def visit_here(session: str) -> str:
+	"""A funnel event written on this connection, below the controller."""
+	name = frappe.generate_hash(length=10)
+	frappe.db.sql("""INSERT INTO `tabTEX Funnel Event` (name, creation, modified, owner, modified_by, event, occurred_at,
+		site, property, session_id, payload) VALUES (%s, NOW(6), NOW(6), 'Guest', 'Guest', 'search', NOW(6), %s, %s, %s, '{}')""",
+	              (name, SLUG, fx.PROPERTY, session))
+	return name
+
+
 # ─── H1: the withdrawal and the booking transaction ──────────────────────
 
 
@@ -201,13 +210,35 @@ class TestWithdrawalLocksOnlyItsRows(PrivacyCase):
 			                       ("h1-open", None)):
 				visit(booking_, session, email)
 
-	def test_a_deadlock_or_timeout_while_tracking_is_never_swallowed(self):
+	def test_a_deadlock_while_tracking_is_raised_a_lock_timeout_undoes_only_the_event(self):
+		"""A deadlock ends the whole transaction: raised, for the retry. A lock wait timeout ends only its
+		statement (``innodb_rollback_on_timeout`` off, the default): the event's own writes are undone to
+		its savepoint, the request's earlier writes stay, and the request goes on (third review of ADR-056,
+		M-6). Where the server rolls the transaction back on a timeout, a timeout is raised as a deadlock is."""
 		site = frappe.get_cached_doc("TEX Booking Site", frappe.db.get_value("TEX Booking Site", {"site_slug": SLUG}))
-		for error in (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
-			patch, failed = tracked("search", error=error)
-			with patch, self.assertRaises(error):
-				public._track(site, "h1-track", "search", {"check_in": "2027-01-01"})
-			self.assertEqual(failed, ["search"])
+		patch, failed = tracked("search", error=frappe.QueryDeadlockError)
+		with patch, self.assertRaises(frappe.QueryDeadlockError):
+			public._track(site, "h1-track", "search", {"check_in": "2027-01-01"})
+		self.assertEqual(failed, ["search"])
+		earlier = visit_here("h1-before")                           # the request's own earlier write
+		real = frappe.get_doc
+
+		def half_written(*args, **kwargs):
+			d = args[0] if args else None
+			if isinstance(d, dict) and d.get("doctype") == "TEX Funnel Event" and d.get("session_id") == "h1-track":
+				visit_here("h1-partial")                              # a write of the step, then the timeout
+				raise frappe.QueryTimeoutError("Lock wait timeout exceeded; try restarting transaction")
+			return real(*args, **kwargs)
+
+		with mock.patch.object(frappe, "get_doc", side_effect=half_written):
+			public._track(site, "h1-track", "search", {"check_in": "2027-01-01"})     # not raised
+		self.assertEqual((funnel("h1-track"), funnel("h1-partial")), ([], []))
+		self.assertTrue(frappe.db.exists("TEX Funnel Event", earlier))
+		from kamra.tex.services import txn
+
+		with mock.patch.object(txn, "_rollback_on_timeout", return_value=True), \
+				mock.patch.object(frappe, "get_doc", side_effect=half_written), self.assertRaises(frappe.QueryTimeoutError):
+			public._track(site, "h1-track", "search", {"check_in": "2027-01-01"})
 		public._track(site, "h1-track", "search", {"check_in": "2027-01-01"})       # anything else: best effort
 		self.assertEqual(len(funnel("h1-track")), 1)
 
@@ -240,12 +271,25 @@ class TestWithdrawalLocksOnlyItsRows(PrivacyCase):
 			    payment_method="Card", session_id="h1-raw", idempotency_key="idem-h1-raw")
 		self.assertEqual(failed, ["payment_started"])
 
-	def test_a_deadlock_while_mailing_is_never_swallowed(self):
-		args = {"reference": ("TEX Booking", "none"), "guest": None, "property": fx.PROPERTY, "template": "t",
+	def test_a_deadlock_while_mailing_is_raised_a_lock_timeout_is_a_failed_mail(self):
+		guest = frappe.get_doc({"doctype": "Guest", "first_name": "Mail", "last_name": "Timeout",
+		                        "email": "h1@example.com"}).insert(ignore_permissions=True).name
+		args = {"reference": ("TEX Booking", "none"), "guest": guest, "property": fx.PROPERTY, "template": "t",
 		        "booking": None, "log_title": "h1 mail"}
-		for target, error in (("_log", frappe.QueryDeadlockError), ("_send", frappe.QueryTimeoutError)):
-			with mock.patch.object(notify, target, side_effect=error("lock")), self.assertRaises(error):
-				notify._deliver("h1@example.com", "s", "<p>x</p>", **args)
+		with mock.patch.object(notify, "_log", side_effect=frappe.QueryDeadlockError("lock")), \
+				self.assertRaises(frappe.QueryDeadlockError):
+			notify._deliver("h1@example.com", "s", "<p>x</p>", **args)
+		# a lock wait timeout while queueing: the mail is not sent, and it is on the record as failed
+		with mock.patch.object(notify, "_send", side_effect=frappe.QueryTimeoutError("lock")):
+			out = notify._deliver("h1@example.com", "s", "<p>x</p>", **args)
+		self.assertEqual((out["queued"], out["status"]), (False, "Failed"))
+		self.assertEqual(frappe.db.get_value("TEX Communication", out["communication"], "status"), "Failed")
+		from kamra.tex.services import txn
+
+		with mock.patch.object(txn, "_rollback_on_timeout", return_value=True), \
+				mock.patch.object(notify, "_send", side_effect=frappe.QueryTimeoutError("lock")), \
+				self.assertRaises(frappe.QueryTimeoutError):
+			notify._deliver("h1@example.com", "s", "<p>x</p>", **args)
 		with mock.patch.object(notify, "_send", side_effect=RuntimeError("smtp down")):
 			self.assertEqual(notify._deliver("h1@example.com", "s", "<p>x</p>", **args)["status"], "Failed")
 
@@ -739,6 +783,12 @@ class TestP45(PrivacyCase):
 		                         "guest_notes": "Profile anonymized on request.", "tex_consent_email": 1,
 		                         "tex_consent_sms": 1, "tex_enterprise": self.ent}).insert(
 			ignore_permissions=True).name
+		# the durable marker of an erasure (third review; p48 sets it on profiles erased before it existed)
+		frappe.db.set_value("Guest", erased, "tex_erased_at", now_datetime())
+		# a live profile whose notes say the same (a merge could copy them): p45 leaves it alone
+		lookalike = frappe.get_doc({"doctype": "Guest", "first_name": "Lena", "last_name": "Alike",
+		                            "guest_notes": "Profile anonymized on request.", "tex_consent_email": 1,
+		                            "tex_enterprise": self.ent}).insert(ignore_permissions=True).name
 		erased_case = frappe.get_doc({"doctype": "TEX Abandoned Booking", "property": fx.PROPERTY,
 		                              "session_id": "p45-erased", "stage_reached": "quote", "status": "Open",
 		                              "guest": erased, "email": "p45-erased@example.com", "consent_marketing": 1,
@@ -770,6 +820,7 @@ class TestP45(PrivacyCase):
 		                            fields=["name", "property"], as_list=True))
 		self.assertEqual((hotel[earn], hotel[by_one], hotel[nobody]), (fx.PROPERTY, sister, None))
 		self.assertEqual(frappe.db.get_value("Guest", erased, ["tex_consent_email", "tex_consent_sms"]), (0, 0))
+		self.assertEqual(frappe.db.get_value("Guest", lookalike, "tex_consent_email"), 1)
 		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", erased_case.name, ["guest", "email"]),
 		                 (None, None))
 		self.assertEqual(frappe.get_all("Version", filters={"ref_doctype": "Guest", "docname": erased}), [])
