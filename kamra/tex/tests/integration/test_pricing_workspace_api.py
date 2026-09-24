@@ -25,6 +25,15 @@ Slice S4:
   messages are unchanged.
 * GAP-5: a board rule naming an unknown room or period, and two rules of one board for the same
   room and period, are publish errors.
+
+Slice S5:
+
+* GAP-6: ``preview_price`` takes a child as whole years (as before), ``{age_months}`` or ``{dob}``
+  and refuses anything else (``7.5``, ``"7.5"``, adult ages, more than 12 children).
+* GAP-7: ``apply_op_values`` changes entered prices of a draft once by an op, as the ARI grid does
+  (the base room's relative entry, O4, and the bulk Adjust…); read-only, ``contract.edit``.
+* GAP-12: each night of a quote reports ``subtotal_adults``, ``subtotal_children`` and
+  ``subtotal_board``; the guest view never carries them.
 """
 
 import json
@@ -657,3 +666,192 @@ class TestAnchoredIssues(WorkspaceCase):
 		self.assertEqual(api.get_version(out["version"])["validation_report"], out["warnings"])
 		published = contracts.publish(self.v)                          # this test case's draft too
 		self.assertEqual(frappe.db.get_value("TEX Contract Version", published["version"], "status"), "Published")
+
+
+# ─── slice S5: preview ages in months or by date of birth, apply_op_values, quote subtotals ───
+
+CHILD_MESSAGE = "Child ages are whole years (0–17), {age_months} or {dob}."
+SUBTOTALS = ("subtotal_adults", "subtotal_children", "subtotal_board")
+SIX_PLACES = r"^\d+\.\d{6}$"
+
+
+def pre_s5_preview(version: str, room_type: str, board: str, check_in: str, check_out: str, adults: int, children,
+                   rate_plan: str, market: str, sale_at: str) -> dict:
+	"""``preview_price`` of a saved version as it answered before S5 (its body, each child read with
+	``int()``): the baseline a whole-year age must still give."""
+	from frappe.utils import get_datetime, getdate
+
+	from kamra.tex.commercial import context as ctxmod
+	from kamra.tex.pricing import engine
+	from kamra.tex.pricing.model import ChildSpec, StayRequest
+
+	v = frappe.get_doc("TEX Contract Version", version)
+	prop = scope.property_of("TEX Contract Version", version)
+	at = get_datetime(sale_at)
+	terms = contracts.load_terms(version) if v.status != "Draft" else contracts.build_terms(v, at=at)
+	kids = tuple(ChildSpec(age=int(a)) for a in children)
+	req = StayRequest(property=prop, room_type=room_type, board=board, rate_plan=rate_plan, check_in=getdate(check_in),
+	                  check_out=getdate(check_out), adults=adults, children=kids, sale_at=at, market=market,
+	                  channel="DIRECT_WEB", sell_currency=terms.currency, promo_codes=())
+	return engine.price_stay(ctxmod.build_context(terms, req), req).to_dict(internal=True)
+
+
+def without_subtotals(q: dict) -> dict:
+	return {**q, "nights": [{k: v for k, v in n.items() if k not in SUBTOTALS} for n in q.get("nights") or []]}
+
+
+class TestPreviewChildren(WorkspaceCase):
+	def test_whole_years_price_as_before(self):
+		pub = fx.create_contract(self.f, code="PW-S5")                 # published, as sold
+		sale_at = str(frappe.utils.now_datetime().replace(microsecond=0))
+		args = {"room_type": self.std, "board": "AI", "check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 12)),
+		        "adults": 2, "rate_plan": self.f["rate_plans"]["FLEX"], "market": "DE", "sale_at": sale_at}
+		before = without_subtotals(pre_s5_preview(pub["version"], children=[8], **args))
+		self.assertTrue(before["sellable"], before["reasons"])
+		self.assertEqual([D(n["occupancy"]) for n in before["nights"]], [D("250"), D("250")])   # 100 + 100 + 50
+		for kids in ([8], json.dumps([8]), ["8"], [8.0]):
+			with self.subTest(children=kids):
+				q = self.preview(pub["version"], children=kids, **args)
+				self.assertEqual(without_subtotals(q), before)
+		# 96 months is 8 years: the same price (the request records the months it was given)
+		q = self.preview(pub["version"], children=[{"age_months": 96}], **args)
+		self.assertEqual(q["request"]["children"], [{"age": None, "dob": None, "age_months": 96}])
+		self.assertEqual((q["totals"], without_subtotals(q)["nights"]), (before["totals"], before["nights"]))
+		# a draft too, and the other ages of the fixture's bands
+		for kids in ([1], [4], [8, 1], [11, 3]):
+			with self.subTest(draft=kids):
+				self.assertEqual(without_subtotals(self.preview(children=kids, **args)),
+				                 without_subtotals(pre_s5_preview(self.v, children=kids, **args)))
+
+	def test_an_age_in_months_lands_in_its_band(self):
+		q = self.preview(children=[{"age_months": 95}])                 # 7y11m: the 7–11.99 band
+		self.assertTrue(q["sellable"], q.get("reasons"))
+		child = find(q["explanation"], code="CHILD_SLOT")
+		self.assertIn("(7y11m, Child B)", child["text"])
+		self.assertEqual(D(q["nights"][0]["occupancy"]), D("250"))
+		q = self.preview(children=[{"age_months": 83}])                 # 6y11m: still 3–6.99
+		self.assertIn("(6y11m, Child A)", find(q["explanation"], code="CHILD_SLOT")["text"])
+
+	def test_a_date_of_birth_is_checked_and_priced(self):
+		today = frappe.utils.getdate()
+		dob = frappe.utils.add_years(today, -8)
+		q = self.preview(children=[{"dob": str(dob)}])
+		self.assertTrue(q["sellable"], q.get("reasons"))
+		self.assertIn("Child B)", find(q["explanation"], code="CHILD_SLOT")["text"])
+		self.assertNotIn(str(dob), json.dumps(q["explanation"]))       # the explanation never carries the date
+		for dob, message in ((frappe.utils.add_days(today, 1), "date of birth is in the future"),
+		                     (frappe.utils.add_years(fx.d(6, 10), -18), "18 or older on arrival")):
+			with self.subTest(dob=str(dob)), self.assertRaises(frappe.ValidationError) as cm:
+				self.preview(children=[{"dob": str(dob)}])
+			self.assertIn(message, str(cm.exception))
+		for bad in ("2019-02-30", "yesterday", 20190101, None):
+			with self.subTest(dob=bad), self.assertRaises(frappe.ValidationError) as cm:
+				self.preview(children=[{"dob": bad}])
+			self.assertIn(CHILD_MESSAGE, str(cm.exception))
+			self.assertNotIn(str(bad), str(cm.exception).replace(CHILD_MESSAGE, ""))
+
+	def test_what_is_not_an_age_is_refused(self):
+		self.assertTrue(self.preview(children=["7"])["sellable"])
+		self.assertIn("sellable", self.preview(children=[0, 17]))                     # the edges are ages
+		for kids in ([7.5], ["7.5"], [True], [False], [-1], [18], ["-1"], ["seven"], [None], [""], [[7]],
+		             [{"age_months": 216}], [{"age_months": -1}], [{"age_months": "95"}], [{"age_months": 95.5}],
+		             [{"age_months": True}], [{"age": 7}], [{}], [{"age_months": 95, "dob": "2019-01-01"}],
+		             {"age": 7}, 7, "not json"):
+			with self.subTest(children=kids), self.assertRaises(frappe.ValidationError) as cm:
+				self.preview(children=kids if isinstance(kids, str) else json.dumps(kids))
+			if kids != "not json":
+				self.assertIn(CHILD_MESSAGE, str(cm.exception))
+		with self.assertRaises(frappe.ValidationError) as cm:
+			self.preview(children=[5] * 13)
+		self.assertIn("12", str(cm.exception))
+		self.assertIn("sellable", self.preview(children=[5] * 12))                    # answered: over capacity
+
+
+class TestApplyOpValues(WorkspaceCase):
+	def call(self, values, op="ADJUST_PERCENT", value="10", version=None):
+		return api.apply_op_values(version or self.v, values=json.dumps(values), op=op, value=value)
+
+	def test_results_are_exact_strings_in_the_contract_currency(self):
+		before = self.untouched()
+		out = self.call(["70", "80.55", None, "", "10", "99.99"])
+		self.assertEqual(out, [{"value": "77.00", "error": None}, {"value": "88.61", "error": None},
+		                       {"value": None, "error": "NO_VALUE"}, {"value": None, "error": "NO_VALUE"},
+		                       {"value": "11.00", "error": None}, {"value": "109.99", "error": None}])
+		self.assertEqual(self.call(["10", "30"], op="SUBTRACT", value="20"),
+		                 [{"value": None, "error": "NEGATIVE"}, {"value": "10.00", "error": None}])
+		self.assertEqual(self.call(["100"], op="MULTIPLY", value="1.155"), [{"value": "115.50", "error": None}])
+		self.assertEqual(self.call(["70"], op="PERCENT_OF", value="50"), [{"value": "35.00", "error": None}])
+		self.assertEqual(self.call(["70", None], op="ABSOLUTE", value="82.5"),
+		                 [{"value": "82.50", "error": None}, {"value": None, "error": "NO_VALUE"}])
+		self.assertEqual(self.call(["70"], op="ADD", value="5"), [{"value": "75.00", "error": None}])
+		self.assertEqual(self.call([]), [])
+		self.assertEqual(self.untouched(), before)                                     # nothing written
+		# in a 3-decimal currency
+		fx.ensure_currency("KWD", "KD")
+		kwd = frappe.get_doc({"doctype": "TEX Contract", "property": fx.PROPERTY, "contract_code": "PW-S5-KWD",
+		                      "contract_name": "PW S5 KWD", "market": "DE", "contract_currency": "KWD",
+		                      "pricing_basis": "PERSON", "status": "Draft"}).insert(ignore_permissions=True)
+		draft = contracts.new_draft(kwd.name)
+		self.assertEqual(self.call(["12.345"], version=draft), [{"value": "13.580", "error": None}])
+
+	def test_only_who_edits_the_hotels_contracts(self):
+		self.as_user(EDITOR)                                                           # contract.edit only
+		self.assertEqual(self.call(["70"]), [{"value": "77.00", "error": None}])
+		for user in (AGENT, FINANCE, FOREIGN):
+			self.as_user(user)
+			with self.subTest(user=user), self.assertRaises(frappe.PermissionError):
+				self.call(["70"])
+
+	def test_only_drafts(self):
+		contracts.publish(self.v)
+		with self.assertRaises(frappe.ValidationError) as cm:
+			self.call(["70"])
+		self.assertIn("draft", str(cm.exception))
+
+	def test_malformed_calls_are_refused(self):
+		self.assertEqual(len(self.call(["70"] * 500)), 500)
+		for kw in ({"values": ["70"] * 501}, {"values": ["70"], "op": "INHERIT"}, {"values": ["70"], "op": "FIXED"},
+		           {"values": ["70"], "op": "bogus"}, {"values": ["70"], "op": None}, {"values": ["70"], "value": ""},
+		           {"values": ["70"], "value": None}, {"values": ["70"], "value": "1.0000000001"},
+		           {"values": ["70"], "value": "ten"}, {"values": ["70.0000000001"]}, {"values": ["abc"]},
+		           {"values": [True]}, {"values": {"a": "70"}}, {"values": "70"}):
+			with self.subTest(**{k: str(v)[:40] for k, v in kw.items()}), self.assertRaises(frappe.ValidationError):
+				self.call(**kw)
+
+	def test_the_base_room_is_adjusted_once_and_stored_as_a_price(self):
+		# O4 (provisional): "+10%" on the base room's entered 100 → the server's 110.00, saved as ABSOLUTE
+		data = self.payload()
+		low = self.std_low(data)
+		[result] = self.call([low["value"]], op="ADJUST_PERCENT", value="10")
+		self.assertEqual(result, {"value": "110.00", "error": None})
+		low.update(op="ABSOLUTE", value=result["value"])
+		m = api.price_matrix(self.v, data=data)
+		self.assertEqual(D(find(m["rooms"], room_type=self.std)["cells"]["LOW"]), D("110"))
+		self.assertEqual(D(find(m["rooms"], room_type=self.dlx)["cells"]["LOW"]), D("148.5"))   # the formula follows
+		api.save_version(self.v, as_json(data))
+		self.assertEqual((self.std_low(api.get_version(self.v))["op"], self.std_low(api.get_version(self.v))["value"]),
+		                 ("ABSOLUTE", "110"))
+
+
+class TestQuoteSubtotals(WorkspaceCase):
+	def test_each_night_carries_the_ladders_subtotals(self):
+		q = self.preview(board="UAI", children=[8])
+		self.assertTrue(q["sellable"], q.get("reasons"))
+		n = q["nights"][0]
+		for k in SUBTOTALS:
+			self.assertRegex(n[k], SIX_PLACES)
+		self.assertEqual((n["unit"], n["subtotal_adults"], n["subtotal_children"], n["occupancy"], n["board"],
+		                  n["subtotal_board"]),
+		                 ("100.000000", "200.000000", "250.000000", "250.000000", "50.000000", "300.000000"))
+		self.assertEqual(n["subtotal_children"], n["occupancy"])
+		# the same from the unsaved draft
+		overlay = self.preview(board="UAI", children=[8], data=self.payload())
+		self.assertEqual({k: overlay["nights"][0][k] for k in SUBTOTALS}, {k: n[k] for k in SUBTOTALS})
+
+	def test_the_guest_view_never_carries_them(self):
+		from kamra.tex.services import quoting
+
+		q = self.preview(board="UAI", children=[8])
+		for staff in (False, True):
+			shown = quoting.strip_internal(json.loads(json.dumps(q)), staff=staff)
+			self.assertEqual([set(n) for n in shown["nights"]], [{"date", "amount"}])

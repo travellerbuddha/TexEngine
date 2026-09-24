@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import frappe
 from frappe import _
@@ -13,7 +14,8 @@ from kamra.tex.api._util import as_int, doc_dict, parse, text
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts as svc
 from kamra.tex.commercial import decimals
-from kamra.tex.pricing import engine, matrix, occupancy
+from kamra.tex.pricing import ages, engine, matrix, occupancy
+from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -389,11 +391,14 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
                   currency: str | None = None, sale_at: str | None = None, promo_codes=None, data=None):
 	"""Price a stay on any version — including an unpublished draft — with the full
 	explanation (contract editor 'test price' panel; also answers 'which rule won'). With
-	``data``: on the draft with those unsaved changes (ADR-061)."""
+	``data``: on the draft with those unsaved changes (ADR-061). ``children``: each an age in
+	whole years, ``{age_months}`` or ``{dob}`` (``_child_specs``). Each night of the quote reports
+	the running totals the Explain ladder shows (``subtotal_*``, GAP-12)."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view_cost", prop)
 	at = frappe.utils.get_datetime(sale_at) if sale_at else now_datetime()
+	kids = _child_specs(children, getdate(check_in))
 	draft = _overlay(version, data) if _has_data(data) else None
 	try:
 		if draft is not None:
@@ -402,7 +407,6 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
 			terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v, at=at)
 	except frappe.ValidationError as e:
 		return {"sellable": False, "reasons": [{"code": "BUILD", "message": str(e)}]}
-	kids = tuple(ChildSpec(age=int(a)) for a in (parse(children, []) or []))
 	req = StayRequest(property=prop, room_type=room_type, board=board, rate_plan=rate_plan or None,
 	                  check_in=getdate(check_in), check_out=getdate(check_out), adults=as_int(adults, 2, lo=1, hi=12),
 	                  children=kids, sale_at=at, market=(market or terms.market).upper(), channel=channel,
@@ -414,6 +418,118 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
 	except (Unsellable, PricingError) as e:
 		return {"sellable": False, "reasons": [{"code": getattr(e, "code", "PRICING_ERROR"), "message": str(e)}]}
 	return q.to_dict(internal=True)
+
+
+# the most children a preview prices (ADR-061 GAP-6); ages the way a guest's are given (0–17 years)
+PREVIEW_CHILDREN_MAX = 12
+CHILD_MONTHS_MAX = (ages.MAX_CHILD_AGE + 1) * 12 - 1      # 215: 17 years and 11 months
+
+
+def _child_specs(children, check_in: date) -> tuple[ChildSpec, ...]:
+	"""The preview's children (ADR-061 GAP-6), each one of:
+
+	* an age in whole years 0–17: an int, a digit-only string or an integral float (as before);
+	* ``{"age_months": n}``, an int 0–215, for the exact month a band starts or ends at;
+	* ``{"dob": "YYYY-MM-DD"}``, checked as a booking checks it (``ages.check_child_dob``: not in the
+	  future, under 18 on ``check_in``) and priced in completed months by the engine.
+
+	Anything else (a bool, ``7.5``, ``"7.5"``, a negative or adult age, another key) is refused, and
+	so are more than 12 children. A refusal never repeats a date of birth."""
+	items = parse(children, [])
+	if items is None:
+		items = []
+	if not isinstance(items, list):
+		frappe.throw(_("Child ages are whole years (0–17), {age_months} or {dob}."))
+	if len(items) > PREVIEW_CHILDREN_MAX:
+		frappe.throw(_("A price test takes at most {0} children.").format(PREVIEW_CHILDREN_MAX))
+	return tuple(_child_spec(item, n, check_in) for n, item in enumerate(items, 1))
+
+
+def _child_spec(item, n: int, check_in: date) -> ChildSpec:
+	years = None
+	if isinstance(item, bool):
+		years = None
+	elif isinstance(item, int):
+		years = item
+	elif isinstance(item, float) and item.is_integer():
+		years = int(item)
+	elif isinstance(item, str) and item.strip().isascii() and item.strip().isdigit():
+		years = int(item.strip())
+	elif isinstance(item, dict) and set(item) == {"age_months"}:
+		months = item["age_months"]
+		if isinstance(months, int) and not isinstance(months, bool) and 0 <= months <= CHILD_MONTHS_MAX:
+			return ChildSpec(age_months=months)
+	elif isinstance(item, dict) and set(item) == {"dob"}:
+		dob = _iso_date(item["dob"])
+		if dob is not None:
+			try:
+				ages.check_child_dob(dob, check_in, today=getdate())
+			except PricingError as e:
+				frappe.throw(_("Child {0}: {1}").format(n, str(e)))
+			return ChildSpec(dob=dob)
+	if years is not None and 0 <= years <= ages.MAX_CHILD_AGE:
+		return ChildSpec(age=years)
+	frappe.throw(_("Child {0}: {1}").format(n, _("Child ages are whole years (0–17), {age_months} or {dob}.")))
+
+
+def _iso_date(value) -> date | None:
+	"""``YYYY-MM-DD`` → the date; anything else None (never echoed: a date of birth is personal)."""
+	if not isinstance(value, str) or len(value.strip()) != 10:
+		return None
+	try:
+		return date.fromisoformat(value.strip())
+	except ValueError:
+		return None
+
+
+# the ops an entered price is adjusted by (ADR-061 GAP-7: the base room's relative entry, O4, and the
+# bulk Adjust…), and the most prices one call adjusts
+ADJUST_OPS = (Op.ABSOLUTE, Op.MULTIPLY, Op.PERCENT_OF, Op.ADJUST_PERCENT, Op.ADD, Op.SUBTRACT)
+ADJUST_VALUES_MAX = 500
+
+
+@frappe.whitelist(methods=["POST"])
+def apply_op_values(version: str, values, op: str, value):
+	"""Entered prices of a draft changed once by ``op`` ``value`` (ADR-061 GAP-7, D2): the workspace
+	never computes money, so a relative entry on the base room (O4: "+10%" on 70.00 is stored as
+	ABSOLUTE 77.00) and the bulk Adjust… preview ask the server. Each value is computed as the ARI
+	grid's rate change computes one (``matrix.adjust_amount``: the op on the price, HALF_UP to the
+	contract currency). Read-only: nothing is written or audited.
+
+	``values``: at most 500 decimal strings (None or "" for a cell without a price). → one
+	``{value, error}`` per value, in order: the new price as exact decimal text, or None with
+	``NO_VALUE`` (no price given) or ``NEGATIVE`` (the result would be below zero)."""
+	row = frappe.db.get_value("TEX Contract Version", version, ["contract", "status"], as_dict=True)
+	if not row:
+		frappe.throw(_("{0} {1} not found").format(_("TEX Contract Version"), version), frappe.DoesNotExistError)
+	prop = scope.property_of("TEX Contract Version", version)
+	scope.require("contract.edit", prop)
+	if row.status != "Draft":
+		frappe.throw(_("Only draft versions can be edited — create a new draft."))
+	if op not in {o.value for o in ADJUST_OPS}:
+		frappe.throw(_("An adjustment is an amount, a factor, a percentage or a change by an amount or a "
+		               "percentage."))
+	amount = decimals.typed(value, _("Value"))
+	if amount is None:
+		frappe.throw(_("Value: a value is required."))
+	items = parse(values, None)
+	if not isinstance(items, list) or len(items) > ADJUST_VALUES_MAX:
+		frappe.throw(_("Prices to adjust are a list of at most {0} values.").format(ADJUST_VALUES_MAX))
+	currents = [decimals.typed(v, _("Price {0}").format(i)) for i, v in enumerate(items, 1)]
+	currency = frappe.db.get_value("TEX Contract", row.contract, "contract_currency")
+	out = []
+	for current in currents:
+		if current is None:
+			out.append({"value": None, "error": "NO_VALUE"})
+			continue
+		try:
+			out.append({"value": money.to_str(matrix.adjust_amount(current, Op(op), amount, currency)),
+			            "error": None})
+		except PricingError as e:
+			if str(e) != "NEGATIVE":
+				raise
+			out.append({"value": None, "error": "NEGATIVE"})
+	return out
 
 
 # sample parties priced by ``price_matrix`` (ADR-061, GAP-2b): at most this many, of at most so many
