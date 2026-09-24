@@ -35,14 +35,15 @@ run on GitHub, because the repository has no base branch (BLOCKED, owner).
 
 **2026-09-23.** The work paused at the owner's request is merged: G-30/G-31 occupancy precedence v2 (ADR-043) and G-45 self-service money flows (ADR-044). G-50 contract header lock (ADR-045) and G-83 security hygiene (ADR-046) are merged too, and TEX operations monitoring (ADR-047). Root `SECURITY.md` is rewritten for TEX (the security contact is still an owner input).
 
-**G-74 audit gaps (2026-09-24, branch `audit-g74`).** Closed in code (ADR-053, patch p33, new DocType
-`TEX Audit Scope`). On the branch: all 24 integration modules **456 OK** (admin_markets 4, age_bands 11,
-audit_trail 15, channel_binding 26, commercial_flows 43, concurrency 8, critical_journey 31,
-crm_segments 7, custom_domains 9, distribution 21, extras_inventory 17, fx_snapshot 5, grant_expiry 9,
-inventory 31, loyalty_admin 7, migrations_notify 7, portfolio 2, post_booking_extras 12,
+**G-74 audit gaps (2026-09-24, branch `audit-g74`, main `178d53c` merged in).** Closed in code
+(ADR-053, patch p33, new DocType `TEX Audit Scope`). On the branch: all 26 integration modules
+**495 OK** (admin_markets 4, age_bands 11, audit_trail 15, channel_binding 26, commercial_flows 43,
+concurrency 8, critical_journey 31, crm_segments 7, custom_domains 9, distribution 21,
+extras_inventory 17, fx_snapshot 5, grant_expiry 9, inventory 31, legacy_pricing 15, loyalty_admin 7,
+migrations_notify 7, modification_determinism 24, portfolio 2, post_booking_extras 12,
 pricing_policies 14, public_booking 17, security_hygiene 14, security_regressions 59,
 self_service_money 75, system_status 12; the 15 `test_audit_trail` tests fail on `db47abb`),
-339 unit tests, ruff clean, semgrep ERROR rules add no finding in the changed files, `npx tsc -b` and
+343 unit tests, ruff clean, semgrep ERROR rules add no finding in the changed files, `npx tsc -b` and
 `npm run i18n:tex` clean (bundles not rebuilt on the branch).
 
 **G-45 fourth review (2026-09-24, branch `fix4-g45`).** The fourth review's High (G-93 path), three
