@@ -50,6 +50,29 @@ def sync_user_permissions(user: str) -> dict:
 	return {"added": added, "removed": removed}
 
 
+def remove_expired_grants() -> dict:
+	"""Daily, just after the site's midnight (G-94): a grant that ended yesterday leaves no
+	mirrored User Permission behind (Frappe's own Desk/REST filters read them), and each ended
+	grant is audited once. The TEX scope already ignores mirrored rows (``scope._scope``)."""
+	today = frappe.utils.nowdate()
+	ended = frappe.get_all("TEX Access Grant", filters={"disabled": 0, "valid_until": ("<", today)},
+	                       fields=["name", "user", "scope_level", "property", "hotel_group", "enterprise",
+	                               "permission_profile", "valid_until"], order_by="name asc")
+	users = []
+	for u in sorted({g.user for g in ended}):
+		if sync_user_permissions(u).get("removed"):
+			users.append(u)
+	for g in ended:
+		if frappe.db.exists("TEX Audit Event", {"action": "grant.expired", "reference_name": g.name}):
+			continue
+		audit("grant.expired", reference_doctype="TEX Access Grant", reference_name=g.name,
+		      property=g.property or None, source="Scheduler",
+		      old={f: str(g.get(f)) if g.get(f) is not None else None
+		           for f in ("user", "scope_level", "property", "hotel_group", "enterprise", "permission_profile",
+		                     "valid_until")})
+	return {"users": users, "grants": [g.name for g in ended]}
+
+
 def resync_for_properties(properties) -> None:
 	"""A property moved between groups/enterprises: resync every group/enterprise grantee."""
 	users = set(frappe.get_all("TEX Access Grant", filters={"scope_level": ("in", ["Hotel Group", "Enterprise"]),

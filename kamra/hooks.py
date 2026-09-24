@@ -233,6 +233,18 @@ _TEX_SCOPED = (
 	"TEX Contract Version", "TEX Loyalty Ledger", "Guest", "TEX Content Translation", "TEX Guest Segment",
 	"TEX Channel Mapping", "TEX Channel ARI Day", "TEX Channel Inbound",
 	"TEX Access Grant", "TEX Enterprise", "TEX Hotel Group", "TEX Guest Change Request",
+	# legacy Kamra DocTypes bound to a hotel (G-94): the TEX scope, not only Frappe's User Permissions
+	"AI Assistant Settings", "Agent Action Log", "Banquet Checklist Template", "Banquet Dish",
+	"Banquet Function Task", "Banquet Menu", "Banquet Service Item", "Cancelled Invoice", "Cashier",
+	"Cashier Session", "Cashier Transaction", "Channel Manager Connection", "Channel Provider Connection",
+	"City Ledger Account", "City Ledger Entry", "Copilot Conversation", "Credit Note", "Discount Voucher",
+	"Exchange Rate", "Exchange Transaction", "Experience", "Folio Ledger Entry", "Folio Reprint",
+	"Housekeeping Task", "Hurdle Rate", "Ingredient", "Ingredient Stock", "Laundry Order", "Laundry Rate",
+	"Lost And Found Item", "Meal Plan", "Menu Item", "Night Audit Run", "POS Order", "POS Outlet",
+	"POS Table Reservation", "Payment Gateway Settings", "Petty Cash Voucher", "Proforma Folio",
+	"Rate Guardrail", "Revenue Budget", "Room Block", "Season", "Security Deposit", "Sellable Unit",
+	"Service Ticket", "Shift Handover", "Stock Ledger Entry", "Transaction Code", "Turnover Profile",
+	"Venue", "Venue Booking", "WhatsApp Message",
 )
 permission_query_conditions = {dt: "kamra.tex.security.perm.query_conditions" for dt in _TEX_SCOPED}
 permission_query_conditions["Property"] = "kamra.tex.security.perm.property_query_conditions"

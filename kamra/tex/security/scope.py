@@ -80,18 +80,34 @@ def _grant_properties(g) -> list[str]:
 	return []
 
 
+def _legacy_properties(user: str) -> list[str]:
+	"""Hotels of the user's own (manual) User Permission rows: the legacy Kamra scope. The rows
+	TEX mirrors from grants (``tex_managed``) are never read here: live grants alone decide, so
+	an expired grant whose rows were not re-synced yet grants nothing (G-94)."""
+	filters = {"user": user, "allow": "Property"}
+	if frappe.db.has_column("User Permission", "tex_managed"):
+		filters["tex_managed"] = 0
+	return frappe.get_all("User Permission", filters=filters, pluck="for_value")
+
+
+def _ever_granted(user: str) -> bool:
+	return frappe.db.table_exists("TEX Access Grant") and bool(frappe.db.exists("TEX Access Grant", {"user": user}))
+
+
 def _scope(user: str) -> dict:
 	"""{property: set(grant profiles)} for the user (cached per request)."""
 	cache = _cache()
 	if user in cache:
 		return cache[user]
 	scope: dict[str, set[str]] = {}
-	for p in frappe.get_all("User Permission", filters={"user": user, "allow": "Property"}, pluck="for_value"):
+	for p in _legacy_properties(user):
 		scope.setdefault(p, set())
 	for g in _grants(user):
 		for p in _grant_properties(g):
 			scope.setdefault(p, set()).add(g.permission_profile)
-	if not scope and not strict_tenancy():
+	# legacy (non-strict) mode opens every hotel only to users TEX never granted anything: one
+	# whose grants ended or were disabled keeps nothing (G-94)
+	if not scope and not strict_tenancy() and not _ever_granted(user):
 		scope = {p: set() for p in _all_properties()}
 	cache[user] = scope
 	return scope
