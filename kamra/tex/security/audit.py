@@ -123,20 +123,62 @@ def recorded(action: str, *, reference_doctype: str, reference_name: str, new=No
 	return bool(frappe.db.exists("TEX Audit Event", filters))
 
 
+REFUSAL_WINDOW_SECONDS = 3600
+
+
+def _refused_lately(action: str, reference_doctype, reference_name, new, once_per) -> bool:
+	"""Whether the same refusal (``once_per``: the keys of ``new`` that make it the same) is on
+	record within the last ``REFUSAL_WINDOW_SECONDS``."""
+	if not once_per or not reference_name:
+		return False
+	since = frappe.utils.add_to_date(now_datetime(), seconds=-REFUSAL_WINDOW_SECONDS)
+	want = {k: (new or {}).get(k) for k in once_per}
+	for raw in frappe.get_all("TEX Audit Event", filters={"action": action, "reference_doctype": reference_doctype,
+	                                                      "reference_name": reference_name,
+	                                                      "event_time": (">=", since)}, pluck="new_value"):
+		try:
+			seen = json.loads(raw or "{}") or {}
+		except ValueError:
+			continue
+		if isinstance(seen, dict) and {k: seen.get(k) for k in once_per} == want:
+			return True
+	return False
+
+
 def audit_refusal(action: str, *, reference_doctype: str | None = None, reference_name: str | None = None,
                   property: str | None = None, old=None, new=None, reason: str | None = None,
-                  source: str | None = None) -> None:
+                  source: str | None = None, once_per: tuple[str, ...] = ()) -> None:
 	"""Audit a refusal the caller raises next (G-73, ADR-058). The refused request is rolled back,
 	and an event written in its transaction would go with it; so a job writes the event in a
 	transaction of its own. It is queued now, not after a commit that never comes, and runs as
-	the refused user. Tests keep one transaction: the job runs inline there."""
-	frappe.enqueue("kamra.tex.security.audit.record_refusal", queue="short", now=bool(frappe.flags.in_test),
-	               action=action, reference_doctype=reference_doctype, reference_name=reference_name,
-	               property=property, old=old, new=new, reason=reason, source=source or source_of_request())
+	the refused user. Tests keep one transaction: the job runs inline there.
+
+	Review of G-73 (L4):
+	- The refusal is the answer whatever happens here. A queue that cannot be reached (Redis down)
+	  is logged (the action and record only), never raised in its place.
+	- ``once_per``: the same refusal is recorded once per ``REFUSAL_WINDOW_SECONDS``. Checked
+	  before queueing and again by the job, so every click on a refused stay is not one more job and
+	  event."""
+	if _refused_lately(action, reference_doctype, reference_name, new, once_per):
+		return
+	try:
+		frappe.enqueue("kamra.tex.security.audit.record_refusal", queue="short", now=bool(frappe.flags.in_test),
+		               action=action, reference_doctype=reference_doctype, reference_name=reference_name,
+		               property=property, old=old, new=new, reason=reason, source=source or source_of_request(),
+		               once_per=list(once_per))
+	except Exception as e:
+		what = f"{action} on {reference_doctype} {reference_name}: {type(e).__name__}"
+		frappe.logger("tex.audit").error(f"TEX refusal audit not queued: {what}")
+		try:
+			frappe.log_error(title="TEX refusal audit not queued", message=what)
+		except Exception:
+			pass                          # the refusal is still the answer
 
 
-def record_refusal(action: str, **kw) -> str:
-	"""The job of ``audit_refusal``."""
+def record_refusal(action: str, once_per=(), **kw) -> str | None:
+	"""The job of ``audit_refusal``: the same refusal once per window, however many were queued."""
+	if _refused_lately(action, kw.get("reference_doctype"), kw.get("reference_name"), kw.get("new"), once_per):
+		return None
 	return audit(action, **kw)
 
 

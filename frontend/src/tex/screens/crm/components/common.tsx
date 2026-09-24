@@ -15,8 +15,9 @@ export function CrmNav() {
   const items = [
     { to: "/tex/crm", label: t("crm.nav.guests"), end: true },
     { to: "/tex/crm/segments", label: t("crm.nav.segments") },
-    { to: "/tex/crm/abandoned", label: t("crm.nav.abandoned") },
     ...(canAnywhere("crm.view") ? [{ to: "/tex/crm/loyalty", label: t("crm.nav.loyalty") }] : []),
+    { to: "/tex/crm/abandoned", label: t("crm.nav.abandoned") },
+    { to: "/tex/crm/communications", label: t("core.nav.sub.communications") },
   ]
   return (
     <nav aria-label={t("crm.nav.label")} className="-mt-2 mb-5 flex gap-1 overflow-x-auto border-b border-zinc-200">
