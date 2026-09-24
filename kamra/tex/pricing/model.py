@@ -428,6 +428,11 @@ class StayRequest:
 	# position of this room in its booking (0-based). Room 0 carries the booking-level
 	# terms: per-booking extras and fixed booking discounts are priced once, there (ADR-029)
 	room_index: int = 0
+	# the basket of the whole booking this room is priced in, in the sell currency (the sum of
+	# every room's own basket), and how many rooms make it: a promotion's minimum basket is
+	# compared with it (G-84, ADR-057). None: the room is priced alone (its own basket)
+	booking_basket: Decimal | None = None
+	booking_rooms: int = 1
 
 
 # ─── context ─────────────────────────────────────────────────────────────

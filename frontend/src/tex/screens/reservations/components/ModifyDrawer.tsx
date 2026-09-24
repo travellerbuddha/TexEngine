@@ -152,6 +152,8 @@ export function ModifyDrawer({
   const [proposeError, setProposeError] = useState<TexApiError>()
   const [override, setOverride] = useState(false)
   const [overrideAmount, setOverrideAmount] = useState("")
+  // sell a change the restrictions refuse (restriction.edit; G-48)
+  const [overrideRestrictions, setOverrideRestrictions] = useState(false)
   const [reason, setReason] = useState("")
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<TexApiError>()
@@ -173,6 +175,7 @@ export function ModifyDrawer({
     setProposeError(undefined)
     setOverride(false)
     setOverrideAmount("")
+    setOverrideRestrictions(false)
     setReason("")
     setApplyError(undefined)
   }, [open, initial])
@@ -238,6 +241,7 @@ export function ModifyDrawer({
       setProposal(p)
       setProposedSig(sig)
       setOverrideAmount("")
+      setOverrideRestrictions(false)
       window.setTimeout(() => resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 50)
     } catch (e) {
       setProposeError(asApiError(e))
@@ -248,13 +252,15 @@ export function ModifyDrawer({
   }
 
   const overrideOk = !override || (isDecimal(overrideAmount) && cmpDecimal(overrideAmount, "0") >= 0)
-  const canApply = Boolean(proposal && !stale && proposal.sellable && reason.trim().length > 2 && overrideOk && !applying)
+  const restricted = Boolean(proposal && !proposal.sellable && proposal.restriction_override)
+  const sellableNow = Boolean(proposal && (proposal.sellable || (restricted && overrideRestrictions)))
+  const canApply = Boolean(proposal && !stale && sellableNow && reason.trim().length > 2 && overrideOk && !applying)
   const apply = async () => {
     if (!proposal || !canApply) return
     setApplying(true)
     setApplyError(undefined)
     try {
-      const r = await applyModification(proposal.proposal_token, reason.trim(), override ? overrideAmount : undefined)
+      const r = await applyModification(proposal.proposal_token, reason.trim(), override ? overrideAmount : undefined, restricted && overrideRestrictions)
       toast.success(t("res.mod.applied", { rev: r.revision }))
       onApplied(r)
     } catch (e) {
@@ -465,7 +471,7 @@ export function ModifyDrawer({
           )}
         </section>
 
-        {proposal && !stale && proposal.sellable && (
+        {proposal && !stale && (proposal.sellable || restricted) && (
           <section aria-labelledby="mod-apply" className="space-y-3 rounded-lg border border-zinc-200 p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 id="mod-apply" className="text-sm font-semibold text-zinc-900">
@@ -473,6 +479,16 @@ export function ModifyDrawer({
               </h3>
               <p className="text-xs text-zinc-500">{t("res.mod.expires_hint")}</p>
             </div>
+            {restricted && (
+              <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50/60 p-3">
+                <Checkbox
+                  label={<span className="font-medium">{t("res.mod.override_restrictions")}</span>}
+                  checked={overrideRestrictions}
+                  onChange={(e) => setOverrideRestrictions(e.target.checked)}
+                />
+                <p className="text-xs text-zinc-600">{t("res.mod.override_restrictions_hint", { rules: proposal.restrictions.map((r) => r.message).join("; ") })}</p>
+              </div>
+            )}
             {canOverride && (
               <div className="space-y-2">
                 <Checkbox label={t("res.mod.override")} checked={override} onChange={(e) => setOverride(e.target.checked)} />

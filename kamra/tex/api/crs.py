@@ -69,6 +69,20 @@ def quote(offer_key: str, extras=None, promo_codes=None):
 
 
 @frappe.whitelist(methods=["POST"])
+def quote_rooms(rooms, promo_codes=None):
+	"""The rooms of one booking quoted together: a minimum basket is the whole booking's (G-84,
+	ADR-057). ``rooms``: [{"offer_key", "extras"}] of one search, in room order."""
+	items = parse(rooms, []) or []
+	for r in items:
+		offer = quoting.verify(str(r.get("offer_key") or ""))
+		scope.require("reservation.create", offer["property"])
+		# a Booking Engine or OTA offer is not the agent's to sell (ADR-050)
+		scope.require_channel(offer.get("channel"), offer["property"])
+	return quoting.create_quotes([{"offer_key": str(r.get("offer_key") or ""), "extras": parse(r.get("extras"), [])}
+	                              for r in items], promo_codes=parse(promo_codes, None))
+
+
+@frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def book(quote_ids, guest, payment_method: str | None = None, confirm_without_payment: int = 0,
          notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
@@ -237,8 +251,12 @@ def propose_modification(reservation: str, changes, basis: str = "CURRENT", basi
 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
-def apply_modification(proposal_token: str, reason: str, override_amount: str | None = None):
-	return modification.apply(proposal_token, reason=text(reason, 500), override_amount=override_amount or None)
+def apply_modification(proposal_token: str, reason: str, override_amount: str | None = None,
+                       override_restrictions: int = 0):
+	"""``override_restrictions``: sell a change the restrictions refuse (``restriction.edit``,
+	audited; G-48)."""
+	return modification.apply(proposal_token, reason=text(reason, 500), override_amount=override_amount or None,
+	                          override_restrictions=bool(as_int(override_restrictions, 0)))
 
 
 @frappe.whitelist()
@@ -335,20 +353,26 @@ def resolve_guest_change(request: str, action: str, reason: str, settlement: str
 
 @frappe.whitelist()
 def ari_grid(property: str, start: str, days: int = 14, contract: str | None = None, market: str | None = None,
-             channel: str | None = None, rate_plan: str | None = None):
-	return grid_svc.grid(property, start, days, contract or None, market or None, channel or None, rate_plan or None)
+             channel: str | None = None, rate_plan: str | None = None, channel_scope: str | None = None):
+	return grid_svc.grid(property, start, days, contract or None, market or None, channel or None, rate_plan or None,
+	                     channel_scope=channel_scope or None)
 
 
 @frappe.whitelist(methods=["POST"])
-def ari_bulk_update(property: str, start: str, end: str, room_types, weekdays=None, contract: str | None = None,
+def ari_bulk_update(property: str, start: str, end: str, room_types=None, weekdays=None, contract: str | None = None,
                     market: str | None = None, channel: str | None = None, rate_plan: str | None = None,
-                    restrictions=None, inventory=None, rate=None):
+                    restrictions=None, inventory=None, rate=None, channel_scope: str | None = None,
+                    hotel_level: int = 0):
+	"""``hotel_level``: one cell without a room type (hotel- or, with a market, market-level;
+	restrictions only). ``channel_scope``: the Booking Engine, the Call Center or both instead of
+	one sales channel (G-48)."""
 	scope.assert_property(property)
-	return grid_svc.bulk_update(property, start, end, room_types=parse(room_types, []),
+	return grid_svc.bulk_update(property, start, end, room_types=parse(room_types, []) or [],
 	                            weekdays=parse(weekdays, None) or None, contract=contract or None,
 	                            market=market or None, channel=channel or None, rate_plan=rate_plan or None,
 	                            restrictions=parse(restrictions, None), inventory=parse(inventory, None),
-	                            rate=parse(rate, None))
+	                            rate=parse(rate, None), channel_scope=channel_scope or None,
+	                            hotel_level=bool(as_int(hotel_level, 0)))
 
 
 # ─── limited extras (G-19) ───────────────────────────────────────────────

@@ -546,6 +546,9 @@ COMMERCIAL_SPECS = [
 		F("market", "Link", "Market", "TEX Market"),
 		F("rate_plan", "Link", "Rate plan", "Rate Plan"),
 		F("sales_channel", "Link", "Sales channel", "TEX Sales Channel"),
+		# a product surface instead of one sales channel (G-48, ADR-057); never both
+		F("channel_scope", "Select", "Channel scope", ["", "Booking Engine", "Call Center",
+		                                               "Booking Engine + Call Center"]),
 		CB(),
 		F("stop_sell", "Select", "Stop sell", ["", "STOP", "OPEN"], in_list_view=1),
 		F("stop_sell_mode", "Select", "Stop sell mode", ["", "STAY_THROUGH", "ARRIVAL", "DEPARTURE"]),
@@ -556,6 +559,9 @@ COMMERCIAL_SPECS = [
 		F("release_days", "Int", "Release days"),
 		F("min_advance", "Int", "Min advance days"),
 		F("max_advance", "Int", "Max advance days"),
+		# the booking window: the sale dates on which this night is sold (G-48, ADR-057)
+		F("book_from", "Date", "Bookable from (sale date)"),
+		F("book_to", "Date", "Bookable until (sale date)"),
 		F("scope_key", "Data", "Scope key", read_only=1, unique=1, hidden=1),
 		F("note", "Data", "Note"),
 	], perms=COMMERCIAL, autoname="hash", sort_field="restriction_date"),

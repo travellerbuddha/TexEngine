@@ -28,6 +28,9 @@
  "dash.period": "{from} – {to}",
  "dash.pf.alert.all_rooms": "Все типы номеров",
  "dash.pf.alert.channel": "Канал: {channel}",
+ "dash.pf.scope.be": "Модуль бронирования",
+ "dash.pf.scope.cc": "Колл-центр",
+ "dash.pf.scope.both": "Модуль бронирования + колл-центр",
  "dash.pf.alert.left": {
   "few": "осталось {count} из {capacity}",
   "many": "осталось {count} из {capacity}",

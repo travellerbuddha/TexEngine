@@ -259,6 +259,8 @@
  "res.mod.override_amount": "Preț final",
  "res.mod.override_hint": "Înlocuiește totalul calculat. Se auditează.",
  "res.mod.override_invalid": "Introduceți o sumă de zero sau mai mare.",
+ "res.mod.override_restrictions": "Vinde în ciuda restricțiilor",
+ "res.mod.override_restrictions_hint": "Această modificare încalcă: {rules}. Puteți edita restricțiile, deci o puteți vinde oricum; motivul este înregistrat și auditat.",
  "res.mod.recalculate": "Recalculează",
  "res.mod.repropose": "Verifică din nou",
  "res.mod.reset": "Anulează modificările mele",

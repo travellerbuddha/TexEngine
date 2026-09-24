@@ -114,8 +114,7 @@ def build_days(mapping, start: date, end: date) -> list[AriDay]:
 	contract, version = _contract_version(m, now)
 	pdays, allot = avail.pool_days(m.property, m.room_type, days)
 	cells = avail.restriction_cells(m.property, days[0], days[-1])
-	eff = rs.effective(cells, rs.RestrictionScope(room_type=m.room_type, contract=contract, market=m.market,
-	                                              rate_plan=m.rate_plan, channel=m.sales_channel), days)
+	eff = rs.effective(cells, avail.scope_for(m.room_type, contract, m.market, m.rate_plan, m.sales_channel), days)
 	out = []
 	for p in pdays:
 		a = inv.day_availability(p, allot, contract, now.date())
@@ -132,8 +131,11 @@ def build_days(mapping, start: date, end: date) -> list[AriDay]:
 					continue                          # e.g. a rate plan the mapping must name: the day is sent closed
 				if q.sellable:
 					rates.append((adults, D(q.totals["total"])))
-		closed = bool(p.closed or not version or not rates or (e and e.stop_sell))
-		out.append(AriDay(p.day, max(0, a.available), closed, bool(e and e.cta), bool(e and e.ctd),
+		# the sale-date rules as of today's sale (G-48): a night outside its booking window is not
+		# sold; an arrival inside its release or outside its advance window is closed to arrival
+		closed = bool(p.closed or not version or not rates or (e and (e.stop_sell or e.sale_closed(now.date()))))
+		cta = bool(e and (e.cta or e.arrival_closed(now.date())))
+		out.append(AriDay(p.day, max(0, a.available), closed, cta, bool(e and e.ctd),
 		                  e.min_los if e else None, e.max_los if e else None, tuple(rates), m.sell_currency))
 	return out
 
@@ -337,6 +339,36 @@ def allotment_boundaries(today: date | None = None) -> int:
 				night = today + timedelta(days=days - 1)
 				if getdate(a.date_from) <= night <= getdate(a.date_to):
 					n += mark_dirty(prop, [a.room_type], night, night, reason="allotment boundary")
+	return n
+
+
+def restriction_boundaries(today: date | None = None) -> int:
+	"""Scheduler (just after the site's midnight): the days whose sale-date restrictions change
+	today are queued for the channels at once (G-48): a booking window opening today
+	(``book_from``) or closed since yesterday (``book_to``), and an arrival entering its release
+	or minimum-advance period or its maximum-advance window today. The daily resync compares the
+	whole horizon later anyway; this sends the change at midnight."""
+	today = getdate(today or now_datetime())
+	n = 0
+	for prop in channel_properties():
+		# only the cells with a sale-date rule
+		rows = frappe.get_all("TEX ARI Restriction", filters={"property": prop, "restriction_date": (">=", today)},
+		                      or_filters={"book_from": ("is", "set"), "book_to": ("is", "set"),
+		                                  "release_days": (">", 0), "min_advance": (">", 0), "max_advance": (">", 0)},
+		                      fields=["room_type", "restriction_date", "book_from", "book_to", "release_days",
+		                              "min_advance", "max_advance"])
+		due: dict[str | None, set[date]] = {}
+		for r in rows:
+			day = getdate(r.restriction_date)
+			lead = (day - today).days
+			if ((r.book_from and getdate(r.book_from) == today)
+			        or (r.book_to and getdate(r.book_to) == today - timedelta(days=1))
+			        or any(v and lead == int(v) - 1 for v in (r.release_days, r.min_advance))
+			        or (r.max_advance and lead == int(r.max_advance))):
+				due.setdefault(r.room_type or None, set()).add(day)
+		for room_type, days in due.items():
+			n += mark_dirty(prop, [room_type] if room_type else None, min(days), max(days),
+			                reason="restriction boundary")
 	return n
 
 

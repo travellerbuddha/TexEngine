@@ -40,8 +40,11 @@ export interface ExtraRequest {
   service_dates?: string[]
 }
 
-export function quoteOffer(offer_key: string, extras: ExtraRequest[], promo_codes?: string[]) {
-  return tex<QuoteResult>("crs", "quote", { offer_key, extras, promo_codes }, { post: true })
+/** The rooms of one booking quoted together (G-84): a coupon's minimum basket is the whole
+ * booking's. One answer per room, in the order given. */
+export async function quoteRooms(rooms: { offer_key: string; extras: ExtraRequest[] }[], promo_codes?: string[]) {
+  const out = await tex<{ ok: boolean; rooms: QuoteResult[]; booking_basket: string | null }>("crs", "quote_rooms", { rooms, promo_codes }, { post: true })
+  return out.rooms
 }
 
 export function quoteSummary(quote_ids: string[], payment_method?: string) {

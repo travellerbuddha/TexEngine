@@ -27,6 +27,9 @@
  "dash.period": "{from} – {to}",
  "dash.pf.alert.all_rooms": "Toate tipurile de camere",
  "dash.pf.alert.channel": "Canal: {channel}",
+ "dash.pf.scope.be": "Motor de rezervări",
+ "dash.pf.scope.cc": "Call center",
+ "dash.pf.scope.both": "Motor de rezervări + call center",
  "dash.pf.alert.left": {
   "few": "au rămas {count} din {capacity}",
   "one": "a rămas {count} din {capacity}",

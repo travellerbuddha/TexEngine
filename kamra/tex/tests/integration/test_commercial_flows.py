@@ -499,6 +499,171 @@ class TestBookingLevelTerms(TexTestCase):
 			            idempotency_key="idem-blt-mix")
 
 
+def two_rooms_quoted_together(session: str, *, code: str | None = None, rooms=None) -> tuple[list[dict], dict]:
+	"""Search two rooms (2A+child 8, 1A) and quote them together, as the booking engine does."""
+	frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+	res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+	                    rooms=rooms or [{"adults": 2, "children": [8]}, {"adults": 1}], market="DE", promo_code=code,
+	                    session_id=session)
+	rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+	rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+	offer = next(o for o in res["properties"][0]["offers"]
+	             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
+	out = public.quote_rooms(site=SLUG, rooms=[{"offer_key": r["offer_key"], "extras": []}
+	                                            for r in sorted(offer["rooms"], key=lambda r: r["room_index"])],
+	                         session_id=session)
+	assert out["ok"], out
+	return out["rooms"], offer
+
+
+class TestBookingBasket(TexTestCase):
+	"""G-84 (ADR-057): a coupon's minimum basket is the whole booking's. Two rooms of 802.50 and
+	321.00 EUR are each below a 1 000 EUR minimum and qualify together (1 123.50): the booking
+	engine and the CRS quote the rooms of a booking together; a room quoted alone is priced
+	alone, and a booking whose rooms were priced otherwise than together is refused rather than
+	sold at another price. A change is judged with the other live rooms of the booking; a room
+	that is not changed keeps its locked price."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+
+	def _big(self, minimum=1000, code="BIG") -> str:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager sets up the code
+		doc = policy_api.save_record("TEX Promotion", {
+			"promotion_name": f"Code {code}", "property": fx.PROPERTY, "trigger": "Code", "code": code,
+			"value_type": "PERCENT", "value": 10, "applies_to": "ACCOMMODATION", "currency": "EUR",
+			"min_basket": minimum})
+		policy_api.activate("TEX Promotion", doc["name"], at=str(add_to_date(now_datetime(), minutes=-1)))
+		return doc["name"]
+
+	def _discounts(self, quotes) -> list:
+		return [D(q["quote"]["totals"]["discounts"]) for q in quotes]
+
+	def test_rooms_quoted_together_qualify_on_the_booking_basket(self):
+		promo = self._big()
+		quotes, _offer = two_rooms_quoted_together("g84-together", code="BIG")
+		self.assertEqual(self._discounts(quotes), [D("80.25"), D("32.10")])
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST,
+		                payment_method="Pay at Hotel", session_id="g84-together", idempotency_key="idem-g84-together")
+		self.assertEqual(D(b["total"]), D("1011.15"))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was sold
+		snap = json.loads(frappe.db.get_value("Reservation", b["rooms"][1]["reservation"], "tex_pricing_snapshot"))
+		self.assertEqual((snap["request"]["booking_basket"], snap["request"]["booking_rooms"], snap["basket"]),
+		                 ("1123.500000", 2, "321.000000"))                # recorded to 6 places
+		self.assertTrue(any(s["code"] == "BOOKING_BASKET" for s in snap["explanation"]))
+		reds = frappe.get_all("TEX Promotion Redemption", filters={"promotion": promo}, fields=["amount"])
+		self.assertEqual([D(r.amount) for r in reds], [D("112.35")])             # one use, both rooms' discount
+
+	def test_a_booking_below_the_minimum_gets_nothing(self):
+		self._big(minimum=1200)
+		quotes, _offer = two_rooms_quoted_together("g84-below", code="BIG")
+		self.assertEqual(self._discounts(quotes), [D("0"), D("0")])
+
+	def test_the_search_prices_a_full_offer_on_the_booking_basket(self):
+		self._big()
+		_quotes, offer = two_rooms_quoted_together("g84-search", code="BIG")
+		self.assertEqual(D(offer["total"]), D("1011.15"))
+
+	def test_rooms_quoted_alone_are_not_booked_below_the_booking_price(self):
+		self._big()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- an API client quotes each room on its own
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2, "children": [8]}, {"adults": 1}], market="DE", promo_code="BIG",
+		                    session_id="g84-alone")
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		offer = next(o for o in res["properties"][0]["offers"]
+		             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
+		ids = [public.quote(site=SLUG, offer_key=r["offer_key"], session_id="g84-alone")["quote_id"]
+		       for r in sorted(offer["rooms"], key=lambda r: r["room_index"])]
+		with self.assertRaisesRegex(frappe.ValidationError, "together"):
+			public.book(site=SLUG, quote_ids=ids, guest=GUEST, payment_method="Pay at Hotel", session_id="g84-alone",
+			            idempotency_key="idem-g84-alone")
+
+	def test_rooms_priced_together_are_booked_together(self):
+		self._big()
+		quotes, _offer = two_rooms_quoted_together("g84-part", code="BIG")
+		with self.assertRaisesRegex(frappe.ValidationError, "together"):
+			public.book(site=SLUG, quote_ids=[quotes[0]["quote_id"]], guest=GUEST, payment_method="Pay at Hotel",
+			            session_id="g84-part", idempotency_key="idem-g84-part")
+
+	def _booked(self, session: str) -> dict:
+		quotes, _offer = two_rooms_quoted_together(session, code="BIG")
+		return public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST,
+		                   payment_method="Pay at Hotel", session_id=session, idempotency_key=f"idem-{session}")
+
+	def test_a_change_keeps_the_discount_while_the_booking_qualifies(self):
+		self._big()
+		b = self._booked("g84-keep")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent adds a guest to room 2
+		room2 = b["rooms"][1]["reservation"]
+		p = modification.propose(room2, {"adults": 2})                   # 642.00 alone: below 1 000
+		code = next(x for x in p["proposed"]["promotions"] if x["code"] == "BIG")
+		self.assertTrue(code["applied"], code["reason"])
+		self.assertEqual(p["proposed"]["totals"]["total"], "577.80")
+		self.assertEqual(p["proposed"]["request"]["booking_basket"], "1444.500000")
+		modification.apply(p["proposal_token"], reason="second guest")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest extends room 2 on the manage page
+		up = public.manage_propose(token=b["manage_token"], reservation=room2, changes={"check_out": str(fx.d(6, 14))})
+		self.assertTrue(up["sellable"], up["warnings"])
+		self.assertEqual(up["new_total"], "770.40")                      # 856.00 alone, less 10 % with room 1
+
+	def test_a_change_below_the_minimum_loses_the_discount_on_the_changed_room_only(self):
+		self._big(minimum=1100)
+		b = self._booked("g84-drop")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent shortens room 2
+		room1, room2 = (r["reservation"] for r in b["rooms"])
+		p = modification.propose(room2, {"check_out": str(fx.d(6, 12))})   # 802.50 + 214.00 = 1 016.50
+		code = next(x for x in p["proposed"]["promotions"] if x["code"] == "BIG")
+		self.assertFalse(code["applied"])
+		self.assertIn("booking basket 1016.50 EUR (2 rooms)", code["reason"])
+		modification.apply(p["proposal_token"], reason="leaves a day early")
+		self.assertEqual(D(frappe.db.get_value("Reservation", room2, "tex_total_amount")), D("214.00"))
+		self.assertEqual(D(frappe.db.get_value("Reservation", room1, "tex_total_amount")), D("722.25"))  # locked
+
+	def test_a_change_is_judged_with_the_other_rooms_of_the_booking(self):
+		# each room qualifies alone (802.50 and 321.00 ≥ 300) and is booked with the discount; room 2
+		# shortened to 214.00 is below the minimum alone, not with room 1 (1 016.50)
+		self._big(minimum=300)
+		_quotes, b = two_rooms_book("g84-change", code="BIG")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent shortens room 2
+		room2 = b["rooms"][1]["reservation"]
+		p = modification.propose(room2, {"check_out": str(fx.d(6, 12))})
+		code = next(x for x in p["proposed"]["promotions"] if x["code"] == "BIG")
+		self.assertTrue(code["applied"], code["reason"])
+		self.assertEqual(p["proposed"]["totals"]["total"], "192.60")
+
+	def test_the_simulator_judges_the_booking_as_recorded(self):
+		self._big()
+		b = self._booked("g84-sim")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a revenue manager simulates room 2
+		room1, room2 = (r["reservation"] for r in b["rooms"])
+		at = str(now_datetime())
+		first = modification.simulate(room2, at)
+		self.assertEqual(first["simulated"]["totals"]["total"], "288.90")   # 321.00 less 10 %, with room 1
+		booking.cancel_reservation(room1, reason="room 1 no longer needed")
+		self.assertEqual(modification.simulate(room2, at)["simulated"]["totals"]["total"], "288.90")  # the same answer
+
+	def test_the_call_center_quotes_the_rooms_of_a_booking_together(self):
+		from kamra.tex.api import crs as crs_api
+
+		self._big()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a call-centre agent
+		res = crs_api.search(check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                     rooms=[{"adults": 2, "children": [8]}, {"adults": 1}], market="DE", channel="CALL_CENTER",
+		                     properties=[fx.PROPERTY], promo_codes=["BIG"])
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		offer = next(o for o in res["properties"][0]["offers"]
+		             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
+		out = crs_api.quote_rooms(rooms=[{"offer_key": r["offer_key"], "extras": []} for r in offer["rooms"]])
+		self.assertEqual(self._discounts(out["rooms"]), [D("80.25"), D("32.10")])
+		b = crs_api.book(quote_ids=[q["quote_id"] for q in out["rooms"]], guest=dict(GUEST),
+		                 payment_method="Pay at Hotel")
+		self.assertEqual(D(b["total"]), D("1011.15"))
+
+
 class TestCouponLimits(TexTestCase):
 	"""G-07: the per-guest limit is enforced when the booking is made (the guest is known
 	only then). G-09: repricing a booking never counts its own coupon use, and a

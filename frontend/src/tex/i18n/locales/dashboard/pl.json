@@ -28,6 +28,9 @@
  "dash.period": "{from} – {to}",
  "dash.pf.alert.all_rooms": "Wszystkie typy pokoi",
  "dash.pf.alert.channel": "Kanał: {channel}",
+ "dash.pf.scope.be": "Silnik rezerwacji",
+ "dash.pf.scope.cc": "Call center",
+ "dash.pf.scope.both": "Silnik rezerwacji + call center",
  "dash.pf.alert.left": {
   "few": "zostały {count} z {capacity}",
   "many": "zostało {count} z {capacity}",

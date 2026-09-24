@@ -269,6 +269,8 @@
  "res.mod.override_amount": "Итоговая цена",
  "res.mod.override_hint": "Заменяет рассчитанный итог. Фиксируется в аудите.",
  "res.mod.override_invalid": "Введите сумму от нуля.",
+ "res.mod.override_restrictions": "Продать вопреки ограничениям",
+ "res.mod.override_restrictions_hint": "Изменение нарушает: {rules}. Вы можете редактировать ограничения, поэтому можете продать; причина записывается в журнал аудита.",
  "res.mod.recalculate": "Пересчитать",
  "res.mod.repropose": "Проверить снова",
  "res.mod.reset": "Отменить мои изменения",

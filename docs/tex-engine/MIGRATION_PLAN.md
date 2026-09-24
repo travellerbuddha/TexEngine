@@ -26,7 +26,7 @@ preserve IDs, keep compatibility, test the migration path, never casually delete
 
 ## 2. Patches
 
-T1–T10 are the original migration tasks. Number p38 is reserved for a parallel branch. T5 was not needed (TEX boards are contract-level codes
+T1–T10 are the original migration tasks. p38 (restriction scope, G-48) came from a parallel branch. T5 was not needed (TEX boards are contract-level codes
 RO/BB/HB/FB/AI/UAI, independent of legacy Meal Plans). T8 is the opt-in API
 `kamra.tex.api.contracts.legacy_draft` (`kamra/tex/commercial/legacy.py`): a Draft "Legacy BAR"
 contract per hotel from its Room Type prices and Seasons, never auto-published. Numbers p26, p30
@@ -73,6 +73,7 @@ whole chain on a Kamra database.
 | `p35_money_field_types` | Checks the 9-place decimal columns and every published payload's hash; changes nothing (G-72). | checks only | `test_money_fields.TestPublishedAndSoldTermsAreUnchanged` |
 | `p36_g92_review` | Sets live the TEX hotels TEX already sold (a published contract or a TEX booking); any other TEX hotel is onboarding until an administrator sets it live (G-92 review, ADR-058). | idempotent | `TestUpgradeFromKamra`, `test_legacy_pricing_review.TestGoLive` |
 | `p37_crm_privacy` | Removes funnel e-mail hashes kept without marketing consent. Masks the pricing internals and guest totals in the change history. Lists the DocTypes whose role permissions were customised, to check who reads permlevel 1 (G-81, G-95, ADR-056). | idempotent | `test_crm_privacy.TestAbandonedPrivacy`, `test_crm_privacy.TestPricingInternalsOutsideTex` |
+| `p38_restriction_scope` | Restriction cells gain a channel scope (Booking Engine, Call Center or both) and a booking window; the DocType sync adds the columns blank. Checks that every stored cell keeps its scope key (a key appends the channel scope only when set) and re-keys a wrong one (G-48, ADR-057). | idempotent | `test_restrictions.TestGridCells.test_p38_keeps_every_key_and_rekeys_only_a_wrong_one` |
 | `p39_lookup_indexes` | Creates the composite indexes that replace the single-column ones on `Reservation.tex_booking`, `TEX Extra Allocation.reservation` and `TEX Communication.email_queue`, which Frappe's schema sync drops (ADR-058). | idempotent | `TestP03Indexes` |
 
 ## 3. Compatibility shims
