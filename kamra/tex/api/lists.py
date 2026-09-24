@@ -298,7 +298,8 @@ def communications(property: str | None = None, channel: str | None = None, stat
 		{**params, "_limit": as_int(limit, 50, lo=1, hi=200), "_start": as_int(start, 0, lo=0)}, as_dict=True)
 	for r in rows:
 		r["sent_at"], r["creation"] = _day(r["sent_at"]), _day(r["creation"])
-		r["actor_name"] = get_fullname(r["actor"]) if r["actor"] else None
+		# a message sent while a guest booked online has the visitor ("Guest") as its actor
+		r["actor_name"] = get_fullname(r["actor"]) if r["actor"] and r["actor"] != "Guest" else None
 	return {"rows": rows, "total": total}
 
 
