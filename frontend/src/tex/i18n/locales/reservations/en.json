@@ -296,6 +296,7 @@
  "res.rev.to": "to",
  "res.sim.actual": "Actual · sold {date}",
  "res.sim.button": "Simulate",
+ "res.sim.contract_now": "This contract is {status} now; this is what it sold at then.",
  "res.sim.difference_hint": "Simulated minus actual",
  "res.sim.not_sellable": "Not sellable at that time",
  "res.sim.readonly": "Read-only: nothing is saved or changed.",

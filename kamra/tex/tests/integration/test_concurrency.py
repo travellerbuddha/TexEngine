@@ -106,10 +106,11 @@ class TestConcurrentLastRoom(IntegrationTestCase):
 
 class TestConcurrentDeskAndTexBooking(IntegrationTestCase):
 	"""G-49: a TEX booking of the last Deluxe room is in flight (its nights locked, not yet
-	committed) when a reservation for the same nights is written outside TEX (Desk form, REST,
-	import). The outside write waits for TEX's inventory lock, then sees the room is gone: the
-	hotel is never oversold. (Before G-49 the outside write took no lock and was checked only
-	against its own snapshot, so both were kept.)"""
+	committed) when a reservation for the same nights is written outside TEX (a migration import:
+	since G-92 the Desk form and REST cannot create one at a TEX hotel, ADR-052). The outside write
+	waits for TEX's inventory lock, then sees the room is gone: the hotel is never oversold.
+	(Before G-49 the outside write took no lock and was checked only against its own snapshot, so
+	both were kept.)"""
 
 	@classmethod
 	def setUpClass(cls):
@@ -168,11 +169,15 @@ class TestConcurrentDeskAndTexBooking(IntegrationTestCase):
 			frappe.init(site=site, sites_path=sites_path)
 			frappe.connect()
 			try:
-				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a desk user
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- an admin importing bookings
 				tex_holds.wait(timeout=30)
-				frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
-				                "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
-				                "adults": 2, "status": "Confirmed"}).insert()
+				from kamra.tex.legacy import flag_import
+
+				doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
+				                      "room_type": self.dlx, "check_in_date": self.ci, "check_out_date": self.co,
+				                      "adults": 2, "status": "Confirmed", "amount_after_tax": 240})
+				flag_import(doc)
+				doc.insert()
 				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each racer is its own request
 				results["desk"] = "booked"
 			except Exception as e:

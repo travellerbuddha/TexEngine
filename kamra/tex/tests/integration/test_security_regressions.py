@@ -513,10 +513,13 @@ class TestLegacyNightAudit(TexTestCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler runs as Administrator
 		self.tex = b["rooms"][0]["reservation"]
 		guest = frappe.db.get_value("Reservation", self.tex, "guest")
-		self.legacy = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": guest,
-		                              "room_type": self.f["room_types"]["DLX"], "check_in_date": fx.d(6, 10),
-		                              "check_out_date": fx.d(6, 12), "status": "Confirmed"}).insert(
-			ignore_permissions=True).name
+		# a stay the legacy engine sold before the hotel joined TEX (since G-92 nothing else writes
+		# one at a TEX hotel, ADR-052)
+		with mock.patch("kamra.tex.legacy.is_tex_hotel", return_value=False):
+			self.legacy = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": guest,
+			                              "room_type": self.f["room_types"]["DLX"], "check_in_date": fx.d(6, 10),
+			                              "check_out_date": fx.d(6, 12), "status": "Confirmed"}).insert(
+				ignore_permissions=True).name
 		frappe.db.set_value("Property", fx.PROPERTY, "no_show_charge", "First Night")
 
 	def test_night_audit_leaves_tex_stays_to_tex(self):

@@ -296,6 +296,7 @@
  "res.rev.to": "auf",
  "res.sim.actual": "Tatsächlich · verkauft {date}",
  "res.sim.button": "Simulieren",
+ "res.sim.contract_now": "Dieser Vertrag ist jetzt {status}; so hat er damals verkauft.",
  "res.sim.difference_hint": "Simuliert minus tatsächlich",
  "res.sim.not_sellable": "Zu diesem Zeitpunkt nicht verkaufbar",
  "res.sim.readonly": "Nur Ansicht: nichts wird gespeichert oder geändert.",

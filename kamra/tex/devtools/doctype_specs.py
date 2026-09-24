@@ -490,6 +490,8 @@ COMMERCIAL_SPECS = [
 		F("code", "Data", "Code", in_list_view=1),
 		F("property", "Link", "Property", "Property"),
 		F("status", "Select", "Status", ["Reserved", "Committed", "Released"], default="Reserved", in_list_view=1),
+		# when the use was given back: coupon usage as of a past moment counts it until then (G-51)
+		F("released_at", "Datetime", "Released at"),
 		CB(),
 		F("booking", "Link", "Booking", "TEX Booking"),
 		F("reservation", "Link", "Reservation", "Reservation"),

@@ -1650,6 +1650,9 @@ sends:
 cutoff also gives the rooms back; a reservation books only its own hotel's room types; a service
 flag covers one save; deadlocks of desk writes, channel bookings and imports; channels hear
 allotment deadlines at the site's midnight.*
+*Amended by ADR-052 (G-92): a Desk or REST insert at a TEX hotel is refused, and so is a change of
+a TEX hotel stay's nights, room type or hotel outside TEX. The writes outside TEX that still take
+the inventory lock are migration imports and status moves into a live status.*
 
 **Context.** G-49 (R-17).
 - The legacy `Reservation.validate_type_capacity` (physical rooms of the room type times the
@@ -2035,6 +2038,122 @@ the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as 
   `test_a_snapshot_sold_before_g56_pins_its_line_rates`; unit
   `TestDateOfBirthAfterTheReference` (3), `TestLegacySnapshotLinePins` (3).
 
+## ADR-052 A TEX hotel's reservation is created and changed only by TEX; a migration import keeps the amount it carries
+**Context.** G-92 (R-01, R-02, R-05), found by the G-49 review.
+- Front Desk, Hotel Admin and Kamra Agent have create and write permission on Reservation (the
+  legacy PMS needs it). ADR-028 refused the legacy selling endpoints for a TEX hotel, but not the
+  generic insert: the Desk form, REST (`POST /api/resource/Reservation`, `frappe.client.insert`)
+  and Frappe's data import still wrote a TEX hotel's reservation. Since ADR-048 it took TEX's
+  inventory lock, but its price came from the legacy auto-price (`Reservation.apply_pricing`,
+  float `Room Type.base_price`), not from TEX contracts, markups, taxes or payments, and it had
+  no TEX price lock.
+- An existing stay that TEX did not price had the same hole. A stay the legacy engine sold before
+  its hotel joined TEX is unlocked (patch p04 locked only the stays that existed when TEX was
+  installed). A Desk, REST or legacy PMS change of its dates or room type (`amend_stay`,
+  `move_reservation`) was re-priced by the legacy engine.
+- Two options: refuse such writes (keeping migration imports, ADR-028), or price them through
+  TEX. Pricing needs a market, a channel, a contract, a board, a rate plan and a party with child
+  ages. The Desk form holds none of them in TEX's terms, and TEX never picks a market or contract
+  silently. TEX already has a staff booking path (CRS / Call Center) with capabilities, channel
+  entitlement (ADR-050), payments and audit. A second, weaker path would duplicate it.
+
+**Decision.** Refuse; keep the migration importers, with the amount they carry.
+- *New reservations* (`Reservation.before_insert` → `kamra.tex.legacy.guard_new_reservation`).
+  At a TEX hotel (`is_tex_hotel`) only these may insert a reservation:
+  - the TEX booking service (`flags.tex_sale`);
+  - a channel's sale (`flags.tex_channel_accept`, ADR-039);
+  - a migration import (`legacy.flag_import`).
+
+  Every other insert is refused, whatever its status, with a message that points to TEX
+  (Reservations → CRS or Call Center). This covers the Desk form (and its Duplicate), REST,
+  Frappe's Data Import and legacy code.
+  - *Every status is refused*, not only live ones. A quote or waitlist entry would become a sale
+    later. A history record counts in reports, guest statistics, segments and loyalty. History
+    comes in through the importers.
+  - *When the check runs.* It runs before the inventory lock (ADR-048) and before naming. It also
+    runs for `ignore_validate` inserts.
+  - *The flags cannot be forged.* They live only in the process: Frappe drops `flags` from a
+    payload, and pricing source or lock fields in a payload change nothing. The controller pops
+    each flag on the insert it was set for (the G-49 pattern).
+  - *Roles are unchanged.* The roles keep their Frappe permissions, which hotels outside TEX
+    need. The refusal is the hotel's rule, so platform administrators are refused too.
+- *Migration imports.* `kamra.api.import_bookings` and `kamra.migrate.run_import` (live and
+  history rows) call `flag_import(doc, final status)`. At a TEX hotel the row:
+  - needs `price.override` at the hotel, because it sets a price;
+  - is never auto-priced (`auto_price` 0);
+  - keeps the amount the file carries, as a Decimal quantized to the hotel's currency
+    (`amount_after_tax`, `tex_total_amount`, `tex_currency`). `migrate` now reads the amount as a
+    Decimal (it was a float). A live row needs a positive amount. A history row (Checked Out,
+    Cancelled, No Show) may come without one;
+  - is recorded with pricing source `Imported`. This is a new Select option, synced from the
+    DocType JSON. No patch is needed: existing rows keep their source;
+  - is price-locked (`tex_price_locked`, `tex_locked_at`);
+  - is audited (`reservation.import`: final status, amount, currency, room type, dates).
+
+  At a hotel outside TEX both importers behave as before (a row without an amount is
+  auto-priced).
+- *The legacy auto-price never runs at a TEX hotel.* `apply_pricing` returns for a stay that is
+  at a TEX hotel, or was until this save.
+- *Existing stays* (`kamra.tex.hooks.guard_commercial_change`). A stay that is at a TEX hotel, or
+  was until this save, changes these fields only through the TEX services
+  (`flags.tex_modification`: modification, cancellation, confirmation, add-ons, channel updates):
+  - its dates, room type and party (adults, children, child ages);
+  - its board or meal plan, rate plan, market and voucher;
+  - its amounts;
+  - its commercial record (`tex_*`, lock included);
+  - its hotel. A stay moved into a TEX hotel would be a sale outside TEX; one moved out would be
+    re-priced by the legacy engine.
+
+  The guard covers every save: the Desk form, REST `PUT`, `frappe.client.set_value`,
+  `amend_stay`, a `move_reservation` to another room type, and group or other legacy actions.
+  - *A TEX-priced stay* keeps the ADR-010 lock and its message ("use Modify reservation").
+  - *A stay TEX did not price* (sold by the legacy engine before the hotel joined TEX, or
+    imported) cannot be re-priced by TEX: the modification service needs a TEX snapshot. The
+    guard refuses it with "keep the stay as it is, or cancel it and book the new stay in TEX".
+  - `Reservation.validate` calls the guard first, so nothing is locked or priced for a refused
+    save. The `validate` doc event checks the values the save will write again.
+  - *Other edits still work:* notes, the booker, a room of the same type, check-in and
+    check-out. So do status moves: a waitlisted legacy stay is confirmed under TEX inventory
+    (ADR-048), and a stay TEX did not price is cancelled with the legacy fee (ADR-010).
+- *Hotels outside TEX are unchanged:* the legacy auto-price, the legacy import, and the ADR-010
+  lock of stays locked by p04.
+
+**Consequences.**
+- Staff book a TEX hotel's stays in TEX. The Desk form still shows and annotates them.
+- A stay TEX did not price is not extended, shortened or moved to another room type outside TEX.
+  Staff cancel it (legacy cancellation) and book the new stay in TEX. A departure through the
+  legacy check-out does not change the dates and still works.
+- *ADR-048.* Outside TEX, only two kinds of write still take TEX's inventory lock at a TEX hotel:
+  a migration import, and a status move into a live status. A Desk or REST insert, or a change of
+  nights, room type or hotel, is refused before the inventory guard. The guard, and its rule that
+  a stay keeps the nights it holds, stay as defense in depth. The G-49 tests were adapted: their
+  outside-TEX writer is an import, and "leaving early over closed nights" (M1) is now a staff
+  modification.
+- Imported stays are price-locked, so the legacy scheduled jobs leave them to TEX
+  (`is_tex_reservation`, ADR-028: no legacy night audit), like p04's legacy-locked stays.
+- Frappe's generic Data Import cannot create a reservation at a TEX hotel. The migration
+  importers can. A TEX-native importer for open bookings (priced by contract) is still a
+  data-migration gap.
+- Writes that bypass validation (`db_set`, SQL, `ignore_validate` saves of an existing stay)
+  bypass the change guard, as they bypass every rule. A new reservation is guarded in
+  `before_insert`, which such inserts still run.
+- Tests: `test_legacy_pricing` (15; the 10 that the fix covers fail first):
+  - Desk inserts by Front Desk, Hotel Admin and Kamra Agent users, and by a platform
+    administrator, refused;
+  - every status refused;
+  - a forged REST payload refused;
+  - `apply_pricing` never prices a TEX hotel;
+  - imports (`import_bookings`, and `run_import` with history rows): recorded as Imported, at a
+    Decimal amount, audited; a live row without an amount refused; `price.override` required;
+  - changes of TEX-priced and legacy stays through the Desk form, REST `PUT`, `set_value`,
+    `amend_stay` and `move_reservation` refused; a move into or out of a TEX hotel refused;
+  - other edits still work;
+  - the TEX CRS booking unaffected;
+  - a hotel outside TEX keeps the legacy auto-price and import.
+
+  G-49 tests were adapted in `test_inventory`, `test_concurrency` and the G-04 night-audit
+  fixture.
+
 ## ADR-053 The audit trail records what changed (compact diffs), for which hotels, and how it arrived
 **Context.** G-74 (R-54): the audit trail missed changes and context. Draft contract edits
 (`save_version`) were not audited and a publish recorded only its payload hash; ARI bulk edits
@@ -2141,3 +2260,129 @@ was given access to a hotel; every payment outcome was recorded as coming from a
   bounds, inventory and rates, limited extras; payment rules on API and Desk paths, no secret in any event,
   one event per change; payment sources for gateway return, notification, a forged channel,
   staff, sandbox page and scheduler), unit `test_audit_changes` (11).
+
+## ADR-054 Modifications and the simulator are deterministic: a sale time belongs to the basis, the past is read as it was then, a proposal belongs to whoever made it
+
+**Context.** G-51 (R-21, R-22).
+- *Sale times ignored.* `sale_at` was an editable field of a change and was dropped without a
+  word. `basis_sale_at` was accepted with every basis and used only by HISTORICAL_SALE_DATE. The
+  simulator accepted any `sale_at`: a future one priced "what it will cost", an empty one failed
+  with an HTTP 500.
+- *Untested money paths.* HISTORICAL_SALE_DATE and the manual override had no end-to-end test.
+  `apply()` checked `price.override` for an override amount but not for the HISTORICAL basis,
+  which only `propose()` checked: a user whose right was withdrawn between the two still applied
+  a price no longer on sale.
+- *The simulator read two things live.* Extras and taxes (G-20), markups, promotions and FX
+  (revisions and rate tables as of the sale time) and the market, channels and sale window of the
+  version live then (G-50) were already as of the sale time. The contract status was not:
+  `candidate_contracts` kept only contracts Active now, so a contract archived since could not be
+  simulated for a time it sold, and one suspended at that time was simulated as selling. Coupon
+  usage was not either: a use given back later made a code apply that did not apply then, and a
+  use made later made it fail. The same status problem hit the ORIGINAL_SALE_DATE basis: after a
+  stop sale or an archive, the contract that sold the stay was no longer a candidate.
+- *Proposal tokens were bearer tokens.* Any user with `reservation.modify` at the hotel could
+  apply another user's proposal. Staff could apply a guest's proposal. A guest could submit a
+  staff proposal on the manage page, where it was re-derived on its own basis. With
+  HISTORICAL_SALE_DATE, that meant a price no longer on sale, paid online, with no
+  `price.override` check on the guest's side.
+
+**Decision.**
+- *A sale time belongs to the basis.* A change carries none: `sale_at` is not in `EDITABLE`, and a
+  change naming one is refused with the way to do it (choose the historical sale date basis).
+  `basis_sale_at` is refused with any basis but HISTORICAL_SALE_DATE. The historical sale date
+  and the simulator's sale time are checked on the server (`modification.past_sale_time`): given,
+  a valid date and time, not in the future. "Modify the sale date" (R-21) is therefore a change
+  priced on HISTORICAL_SALE_DATE. Its revision is of type *Sale Date* (or *Multiple* with other
+  changes), and it records the basis and its sale time. The reservation's own `tex_sale_at` (when
+  it was sold) never moves.
+- *Who may price as of another time.* Pricing a change as if sold at another moment sets what the
+  guest pays at a price that is not on sale today. That is an override, so it needs
+  `price.override` at the hotel, on propose and again on apply: a token carries the change, not
+  the right (as ADR-050 does for product changes). A manual amount also needs `price.override` on
+  apply, and a reason. No new capability: the spec ties the historical basis to the override
+  right, and a separate capability would be granted to the same revenue managers. The simulator
+  writes nothing: it needs `price.view` and, because it shows the reservation's actual total and
+  sale time, `reservation.view` (new). It does not need `price.override`.
+- *A contract's status at a past moment* comes from the audit trail. `TEXContract.on_update`
+  audits every status change as `contract.status` (old and new status), on every path (publish,
+  the status actions, any save), in the same transaction, and has done so since the first
+  release. Audit events are immutable: they cannot be edited or deleted. `versions.status_at`
+  (pure) reads them:
+  - the new status of the last change at or before the moment;
+  - before every change, the old status of the first one (what it replaced);
+  - with no change recorded, the current status.
+
+  A status-history table would duplicate these rows and need a backfill from them, so none was
+  added. `contracts.statuses_at` loads the changes of a hotel's contracts in one query.
+- *Where the past status applies.* `candidate_contracts(historical=True)` keeps the contracts that
+  were Active at the sale time (a never-published Draft never sold). It is used by:
+  - the simulator;
+  - ORIGINAL_SALE_DATE and HISTORICAL_SALE_DATE;
+  - CURRENT re-derived at the moment it was priced (a guest's paid or approved change, ADR-044).
+
+  Live selection keeps the live status (search, quotes, bookings, channels, a staff CURRENT
+  change): a stop sale acts now (ADR-045, unchanged). A guest who accepted a price and paid by its
+  deadline therefore gets the change even if the contract was suspended in between. ADR-045 keeps
+  modifications of sold stays out of a stop sale; availability and restrictions are still checked
+  live under the locks.
+- *Coupon uses at a past moment* (simulator only): a limited promotion's uses are those held
+  then. That is every redemption made by then and not released by then; the booking's own uses
+  are still excluded (G-09). `TEX Promotion Redemption.released_at` is new (patch p34). The
+  controller writes it once, when a use is released, and refuses to take a released use again (a
+  new use is a new redemption). p34 copies `modified` into it for uses released before, because
+  nothing writes a released row. A row without it falls back to `modified`. Modifications count
+  uses as they are now: a code a change keeps or adds is recorded under today's limits by
+  `sync_redemptions` (G-09), so pricing it on a past count would promise a discount the apply then
+  refuses.
+- *What "as of the sale time" covers in the simulator:*
+  - the contracts Active then; the version live then, its frozen payload and selling terms (G-50);
+  - markups, promotions and their limits, extras, the tax policy, FX policies and provider rates
+    (G-20, ADR-031);
+  - coupon uses held then.
+
+  Not as of then:
+  - the stay itself: the reservation's current request, channel and guest (the booking's coupon
+    key, else the guest's e-mail or phone now);
+  - the hotel's group, which decides whether group-wide promotions apply;
+  - availability, restrictions and the capacity of limited extras, which are not checked (the
+    stay is sold already).
+
+  The answer names the contract that sold then and its status now; the simulator dialog says when
+  that contract no longer sells.
+- *A proposal belongs to whoever made it.* A proposal token names:
+  - its `origin` (`staff`, or `guest` for the manage page);
+  - its proposer (`by`);
+  - its hotel and booking.
+
+  Staff apply only their own proposals (`require_proposer`), at the hotel and booking named:
+  another user's is refused, a guest's too, and so is a token re-pointed at another reservation.
+  The manage page accepts only a guest's proposal (`guest_changes.submit`, after the booking's own
+  guards, so a booking waiting for its payment still says so first), and its booking is proven by
+  the manage token (`_own_reservation`, and `submit` checks the reservation's booking).
+  The guest path applies only CURRENT proposals. Stored proposals (`TEX Guest Change Request`:
+  verified and stored by the server when the guest submitted) apply on payment or staff approval
+  as before. A token made before this change names nobody and is refused. It expires within
+  `PROPOSAL_TTL_MINUTES` (30) anyway. ADR-044's lock order (booking → reservation → inventory) is
+  unchanged: the proposer check needs no lock, and the hotel and booking check reads the locked
+  reservation.
+- *Explained.* The `reservation.modify` audit adds the pricing sale time. For an override it also
+  records the computed total next to the amount set (`computed_total`, `override`).
+
+**Consequences.**
+- Historical selection depends on the `contract.status` audit rows. A status written behind the
+  controller (a direct DB write) is invisible to it, as it is to the audit: such writes are not
+  supported. The G-74 audit work must keep `contract.status` as it is (action, reference, old and
+  new status).
+- The simulator's answer for a past moment no longer changes with later archives, stop sales or
+  coupon uses. Its answer for "now" is the live one.
+- Staff cannot hand a proposal to a colleague. The colleague proposes again, at the same price if
+  nothing moved.
+- Not changed: add-on proposals (ADR-034) are bound to guest or staff but not to the staff user.
+  They price at today's rates and need `reservation.modify`, so the risk is lower; binding them
+  the same way is a follow-up.
+- The simulator refuses a future sale time. `test_pricing_policies` simulated one hour after a
+  version scheduled for tomorrow; it now publishes that version now and simulates the present.
+- Tests: integration `test_modification_determinism` (24; 21 fail on the base commit), unit
+  `TestStatusAt` (4). All 24 integration modules pass (465 tests), among them `TestCouponLimits`,
+  `TestHistoricalSimulator`, the G-41 product-change test (a colleague's token is now refused
+  before its channel re-check), `test_fx_snapshot` HISTORICAL and the self-service suites.

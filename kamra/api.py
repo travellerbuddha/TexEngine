@@ -424,10 +424,15 @@ def import_bookings(property: str, bookings):
 	"""Bulk booking import - the switch-over tool. Each row: {guest_name,
 	phone?, room_type_code, check_in, check_out, adults?, children?,
 	amount_after_tax?, channel?, status?}. Rows with a fixed amount keep
-	it (auto_price off); others are priced by the engine."""
+	it (auto_price off); others are priced by the engine.
+
+	TEX Engine (G-92, ADR-052): at a TEX hotel a row is recorded as imported at
+	its amount (a Decimal, never auto-priced; a live row needs one)."""
 	if isinstance(bookings, str):
 		bookings = json.loads(bookings)
 	frappe.only_for(("System Manager", "Hotel Admin"))
+	from kamra.tex.legacy import flag_import
+	from kamra.tex.money import D
 
 	created, errors = [], []
 	for i, row in enumerate(bookings):
@@ -454,7 +459,9 @@ def import_bookings(property: str, bookings):
 				"auto_price": 0 if row.get("amount_after_tax") else 1,
 			})
 			if row.get("amount_after_tax"):
-				doc.amount_after_tax = row["amount_after_tax"]
+				doc.amount_after_tax = D(row["amount_after_tax"])
+			# a migration, not a sale (ADR-028, ADR-052)
+			flag_import(doc, row["status"] if row.get("status") in ("Checked In", "Cancelled") else None)
 			doc.insert()
 			if row.get("status") in ("Checked In", "Cancelled"):
 				doc.status = row["status"]
