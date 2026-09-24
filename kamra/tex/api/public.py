@@ -338,8 +338,9 @@ def book(site: str, quote_ids, guest, payment_method: str | None = None, provide
 	guest_clean["special_requests"] = text(g.get("special_requests"), 1000)
 	guest_clean["country"] = _country(g.get("country"))
 	guest_clean["nationality"] = _country(g.get("nationality"))
-	guest_clean.update({k: bool(g.get(k)) for k in ("consent_email", "consent_sms", "consent_whatsapp")})
-	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=bool(g.get("consent_email")))
+	guest_clean.update({k: booking_svc.consent_given(g.get(k)) for k in ("consent_email", "consent_sms",
+	                                                                     "consent_whatsapp")})
+	_track(s, session_id, "guest_details", {"email": g.get("email")}, consent=guest_clean["consent_email"])
 	method = payment_method or "Card"
 	# a retry key only counts within the visitor's own session (no cross-visitor replay)
 	result = booking_svc.create_booking(quote_ids=ids, guest=guest_clean, payment_method=method,
@@ -565,8 +566,31 @@ def _no_dob(value):
 	return value
 
 
-# contact data never stays in a funnel payload, whoever sent it (a browser's event may carry anything)
+# contact data never stays in a funnel payload the server writes
 FUNNEL_CONTACT_KEYS = frozenset({"email", "phone", "mobile", "first_name", "last_name", "name", "full_name"})
+# what a browser's event may carry (ADR-056 review): these fields only, scalar text or numbers of
+# bounded size (the quotes of a basket: their ids); anything else is dropped, never stored
+BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel")}
+BROWSER_TEXT_MAX = 140
+BROWSER_QUOTES_MAX = 10
+BROWSER_QUOTE_ID_MAX = 64
+
+
+def _browser_payload(event: str, payload) -> dict:
+	"""A browser's funnel payload reduced to the event's own fields (an allow-list, not a list of
+	what to drop: anything a caller sends beyond it, contact data of anyone included, is not kept)."""
+	if not isinstance(payload, dict):
+		return {}
+	out = {}
+	for key in BROWSER_EVENT_FIELDS.get(event, ()):
+		v = payload.get(key)
+		if key == "quotes":
+			ids = [q for q in v if isinstance(q, str) and 0 < len(q) <= BROWSER_QUOTE_ID_MAX] if isinstance(v, list) else []
+			if ids:
+				out[key] = ids[:BROWSER_QUOTES_MAX]
+		elif isinstance(v, str) and 0 < len(v) <= BROWSER_TEXT_MAX:
+			out[key] = v
+	return out
 
 
 def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
@@ -593,9 +617,9 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=120, seconds=60)
 def track(site: str, session_id: str, event: str, payload=None):
-	if event not in ("room_view", "abandoned"):
+	if event not in BROWSER_EVENT_FIELDS:
 		frappe.throw(_("Unknown event."))
-	_track(_site(site), session_id, event, parse(payload, {}) or {})
+	_track(_site(site), session_id, event, _browser_payload(event, parse(payload, {})))
 	return {"ok": True}
 
 

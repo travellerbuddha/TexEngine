@@ -88,6 +88,16 @@ def find_or_create_guest(g: dict, *, property: str, market: str | None, language
 	                     market=market, language=language, staff=False)[0]
 
 
+def consent_given(value) -> bool:
+	"""Whether a consent flag a caller sent says yes: only ``True``, ``1``, ``"1"`` or ``"true"`` (any
+	case). ``"0"``, ``"false"``, ``"no"`` or anything else is no consent (ADR-056 review)."""
+	if isinstance(value, bool):
+		return value
+	if isinstance(value, int):
+		return value == 1
+	return isinstance(value, str) and value.strip().lower() in ("1", "true")
+
+
 def resolve_guest(g: dict, *, property: str, market: str | None, language: str | None,
                   staff: bool) -> tuple[str, list[str], list[str]]:
 	"""→ (guest profile, consent granted now, consent asked for but not applied).
@@ -105,7 +115,7 @@ def resolve_guest(g: dict, *, property: str, market: str | None, language: str |
 		existing = frappe.db.get_value("Guest", {"email": g["email"], "tex_enterprise": ("in", [enterprise, "", None])})
 	if not existing and g.get("phone"):
 		existing = frappe.db.get_value("Guest", {"phone": g["phone"], "tex_enterprise": ("in", [enterprise, "", None])})
-	asked = [k for k in CONSENT_FIELDS if g.get(k.replace("tex_", ""))]
+	asked = [k for k in CONSENT_FIELDS if consent_given(g.get(k.replace("tex_", "")))]
 	if existing:
 		doc = frappe.get_doc("Guest", existing)
 		changed = False
