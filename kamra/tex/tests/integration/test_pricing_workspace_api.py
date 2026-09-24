@@ -17,6 +17,14 @@ Slice S3:
 * GAP-3: it shows what the version inherits and what the engine assumes: the effective capacity
   (``rooms[].capacity``), the age bands with their origin, the inherited occupancy rules and the
   engine's adult default (``occupancy_defaults``).
+
+Slice S4:
+
+* GAP-4: ``validate_version`` issues carry a ``ref`` naming the rule(s), room, period, band(s),
+  party or board they are about (row names of the saved draft, ``~<_key>`` of unsaved rows);
+  messages are unchanged.
+* GAP-5: a board rule naming an unknown room or period, and two rules of one board for the same
+  room and period, are publish errors.
 """
 
 import json
@@ -559,3 +567,71 @@ class TestSampleParties(WorkspaceCase):
 		self.as_user(AGENT)
 		with self.assertRaises(frappe.PermissionError):
 			api.price_matrix(self.v, parties=[{"adults": 2, "children": []}], party_room=self.std)
+
+
+class TestAnchoredIssues(WorkspaceCase):
+	def test_a_duplicated_room_rule_is_anchored_in_the_validation_json(self):
+		data = self.payload()
+		key = self.std_low(data)["_key"]
+		data["period_rates"].append({**self.std_low(data), "_key": "dup", "value": "90"})
+		report = json.loads(frappe.as_json(api.validate_version(self.v, data=as_json(data))))   # as the browser gets it
+		dup = find(report["issues"], code="ROOM_RULE_DUPLICATE")
+		self.assertEqual(dup["message"], f"room {self.std} has two rules for period LOW")
+		self.assertEqual(dup["ref"], {"rule_id": f"~{key}", "rule_ids": [f"~{key}", "~dup"], "room_type": self.std,
+		                              "period": "LOW"})
+		# the saved draft's issue names the saved rows
+		api.save_version(self.v, as_json(data))
+		names = [r["name"] for r in api.get_version(self.v)["period_rates"]
+		         if r["room_type"] == self.std and r["period_code"] == "LOW"]
+		self.assertEqual(len(names), 2)
+		dup = find(api.validate_version(self.v)["issues"], code="ROOM_RULE_DUPLICATE")
+		self.assertEqual(dup["ref"], {"rule_id": names[0], "rule_ids": names, "room_type": self.std, "period": "LOW"})
+
+	def test_an_issue_about_nothing_in_particular_has_no_ref(self):
+		data = self.payload()
+		data["boards"] = [b for b in data["boards"] if not b["is_base"]]
+		issue = find(api.validate_version(self.v, data=data)["issues"], code="NO_BASE_BOARD")
+		self.assertEqual(set(issue), {"level", "code", "message"})
+
+	def test_board_rules_for_an_unknown_room_or_period_or_twice_the_same(self):
+		data = self.payload()
+		data["rooms"].remove(find(data["rooms"], room_type=self.dlx))            # the draft no longer sells DLX
+		data["period_rates"].remove(find(data["period_rates"], room_type=self.dlx))
+		supplement = {"board": "UAI", "op": "ADD", "adult_amount": "15", "child_percent": "50"}
+		data["boards"] += [{**supplement, "room_type": self.dlx, "_key": "dlx-only"},
+		                   {**supplement, "period_code": "NOPE", "_key": "orphan"},
+		                   {**supplement, "adult_amount": "25", "_key": "twin"}]
+		report = api.validate_version(self.v, data=data)
+		self.assertFalse(report["ok"])
+		room = find(report["issues"], code="BOARD_UNKNOWN_ROOM")
+		self.assertEqual(room["message"], f"board rule ~dlx-only (UAI) names unknown room {self.dlx}")
+		self.assertEqual(room["ref"], {"rule_id": "~dlx-only", "board": "UAI", "room_type": self.dlx})
+		orphan = find(report["issues"], code="BOARD_UNKNOWN_PERIOD")
+		self.assertEqual(orphan["message"], "board rule ~orphan (UAI) names unknown period NOPE")
+		self.assertEqual(orphan["ref"], {"rule_id": "~orphan", "board": "UAI", "period": "NOPE"})
+		twin = find(report["issues"], code="BOARD_DUPLICATE")
+		uai = find(data["boards"], board="UAI", period_code=None, room_type=None)["_key"]
+		self.assertEqual(twin["message"], "board UAI has 2 rules for the same room and period")
+		self.assertEqual(twin["ref"], {"rule_id": f"~{uai}", "rule_ids": [f"~{uai}", "~twin"], "board": "UAI"})
+
+	def test_publish_is_refused_for_an_orphan_board_period(self):
+		data = self.payload()
+		data["boards"].append({"board": "UAI", "op": "ADD", "adult_amount": "15", "child_percent": "50",
+		                       "period_code": "NOPE", "_key": "orphan"})
+		api.save_version(self.v, as_json(data))
+		row = find(api.get_version(self.v)["boards"], period_code="NOPE")["name"]
+		with self.assertRaises(frappe.ValidationError) as cm:
+			contracts.publish(self.v)
+		self.assertIn(f"board rule {row} (UAI) names unknown period NOPE", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.v, "status"), "Draft")
+		issue = find(api.validate_version(self.v)["issues"], code="BOARD_UNKNOWN_PERIOD")
+		self.assertEqual(issue["ref"], {"rule_id": row, "board": "UAI", "period": "NOPE"})
+
+	def test_the_fixture_contract_still_publishes(self):
+		out = fx.create_contract(self.f, code="PW-S4")                 # publishes, as every suite's fixture does
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", out["version"], "status"), "Published")
+		self.assertTrue(all(set(w) <= {"level", "code", "message", "ref"} and w["level"] == "WARNING"
+		                    for w in out["warnings"]), out["warnings"])
+		self.assertEqual(api.get_version(out["version"])["validation_report"], out["warnings"])
+		published = contracts.publish(self.v)                          # this test case's draft too
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", published["version"], "status"), "Published")
