@@ -3001,6 +3001,109 @@ patch p45).**
   merged from the profile), `crm-admin.spec.ts` and `booking.spec.ts` pass twice in a row on a server
   running this tree.
 
+**Third review follow-up (focused review of the guest merge and the H1 fix, 2026-09-25; 1 High, 6
+Medium, 3 Low; patch p48).**
+- *M-6 (a regression of the H1 fix): a lock wait timeout failed bookings.* The second review made
+  `_track`, the guest e-mails, the payment start and the channel-push trigger re-raise
+  `QueryTimeoutError` as well as `QueryDeadlockError`, and `retry_on_deadlock` retries deadlocks only;
+  meanwhile `purge_funnel` deleted `WHERE occurred_at < …` with no index on `occurred_at`, holding
+  next-key locks on every funnel row until the daily job ended. A booking whose funnel event waited
+  more than `innodb_lock_wait_timeout` (50 s) failed; before H1 it went through without that event.
+  The two errors are not alike: a deadlock ends the whole transaction (InnoDB rolls the victim back),
+  a lock wait timeout ends only its statement (`innodb_rollback_on_timeout` is off by default; the
+  server setting is read on the first timeout, and where it is on a timeout is treated as a deadlock).
+  Now:
+  - `txn.transaction_lost(e)` says which, and `txn.undo_step(e, savepoint)` raises when the transaction
+    is gone and otherwise undoes the step's own writes to its savepoint. `_track` (savepoint
+    `tex_funnel_event`) and `notify._deliver` (`tex_mail_send`, `tex_mail_log`) use it: a timeout drops
+    the event, or records the mail as failed, and the booking goes on; a deadlock is raised and the
+    booking retried or refused, never reported. A payment start (`tex_checkout`) treats a timeout as a
+    failed start (the request answers "could not be started") and raises a deadlock. The channel-push
+    trigger writes nothing: it logs a timeout and raises a deadlock. The e-mails' rendering reads only:
+    a deadlock is raised. `txn.TRANSACTION_LOST` is gone.
+  - the purge reads old events through the new index `(occurred_at, session_id)` without a lock
+    (`PURGE_OLD`) and deletes them by primary key (`PURGE_EVENTS`), 500 at a time, each batch committed
+    by the job (`_commit`, skipped in tests). A new event (at the end of that index) never waits for it.
+- *H-1: the merge locked the profiles but read a stale snapshot.* Under REPEATABLE READ (and
+  `innodb_snapshot_isolation` off on MariaDB 10.11) the request's read view is made by its first read,
+  long before the merge takes its locks; every plain read after that (`_records_hotels`, the profiles,
+  `_repoint`'s SELECT, `delete_doc`'s link check) missed rows committed meanwhile, and bookings never
+  locked a profile before linking to it. A booking of the duplicate committed during the merge was left
+  pointing at a deleted profile (its points lost, its hotel never checked); a concurrent withdrawal or
+  erasure of the duplicate was ignored (and MERGE_FILL copied the erased contact); two merges of one
+  duplicate into two profiles both "succeeded", the second moving rows off the first's target (the lock
+  query returned one row, never counted); and `loyalty.redeem` read the balance from its snapshot after
+  waiting for the profile's lock, so two redemptions could spend the same points (also before the
+  merge existed). Now:
+  - `_lock_pair` locks both profiles in name order and requires both rows back, named as stored (a
+    name in another case or with spaces is the same profile and is refused; a duplicate merged elsewhere
+    meanwhile is "not found"); both are loaded `FOR UPDATE`;
+  - `_records_hotels` (`LOCK IN SHARE MODE`), `_repoint` (`SELECT … FOR UPDATE`, then by primary key)
+    and `_assert_unlinked` (a shared-lock check per link table before the delete: anything still naming
+    the duplicate fails the merge, which rolls back) read what is committed now. Every Link to Guest has
+    an index that starts with it (`TEX Booking.booker_guest`, `TEX Communication.guest`, `TEX Funnel
+    Event.guest` and the legacy Folio, Security Deposit, Service Ticket, Lost And Found Item, Exchange
+    Transaction, Venue Booking, WhatsApp Message: `setup.TEX_INDEXES`, p48), so these reads lock the two
+    profiles' rows, not the tables; a test fails when a new Link to Guest has none;
+  - whoever writes a link to a profile locks it first (`crm.lock_guest` / `require_live_guest`):
+    `booking.resolve_guest` (`FOR UPDATE`; a profile gone since the request began is looked up again
+    with a locking read, which finds the profile it was merged into by e-mail, or none), a new loyalty
+    entry (`FOR UPDATE`), a new TEX Communication (shared), a Reservation's save (`FOR UPDATE`, before
+    the stay's totals are written: a stay read before a merge and saved after it is refused, never left
+    on a deleted profile). The exclusive lock where the same transaction writes the profile next (the
+    stay totals, the points) avoids a shared-to-exclusive upgrade, which deadlocks two bookings of one
+    guest; `resolve_guest` runs after the inventory locks, so the lock order (nights, then the profile)
+    is the one a modification already takes;
+  - `loyalty.redeem` requires its `FOR UPDATE` to return the profile and reads the balance with a lock
+    (`balances(lock=True)`, through the new `(guest, program)` index); so do `adjust`, the earn tier,
+    a reversal, the daily expiry and the stored points total (`_sync_guest`).
+  Remaining: a legacy PMS write of a record the merge moved (a Folio, a Security Deposit …) that was
+  read before the merge and saved after it puts the duplicate back into that link; `modified` is not
+  changed by the merge, so Frappe's own check does not catch it (a Reservation's save does, above).
+- *M-1: the duplicate's comments, mail, tasks, shares and activity were deleted.* `_repoint` skipped
+  every DocType in `ignore_links_on_delete`, and `delete_doc` then deleted the duplicate's Comments,
+  ToDos and DocShares and unlinked its Communications and Activity Log. The merge now moves, with
+  locking reads, Frappe's own dynamic links (`DYNAMIC_LINKS`: Comment, Communication and Communication
+  Link, ToDo, Activity Log (reference and timeline), DocShare, Document Follow, Notification Log, View
+  Log, Email Unsubscribe, Tag Link, File, Version) and any other Dynamic Link found in the meta; only the
+  audit trail (TEX Audit Event, TEX Audit Scope) keeps the duplicate's name.
+- *M-2: a merge could undo an erasure.* An erased duplicate merged into a live profile re-attached the
+  erased stays to a person (and `guest_name` was rewritten with the real name); an erased target took
+  live contact data. An erasure now sets a durable marker, `Guest.tex_erased_at` (read-only, no copy),
+  and a merge refuses when either profile has it. p48 sets it on profiles erased before, from their
+  `guest.erase` audit event or their `anonymize_guest` entry in the Agent Action Log; the notes text
+  ("Profile anonymized on request.") is not proof (a merge could copy it), so profiles with the text
+  and no record are counted, not marked. p45 now selects erased profiles by the marker too.
+- *M-3: a merge could not be reconstructed.* The duplicate was deleted permanently and the audit held
+  counts. The `guest.merge` event now names every record moved, per DocType (names are not contact
+  data), and the duplicate is deleted into a Deleted Document (Frappe's own record, readable by System
+  Manager only), holding the duplicate as it was committed when locked. It is kept `MERGE_COPY_DAYS` (90;
+  owner decision to confirm, GO_LIVE_READINESS), then the daily job removes it (`purge_merge_copies`);
+  an erasure of the profile it went into removes it at once (`erase_traces`). The copy holds the
+  duplicate's contact data (a second e-mail or phone): kept for a period and platform administrators
+  only, rather than lost, so a wrong merge can be undone by hand.
+- *M-4: the legacy endpoint bypassed the hotel rule.* `kamra.api.merge_guests` passed `checked=True`,
+  and its guard (`authz._guest_allowed`) checks the Hotel Admin role and Reservation hotels only. `checked`
+  now skips only the TEX visibility check (`require_guest`): for anyone but a platform administrator the
+  merge requires `crm.edit` at every hotel of every record of both profiles, whichever endpoint calls it.
+- *M-5: p45 missed most earlier erasures.* It chose erased profiles still holding a consent; the rest
+  kept old Version rows with name, e-mail, phone and ID number, and their bookings' `booker_*`, their
+  payment links' `guest_*` and those records' Version rows were never scrubbed. p48 finishes every
+  erased profile (marker set): consent withdrawn, date of birth, gender, tags, preferences and identity
+  fields cleared, `erase_traces` run (now re-runnable, reporting what it changed); `guest.erase` is
+  audited (reason p48) only for a profile where something was left.
+- *Low:* the `source == target` check compared strings (`g-00001` passed against `G-00001`, and the
+  profile merged into itself): canonical names (`_lock_pair`). p45 found erased profiles by their notes
+  text: the marker. `_records_hotels` ignored a linking DocType without a `property` column: a record of
+  such a DocType now refuses the merge for anyone but a platform administrator.
+- Tests: `test_crm_third_review` (21) and changes to `test_crm_privacy_review` (the tracking and mailing
+  tests follow M-6: a timeout undoes only the step, a deadlock is raised, with the server setting mocked
+  both ways; p45's erased profile has the marker, a look-alike with the notes text is left alone); the
+  p48 registry entry in `test_patches`. The concurrency tests of H-1 need a second connection that
+  commits what another request would commit meanwhile, after this transaction's snapshot: they run only
+  on a disposable site (`tex_disposable_test_site`: CI's throwaway site, `disposable_test.sh`) and are
+  skipped on the shared one. FAIL_FIRST_THIRD.
+
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
 - A modification — staff, a guest on the manage page, a paid or approved guest change — only
