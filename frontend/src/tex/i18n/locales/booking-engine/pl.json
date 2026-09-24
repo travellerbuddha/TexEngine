@@ -383,5 +383,6 @@
  "be.analytics_page.tracking_hint": "Identyfikatory Google Analytics, Tag Managera i Meta Pixel oraz baner zgód ustawia się dla każdej strony rezerwacji.",
  "be.analytics_page.tracking_open": "Ustawienia śledzenia",
  "be.analytics_page.no_sites": "Żadna strona rezerwacji nie sprzedaje jeszcze tego hotelu.",
- "be.rooms.more": "jeszcze {count}"
+ "be.rooms.more": "jeszcze {count}",
+ "be.analytics_page.open_report": "Raport konwersji"
 }

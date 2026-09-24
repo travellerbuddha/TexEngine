@@ -369,5 +369,6 @@
  "be.analytics_page.tracking_hint": "IDs für Google Analytics, Tag Manager und Meta-Pixel sowie das Einwilligungsbanner werden je Buchungsseite eingestellt.",
  "be.analytics_page.tracking_open": "Tracking-Einstellungen",
  "be.analytics_page.no_sites": "Noch keine Buchungsseite verkauft dieses Hotel.",
- "be.rooms.more": "+{count} weitere"
+ "be.rooms.more": "+{count} weitere",
+ "be.analytics_page.open_report": "Konversionsbericht"
 }

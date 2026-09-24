@@ -376,5 +376,6 @@
  "be.analytics_page.tracking_hint": "ID-urile Google Analytics, Tag Manager și Meta Pixel și bannerul de consimțământ se setează pentru fiecare site de rezervare.",
  "be.analytics_page.tracking_open": "Setări de urmărire",
  "be.analytics_page.no_sites": "Niciun site de rezervare nu vinde încă acest hotel.",
- "be.rooms.more": "încă {count}"
+ "be.rooms.more": "încă {count}",
+ "be.analytics_page.open_report": "Raport de conversie"
 }

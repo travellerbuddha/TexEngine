@@ -186,6 +186,9 @@ test("navigation: every new sub-section opens its screen for a user who holds it
     await expect(page.getByText("Booking funnel")).toBeVisible()
     await expect(page.getByRole("region", { name: "Summary" }).getByText("Searches")).toBeVisible()
     await expect(page.getByText("Tracking and consent")).toBeVisible()
+    // the full conversion view is a report (G-46)
+    await page.getByRole("button", { name: "Conversion report" }).click()
+    await expect(page).toHaveURL(/\/tex\/reports\/conversion$/)
   })
 
   await test.step("CRM: loyalty and communications as sections; campaigns plainly not available", async () => {

@@ -1,12 +1,12 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
-import { BarChart3, Settings2 } from "lucide-react"
+import { Link, useNavigate } from "react-router-dom"
+import { BarChart3, FileBarChart, Settings2 } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { num, pct } from "../../lib/format"
 import { useSession } from "../../lib/session"
 import { useSiteToday } from "../../lib/siteDay"
 import { useTexT } from "../../i18n"
-import { Card, CardBody, CardHeader, EmptyState, ErrorState, PageHeader, Skeleton, Stat, Toolbar } from "../../ui"
+import { Button, Card, CardBody, CardHeader, EmptyState, ErrorState, PageHeader, Skeleton, Stat, Toolbar } from "../../ui"
 import { RangeFilter } from "../reports/components/RangeFilter"
 import { presetRange, type RangePreset } from "../reports/lib"
 import { BeNav } from "./BeNav"
@@ -40,6 +40,7 @@ function share(n: number, of: number): string | null {
 export default function Analytics() {
   const { t } = useTexT()
   const { property, can } = useSession()
+  const navigate = useNavigate()
   const today = useSiteToday()
   const [range, setRange] = useState<{ preset: RangePreset; from: string; to: string }>(() => {
     const [from, to] = presetRange("last_30", today)
@@ -57,6 +58,12 @@ export default function Analytics() {
         title={t("core.nav.sub.analytics")}
         subtitle={property ? t("be.analytics_page.subtitle", { hotel: property.property_name }) : undefined}
         crumbs={[{ label: t("core.nav.booking_engine"), to: "/tex/booking-engine" }, { label: t("core.nav.sub.analytics") }]}
+        actions={
+          // the full conversion view (by day, site, market, channel) is a report (G-46, ADR-059)
+          <Button variant="secondary" icon={<FileBarChart className="size-4" aria-hidden />} onClick={() => navigate("/tex/reports/conversion")}>
+            {t("be.analytics_page.open_report")}
+          </Button>
+        }
       />
       <BeNav />
       <Toolbar className="items-end">

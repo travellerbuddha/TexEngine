@@ -369,5 +369,6 @@
  "be.analytics_page.tracking_hint": "Google Analytics, Tag Manager and Meta pixel ids and the consent banner are set per booking site.",
  "be.analytics_page.tracking_open": "Tracking settings",
  "be.analytics_page.no_sites": "No booking site sells this hotel yet.",
- "be.rooms.more": "+{count} more"
+ "be.rooms.more": "+{count} more",
+ "be.analytics_page.open_report": "Conversion report"
 }

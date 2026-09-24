@@ -383,5 +383,6 @@
  "be.analytics_page.tracking_hint": "Идентификаторы Google Analytics, Tag Manager и Meta Pixel и баннер согласия настраиваются для каждого сайта бронирования.",
  "be.analytics_page.tracking_open": "Настройки отслеживания",
  "be.analytics_page.no_sites": "Ни один сайт бронирования пока не продаёт этот отель.",
- "be.rooms.more": "ещё {count}"
+ "be.rooms.more": "ещё {count}",
+ "be.analytics_page.open_report": "Отчёт о конверсии"
 }

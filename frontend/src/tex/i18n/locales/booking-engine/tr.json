@@ -369,5 +369,6 @@
  "be.analytics_page.tracking_hint": "Google Analytics, Tag Manager ve Meta piksel kimlikleri ile onay bandı her rezervasyon sitesinde ayrı ayarlanır.",
  "be.analytics_page.tracking_open": "İzleme ayarları",
  "be.analytics_page.no_sites": "Bu oteli satan bir rezervasyon sitesi henüz yok.",
- "be.rooms.more": "+{count} tane daha"
+ "be.rooms.more": "+{count} tane daha",
+ "be.analytics_page.open_report": "Dönüşüm raporu"
 }
