@@ -34,7 +34,10 @@ STAY_MATCH = ["ANY_NIGHT", "ALL_NIGHTS", "ARRIVAL", "DEPARTURE"]
 EXTRA_MODES = ["RESERVATION", "ROOM", "STAY", "PERSON", "ADULT", "CHILD", "INFANT", "NIGHT", "PERSON_NIGHT",
                "SERVICE_DATE", "UNIT", "USAGE"]
 REV_STATUS = ["Draft", "Active", "Superseded", "Archived"]
-V = {"precision": "6"}   # generic decimal value (money or % or multiplier)
+# A generic decimal value — money, a percent or a factor, as its rule's op says — kept to 9 places:
+# DECIMAL(21,9) (G-72, ADR-055; precision 6 made the column DECIMAL(21,6) and rounded a 7th place away).
+# Loaders read it with money.db_dec; typed values are checked by commercial.decimals.check_inputs.
+V = {"precision": "9"}
 
 
 def revision(self_name):
@@ -287,7 +290,7 @@ COMMERCIAL_SPECS = [
 		F("is_base", "Check", "Included (base board)", in_list_view=1),
 		F("op", "Select", "Supplement type", ["ADD", "ADJUST_PERCENT", "ABSOLUTE"], default="ADD", in_list_view=1),
 		F("adult_amount", "Float", "Adult amount / %", in_list_view=1, **V),
-		F("child_percent", "Float", "Child % of adult", default="50", in_list_view=1, **V),
+		F("child_percent", "Percent", "Child % of adult", default="50", in_list_view=1, **V),
 		F("infant_free", "Check", "Infants free", default="1"),
 		F("room_type", "Link", "Room type", "Room Type"),
 		F("period_code", "Data", "Period"),
@@ -454,7 +457,7 @@ COMMERCIAL_SPECS = [
 		F("contracts", "Small Text", "Contracts"),
 		F("requires_extras", "Small Text", "Required extras (package)"),
 		F("member_only", "Check", "Members only"),
-		F("min_basket", "Currency", "Minimum basket"),
+		F("min_basket", "Currency", "Minimum basket", options="currency"),
 		SB("Combination & limits"),
 		F("stackable", "Check", "Stackable", default="1"),
 		F("exclusive", "Check", "Exclusive"),
@@ -638,10 +641,10 @@ COMMERCIAL_SPECS = [
 		F("sale_to", "Date", "Sale to"),
 		F("service_from", "Date", "Service from", in_list_view=1),
 		F("service_to", "Date", "Service to", in_list_view=1),
-		F("amount", "Currency", "Amount", in_list_view=1),
+		F("amount", "Currency", "Amount", options="currency", in_list_view=1),
 		F("custom_child_amounts", "Check", "Custom child/infant amounts"),
-		F("child_amount", "Currency", "Child amount"),
-		F("infant_amount", "Currency", "Infant amount"),
+		F("child_amount", "Currency", "Child amount", options="currency"),
+		F("infant_amount", "Currency", "Infant amount", options="currency"),
 		F("priority", "Int", "Priority"),
 	], istable=True),
 
@@ -706,8 +709,8 @@ COMMERCIAL_SPECS = [
 		F("tax_name", "Data", "Name", in_list_view=1),
 		F("kind", "Select", "Kind", ["PERCENT", "PER_PERSON_NIGHT", "PER_ROOM_NIGHT"], default="PERCENT",
 		  in_list_view=1),
-		F("rate", "Float", "Rate %", in_list_view=1, **V),
-		F("amount", "Currency", "Fixed amount"),
+		F("rate", "Percent", "Rate %", in_list_view=1, **V),
+		F("amount", "Currency", "Fixed amount", options="currency"),
 		F("applies_to", "Data", "Applies to", default="ACCOMMODATION",
 		  description="ACCOMMODATION, EXTRA:*, EXTRA:FOOD … comma separated"),
 		F("compound", "Check", "Compound"),
@@ -1197,9 +1200,9 @@ CRM_SPECS = [
 		F("enabled", "Check", "Enabled", default="1", in_list_view=1),
 		CB(),
 		F("currency", "Link", "Currency", "Currency"),
-		F("point_value", "Float", "Value of 1 point (burn)", **V),
+		F("point_value", "Currency", "Value of 1 point (burn)", options="currency", **V),
 		F("min_redeem_points", "Int", "Min points to redeem"),
-		F("max_redeem_percent", "Percent", "Max % of stay payable with points", default="100",
+		F("max_redeem_percent", "Percent", "Max % of stay payable with points", default="100", **V,
 		  description="0 = points cannot be redeemed"),
 		F("pending_days", "Int", "Points available N days after checkout", default="1"),
 		F("expiry_months", "Int", "Points expire after (months)", default="24"),

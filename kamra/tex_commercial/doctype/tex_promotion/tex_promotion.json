@@ -119,7 +119,7 @@
    "fieldname": "value",
    "fieldtype": "Float",
    "label": "Value",
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "currency",
@@ -254,7 +254,8 @@
   {
    "fieldname": "min_basket",
    "fieldtype": "Currency",
-   "label": "Minimum basket"
+   "label": "Minimum basket",
+   "options": "currency"
   },
   {
    "fieldname": "section_39",

@@ -97,7 +97,7 @@
    "label": "Value",
    "reqd": 1,
    "in_list_view": 1,
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "currency",

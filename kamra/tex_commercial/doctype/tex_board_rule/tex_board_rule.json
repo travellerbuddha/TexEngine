@@ -43,15 +43,15 @@
    "fieldtype": "Float",
    "label": "Adult amount / %",
    "in_list_view": 1,
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "child_percent",
-   "fieldtype": "Float",
+   "fieldtype": "Percent",
    "label": "Child % of adult",
    "default": "50",
    "in_list_view": 1,
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "infant_free",

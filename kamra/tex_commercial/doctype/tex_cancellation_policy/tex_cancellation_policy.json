@@ -53,7 +53,7 @@
    "fieldtype": "Float",
    "label": "No-show value",
    "default": "1",
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "section_54",

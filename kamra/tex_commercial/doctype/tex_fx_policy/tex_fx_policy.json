@@ -84,7 +84,7 @@
    "fieldname": "adjustment",
    "fieldtype": "Float",
    "label": "Adjustment (% or fixed)",
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "max_age_days",

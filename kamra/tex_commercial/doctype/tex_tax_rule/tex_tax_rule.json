@@ -38,15 +38,16 @@
   },
   {
    "fieldname": "rate",
-   "fieldtype": "Float",
+   "fieldtype": "Percent",
    "label": "Rate %",
    "in_list_view": 1,
-   "precision": "6"
+   "precision": "9"
   },
   {
    "fieldname": "amount",
    "fieldtype": "Currency",
-   "label": "Fixed amount"
+   "label": "Fixed amount",
+   "options": "currency"
   },
   {
    "fieldname": "applies_to",
