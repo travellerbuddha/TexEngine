@@ -7,10 +7,49 @@
  "settings.audit.caption": "Denetim kayıtları, en yenisi önce. Eski ve yeni değerleri görmek için bir satırı açın.",
  "settings.audit.change": "Değişiklik",
  "settings.audit.changes": "Değişiklikler",
+ "settings.audit.coll.added": {
+  "one": "{count} eklendi",
+  "other": "{count} eklendi"
+ },
+ "settings.audit.coll.also_changed": "Ayrıca değişenler",
+ "settings.audit.coll.changed": {
+  "one": "{count} değişti",
+  "other": "{count} değişti"
+ },
+ "settings.audit.coll.more": {
+  "one": "ve {count} tane daha",
+  "other": "ve {count} tane daha"
+ },
+ "settings.audit.coll.name.age_bands": "Çocuk yaşları",
+ "settings.audit.coll.name.boards": "Pansiyonlar",
+ "settings.audit.coll.name.contract": "Kontrat koşulları",
+ "settings.audit.coll.name.inventory": "Envanter",
+ "settings.audit.coll.name.occupancy_rules": "Kişi kuralları",
+ "settings.audit.coll.name.offers": "Teklifler",
+ "settings.audit.coll.name.period_rates": "Oda fiyatları",
+ "settings.audit.coll.name.periods": "Dönemler",
+ "settings.audit.coll.name.rate_plans": "Fiyat planları",
+ "settings.audit.coll.name.rates": "Kontrat fiyatları",
+ "settings.audit.coll.name.restrictions": "Kısıtlamalar",
+ "settings.audit.coll.name.room_rules": "Oda fiyatları",
+ "settings.audit.coll.name.rooms": "Odalar",
+ "settings.audit.coll.name.settings": "Ayarlar",
+ "settings.audit.coll.previous_values": "Değişiklikten önceki değerler",
+ "settings.audit.coll.removed": {
+  "one": "{count} kaldırıldı",
+  "other": "{count} kaldırıldı"
+ },
+ "settings.audit.coll.row": "Satır",
+ "settings.audit.coll.rows": "{before} → {after} satır",
+ "settings.audit.coll.unchanged": {
+  "one": "{count} zaten bu değerde",
+  "other": "{count} zaten bu değerde"
+ },
  "settings.audit.details": "Ayrıntılar",
  "settings.audit.empty": "Bu filtrelere uyan denetim kaydı yok",
  "settings.audit.empty_hint": "Tarih aralığını genişletin veya işlem ve kullanıcı filtrelerini temizleyin.",
  "settings.audit.empty_value": "boş",
+ "settings.audit.enterprise": "Kuruluş",
  "settings.audit.err.both_dates": "Hem başlangıç hem bitiş tarihi seçin.",
  "settings.audit.err.order": "Bitiş tarihi başlangıç tarihinden önce.",
  "settings.audit.event_id": "Kayıt no",
@@ -18,6 +57,7 @@
  "settings.audit.filter_help": "İşlem, olay adının başıyla eşleşir (contract. tüm sözleşme olaylarını bulur). İşlemi yapan, tam e-posta adresidir. Tarih filtresi için iki tarih de gerekir.",
  "settings.audit.hide_unchanged": "Değişmeyen alanları gizle",
  "settings.audit.hotel": "Otel",
+ "settings.audit.hotel_group": "Otel grubu",
  "settings.audit.kind.added": "Eklendi",
  "settings.audit.kind.changed": "Değişti",
  "settings.audit.kind.removed": "Kaldırıldı",
@@ -27,8 +67,13 @@
  "settings.audit.no_changes": "Hiçbir alan değişmedi.",
  "settings.audit.no_values": "Bu olay eski veya yeni değer kaydetmedi.",
  "settings.audit.old": "Eski değer",
+ "settings.audit.other_hotels": {
+  "one": "+{count} diğer otel",
+  "other": "+{count} diğer otel"
+ },
  "settings.audit.reason": "Gerekçe",
  "settings.audit.reference": "Kayıt",
+ "settings.audit.scope_hotels": "Etkilenen oteller",
  "settings.audit.show_unchanged": {
   "one": "Değişmeyen {count} alanı göster",
   "other": "Değişmeyen {count} alanı göster"
@@ -38,6 +83,14 @@
   "other": "{count} kayıt gösteriliyor"
  },
  "settings.audit.source": "Kaynak",
+ "settings.audit.source_label.agent": "Yapay zekâ asistanı",
+ "settings.audit.source_label.api": "API (anahtar)",
+ "settings.audit.source_label.desk": "Personel (oturum açık)",
+ "settings.audit.source_label.gateway_return": "Ödeme sayfasından dönüş",
+ "settings.audit.source_label.guest": "Misafir",
+ "settings.audit.source_label.scheduler": "Zamanlanmış görev",
+ "settings.audit.source_label.system": "Sistem",
+ "settings.audit.source_label.webhook": "Webhook (sunucu bildirimi)",
  "settings.audit.subtitle": "Kim neyi, ne zaman, nerede ve neden değiştirdi. Denetim kaydı salt okunurdur.",
  "settings.audit.time": "Zaman",
  "settings.audit.view_diff": "Değişiklikleri göster",

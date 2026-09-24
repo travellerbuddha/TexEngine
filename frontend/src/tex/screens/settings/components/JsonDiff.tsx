@@ -34,7 +34,8 @@ export function diffObjects(before: unknown, after: unknown): DiffRow[] | null {
   })
 }
 
-function Value({ v }: { v: unknown }) {
+/** One audit value: blank, a scalar, or pretty-printed JSON. */
+export function AuditValue({ v }: { v: unknown }) {
   const { t } = useTexT()
   if (v === undefined) return <span className="text-zinc-400">—</span>
   if (v === null || v === "") return <span className="text-zinc-400 italic">{t("settings.audit.empty_value")}</span>
@@ -76,11 +77,11 @@ export function JsonDiff({ before, after }: { before: unknown; after: unknown })
         <div className="grid gap-3 md:grid-cols-2">
           <div className="min-w-0">
             <p className="mb-1 text-xs font-medium text-zinc-500">{t("settings.audit.old")}</p>
-            <Value v={before ?? null} />
+            <AuditValue v={before ?? null} />
           </div>
           <div className="min-w-0">
             <p className="mb-1 text-xs font-medium text-zinc-500">{t("settings.audit.new")}</p>
-            <Value v={after ?? null} />
+            <AuditValue v={after ?? null} />
           </div>
         </div>
       ) : visible.length === 0 ? (
@@ -115,10 +116,10 @@ export function JsonDiff({ before, after }: { before: unknown; after: unknown })
                     <Badge tone={TONE[r.kind]}>{t(`settings.audit.kind.${r.kind}`)}</Badge>
                   </td>
                   <td className="max-w-[18rem] py-1.5 pr-3">
-                    <Value v={r.kind === "added" ? undefined : r.before} />
+                    <AuditValue v={r.kind === "added" ? undefined : r.before} />
                   </td>
                   <td className="max-w-[18rem] py-1.5">
-                    <Value v={r.kind === "removed" ? undefined : r.after} />
+                    <AuditValue v={r.kind === "removed" ? undefined : r.after} />
                   </td>
                 </tr>
               ))}
