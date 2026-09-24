@@ -24,6 +24,19 @@ const rangePatch = (suffix: string, r: Range) => ({
 })
 
 /**
+ * A typed date changes that date only. The other one is the live URL's: a change re-renders as a
+ * router transition, which waits for the new report, so this render's other date may be stale
+ * (typing "from" then "to" while the report loads lost "from").
+ */
+const typedRange = (suffix: string, shown: Range, n: Range): Range => {
+  if (n.preset !== "custom") return n
+  const live = new URLSearchParams(window.location.search)
+  const custom = live.get(`period${suffix}`) === "custom"
+  const other = (k: "from" | "to") => (n[k] !== shown[k] || !custom ? n[k] : (live.get(`${k}${suffix}`) ?? n[k]))
+  return { preset: "custom", from: other("from"), to: other("to") }
+}
+
+/**
  * The filters of every report view: scope (a hotel, a group, an enterprise or all the
  * viewer's hotels), the stay and / or sale window, market, channel, room, rate, currency,
  * grouping and cancelled stays. A view shows only the filters it can apply (the server
@@ -115,7 +128,7 @@ export function ReportFilters({
             to={f.primary.to}
             error={problem ? t(problem, { max: MAX_RANGE_DAYS }) : null}
             labels={{ period: primaryLabel, from: t("core.label.from"), to: t("core.label.to") }}
-            onChange={(n) => update(rangePatch("", n))}
+            onChange={(n) => update(rangePatch("", typedRange("", f.primary, n)))}
           />
         </fieldset>
 
@@ -135,7 +148,7 @@ export function ReportFilters({
                   from={f.secondary.from}
                   to={f.secondary.to}
                   labels={{ period: secondaryLabel, from: t("core.label.from"), to: t("core.label.to") }}
-                  onChange={(n) => update(rangePatch("2", n))}
+                  onChange={(n) => f.secondary && update(rangePatch("2", typedRange("2", f.secondary, n)))}
                 />
               </fieldset>
             )}
