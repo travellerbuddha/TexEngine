@@ -72,14 +72,13 @@ def quote(offer_key: str, extras=None, promo_codes=None):
 def quote_rooms(rooms, promo_codes=None):
 	"""The rooms of one booking quoted together: a minimum basket is the whole booking's (G-84,
 	ADR-057). ``rooms``: [{"offer_key", "extras"}] of one search, in room order."""
-	items = parse(rooms, []) or []
+	items = quoting.room_items(rooms)                  # a clean refusal for anything but rooms (review L2)
 	for r in items:
-		offer = quoting.verify(str(r.get("offer_key") or ""))
+		offer = quoting.verify(r["offer_key"])
 		scope.require("reservation.create", offer["property"])
 		# a Booking Engine or OTA offer is not the agent's to sell (ADR-050)
 		scope.require_channel(offer.get("channel"), offer["property"])
-	return quoting.create_quotes([{"offer_key": str(r.get("offer_key") or ""), "extras": parse(r.get("extras"), [])}
-	                              for r in items], promo_codes=parse(promo_codes, None))
+	return quoting.create_quotes(items, promo_codes=parse(promo_codes, None))
 
 
 @frappe.whitelist(methods=["POST"])

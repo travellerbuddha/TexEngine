@@ -90,6 +90,8 @@
   "other": "{count} oda"
  },
  "res.booking.title": "Rezervasyon dosyası {name}",
+ "res.cancel.basket": "{amount} içerir: diğer odaların koruduğu indirim ({promotion}, asgari sepet {minimum}). Cezayla birlikte silinmez.",
+ "res.cancel.basket_credit": "{amount} tutarında alacak içerir: daha önce {promotion} için başka bir odaya yansıtıldı.",
  "res.cancel.body": "{guest}, {from} – {to}. Rezervasyon serbest bırakılır ve aşağıdaki ceza kaydedilir.",
  "res.cancel.button": "Rezervasyonu iptal et",
  "res.cancel.confirm": "Rezervasyonu iptal et",

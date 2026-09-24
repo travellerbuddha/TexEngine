@@ -215,11 +215,26 @@ def mark_dirty(property: str, room_types=None, date_from=None, date_to=None, *, 
 	return touched
 
 
+# a waiting job takes in a new range this close to its own; a range further away is a job of its
+# own, so two far-apart days never make one job of every day between them (G-48 review L5)
+COALESCE_GAP_DAYS = 7
+
+
+def _near(p: dict, a: date, b: date) -> bool:
+	lo, hi = p.get("from"), p.get("to")
+	if not lo or not hi:
+		return True
+	gap = timedelta(days=COALESCE_GAP_DAYS)
+	return a <= getdate(hi) + gap and getdate(lo) - gap <= b
+
+
 def _queue(m, a: date, b: date, reason: str) -> None:
 	waiting = frappe.db.sql(
 		"""SELECT name, payload FROM `tabTEX Integration Outbox`
 		   WHERE kind='ARI' AND connection=%(c)s AND status='Pending' AND claim_token IS NULL
-		     AND reference_name=%(m)s LIMIT 1 FOR UPDATE""", {"c": m.connection, "m": m.name}, as_dict=True)
+		     AND reference_name=%(m)s ORDER BY creation ASC FOR UPDATE""", {"c": m.connection, "m": m.name},
+		as_dict=True)
+	waiting = [w for w in waiting if _near(json.loads(w.payload or "{}"), a, b)]
 	if waiting:
 		p = json.loads(waiting[0].payload or "{}")
 		p["from"] = min(p.get("from", a.isoformat()), a.isoformat())
@@ -347,7 +362,8 @@ def restriction_boundaries(today: date | None = None) -> int:
 	today are queued for the channels at once (G-48): a booking window opening today
 	(``book_from``) or closed since yesterday (``book_to``), and an arrival entering its release
 	or minimum-advance period or its maximum-advance window today. The daily resync compares the
-	whole horizon later anyway; this sends the change at midnight."""
+	whole horizon later anyway; this sends the change at midnight. Days close together are one
+	range; days far apart are queued each on their own, never every day between them (review L5)."""
 	today = getdate(today or now_datetime())
 	n = 0
 	for prop in channel_properties():
@@ -366,10 +382,21 @@ def restriction_boundaries(today: date | None = None) -> int:
 			        or any(v and lead == int(v) - 1 for v in (r.release_days, r.min_advance))
 			        or (r.max_advance and lead == int(r.max_advance))):
 				due.setdefault(r.room_type or None, set()).add(day)
-		for room_type, days in due.items():
-			n += mark_dirty(prop, [room_type] if room_type else None, min(days), max(days),
-			                reason="restriction boundary")
+		for room_type, days in sorted(due.items(), key=lambda kv: kv[0] or ""):
+			for lo, hi in clusters(days):
+				n += mark_dirty(prop, [room_type] if room_type else None, lo, hi, reason="restriction boundary")
 	return n
+
+
+def clusters(days, gap: int = COALESCE_GAP_DAYS) -> list[tuple[date, date]]:
+	"""Days as ranges: a day at most ``gap`` days after the previous one joins its range."""
+	out: list[list[date]] = []
+	for d in sorted(days):
+		if out and (d - out[-1][1]).days <= gap:
+			out[-1][1] = d
+		else:
+			out.append([d, d])
+	return [(lo, hi) for lo, hi in out]
 
 
 # ─── inbound ─────────────────────────────────────────────────────────────

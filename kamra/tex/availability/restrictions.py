@@ -266,8 +266,11 @@ def evaluate_change(cells: list[RestrictionCell], scope: RestrictionScope, check
 	- arrival rules (closed to arrival, arrival stop sell, release, minimum and maximum advance)
 	  apply when the arrival changes or the product does; departure rules (closed to departure,
 	  departure stop sell) when the departure changes or the product does;
-	- the length of stay (minimum / maximum) is judged on the new stay when its dates change, or
-	  when another product is sold for a stay not begun yet;
+	- the length of stay (minimum / maximum): another product sold for a stay not begun yet, or a
+	  new arrival, is judged in full; a stay that keeps its arrival (or is under way) is refused only
+	  for moving away from the rule — a minimum stay when it gets shorter, a maximum when it gets
+	  longer (review L1). Leaving early is not a sale: the minimum stay never keeps an in-house
+	  guest;
 	- the past is not sold again: a night before the sale date is never judged, and neither is the
 	  arrival of a stay under way (an in-house guest moved to another room or rate).
 	An unchanged stay of the same product is never refused."""
@@ -277,8 +280,11 @@ def evaluate_change(cells: list[RestrictionCell], scope: RestrictionScope, check
 	held = set() if product_changed else set(stay_days(before[0], before[1])[:-1])
 	arrival_moved = product_changed or check_in != before[0]
 	departure_moved = product_changed or check_out != before[1]
-	dates_moved = (check_in, check_out) != tuple(before)
 	begun = check_in < sale_date
+	# a length rule judges the new stay in full when it is a new sale (another product, not begun)
+	# or a new arrival; else only a move away from it (review L1)
+	new_stay = (product_changed or check_in != before[0]) and not begun
+	los, old_los = (check_out - check_in).days, (before[1] - before[0]).days
 	out = []
 	for v in violations:
 		if v.code in NIGHT_CODES:
@@ -287,8 +293,12 @@ def evaluate_change(cells: list[RestrictionCell], scope: RestrictionScope, check
 			keep = arrival_moved and not begun
 		elif v.code in DEPARTURE_CODES:
 			keep = departure_moved
-		elif v.code in LENGTH_CODES:
-			keep = dates_moved or (product_changed and not begun)
+		elif v.code == "MIN_LOS":
+			# a minimum stay through a night the stay did not hold is that night's rule, newly taken
+			keep = new_stay or (not begun and (los < old_los or (min_los_basis == STAY_THROUGH
+			                                                   and v.day not in stay_days(*before)[:-1])))
+		elif v.code == "MAX_LOS":
+			keep = new_stay or los > old_los
 		else:
 			keep = True
 		if keep:

@@ -84,6 +84,36 @@ INTERNAL_TOTALS = ("cost", "margin", "margin_percent", "cost_contract_currency")
 COST = PromoStage.COST.value         # the stage of a promotion outcome only cost access may see
 
 
+@dataclass(frozen=True, slots=True)
+class BasketTerm:
+	"""A SELL promotion with a minimum basket this room is eligible for on every other check
+	(G-84, ADR-057 and its review): its minimum in the sell currency, the basket it was compared
+	with (this room's, or the basket of the booking's rooms it covers, over ``rooms`` rooms),
+	whether that basket reached the minimum and whether the promotion applied to this room.
+	``forfeit``: granted only on the booking's basket (this room's own is below the minimum), what
+	the room costs more without it — its total, the part before added tax (``forfeit_net``) and
+	the tax in it (``forfeit_tax``); never below zero. A change that takes the booking below the
+	minimum charges it to the changed room (review H1)."""
+
+	promo_id: str
+	name: str
+	code: str | None
+	minimum: Decimal
+	basket: Decimal
+	rooms: int
+	qualified: bool
+	applied: bool
+	forfeit: Decimal = ZERO
+	forfeit_net: Decimal = ZERO
+	forfeit_tax: Decimal = ZERO
+
+	def to_dict(self) -> dict:
+		return {"promo_id": self.promo_id, "name": self.name, "code": self.code, "minimum": to_str6(self.minimum),
+		        "basket": to_str6(self.basket), "rooms": self.rooms, "qualified": self.qualified,
+		        "applied": self.applied, "forfeit": to_str(self.forfeit), "forfeit_net": to_str(self.forfeit_net),
+		        "forfeit_tax": to_str(self.forfeit_tax)}
+
+
 @dataclass
 class RoomQuote:
 	request: StayRequest
@@ -107,6 +137,8 @@ class RoomQuote:
 	# currency. A minimum basket compares with it, or with the booking's basket: the sum of every
 	# room's basket as recorded (6 places, ``recorded_basket``; G-84, ADR-057)
 	basket: Decimal | None = None
+	# the promotions with a minimum basket this room is eligible for (``BasketTerm``)
+	basket_terms: list[BasketTerm] = field(default_factory=list)
 
 	@property
 	def total(self) -> Decimal:
@@ -138,6 +170,8 @@ class RoomQuote:
 		}
 		if self.basket is not None:
 			out["basket"] = to_str6(self.basket)
+		if internal:
+			out["minimum_baskets"] = [t.to_dict() for t in self.basket_terms]
 		if internal:
 			out["fx"] = self.fx
 			out["fx_rates"] = self.fx_rates
@@ -232,7 +266,39 @@ def price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 		log = fx.FxLog()
 		q = _price_stay(ctx, req, log)
 		q.fx_rates = log.to_list()
+		if q.sellable and req.booking_basket is not None:
+			_forfeits(ctx, req, q)
 		return q
+
+
+def _without(ctx: PricingContext, promo_id: str) -> PricingContext:
+	t = ctx.terms
+	return replace(ctx, terms=replace(t, offers=tuple(p for p in t.offers if p.promo_id != promo_id)),
+	               promotions=tuple(p for p in ctx.promotions if p.promo_id != promo_id))
+
+
+def _forfeits(ctx: PricingContext, req: StayRequest, q: RoomQuote) -> None:
+	"""A room priced in a booking: for each promotion granted only on the booking's basket (the
+	room's own is below its minimum), what the room would cost without it — priced again without
+	that promotion, everything else the same; never below zero (G-84 review H1)."""
+	for i, t in enumerate(q.basket_terms):
+		if not t.applied or q.basket >= t.minimum:
+			continue                      # granted on the room's own basket: the booking never takes it back
+		alone = _price_stay(_without(ctx, t.promo_id), req, fx.FxLog())
+		if not alone.sellable or alone.currency != q.currency:
+			continue
+		more = alone.total - q.total
+		if more <= ZERO:
+			continue                      # another promotion would do at least as well
+		net = min(more, max(ZERO, alone.totals["subtotal"] - q.totals["subtotal"]))
+		tax_ = min(more, max(ZERO, alone.totals["tax"] - q.totals["tax"]))
+		q.basket_terms[i] = replace(t, forfeit=more, forfeit_net=net, forfeit_tax=tax_)
+		q.explanation.add("promotion", "BASKET_FORFEIT",
+		                  "{name} is granted on the booking's basket ({basket} {currency} over {rooms} rooms, minimum "
+		                  "{minimum}): without it this room costs {forfeit} more",
+		                  rule=RuleRef("promotion", t.promo_id, None, "", t.name), currency=q.currency, name=t.name,
+		                  basket=quantize(t.basket, q.currency), rooms=t.rooms, minimum=quantize(t.minimum, q.currency),
+		                  forfeit=more)
 
 
 # ─── the rooms of one booking (G-84, ADR-057) ────────────────────────────
@@ -240,8 +306,7 @@ def price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 
 def basket_limited(q: RoomQuote) -> bool:
 	"""A SELL promotion of this room was refused because its basket was below the minimum: a
-	larger basket (the booking's) may grant it. Nothing else changes with the basket, which only
-	grows."""
+	larger basket (the booking's) may grant it."""
 	return any(not p.applied and p.rule == promotions.MIN_BASKET for p in q.promotions)
 
 
@@ -250,33 +315,56 @@ def recorded_basket(q: RoomQuote) -> Decimal:
 	return D(to_str6(q.basket))
 
 
-def booking_pass(quotes: list[RoomQuote]) -> Decimal | None:
-	"""The booking basket to price the rooms of one booking again with — the sum of the rooms'
-	recorded baskets — when a minimum basket refused a promotion on any room and every room is
-	sellable in one sell currency; else None: the rooms priced alone are the answer. The basket
-	is taken before promotions, so pricing again with it is final."""
-	if len(quotes) < 2 or not any(basket_limited(q) for q in quotes):
-		return None
-	if not all(q.sellable and q.basket is not None for q in quotes) or len({q.currency for q in quotes}) != 1:
-		return None                       # not one booking that can be sold: each room answers alone
-	return sum((recorded_basket(q) for q in quotes), ZERO)
+def eligible_baskets(rooms) -> dict[str, tuple[Decimal, int]]:
+	"""``rooms``: (basket, the promotions it is eligible for). → {promotion: (the sum of the
+	baskets of the rooms eligible for it, how many)}: what each minimum is compared with (G-84
+	review M2)."""
+	out: dict[str, tuple[Decimal, int]] = {}
+	for basket, promos in rooms:
+		for pid in set(promos):
+			b, n = out.get(pid, (ZERO, 0))
+			out[pid] = (b + basket, n + 1)
+	return out
 
 
-def in_booking(req: StayRequest, total: Decimal, rooms: int) -> StayRequest:
-	return replace(req, booking_basket=total, booking_rooms=rooms)
+def in_booking(req: StayRequest, total: Decimal, rooms: int, baskets: dict[str, tuple[Decimal, int]]
+               ) -> StayRequest:
+	"""``req`` recording the booking it is priced in: the whole booking's basket and size, and
+	per promotion the basket of the rooms it covers."""
+	return replace(req, booking_basket=total, booking_rooms=rooms,
+	               booking_baskets=tuple(sorted((p, b, n) for p, (b, n) in baskets.items())))
+
+
+def _one_booking(quotes: list[RoomQuote]) -> bool:
+	return len(quotes) > 1 and all(q.sellable and q.basket is not None for q in quotes) \
+		and len({q.currency for q in quotes}) == 1
 
 
 def price_together(reqs: list[StayRequest], quotes: list[RoomQuote],
-                   price: Callable[[int, StayRequest], RoomQuote]) -> tuple[list[RoomQuote], Decimal | None]:
-	"""The second pass of the rooms of one booking, priced alone as ``quotes``: when
-	``booking_pass`` finds a booking basket, every room ``i`` is priced again by ``price(i, request)``
-	with the basket recorded in its request (``booking_basket``, ``booking_rooms``) and explained;
-	those quotes are the answer (a room they cannot sell answers with its reasons). → (quotes, the
-	booking basket or None). The one rule the engine and the quoting service both use."""
-	total = booking_pass(quotes)
-	if total is None:
+                   price: Callable[[int, StayRequest], RoomQuote], *, record: bool = True
+                   ) -> tuple[list[RoomQuote], Decimal | None]:
+	"""The rooms of one booking, priced alone as ``quotes``, as one booking (G-84, ADR-057): each
+	promotion's minimum is compared with the basket of the rooms it covers (the rooms' recorded
+	baskets, ``eligible_baskets``). When a minimum refused a promotion on a room and the rooms it
+	covers reach it, every room ``i`` is priced again by ``price(i, request)`` with the booking
+	recorded in its request; else the rooms priced alone are the answer, and — ``record`` — each
+	records the booking it is in all the same (review L3): priced again when a promotion with a
+	minimum could see it, so a request always prices to its quote. The booking pass can raise a
+	price (an exclusive promotion granted on the booking's basket replaces a better one: review
+	M1). → (quotes, the booking's basket, or None when the rooms are not one booking: fewer than
+	two, one unsellable, or different sell currencies)."""
+	if not _one_booking(quotes):
 		return quotes, None
-	return [price(i, in_booking(req, total, len(reqs))) for i, req in enumerate(reqs)], total
+	total = sum((recorded_basket(q) for q in quotes), ZERO)
+	baskets = eligible_baskets((recorded_basket(q), [t.promo_id for t in q.basket_terms]) for q in quotes)
+	again = [in_booking(r, total, len(reqs), baskets) for r in reqs]
+	grows = any(not t.qualified and baskets[t.promo_id][0] >= t.minimum for q in quotes for t in q.basket_terms)
+	if grows or (record and any(q.basket_terms for q in quotes)):
+		return [price(i, r) for i, r in enumerate(again)], total
+	if record:
+		for q, r in zip(quotes, again, strict=True):
+			q.request = r                 # nothing in this room's price depends on the booking
+	return quotes, total
 
 
 def price_booking(rooms: list[tuple[PricingContext, StayRequest]]) -> list[RoomQuote]:
@@ -286,15 +374,48 @@ def price_booking(rooms: list[tuple[PricingContext, StayRequest]]) -> list[RoomQ
 	                      lambda i, req: price_stay(rooms[i][0], req))[0]
 
 
-def booking_request(req: StayRequest, quote: RoomQuote, *, others_basket: Decimal, others_rooms: int
-                    ) -> StayRequest | None:
-	"""A room of a booking priced again on its own (a modification, the simulator): the request
-	that prices it with the booking's basket — its own basket plus the other live rooms' — when
-	a minimum basket refused a promotion and there are other rooms; else None (the room priced
-	alone is the answer)."""
-	if others_rooms < 1 or not quote.sellable or quote.basket is None or not basket_limited(quote):
+@dataclass(frozen=True)
+class BookingOthers:
+	"""The other live rooms of a booking one room is priced again in (a change, the simulator):
+	their baskets, how many, and per promotion the baskets of those it covers
+	(``eligible_baskets``). ``promos`` None: a booking recorded before the review, whose rooms
+	count for every promotion."""
+
+	basket: Decimal
+	rooms: int
+	promos: dict[str, tuple[Decimal, int]] | None
+
+
+def booking_request(req: StayRequest, quote: RoomQuote, others: BookingOthers) -> StayRequest | None:
+	"""A room of a booking priced again on its own: ``req`` recording the booking it makes with
+	``others`` — this room's new basket and theirs — or None when there are no other rooms or the
+	room cannot be sold (it is its own booking)."""
+	if others.rooms < 1 or not quote.sellable or quote.basket is None:
 		return None
-	return in_booking(req, recorded_basket(quote) + others_basket, others_rooms + 1)
+	own = recorded_basket(quote)
+	if others.promos is None:
+		baskets = {t.promo_id: (others.basket, others.rooms) for t in quote.basket_terms}
+	else:
+		baskets = dict(others.promos)
+	for t in quote.basket_terms:
+		b, n = baskets.get(t.promo_id, (ZERO, 0))
+		baskets[t.promo_id] = (b + own, n + 1)
+	return in_booking(req, own + others.basket, others.rooms + 1, baskets)
+
+
+def price_in_booking(quote: RoomQuote, others: BookingOthers, price: Callable[[StayRequest], RoomQuote]
+                     ) -> RoomQuote:
+	"""``quote`` (a room priced alone) as a room of the booking it makes with ``others``: priced
+	again by ``price`` when a promotion with a minimum basket could see the booking, else recording
+	it (review L3). A room the booking cannot sell answers alone."""
+	again = booking_request(quote.request, quote, others)
+	if again is None:
+		return quote
+	if not quote.basket_terms:
+		quote.request = again
+		return quote
+	q2 = price(again)
+	return q2 if q2.sellable else quote
 
 
 def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuote:
@@ -451,15 +572,27 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 		sell_promos = tuple(p for p in (*t.offers, *ctx.promotions) if p.stage == PromoStage.SELL)
 		gross_accom = sum(sells.values(), ZERO)
 		q.basket = gross_accom + extras_total
-		if req.booking_basket is not None:
-			# priced in a booking of several rooms: minimum baskets are the booking's (G-84, ADR-057)
+		sell_ctx = promotions.PromoContext(basket=q.basket, sell_currency=sell_ccy, fx=ctx.promo_fx, fx_log=log,
+		                                   booking_basket=req.booking_basket, booking_rooms=req.booking_rooms,
+		                                   booking_baskets={p: (b, n) for p, b, n in req.booking_baskets} or None,
+		                                   **promo_ctx_base)
+		# the promotions with a minimum basket this room is eligible for on every other check (G-84)
+		minimums = promotions.basket_minimums(sell_promos, sell_ctx, ctx.coupon_usage)
+		by_id = {p.promo_id: p for p in sell_promos}
+		if req.booking_basket is not None and minimums:
+			# priced in a booking of several rooms: a minimum basket is the booking's, counting the
+			# rooms the promotion covers (G-84, ADR-057 and its review M2)
 			ex.add("promotion", "BOOKING_BASKET",
 			       "minimum baskets judged on the booking: {basket} {currency} over {rooms} rooms (this room {own})",
 			       after=req.booking_basket, currency=sell_ccy, basket=quantize(req.booking_basket, sell_ccy),
 			       rooms=req.booking_rooms, own=quantize(q.basket, sell_ccy))
-		sell_ctx = promotions.PromoContext(basket=q.basket, sell_currency=sell_ccy, fx=ctx.promo_fx, fx_log=log,
-		                                   booking_basket=req.booking_basket, booking_rooms=req.booking_rooms,
-		                                   **promo_ctx_base)
+			for pid in sorted(minimums):
+				b, n, _booked = promotions.judged_basket(pid, sell_ctx)
+				ex.add("promotion", "BOOKING_BASKET_PROMOTION",
+				       "{name}: minimum {minimum} {currency} judged on the {rooms} room(s) it covers: {basket} {currency}",
+				       after=b, currency=sell_ccy, rule=promotions.promo_ref(by_id[pid]), name=by_id[pid].name,
+				       minimum=quantize(minimums[pid], sell_ccy), rooms=n, basket=quantize(b, sell_ccy))
+		sell_from = len(q.promotions)
 		chosen, rejected = promotions.select(sell_promos, sell_ctx, ctx.coupon_usage)
 		fx.explain_new(log, ex)
 		accom_chosen = [p for p in chosen if p.applies_to == PromoAppliesTo.ACCOMMODATION]
@@ -511,6 +644,13 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 				continue
 			outcome = _apply_basket_promo(p, categories, sell_ccy, ctx, lines, ex, log)
 			q.promotions.append(outcome)
+		sold = q.promotions[sell_from:]
+		refused = {o.promo_id for o in sold if not o.applied and o.rule == promotions.MIN_BASKET}
+		granted = {o.promo_id for o in sold if o.applied}
+		for pid in sorted(minimums):
+			b, n, _booked = promotions.judged_basket(pid, sell_ctx)
+			q.basket_terms.append(BasketTerm(pid, by_id[pid].name, by_id[pid].code, minimums[pid], b, n,
+			                                 pid not in refused, pid in granted))
 
 		persons = party.adults + party.child_count
 		tax_lines, _nets = tax.compute_taxes(ctx.tax_rules, categories, inclusive=t.prices_include_tax,
