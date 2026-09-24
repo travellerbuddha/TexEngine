@@ -656,6 +656,17 @@ class TestReviewMoney(ReportCase):
 		by_method = {c: t["charged"] for c, t in out["method_totals"].items()}
 		self.assertEqual(charged.get("GBP"), by_method.get("GBP"))
 		self.assertEqual(D(charged.get("EUR", "0")), D(by_method.get("EUR", "0")))
+		# a booking and its payment with no currency recorded are in the hotel's currency, in both
+		blank = sell("g46r-ccy-blank")
+		pay(blank)
+		paid = D(frappe.db.get_value("TEX Booking", blank["booking"], "paid_amount"))
+		self.assertGreater(paid, 0)
+		frappe.db.set_value("TEX Booking", blank["booking"], "currency", None)
+		frappe.db.set_value("TEX Payment Transaction", {"booking": blank["booking"]}, "currency", None)
+		out = self.report("payment", self.admin, **self.june())
+		self.assertEqual(frappe.db.get_value("Property", fx.PROPERTY, "currency"), "EUR")
+		self.assertEqual((D(out["totals"]["EUR"]["charged"]), D(out["method_totals"]["EUR"]["charged"])), (paid, paid))
+		self.assertEqual(out["totals"]["EUR"]["bookings"], 2)          # both bookings; the first one's payment is GBP
 
 
 class TestReviewVisibility(ReportCase):
