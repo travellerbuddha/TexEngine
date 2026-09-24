@@ -142,6 +142,32 @@ front-desk journey 13/13, banquet 101 OK), 368 unit tests, ruff clean, `npx tsc 
   The upstream suites with the branch's code: eval harness 76/76, front-desk journey 13/13,
   banquet 101 OK. Also 368 unit tests and ruff (clean); semgrep is not installed in this session.
 
+**G-48 and G-84 (2026-09-24, branch `restrictions-basket` on main `b2011bc`, main `665b6b9` merged in, ADR-057, patch p38).**
+Restrictions: a change of a booked stay (staff, the guest's manage page, a guest change paid or
+approved later) is refused by the restrictions of its scope, checked like a new booking for what it
+newly takes (new nights, a new arrival or departure, the new length, or the whole stay of another
+product, never the past of a stay under way); staff with `restriction.edit` override with a reason,
+audited. The booking window (sale dates per night), hotel- and market-level cells and the Booking
+Engine / Call Center / both scopes exist, in the grid too; a channel's booking breaking a
+restriction is accepted with a warning; the channels' ARI hears the booking window and the advance
+days (queued at the site's midnight). Minimum basket: the booking engine and the CRS quote the rooms
+of a booking together, the minimum is the whole booking's at search, quote, booking and in changes,
+and a booking is never sold at a price other than its rooms' together. A code review of the branch
+found 6 correctness items and 9 smaller ones; all fixed but two kept by decision (ADR-057 review
+note). On the branch with its schema: all 32 integration modules **614 OK** (admin_markets 4,
+age_bands 11, audit_trail 15, channel_binding 27, commercial_flows 53, concurrency 8,
+critical_journey 31, crm_privacy 18, crm_segments 7, custom_domains 9, distribution 21,
+extras_inventory 17, fx_snapshot 5, grant_expiry 9, inventory 31, legacy_pricing 15,
+legacy_pricing_review 23, loyalty_admin 7, migrations_notify 7, modification_determinism 27,
+money_fields 9, patches 21, portfolio 2, post_booking_extras 12, pricing_policies 14,
+public_booking 17, restrictions 25, security_hygiene 14, security_regressions 59,
+self_service_money 75, snapshot_integrity 9, system_status 12; 18 of the first 22
+`test_restrictions` tests and the 9 first `TestBookingBasket` tests fail on `b2011bc`, the review's
+tests on the code before it), the upstream suites with the branch's code and schema (eval harness
+76/76, front-desk journey 13/13, banquet 101 OK), 400 unit tests (32 new), ruff clean, `npx tsc -b`, `npm run build` and
+`npm run i18n:tex` clean, e2e `restrictions-grid.spec.ts` type-checked (not run here; bundles not
+rebuilt on the branch).
+
 **Go-live.** Launch readiness per area (READY / PARTIAL / BLOCKED), the blockers and the owner inputs are in
 [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md). Verdict: NOT READY.
 
