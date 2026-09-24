@@ -451,6 +451,13 @@ def force_advance_bill(reservation: str, nights: str = "entire",
 	require_cashier_pin(res.property, pin)
 	if res.status not in ("Confirmed", "Checked In", "Held", "Pending Payment"):
 		frappe.throw("Advance bill only for active reservations.")
+	# TEX Engine (G-96): a stay sold through TEX is billed on its TEX booking; a
+	# price-locked stay posts its locked amount (post_room_night), never the legacy rate
+	from kamra.tex.legacy import locked_bill
+	bill = locked_bill(res)
+	if bill and bill.get("tex"):
+		frappe.throw(frappe._("Reservation {0} is billed on its TEX booking {1}: the folio posts "
+		                      "none of its nights.").format(res.name, bill["booking"]))
 	folio_name = open_folio(res)
 	folio = frappe.get_doc("Folio", folio_name)
 	ci = getdate(res.check_in_date)

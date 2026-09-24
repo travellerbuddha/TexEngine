@@ -10,7 +10,7 @@ This module must not import frappe.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 
 # ISO 4217 minor units for currencies TEX sells in or is likely to meet. Anything
 # missing defaults to 2, which is right for the vast majority of currencies.
@@ -71,6 +71,18 @@ def quantum(currency: str) -> Decimal:
 def quantize(amount: Decimal, currency: str) -> Decimal:
 	"""Round to the currency's minor unit, half-up (commercial rounding)."""
 	return D(amount).quantize(quantum(currency), rounding=ROUND_HALF_UP)
+
+
+def split_evenly(total: Decimal, parts: int, currency: str) -> list[Decimal]:
+	"""``total`` in ``parts`` equal shares of the currency's minor unit, the remainder on the last
+	share, so the shares always add up to the total (a locked price over its nights, G-96)."""
+	if parts < 1:
+		raise ValueError("at least one part")
+	total = quantize(D(total), currency)
+	if total < 0:
+		raise ValueError("a negative total is not split")
+	share = (total / parts).quantize(quantum(currency), rounding=ROUND_DOWN)
+	return [share] * (parts - 1) + [total - share * (parts - 1)]
 
 
 def quantize_rate(rate: Decimal, places: int = FX_PLACES) -> Decimal:

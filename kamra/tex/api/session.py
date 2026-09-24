@@ -16,6 +16,8 @@ def bootstrap():
 	user = frappe.session.user
 	if user == "Guest":
 		frappe.throw("Login required", frappe.AuthenticationError)
+	from kamra.tex.legacy import tex_mode
+
 	props = sorted(scope.permitted_properties())
 	rows = {p.name: p for p in frappe.get_all("Property", filters={"name": ("in", props or ["__none__"])},
 	                                          fields=["name", "property_name", "city", "country", "currency",
@@ -29,6 +31,8 @@ def bootstrap():
 			"name": p, "property_name": rows[p].property_name, "city": rows[p].city, "country": rows[p].country,
 			"currency": rows[p].currency, "hotel_group": rows[p].tex_hotel_group, "enterprise": rows[p].tex_enterprise,
 			"default_market": rows[p].tex_default_market,
+			# live in TEX (the Desk no longer sells it), onboarding, or None outside TEX (ADR-052 review)
+			"tex_mode": tex_mode(p),
 			"capabilities": sorted(scope.capabilities(p, user)),
 			# the channels the user may price (search) and book on there: the CRS channel picker
 			# (ADR-050)

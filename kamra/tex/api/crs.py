@@ -261,6 +261,15 @@ def cancel(reservation: str, reason: str, waive_penalty: int = 0):
 
 
 @frappe.whitelist(methods=["POST"])
+def correct_imported_amount(reservation: str, amount: str, reason: str, currency: str | None = None):
+	"""Correct the amount (and currency) an imported stay was locked at: ``price.override`` at
+	its hotel, a reason, a revision and an audit event (ADR-052 review H1)."""
+	from kamra.tex.services import imported
+
+	return imported.correct_amount(reservation, amount, reason, currency)
+
+
+@frappe.whitelist(methods=["POST"])
 def acknowledge_guest_change(reservation: str, note: str | None = None):
 	res = frappe.get_doc("Reservation", reservation)
 	scope.require("reservation.modify", res.property)

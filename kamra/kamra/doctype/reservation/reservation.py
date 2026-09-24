@@ -270,15 +270,16 @@ class Reservation(Document):
 		modification flow. Legacy reservations re-price only on insert or when a
 		pricing input changes, never silently on unrelated edits.
 
-		A TEX hotel is never priced here (G-92, ADR-052): its stays are priced by TEX,
-		or imported at the amount they were sold at."""
+		A hotel live in TEX is never priced here (G-92, ADR-052): its stays are priced
+		by TEX, or imported at the amount they were sold at. A hotel onboarding into
+		TEX is still sold at the Desk until it goes live (ADR-052 review)."""
 		if not getattr(self, "auto_price", 0) or not self.room_type:
 			return
 		if self.get("tex_pricing_source") == "TEX" or self.get("tex_price_locked"):
 			return
-		from kamra.tex.legacy import is_tex_hotel
+		from kamra.tex.legacy import tex_live
 		before = None if self.is_new() else self.get_doc_before_save()
-		if is_tex_hotel(self.property) or (before and is_tex_hotel(before.property)):
+		if tex_live(self.property) or (before and tex_live(before.property)):
 			return
 		if not self.is_new():
 			ages = lambda d: [str(o.get("age") or "") for o in (d.get("occupants") or [])]  # noqa: E731

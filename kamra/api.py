@@ -420,52 +420,57 @@ def setup_property(payload):
 
 
 @frappe.whitelist()
-def import_bookings(property: str, bookings):
+def import_bookings(property: str, bookings, decimal: str | None = None, currency: str | None = None):
 	"""Bulk booking import - the switch-over tool. Each row: {guest_name,
 	phone?, room_type_code, check_in, check_out, adults?, children?,
-	amount_after_tax?, channel?, status?}. Rows with a fixed amount keep
+	amount_after_tax?, currency?, channel?, status?}. Rows with a fixed amount keep
 	it (auto_price off); others are priced by the engine.
 
-	TEX Engine (G-92, ADR-052): at a TEX hotel a row is recorded as imported at
-	its amount (a Decimal, never auto-priced; a live row needs one)."""
+	TEX Engine (G-92, ADR-052 and its review): amounts are read strictly (the
+	``decimal`` mark when a cell is ambiguous; never a float); at a TEX hotel a row
+	is recorded as imported at its amount, in its ``currency`` (the row's, else the
+	import's), and a live row needs one. Each row is all or nothing; Checked In
+	and history statuses (Checked Out, Cancelled, No Show) are stamped."""
 	if isinstance(bookings, str):
 		bookings = json.loads(bookings)
 	frappe.only_for(("System Manager", "Hotel Admin"))
-	from kamra.tex.legacy import flag_import
-	from kamra.tex.money import D
+	from kamra.tex.legacy import HISTORY, flag_import, import_savepoint, insert_imported, read_import_amount
 
 	created, errors = [], []
 	for i, row in enumerate(bookings):
 		try:
-			rt = frappe.db.get_value(
-				"Room Type",
-				{"property": property, "room_type_code": row["room_type_code"]},
-			)
-			if not rt:
-				raise frappe.ValidationError(
-					f"unknown room type code {row['room_type_code']}")
-			guest = _find_or_create_guest(row["guest_name"], row.get("phone"))
-			doc = frappe.get_doc({
-				"doctype": "Reservation",
-				"property": property,
-				"guest": guest,
-				"room_type": rt,
-				"check_in_date": row["check_in"],
-				"check_out_date": row["check_out"],
-				"adults": row.get("adults", 2),
-				"children": row.get("children", 0),
-				"source": "PMS",
-				"channel": row.get("channel"),
-				"auto_price": 0 if row.get("amount_after_tax") else 1,
-			})
-			if row.get("amount_after_tax"):
-				doc.amount_after_tax = D(row["amount_after_tax"])
-			# a migration, not a sale (ADR-028, ADR-052)
-			flag_import(doc, row["status"] if row.get("status") in ("Checked In", "Cancelled") else None)
-			doc.insert()
-			if row.get("status") in ("Checked In", "Cancelled"):
-				doc.status = row["status"]
-				doc.save()
+			with import_savepoint(f"tex_import_{i}"):
+				status = row.get("status") or "Confirmed"
+				if status not in ("Confirmed", "Checked In", *HISTORY):
+					raise frappe.ValidationError(f"unknown status {status}")
+				amount, ccy = read_import_amount(row.get("amount_after_tax"), property=property, decimal=decimal,
+				                                 currency=currency, row_currency=row.get("currency"))
+				rt = frappe.db.get_value(
+					"Room Type",
+					{"property": property, "room_type_code": row["room_type_code"]},
+				)
+				if not rt:
+					raise frappe.ValidationError(
+						f"unknown room type code {row['room_type_code']}")
+				guest = _find_or_create_guest(row["guest_name"], row.get("phone"))
+				doc = frappe.get_doc({
+					"doctype": "Reservation",
+					"property": property,
+					"guest": guest,
+					"room_type": rt,
+					"check_in_date": row["check_in"],
+					"check_out_date": row["check_out"],
+					"adults": row.get("adults", 2),
+					"children": row.get("children", 0),
+					"source": "PMS",
+					"channel": row.get("channel"),
+					"auto_price": 0 if amount else 1,
+				})
+				if amount:
+					doc.amount_after_tax = amount
+				# a migration, not a sale (ADR-028, ADR-052)
+				flag_import(doc, status, ccy)
+				insert_imported(doc, status)
 			created.append(doc.name)
 		except frappe.QueryDeadlockError:
 			# InnoDB rolled back the whole import so far: stop, never report those rows as
@@ -2069,14 +2074,19 @@ def guest_journey(guest: str):
 def my_properties():
 	"""Properties the current user may work with: the TEX tenancy scope
 	(User Permissions + TEX Access Grants; strict tenancy by default)."""
+	from kamra.tex.legacy import tex_mode
 	from kamra.tex.security import scope
 	allowed = sorted(scope.permitted_properties())
-	return frappe.get_all(
+	rows = frappe.get_all(
 		"Property",
 		filters={"disabled": 0, "name": ("in", allowed or [""])},
 		fields=["name", "property_name", "city"],
 		order_by="property_name asc",
 	)
+	# TEX Engine (ADR-052 review): the shell says when a hotel is sold through TEX
+	for r in rows:
+		r["tex_mode"] = tex_mode(r.name)
+	return rows
 
 
 @frappe.whitelist()
@@ -2652,6 +2662,10 @@ def _do_cancel(res, reason: str = "Guest request", note: str | None = None,
                waive_fee: int = 0, issue_credit_note: int = 0) -> dict:
 	"""Shared cancel path for desk API and OTA channel manager."""
 	from frappe.model.naming import make_autoname
+
+	# TEX Engine (ADR-052 review M2): a stay billed in TEX is cancelled in TEX
+	from kamra.tex.legacy import refuse_legacy_cancel
+	refuse_legacy_cancel(res)
 
 	if reason not in CANCEL_REASONS:
 		reason = "Other"

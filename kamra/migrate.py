@@ -19,7 +19,7 @@ import frappe
 from frappe import _
 
 from kamra.authz import require_roles
-from kamra.tex.money import D
+from kamra.tex.money import to_str
 
 # who a header column really is, whatever the vendor called it
 SYNONYMS = {
@@ -43,6 +43,7 @@ SYNONYMS = {
 	"amount_after_tax": ["grand total", "total amount", "total", "amount",
 	                     "booking amount", "amount after tax", "net amount",
 	                     "total charges", "total revenue"],
+	"currency": ["currency", "currency code", "ccy", "curr"],
 	"status": ["status", "reservation status", "booking status",
 	           "res status"],
 	"channel": ["channel", "source", "business source", "booking source",
@@ -174,7 +175,8 @@ def _room_type_resolver(property: str):
 	return resolve, [rt.room_type_name for rt in rts]
 
 
-def _normalize(property: str, csv_text: str, preset: str):
+def _normalize(property: str, csv_text: str, preset: str, decimal: str | None = None,
+               currency: str | None = None):
 	headers, raw = _parse_csv(csv_text)
 	mapping = _map_headers(headers)
 	missing = [f for f in REQUIRED if f not in mapping]
@@ -212,12 +214,21 @@ def _normalize(property: str, csv_text: str, preset: str):
 			problems.append("check-out before check-in")
 		status_raw = _norm(get("status"))
 		status = STATUS_MAP.get(status_raw, "Confirmed") if status_raw else "Confirmed"
+		# money is read strictly and never guessed; at a TEX hotel the row names its
+		# currency (TEX Engine, ADR-052 review H1, L3)
+		from kamra.tex.legacy import read_import_amount
+		amount = ccy = None
+		try:
+			amount, ccy = read_import_amount(get("amount_after_tax"), property=property, decimal=decimal,
+			                                 currency=currency, row_currency=get("currency"))
+		except Exception as e:
+			problems.append(str(e))
 		if problems:
 			issues.append({"row": i, "guest": guest,
 			               "error": "; ".join(problems)})
 			continue
-		amount = re.sub(r"[^0-9.]", "", get("amount_after_tax") or "")
 		rows.append({
+			"line": i,
 			"guest_name": guest.strip(),
 			"phone": get("phone").strip() or None,
 			"email": get("email").strip() or None,
@@ -225,7 +236,9 @@ def _normalize(property: str, csv_text: str, preset: str):
 			"check_in": ci, "check_out": co,
 			"adults": int(re.sub(r"\D", "", get("adults") or "") or 2) or 2,
 			"children": int(re.sub(r"\D", "", get("children") or "") or 0),
-			"amount_after_tax": D(amount) if amount else None,     # money: never a float
+			"amount_after_tax": amount,             # a Decimal: money is never a float
+			"amount": to_str(amount),               # as the preview shows it
+			"currency": ccy,
 			"status": status,
 			"channel": get("channel").strip() or None,
 		})
@@ -234,11 +247,16 @@ def _normalize(property: str, csv_text: str, preset: str):
 
 @frappe.whitelist(methods=["POST"])
 @require_roles()
-def preview_import(property: str, csv_text: str, preset: str = "auto"):
+def preview_import(property: str, csv_text: str, preset: str = "auto", decimal: str | None = None,
+                   currency: str | None = None):
 	"""Dry run: how the file's columns map, which date convention was
-	detected, and every row that would be skipped - nothing is written."""
+	detected, each row's amount and currency as it would be written, and
+	every row that would be skipped - nothing is written. ``decimal`` ("."
+	or ",") settles amounts like "1.500"; ``currency`` is the import's
+	currency when the file has no Currency column (required at a TEX hotel)."""
+	from kamra.tex.legacy import is_tex_hotel
 	headers, mapping, rows, issues, dayfirst = _normalize(
-		property, csv_text, preset)
+		property, csv_text, preset, decimal, currency)
 	return {
 		"headers": headers,
 		"mapping": mapping,
@@ -248,68 +266,45 @@ def preview_import(property: str, csv_text: str, preset: str = "auto"):
 		"skipped": len(issues),
 		"issues": issues[:25],
 		"sample": rows[:10],
+		"decimal": decimal,
+		"currency": currency,
+		"needs_currency": is_tex_hotel(property),
 	}
 
 
 @frappe.whitelist(methods=["POST"])
 @require_roles()
-def run_import(property: str, csv_text: str, preset: str = "auto"):
+def run_import(property: str, csv_text: str, preset: str = "auto", decimal: str | None = None,
+               currency: str | None = None):
 	"""Import the file. Live rows (confirmed / in-house) go through the
 	full booking validation; history rows (checked-out / cancelled /
 	no-show) are stored as records with their status stamped directly, so
 	guest history survives the migration.
 
-	TEX Engine (G-92, ADR-052): at a TEX hotel every row is recorded as
-	imported at its amount (never auto-priced; a live row needs one)."""
+	TEX Engine (G-92, ADR-052 and its review): amounts are read strictly
+	(``decimal`` settles "1.500"); at a TEX hotel every row is recorded as
+	imported at its amount in its currency (a Currency column, else
+	``currency``; never auto-priced; a live row needs an amount). Each row is
+	all or nothing."""
 	from kamra.api import _find_or_create_guest
-	from kamra.tex.legacy import flag_import
+	from kamra.tex.legacy import flag_import, import_savepoint, insert_imported
 	_headers, _mapping, rows, issues, _dayfirst = _normalize(
-		property, csv_text, preset)
+		property, csv_text, preset, decimal, currency)
 
 	created, history, errors = [], 0, list(issues)
-	for i, row in enumerate(rows, start=1):
+	for row in rows:
 		try:
-			guest = _find_or_create_guest(row["guest_name"], row["phone"])
-			if row["email"] and not frappe.db.get_value("Guest", guest, "email"):
-				frappe.db.set_value("Guest", guest, "email", row["email"],
-				                    update_modified=False)
-			doc = frappe.get_doc({
-				"doctype": "Reservation",
-				"property": property,
-				"guest": guest,
-				"room_type": row["room_type"],
-				"check_in_date": row["check_in"],
-				"check_out_date": row["check_out"],
-				"adults": row["adults"],
-				"children": row["children"],
-				"source": "PMS",
-				"channel": row["channel"],
-				"auto_price": 0 if row["amount_after_tax"] else 1,
-			})
-			if row["amount_after_tax"]:
-				doc.amount_after_tax = row["amount_after_tax"]
-			# a migration, not a sale (ADR-028, ADR-052)
-			flag_import(doc, row["status"])
+			with import_savepoint(f"tex_import_{row['line']}"):
+				doc = _import_one(property, row, _find_or_create_guest, flag_import, insert_imported)
 			if row["status"] in HISTORY:
-				# a past stay is a record, not a live booking: skip live
-				# validation (overbooking guard, blacklist) and stamp the
-				# final status without side effects (no folio, no HK task)
-				doc.flags.ignore_validate = True
-				doc.insert()
-				doc.db_set("status", row["status"], update_modified=False)
 				history += 1
-			else:
-				doc.insert()
-				if row["status"] == "Checked In":
-					doc.status = "Checked In"
-					doc.save()
 			created.append(doc.name)
 		except frappe.QueryDeadlockError:
 			# InnoDB rolled back the whole import so far: stop, never report those rows as
 			# created (TEX Engine, G-49 review)
 			raise
 		except Exception as e:
-			errors.append({"row": i, "guest": row["guest_name"],
+			errors.append({"row": row["line"], "guest": row["guest_name"],
 			               "error": str(e)[:160]})
 
 	from kamra.savings import log_action
@@ -320,3 +315,34 @@ def run_import(property: str, csv_text: str, preset: str = "auto"):
 	           channel="API")
 	return {"created": len(created), "history": history,
 	        "reservations": created[:50], "errors": errors}
+
+
+def _import_one(property, row, find_guest, flag_import, insert_imported):
+	"""One normalised row as a reservation, inside the caller's savepoint. A
+	past stay (history) is a record, not a live booking: it skips live
+	validation (overbooking guard, blacklist) and its final status is stamped
+	without side effects (no folio, no HK task); an in-house row is checked as
+	a live stay and stamped Checked In (TEX Engine, ADR-052 review M1)."""
+	guest = find_guest(row["guest_name"], row["phone"])
+	if row["email"] and not frappe.db.get_value("Guest", guest, "email"):
+		frappe.db.set_value("Guest", guest, "email", row["email"],
+		                    update_modified=False)
+	doc = frappe.get_doc({
+		"doctype": "Reservation",
+		"property": property,
+		"guest": guest,
+		"room_type": row["room_type"],
+		"check_in_date": row["check_in"],
+		"check_out_date": row["check_out"],
+		"adults": row["adults"],
+		"children": row["children"],
+		"source": "PMS",
+		"channel": row["channel"],
+		"auto_price": 0 if row["amount_after_tax"] else 1,
+	})
+	if row["amount_after_tax"]:
+		doc.amount_after_tax = row["amount_after_tax"]
+	# a migration, not a sale (ADR-028, ADR-052)
+	flag_import(doc, row["status"], row["currency"])
+	insert_imported(doc, row["status"])
+	return doc

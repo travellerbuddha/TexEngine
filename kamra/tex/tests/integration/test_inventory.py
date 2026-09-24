@@ -81,7 +81,7 @@ class InventoryCase(TexTestCase):
 		                      "room_type": self.rt(code), "check_in_date": check_in or self.ci,
 		                      "check_out_date": check_out or self.co, "adults": 2, "status": "Confirmed",
 		                      "amount_after_tax": 240, **kw})
-		flag_import(doc)
+		flag_import(doc, currency="EUR")
 		return doc.insert()
 
 	def set_inventory(self, code: str, start=None, end=None, **values):
@@ -187,7 +187,7 @@ class TestOutsideTexReservations(InventoryCase):
 		                      "room_type": "G49 No Such Room Type", "check_in_date": self.ci,
 		                      "check_out_date": self.co, "adults": 2, "status": "Confirmed", "amount_after_tax": 240})
 		doc.flags.ignore_links = True                    # a write that skipped link validation
-		flag_import(doc)
+		flag_import(doc, currency="EUR")
 		with self.assertRaisesRegex(frappe.ValidationError, TEX_REFUSAL):
 			doc.insert()
 
@@ -244,11 +244,11 @@ class TestOutsideTexReservations(InventoryCase):
 		self.set_inventory("DLX", closed=1)
 		row = {"guest_name": "Imported Guest", "phone": "+49 30 5550150", "room_type_code": "DLX",
 		       "check_in": str(self.ci), "check_out": str(self.co), "amount_after_tax": 300}
-		out = import_bookings(fx.PROPERTY, [row])
+		out = import_bookings(fx.PROPERTY, [row], currency="EUR")
 		self.assertEqual(out["created"], 0)
 		self.assertIn(TEX_REFUSAL, out["errors"][0]["error"])
 		self.set_inventory("DLX", closed=0)
-		self.assertEqual(import_bookings(fx.PROPERTY, [row])["created"], 1)
+		self.assertEqual(import_bookings(fx.PROPERTY, [row], currency="EUR")["created"], 1)
 		self.assertEqual(self.available(), 1)
 
 	def test_a_stay_that_takes_no_room_is_never_refused(self):
@@ -445,7 +445,7 @@ class TestRoomTypeBelongsToTheHotel(TestLegacyHotel):
 		doc = frappe.get_doc({"doctype": "Reservation", "property": fx.PROPERTY, "guest": self.guest,
 		                      "room_type": self.legacy_rt, "check_in_date": self.ci, "check_out_date": self.co,
 		                      "adults": 2, "status": "Confirmed", "amount_after_tax": 240})
-		flag_import(doc)                                 # a Desk insert is refused before (G-92)
+		flag_import(doc, currency="EUR")                 # a Desk insert is refused before (G-92)
 		with self.assertRaisesRegex(frappe.ValidationError, "does not belong to"):
 			doc.insert()
 		# nothing of the other hotel's inventory was created under this one
@@ -534,7 +534,7 @@ class TestReviewFollowUps(InventoryCase):
 
 		with mock.patch.object(api, "_find_or_create_guest", side_effect=guest):
 			with self.assertRaises(frappe.QueryDeadlockError):
-				api.import_bookings(fx.PROPERTY, rows)
+				api.import_bookings(fx.PROPERTY, rows, currency="EUR")
 
 	def test_a_disabled_allotment_saves_whatever_its_release(self):
 		name = self.allot()
