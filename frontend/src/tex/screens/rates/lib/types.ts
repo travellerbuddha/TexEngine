@@ -192,10 +192,31 @@ export interface VersionDoc {
   modified?: string
 }
 
+/**
+ * What a validation issue is about (ADR-061 D9, GAP-4): only the parts it has. Rule ids are the
+ * saved row names, or `~<_key>` for rows sent unsaved to `validate_version(name, data)`.
+ * `rule_ids` lists every rule of an issue about several (twins, ties); `rule_id` is the first.
+ * `age_bands` (AGE_BANDS) is every band code of the contract, so the message's codes can be
+ * shown as labels. The sweep reports a combination once, with the first period it fails in.
+ */
+export interface IssueRef {
+  rule_id?: string
+  rule_ids?: string[]
+  room_type?: string
+  period?: string
+  other_period?: string
+  age_band?: string
+  age_bands?: string[]
+  adults?: number
+  children?: number
+  board?: string
+}
+
 export interface Issue {
   level: "ERROR" | "WARNING"
   code: string
   message: string
+  ref?: IssueRef
 }
 
 export interface ValidationResult {
