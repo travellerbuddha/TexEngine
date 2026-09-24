@@ -719,6 +719,26 @@ class TestReviewVisibility(ReportCase):
 			self.report("production", other, **self.june())
 			frappe.cache.delete_keys("tex_report_rate:")
 
+	def test_the_dashboard_and_pace_count_against_the_same_budget(self):
+		"""M5: the dashboard (two production aggregates and the funnel) and pace (every stay of its
+		window) are report runs too."""
+		pace = {"property": fx.PROPERTY, "stay_from": str(fx.d(6, 1)), "stay_to": str(fx.d(6, 30))}
+		with patch.object(rep, "RATE_LIMIT", (2, 60)), patch.object(frappe.local, "request", object(), create=True):
+			frappe.cache.delete_keys("tex_report_rate:")
+			frappe.set_user(self.rm)  # nosemgrep: frappe-setuser -- the viewer
+			scope.clear_cache()
+			try:
+				rep_api.dashboard(property=fx.PROPERTY)
+				rep_api.pace(**pace)
+				with self.assertRaises(frappe.RateLimitExceededError):
+					rep_api.dashboard(property=fx.PROPERTY)
+				with self.assertRaises(frappe.RateLimitExceededError):
+					rep_api.pace(**pace)
+			finally:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+				scope.clear_cache()
+				frappe.cache.delete_keys("tex_report_rate:")
+
 
 class TestReviewConversion(ReportCase):
 	def event(self, session, event, at, **kw):
