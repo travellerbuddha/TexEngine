@@ -3,8 +3,10 @@
 // sets one hotel-level cell (no room type) for a far-future night that is only sold from a
 // sale date still to come, and the grid shows it on the hotel row ("All room types") and,
 // inherited, on every room row. A call-centre search for a stay through that night is refused
-// with the booking window; a B2B search is not (another channel). The cell is removed again
-// even when a step fails.
+// with the booking window; a B2B search is not (another channel).
+// Re-runnable on a shared site: the night is one no booking window touches yet (read from the
+// grid), and the cell is cleared again even when a step fails (a clear of a missing cell writes
+// nothing), then checked gone.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e restrictions-grid
 import { expect, test, type Page } from "@playwright/test"
 import { byLabel, esc, isoDate, login, pageApi, texPath, trackErrors } from "./helpers"
@@ -20,6 +22,15 @@ interface Entry {
 }
 interface Search {
   properties: { offers: Entry[]; unavailable: Entry[] }[]
+}
+interface GridCellLite {
+  date: string
+  own: Record<string, unknown> | null
+  book_from: string | null
+  book_to: string | null
+}
+interface GridLite {
+  rows: { level: "hotel" | "room"; cells: GridCellLite[] }[]
 }
 
 async function english(page: Page) {
@@ -64,7 +75,25 @@ async function entries(page: Page, night: string, channel: string): Promise<Entr
   return [...(p?.offers ?? []), ...(p?.unavailable ?? [])]
 }
 
-/** Remove the test's hotel-level cell (all fields blank deletes it). */
+async function hotelGrid(page: Page, start: string, days: number) {
+  const g = await pageApi<GridLite>(page, "kamra.tex.api.crs.ari_grid", { property: HOTEL, start, days, channel_scope: SCOPE })
+  expect(g.ok, JSON.stringify(g.body).slice(0, 300)).toBeTruthy()
+  return g.message.rows
+}
+
+/** A far-future night (with free neighbours for a 2-night search) that no booking window of
+ * this scope touches and that has no hotel-level cell of its own: earlier runs, or other work on
+ * the shared site, may have left cells elsewhere. */
+async function freeNight(page: Page): Promise<string> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const rows = await hotelGrid(page, isoDate(300 + Math.floor(Math.random() * 60)), 14)
+    const clear = (i: number) => rows.every((r) => !r.cells[i].book_from && !r.cells[i].book_to && (r.level !== "hotel" || !r.cells[i].own))
+    for (let i = 1; i < rows[0].cells.length - 1; i++) if (clear(i - 1) && clear(i) && clear(i + 1)) return rows[0].cells[i].date
+  }
+  throw new Error(`no night free of booking windows at ${HOTEL}`)
+}
+
+/** Clear the test's hotel-level cell (all fields blank deletes it; nothing set, nothing written). */
 async function removeCell(page: Page, night: string) {
   return pageApi(page, "kamra.tex.api.crs.ari_bulk_update", {
     property: HOTEL,
@@ -83,7 +112,7 @@ test("restrictions: a hotel-level booking window for the Booking Engine + Call C
   await english(page)
   await login(page, "revenue@demo.tex")
   await page.goto(texPath("/tex/inventory"))
-  const night = isoDate(300 + Math.floor(Math.random() * 40))
+  const night = await freeNight(page)
   const opens = isoDate(420)
   const names = await dayNames(page, night)
   const opensName = (await dayNames(page, opens)).medium
@@ -118,7 +147,7 @@ test("restrictions: a hotel-level booking window for the Booking Engine + Call C
     })
 
     await test.step("the hotel row holds the window; every room row inherits it", async () => {
-      await expect(hotelCell).toHaveAccessibleName(new RegExp(`: sold from ${esc(opensName)}, set at this scope$`))
+      await expect(hotelCell).toHaveAccessibleName(new RegExp(`: sold from ${esc(opensName)}, Set at this scope$`))
       const roomCells = page.getByRole("gridcell", { name: new RegExp(`, Booking window, ${esc(names.weekday)} ${esc(names.medium)}: sold from `) })
       expect(await roomCells.count()).toBeGreaterThan(1)
       // the hotel row has no availability or rate rows (restrictions only)
@@ -137,5 +166,9 @@ test("restrictions: a hotel-level booking window for the Booking Engine + Call C
   } finally {
     const r = await removeCell(page, night)
     expect(r.ok, JSON.stringify(r.body).slice(0, 300)).toBeTruthy()
+    // gone: no cell of its own left on the hotel row, and no window left on that night
+    const rows = await hotelGrid(page, night, 1)
+    expect(rows[0].cells[0].own).toBeNull()
+    expect(rows.every((row) => !row.cells[0].book_from)).toBe(true)
   }
 })
