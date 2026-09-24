@@ -78,6 +78,23 @@ def _lock_and_check(property: str, room_type: str, ci, co, exclude: list[str]) -
 	return None if count >= 1 else f"{room_type} {ci}→{co}: accepted from the channel although TEX shows no room left"
 
 
+def _restriction_warning(property: str, m, ci, co, now, before=None) -> str | None:
+	"""A stay the channel sold although a TEX restriction of its scope refuses it (a stop sell,
+	CTA/CTD, a length of stay, the booking window …) is accepted like an overbooking: the guest
+	holds the channel's confirmation (ADR-039, G-48). ``before``: the stay a modification
+	replaces, of the same product: only what it newly takes is checked (ADR-057)."""
+	from kamra.tex.availability import repository as avail
+	from kamra.tex.distribution.repository import _contract_version
+
+	contract = m.contract or _contract_version(m, now)[0]
+	sc = avail.scope_for(m.room_type, contract, m.market, m.rate_plan, m.sales_channel)
+	found = avail.check_restrictions(property, sc, ci, co, now.date(), before=before)
+	if not found:
+		return None
+	return (f"{m.room_type} {ci}→{co}: accepted from the channel although TEX restrictions refuse it: "
+	        + "; ".join(v.message for v in found))
+
+
 def _contract_warning(m, now) -> str | None:
 	"""A stay the channel sold on a contract TEX no longer sells (suspended, archived, or closed for
 	this market and channel before the closed ARI reached the channel) is accepted like an
@@ -169,6 +186,9 @@ def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, 
 		w = _contract_warning(m, now)
 		if w:
 			warnings.append(w)
+		w = _restriction_warning(prop, m, ci, co, now)
+		if w:
+			warnings.append(w)
 		res = frappe.get_doc({"doctype": "Reservation", "property": prop, "guest": guest, "status": "Confirmed",
 		                      "source": "OTA", "channel": m.sales_channel, "auto_price": 0, "tex_booking": booking.name,
 		                      "tex_room_index": idx + 1, "tex_sale_at": now, "tex_locked_at": now, "tex_accepted_at": now,
@@ -219,6 +239,9 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			stopped = _contract_warning(m, now)
 			if stopped:
 				warnings.append(stopped)
+			restricted = _restriction_warning(prop, m, ci, co, now)
+			if restricted:
+				warnings.append(restricted)
 			res = frappe.get_doc({"doctype": "Reservation", "property": prop, "guest": b.booker_guest,
 			                      "status": "Confirmed", "source": "OTA", "channel": m.sales_channel, "auto_price": 0,
 			                      "tex_booking": b.name, "tex_room_index": len(b.rooms) + 1, "tex_sale_at": now,
@@ -238,6 +261,12 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			if all(before[f] == str(values[f] or "") for f in before) and res.status in LIVE:
 				continue
 			w = _lock_and_check(prop, m.room_type, ci, co, [res.name])
+			# the nights, arrival and departure the line already had are its own (ADR-057)
+			same = (res.room_type, res.rate_plan or None, res.tex_market) == (m.room_type, m.rate_plan or None, m.market)
+			restricted = _restriction_warning(prop, m, ci, co, now, before=(
+				getdate(res.check_in_date), getdate(res.check_out_date)) if same and res.status in LIVE else None)
+			if restricted:
+				warnings.append(restricted)
 			old = D(str(res.tex_total_amount or 0))
 			res.update(values)
 			if res.status not in LIVE:
