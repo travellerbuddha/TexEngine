@@ -31,6 +31,8 @@ LIST_FIELDS = ["name", "full_name", "first_name", "last_name", "email", "phone",
                "tex_lifetime_currency", "tex_last_stay", "tex_loyalty_points", "tex_consent_email", "tex_consent_sms",
                "tex_consent_whatsapp", "tex_enterprise"]
 ABANDON_AFTER_MINUTES = 45
+# how long an open case left at payment is watched for its booking's payment (a payment link's life)
+RECOVERY_DAYS = 60
 
 
 # ─── tenancy ─────────────────────────────────────────────────────────────
@@ -580,7 +582,8 @@ STAGES = ("search", "room_view", "quote", "guest_details", "payment_started")
 def detect_abandoned(now=None) -> dict:
 	"""Scheduler: sessions that reached at least a quote, went quiet for
 	ABANDON_AFTER_MINUTES and never booked. Contact data is kept only with the guest's
-	marketing consent; otherwise the record is anonymous (value, dates, stage)."""
+	marketing consent; otherwise the record is anonymous (value, dates, stage). A case is
+	recovered when its session books, or when the booking it left at payment is paid later."""
 	now = now or now_datetime()
 	cutoff = add_to_date(now, minutes=-ABANDON_AFTER_MINUTES)
 	since = add_to_date(now, days=-3)
@@ -591,17 +594,19 @@ def detect_abandoned(now=None) -> dict:
 	created = recovered = 0
 	for s in sessions:
 		events = frappe.get_all("TEX Funnel Event", filters={"session_id": s.session_id},
-		                        fields=["event", "payload", "property", "email_hash", "consent_marketing",
-		                                "occurred_at"], order_by="occurred_at asc")
+		                        fields=["event", "payload", "property", "consent_marketing", "occurred_at"],
+		                        order_by="occurred_at asc")
 		names = [e.event for e in events]
 		existing = frappe.db.get_value("TEX Abandoned Booking", {"session_id": s.session_id},
 		                               ["name", "status"], as_dict=True)
-		if "booked" in names:
+		# booked in the session, or the booking left at payment was paid later (a payment link, a
+		# retry): nothing was abandoned; an open case is recovered by that booking (G-81)
+		booked = next((json.loads(e.payload or "{}").get("booking") for e in reversed(events)
+		               if e.event == "booked"), None) if "booked" in names else _paid_later(events)
+		if "booked" in names or booked:
 			if existing and existing.status in ("Open", "Contacted"):
-				booking = next((json.loads(e.payload or "{}").get("booking") for e in reversed(events)
-				                if e.event == "booked"), None)
 				frappe.db.set_value("TEX Abandoned Booking", existing.name,
-				                    {"status": "Recovered", "recovered_booking": booking})
+				                    {"status": "Recovered", "recovered_booking": booked})
 				recovered += 1
 			continue
 		if existing or not ({"quote", "guest_details", "payment_started"} & set(names)):
@@ -636,10 +641,38 @@ def detect_abandoned(now=None) -> dict:
 			"quote": qp.get("quote") if qp.get("quote") and frappe.db.exists("TEX Quote", qp.get("quote")) else None,
 			"last_event_at": s.last_at}).insert(ignore_permissions=True)
 		created += 1
+	# a case left at payment is recovered when its booking is paid, however long after its session
+	# went quiet (a payment link lives up to 60 days)
+	for a in frappe.get_all("TEX Abandoned Booking", filters={
+			"status": ("in", ["Open", "Contacted"]), "stage_reached": "payment_started",
+			"last_event_at": (">=", add_to_date(now, days=-RECOVERY_DAYS))}, fields=["name", "session_id"]):
+		booked = _paid_later(frappe.get_all("TEX Funnel Event", filters={"session_id": a.session_id,
+		                                                                  "event": "payment_started"},
+		                                    fields=["event", "payload"], order_by="occurred_at asc"))
+		if booked:
+			frappe.db.set_value("TEX Abandoned Booking", a.name, {"status": "Recovered", "recovered_booking": booked})
+			recovered += 1
 	return {"created": created, "recovered": recovered}
 
 
+# a booking whose payment arrived: the guest came back and completed it
+PAID_BOOKING = ("Confirmed", "Partially Cancelled")
+
+
+def _paid_later(events) -> str | None:
+	"""The booking a session left at the payment step, when it has been paid since."""
+	for e in reversed(events):
+		if e.event != "payment_started":
+			continue
+		booking = json.loads(e.payload or "{}").get("booking")
+		if booking and frappe.db.get_value("TEX Booking", booking, "status") in PAID_BOOKING:
+			return booking
+	return None
+
+
 def abandoned(property: str, *, status: str | None = None, days: int = 30) -> list[dict]:
+	"""The hotel's abandoned bookings. Contact data is shown only while the guest profile's own
+	e-mail consent holds (withdrawn later: the case stays, anonymous; ADR-046, ADR-056)."""
 	scope.require("crm.view", property)
 	filters = {"property": property, "last_event_at": (">=", add_to_date(now_datetime(), days=-days))}
 	if status:
@@ -648,7 +681,12 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	                      fields=["name", "site", "stage_reached", "status", "guest", "email", "phone",
 	                              "consent_marketing", "value", "currency", "check_in", "check_out",
 	                              "last_event_at", "recovered_booking"], order_by="last_event_at desc", limit=500)
+	guests = {r.guest for r in rows if r.guest}
+	agreed = set(frappe.get_all("Guest", filters={"name": ("in", list(guests)), "tex_consent_email": 1},
+	                            pluck="name")) if guests else set()
 	for r in rows:
+		if not (r.consent_marketing and r.guest in agreed):
+			r["email"] = r["phone"] = None
 		r["value"] = to_str(from_db(r["value"], r["currency"] or "EUR"))
 		for k in ("check_in", "check_out", "last_event_at"):
 			r[k] = str(r[k]) if r[k] else None
