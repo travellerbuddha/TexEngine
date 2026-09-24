@@ -116,6 +116,9 @@ class FxMode(StrEnum):
 	PROVIDER = "PROVIDER"
 	PROVIDER_PERCENT = "PROVIDER_PERCENT"
 	PROVIDER_FIXED = "PROVIDER_FIXED"
+	# a rate known only from a sold line of a snapshot priced before G-56 (``fx.recorded``):
+	# reused, never resolved (no FX policy has this mode)
+	RECORDED = "RECORDED"
 
 
 class ExtraPricingMode(StrEnum):

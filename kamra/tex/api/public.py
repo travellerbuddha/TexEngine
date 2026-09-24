@@ -179,7 +179,7 @@ def _market(site, market: str | None, country: str | None) -> str:
 # ─── search / quote / book ───────────────────────────────────────────────
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=True, methods=["POST"])   # a party may carry a child's date of birth
 @rate_limit(**SEARCH_LIMIT)
 def search(site: str, check_in: str, check_out: str, rooms, currency: str | None = None,
            promo_code: str | None = None, market: str | None = None, country: str | None = None,
@@ -207,8 +207,10 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 			o.pop("version", None)
 	res["market"] = mkt
 	content.Localizer(content.guest_language()).search(res)
-	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out, "rooms": parse(rooms, []),
-	                                  "market": mkt})
+	# the party as ages on arrival: a child's date of birth never reaches analytics (G-52 review)
+	parties = quoting.parse_rooms(rooms, arrival=getdate(check_in))
+	_track(s, session_id, "search", {"check_in": check_in, "check_out": check_out,
+	                                  "rooms": [p.summary() for p in parties], "market": mkt})
 	return res
 
 
@@ -549,10 +551,21 @@ def pay_link(token: str, provider_account: str | None = None):
 # ─── funnel ──────────────────────────────────────────────────────────────
 
 
+def _no_dob(value):
+	"""A funnel payload without dates of birth, whoever sent it (a browser's event may carry
+	anything): every ``dob`` / ``date_of_birth`` key is dropped, at any depth."""
+	if isinstance(value, dict):
+		return {k: _no_dob(v) for k, v in value.items() if str(k).lower() not in ("dob", "date_of_birth")}
+	if isinstance(value, list | tuple):
+		return [_no_dob(v) for v in value]
+	return value
+
+
 def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
 	if not session_id:
 		return
-	email = (payload or {}).pop("email", None) if isinstance(payload, dict) else None
+	payload = _no_dob(payload) if isinstance(payload, dict) else {}
+	email = payload.pop("email", None)
 	try:
 		frappe.get_doc({
 			"doctype": "TEX Funnel Event", "event": event, "occurred_at": now_datetime(), "site": site.name,

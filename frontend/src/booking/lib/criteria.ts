@@ -7,12 +7,44 @@
 // `rooms` lists each room as "<adults>" or "<adults>-<age>_<age>…" (child ages in
 // whole years). `adults` + `children` (comma-separated ages) are accepted as a
 // single-room shorthand.
+//
+// A child may be given by date of birth instead (G-52). The date never goes into the URL
+// (links are shared and reach analytics): the URL says "b" for that child and the date
+// stays in this tab (sessionStorage); elsewhere the child's age must be chosen again.
 import { isValidDay } from "./dates"
+import { getJSON, setJSON } from "./storage"
 
 export interface Party {
   adults: number
-  /** whole years 0–17; null = not chosen yet */
-  ages: (number | null)[]
+  /** per child: whole years 0–17; a date of birth "yyyy-mm-dd" ("" while being typed) that the
+   * server prices in completed months on arrival; null = not chosen yet */
+  ages: (number | string | null)[]
+}
+
+const DOBS_KEY = "tex.dobs"
+
+/** A child whose age (or date of birth) is given. */
+export function childSet(a: number | string | null): boolean {
+  return typeof a === "number" || isValidDay(a)
+}
+
+/** Why a child's date of birth cannot be used ("" when it can). The server checks it again;
+ * at 18 on arrival a guest is an adult. Plain calendar-day string comparisons. */
+export function dobProblem(dob: string, today: string, checkIn?: string | null): "" | "missing" | "future" | "adult" {
+  if (!isValidDay(dob)) return "missing"
+  if (dob > today) return "future"
+  if (checkIn && isValidDay(checkIn) && `${String(Number(dob.slice(0, 4)) + 18).padStart(4, "0")}${dob.slice(4)}` <= checkIn)
+    return "adult"
+  return ""
+}
+
+function dobsOf(rooms: Party[]): (string | null)[][] {
+  return rooms.map((r) => r.ages.map((a) => (typeof a === "string" && isValidDay(a) ? a : null)))
+}
+
+function storedDobs(): (string | null)[][] {
+  const v = getJSON<unknown>(DOBS_KEY)
+  return Array.isArray(v) ? (v as (string | null)[][]) : []
 }
 
 export interface Criteria {
@@ -38,28 +70,33 @@ function clampInt(v: string | undefined, lo: number, hi: number, dflt: number) {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt
 }
 
-function parseAges(s: string, sep: string | RegExp) {
+function parseAges(s: string, sep: string | RegExp, dobs: (string | null)[] = []): (number | string | null)[] {
   return s
     .split(sep)
     .filter((x) => x !== "")
     .slice(0, MAX_CHILDREN)
-    .map((x) => (/^\d{1,2}$/.test(x) && Number(x) <= 17 ? Number(x) : null))
+    .map((x, k) => {
+      if (x === "b") return isValidDay(dobs[k]) ? dobs[k] : null
+      return /^\d{1,2}$/.test(x) && Number(x) <= 17 ? Number(x) : null
+    })
 }
 
 export function parseRooms(raw: string | null): Party[] | null {
   if (!raw) return null
+  const dobs = storedDobs()
   const rooms = raw
     .split(",")
     .slice(0, MAX_ROOMS)
-    .map((r) => {
+    .map((r, i) => {
       const [a, kids = ""] = r.split("-")
-      return { adults: clampInt(a, 1, MAX_ADULTS, 2), ages: parseAges(kids, /[._]/) }
+      return { adults: clampInt(a, 1, MAX_ADULTS, 2), ages: parseAges(kids, /[._]/, Array.isArray(dobs[i]) ? dobs[i] : []) }
     })
   return rooms.length ? rooms : null
 }
 
 export function roomsParam(rooms: Party[]) {
-  return rooms.map((r) => (r.ages.length ? `${r.adults}-${r.ages.map((a) => (a === null ? "x" : a)).join("_")}` : `${r.adults}`)).join(",")
+  const token = (a: number | string | null) => (a === null ? "x" : typeof a === "string" ? "b" : a)
+  return rooms.map((r) => (r.ages.length ? `${r.adults}-${r.ages.map(token).join("_")}` : `${r.adults}`)).join(",")
 }
 
 export function parseCriteria(sp: URLSearchParams): Criteria {
@@ -87,6 +124,7 @@ export function applyCriteria(sp: URLSearchParams, c: Criteria) {
   const out = new URLSearchParams(sp)
   for (const k of ["checkin", "checkout", "check_in", "check_out", "rooms", "adults", "children", "ages", "promo", "currency", "hotel", "market", "country", "step"])
     out.delete(k)
+  setJSON(DOBS_KEY, dobsOf(c.rooms))       // dates of birth stay in this tab, never in the URL
   if (c.checkIn) out.set("checkin", c.checkIn)
   if (c.checkOut) out.set("checkout", c.checkOut)
   out.set("rooms", roomsParam(c.rooms))
@@ -99,16 +137,21 @@ export function applyCriteria(sp: URLSearchParams, c: Criteria) {
 }
 
 export function isComplete(c: Criteria) {
-  return !!(c.checkIn && c.checkOut && c.checkOut > c.checkIn && c.rooms.every((r) => r.ages.every((a) => a !== null)))
+  return !!(c.checkIn && c.checkOut && c.checkOut > c.checkIn && c.rooms.every((r) => r.ages.every(childSet)))
 }
 
 /** Identity of a search (everything that changes prices), without the hotel filter. */
 export function searchKey(c: Criteria) {
-  return JSON.stringify([c.checkIn, c.checkOut, roomsParam(c.rooms), c.promo.toUpperCase(), c.currency, c.market, c.country])
+  return JSON.stringify([c.checkIn, c.checkOut, roomsParam(c.rooms), dobsOf(c.rooms), c.promo.toUpperCase(), c.currency, c.market, c.country])
 }
 
 export function apiRooms(c: Criteria) {
-  return c.rooms.map((r) => ({ adults: r.adults, children: r.ages.map((a) => a ?? 0) }))
+  return c.rooms.map((r) => ({ adults: r.adults, children: r.ages.map(apiChild) }))
+}
+
+/** A child as the API takes it: an age in whole years, or ``{ dob }`` (checked and priced by the server). */
+export function apiChild(a: number | string | null): number | { dob: string } {
+  return typeof a === "string" ? { dob: a } : (a ?? 0)
 }
 
 export function totalGuests(c: Criteria) {

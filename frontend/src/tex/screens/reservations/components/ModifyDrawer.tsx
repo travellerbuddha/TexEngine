@@ -39,7 +39,7 @@ import {
 } from "../../crs/lib/extrasStock"
 import { useLabels } from "../../crs/lib/labels"
 import { useServerClock } from "../../crs/lib/serverClock"
-import { BOARDS, cmpDecimal, isZero, shortCode, type PartyForm } from "../../crs/lib/party"
+import { BOARDS, DOB_ERRORS, childToApi, cmpDecimal, dobProblem, isDob, isZero, shortCode, type PartyForm } from "../../crs/lib/party"
 import { asApiError } from "../../crs/lib/useBookingFlow"
 import type { StayRequest } from "../../crs/lib/types"
 import { applyModification, proposeModification, type Basis } from "../lib/api"
@@ -75,7 +75,8 @@ function formOf(req: StayRequest): ModForm {
     board: req.board,
     rate_plan: req.rate_plan ?? "",
     market: req.market,
-    party: { adults: req.adults, children: (req.children ?? []).map((c) => (c.age === null || c.age === undefined ? null : c.age)) },
+    // a child sold by date of birth keeps it (the server prices it in months on arrival, G-52)
+    party: { adults: req.adults, children: (req.children ?? []).map((c) => (c.dob ? { dob: c.dob } : (c.age ?? null))) },
     extras: Object.fromEntries(
       (req.extras ?? []).map((e) => [e.code, { quantity: e.quantity, service_dates: [...(e.service_dates ?? [])].sort() }]),
     ),
@@ -108,7 +109,7 @@ function changesOf(a: ModForm, b: ModForm): Record<string, unknown> {
   if (b.rate_plan !== a.rate_plan && b.rate_plan) c.rate_plan = b.rate_plan
   if (b.market !== a.market) c.market = b.market
   if (b.party.adults !== a.party.adults) c.adults = b.party.adults
-  if (JSON.stringify(b.party.children) !== JSON.stringify(a.party.children)) c.children = b.party.children.map((age) => ({ age }))
+  if (JSON.stringify(b.party.children) !== JSON.stringify(a.party.children)) c.children = b.party.children.map(childToApi)
   const ex = choicesToRequest(b.extras)
   if (!sameChoices(choicesToRequest(a.extras), ex)) c.extras = ex
   if ([...b.promo].sort().join(",") !== [...a.promo].sort().join(",")) c.promo_codes = b.promo
@@ -216,7 +217,12 @@ export function ModifyDrawer({
     const e: Record<string, string> = {}
     if (!form.check_in) e.check_in = t("crs.err.check_in")
     if (!form.check_out || form.check_out <= form.check_in) e.check_out = t("crs.err.check_out_after")
-    if ("children" in changes) form.party.children.forEach((a, k) => a === null && (e[`room_0_child_${k}`] = t("crs.err.child_age")))
+    if ("children" in changes)
+      form.party.children.forEach((a, k) => {
+        const why = isDob(a) ? dobProblem(a.dob, clock.today(), form.check_in) : ""
+        if (a === null) e[`room_0_child_${k}`] = t("crs.err.child_age")
+        else if (why) e[`room_0_child_${k}`] = t(DOB_ERRORS[why])
+      })
     if (basis === "HISTORICAL_SALE_DATE" && !basisAt) e.basis_at = t("res.mod.err_basis_at")
     setErrors(e)
     return !Object.keys(e).length

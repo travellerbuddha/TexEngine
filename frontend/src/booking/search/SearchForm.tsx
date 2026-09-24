@@ -6,7 +6,7 @@ import { nightsBetween, today } from "../lib/dates"
 import { siteText, useSite } from "../site/SiteContext"
 import { Button, Field, Input, Select } from "../ui/controls"
 import { DateRangePicker } from "./DateRangePicker"
-import { GuestsPicker } from "./GuestsPicker"
+import { GuestsPicker, childOk } from "./GuestsPicker"
 
 interface Props {
   value: Criteria
@@ -37,7 +37,7 @@ export function SearchForm({ value, onSearch, busy, variant = "card" }: Props) {
     else if (draft.checkIn < today()) errs.dates = t("search.errPast")
     else if (draft.checkOut <= draft.checkIn) errs.dates = t("search.errOrder")
     else if (nightsBetween(draft.checkIn, draft.checkOut) > MAX_NIGHTS) errs.dates = t("search.errLong", { count: MAX_NIGHTS })
-    if (draft.rooms.some((r) => r.ages.some((a) => a === null))) errs.guests = t("search.errAges")
+    if (draft.rooms.some((r) => r.ages.some((a) => !childOk(a, draft.checkIn)))) errs.guests = t("search.errAges")
     setErrors(errs)
     if (errs.dates) return document.getElementById(ids.dates)?.focus()
     if (errs.guests) return document.getElementById(ids.guests)?.focus()
@@ -83,9 +83,10 @@ export function SearchForm({ value, onSearch, busy, variant = "card" }: Props) {
           id={ids.guests}
           rooms={draft.rooms}
           error={errors.guests}
+          checkIn={draft.checkIn}
           onChange={(rooms) => {
             setDraft((d) => ({ ...d, rooms }))
-            if (rooms.every((r) => r.ages.every((a) => a !== null))) setErrors((e) => ({ ...e, guests: undefined }))
+            if (rooms.every((r) => r.ages.every((a) => childOk(a, draft.checkIn)))) setErrors((e) => ({ ...e, guests: undefined }))
           }}
         />
         <div className="flex items-end">

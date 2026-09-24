@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, calc, quantize, to_str, to_str6
-from kamra.tex.pricing import ages, boards, extras, markup, occupancy, promotions, rooms, tax
+from kamra.tex.pricing import ages, boards, extras, fx, markup, occupancy, promotions, rooms, tax
 from kamra.tex.pricing.enums import (
 	ExtraPricingMode,
 	Level,
@@ -95,6 +95,8 @@ class RoomQuote:
 	extras: list[extras.ExtraOutcome] = field(default_factory=list)
 	taxes: list[tax.TaxLine] = field(default_factory=list)
 	fx: dict | None = None
+	# every conversion the quote made: rate, source, policy and what it converted (G-56)
+	fx_rates: list[dict] = field(default_factory=list)
 	totals: dict[str, Decimal] = field(default_factory=dict)
 	rate_plan: dict | None = None
 	explanation: Explanation = field(default_factory=Explanation)
@@ -129,6 +131,7 @@ class RoomQuote:
 		}
 		if internal:
 			out["fx"] = self.fx
+			out["fx_rates"] = self.fx_rates
 			out["nights"] = [n.to_dict() for n in self.nights]
 			out["explanation"] = self.explanation.to_list()
 		else:
@@ -217,10 +220,13 @@ def unsellable_quote(terms, req: StayRequest, u: Unsellable) -> RoomQuote:
 
 def price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 	with calc():
-		return _price_stay(ctx, req)
+		log = fx.FxLog()
+		q = _price_stay(ctx, req, log)
+		q.fx_rates = log.to_list()
+		return q
 
 
-def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
+def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuote:
 	t = ctx.terms
 	sell_ccy = req.sell_currency.upper()
 	q = RoomQuote(request=req, sellable=True, currency=sell_ccy)
@@ -305,9 +311,8 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 			sells_cc[n] = markup.apply_markup(ctx.markups, scope, n, cost_net[n], explain=ex)
 			sells[n] = sells_cc[n] * ctx.fx.sell_rate
 		q.fx = ctx.fx.to_dict()
-		if ctx.fx.from_currency != ctx.fx.to_currency:
-			ex.add("fx", "FX", "{frm}→{to} at {rate} ({mode})", frm=ctx.fx.from_currency, to=ctx.fx.to_currency,
-			       rate=ctx.fx.sell_rate, mode=ctx.fx.mode.value)
+		log.note(ctx.fx, "accommodation")
+		fx.explain_new(log, ex)
 
 		# ── 12: extras (priced before promotions so min-basket can see them) ──
 		ex_ctx = extras.ExtraContext(sale_date=sale_date, check_in=req.check_in, check_out=req.check_out,
@@ -359,6 +364,9 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 				       rule=RuleRef("extra", d.code, Level.HOTEL, f"extra:{d.revision}" if d.revision else "",
 				                    d.name),
 				       name=d.name, detail=outcome.detail, amount=outcome.amount)
+				if outcome.fx_rate is not None:
+					log.note(ctx.extra_fx.get(d.currency), f"extra:{code}")
+					fx.explain_new(log, ex)
 			else:
 				ex.add("extra", "EXTRA_REJECTED", "{name} not added: {reason}", name=d.name, reason=outcome.reason)
 			if not outcome.ok and d.mandatory:
@@ -369,13 +377,16 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 		sell_promos = tuple(p for p in (*t.offers, *ctx.promotions) if p.stage == PromoStage.SELL)
 		gross_accom = sum(sells.values(), ZERO)
 		sell_ctx = promotions.PromoContext(basket=gross_accom + extras_total, sell_currency=sell_ccy,
-		                                   fx=ctx.promo_fx, **promo_ctx_base)
+		                                   fx=ctx.promo_fx, fx_log=log, **promo_ctx_base)
 		chosen, rejected = promotions.select(sell_promos, sell_ctx, ctx.coupon_usage)
+		fx.explain_new(log, ex)
 		accom_chosen = [p for p in chosen if p.applies_to == PromoAppliesTo.ACCOMMODATION]
 		basket_chosen = [p for p in chosen if p.applies_to != PromoAppliesTo.ACCOMMODATION]
 		promotions.explain_rejections(rejected, ex, "promotion")
 		finals, accom_outcomes = promotions.apply_promotions(accom_chosen, sells, sell_ctx, t.stacking, sell_ccy,
-		                                                     fx=ctx.promo_fx, explain=ex, stage="promotion")
+		                                                     fx=ctx.promo_fx, explain=ex, stage="promotion",
+		                                                     fx_log=log)
+		fx.explain_new(log, ex)
 		q.promotions.extend(accom_outcomes)
 		q.promotions.extend(rejected)
 
@@ -416,13 +427,14 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 				q.promotions.append(promotions.PromoOutcome(p.promo_id, p.name, p.kind, False, reason,
 				                                            source=p.source, code=p.code))
 				continue
-			outcome = _apply_basket_promo(p, categories, sell_ccy, ctx, lines, ex)
+			outcome = _apply_basket_promo(p, categories, sell_ccy, ctx, lines, ex, log)
 			q.promotions.append(outcome)
 
 		persons = party.adults + party.child_count
 		tax_lines, _nets = tax.compute_taxes(ctx.tax_rules, categories, inclusive=t.prices_include_tax,
 		                                    currency=sell_ccy, persons=persons, nights=len(nights),
-		                                    fx=ctx.tax_fx)
+		                                    fx=ctx.tax_fx, fx_log=log)
+		fx.explain_new(log, ex)
 		q.taxes = tax_lines
 		for tl in tax_lines:
 			lines.append(QuoteLine(LineKind.TAX, tl.code, tl.name, tl.amount, category=tl.category,
@@ -438,6 +450,8 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 		tax_total = sum((ln.amount for ln in lines if ln.kind == LineKind.TAX), ZERO)
 		total = subtotal + tax_added
 		cost_sell = quantize(sum(cost_net.values(), ZERO) * ctx.fx.sell_rate, sell_ccy)
+		log.note(ctx.fx, "cost")
+		fx.explain_new(log, ex)
 		accom_net = categories["ACCOMMODATION"]
 		margin = accom_net - cost_sell
 		q.totals = {
@@ -463,7 +477,8 @@ def _price_stay(ctx: PricingContext, req: StayRequest) -> RoomQuote:
 
 
 def _apply_basket_promo(p: Promotion, categories: dict[str, Decimal], currency: str, ctx: PricingContext,
-                        lines: list[QuoteLine], ex: Explanation) -> promotions.PromoOutcome:
+                        lines: list[QuoteLine], ex: Explanation, log: fx.FxLog | None = None
+                        ) -> promotions.PromoOutcome:
 	if p.applies_to == PromoAppliesTo.EXTRAS:
 		scope = {k: v for k, v in categories.items() if k.startswith("EXTRA:")}
 	else:
@@ -472,10 +487,11 @@ def _apply_basket_promo(p: Promotion, categories: dict[str, Decimal], currency: 
 	if p.value_type == PromoValueType.PERCENT:
 		discount = base * D(p.value) / HUNDRED
 	elif p.value_type == PromoValueType.FIXED_STAY:
-		amt = promotions._fixed_in(p, currency, ctx.promo_fx)
+		amt = promotions._fixed_in(p, currency, ctx.promo_fx, log)
 		if amt is None:
 			return promotions.PromoOutcome(p.promo_id, p.name, p.kind, False, f"no FX to convert {p.currency}",
 			                               source=p.source, code=p.code)
+		fx.explain_new(log, ex)
 		discount = min(amt, base)
 	else:
 		return promotions.PromoOutcome(p.promo_id, p.name, p.kind, False,

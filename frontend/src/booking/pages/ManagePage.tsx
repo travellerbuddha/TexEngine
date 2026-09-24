@@ -3,14 +3,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams, type NavigateFunction } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
-import { MAX_ADULTS, MAX_CHILDREN, type Party } from "../lib/criteria"
+import { MAX_ADULTS, MAX_CHILDREN, apiChild, type Party } from "../lib/criteria"
 import { parseRefusal, refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
 import { getItem, rememberPayment, removeItem, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment, resumeAt } from "../flow/payment"
 import { sitePath, siteUrl, useSiteSlug } from "../lib/mount"
 import { DateRangePicker } from "../search/DateRangePicker"
-import { RoomsEditor } from "../search/GuestsPicker"
+import { RoomsEditor, childOk } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
 import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
 import type { BookingRoom, BookingSummary, ChangeOutcome, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
@@ -282,7 +282,8 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
   }
   const [checkIn, setCheckIn] = useState<string | null>(room.check_in)
   const [checkOut, setCheckOut] = useState<string | null>(room.check_out)
-  const initialAges = (room.child_ages ?? []).map((c) => (typeof c.age === "number" ? c.age : null))
+  // a child booked by date of birth keeps it: the server prices it in months on arrival (G-52)
+  const initialAges = (room.child_ages ?? []).map((c) => c.dob ?? (typeof c.age === "number" ? c.age : null))
   const [party, setParty] = useState<Party[]>([{ adults: room.adults, ages: initialAges.length === room.children ? initialAges : Array(room.children).fill(null) }])
   const [proposal, setProposal] = useState<Proposal | null>(null)
   const [busy, setBusy] = useState(false)
@@ -294,7 +295,7 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
   const check = async () => {
     setError(null)
     if (!checkIn || !checkOut) return setError(t("search.errDates"))
-    if (party[0].ages.some((a) => a === null)) {
+    if (party[0].ages.some((a) => !childOk(a, checkIn))) {
       setShowErrors(true)
       return setError(t("search.errAges"))
     }
@@ -303,7 +304,7 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
       const p = await pub<Proposal>("manage_propose", {
         token,
         reservation: room.reservation,
-        changes: { check_in: checkIn, check_out: checkOut, adults: party[0].adults, children: party[0].ages },
+        changes: { check_in: checkIn, check_out: checkOut, adults: party[0].adults, children: party[0].ages.map(apiChild) },
       })
       setProposal(p)
     } catch (e) {
@@ -398,6 +399,7 @@ function ChangeDialog({ room, currency, hotel, token, onClose, onDone }: { room:
             onChange={(r) => setParty([{ adults: Math.min(MAX_ADULTS, r[0]?.adults ?? 1), ages: (r[0]?.ages ?? []).slice(0, MAX_CHILDREN) }])}
             showErrors={showErrors}
             single
+            checkIn={checkIn}
           />
           {error && (
             <Alert tone="bad" title={t("manage.proposeFailed")}>

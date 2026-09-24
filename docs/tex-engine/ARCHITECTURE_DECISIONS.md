@@ -1889,3 +1889,105 @@ user to a channel.
   TEX scope like TEX's own DocTypes (a blank `property` stays readable, as for TEX policies).
 - Tests: `test_channel_binding` (26: + web-only sites, staff on a site, p31, per-capability
   channels, product changes), `test_grant_expiry` (9), unit `test_channel_entitlement` (7).
+
+## ADR-051 Every FX rate a price used is recorded with it; ORIGINAL_* reprices reuse the record; child ages are judged in months (bands and dates of birth)
+**Context.** Two pricing gaps.
+- G-56 (R-15): a quote kept only the contract → sell currency rate (`fx`). Extras in another
+  currency (`extra_fx`), fixed promotions and their minimum-basket thresholds (`promo_fx`),
+  coupons and fixed levies (`tax_fx`) were converted with rates nobody recorded, so a sold
+  price could not be re-explained without reading the FX tables, and the ORIGINAL_* bases
+  re-read those tables as of the sale time. The tables can say something else about the past
+  than what the sale saw: a provider rate imported after the sale but stamped with an earlier
+  publication time (`fetched_at`) wins the as-of lookup.
+- G-52 (R-08): bands are entered in years and priced in whole months. `validate_bands` checked
+  overlaps only, so "INF 0–2.95, CHA 3–6.99" published, and a child of 2y11m (35 months) matched
+  no band: unsellable. Neither the CRS nor the booking engine took a date of birth.
+
+**Decision.**
+- *The record.* The engine logs every conversion in a pure `fx.FxLog`: each rate once, in the
+  order first used, with what it converted (`accommodation`, `cost`, `extra:<code>`,
+  `promotion:<id>`, `promotion:<id>:min_basket`, `tax:<code>`). The quote carries it as
+  `fx_rates` (internal: stripped with `fx` for viewers without `price.view_cost` and for
+  guests): per rate the pair, the exact `sell_rate` (6 dp, as converted), the mode, provider,
+  provider rate and its row id, rate date, adjustment, policy and the sale time it was resolved
+  for. Each conversion is also an explanation step (`fx` / `FX`, one per use, the policy as the
+  rule): "extra:SPA: 1 USD = 40.000000 TRY (manual rate, policy FXP-0002)". Same-currency
+  "conversions" are not recorded. Add-on quotes record theirs the same way.
+- *The snapshot.* A reservation's price-locked snapshot is the accepted quote, so it and the
+  Original revision hold the record. A modification's snapshot carries the original sale's
+  record on as `original_fx_rates` (like `original_priced_at`); for a modification made before
+  this ADR it is read from the Original revision. A snapshot priced before this ADR has only
+  `fx`: its room rate is the record (`fx.recorded`).
+- *Repricing.* `build_context(fx_pins=…)` uses a pinned snapshot for its pair instead of the
+  tables. ORIGINAL_VERSION and ORIGINAL_SALE_DATE pin the original sale's record
+  (`modification.fx_pins`, origin `reservation:<name>`, shown in the explanation as "recorded
+  at sale"); a pair the sale did not convert (another contract currency, a new extra's
+  currency) is resolved as of the original sale time. HISTORICAL_SALE_DATE ("as if sold then")
+  and CURRENT resolve every rate from the tables as of their own sale time. The simulator is a
+  HISTORICAL-style what-if and pins nothing. Extras added after booking are a new sale at the
+  rates of their day (ADR-034) and record them in their own block.
+- *Bands in months.* `ages.band_problems` judges a band set on the month scale pricing uses:
+  every overlap and every gap between two bands is an ERROR naming the months ("INF and CHA
+  leave a gap at 35 months (2y11m)… end INF where CHA starts"); publish (`validate_terms`, on the
+  cascaded set, so a policy's set is checked where it applies) and the pricing-policy
+  controller (draft save) refuse them. A set starting above 0 months is a minimum child age
+  (children that young cannot be booked): a WARNING (`AGE_BANDS_MIN_AGE`), not an error. The
+  year → month conversion (`years_to_months`) and frozen payloads are unchanged.
+- *Which set applies* is ADR-043's: the version's bands, else those of the most specific live
+  pricing policy that defines bands (hotel + market > market > hotel > global), frozen at publish.
+- *Date of birth.* A child is an age in whole years (0–17) or `{dob}`. The server checks a date
+  of birth (`quoting.Party.parse(arrival=…)`, `ages.check_child_dob`): not in the future, under
+  18 on arrival (`ages.MAX_CHILD_AGE` = 17, the ceiling a declared age has; there is no per-hotel
+  setting — above a contract's top band a child is priced as that contract says). It fills the
+  child's age on arrival for display; pricing counts completed months from the date of birth at
+  the contract's reference date (arrival or booking date). Modifications check a new party the
+  same way against the new arrival. The CRS / Call Center and the modification drawer send
+  `{dob}`; the booking engine keeps a date of birth out of the URL (the `rooms` parameter says
+  `b`; the date stays in the tab's session storage and in the search key), so shared links and
+  analytics never carry it.
+
+**Consequences.**
+- A confirmed booking is re-explained from its snapshot alone, and an ORIGINAL_* reprice
+  reproduces the sold conversions even after the FX tables changed (`test_fx_snapshot`: a EUR
+  contract sold in TRY with EUR and USD extras and a fixed EUR promotion; a late TCMB import and
+  a revised manual rate change CURRENT and HISTORICAL_SALE_DATE, not the snapshot or the
+  ORIGINAL_* reprices).
+- Versions published with a band gap still sell as frozen; they cannot be republished until the
+  gap is closed (`devtools/precedence_report` lists a refused rebuild under `cannot_rebuild`).
+- The FX rate table's `rate` is still a Float column (G-72); the record keeps the 6-dp Decimal
+  rate the price used, so a reprice never re-reads it.
+- A shared booking-engine link with a child given by date of birth asks for that child's age
+  again in another tab or device.
+
+**Review follow-up (2026-09-24).** An independent review found no Critical or High issue and
+the FX pinning sound; it found two Medium privacy leaks and Low items, fixed as follows.
+- *A date of birth stays where the price needs it* (the quote's request, the reservation's
+  `tex_child_ages` and snapshot, its revisions) *and nowhere else.* The funnel `search` event
+  stores each party as adults and ages on arrival (`quoting.Party.summary`); every funnel payload
+  loses `dob` / `date_of_birth` keys at any depth, a browser-sent one included
+  (`public._no_dob`). A guest change waiting for staff notes children as ages. No age message
+  names a date of birth, and an invalid one is not echoed.
+- *Searches are POST only* (`crs.search`, `ui_crs.search`, `public.search`): a party may carry
+  a date of birth, which must never sit in a URL or an access log. The CRS posts its search;
+  the booking engine already did. Modifications and the contract preview were POST already;
+  the simulator carries no party.
+- *A baby born after the pricing reference date* (the sale date of a BOOKING_DATE contract
+  repriced later on ORIGINAL_* or HISTORICAL terms, the arrival of a stay already in house) is
+  0 months old there (`ages.child_months`, `check_child_dob`), not an error and not "18 or
+  older". `quoting.price_request` turns any `PricingError` into an unsellable quote
+  (`PRICING_ERROR`) instead of an HTTP 500 whose Error Log would hold the request.
+- *Pre-G-56 snapshots pin their line rates too.* Besides the room rate (`fx`), such a snapshot
+  recorded each converted extra's rate (`extras[].fx_rate`, the currency is the extra
+  revision's) and a fixed levy's (`taxes[].fx_rate`, the tax policy's currency):
+  `fx.recorded(…, extra_currency, tax_currency)` makes them record entries of mode `RECORDED`
+  (no policy; "rate recorded on the sold line"), so ORIGINAL_* reprices of old bookings no
+  longer re-read the tables for extras and levies. A fixed promotion in a third currency
+  recorded no rate before G-56: it is still resolved as of the sale.
+- *Not changed:* the record's provider row, adjustment (the FX margin) and policy are readable
+  through Desk/REST wherever the snapshot is (with cost and margin, which were already there):
+  a field-level permission cannot express a per-hotel capability (`price.view_cost`), so this
+  is gap G-95 (Low). Rates below 1 keep 6 decimals, 4–5 significant digits for TRY → EUR: a
+  significant-digit (or inverse-rate) precision belongs to G-72.
+- Tests: integration `TestDateOfBirthPrivacy` (2), `TestDateOfBirthAfterTheReference` (3),
+  `test_a_snapshot_sold_before_g56_pins_its_line_rates`; unit
+  `TestDateOfBirthAfterTheReference` (3), `TestLegacySnapshotLinePins` (3).

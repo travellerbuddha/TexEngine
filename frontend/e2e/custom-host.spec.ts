@@ -33,14 +33,17 @@ test.use({
 const platform = () => pwRequest.newContext({ baseURL: PLATFORM.origin })
 
 /** A public API call made by the page itself, i.e. from the custom host. */
-async function hostApi(page: Page, method: string, args: Record<string, string>) {
+async function hostApi(page: Page, method: string, args: Record<string, string>, post = false) {
   return page.evaluate(
-    async ({ method, args }) => {
-      const r = await fetch(`/api/method/kamra.tex.api.public.${method}?${new URLSearchParams(args)}`, { credentials: "include" })
+    async ({ method, args, post }) => {
+      const url = `/api/method/kamra.tex.api.public.${method}`
+      const r = post
+        ? await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(args), credentials: "include" })
+        : await fetch(`${url}?${new URLSearchParams(args)}`, { credentials: "include" })
       const body = await r.json().catch(() => ({}))
       return { status: r.status, body: body as { message?: { slug?: string; name?: string }; exc_type?: string } }
     },
-    { method, args },
+    { method, args, post },
   )
 }
 
@@ -133,7 +136,7 @@ test("another site is not served on this host: its pages redirect home, its API 
       check_in: stay.checkIn,
       check_out: stay.checkOut,
       rooms: JSON.stringify([{ adults: 2, children: [] }]),
-    })
+    }, true)                                   // search is POST only (a party may carry a date of birth)
     expect(search.status, JSON.stringify(search.body).slice(0, 300)).toBe(404)
     expect(search.body.exc_type).toBe("DoesNotExistError")
   } finally {

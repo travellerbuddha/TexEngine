@@ -262,7 +262,8 @@ export interface BookingRoom {
   amount: Money
   status: string
   board?: string
-  child_ages?: { age: number | null }[]
+  /** age on arrival (whole years); dob when the child was given by date of birth (G-52) */
+  child_ages?: { age: number | null; dob?: string | null }[]
   rate_plan?: string | null
   refundable?: boolean
   lines?: QuoteLine[]

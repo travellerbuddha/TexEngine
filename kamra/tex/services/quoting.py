@@ -25,7 +25,7 @@ from kamra.tex.availability.restrictions import RestrictionScope
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, quantize, to_str
-from kamra.tex.pricing import engine, serialize
+from kamra.tex.pricing import ages, engine, serialize
 from kamra.tex.pricing.model import ChildSpec, ExtraRequest, PricingError, StayRequest, Unsellable
 from kamra.tex.security.keys import site_secret
 
@@ -76,20 +76,48 @@ def require_fresh(data: dict) -> None:
 # ─── request helpers ─────────────────────────────────────────────────────
 
 
+def parse_dob(value) -> date:
+	"""A child's date of birth as the API receives it (ISO date)."""
+	try:
+		return date.fromisoformat(str(value).strip()[:10])
+	except ValueError:
+		frappe.throw(_("Invalid date of birth."))       # never echoed: personal data
+
+
+def checked_dob(dob: date, arrival: date, n: int) -> int:
+	"""A child's date of birth checked server-side (G-52): not in the future, the child under
+	18 on arrival. → the child's age in whole years on arrival (display; pricing uses the
+	date of birth itself, in completed months)."""
+	try:
+		months = ages.check_child_dob(dob, arrival, today=getdate(now_datetime()))
+	except PricingError:
+		if dob > getdate(now_datetime()):
+			frappe.throw(_("Child {0}: the date of birth cannot be in the future.").format(n))
+		frappe.throw(_("Child {0} is {1} or older on arrival: add them as an adult.").format(
+			n, ages.MAX_CHILD_AGE + 1))
+	return months // 12
+
+
 @dataclass
 class Party:
 	adults: int
 	children: list[ChildSpec] = field(default_factory=list)
 
 	@classmethod
-	def parse(cls, raw) -> Party:
+	def parse(cls, raw, *, arrival: date | None = None) -> Party:
+		"""Each child has an age in whole years (0–17) or a date of birth. A date of birth is
+		checked against ``arrival`` (when the stay is known) and gives the child's age on
+		arrival for display; pricing counts completed months from it (G-52)."""
 		raw = raw or {}
 		adults = int(raw.get("adults") or 0)
 		kids = []
-		for c in raw.get("children") or []:
+		for n, c in enumerate(raw.get("children") or [], start=1):
 			if isinstance(c, dict):
-				kids.append(ChildSpec(age=int(c["age"]) if c.get("age") not in (None, "") else None,
-				                      dob=getdate(c["dob"]) if c.get("dob") else None))
+				dob = parse_dob(c["dob"]) if c.get("dob") else None
+				age = int(c["age"]) if c.get("age") not in (None, "") else None
+				if dob is not None and arrival is not None:
+					age = checked_dob(dob, arrival, n)
+				kids.append(ChildSpec(age=age, dob=dob))
 			else:
 				kids.append(ChildSpec(age=int(c)))
 		if adults < 1 or adults > 12 or len(kids) > 8:
@@ -97,7 +125,7 @@ class Party:
 		for k in kids:
 			if k.age is None and k.dob is None:
 				frappe.throw(_("Each child needs an age."))
-			if k.age is not None and not (0 <= k.age <= 17):
+			if k.age is not None and not (0 <= k.age <= ages.MAX_CHILD_AGE):
 				frappe.throw(_("Child ages must be 0–17."))
 		return cls(adults, kids)
 
@@ -105,15 +133,20 @@ class Party:
 		return {"adults": self.adults, "children": [{"age": c.age, "dob": c.dob.isoformat() if c.dob else None}
 		                                            for c in self.children]}
 
+	def summary(self) -> dict:
+		"""The party without dates of birth, for analytics and notes: each child's age in whole
+		years (on arrival, for one given by date of birth)."""
+		return {"adults": self.adults, "children": [c.age for c in self.children]}
 
-def parse_rooms(rooms) -> list[Party]:
+
+def parse_rooms(rooms, *, arrival: date | None = None) -> list[Party]:
 	if isinstance(rooms, str):
 		rooms = json.loads(rooms)
 	if not rooms:
 		frappe.throw(_("At least one room is required."))
 	if len(rooms) > MAX_ROOMS:
 		frappe.throw(_("At most {0} rooms per booking.").format(MAX_ROOMS))
-	return [Party.parse(r) for r in rooms]
+	return [Party.parse(r, arrival=arrival) for r in rooms]
 
 
 def _dates(check_in, check_out) -> tuple[date, date]:
@@ -329,7 +362,7 @@ def search(*, properties: list[str], check_in, check_out, rooms, market: str, ch
            currency: str | None = None, promo_codes=(), member=False, internal=False,
            sale_at: datetime | None = None) -> dict:
 	ci, co = _dates(check_in, check_out)
-	parties = parse_rooms(rooms)
+	parties = parse_rooms(rooms, arrival=ci)
 	market = (market or "").upper()
 	if not frappe.db.exists("TEX Market", market):
 		frappe.throw(_("Unknown market {0}.").format(market))
@@ -364,14 +397,21 @@ def request_from_offer(offer: dict, *, sale_at: datetime, extras=(), promo_codes
 
 def price_request(version: str, req: StayRequest, *, gkey: str | None = None, extras_catalog=None,
                   exclude_booking: str | None = None, check_capacity: bool = True,
-                  exclude_reservation: str | None = None):
+                  exclude_reservation: str | None = None, fx_pins=None):
+	"""``fx_pins``: rates recorded at the original sale, reused for their pairs (G-56)."""
 	terms = contracts.load_terms(version)
 	try:
 		ctx = ctxmod.build_context(terms, req, gkey=gkey, extras=extras_catalog, exclude_booking=exclude_booking,
-		                           check_capacity=check_capacity, exclude_reservation=exclude_reservation)
+		                           check_capacity=check_capacity, exclude_reservation=exclude_reservation,
+		                           fx_pins=fx_pins)
 	except Unsellable as u:          # no FX rate, an ambiguous or missing tax policy…
 		return engine.unsellable_quote(terms, req, u), terms
-	return engine.price_stay(ctx, req), terms
+	try:
+		return engine.price_stay(ctx, req), terms
+	except PricingError as e:
+		# an input the engine refuses (a missing rate plan, a stay too long…): a reason on the
+		# quote, never an HTTP 500 whose Error Log would hold the request's guest data
+		return engine.unsellable_quote(terms, req, Unsellable("PRICING_ERROR", str(e))), terms
 
 
 def _extras_list(extras) -> tuple[ExtraRequest, ...]:
@@ -471,6 +511,8 @@ def strip_internal(q: dict | None, *, staff: bool = False) -> dict | None:
 		return q
 	q.pop("explanation", None)
 	q.pop("fx", None)
+	q.pop("fx_rates", None)                       # rates, providers and FX margins (G-56)
+	q.pop("original_fx_rates", None)
 	if isinstance(q.get("nights"), list):
 		ccy = q.get("currency") or ""
 		q["nights"] = [{"date": n.get("date"), "amount": _night_amount(n, ccy)} for n in q["nights"]

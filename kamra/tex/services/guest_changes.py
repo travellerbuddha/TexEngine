@@ -475,7 +475,8 @@ def submit(b, proposal_token: str, *, note: str | None = None, return_url: str |
 		       else _("lower price, the hotel approves it") if s.kind == st.STAFF_APPROVAL
 		       else _("{0} {1} is due now and no card payment is set up").format(_money(s.collect, ccy), ccy))
 		_flag(res.name, b.name, f"Guest requests a change ({_money(s.difference, ccy)} {ccy}; {why}); "
-		                        f"request {req.name} {json.dumps(p['changes'], default=str)} {note or ''}")
+		                        f"request {req.name} {json.dumps(_note_changes(res, p['changes']), default=str)} "
+		                        f"{note or ''}")
 		audit("guest_change.request", reference_doctype=DT, reference_name=req.name, property=b.property,
 		      new=_audit_row(req, s))
 		return _requested(req, s)
@@ -586,6 +587,20 @@ def _after_apply(req, s: st.Settlement | None) -> None:
 	_flag(req.reservation, req.booking, f"Guest changed online ({req.name}{'; ' + what if what else ''})")
 	frappe.db.set_value("TEX Booking", req.booking, "amount_due_now", booking_svc.required_now(req.booking),
 	                    update_modified=False)
+
+
+def _note_changes(res, changes: dict) -> dict:
+	"""The requested changes for a staff note: children as ages on arrival, never a date of
+	birth (the reservation keeps it where the price needs it; G-52 review)."""
+	out = dict(changes or {})
+	if out.get("children"):
+		arrival = getdate(out.get("check_in") or res.check_in_date)
+		try:
+			out["children"] = quoting.Party.parse({"adults": 1, "children": list(out["children"])},
+			                                      arrival=arrival).summary()["children"]
+		except Exception:
+			out["children"] = len(out["children"])
+	return out
 
 
 def _flag(reservation: str, booking: str, note: str) -> None:
