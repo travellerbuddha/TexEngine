@@ -126,7 +126,13 @@ export function LoyaltyPanel({
                       ),
                     },
                     { key: "status", header: t("crm.loyalty.col.status"), cell: (e) => <Badge tone={e.status === "Available" ? "success" : e.status === "Pending" ? "warning" : statusTone(e.status)}>{t(statusKey(e.status))}</Badge> },
-                    { key: "booking", header: t("crm.loyalty.col.booking"), hideBelow: "md", cell: (e) => e.booking || "—" },
+                    {
+                      key: "booking",
+                      header: t("crm.loyalty.col.booking"),
+                      hideBelow: "md",
+                      // a booking at another hotel of a shared program stays with that hotel (ADR-056)
+                      cell: (e) => (e.other_hotel ? <span className="text-xs text-zinc-500 italic">{t("crm.loyalty.other_hotel")}</span> : e.booking || "—"),
+                    },
                     {
                       key: "dates",
                       header: t("crm.loyalty.col.dates"),

@@ -227,21 +227,45 @@ def mature_and_expire(today: date | None = None) -> dict:
 	return {"matured": matured, "expired_points": expired}
 
 
-def summary(guest: str, programs: set[str] | None = None) -> list[dict]:
-	"""``programs``: the ones the viewer may see (another tenant's program is never shown, G-65)."""
+def _entry_hotels(entries: list[dict]) -> dict[str, str]:
+	"""Ledger entry → the hotel of the booking (or stay) it belongs to; entries without one
+	(a manual adjustment of the program) have none."""
+	bookings = {e["booking"] for e in entries if e.get("booking")}
+	stays = {e["reservation"] for e in entries if e.get("reservation") and not e.get("booking")}
+	hotel = dict(frappe.get_all("TEX Booking", filters={"name": ("in", list(bookings))}, fields=["name", "property"],
+	                            as_list=True)) if bookings else {}
+	if stays:
+		hotel |= dict(frappe.get_all("Reservation", filters={"name": ("in", list(stays))}, fields=["name", "property"],
+		                             as_list=True))
+	return {e["name"]: hotel.get(e.get("booking") or e.get("reservation")) for e in entries}
+
+
+def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> list[dict]:
+	"""The guest's accounts in ``programs``, the programs the viewer may see (their hotels' own
+	or their group's; another tenant's program is never shown, G-65).
+
+	A program's balance is one balance wherever it was earned, so it is shown whole. ``hotels``
+	(the viewer's): an entry tied to a booking at another hotel of a shared (group) program shows
+	its points, status and dates, never that booking or its reason (ADR-056; as consent entries
+	made at another hotel, ADR-046)."""
 	out = []
-	for p in frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest}, pluck="program", distinct=True):
-		if programs is not None and p not in programs:
-			continue
+	for p in frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "program": ("in", list(programs) or [""])},
+	                        pluck="program", distinct=True, order_by="program asc"):
 		prog = frappe.get_cached_doc("TEX Loyalty Program", p)
 		b = balances(guest, p)
 		tier = tier_of(prog, b["lifetime_earned"])
 		entries = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "program": p},
 		                         fields=["name", "entry_type", "points", "status", "available_on", "expires_on",
-		                                 "booking", "reason", "creation"], order_by="creation desc", limit=50)
+		                                 "booking", "reservation", "reason", "creation"],
+		                         order_by="creation desc", limit=50)
+		where = _entry_hotels(entries)
 		for e in entries:
+			e.pop("reservation", None)
 			for k in ("available_on", "expires_on", "creation"):
 				e[k] = str(e[k]) if e[k] else None
+			e["other_hotel"] = bool(hotels is not None and where[e["name"]] and where[e["name"]] not in hotels)
+			if e["other_hotel"]:
+				e["booking"] = e["reason"] = None
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
 		            "value": to_str(quantize(db_dec(prog.point_value) * b["available"], prog.currency or "EUR")),
 		            "tier": tier.tier_name if tier else None, "entries": entries})

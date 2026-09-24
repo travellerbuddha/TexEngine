@@ -95,7 +95,7 @@ def set_abandoned_status(name: str, status: str, note: str | None = None):
 @frappe.whitelist()
 def loyalty_summary(guest: str):
 	via = crm.require_guest(guest)
-	return loyalty.summary(guest, programs=loyalty.visible_programs(via))       # this tenant's programs only
+	return loyalty.summary(guest, loyalty.visible_programs(via), hotels=via)     # this tenant's programs only
 
 
 @frappe.whitelist(methods=["POST"])

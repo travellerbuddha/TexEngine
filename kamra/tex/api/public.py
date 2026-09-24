@@ -601,16 +601,25 @@ def _no_dob(value):
 	return value
 
 
+# contact data never stays in a funnel payload, whoever sent it (a browser's event may carry anything)
+FUNNEL_CONTACT_KEYS = frozenset({"email", "phone", "mobile", "first_name", "last_name", "name", "full_name"})
+
+
 def _track(site, session_id: str | None, event: str, payload: dict, *, consent: bool = False) -> None:
+	"""One funnel event (R-38). Analytics need no identity: an e-mail hash (the only link to a
+	person) is kept only when the visitor ticked marketing consent in that same step, and no
+	contact field of the payload is ever stored (G-81, ADR-056)."""
 	if not session_id:
 		return
 	payload = _no_dob(payload) if isinstance(payload, dict) else {}
-	email = payload.pop("email", None)
+	email = payload.get("email")
+	payload = {k: v for k, v in payload.items() if str(k).lower() not in FUNNEL_CONTACT_KEYS}
+	email = email.strip().lower() if consent and isinstance(email, str) and email.strip() else None
 	try:
 		frappe.get_doc({
 			"doctype": "TEX Funnel Event", "event": event, "occurred_at": now_datetime(), "site": site.name,
 			"property": site.property, "session_id": text(session_id, 64),
-			"email_hash": hashlib.sha256(email.strip().lower().encode()).hexdigest() if email else None,
+			"email_hash": hashlib.sha256(email.encode()).hexdigest() if email else None,
 			"consent_marketing": 1 if consent else 0,
 			"payload": json.dumps(payload or {}, default=str)[:4000]}).insert(ignore_permissions=True)
 	except Exception:
