@@ -24,6 +24,7 @@ import unittest
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
+from unittest import mock
 
 from kamra.tex.pricing import inherit, matrix, validate
 from kamra.tex.pricing.enums import OccTarget, Op, PricingBasis
@@ -193,6 +194,31 @@ class TestTheReportedLeaks(unittest.TestCase):
 		self.assertNotIn(("STD", "P2", 2, 1), {(i["ref"]["room_type"], i["ref"]["period"], i["ref"]["adults"],
 		                                        i["ref"]["children"]) for i in stored
 		                                       if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"})
+
+	def test_a_stored_sweep_at_its_limit_is_given_as_the_live_one(self):
+		"""The sweep stops at its limit (200 issues). Parties a hidden rule decides fill it in one op and
+		not in another, which changes the later parties that were stored: a stored sweep at its limit is
+		given as the live check's sweep, run again (the limit is 3 here)."""
+		teen = AgeBand("TEEN", "Teen", 144, 192)
+
+		def build(op, value):
+			own = (*OWN_ADULTS, rule("V-INF", CHILD, Op.MULTIPLY, "0", age_band="INF"))
+			return cascaded((*BANDS, teen), own,
+			                layers=policy(rule("G-C1", CHILD, op, value, position=1, age_band="CHD")))
+
+		shown = {}
+		with mock.patch.object(validate, "SWEEP_LIMIT", 3):
+			for op, value in ((Op.INHERIT, None), (Op.MULTIPLY, "0.5")):
+				t = build(op, value)
+				stored = [i.to_dict(ref=True) for i in validate.validate_terms(t, max_warnings=3)]
+				self.assertEqual(sum(i["code"] == "NO_CHILD_RULE" for i in stored), 3)
+				self.assertIn("CHD", {i["ref"]["age_band"] for i in stored})     # a party G-C1 decides was stored
+				shown[op] = validate.visible_issues(t, stored, hidden_of(t))
+				self.assertEqual(shown[op], [i.to_dict(ref=True) for i in
+				                             validate.validate_terms(t, hidden=hidden_of(t), max_warnings=3)])
+		self.assertEqual(shown[Op.INHERIT], shown[Op.MULTIPLY])
+		self.assertEqual([(i["ref"]["adults"], i["ref"]["children"], i["ref"]["age_band"]) for i in shown[Op.INHERIT]],
+		                 [(1, 1, "TEEN"), (1, 2, "TEEN"), (1, 3, "TEEN")])
 
 	def test_a_hidden_rule_without_a_value_is_not_named(self):
 		"""OCC_NO_VALUE of a hidden rule says it does not defer (an INHERIT rule needs no value). A policy
