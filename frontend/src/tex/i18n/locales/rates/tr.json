@@ -1145,7 +1145,6 @@
  "rates.ws.pop.selected_periods": "Seçili dönemler",
  "rates.ws.pop.this_period": "Yalnız {period}",
  "rates.ws.room.add": "Oda ekle",
- "rates.ws.room.add_placeholder": "+ Oda ekle…",
  "rates.ws.room.all_added": "Tüm oda tipleri kontratta",
  "rates.ws.room.base": "BAZ",
  "rates.ws.room.by_period": "Döneme göre formüller",
@@ -1657,9 +1656,11 @@
  "rates.occ.pop.position_n": "Yalnızca {n}. çocuk",
  "rates.occ.pop.single_children": "Çocuklar da seyahat ettiğinde",
  "rates.occ.pop.single_children_help": "Tüm 1 yetişkinlik konaklama yerine, çocuklu veya çocuksuz tek yetişkinli odanın yetişkinini fiyatlandırır (1 yetişkin + herhangi sayıda çocuk).",
+ "rates.occ.pop.single_whole_row": "Satırın tamamı değişir: seçilen odalarda her dönemin kuralı değerini korur.",
  "rates.occ.sum.adults": "Yetişkinler: {items}",
  "rates.occ.sum.children": "Çocuklar: {items}",
  "rates.occ.sum.single": "1Y",
+ "rates.occ.sum.single_any": "1Y (çocuklu da)",
  "rates.occ.sum.adult": {
   "other": "{n}."
  },
@@ -1675,7 +1676,6 @@
  "rates.brd.title": "Pansiyonlar",
  "rates.brd.caption": "Döneme göre pansiyon farkları",
  "rates.brd.add": "Pansiyon ekle",
- "rates.brd.add_placeholder": "+ Pansiyon ekle…",
  "rates.brd.all_added": "Tüm pansiyonlar sözleşmede",
  "rates.brd.hint": "Hücreye yazın: 20 oda başına gecelik sabit tutardır, +20 veya -20 yetişkin başınadır (çocuklar paylarını öder), %5 için 5% veya -5% gecelik kişi fiyatının yüzdesidir, BASE oda fiyatına dahil olan pansiyondur. Enter aşağı iner; Alt+Enter satırın koşullarını açar.",
  "rates.brd.none": "Henüz pansiyon yok. Önce oda fiyatına dahil olan pansiyonu ekleyin: temel pansiyon olur.",
@@ -1776,7 +1776,6 @@
  "rates.brd.pop.mixed": "Şu anda farklı koşulları var; Uygula hepsine bunları verir.",
  "rates.brd.pop.add_room": "Tek bir oda için kural ekle",
  "rates.brd.pop.add_room_help": "{board} altında o oda için bir satır; farkını oraya yazın.",
- "rates.brd.pop.add_room_placeholder": "Oda seçin…",
  "rates.brd.pop.remove_board": "Pansiyonu kaldır",
  "rates.brd.pop.remove_row": "Bu kuralları kaldır",
  "rates.brd.pop.remove_row_body": {

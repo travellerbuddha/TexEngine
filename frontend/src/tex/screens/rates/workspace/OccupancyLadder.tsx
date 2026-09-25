@@ -164,6 +164,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const navRows = rows.length + (showResolved ? 1 : 0)
   const template = columnTemplate(cols.length - 1)
   const rowIndex = useMemo(() => new Map(rows.map((x, i) => [x.id, i])), [rows])
+  const singleRows = rows.filter((x) => x.kind === "single").length
 
   // ─── words ─────────────────────────────────────────────────────────────
   const periodName = (code: string) => code || t("rates.rates.all_periods")
@@ -284,6 +285,17 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       if (now && now !== document.body && now.isConnected) return
       const at = positionOf(cell)
       if (at) gridEl.current?.querySelector<HTMLElement>(`[data-cell="${at.r}:${at.c}"]`)?.focus()
+    })
+  /** Focus a cell by its id once the change is rendered, when nothing else holds the focus: the
+   * single-use row that switched form is a row of another id (S16 re-review 2). */
+  const refocusId = (cell: LadderRef) =>
+    requestAnimationFrame(() => {
+      const now = document.activeElement
+      if (now && now !== document.body && now.isConnected) return
+      const id = ladderCellId(cell.row, cell.period, p.scope)
+      Array.from(gridEl.current?.querySelectorAll<HTMLElement>("[data-cellid]") ?? [])
+        .find((x) => x.dataset.cellid === id)
+        ?.focus()
     })
   const bulkDone = (count: number) => {
     const message = t("rates.ws.bulk.applied", { count })
@@ -928,9 +940,10 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
               reading={(op, value, where, to) => ruleReading(rowAs(row, to), op, value, where)}
               // §3.6.2: a band row's rule for one child position (a position row of its own), and the
               // single-use row's "also when children travel" form (PERSON basis: under ROOM the
-              // included adult 1 takes no rule)
+              // included adult 1 takes no rule). The form switches for the whole row; with both
+              // forms shown (a row each) each row keeps its own (S16 re-review 2).
               positions={row.kind === "band" ? p.maxChildren : 0}
-              single={row.kind === "single" && basis === "PERSON" ? (row.identity.target === "ADULT" ? "children" : "whole") : undefined}
+              single={row.kind === "single" && basis === "PERSON" && singleRows === 1 ? (row.identity.target === "ADULT" ? "children" : "whole") : undefined}
               slotNameAs={(to) => slotName(rowAs(row, to))}
               minorUnits={minorUnits}
               ccy={ccy}
@@ -939,7 +952,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
                 const label = rule ? t("rates.occ.h.rule", { cell: to ? `${slotName(rowAs(row, to))} · ${periodName(cell.period)}` : cellName(cell) }) : t("rates.occ.h.clear", { cell: cellName(cell) })
                 history.apply(label, (tb) => applyOccRuleAs(tb, slot, rooms, periods, rule, to))
                 setPop(null)
-                refocus(cell)
+                if (rule && to && "single" in to) refocusId({ row: to.single === "children" ? "single:1:" : "single:0:", period: cell.period })
+                else refocus(cell)
               }}
             />
           )

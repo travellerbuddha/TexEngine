@@ -10,7 +10,8 @@
 // included), its value, the Rooms scope (all rooms, or chosen rooms: one row per room), "Always
 // wins (override)", a note and the periods it applies to. On a child band row it can name one child
 // position instead ("Child 2 · 7–11.99", a position row of its own), and on the single-use row
-// (PERSON basis) switch it to "also when children travel" (§3.6.2, S16 re-review).
+// (PERSON basis) switch it to "also when children travel" (§3.6.2, S16 re-review): the whole row
+// switches, every period keeping its value (S16 re-review 2).
 import { useMemo, useState, type RefObject } from "react"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, DECIMAL_PLACES, DecimalInput, Field, Input, Popover, Segmented, Select } from "../../../ui"
@@ -266,6 +267,7 @@ export function OccRulePopover(p: OccRulePopoverProps) {
           <div className="space-y-0.5">
             <Checkbox label={t("rates.occ.pop.single_children")} checked={single === "children"} onChange={(e) => setSingle(e.target.checked ? "children" : "whole")} />
             <p className="pl-6 text-xs text-zinc-500">{t("rates.occ.pop.single_children_help")}</p>
+            {single !== p.single && <p className="pl-6 text-xs font-medium text-zinc-700">{t("rates.occ.pop.single_whole_row")}</p>}
           </div>
         )}
         <fieldset className="space-y-2">

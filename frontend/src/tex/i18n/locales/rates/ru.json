@@ -1185,7 +1185,6 @@
  "rates.ws.pop.selected_periods": "Выбранные периоды",
  "rates.ws.pop.this_period": "Только {period}",
  "rates.ws.room.add": "Добавить номер",
- "rates.ws.room.add_placeholder": "+ Добавить номер…",
  "rates.ws.room.all_added": "Все типы номеров уже в контракте",
  "rates.ws.room.base": "БАЗА",
  "rates.ws.room.by_period": "Формулы по периодам",
@@ -1767,9 +1766,11 @@
  "rates.occ.pop.position_n": "Только ребёнок {n}",
  "rates.occ.pop.single_children": "Также когда едут дети",
  "rates.occ.pop.single_children_help": "Задаёт цену взрослого в номере с одним взрослым, с детьми или без (1 взрослый + любые дети), вместо всего проживания 1 взрослого.",
+ "rates.occ.pop.single_whole_row": "Переключается вся строка: правила каждого периода в выбранных номерах сохраняют свои значения.",
  "rates.occ.sum.adults": "Взрослые: {items}",
  "rates.occ.sum.children": "Дети: {items}",
  "rates.occ.sum.single": "1В",
+ "rates.occ.sum.single_any": "1В (и с детьми)",
  "rates.occ.sum.adult": {
   "other": "{n}-й"
  },
@@ -1789,7 +1790,6 @@
  "rates.brd.title": "Питание",
  "rates.brd.caption": "Доплаты за питание по периодам",
  "rates.brd.add": "Добавить питание",
- "rates.brd.add_placeholder": "+ Добавить питание…",
  "rates.brd.all_added": "Все типы питания уже в контракте",
  "rates.brd.hint": "Введите в ячейку: 20 — фиксированная сумма за номер за ночь, +20 или -20 — за взрослого (дети платят свою долю), 5% или -5% — от цены размещения за ночь, BASE — питание, включённое в цену номера. Enter — вниз; Alt+Enter открывает условия строки.",
  "rates.brd.none": "Питания пока нет. Сначала добавьте питание, включённое в цену номера: оно станет базовым.",
@@ -1902,7 +1902,6 @@
  "rates.brd.pop.mixed": "Сейчас условия у них разные; «Применить» задаст всем эти.",
  "rates.brd.pop.add_room": "Добавить правило для одного номера",
  "rates.brd.pop.add_room_help": "Строка для этого номера под {board}; введите там доплату.",
- "rates.brd.pop.add_room_placeholder": "Выберите номер…",
  "rates.brd.pop.remove_board": "Удалить питание",
  "rates.brd.pop.remove_row": "Удалить эти правила",
  "rates.brd.pop.remove_row_body": {

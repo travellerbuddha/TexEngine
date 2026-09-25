@@ -1165,7 +1165,6 @@
  "rates.ws.pop.selected_periods": "Perioadele selectate",
  "rates.ws.pop.this_period": "Doar {period}",
  "rates.ws.room.add": "Adaugă cameră",
- "rates.ws.room.add_placeholder": "+ Adaugă cameră…",
  "rates.ws.room.all_added": "Toate tipurile de camere sunt în contract",
  "rates.ws.room.base": "BAZĂ",
  "rates.ws.room.by_period": "Formule pe perioade",
@@ -1714,9 +1713,11 @@
  "rates.occ.pop.position_n": "Doar copilul {n}",
  "rates.occ.pop.single_children": "Și când călătoresc copii",
  "rates.occ.pop.single_children_help": "Stabilește prețul adultului dintr-o cameră cu un adult, cu sau fără copii (1 adult + oricâți copii), în locul întregului sejur pentru 1 adult.",
+ "rates.occ.pop.single_whole_row": "Se schimbă tot rândul: regulile fiecărei perioade, în camerele alese, își păstrează valorile.",
  "rates.occ.sum.adults": "Adulți: {items}",
  "rates.occ.sum.children": "Copii: {items}",
  "rates.occ.sum.single": "1A",
+ "rates.occ.sum.single_any": "1A (și cu copii)",
  "rates.occ.sum.adult": {
   "one": "primul",
   "other": "al {n}-lea"
@@ -1735,7 +1736,6 @@
  "rates.brd.title": "Tipuri de masă",
  "rates.brd.caption": "Suplimente de masă pe perioade",
  "rates.brd.add": "Adăugați tip de masă",
- "rates.brd.add_placeholder": "+ Adăugați tip de masă…",
  "rates.brd.all_added": "Toate tipurile de masă sunt în contract",
  "rates.brd.hint": "Tastați într-o celulă: 20 este o sumă fixă pe cameră pe noapte, +20 sau -20 pe adult (copiii plătesc partea lor), 5% sau -5% din prețul de ocupare al nopții, BASE tipul de masă inclus în prețul camerei. Enter coboară; Alt+Enter deschide condițiile rândului.",
  "rates.brd.none": "Încă nu există tipuri de masă. Adăugați întâi tipul de masă inclus în prețul camerei: devine tipul de bază.",
@@ -1842,7 +1842,6 @@
  "rates.brd.pop.mixed": "Acum au condiții diferite; Aplicați le dă tuturor acestea.",
  "rates.brd.pop.add_room": "Adăugați o regulă pentru o cameră",
  "rates.brd.pop.add_room_help": "Un rând pentru acea cameră sub {board}; tastați acolo suplimentul.",
- "rates.brd.pop.add_room_placeholder": "Alegeți o cameră…",
  "rates.brd.pop.remove_board": "Eliminați tipul de masă",
  "rates.brd.pop.remove_row": "Eliminați aceste reguli",
  "rates.brd.pop.remove_row_body": {

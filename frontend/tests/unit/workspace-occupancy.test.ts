@@ -1223,3 +1223,75 @@ test("the rule popover adds a child position row, and switches single use to 'al
   assert.equal(applyOccRuleAs(t, single, [""], [""], { op: "MULTIPLY", value: "1.5", is_override: false, note: "" }, { single: "whole" }), t)
   assert.deepEqual(applyOccRuleAs(t, single, [""], [""], null, { single: "children" }), applyOccRule(t, single, [""], [""], null))
 })
+
+// ─── the single-use row's two forms (S16 re-review 2) ─────────────────────
+
+const RULE = (value: string) => ({ op: "MULTIPLY", value, is_override: false, note: "" })
+const SINGLE = { target: "COMBINATION" as const, position: 0, age_band: "", combination: "1+0" }
+const SINGLE_ANY = { target: "ADULT" as const, position: 1, age_band: "", combination: "1+*" }
+const singleRules = (t: Tables) =>
+  t.occupancy_rules
+    .filter((x) => x.combination === "1+0" || x.combination === "1+*")
+    .map((x) => `${x.target}:${x.combination}:${x.room_type}:${x.period_code || "ALL"}:${x.value}`)
+    .sort()
+
+test("switching one period's single-use form switches the whole row: every period keeps its value in the new form (S16 re-review 2)", () => {
+  // All periods 1+0 ×1.5; P4 switched to "also when children travel" ×1.6, only P4
+  const t = example()
+  const kept = t.occupancy_rules.find((x) => x.combination === "1+0")!._key
+  const out = applyOccRuleAs(t, SINGLE, [""], ["P4"], RULE("1.6"), { single: "children" })
+  assert.deepEqual(singleRules(out), ["ADULT:1+*::ALL:1.5", "ADULT:1+*::P4:1.6"])
+  assert.equal(out.occupancy_rules.find((x) => x.combination === "1+*" && !x.period_code)?._key, kept, "the row keeps its key")
+  const m = ladderModel(out, null, "PERSON", OPTS)
+  assert.deepEqual(kinds(m).slice(0, 2), ["single1", "adults_base"], "one single-use row, in the new form")
+  assert.equal(summary(m.rows[0].cells[""]), "rule MULTIPLY 1.5")
+  assert.equal(summary(m.rows[0].cells.P1), "inherited MULTIPLY 1.5")
+  assert.equal(summary(m.rows[0].cells.P4), "period-override MULTIPLY 1.6")
+  // and back from one period: All periods and P4 return to the whole 1+0 combination
+  const back = applyOccRuleAs(out, SINGLE_ANY, [""], ["P2"], RULE("1.2"), { single: "whole" })
+  assert.deepEqual(singleRules(back), ["COMBINATION:1+0::ALL:1.5", "COMBINATION:1+0::P2:1.2", "COMBINATION:1+0::P4:1.6"])
+  const mb = ladderModel(back, null, "PERSON", OPTS)
+  assert.deepEqual(kinds(mb).slice(0, 2), ["single", "adults_base"])
+  assert.equal(summary(mb.rows[0].cells[""]), "rule MULTIPLY 1.5", "All periods keeps its rule")
+  assert.equal(summary(mb.rows[0].cells.P1), "inherited MULTIPLY 1.5")
+})
+
+test("switching All periods while a period override exists takes the override along (S16 re-review 2)", () => {
+  const t = example([occ({ target: "COMBINATION", combination: "1+0", period_code: "P4", op: "MULTIPLY", value: "1.6" })])
+  const out = applyOccRuleAs(t, SINGLE, [""], [""], RULE("1.5"), { single: "children" })
+  assert.deepEqual(singleRules(out), ["ADULT:1+*::ALL:1.5", "ADULT:1+*::P4:1.6"])
+  const m = ladderModel(out, null, "PERSON", OPTS)
+  assert.equal(summary(m.rows[0].cells.P1), "inherited MULTIPLY 1.5")
+  assert.equal(summary(m.rows[0].cells.P4), "period-override MULTIPLY 1.6")
+  // a room's own rules of the old form switch with the rooms written, other rooms' stay
+  const rooms = example([occ({ target: "COMBINATION", combination: "1+0", room_type: "SUP", op: "MULTIPLY", value: "1.3" })])
+  assert.deepEqual(singleRules(applyOccRuleAs(rooms, SINGLE, ["SUP"], [""], RULE("1.4"), { single: "children" })), ["ADULT:1+*:SUP:ALL:1.4", "COMBINATION:1+0::ALL:1.5"])
+  // a cell that already has a rule of the new form keeps it (one rule per cell)
+  const both = example([occ({ target: "ADULT", position: 1, combination: "1+*", period_code: "P2", op: "MULTIPLY", value: "1.1" })])
+  assert.deepEqual(singleRules(applyOccRuleAs(both, SINGLE, [""], [""], RULE("1.5"), { single: "children" })), ["ADULT:1+*::ALL:1.5", "ADULT:1+*::P2:1.1"])
+})
+
+test("both single-use forms reaching a scope are two rows, each showing its own rules (S16 re-review 2)", () => {
+  // e.g. a draft saved before the switch rewrote whole rows: 1+0 for all periods, 1+* in P4
+  const t = example([occ({ target: "ADULT", position: 1, combination: "1+*", period_code: "P4", op: "MULTIPLY", value: "1.6" })])
+  const m = ladderModel(t, null, "PERSON", OPTS)
+  assert.deepEqual(kinds(m).slice(0, 3), ["single", "single1", "adults_base"])
+  const [whole, any] = m.rows
+  assert.deepEqual([whole.id, any.id], ["single:0:", "single:1:"])
+  assert.deepEqual(any.identity, { ...SINGLE_ANY, room_type: "" })
+  assert.equal(summary(whole.cells.P4), "inherited MULTIPLY 1.5")
+  assert.equal(summary(any.cells.P4), "period-override MULTIPLY 1.6")
+  assert.equal(summary(any.cells[""]), "default MULTIPLY 1")
+  // both are in the summary, neither is a special combination
+  const s = ladderSummary(m, groupCombinations(t))
+  assert.deepEqual(s.adults.map((x) => `${x.kind}${x.position}:${x.value}`), ["single0:1.5", "adult3:0.7"])
+  assert.equal(s.combinations, 0)
+  // a room scope: All rooms' whole form and the room's own "also with children" form
+  const sup = ladderModel(example([occ({ target: "ADULT", position: 1, combination: "1+*", room_type: "SUP", op: "MULTIPLY", value: "1.4" })]), "SUP", "PERSON", OPTS)
+  assert.deepEqual(kinds(sup).slice(0, 2), ["single", "single1"])
+  assert.equal(summary(sup.rows[0].cells.P1), "all-rooms MULTIPLY 1.5")
+  assert.equal(summary(sup.rows[1].cells.P1), "inherited MULTIPLY 1.4")
+  // only the new form: one row
+  const alt = tablesOf({ periods: [r({ period_code: "P1" })], occupancy_rules: [occ({ target: "ADULT", position: 1, combination: "1+*", op: "MULTIPLY", value: "1.3" })] })
+  assert.deepEqual(kinds(ladderModel(alt, null, "PERSON", OPTS))[0], "single1")
+})

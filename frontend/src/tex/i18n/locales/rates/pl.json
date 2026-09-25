@@ -1185,7 +1185,6 @@
  "rates.ws.pop.selected_periods": "Wybrane okresy",
  "rates.ws.pop.this_period": "Tylko {period}",
  "rates.ws.room.add": "Dodaj pokój",
- "rates.ws.room.add_placeholder": "+ Dodaj pokój…",
  "rates.ws.room.all_added": "Wszystkie typy pokoi są w umowie",
  "rates.ws.room.base": "BAZA",
  "rates.ws.room.by_period": "Formuły według okresów",
@@ -1767,9 +1766,11 @@
  "rates.occ.pop.position_n": "Tylko dziecko {n}",
  "rates.occ.pop.single_children": "Także gdy podróżują dzieci",
  "rates.occ.pop.single_children_help": "Wycenia dorosłego w pokoju z jednym dorosłym, z dziećmi lub bez (1 dorosły + dowolne dzieci), zamiast całego pobytu 1 dorosłego.",
+ "rates.occ.pop.single_whole_row": "Zmienia się cały wiersz: reguły każdego okresu w wybranych pokojach zachowują swoje wartości.",
  "rates.occ.sum.adults": "Dorośli: {items}",
  "rates.occ.sum.children": "Dzieci: {items}",
  "rates.occ.sum.single": "1D",
+ "rates.occ.sum.single_any": "1D (także z dziećmi)",
  "rates.occ.sum.adult": {
   "other": "{n}."
  },
@@ -1789,7 +1790,6 @@
  "rates.brd.title": "Wyżywienie",
  "rates.brd.caption": "Dopłaty za wyżywienie według okresów",
  "rates.brd.add": "Dodaj wyżywienie",
- "rates.brd.add_placeholder": "+ Dodaj wyżywienie…",
  "rates.brd.all_added": "Wszystkie rodzaje wyżywienia są w umowie",
  "rates.brd.hint": "Wpisz w komórce: 20 to stała kwota za pokój za noc, +20 lub -20 za osobę dorosłą (dzieci płacą swoją część), 5% lub -5% ceny obłożenia za noc, BASE to wyżywienie wliczone w cenę pokoju. Enter przechodzi w dół; Alt+Enter otwiera warunki wiersza.",
  "rates.brd.none": "Brak wyżywienia. Najpierw dodaj wyżywienie wliczone w cenę pokoju: stanie się bazowym.",
@@ -1902,7 +1902,6 @@
  "rates.brd.pop.mixed": "Teraz mają różne warunki; Zastosuj nada wszystkim te.",
  "rates.brd.pop.add_room": "Dodaj regułę dla jednego pokoju",
  "rates.brd.pop.add_room_help": "Wiersz dla tego pokoju pod {board}; wpisz tam dopłatę.",
- "rates.brd.pop.add_room_placeholder": "Wybierz pokój…",
  "rates.brd.pop.remove_board": "Usuń wyżywienie",
  "rates.brd.pop.remove_row": "Usuń te reguły",
  "rates.brd.pop.remove_row_body": {

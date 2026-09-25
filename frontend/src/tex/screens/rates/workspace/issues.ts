@@ -63,14 +63,15 @@ export function anchorId(a: IssueAnchor): string {
 
 /** The ladder row (occupancy.ladderModel's row id) that shows a plain occupancy rule in its rooms
  * scope: `adult:{n}:`, `adult_any:0:`, `band:0:{BAND}`, `child:{n}:{BAND}`, `child_any:0:`, or the
- * single-use row `single:0:` (1+0 for the whole party, adult 1 of 1+*); null for a rule no ladder
+ * single-use rows `single:0:` (1+0 for the whole party) and `single:1:` (adult 1 of 1+*); null for a rule no ladder
  * row shows (a special combination, an adult rule with a band, a combination rule without a party). */
 export function ladderRowIdOf(rule: Row): string | null {
   const target = str(rule.target).toUpperCase()
   const position = int(rule.position)
   const band = str(rule.age_band).toUpperCase()
   const combination = canonCombination(rule.combination)
-  if ((target === "COMBINATION" && combination === "1+0") || (target === "ADULT" && position === 1 && combination === "1+*")) return "single:0:"
+  if (target === "COMBINATION" && combination === "1+0") return "single:0:"
+  if (target === "ADULT" && position === 1 && combination === "1+*") return "single:1:"
   if (combination) return null
   if (target === "ADULT") {
     if (band) return null
@@ -235,7 +236,7 @@ function anchorsOfRef(ix: Index, code: string, ref: IssueRef): IssueAnchor[] {
   const party = known(ref.adults) && known(ref.children)
   if (party) {
     const card = cardOfParty(ix, int(ref.adults), int(ref.children), room, period)
-    if (card) return [isSingleUseCard(card) ? { kind: "ladder", scope: room, row: "single:0:", period } : { kind: "card", card: card.id }]
+    if (card) return [isSingleUseCard(card) ? { kind: "ladder", scope: room, row: card.combination === "1+*" ? "single:1:" : "single:0:", period } : { kind: "card", card: card.id }]
   }
   const band = str(ref.age_band).toUpperCase()
   if (band && ix.hasBand(band, room)) return [{ kind: "ladder", scope: room, row: `band:0:${band}`, period }]

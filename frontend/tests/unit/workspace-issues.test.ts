@@ -97,7 +97,8 @@ test("ladderRowIdOf: the ladder row a plain occupancy rule is shown in", () => {
   assert.equal(ladderRowIdOf(occ("a", { position: 2 })), "child:2:")
   assert.equal(ladderRowIdOf(occ("a", {})), "child_any:0:")
   assert.equal(ladderRowIdOf(occ("a", { target: "COMBINATION", combination: "1+0" })), "single:0:")
-  assert.equal(ladderRowIdOf(occ("a", { target: "ADULT", position: 1, combination: "1+*" })), "single:0:")
+  // the single-use row's "also with children" form is a row of its own (S16 re-review 2)
+  assert.equal(ladderRowIdOf(occ("a", { target: "ADULT", position: 1, combination: "1+*" })), "single:1:")
   // an adult rule with a band (OCC_ADULT_BAND), a combination rule without a party, a special
   // combination (a card), an unknown target: no ladder row
   assert.equal(ladderRowIdOf(occ("a", { target: "ADULT", position: 3, age_band: "CHB" })), null)
@@ -162,6 +163,10 @@ test("occupancy rules: a plain rule marks its ladder cell in its rooms scope; a 
   assert.deepEqual(a.anchors[3], [{ kind: "ladder", scope: "", row: "single:0:", period: "" }])
   assert.deepEqual(a.byCell.get(ladderCellId("band:0:CHA", "", "DLX")), [issues[1]])
   assert.deepEqual(a.byCell.get(cardAnchorId(twoTwo.id)), [issues[2]])
+  // a party the "also with children" form prices: its row (S16 re-review 2)
+  const any = { ...tb, occupancy_rules: [...tb.occupancy_rules, { _key: "oany", target: "ADULT", position: 1, age_band: "", combination: "1+*", room_type: "", period_code: "", op: "MULTIPLY", value: "1.2", is_override: 0, note: "" }] }
+  const party = issue("WARNING", "NEGATIVE_OCCUPANCY_PRICE", "STD 1A+1C [CHA]: occupancy rules produce a negative price", { room_type: "STD", period: "P1", adults: 1, children: 1, age_band: "CHA" })
+  assert.deepEqual(anchorIssues([party], any).anchors[0], [{ kind: "ladder", scope: "STD", row: "single:1:", period: "P1" }])
 })
 
 test("age_band (± period) → a ladder row: a band's own issue, and a sweep party in its room", () => {

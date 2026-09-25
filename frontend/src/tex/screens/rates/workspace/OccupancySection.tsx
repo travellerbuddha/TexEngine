@@ -235,7 +235,7 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
   const itemName = (x: SummaryItem) => {
     switch (x.kind) {
       case "single":
-        return t("rates.occ.sum.single")
+        return t(x.position ? "rates.occ.sum.single_any" : "rates.occ.sum.single")
       case "adult":
         return tOrdinal("rates.occ.sum.adult", x.position)
       case "adult_any":

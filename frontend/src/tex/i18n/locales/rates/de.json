@@ -1145,7 +1145,6 @@
  "rates.ws.pop.selected_periods": "Ausgewählte Perioden",
  "rates.ws.pop.this_period": "Nur {period}",
  "rates.ws.room.add": "Zimmer hinzufügen",
- "rates.ws.room.add_placeholder": "+ Zimmer hinzufügen…",
  "rates.ws.room.all_added": "Alle Zimmertypen sind im Vertrag",
  "rates.ws.room.base": "BASIS",
  "rates.ws.room.by_period": "Formeln je Periode",
@@ -1657,9 +1656,11 @@
  "rates.occ.pop.position_n": "Nur Kind {n}",
  "rates.occ.pop.single_children": "Auch wenn Kinder mitreisen",
  "rates.occ.pop.single_children_help": "Bepreist den Erwachsenen eines Zimmers mit einem Erwachsenen, mit oder ohne Kinder (1 Erwachsener + beliebig viele Kinder), statt des ganzen Aufenthalts für 1 Erwachsenen.",
+ "rates.occ.pop.single_whole_row": "Die ganze Zeile wechselt: Ihre Regeln für jeden Zeitraum behalten in den gewählten Zimmern ihre Werte.",
  "rates.occ.sum.adults": "Erwachsene: {items}",
  "rates.occ.sum.children": "Kinder: {items}",
  "rates.occ.sum.single": "1E",
+ "rates.occ.sum.single_any": "1E (auch mit Kindern)",
  "rates.occ.sum.adult": {
   "other": "{n}."
  },
@@ -1675,7 +1676,6 @@
  "rates.brd.title": "Verpflegung",
  "rates.brd.caption": "Verpflegungszuschläge nach Periode",
  "rates.brd.add": "Verpflegung hinzufügen",
- "rates.brd.add_placeholder": "+ Verpflegung hinzufügen…",
  "rates.brd.all_added": "Alle Verpflegungsarten sind im Vertrag",
  "rates.brd.hint": "In eine Zelle tippen: 20 ist ein fester Betrag pro Zimmer und Nacht, +20 oder -20 pro Erwachsenem (Kinder zahlen ihren Anteil), 5% oder -5% vom Belegungspreis der Nacht, BASE die im Zimmerpreis enthaltene Verpflegung. Enter geht nach unten; Alt+Enter öffnet die Bedingungen der Zeile.",
  "rates.brd.none": "Noch keine Verpflegung. Fügen Sie zuerst die im Zimmerpreis enthaltene hinzu: Sie wird die Basisverpflegung.",
@@ -1776,7 +1776,6 @@
  "rates.brd.pop.mixed": "Sie haben jetzt unterschiedliche Bedingungen; Übernehmen gibt allen diese.",
  "rates.brd.pop.add_room": "Regel für ein Zimmer hinzufügen",
  "rates.brd.pop.add_room_help": "Eine Zeile für dieses Zimmer unter {board}; tragen Sie dort den Zuschlag ein.",
- "rates.brd.pop.add_room_placeholder": "Zimmer wählen…",
  "rates.brd.pop.remove_board": "Verpflegung entfernen",
  "rates.brd.pop.remove_row": "Diese Regeln entfernen",
  "rates.brd.pop.remove_row_body": {

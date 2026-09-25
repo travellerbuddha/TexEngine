@@ -325,14 +325,16 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
   const anyAdult = identity("ADULT", 0, "", "", scope)
   const anyChild = identity("CHILD", 0, "", "", scope)
 
-  // 1 Adult (single use): the whole combination 1+0, or the "also when children travel" variant
-  // (the scope's own choice, else All rooms')
+  // 1 Adult (single use): the whole combination 1+0 (`single:0:`) and the "also when children
+  // travel" form, Adult 1 of 1+* (`single:1:`): a row for each form that a rule reaching the scope
+  // has (both when both do: the engine applies both, and no rule is left unshown, S16 re-review 2),
+  // else the whole combination
   const single = identity("COMBINATION", 0, "", "1+0", scope)
   const singleAlt = identity("ADULT", 1, "", "1+*", scope)
-  const has = (id: OccIdentity, room: string) => all.some((n) => n.room_type === room && sameGuest(n, id))
-  const singleRoom = has(single, scope) || has(singleAlt, scope) ? scope : ""
-  const singleId = !has(single, singleRoom) && has(singleAlt, singleRoom) ? singleAlt : single
-  add("single", 0, "", singleId, [], "adult")
+  const hasWhole = all.some((n) => sameGuest(n, single))
+  const hasAlt = all.some((n) => sameGuest(n, singleAlt))
+  if (hasWhole || !hasAlt) add("single", 0, "", single, [], "adult")
+  if (hasAlt) add("single", 1, "", singleAlt, [], "adult")
 
   // adults: PERSON shows the BASE pair (positions 1–2, read-only, default) until a rule names one of them
   const included = basis === "ROOM" ? Math.max(1, opts.includedAdults ?? 1) : 0
@@ -511,14 +513,28 @@ const sameSlotOf = (a: Slot, b: Slot) => a.target === b.target && a.position ===
 /** The rule popover with a slot switch (§3.6.2 "position rows added through the popover"; "the
  * popover can switch [single use] to also when children travel"): the rule is written to the
  * switched slot for each room × period (applyOccRule). A child position rule is a row of its own,
- * so the band's rule stays; the single-use row switched to its other form loses the old form's
- * rows of the same cells (one form per cell, one history entry). Remove (`rule` null) and no
- * switch are applyOccRule on the row's slot. */
+ * so the band's rule stays. The single-use row switches form as a whole (S16 re-review 2): every
+ * row of the old form in the rooms written, of All periods and of each period, becomes a row of
+ * the new form (its key, op, value, "Always wins" and note kept; dropped where that cell already
+ * has a row of the new form), then the rule is written to the periods chosen; one history entry.
+ * Remove (`rule` null) and no switch are applyOccRule on the row's slot. */
 export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly string[], periods: readonly string[], rule: OccRule | null, to?: SlotSwitch): Tables {
   const target = switchedSlot(slot, to)
   if (!rule || !to || sameSlotOf(target, slot)) return applyOccRule(tables, slot, rooms, periods, rule)
-  const written = applyOccRule(tables, target, rooms, periods, rule)
-  return "single" in to ? applyOccRule(written, slot, rooms, periods, null) : written
+  if (!("single" in to)) return applyOccRule(tables, target, rooms, periods, rule)
+  const written = new Set((rooms.length ? rooms : [""]).map(str))
+  const norms = tables.occupancy_rules.map((r) => norm(r))
+  const taken = new Set(norms.filter((n) => written.has(n.room_type) && sameGuest(n, { ...target, room_type: "" })).map((n) => `${n.room_type}|${n.period}`))
+  const old = new Map(norms.filter((n) => written.has(n.room_type) && sameGuest(n, { ...slot, room_type: "" })).map((n) => [n.src as Row, n]))
+  const rows = tables.occupancy_rules.flatMap((r) => {
+    const n = old.get(r)
+    if (!n) return [r]
+    const cell = `${n.room_type}|${n.period}`
+    if (taken.has(cell)) return []
+    taken.add(cell)
+    return [{ ...r, target: target.target, position: target.position, age_band: target.age_band, combination: target.combination }]
+  })
+  return applyOccRule({ ...tables, occupancy_rules: rows }, target, rooms, periods, rule)
 }
 
 /** One ladder cell of a gesture and what was typed for it. */
