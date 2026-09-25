@@ -410,7 +410,7 @@ const activeCell = (page: Page) => page.evaluate(() => document.activeElement?.g
 const cell = (page: Page, r: number, c: number) => page.locator(`[data-cell="${r}:${c}"]`)
 const at = (...pairs: Array<[number, number]>) => pairs.map(([r, c]) => ({ r, c }))
 
-test("Grid: one tab stop, roving tabindex, Shift+Arrow skips read-only cells, keys never scroll the page", async ({ page }) => {
+test("Grid: one tab stop, roving tabindex, Shift+Arrow shows read-only cells but writes skip them, keys never scroll the page", async ({ page }) => {
   const stops = () => page.locator('[data-testid="grid"] [role="gridcell"][tabindex="0"]').count()
   expect(await stops()).toBe(1)
   expect(await page.locator('[data-testid="grid"] [role="gridcell"][tabindex="-1"]').count()).toBe(19)
@@ -427,7 +427,10 @@ test("Grid: one tab stop, roving tabindex, Shift+Arrow skips read-only cells, ke
   await expect.poll(() => activeCell(page)).toBe("2:2")
   expect((await gridState(page)).selected).toEqual(at([0, 2], [2, 2]))
   expect(await cell(page, 2, 2).getAttribute("aria-selected")).toBe("true")
-  expect(await cell(page, 1, 2).getAttribute("aria-selected")).toBe("false")
+  // the read-only cell in the range is selected and shown (it is copied), but no write gesture
+  // changes it: `selected` holds the editable cells only (S16 review)
+  expect(await cell(page, 1, 2).getAttribute("aria-selected")).toBe("true")
+  expect(await cell(page, 1, 1).getAttribute("aria-selected")).toBe("false")
 
   await page.keyboard.press("Escape")
   expect((await gridState(page)).selected).toEqual(at([2, 2]))

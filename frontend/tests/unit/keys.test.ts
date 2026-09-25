@@ -2,7 +2,7 @@
 // (slice S7 review follow-up). Run with `npm run test:unit`.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { editorSwallowsShortcut, editShortcut, shortcutLetter } from "../../src/tex/ui/keys.ts"
+import { editorSwallowsShortcut, editShortcut, shortcutLetter, editorKeyAction, isSaveShortcut } from "../../src/tex/ui/keys.ts"
 
 test("a Latin letter is the letter, in lower case", () => {
   assert.equal(shortcutLetter({ key: "a", code: "KeyA" }), "a")
@@ -90,4 +90,29 @@ test("a cell editor keeps Ctrl/Cmd+R and Ctrl/Cmd+D from the browser (reload, bo
   // Ctrl+Shift+R (hard reload) and AltGr are not the grid's shortcuts
   assert.equal(editorSwallowsShortcut(k("R", { ctrl: true, shift: true })), false)
   assert.equal(editorSwallowsShortcut(k("d", { ctrl: true, alt: true })), false)
+})
+
+test("Ctrl/Cmd+S is the save shortcut on every layout; a cell editor routes it to commit-then-save (S16 review)", () => {
+  assert.equal(isSaveShortcut(k("s", { ctrl: true })), true)
+  assert.equal(isSaveShortcut(k("s", { meta: true })), true)
+  assert.equal(isSaveShortcut(k("ы", { ctrl: true }, "KeyS")), true, "Russian: the key marked S")
+  assert.equal(isSaveShortcut(k("s")), false)
+  assert.equal(isSaveShortcut(k("s", { ctrl: true, alt: true })), false, "AltGr types characters")
+  assert.deepEqual(editorKeyAction(k("s", { ctrl: true })), { kind: "save" })
+  assert.deepEqual(editorKeyAction(k("ы", { meta: true }, "KeyS")), { kind: "save" })
+})
+
+test("a cell editor's keys: one routing for the matrix, the ladder and the boards grid (S16 review)", () => {
+  assert.deepEqual(editorKeyAction(k("r", { ctrl: true })), { kind: "swallow" })
+  assert.deepEqual(editorKeyAction(k("d", { meta: true })), { kind: "swallow" })
+  assert.deepEqual(editorKeyAction(k("Escape")), { kind: "cancel" })
+  assert.deepEqual(editorKeyAction(k("Enter", { alt: true })), { kind: "popover" })
+  assert.deepEqual(editorKeyAction(k("Enter", { ctrl: true })), { kind: "bulk" })
+  assert.deepEqual(editorKeyAction(k("Enter", { meta: true })), { kind: "bulk" })
+  assert.deepEqual(editorKeyAction(k("Enter")), { kind: "commit", move: "down" })
+  assert.deepEqual(editorKeyAction(k("Enter", { shift: true })), { kind: "commit", move: "up" })
+  assert.deepEqual(editorKeyAction(k("Tab")), { kind: "commit", move: "right" })
+  assert.deepEqual(editorKeyAction(k("Tab", { shift: true })), { kind: "commit", move: "left" })
+  // typing, the field's own undo and the clipboard stay the field's
+  for (const e of [k("a"), k("z", { ctrl: true }), k("c", { ctrl: true }), k("v", { meta: true }), k("ArrowLeft")]) assert.equal(editorKeyAction(e), null)
 })

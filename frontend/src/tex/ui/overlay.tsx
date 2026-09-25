@@ -6,6 +6,7 @@ import { Button, IconButton } from "./primitives"
 import { Field, Textarea } from "./form"
 import { InlineError } from "./layout"
 import { useTexT } from "../i18n"
+import { tabbables, useIsPhone } from "./popover"
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
@@ -118,7 +119,12 @@ export function Dialog({
  * role="dialog" without aria-modal, no backdrop, no focus trap and no scroll lock, so the page stays
  * usable beside it. Focus moves into it on open and back to the opener on close (unless the user
  * put it elsewhere); Escape closes it while the focus is inside it (a Popover, Menu or tooltip
- * opened in it closes first: their Escape runs earlier, at the window).
+ * opened in it closes first: their Escape runs earlier, at the window). Tab leaves it as if it sat
+ * right after its opener: Shift+Tab from its first control goes to the opener, Tab from its last to
+ * what follows the opener (S16 review; it is portaled to the end of the page).
+ *
+ * On a phone (below `sm`) the panel covers the whole page, so there it is the modal drawer: a page
+ * under it that stayed in the tab order and the accessibility tree could not be seen (S16 review).
  */
 export function Drawer({
   open,
@@ -137,7 +143,8 @@ export function Drawer({
   width?: "md" | "lg" | "xl"
   modal?: boolean
 }) {
-  if (!modal) return <SidePanel open={open} onClose={onClose} title={title} footer={footer} width={width}>{children}</SidePanel>
+  const phone = useIsPhone()
+  if (!modal && !phone) return <SidePanel open={open} onClose={onClose} title={title} footer={footer} width={width}>{children}</SidePanel>
   return <ModalDrawer open={open} onClose={onClose} title={title} footer={footer} width={width}>{children}</ModalDrawer>
 }
 
@@ -185,6 +192,15 @@ function ModalDrawer({ open, onClose, title, children, footer, width }: DrawerPr
   )
 }
 
+/** The first element Tab reaches after `from` in the page, outside `skip`, or null. */
+function nextTabbable(from: HTMLElement, skip: HTMLElement): HTMLElement | null {
+  for (const el of tabbables(document.body)) {
+    if (skip.contains(el) || from.contains(el)) continue
+    if (from.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) return el
+  }
+  return null
+}
+
 function SidePanel({ open, onClose, title, children, footer, width }: DrawerProps) {
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
@@ -196,7 +212,20 @@ function SidePanel({ open, onClose, title, children, footer, width }: DrawerProp
     const opener = document.activeElement as HTMLElement | null
     const first = el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>(FOCUSABLE)
     ;(first ?? el).focus({ preventScroll: true })
+    // Tab out as if the panel followed its opener (the opener: Shift+Tab; what follows it: Tab)
+    const onTab = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return
+      const t = e.target
+      if (!(t instanceof Node) || !el.contains(t) || !opener?.isConnected || el.contains(opener)) return
+      const items = tabbables(el)
+      const leaving = e.shiftKey ? !items.length || t === el || t === items[0] : !items.length || t === items[items.length - 1]
+      if (!leaving) return
+      e.preventDefault()
+      ;(e.shiftKey ? opener : (nextTabbable(opener, el) ?? opener)).focus()
+    }
+    el.addEventListener("keydown", onTab)
     return () => {
+      el.removeEventListener("keydown", onTab)
       // back to the opener only when the focus was in the panel (or went with it)
       const now = document.activeElement
       if (now && now !== document.body && !el.contains(now)) return

@@ -35,7 +35,8 @@ import { shortcutLetter } from "./keys"
 export interface GridSelectionOptions {
   rows: number
   cols: number
-  /** Cells that accept edits; header selection, Ctrl/Cmd+A and `selected` use only these. */
+  /** Cells that accept edits; header selection, Ctrl/Cmd+A and `selected` (what write gestures
+   * change) use only these. A range over other cells is still selected and shown (`isSelected`). */
   isEditable?: GridEditable
 }
 
@@ -43,9 +44,11 @@ export interface GridSelectionApi {
   state: GridSelection
   /** Dispatch a reducer action (the grid's current bounds are applied first). */
   dispatch: (action: GridAction) => void
-  /** Selected and editable (drives aria-selected and the selection tint). */
+  /** In a selected range, editable or not (drives aria-selected and the selection's cue): a range
+   * over read-only cells is visible and announced, and it is what Ctrl/Cmd+C copies. */
   isSelected: (r: number, c: number) => boolean
-  /** The selected editable cells, unique and in reading order. */
+  /** The selected editable cells, unique and in reading order: what write gestures (fill, paste,
+   * clear, Adjust…) change. */
   selected: GridCell[]
   /** More than the active cell is selected. */
   multiple: boolean
@@ -75,10 +78,7 @@ export function useGridSelection({ rows, cols, isEditable }: GridSelectionOption
   }, [])
 
   const selected = useMemo(() => selectedCells(state, isEditable), [state, isEditable])
-  const isSelected = useCallback(
-    (r: number, c: number) => isCellSelected(state, r, c) && (!isEditable || isEditable(r, c)),
-    [state, isEditable],
-  )
+  const isSelected = useCallback((r: number, c: number) => isCellSelected(state, r, c), [state])
   const click = useCallback(
     (r: number, c: number, mods: { shift?: boolean; meta?: boolean } = {}) => dispatch({ type: "click", r, c, ...mods }),
     [dispatch],

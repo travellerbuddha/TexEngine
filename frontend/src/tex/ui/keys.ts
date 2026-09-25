@@ -47,3 +47,38 @@ export function editorSwallowsShortcut(e: { key: string; code?: string; ctrlKey?
   const which = editShortcut(e)
   return which === "fill_right" || which === "fill_down"
 }
+
+type KeyLike = { key: string; code?: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean }
+
+/** Ctrl/Cmd+S (save), on any layout (Russian: the key marked S types "ы"). */
+export function isSaveShortcut(e: KeyLike): boolean {
+  return Boolean((e.ctrlKey || e.metaKey) && !e.altKey && shortcutLetter(e) === "s")
+}
+
+/** What a key typed in a grid's cell editor asks for (PRICING_WORKSPACE_UX.md §3.4.1, §3.10): one
+ * routing for the matrix, the occupancy ladder and the boards grid, which each carry it out. */
+export type EditorKeyAction =
+  /** Ctrl/Cmd+R, Ctrl/Cmd+D: kept from the browser (reload, bookmark); no fill while editing */
+  | { kind: "swallow" }
+  /** Ctrl/Cmd+S: commit the entry and stay on the cell; the version editor then saves what it
+   * wrote, so the save never leaves the typed value behind (S16 review) */
+  | { kind: "save" }
+  /** Escape: drop the entry */
+  | { kind: "cancel" }
+  /** Alt+Enter: the entry in the advanced rule popover */
+  | { kind: "popover" }
+  /** Ctrl/Cmd+Enter: the entry into every selected editable cell */
+  | { kind: "bulk" }
+  /** Enter / Shift+Enter / Tab / Shift+Tab: commit, then move */
+  | { kind: "commit"; move: "down" | "up" | "left" | "right" }
+
+export function editorKeyAction(e: KeyLike): EditorKeyAction | null {
+  if (editorSwallowsShortcut(e)) return { kind: "swallow" }
+  if (isSaveShortcut(e)) return { kind: "save" }
+  if (e.key === "Escape") return { kind: "cancel" }
+  if (e.key === "Enter" && e.altKey) return { kind: "popover" }
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) return { kind: "bulk" }
+  if (e.key === "Enter") return { kind: "commit", move: e.shiftKey ? "up" : "down" }
+  if (e.key === "Tab") return { kind: "commit", move: e.shiftKey ? "left" : "right" }
+  return null
+}

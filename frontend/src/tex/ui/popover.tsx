@@ -46,7 +46,8 @@ function subscribePhone(onChange: () => void) {
   return () => m.removeEventListener("change", onChange)
 }
 
-function useIsPhone(): boolean {
+/** Below Tailwind's `sm` breakpoint (a phone): overlays take the whole screen there. */
+export function useIsPhone(): boolean {
   return useSyncExternalStore(
     subscribePhone,
     () => window.matchMedia(PHONE).matches,
@@ -181,7 +182,8 @@ function useDismiss(open: boolean, onClose: () => void, anchorRef: ElementRef, p
 }
 
 /** The panel's visible Tab stops in document order (a positive tabindex is not reordered). */
-function tabbables(panel: HTMLElement): HTMLElement[] {
+/** The elements Tab reaches inside `panel`, in DOM order (shown, tabIndex ≥ 0). */
+export function tabbables(panel: HTMLElement): HTMLElement[] {
   return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0)
 }
 
