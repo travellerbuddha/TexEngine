@@ -8396,3 +8396,67 @@ No parser, op mapping or `apply_op_values` change.
   an editor without cost is not given its rows of the four policy-dependent codes at all.
 - `preview_price` and `price_matrix` keep main's bodies as separate functions (`_mains_preview`,
   `_mains_matrix`) beside the workspace's, so either can be read against main line for line.
+
+**Draft overlay performance (2026-09-25).** Measured by the regression module
+`kamra/tex/tests/integration/test_pricing_workspace_perf.py` (about 3.5 minutes). The opt-in
+`bench_pricing_workspace` stays for best-of-three figures near and above the row cap.
+- *The draft* (saved in the test transaction, rolled back): 15 room types, the base room priced per
+  period and 14 derived by a formula for all periods with their own price in every fourth season;
+  26 periods (22 seasons over 1 May–31 Oct and 4 Fri/Sat periods, June–September); PERSON basis;
+  adult positions 1–4 with the 3rd adult per period and per room and period, the 4th per room and
+  period; 4 child bands (INF, CH1, CH2, CH3) with band, first-child, per-period and per-room-period
+  rules; 11 special combinations (1+0 … 4+2, 2A+2C also per peak period and per family room);
+  6 boards with rules per room, period and room and period; 3 rate plans; 4 offers. That is 1,320
+  rows (129 room, 902 occupancy, 237 board rules) and 390 cells. It validates with no issue, so each
+  check runs the whole publish sweep (11,076 parties).
+- *The calls*, as the workspace makes them (`workspace=1`): the unsaved state is posted as the
+  278.5 KB JSON text the browser sends, with a one-cell edit; the same calls on the saved draft by
+  name are the baseline. Each starts from a fresh request's caches (redis warm), after three
+  warm-up calls (one for a call over a second): 20 timed runs, then one counted run. The response
+  size is the body Frappe sends. HTTP, session and auth are not included.
+
+| Call | Overlay p50 / p95 / max, ms | Saved draft p50 / p95 / max, ms | Response KB, overlay / saved | Queries, overlay / saved |
+|---|---|---|---|---|
+| `price_matrix`, whole matrix | 241.6 / 252.6 / 256.6 | 80.7 / 87.3 / 90.2 | 82.1 / 79.2 | 58 / 46 |
+| … + 1 sample party (the ladder) | 247.6 / 284.9 / 287.2 | 89.3 / 97.6 / 98.1 | 94.5 / 90.8 | 58 / 46 |
+| … + 12 sample parties (the cap) | 311.0 / 378.0 / 402.3 | 156.8 / 207.0 / 208.0 | 195.4 / 185.3 | 58 / 46 |
+| `preview_price`, 3 nights, 2A (the prefill) | 224.5 / 263.6 / 281.8 | 65.3 / 78.7 / 81.2 | 13.8 / 13.7 | 63 / 51 |
+| `preview_price`, 14 nights, 2A+2C | 231.1 / 247.2 / 280.6 | 75.1 / 98.6 / 108.3 | 73.4 / 71.9 | 63 / 51 |
+| `validate_version` | 2,664 / 2,808 / 2,984 | 2,536 / 2,652 / 2,658 | 0.03 / 0.03 | 48 / 48 |
+| `apply_op_values`, 26 / 500 prices | 5.3 / 6.0 / 6.4 and 9.3 / 9.8 / 10.0 | — | 0.8 and 15.6 | 7 and 7 |
+
+`save_version` of the draft: 741 ms, once.
+
+*Budget: met.* The whole-matrix overlay's p95 is 253 ms (285 ms with the ladder's party; budget
+800 ms). A draft quote's p95 is 264 ms for 3 nights and 247 ms for 14 nights with 2A+2C (budget
+500 ms). The module fails only above the budget × 3 (`TEX_PERF_FACTOR`), so a busy CI host does not
+fail it; a p95 over the budget itself prints the call's cProfile (as `TEX_PERF_PROFILE=1` does).
+
+*Queries: no growth with cells*, asserted exactly. Every overlay and saved call asks the same
+number of queries for 26 periods as for 13 (half the cells and period rules). 15 rooms ask exactly
+one query per room more than 8 rooms (the module allows at most one). A 14-night quote asks what a
+3-night one asks. `apply_op_values` asks 7 for 26 prices and for 500.
+
+*Where the time goes* (cProfile; the overlay and saved query sets diffed):
+1. The overlay is about 160 ms of each 240 ms call and grows with the rows posted, not the cells.
+   About 60 % of `_overlay` is Frappe's per-row field checks (`_validate_length`,
+   `_validate_data_fields`, `_validate_selects`, `_validate_mandatory`, `_validate_non_negative`),
+   each filtering the child DocType's fields again per row (`BaseDocument._filter`, 6,605 calls for
+   1,321 documents). The rest is building the 1,320 child documents, loading the saved draft,
+   `_as_stored` and the decimal check. `build_terms` and pricing the 390 cells take under 20 %.
+2. The overlay path loads the draft twice: `price_matrix` and `preview_price` load it for their
+   gate, then `_overlay` loads it again and repeats `scope.property_of`. These are the 12 extra
+   queries against the saved path (the version row, its nine tables, two property lookups).
+   `validate_version` loads it once, so its overlay asks what its saved path asks.
+3. `build_terms` reads each room type's capacity with its own query: one per contract room on every
+   path (overlay, by name, publish, selling), never per period or rule.
+4. `validate_version` (2.7 s, with or without data; not budgeted): about 95 % is the publish sweep.
+   For each of its 11,076 parties `occupancy.price_occupancy` filters all 902 occupancy rules:
+   10.0 million `qualifiers_match` calls and as many `Party.child_count` property reads. So its time
+   grows with cells × party sizes × rules; its queries do not. The client keeps one check in flight,
+   debounced by the last check's duration (S8), and the server bounds it per user (`_heavy`).
+
+No application code was changed. Open (possible optimisations, none needed for the budget): pass
+the loaded draft to `_overlay` (item 2); read the contract's room types in one query (item 3);
+filter the rules once per room and period in the sweep, and read `child_count` once per party
+(item 4).

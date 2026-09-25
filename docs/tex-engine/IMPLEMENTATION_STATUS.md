@@ -1031,6 +1031,18 @@ spec files 98/98 (with the new `pricing-workspace-optin`) and `editor-edits`, `c
 on the frontend before it sent the flag (`2a13fd3`, Vite :5187): without `workspace=1`, `get_version`
 answers no `can_preview`, so the Price test is not offered.
 
+**Pricing Workspace, draft overlay performance (2026-09-25, ADR-061, branch `pricing-workspace`).**
+The new regression module `test_pricing_workspace_perf` (2 tests) measures the overlay's calls on a
+draft of 15 rooms × 26 periods (1,320 rows, 902 occupancy rules, 11 special combinations, 6 boards):
+20 runs each from a fresh request, p50 / p95 / max, response size and `frappe.db.sql` count, against
+the saved draft by name. Within budget on the development bench: whole-matrix overlay p95 253 ms
+(285 ms with the ladder's sample party; budget 800 ms), draft quote p95 264 ms for 3 nights and
+247 ms for 14 nights 2A+2C (budget 500 ms). Validation takes 2.7 s (not budgeted); `apply_op_values`
+takes 10 ms at 500 prices. Query counts do not grow with cells, and the module asserts it: the same
+for 13 and 26 periods, exactly one per room, the same for 3 and 14 nights. The overlay adds about
+160 ms and 12 queries (the draft is loaded twice). The table and the profile are in ADR-061. No app
+code changed.
+
 **Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review, three re-review follow-ups and the existing-semantics follow-up, branch `pricing-workspace`).** Backend S2–S5 (opt-in: `workspace=1`; existing callers get main's answers)
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of the price test's internal quote
