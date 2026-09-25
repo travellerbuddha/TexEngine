@@ -52,6 +52,9 @@ interface BandDraftState {
   to: string
   infant: boolean
   infantTouched: boolean
+  /** a field was typed into (the From it started with does not count): the drawer holds input not in
+   * the version, until the band is added or cancelled (S16 re-review 3) */
+  typed: boolean
 }
 
 type BandField = "label" | "from" | "to" | "code"
@@ -100,7 +103,7 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
   })
 
   const gen = labels.gen
-  const newDraft = (from: string): BandDraftState => ({ key: newKey(), label: "", labelTouched: false, from, to: "", infant: false, infantTouched: false })
+  const newDraft = (from: string): BandDraftState => ({ key: newKey(), label: "", labelTouched: false, from, to: "", infant: false, infantTouched: false, typed: false })
   const startDraft = () => {
     const last = own[own.length - 1]
     const d = newDraft(last ? nextBandFrom(last.to_age) : "0")
@@ -116,11 +119,12 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
     return a !== null && b !== null && b > a
   }
 
-  /** Commits the new band (its Up to was committed); `next`: Enter, so the next band starts. */
-  const commitDraft = (d: BandDraftState, next: boolean) => {
+  /** Commits the new band (its Up to was committed); `next`: Enter, so the next band starts. False
+   * when the range is refused (the band stays a draft, with its error). */
+  const commitDraft = (d: BandDraftState, next: boolean): boolean => {
     if (!rangeOk(d.from, d.to)) {
       setDraftError(t("rates.ages.invalid"))
-      return
+      return false
     }
     const infant = draftInfant(d)
     const label = d.labelTouched ? d.label.trim() : ""
@@ -131,6 +135,7 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
       setDraft(n)
       focusNext.current = { key: n.key, field: "to" }
     } else setDraft(null)
+    return true
   }
 
   const commitBand = (band: Row, patch: BandPatch) => {
@@ -142,10 +147,13 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
   const onCommit = (item: Row | BandDraftState, isDraft: boolean, field: BandField, text: string, enter: boolean): boolean => {
     if (isDraft) {
       const d = item as BandDraftState
-      const next: BandDraftState =
+      const was = field === "label" ? d.label : field === "from" ? d.from : field === "to" ? d.to : ""
+      const edited: BandDraftState =
         field === "label" ? { ...d, label: text, labelTouched: text.trim() !== "" } : field === "from" ? { ...d, from: text } : field === "to" ? { ...d, to: text } : d
+      const next = { ...edited, typed: d.typed || text !== was }
       setDraft(next)
-      if (field === "to" && text.trim()) commitDraft(next, enter)
+      // a range the band refuses is not taken: the field stays a change (S16 re-review 3)
+      if (field === "to" && text.trim()) return commitDraft(next, enter)
       return true
     }
     const band = item as Row
@@ -198,6 +206,9 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
   return (
     <Drawer open={p.open} onClose={p.onClose} title={t("rates.bands.title")} width="md" modal={false}>
       <div ref={body} className="space-y-4 text-sm">
+        {/* a new band being typed is input not in the version yet (keptState.UNCOMMITTED_INPUT): the
+            tab asks before it closes, also once its fields show what was typed (S16 re-review 3) */}
+        {draft?.typed && <span hidden data-uncommitted="" data-changed="" data-band-draft="" />}
         <p className="text-xs text-zinc-600">{t("rates.ages.intro")}</p>
 
         {inherited.length > 0 ? (
@@ -304,7 +315,7 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
                             disabled={!canEdit}
                             onChange={(e) => {
                               const on = e.target.checked
-                              if (d) setDraft({ ...d, infant: on, infantTouched: true })
+                              if (d) setDraft({ ...d, infant: on, infantTouched: true, typed: true })
                               else if (band) commitBand(band, { is_infant: on ? 1 : 0 })
                             }}
                           />
