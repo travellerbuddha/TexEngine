@@ -8052,3 +8052,182 @@ Discard, only Chromium run, CI never run on GitHub). New: a single-use rule of t
 room scope inherits from All rooms is switched only in the rooms the popover writes, so the room scope
 then shows both rows (by design: switching All rooms' rows from a room scope would change other
 rooms).
+
+**S16 re-review 3 follow-up (2026-09-25).** A fourth review of the workspace reported four medium
+and fourteen low findings. Two of the low ones are context, not defects of this branch: untracked
+parity files of other work in the worktree, and a reviewer's own scratch clean-up. The other
+sixteen are fixed. Branch `pricing-workspace`; main `1575c8b` has no newer commit, so no merge was
+needed.
+
+**Decision (S16 re-review 3 follow-up).**
+1. *A special combination's rules are the card's, not the single-use row's (medium, D8, §3.7.4).*
+   The combination builder can make "1 adult + any children" with an Adult 1 line and a Child 1
+   line: an ADULT position 1 rule in 1+*, the single-use row's "also with children" form. The row
+   counted it as its own. Switching the row's form then rewrote the card's Adult 1 into a 1+0
+   combination rule, so a 1A+children party lost its ×1.20 without a word. Now:
+   - `occupancy.cardRows` marks the rows of every combination cell (combination, room, period,
+     "Always wins", and for a policy's rules their source) that is not a single-use card
+     (`isSingleUseCard`), as `groupCombinations` groups them.
+   - `ladderModel` leaves those rows out of the single-use rows. It neither shows nor counts them
+     for the row's form, and `slotRows` never edits or removes them.
+   - `singleWriteRefusal` refuses a write into a cell that a card holds (`"card"`), from the
+     popover, from a form switch (the rows it converts, the cells it writes) and from a typed entry
+     (`applyOccEntry` gives `CARD`, "A special combination prices 1 adult in this cell…"). The rule
+     would join the card or rewrite its rule. `applyOccRule` and `applyOccRuleAs` then return the
+     tables unchanged, and the popover says why and keeps Apply disabled.
+2. *Only the scope's own rules switch form (medium).* In a room scope the single-use row often
+   shows a rule of All rooms, or a policy's. The switch then converted nothing, added the new form
+   for the room, and left the All-rooms 1+0 applying. MULTIPLY replaces the party total, so 1A+0C
+   still cost the All-rooms price. `LadderRow.foreign` says that a rule of the row's form reaching
+   the scope is not the scope's own: a policy rule, or an All-rooms rule seen from a room, outranked
+   or not. The switch is then not offered. The popover says instead: "This row's rule comes from
+   All rooms or a pricing policy and would still apply, so its form is not switched here. Switch it
+   where that rule is set."
+3. *No relative rule is carried into the other form (low).* A whole combination's ADJUST_PERCENT,
+   ADD or SUBTRACT applies to the party total, and an adult's to the slot unit. Converting such a
+   row of another period or room changed its price silently (1+0 −20 % gave 118.80, after the
+   switch 108.00). `singleWriteRefusal` gives `"relative"` when a converted row that the new rule
+   does not overwrite has one of those ops. The popover says "Not switched: another period or room
+   of this row has a rule that adds, subtracts or changes by a percentage…". Replacing ops (ABSOLUTE,
+   FIXED, MULTIPLY, PERCENT_OF) and INHERIT price the same in either form, so the popover's "keep
+   their values" holds.
+4. *Undo and redo from the keyboard keep the focus in the grid (medium, §3.19).* Ctrl/Cmd+Z after
+   Add room removed the focused row, and so did Ctrl/Cmd+Z after a single-use switch (the row's id
+   changes). The focus fell to the page, where the grid's keys no longer reach. `ui.refocusIfLost`
+   runs after a keyboard undo or redo in the matrix, the ladder and the boards grid. Once the change
+   is rendered, it focuses the active cell by position, if the focus is on the body or on an element
+   no longer in the page. The toolbar's buttons keep their own focus. The toast's Undo already had
+   `onToastFocusBack`.
+5. *A refused or partly typed new child-age band keeps the tab from closing silently (medium).*
+   `onCommit` of a draft band returned true even when `commitDraft` refused the range. `setDraft`
+   made the field's value the typed text, so nothing was marked changed. A refused range now
+   returns false. The drawer renders a hidden `[data-uncommitted][data-changed]` marker while the
+   draft band holds anything typed (label, From, Up to or Infant), so the tab asks before it closes
+   (`keptState.UNCOMMITTED_INPUT`).
+6. *What a viewer without cost learns of a hidden policy rule's op (low; corrects re-review 2's
+   "the op of a policy rule is hidden as its value is").*
+   - OCC_INFANT_GENERIC named every non-INHERIT band-less child rule, hidden ones included, and
+     left INHERIT ones out. `validate._infant_generic(t, hidden)` names no hidden rule. It says
+     nothing for an infant band that a hidden rule names. The stored report
+     (`visible_issues`) gives the live check's row in place of the stored one, and
+     OCC_INFANT_GENERIC is in `HIDEABLE_CODES`.
+   - `occupancy.depends_on` counted only hidden rules that won a slot. A hidden rule that defers
+     (INHERIT) where it would otherwise win decides the winner too. The finding's example: a policy
+     rule naming an infant band over the version's band-less rule, G-31. So the sample party (shown
+     or "total not shown") and NEGATIVE_OCCUPANCY_PRICE still told the op apart.
+     `_defers_where_it_would_win` tries each such hidden INHERIT rule with a pricing op in its
+     place. If it would then take part, the answer depends on it, for a total and a negative total
+     alike.
+7. *The rest (low):*
+   - *Header lane, per grid (§3.19).* The matrix keeps "ArrowUp on the first row or ArrowLeft on
+     the first column reaches the headers' actions (Enter opens a menu)", for an editor only; a
+     read-only matrix has no header controls. The ladder says "ArrowLeft on the first column of the
+     resolved line reaches its sample party.", while the resolved line is shown. The boards grid
+     says "ArrowLeft on the first column reaches the row's board terms (Enter opens them).", for an
+     editor with boards. Each grid's `aria-describedby` points at the visible hint's note, not at a
+     second, screen-reader-only copy, and is left off where the grid has no lane.
+   - *The single-use checkbox:* its help and the consequence line ("The whole row switches…") are
+     its description. The consequence line is a polite live region, there from the start, so ticking
+     the box says what Apply will now do.
+   - *A new period's dates:* committing them (Enter, Ctrl/Cmd+S) or keeping them (Escape) unmounts
+     the focused input. The period's first cell then takes the focus (its menu button when there
+     are no rooms). The cell element is focused itself: the grid's `focusCell`, called from a
+     frame, focused the previous active cell.
+   - *i18n:* the TEX i18n check also reads both keys of `t(cond ? "a" : "b")`. `stateKeys()` lists
+     `cellTone.STALE_STATE`'s keys and `rates.sh.err.CARD`.
+   - *Toasts* stay about 60 ms per character, 4.5 s at least (8 s for an error) and 15 s at most.
+     The ladder's 190-character German copy/paste notice now stays 11 s.
+   - *Side panels:* a panel sits beside the page only where a few price columns still fit (md from
+     80rem, lg from 96rem, xl from 120rem), and while it does, the grids' sticky row header is
+     `clamp(9rem, 12vw, 12rem)` (`--tex-row-header`). Below those widths it lies over the page as
+     before the S16 re-review. At 1280 px the matrix keeps All periods and two periods beside the
+     Price test, at 1440 px three.
+   - *The Price test panel's nightly table* shows the night, cost (with `price.view_cost`),
+     selling and final price. The steps between them are in the Explain ladder above. The table's
+     columns hid by the viewport's width, so in the md panel it was 784 px wide in a 405 px
+     scroller.
+   - *Docs:* the re-review 2 verification ran twelve `pricing-workspace*` spec files, not
+     thirteen.
+
+**Deviations from the findings' fixes, with reasons.**
+- *A room or policy rule: no switch, and the rooms default is unchanged.* The finding offers "say
+  that the All-rooms or policy rule still applies and default its rooms to All rooms". Defaulting
+  to All rooms from a room scope would convert All rooms' rows for every room from a popover opened
+  on one room. The popover says why the switch is not there and where to make it.
+- *The whole-row switch refuses any relative op it would carry.* It does not also check whether
+  adult 1 of a 1A+0C party is priced at exactly the unit. That would make the switch depend on
+  another row's rule. The finding lists this restriction as an option.
+- *A card-held cell is refused for every single-use write, not only a switch.* With the card's rows
+  out of the row, a typed entry or a popover rule in that cell would have rewritten or joined the
+  card unseen.
+- *The copy/paste notice stays a toast, longer.* The finding also suggests a notice kept until
+  dismissed. A longer toast is also one of its options, and the change applies to every toast.
+
+**Tests (S16 re-review 3 follow-up).**
+- *Unit (Python), 506 (504 + 2), `test_policy_cascade.TestHiddenPolicyRules`:*
+  - the infant warning names no hidden rule, live and stored, and says nothing where a hidden rule
+    names the band, INHERIT or not;
+  - a hidden infant-band rule that defers hides the 2A+[INF] party as one that prices does, in
+    `depends_on` and in the live check's NEGATIVE_OCCUPANCY_PRICE; a hidden INHERIT that a more
+    specific version rule outranks takes no part.
+  Fail-first: 2 failures (the INHERIT subtest's `depends_on` is False; the viewer without cost gets
+  "…priced by the band-less child rules (G-ANY-A)").
+- *Unit (frontend), `npm run test:unit` 310 (306 + 4):* the builder's "1 adult + any children" card
+  through a switch both ways, with a refused All-periods switch, a refused typed entry and a Remove
+  that leaves the card (`workspace-occupancy.test.ts`); `foreign` for All rooms, a room's own rule,
+  both, and a policy's; the relative-op refusal both ways; the state keys picked from a map
+  (`state-keys.test.ts`). Fail-first: with a stub `singleWriteRefusal` export the three occupancy
+  tests fail on the unfixed model (`['single1', 'adults_base']`, `foreign` undefined, `null !==
+  'relative'`); without it the module does not load.
+- *E2E, `pricing-workspace-rereview3.spec.ts`, 9 tests:* the card through a switch both ways (the
+  rules sent) and its refused All-periods switch, a room scope without the switch, the
+  relative-op refusal, keyboard undo after Add room and after the switch, a refused new band that
+  makes the tab ask, each grid's own lane note, read-only grids without one, a new period's focus,
+  and the Price test panel's nightly table and page padding at 1440 and 1100 px. Changed:
+  `pricing-workspace-rereview2.spec.ts` expects each grid's own note.
+  Fail-first: 9 of 9 fail on the re-review 2 frontend (`2776ba5`'s frontend served by Vite :5186
+  against this tree's bench). The card test fails on the "1 Adult (also with children)" row the
+  card's rule made (1, expected 0). The switch is offered in a room scope (1, expected 0). Apply is
+  enabled for a relative rule. The focus is on `body` after Ctrl+Z. No uncommitted marker for the
+  refused band. Each grid carries the matrix's note, also read-only. The new period's cell is not
+  focused. The nightly table overflows the panel.
+
+**Verification (S16 re-review 3 follow-up).**
+- *Python:* unit 506 OK (the tracked suite), ruff clean. The worktree's untracked files of other
+  work (`test_main_parity.py` with `parity_data/`, `integration/test_existing_semantics.py`) are not
+  part of this branch. The parity test fails the same 3 of 4 as before this follow-up. It is not
+  counted here.
+- *Frontend:* `tsc -b`, `npm run build` (the bundles were not committed), `npm run i18n:tex` (5,100
+  literal and conditional keys), `npm run test:unit` 310/310, `npm run test:dom` 32/32.
+- *Integration:* all 38 tracked modules migrated with this tree (`migrate_test.sh`): 846 OK (10
+  skipped, as before), `test_pricing_workspace_api` 63 of them.
+- *Upstream suites with this tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the thirteen
+  `pricing-workspace*` spec files (the new `rereview3`; desktop, and the mobile spec on Pixel 7 too).
+  The first full run gave 96 of 97. `bulk` test 1 applied a Ctrl+Enter to one cell of a three-cell
+  selection under load, and passed in both runs of `--repeat-each 2` of the bulk spec (28 of 28).
+  The final full run is below. Also `editor-edits` and `policy-revisions` 4 of 4. Measured beside
+  the Price test: at 1280 px the matrix keeps All periods, P1 and P2 in view; at 1440 px also P3.
+  At 1024 px the panel lies over the page.
+
+**O1–O5 after the S16 re-review 3 follow-up** (all five provisional, owner input 13): unchanged. No
+parser, op mapping or `apply_op_values` change.
+
+**Open after the S16 re-review 3 follow-up.** As after the S16 re-review 2 follow-up: the grids'
+inline editing is written three times (`useInlineGridEditor` open); the ladder and the boards grid
+have no clipboard or fills; a base-room entry waiting for `apply_op_values` is not in a Ctrl/Cmd+S
+made meanwhile. S16's open items remain: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no
+F6 shortcut, an error draft of a removed room or period kept until Discard, only Chromium run, CI
+never run on GitHub. Changed:
+- Side panels now lie over the page below 80rem (md) instead of below `lg`. At 1024–1279 px the
+  Price test covers the matrix's right side again, rather than leaving it no columns.
+- The re-review 2 item "a single-use rule of the other form that a room scope inherits from All
+  rooms is switched only in the rooms the popover writes" is gone: the switch is no longer offered
+  there.
+
+New:
+- A special combination's cell refuses the single-use row's writes. To change the row there, edit
+  the card, or write other periods.
+- The switch refuses a relative rule in another period or room, even where adult 1 of 1A+0C is
+  priced at exactly the unit and the price would not change.
+- The copy/paste notice is still a timed toast, not one kept until dismissed.

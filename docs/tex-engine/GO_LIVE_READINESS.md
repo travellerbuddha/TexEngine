@@ -616,3 +616,12 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - Open: unchanged (one shared inline-editing hook; no clipboard in the ladder and the boards grid;
     the §3.18 one-screen fit).
   - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 re-review 3 follow-up on branch `pricing-workspace` (ADR-061).
+  - Server: an editor without `price.view_cost` no longer learns whether a hidden policy rule is
+    INHERIT (the infant warning and the sample parties).
+  - Workspace: the single-use row no longer rewrites a special combination's rules, switches only
+    the scope's own rules and refuses to carry a relative rule; the focus stays in the grid after a
+    keyboard undo; a refused new child-age band makes the tab ask before closing; smaller
+    accessibility, i18n and layout fixes.
+  - Open: unchanged, and side panels lie over the page below 80rem.
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.

@@ -969,7 +969,37 @@ the twelve `pricing-workspace*` specs 88/88, and `editor-edits`, `contract-admin
 `pricing-workspace-rereview2.spec.ts`, which fails 10 of 10 on the re-review frontend). Untracked
 test files of other work in the worktree are not counted (ADR-061).
 
-**Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review and two re-review follow-ups, branch `pricing-workspace`).** Backend S2–S5
+**Pricing Workspace, S16 re-review 3 follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+A fourth review found 4 medium and 14 low items. Sixteen are fixed. The other two are context: other
+work's untracked parity files in the worktree, and a reviewer's scratch clean-up.
+- *Server:*
+  - An editor without `price.view_cost` no longer learns whether a hidden policy rule is INHERIT.
+    OCC_INFANT_GENERIC names no hidden rule and is not said for an infant band a hidden rule names,
+    live and in the stored report.
+  - A hidden rule that defers where it would otherwise win a slot hides the party as one that
+    prices it (`occupancy.depends_on`).
+- *Workspace:*
+  - The single-use row leaves a special combination's rules alone: a builder's "1 adult + any
+    children" card keeps its Adult 1 through a form switch, and a write into its cell is refused.
+  - The switch is offered only for the scope's own rules, and never carries a relative rule into
+    the other form.
+  - Keyboard undo or redo that removes the focused row puts the focus back on the grid.
+  - A refused or partly typed new child-age band makes the tab ask before it closes.
+  - Also: each grid's header-lane note says its own controls, and only where it has them; the
+    single-use checkbox is described; a new period's dates hand the focus to its first cell; the
+    i18n check reads conditional keys; toasts stay long enough to read; side panels sit beside the
+    page only from 80rem, with a narrower row header; the Price test panel's nightly table fits it;
+    the re-review 2 notes counted twelve spec files, not thirteen.
+
+Verification: unit 506 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,100 keys),
+`npm run test:unit` 310, `npm run test:dom` 32. All 38 integration modules migrated with the tree: 846
+OK (10 skipped, as before). Upstream suites: eval 76/76, journey 13/13, banquet 101 OK. Playwright on
+the tree's own servers (bench :8016, Vite :5186): the thirteen `pricing-workspace*` spec files (see
+ADR-061 for the counts), and `editor-edits` and `policy-revisions` 4/4. Fail-first: see ADR-061 (2
+Python tests, 3 frontend unit tests, and the new `pricing-workspace-rereview3.spec.ts`, which fails 9
+of 9 on the re-review 2 frontend). Untracked test files of other work in the worktree are not counted.
+
+**Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review and three re-review follow-ups, branch `pricing-workspace`).** Backend S2–S5
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of an internal quote reports its
 running subtotals after the adults, the children and the board, reported only, which the Explain
