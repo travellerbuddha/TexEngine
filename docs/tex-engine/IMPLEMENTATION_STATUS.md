@@ -941,7 +941,35 @@ re-run. Upstream suites: eval 76/76, journey 13/13, banquet 101 OK. Playwright o
 Fail-first: see ADR-061 (the backend tests, the unit tests, the DOM test, and the new
 `pricing-workspace-rereview.spec.ts`, which fails 11 of 11 on the S16-review frontend).
 
-**Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review and re-review follow-ups, branch `pricing-workspace`).** Backend S2–S5
+**Pricing Workspace, S16 re-review 2 follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+A third review found 1 high, 4 medium and 8 low items. All 13 are fixed.
+- *Server:*
+  - An editor without `price.view_cost` is again told when a child band has no rule, in the
+    live check and in the sample-party cells, also when a policy rule priced the adults. Only
+    what depends on a hidden rule's op or value stays hidden: a total or negative total it takes
+    part in, and a missing child rule where it defers (`occupancy.depends_on`).
+  - `get_version` gives that editor the report stored at publish filtered the same way
+    (`contracts.stored_report`).
+- *Workspace:*
+  - "Also when children travel" switches the whole single-use row, every period keeping its
+    value.
+  - A draft with both single-use forms shows a row for each.
+  - The header lane is in the keyboard shortcuts, the grid hints and each grid's description.
+  - A cleared child-age name no longer leaves the tab asking before it closes.
+  - Also: Add room focuses the new room; the Price test's status region is announced on the
+    first result; the terms popover's Add a rule for one room carries its help; a read-only copy
+    notice; board names in the history; three unused keys removed.
+
+Verification: unit 504 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,072 literal
+keys), `npm run test:unit` 306, `npm run test:dom` 32. All 38 integration modules migrated with the
+tree: 846 OK (10 skipped, as before), `test_pricing_workspace_api` 63 of them. Upstream suites: eval
+76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite :5186):
+the thirteen `pricing-workspace*` specs 88/88, and `editor-edits`, `contract-admin` and
+`critical-journey` 5/5. Fail-first: see ADR-061 (the backend tests, the unit tests, and the new
+`pricing-workspace-rereview2.spec.ts`, which fails 10 of 10 on the re-review frontend). Untracked
+test files of other work in the worktree are not counted (ADR-061).
+
+**Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review and two re-review follow-ups, branch `pricing-workspace`).** Backend S2–S5
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of an internal quote reports its
 running subtotals after the adults, the children and the board, reported only, which the Explain

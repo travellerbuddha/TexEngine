@@ -7905,3 +7905,150 @@ parser, op mapping or `apply_op_values` change.
 - Still open from S16: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no F6 shortcut, an
   error draft of a removed room or period kept until Discard, only Chromium run, CI never run on
   GitHub.
+
+**S16 re-review 2 follow-up (2026-09-25).** A third review of the workspace reported one high, four
+medium and eight low findings. All thirteen are fixed. Branch `pricing-workspace`; main `1575c8b`
+has no newer commit, so no merge was needed.
+
+**Decision (S16 re-review 2 follow-up).**
+1. *Hide only what depends on a hidden value (medium; corrects re-review decisions 1 and 2).* The
+   re-review hid every sample party and sweep warning that a hidden policy rule took part in, failures
+   included. For a failure, the rules that take part are all the rules resolved before it. So a
+   NO_CHILD_RULE failure ("no occupancy rule for child 1 in band CHD (2A+1C)", with no amount) was
+   hidden whenever a policy rule priced an adult before the child. An editor without
+   `price.view_cost` then lost every unsellable-combination warning and saw "total not shown" instead
+   of the error. `occupancy.depends_on` (pure) now says whether what `price_occupancy` answers for a
+   party depends on the op or value of a hidden rule:
+   - a total, or a negative total (NEGATIVE_OCCUPANCY_PRICE), that a hidden rule takes part in:
+     yes, as before;
+   - a child that no rule prices (NO_CHILD_RULE): only when a hidden rule defers (INHERIT) for that
+     child, since its op is hidden too. A band without any rule is said, whoever priced the adults;
+   - any other failure (an ambiguity; a failure before the occupancy is priced): no. Under
+     `CASCADE` a version rule never ties a policy rule.
+
+   `validate._sweep` asks it for NEGATIVE_OCCUPANCY_PRICE and NO_CHILD_RULE only. `_party_cells` asks
+   `matrix.party_hidden` (the same answer for a sample party) and reports every other error.
+   `party_rules` stays, and its docstring now says it returns an empty set, not None.
+2. *The report stored at publish is filtered the same way (low).* `get_version` gave an editor
+   without `price.view_cost` (contract.edit is enough to read a version) the report that
+   `validate_terms(terms)` stored at publish with nothing hidden. The workspace's saved mode shows it
+   as "Checked when published". `contracts.stored_report(version, formula=…)` now gives that viewer
+   `validate.visible_issues(frozen terms, report, policy rules)`:
+   - no OCC_POLICY_OVERRIDE_OUTRANKED (the override is always a policy rule);
+   - no sweep issue whose party and period, as its `ref` names them, `depends_on` a policy rule;
+   - a row that does not say which override or party it is about is left out.
+   If the frozen terms cannot be read, every issue of those codes is left out. The stored report
+   itself is unchanged, and whoever sees cost gets it as stored.
+3. *The single-use row switches form as a whole (high and medium, §3.6.2).* The popover wrote the new
+   form (ADULT 1 in 1+*, or COMBINATION 1+0) only in the cells it wrote. The ladder showed one form
+   per row, and the combination cards left out both forms, so the rule just written could show
+   nowhere while it priced. Two changes:
+   - `applyOccRuleAs` with a form switch rewrites every row of the old form in the rooms written
+     (All periods and each period), keeping its key, op, value, "Always wins" and note, then writes
+     the rule to the periods chosen, in one history entry. A cell that already has a row of the new
+     form keeps it. Switching P4 of "1+0 ×1.50 for All periods" to ×1.60 gives "1+* ×1.50 for All
+     periods, P4 ×1.60". The popover says "The whole row switches: its rules for every period, in
+     the rooms chosen, keep their values."
+   - `ladderModel` shows a row for each form that a rule reaching the scope has: "1 Adult (single
+     use)" (`single:0:`) and "1 Adult (also with children)" (`single:1:`). With no rule it shows the
+     first. Both rows show when both forms reach, for example from a draft saved before this change,
+     or from All rooms' 1+0 and a room's own 1+*, where the engine applies both. Each row then edits
+     its own form, and the switch is not offered. Issue anchors follow (`ladderRowIdOf`, a party's
+     single-use card), and the summary names the second form "1A (also with children)".
+4. *The header lane is said (medium, §3.19).* The Keyboard shortcuts popover has a row for it
+   ("ArrowUp on the first row, ArrowLeft on the first column": a column's or row's actions; Enter
+   opens a menu, and ArrowDown or ArrowRight goes back to the cells). The matrix, ladder and boards
+   hints end with the same sentence, and each grid carries it as its accessible description
+   (`aria-describedby`, for a read-only viewer too). Six languages.
+5. *A child-age field shows what was stored (medium).* CommitInput resynced its text only when the
+   stored value changed. A cleared band name is stored as the generated name, which is the old value,
+   so the field stayed blank and marked changed, and the tab asked before closing until a reload.
+   A commit the version takes now shows the stored value at once, focused or not. A refused code
+   (`onCommit` returns false) keeps the typed text, which stays a change.
+6. *The rest (low):*
+   - Add room focuses the new room's first cell, as Add board does. The menu's button that the
+     focus returned to is disabled once nothing is left to add. It focuses the cell element itself:
+     the grid's `focusCell`, called from an effect, focused the active cell of the render before.
+   - The Price test's status region is always rendered, empty until a result. It says the total,
+     "unsellable", or that the result is out of date. A live region inserted with its text already
+     in it is not announced. The visible out-of-date line is `aria-hidden`.
+   - Unused keys and the terms popover: `rates.ws.room.add_placeholder`, `rates.brd.add_placeholder`
+     and `rates.brd.pop.add_room_placeholder` are gone from the six catalogues. The terms popover's
+     "Add a rule for one room" is described by its help (`Menu` `buttonProps` takes
+     `aria-describedby`, `AddMenu` `describedBy`).
+   - A read-only viewer's Ctrl/Cmd+C or V on a ladder or boards cell says only "Copy works in the
+     room price matrix." (`useMatrixOnlyBulk(gridEl, canEdit)`).
+   - Adding a board records "Add board: Half board" in the history, not the code.
+
+**Deviations from the findings' fixes, with reasons.**
+- *NO_CHILD_RULE is hidden where a hidden rule defers (INHERIT) for that child.* The finding
+  suggests reporting it always. The op of a policy rule is hidden as its value is (`_rule_dict`), so
+  the missing rule would say that a "Policy rule" in the ladder is INHERIT. Where no hidden rule is a
+  candidate for the child, it is reported, as the finding asks.
+- *Both single-use forms, and a whole-row switch.* The findings offer either. The switch rewrites
+  the row, so a switch never splits it by period. The two-row model covers the drafts and room scopes
+  where both forms reach, which no switch makes.
+
+**Tests (S16 re-review 2 follow-up).**
+- *Unit (Python), 504 (496 + 8):*
+  - `test_policy_cascade.TestHiddenPolicyRules` + 3: a missing child rule is said whoever priced the
+    adults, while a negative total goes (the finding's case: 29 NO_CHILD_RULE warnings kept); a
+    missing child rule where a hidden rule defers is left out; a stored report is filtered as the live
+    check is;
+  - `test_matrix.TestPartyHidden` 5: a total, a negative total, a missing child rule, an ambiguity
+    and a failure before the occupancy is priced.
+  Fail-first: 1 failure and 8 errors (`party_hidden` and `visible_issues` missing; the finding's
+  case: `[] != [29 NO_CHILD_RULE warnings]`).
+- *Integration, `test_pricing_workspace_api`, 63 (61 + 2):* a child band without a rule is said to an
+  editor without cost (the cell's error in both periods, saved and unsaved; the live check's
+  NO_CHILD_RULE issues) while a party the policy's adult rules price stays hidden; and `get_version`'s
+  report for that editor leaves out the 2A+1C negative total and OCC_POLICY_OVERRIDE_OUTRANKED, which
+  a Revenue Manager still gets. Fail-first: 3 failures (`['LOW', 'HIGH'] != []` hidden for the
+  NO_CHILD_RULE party, saved and unsaved; `(2, 1)` in the editor's report).
+- *Unit (frontend), `npm run test:unit` 306 (303 + 3):* switching one period's form in both
+  directions, switching All periods with a P4 override (and a room's own rows, and a cell that
+  already has the new form), and both forms as a row each (the summary, a room scope). Changed:
+  `ladderRowIdOf` of ADULT 1 in 1+* is `single:1:`, and a 1A+1C issue of a 1+* card anchors there.
+  Fail-first: 5 of the 66 occupancy and issue tests fail on the unfixed frontend.
+- *E2E, `pricing-workspace-rereview2.spec.ts`, 10 tests:* single use switched in P4 (the rules sent,
+  the cells, the focus), switched in All periods with a P4 override, both forms of a saved draft as a
+  row each, a cleared band name (the generated name shown, the tab closes without asking), the
+  header lane in the shortcuts and each grid's description, Add room's focus, the Price test's
+  status region before the first result, the terms popover's description, "Undone: Add board: Bed &
+  breakfast", and a published ladder's Ctrl+C notice. Fail-first: 10 of 10 fail on the unfixed
+  frontend (commit `47ae057`'s frontend served by Vite :5186). The two single-use tests fail on the
+  rules sent: `COMBINATION:1+0:ALL:1.5` is left beside `ADULT:1+*:P4:1.6`, and
+  `COMBINATION:1+0:P4:1.6` beside `ADULT:1+*:ALL:1.5`.
+- *Changed tests:* `test_matrix.TestPartyRules` is unchanged (`party_rules` still answers the same);
+  `workspace-issues.test.ts` expects `single:1:` for ADULT 1 in 1+*.
+
+**Verification (S16 re-review 2 follow-up).**
+- *Python:* unit 504 OK (the tracked suite), ruff clean. The worktree also holds three untracked files
+  of other work (`test_main_parity.py` with `parity_data/`, and
+  `integration/test_existing_semantics.py`). They are not part of this branch and are left out of
+  the counts below. The parity test fails 3 of 4 on this tree and the same 3 on the tree before
+  this follow-up (`47ae057`). The other module (7 tests, 35 failures and 20 errors in the full run)
+  fails on `preview_price`'s night keys and child ages, which this follow-up does not touch; it was
+  not re-run on the earlier tree.
+- *Frontend:* `tsc -b`, `npm run build` (the bundles were not committed), `npm run i18n:tex` (5,072
+  literal keys), `npm run test:unit` 306/306, `npm run test:dom` 32/32 (TEX_DOM_PORT 5186, with the
+  workspace's Vite stopped).
+- *Integration:* all 38 modules migrated with this tree (`migrate_test.sh`): 846 OK (10 skipped, as
+  before), `test_pricing_workspace_api` 63 of them.
+- *Upstream suites with this tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the thirteen
+  `pricing-workspace*` specs (desktop, and the mobile spec on Pixel 7 too): 88 of 88; `editor-edits`,
+  `contract-admin` and `critical-journey`: 5 of 5.
+
+**O1–O5 after the S16 re-review 2 follow-up** (all five provisional, owner input 13): unchanged. No
+parser, op mapping or `apply_op_values` change.
+
+**Open after the S16 re-review 2 follow-up.** As after the S16 re-review follow-up: the grids' inline
+editing written three times (`useInlineGridEditor` open), no clipboard or fills in the ladder and the
+boards grid, a base-room entry waiting for `apply_op_values` not in a Ctrl/Cmd+S made meanwhile,
+side panels covering the page between `sm` and `lg`, and S16's open items (the §3.18 one-screen fit,
+`HEAVY_LIMITS` as constants, no F6 shortcut, an error draft of a removed room or period kept until
+Discard, only Chromium run, CI never run on GitHub). New: a single-use rule of the other form that a
+room scope inherits from All rooms is switched only in the rooms the popover writes, so the room scope
+then shows both rows (by design: switching All rooms' rows from a room scope would change other
+rooms).

@@ -605,3 +605,14 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - Open: one shared inline-editing hook; no clipboard in the ladder and the boards grid (they say
     where it works); the §3.18 one-screen fit.
   - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 re-review 2 follow-up on branch `pricing-workspace` (ADR-061).
+  - Server: an editor without `price.view_cost` is again told when a child band has no rule (the
+    live check and the sample parties); only what depends on a hidden policy rule's op or value
+    stays hidden, and the report stored at publish is filtered for that editor the same way.
+  - Workspace: "also when children travel" switches the whole single-use row, and a draft with both
+    single-use forms shows a row for each; the header lane is in the keyboard help and on each
+    grid; a cleared child-age name no longer makes the tab ask before closing; Add room focuses the
+    room it added; the Price test's first total is announced.
+  - Open: unchanged (one shared inline-editing hook; no clipboard in the ladder and the boards grid;
+    the §3.18 one-screen fit).
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
