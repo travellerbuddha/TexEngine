@@ -5001,3 +5001,181 @@ check lists issues without anchoring them (S15). `rates.preview.unsaved` is no l
 in the catalogues). Still open from before: the overlay skips `_validate_links` and the window
 order; the cross-hotel rate plan / policy gap in `build_terms`; party cells in full precision; no
 server-side validation concurrency guard; the S1, S6 and S7 review items listed above.
+
+**S8 review follow-up (2026-09-25).** Two verifier findings on S8, both fixed; one more fault of the
+same kind found while fixing them.
+1. *Drafts above the overlay's row cap lost all feedback.* S8 sent every editor request through
+   the overlay, which refuses more than 5,000 rows, while `save_version` has no cap. A realistic
+   weekly contract has more (12 rooms × 52 periods with 6 occupancy rules and 3 board supplements
+   per room and period: 5,892 rows). For such a draft the Check button, the check on opening and
+   the room price grid's resolved prices all got the refusal, contrary to §3.15 ("The Validate
+   button still validates the saved draft").
+2. *"Could not run" never showed.* After a refused check, `issuesStale` stayed true, so the chip
+   showed its spinner and older counts indefinitely, and nothing retried. The Preview & audit
+   matrix showed "Updating…" over a dimmed older matrix in the same way.
+
+**Decision (S8 review follow-up).**
+- *The saved draft by name* (`draftPreview.previewSource`). In overlay mode the saved draft is
+  asked for by name, with no payload and so no row cap (`price_matrix` by GET without `data`,
+  `validate_version` by GET with `name` only, as the Check button asked before S8), in three
+  cases:
+  - the state on screen is the save base (`useDraftPreview(…, {base})`: the fingerprint equals the
+    editor's save base);
+  - the Check button asked (`validateNow`);
+  - the overlay does not take the draft.
+
+  Only unsaved changes the overlay takes are POSTed with `data`. By-name answers name rows by
+  their server names, which §3.15's anchoring already accepts (`_name`). S8's deviation 2 ("the
+  Check button sends the payload") is withdrawn.
+- *The cap, from the server* (additive).
+  - `get_version` gives an editor of an editable draft `overlay_max_rows` (5,000).
+  - The overlay's refusal above it is typed, `OverlayTooLarge(frappe.ValidationError)`: the same
+    417 and the same message, and still caught as a ValidationError.
+  - The client counts the rows it would send (`overlayRows`, an integer count over the eight
+    tables, as the server counts them) and does not send the overlay above the cap.
+  - If a refusal arrives anyway (the field is missing), the client stops sending the overlay for
+    that version at that row count or above (`overlayFits`). A blank value's refusal is not
+    mistaken for the cap (`isTooLarge`).
+- *Answer keys* (`previewKeys`).
+  - While the overlay takes the draft, answers are keyed by the content on screen (fingerprint
+    and row keys), however they were asked. A save of what is on screen therefore keeps them: no
+    re-check after a save, as in S8.
+  - Above the cap they are keyed by the saved revision (`doc.modified`). Edits ask nothing; a
+    save or Check asks again.
+- *Above the cap with unsaved changes* (`savedOnly`). The answers are the saved draft's, and each
+  view says so:
+  - the Preview & audit matrix shows "Saved draft only" and a notice ("This draft has more than
+    {max} rows, too many to preview unsaved changes: the prices and checks shown are the saved
+    draft's. Save to include your changes.");
+  - the live check popover and the Live check card show the same notice;
+  - the Price test prices the saved draft without `data`, under its pre-S8 notice ("You have
+    unsaved changes. The price check uses the saved draft.");
+  - the room price grid hides resolved prices, as it does for any unsaved change.
+
+  Nothing is refused or shown as an error.
+- *The call state* (`callState`: ready, busy or failed). It is derived from the key of the answer
+  wanted, the key of the last answer, the key of the last failure (failures are now stored with
+  their key) and whether a call is in flight. A failure for the state on screen is "failed", not
+  "busy":
+  - the chip shows its warning mark, named "The live check could not run", with no spinner and no
+    older counts;
+  - its popover and the Live check card give the server's reason and Try again (`refetch`);
+  - the preview hands out no issues while the check has failed, so the section badges and the
+    lists do not count older issues as current;
+  - the matrix card shows the error and Try again instead of "Updating…" over an older matrix;
+  - `error` and `issuesError` are those of the current state only (the room grid's legend reads
+    `error`).
+
+  Nothing retries on its own. An edit or Try again asks again.
+- *Found while fixing* (`alreadyChecked`). Undoing to the last checked state while a check of
+  another state was in flight skipped the re-check. The other state's answer then replaced the
+  issues, and the chip stayed stale for good. A state already checked is now asked again when a
+  check is in flight.
+
+**Tests (S8 review follow-up).**
+- *Frontend unit tests:* `npm run test:unit` 148 (143 + 5, all in `draft-preview.test.ts`). They
+  cover:
+  - a clean state and the Check button give by-name requests with no data, and unsaved changes
+    the overlay takes give the POST with data;
+  - the row count, the cap and the typed refusal;
+  - the answer keys (a save keeps them while the overlay takes the draft; above the cap edits do
+    not change them and a save or Check does);
+  - the call state (a refused check for the current key is "failed", not "busy");
+  - the re-check guard.
+- *Integration tests:* `test_pricing_workspace_api` 50 (48 + 2):
+  - `test_above_the_row_cap_the_saved_draft_still_answers_by_name`: with the cap patched to the
+    payload's rows − 1, `price_matrix`, `validate_version` and `preview_price` with `data` raise
+    `OverlayTooLarge` with the unchanged message; `save_version` takes the draft, and the saved
+    draft is priced (the new price), validated and quoted by name; a blank value still raises a
+    plain ValidationError;
+  - `test_an_editor_is_told_the_overlay_row_cap`: a Revenue Manager and a contract editor get
+    5,000, Finance and an agent nothing.
+- *Benchmark:* `bench_pricing_workspace` gains `test_above_the_row_cap`.
+- *Fail-first:*
+  - `draft-preview.test.ts` fails on the unfixed tree (missing exports: 132 tests, 131 pass,
+    1 fail), and so does the guard's test before the guard;
+  - on the unfixed server, `test_pricing_workspace_api` ran 50 tests with 2 failures (the
+    Revenue Manager and editor subtests, `None != 5000`) and 1 error (`KeyError:
+    'overlay_max_rows'`).
+
+**Verification (S8 review follow-up).**
+- *Build and unit tests:* `tsc -b`, `npm run build`, `npm run i18n:tex` (2 new keys in the six
+  languages), `npm run test:unit` 148, `npm run test:dom` 24, Python unit 491, ruff.
+- *Integration:* the full regression on this tree, migrated with it: 38 modules, 833 tests OK (10
+  skipped, as before), `test_pricing_workspace_api` 50 among them. The opt-in
+  `bench_pricing_workspace` ran 3 OK.
+- *Upstream suites:* 76/76, 13/13, banquet 101.
+- *Playwright:* `contract-admin`, `critical-journey`, `editor-edits` (3), `entry-branding` (9, 1 skipped
+  as before: no two-factor user), `policy-revisions` and `restrictions-grid` all pass (16 passed),
+  against the tree's own servers, with no spec changed.
+
+The fixes were checked in the browser against the tree's own servers (bench :8016, Vite :5186),
+with a scratch script that is not committed, 4/4:
+1. *A clean draft:*
+   - opening it makes only GET `price_matrix` calls without `data` and one GET
+     `validate_version` by name (200);
+   - Check makes one GET `validate_version` by name and no `price_matrix` call;
+   - an edit POSTs both with `data`.
+2. *A blank value (a new HB board row, its amount left empty):*
+   - one 417 comes back. The chip is named "The live check could not run", with no `aria-busy`,
+     no spinner and no counts, and the Pricing section badge counts nothing. It is unchanged 3 s
+     later, with no retry;
+   - the popover gives the reason and Try again, which asks once more (a second 417);
+   - in Preview & audit the matrix card is an alert with the reason and Try again (no "Updating…",
+     no table), and the Live check card says the check could not run;
+   - typing the amount recovers the chip, the badge (as before) and the table.
+3. *Above the cap (3 rooms × 354 two-day periods, 6,024 rows; `save_version` 3.1–3.2 s):*
+   - on opening Preview & audit, the matrix is shown after 3.2–3.4 s and the live check after
+     5.6 s. No request carries `data` and every answer is 200;
+   - after an unsaved edit, no `price_matrix` or `validate_version` call is made for 3 s and the
+     chip is not failed. The popover, the matrix card ("Saved draft only") and the Live check
+     card say the answers are the saved draft's;
+   - the Price test sends no `data` and says so;
+   - Discard, then Check: `validate_version` by name, 200.
+4. *The same draft with `overlay_max_rows` removed from `get_version`'s answer:*
+   - the first edit makes exactly one POST `price_matrix` (417, `OverlayTooLarge`), then one GET
+     `price_matrix` by name (200) and one `validate_version` by name;
+   - the matrix card says "Saved draft only", with no alert;
+   - a further edit asks nothing.
+
+**Performance above the cap** (`bench_pricing_workspace` `test_above_the_row_cap` on this tree,
+best of three, seconds; validation run once). The draft is 12 rooms × 52 periods with 6 occupancy
+rules and 3 board supplements per room and period: 5,892 rows, a 1,469 KB payload.
+
+| Call | Seconds |
+|---|---|
+| `save_version` | 3.09 |
+| `get_version` | 0.27 |
+| Overlay refusal: `price_matrix` with `data` | 0.24 |
+| Overlay refusal: `validate_version` with `data` | 0.13 |
+| `price_matrix` by name | 0.23 |
+| `price_matrix` by name, 12 sample parties | 0.62 |
+| `preview_price` by name | 0.18 |
+| `validate_version` by name | 16.0 |
+
+In the same run, for comparison:
+- *realistic 12 × 26 (1,406 rows):* the overlay 0.155, `price_matrix` with data 0.23 and
+  `validate_version` 1.99 (saved) / 2.16 (unsaved);
+- *near the cap 12 × 40 (4,539 rows):* the overlay 0.52, `price_matrix` with data 0.68 and
+  `validate_version` 10.0 (saved) / 9.5 (unsaved).
+
+Reading:
+- For such a contract the workspace shows the saved draft's prices at once. Its check (16 s) runs
+  on opening, after each save and on Check.
+- Its unsaved changes are not previewed until they are saved.
+- The refusal is never made while the cap is known. When it is made, it costs 0.1–0.25 s, because
+  the draft is loaded before its rows are counted.
+
+**O1–O5 after the S8 review follow-up** (all five provisional, owner input 13): unchanged. The
+follow-up builds no entry cell and parses no shorthand, so the parser, the model and
+`apply_op_values` behave as after S8.
+
+**Open after the S8 review follow-up.**
+- A realistic weekly contract is above the overlay's cap, so its unsaved changes are not
+  previewed. Two remedies need a decision, and neither is taken here:
+  - raise `OVERLAY_MAX_ROWS`. The overlay's matrix scales well (0.68 s at 4,539 rows); its
+    validation does not (9.5 s at 4,539 rows, 16 s for 5,892 by name);
+  - make the overlay incremental.
+- The row count in the notice is not formatted for the locale ("5000").
+- Still open from S8: the modal Price test drawer until S14; no server-side validation
+  concurrency guard; the items listed under "Open after S8".

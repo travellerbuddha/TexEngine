@@ -475,3 +475,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   the editor before the first publish (the existing header save, audited). BOARD_* publish errors
   count on Pricing. No server change; no area status changes. O1–O5 remain owner input 13.
   Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S8 review follow-up on branch `pricing-workspace` (ADR-061). Editors
+  of a large contract (above 5,000 rows, e.g. a weekly contract of 12 rooms) again get the saved
+  draft's prices and checks and a working Check button; their unsaved changes are previewed only
+  after a save, and the screen says so. A live check that could not run now says so, with the
+  reason and Try again. Additive server change: the overlay's row-cap refusal is typed and
+  `get_version` reports the cap. No area status changes. O1–O5 remain owner input 13. Verdict
+  unchanged: NOT READY.
