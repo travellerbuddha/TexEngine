@@ -534,7 +534,10 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	"""Freeze a draft and put it on sale at ``effective_from``. ``workspace`` (the Pricing
 	Workspace's opt-in, ADR-061): its board checks block the publish as its live check reports them
 	(GAP-5), and the report stored and returned carries each issue's ``ref`` (D9); without it a
-	publish decides and stores exactly what main did."""
+	publish decides and stores exactly what main did. The report is stored whole; the ``warnings``
+	returned are that report as ``get_version`` gives it to the caller (``stored_report``): to a
+	publisher without ``price.view_cost``, without what depends on a pricing policy's formulas (S16
+	re-review 4; a security fix for every caller, like the stored report's)."""
 	version = frappe.get_doc("TEX Contract Version", name)
 	contract = frappe.get_doc("TEX Contract", version.contract)
 	scope.require("contract.publish", contract.property)
@@ -605,8 +608,11 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	           "collections": diffs.payload_diff(json.loads(previous.payload) if previous else None, payload)},
 	      reason=change_note)
 	clear_terms_cache()
-	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff),
-	        "warnings": [i.to_dict(ref=workspace) for i in issues]}
+	# the report just stored, as get_version gives it to this caller: a publisher without
+	# price.view_cost is told only what that viewer's live check tells (S16 re-review 4)
+	formula = scope.has_capability("price.view_cost", contract.property)
+	warnings = [i.to_dict(ref=workspace) for i in issues] if formula else stored_report(version, formula=False)
+	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff), "warnings": warnings}
 
 
 def _previous_version(contract: str, publishing: str, at) -> frappe._dict | None:

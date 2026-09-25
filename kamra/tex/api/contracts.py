@@ -470,7 +470,10 @@ def validate_version(name: str, data=None, workspace=None):
 @frappe.whitelist(methods=["POST"])
 def publish_version(name: str, effective_from: str | None = None, change_note: str | None = None, workspace=None):
 	"""Publish a draft. ``workspace`` (ADR-061, opt-in): the workspace's board checks block it as its
-	live check reports them, and the stored report carries each issue's ``ref``."""
+	live check reports them, and the stored report carries each issue's ``ref``. The ``warnings``
+	answered are the stored report as ``get_version`` gives it to the caller: without
+	``price.view_cost``, nothing that depends on a pricing policy's formulas (S16 re-review 4; a
+	security fix, for every caller)."""
 	return svc.publish(name, effective_from=effective_from or None, change_note=text(change_note, 500),
 	                   workspace=_workspace(workspace))
 

@@ -52,6 +52,7 @@ from kamra.tex.api import policies
 from kamra.tex.commercial import contracts, revisions
 from kamra.tex.money import D
 from kamra.tex.pricing import rooms as room_math
+from kamra.tex.pricing import validate
 from kamra.tex.pricing.model import Unsellable
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
@@ -65,6 +66,7 @@ EDITOR = "pw-editor@example.com"       # contract.edit without price.view_cost
 FINANCE = "pw-finance@example.com"     # price.view_cost without contract.edit
 AGENT = "pw-agent@example.com"         # sells only: the catalogue
 FOREIGN = "pw-foreign@example.com"     # a Revenue Manager of another hotel
+PUBLISHER = "pw-publisher@example.com" # contract.edit and contract.publish without price.view_cost
 ROW_MESSAGE = "a value is required; clear the cell to remove the price."
 NO_CHD_RULE = "no occupancy rule for child 1 in band CHD (2A+1C)"
 
@@ -834,6 +836,53 @@ class TestInheritedTerms(WorkspaceCase):
 			with self.subTest(saved=not kw):
 				codes = {i["code"] for i in wapi.validate_version(self.v, **kw)["issues"]}
 				self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", codes)
+
+	def test_a_publisher_without_cost_is_told_the_warnings_get_version_gives_it(self):
+		"""publish_version answered its caller with the report it stores, unfiltered: a publisher with
+		contract.publish but without price.view_cost was told what get_version leaves out of that same
+		report (a negative total a hidden policy rule takes part in, an outranked policy override; S16
+		re-review 4, low finding). Its warnings are now exactly what get_version gives that caller, for
+		the workspace's publish and an existing caller's; the report stored is the full one, and who sees
+		cost is told it all."""
+		fx.ensure("TEX Permission Profile", {"profile_name": "PW Contract Publisher"},
+		          {"profile_name": "PW Contract Publisher",
+		           "capabilities": [{"capability": c} for c in ("price.view", "contract.edit", "contract.publish")]})
+		fx.ensure_user(PUBLISHER, ["Revenue Manager"])
+		fx.ensure("TEX Access Grant", {"user": PUBLISHER, "property": fx.PROPERTY},
+		          {"user": PUBLISHER, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "PW Contract Publisher"})
+		scope.clear_cache()
+		policy("PW Hotel Override", property=fx.PROPERTY, rules=[child("INF", "FIXED", 15, is_override=1)])
+		# 1A: 100 − 150 (the engine's default prices the adult); 2A+1C: 200 + a policy-priced CHD child
+		# (hidden) or the draft's own INF rule − 260; the draft's INF rule outranks the policy's override
+		rules = [{"target": "COMBINATION", "combination": "1+0", "op": "SUBTRACT", "value": 150},
+		         {"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 260},
+		         child("INF", "MULTIPLY", 0)]
+
+		def negative(issues):
+			return {(i["ref"]["adults"], i["ref"]["children"], i["ref"].get("age_band")) for i in issues
+			        if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"}
+
+		for n, (user, workspace) in enumerate(((PUBLISHER, True), (PUBLISHER, False), (RM, True))):
+			with self.subTest(user=user, workspace=workspace):
+				self.as_user("Administrator")
+				version = fx.create_contract(self.f, code=f"PW-RR4-PUB{n}", age_bands=[], occupancy_rules=rules,
+				                             publish=False)["version"]
+				self.as_user(user)
+				answer = (wapi if workspace else api).publish_version(version)
+				stored = json.loads(frappe.db.get_value("TEX Contract Version", version, "validation_report"))
+				self.assertTrue({"OCC_POLICY_OVERRIDE_OUTRANKED", "NEGATIVE_OCCUPANCY_PRICE"} <= {i["code"] for i in stored})
+				shown = (wapi if workspace else api).get_version(version)["validation_report"]
+				self.assertEqual(answer["warnings"], shown)
+				if user == RM:
+					self.assertEqual(answer["warnings"], stored)
+					continue
+				self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", {i["code"] for i in answer["warnings"]})
+				if workspace:
+					self.assertEqual(negative(stored), {(1, 0, None), (2, 1, "CHD"), (2, 1, "INF")})
+					self.assertEqual(negative(answer["warnings"]), {(1, 0, None), (2, 1, "INF")})
+				else:   # main's rows say no party: every row of a code a policy rule can decide is left out
+					self.assertEqual(answer["warnings"], [i for i in stored if i["code"] not in validate.HIDEABLE_CODES])
 
 # 2 adults; 2 adults + a CHB child (a code in any case); an unknown band; more children than STD holds
 PARTIES = ({"adults": 2, "children": []}, {"adults": 2, "children": ["chb"]}, {"adults": 1, "children": ["XX"]},
