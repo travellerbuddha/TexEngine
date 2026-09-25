@@ -8359,4 +8359,36 @@ commit (it adds only the design document to `6b0102c`, the branch's base).
   `pricing-workspace-optin.spec.ts`: opening a draft, an unsaved edit's live price and check, the
   Price test, Save and Publish all send `workspace=1`. `pricing-workspace-issues` test 5 and
   `flows/workspace.ts publish` publish as the workspace does (their read-only view anchors the
-  stored report by `ref`).
+  stored report by `ref`). Fail-first: `pricing-workspace-optin` against the frontend before it sent
+  the flag (`2a13fd3` served by Vite :5187 against this tree's bench) fails: without the flag
+  `get_version` has no `can_preview`, so the workspace does not offer the Price test.
+
+**Verification (existing semantics kept).**
+- *Python:* unit 516 OK (`test_main_parity` 8), ruff clean. `TestMainParity` also against main's
+  code (`git archive 6b0102c` with the test and its data): 5 OK.
+- *Frontend:* `tsc -b`, `npm run build` (the bundles were not committed), `npm run i18n:tex` (5,100
+  keys), `npm run test:unit` 311/311.
+- *Integration, migrated with this tree (`migrate_test.sh`):* `test_existing_semantics` 13,
+  `test_pricing_workspace_api` 63, `test_commercial_flows` 63, `test_age_bands` 11,
+  `test_money_fields` 9, `test_critical_journey` 31, `test_security_regressions` 59,
+  `test_pricing_policies` 14: all OK. `test_existing_semantics` against main's code (migrated with
+  it): 10 OK, the 3 of `TestSecurityChanges` fail as designed.
+- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the fourteen
+  `pricing-workspace*` spec files (desktop, and the mobile spec on Pixel 7 too) 98/98, and
+  `editor-edits`, `contract-admin`, `critical-journey` and `policy-revisions` 6/6: 104 passed.
+- Not run for this follow-up: the other 30 integration modules and the upstream suites (eval,
+  journey, banquet); with the defaults main's again, the code they reach answers as on main.
+
+**O1–O5 after the existing-semantics follow-up** (all five provisional, owner input 13): unchanged.
+No parser, op mapping or `apply_op_values` change.
+
+**Open after the existing-semantics follow-up.**
+- Owner input 14: confirm the three security differences; decide whether the board checks and the
+  blank-value refusal should hold for every caller (today the contract detail page's and the ARI
+  grid's publish still publish a draft with orphan or twin board rows, and a caller other than the
+  workspace still saves a blank value as 0).
+- A report stored by a publish without the flag (and every report published before the branch) has
+  no `ref`: the workspace's read-only view lists its issues but anchors none of them to a cell, and
+  an editor without cost is not given its rows of the four policy-dependent codes at all.
+- `preview_price` and `price_matrix` keep main's bodies as separate functions (`_mains_preview`,
+  `_mains_matrix`) beside the workspace's, so either can be read against main line for line.

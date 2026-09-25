@@ -1023,7 +1023,11 @@ Verification: unit 516 OK, ruff clean; `tsc -b`, `npm run build` (bundles not co
 i18n:tex`, `npm run test:unit` 311. Integration with the tree migrated: `test_existing_semantics` 13,
 `test_pricing_workspace_api` 63, `test_commercial_flows` 63, `test_age_bands` 11, `test_money_fields`
 9, `test_critical_journey` 31, `test_security_regressions` 59, `test_pricing_policies` 14, all OK.
-E2E_PLACEHOLDER
+Playwright on the tree's own servers (bench :8016, Vite :5186): the fourteen `pricing-workspace*`
+spec files 98/98 (with the new `pricing-workspace-optin`) and `editor-edits`, `contract-admin`,
+`critical-journey` and `policy-revisions` 6/6: 104 passed. Fail-first: `pricing-workspace-optin` fails
+on the frontend before it sent the flag (`2a13fd3`, Vite :5187): without `workspace=1`, `get_version`
+answers no `can_preview`, so the Price test is not offered.
 
 **Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review, three re-review follow-ups and the existing-semantics follow-up, branch `pricing-workspace`).** Backend S2–S5 (opt-in: `workspace=1`; existing callers get main's answers)
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
