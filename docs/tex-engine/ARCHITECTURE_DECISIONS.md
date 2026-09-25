@@ -5179,3 +5179,186 @@ follow-up builds no entry cell and parses no shorthand, so the parser, the model
 - The row count in the notice is not formatted for the locale ("5000").
 - Still open from S8: the modal Price test drawer until S14; no server-side validation
   concurrency guard; the items listed under "Open after S8".
+
+**Decision (implemented in S9: the room price matrix).** Branch `pricing-workspace`, frontend
+only (no server file changes). Pricing shows the workspace matrix; the Advanced "Room prices"
+table stays under Commercial rules.
+- *Grid.* `workspace/PriceMatrix.tsx`: `role="grid"` named "Room prices by period" (the caption
+  the helpers use), rows of `columnheader` / `rowheader` / `gridcell`, `aria-rowcount` and
+  `aria-colcount`, `aria-multiselectable` when editable and `aria-readonly` when not. Every row
+  is its own CSS grid on one column template, `matrixView.columnTemplate(periods)` with
+  `MATRIX_WIDTHS`: row header `clamp(9rem, 38vw, 16rem)`, All periods and each period `7.5rem`,
+  "+ Period" `7rem`. The widths depend on the viewport only, so separate grids (the rows, and the
+  ladder and boards of S11 and S13) line their period columns up exactly. Sticky header row and
+  first column in the matrix's own scroll box; the page does not scroll sideways at 375 px.
+- *Rows and labels* come from `model.matrixModel` (§3.3.1, §3.11): the base row ("Base person
+  price" / "Base room price · N adults included"), Formula + Resolved for a derived room, Manual
+  price (+ Resolved with an All-periods price). N is the effective `included_adults` the server
+  priced with (`price_matrix` capacity), else the room row's, else the room type's. The row
+  header shows ★ and BASE, or the default derivation in words ("Formula · Standard ×1.15").
+- *Cells* (`MatrixCell.tsx`) render `cellState` with a glyph and a screen-reader state (entered
+  price, formula for all periods, ↳ follows all periods, ◆ period override with the "P4 replaces
+  the default ×1.15: Standard ×1.2" tooltip, the pin of a fixed price, ↳ inherit, a dashed "no
+  price"). Resolved rows show `useDraftPreview().matrix` with `Money` in the contract currency,
+  "Not sellable" with the server's reason, and the stale style while the answer is for another
+  state. Read-only cells carry a tooltip with their reason. The accessible name is the full
+  sentence ("Family Suite · P4: period override, Standard Sea View ×1.2").
+- *Editing* uses the S7 grid hooks: typing starts an edit with the character, F2 / Enter /
+  double-click edit with everything selected; Enter / Shift+Enter commit and move to the next
+  editable row (resolved rows are skipped), Tab / Shift+Tab commit and move sideways; Escape
+  reverts (and drops an error draft). Leaving a cell commits a valid entry and keeps an invalid
+  one as an error draft (⚠, `aria-invalid`, the message by `aria-describedby`; Escape on the cell
+  drops it). The input is named "Price: {room} · {period}"; its reading line (`readingOf`, no
+  arithmetic) says what the commit does: "Superior · P2 = Standard ×1.2 (replaces the fixed price
+  245.00)", "Standard · P1: adjust 70.00 by +10% (calculated on commit)", a price, "a fixed price
+  instead of the formula", "the same as all periods …", a removal, or the refusal. An edit text
+  that did not change is never committed again (S1: ADD −5 edits as "-5"). Edit text uses the
+  viewer's decimal mark (Intl); the parser takes both.
+- *Commit.* `parseShorthand(text, "room", {minorUnits: contract_doc.minor_units})`, then
+  `matrixView.planEntry` over the cell, or over every selected editable cell with Ctrl/Cmd+Enter:
+  all or nothing; each cell by its row's rule (D11). The base-room cells of one gesture go to
+  `apply_op_values` in one call (the cells show "70.00 → …"), and the whole gesture is committed
+  as one history entry when the server answers: `finishEntry` plans it again on the tables as they
+  are then and writes the answers as ABSOLUTE. It is refused with CHANGED when a price sent was
+  edited meanwhile, with the server's NEGATIVE / NO_VALUE, or with the server's message; the entry
+  then stays as an error draft. An answer for a draft that was reloaded or discarded meanwhile is
+  dropped (`useWorkspaceHistory().generation`). Errors read `rates.sh.err.<CODE>`: the parser's
+  codes, BASE_NO_PRICE, NO_BASE_ROOM, and BASE_FORMULA (new: a base-room cell priced by a formula,
+  which "Set as base" keeps; S6 review item) and CHANGED / NEGATIVE / NO_VALUE.
+- *Rule popover* (`RuleEditorPopover.tsx`, the S7 Popover, not modal), named "Edit price: {room} ·
+  {period}": Rule (the room ops, INHERIT included, `rates.op.*` with their help), Value
+  (`DecimalInput`, 9 places; the AMBIGUOUS guard applies to amounts here too), Derived from
+  (relative ops), Applies to: this period / All periods (the All-periods rule) / selected periods
+  (one row each). Apply and Remove are one history entry; the op chosen is the op stored (on the
+  base room too: the popover is the explicit way to store a formula there). Opened with Alt+Enter
+  (from an edit it starts with the typed rule, unless that is a relative entry on the base room),
+  the ▾ trigger (shown on focus or hover, absent when read-only), Shift+F10, the ContextMenu key and
+  the `contextmenu` event (right click, long press). An inherited cell's popover starts from the
+  rule it follows. Focus returns to the cell, also when the edit re-rendered it.
+- *Rooms* (`RoomRowHeader.tsx`): "+ Add room" (the hotel's room types not in the contract; the
+  first becomes base); the room menu: Set as base (re-point formulas, on by default; a warning
+  when the new base keeps formulas of its own), Derive from… (the All-periods formula and, on by
+  default, the single periods'), Capacity… (a Drawer; the server's effective capacity as
+  placeholders), Move up / down, Remove (a confirmation with the prices, occupancy and board rules
+  it removes, and a warning for formulas of other rooms that derive from it).
+- *Periods* (`PeriodHeader.tsx`): the header shows the code, name, a compact range ("1–30 Apr",
+  `Intl.DateTimeFormat.formatRange`), weekday and night-adjustment badges. "+ Period" adds the next
+  period (`addPeriod`) and focuses its end date (and its start, when no dated period precedes it).
+  The period menu: Rename… (code and name; the three tables follow; errors inline; an unchanged
+  rename records nothing), Dates… (from / to, `WeekdayPicker`, priority), Night adjustment… (the
+  `period_adjust` shorthand with its reading and the note that it applies to occupancy + board,
+  after the board supplement), Duplicate, Copy previous period's prices, Move left / right ("no
+  effect on prices"), Delete… (a confirmation with the dependent rows). A thin PeriodStrip shows
+  the periods without weekdays against the stay window and counts gaps and overlaps in text.
+- *History.* `workspace/useWorkspaceHistory.ts` wraps `history.ts`: `commit(label, before, after)`
+  records the tables whose arrays changed and writes them with `setTable`; `apply(label, edit)` does
+  the same from the tables as last written (answers that arrive later); `undo` / `redo` put the
+  recorded arrays back (their buttons, keys and toast are S10's). It lives in `VersionEditor`, which
+  clears it whenever a version is loaded and on Discard, and passes it and a load epoch to the
+  sections (`TabProps.history`, `TabProps.epoch`; the matrix is keyed on the epoch, so Discard also
+  drops edits in progress and error drafts). Every matrix, room and period change is one entry.
+- *Read-only and catalogue.* A published version (or a draft without `contract.edit`) has no
+  inputs, no "Edit price:" triggers, no room or period menus and no "+ Add room" / "+ Period"; the
+  grid has `aria-readonly`. An agent's catalogue does not render the matrix (S8's catalogue view).
+- *Rendering cost.* What a cell shows is computed once per change of the draft, the server's
+  answers, the entries in flight or the language (`cellViews`), not when the active cell moves;
+  rows and cells are memoised on it, on the active cell and on the row's selection. A memoised
+  cell may keep handlers older than the latest render, which is safe: only a focused cell gets
+  keys, focusing a cell makes it the active cell, and the active cell re-renders with every new
+  selection state. Typing re-renders only the editor. `decText` caches its Intl formatters (it runs
+  for every cell).
+
+**Deviations from the slice text, with reasons (S9).**
+1. Files beyond the list: `workspace/matrixView.ts` (the screen logic, pure and unit-tested);
+   `contracts/VersionEditor.tsx` and `contracts/tabs/shared.tsx` (the history must survive section
+   changes and be cleared on load and Discard, so it lives in the editor); `lib/util.ts` (the
+   `decText` formatter cache: the same output; alone it took an arrow key on 265 cells from 171 to
+   115 ms); `tests/unit/workspace-matrix.test.ts`.
+2. Delete / Backspace clear the selected cells in one entry (§3.4.1's navigation mode). S10's text
+   lists it too; S10 keeps it as it is.
+3. Enter / Shift+Enter skip resolved rows when they move after a commit; arrow keys still visit
+   them.
+4. New entry errors BASE_FORMULA and CHANGED (above); the AMBIGUOUS message is the slice's text,
+   without the design's "Thousands separators are not used."
+5. The popover also opens on `contextmenu` (right click, long press: §3.19's touch gesture), and
+   applies the AMBIGUOUS guard to amounts (its `DecimalInput` turns "," into ".").
+6. The row header puts the room name and BASE on its first line and the row label with the
+   derivation on its second (the design's mock-up shows them on one line; long room names do not
+   fit 16rem).
+7. The Capacity… Drawer is the existing modal Drawer, as the slice says. It is not on the
+   acceptance path, so S16's zero-modal budget is unaffected.
+8. Column-header selection (§3.9) is left to S10 with the other range gestures.
+9. The dev-server smoke is a scratch Playwright spec (as the slice allows): committed workspace
+   specs are S16's, and CI runs Playwright against the committed bundles, which S16 rebuilds.
+
+**Tests (S9).** `tests/unit/workspace-matrix.test.ts` (18): the column template; the grid rows;
+a price on a base cell stored at once; Ctrl+Enter with base cells in one server list and formulas
+elsewhere, completed as one result; O4 `+10%` on 70 → the server's 77.00 as ABSOLUTE; NEGATIVE,
+NO_VALUE and CHANGED; all or nothing (NO_BASE_ROOM, SYNTAX, AMBIGUOUS); BASE_FORMULA after "Set as
+base" and BASE_NO_PRICE for a blank price (S6 review item: that mutant now dies); `x1.20` over
+`=245` restores the formula; Delete; the reading line (formula over a fixed price, adjust, fixed
+price, same as default, clear, unchanged, refusals, `1.500` accepted in a 3-decimal currency);
+edit text in both decimal marks (`ADD −5` → "-5", `12.345` → "12.3450"); the popover (one row per
+period, the op as chosen, INHERIT without a value, All periods, Remove, unchanged); rooms (first is
+base, added once, move, capacity); periods (dates, weekdays, priority, night adjustment).
+Fail-first: before `matrixView.ts` existed the file failed to load (`ERR_MODULE_NOT_FOUND`).
+
+**Verification (S9).** `tsc -b`, `npm run build`, `npm run i18n:tex` (153 new keys in the six
+catalogues), `npm run test:unit` 166/166, `npm run test:dom` 24/24, Python unit tests 491 OK (no
+server change). Playwright on the tree's own servers (bench :8016, Vite :5186): the scratch smoke
+8/8 — 70⇥80⇥100⇥130↵ and x1.15 / x1.35 give the resolved rows 80.50 / 92.00 / 115.00 / 149.50 and
+94.50 / 108.00 / 135.00 / 175.50 without a save; Superior P4 `x1.20` shows ◆ and 156.00; Deluxe
+P3:P4 `x1.40` + Ctrl+Enter; Escape reverts; `abc` and `1.500` show their messages and an invalid
+entry stays as an error draft; `+10%` on the base P1 becomes 77.00 through `apply_op_values`, and a
+base + formula selection makes one call; Superior P2 `=245` then `x1.20` restores the formula and
+renaming P2 → MAY rewrites it (`get_version` after the save: `MAY` MULTIPLY 1.2 from Standard, no
+`P2` rule left); the popover (Alt+Enter, Shift+F10, the op stored, focus back); + Period with its
+end date, Remove room and Add room; Delete over a selection and after Ctrl+A; a published version
+read-only — and 2 more checks (Set as base with the formula warning and BASE_FORMULA, Derive from,
+Capacity, Night adjustment, Dates, Duplicate and Delete with counts; no sideways scroll at 375 px).
+The existing `contract-admin`, `critical-journey`, `editor-edits` and `entry-branding` specs pass
+on the tree (14, one skipped for want of a 2FA user, as before).
+
+**Performance after S9** (the Vite dev server, i.e. development React; keydown to the next
+painted frame, measured in the page; demo hotels have at most three room types, so large grids
+were made with many periods):
+- 3 rooms × 52 weekly periods (265 cells): arrow keys median 32 ms (max 40), typing 4 ms; before
+  the memoisation 171 ms. 3 rooms × 200 periods (1,005 cells): 72 ms (max 121), typing 6 ms; before
+  922 ms.
+- A committed formula reached the resolved rows through the overlay with `price_matrix` answering
+  in 55–59 ms (3 × 52) and 122–137 ms (3 × 200) after the 300 ms debounce.
+- The server-side figures of S8 (realistic 12 × 26: overlay 0.16 s, matrix with unsaved data
+  0.24 s, validation 2.0–2.2 s; near the cap 12 × 40: 0.54 / 0.67 / 9.5–9.9 s; `apply_op_values`
+  with 500 prices 0.007 s) still hold: S9 changes no server code. Final re-measures them on the
+  merged tree.
+
+**O1–O5 after S9** (all five provisional, owner input 13):
+- *O4 (base room, relative entry) is now built end to end.* In a base-room cell that resolves to an
+  entered price, `x1.1`, `+10%`, `-5`, `+5` or `50%` is parsed as the owner's table says; the reading
+  line says "adjust 70.00 by +10% (calculated on commit)"; on commit `apply_op_values` applies it
+  once (one call for every base cell of a Ctrl/Cmd+Enter) and the answer is stored as ABSOLUTE
+  (`+10%` on 70 → 77.00, verified in the browser). Without an entered price: BASE_NO_PRICE; with a
+  formula: BASE_FORMULA. The rule popover stores what it is told (the explicit way to put a
+  formula on the base room).
+- *O5 (AMBIGUOUS)* now reaches the screen: "Is this 1500 or 1.5? …" in the six languages, for
+  amounts in 0- and 2-decimal currencies, in the cells and in the popover; `12.345` is accepted in
+  3-decimal currencies. Factors and percentages are exempt.
+- *O1–O3 (boards)* are unchanged: in the parser and the model; their cells are S13. (The period
+  night adjustment uses the `period_adjust` context, which no O item covers.)
+
+**Open after S9.**
+- `Money` (the existing helper) cuts a resolved amount to the currency's decimals instead of
+  rounding it: a derived unit of 108.675 reads "108.67". The exact server text is in the cell's
+  tooltip and accessible name. Round half-up for display, or show the exact digits: a decision for
+  the owner.
+- Ctrl/Cmd+S while a cell is being edited saves the draft without the text in the editor; the text
+  is committed when the edit ends, and the draft is unsaved again.
+- An answer of the server re-renders every cell (1,005 cells: a few hundred ms in development
+  React); not measured beyond 1,005 cells.
+- Issues are not anchored in cells yet (S15); fill, paste, Adjust…, column selection and the undo
+  UI are S10; occupancy and boards S11 and S13, so `#occupancy` / `#boards` still land on the
+  matrix.
+- Still open from S8: the modal Price test drawer until S14; no server-side validation concurrency
+  guard; the overlay skips `_validate_links` and the window order; the cross-hotel rate plan /
+  policy gap in `build_terms`; a weekly contract above the overlay's row cap is not previewed
+  unsaved.

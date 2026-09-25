@@ -482,3 +482,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   reason and Try again. Additive server change: the overlay's row-cap refusal is typed and
   `get_version` reports the cap. No area status changes. O1–O5 remain owner input 13. Verdict
   unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S9 on branch `pricing-workspace` (ADR-061): the contract
+  version's Pricing section is a room price matrix typed into with the shorthand and priced live by
+  the server before any save; rooms and periods are managed from the matrix; every change is one
+  undo entry. O4 (a relative entry on the base room changes its entered price once, on the server,
+  and stores the result) is built end to end and O5's "Is this 1500 or 1.5?" message is on screen;
+  both stay owner input 13 with O1–O3. Display note for the owner: resolved amounts are cut, not
+  rounded, to the currency's decimals by the existing formatter (ADR-061, open). No server change;
+  no area status changes. Verdict unchanged: NOT READY.
