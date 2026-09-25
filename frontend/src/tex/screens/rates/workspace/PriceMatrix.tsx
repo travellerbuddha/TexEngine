@@ -12,7 +12,7 @@
 // cell has focus: no clipboard permission is asked); Adjust… changes entered prices by the
 // server's apply_op_values with a preview; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z / Ctrl+Y and the toolbar
 // undo and redo. A bulk operation shows "Applied to N cells · Undo" for 10 s.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { AlertTriangle, Calculator, Loader2, Pencil, Pin } from "lucide-react"
 import { tex, TexApiError } from "../../../lib/api"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
@@ -169,6 +169,8 @@ export function PriceMatrix({
   onActiveCell?: (cell: CellRef) => void
 }) {
   const { t, locale } = useTexT()
+  // the header lane, said to a screen reader on the grid (S16 re-review 2)
+  const laneNoteId = useId()
   const tables = state.tables
   const cd = doc.contract_doc
   const ccy = cd.contract_currency
@@ -756,6 +758,19 @@ export function PriceMatrix({
   // once. Stable callbacks: the headers are memoised.
   const shape = useRef({ rows, cols, isEditable, nav })
   shape.current = { rows, cols, isEditable, nav }
+
+  // a room added from the Add room menu takes the focus on its first cell, after the render that
+  // shows it: the menu's button that the focus returned to is disabled once nothing is left to add
+  // (S16 re-review 2)
+  const [focusRoom, setFocusRoom] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusRoom) return
+    setFocusRoom(null)
+    const r = rows.findIndex((x) => model.rooms[x.roomIndex]?.room_type === focusRoom)
+    if (r >= 0) nav.focusCell(r, 0)
+    // after the render that shows the room
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRoom, rows])
   const { selectRow, selectCol } = selection
   const focusCellEl = (r: number, c: number) => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
   const pickRow = useCallback(
@@ -1070,7 +1085,14 @@ export function PriceMatrix({
           <Checkbox label={t("rates.ws.show_resolved")} checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
         </span>
       </div>
-      {canEdit && <p className="text-xs text-zinc-500">{t("rates.ws.matrix_hint")}</p>}
+      {canEdit && (
+        <p className="text-xs text-zinc-500">
+          {t("rates.ws.matrix_hint")} {t("rates.kbd.lane_note")}
+        </p>
+      )}
+      <span id={laneNoteId} className="sr-only">
+        {t("rates.kbd.lane_note")}
+      </span>
       {canEdit && (
         <BulkToolbar
           canFillRight={fillRightPlan(selection.selected).length > 0}
@@ -1115,6 +1137,7 @@ export function PriceMatrix({
         <div
           role="grid"
           aria-label={t("rates.rates.caption")}
+          aria-describedby={laneNoteId}
           aria-rowcount={rows.length + 1}
           aria-colcount={cols.length + 2}
           aria-readonly={readOnly || undefined}
@@ -1223,7 +1246,10 @@ export function PriceMatrix({
             marker="add-room"
             emptyText={t("rates.ws.room.all_added")}
             items={available.map((r) => ({ value: r.name, label: r.room_type_name || r.name }))}
-            onAdd={(rt) => edit(t("rates.ws.h.add_room", { room: roomName(rt) }), (tb) => addRoom(tb, rt))}
+            onAdd={(rt) => {
+              edit(t("rates.ws.h.add_room", { room: roomName(rt) }), (tb) => addRoom(tb, rt))
+              setFocusRoom(rt)
+            }}
           />
           {model.rooms.length > 0 && !model.baseRoom && <span className="text-xs text-amber-800">{t("rates.ws.room.no_base")}</span>}
         </div>

@@ -327,18 +327,20 @@ function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, s
           </form>
         </CardBody>
       </Card>
+      {/* a short summary for assistive tech, or that the result shown is out of date; the result
+          below is not a live region (a re-price would queue every changed line of the ladder and
+          the tables). The region is always there, empty until there is a result: one inserted with
+          its text already in it is not announced (S16 re-review 2) */}
+      <p role="status" className="sr-only">
+        {!res ? "" : stale ? (live ? t("rates.pt.updating") : t("rates.pt.stale")) : res.sellable ? t("rates.pt.announce_total", { total: money(res.totals?.total ?? "", res.currency ?? "") }) : t("rates.preview.unsellable")}
+      </p>
       {res && (
         <div className={cn("space-y-3 transition-opacity", stale && "opacity-60")} aria-busy={busy || undefined}>
           {stale && (
-            <p role="status" className="text-xs text-zinc-600">
+            <p aria-hidden className="text-xs text-zinc-600">
               {live ? t("rates.pt.updating") : t("rates.pt.stale")}
             </p>
           )}
-          {/* a short summary for assistive tech; the result below is not a live region (a re-price
-              would queue every changed line of the ladder and the tables) */}
-          <p role="status" className="sr-only">
-            {res.sellable ? t("rates.pt.announce_total", { total: money(res.totals?.total ?? "", res.currency ?? "") }) : t("rates.preview.unsellable")}
-          </p>
           <PreviewResultView res={res} canCost={canCost} layout={layout} doc={doc} state={state} preview={preview} showInGrid={showInGrid} />
         </div>
       )}

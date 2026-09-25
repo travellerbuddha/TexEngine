@@ -395,8 +395,9 @@ export interface MenuProps {
   disabled?: boolean
   className?: string
   /** More props of the menu button: `tabIndex` -1 for a button in a grid's header (reached with
-   * the arrow keys, not Tab: one tab stop per grid, §3.19) and its `data-lane-*` attributes. */
-  buttonProps?: { tabIndex?: number } & { [key: `data-${string}`]: string | undefined }
+   * the arrow keys, not Tab: one tab stop per grid, §3.19) and its `data-lane-*` attributes; the
+   * id of a help text beside it (`aria-describedby`). */
+  buttonProps?: { tabIndex?: number; "aria-describedby"?: string } & { [key: `data-${string}`]: string | undefined }
 }
 
 /**

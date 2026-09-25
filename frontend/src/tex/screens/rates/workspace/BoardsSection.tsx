@@ -178,6 +178,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const canEdit = !readOnly
   const titleId = useId()
   const bodyId = useId()
+  // the header lane, said to a screen reader on the grid (S16 re-review 2)
+  const laneNoteId = useId()
   const sectionRef = useRef<HTMLElement>(null)
   const addRef = useRef<HTMLSpanElement>(null)
   const focusAdd = () => addRef.current?.querySelector<HTMLElement>("button")?.focus()
@@ -242,7 +244,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
   // copy, paste and the fills are the matrix's: here they say so (S16 re-review)
-  const matrixOnly = useMatrixOnlyBulk(gridEl)
+  const matrixOnly = useMatrixOnlyBulk(gridEl, canEdit)
   const toast = useToast()
   // "Show in grid" (S14): the section opens, then the board cell of the rule is focused
   const { show, onShown } = props
@@ -742,7 +744,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     if ("exists" in res) return
     setOpen(true)
     if ("tables" in res) {
-      if (history.commit(t("rates.brd.h.add", { board: code }), now, res.tables)) {
+      if (history.commit(t("rates.brd.h.add", { board: boardName(code) }), now, res.tables)) {
         say(t("rates.brd.added_base", { board: boardName(code) }))
         setFocusNext({ row: `${code}|`, period: ALL_PERIODS })
       }
@@ -825,7 +827,14 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       <div id={bodyId}>
         {open && (
           <div className="space-y-1.5">
-            {canEdit && rows.length > 0 && <p className="text-xs text-zinc-500">{t("rates.brd.hint")}</p>}
+            {canEdit && rows.length > 0 && (
+              <p className="text-xs text-zinc-500">
+                {t("rates.brd.hint")} {t("rates.kbd.lane_note")}
+              </p>
+            )}
+            <span id={laneNoteId} className="sr-only">
+              {t("rates.kbd.lane_note")}
+            </span>
             {tables.boards.length > 0 && !hasBase && <Notice tone="warning">{t("rates.boards.no_base")}</Notice>}
             {!rows.length && <Notice tone="info">{canEdit ? t("rates.brd.none") : t("rates.brd.none_ro")}</Notice>}
             {confirm && (
@@ -843,6 +852,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                 <div
                   role="grid"
                   aria-label={t("rates.brd.caption")}
+                  aria-describedby={laneNoteId}
                   aria-rowcount={rows.length + 1}
                   aria-colcount={cols.length + 1}
                   aria-readonly={readOnly || undefined}
@@ -1054,6 +1064,7 @@ function BoardTermsPopover(p: {
   onRemove: () => void
 }) {
   const { t } = useTexT()
+  const addRoomHelpId = useId()
   const [child, setChild] = useState(() => {
     const n = normaliseDecimal(p.terms.child_percent)
     return n.ok ? n.value : p.terms.child_percent
@@ -1106,8 +1117,10 @@ function BoardTermsPopover(p: {
         </p>
         {board && p.addRooms.length > 0 && (
           <div className="space-y-1">
-            <AddMenu label={t("rates.brd.pop.add_room")} items={p.addRooms} onAdd={p.onAddRoom} />
-            <p className="text-xs text-zinc-500">{t("rates.brd.pop.add_room_help", { board: p.rowLabel })}</p>
+            <AddMenu label={t("rates.brd.pop.add_room")} items={p.addRooms} onAdd={p.onAddRoom} describedBy={addRoomHelpId} />
+            <p id={addRoomHelpId} className="text-xs text-zinc-500">
+              {t("rates.brd.pop.add_room_help", { board: p.rowLabel })}
+            </p>
           </div>
         )}
         {removing ? (

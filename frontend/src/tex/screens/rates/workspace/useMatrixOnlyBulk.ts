@@ -8,12 +8,14 @@ import { useToast } from "../../../ui"
 
 /** Listens for copy and paste on a focused cell of `gridEl` (the events reach the document while a
  * cell has the focus, as in the matrix; a cell editor's own copy and paste are left alone), and
- * returns the notice for the grid's key handler to show on Ctrl/Cmd+R and Ctrl/Cmd+D. */
-export function useMatrixOnlyBulk(gridEl: RefObject<HTMLElement | null>): () => void {
+ * returns the notice for the grid's key handler to show on Ctrl/Cmd+R and Ctrl/Cmd+D. A viewer who
+ * cannot edit (`canEdit` false) is only told where copy works: there is no entry to type for them
+ * (S16 re-review 2). */
+export function useMatrixOnlyBulk(gridEl: RefObject<HTMLElement | null>, canEdit: boolean): () => void {
   const { t } = useTexT()
   const toast = useToast()
   const notice = useRef(() => {})
-  notice.current = () => toast.info(t("rates.ws.bulk.matrix_only"))
+  notice.current = () => toast.info(t(canEdit ? "rates.ws.bulk.matrix_only" : "rates.ws.bulk.matrix_only_ro"))
   useEffect(() => {
     const onClip = (e: ClipboardEvent) => {
       const a = document.activeElement

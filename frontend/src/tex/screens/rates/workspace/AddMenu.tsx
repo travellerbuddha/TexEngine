@@ -19,12 +19,22 @@ export interface AddMenuProps {
   className?: string
   /** data-add-room / data-add-board on the wrapper (where the focus goes when no cell is left). */
   marker?: string
+  /** The id of a help text for the button (aria-describedby). */
+  describedBy?: string
 }
 
-export function AddMenu({ label, items, onAdd, emptyText, ref, className, marker }: AddMenuProps) {
+export function AddMenu({ label, items, onAdd, emptyText, ref, className, marker, describedBy }: AddMenuProps) {
   return (
     <span ref={ref} className={className ?? "inline-flex flex-wrap items-center gap-2"} {...(marker ? { [`data-${marker}`]: "" } : {})}>
-      <Menu label={label} text={label} icon={<Plus className="size-4" aria-hidden />} variant="secondary" size="sm" disabled={!items.length}>
+      <Menu
+        label={label}
+        text={label}
+        icon={<Plus className="size-4" aria-hidden />}
+        variant="secondary"
+        size="sm"
+        disabled={!items.length}
+        buttonProps={describedBy ? { "aria-describedby": describedBy } : undefined}
+      >
         {items.map((i) => (
           <MenuItem key={i.value} onSelect={() => onAdd(i.value)}>
             {i.label}

@@ -12,7 +12,7 @@
 // sellable". The resolved line shows the server's occupancy total of a sample party per period
 // (price_matrix parties, GAP-2b), from an answer that priced that very party; the client adds
 // nothing up.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { AlertTriangle, Info, Loader2 } from "lucide-react"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -153,6 +153,8 @@ export interface OccupancyLadderProps {
 export function OccupancyLadder(p: OccupancyLadderProps) {
   const { doc, tables, readOnly, history, preview, model, labels, basis } = p
   const { t, tOrdinal, locale } = useTexT()
+  // the header lane, said to a screen reader on the grid (S16 re-review 2)
+  const laneNoteId = useId()
   const ccy = doc.contract_doc.contract_currency
   const minorUnits = doc.contract_doc.minor_units ?? currencyMinorUnits(ccy)
   const decimalMark = useMemo(() => decimalMarkOf(locale), [locale])
@@ -227,7 +229,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
   // copy, paste and the fills are the matrix's: here they say so (S16 re-review)
-  const matrixOnly = useMatrixOnlyBulk(gridEl)
+  const matrixOnly = useMatrixOnlyBulk(gridEl, canEdit)
   const toast = useToast()
   // only requests made while mounted (a remount after Discard or a scope change does not replay one)
   const focused = useRef(p.focus?.n ?? 0)
@@ -810,7 +812,14 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const headerCell = "border-r border-b border-zinc-200 bg-white px-2 py-1 text-left"
   return (
     <div className="space-y-1.5">
-      {canEdit && <p className="text-xs text-zinc-500">{t("rates.occ.ladder.hint")}</p>}
+      {canEdit && (
+        <p className="text-xs text-zinc-500">
+          {t("rates.occ.ladder.hint")} {t("rates.kbd.lane_note")}
+        </p>
+      )}
+      <span id={laneNoteId} className="sr-only">
+        {t("rates.kbd.lane_note")}
+      </span>
       <span role="status" aria-live="polite" className="sr-only">
         {announce}
       </span>
@@ -818,6 +827,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         <div
           role="grid"
           aria-label={t("rates.occ.ladder.caption")}
+          aria-describedby={laneNoteId}
           aria-rowcount={navRows + 1}
           aria-colcount={cols.length + 1}
           aria-readonly={readOnly || undefined}
