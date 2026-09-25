@@ -110,10 +110,21 @@ export function decText(s: string | number | null | undefined, minDec = 2): stri
   const [ip, fp = ""] = str.replace(/^[-+]/, "").split(".")
   let frac = fp.replace(/0+$/, "")
   if (frac.length < minDec) frac = (frac + "0".repeat(minDec)).slice(0, minDec)
-  const locale = intlLocale(getTexLang())
-  const intTxt = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(BigInt(ip || "0"))
-  const sep = new Intl.NumberFormat(locale, { minimumFractionDigits: 1 }).formatToParts(1.1).find((p) => p.type === "decimal")?.value ?? "."
-  return `${neg ? "−" : ""}${intTxt}${frac ? sep + frac : ""}`
+  const { int, sep } = decFormat(intlLocale(getTexLang()))
+  return `${neg ? "−" : ""}${int.format(BigInt(ip || "0"))}${frac ? sep + frac : ""}`
+}
+
+// Intl.NumberFormat objects are costly to build and decText runs for every cell of the price
+// matrix: one integer formatter and the decimal mark per locale.
+const decFormats = new Map<string, { int: Intl.NumberFormat; sep: string }>()
+function decFormat(locale: string) {
+  let f = decFormats.get(locale)
+  if (!f) {
+    const sep = new Intl.NumberFormat(locale, { minimumFractionDigits: 1 }).formatToParts(1.1).find((p) => p.type === "decimal")?.value ?? "."
+    f = { int: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }), sep }
+    decFormats.set(locale, f)
+  }
+  return f
 }
 
 /** Datetime-local input value → "YYYY-MM-DD HH:MM:SS" for Frappe. */
