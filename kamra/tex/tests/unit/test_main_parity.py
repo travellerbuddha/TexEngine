@@ -17,7 +17,10 @@ the code under test and compares every result with what main (``6b0102c``, the b
   order and nothing more, each given as main gave it (``Issue.to_dict()`` has main's three keys),
   and so the same ``ok`` and the same publish decision;
 * the payload a publish freezes from the same terms (its hash), and each room × period unit the
-  rates grid shows.
+  rates grid shows;
+* drafts made from three of the payloads, each broken or unusual in one way (97, reaching every
+  issue code main's validation reports but the sweep's AMBIGUOUS_OCCUPANCY_RULES), as an existing
+  caller validates a draft before publishing it: the same issues, in main's shape.
 
 The workspace's additions to these functions are opt-in and off by default (``TestWorkspaceOptIn``):
 the board checks (``validate_terms(board_checks=True)``, GAP-5), an issue's ``ref``
@@ -48,6 +51,7 @@ import hashlib
 import json
 import sys
 import unittest
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from functools import cache
@@ -55,13 +59,18 @@ from pathlib import Path
 
 from kamra.tex.pricing import engine, serialize, validate
 from kamra.tex.pricing import rooms as room_math
-from kamra.tex.pricing.enums import FxMode, Op
+from kamra.tex.pricing.enums import FxMode, Level, OccTarget, Op, PromoValueType
 from kamra.tex.pricing.model import (
+	AgeBand,
 	ChildSpec,
 	FxSnapshot,
 	MarkupRule,
+	OccupancyRule,
+	Period,
 	PricingContext,
 	PricingError,
+	Promotion,
+	RoomRule,
 	StayRequest,
 	TaxRule,
 	Unsellable,
@@ -194,6 +203,134 @@ def quote_result(ctx, req) -> tuple[str, str]:
 	return digest([internal, guest]), summary
 
 
+# the drafts' bases: PERSON basis with derived rooms and rate plans, ROOM basis, policy cascades
+DRAFT_BASES = ("FX-DE-S27", "FX-ROOM", "FX-POLICY-CASCADE")
+# every issue code main's validation reports (validate.py on 6b0102c; OCC_UNKNOWN_* and
+# OCC_INHERITED_*_UNUSED for a band, room and period; the sweep's and the room resolver's codes):
+# each is reached by some draft or corpus payload. The sweep's AMBIGUOUS_OCCUPANCY_RULES is not: a
+# tie it would find is an OCC_AMBIGUOUS error first, and an error stops the sweep
+MAIN_CODES = frozenset({
+	"CURRENCY", "NO_ROOMS", "NO_PERIODS", "SALE_WINDOW", "STAY_WINDOW", "ROOM_CAPACITY", "INCLUDED_ADULTS",
+	"PERIOD_DUPLICATE", "PERIOD_RANGE", "PERIOD_OVERLAP", "ROOM_RULE_DUPLICATE", "ROOM_RULE_UNKNOWN_ROOM",
+	"ROOM_RULE_UNKNOWN_PERIOD", "ROOM_RULE_NO_BASE", "ROOM_NEGATIVE", "NO_ROOM_PRICE", "ROOM_DERIVATION_CYCLE",
+	"ROOM_DERIVATION_NO_BASE",
+	"AGE_BANDS", "AGE_BANDS_MIN_AGE", "NO_AGE_BANDS", "OCC_UNKNOWN_BAND", "OCC_UNKNOWN_ROOM", "OCC_UNKNOWN_PERIOD",
+	"OCC_INHERITED_BAND_UNUSED", "OCC_INHERITED_ROOM_UNUSED", "OCC_INHERITED_PERIOD_UNUSED",
+	"OCC_COMBINATION_QUALIFIER", "OCC_ADULT_BAND", "OCC_INHERITED_ADULT_BAND_UNUSED", "OCC_NO_VALUE", "OCC_DUPLICATE",
+	"OCC_AMBIGUOUS", "OCC_POLICY_OVERRIDE_OUTRANKED", "OCC_INFANT_GENERIC", "NO_BASE_BOARD", "RATE_PLAN_BOARD",
+	"OFFER_VALUE", "OFFER_FREE_NIGHTS", "NO_CHILD_RULE", "NEGATIVE_OCCUPANCY_PRICE",
+})
+
+
+def _inherited(r: OccupancyRule, **changes) -> OccupancyRule:
+	"""``r`` as a hotel pricing policy's rule."""
+	return replace(r, base_level=Level.HOTEL, source="policy:POL-H/r1/hotel", scope_weight=1, **changes)
+
+
+def drafts(t) -> list[tuple[str, object]]:
+	"""(name, terms) of drafts made from ``t``, each broken or unusual in one way, as an existing
+	caller validates a draft before publishing it. Made with ``dataclasses.replace`` on the terms
+	(the model is the same on main and on this branch), so both validate the very same terms."""
+	rooms = sorted(t.rooms)
+	room0, room1 = rooms[0], rooms[-1]
+	p0, p1 = t.periods[0], t.periods[-1]
+	rr0 = t.room_rules[0]
+	absolute = next(r for r in t.room_rules if r.op in (Op.ABSOLUTE, Op.FIXED))
+	derived = next((r for r in t.room_rules if r.base_room_type), None)
+	child = next(r for r in t.occupancy_rules if r.target == OccTarget.CHILD and r.age_band)
+	infant = next((b for b in t.age_bands if b.is_infant), None)
+	base_board = next(b for b in t.boards if b.is_base)
+	spec0 = t.rooms[room0]
+	occ = t.occupancy_rules
+	out = [
+		("currency", replace(t, currency="EURO")),
+		("windows", replace(t, sale_from=date(2030, 1, 2), sale_to=date(2030, 1, 1),
+		                    stay_from=date(2030, 1, 2), stay_to=date(2030, 1, 1))),
+		("no-rooms", replace(t, rooms={})),
+		("no-periods", replace(t, periods=())),
+		("capacity", replace(t, rooms={**t.rooms, room0: replace(spec0, max_adults=0),
+		                               room1: replace(t.rooms[room1], max_occupants=1, max_adults=2)})),
+		("included-adults", replace(t, rooms={**t.rooms, room0: replace(spec0, included_adults=spec0.max_adults + 1)})),
+		("period-duplicate", replace(t, periods=(*t.periods, replace(p1, name="again")))),
+		("period-range", replace(t, periods=(replace(p0, start=p0.end + timedelta(days=1)), *t.periods[1:]))),
+		("period-overlap", replace(t, periods=(*t.periods, Period("PX", "overlap", p0.start, p0.end,
+		                                                          priority=p0.priority)))),
+		("room-rule-duplicate", replace(t, room_rules=(*t.room_rules, replace(rr0, rule_id="RR-TWIN")))),
+		("room-rule-unknown", replace(t, room_rules=(*t.room_rules, RoomRule("RR-ZZ", "ZZZ", None, Op.ABSOLUTE, Decimal(9)),
+		                                             replace(absolute, rule_id="RR-PZ", period="PZ")))),
+		("room-rule-no-base", replace(t, room_rules=(*t.room_rules, RoomRule("RR-NB", room1, p1.code, Op.MULTIPLY,
+		                                                                      Decimal("1.1"))))),
+		("room-negative", replace(t, room_rules=(replace(absolute, value=Decimal(-5)),
+		                                         *(r for r in t.room_rules if r is not absolute)))),
+		("no-room-price", replace(t, room_rules=tuple(r for r in t.room_rules if r.room_type != room1))),
+		("age-bands", replace(t, age_bands=tuple(replace(b, to_months=b.to_months - 6) if i == 1 else
+		                                         replace(b, from_months=b.to_months + 5, to_months=b.from_months)
+		                                         if i == 2 else b for i, b in enumerate(t.age_bands)))),
+		("no-bands", replace(t, age_bands=())),
+		("min-age", replace(t, age_bands=tuple(b for b in t.age_bands if not b.is_infant))),
+		("occ-unknown", replace(t, occupancy_rules=(*occ, replace(child, rule_id="O-ZB", age_band="ZZ"),
+		                                            replace(child, rule_id="O-ZR", room_type="ZZZ"),
+		                                            replace(child, rule_id="O-ZP", period="PZ")))),
+		("occ-inherited-unused", replace(t, occupancy_rules=(*occ, _inherited(child, rule_id="P-ZB", age_band="ZZ"),
+		                                                     _inherited(child, rule_id="P-ZR", room_type="ZZZ"),
+		                                                     _inherited(child, rule_id="P-ZP", period="PZ"),
+		                                                     OccupancyRule("P-AB", OccTarget.ADULT, Op.MULTIPLY,
+		                                                                   Decimal("0.9"), position=2,
+		                                                                   age_band=child.age_band, base_level=Level.HOTEL,
+		                                                                   source="policy:POL-H/r1/hotel",
+		                                                                   scope_weight=1)))),
+		("occ-shape", replace(t, occupancy_rules=(*occ, OccupancyRule("O-CQ", OccTarget.COMBINATION, Op.MULTIPLY,
+		                                                             Decimal("0.9")),
+		                                          OccupancyRule("O-AB", OccTarget.ADULT, Op.MULTIPLY, Decimal("0.9"),
+		                                                        position=2, age_band=child.age_band),
+		                                          replace(child, rule_id="O-NV", room_type=room0, value=None)))),
+		("occ-duplicate", replace(t, occupancy_rules=(*occ, replace(child, rule_id="O-TWIN")))),
+		("occ-ambiguous", replace(t, occupancy_rules=(*occ, replace(child, rule_id="O-A2", adults=2, value=Decimal(40)),
+		                                              replace(child, rule_id="O-C1", children=1, value=Decimal(60))))),
+		("occ-policy-override", replace(t, occupancy_rules=(*occ, _inherited(child, rule_id="P-OVR", is_override=True,
+		                                                                     value=Decimal(7))))),
+		("infant-generic", replace(t, occupancy_rules=(*(r for r in occ if not (infant and r.age_band == infant.code)),
+		                                               replace(child, rule_id="O-ANY", age_band=None)))),
+		("no-base-board", replace(t, boards=tuple(b for b in t.boards if b is not base_board))),
+		("offers", replace(t, offers=(*t.offers, Promotion("OF-150", "over", PromoValueType.PERCENT, Decimal(150)),
+		                              Promotion("OF-FN", "free", PromoValueType.FREE_NIGHTS, free_nights_stay=3,
+		                                        free_nights_pay=3)))),
+		("sweep-negative", replace(t, occupancy_rules=(*occ, OccupancyRule("O-NEG", OccTarget.COMBINATION, Op.SUBTRACT,
+		                                                                   Decimal(99999), adults=2, children=1)))),
+		("sweep-no-child-rule", replace(t, occupancy_rules=tuple(r for r in occ if r.age_band != child.age_band
+		                                                         or r.target != OccTarget.CHILD))),
+		("sweep-ambiguous", replace(t, occupancy_rules=(*occ, replace(child, rule_id="O-A2", adults=2, value=Decimal(40)),
+		                                                replace(child, rule_id="O-C1", children=1, value=Decimal(60))),
+		                            occupancy_precedence=1)),
+		("board-rows", replace(t, boards=(*t.boards, replace(base_board, rule_id="B-ZR", is_base=False,
+		                                                     room_type="ZZZ", adult_amount=Decimal(5)),
+		                                  replace(base_board, rule_id="B-ZP", is_base=False, period="PZ",
+		                                          adult_amount=Decimal(5)),
+		                                  replace(base_board, rule_id="B-TWIN")))),
+	]
+	if derived is not None:
+		base = next(r for r in t.room_rules if r.room_type == derived.base_room_type)
+		out.append(("derivation-cycle", replace(t, room_rules=(
+			*(r for r in t.room_rules if r is not base),
+			replace(base, op=Op.MULTIPLY, value=Decimal("1.1"), base_room_type=derived.room_type)))))
+	if t.rate_plans:
+		code = sorted(t.rate_plans)[0]
+		out.append(("rate-plan-board", replace(t, rate_plans={**t.rate_plans, code: replace(
+			t.rate_plans[code], boards=frozenset({"ZZ"}))})))
+	if infant is not None:
+		out.append(("band-invalid", replace(t, age_bands=(AgeBand("NEG", "negative", 5, 2), *t.age_bands))))
+	return out
+
+
+def issues_of(t) -> list:
+	"""``validate_terms`` as an existing caller gets it: each issue's (level, code, message) and the
+	keys of its dict, or the error it raises."""
+	try:
+		return [[i.level, i.code, i.message, sorted(i.to_dict())] for i in validate.validate_terms(t)]
+	except Exception as e:                # a draft main cannot validate: the same failure here
+		return [["raises", type(e).__name__, str(e)]]
+
+
 def payload_result(t) -> dict:
 	"""What a publish and the rates grid take from the terms: the issues, the frozen payload's hash
 	and each room × period unit."""
@@ -209,8 +346,14 @@ def payload_result(t) -> dict:
 	        "units": units}
 
 
+def draft_results() -> dict:
+	"""Each draft's issues, keyed ``<base>|<draft>``."""
+	return {f"{pid}|{name}": issues_of(t) for pid, payload in corpus() if pid in DRAFT_BASES
+	        for name, t in drafts(terms_of(payload))}
+
+
 def record() -> dict:
-	out = {"base": BASE, "payloads": {}, "quotes": {}}
+	out = {"base": BASE, "payloads": {}, "drafts": draft_results(), "quotes": {}}
 	for pid, payload in corpus():
 		t = terms_of(payload)
 		out["payloads"][pid] = payload_result(t)
@@ -222,7 +365,7 @@ def record() -> dict:
 def write(result: dict, path: str) -> None:
 	"""One quote a line, so a new recording diffs readably."""
 	lines = ["{", f'"base":{json.dumps(result["base"])},',
-	         f'"payloads":{canonical(result["payloads"])},', '"quotes":{']
+	         f'"payloads":{canonical(result["payloads"])},', f'"drafts":{canonical(result["drafts"])},', '"quotes":{']
 	items = list(result["quotes"].items())
 	lines += [f"{json.dumps(k, ensure_ascii=False)}:{json.dumps(v, ensure_ascii=False)}"
 	          + ("," if i < len(items) - 1 else "") for i, (k, v) in enumerate(items)]
@@ -273,6 +416,18 @@ class TestMainParity(unittest.TestCase):
 				self.assertEqual(got["issues"], want["issues"])
 				for issue in validate.validate_terms(t):
 					self.assertEqual(set(issue.to_dict()), MAIN_ISSUE_KEYS)
+
+	def test_every_draft_validates_as_on_main(self):
+		"""Drafts broken or unusual in every way main's validation knows, as an existing caller checks
+		one before publishing: the same issues (level, code, message, main's keys) in the same order."""
+		got, want = draft_results(), expected()["drafts"]
+		self.assertEqual(sorted(got), sorted(want))
+		for key in want:
+			with self.subTest(draft=key):
+				self.assertEqual(got[key], want[key])
+		reached = {i[1] for issues in want.values() for i in issues} | \
+			{i[1] for p in expected()["payloads"].values() for i in p["issues"]}
+		self.assertEqual(MAIN_CODES - reached, set())
 
 	def test_board_rows_main_published_still_publish(self):
 		"""The corpus has board rows main published: an orphan room, an orphan period and two rows of
