@@ -109,22 +109,36 @@ function baseError(tables: Tables, cell: CellRef): EntryError {
   return rule && isRelativeOp(rule.op) ? "BASE_FORMULA" : "BASE_NO_PRICE"
 }
 
+/** One cell of an entry and what was typed (or pasted) for it, parsed in the room context. */
+export interface EntryItem {
+  cell: CellRef
+  parsed: ShResult
+}
+
 /**
  * One entry over the given cells, each by its own row's rule (§3.3.2, D11): a relative entry on
- * a base-room cell becomes a server adjustment (`server`, sent in one apply_op_values call), every
- * other cell is written into `tables` (in the order given). All or nothing: the first cell that
- * cannot take the entry refuses the whole gesture.
+ * a base-room cell becomes a server adjustment (`server`, sent to apply_op_values), every other
+ * cell is written into `tables` (in the order given). All or nothing: the first cell that cannot
+ * take its entry refuses the whole gesture. Each cell has its own entry (a paste, S10).
  */
-export function planEntry(tables: Tables, cells: readonly CellRef[], parsed: ShResult): EntryPlan {
+export function planItems(tables: Tables, items: readonly EntryItem[]): EntryPlan {
   let acc = tables
   const server: NeedsServer[] = []
-  for (const cell of cells) {
+  for (const { cell, parsed } of items) {
     const r = applyRoomEntry(acc, cell.room, cell.period, parsed)
     if ("error" in r) return { error: r.error === "BASE_NO_PRICE" ? baseError(acc, cell) : r.error, cell: { room: cell.room, period: cell.period } }
     if ("needsServer" in r) server.push(r.needsServer)
     else acc = r.tables
   }
   return { tables: acc, server }
+}
+
+/** The same entry in every cell (a typed entry, Ctrl/Cmd+Enter over a selection). */
+export function planEntry(tables: Tables, cells: readonly CellRef[], parsed: ShResult): EntryPlan {
+  return planItems(
+    tables,
+    cells.map((cell) => ({ cell, parsed })),
+  )
 }
 
 /** Every cell of an entry while the server adjusts its base-room prices, in the order given: all
@@ -166,6 +180,39 @@ function cellExists(tables: Tables, cell: CellRef): boolean {
  * so a late answer never overwrites what the user typed meanwhile; and when the server refused a
  * price (NEGATIVE, NO_VALUE).
  */
+export function finishItems(
+  tables: Tables,
+  items: readonly EntryItem[],
+  sent: readonly NeedsServer[],
+  answers: readonly AdjustAnswer[],
+  sentFrom: Tables,
+): { tables: Tables } | { error: EntryError; cell: CellRef } {
+  for (const { cell } of items) {
+    if (!cellExists(tables, cell) || ownSignature(sentFrom, cell) !== ownSignature(tables, cell)) return { error: "CHANGED", cell: { room: cell.room, period: cell.period } }
+  }
+  const plan = planItems(tables, items)
+  if ("error" in plan) return plan
+  const at = (s: NeedsServer): CellRef => ({ room: s.room, period: s.targetPeriod })
+  for (let i = 0; i < sent.length; i++) {
+    const now = plan.server[i]
+    const was = sent[i]
+    if (
+      !now ||
+      now.room !== was.room ||
+      now.targetPeriod !== was.targetPeriod ||
+      now.op !== was.op ||
+      canonValue(now.value) !== canonValue(was.value) ||
+      canonValue(now.current) !== canonValue(was.current)
+    )
+      return { error: "CHANGED", cell: at(was) }
+    const a = answers[i]
+    if (!a || a.error || typeof a.value !== "string" || !a.value.trim()) return { error: a?.error === "NEGATIVE" ? "NEGATIVE" : "NO_VALUE", cell: at(was) }
+  }
+  if (plan.server.length !== sent.length) return { error: "CHANGED", cell: at(plan.server[sent.length] ?? sent[0]) }
+  return { tables: applyAdjustResults(plan.tables, plan.server, answers.map((a) => a.value)) }
+}
+
+/** finishItems for the same entry in every cell. */
 export function finishEntry(
   tables: Tables,
   cells: readonly CellRef[],
@@ -174,21 +221,13 @@ export function finishEntry(
   answers: readonly AdjustAnswer[],
   sentFrom: Tables,
 ): { tables: Tables } | { error: EntryError; cell: CellRef } {
-  for (const cell of cells) {
-    if (!cellExists(tables, cell) || ownSignature(sentFrom, cell) !== ownSignature(tables, cell)) return { error: "CHANGED", cell: { room: cell.room, period: cell.period } }
-  }
-  const plan = planEntry(tables, cells, parsed)
-  if ("error" in plan) return plan
-  const at = (s: NeedsServer): CellRef => ({ room: s.room, period: s.targetPeriod })
-  for (let i = 0; i < sent.length; i++) {
-    const now = plan.server[i]
-    const was = sent[i]
-    if (!now || now.room !== was.room || now.targetPeriod !== was.targetPeriod || canonValue(now.current) !== canonValue(was.current)) return { error: "CHANGED", cell: at(was) }
-    const a = answers[i]
-    if (!a || a.error || typeof a.value !== "string" || !a.value.trim()) return { error: a?.error === "NEGATIVE" ? "NEGATIVE" : "NO_VALUE", cell: at(was) }
-  }
-  if (plan.server.length !== sent.length) return { error: "CHANGED", cell: at(plan.server[sent.length] ?? sent[0]) }
-  return { tables: applyAdjustResults(plan.tables, plan.server, answers.map((a) => a.value)) }
+  return finishItems(
+    tables,
+    cells.map((cell) => ({ cell, parsed })),
+    sent,
+    answers,
+    sentFrom,
+  )
 }
 
 /** Delete / Backspace: removes the rows of the given cells (CLEAR semantics). */

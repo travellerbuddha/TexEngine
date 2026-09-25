@@ -2,7 +2,7 @@
 // Run with `npm run test:unit` (node --test).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { createHistory, diffTables } from "../../src/tex/screens/rates/workspace/history.ts"
+import { createHistory, diffTables, MERGE_WINDOW_MS } from "../../src/tex/screens/rates/workspace/history.ts"
 
 type R = { _key: string; [k: string]: string | number | null }
 type T = { rooms: R[]; periods: R[]; period_rates: R[] }
@@ -123,4 +123,47 @@ test("diffTables records only the tables whose arrays changed", () => {
   assert.equal(d.before.period_rates, s0.period_rates)
   assert.equal(d.after.period_rates, s1.period_rates)
   assert.equal(diffTables(s0, { ...s0 }), null, "no change → nothing to record")
+})
+
+// ─── merged entries (slice S10: the Advanced rule tables go through the log) ────────────────────
+
+test("edits of one Advanced table typed in one burst merge into one entry; the first 'before' is kept", () => {
+  const h = createHistory<T>()
+  const s0 = base()
+  const a = [r("a", { room_type: "S" })]
+  const b = [r("a", { room_type: "ST" })]
+  const c = [r("a", { room_type: "STD2" })]
+  h.commit("Rule table: Rooms", { rooms: s0.rooms }, { rooms: a }, { merge: "rooms", at: 1_000 })
+  h.commit("Rule table: Rooms", { rooms: a }, { rooms: b }, { merge: "rooms", at: 1_000 + MERGE_WINDOW_MS })
+  h.commit("Rule table: Rooms", { rooms: b }, { rooms: c }, { merge: "rooms", at: 1_000 + 2 * MERGE_WINDOW_MS })
+  assert.equal(h.size(), 1)
+  const u = h.undo({ ...s0, rooms: c })
+  assert.equal(u?.state.rooms, s0.rooms, "one undo puts back the table as it was before the burst")
+  assert.equal(h.redo(u!.state)?.state.rooms, c)
+})
+
+test("a pause, another table, another kind of edit or an undo in between starts a new entry", () => {
+  const h = createHistory<T>()
+  const s0 = base()
+  const a = [r("a", { room_type: "A" })]
+  const b = [r("a", { room_type: "B" })]
+  h.commit("Rooms", { rooms: s0.rooms }, { rooms: a }, { merge: "rooms", at: 0 })
+  h.commit("Rooms", { rooms: a }, { rooms: b }, { merge: "rooms", at: MERGE_WINDOW_MS + 1 })
+  assert.equal(h.size(), 2, "a pause longer than the window")
+  h.commit("Periods", { periods: s0.periods }, { periods: [] }, { merge: "periods", at: MERGE_WINDOW_MS + 2 })
+  assert.equal(h.size(), 3, "another table")
+  h.commit("Price STD · P1", { period_rates: [] }, { period_rates: [r("x")] })
+  h.commit("Periods", { periods: [] }, { periods: s0.periods }, { merge: "periods", at: MERGE_WINDOW_MS + 3 })
+  assert.equal(h.size(), 5, "a workspace entry in between")
+  h.undo({ ...s0, rooms: b })
+  h.commit("Periods", { periods: [] }, { periods: s0.periods }, { merge: "periods", at: MERGE_WINDOW_MS + 4 })
+  assert.equal(h.size(), 5, "after an undo the next edit is an entry of its own")
+  // a merge that adds a table the entry did not record yet keeps that table's own 'before'
+  const h2 = createHistory<T>()
+  h2.commit("x", { rooms: s0.rooms }, { rooms: a }, { merge: "k", at: 0 })
+  h2.commit("x", { periods: s0.periods }, { periods: [] }, { merge: "k", at: 1 })
+  assert.equal(h2.size(), 1)
+  const u = h2.undo({ ...s0, rooms: a, periods: [] })
+  assert.equal(u?.state.rooms, s0.rooms)
+  assert.equal(u?.state.periods, s0.periods)
 })

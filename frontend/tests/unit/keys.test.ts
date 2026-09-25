@@ -2,7 +2,7 @@
 // (slice S7 review follow-up). Run with `npm run test:unit`.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { shortcutLetter } from "../../src/tex/ui/keys.ts"
+import { editShortcut, shortcutLetter } from "../../src/tex/ui/keys.ts"
 
 test("a Latin letter is the letter, in lower case", () => {
   assert.equal(shortcutLetter({ key: "a", code: "KeyA" }), "a")
@@ -29,4 +29,45 @@ test("anything else is not a letter shortcut", () => {
   assert.equal(shortcutLetter({ key: "ф" }), null)
   assert.equal(shortcutLetter({ key: "ф", code: "" }), null)
   assert.equal(shortcutLetter({ key: "ß", code: "Minus" }), null)
+})
+
+// ─── editing shortcuts of the keyboard grids (slice S10) ───────────────────
+
+const k = (key: string, mods: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}, code?: string) => ({
+  key,
+  code: code ?? (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : ""),
+  ctrlKey: Boolean(mods.ctrl),
+  metaKey: Boolean(mods.meta),
+  shiftKey: Boolean(mods.shift),
+  altKey: Boolean(mods.alt),
+})
+
+test("undo, redo, fill right and fill down by Ctrl or Cmd, on every layout", () => {
+  assert.equal(editShortcut(k("z", { ctrl: true })), "undo")
+  assert.equal(editShortcut(k("z", { meta: true })), "undo")
+  assert.equal(editShortcut(k("Z", { ctrl: true, shift: true })), "redo")
+  assert.equal(editShortcut(k("Z", { meta: true, shift: true })), "redo")
+  assert.equal(editShortcut(k("y", { ctrl: true })), "redo")
+  assert.equal(editShortcut(k("r", { ctrl: true })), "fill_right")
+  assert.equal(editShortcut(k("d", { ctrl: true })), "fill_down")
+  // Russian ЙЦУКЕН: the keys marked Z, R, D type я, к, в
+  assert.equal(editShortcut(k("я", { ctrl: true }, "KeyZ")), "undo")
+  assert.equal(editShortcut(k("Я", { ctrl: true, shift: true }, "KeyZ")), "redo")
+  assert.equal(editShortcut(k("к", { ctrl: true }, "KeyR")), "fill_right")
+  assert.equal(editShortcut(k("в", { ctrl: true }, "KeyD")), "fill_down")
+  // German QWERTZ: Ctrl + the key labelled Z (physical KeyY) is undo, the one labelled Y redo
+  assert.equal(editShortcut(k("z", { ctrl: true }, "KeyY")), "undo")
+  assert.equal(editShortcut(k("y", { ctrl: true }, "KeyZ")), "redo")
+})
+
+test("no editing shortcut without Ctrl/Cmd, with Alt (AltGr), or with Shift on R, D, Y", () => {
+  assert.equal(editShortcut(k("z")), null)
+  assert.equal(editShortcut(k("r", { shift: true })), null)
+  assert.equal(editShortcut(k("z", { ctrl: true, alt: true })), null)
+  assert.equal(editShortcut(k("R", { ctrl: true, shift: true })), null)
+  assert.equal(editShortcut(k("D", { ctrl: true, shift: true })), null)
+  assert.equal(editShortcut(k("Y", { ctrl: true, shift: true })), null)
+  assert.equal(editShortcut(k("c", { ctrl: true })), null, "copy and paste are the browser's clipboard events")
+  assert.equal(editShortcut(k("v", { ctrl: true })), null)
+  assert.equal(editShortcut(k("Enter", { ctrl: true })), null)
 })

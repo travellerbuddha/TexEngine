@@ -4,14 +4,32 @@
 // inverted or recomputed (restoring "no rule" restores the absence of the row, never a 0), and
 // nothing calls the server. Pure and framework-free: the React binding (useWorkspaceHistory) is
 // built on it in S9. No runtime imports.
+//
+// Edits of the Advanced rule tables go through the log too (S10), one call per keystroke: a commit
+// with a `merge` key joins the last entry when that entry has the same key, nothing was undone
+// since, and it came within MERGE_WINDOW_MS of the entry's last edit. One undo then puts back the
+// table as it was before the burst of typing.
 import type { Tables } from "../lib/tables.ts"
 
 export const HISTORY_CAP = 100
+
+/** Commits with the same merge key closer than this (ms) are one entry. */
+export const MERGE_WINDOW_MS = 1500
 
 export interface HistoryEntry<T extends object = Tables> {
   label: string
   before: Partial<T>
   after: Partial<T>
+  /** the merge key and the time of the entry's last edit (merged entries only) */
+  merge?: string
+  at?: number
+}
+
+export interface CommitOptions {
+  /** join the last entry when it has the same key and came within MERGE_WINDOW_MS */
+  merge?: string
+  /** the time of this edit (ms), for the merge window */
+  at?: number
 }
 
 export interface HistoryStep<T extends object = Tables> {
@@ -22,8 +40,9 @@ export interface HistoryStep<T extends object = Tables> {
 }
 
 export interface History<T extends object = Tables> {
-  /** Records one mutation: the affected tables before and after it. Clears the redo stack. */
-  commit(label: string, before: Partial<T>, after: Partial<T>): void
+  /** Records one mutation: the affected tables before and after it. Clears the redo stack. With
+   * `merge`, joins the last entry instead when it is the same kind of edit made just before. */
+  commit(label: string, before: Partial<T>, after: Partial<T>, opts?: CommitOptions): void
   /** The current state with the last entry's "before" tables, or null when there is nothing to undo. */
   undo(current: T): HistoryStep<T> | null
   /** The current state with the next entry's "after" tables, or null when there is nothing to redo. */
@@ -43,8 +62,16 @@ export function createHistory<T extends object = Tables>(cap: number = HISTORY_C
   let done: HistoryEntry<T>[] = []
   let undone: HistoryEntry<T>[] = []
   return {
-    commit(label, before, after) {
-      done = [...done, { label, before, after }]
+    commit(label, before, after, opts) {
+      const last = done.at(-1)
+      const at = opts?.at ?? 0
+      if (opts?.merge && last && last.merge === opts.merge && !undone.length && at - (last.at ?? 0) <= MERGE_WINDOW_MS) {
+        // the entry keeps each table's first "before" and takes the latest "after"
+        const joined: HistoryEntry<T> = { label, before: { ...before, ...last.before }, after: { ...last.after, ...after }, merge: opts.merge, at }
+        done = [...done.slice(0, -1), joined]
+        return
+      }
+      done = [...done, opts?.merge ? { label, before, after, merge: opts.merge, at } : { label, before, after }]
       if (done.length > limit) done = done.slice(done.length - limit)
       undone = []
     },

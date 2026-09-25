@@ -17,3 +17,23 @@ export function shortcutLetter(e: { key: string; code?: string }): string | null
   const m = /^Key([A-Z])$/.exec(e.code ?? "")
   return m ? m[1].toLowerCase() : null
 }
+
+/** The editing shortcuts of the keyboard grids (PRICING_WORKSPACE_UX.md §3.10). */
+export type EditShortcut = "undo" | "redo" | "fill_right" | "fill_down"
+
+/**
+ * The editing shortcut a key event means, on any layout (via shortcutLetter), or null:
+ * Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y redo, Ctrl/Cmd+R fill right, Ctrl/Cmd+D fill
+ * down. With Alt (AltGr types characters on Windows) it is none. Copy and paste are not here: the
+ * browser's clipboard events carry them, on every layout.
+ */
+export function editShortcut(e: { key: string; code?: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean }): EditShortcut | null {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return null
+  const letter = shortcutLetter(e)
+  if (letter === "z") return e.shiftKey ? "redo" : "undo"
+  if (e.shiftKey) return null
+  if (letter === "y") return "redo"
+  if (letter === "r") return "fill_right"
+  if (letter === "d") return "fill_down"
+  return null
+}
