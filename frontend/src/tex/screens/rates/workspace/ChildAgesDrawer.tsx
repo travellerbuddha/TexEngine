@@ -83,6 +83,14 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
   const body = useRef<HTMLDivElement>(null)
   const focusNext = useRef<{ key: string; field: BandField } | null>(null)
 
+  // closing the drawer drops a new band that was not committed (and an open confirmation)
+  useEffect(() => {
+    if (p.open) return
+    setDraft(null)
+    setDraftError("")
+    setConfirming(null)
+  }, [p.open])
+
   // focus the field a gesture asked for once it is rendered (a new band's Up to)
   useEffect(() => {
     const want = focusNext.current
