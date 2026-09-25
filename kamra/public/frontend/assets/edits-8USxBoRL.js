@@ -1,0 +1,1 @@
+function r(t,c,o,e=Object.keys(t)){const s={...t};for(const n of e)JSON.stringify(o[n])!==JSON.stringify(c[n])&&(s[n]=o[n]);return s}function k(t,c){const o={...t};for(const e of Object.keys(t)){const s=t[e],n=c[e];!n||n.length!==s.length||(o[e]=s.map((f,i)=>({...f,_key:n[i]._key})))}return o}export{k,r as o};
