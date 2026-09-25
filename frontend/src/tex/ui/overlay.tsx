@@ -204,13 +204,14 @@ function nextTabbable(from: HTMLElement, skip: HTMLElement): HTMLElement | null 
   return null
 }
 
-// the widths of the side panels open now: the page gives up the widest (html[data-side-panel], tex.css)
+// the widths of the side panels open now: the page gives up the widest (html[data-side-panel-open],
+// tex.css; not data-side-panel, which marks the panel itself)
 const openPanels: DrawerProps["width"][] = []
 function syncSidePanels() {
   const order = ["md", "lg", "xl"] as const
   const widest = openPanels.reduce<DrawerProps["width"] | "">((w, x) => (w === "" || order.indexOf(x) > order.indexOf(w) ? x : w), "")
-  if (widest) document.documentElement.dataset.sidePanel = widest
-  else delete document.documentElement.dataset.sidePanel
+  if (widest) document.documentElement.dataset.sidePanelOpen = widest
+  else delete document.documentElement.dataset.sidePanelOpen
 }
 
 function SidePanel({ open, onClose, title, children, footer, width }: DrawerProps) {

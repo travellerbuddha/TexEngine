@@ -54,13 +54,13 @@
    the shell's content column gives up the panel's width (sm:max-w-md / 2xl / 4xl) while it is open
    (S16 re-review: the Price test covered the matrix columns and the header's Save and Publish). */
 @media (min-width: 64rem) {
-  html[data-side-panel="md"] .tex-page {
+  html[data-side-panel-open="md"] .tex-page {
     padding-right: 28rem;
   }
-  html[data-side-panel="lg"] .tex-page {
+  html[data-side-panel-open="lg"] .tex-page {
     padding-right: 42rem;
   }
-  html[data-side-panel="xl"] .tex-page {
+  html[data-side-panel-open="xl"] .tex-page {
     padding-right: 56rem;
   }
 }

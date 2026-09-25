@@ -710,7 +710,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       case "base":
         return {
           text: reading.previous.length
-            ? t("rates.brd.read.base_moves", { cell: name, board: boardName(row.board), previous: reading.previous.join(", ") })
+            ? t("rates.brd.read.base_moves", { cell: name, board: boardName(row.board), previous: reading.previous.map(boardName).join(", ") })
             : t("rates.brd.read.base", { cell: name, board: boardName(row.board) }),
           invalid: false,
         }

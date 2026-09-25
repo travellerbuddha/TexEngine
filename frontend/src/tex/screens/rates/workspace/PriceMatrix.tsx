@@ -1060,8 +1060,8 @@ export function PriceMatrix({
             </>
           ) : null}
         </span>
-        <span role="status" aria-live="polite" className="sr-only">
-          {announce}
+        <span role="status" aria-live="polite">
+          <span className="sr-only">{announce}</span>
         </span>
         {/* a base-room entry waiting for the server's adjustment is typed input not in the version
             yet: the tab asks before it closes (keptState.UNCOMMITTED_INPUT, S16 re-review) */}
