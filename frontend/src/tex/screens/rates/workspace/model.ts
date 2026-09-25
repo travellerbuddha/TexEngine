@@ -438,6 +438,15 @@ function boardSource(tables: Pick<Tables, "boards">, id: BoardIdentity, period: 
   return best
 }
 
+/** One boards cell by a scan of the table (boards.board_rule's order); boardModel reads the table
+ * once and gives the same cells. */
+export function boardCellOf(tables: Pick<Tables, "boards">, id: BoardIdentity, period: string): BoardCell {
+  const own = boardRowsAt(tables, id, period)[0] ?? null
+  if (own) return { state: isSet(own.is_base) ? "base" : period === ALL_PERIODS ? "rule" : "period-override", rule: own, source: own }
+  const source = boardSource(tables, id, period)
+  return { state: source ? "inherited" : "empty", rule: null, source }
+}
+
 /** The boards grid (§3.12): one row per board in `boards` order, each followed by its room-scoped
  * rows; cells for All periods ("") and every period. `pending` adds rows that have no rule yet
  * (S13: a new board after the last one, a new room rule under its board); an identity that has
@@ -468,18 +477,33 @@ export function boardModel(tables: Pick<Tables, "boards" | "periods">, pending: 
     place(b, str(id.room_type))
     waiting.add(`${b}|${str(id.room_type)}`)
   }
+  // the first row of each (board, room, period), read once: a cell looks its rows up (the grid
+  // stays fast at the overlay's row cap)
+  const first = new Map<string, Row>()
+  for (const r of tables.boards) {
+    const key = `${boardOf(r)}\u0000${roomOf(r)}\u0000${periodOf(r)}`
+    if (!first.has(key)) first.set(key, r)
+  }
+  const at = (board: string, room: string, period: string) => first.get(`${board}\u0000${room}\u0000${period}`) ?? null
+  /** boardSource from the index: a period rule for all rooms, else the room's own rule for all
+   * periods, else the board's rule (boards.board_rule's rank), never the cell's own row. */
+  const sourceOf = (id: BoardIdentity, period: string): Row | null => {
+    if (period && id.room_type) return at(id.board, "", period) ?? at(id.board, id.room_type, "") ?? at(id.board, "", "")
+    if (period || id.room_type) return at(id.board, "", "")
+    return null
+  }
   const rows: BoardRow[] = []
   const build = (id: BoardIdentity, depth: 0 | 1): BoardRow => {
     const cells: Record<string, BoardCell> = {}
     for (const p of periods) {
-      const own = boardRowsAt(tables, id, p)[0] ?? null
+      const own = at(id.board, id.room_type, p)
       if (own) cells[p] = { state: isSet(own.is_base) ? "base" : p === ALL_PERIODS ? "rule" : "period-override", rule: own, source: own }
       else {
-        const source = boardSource(tables, id, p)
+        const source = sourceOf(id, p)
         cells[p] = { state: source ? "inherited" : "empty", rule: null, source }
       }
     }
-    const generic = boardRowsAt(tables, id, ALL_PERIODS)[0]
+    const generic = at(id.board, id.room_type, ALL_PERIODS)
     const key = `${id.board}|${id.room_type}`
     return {
       id: key,

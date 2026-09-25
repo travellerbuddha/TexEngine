@@ -1744,5 +1744,6 @@
  "rates.brd.pop.remove_row_body": {
   "one": "{row} kuralı kaldırılsın mı?",
   "other": "{row} için {count} kural kaldırılsın mı?"
- }
+ },
+ "rates.brd.row.base_sub": "oda fiyatına dahil"
 }

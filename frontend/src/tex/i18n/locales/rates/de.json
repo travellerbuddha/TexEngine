@@ -1744,5 +1744,6 @@
  "rates.brd.pop.remove_row_body": {
   "one": "Die Regel von {row} entfernen?",
   "other": "Die {count} Regeln von {row} entfernen?"
- }
+ },
+ "rates.brd.row.base_sub": "im Zimmerpreis enthalten"
 }

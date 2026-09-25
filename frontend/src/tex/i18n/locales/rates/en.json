@@ -1730,7 +1730,7 @@
  "rates.brd.confirm.title": "Remove board",
  "rates.brd.confirm.remove": "Remove",
  "rates.brd.confirm.body": {
-  "one": "Remove {boards} from this version? Its {count} rule is removed.",
+  "one": "Remove {boards} from this version? {count} rule is removed.",
   "other": "Remove {boards} from this version? {count} rules are removed."
  },
  "rates.brd.pop.title": "Board terms: {row}",
@@ -1753,5 +1753,6 @@
  "rates.brd.pop.remove_row_body": {
   "one": "Remove the rule of {row}?",
   "other": "Remove the {count} rules of {row}?"
- }
+ },
+ "rates.brd.row.base_sub": "included in the room price"
 }

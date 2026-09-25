@@ -1860,5 +1860,6 @@
   "few": "Usunąć {count} reguły wiersza {row}?",
   "many": "Usunąć {count} reguł wiersza {row}?",
   "other": "Usunąć {count} reguły wiersza {row}?"
- }
+ },
+ "rates.brd.row.base_sub": "wliczone w cenę pokoju"
 }

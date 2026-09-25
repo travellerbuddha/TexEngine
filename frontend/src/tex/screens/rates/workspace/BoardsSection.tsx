@@ -708,7 +708,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     const own = row.cells[ALL_PERIODS]?.rule
     const label = own ? str(own.label) : ""
     if (!own) return t("rates.brd.row.periods_only")
-    const words = isSet(own.is_base) ? t("rates.brd.unit_full.base") : str(own.adult_amount) ? unitFull(str(own.op), str(own.child_percent), isSet(own.infant_free)) : t("rates.brd.cell.no_value")
+    const words = isSet(own.is_base) ? t("rates.brd.row.base_sub") : str(own.adult_amount) ? unitFull(str(own.op), str(own.child_percent), isSet(own.infant_free)) : t("rates.brd.cell.no_value")
     return label ? `${label} · ${words}` : words
   }
 

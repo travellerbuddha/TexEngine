@@ -1805,5 +1805,6 @@
   "one": "Eliminați regula pentru {row}?",
   "few": "Eliminați cele {count} reguli pentru {row}?",
   "other": "Eliminați cele {count} de reguli pentru {row}?"
- }
+ },
+ "rates.brd.row.base_sub": "inclus în prețul camerei"
 }

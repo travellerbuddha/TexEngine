@@ -9,6 +9,7 @@ import {
   applyAdjustResults,
   applyBoardEntry,
   applyRoomEntry,
+  boardCellOf,
   boardEditText,
   boardModel,
   boardReadingOf,
@@ -648,6 +649,20 @@ test("S13 boardModel: rows waiting for a value (a new board, a new room rule) si
   assert.equal(sup.cells[""].source?.adult_amount, "-20")
   assert.equal(sup.cells.P2.source?.adult_amount, "-25")
   assert.equal(m.rows[5].cells[""].state, "empty")
+})
+
+test("S13 boardModel's cells equal the per-cell scan (one pass over the board rules)", () => {
+  const t = owner()
+  const variants: Tables[] = [
+    t,
+    planned(planBoardEntries(t, [cellOf(HB, "P4", "-30"), cellOf({ board: "HB", room_type: "DLX" }, "P2", "+5"), cellOf({ board: "AI", room_type: "SUP" }, "", "10")])).tables,
+    tablesOf({ ...t, boards: [...t.boards, { ...t.boards[2], _key: "dup" }] }),
+    tablesOf({ ...t, boards: t.boards.filter((b) => b.board !== "HB" || b.room_type === "DLX") }),
+  ]
+  for (const v of variants) {
+    const m = boardModel(v, [{ board: "FB", room_type: "" }, { board: "HB", room_type: "SUP" }])
+    for (const row of m.rows) for (const p of m.periods) assert.deepEqual(row.cells[p], boardCellOf(v, row.identity, p), `${row.id} ${p}`)
+  }
 })
 
 test("S13 row terms: child %, infants free and the label go to every rule of the row; rooms move; summary", () => {
