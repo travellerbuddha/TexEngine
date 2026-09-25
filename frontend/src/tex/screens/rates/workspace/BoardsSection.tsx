@@ -825,12 +825,13 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                         )}
                       >
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="flex min-w-0 items-center gap-1.5">
+                          {/* the name wraps rather than being cut on phones (the row header is 9rem there) */}
+                          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                             {row.depth ? (
-                              <span className="truncate text-[13px] text-zinc-800">{t("rates.brd.row.room", { board: row.board, room: roomName(row.room_type) })}</span>
+                              <span className="min-w-0 text-[13px] leading-tight break-words text-zinc-800">{t("rates.brd.row.room", { board: row.board, room: roomName(row.room_type) })}</span>
                             ) : (
                               <>
-                                <span className="truncate text-[13px] font-medium text-zinc-900">{boardName(row.board)}</span>
+                                <span className="min-w-0 text-[13px] leading-tight font-medium break-words text-zinc-900">{boardName(row.board)}</span>
                                 <span className="font-mono text-[11px] text-zinc-500">{row.board}</span>
                               </>
                             )}
