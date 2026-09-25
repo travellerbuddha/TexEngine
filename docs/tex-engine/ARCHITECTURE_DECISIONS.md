@@ -6684,8 +6684,9 @@ plain number as a price (D10).
 
 **Decision (implemented in S13: Boards in the workspace).** Branch `pricing-workspace`, frontend
 only (no server file changes), commits `7464160` (pure logic and unit tests), `0714848` (the
-screen), `83dfa0f` (the grid reads the board rules once; wording) and `d56302a` (a cell's context
-menu opens its row's terms). Boards sit under Occupancy & child pricing in Pricing
+screen), `83dfa0f` (the grid reads the board rules once; wording), `d56302a` (a cell's context
+menu opens its row's terms) and `275a261` (a board's name wraps in its row header on phones instead
+of being cut to "U…"). Boards sit under Occupancy & child pricing in Pricing
 (`workspace/BoardsSection.tsx`, §3.12). The Advanced "Boards" table stays under Commercial rules.
 - *The section* is collapsible. Collapsed, it shows chips in `boards` order: "UAI BASE · AI −5 % ·
   HB −20.00 per adult", plus "+N period or room rules" when there are any. A board with no rule for
