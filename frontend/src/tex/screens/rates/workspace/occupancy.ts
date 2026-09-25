@@ -251,7 +251,8 @@ function fallback(ctx: Ctx, id: OccIdentity, general: readonly OccIdentity[], pe
   }
   if (best) {
     const state: LadderCellState = best.policy ? "policy" : best.room_type !== ctx.scope ? "all-rooms" : sameGuest(best, id) ? "inherited" : "general"
-    return { state, source: best.src, value: valueOf(best.src) }
+    // a policy rule whose formula the viewer may not read has no value (price_matrix `hidden`)
+    return { state, source: best.src, value: best.policy && isSet(best.src.hidden) ? null : valueOf(best.src) }
   }
   if (slot === "child") {
     const child = ctx.defaults?.child
@@ -431,6 +432,7 @@ export function fromInheritedRule(r: InheritedOccupancyRule): OccRuleLike {
     is_override: r.is_override ? 1 : 0,
     note: "",
     source: str(r.source),
+    hidden: r.hidden ? 1 : 0,
   }
 }
 

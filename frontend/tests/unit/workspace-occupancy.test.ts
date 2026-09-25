@@ -707,6 +707,25 @@ test("policy rules: a version rule of All rooms beats a room's policy rule (orig
   assert.equal(summary(cellOf(all, (x) => x.band === "CHB", "P1")), "policy MULTIPLY 0.4")
 })
 
+test("a policy rule served without its formula (a viewer without cost, S16 review) still ranks and names its source, without a value", () => {
+  const hidden = { adults: null, children: null, room_type: null, period: null, op: null, value: null, is_override: false, hidden: true }
+  const inherited = [
+    fromInheritedRule({ ...hidden, rule_id: "OR-1", target: "CHILD", position: null, age_band: "CHB", source: "policy:PP-1/r2/hotel" }),
+    fromInheritedRule({ ...hidden, rule_id: "OR-3", target: "ADULT", position: 4, age_band: null, source: "policy:PP-2/r1/global" }),
+  ]
+  assert.deepEqual([inherited[0].op, inherited[0].value, inherited[0].hidden], ["", "", 1])
+  const m = ladderModel(example(), null, "PERSON", { ...OPTS, inherited })
+  const chb = cellOf(m, (x) => x.band === "CHB", "P1")
+  assert.equal(chb.state, "policy")
+  assert.equal(chb.value, null, "no op or value to show")
+  assert.equal(chb.source?.source, "policy:PP-1/r2/hotel")
+  const fourth = cellOf(m, (x) => x.position === 4, "")
+  assert.deepEqual([fourth.state, fourth.value], ["policy", null])
+  // a version rule still wins over it, as over any policy rule
+  const cha = [fromInheritedRule({ ...hidden, rule_id: "OR-2", target: "CHILD", position: null, age_band: "CHA", source: "policy:PP-1/r2/hotel" })]
+  assert.equal(summary(cellOf(ladderModel(example(), null, "PERSON", { ...OPTS, inherited: cha }), (x) => x.band === "CHA", "P1")), "inherited MULTIPLY 0.25")
+})
+
 test("an infant is priced by a rule naming its band before any band-less rule (G-31)", () => {
   const t = example([occ({ target: "CHILD", room_type: "SUP", op: "MULTIPLY", value: "0.5" })])
   const sup = ladderModel(t, "SUP", "PERSON", OPTS)

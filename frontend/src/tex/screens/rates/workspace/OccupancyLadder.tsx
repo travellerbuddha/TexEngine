@@ -184,7 +184,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const subLabel = (row: LadderRow): string => {
     if (row.kind === "adults_base") {
       const all = row.cells[ALL_PERIODS]
-      const rule = all.value ? ruleShort(all.value.op, all.value.value) : "×1"
+      const rule = all.value ? ruleShort(all.value.op, all.value.value) : all.state === "policy" ? t("rates.occ.ladder.cell.policy_hidden") : "×1"
       return all.state === "default" ? t("rates.occ.ladder.base_pair", { rule, count: 2 }) : t("rates.occ.ladder.base_pair_general", { rule })
     }
     if (isIncludedRow(row)) return t("rates.occ.ladder.included_sub", { count: model.includedAdults })
@@ -528,6 +528,23 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         // in a room scope, a policy rule without a room applies as the All-rooms rule of the policy
         const allRooms = p.scope !== "" && str(cell.source?.room_type) === "" ? t("rates.occ.ladder.all_rooms") : ""
         const source = [src ? `${scope} · ${src.policy} r${src.revision}` : str(cell.source?.source), allRooms].filter(Boolean).join(" · ")
+        if (!val) {
+          // its formula is cost the viewer does not see (price_matrix `hidden`): which rule applies, not how
+          const hidden = t("rates.occ.ladder.cell.policy_hidden")
+          return {
+            tone: "muted",
+            content: (
+              <>
+                <i>{hidden}</i>
+                <span className="max-w-full truncate text-[10px]">{from}</span>
+              </>
+            ),
+            stack: true,
+            state: "policy",
+            value: `${hidden} (${[from, allRooms].filter(Boolean).join(" · ")})`,
+            tooltip: t("rates.occ.ladder.cell.policy_hidden_tip", { source }),
+          }
+        }
         return {
           tone: "muted",
           content: (
@@ -615,6 +632,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       return { tone: "resolved", content: "…", state: "loading" }
     }
     const v = partyCell.cells?.[period]
+    if (partyCell.hidden?.includes(period)) return { tone: "resolved", content: "—", state: "cost_hidden", value: t("rates.occ.ladder.party_hidden"), tooltip: t("rates.occ.ladder.party_hidden") }
     if (v === undefined || v === null) return { tone: "resolved", content: "—", state: "no_price" }
     return { tone: "resolved", content: <Money amount={v} currency={ccy} />, state: "occ_resolved", value: `${ccy} ${amount(v)}`, tooltip: t("rates.occ.ladder.resolved_tip") }
   }

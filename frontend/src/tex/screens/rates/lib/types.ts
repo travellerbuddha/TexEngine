@@ -449,10 +449,14 @@ export interface InheritedOccupancyRule {
   children: number | null
   room_type: string | null
   period: string | null
-  op: string
+  /** null when hidden */
+  op: string | null
   value: string | null
   is_override: boolean
   source: string
+  /** the viewer does not see cost (no price.view_cost): the rule's scope and source only, without
+   * its op or value (a pricing policy's formulas are cost, G-11) */
+  hidden?: boolean
 }
 
 /** The engine's own default for a slot no rule prices (D12). */
@@ -486,6 +490,8 @@ export interface PartyCell {
   cells: Record<string, string | null>
   slots: Record<string, PartySlot[]>
   errors: Record<string, string>
+  /** periods whose total uses an inherited policy rule the viewer may not read (no total is sent) */
+  hidden?: string[]
 }
 
 export interface PriceMatrix {
