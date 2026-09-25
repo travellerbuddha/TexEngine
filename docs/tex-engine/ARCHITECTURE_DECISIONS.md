@@ -5341,10 +5341,14 @@ were made with many periods):
   formula: BASE_FORMULA. The rule popover stores what it is told (the explicit way to put a
   formula on the base room).
 - *O5 (AMBIGUOUS)* now reaches the screen: "Is this 1500 or 1.5? …" in the six languages, for
-  amounts in 0- and 2-decimal currencies, in the cells and in the popover; `12.345` is accepted in
-  3-decimal currencies. Factors and percentages are exempt.
-- *O1–O3 (boards)* are unchanged: in the parser and the model; their cells are S13. (The period
-  night adjustment uses the `period_adjust` context, which no O item covers.)
+  amounts in 0- and 2-decimal currencies, in the cells and in the rule popover, where `12.345` is
+  accepted in 3-decimal currencies. Factors and percentages are exempt. *Corrected by the S9
+  review follow-up:* O5 also covers the period night adjustment (`period_adjust` ADD / SUBTRACT
+  are amount ops, §3.4.3), and as built in S9 the Night adjustment popover was not
+  currency-aware: it parsed without the contract's minor units, so `+12.345` and `+2.500` were
+  refused as AMBIGUOUS in 3-decimal currencies too, and a stored ADD 12.345 re-opened as text that
+  could not be applied. Fixed by the follow-up below.
+- *O1–O3 (boards)* are unchanged: in the parser and the model; their cells are S13.
 
 **Open after S9.**
 - `Money` (the existing helper) cuts a resolved amount to the currency's decimals instead of
@@ -5362,3 +5366,178 @@ were made with many periods):
   guard; the overlay skips `_validate_links` and the window order; the cross-hotel rate plan /
   policy gap in `build_terms`; a weekly contract above the overlay's row cap is not previewed
   unsaved.
+
+**S9 review follow-up (2026-09-25).** One medium and five low verifier findings on S9. The medium
+one and three low ones are fixed; the fifth low one is the owner decision already listed under
+"Open after S9". One more fault was found while verifying and is fixed too.
+1. *(medium) The night adjustment was not currency-aware.* The Night adjustment popover
+   (`PeriodHeader.tsx`) called `parseShorthand(text, "period_adjust")` without the contract's minor
+   units, so the parser used its default, 2. O5 (§3.4.3) lists the period adjustment's ADD /
+   SUBTRACT as amount ops, with the guard only below 3 decimals. As built, a KWD, BHD, OMR, JOD or
+   TND contract had `+2.500` or `+12.345` refused as "Is this 1500 or 1.5?". The start text of an
+   existing adjustment (`displayText` with no minor units) re-opened ADD 12.345 as `+12.345`, which
+   was refused as it stood; that happened in a 2-decimal contract too. The O1–O5 report after S9
+   said the night adjustment was covered by no O item, which was wrong.
+2. *(low) A late `apply_op_values` answer could overwrite an edit.* Only the base-room cells of a
+   Ctrl/Cmd+Enter entry were pending. Its other cells could be edited while the call was out, and
+   the answer re-planned the entry and overwrote them. The open editor was kept by row index: when
+   the answer turned a manual room into a formula room, that room gained a Resolved row, and an
+   editor below it re-mounted in another room's row with its start text and committed there
+   (reproduced in the browser: the editor of Garden Villa P2 holding `x1.5` became "Price: Family
+   Suite · P2" holding `x`).
+3. *(low) "50%" and "+50%" read alike on the base room*: "adjust 70.00 by 50%" (PERCENT_OF, 35.00)
+   and "adjust 70.00 by +50%" (ADJUST_PERCENT, 105.00).
+4. *(low) Stale resolved cells* were only dimmed; their accessible name gave the older value as
+   current (§3.3.3 names the state "updating").
+5. *(low) The cell editor asked for the decimal keypad* (`inputMode="decimal"`), which has no x, %,
+   + or =; a formula could not be typed into a cell on a phone (§3.21), and iOS Safari does not open
+   the popover on a long press.
+6. *(low, not changed) `Money` cuts resolved amounts* to the currency's decimals (108.675 shows
+   108.67). Pre-existing and already under "Open after S9" as an owner decision; if the owner
+   chooses rounding, it must be half-up on the decimal string, never a float.
+7. *(found while verifying) The refocus frame after Escape could take the focus from a new edit.*
+   Under load (animation frames 400 ms late in the check below), Escape, then a click on another
+   cell and typing, let the late frame move the focus back to the old cell: the new editor lost
+   focus and its text was committed as it stood.
+
+**Decision (S9 review follow-up).** Frontend only; no endpoint, payload, price or rule change, and
+no change to what an entry stores.
+- *Night adjustment (O5).* `PeriodHeader` gets the contract's minor units from `PriceMatrix`
+  (`contract_doc.minor_units`, else the currency's). The popover parses with
+  `matrixView.parsePeriodAdjust(text, {minorUnits})` and starts from
+  `matrixView.periodAdjustEditText(tables, code, {decimalMark, minorUnits})`, which is `editText`
+  in the `period_adjust` context. That text parses back to the stored adjustment with the same
+  minor units: `+12.345` in a 3-decimal currency, `+12.3450` below (as the cells already do,
+  ADR-061 S1).
+- *Late answers (O4's commit).*
+  - Every cell of the entry is pending until the answer (`matrixView.gestureCells`): the base-room
+    ones show the price sent ("70.00 → …"), the others what they hold, with the spinner. None
+    opens an editor or the popover, or takes Delete.
+  - An entry over a selection that includes a pending cell is refused as a whole with PENDING
+    ("This cell is still being calculated. Enter it when the calculation is done.").
+  - `finishEntry` takes the tables the entry was sent from. It completes nothing, with CHANGED at
+    that cell, when a cell of the entry has other own rows now (op, canonical value, base room) or
+    its room or period is gone (renamed, deleted, removed). This covers the paths the pending state
+    cannot block: the popover's "selected periods", the room and period menus, and undo. Edits of
+    other cells made meanwhile are kept. CHANGED now reads "This cell changed while the entry was
+    being calculated. Enter it again."; the entry stays in the cell as an error draft, as before.
+  - The editor is kept by its cell (room, period), not by a row index. `matrixView.cellPosition`
+    finds the room's entry row and the period's column on each render; rows that come and go
+    above it do not move it. A commit re-checks that each cell still exists and takes entries
+    (CHANGED otherwise).
+- *Reading.* A base-room PERCENT_OF entry reads "{cell}: 50% of 70.00 (calculated on commit)"
+  (`rates.sh.read.adjust_pct`); the other relative ops keep "adjust 70.00 by +50%".
+- *Stale.* A resolved cell older than the draft on screen is named "{state}, updating"
+  (`rates.ws.cell.stale_state`), e.g. "Garden Villa · P1: resolved price, updating, EUR 94.50".
+- *Keyboard.* The cell editor uses `inputMode="text"`, with no autocapitalise or autocorrect.
+- *Focus.* The refocus frame after Escape does nothing while an editor is open.
+- New strings, in the six languages: `rates.sh.err.PENDING`, `rates.sh.read.adjust_pct`,
+  `rates.ws.cell.stale_state`; `rates.sh.err.CHANGED` reworded.
+
+**Tests (S9 review follow-up).** `tests/unit/workspace-matrix.test.ts` 23 (18 + 5):
+- the night adjustment's `+12.345` is AMBIGUOUS at 2 and 0 decimals (and with no minor units) and
+  ADD 12.345 at 3; `+2.500` and `-2,500` are ADD / SUBTRACT 2.5 at 3; percentages and factors are
+  exempt;
+- the start text of ADD 12.345 is `+12.345` / `+12,345` at 3 decimals and `+12.3450` at 2, and at
+  0, 2 and 3 decimals with either mark it applies back to the same tables; SUBTRACT, MULTIPLY,
+  ADJUST_PERCENT, no adjustment and an unknown period;
+- every cell of an entry is pending, the base ones with the price sent;
+- a late answer completes nothing (CHANGED at that cell) after a price typed into a non-base cell
+  of the entry, a period rule of the entry removed, its period renamed or deleted, or its room
+  removed; it completes around an edit of another cell; the same price retyped (`70.00`) is not a
+  change;
+- `cellPosition` follows Garden Villa P2 from row 2 to row 3 when Family Suite gains its Resolved
+  row, and is null for an unknown room or period.
+
+The existing `finishEntry` tests pass the tables the entry was sent from (the new argument), and
+their answers are unchanged.
+
+Fail-first:
+- with the new tests on the unfixed tree, the file does not load (`SyntaxError: … does not provide
+  an export named 'cellPosition'`);
+- a scratch test of the unfixed code paths fails three times:
+  - the popover's parse of `+12.345` gives `{ok: false, code: "AMBIGUOUS", op: "ADD"}` where a
+    3-decimal contract needs ADD 12.345;
+  - the re-opened `+12.345` gives `{error: "AMBIGUOUS"}`;
+  - the late answer overwrites Deluxe P3's typed 150 with ADJUST_PERCENT 10.
+- the browser checks below were run on the unfixed sources as well: the KWD night adjustment, the
+  PERCENT_OF reading, the keyboard, the stale name, the pending cells and the editor's cell all
+  failed there; the EUR check passed, as it should.
+
+**Verification (S9 review follow-up).**
+- *Build and unit tests:* `tsc -b`, `npm run build`, `npm run i18n:tex` (3 new keys, one reworded, in
+  the six languages), `npm run test:unit` 171, `npm run test:dom` 24, Python unit 491, ruff (no
+  Python change).
+- *Integration, on the tree migrated with it:* `test_pricing_workspace_api` 50 OK. The opt-in
+  `bench_pricing_workspace` ran 3 OK.
+- *Browser:* a scratch Playwright check on the tree's own servers (bench :8016, Vite :5186), 8/8:
+  1. a KWD contract (`minor_units` 3): the night adjustment takes `+12.345` ("P3: occupancy +
+     board +12.345", Apply enabled), the header shows "◆ +12.345", the popover re-opens with
+     `+12.345`, and after a save `get_version` has ADD 12.345;
+  2. a EUR contract: `+12.345` shows the AMBIGUOUS message with Apply disabled; `+12.5` is taken;
+  3. the base room: "Standard Sea View · P1: 50% of 70.00 (calculated on commit)" and "…: adjust
+     70.00 by +50% …"; the editor has `inputmode="text"`;
+  4. with the live preview held back 2.5 s: "Garden Villa · P1: resolved price, updating, EUR
+     94.50", then "…: resolved price, EUR 108.00";
+  5. with `apply_op_values` held back, one entry `x1.2` over Standard P1 and Family Suite All
+     periods:
+     - both cells are "being calculated", and F2 and typing open no editor on Family Suite;
+     - an entry over a selection with Standard P1 is refused with "… still being calculated";
+     - an editor opened on Garden Villa P2 with `x1.5` keeps its cell, its text and the focus when
+       the answer lands (84.00; Family Suite ×1.2, its Resolved row with 96.00);
+     - Enter stores Garden Villa P2 ×1.5 (120.00), and Family Suite P2 still follows all periods;
+  6. the reading and the editor checks on their own (both also run on the unfixed sources, where
+     both failed);
+  7. with animation frames 400 ms late: Escape, a click on Garden Villa P3 and `15` keep the
+     editor, its text and the focus, with nothing committed. Without the guard the frame took the
+     focus and committed 15.
+- *S9's own scratch smoke* passed 8/8 three times in a row. One earlier run failed while Vite
+  recompiled the restored sources: the keys typed at once after Escape went nowhere until the
+  delayed refocus frame. That is item 1 under "Open after the S9 review follow-up".
+- *Existing specs:* `contract-admin`, `critical-journey` and `editor-edits` (3) pass on the tree's
+  own servers (5 passed).
+
+**Performance of the server-side draft overlay** (`bench_pricing_workspace` on this tree, best of
+three, seconds; validation run once; no server code changed since S8):
+
+| Draft | Rows | Overlay alone | `price_matrix` with data (saved) | 12 sample parties with data | `preview_price` with data | `validate_version` with data (saved) |
+|---|---|---|---|---|---|---|
+| Realistic 12 rooms × 26 periods | 1,406 | 0.164 | 0.247 (0.074) | 0.286 | 0.226 | 2.03 (1.89) |
+| Near the cap, 12 × 40 | 4,539 | 0.514 | 0.683 (0.162) | 0.896 | 0.699 | 9.72 (9.55) |
+| Above the cap, 12 × 52 | 5,892 | refused in 0.266 | by name 0.241 | by name 0.645 | by name 0.201 | by name 16.0 |
+
+`apply_op_values` with 500 prices: 0.007–0.008 s. `save_version`: 0.77 / 2.27 / 3.14 s. These are
+within 10 % of the S8 review follow-up's figures.
+
+**O1–O5 after the S9 review follow-up** (all five provisional, owner input 13; none changes how the
+engine prices, since each maps an entry onto an op the engine already has):
+- *O1 (board `100` → ABSOLUTE, per room per night):* in the parser and the model only; the board
+  cells and their reading line are S13. Unchanged.
+- *O2 (board `-20` → ADD −20 per adult):* parser and model only (S13). Unchanged.
+- *O3 (board `50%` → ADJUST_PERCENT 50):* parser and model only (S13). Unchanged.
+- *O4 (base room, relative entry):* built end to end.
+  - In a base-room cell whose price is an entered one, `x1.1`, `+10%`, `-5`, `+5` and `50%` are
+    parsed as the owner's table says.
+  - The reading line says what will be stored, before commit: "adjust 70.00 by +10% (calculated
+    on commit)", or for PERCENT_OF "50% of 70.00 (calculated on commit)".
+  - On commit, one `apply_op_values` call adjusts every base cell of the entry once, HALF_UP to the
+    contract currency, and the answers are stored as ABSOLUTE (`+10%` on 70 → 77.00).
+  - Meanwhile every cell of the entry is pending. An answer for a cell changed meanwhile stores
+    nothing (CHANGED).
+  - Without an entered price: BASE_NO_PRICE; with a formula: BASE_FORMULA. The rule popover
+    stores the op it is given.
+- *O5 (currency-aware AMBIGUOUS):* on screen in every context built so far, in the six languages.
+  - It applies to amounts only: room ABSOLUTE / ADD / SUBTRACT, in the cells and the rule popover,
+    and period night adjustment ADD / SUBTRACT, in its popover.
+  - An amount with 1–3 integer digits and exactly 3 fraction digits is refused in 0- and 2-decimal
+    currencies and accepted in 3-decimal ones (KWD, BHD, OMR, JOD, TND).
+  - Factors and percentages are exempt.
+  - Occupancy and board cells (S11, S13) will use the same parser, whose tests cover those
+    contexts.
+
+**Open after the S9 review follow-up.**
+- Keys typed before the refocus frame after Escape, Enter or Tab (one frame, longer under load) go
+  nowhere. Pre-existing, and harmless: nothing is committed.
+- `Money` cuts resolved amounts to the currency's decimals (item 6): the owner decides; if
+  rounding, half-up on the decimal string.
+- The other items under "Open after S9" are unchanged.

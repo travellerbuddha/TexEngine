@@ -490,3 +490,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   both stay owner input 13 with O1–O3. Display note for the owner: resolved amounts are cut, not
   rounded, to the currency's decimals by the existing formatter (ADR-061, open). No server change;
   no area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S9 review follow-up on branch `pricing-workspace` (ADR-061). In a
+  3-decimal contract currency (KWD, BHD, OMR, JOD, TND) the night adjustment takes amounts such as
+  +12.345, as O5 says. An answer of the server that arrives after the user changed one of its cells
+  no longer overwrites that change, and the cell editor no longer jumps to another room. The
+  base-room reading tells "50%" from "+50%". O1–O5 remain owner input 13, and their implemented
+  behaviour is listed in ADR-061. Display note unchanged: resolved amounts are cut, not rounded.
+  No server change; no area status changes. Verdict unchanged: NOT READY.
