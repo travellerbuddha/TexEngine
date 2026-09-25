@@ -115,7 +115,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     repository, not the version). Local changes that are not committed and pushed are not offered:
     deploy only pushed commits.
 13. Pricing Workspace shorthand (ADR-061, `PRICING_WORKSPACE_UX.md` §0.1): five provisional
-    decisions the workspace is built with (complete on branch `pricing-workspace`, S16). O1: a bare number in a board cell is a price per
+    decisions the workspace is built with (branch `pricing-workspace`, S1–S16; PARTIAL until its final verification is green in every suite, IMPLEMENTATION_STATUS). O1: a bare number in a board cell is a price per
     room per night (ABSOLUTE), not per adult. O2: `-20` in a board cell is ADD −20 per adult. O3:
     `50%` in a board cell is ADJUST_PERCENT 50. O4: a relative entry (`x1.1`, `+10%`, `-5`) on the
     base room is applied once to its entered price and stored as a price. O5: an amount typed as
@@ -647,3 +647,14 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - Parity with main `6b0102c`: 2,906 quotes byte for byte, 25 payloads' issues, hashes and units,
     97 broken drafts' issues (`test_main_parity`); the endpoints (`test_existing_semantics`).
   - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace final verification on branch `pricing-workspace` (`ebf6631`; main
+  `1575c8b` contained) (ADR-061). Green: unit 516, ruff, frontend unit 311 and DOM 32, `tsc -b`,
+  build, i18n; the whole-site tests on a disposable site; upstream 76/76, 13/13, 101; the acceptance
+  in five runs, each 41 clicks, 0 section switches, 0 modal dialogs. Not green: integration 860 of
+  861 (`test_system_status`'s FX test depends on the site's weekday and fails the same on main's
+  code); Playwright 148 of 149 and 8/8 in run 1, 139 passed and 4 failed in run 2: two workspace
+  tests fail intermittently (keys typed at once after Escape lost, 2 of 6 runs; one header-lane
+  arrow step, 1 of 6), and two `entry-branding` navigation tests fail on the shared site's data
+  (over 2,000 draft versions left by E2E runs cut the version lists). The workspace is recorded
+  PARTIAL; O1–O5 remain owner input 13, the existing-caller differences owner input 14. No area
+  status changes. Verdict unchanged: NOT READY.

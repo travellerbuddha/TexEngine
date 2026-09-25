@@ -8460,3 +8460,35 @@ No application code was changed. Open (possible optimisations, none needed for t
 the loaded draft to `_overlay` (item 2); read the contract's room types in one query (item 3);
 filter the rules once per room and period in the sweep, and read `child_count` once per party
 (item 4).
+
+**Final verification (2026-09-25).** On `ebf6631`; main `1575c8b` is contained, so nothing was
+merged. Unit 516 OK, ruff clean, `npm run test:unit` 311/311, `npm run test:dom` 32/32, `tsc -b`,
+`npm run build` (bundles not committed) and `npm run i18n:tex` clean. All 40 integration modules
+(migrated with the tree): 861 tests, 860 OK (10 skipped) and 1 error. On a disposable site:
+`test_patches` 33/33 and the 7 second-connection tests of `test_crm_third_review` OK. Upstream:
+76/76, 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016 serving the tree and
+its own build, RQ worker, Vite :5186; a second factor for one test user and a `tex_source_url`, so
+nothing is skipped): run 1, 148 of 149 through Vite and custom-host, pay-link and manage-money 8/8
+against :8016; the acceptance spec 3/3 twice in a row; run 2, 139 passed, 4 failed, 6 not run;
+reruns as listed in IMPLEMENTATION_STATUS, ending with every `pricing-workspace*` spec 98/98. The
+acceptance measured **41 clicks, 0 section switches, 0 modal dialogs** in each of its five runs.
+- *In the workspace, intermittent:* `pricing-workspace-matrix` "Escape reverts; 'abc' and '1.500' …"
+  failed in 2 of 6 runs: keys typed at once after Escape closed the invalid editor were lost (the
+  editor held `.500`, or nothing opened). Likely cause: `finish` returns the focus to the cell only
+  on the next animation frame (`focusAt`), so keys in between reach `body`. And
+  `pricing-workspace-rereview` "one tab stop per grid …" failed once in 6 runs (ArrowDown on the
+  first room's header menu did not reach the next room's menu; cause not found). Open.
+- *Outside the workspace:* `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails`
+  warns only on a site date of Wednesday to Friday (two business days against a rate three calendar
+  days old); the run was on a Saturday (Europe/Istanbul) and main's code errors the same way in the
+  same hold. Correction to "Verification (existing semantics kept)" above: it depends on the site's
+  weekday, not the time of day. `entry-branding` "navigation: every new sub-section …" clicked a Rate
+  plans row while the table showed its loading placeholders (run 1); from run 2 on, that test and
+  "a restricted user sees only …" fail because `lists.version_rows` cuts at 2,000 versions and the
+  shared site's hotel now has 2,114 Draft or Published versions, nearly all archived E2E contracts'
+  drafts, so the demo contracts' rows are cut (answer: no row, `truncated`). On a disposable site
+  the other 14 tests of `test_crm_third_review` need the shared site's `developer_mode` and
+  `encryption_key`; with both, `test_new_events_never_wait_for_a_purge` still waits out its lock on
+  the near-empty site.
+- The lane's rule records the workspace as COMPLETE only when every suite is green: it is PARTIAL in
+  IMPLEMENTATION_STATUS.
