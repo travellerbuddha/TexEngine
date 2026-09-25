@@ -41,6 +41,12 @@ import {
   type PreviewMode,
 } from "./draftPreview.ts"
 
+/** The sample parties the occupancy ladder's resolved line asks for (GAP-2b, S11), priced in `room`. */
+export interface SampleRequest {
+  room: string
+  parties: SampleParty[]
+}
+
 export interface DraftPreviewOptions {
   /** fingerprint(state), when the caller has already computed it */
   fingerprint?: string
@@ -125,8 +131,9 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
   const modified = doc?.modified ?? ""
   const { parties, partyRoom } = opts
   const partiesJson = parties?.length && partyRoom ? JSON.stringify([parties, partyRoom]) : ""
-  const partiesRef = useRef({ parties, partyRoom })
-  partiesRef.current = { parties, partyRoom }
+  const savedRooms = useMemo(() => (doc?.rooms ?? []).map((r) => String(r.room_type ?? "").trim()).filter(Boolean), [doc?.rooms])
+  const partiesRef = useRef({ parties, partyRoom, savedRooms })
+  partiesRef.current = { parties, partyRoom, savedRooms }
   const [tick, setTick] = useState(0)
   const [vtick, setVtick] = useState(0)
 

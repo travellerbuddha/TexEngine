@@ -134,6 +134,9 @@ export interface PreviewInput {
   partyRoom?: string
   /** previewSource: "saved" asks for the saved draft by name (overlay mode's default is the overlay) */
   source?: PreviewSource
+  /** the rooms of the saved draft (doc.rooms): an answer about the saved draft prices the sample
+   * parties only in one of them (price_matrix refuses a party room that is not a contract room) */
+  savedRooms?: readonly string[]
 }
 
 export interface PreviewRequest {
@@ -148,7 +151,8 @@ export function matrixRequest(mode: PreviewMode, p: PreviewInput): PreviewReques
   const overlay = mode === "overlay" && p.source !== "saved"
   const args: Record<string, unknown> = { version: p.version }
   if (overlay) args.data = p.data
-  if (p.parties && p.parties.length > 0 && p.partyRoom) {
+  const roomKnown = overlay || !p.savedRooms || p.savedRooms.includes(p.partyRoom ?? "")
+  if (p.parties && p.parties.length > 0 && p.partyRoom && roomKnown) {
     args.parties = p.parties
     args.party_room = p.partyRoom
   }

@@ -40,6 +40,10 @@ export interface CellView {
   error?: string
   /** the ▾ trigger of the advanced popover (editable cells only) */
   trigger?: { label: string; onOpen: (anchor: HTMLElement) => void }
+  /** the content may take two short lines instead of being cut (the ladder's "No rule · not sellable") */
+  wrap?: boolean
+  /** the content is a column of lines (the ladder's "◆ ×0.80" over its OVERRIDE tag) */
+  stack?: boolean
   onContextMenu?: (e: MouseEvent<HTMLElement>) => void
 }
 
@@ -177,7 +181,17 @@ function MatrixCellImpl({ nav, view, tint, editor, blockStart }: MatrixCellProps
     >
       {editor ?? (
         <>
-          <span className="min-w-0 truncate">{view.content}</span>
+          <span
+            className={
+              view.stack
+                ? "flex min-w-0 flex-col items-end py-0.5 leading-tight whitespace-nowrap"
+                : view.wrap
+                  ? "min-w-0 text-right text-[11px] leading-tight whitespace-normal"
+                  : "min-w-0 truncate"
+            }
+          >
+            {view.content}
+          </span>
           {trigger && (
             <button
               type="button"

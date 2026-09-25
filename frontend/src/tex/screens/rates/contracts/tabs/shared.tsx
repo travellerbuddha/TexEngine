@@ -4,7 +4,7 @@ import { IssueList } from "../../components/common"
 import type { EditorState, SellingForm } from "../../lib/tables"
 import type { Issue, Lookups, Row, VersionDoc, VersionSetting, VersionTable } from "../../lib/types"
 import { issueTable } from "../../lib/util"
-import type { DraftPreview } from "../../workspace/useDraftPreview"
+import type { DraftPreview, SampleRequest } from "../../workspace/useDraftPreview"
 import type { WorkspaceHistory } from "../../workspace/useWorkspaceHistory"
 
 export interface TabProps {
@@ -28,6 +28,8 @@ export interface TabProps {
   /** Bumped each time the editor loads a version (and on Discard): workspace views keyed on it
    * start afresh (no edit in progress, no error drafts). */
   epoch?: number
+  /** The occupancy ladder asks the live preview to price a sample party (GAP-2b, S11); null stops it. */
+  setSampleParty?: (request: SampleRequest | null) => void
 }
 
 export function roomOptions(doc: VersionDoc): Option[] {

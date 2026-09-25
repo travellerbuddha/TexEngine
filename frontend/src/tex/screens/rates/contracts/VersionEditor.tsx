@@ -14,7 +14,7 @@ import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } fr
 import { ContextHeader } from "../workspace/ContextHeader"
 import { PricingSection } from "../workspace/PricingSection"
 import { SECTIONS, DEFAULT_RULE_TABLE, type EditorPlace, type PricingRegion, type RuleTableId, type SectionId } from "../workspace/sections.ts"
-import { useDraftPreview } from "../workspace/useDraftPreview"
+import { useDraftPreview, type SampleRequest } from "../workspace/useDraftPreview"
 import { useWorkspaceHistory } from "../workspace/useWorkspaceHistory"
 import { CommercialRulesSection } from "./sections/CommercialRulesSection"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
@@ -112,8 +112,12 @@ export default function VersionEditor() {
   const editable = Boolean(doc?.editable)
   const fp = useMemo(() => (state ? fingerprint(state) : ""), [state])
   const dirty = Boolean(state && editable && fp !== base)
+  // the occupancy ladder's sample party (S11), priced only in a room the draft on screen holds
+  // (price_matrix refuses the whole call for a party room that is not a contract room)
+  const [samples, setSamples] = useState<SampleRequest | null>(null)
+  const sampleRoom = samples && state?.tables.rooms.some((r) => String(r.room_type ?? "").trim() === samples.room) ? samples.room : undefined
   // the server's resolved prices and issues for what is on screen (overlay, saved or catalogue)
-  const preview = useDraftPreview(doc, state, { fingerprint: fp, base })
+  const preview = useDraftPreview(doc, state, { fingerprint: fp, base, parties: sampleRoom ? samples?.parties : undefined, partyRoom: sampleRoom })
 
   const onSave = useCallback(async () => {
     // one save at a time (Ctrl+S while one is in flight waits for the next press)
@@ -209,7 +213,9 @@ export default function VersionEditor() {
     )
 
   const props: TabProps | undefined =
-    doc && state ? { doc, state, readOnly: !editable, issues, setTable: recordTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview, history, epoch } : undefined
+    doc && state
+      ? { doc, state, readOnly: !editable, issues, setTable: recordTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview, history, epoch, setSampleParty: setSamples }
+      : undefined
 
   const draftAction =
     doc &&

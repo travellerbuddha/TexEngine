@@ -47,6 +47,24 @@ test("saved: a GET without data, and never a validation", () => {
   assert.equal(validationRequest("saved", { version: "V-1", data: { rooms: [] } }), null)
 })
 
+test("sample parties go with the saved draft only when its rooms hold the party room (S11)", () => {
+  const parties = [{ adults: 2, children: ["CHB"] }]
+  // the saved draft asked for by name (clean, over the overlay's cap) or a published version: a
+  // room added since the last save is not a room of the answer, and price_matrix would refuse
+  // the whole call for it; the ladder then shows no total for that room instead of losing the matrix
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", source: "saved", parties, partyRoom: "SUP", savedRooms: ["STD"] }), { args: { version: "V-1" }, post: false })
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", source: "saved", parties, partyRoom: "STD", savedRooms: ["STD"] }), {
+    args: { version: "V-1", parties, party_room: "STD" },
+    post: false,
+  })
+  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties, partyRoom: "SUP", savedRooms: ["STD", "DLX"] }), { args: { version: "V-1" }, post: false })
+  // the overlay prices what is on screen: its rooms are the caller's to check
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data: {}, parties, partyRoom: "SUP", savedRooms: ["STD"] }), {
+    args: { version: "V-1", data: {}, parties, party_room: "SUP" },
+    post: true,
+  })
+})
+
 test("catalogue: no request at all", () => {
   assert.equal(matrixRequest("catalogue", { version: "V-1", data: {} }), null)
   assert.equal(validationRequest("catalogue", { version: "V-1", data: {} }), null)
