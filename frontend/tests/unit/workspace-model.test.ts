@@ -3,17 +3,26 @@
 // Run with `npm run test:unit` (node --test).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseShorthand, type ShContext } from "../../src/tex/screens/rates/lib/shorthand.ts"
+import { editText, parseShorthand, type ShContext, type ShOp } from "../../src/tex/screens/rates/lib/shorthand.ts"
 import {
+  addBoard,
   applyAdjustResults,
   applyBoardEntry,
   applyRoomEntry,
+  boardEditText,
   boardModel,
+  boardReadingOf,
+  boardSummary,
+  boardTermsOf,
   cellState,
   defaultBase,
   matrixModel,
+  moveBoardRows,
+  planBoardEntries,
   removeBoard,
+  removeBoardRow,
   removeRoom,
+  setBoardTerms,
   setBaseRoom,
   setDerivation,
   upsertRoomRule,
@@ -480,6 +489,215 @@ test("removeBoard removes every row of a board", () => {
   assert.deepEqual(
     out.tables.boards.map((b) => b.board),
     ["UAI", "AI"],
+  )
+})
+
+// ─── the boards grid of the workspace (§3.12, slice S13) ─────────────────
+
+const cellOf = (id: { board: string; room_type: string }, period: string, text: string) => ({ id, period, parsed: sh(text, "board") })
+function planned(res: ReturnType<typeof planBoardEntries>): { tables: Tables; removes: string[] } {
+  assert.ok("tables" in res, `expected tables, got ${JSON.stringify(res)}`)
+  return res
+}
+
+test("S13 cells: HB -20 / +20 / 20, AI -5% / 5%, UAI base, HB P4 — through the grid's plan", () => {
+  const t = owner()
+  const hb = (text: string, period = "") => boardRows(planned(planBoardEntries(t, [cellOf(HB, period, text)])).tables, "HB")
+  assert.deepEqual(hb("-20"), ["*/*:ADD:-20", "*/P2:ADD:-25", "DLX/*:ADD:-10"])
+  assert.deepEqual(hb("+20")[0], "*/*:ADD:20")
+  assert.deepEqual(hb("20")[0], "*/*:ABSOLUTE:20")
+  const ai = { board: "AI", room_type: "" }
+  assert.deepEqual(boardRows(planned(planBoardEntries(t, [cellOf(ai, "", "-5%")])).tables, "AI"), ["*/*:ADJUST_PERCENT:-5"])
+  assert.deepEqual(boardRows(planned(planBoardEntries(t, [cellOf(ai, "", "5%")])).tables, "AI"), ["*/*:ADJUST_PERCENT:5"])
+  // UAI base while AI is the base board: UAI gets is_base 1, every other row 0
+  const aiBase = planned(planBoardEntries(t, [cellOf(ai, "", "base")])).tables
+  const uai = planned(planBoardEntries(aiBase, [cellOf({ board: "UAI", room_type: "" }, "", "BASE")])).tables
+  assert.deepEqual(
+    uai.boards.map((b) => `${b.board}/${b.room_type || "*"}/${b.period_code || "*"}:${b.is_base}`),
+    ["UAI/*/*:1", "AI/*/*:0", "HB/*/*:0", "HB/*/P2:0", "HB/DLX/*:0"],
+  )
+  // a period-scoped HB P4 row, with the terms of the row it overrides
+  const p4 = planned(planBoardEntries(t, [cellOf(HB, "P4", "-30")])).tables
+  const row = p4.boards.find((b) => b.board === "HB" && b.period_code === "P4" && !b.room_type)
+  assert.deepEqual([row?.op, row?.adult_amount, row?.child_percent, row?.infant_free, row?.is_base], ["ADD", "-30", "30", 1, 0])
+})
+
+test("S13 plan: BASE only in one board's All periods cell; clearing a board's own cell removes the board; all or nothing", () => {
+  const t = owner()
+  const ai = { board: "AI", room_type: "" }
+  assert.deepEqual(planBoardEntries(t, [cellOf(HB, "P2", "base")]), { error: "BASE_SCOPE", index: 0 })
+  assert.deepEqual(planBoardEntries(t, [cellOf({ board: "HB", room_type: "DLX" }, "", "base")]), { error: "BASE_SCOPE", index: 0 })
+  assert.deepEqual(planBoardEntries(t, [cellOf(ai, "", "base"), cellOf(HB, "", "base")]), { error: "BASE_SCOPE", index: 0 })
+  // the board's own All periods cell: the whole board goes (the screen asks first)
+  const gone = planned(planBoardEntries(t, [cellOf(HB, "", "")]))
+  assert.deepEqual(gone.removes, ["HB"])
+  assert.deepEqual(
+    gone.tables.boards.map((b) => b.board),
+    ["UAI", "AI"],
+  )
+  // a period or room cell: only that row
+  const p2 = planned(planBoardEntries(t, [cellOf(HB, "P2", "")]))
+  assert.deepEqual(p2.removes, [])
+  assert.deepEqual(boardRows(p2.tables, "HB"), ["*/*:ADD:-20", "DLX/*:ADD:-10"])
+  const dlx = planned(planBoardEntries(t, [cellOf({ board: "HB", room_type: "DLX" }, "", "")]))
+  assert.deepEqual(boardRows(dlx.tables, "HB"), ["*/*:ADD:-20", "*/P2:ADD:-25"])
+  // a board with room rules only: its empty All periods cell removes nothing
+  const dlxOnly = tablesOf({ ...t, boards: t.boards.filter((b) => b.board !== "HB" || b.room_type === "DLX") })
+  const none = planned(planBoardEntries(dlxOnly, [cellOf(HB, "", "")]))
+  assert.equal(none.tables, dlxOnly)
+  assert.deepEqual(none.removes, [])
+  // the second cell fails: nothing is written
+  assert.deepEqual(planBoardEntries(t, [cellOf(HB, "P1", "-5"), cellOf(HB, "P3", "x2")]), { error: "OP_NOT_ALLOWED", index: 1 })
+  assert.deepEqual(planBoardEntries(t, [cellOf(HB, "P1", "1.500")]), { error: "AMBIGUOUS", index: 0 })
+  // unchanged: the same tables object (no history entry)
+  assert.equal(planned(planBoardEntries(t, [cellOf(HB, "", "-20.00")])).tables, t)
+})
+
+test("S13 reading: the unit and the child share of the row that will be written, BASE moves, clear follows", () => {
+  const t = owner()
+  const read = (id: { board: string; room_type: string }, period: string, text: string, tb: Tables = t) => boardReadingOf(tb, id, period, sh(text, "board"))
+  assert.deepEqual(read(HB, "P4", "-30"), { kind: "rule", op: "ADD", value: "-30", child_percent: "30", infant_free: true, wasBase: false })
+  assert.deepEqual(read({ board: "HB", room_type: "DLX" }, "P4", "+15"), { kind: "rule", op: "ADD", value: "15", child_percent: "40", infant_free: false, wasBase: false })
+  assert.deepEqual(read(HB, "", "100"), { kind: "rule", op: "ABSOLUTE", value: "100", child_percent: "30", infant_free: true, wasBase: false })
+  assert.deepEqual(read({ board: "UAI", room_type: "" }, "", "+30"), { kind: "rule", op: "ADD", value: "30", child_percent: "50", infant_free: true, wasBase: true })
+  // a new board (no row yet): the table defaults
+  assert.deepEqual(read({ board: "FB", room_type: "" }, "", "+40"), { kind: "rule", op: "ADD", value: "40", child_percent: "50", infant_free: true, wasBase: false })
+  assert.deepEqual(read({ board: "AI", room_type: "" }, "", "base"), { kind: "base", previous: ["UAI"] })
+  assert.deepEqual(read({ board: "UAI", room_type: "" }, "", "BASE"), { kind: "unchanged" })
+  assert.deepEqual(read(HB, "", "-20"), { kind: "unchanged" })
+  assert.deepEqual(read(HB, "", ""), { kind: "remove-board", rows: 3 })
+  const follows = read(HB, "P2", "")
+  assert.equal(follows.kind, "clear")
+  assert.equal(follows.kind === "clear" ? follows.follows?.adult_amount : null, "-20")
+  assert.deepEqual(read(HB, "P1", ""), { kind: "unchanged" })
+  assert.deepEqual(read(HB, "P1", "base"), { kind: "error", code: "BASE_SCOPE" })
+  assert.deepEqual(read(HB, "P1", "x1.1"), { kind: "error", code: "OP_NOT_ALLOWED" })
+})
+
+test("S13 edit text: a board cell's own rule as shorthand, which parses back to the same rule", () => {
+  const t = owner()
+  const m = boardModel(t)
+  const hb = m.rows.find((x) => x.id === "HB|") as NonNullable<(typeof m.rows)[number]>
+  assert.equal(boardEditText(hb.cells[""]), "-20")
+  assert.equal(boardEditText(hb.cells.P1), "", "an inherited cell starts empty")
+  assert.equal(boardEditText(m.rows[0].cells[""]), "BASE")
+  assert.equal(boardEditText(m.rows[1].cells[""], { decimalMark: "," }), "-5%")
+  for (const [op, value] of [["ADD", "-20"], ["ADD", "20.5"], ["ABSOLUTE", "100"], ["ADJUST_PERCENT", "-5"], ["ADJUST_PERCENT", "12.5"], ["ABSOLUTE", "12.345"]] as [ShOp, string][]) {
+    const text = editText(op, value, "board")
+    const back = parseShorthand(text, "board")
+    assert.deepEqual(back, { ok: true, kind: "rule", op, value }, `${op} ${value} → ${text}`)
+  }
+  // a non-base row without a value (a base board that lost its base) starts empty
+  const lost = planned(planBoardEntries(t, [cellOf({ board: "AI", room_type: "" }, "", "base")])).tables
+  assert.equal(boardEditText(boardModel(lost).rows[0].cells[""]), "")
+})
+
+test("S13 Add board: the first board is the base board with the new-row defaults; later ones wait for a value", () => {
+  const empty = tablesOf({})
+  const first = addBoard(empty, "UAI")
+  assert.ok("tables" in first)
+  const row = first.tables.boards[0]
+  assert.deepEqual(
+    [row.board, row.is_base, row.op, row.adult_amount, row.child_percent, row.infant_free, row.room_type, row.period_code, row.label],
+    ["UAI", 1, "ADD", "", "50", 1, "", "", ""],
+  )
+  assert.deepEqual(addBoard(first.tables, "AI"), { pending: { board: "AI", room_type: "" } })
+  assert.deepEqual(addBoard(first.tables, "UAI"), { exists: true })
+  // the owner's example typed in the grid: BASE (UAI, already base), -5% (AI), -20 (HB)
+  let t = first.tables
+  t = planned(planBoardEntries(t, [cellOf({ board: "UAI", room_type: "" }, "", "BASE")])).tables
+  assert.equal(t, first.tables, "BASE on the base board changes nothing")
+  t = planned(planBoardEntries(t, [cellOf({ board: "AI", room_type: "" }, "", "-5%")])).tables
+  t = planned(planBoardEntries(t, [cellOf({ board: "HB", room_type: "" }, "", "-20")])).tables
+  assert.deepEqual(
+    t.boards.map((b) => [b.board, b.is_base, b.op, b.adult_amount, b.child_percent, b.infant_free]),
+    [
+      ["UAI", 1, "ADD", "", "50", 1],
+      ["AI", 0, "ADJUST_PERCENT", "-5", "50", 1],
+      ["HB", 0, "ADD", "-20", "50", 1],
+    ],
+  )
+  const sum = boardSummary(t)
+  assert.deepEqual(
+    sum.items.map((x) => [x.board, x.base, x.rule?.op, x.rule?.adult_amount]),
+    [
+      ["UAI", true, "ADD", ""],
+      ["AI", false, "ADJUST_PERCENT", "-5"],
+      ["HB", false, "ADD", "-20"],
+    ],
+  )
+  assert.equal(sum.scoped, 0)
+})
+
+test("S13 boardModel: rows waiting for a value (a new board, a new room rule) sit in place, marked pending", () => {
+  const t = owner()
+  const m = boardModel(t, [{ board: "FB", room_type: "" }, { board: "HB", room_type: "SUP" }, { board: "AI", room_type: "" }])
+  assert.deepEqual(
+    m.rows.map((x) => [x.id, x.depth, x.pending]),
+    [
+      ["UAI|", 0, false],
+      ["AI|", 0, false],
+      ["HB|", 0, false],
+      ["HB|DLX", 1, false],
+      ["HB|SUP", 1, true],
+      ["FB|", 0, true],
+    ],
+  )
+  const sup = m.rows[4]
+  assert.equal(sup.cells[""].state, "inherited")
+  assert.equal(sup.cells[""].source?.adult_amount, "-20")
+  assert.equal(sup.cells.P2.source?.adult_amount, "-25")
+  assert.equal(m.rows[5].cells[""].state, "empty")
+})
+
+test("S13 row terms: child %, infants free and the label go to every rule of the row; rooms move; summary", () => {
+  const t = owner()
+  const terms = boardTermsOf(t, HB)
+  assert.deepEqual(terms, { child_percent: "30", infant_free: true, label: "", count: 2, periods: ["", "P2"], mixed: false })
+  const out = setBoardTerms(t, HB, { child_percent: "25", infant_free: 0, label: "Half board, drinks" })
+  assert.deepEqual(
+    out.boards.filter((b) => b.board === "HB").map((b) => [b.room_type || "*", b.period_code || "*", b.child_percent, b.infant_free, b.label]),
+    [
+      ["*", "*", "25", 0, "Half board, drinks"],
+      ["*", "P2", "25", 0, "Half board, drinks"],
+      ["DLX", "*", "40", 0, ""],
+    ],
+  )
+  assert.equal(setBoardTerms(t, HB, { child_percent: "30.000", infant_free: 1, label: "" }), t, "the same terms change nothing")
+  const mixed = tablesOf({ ...t, boards: t.boards.map((b) => (b.board === "HB" && b.period_code === "P2" ? { ...b, child_percent: "20" } : b)) })
+  assert.equal(boardTermsOf(mixed, HB).mixed, true)
+  // rooms: move a room rule to another room, never onto a row that exists
+  const moved = moveBoardRows(t, { board: "HB", room_type: "DLX" }, "SUP")
+  assert.ok("tables" in moved)
+  assert.deepEqual(boardRows(moved.tables, "HB"), ["*/*:ADD:-20", "*/P2:ADD:-25", "SUP/*:ADD:-10"])
+  assert.deepEqual(moveBoardRows(t, HB, "DLX"), { error: "TAKEN" })
+  assert.deepEqual(moveBoardRows(t, { board: "HB", room_type: "DLX" }, ""), { error: "TAKEN" })
+  const onlyDlx = moveBoardRows(t, { board: "AI", room_type: "" }, "DLX")
+  assert.ok("tables" in onlyDlx)
+  assert.deepEqual(boardRows(onlyDlx.tables, "AI"), ["DLX/*:ADJUST_PERCENT:-5"])
+  const same = moveBoardRows(t, HB, "")
+  assert.ok("tables" in same && same.tables === t)
+  const dropped = removeBoardRow(t, { board: "HB", room_type: "DLX" })
+  assert.deepEqual(dropped.counts, { rows: 1 })
+  assert.deepEqual(boardRows(dropped.tables, "HB"), ["*/*:ADD:-20", "*/P2:ADD:-25"])
+  const sum = boardSummary(t)
+  assert.deepEqual(
+    sum.items.map((x) => [x.board, x.base, x.rule?.adult_amount, x.scoped]),
+    [
+      ["UAI", true, "", 0],
+      ["AI", false, "-5", 0],
+      ["HB", false, "-20", 2],
+    ],
+  )
+  assert.equal(sum.scoped, 2)
+  const roomOnly = boardSummary(onlyDlx.tables)
+  assert.deepEqual(
+    roomOnly.items.map((x) => [x.board, x.rule === null, x.scoped]),
+    [
+      ["UAI", false, 0],
+      ["AI", true, 1],
+      ["HB", false, 2],
+    ],
   )
 })
 

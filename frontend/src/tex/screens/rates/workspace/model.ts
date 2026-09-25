@@ -8,7 +8,7 @@
 //   an edit that changes nothing returns the same tables object (so no history entry is recorded);
 // - values stay decimal strings: they are parsed, canonicalised and compared as strings, never
 //   computed. Adjusting an entered price is done by the server (apply_op_values, §3.4.5).
-import { normaliseDecimal, type ShErrorCode, type ShOp, type ShResult } from "../lib/shorthand.ts"
+import { editText, normaliseDecimal, type ShErrorCode, type ShFormatOptions, type ShOp, type ShResult } from "../lib/shorthand.ts"
 import type { Tables } from "../lib/tables.ts"
 import type { Row } from "../lib/types.ts"
 import { isSet, newRow, str } from "./rows.ts"
@@ -404,6 +404,9 @@ export interface BoardRow {
   depth: 0 | 1
   /** Its All-periods row is the base board. */
   isBase: boolean
+  /** A row the screen added that has no rule yet (a new board, a new room rule, S13): it becomes
+   * rows of the table with its first value (a non-base board row needs one, GAP-8). */
+  pending: boolean
   identity: BoardIdentity
   cells: Record<string, BoardCell>
 }
@@ -436,21 +439,34 @@ function boardSource(tables: Pick<Tables, "boards">, id: BoardIdentity, period: 
 }
 
 /** The boards grid (§3.12): one row per board in `boards` order, each followed by its room-scoped
- * rows; cells for All periods ("") and every period. */
-export function boardModel(tables: Pick<Tables, "boards" | "periods">): { rows: BoardRow[]; periods: string[] } {
+ * rows; cells for All periods ("") and every period. `pending` adds rows that have no rule yet
+ * (S13: a new board after the last one, a new room rule under its board); an identity that has
+ * rows is never pending. */
+export function boardModel(tables: Pick<Tables, "boards" | "periods">, pending: readonly BoardIdentity[] = []): { rows: BoardRow[]; periods: string[] } {
   const periods = [ALL_PERIODS, ...tables.periods.map(periodOf).filter(Boolean)]
   const order: string[] = []
   const roomsOf = new Map<string, string[]>()
-  for (const r of tables.boards) {
-    const b = boardOf(r)
-    if (!b) continue
+  const has = new Set<string>()
+  const place = (b: string, rr: string) => {
     if (!roomsOf.has(b)) {
       roomsOf.set(b, [])
       order.push(b)
     }
-    const rr = roomOf(r)
     const list = roomsOf.get(b) as string[]
     if (rr && !list.includes(rr)) list.push(rr)
+  }
+  for (const r of tables.boards) {
+    const b = boardOf(r)
+    if (!b) continue
+    place(b, roomOf(r))
+    has.add(`${b}|${roomOf(r)}`)
+  }
+  const waiting = new Set<string>()
+  for (const id of pending) {
+    const b = str(id.board)
+    if (!b) continue
+    place(b, str(id.room_type))
+    waiting.add(`${b}|${str(id.room_type)}`)
   }
   const rows: BoardRow[] = []
   const build = (id: BoardIdentity, depth: 0 | 1): BoardRow => {
@@ -464,7 +480,17 @@ export function boardModel(tables: Pick<Tables, "boards" | "periods">): { rows: 
       }
     }
     const generic = boardRowsAt(tables, id, ALL_PERIODS)[0]
-    return { id: `${id.board}|${id.room_type}`, board: id.board, room_type: id.room_type, depth, isBase: Boolean(generic && isSet(generic.is_base)), identity: id, cells }
+    const key = `${id.board}|${id.room_type}`
+    return {
+      id: key,
+      board: id.board,
+      room_type: id.room_type,
+      depth,
+      isBase: Boolean(generic && isSet(generic.is_base)),
+      pending: waiting.has(key) && !has.has(key),
+      identity: id,
+      cells,
+    }
   }
   for (const b of order) {
     rows.push(build({ board: b, room_type: "" }, 0))
@@ -526,4 +552,217 @@ export function removeBoard(tables: Tables, board: string): { tables: Tables; co
   const boards = tables.boards.filter((r) => boardOf(r) !== board)
   const rows = tables.boards.length - boards.length
   return { tables: rows ? { ...tables, boards } : tables, counts: { rows } }
+}
+
+// ─── the boards grid of the workspace (§3.12, slice S13) ─────────────────
+
+const identityRows = (tables: Pick<Tables, "boards">, id: BoardIdentity): Row[] =>
+  tables.boards.filter((r) => boardOf(r) === id.board && roomOf(r) === id.room_type)
+
+/** BASE_SCOPE: BASE typed anywhere but one board's own All periods cell (all rooms). The base board
+ * is the board the room price includes, in every room and period; a BASE in a period or room cell,
+ * or in several cells at once, would take is_base from every other board (the radio behaviour). */
+export type BoardEntryError = ShErrorCode | "BASE_SCOPE"
+
+export interface BoardEntryItem {
+  id: BoardIdentity
+  period: string
+  parsed: ShResult
+}
+
+export type BoardPlan = { tables: Tables; removes: string[] } | { error: BoardEntryError; index: number }
+
+/**
+ * One gesture over board cells (a typed entry, Ctrl/Cmd+Enter, Delete), all or nothing, in order
+ * (§3.12): each cell by applyBoardEntry (O1–O3: a bare number is ABSOLUTE per room-night, +n / -n
+ * ADD per adult, n% / ±n% ADJUST_PERCENT; BASE sets is_base exclusively). Clearing a board's own All
+ * periods cell (its row for all rooms) removes the whole board: `removes` names the boards, which
+ * the screen confirms first. Clearing any other cell removes that cell's row only; an empty cell
+ * clears nothing. BASE is refused outside one board's own All periods cell (BASE_SCOPE). When
+ * nothing changes the same tables object comes back (no history entry).
+ */
+export function planBoardEntries(tables: Tables, items: readonly BoardEntryItem[]): BoardPlan {
+  const bases = items.filter((x) => x.parsed.ok && x.parsed.kind === "base").length
+  let out = tables
+  const removes: string[] = []
+  for (let index = 0; index < items.length; index++) {
+    const { id, period, parsed } = items[index]
+    if (!parsed.ok) return { error: parsed.code, index }
+    const generic = id.room_type === "" && period === ALL_PERIODS
+    if (parsed.kind === "base" && (!generic || bases > 1)) return { error: "BASE_SCOPE", index }
+    if (parsed.kind === "clear" && generic && boardRowsAt(out, id, ALL_PERIODS).length) {
+      out = removeBoard(out, id.board).tables
+      if (!removes.includes(id.board)) removes.push(id.board)
+      continue
+    }
+    const res = applyBoardEntry(out, id, period, parsed)
+    if ("error" in res) return { error: res.error, index }
+    out = res.tables
+  }
+  return { tables: out, removes }
+}
+
+export type BoardReading =
+  | { kind: "error"; code: BoardEntryError }
+  | { kind: "unchanged" }
+  /** the cell's own row goes; `follows` is the rule that prices the cell then (null: none) */
+  | { kind: "clear"; follows: Row | null }
+  /** the board's own All periods cell: the board and its `rows` rules go (confirmed first) */
+  | { kind: "remove-board"; rows: number }
+  /** the board becomes the base board; `previous` boards lose is_base (they then need a value) */
+  | { kind: "base"; previous: string[] }
+  /** the rule as it will be stored, with the child share and infants-free of the row written;
+   * `wasBase`: the cell's row was the base board's */
+  | { kind: "rule"; op: ShOp; value: string; child_percent: string; infant_free: boolean; wasBase: boolean }
+
+/** What an entry in a board cell will do (the reading line, §3.4.1, §3.12), from the same plan the
+ * commit uses; no arithmetic. */
+export function boardReadingOf(tables: Tables, id: BoardIdentity, period: string, parsed: ShResult): BoardReading {
+  const plan = planBoardEntries(tables, [{ id, period, parsed }])
+  if ("error" in plan) return { kind: "error", code: plan.error }
+  if (plan.removes.length) return { kind: "remove-board", rows: removeBoard(tables, id.board).counts.rows }
+  if (plan.tables === tables || !parsed.ok) return { kind: "unchanged" }
+  if (parsed.kind === "clear") return { kind: "clear", follows: boardSource(plan.tables, id, period) }
+  if (parsed.kind === "base") {
+    const previous: string[] = []
+    for (const r of tables.boards) if (isSet(r.is_base) && boardOf(r) !== id.board && !previous.includes(boardOf(r))) previous.push(boardOf(r))
+    return { kind: "base", previous }
+  }
+  const written = boardRowsAt(plan.tables, id, period)[0]
+  const own = boardRowsAt(tables, id, period)[0]
+  return {
+    kind: "rule",
+    op: parsed.op,
+    value: parsed.value,
+    child_percent: str(written?.child_percent) || "50",
+    infant_free: isSet(written?.infant_free),
+    wasBase: Boolean(own && isSet(own.is_base)),
+  }
+}
+
+/** The text an edit of a board cell starts from (F2 / Enter): its own rule as board shorthand
+ * (§3.4.6: 20, +20, -20, +5%, BASE) in the viewer's decimal mark; empty for an inherited or empty
+ * cell and for a row without a value. It parses back to the same rule. */
+export function boardEditText(cell: BoardCell | undefined, opts?: ShFormatOptions): string {
+  const own = cell?.rule
+  if (!own) return ""
+  if (isSet(own.is_base)) return "BASE"
+  if (!str(own.adult_amount)) return ""
+  return editText(str(own.op) as ShOp, str(own.adult_amount), "board", opts)
+}
+
+export type AddBoardResult = { tables: Tables } | { pending: BoardIdentity } | { exists: true }
+
+/** "Add board" (§3.12): the contract's first board becomes the base board, a row with the new-row
+ * defaults (is_base 1, which needs no value). A later board has no rule until a value is typed
+ * (a non-base row without a value is refused by the server, GAP-8), so it comes back as a pending
+ * row for the grid. A board the version has already is not added again. */
+export function addBoard(tables: Tables, board: string): AddBoardResult {
+  const b = str(board)
+  if (!b || tables.boards.some((r) => boardOf(r) === b)) return { exists: true }
+  if (!tables.boards.length) return { tables: { ...tables, boards: [newRow("boards", { board: b, is_base: 1 })] } }
+  return { pending: { board: b, room_type: "" } }
+}
+
+export interface BoardTerms {
+  /** child % of the adult amount, infants free and the label of the row (its All periods rule,
+   * else its first) */
+  child_percent: string
+  infant_free: boolean
+  label: string
+  /** the rules of the row and their periods ("" = All periods) */
+  count: number
+  periods: string[]
+  /** the rules of the row do not all have these terms */
+  mixed: boolean
+}
+
+/** The terms the row popover shows for a grid row (board + room scope). */
+export function boardTermsOf(tables: Pick<Tables, "boards">, id: BoardIdentity): BoardTerms {
+  const rows = identityRows(tables, id)
+  const first = rows.find((r) => periodOf(r) === ALL_PERIODS) ?? rows[0]
+  const child = str(first?.child_percent) || "50"
+  const infant = first ? isSet(first.infant_free) : true
+  const label = str(first?.label)
+  return {
+    child_percent: child,
+    infant_free: infant,
+    label,
+    count: rows.length,
+    periods: rows.map(periodOf),
+    mixed: rows.some((r) => canonValue(str(r.child_percent) || "50") !== canonValue(child) || isSet(r.infant_free) !== infant || str(r.label) !== label),
+  }
+}
+
+/** The row popover's terms (child %, infants free, label), written to every rule of the row. */
+export function setBoardTerms(tables: Tables, id: BoardIdentity, patch: { child_percent?: string; infant_free?: 0 | 1; label?: string }): Tables {
+  let changed = false
+  const boards = tables.boards.map((r) => {
+    if (boardOf(r) !== id.board || roomOf(r) !== id.room_type) return r
+    const next: Record<string, string | number> = {}
+    if (patch.child_percent !== undefined && canonValue(str(r.child_percent) || "50") !== canonValue(patch.child_percent)) next.child_percent = patch.child_percent
+    if (patch.infant_free !== undefined && isSet(r.infant_free) !== Boolean(patch.infant_free)) next.infant_free = patch.infant_free
+    if (patch.label !== undefined && str(r.label) !== patch.label) next.label = patch.label
+    if (!Object.keys(next).length) return r
+    changed = true
+    return { ...r, ...next }
+  })
+  return changed ? { ...tables, boards } : tables
+}
+
+/** The row popover's Rooms: moves every rule of the row to another room scope ("" = all rooms);
+ * TAKEN when the board has rules for that scope already (the grid row is edited instead). */
+export function moveBoardRows(tables: Tables, id: BoardIdentity, room: string): { tables: Tables } | { error: "TAKEN" } {
+  const to = str(room)
+  if (to === id.room_type) return { tables }
+  if (identityRows(tables, { board: id.board, room_type: to }).length) return { error: "TAKEN" }
+  let moved = 0
+  const boards = tables.boards.map((r) => {
+    if (boardOf(r) !== id.board || roomOf(r) !== id.room_type) return r
+    moved += 1
+    return { ...r, room_type: to }
+  })
+  return { tables: moved ? { ...tables, boards } : tables }
+}
+
+/** Removes every rule of one grid row (a board's room rule, with its period rules). */
+export function removeBoardRow(tables: Tables, id: BoardIdentity): { tables: Tables; counts: { rows: number } } {
+  const boards = tables.boards.filter((r) => !(boardOf(r) === id.board && roomOf(r) === id.room_type))
+  const rows = tables.boards.length - boards.length
+  return { tables: rows ? { ...tables, boards } : tables, counts: { rows } }
+}
+
+export interface BoardSummaryItem {
+  board: string
+  /** the board's own rule for all rooms and periods, if any */
+  rule: Row | null
+  base: boolean
+  /** the board's other rules (period or room scoped) */
+  scoped: number
+}
+
+/** The collapsed section's chips (§3.12): "UAI BASE · AI −5 % · HB −20.00 per adult", one item per
+ * board in `boards` order, and how many rules are period or room scoped. */
+export function boardSummary(tables: Pick<Tables, "boards">): { items: BoardSummaryItem[]; scoped: number } {
+  const items: BoardSummaryItem[] = []
+  const at = new Map<string, BoardSummaryItem>()
+  let scoped = 0
+  for (const r of tables.boards) {
+    const b = boardOf(r)
+    if (!b) continue
+    let item = at.get(b)
+    if (!item) {
+      item = { board: b, rule: null, base: false, scoped: 0 }
+      at.set(b, item)
+      items.push(item)
+    }
+    if (!item.rule && !roomOf(r) && !periodOf(r)) {
+      item.rule = r
+      item.base = isSet(r.is_base)
+    } else {
+      item.scoped += 1
+      scoped += 1
+    }
+  }
+  return { items, scoped }
 }
