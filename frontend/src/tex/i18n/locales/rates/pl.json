@@ -1954,5 +1954,22 @@
  "rates.explain.p.fixed": "stała",
  "rates.explain.age_y": "{y} l.",
  "rates.explain.age_ym": "{y} l. {m} mies.",
- "rates.explain.child_label": "Dziecko {n} ({age}, {band})"
+ "rates.explain.child_label": "Dziecko {n} ({age}, {band})",
+ "rates.ws.issue.error": "Błąd: {message}",
+ "rates.ws.issue.warning": "Ostrzeżenie: {message}",
+ "rates.ws.issue.level_error": "Błąd",
+ "rates.ws.issue.level_warning": "Ostrzeżenie",
+ "rates.ws.issue.more": {
+  "one": "+{count} więcej",
+  "few": "+{count} więcej",
+  "many": "+{count} więcej",
+  "other": "+{count} więcej"
+ },
+ "rates.ws.issue.nav_hint": "Wybierz problem, aby pokazać, gdzie jest.",
+ "rates.ws.issue.group": {
+  "one": "{section}: {count} problem",
+  "few": "{section}: {count} problemy",
+  "many": "{section}: {count} problemów",
+  "other": "{section}: {count} problemu"
+ }
 }

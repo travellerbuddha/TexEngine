@@ -70,10 +70,12 @@ import {
   type PopoverRule,
   type Reading,
 } from "./matrixView.ts"
+import { matrixCellId, periodHeaderId } from "./issues.ts"
 import { AddPeriodHeader, PeriodHeader, PeriodStrip } from "./PeriodHeader"
 import { headerPick, RoomRowHeader } from "./RoomRowHeader"
 import { RuleEditorPopover } from "./RuleEditorPopover"
 import { int, str } from "./rows.ts"
+import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
 
 const SHOW_RESOLVED_KEY = "tex.rates.ws.show_resolved"
@@ -133,8 +135,8 @@ interface PendingFill {
 }
 
 const keyOf = (c: CellRef) => `${c.room}\u0000${c.period}`
-/** The DOM id of an entry cell (data-cellid), stable while rows come and go. */
-const cellIdOf = (c: CellRef) => `${c.room}|${c.period}`
+/** The DOM id of an entry cell (data-cellid), stable while rows come and go; issues anchor on it (S15). */
+const cellIdOf = (c: CellRef) => matrixCellId(c.room, c.period)
 
 export function PriceMatrix({
   doc,
@@ -147,6 +149,9 @@ export function PriceMatrix({
   onPriceTest,
   show,
   onShown,
+  anchored,
+  issueText,
+  issuesStale,
 }: TabProps & {
   history: WorkspaceHistory
   /** the period ("" = All periods) of the cell that gets the focus: the boards grid highlights
@@ -193,6 +198,8 @@ export function PriceMatrix({
     return isRelativeOp(op) ? opText(op, str(rule.value)) : amount(rule.value)
   }
   const errorText = (code: EntryError | string) => t(`rates.sh.err.${code}`)
+  // the validation issues anchored on entry cells and period headers (§3.15, S15)
+  const issueAt = useCellIssues(anchored, issueText, issuesStale)
 
   // ─── the server's resolved prices (live preview) ─────────────────────
   const matrix = preview?.matrix
@@ -399,14 +406,21 @@ export function PriceMatrix({
   const cellMenuRef = useRef(openCellMenu)
   cellMenuRef.current = openCellMenu
 
-  // "Show in grid" (S14): the cell of a room price rule is brought into view and focused
+  // "Show in grid" (S14): the cell of a room price rule is brought into view and focused; an issue
+  // (S15) can also lead to a period's column header, or to the matrix as a whole
+  const sectionRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
-    if (!show || show.target.kind !== "matrix") return
-    const { room, period } = show.target
-    requestAnimationFrame(() => {
-      const el = gridEl.current?.querySelector<HTMLElement>(`[data-cellid="${CSS.escape(cellIdOf({ room, period }))}"]`)
-      if (el) revealElement(el)
-    })
+    if (!show) return
+    const target = show.target
+    if (target.kind === "matrix" || target.kind === "period") {
+      const id = target.kind === "matrix" ? cellIdOf({ room: target.room, period: target.period }) : periodHeaderId(target.period)
+      requestAnimationFrame(() => {
+        const el = Array.from(gridEl.current?.querySelectorAll<HTMLElement>("[data-cellid]") ?? []).find((x) => x.dataset.cellid === id)
+        if (el) revealElement(el)
+        else sectionRef.current?.scrollIntoView({ block: "start" })
+      })
+    } else if (target.kind === "region" && target.region === "matrix") requestAnimationFrame(() => sectionRef.current?.scrollIntoView({ block: "start" }))
+    else return
     onShown?.(show.n)
   }, [show, onShown])
 
@@ -914,8 +928,9 @@ export function PriceMatrix({
     const state = t(`rates.ws.state.${view.state}`)
     // a resolved value older than the state on screen says so to a screen reader too (§3.3.3)
     const stateText = resolved && stale ? t("rates.ws.cell.stale_state", { state }) : state
+    const cellId = resolved ? undefined : cellIdOf(cell)
     return {
-      cellId: resolved ? undefined : cellIdOf(cell),
+      cellId,
       label: view.value ? t("rates.ws.cell.label", { cell: cellName(cell), state: stateText, value: view.value }) : t("rates.ws.cell.label_bare", { cell: cellName(cell), state: stateText }),
       tone: view.tone,
       content: view.content,
@@ -923,6 +938,7 @@ export function PriceMatrix({
       readOnly: !editable,
       stale: resolved && stale,
       error: view.error,
+      issue: cellId ? issueAt(cellId) : undefined,
       trigger: editable && waiting === undefined ? { label: t("rates.rates.edit_cell", { cell: cellName(cell) }), onOpen: (el) => openPopover(cell, el) } : undefined,
       onContextMenu:
         editable || onPriceTest
@@ -940,8 +956,10 @@ export function PriceMatrix({
     () => rows.map((row, r) => cols.map((period, c) => cellView(row, r, period, c))),
     // everything cellView reads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, cols, model, tables, resolvedRooms, matrix, stale, drafts, pending, canEdit, t, decimalMark, minorUnits, doc.status, ccy, names],
+    [rows, cols, model, tables, resolvedRooms, matrix, stale, drafts, pending, canEdit, t, decimalMark, minorUnits, doc.status, ccy, names, issueAt],
   )
+  // a period header's issues, as one stable object per header (the headers are memoised)
+  const periodIssues = useMemo(() => new Map(model.periods.map((p) => [p.code, issueAt(periodHeaderId(p.code))])), [model.periods, issueAt])
   const periodsForPopover = model.periods.map((p) => ({ code: p.code, label: p.name ? `${p.code} · ${p.name}` : p.code }))
   const available = doc.room_types.filter((r) => !tables.rooms.some((x) => str(x.room_type) === r.name))
   const knownRooms = new Set(model.rooms.map((x) => x.room_type))
@@ -969,7 +987,7 @@ export function PriceMatrix({
   }
 
   return (
-    <section aria-labelledby="pm-title" className="space-y-2">
+    <section ref={sectionRef} aria-labelledby="pm-title" className="scroll-mt-44 space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h2 id="pm-title" className="text-base font-semibold text-zinc-900">
           {t("rates.tab.rates")}
@@ -1086,6 +1104,7 @@ export function PriceMatrix({
                 decimalMark={decimalMark}
                 minorUnits={minorUnits}
                 onSelect={canEdit ? pickCol : undefined}
+                issue={periodIssues.get(p.code)}
               />
             ))}
             <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} />

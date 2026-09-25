@@ -4,12 +4,12 @@
 // Rename…, Dates…, Night adjustment…, Duplicate, Copy previous period's prices, Move left / right
 // (no pricing effect), Delete… (inline confirmation with the dependent rows). Every change is one
 // workspace history entry; a rename rewrites the period's rules in the three tables.
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
-import { ArrowLeft, ArrowRight, CalendarRange, Copy, CopyPlus, MoreHorizontal, Pencil, Percent, Plus, SquareDashedMousePointer, Trash2 } from "lucide-react"
+import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { AlertOctagon, AlertTriangle, ArrowLeft, ArrowRight, CalendarRange, Copy, CopyPlus, MoreHorizontal, Pencil, Percent, Plus, SquareDashedMousePointer, Trash2 } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { date as fmtDate } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, Field, FormGrid, Input, Menu, MenuItem, MenuSeparator, Notice, Popover } from "../../../ui"
+import { Badge, Button, Field, FormGrid, Input, Menu, MenuItem, MenuSeparator, Notice, Popover, useTooltip } from "../../../ui"
 import { WeekdayPicker } from "../components/pickers"
 import { displayText, type ShOp } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
@@ -17,8 +17,10 @@ import { splitCsv } from "../lib/util"
 import type { MatrixPeriod } from "./model.ts"
 import { parsePeriodAdjust, periodAdjustEditText, setPeriodAdjustment, setPeriodFields } from "./matrixView.ts"
 import { addPeriod, copyPreviousPeriod, deletePeriod, duplicatePeriod, isoDay, isoOfDay, movePeriod, periodDependents, renamePeriod } from "./periods.ts"
+import { periodHeaderId } from "./issues.ts"
 import { str } from "./rows.ts"
 import { headerPick, type Edit } from "./RoomRowHeader"
+import type { CellIssue } from "./useCellIssues"
 
 export interface PeriodHeaderProps {
   period: MatrixPeriod
@@ -37,6 +39,9 @@ export interface PeriodHeaderProps {
   /** selecting the column's editable cells (header click, the menu's "Select prices"); the
    * column's index in the grid is `index + 1` (All periods is column 0) */
   onSelect?: (c: number, add: boolean) => void
+  /** validation issues about the period itself (PERIOD_RANGE, PERIOD_OVERLAP, PERIOD_DUPLICATE;
+   * S15): a glyph, the messages in the header's description; the header can then take the focus */
+  issue?: CellIssue
 }
 
 type Open = "rename" | "dates" | "adjust" | "delete" | null
@@ -88,19 +93,44 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
   const adjustText = adjust ? displayText(str(adjust.adjustment_op) as ShOp, str(adjust.adjustment_value), "period_adjust", { decimalMark: p.decimalMark }) : ""
   const weekdays = splitCsv(period.weekdays)
   const select = p.onSelect ? (add: boolean) => p.onSelect?.(p.index + 1, add) : undefined
+  const issueId = useId()
+  const issue = p.issue
+  const IssueIcon = issue?.level === "ERROR" ? AlertOctagon : AlertTriangle
+  // the issue's messages on hover and on focus; described once, by the hidden text below
+  const tip = useTooltip(issue ? issue.text : null, { describe: false })
+  const tp = tip.triggerProps
 
   return (
     <div
       role="columnheader"
+      data-cellid={periodHeaderId(code)}
+      // an issue's link focuses the header (S15)
+      tabIndex={issue ? -1 : undefined}
+      aria-invalid={issue?.level === "ERROR" ? true : undefined}
+      aria-describedby={issue ? issueId : undefined}
+      ref={tp.ref}
+      onPointerEnter={tp.onPointerEnter}
+      onPointerLeave={tp.onPointerLeave}
+      onPointerDown={tp.onPointerDown}
+      onFocus={tp.onFocus}
+      onBlur={tp.onBlur}
+      onKeyDown={tp.onKeyDown}
       onMouseDown={(e) => headerPick(e, select)}
       className={cn(
-        "flex min-w-0 flex-col justify-end gap-0.5 border-r border-b border-zinc-200 px-2 py-1.5 text-left",
+        "flex min-w-0 flex-col justify-end gap-0.5 border-r border-b border-zinc-200 px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
         p.index % 2 ? "bg-zinc-50" : "bg-white",
         weekdays.length > 0 && "border-t-2 border-t-dotted border-t-zinc-400",
+        issue && (issue.level === "ERROR" ? "shadow-[inset_0_-2px_0_var(--color-rose-500)]" : "shadow-[inset_0_-2px_0_var(--color-amber-500)]"),
       )}
     >
+      {issue && (
+        <span id={issueId} hidden>
+          {issue.text}
+        </span>
+      )}
       <span className="flex min-w-0 items-center gap-1">
         <span className="rounded bg-zinc-900 px-1 font-mono text-[11px] font-semibold text-white">{code}</span>
+        {issue && <IssueIcon aria-hidden className={cn("size-3.5 shrink-0", issue.level === "ERROR" ? "text-rose-600" : "text-amber-600", issue.stale && "opacity-50")} />}
         {period.adjusted && (
           <Badge tone="warning" className="px-1 py-0 text-[10px]" title={t("rates.ws.period.adjusted", { rule: adjustText })}>
             ◆ {adjustText}
@@ -181,6 +211,7 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
       {open === "dates" && <DatesPopover {...p} anchor={anchor} onClose={close} />}
       {open === "adjust" && <AdjustPopover {...p} anchor={anchor} onClose={close} />}
       {open === "delete" && <DeletePopover {...p} anchor={anchor} onClose={close} />}
+      {tip.tooltip}
     </div>
   )
 }

@@ -1843,5 +1843,18 @@
  "rates.explain.p.fixed": "fixed",
  "rates.explain.age_y": "{y}y",
  "rates.explain.age_ym": "{y}y{m}m",
- "rates.explain.child_label": "Child {n} ({age}, {band})"
+ "rates.explain.child_label": "Child {n} ({age}, {band})",
+ "rates.ws.issue.error": "Error: {message}",
+ "rates.ws.issue.warning": "Warning: {message}",
+ "rates.ws.issue.level_error": "Error",
+ "rates.ws.issue.level_warning": "Warning",
+ "rates.ws.issue.more": {
+  "one": "+{count} more",
+  "other": "+{count} more"
+ },
+ "rates.ws.issue.nav_hint": "Select an issue to show where it is.",
+ "rates.ws.issue.group": {
+  "one": "{section}: {count} issue",
+  "other": "{section}: {count} issues"
+ }
 }

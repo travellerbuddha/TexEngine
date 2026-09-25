@@ -113,6 +113,8 @@ interface Index {
   /** whether the ladder has a row for a band in a rooms scope */
   hasBand: (band: string, scope: string) => boolean
   cards: () => CombinationCard[]
+  /** the card that holds a rule row (by its key) */
+  cardOfKey: (key: string) => CombinationCard | undefined
   /** the row a rule id names (priceTest.ruleRowOf's reading, looked up in maps) */
   row: (ruleId: string) => { table: ShownTable; row: Row } | null
   periodOk: (period: string) => boolean
@@ -137,6 +139,8 @@ function indexOf(tables: Tables, opts: AnchorOptions): Index {
     if (id?.startsWith("band:")) named.add(`${str(r.room_type)}|${id.slice("band:0:".length)}`)
   }
   let cardList: CombinationCard[] | undefined
+  let byKey: Map<string, CombinationCard> | undefined
+  const cards = () => (cardList ??= groupCombinations(tables))
   let keys: Map<string, { table: ShownTable; row: Row }> | undefined
   let names: Map<string, { table: ShownTable; row: Row }> | undefined
   const row = (ruleId: string): { table: ShownTable; row: Row } | null => {
@@ -169,7 +173,14 @@ function indexOf(tables: Tables, opts: AnchorOptions): Index {
     periods,
     boardRows,
     hasBand: (band, scope) => bands.has(band) || named.has(`|${band}`) || (scope !== "" && named.has(`${scope}|${band}`)),
-    cards: () => (cardList ??= groupCombinations(tables)),
+    cards,
+    cardOfKey: (key) => {
+      if (!byKey) {
+        byKey = new Map()
+        for (const c of cards()) for (const k of c.keys) if (!byKey.has(k)) byKey.set(k, c)
+      }
+      return byKey.get(key)
+    },
     row,
     periodOk: (period) => period === ALL_PERIODS || periods.has(period),
   }
@@ -187,7 +198,7 @@ function anchorOfRow(ix: Index, table: ShownTable, row: Row): IssueAnchor | null
   }
   if (room && !ix.rooms.has(room)) return null
   if (canonCombination(row.combination)) {
-    const card = ix.cards().find((c) => c.keys.includes(row._key))
+    const card = ix.cardOfKey(row._key)
     if (card && !isSingleUseCard(card)) return { kind: "card", card: card.id }
   }
   const rowId = ladderRowIdOf(row)

@@ -32,7 +32,7 @@ import { sampleKey } from "./draftPreview.ts"
 import type { DraftPreview } from "./useDraftPreview"
 import { parseShorthand } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
-import type { VersionDoc } from "../lib/types"
+import type { Issue, VersionDoc } from "../lib/types"
 import { decText } from "../lib/util"
 import { UndoToastView } from "./BulkToolbar"
 import { CellEditor, MatrixRowCells, type CellTone, type CellView } from "./MatrixCell"
@@ -52,9 +52,11 @@ import {
   type OccRule,
   type PartyOption,
 } from "./occupancy.ts"
+import { ladderCellId, type AnchoredIssues } from "./issues.ts"
 import { OccRulePopover } from "./RuleEditorPopover"
 import { isSet, str } from "./rows.ts"
 import type { BandLabels } from "./useBandLabels"
+import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
 
 /** A ladder cell: a row of the model (by its id) and a period ("" = All periods). */
@@ -75,8 +77,9 @@ interface Draft {
 }
 
 const keyOf = (c: LadderRef) => `${c.row}\u0000${c.period}`
-/** The DOM id of a ladder cell (data-cellid): "Show in grid" (S14) and issue anchoring (S15) find it. */
-export const ladderCellId = (row: string, period: string) => `occ:${row}|${period}`
+/** The DOM id of a ladder cell (data-cellid, `occ:{row}|{period}`, `@{room}` in a room scope):
+ * "Show in grid" (S14) and issue anchoring (S15) find it. */
+export { ladderCellId }
 
 /** A rule as a ladder cell and the section summary show it (display only, from the stored
  * strings): ×0.70, 50%, +10%, +25.00, −25.00, 25.00. */
@@ -127,6 +130,11 @@ export interface OccupancyLadderProps {
   partyName: (party: PartyOption) => string
   /** a cell to bring into view and focus (ladderCellId; "Show in grid", S14); `n` repeats a request */
   focus?: { cellId: string; n: number } | null
+  /** the validation issues anchored on ladder cells (S15), their messages as shown, and whether
+   * they are older than the state on screen */
+  anchored?: AnchoredIssues
+  issueText?: (issue: Issue) => string
+  issuesStale?: boolean
 }
 
 export function OccupancyLadder(p: OccupancyLadderProps) {
@@ -189,6 +197,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     return t(`rates.occ.read.${single ? "single." : ""}${op}`, { cell, rule: op === "INHERIT" ? "" : ruleShort(op, value), unit: unitWord(row) })
   }
   const errorText = (code: string) => t(`rates.sh.err.${code}`)
+  // the validation issues anchored on this scope's cells (§3.15, S15)
+  const issueAt = useCellIssues(p.anchored, p.issueText, p.issuesStale)
 
   // ─── the keyboard grid ─────────────────────────────────────────────────
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && r < rows.length && Boolean(rows[r]?.editable), [canEdit, rows])
@@ -657,8 +667,10 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     const state = t(`rates.occ.state.${view.state}`)
     const stateText = resolved && stale ? t("rates.ws.cell.stale_state", { state }) : state
     const value = [view.value, note].filter(Boolean).join(" · ")
+    const cellId = ref ? ladderCellId(ref.row, ref.period, p.scope) : undefined
     return {
-      cellId: ref ? ladderCellId(ref.row, ref.period) : undefined,
+      cellId,
+      issue: cellId ? issueAt(cellId) : undefined,
       label: value ? t("rates.ws.cell.label", { cell: name, state: stateText, value }) : t("rates.ws.cell.label_bare", { cell: name, state: stateText }),
       tone: view.tone,
       content: view.content,
@@ -682,7 +694,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     () => Array.from({ length: navRows }, (_, r) => cols.map((period, c) => cellView(r, period, c))),
     // everything cellView reads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, cols, navRows, model, tables, drafts, canEdit, t, tOrdinal, decimalMark, minorUnits, doc.status, ccy, labels, p.notes, p.cards, partyCell, stale, matrix, matrixState, p.partyRoom, p.scope, basis],
+    [rows, cols, navRows, model, tables, drafts, canEdit, t, tOrdinal, decimalMark, minorUnits, doc.status, ccy, labels, p.notes, p.cards, partyCell, stale, matrix, matrixState, p.partyRoom, p.scope, basis, issueAt],
   )
   const selectedKey = (r: number) => {
     let out = ""

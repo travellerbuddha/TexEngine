@@ -1,9 +1,10 @@
-import type { ReactNode } from "react"
+import { createContext, useContext, type ReactNode } from "react"
 import type { Option } from "../../../../ui"
 import { IssueList } from "../../components/common"
 import type { EditorState, SellingForm } from "../../lib/tables"
 import type { Issue, Lookups, Row, VersionDoc, VersionSetting, VersionTable } from "../../lib/types"
 import { issueTable } from "../../lib/util"
+import type { AnchoredIssues } from "../../workspace/issues.ts"
 import type { ShowRequest, ShowTarget } from "../../workspace/priceTest.ts"
 import type { DraftPreview, SampleRequest } from "../../workspace/useDraftPreview"
 import type { WorkspaceHistory } from "../../workspace/useWorkspaceHistory"
@@ -42,6 +43,13 @@ export interface TabProps {
    * `onShown(n)`, which clears it (a later remount does not replay it). */
   show?: ShowRequest | null
   onShown?: (n: number) => void
+  /** Where the issues are shown (issues.anchorIssues over `issues` and the tables on screen, S15):
+   * the grids mark the cells they point at. */
+  anchored?: AnchoredIssues
+  /** An issue's message as shown: band codes as their labels (D13). */
+  issueText?: (issue: Issue) => string
+  /** The issues belong to an older state than the one on screen (the live check is on its way). */
+  issuesStale?: boolean
 }
 
 /** A matrix cell: its room and period ("" = All periods). */
@@ -78,11 +86,16 @@ export function bandOptions(state: EditorState): Option[] {
     })
 }
 
+/** How the version editor shows an issue's message (band codes as labels, D13), for the lists of
+ * the Advanced rule tables and Offers; the server's message outside the editor. */
+export const IssueFormatContext = createContext<((issue: Issue) => string) | undefined>(undefined)
+
 /** The issues an Advanced rule table (or Offers) lists: its own, as the ten-tab editor did. */
 export function TabIssues({ issues, tab }: { issues: Issue[] | undefined; tab: string }) {
+  const format = useContext(IssueFormatContext)
   const mine = issues?.filter((i) => issueTable(i.code, i.ref) === tab)
   if (!mine?.length) return null
-  return <IssueList issues={mine} />
+  return <IssueList issues={mine} format={format} />
 }
 
 export function TabIntro({ title, children, aside }: { title: ReactNode; children?: ReactNode; aside?: ReactNode }) {

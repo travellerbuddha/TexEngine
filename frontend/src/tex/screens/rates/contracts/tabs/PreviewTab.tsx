@@ -30,7 +30,7 @@ import {
 import { BOARDS, enumLabel, enumOptions } from "../../lib/options"
 import { IssueList } from "../../components/common"
 import { overlayPayloadOf } from "../../lib/tables"
-import type { ExplainStep, NightLine, PreviewChild, PreviewResult, VersionDoc } from "../../lib/types"
+import type { ExplainStep, Issue, NightLine, PreviewChild, PreviewResult, VersionDoc } from "../../lib/types"
 import { decText, splitCsv, toFrappeDatetime, versionLabel } from "../../lib/util"
 import { bandCode, effectiveBands } from "../../workspace/bands.ts"
 import { MATRIX_DEBOUNCE_MS } from "../../workspace/draftPreview.ts"
@@ -51,7 +51,7 @@ export function PreviewTab(props: TabProps) {
       <TabIntro title={t("rates.section.preview")}>{t("rates.preview.intro")}</TabIntro>
       <PriceTestPanel {...props} />
       <MatrixCard preview={props.preview} dirty={props.dirty} />
-      <IssuesCard doc={props.doc} preview={props.preview} dirty={props.dirty} />
+      <IssuesCard doc={props.doc} preview={props.preview} dirty={props.dirty} format={props.issueText} />
       <VersionInfo doc={props.doc} />
     </div>
   )
@@ -733,7 +733,7 @@ export function MatrixCard({ preview, dirty }: { preview?: DraftPreview; dirty?:
 }
 
 /** Every issue: the live check of what the editor shows, or the report stored at publish. */
-function IssuesCard({ doc, preview, dirty }: { doc: VersionDoc; preview?: DraftPreview; dirty: boolean }) {
+function IssuesCard({ doc, preview, dirty, format }: { doc: VersionDoc; preview?: DraftPreview; dirty: boolean; format?: (issue: Issue) => string }) {
   const { t } = useTexT()
   if (!preview || preview.issuesSource === "none") return null
   const live = preview.issuesSource === "live"
@@ -770,7 +770,7 @@ function IssuesCard({ doc, preview, dirty }: { doc: VersionDoc; preview?: DraftP
             </Button>
           </Notice>
         ) : preview.issues ? (
-          <IssueList issues={preview.issues} emptyOk={t("rates.ws.check.clean")} />
+          <IssueList issues={preview.issues} emptyOk={t("rates.ws.check.clean")} format={format} />
         ) : (
           <Skeleton className="h-10 w-full" />
         )}

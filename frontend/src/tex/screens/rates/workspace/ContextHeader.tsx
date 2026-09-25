@@ -1,15 +1,16 @@
 import { useId, useRef, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
-import { AlertOctagon, AlertTriangle, Calculator, CheckCircle2, ChevronDown, Loader2, Lock, Rocket, RotateCcw, Save, ShieldCheck } from "lucide-react"
+import { AlertOctagon, AlertTriangle, Calculator, CheckCircle2, ChevronDown, CornerDownRight, Loader2, Lock, Rocket, RotateCcw, Save, ShieldCheck } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Field, FormGrid, Input, Popover, Select, Tooltip } from "../../../ui"
-import { DateRange, IssueList, StatusBadge } from "../components/common"
+import { DateRange, StatusBadge } from "../components/common"
 import type { EditorState, SellingForm } from "../lib/tables"
 import type { Issue, VersionDoc } from "../lib/types"
 import { versionLabel } from "../lib/util"
 import { BasisPopover, CHIP, CHIP_BUTTON } from "./BasisPopover"
+import { issuesBySection } from "./issues.ts"
 import type { DraftPreview } from "./useDraftPreview"
 
 export interface ContextHeaderProps {
@@ -30,6 +31,11 @@ export interface ContextHeaderProps {
   draftAction?: ReactNode
   /** the section tablist, kept in view with the header */
   children?: ReactNode
+  /** an issue's message as shown (band codes as labels, D13) */
+  issueText?: (issue: Issue) => string
+  /** a click on an issue of the live check (by its index in `preview.issues`): its cell, or the
+   * section, region or rule table that holds it (S15) */
+  onShowIssue?: (index: number) => void
 }
 
 /**
@@ -66,7 +72,7 @@ export function ContextHeader(p: ContextHeaderProps) {
             </Badge>
           )}
           {dirty && <Badge tone="warning">{t("rates.version.unsaved")}</Badge>}
-          <LiveCheck preview={preview} />
+          <LiveCheck preview={preview} issueText={p.issueText} onShowIssue={p.onShowIssue} />
         </div>
         <div className="ml-auto flex max-w-full min-w-0 flex-wrap items-center gap-2">
           {doc.can_preview && (
@@ -260,11 +266,13 @@ function SellingChip({
 }
 
 /** The live check chip: the server's issue counts for what the editor shows (overlay), or the
- * report stored at publish ("Checked when published"); a click lists them. Hidden when there is
- * nothing to show (a catalogue, or a frozen version without a stored report). When the check of
- * the state on screen could not run, the chip says so (not older counts, not a spinner) and its
- * popover gives the server's reason and Try again. */
-function LiveCheck({ preview }: { preview: DraftPreview }) {
+ * report stored at publish ("Checked when published"); a click lists them, grouped by section
+ * (S15), and a click on one shows its cell (switching section, opening a region or the rooms scope
+ * as needed), or the region or rule table that holds it. Hidden when there is nothing to show (a
+ * catalogue, or a frozen version without a stored report). When the check of the state on screen
+ * could not run, the chip says so (not older counts, not a spinner) and its popover gives the
+ * server's reason and Try again. */
+function LiveCheck({ preview, issueText, onShowIssue }: { preview: DraftPreview; issueText?: (issue: Issue) => string; onShowIssue?: (index: number) => void }) {
   const { t } = useTexT()
   const ref = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
@@ -337,9 +345,92 @@ function LiveCheck({ preview }: { preview: DraftPreview }) {
               </Button>
             </div>
           )}
-          {issues && <IssueList issues={issues} emptyOk={t("rates.ws.check.clean")} />}
+          {issues &&
+            (issues.length ? (
+              <IssueNav
+                issues={issues}
+                stale={live && preview.issuesStale}
+                issueText={issueText}
+                onShow={
+                  onShowIssue
+                    ? (index) => {
+                        setOpen(false)
+                        onShowIssue(index)
+                      }
+                    : undefined
+                }
+              />
+            ) : (
+              <p className="flex items-center gap-2 text-sm text-emerald-800" role="status">
+                <CheckCircle2 className="size-4 text-emerald-600" aria-hidden />
+                {t("rates.ws.check.clean")}
+              </p>
+            ))}
         </div>
       </Popover>
     </>
+  )
+}
+
+/** At most this many issues per section in the chip's list (the sweep reports up to 200). */
+const NAV_MAX = 50
+
+/** The live check's issues by section, errors first; each one a button that shows where it is. */
+function IssueNav({ issues, stale, issueText, onShow }: { issues: Issue[]; stale: boolean; issueText?: (issue: Issue) => string; onShow?: (index: number) => void }) {
+  const { t } = useTexT()
+  const groups = issuesBySection(issues)
+  const hintId = useId()
+  return (
+    <div className={cn("space-y-3", stale && "opacity-60")}>
+      {onShow && (
+        <p id={hintId} className="text-xs text-zinc-500">
+          {t("rates.ws.issue.nav_hint")}
+        </p>
+      )}
+      {groups.map((g) => (
+        <section key={g.section} aria-label={t("rates.ws.issue.group", { section: t(`rates.section.${g.section}`), count: g.items.length })}>
+          <h3 className="flex flex-wrap items-center gap-x-2 text-xs font-semibold text-zinc-700">
+            {t(`rates.section.${g.section}`)}
+            <span className="inline-flex items-center gap-1.5 font-normal tabular-nums">
+              {g.errors > 0 && <span className="text-rose-700">{t("rates.ws.check.errors", { count: g.errors })}</span>}
+              {g.warnings > 0 && <span className="text-amber-800">{t("rates.ws.check.warnings", { count: g.warnings })}</span>}
+            </span>
+          </h3>
+          <ul className="mt-1 space-y-0.5">
+            {g.items.slice(0, NAV_MAX).map(({ issue, index }) => {
+              const error = issue.level === "ERROR"
+              const Icon = error ? AlertOctagon : AlertTriangle
+              const body = (
+                <>
+                  <Icon className={cn("mt-0.5 size-3.5 shrink-0", error ? "text-rose-600" : "text-amber-600")} aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="sr-only">{t(error ? "rates.ws.issue.level_error" : "rates.ws.issue.level_warning")}: </span>
+                    <span className="font-mono text-[11px] text-zinc-500">{issue.code}</span> {issueText ? issueText(issue) : issue.message}
+                  </span>
+                </>
+              )
+              return (
+                <li key={index}>
+                  {onShow ? (
+                    <button
+                      type="button"
+                      aria-describedby={hintId}
+                      onClick={() => onShow(index)}
+                      className="group flex w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left text-sm text-zinc-900 hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:outline-none"
+                    >
+                      {body}
+                      <CornerDownRight className="mt-0.5 size-3.5 shrink-0 text-zinc-400 group-hover:text-zinc-700" aria-hidden />
+                    </button>
+                  ) : (
+                    <div className="flex items-start gap-1.5 px-1.5 py-1 text-sm text-zinc-900">{body}</div>
+                  )}
+                </li>
+              )
+            })}
+            {g.items.length > NAV_MAX && <li className="px-1.5 text-xs text-zinc-500">{t("rates.ws.issue.more", { count: g.items.length - NAV_MAX })}</li>}
+          </ul>
+        </section>
+      ))}
+    </div>
   )
 }

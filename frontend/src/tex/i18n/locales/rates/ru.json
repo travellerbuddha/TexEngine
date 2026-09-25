@@ -1954,5 +1954,22 @@
  "rates.explain.p.fixed": "фикс.",
  "rates.explain.age_y": "{y} г.",
  "rates.explain.age_ym": "{y} г. {m} мес.",
- "rates.explain.child_label": "Ребёнок {n} ({age}, {band})"
+ "rates.explain.child_label": "Ребёнок {n} ({age}, {band})",
+ "rates.ws.issue.error": "Ошибка: {message}",
+ "rates.ws.issue.warning": "Предупреждение: {message}",
+ "rates.ws.issue.level_error": "Ошибка",
+ "rates.ws.issue.level_warning": "Предупреждение",
+ "rates.ws.issue.more": {
+  "one": "ещё {count}",
+  "few": "ещё {count}",
+  "many": "ещё {count}",
+  "other": "ещё {count}"
+ },
+ "rates.ws.issue.nav_hint": "Выберите проблему, чтобы показать, где она.",
+ "rates.ws.issue.group": {
+  "one": "{section}: {count} проблема",
+  "few": "{section}: {count} проблемы",
+  "many": "{section}: {count} проблем",
+  "other": "{section}: {count} проблемы"
+ }
 }

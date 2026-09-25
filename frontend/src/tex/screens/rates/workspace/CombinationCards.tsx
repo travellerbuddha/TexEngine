@@ -7,11 +7,12 @@
 // rows. Every change is one workspace history entry with the undo toast. Each card carries
 // `data-card` (its id) for the ladder's ⓘ note, "Show in grid" and issue anchoring.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
-import { Plus } from "lucide-react"
+import { AlertOctagon, AlertTriangle, Plus } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
 import { Badge, Button } from "../../../ui"
 import type { Tables } from "../lib/tables"
+import type { Issue } from "../lib/types"
 import { UndoToastView } from "./BulkToolbar"
 import { CombinationBuilder } from "./CombinationBuilder"
 import { ALL_PERIODS, type Basis } from "./model.ts"
@@ -28,8 +29,10 @@ import {
   type CombinationCard,
   type CombinationPlan,
 } from "./occupancy.ts"
+import { cardAnchorId, type AnchoredIssues } from "./issues.ts"
 import { occRuleText } from "./OccupancyLadder"
 import type { BandLabels } from "./useBandLabels"
+import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
 
 /** How combinations read (cards, the builder's reading line, the ladder's ⓘ notes). */
@@ -113,6 +116,11 @@ export interface CombinationCardsProps {
   ccy: string
   /** a card to bring into view and focus (the ladder's ⓘ note, Show in grid); `n` repeats a request */
   show?: { id: string; n: number } | null
+  /** the validation issues anchored on cards (S15), their messages as shown, and whether they are
+   * older than the state on screen */
+  anchored?: AnchoredIssues
+  issueText?: (issue: Issue) => string
+  issuesStale?: boolean
 }
 
 /** The card element of an id (ids are JSON: compared, never put in a selector). */
@@ -135,6 +143,8 @@ export function CombinationCards(p: CombinationCardsProps) {
   const [announce, setAnnounce] = useState("")
   const say = useCallback((s: string) => setAnnounce((prev) => (prev === s ? `${s}​` : s)), [])
   const undoToast = useUndoToast(history)
+  // the validation issues about a card's rules or its party (§3.15, S15)
+  const issueAt = useCellIssues(p.anchored, p.issueText, p.issuesStale)
 
   // bring a card into view and focus it (after the render that shows it)
   const [focusReq, setFocusReq] = useState<{ id: string; n: number } | null>(null)
@@ -298,15 +308,21 @@ export function CombinationCards(p: CombinationCardsProps) {
             const main = t("rates.combo.card.main", { name, rules: text.rules(card.rules) })
             const bands = text.bands(card.rules)
             const secondary = [bands, text.scope(card.rooms, card.periods)].filter(Boolean).join(" · ")
+            const issue = issueAt(cardAnchorId(card.id))
+            const IssueIcon = issue?.level === "ERROR" ? AlertOctagon : AlertTriangle
+            const issueId = `${titleId}-issue-${cards.indexOf(card)}`
             return (
               <li
                 key={card.id}
                 data-card={card.id}
                 data-combination={card.combination}
+                data-issue={issue ? issue.level.toLowerCase() : undefined}
                 tabIndex={-1}
                 aria-label={t("rates.combo.card.label", { text: main, scope: secondary })}
+                aria-describedby={issue ? issueId : undefined}
                 className={cn(
                   "rounded-md border border-zinc-200 bg-white px-3 py-2 transition-shadow outline-none focus-visible:ring-2 focus-visible:ring-tex-500",
+                  issue && (issue.level === "ERROR" ? "border-rose-300" : "border-amber-300"),
                   highlight === card.id && "ring-2 ring-sky-400",
                 )}
               >
@@ -340,6 +356,12 @@ export function CombinationCards(p: CombinationCardsProps) {
                     )}
                   </div>
                 </div>
+                {issue && (
+                  <p id={issueId} className={cn("mt-1 flex items-start gap-1 text-xs", issue.level === "ERROR" ? "text-rose-800" : "text-amber-900", issue.stale && "opacity-60")}>
+                    <IssueIcon className="mt-px size-3.5 shrink-0" aria-hidden />
+                    <span>{issue.text}</span>
+                  </p>
+                )}
               </li>
             )
           })}

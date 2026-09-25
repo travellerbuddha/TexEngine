@@ -1834,5 +1834,18 @@
  "rates.explain.p.fixed": "sabit",
  "rates.explain.age_y": "{y} yaş",
  "rates.explain.age_ym": "{y} yaş {m} ay",
- "rates.explain.child_label": "{n}. çocuk ({age}, {band})"
+ "rates.explain.child_label": "{n}. çocuk ({age}, {band})",
+ "rates.ws.issue.error": "Hata: {message}",
+ "rates.ws.issue.warning": "Uyarı: {message}",
+ "rates.ws.issue.level_error": "Hata",
+ "rates.ws.issue.level_warning": "Uyarı",
+ "rates.ws.issue.more": {
+  "one": "+{count} tane daha",
+  "other": "+{count} tane daha"
+ },
+ "rates.ws.issue.nav_hint": "Nerede olduğunu görmek için bir sorun seçin.",
+ "rates.ws.issue.group": {
+  "one": "{section}: {count} sorun",
+  "other": "{section}: {count} sorun"
+ }
 }

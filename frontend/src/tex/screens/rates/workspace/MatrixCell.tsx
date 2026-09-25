@@ -1,11 +1,13 @@
 // One cell of the room price matrix (PRICING_WORKSPACE_UX.md §3.3.3, §3.4.1, §3.19; slice S9): a
 // role="gridcell" wired to the keyboard grid (useGridNavigation's cellProps), its tooltip, the
 // state glyphs (never colour alone), the ▾ trigger of the advanced popover, and the inline editor
-// with its reading line. What the cell shows is computed by PriceMatrix; this renders it.
+// with its reading line, and the validation issues anchored on it (S15). What the cell shows is
+// computed by PriceMatrix (and the ladder and boards grids); this renders it.
 import { memo, useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
-import { ChevronDown } from "lucide-react"
+import { AlertOctagon, AlertTriangle, ChevronDown } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTooltip, type GridCellProps, type GridNavigationApi } from "../../../ui"
+import type { CellIssue } from "./useCellIssues"
 
 export type CellTone = "plain" | "muted" | "override" | "fixed" | "missing" | "resolved" | "error" | "pending"
 
@@ -38,6 +40,9 @@ export interface CellView {
   stale?: boolean
   /** an error message, referenced by aria-describedby (aria-invalid) */
   error?: string
+  /** validation issues anchored on the cell (S15): a ⚠ glyph and an underline (an error: rose, and
+   * aria-invalid; warnings only: amber), the messages in the tooltip and in the description */
+  issue?: CellIssue
   /** the ▾ trigger of the advanced popover (editable cells only) */
   trigger?: { label: string; onOpen: (anchor: HTMLElement) => void }
   /** the content may take two short lines instead of being cut (the ladder's "No rule · not sellable") */
@@ -149,18 +154,23 @@ export const MatrixCell = memo(
 )
 
 function MatrixCellImpl({ nav, view, tint, editor, blockStart, highlight }: MatrixCellProps) {
-  const { cellId, label, tone, tooltip, readOnly, stale, error, trigger, onContextMenu } = view
-  const tip = useTooltip(editor ? null : tooltip)
+  const { cellId, label, tone, tooltip, readOnly, stale, error, issue, trigger, onContextMenu } = view
+  // with an issue, the tooltip shows its messages too, and one hidden description holds it all (the
+  // tooltip's own description would repeat them)
+  const tip = useTooltip(editor ? null : issue ? [tooltip, issue.text].filter(Boolean).join(" · ") : tooltip, { describe: !issue })
   const errId = useId()
   const tp = tip.triggerProps
-  const describedBy = [tp["aria-describedby"], error ? errId : undefined].filter(Boolean).join(" ") || undefined
+  const description = issue ? [...new Set([tooltip, error, issue.text].filter(Boolean))].join(" · ") : error
+  const describedBy = [tp["aria-describedby"], description ? errId : undefined].filter(Boolean).join(" ") || undefined
+  const IssueIcon = issue?.level === "ERROR" ? AlertOctagon : AlertTriangle
   return (
     <div
       role="gridcell"
       data-cellid={cellId}
+      data-issue={issue ? issue.level.toLowerCase() : undefined}
       aria-label={editor ? undefined : label}
       aria-readonly={readOnly || undefined}
-      aria-invalid={error ? true : undefined}
+      aria-invalid={error || issue?.level === "ERROR" ? true : undefined}
       aria-describedby={describedBy}
       {...nav}
       ref={tp.ref}
@@ -185,6 +195,10 @@ function MatrixCellImpl({ nav, view, tint, editor, blockStart, highlight }: Matr
         TONE[tone],
         stale && "opacity-55",
         highlight && "shadow-[inset_2px_0_0_var(--color-tex-300),inset_-2px_0_0_var(--color-tex-300)]",
+        // an anchored issue: an underline across the cell (the glyph says it without colour)
+        issue && !editor && "after:absolute after:inset-x-1 after:bottom-0.5 after:h-0.5 after:rounded-full after:content-['']",
+        issue && !editor && (issue.level === "ERROR" ? "after:bg-rose-500" : "after:bg-amber-500"),
+        issue?.stale && "after:opacity-50",
         editor ? "z-[3] p-0" : undefined,
       )}
     >
@@ -217,9 +231,19 @@ function MatrixCellImpl({ nav, view, tint, editor, blockStart, highlight }: Matr
               <ChevronDown className="size-3" aria-hidden />
             </button>
           )}
-          {error && (
+          {issue && (
+            <IssueIcon
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute bottom-1 left-0.5 size-3",
+                issue.level === "ERROR" ? "text-rose-600" : "text-amber-600",
+                issue.stale && "opacity-50",
+              )}
+            />
+          )}
+          {description && (
             <span id={errId} hidden>
-              {error}
+              {description}
             </span>
           )}
         </>

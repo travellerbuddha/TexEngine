@@ -1834,5 +1834,18 @@
  "rates.explain.p.fixed": "fest",
  "rates.explain.age_y": "{y} J.",
  "rates.explain.age_ym": "{y} J. {m} M.",
- "rates.explain.child_label": "Kind {n} ({age}, {band})"
+ "rates.explain.child_label": "Kind {n} ({age}, {band})",
+ "rates.ws.issue.error": "Fehler: {message}",
+ "rates.ws.issue.warning": "Warnung: {message}",
+ "rates.ws.issue.level_error": "Fehler",
+ "rates.ws.issue.level_warning": "Warnung",
+ "rates.ws.issue.more": {
+  "one": "+{count} weiterer",
+  "other": "+{count} weitere"
+ },
+ "rates.ws.issue.nav_hint": "Wählen Sie ein Problem, um zu zeigen, wo es liegt.",
+ "rates.ws.issue.group": {
+  "one": "{section}: {count} Problem",
+  "other": "{section}: {count} Probleme"
+ }
 }

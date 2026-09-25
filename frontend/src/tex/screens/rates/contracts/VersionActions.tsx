@@ -3,7 +3,7 @@ import { tex, TexApiError, useTexMutation } from "../../../lib/api"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, ConfirmDialog, Dialog, Field, InlineError, Input, Notice, Select, Spinner, Textarea, useToast } from "../../../ui"
 import { IssueList } from "../components/common"
-import type { ValidationResult, VersionRow } from "../lib/types"
+import type { Issue, ValidationResult, VersionRow } from "../lib/types"
 import { toFrappeDatetime, versionLabel } from "../lib/util"
 
 /** Publish a draft: server validation first (errors block, warnings need a
@@ -14,12 +14,15 @@ export function PublishDialog({
   version,
   contractCode,
   onDone,
+  format,
 }: {
   open: boolean
   onClose: () => void
   version: { name: string; version_no: number }
   contractCode: string
   onDone: () => void
+  /** an issue's message as shown (the version editor: band codes as labels, D13) */
+  format?: (issue: Issue) => string
 }) {
   const { t } = useTexT()
   const toast = useToast()
@@ -103,7 +106,7 @@ export function PublishDialog({
           ) : checkErr ? (
             <InlineError error={checkErr} />
           ) : (
-            <IssueList issues={check?.issues} emptyOk={t("rates.version.check_ok")} />
+            <IssueList issues={check?.issues} emptyOk={t("rates.version.check_ok")} format={format} />
           )}
           {errors > 0 && <p className="text-sm text-rose-800">{t("rates.version.fix_errors")}</p>}
           {errors === 0 && warnings > 0 && (

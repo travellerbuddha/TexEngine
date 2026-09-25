@@ -9,19 +9,22 @@ import { Button, Card, CardBody, Drawer, ErrorState, Notice, PageHeader, shortcu
 import { IssueCount } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
 import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm } from "../lib/tables"
-import type { ContractBundle, Row, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
+import type { ContractBundle, Issue, Row, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
 import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } from "../lib/util"
+import { effectiveBands } from "../workspace/bands.ts"
 import { ContextHeader } from "../workspace/ContextHeader"
+import { anchorIssues, issueMessage, issuePlace } from "../workspace/issues.ts"
 import { PricingSection } from "../workspace/PricingSection"
 import type { ShowRequest, ShowTarget } from "../workspace/priceTest.ts"
 import { SECTIONS, DEFAULT_RULE_TABLE, type EditorPlace, type PricingRegion, type RuleTableId, type SectionId } from "../workspace/sections.ts"
+import { useBandLabels } from "../workspace/useBandLabels"
 import { useDraftPreview, type SampleRequest } from "../workspace/useDraftPreview"
 import { useWorkspaceHistory } from "../workspace/useWorkspaceHistory"
 import { CommercialRulesSection } from "./sections/CommercialRulesSection"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
 import { OffersTab } from "./tabs/OffersTab"
 import { PreviewTab, PriceTestPanel, type PriceTestPrefill } from "./tabs/PreviewTab"
-import type { MatrixCellRef, TabProps } from "./tabs/shared"
+import { IssueFormatContext, type MatrixCellRef, type TabProps } from "./tabs/shared"
 
 const initialPlace = (): EditorPlace => parseEditorHash(window.location.hash) ?? { section: "pricing" }
 
@@ -204,6 +207,33 @@ export default function VersionEditor() {
   )
 
   const issues = preview.issues
+  // the issues' messages with band labels (D13), and where each is shown (§3.15, S15): the grids
+  // mark the cells, and a click in the live check's list goes to its cell, region or rule table
+  const tables = state?.tables
+  const ageBands = tables?.age_bands
+  const servedBands = preview.matrix?.age_bands
+  const bands = useMemo(() => (ageBands ? effectiveBands({ age_bands: ageBands }, servedBands) : []), [ageBands, servedBands])
+  const bandLabels = useBandLabels(bands)
+  const labelDisplay = bandLabels.display
+  const issueText = useCallback((issue: Issue) => issueMessage(issue, labelDisplay), [labelDisplay])
+  const anchored = useMemo(() => (tables && issues?.length ? anchorIssues(issues, tables, { bands }) : undefined), [issues, tables, bands])
+  const goTo = useCallback((next: SectionId, table?: RuleTableId) => {
+    setTesting(null)
+    setSection(next)
+    setRegion(undefined)
+    if (table) setRuleTable(table)
+    window.history.replaceState(null, "", `#${editorHash({ section: next, table })}`)
+  }, [])
+  const showIssue = useCallback(
+    (index: number) => {
+      const issue = issues?.[index]
+      if (!issue) return
+      const place = issuePlace(issue, anchored?.anchors[index] ?? [])
+      if (place.section === "pricing") showInGrid(place.target)
+      else goTo(place.section, place.table)
+    },
+    [issues, anchored, showInGrid, goTo],
+  )
   const offersCount = state?.tables.offers.length ?? 0
   const tabDefs = useMemo(
     () =>
@@ -261,6 +291,9 @@ export default function VersionEditor() {
           showInGrid,
           show,
           onShown,
+          anchored,
+          issueText,
+          issuesStale: preview.issuesStale,
         }
       : undefined
 
@@ -330,6 +363,8 @@ export default function VersionEditor() {
           setSelling={setSelling}
           onBasisApplied={onBasisApplied}
           draftAction={draftAction}
+          issueText={issueText}
+          onShowIssue={showIssue}
         >
           {sections}
         </ContextHeader>
@@ -346,10 +381,12 @@ export default function VersionEditor() {
             </div>
           ) : (
             <TabPanel id={section}>
-              {section === "pricing" && <PricingSection {...props} region={region} />}
-              {section === "rules" && <CommercialRulesSection {...props} table={ruleTable} onTable={changeTable} />}
-              {section === "offers" && <OffersTab {...props} />}
-              {section === "preview" && <PreviewTab {...props} />}
+              <IssueFormatContext.Provider value={issueText}>
+                {section === "pricing" && <PricingSection {...props} region={region} />}
+                {section === "rules" && <CommercialRulesSection {...props} table={ruleTable} onTable={changeTable} />}
+                {section === "offers" && <OffersTab {...props} />}
+                {section === "preview" && <PreviewTab {...props} />}
+              </IssueFormatContext.Provider>
             </TabPanel>
           )}
         </CardBody>
@@ -368,6 +405,7 @@ export default function VersionEditor() {
           onClose={() => setPublishing(false)}
           version={doc}
           contractCode={cd.contract_code}
+          format={issueText}
           onDone={() => {
             q.reload()
             contract.reload()

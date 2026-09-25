@@ -66,8 +66,10 @@ import {
   type BoardRow,
   type BoardTerms,
 } from "./model.ts"
+import { boardCellId } from "./issues.ts"
 import { isSet, str } from "./rows.ts"
 import type { PricingRegion } from "./sections.ts"
+import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
 
 const OPEN_KEY = "tex.rates.ws.boards_open"
@@ -150,8 +152,9 @@ interface Confirming {
 
 const keyOf = (c: BoardRef) => `${c.row}\u0000${c.period}`
 const rowIdOf = (id: BoardIdentity) => `${id.board}|${id.room_type}`
-/** The DOM id of a boards cell (data-cellid): S15 anchors issues on it, S14 "Show in grid" finds it. */
-export const boardCellId = (board: string, room: string, period: string) => `board:${board}|${room}|${period}`
+/** The DOM id of a boards cell (data-cellid, issues.boardCellId): S15 anchors issues on it, S14
+ * "Show in grid" finds it. */
+export { boardCellId }
 const hasRows = (boards: readonly Row[], id: BoardIdentity) => boards.some((r) => str(r.board) === id.board && str(r.room_type) === id.room_type)
 /** Entry errors with a board-specific message; the others read as in every grid (rates.sh.err.*). */
 const BOARD_ERRORS = ["SYNTAX", "OP_NOT_ALLOWED", "BASE_SCOPE"]
@@ -219,6 +222,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   }
   const sourceName = (r: Row) => `${rowLabel({ board: str(r.board), room_type: str(r.room_type) })} · ${periodName(str(r.period_code))}`
   const errorText = (code: string) => (BOARD_ERRORS.includes(code) ? t(`rates.brd.err.${code}`) : t(`rates.sh.err.${code}`))
+  // the validation issues anchored on board cells (§3.15, S15)
+  const issueAt = useCellIssues(props.anchored, props.issueText, props.issuesStale)
 
   // ─── the keyboard grid ─────────────────────────────────────────────────
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && r >= 0 && r < rows.length, [canEdit, rows])
@@ -228,16 +233,23 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const { show, onShown } = props
   const [reveal, setReveal] = useState<string | null>(null)
   useEffect(() => {
-    if (!show || show.target.kind !== "board") return
-    const { board, room, period } = show.target
-    onShown?.(show.n)
-    setOpen(true)
-    setReveal(boardCellId(board, room, period))
+    if (!show) return
+    const target = show.target
+    if (target.kind === "board") {
+      onShown?.(show.n)
+      setOpen(true)
+      setReveal(boardCellId(target.board, target.room, target.period))
+    } else if (target.kind === "region" && target.region === "boards") {
+      // an issue about the boards as a whole (NO_BASE_BOARD, S15): the section, open
+      onShown?.(show.n)
+      setOpen(true)
+      setReveal("")
+    }
   }, [show, onShown, setOpen])
   useEffect(() => {
-    if (!reveal || !open) return
+    if (reveal === null || !open) return
     setReveal(null)
-    const el = Array.from(gridEl.current?.querySelectorAll<HTMLElement>("[data-cellid]") ?? []).find((x) => x.dataset.cellid === reveal)
+    const el = reveal ? Array.from(gridEl.current?.querySelectorAll<HTMLElement>("[data-cellid]") ?? []).find((x) => x.dataset.cellid === reveal) : undefined
     if (el) revealElement(el)
     else sectionRef.current?.scrollIntoView({ block: "start" })
   }, [reveal, open])
@@ -616,8 +628,10 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     if (draft) view = draftView(draft)
     const stateText = t(`rates.brd.state.${view.state}`)
     const name = cellName(ref)
+    const cellId = boardCellId(row.board, row.room_type, period)
     return {
-      cellId: boardCellId(row.board, row.room_type, period),
+      cellId,
+      issue: issueAt(cellId),
       label: view.value ? t("rates.ws.cell.label", { cell: name, state: stateText, value: view.value }) : t("rates.ws.cell.label_bare", { cell: name, state: stateText }),
       tone: view.tone,
       content: view.content,
@@ -639,7 +653,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     () => rows.map((_, r) => cols.map((period, c) => cellView(r, period, c))),
     // everything cellView reads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, cols, drafts, canEdit, t, minorUnits, doc.status, roomName],
+    [rows, cols, drafts, canEdit, t, minorUnits, doc.status, roomName, issueAt],
   )
   const selectedKey = (r: number) => {
     let out = ""

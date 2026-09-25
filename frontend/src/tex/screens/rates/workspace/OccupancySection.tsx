@@ -44,6 +44,9 @@ import type { WorkspaceHistory } from "./useWorkspaceHistory"
 
 const OPEN_KEY = "tex.rates.ws.occupancy_open"
 
+/** What a "Show in grid" or issue request waits to show once the section is open (in its scope). */
+type Showing = { key: string } | { card: string } | { row: string; period: string } | { section: true }
+
 function readOpen(fallback: boolean): boolean {
   try {
     const s = window.localStorage.getItem(OPEN_KEY)
@@ -133,26 +136,49 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
   const summary = ladderSummary(model, cards)
   const withRules = useMemo(() => scopesWithRules(tables), [tables])
 
-  // ─── "Show in grid" (S14): an occupancy rule's combination card, else its ladder cell ─────
+  // ─── "Show in grid" (S14): an occupancy rule's combination card, else its ladder cell; an issue
+  // (S15): a ladder cell in a rooms scope, a combination card, the section or the child ages drawer
   const { show, onShown } = props
-  const [showing, setShowing] = useState<string | null>(null)
+  const [showing, setShowing] = useState<Showing | null>(null)
   const [ladderFocus, setLadderFocus] = useState<{ cellId: string; n: number } | null>(null)
   const focusSeq = useRef(0)
   const cardOf = useCallback((key: string) => {
     const card = cards.find((c) => c.keys.includes(key))
     return card && !isSingleUseCard(card) ? card : null
   }, [cards])
-  useEffect(() => {
-    if (!show || show.target.kind !== "occupancy") return
-    const key = show.target.key
-    onShown?.(show.n)
-    const row = tables.occupancy_rules.find((r) => r._key === key)
-    if (!row) return
+  const openSection = () => {
     setOpenState(true)
     storeOpen(true)
-    // a ladder rule is shown in its room's scope (All rooms for a rule of every room)
-    if (!cardOf(key)) setScope(rooms.includes(str(row.room_type)) ? str(row.room_type) : "")
-    setShowing(key)
+  }
+  useEffect(() => {
+    if (!show) return
+    const target = show.target
+    if (target.kind === "occupancy") {
+      const key = target.key
+      onShown?.(show.n)
+      const row = tables.occupancy_rules.find((r) => r._key === key)
+      if (!row) return
+      openSection()
+      // a ladder rule is shown in its room's scope (All rooms for a rule of every room)
+      if (!cardOf(key)) setScope(rooms.includes(str(row.room_type)) ? str(row.room_type) : "")
+      setShowing({ key })
+    } else if (target.kind === "ladder") {
+      onShown?.(show.n)
+      openSection()
+      setScope(rooms.includes(target.scope) ? target.scope : "")
+      setShowing({ row: target.row, period: target.period })
+    } else if (target.kind === "card") {
+      onShown?.(show.n)
+      openSection()
+      setShowing({ card: target.id })
+    } else if (target.kind === "region" && target.region === "occupancy") {
+      onShown?.(show.n)
+      openSection()
+      setShowing({ section: true })
+    } else if (target.kind === "region" && target.region === "ages") {
+      onShown?.(show.n)
+      setDrawer(true)
+    }
     // the request is handled once, by its number
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show])
@@ -160,17 +186,22 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
     // after the render that opened the section in that scope
     if (!showing || !open) return
     setShowing(null)
-    const card = cardOf(showing)
-    if (card) return onShowCard(card.id)
-    for (const row of model.rows)
-      for (const period of model.periods)
-        if (row.cells[period]?.rule?._key === showing) {
-          focusSeq.current += 1
-          setLadderFocus({ cellId: ladderCellId(row.id, period), n: focusSeq.current })
-          return
-        }
+    const focusCell = (row: string, period: string) => {
+      focusSeq.current += 1
+      setLadderFocus({ cellId: ladderCellId(row, period, scope), n: focusSeq.current })
+    }
+    if ("key" in showing) {
+      const card = cardOf(showing.key)
+      if (card) return onShowCard(card.id)
+      for (const row of model.rows)
+        for (const period of model.periods) if (row.cells[period]?.rule?._key === showing.key) return focusCell(row.id, period)
+    } else if ("card" in showing) {
+      if (cards.some((c) => c.id === showing.card)) return onShowCard(showing.card)
+    } else if ("row" in showing) {
+      if (model.rows.some((r) => r.id === showing.row) && model.periods.includes(showing.period)) return focusCell(showing.row, showing.period)
+    }
     requestAnimationFrame(() => sectionRef.current?.scrollIntoView({ block: "start" }))
-  }, [showing, open, model, cardOf, onShowCard])
+  }, [showing, open, model, cardOf, onShowCard, scope, cards])
 
   // ─── the resolved line's sample party (price_matrix parties, GAP-2b) ─────
   const partyRoom = scope || baseRoom || rooms[0] || ""
@@ -323,6 +354,9 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
               partyName={partyName}
               onShowCard={onShowCard}
               focus={ladderFocus}
+              anchored={props.anchored}
+              issueText={props.issueText}
+              issuesStale={props.issuesStale}
             />
             <CombinationCards
               key={`combos:${props.epoch ?? 0}`}
@@ -343,6 +377,9 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
               decimalMark={decimalMarkOf(locale)}
               ccy={doc.contract_doc.contract_currency}
               show={showCard}
+              anchored={props.anchored}
+              issueText={props.issueText}
+              issuesStale={props.issuesStale}
             />
           </div>
         )}

@@ -1897,5 +1897,20 @@
  "rates.explain.p.fixed": "fix",
  "rates.explain.age_y": "{y} ani",
  "rates.explain.age_ym": "{y} ani {m} luni",
- "rates.explain.child_label": "Copilul {n} ({age}, {band})"
+ "rates.explain.child_label": "Copilul {n} ({age}, {band})",
+ "rates.ws.issue.error": "Eroare: {message}",
+ "rates.ws.issue.warning": "Avertisment: {message}",
+ "rates.ws.issue.level_error": "Eroare",
+ "rates.ws.issue.level_warning": "Avertisment",
+ "rates.ws.issue.more": {
+  "one": "încă {count}",
+  "few": "încă {count}",
+  "other": "încă {count}"
+ },
+ "rates.ws.issue.nav_hint": "Alegeți o problemă pentru a arăta unde se află.",
+ "rates.ws.issue.group": {
+  "one": "{section}: {count} problemă",
+  "few": "{section}: {count} probleme",
+  "other": "{section}: {count} de probleme"
+ }
 }
