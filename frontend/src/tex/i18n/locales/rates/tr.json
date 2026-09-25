@@ -1505,15 +1505,22 @@
  "rates.occ.ladder.child_ages": "Çocuk yaşları…",
  "rates.occ.ladder.guest": "Misafir",
  "rates.occ.ladder.hint": "Hücreye yazın: x0.7 çarpar, 50% bir paydır, +10% veya -10% ayarlar, +25 ekler, =25 sabit fiyattır. Enter aşağı iner; Alt+Enter kuralı açar.",
- "rates.occ.ladder.base_pair": "her biri {rule} (varsayılan) = {count} × baz kişi fiyatı",
+ "rates.occ.ladder.base_pair": {
+  "one": "her biri {rule} (varsayılan) = {count} × baz kişi fiyatı",
+  "other": "her biri {rule} (varsayılan) = {count} × baz kişi fiyatı"
+ },
  "rates.occ.ladder.base_pair_general": "her biri {rule} (her yetişkin kuralı)",
- "rates.occ.ladder.included_sub": "oda fiyatına dahil (oda başına {count} yetişkin)",
+ "rates.occ.ladder.included_sub": {
+  "one": "oda fiyatına dahil (oda başına {count} yetişkin)",
+  "other": "oda fiyatına dahil (oda başına {count} yetişkin)"
+ },
  "rates.occ.ladder.single_sub": "odanın tamamı, {unit} üzerinden",
  "rates.occ.ladder.unit_sub": "{unit} üzerinden",
  "rates.occ.ladder.no_bands": "Çocuk yaş grubu yok: çocuklar henüz fiyatlandırılamaz. Çocuk yaşları… ile ekleyin.",
  "rates.occ.ladder.inherited_bands": "Çocuk yaş grupları şuradan geliyor: {source}.",
  "rates.occ.ladder.party": "Örnek konaklayan grubu",
  "rates.occ.ladder.party_unsaved": "Bu odanın toplamlarını görmek için taslağı kaydedin: önizleme, bu odayı henüz içermeyen kayıtlı taslağı gösteriyor.",
+ "rates.occ.ladder.party_hidden": "Bir fiyatlandırma politikası kuralıyla fiyatlandı; toplamı yalnızca maliyeti görebilen kullanıcılara gösterilir.",
  "rates.occ.ladder.party_failed": "Sunucu bu grubu hesaplayamadı. Yeniden sormak için başka bir grup seçin veya bir kuralı düzenleyin.",
  "rates.occ.ladder.resolved": "Hesaplanan · {room}",
  "rates.occ.ladder.resolved_tip": "Bu grubun bir gecelik kişi toplamı, sunucu tarafından hesaplanır.",
@@ -1544,8 +1551,14 @@
  "rates.occ.ladder.cell.missing": "Kural yok · satılamaz",
  "rates.occ.ladder.cell.missing_tip": "Bu yaş grubundaki bir çocuğu fiyatlandıran kural yok, bu yüzden böyle bir çocuğu olan grup satılamaz. Kural koymak için bir değer yazın.",
  "rates.occ.ladder.cell.included": "oda fiyatına dahil",
- "rates.occ.ladder.cell.included_tip": "Oda fiyatına dahil: oda fiyatı {count} yetişkini kapsar.",
- "rates.occ.ladder.cell.ignored_tip": "Bu yer oda fiyatına dahil ({count} yetişkin), bu yüzden {rule} kuralının etkisi yok.",
+ "rates.occ.ladder.cell.included_tip": {
+  "one": "Oda fiyatına dahil: oda fiyatı {count} yetişkini kapsar.",
+  "other": "Oda fiyatına dahil: oda fiyatı {count} yetişkini kapsar."
+ },
+ "rates.occ.ladder.cell.ignored_tip": {
+  "one": "Bu yer oda fiyatına dahil ({count} yetişkin), bu yüzden {rule} kuralının etkisi yok.",
+  "other": "Bu yer oda fiyatına dahil ({count} yetişkin), bu yüzden {rule} kuralının etkisi yok."
+ },
  "rates.occ.ladder.cell.override": "ÖZEL",
  "rates.occ.ladder.cell.override_tip": "{period}, tüm dönemler kuralı {default} yerine geçer: {rule}",
  "rates.occ.ladder.cell.inherit_tip": "Bu hücrenin kendi kuralı Devral: sıradaki kural uygulanır ({rule}).",
@@ -1553,6 +1566,8 @@
  "rates.occ.ladder.cell.all_rooms_tip": "{room} için bu misafire ait kendi kuralı yok: Tüm odalar kuralı {rule} uygulanır. {room} için kural koymak üzere bir değer yazın.",
  "rates.occ.ladder.cell.policy_tip": "Fiyatlandırma politikasından ({source}): {rule}. Bu versiyona kural koymak için bir değer yazın; politikanın önüne geçer.",
  "rates.occ.ladder.cell.policy_from": "kaynak: {source}",
+ "rates.occ.ladder.cell.policy_hidden": "Politika kuralı",
+ "rates.occ.ladder.cell.policy_hidden_tip": "Bu yeri fiyatlandırma politikasının ({source}) bir kuralı fiyatlar. Formülü yalnızca maliyeti görebilen kullanıcılara gösterilir. Bu versiyona ait bir kural koymak için bir değer yazın; politikaya karşı o kazanır.",
  "rates.occ.ladder.cell.always_tag": "öncelikli",
  "rates.occ.ladder.cell.fixed_tag": "sabit",
  "rates.occ.ladder.cell.combo_note": "Özel kombinasyonlar, kural Her zaman öncelikli olarak işaretlenmedikçe dönem kurallarının önüne geçer: {combos}.",
@@ -1584,7 +1599,10 @@
  "rates.occ.state.loading": "yükleniyor",
  "rates.occ.state.failed": "hesaplanamadı",
  "rates.occ.unit.person": "baz kişi fiyatı",
- "rates.occ.unit.person_share": "kişi başı pay (oda ÷ {count})",
+ "rates.occ.unit.person_share": {
+  "one": "kişi başı pay (oda ÷ {count})",
+  "other": "kişi başı pay (oda ÷ {count})"
+ },
  "rates.occ.unit.room": "oda fiyatı",
  "rates.occ.read.MULTIPLY": "{cell}, {unit} üzerinden {rule} öder",
  "rates.occ.read.PERCENT_OF": "{cell}, {unit} üzerinden {rule} öder",

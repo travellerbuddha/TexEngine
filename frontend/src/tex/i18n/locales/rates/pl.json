@@ -1599,15 +1599,26 @@
  "rates.occ.ladder.child_ages": "Wiek dzieci…",
  "rates.occ.ladder.guest": "Gość",
  "rates.occ.ladder.hint": "Wpisz w komórkę: x0.7 mnoży, 50% to udział, +10% lub -10% koryguje, +25 dodaje, =25 to cena stała. Enter przechodzi w dół; Alt+Enter otwiera regułę.",
- "rates.occ.ladder.base_pair": "po {rule} (domyślnie) = {count} × bazowa cena za osobę",
+ "rates.occ.ladder.base_pair": {
+  "one": "po {rule} (domyślnie) = {count} × bazowa cena za osobę",
+  "few": "po {rule} (domyślnie) = {count} × bazowa cena za osobę",
+  "many": "po {rule} (domyślnie) = {count} × bazowa cena za osobę",
+  "other": "po {rule} (domyślnie) = {count} × bazowa cena za osobę"
+ },
  "rates.occ.ladder.base_pair_general": "po {rule} (reguła dla każdego dorosłego)",
- "rates.occ.ladder.included_sub": "wliczone w cenę pokoju ({count} dorosłych na pokój)",
+ "rates.occ.ladder.included_sub": {
+  "one": "wliczone w cenę pokoju ({count} dorosły na pokój)",
+  "few": "wliczone w cenę pokoju ({count} dorosłych na pokój)",
+  "many": "wliczone w cenę pokoju ({count} dorosłych na pokój)",
+  "other": "wliczone w cenę pokoju ({count} dorosłego na pokój)"
+ },
  "rates.occ.ladder.single_sub": "cały pokój, od wartości „{unit}”",
  "rates.occ.ladder.unit_sub": "od wartości „{unit}”",
  "rates.occ.ladder.no_bands": "Brak przedziałów wiekowych dzieci: dzieci nie można jeszcze wycenić. Dodaj je przez Wiek dzieci…",
  "rates.occ.ladder.inherited_bands": "Przedziały wiekowe pochodzą z: {source}.",
  "rates.occ.ladder.party": "Przykładowa grupa",
  "rates.occ.ladder.party_unsaved": "Zapisz szkic, aby zobaczyć sumy dla tego pokoju: podgląd pokazuje zapisany szkic, który jeszcze go nie zawiera.",
+ "rates.occ.ladder.party_hidden": "Wyceniono regułą polityki cenowej; sumę widzą tylko użytkownicy, którzy mogą widzieć koszt.",
  "rates.occ.ladder.party_failed": "Serwer nie mógł obliczyć tej grupy. Wybierz inną grupę lub edytuj regułę, aby zapytać ponownie.",
  "rates.occ.ladder.resolved": "Wynik · {room}",
  "rates.occ.ladder.resolved_tip": "Suma obłożenia za jedną noc dla tej grupy, obliczona przez serwer.",
@@ -1638,8 +1649,18 @@
  "rates.occ.ladder.cell.missing": "Brak reguły · niedostępne",
  "rates.occ.ladder.cell.missing_tip": "Żadna reguła nie wycenia dziecka z tego przedziału, więc grupy z takim dzieckiem nie można sprzedać. Wpisz wartość, aby ustawić regułę.",
  "rates.occ.ladder.cell.included": "wliczone w cenę pokoju",
- "rates.occ.ladder.cell.included_tip": "Wliczone w cenę pokoju: cena pokoju obejmuje {count} dorosłych.",
- "rates.occ.ladder.cell.ignored_tip": "To miejsce jest wliczone w cenę pokoju ({count} dorosłych), więc jego reguła {rule} nie działa.",
+ "rates.occ.ladder.cell.included_tip": {
+  "one": "Wliczone w cenę pokoju: cena pokoju obejmuje {count} dorosłego.",
+  "few": "Wliczone w cenę pokoju: cena pokoju obejmuje {count} dorosłych.",
+  "many": "Wliczone w cenę pokoju: cena pokoju obejmuje {count} dorosłych.",
+  "other": "Wliczone w cenę pokoju: cena pokoju obejmuje {count} dorosłego."
+ },
+ "rates.occ.ladder.cell.ignored_tip": {
+  "one": "To miejsce jest wliczone w cenę pokoju ({count} dorosły), więc jego reguła {rule} nie działa.",
+  "few": "To miejsce jest wliczone w cenę pokoju ({count} dorosłych), więc jego reguła {rule} nie działa.",
+  "many": "To miejsce jest wliczone w cenę pokoju ({count} dorosłych), więc jego reguła {rule} nie działa.",
+  "other": "To miejsce jest wliczone w cenę pokoju ({count} dorosłego), więc jego reguła {rule} nie działa."
+ },
  "rates.occ.ladder.cell.override": "WYJĄTEK",
  "rates.occ.ladder.cell.override_tip": "{period} zastępuje regułę dla wszystkich okresów {default}: {rule}",
  "rates.occ.ladder.cell.inherit_tip": "Własna reguła tej komórki to Dziedzicz: działa następna reguła ({rule}).",
@@ -1647,6 +1668,8 @@
  "rates.occ.ladder.cell.all_rooms_tip": "{room} nie ma własnej reguły dla tego gościa: obowiązuje reguła dla wszystkich pokoi {rule}. Wpisz wartość, aby ustawić regułę dla {room}.",
  "rates.occ.ladder.cell.policy_tip": "Z polityki cenowej ({source}): {rule}. Wpisz wartość, aby ustawić regułę tej wersji; ma pierwszeństwo przed polityką.",
  "rates.occ.ladder.cell.policy_from": "źródło: {source}",
+ "rates.occ.ladder.cell.policy_hidden": "Reguła polityki",
+ "rates.occ.ladder.cell.policy_hidden_tip": "To miejsce wycenia reguła polityki cenowej ({source}). Jej formułę widzą tylko użytkownicy, którzy mogą widzieć koszt. Wpisz wartość, aby ustawić regułę tej wersji; ma ona pierwszeństwo przed polityką.",
  "rates.occ.ladder.cell.always_tag": "pierwszeństwo",
  "rates.occ.ladder.cell.fixed_tag": "stała",
  "rates.occ.ladder.cell.combo_note": "Kombinacje specjalne mają pierwszeństwo przed regułami okresu, chyba że reguła ma oznaczenie Zawsze ma pierwszeństwo: {combos}.",
@@ -1678,7 +1701,12 @@
  "rates.occ.state.loading": "wczytywanie",
  "rates.occ.state.failed": "nie udało się obliczyć",
  "rates.occ.unit.person": "bazowa cena za osobę",
- "rates.occ.unit.person_share": "udział na osobę (pokój ÷ {count})",
+ "rates.occ.unit.person_share": {
+  "one": "udział na osobę (pokój ÷ {count})",
+  "few": "udział na osobę (pokój ÷ {count})",
+  "many": "udział na osobę (pokój ÷ {count})",
+  "other": "udział na osobę (pokój ÷ {count})"
+ },
  "rates.occ.unit.room": "cena pokoju",
  "rates.occ.read.MULTIPLY": "{cell} płaci {rule} od wartości „{unit}”",
  "rates.occ.read.PERCENT_OF": "{cell} płaci {rule} od wartości „{unit}”",

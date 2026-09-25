@@ -1552,15 +1552,24 @@
  "rates.occ.ladder.child_ages": "Vârstele copiilor…",
  "rates.occ.ladder.guest": "Oaspete",
  "rates.occ.ladder.hint": "Scrieți într-o celulă: x0.7 înmulțește, 50% este o cotă, +10% sau -10% ajustează, +25 adaugă, =25 este preț fix. Enter coboară; Alt+Enter deschide regula.",
- "rates.occ.ladder.base_pair": "câte {rule} (implicit) = {count} × prețul de bază pe persoană",
+ "rates.occ.ladder.base_pair": {
+  "one": "câte {rule} (implicit) = {count} × prețul de bază pe persoană",
+  "few": "câte {rule} (implicit) = {count} × prețul de bază pe persoană",
+  "other": "câte {rule} (implicit) = {count} × prețul de bază pe persoană"
+ },
  "rates.occ.ladder.base_pair_general": "câte {rule} (regulă pentru fiecare adult)",
- "rates.occ.ladder.included_sub": "inclus în prețul camerei ({count} adulți pe cameră)",
+ "rates.occ.ladder.included_sub": {
+  "one": "inclus în prețul camerei ({count} adult pe cameră)",
+  "few": "inclus în prețul camerei ({count} adulți pe cameră)",
+  "other": "inclus în prețul camerei ({count} de adulți pe cameră)"
+ },
  "rates.occ.ladder.single_sub": "toată camera, din {unit}",
  "rates.occ.ladder.unit_sub": "din {unit}",
  "rates.occ.ladder.no_bands": "Nu există grupe de vârstă pentru copii: copiii nu pot primi încă preț. Adăugați-le cu Vârstele copiilor…",
  "rates.occ.ladder.inherited_bands": "Grupele de vârstă provin din: {source}.",
  "rates.occ.ladder.party": "Grup exemplu",
  "rates.occ.ladder.party_unsaved": "Salvați ciorna pentru a vedea totalurile acestei camere: previzualizarea arată ciorna salvată, care încă nu o conține.",
+ "rates.occ.ladder.party_hidden": "Calculat cu o regulă a politicii de prețuri; totalul este afișat doar utilizatorilor care pot vedea costul.",
  "rates.occ.ladder.party_failed": "Serverul nu a putut calcula acest grup. Alegeți alt grup sau modificați o regulă pentru a cere din nou.",
  "rates.occ.ladder.resolved": "Calculat · {room}",
  "rates.occ.ladder.resolved_tip": "Totalul de ocupare pentru o noapte al acestui grup, calculat de server.",
@@ -1593,8 +1602,16 @@
  "rates.occ.ladder.cell.missing": "Fără regulă · nevandabil",
  "rates.occ.ladder.cell.missing_tip": "Nicio regulă nu stabilește prețul unui copil din această grupă, deci un grup cu un astfel de copil nu se poate vinde. Introduceți o valoare pentru a stabili o regulă.",
  "rates.occ.ladder.cell.included": "inclus în prețul camerei",
- "rates.occ.ladder.cell.included_tip": "Inclus în prețul camerei: prețul camerei acoperă {count} adulți.",
- "rates.occ.ladder.cell.ignored_tip": "Acest loc este inclus în prețul camerei ({count} adulți), deci regula lui {rule} nu are efect.",
+ "rates.occ.ladder.cell.included_tip": {
+  "one": "Inclus în prețul camerei: prețul camerei acoperă {count} adult.",
+  "few": "Inclus în prețul camerei: prețul camerei acoperă {count} adulți.",
+  "other": "Inclus în prețul camerei: prețul camerei acoperă {count} de adulți."
+ },
+ "rates.occ.ladder.cell.ignored_tip": {
+  "one": "Acest loc este inclus în prețul camerei ({count} adult), deci regula lui {rule} nu are efect.",
+  "few": "Acest loc este inclus în prețul camerei ({count} adulți), deci regula lui {rule} nu are efect.",
+  "other": "Acest loc este inclus în prețul camerei ({count} de adulți), deci regula lui {rule} nu are efect."
+ },
  "rates.occ.ladder.cell.override": "EXCEPȚIE",
  "rates.occ.ladder.cell.override_tip": "{period} înlocuiește regula pentru toate perioadele {default}: {rule}",
  "rates.occ.ladder.cell.inherit_tip": "Regula proprie a acestei celule este Moștenire: se aplică regula următoare ({rule}).",
@@ -1602,6 +1619,8 @@
  "rates.occ.ladder.cell.all_rooms_tip": "{room} nu are o regulă proprie pentru acest oaspete: se aplică regula pentru toate camerele, {rule}. Introduceți o valoare pentru a seta o regulă pentru {room}.",
  "rates.occ.ladder.cell.policy_tip": "Din politica de prețuri ({source}): {rule}. Introduceți o valoare pentru a stabili o regulă a acestei versiuni; are prioritate față de politică.",
  "rates.occ.ladder.cell.policy_from": "sursa: {source}",
+ "rates.occ.ladder.cell.policy_hidden": "Regulă de politică",
+ "rates.occ.ladder.cell.policy_hidden_tip": "O regulă a politicii de prețuri ({source}) stabilește prețul acestui loc. Formula ei este afișată doar utilizatorilor care pot vedea costul. Introduceți o valoare pentru a seta o regulă a acestei versiuni; ea are prioritate față de politică.",
  "rates.occ.ladder.cell.always_tag": "prioritar",
  "rates.occ.ladder.cell.fixed_tag": "fix",
  "rates.occ.ladder.cell.combo_note": "Combinațiile speciale au prioritate față de regulile de perioadă, dacă regula nu este marcată Are mereu prioritate: {combos}.",
@@ -1633,7 +1652,11 @@
  "rates.occ.state.loading": "se încarcă",
  "rates.occ.state.failed": "nu a putut fi calculat",
  "rates.occ.unit.person": "prețul de bază pe persoană",
- "rates.occ.unit.person_share": "cota pe persoană (cameră ÷ {count})",
+ "rates.occ.unit.person_share": {
+  "one": "cota pe persoană (cameră ÷ {count})",
+  "few": "cota pe persoană (cameră ÷ {count})",
+  "other": "cota pe persoană (cameră ÷ {count})"
+ },
  "rates.occ.unit.room": "prețul camerei",
  "rates.occ.read.MULTIPLY": "{cell} plătește {rule} din {unit}",
  "rates.occ.read.PERCENT_OF": "{cell} plătește {rule} din {unit}",

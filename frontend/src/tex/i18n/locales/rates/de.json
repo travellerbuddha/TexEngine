@@ -1505,15 +1505,22 @@
  "rates.occ.ladder.child_ages": "Kinderalter…",
  "rates.occ.ladder.guest": "Gast",
  "rates.occ.ladder.hint": "In eine Zelle tippen: x0.7 multipliziert, 50% ist ein Anteil, +10% oder -10% passt an, +25 addiert, =25 ist ein Festpreis. Enter geht nach unten; Alt+Enter öffnet die Regel.",
- "rates.occ.ladder.base_pair": "je {rule} (Standard) = {count} × Basis-Personenpreis",
+ "rates.occ.ladder.base_pair": {
+  "one": "je {rule} (Standard) = {count} × Basis-Personenpreis",
+  "other": "je {rule} (Standard) = {count} × Basis-Personenpreis"
+ },
  "rates.occ.ladder.base_pair_general": "je {rule} (Regel für jeden Erwachsenen)",
- "rates.occ.ladder.included_sub": "im Zimmerpreis enthalten ({count} Erwachsene pro Zimmer)",
+ "rates.occ.ladder.included_sub": {
+  "one": "im Zimmerpreis enthalten ({count} Erwachsener pro Zimmer)",
+  "other": "im Zimmerpreis enthalten ({count} Erwachsene pro Zimmer)"
+ },
  "rates.occ.ladder.single_sub": "das ganze Zimmer, vom {unit}",
  "rates.occ.ladder.unit_sub": "vom {unit}",
  "rates.occ.ladder.no_bands": "Keine Altersgruppen für Kinder: Kinder können noch nicht bepreist werden. Legen Sie sie über Kinderalter… an.",
  "rates.occ.ladder.inherited_bands": "Die Altersgruppen stammen aus: {source}.",
  "rates.occ.ladder.party": "Beispielbelegung",
  "rates.occ.ladder.party_unsaved": "Speichern Sie den Entwurf, um Summen für dieses Zimmer zu sehen: Die Vorschau zeigt den gespeicherten Entwurf, der es noch nicht enthält.",
+ "rates.occ.ladder.party_hidden": "Mit einer Regel der Preisrichtlinie bepreist; die Summe sehen nur Benutzer, die Kosten sehen dürfen.",
  "rates.occ.ladder.party_failed": "Der Server konnte diese Belegung nicht berechnen. Wählen Sie eine andere Belegung oder ändern Sie eine Regel, um erneut anzufragen.",
  "rates.occ.ladder.resolved": "Berechnet · {room}",
  "rates.occ.ladder.resolved_tip": "Belegungssumme einer Nacht für diese Belegung, vom Server berechnet.",
@@ -1544,8 +1551,14 @@
  "rates.occ.ladder.cell.missing": "Keine Regel · nicht verkäuflich",
  "rates.occ.ladder.cell.missing_tip": "Keine Regel bepreist ein Kind dieser Altersgruppe, daher ist eine Belegung mit einem solchen Kind nicht verkäuflich. Geben Sie einen Wert ein, um eine Regel festzulegen.",
  "rates.occ.ladder.cell.included": "im Zimmerpreis enthalten",
- "rates.occ.ladder.cell.included_tip": "Im Zimmerpreis enthalten: Der Zimmerpreis deckt {count} Erwachsene ab.",
- "rates.occ.ladder.cell.ignored_tip": "Dieser Platz ist im Zimmerpreis enthalten ({count} Erwachsene), daher wirkt seine Regel {rule} nicht.",
+ "rates.occ.ladder.cell.included_tip": {
+  "one": "Im Zimmerpreis enthalten: Der Zimmerpreis deckt {count} Erwachsenen ab.",
+  "other": "Im Zimmerpreis enthalten: Der Zimmerpreis deckt {count} Erwachsene ab."
+ },
+ "rates.occ.ladder.cell.ignored_tip": {
+  "one": "Dieser Platz ist im Zimmerpreis enthalten ({count} Erwachsener), daher wirkt seine Regel {rule} nicht.",
+  "other": "Dieser Platz ist im Zimmerpreis enthalten ({count} Erwachsene), daher wirkt seine Regel {rule} nicht."
+ },
  "rates.occ.ladder.cell.override": "ABWEICHUNG",
  "rates.occ.ladder.cell.override_tip": "{period} ersetzt die Regel für alle Perioden {default}: {rule}",
  "rates.occ.ladder.cell.inherit_tip": "Die eigene Regel dieser Zelle ist Erben: Die nächste Regel gilt ({rule}).",
@@ -1553,6 +1566,8 @@
  "rates.occ.ladder.cell.all_rooms_tip": "{room} hat für diesen Gast keine eigene Regel: Es gilt die Regel für alle Zimmer, {rule}. Geben Sie einen Wert ein, um eine Regel für {room} festzulegen.",
  "rates.occ.ladder.cell.policy_tip": "Aus der Preisrichtlinie ({source}): {rule}. Geben Sie einen Wert ein, um eine Regel dieser Version festzulegen; sie hat Vorrang vor der Richtlinie.",
  "rates.occ.ladder.cell.policy_from": "Quelle: {source}",
+ "rates.occ.ladder.cell.policy_hidden": "Richtlinienregel",
+ "rates.occ.ladder.cell.policy_hidden_tip": "Eine Regel der Preisrichtlinie ({source}) bepreist diesen Platz. Ihre Formel sehen nur Benutzer, die Kosten sehen dürfen. Geben Sie einen Wert ein, um eine Regel dieser Version festzulegen; sie hat Vorrang vor der Richtlinie.",
  "rates.occ.ladder.cell.always_tag": "Vorrang",
  "rates.occ.ladder.cell.fixed_tag": "fest",
  "rates.occ.ladder.cell.combo_note": "Sonderkombinationen haben Vorrang vor Periodenregeln, außer die Regel ist als Hat immer Vorrang markiert: {combos}.",
@@ -1584,7 +1599,10 @@
  "rates.occ.state.loading": "wird geladen",
  "rates.occ.state.failed": "konnte nicht berechnet werden",
  "rates.occ.unit.person": "Basis-Personenpreis",
- "rates.occ.unit.person_share": "Anteil pro Person (Zimmer ÷ {count})",
+ "rates.occ.unit.person_share": {
+  "one": "Anteil pro Person (Zimmer ÷ {count})",
+  "other": "Anteil pro Person (Zimmer ÷ {count})"
+ },
  "rates.occ.unit.room": "Zimmerpreis",
  "rates.occ.read.MULTIPLY": "{cell} zahlt {rule} vom {unit}",
  "rates.occ.read.PERCENT_OF": "{cell} zahlt {rule} vom {unit}",

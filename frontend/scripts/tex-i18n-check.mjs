@@ -3,12 +3,16 @@
 // Also (PRICING_WORKSPACE_UX.md §3.20, slice S15): every key used as a string literal in
 // src/tex (t("…"), t('…'), tOrdinal("…"); not template literals, which build keys at run time)
 // must exist in the English catalogue of its area (the area whose keys share its first segment).
+// And (§3.20, S16 review): a Pricing Workspace string with a {count} is a plural object
+// (one/few/many/other), never a plain string ("1 adults", "1 взрослых").
 import { readdirSync, readFileSync, existsSync } from "node:fs"
 import { join, relative } from "node:path"
 
 const LANGS = ["en", "tr", "de", "ru", "ro", "pl"]
 const roots = [["admin", "src/tex/i18n/locales"], ["booking", "src/booking/i18n/locales"]]
 let problems = 0
+// the Pricing Workspace's namespaces (§3.20; the boards' keys are rates.brd.*)
+const WORKSPACE_KEYS = ["rates.section.", "rates.ws.", "rates.sh.", "rates.occ.", "rates.combo.", "rates.bands.", "rates.brd.", "rates.boards.", "rates.pt.", "rates.kbd.", "rates.explain."]
 const placeholders = (v) => {
   const s = typeof v === "string" ? v : Object.values(v ?? {}).join(" ")
   return [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(",")
@@ -29,6 +33,14 @@ for (const [label, root] of roots) {
       return JSON.parse(readFileSync(f, "utf8"))
     }
     const en = load("en")
+    if (label === "admin" && area === "rates") {
+      for (const [k, v] of Object.entries(en)) {
+        if (typeof v === "string" && v.includes("{count}") && WORKSPACE_KEYS.some((ns) => k.startsWith(ns))) {
+          console.error(`✗ ${label}/${area}/en: "${k}" has a {count} but is not a plural object (one/…/other)`)
+          problems++
+        }
+      }
+    }
     for (const l of LANGS.slice(1)) {
       const cat = load(l)
       for (const [k, v] of Object.entries(en)) {
