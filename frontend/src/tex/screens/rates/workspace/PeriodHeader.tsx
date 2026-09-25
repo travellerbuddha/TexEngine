@@ -104,6 +104,7 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
     <div
       role="columnheader"
       data-cellid={periodHeaderId(code)}
+      data-issue={issue ? issue.level.toLowerCase() : undefined}
       // an issue's link focuses the header (S15)
       tabIndex={issue ? -1 : undefined}
       aria-invalid={issue?.level === "ERROR" ? true : undefined}
