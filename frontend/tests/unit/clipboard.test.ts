@@ -7,6 +7,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { parseShorthand } from "../../src/tex/screens/rates/lib/shorthand.ts"
 import { copyBlock, decodeTSV, encodeTSV, pasteOrigin, planPaste, PASTE_MAX_ERRORS, type PasteResult } from "../../src/tex/screens/rates/workspace/clipboard.ts"
+import { gridSelectionInit, gridSelectionReducer, selectedCells, type GridSelection } from "../../src/tex/ui/grid-model.ts"
 
 // the owner's example as the matrix walks it (workspace-matrix.test.ts "grid rows"): Standard is
 // the base room, Superior and Deluxe are formula rooms, each with a resolved row under it
@@ -41,9 +42,15 @@ test("TSV round trip: rows by line breaks, cells by tabs, empty cells kept", () 
     ["", "", "", ""],
   ]
   const text = encodeTSV(block)
-  assert.equal(text, "70\t80\t100\t130\nx1.15\t\t=245\tx1.2\n\t\t\t")
+  // every row ends with a line break, as spreadsheets write it (decodeTSV trims exactly that one)
+  assert.equal(text, "70\t80\t100\t130\nx1.15\t\t=245\tx1.2\n\t\t\t\n")
   assert.deepEqual(decodeTSV(text), block)
   assert.deepEqual(decodeTSV(encodeTSV([["70"]])), [["70"]])
+  // a last row of one empty cell (a room without rules) is kept, so it clears where it is pasted
+  assert.deepEqual(decodeTSV(encodeTSV([["70"], [""]])), [["70"], [""]])
+  // one empty cell copied is one empty cell (it clears), not "nothing to paste"
+  assert.deepEqual(decodeTSV(encodeTSV([[""]])), [[""]])
+  assert.equal(encodeTSV([]), "")
 })
 
 test("decodeTSV: a spreadsheet's trailing line break is trimmed, CRLF and CR split lines, an empty text is no block", () => {
@@ -63,7 +70,7 @@ test("decodeTSV: a spreadsheet's trailing line break is trimmed, CRLF and CR spl
 })
 
 test("encodeTSV never lets a cell's own tab or line break split the block", () => {
-  assert.equal(encodeTSV([["a\tb", "c\r\nd"]]), "a b\tc d")
+  assert.equal(encodeTSV([["a\tb", "c\r\nd"]]), "a b\tc d\n")
 })
 
 test("the block Ctrl/Cmd+C copies: a range's rectangle; several ranges give their rows × columns, the rest empty", () => {
@@ -99,6 +106,82 @@ test("the block Ctrl/Cmd+C copies: a range's rectangle; several ranges give thei
     [["0:2"], ["1:2"], ["3:2"]],
   )
   assert.deepEqual(copyBlock([], text), [])
+})
+
+// the owner grid with "Show resolved" on (the verifier's S10 case): Standard is the base room,
+// Superior and Deluxe are formula rooms, Family a manual room; each of the three has a resolved row
+const OWNER = [
+  { room: "STD", editable: true, text: ["", "70", "80", "100", "130"] },
+  { room: "SUP", editable: true, text: ["x1.15", "x1.15", "245", "x1.15", "x1.2"] },
+  { room: "SUP", editable: false, text: ["", "80.5", "245", "115", "156"] },
+  { room: "DLX", editable: true, text: ["x1.35", "x1.35", "x1.35", "x1.35", "x1.35"] },
+  { room: "DLX", editable: false, text: ["", "94.5", "108", "135", "175.5"] },
+  { room: "FAM", editable: true, text: ["90", "90", "90", "90", "90"] },
+  { room: "FAM", editable: false, text: ["", "90", "90", "90", "90"] },
+]
+const ownerEditable = (r: number, c: number) => Boolean(OWNER[r]?.editable) && c >= 0 && c < 5
+const ownerEntry = (r: number) => Boolean(OWNER[r]?.editable)
+const ownerText = (r: number, c: number) => OWNER[r].text[c]
+const ownerStart = (r: number, c: number) => gridSelectionReducer(gridSelectionInit(OWNER.length, 5), { type: "moveTo", r, c })
+const shiftDown = (s: GridSelection, n: number) => {
+  for (let i = 0; i < n; i++) s = gridSelectionReducer(s, { type: "move", dr: 1, dc: 0, extend: true })
+  return s
+}
+/** Ctrl/Cmd+C then Ctrl/Cmd+V as PriceMatrix does them: the clipboard's text in between. */
+function copyThenPaste(from: GridSelection, to: GridSelection) {
+  const tsv = encodeTSV(copyBlock(from.ranges, ownerText, ownerEntry))
+  const res = planPaste(decodeTSV(tsv), pasteOrigin(to), selectedCells(to, ownerEditable), ownerEditable, room(), { rows: OWNER.length, cols: 5 })
+  assert.ok(res.ok, `expected a paste plan, got ${JSON.stringify(res)}`)
+  return { tsv, written: res.items.map((x) => [OWNER[x.cell.r].room, x.cell.r, x.cell.c, x.text]) }
+}
+
+test("a range over entry and resolved rows copies the entry rows only, so it pastes back onto the same rooms (S10 review)", () => {
+  // Shift+ArrowDown ×3 from Standard P1: Standard, Superior, Superior resolved, Deluxe
+  const range = shiftDown(ownerStart(0, 1), 3)
+  assert.deepEqual(range.ranges, [{ r0: 0, c0: 1, r1: 3, c1: 1 }])
+  assert.deepEqual(copyBlock(range.ranges, ownerText, ownerEntry), [["70"], ["x1.15"], ["x1.35"]])
+  // pasted at Standard P2: Standard, Superior and Deluxe P2 take their own row's text; Family is untouched
+  const there = copyThenPaste(range, gridSelectionReducer(range, { type: "moveTo", r: 0, c: 2 }))
+  assert.equal(there.tsv, "70\nx1.15\nx1.35\n")
+  assert.deepEqual(there.written, [
+    ["STD", 0, 2, "70"],
+    ["SUP", 1, 2, "x1.15"],
+    ["DLX", 3, 2, "x1.35"],
+  ])
+  // pasted back where it was copied: the same cells, the same texts
+  assert.deepEqual(copyThenPaste(range, range).written, [
+    ["STD", 0, 1, "70"],
+    ["SUP", 1, 1, "x1.15"],
+    ["DLX", 3, 1, "x1.35"],
+  ])
+  // Shift+Click from Superior's resolved P1 to Deluxe P2: Deluxe's row only
+  const click = gridSelectionReducer(ownerStart(2, 1), { type: "click", r: 3, c: 2, shift: true })
+  assert.deepEqual(copyBlock(click.ranges, ownerText, ownerEntry), [["x1.35", "x1.35"]])
+  // Ctrl/Cmd+Click on Standard P1 and Superior's resolved P3: the resolved cell's column goes with its row
+  assert.deepEqual(
+    copyBlock(
+      [
+        { r0: 0, c0: 1, r1: 0, c1: 1 },
+        { r0: 2, c0: 3, r1: 2, c1: 3 },
+      ],
+      ownerText,
+      ownerEntry,
+    ),
+    [["70"]],
+  )
+})
+
+test("resolved cells selected on their own copy the server's exact amounts (§3.10)", () => {
+  assert.deepEqual(copyBlock([{ r0: 2, c0: 1, r1: 2, c1: 4 }], ownerText, ownerEntry), [["80.5", "245", "115", "156"]])
+  assert.deepEqual(copyBlock([{ r0: 4, c0: 1, r1: 4, c1: 2 }], ownerText, ownerEntry), [["94.5", "108"]])
+  // pasted onto Family P1: the amounts become Family's prices
+  const from = gridSelectionReducer(ownerStart(2, 1), { type: "click", r: 2, c: 4, shift: true })
+  assert.deepEqual(copyThenPaste(from, ownerStart(5, 1)).written, [
+    ["FAM", 5, 1, "80.5"],
+    ["FAM", 5, 2, "245"],
+    ["FAM", 5, 3, "115"],
+    ["FAM", 5, 4, "156"],
+  ])
 })
 
 test("a block is anchored at the top-left of the selection that holds the active cell, else at the active cell", () => {

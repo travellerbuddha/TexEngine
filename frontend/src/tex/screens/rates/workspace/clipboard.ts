@@ -23,10 +23,12 @@ export interface GridRect {
 
 // ─── TSV ────────────────────────────────────────────────────────────────────
 
-/** Rows joined by line breaks, cells by tabs, as spreadsheets exchange them. A tab or line break
- * inside a cell (never in shorthand or an amount) becomes a space, so it cannot split the block. */
+/** Cells joined by tabs, every row ended by a line break, as spreadsheets exchange them (decodeTSV
+ * trims exactly that last one, so a last row of one empty cell survives the round trip). A tab or
+ * line break inside a cell (never in shorthand or an amount) becomes a space, so it cannot split
+ * the block. No rows is an empty text. */
 export function encodeTSV(cells: readonly (readonly string[])[]): string {
-  return cells.map((row) => row.map((v) => v.replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n")
+  return cells.map((row) => `${row.map((v) => v.replace(/[\t\r\n]+/g, " ")).join("\t")}\n`).join("")
 }
 
 /** The block of a TSV text: one trailing line break (spreadsheets end with one) is trimmed, lines
@@ -45,17 +47,26 @@ export function decodeTSV(text: string): string[][] {
  * with each selected cell's text and "" for the others. One range is its rectangle; ranges that
  * skip rows (a column selected by its header passes over the resolved rows) give only the rows
  * they hold, so the block pastes back onto the same rows.
+ *
+ * `entryRow` (the rows that take entries; the matrix's resolved rows do not): a selection that
+ * holds entry rows copies those only. A paste writes entry rows only and passes over the resolved
+ * ones (planPaste), so a Shift+Arrow or Shift+Click rectangle across a resolved row would
+ * otherwise shift every row below it onto the next room (S10 review). The columns are then the
+ * ones that hold a selected cell of a row kept. A selection of resolved rows alone copies them
+ * (their server amounts, §3.10).
  */
-export function copyBlock(ranges: readonly GridRect[], textAt: (r: number, c: number) => string): string[][] {
+export function copyBlock(ranges: readonly GridRect[], textAt: (r: number, c: number) => string, entryRow?: (r: number) => boolean): string[][] {
   if (!ranges.length) return []
-  const rows = new Set<number>()
+  const inside = (r: number, c: number) => ranges.some((g) => r >= g.r0 && r <= g.r1 && c >= g.c0 && c <= g.c1)
+  const held = new Set<number>()
+  for (const g of ranges) for (let r = g.r0; r <= g.r1; r++) held.add(r)
+  let rs = [...held].sort((a, b) => a - b)
+  if (entryRow && rs.some(entryRow)) rs = rs.filter(entryRow)
   const cols = new Set<number>()
   for (const g of ranges) {
-    for (let r = g.r0; r <= g.r1; r++) rows.add(r)
+    if (!rs.some((r) => r >= g.r0 && r <= g.r1)) continue
     for (let c = g.c0; c <= g.c1; c++) cols.add(c)
   }
-  const inside = (r: number, c: number) => ranges.some((g) => r >= g.r0 && r <= g.r1 && c >= g.c0 && c <= g.c1)
-  const rs = [...rows].sort((a, b) => a - b)
   const cs = [...cols].sort((a, b) => a - b)
   return rs.map((r) => cs.map((c) => (inside(r, c) ? textAt(r, c) : "")))
 }
