@@ -42,6 +42,7 @@ from unittest import mock
 import frappe
 
 from kamra.tex.api import contracts as api
+from kamra.tex.api import policies
 from kamra.tex.commercial import contracts, revisions
 from kamra.tex.money import D
 from kamra.tex.pricing import rooms as room_math
@@ -259,6 +260,85 @@ class TestOverlayRefusals(WorkspaceCase):
 					call()
 				self.assertIn(message, str(cm.exception))
 		self.assertEqual(self.untouched(), before)
+
+	def test_a_blank_night_adjustment_or_rate_plan_value_is_refused(self):
+		"""GAP-8 covers every value an op needs (S16 review): a period's night adjustment and a rate
+		plan's adjustment left blank with an op set were stored as 0 and priced every night (or every
+		stay of the plan) at 0.00."""
+		before = self.untouched()
+		flex = self.f["rate_plans"]["FLEX"]
+		cases = (
+			("periods", dict(period_code="LOW"), {"adjustment_op": "MULTIPLY", "adjustment_value": ""}, "Stay periods"),
+			("rate_plans", dict(rate_plan=flex), {"op": "MULTIPLY", "value": None}, "Rate plans"),
+		)
+		for table, match, blank, label in cases:
+			data = self.payload()
+			row = find(data[table], **match)
+			row.update(blank)
+			message = f"{label}, row {data[table].index(row) + 1}: {ROW_MESSAGE}"
+			with self.subTest(table=table, path="save"), self.assertRaises(frappe.ValidationError) as cm:
+				api.save_version(self.v, as_json(data))
+			self.assertIn(message, str(cm.exception))
+			for name, call in self.calls(data):
+				with self.subTest(table=table, path=name), self.assertRaises(frappe.ValidationError) as cm:
+					call()
+				self.assertIn(message, str(cm.exception))
+		self.assertEqual(self.untouched(), before)
+		# without an op neither needs a value, and a value of 0 is still a value
+		data = self.payload()
+		find(data["periods"], period_code="LOW").update(adjustment_op="", adjustment_value="")
+		find(data["rate_plans"], rate_plan=flex).update(op="", value=None)
+		find(data["periods"], period_code="HIGH").update(adjustment_op="ADD", adjustment_value="0")
+		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+		api.save_version(self.v, as_json(data))
+
+	def test_another_hotels_rate_plan_or_terms_are_refused(self):
+		"""A rate plan row, or its explicit cancellation or payment policy, of another hotel is refused
+		when the terms are built (S16 review): by the overlay (which left no trace), the live check,
+		the price test and publish; a policy of no hotel (shared) stays allowed."""
+		cxl = fx.ensure("TEX Cancellation Policy", {"property": OTHER_HOTEL, "policy_name": "PW other cxl"},
+		                {"property": OTHER_HOTEL, "policy_name": "PW other cxl", "refundable": 1,
+		                 "description": "Other hotel's secret terms"})
+		pay = fx.ensure("TEX Payment Policy", {"property": OTHER_HOTEL, "policy_name": "PW other pay"},
+		                {"property": OTHER_HOTEL, "policy_name": "PW other pay", "deposit_type": "PERCENT",
+		                 "deposit_value": 45})
+		plan = fx.ensure("Rate Plan", {"property": OTHER_HOTEL, "code": "PWX"},
+		                 {"property": OTHER_HOTEL, "code": "PWX", "rate_plan_name": "PW other plan",
+		                  "modifier_type": "Percent", "modifier_value": 0})
+		shared = fx.ensure("TEX Payment Policy", {"property": "", "policy_name": "PW shared pay"},
+		                   {"policy_name": "PW shared pay", "deposit_type": "FULL"})
+		flex = self.f["rate_plans"]["FLEX"]
+		cases = (("rate plan", {"rate_plan": plan, "refundable": 1}, plan),
+		         ("cancellation policy", {"rate_plan": flex, "cancellation_policy": cxl, "refundable": 1}, cxl),
+		         ("payment policy", {"rate_plan": flex, "payment_policy": pay, "refundable": 1}, pay))
+		for what, row, name in cases:
+			data = self.payload()
+			data["rate_plans"] = [r for r in data["rate_plans"] if r["rate_plan"] != row["rate_plan"]]
+			data["rate_plans"].append({**row, "_key": "foreign"})
+			with self.subTest(what=what):
+				m = api.price_matrix(self.v, data=as_json(data))
+				self.assertIn("belongs to another hotel", m["build_error"])
+				self.assertIn(name, m["build_error"])
+				report = api.validate_version(self.v, data=as_json(data))
+				self.assertEqual([i["code"] for i in report["issues"]], ["BUILD"])
+				q = self.preview(data=as_json(data), rate_plan=row["rate_plan"])
+				self.assertFalse(q["sellable"])
+				self.assertEqual(q["reasons"][0]["code"], "BUILD")
+				self.assertNotIn("rate_plan", q)
+				self.assertNotIn("secret", json.dumps(q))
+		# saved, the draft does not publish either
+		data = self.payload()
+		data["rate_plans"].append({"rate_plan": plan, "refundable": 1, "_key": "foreign"})
+		api.save_version(self.v, as_json(data))
+		with self.assertRaises(frappe.ValidationError) as cm:
+			contracts.publish(self.v)
+		self.assertIn("belongs to another hotel", str(cm.exception))
+		# a shared policy (no hotel) is anyone's
+		data = self.payload()
+		data["rate_plans"] = [r for r in data["rate_plans"] if r["rate_plan"] != plan]
+		find(data["rate_plans"], rate_plan=flex)["payment_policy"] = shared
+		self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+		self.assertTrue(self.preview(data=as_json(data))["sellable"])
 
 	def test_inherit_and_the_included_board_need_no_value(self):
 		data = self.payload()
@@ -565,6 +645,49 @@ class TestInheritedTerms(WorkspaceCase):
 		self.assertEqual({r["source"] for r in m["inherited_rules"]}, {self.source})
 
 
+	def test_an_editor_without_cost_is_told_that_a_policy_rule_applies_not_its_formula(self):
+		"""A pricing policy's formulas are cost (G-11): the policies API reads them only with
+		price.view_cost (READ_CAP), and so does the matrix (S16 review). An editor without it is told
+		which inherited rule applies where (its id, source and scope) without its op or value, and a
+		sample party priced with an inherited rule has no total."""
+		version = self.inh["version"]
+		parties = json.dumps([{"adults": 2, "children": []}, {"adults": 2, "children": ["CHD"]},
+		                      {"adults": 3, "children": []}])
+		full = api.price_matrix(version, parties=parties, party_room=self.std)
+		self.assertEqual(find(full["inherited_rules"], target="ADULT")["value"], "0.8")
+		self.assertTrue(all(c["hidden"] == [] for c in full["party_cells"]))
+		self.assertEqual(D(full["party_cells"][1]["cells"]["LOW"]), D("250"))     # 2 × 100 + 50 % of 100
+		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		self.as_user(EDITOR)
+		with self.assertRaises(frappe.PermissionError):
+			policies.get_record(POLICY, self.policy)
+		for label, kw in (("saved", {}), ("unsaved", {"data": as_json(data)})):
+			m = api.price_matrix(version, parties=parties, party_room=self.std, **kw)
+			with self.subTest(label):
+				rules = m["inherited_rules"]
+				self.assertEqual(len(rules), 3)
+				for r in rules:
+					self.assertEqual((r["op"], r["value"], r["hidden"], r["source"]), (None, None, True, self.source))
+				self.assertEqual({(r["target"], r["position"], r["age_band"]) for r in rules},
+				                 {(r["target"], r["position"], r["age_band"]) for r in full["inherited_rules"]})
+				two, family, three = m["party_cells"]
+				# the engine's adult default prices it: shown
+				self.assertEqual({k: D(c) for k, c in two["cells"].items()}, {"LOW": D("200"), "HIGH": D("240")})
+				self.assertEqual((two["hidden"], two["errors"]), ([], {}))
+				for cell in (family, three):
+					self.assertEqual(cell["cells"], {"LOW": None, "HIGH": None})
+					self.assertEqual((cell["slots"], cell["errors"]), ({}, {}))
+					self.assertEqual(sorted(cell["hidden"]), ["HIGH", "LOW"])
+				self.assertNotIn("0.8", json.dumps(rules))
+		# a published version's frozen rules likewise
+		self.as_user("Administrator")
+		contracts.publish(version)
+		self.as_user(EDITOR)
+		m = api.price_matrix(version)
+		self.assertEqual({(r["op"], r["value"]) for r in m["inherited_rules"]}, {(None, None)})
+		self.as_user(RM)
+		self.assertEqual(find(api.price_matrix(version)["inherited_rules"], target="ADULT")["op"], "MULTIPLY")
+
 # 2 adults; 2 adults + a CHB child (a code in any case); an unknown band; more children than STD holds
 PARTIES = ({"adults": 2, "children": []}, {"adults": 2, "children": ["chb"]}, {"adults": 1, "children": ["XX"]},
            {"adults": 2, "children": ["CHA", "CHA", "CHB"]})
@@ -639,6 +762,62 @@ class TestSampleParties(WorkspaceCase):
 		with self.assertRaises(frappe.PermissionError):
 			api.price_matrix(self.v, parties=[{"adults": 2, "children": []}], party_room=self.std)
 
+
+
+class TestHeavyReads(WorkspaceCase):
+	"""``validate_version`` (seconds a call near the row cap, with or without data) and
+	``price_matrix`` with unsaved data or sample parties are bounded per user: a budget a minute and
+	a cap on the calls running at once (S16 review; an aborted fetch does not stop the server).
+	Only a web request counts; a direct call (a job, the console, a test) never does."""
+
+	def tearDown(self):
+		try:
+			frappe.cache.delete(*[api._heavy_key(kind, what, user) for kind in api.HEAVY_LIMITS
+			                      for what in ("minute", "running") for user in (EDITOR, RM)])
+		finally:
+			super().tearDown()
+
+	def test_a_budget_a_minute_for_each_user(self):
+		data = self.payload()
+		parties = [{"adults": 2, "children": []}]
+		self.as_user(EDITOR)
+		with mock.patch.object(api, "_in_request", return_value=True), mock.patch.dict(api.HEAVY_LIMITS, {"validate": (2, 3), "matrix": (3, 6)}):
+			self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+			self.assertTrue(api.validate_version(self.v)["ok"])                   # the saved draft counts too
+			with self.assertRaises(frappe.RateLimitExceededError) as cm:
+				api.validate_version(self.v, data=as_json(data))
+			self.assertIn("Too many", str(cm.exception))
+			# the matrix has its own budget, and a plain read of it is not counted
+			for _ in range(5):
+				self.assertTrue(api.price_matrix(self.v)["rooms"])
+			api.price_matrix(self.v, data=as_json(data))
+			api.price_matrix(self.v, parties=parties, party_room=self.std)
+			api.price_matrix(self.v, data=as_json(data), parties=parties, party_room=self.std)
+			with self.assertRaises(frappe.RateLimitExceededError):
+				api.price_matrix(self.v, parties=parties, party_room=self.std)
+			# another user has a budget of their own
+			self.as_user(RM)
+			self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+		# a direct call is never counted
+		self.as_user(EDITOR)
+		self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+
+	def test_calls_running_at_once(self):
+		data = as_json(self.payload())
+		self.as_user(EDITOR)
+		with mock.patch.object(api, "_in_request", return_value=True), \
+		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (100, 1), "matrix": (100, 1)}):
+			with api._heavy("validate"):
+				with self.assertRaises(frappe.RateLimitExceededError) as cm:
+					api.validate_version(self.v, data=data)
+				self.assertIn("still running", str(cm.exception))
+				self.assertTrue(api.price_matrix(self.v, data=data)["rooms"])      # the other kind is free
+			self.assertTrue(api.validate_version(self.v, data=data)["ok"])        # the slot is free again
+			# a call that fails frees its slot too
+			with self.assertRaises(frappe.ValidationError):
+				api.validate_version(self.v, data="[1]")
+			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+			self.assertEqual(int(frappe.cache.get(api._heavy_key("validate", "running", EDITOR)) or 0), 0)
 
 class TestAnchoredIssues(WorkspaceCase):
 	def test_a_duplicated_room_rule_is_anchored_in_the_validation_json(self):

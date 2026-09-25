@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import date
 
 import frappe
@@ -32,6 +33,13 @@ ROW_BOOKKEEPING = ("name", "parent", "parenttype", "parentfield", "doctype", "id
                    "modified_by", "docstatus")
 # the most rows a draft previewed with unsaved changes may have, over all its tables (ADR-061)
 OVERLAY_MAX_ROWS = 5000
+# per user (ADR-061, S16 review): the calls a minute and the calls running at once of the workspace's
+# heavy reads — "validate": validate_version (10–16 s near the row cap, with or without data);
+# "matrix": price_matrix with unsaved data or sample parties. An aborted fetch does not stop the
+# server, so the client's one-call-in-flight is no bound.
+HEAVY_LIMITS = {"validate": (60, 3), "matrix": (120, 6)}
+HEAVY_WINDOW = 60              # seconds of a budget
+HEAVY_RUNNING_TTL = 300        # a crashed call's slot is freed after this many seconds
 
 
 class OverlayTooLarge(frappe.ValidationError):
@@ -268,13 +276,17 @@ _VALUE_REQUIRED = (
 	("period_rates", "value", lambda r: (r.op or "").strip() != "INHERIT"),
 	("occupancy_rules", "value", lambda r: (r.op or "").strip() != "INHERIT"),
 	("boards", "adult_amount", lambda r: not cint(r.is_base)),
+	# an op needs its value: a blank night adjustment or rate plan value priced every night at 0
+	("periods", "adjustment_value", lambda r: (r.adjustment_op or "").strip() not in ("", "INHERIT")),
+	("rate_plans", "value", lambda r: (r.op or "").strip() not in ("", "INHERIT")),
 )
 
 
 def _require_values(v) -> None:
 	"""A rule's value is never left blank (GAP-8, ADR-061): Frappe would store a blank as 0 and
 	the draft would price it as 0. INHERIT rules and the included board have no value; to remove
-	a price the editor removes its row."""
+	a price the editor removes its row. A period's night adjustment and a rate plan's adjustment
+	need a value only with an op (S16 review)."""
 	for table, field, needs in _VALUE_REQUIRED:
 		for row in v.get(table) or []:
 			if needs(row) and _blank(row.get(field)):
@@ -363,12 +375,51 @@ def _has_data(data) -> bool:
 	return data is not None and data != ""
 
 
+def _in_request() -> bool:
+	"""A web request (what the heavy-read budget counts); a job, the console or a test calling the
+	function directly is not counted."""
+	return bool(getattr(frappe.local, "request", None))
+
+
+def _heavy_key(kind: str, what: str, user: str | None = None) -> str:
+	return frappe.cache.make_key(f"tex:heavy:{kind}:{what}:{user or frappe.session.user}")
+
+
+@contextmanager
+def _heavy(kind: str):
+	"""A heavy read of ``kind`` (``HEAVY_LIMITS``) by the session user: refused with
+	``RateLimitExceededError`` (429) above its budget a minute, or while as many of the user's own
+	calls of that kind are still running (ADR-061, S16 review)."""
+	if not _in_request():
+		yield
+		return
+	per_minute, at_once = HEAVY_LIMITS[kind]
+	budget = _heavy_key(kind, "minute")
+	frappe.cache.set(budget, 0, ex=HEAVY_WINDOW, nx=True)
+	if frappe.cache.incr(budget) > per_minute:
+		frappe.throw(_("Too many price checks in a minute; wait a moment and try again."),
+		             frappe.RateLimitExceededError)
+	running = _heavy_key(kind, "running")
+	count = frappe.cache.incr(running)
+	frappe.cache.expire(running, HEAVY_RUNNING_TTL)
+	try:
+		if count > at_once:
+			frappe.throw(_("Your other price checks are still running; try again when they have finished."),
+			             frappe.RateLimitExceededError)
+		yield
+	finally:
+		if frappe.cache.decr(running) <= 0:
+			frappe.cache.delete(running)
+
+
 @frappe.whitelist()
 def validate_version(name: str, data=None):
-	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061)."""
-	if _has_data(data):
-		return svc.validate_doc(_overlay(name, data))
-	return svc.validate_version(name)
+	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061).
+	Bounded per user (``_heavy``): near the row cap one call takes 10–16 s."""
+	with _heavy("validate"):
+		if _has_data(data):
+			return svc.validate_doc(_overlay(name, data))
+		return svc.validate_version(name)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -575,11 +626,17 @@ def _parties(raw) -> list[tuple[int, tuple[str, ...]]] | None:
 	return out
 
 
-def _rule_dict(r) -> dict:
-	"""An occupancy rule of the built terms, as the workspace shows an inherited one."""
-	return {"rule_id": r.rule_id, "target": r.target.value, "position": r.position, "age_band": r.age_band,
-	        "adults": r.adults, "children": r.children, "room_type": r.room_type, "period": r.period,
-	        "op": r.op.value, "value": matrix.rule_value(r.value), "is_override": r.is_override, "source": r.source}
+def _rule_dict(r, formula: bool = True) -> dict:
+	"""An occupancy rule of the built terms, as the workspace shows an inherited one. Without
+	``formula`` (a viewer who does not see cost, S16 review) it says which rule applies where, not
+	its op or value (``hidden``)."""
+	out = {"rule_id": r.rule_id, "target": r.target.value, "position": r.position, "age_band": r.age_band,
+	       "adults": r.adults, "children": r.children, "room_type": r.room_type, "period": r.period,
+	       "op": r.op.value, "value": matrix.rule_value(r.value), "is_override": r.is_override, "source": r.source,
+	       "hidden": False}
+	if not formula:
+		out.update(op=None, value=None, hidden=True)
+	return out
 
 
 def _occupancy_defaults() -> dict:
@@ -591,16 +648,23 @@ def _occupancy_defaults() -> dict:
 	        "child": None}
 
 
-def _party_cells(terms, room_type: str, parties) -> list[dict]:
+def _party_cells(terms, room_type: str, parties, hidden_rules: frozenset[str] = frozenset()) -> list[dict]:
+	"""Each sample party's total per period. A total priced with one of ``hidden_rules`` (an
+	inherited policy rule a viewer without cost may not read, S16 review) is left out: its period is
+	listed in ``hidden``, without a total, slots or error, so no formula can be worked back."""
 	out = []
 	for adults, kids in parties:
-		cell = {"cells": {}, "slots": {}, "errors": {}}
+		cell = {"cells": {}, "slots": {}, "errors": {}, "hidden": []}
 		for p in terms.periods:
 			try:
 				total, slots = matrix.party_total(terms, room_type, p, adults, kids)
 			except (Unsellable, PricingError) as e:
 				cell["cells"][p.code] = None
 				cell["errors"][p.code] = getattr(e, "message", None) or str(e)
+				continue
+			if any(s["rule_id"] in hidden_rules for s in slots):
+				cell["cells"][p.code] = None
+				cell["hidden"].append(p.code)
 				continue
 			cell["cells"][p.code] = money.to_str(total)
 			cell["slots"][p.code] = slots
@@ -619,12 +683,24 @@ def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_r
 	priced it), each room's effective capacity, the age bands with their origin, the occupancy
 	rules inherited from pricing policies and the engine's defaults (``occupancy_defaults``); with
 	``parties`` (``[{adults, children: [band code]}]``) and ``party_room``, the occupancy total of
-	each sample party per period (``party_cells``)."""
+	each sample party per period (``party_cells``).
+
+	The inherited rules are a pricing policy's formulas, which are cost (G-11, the policies API's
+	READ_CAP): an editor without ``price.view_cost`` is told which inherited rule applies where
+	without its op or value, and a party total priced with one is left out (``hidden``, S16
+	review). With ``data`` or ``parties`` the call is bounded per user (``_heavy``)."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view", prop)
 	if not _sees_cost(prop):
 		frappe.throw(_("Not permitted: {0}.").format("price.view_cost"), frappe.PermissionError)
+	if _has_data(data) or _has_data(parties):
+		with _heavy("matrix"):
+			return _price_matrix(v, version, prop, data, parties, party_room)
+	return _price_matrix(v, version, prop, data, parties, party_room)
+
+
+def _price_matrix(v, version: str, prop: str, data, parties, party_room: str | None) -> dict:
 	wanted = _parties(parties)
 	at = now_datetime()
 	if _has_data(data):
@@ -663,14 +739,17 @@ def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_r
 		                   "included_adults": spec.included_adults}
 		out.append(row)
 	band_source = svc.band_source(doc, terms, at) if terms.age_bands else "version"
+	inherited = [r for r in terms.occupancy_rules if r.source != "version"]
+	formula = scope.has_capability("price.view_cost", prop)
 	result = {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
 	                      for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency,
 	          "age_bands": [{"code": b.code, "label": b.label, "from_months": b.from_months, "to_months": b.to_months,
 	                         "is_infant": b.is_infant, "source": band_source} for b in terms.age_bands],
-	          "inherited_rules": [_rule_dict(r) for r in terms.occupancy_rules if r.source != "version"],
+	          "inherited_rules": [_rule_dict(r, formula) for r in inherited],
 	          "occupancy_defaults": _occupancy_defaults()}
 	if wanted is not None:
-		result["party_cells"] = _party_cells(terms, party_room, wanted)
+		hidden = frozenset() if formula else frozenset(r.rule_id for r in inherited)
+		result["party_cells"] = _party_cells(terms, party_room, wanted, hidden)
 	return result
 
 

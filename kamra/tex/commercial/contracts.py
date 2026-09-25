@@ -386,7 +386,16 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 	for rp in version.rate_plans:
 		rp_doc = frappe.db.get_value("Rate Plan", rp.rate_plan,
 		                             ["rate_plan_name", "tex_inclusions", "tex_cancellation_policy",
-		                              "tex_payment_policy"], as_dict=True) or {}
+		                              "tex_payment_policy", "property"], as_dict=True) or {}
+		# never another hotel's rate plan or terms, as for room types (S16 review: the overlay and
+		# the price test read them back); a policy of no hotel is shared
+		if rp_doc and rp_doc.get("property") != contract.property:
+			frappe.throw(_("Rate plan {0} belongs to another hotel").format(rp.rate_plan))
+		for doctype, name in (("TEX Cancellation Policy", rp.cancellation_policy),
+		                      ("TEX Payment Policy", rp.payment_policy)):
+			owner = frappe.db.get_value(doctype, name, "property") if name else None
+			if owner and owner != contract.property:
+				frappe.throw(_("{0} {1} belongs to another hotel").format(_(doctype), name))
 		rate_plans[rp.rate_plan] = RatePlanTerms(
 			code=rp.rate_plan, name=rp_doc.get("rate_plan_name") or rp.rate_plan,
 			op=Op(rp.op) if rp.op else None, value=db_dec_or_none(rp.value) if rp.op else None,
