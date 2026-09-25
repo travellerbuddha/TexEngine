@@ -7708,3 +7708,200 @@ parser, op mapping or `apply_op_values` change.
 - Still open from S16: the committed bundles run on the dev bench only after the merge; the
   keyboard help's Shift+F10 wording; the S10–S15 low items; only Chromium was run; CI has never run
   on GitHub.
+
+**S16 re-review follow-up (2026-09-25).** A second review of the finished workspace reported nine
+medium and twelve low findings. All nine medium ones are fixed. Of the low ones, eleven are fixed
+and one is recorded as open (the shared inline-editing hook). Branch `pricing-workspace`; main
+`1575c8b` has no newer commit, so no merge was needed.
+
+**Decision (S16 re-review follow-up).**
+1. *No formula of a hidden policy rule can be worked back from a sample party (medium).* S16 hid a
+   party's total only when a slot's winning rule was hidden. Two leaks were left:
+   - a whole-party (COMBINATION) rule of a policy is not a slot rule, so a total it priced still
+     showed next to its slots (180 beside 100 + 100);
+   - a party that could not be priced reported its error (for example "occupancy rules produce a
+     negative price") before the hidden check ran. With an overlay probe "2A+1C SUBTRACT X" per
+     period, one `price_matrix` call bisected the policy's value.
+
+   `matrix.party_rules` (pure; `occupancy.rules_taking_part`) returns every rule that takes part in
+   pricing the party: each slot's winner and the whole-combination rule, also when the party fails.
+   For a failure these are the rules resolved before it (all of them for a negative total) and the
+   rules an ambiguity names. A party fails before its occupancy is priced (no room, an unknown band,
+   over capacity, no unit)? Then no rule takes part. `_party_cells` now decides "hidden" first,
+   before it reports a total or an error. A hidden period has no total, slots or error text.
+2. *The live check no longer answers such a probe either (low).* `validate_terms(hidden=…)`, which
+   `validate_version` passes for a viewer without `price.view_cost` (saved or unsaved draft):
+   - reports no sweep warning for a party a hidden rule takes part in (NEGATIVE_OCCUPANCY_PRICE was
+     a threshold oracle: about 20 calls found a total);
+   - reports no OCC_POLICY_OVERRIDE_OUTRANKED for a hidden override (it showed only while the
+     version's rule differed from the override's op and value: an equality oracle).
+   AMBIGUOUS_OCCUPANCY_RULES stays an error. It names rule ids, not values, and in the cascade
+   precedence a version rule never ties a policy rule. The report stored at publish is unchanged.
+3. *The heavy-read budget is atomic, and a leaked slot ages out (low).* SET NX EX and then INCR as
+   two steps left a counter without a TTL when the window ran out between them. That user was then
+   refused for good. Now:
+   - the budget is one Lua step: INCR, then EXPIRE when the key has no TTL. A counter left without
+     a TTL heals on its next use;
+   - running calls are their start times in a sorted set (`…:slots:…`, a new key name). Entries
+     older than 300 s are dropped before counting, so a killed worker's slot ages out 300 s after
+     its call started, however often the user retries. Before, every call pushed the TTL back.
+4. *`preview_price` with data is bounded (low).* It builds the same overlay as the matrix, so it
+   runs under `_heavy("preview")`, with its own budget: `HEAVY_LIMITS["preview"] = (120, 6)`.
+   Without data it is not counted.
+5. *The explanation after a second result (medium).* "Why this price" and the Explain ladder keep a
+   picked night only while the result has it. Otherwise they show All nights. "Why this price"
+   starts on All nights, as the ladder does.
+6. *Child position rows and "also when children travel" come from the ladder popover (medium;
+   §3.6.2).*
+   - A band row's popover has "Child position": every child in the band (the row itself), or
+     Child 1…n, where n is the most children a room in scope holds. A position writes
+     `{CHILD, position n, age_band}` rules, a row of their own, and the band's rule stays.
+   - Under the PERSON basis, the single-use row has "Also when children travel". It switches the
+     cells written between COMBINATION 1+0 and ADULT 1 in 1+*, removing the other form's rows of
+     those cells in the same history entry (`occupancy.applyOccRuleAs`).
+   - It is not offered under ROOM: adult 1 is then included in the room price and takes no rule.
+7. *Every run-time state key exists (medium).* `workspace/stateKeys.ts` lists each grid's cell
+   states and the entry error codes. The three grids type their views' `state` from these lists,
+   and a type check makes the error list complete. `tests/unit/state-keys.test.ts` checks every
+   `rates.ws.state.*`, `rates.occ.state.*`, `rates.brd.state.*` and `rates.sh.err.*` key in the six
+   catalogues. `rates.occ.state.cost_hidden` ("total not shown") was missing.
+8. *Add room and Add board are menus (medium).* The matrix's Add room, the Boards section's Add
+   board and the terms popover's Add room are menu buttons (`workspace/AddMenu.tsx`). Arrow keys
+   move between the items; Enter, Space or a click adds one. On Chromium, a native select fired
+   `change` on each ArrowDown and added rooms one by one. A menu is two clicks, as the select was,
+   so the acceptance budget is unchanged.
+9. *"Updating" only while something is on its way (medium, and the stale cells' contrast, low).*
+   `draftPreview.resolvedStatus` says what the resolved prices are, compared with the screen:
+   - current;
+   - updating (an answer for this state is in flight or asked for after the pause);
+   - failed (its call failed);
+   - as saved (above the overlay cap with unsaved changes).
+   The matrix and the ladder show:
+   - the spinner and "Updating…" only while a price call is in flight;
+   - "Prices not updated" after a failure;
+   - nothing extra when as saved (the "Saved draft only" badge is there).
+   A stale cell's name ends ", updating", ", not updated: the last calculation failed" or ", as
+   saved (without your unsaved changes)". The visible status is no longer in the live region that
+   bulk and undo messages use. Stale cells are italic zinc-600 instead of 55 % opacity (4.5:1 in
+   both themes; `contrast.test.ts` checks it).
+10. *Ctrl/Cmd+S and closing the tab cover every typed field (medium).* The child-age band fields
+    (CommitInput) and a new period's inline dates (FreshDates):
+    - commit on Ctrl/Cmd+S before the version editor's save reads the tables;
+    - mark typed text (`data-uncommitted` + `data-changed`).
+    The tab asks before it closes while such a field, a changed cell editor, or a base-room entry
+    waiting for `apply_op_values` is on the page (`keptState.UNCOMMITTED_INPUT`).
+11. *Alt+Enter in a boards cell keeps what was typed (medium).* It commits the entry as Enter does,
+    or keeps a refused one as the cell's error draft, then opens the row's terms. When the entry
+    removes a board, the removal's confirmation comes instead.
+12. *One tab stop per grid (medium, §3.19).* The headers' controls are a "header lane"
+    (`ui/grid.ts`):
+    - They have `tabIndex={-1}` and say which header they belong to (`data-lane-col`,
+      `data-lane-rows`). These are the Room and Period actions, "+ Period", a board row's terms or
+      discard button, and the sample party select.
+    - ArrowUp on the first row or ArrowLeft on the first column goes to them. On them, the arrows
+      move along the header, and ArrowDown or ArrowRight goes back into the cells. Enter or Space
+      opens a menu, and a select keeps its own ArrowUp and ArrowDown.
+    - While a grid has no cell (no room yet), its header controls stay Tab stops.
+13. *The rest (low):*
+    - Shift+click on a row or column header selects every row or column from the anchor's
+      (`grid-model` `extend`); the keyboard help lists it.
+    - On a desktop (from `lg`) the non-modal side panels sit beside the page. The shell's content
+      column gives up their width (`html[data-side-panel-open]`, `.tex-page`). The Price test panel is
+      `md` (28 rem): at 1440×900 the matrix, Save and Publish stay uncovered beside it.
+    - Ctrl/Cmd+C, V, R and D on a ladder or boards cell show where copy, paste and fill work, and
+      what to use instead (`useMatrixOnlyBulk`).
+    - Their Delete refusals are toasts, as in the matrix.
+    - A weekday-limited period names its days in the viewer's language.
+    - The Price test result is no longer one live region; a short status announces the total.
+    - A board's row header and messages use its name.
+    - German "+ Zeitraum" matches its accessible name "Zeitraum hinzufügen".
+
+**Deviations from the findings' fixes, with reasons.**
+- *`party_total` is unchanged.* The finding suggests returning the combination rule from it. One
+  function, `party_rules`, now answers both cases (a party that prices and one that fails), and it
+  runs only for a viewer without cost.
+- *No clipboard or fills in the ladder and the boards grid.* S11 deviation 8 and S13 deviation 8
+  stand. The finding's interim fix is built: the keys say where those work instead of doing nothing.
+- *`useInlineGridEditor` is still not extracted* (open, as after S16). Two of the divergences
+  the finding names are closed: Alt+Enter in the boards grid, and Delete refusals shown only to
+  screen readers.
+- *Validation for a viewer without cost also leaves those issues out for the saved draft*, not only
+  for the overlay. The saved check is the same oracle, only audited through the save.
+
+**Tests (S16 re-review follow-up).**
+- *Integration, `test_pricing_workspace_api`, 61 (55 + 6):*
+  - a whole-party policy rule hides the party's total (saved and unsaved);
+  - a failure of a party that a hidden rule takes part in says nothing, for probes X = 200, 238 and
+    300, and the live check leaves out the sweep's issue, while a capacity error is still said;
+  - the live check leaves out OCC_POLICY_OVERRIDE_OUTRANKED (saved and unsaved);
+  - the budget window always expires (a race and a counter without a TTL);
+  - a leaked slot ages out while the user retries;
+  - `preview_price` with data is bounded.
+  Fail-first: 8 failures and 1 error on the unfixed code.
+- *Unit (Python), 496 (491 + 5):* `test_matrix.TestPartyRules` 3 and
+  `test_policy_cascade.TestHiddenPolicyRules` 2. Fail-first: 8 errors (`party_rules` and
+  `hidden` missing).
+- *Unit (frontend), `npm run test:unit` 303 (296 + 7):* `state-keys.test.ts` 3 (it fails with
+  "en: missing rates.occ.state.cost_hidden" on the unfixed catalogue), `resolvedStatus`, the stale
+  contrast, the header range and the popover's slot switch. Fail-first on the unfixed frontend: 5
+  of 5 files fail.
+- *DOM, `npm run test:dom` 32 (31 + 1):* the header lane (Tab leaves the grid, ArrowUp/ArrowLeft
+  reach the header buttons, the arrows move along and back). Fail-first: it fails on the unfixed
+  harness.
+- *E2E, `pricing-workspace-rereview.spec.ts`, 11 tests:*
+  - the explanation after a second result with other dates, and no live region around the result;
+  - a Child 2 position row and "also when children travel" from the ladder popover (the rows sent);
+  - Add room by keyboard (arrows add nothing, Enter adds one);
+  - the matrix after a failed `price_matrix` call ("Prices not updated", no "Updating…", stale
+    cells italic at full opacity);
+  - Ctrl+S in a child-age field (the save body) and the beforeunload prompt for a typed one;
+  - Alt+Enter in a boards cell keeps "+25" and opens the terms, and a board row header says "Half
+    board · Garden Villa only";
+  - one tab stop in the matrix and its header lane;
+  - Shift+click from P3 to P4;
+  - at 1440×900 the Price test panel is at most 450 px wide, the matrix and Publish end left of it,
+    and a right-click on a matrix cell beside it still reaches the cell;
+  - Ctrl+V and Ctrl+R on a ladder cell;
+  - German weekday names and "+ Zeitraum".
+  Fail-first: all 11 fail on the unfixed frontend (the S16-review tree, served by Vite :5187 on the
+  same bench).
+- *Changed specs:* Add room and Add board are picked from their menus (`flows/budget.pickFrom`, two
+  clicks as the select was: the acceptance still counts 41 clicks). The boards spec reads board
+  names where it read codes ("All inclusive becomes the base board …", "Half board · Garden Villa
+  only", "Half board already has rules …").
+
+**Verification (S16 re-review follow-up).**
+- *Python:* unit 496 OK, ruff clean.
+- *Frontend:* `tsc -b`, `npm run build` (the bundles were not committed), `npm run i18n:tex` (5,065
+  literal keys), `npm run test:unit` 303/303, `npm run test:dom` 32/32 (TEX_DOM_PORT 5188).
+- *Integration:* all 38 modules migrated with this tree (`migrate_test.sh`): 844 OK (10 skipped, as
+  before). `test_pricing_workspace_api` 61 of them. `test_entry_branding` failed once in that run
+  (1 of 34): the tree's HEAD moved by a commit during the run, and the test compares the source
+  link's commit with HEAD. It passed 34/34 on its own afterwards.
+- *Upstream suites with this tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the eleven
+  workspace specs, `editor-edits`, `contract-admin` and `critical-journey`, desktop and Pixel 7: 83
+  tests, 83 passed on the final run. The acceptance counted 41 clicks, 0 section switches and 0
+  modal dialogs. The first run had 6 failures, all fixed before the final run:
+  - five came from two regressions of this follow-up, fixed in `8a76b52`: the matrix's live region
+    had lost its inner `.sr-only` (four bulk tests read it), and the page marker `data-side-panel`
+    was also set on `<html>` (the S16 review test finds the panel by it);
+  - one came from the boards spec expecting board codes.
+- Main `1575c8b` had no newer commit: nothing to merge.
+
+**O1–O5 after the S16 re-review follow-up** (all five provisional, owner input 13): unchanged. No
+parser, op mapping or `apply_op_values` change.
+
+**Open after the S16 re-review follow-up.**
+- The grids' inline editing is still written three times (PriceMatrix, OccupancyLadder,
+  BoardsSection). A `useInlineGridEditor` hook (a pure reducer and a thin hook) is open, as after
+  S16.
+- The ladder and the boards grid have no clipboard or fills of their own. They say where those
+  work.
+- A relative entry on the base room that is waiting for `apply_op_values` is still not in a
+  Ctrl/Cmd+S made meanwhile. The tab now asks before it closes while one is waiting.
+- Between `sm` and `lg` a non-modal side panel still covers the page's right side. From `lg` the
+  page makes room for it.
+- Still open from S16: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no F6 shortcut, an
+  error draft of a removed room or period kept until Discard, only Chromium run, CI never run on
+  GitHub.

@@ -907,7 +907,41 @@ passed again with 14 of 14. The new `pricing-workspace-review.spec.ts` passed 10
 see ADR-061 (the backend tests, the i18n check, the unit tests, and the review spec, 10 of 10 on the
 S16 frontend).
 
-**Pricing Workspace status (R-04): COMPLETE (S1–S16 and the S16 review follow-up, branch `pricing-workspace`).** Backend S2–S5
+**Pricing Workspace, S16 re-review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).** A
+second review found 9 medium and 12 low items. All are fixed except one low item, the shared
+inline-editing hook, which ADR-061 lists as open.
+- *Server:*
+  - A sample party that a hidden policy rule takes part in has no total and no error text for an
+    editor without `price.view_cost`. This covers a whole-party rule and a party that cannot be
+    priced (`matrix.party_rules`).
+  - That editor's live check leaves out the issues that depend on a hidden rule's value.
+  - The heavy-read budget is one atomic step, and a leaked slot ages out after 300 s.
+  - `preview_price` with unsaved data is bounded per user.
+- *Workspace:*
+  - The Price test's explanation is complete after a second result.
+  - The ladder popover adds child position rows and the "also when children travel" single use.
+  - Add room and Add board are menus.
+  - "Prices not updated" or "as saved" is shown instead of a spinner that never stops, and stale
+    values are italic, not faded.
+  - Ctrl/Cmd+S and closing the tab cover the child-age fields and new period dates.
+  - Alt+Enter in the boards grid keeps the typed entry.
+  - Each grid is one tab stop, with its header controls on the arrow keys.
+  - Shift+click selects header ranges.
+  - The Price test sits beside the matrix on a desktop.
+  - Also: every run-time state key is in the six languages, board names are used, and weekday
+    names are in the viewer's language.
+
+Verification: unit 496 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,065
+literal keys), `npm run test:unit` 303, `npm run test:dom` 32. All 38 integration modules migrated
+with the tree: 844 OK (10 skipped, as before), `test_pricing_workspace_api` 61 of them.
+`test_entry_branding` failed once because a commit moved HEAD during the run; it passed 34/34 when
+re-run. Upstream suites: eval 76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite
+:5186): the eleven workspace specs, `editor-edits`, `contract-admin` and `critical-journey`
+(desktop and Pixel 7), 83 tests. The final run passed all 83; the acceptance counted 41 clicks.
+Fail-first: see ADR-061 (the backend tests, the unit tests, the DOM test, and the new
+`pricing-workspace-rereview.spec.ts`, which fails 11 of 11 on the S16-review frontend).
+
+**Pricing Workspace status (R-04): COMPLETE (S1–S16, the S16 review and re-review follow-ups, branch `pricing-workspace`).** Backend S2–S5
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of an internal quote reports its
 running subtotals after the adults, the children and the board, reported only, which the Explain

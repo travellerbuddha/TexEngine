@@ -592,3 +592,16 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     occupancy, grids that scroll together, and settings in the undo history.
   - Open: the §3.18 one-screen fit; one shared inline-editing hook.
   - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 re-review follow-up on branch `pricing-workspace` (ADR-061).
+  - Server:
+    - an editor without `price.view_cost` can no longer work back an inherited policy formula from
+      sample parties (a whole-party rule, or a failure a probe provokes) or from the live check;
+    - the per-user heavy-read budget is atomic and a leaked slot ages out;
+    - `preview_price` with unsaved data is bounded too.
+  - Workspace: the Price test's explanation after a second result, child position rows and "also
+    when children travel" in the ladder popover, Add room / Add board menus, no spinner that never
+    stops, Ctrl/Cmd+S and the tab-close prompt for every typed field, one tab stop per grid,
+    Shift+click header ranges, and the Price test beside the matrix on a desktop.
+  - Open: one shared inline-editing hook; no clipboard in the ladder and the boards grid (they say
+    where it works); the §3.18 one-screen fit.
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
