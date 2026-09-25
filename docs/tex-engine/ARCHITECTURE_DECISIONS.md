@@ -5819,6 +5819,98 @@ addressed.
 **O1–O5 after the S10 review follow-up:** unchanged from "O1–O5 after S10". A following formula
 filled down into the base room is refused like any formula (O4).
 
+**S10 second review follow-up (2026-09-25).** One high and three low verifier findings on S10
+and its first follow-up, all addressed.
+1. *(high) Copy and paste mapped rows differently.* A Shift+Arrow or Shift+Click range over a
+   resolved row copied that row's server amount (`copyBlock` took the whole rectangle). A paste
+   writes entry rows only and passes over the resolved ones (`planPaste`). Each resolved row in
+   the block therefore moved every row below it one room down. The verifier's case: the owner
+   grid with resolved rows shown, Standard P1 to Deluxe P1 copied and pasted at Standard P2. Deluxe
+   P2 got Superior's resolved price as a fixed price (ABSOLUTE 80.5), Family P2 got Deluxe's
+   formula (a manual room became a formula room), and the toast read "Applied to 4 cells". With
+   no entry row below, the same gesture failed with a confusing SHAPE. Ctrl/Cmd+A and header
+   selections leave resolved rows out, so they were not affected.
+2. *(low) The TSV round trip lost a last row of one empty cell.* `encodeTSV` wrote no final line
+   break and `decodeTSV` trims one. A copied column whose last cell shows no rule did not clear
+   that target, and one copied empty cell pasted as "nothing to paste".
+3. *(low) Ctrl/Cmd+R and Ctrl/Cmd+D in a cell editor reached the browser* (reload, bookmark). The
+   grid's key handler ignores the editor's events, and the editor handled only Escape, Enter and
+   Tab.
+4. *(low) The undo toast's Undo dropped the focus to the page.* The toast unmounts while its
+   button holds the focus, so a keyboard user lost their place in the grid.
+
+**Decision (S10 second review follow-up).** Frontend only; no endpoint, payload, price or rule
+change.
+- *Copy leaves out the resolved rows when the selection also holds entry rows*
+  (`clipboard.copyBlock(ranges, textAt, entryRow)`; PriceMatrix passes the grid rows'
+  `editable`). The copy and the paste now map rows the same way, so a block pastes back onto the
+  same rooms wherever it is pasted, and a spreadsheet round trip keeps that alignment. The
+  columns are then the ones that hold a selected cell of a kept row. Resolved cells selected on
+  their own still copy the server's exact amounts (§3.10), for example to paste them into a
+  manual room.
+  - *Deviation from §3.10:* "resolved rows copy the exact server amounts" now holds only for a
+    selection of resolved cells alone. In a mixed selection a spreadsheet gets the entry rows,
+    as Ctrl/Cmd+A and a column-header selection already gave it.
+  - *Rejected alternative:* an app-specific clipboard type naming each row's kind, with the
+    resolved rows dropped only on an in-app paste. The type does not survive a spreadsheet: a
+    block copied from the matrix, edited in a spreadsheet and pasted back would shift again.
+- *`encodeTSV` ends every row with a line break*, as spreadsheets do; `decodeTSV` trims exactly
+  that one. An empty last row and a single empty cell survive the round trip, so they clear
+  where they are pasted.
+- *A cell editor keeps Ctrl/Cmd+R and Ctrl/Cmd+D from the browser*
+  (`ui/keys.editorSwallowsShortcut`, on every layout; PriceMatrix's `onEditorKey` prevents the
+  default). No fill runs while a cell is being edited. Ctrl/Cmd+Z and Ctrl/Cmd+Y stay the field's
+  own undo and redo; Ctrl/Cmd+Shift+R (hard reload) is not a grid shortcut and is left alone.
+- *The undo toast gives the focus back* (`UndoToastView` `onFocusBack`). When its Undo or close
+  button takes the toast away while the toast holds the focus, the matrix puts the focus on the
+  grid's active cell, as the fill confirmation does. A toast that goes without holding the focus
+  leaves the focus where it is.
+
+**Tests (S10 second review follow-up).**
+- `tests/unit/clipboard.test.ts` 15 (13 + 2), with the real selection reducer:
+  - on the owner grid (Standard, Superior, Superior resolved, Deluxe, Deluxe resolved, Family,
+    Family resolved), Shift+ArrowDown ×3 from Standard P1 copies `70⏎x1.15⏎x1.35⏎`. Pasted at
+    Standard P2 it writes Standard, Superior and Deluxe P2, each with its own row's text, and
+    leaves Family alone. Pasted back in place it writes the same cells. A Shift+Click from
+    Superior's resolved P1 to Deluxe P2 copies Deluxe's row. A Ctrl/Cmd+Click mix drops the
+    resolved cell's column;
+  - resolved cells alone copy the server amounts and paste onto Family as its prices;
+  - the TSV round trip of `[["70"],[""]]` and `[[""]]`; every row ends with a line break.
+- `tests/unit/keys.test.ts` 7 (6 + 1): `editorSwallowsShortcut` for Ctrl and Cmd+R and +D (the
+  Russian layout too). It is false for undo, redo, copy, paste, plain letters, Ctrl+Shift+R and
+  AltGr.
+- `tests/dom/history.spec.ts` 4 (3 + 1): the toast's Undo (Enter) and close button (Space) put the
+  focus on the harness's active cell; a click that does not focus the toast leaves the focus where
+  it was.
+- `npm run test:unit` 207, `npm run test:dom` 28.
+- Fail-first, on `0f1e863`:
+  - clipboard: 3 of 15 fail. The mixed range copies `[["70"],["x1.15"],["80.5"],["x1.35"]]`,
+    and `encodeTSV` gives `…\t\t\t` and `a b\tc d` without the final line break;
+  - keys: the file does not load ("does not provide an export named 'editorSwallowsShortcut'");
+  - DOM: the new test fails, because the focus is not on the active cell after the toast's Undo.
+
+**Verification (S10 second review follow-up).**
+- *Build and unit tests:* `tsc -b`, `vite build` (bundles not committed), `npm run i18n:tex`
+  complete (no new key), `npm run test:unit` 207/207, `npm run test:dom` 28/28.
+- *Integration, on the tree migrated with it:* `test_pricing_workspace_api` 50 OK.
+- *Browser, on the tree's own servers* (bench :8026, Vite :5196):
+  - a scratch check `s10v2-review.spec.ts`, 5/5. V1: Shift+ArrowDown ×3 from Standard P1 over
+    Family Suite's resolved row to Garden Villa copies `70⏎x1.15⏎90⏎`; pasted at P2 it gives
+    Standard 70.00, Family Suite still following ×1.15 and Garden Villa 90.00, "Applied to 3
+    cells", and Ctrl+Z puts them back. V2: a range ending on the resolved row, pasted at P3,
+    never writes Garden Villa; Family Suite's resolved P1:P2 alone copies `80.5⇥92` and pastes
+    onto Garden Villa. V3: an empty All-periods cell copies `⏎` and clears Garden Villa P4.
+    V4: in a cell editor Ctrl+R and Ctrl+D are default-prevented, Ctrl+Z is not, and no fill
+    runs. V5: the toast's Undo (Enter and click) and its close button leave the focus on the
+    grid's active cell;
+  - each of V1–V5 fails on the `0f1e863` sources: the clipboard holds `…80.5…`, or `""` for the
+    empty cell; Ctrl+R and Ctrl+D are not prevented; the focus is on BODY;
+  - the S10 checks (6/6) and the first review check R1–R3 (3/3) pass, with their clipboard
+    expectations given the final line break;
+  - `contract-admin`, `critical-journey` and `editor-edits`: 5/5.
+
+**O1–O5 after the S10 second review follow-up:** unchanged.
+
 **Open after S10 and its review follow-up.**
 - *S16 must carry the scratch scenarios into the committed workspace specs*:
   - from `s10-bulk.spec.ts`: Ctrl/Cmd+Enter with the undo and redo keys; the toast's Undo and
@@ -5826,9 +5918,13 @@ filled down into the base room is refused like any formula (O4).
     NO_TARGET, resolved rows); header selection; Fill with the confirmation; the Rule table undo
     interleaved with matrix entries; the Russian-layout shortcuts; Discard clearing the history;
     the phone toolbar;
-  - from the review check: R1–R3.
-  The DOM harness covers `useUndoToast` and `record()` only. The document-level clipboard
-  listeners and the grid's shortcuts have no committed test until then.
+  - from the review check: R1–R3;
+  - from the second review check: V1–V5 (a copied range over a resolved row, a resolved row
+    alone, an empty cell, Ctrl+R and Ctrl+D in the editor, the toast's focus).
+  The DOM harness covers `useUndoToast`, the toast's focus return and `record()` only. The
+  document-level clipboard listeners and the grid's shortcuts have no committed test until then.
+- A spreadsheet gets only the entry rows of a selection that mixes entry and resolved rows
+  (second review follow-up); the resolved amounts are copied when they are selected alone.
 - Undo and Redo are only on Pricing's matrix toolbar (and Ctrl/Cmd+Z with a grid cell focused).
   Entries made in a Rule table or in Offers are undone from there; inside a text field
   Ctrl/Cmd+Z is the field's own text undo.

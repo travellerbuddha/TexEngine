@@ -512,3 +512,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   from an empty cell says how many cells it cleared. S10 is now documented in ADR-061, and the
   undo toast has a committed browser test. No server change; no area status changes. Verdict
   unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S10 second review follow-up on branch `pricing-workspace`
+  (ADR-061). A block copied from the price matrix over a resolved row now pastes back onto the same
+  rooms. Before, it put one room's resolved price on the next room as a fixed price, with a
+  success toast. Copied text ends every row with a line break, so an empty cell clears where it
+  is pasted. Ctrl/Cmd+R and Ctrl/Cmd+D typed in a cell no longer reload the page. The undo
+  toast returns the focus to the grid. No server change; no area status changes. Verdict
+  unchanged: NOT READY.
