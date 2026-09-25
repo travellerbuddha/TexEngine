@@ -563,3 +563,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   shows band labels instead of codes, speaks the viewer's language where a template exists and
   links each rule to its cell or card. No server change; no area status changes. O1–O5 remain owner
   input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S15 on branch `pricing-workspace` (ADR-061): validation
+  issues are shown on the matrix cell, period header, occupancy ladder cell, combination card or
+  board cell they are about, and the live check lists them by section; a click on one shows its
+  cell (or the region or rule table that holds it). Every issue list shows band labels instead of
+  band codes. The i18n check also fails on a key used in the code but missing from the catalogue.
+  No server change; no area status changes. O1–O5 remain owner input 13. Verdict unchanged: NOT
+  READY.

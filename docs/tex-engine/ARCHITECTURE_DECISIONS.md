@@ -7138,3 +7138,175 @@ as the server priced them.
 - The `#occupancy` / `#boards` hash still does not reopen a section followed a second time (S11 and
   S13 review items); Show in grid always opens it.
 - Still open from S10–S13: their low review items.
+
+**Decision (implemented in S15: validation anchored in the workspace, band labels in every issue
+list, the literal i18n key scan).** Branch `pricing-workspace`, frontend only (no server file
+changes), commits `716e51f` (pure `issues.ts` and its tests), `665efd0` (the screens) and `6ee38ef`
+(the i18n check).
+- *Anchoring* (pure `workspace/issues.ts`, `anchorIssues(issues, tables, {bands})` → `byCell`
+  (anchor id → issues), `anchors` (per issue) and `unanchored`). The anchor ids are the grids'
+  `data-cellid`: matrix `{room}|{period}`, board `board:{board}|{room}|{period}`, ladder
+  `occ:{row}|{period}` in All rooms and `occ:{row}|{period}@{room}` in a room scope, a period
+  header `period:{code}`, a card `card:{id}` (matched on `data-card`, never put in a selector).
+  Precedence, first match wins:
+  1. `ref.rule_ids` (all of them) and `ref.rule_id`: `~<_key>` (and `~<table>-<n>`, as `ruleRowOf`)
+     or a saved row's `_name`. A room price row marks its matrix cell; an occupancy rule its
+     combination card (single use: the ladder's first row) or its ladder cell in the rule's own rooms
+     scope (`ladderRowIdOf`: `adult:{n}:`, `adult_any:0:`, `band:0:{BAND}`, `child:{n}:{BAND}`,
+     `child_any:0:`, `single:0:`); a board rule its board cell. A named row whose room or period the
+     contract does not have (ROOM_RULE_UNKNOWN_*, OCC_UNKNOWN_ROOM/PERIOD) is not on screen: the
+     issue stays in the lists.
+  2. Only when no rule id names a row of the draft (a pricing policy's rule, a row removed since),
+     the ref's fields: a board (+ room, period) → the board cell; a party (adults + children) → the
+     combination card that takes it (a "*" card too; exact counts, then a named room, then a named
+     period win; a single-use card → the ladder's first row); an age band the ladder shows (the
+     effective bands, or a band a plain rule of the scope names) → its band row in the ref's room
+     scope and period; room + period → the matrix cell, but never for an issue about guests (a party,
+     a band or OCC_*); a period alone → its header (PERIOD_OVERLAP: both headers).
+  3. Otherwise unanchored: the header and selling terms, rate plans, offers, AGE_BANDS about two
+     bands, a room alone (ROOM_CAPACITY, INCLUDED_ADULTS), NO_BASE_BOARD.
+- *Where it shows:* `useCellIssues` gives a cell its issues' level and text ("Error: …" / "Warning:
+  …", errors first, at most three and "+N more", band labels). `MatrixCell` (the matrix, the ladder
+  and the boards grid) draws a glyph (an octagon for an error, a triangle for a warning) and an
+  underline (rose / amber), sets `aria-invalid` for an error, and puts the cell's tooltip text, a
+  draft error and the issue text in one hidden description (`aria-describedby`); the tooltip shows
+  the messages too. Period headers (PERIOD_*) get the glyph, a bottom line, `aria-invalid` for an
+  error, the description and a Tooltip, and can take the focus while they carry an issue. A
+  combination card gets a coloured border and its messages as a visible line under it
+  (`aria-describedby`). Issues older than the state on screen (`issuesStale`) are dimmed. Every
+  element carries `data-issue` (error / warning).
+- *The live check's list* (the chip's popover, `IssueNav` in `ContextHeader`): issues grouped by
+  section (`issuesBySection`, section order, errors first, each section named "{Section}: N
+  issues"), at most 50 per section. Each is a button: a click closes the popover and shows the
+  issue (`issuePlace`): its first anchor through the "Show in grid" request of S14 (`showInGrid`:
+  Pricing opens, the Occupancy or Boards section opens, the ladder switches to the anchor's rooms
+  scope, and the cell, card or header is brought into view and focused with `revealElement`);
+  without an anchor, the Pricing region that holds its subject (the child ages drawer for AGE_BANDS*
+  and NO_AGE_BANDS, Boards for BOARD_* and NO_BASE_BOARD, Occupancy for OCC_* and sweep parties, the
+  matrix for the rest), the Advanced rule table that lists it (Commercial rules, `issueTable`) or
+  Offers. `ShowTarget` gains `ladder`, `card`, `period` and `region`. The "saved" mode lists the
+  report stored at publish (anchored by saved row names; no `validate_version` call); in catalogue
+  mode the chip stays hidden.
+- *Band labels in every issue list* (D13): `issueMessage(issue, display)` passes the message through
+  `useBandLabels.display` with `ref.age_bands`, else `[ref.age_band]` (the bracket rule for the
+  sweep's "STD 2A+2C [CHB]: …" always applies). `VersionEditor` computes the labels once
+  (`effectiveBands` of the draft and the served bands), the anchors once per issues and tables, and
+  hands `issueText` to the cells, the chip, Preview & audit, the Publish dialog's check and, through
+  `IssueFormatContext`, to the Advanced rule tables' `TabIssues`. `IssueList` gains `format`
+  (the server's message by default, so the policy editor is unchanged).
+- *The i18n check* (`scripts/tex-i18n-check.mjs`) also scans `src/tex/**/*.{ts,tsx}` for `t("…")`,
+  `t('…')` and `tOrdinal("…")` string literals (not template literals, not a concatenation) and
+  fails when a key is missing from the English catalogue of its area (the area whose keys share its
+  first segment). Parity and placeholder checks are unchanged. The tree passes (5,038 literal keys).
+- *Strings:* 7 new `rates.ws.issue.*` keys in the six catalogues.
+
+**Deviations from the slice text, with reasons (S15).**
+1. *Files beyond the slice list:* `useCellIssues.ts` (new: a cell's issue state and text),
+   `MatrixCell.tsx` (the `issue` view field), `PeriodHeader.tsx` (period anchors), `OccupancySection.tsx`
+   (the new show requests; passes the issues on), `priceTest.ts` (`ShowTarget` kinds),
+   `VersionEditor.tsx` (labels, anchors and routing once per editor; the formatter context),
+   `tabs/shared.tsx` (TabProps `anchored`, `issueText`, `issuesStale`; `TabIssues` formats),
+   `tabs/PreviewTab.tsx` and `VersionActions.tsx` (Preview & audit's list and the Publish dialog's
+   check with labels), and the six catalogues.
+2. *A warning is described, not invalid:* a cell whose issues are only warnings shows the amber glyph
+   and line and has the description, but no `aria-invalid` (a warning does not refuse the value or
+   the publish). Errors set `aria-invalid`, as the slice says.
+3. *Cards are list items*, where ARIA 1.2 does not allow `aria-invalid`; a card shows its messages as
+   a visible line referenced by `aria-describedby` instead. A period header (columnheader) takes
+   `aria-invalid`.
+4. *Precedence where the slice's rules overlap* (a ref usually has several fields): rule ids first
+   (all of `rule_ids`), then board, party, band, room + period, period; a party or band issue never
+   marks a room price; a rule id that names a row off screen leaves the issue unanchored rather than
+   falling back to that rule's own ref; a room alone is not anchored. A rule id wins over the ref's
+   period: ROOM_NEGATIVE and the room_unit errors name the rule that prices the cell, which may be the
+   room's All periods rule, so that cell is marked (the resolved row already shows "Unsellable" in
+   the period).
+5. *Ladder ids in room scopes* gain `@{room}` (S14's `occ:{row}|{period}` is unchanged for All
+   rooms), so a room's cell is never taken for the All-rooms one. A sweep party is anchored in its
+   room's scope, which shows the rules the engine uses for that room (S11 review).
+6. *A click on an unanchored issue* opens the region, rule table or section that holds its subject
+   (the slice only says "focuses its cell").
+7. *"A duplicate SUP P4 row created through the Advanced tables":* the Advanced Room prices table is
+   a room × period grid that keeps one row per cell (it cannot create a twin), so the SUP P4 twin was
+   stored with `save_version` (as an import would) and loaded; the Advanced-tables path was checked
+   with the Boards table's "Duplicate row" (BOARD_DUPLICATE), which marks its board cell and adds to
+   the chip's count.
+8. *The chip's list shows 50 issues per section* ("+N more"): the sweep can report 200 warnings.
+   Preview & audit keeps `IssueList` (50 per level).
+9. *The literal scan also reads `tOrdinal("…")` and `x.t("…")`*, and ignores a literal without a dot.
+10. *No committed Playwright spec* (S16 owns them). The slice's checks ran as a scratch spec (below).
+
+**Tests (S15).** `npm run test:unit` 287 (272 + 15, `tests/unit/workspace-issues.test.ts`): anchor
+ids; `ladderRowIdOf` per target; `~key`, `~table-n` and `_name` anchoring (a SUP P4 twin marks one
+cell once); room + period, and a rule id the draft does not hold falling back to it; unknown room,
+unknown period and a room alone unanchored; occupancy rules in their scope, a combination row on its
+card, single use on the ladder's first row; `age_band` → the band row (All rooms, a sweep party's
+room, inherited bands, an unknown band not anchored); a party → the All-rooms 2+2 card, the room's
+own card first, a "2+*" card; board refs, period headers (PERIOD_OVERLAP both); unanchored header
+issues; `issuePlace` for every kind; `issuesBySection`; `issueBandCodes`; "age bands CHA and CHB
+overlap at …" → "age bands Child 3–6.99 and School age overlap at …"; "STD 2A+2C [CHB]: … (CHB)" →
+"STD 2A+2C [School age]: … (School age)", and only the bracket without a ref.
+Fail-first: without `issues.ts` the file fails to load (`ERR_MODULE_NOT_FOUND:
+…/workspace/issues.ts`). The scratch spec's five checks against the S14 head (`ee8de20`'s frontend
+exported with `git archive`, served by Vite :5186 on the same bench) fail: (1) the SUP · P4 cell
+has no `aria-invalid` (the chip already counted "1 error"); (2) the chip's popover has no issue
+button to find the AGE_BANDS message in; (3) the 2+2 card has no `data-issue`; (4) there is no
+`period:P2` header anchor. The i18n check fails on injected keys (`rates.ws.issue.nav_hint_typo`,
+`core.nope.missing`, `zzz.unknown`: "3 i18n problem(s)", exit 1) and passes on the tree.
+
+**Verification (S15).**
+- Frontend: `tsc -b`, `npm run build` (bundles not committed), `npm run i18n:tex` (7 new keys; 5,038
+  literal keys found), `test:unit` 287/287, `test:dom` 30/30 (TEX_DOM_PORT 5186). Python unit 491 OK
+  and ruff clean (no server change).
+- Integration, migrated with this tree: `test_pricing_workspace_api` 50 OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186), a scratch spec 5/5
+  (`scratchpad/s15/e2e/s15-issues.spec.ts`):
+  1. A draft with two SUP P4 rows: the chip reads "1 error"; the Family Suite · P4 cell has
+     `aria-invalid`, `data-issue="error"` and the description "Error: room … has two rules for period
+     P4"; P3 is clean. The popover's "Pricing: 1 issue" lists ROOM_RULE_DUPLICATE; its click closes
+     the popover and focuses the cell. Commercial rules → Rule tables → Boards → "Duplicate row 3":
+     the chip reads "2 errors", the Boards table lists BOARD_DUPLICATE, and its click in the popover
+     opens Pricing (`#pricing`) and focuses "Half board · Family Suite only · P2" (`aria-invalid`).
+     Delete on the SUP P4 cell removes both rows: "1 error", the cell is clean.
+  2. Bands CHA "Small kids" 3–6.99 and CHB (no label) 6–11.99: the popover reads "age bands Small
+     kids and Child 6–11.99 overlap at …" and no INF, CHA or CHB; a click opens the child ages drawer.
+     The Advanced Child ages table and Preview & audit read the labels too.
+  3. Without an infant rule: the 2+2 card has `data-issue="warning"` and "[Infant 0–2.99]"; the
+     popover has no "[INF]"; "… STD 2A+1C [Infant 0–2.99]" switches the ladder to Standard and
+     focuses "Infant 0–2.99 · P1" (a warning: described, not invalid); the All rooms scope's Infant
+     row is not marked; from a collapsed section, the 2A+2C issue opens it and focuses the card.
+  4. P2 and P3 overlapping and twin 3rd-adult rules: both headers `aria-invalid` (P1 clean) with
+     "Error: periods P2 and P3 overlap with equal priority"; "3rd adult · All periods" invalid ("…
+     share the same scope …"); the popover focuses the P2 header, then the ladder cell.
+  5. A published version with OCC_INFANT_GENERIC in its stored report: "Checked when published"
+     reads a warning, "Every child (any age band) · All periods" is marked by the saved rule's name
+     and described with "Warning: no rule names infant band Infant 0–2.99 …", the popover focuses it,
+     and no `validate_version` request is made.
+  Screenshots (desktop and 390 px, the popover as a sheet, no sideways page scroll) are in the
+  scratch directory.
+- Committed specs `contract-admin`, `critical-journey`, `editor-edits`, `entry-branding`
+  (`TEX_E2E_BENCH=http://test.localhost:8016`) and `policy-revisions`: 15 passed, 1 skipped (the
+  two-factor case, as before). Earlier scratch specs on this tree: S14 5/5, S13 6/6, S12 5/5 +
+  review 2/2, S11 rerun 4/4, S10 bulk (scoped) 6/6, S9 with the cell menu 8/8.
+
+**Performance after S15.** `anchorIssues` over 3,380 rows (1,800 occupancy rules, half in
+combinations) with 200 issues: 26 ms the first call, 14 ms after (Node), mostly `groupCombinations`,
+which runs only when an issue names a combination row or a party; it runs again when the issues or
+the tables change, and not at all without issues. A cell looks its issues up in a map; the grids'
+cell views are recomputed when the issues change, as when the tables do.
+
+**O1–O5 after S15** (all five provisional, owner input 13): unchanged.
+
+**Open after S15.**
+- *S16 must commit the S15 scratch scenarios 1–5* with those of S10–S14. Useful names: the chip
+  (button whose name starts "Live check" or "Checked when published") and its dialog of the same
+  name; regions "{Section}: N issue(s)"; buttons named by code and message; `data-issue` on cells,
+  cards and headers (`error` / `warning`), `aria-invalid` for errors; period headers
+  `data-cellid="period:{code}"`; ladder cells `occ:{row}|{period}` (All rooms) and
+  `occ:{row}|{period}@{room}`.
+- Messages keep the server's other identifiers: room type ids ("Aurora Beach Resort-FAM") and rule
+  ids (`~r…` in the overlay, saved row names); only band codes are shown as labels (D13).
+- A room alone (ROOM_CAPACITY, INCLUDED_ADULTS) has no anchor; its click goes to the matrix. An
+  AGE_BANDS issue about two bands goes to the drawer, whose bands are not marked.
+- Still open from S10–S14: their low review items; `#occupancy` / `#boards` followed a second time
+  still do not reopen a collapsed section (an issue's click always opens it).
