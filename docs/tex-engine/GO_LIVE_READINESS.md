@@ -541,3 +541,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   others. It prices each child by age band and writes ordinary occupancy rules as one undo entry.
   It refuses a rule another combination already holds. No server change; no area status changes.
   O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S12 review follow-up on branch `pricing-workspace` (ADR-061). A
+  combination saved for all rooms and the same one for a single room used to merge into one card.
+  Editing and saving that card unchanged deleted the single room's rules, which could change that
+  room's price. The two are now separate cards, and a card saved unchanged keeps its rules. The
+  builder no longer opens a card it cannot save back as it is. Such cards are edited in the rule
+  tables. No server change; no area status changes. Verdict unchanged: NOT READY.

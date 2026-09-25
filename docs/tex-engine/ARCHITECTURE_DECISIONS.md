@@ -6569,3 +6569,115 @@ no new call or endpoint.
 - An adult rule for a place included in a ROOM-basis price has no effect, and the builder does
   not warn about it (the ladder does).
 - Still open from S10 and S11: their low review items.
+
+**S12 review follow-up (2026-09-25).** The verifier reported one medium finding and four low
+ones on S12. Three low findings are fixed. The fourth low finding is answered with a reason and
+a wording fix.
+1. *(medium) An unchanged Edit and Save of a mixed-scope card deleted rows.* `groupCombinations`
+   merged cells with the same signature over rooms {All, Standard} (or periods {All, P1}) into one
+   card. `builderCanEdit` accepted that card. `builderFromCard` then set `roomsAll` and hid
+   `['STD']`, and `planCombination` wrote All rooms only. An Edit and Save with nothing changed
+   therefore dropped the STD rows and recorded "Edit combination". The builder alone could reach
+   this: save 2A+2C Child 1 7–11.99 ×0.5 for All rooms, then the same for Standard, and the
+   Standard card seemed to vanish. That can change prices. In the engine's CASCADE rank a room
+   qualifier outranks exactness, so after the STD "2+2" row is gone, a STD "2+*" rule beats the
+   All-rooms "2+2" row. The card's second line also read "All rooms · All periods" and hid
+   Standard.
+2. *(low) A negative value outside Plus/minus % did not read back.* ADD -5 showed as "-5" and read
+   back as SUBTRACT 5, which is another row. MULTIPLY -1 showed as "x-1", which the parser
+   refuses.
+3. *(low) INHERIT twins were refused*, although the server's OCC_DUPLICATE (`validate._duplicates`)
+   ignores INHERIT rules.
+4. *(low) The value hint* said that "+25, -25 … choose the rule themselves", but under Plus/minus %
+   they stay Plus/minus % (deviation 2).
+5. *(low) The fail-first evidence* was a module-load error only.
+
+**Decision (S12 review follow-up).** Frontend only. No endpoint, payload, price or rule semantics
+change. Commit `fadfe8a`.
+- *All rooms and named rooms are never one card, and neither are All periods and named periods*
+  (`groupCombinations`). Before §3.7.4 step 3 (the cross product, else a split by room), a
+  group's cells are split by scope kind: all or named rooms × all or named periods. The builder
+  offers exactly these scope choices. The engine ranks them as different rules too: a named room
+  or period outranks All. The verifier's scenario therefore gives two cards, "… · All rooms · All
+  periods" and "… · Standard Sea View · All periods". Each opens in the builder, and saved
+  unchanged, each writes back exactly its rows and records nothing. This refines §3.7.4 (step 2
+  merges cells by signature only). It is the verifier's second option ("split such groups into an
+  All card and a named-scope card"). *Rejected:* only marking such cards non-expressible. With
+  that alone, two cards made in the builder would merge into one card that the builder cannot
+  open.
+- *`builderCanEdit` is the builder's invariant, whatever the grouping.* It also refuses a card
+  whose rooms or periods mix All with named ones: the draft has "All" or chosen ones, so Save
+  would write All only. It also refuses a negative value on any rule but Plus/minus % (and
+  INHERIT). `-0` is 0. Such cards get "Edit in rule tables", whose tooltip now names "a negative
+  value outside Plus/minus %". The builder never writes such a value itself: "=-25", "x-1" and
+  "+-5" are SYNTAX errors, and "-25" is SUBTRACT 25. `builderValueText`'s docstring no longer
+  promises a read-back for these values.
+- *The card's scope line never hides named rooms or periods* (`useComboText.scope`). For a mixed
+  list it reads "All rooms + Standard Sea View". The grouping no longer produces one, so this only
+  guards the text.
+- *INHERIT twins stay refused (finding 3, not changed, for these reasons).* A twin always has the
+  same combination, room, period and flag as the new rule, so the two rows form one cell. That
+  cell holds two rules for one guest and band, and its card cannot be opened in the builder. Only
+  "Edit in rule tables" would remain. The engine also skips the INHERIT one
+  (`occupancy.py`: "INHERIT defers"). A new INHERIT line next to a non-INHERIT rule would be
+  ignored: deviation 6 refuses what the server would ignore. A new rule next to an INHERIT row
+  leaves that row dead. The refusal's advice ("Edit that combination instead") leads to a card
+  the builder can open, where the INHERIT line can be changed. The message now says "{cards}
+  already has a rule for {line}", not "this rule": the other rule may be an INHERIT or have
+  another value. The code comments of `TWIN` and `planCombination` say that TWIN goes beyond
+  OCC_DUPLICATE here.
+- *The value hint names the exception* (six languages): "In Value, a number alone takes the rule
+  chosen, and so does a signed number under Plus/minus %. Otherwise x0.5, 50%, +10%, -10%, +25,
+  -25 or =25 choose the rule themselves." No visible cue was added next to a plain number. The
+  reading line already says what is stored.
+
+**Tests (S12 review follow-up).** `npm run test:unit` 249 (244 + 5), all in
+`workspace-occupancy.test.ts`:
+- the verifier's scenario through the builder: All rooms, then Standard. There are two cards and
+  no twin. For each card, `builderFromCard`, `planCombination` and `persistCombination` write back
+  the same row set (removed 1, added 1), and the card id is unchanged ("saved unchanged records
+  nothing");
+- All periods and P1 give two cards, and both save back unchanged. A split by room no longer
+  keeps STD's All and P1 cells together. Rooms {All, STD} × periods {All, P1} give four cards, all
+  expressible;
+- `builderCanEdit` / `builderFromCard` on a card whose rooms are ['', 'STD'] or whose periods are
+  ['', 'P1']: false / null;
+- negative values: ADD -5, MULTIPLY -1 and SUBTRACT -10 are not expressible. ADJUST_PERCENT -5 and
+  ADD -0 are expressible and plan back to their rules;
+- an INHERIT twin is refused. Written anyway, it forms one card with two rules for Child 1 7–11.99
+  that the builder cannot open (this documents the decision; it passes on S12 too).
+One existing assertion message changed (the negative ADD).
+Fail-first on the S12 head `044ed20`: 4 of the 46 tests in the file failed on assertions, not at
+load time:
+- "the Standard card does not vanish into the All rooms card": one card instead of two;
+- the periods case: one card instead of two;
+- `{"rooms":["","STD"]}`: `builderCanEdit` was true;
+- "ADD -5 would read back as SUBTRACT 5, another row": `expressible` was true.
+`npm run test:dom` 29/29.
+
+**Verification (S12 review follow-up).**
+- Frontend: `tsc -b`, `npm run build`, `npm run i18n:tex` (3 keys reworded in the six catalogues;
+  none added), `test:unit` 249/249, `test:dom` 29/29.
+- Integration, migrated with this tree: `test_pricing_workspace_api` 50 OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186), a scratch spec 2/2
+  (`scratchpad/s12/e2e/s12-review.spec.ts`). R1 fails on the S12 sources (1 card instead of 2):
+  1. R1: in the builder, 2A+2C Child 1 7–11.99 `x0.5` for All rooms, then for Standard. Two cards
+     read "Child 1: Child 7–11.99 · All rooms · All periods" and "… · Standard Sea View · All
+     periods". Each is opened with Edit (value "0.5") and saved unchanged: no toast, still two
+     cards. After Save, `get_version` holds both CHILD 1 CHB "2+2" rows, All rooms and STD.
+  2. R2: the 2+1 card with ADD -5 links to the rule tables and has no Edit. The 2+2 card with
+     Plus/minus % -5 has Edit. The builder shows the new hint. A 2A+1C Child 1 `x0.4` is refused
+     with "2 Adults + 1 Child already has a rule for Child 1 (oldest) in these rooms and periods."
+  The S12 scratch spec passes 5/5, with its twin message updated to "a rule".
+- Performance: `groupCombinations` takes 8.7 ms at 5,000 rules and `planCombination` 6.0 ms at 40
+  rooms × 40 periods (as after S12).
+
+**O1–O5 after the S12 review follow-up:** unchanged. Deviation 2 (a number alone follows the
+Rule select) is for the owner to confirm with owner input 13. The ladder and matrix cells read a
+plain number as a price (D10).
+
+**Open after the S12 review follow-up.** Everything open after S12, plus:
+- The ⓘ note line names cards by combination only. Two cards of one combination, e.g. All rooms
+  and Standard, give two buttons with the same name. Their `data-card` targets differ.
+- The builder's scope is All or chosen rooms and periods. A card that mixes both cannot come from
+  the grouping any more. A scope that mixes both still cannot be written in one save.
