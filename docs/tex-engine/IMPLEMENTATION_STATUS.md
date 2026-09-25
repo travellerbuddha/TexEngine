@@ -994,8 +994,9 @@ work's untracked parity files in the worktree, and a reviewer's scratch clean-up
 Verification: unit 506 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,100 keys),
 `npm run test:unit` 310, `npm run test:dom` 32. All 38 integration modules migrated with the tree: 846
 OK (10 skipped, as before). Upstream suites: eval 76/76, journey 13/13, banquet 101 OK. Playwright on
-the tree's own servers (bench :8016, Vite :5186): the thirteen `pricing-workspace*` spec files (see
-ADR-061 for the counts), and `editor-edits` and `policy-revisions` 4/4. Fail-first: see ADR-061 (2
+the tree's own servers (bench :8016, Vite :5186): the thirteen `pricing-workspace*` spec files 97/97,
+and `editor-edits`, `contract-admin`, `critical-journey` and `policy-revisions` 6/6 (one bulk test
+failed once under load in an earlier full run and passed on every rerun). Fail-first: see ADR-061 (2
 Python tests, 3 frontend unit tests, and the new `pricing-workspace-rereview3.spec.ts`, which fails 9
 of 9 on the re-review 2 frontend). Untracked test files of other work in the worktree are not counted.
 

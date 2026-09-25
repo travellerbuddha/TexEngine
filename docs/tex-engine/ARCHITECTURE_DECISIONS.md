@@ -8206,9 +8206,10 @@ needed.
   `pricing-workspace*` spec files (the new `rereview3`; desktop, and the mobile spec on Pixel 7 too).
   The first full run gave 96 of 97. `bulk` test 1 applied a Ctrl+Enter to one cell of a three-cell
   selection under load, and passed in both runs of `--repeat-each 2` of the bulk spec (28 of 28).
-  The final full run is below. Also `editor-edits` and `policy-revisions` 4 of 4. Measured beside
-  the Price test: at 1280 px the matrix keeps All periods, P1 and P2 in view; at 1440 px also P3.
-  At 1024 px the panel lies over the page.
+  The final run of the thirteen files with `editor-edits`, `contract-admin`, `critical-journey` and
+  `policy-revisions` passed 103 of 103 (97 workspace tests). Measured beside the Price test: at
+  1280 px the matrix keeps All periods, P1 and P2 in view; at 1440 px also P3. At 1024 px the panel
+  lies over the page.
 
 **O1–O5 after the S16 re-review 3 follow-up** (all five provisional, owner input 13): unchanged. No
 parser, op mapping or `apply_op_values` change.
