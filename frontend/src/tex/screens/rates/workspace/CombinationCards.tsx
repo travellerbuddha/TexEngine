@@ -141,8 +141,12 @@ export function CombinationCards(p: CombinationCardsProps) {
     seq.current += 1
     setFocusReq({ id, n: seq.current })
   }, [])
+  // only requests made while mounted (a remount after Discard does not replay the last one)
+  const handled = useRef(p.show?.n ?? 0)
   useEffect(() => {
-    if (p.show) focusCard(p.show.id)
+    if (!p.show || p.show.n === handled.current) return
+    handled.current = p.show.n
+    focusCard(p.show.id)
   }, [p.show, focusCard])
   useEffect(() => {
     if (!focusReq) return
