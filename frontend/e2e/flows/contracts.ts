@@ -3,7 +3,8 @@
 // admin UI (role/label locators only); the API is used for assertions and clean-up.
 // Helpers take a Page that is already logged in (see ../helpers.ts `login`).
 import { expect, type Locator, type Page } from "@playwright/test"
-import { answerOf, byLabel, esc, isoDate, pageApi, texPath, uniqueRunId } from "../helpers"
+import { answerOf, byLabel, esc, pageApi, texPath } from "../helpers"
+import { type Budget, choose, typeIn } from "./budget"
 
 // shared helpers (moved to ../helpers.ts); re-exported for existing imports
 export { APP_PREFIX, byLabel, isoDate, pageApi, texPath, uniqueRunId } from "../helpers"
@@ -201,6 +202,19 @@ const TABLE_LABEL = {
 } as const
 export type VersionTab = keyof typeof TABLE_LABEL | "offers" | "preview"
 
+/** How a version-editor step runs. By default it drives the Pricing workspace (the room price
+ * matrix, the occupancy ladder with the child ages drawer, the Boards section, the Price test
+ * drawer) and saves the draft when it is done, as the ten-tab steps did. */
+export interface StepOptions {
+  /** Use the Advanced rule tables (Commercial rules → Rule tables, the former tab editors) instead
+   * of the workspace. */
+  advanced?: boolean
+  /** Count the step's gestures on this budget (./budget.ts). */
+  budget?: Budget
+  /** Save the draft at the end of the step (default true). */
+  save?: boolean
+}
+
 async function selectTab(page: Page, tablist: string, label: string): Promise<Locator> {
   const name = new RegExp(`^${esc(label)}`)
   const t = page.getByRole("tablist", { name: tablist, exact: true }).getByRole("tab", { name })
@@ -212,6 +226,16 @@ async function selectTab(page: Page, tablist: string, label: string): Promise<Lo
 /** Select a version editor section; returns its panel. */
 export async function openSection(page: Page, section: VersionSection): Promise<Locator> {
   return selectTab(page, "Version sections", SECTION_LABEL[section])
+}
+
+/** The panel of `section`, switching to it only when another section is shown (a switch the user
+ * would make; none when the section is already on screen). */
+async function onSection(page: Page, section: VersionSection): Promise<Locator> {
+  const name = new RegExp(`^${esc(SECTION_LABEL[section])}`)
+  const tab = page.getByRole("tablist", { name: "Version sections", exact: true }).getByRole("tab", { name })
+  await expect(tab).toBeVisible()
+  if ((await tab.getAttribute("aria-selected")) !== "true") return openSection(page, section)
+  return page.getByRole("tabpanel", { name })
 }
 
 /** Open what a version editor tab of the ten-tab editor held; returns its panel: "offers" and
@@ -239,6 +263,10 @@ export async function saveDraft(page: Page) {
   await expect(save).toBeDisabled()
 }
 
+const saved = async (page: Page, o: StepOptions) => {
+  if (o.save ?? true) await saveDraft(page)
+}
+
 /** Click a table editor's add button; returns the new row's 1-based number (controls
  * are labelled "<column> <n>"). */
 export async function addRow(panel: Locator, addLabel: string, firstColumn: string): Promise<number> {
@@ -252,17 +280,118 @@ export async function addRow(panel: Locator, addLabel: string, firstColumn: stri
 /** Row `n`'s control in `column` of a table editor. */
 export const cell = (panel: Locator, column: string, n: number) => byLabel(panel, `${column} ${n}`)
 
-/** Rooms tab: add room types (labels as shown, e.g. "Standard Sea View"). The first
- * room added to an empty version becomes the base room. Saves. */
-export async function addRooms(page: Page, rooms: { room: string; base?: boolean }[]) {
+// ─── the Pricing workspace: locators ─────────────────────────────────────
+
+/** The room price matrix (a grid of rooms × "All periods" and the period columns). */
+export const priceMatrix = (scope: Page | Locator) => scope.getByRole("grid", { name: "Room prices by period", exact: true })
+
+/** The matrix cell a price or formula is typed into for `room` in `period` (default All periods);
+ * never the room's resolved row. */
+export const priceCell = (scope: Page | Locator, room: string, period?: string | null) =>
+  priceMatrix(scope)
+    .getByRole("gridcell", { name: new RegExp(`^${esc(room)} · ${esc(period ?? "All periods")}: (?!resolved)`) })
+    .first()
+
+/** The occupancy ladder (adult positions, child bands, the resolved line) under the matrix. */
+export const occupancyLadder = (scope: Page | Locator) => scope.getByRole("grid", { name: "Occupancy and child pricing by period", exact: true })
+
+/** A ladder cell: `slot` is the row's name ("3rd adult", a band label, "Resolved · {room}"). */
+export const ladderCell = (scope: Page | Locator, slot: string | RegExp, period?: string | null) => {
+  const s = typeof slot === "string" ? esc(slot) : slot.source
+  return occupancyLadder(scope)
+    .getByRole("gridcell", { name: new RegExp(`^(${s}) · ${esc(period ?? "All periods")}: `) })
+    .first()
+}
+
+/** The boards grid of the Boards section. */
+export const boardsGrid = (scope: Page | Locator) => scope.getByRole("grid", { name: "Board supplements by period", exact: true })
+
+/** Opens a collapsible region of the workspace ("Occupancy & child pricing", "Boards") when it is
+ * closed; returns the region. */
+async function openRegion(page: Page, title: string): Promise<Locator> {
+  const region = page.getByRole("region", { name: title, exact: true })
+  const toggle = region.getByRole("button", { name: title, exact: true })
+  await expect(toggle).toBeVisible()
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-expanded", "true")
+  return region
+}
+
+/** Types `text` into a workspace grid cell (a click, then typing starts the cell's editor) and
+ * commits it with Enter; the editor must close, i.e. the entry was taken. */
+async function typeIntoCell(page: Page, grid: Locator, target: Locator, text: string) {
+  await target.click()
+  await expect(target).toBeFocused()
+  await page.keyboard.type(text)
+  await expect(grid.getByRole("textbox")).toBeVisible()
+  await page.keyboard.press("Enter")
+  await expect(grid.getByRole("textbox"), `the entry "${text}" was not taken`).toHaveCount(0)
+}
+
+// ─── pricing basis ───────────────────────────────────────────────────────
+
+const BASIS_LABEL = { PERSON: "Per person", ROOM: "Per room" } as const
+
+/** The context header's pricing basis popover (§3.2.1): the Basis chip → the basis → Apply, saved
+ * at once as the contract header (the draft's own edits are untouched). A no-op when the contract
+ * already has that basis. Unpublished contracts only (the chip is locked after the first publish). */
+export async function setBasis(page: Page, basis: "PERSON" | "ROOM", budget?: Budget) {
+  const want = BASIS_LABEL[basis]
+  const chip = page.getByRole("button", { name: /^Pricing basis: / })
+  await expect(chip).toBeVisible()
+  if ((await chip.getAttribute("aria-label")) === `Pricing basis: ${want}`) return
+  void budget // the budget counts the clicks from the page
+  await chip.click()
+  const pop = page.getByRole("dialog", { name: "Pricing basis", exact: true })
+  await expect(pop).toBeVisible()
+  await pop.getByRole("radio", { name: want, exact: true }).click()
+  const answered = answerOf(page, "kamra.tex.api.contracts.save_contract")
+  await pop.getByRole("button", { name: "Apply", exact: true }).click()
+  const res = await answered
+  if (!res.ok()) throw new Error(`save_contract: HTTP ${res.status()} ${(await res.text()).slice(0, 400)}`)
+  await expect(pop).toBeHidden()
+  await expect(page.getByRole("button", { name: `Pricing basis: ${want}`, exact: true })).toBeVisible()
+}
+
+// ─── rooms ───────────────────────────────────────────────────────────────
+
+/** Add the contract's room types (labels as shown, e.g. "Standard Sea View"). The workspace adds
+ * each with the matrix's "Add room" and makes the first room of an empty version the base room;
+ * `base: true` on another room makes that one the base (Set as base). Saves (StepOptions). */
+export async function addRooms(page: Page, rooms: { room: string; base?: boolean }[], opts: StepOptions = {}) {
+  if (opts.advanced) return addRoomsAdvanced(page, rooms, opts)
+  const panel = await onSection(page, "pricing")
+  for (const r of rooms) {
+    await choose(opts.budget, panel.getByLabel("Add room", { exact: true }), { label: r.room })
+    const menu = panel.getByRole("button", { name: `Room actions: ${r.room}`, exact: true })
+    await expect(menu).toBeVisible()
+    const header = panel.getByRole("rowheader").filter({ has: page.getByRole("button", { name: `Room actions: ${r.room}`, exact: true }) })
+    const isBase = (await header.textContent())?.includes("BASE") ?? false
+    if (r.base === true && !isBase) {
+      await menu.click()
+      await page.getByRole("menuitem", { name: "Set as base" }).click()
+      const pop = page.getByRole("dialog", { name: `Set ${r.room} as the base room` })
+      await pop.getByRole("button", { name: "Apply", exact: true }).click()
+      await expect(pop).toBeHidden()
+      await expect(header).toContainText("BASE")
+    } else if (r.base === false && isBase) {
+      throw new Error(`${r.room} became the base room (the workspace's first room is the base); use {advanced: true} for a version without one`)
+    }
+  }
+  await saved(page, opts)
+}
+
+async function addRoomsAdvanced(page: Page, rooms: { room: string; base?: boolean }[], opts: StepOptions) {
   const panel = await openTab(page, "rooms")
   for (const r of rooms) {
     const n = await addRow(panel, "Add room type", "Room type")
     await cell(panel, "Room type", n).selectOption({ label: r.room })
     if (r.base !== undefined) await cell(panel, "Base room", n).setChecked(r.base)
   }
-  await saveDraft(page)
+  await saved(page, opts)
 }
+
+// ─── periods ─────────────────────────────────────────────────────────────
 
 export interface PeriodInput {
   code: string
@@ -271,20 +400,80 @@ export interface PeriodInput {
   to: string
 }
 
-/** Periods tab: add a stay period (dates inclusive). Saves. */
-export async function addPeriod(page: Page, p: PeriodInput) {
+/** Add a stay period (dates inclusive). The workspace adds a period column with "+ Period" and
+ * types its dates in the column header (a first period asks for both, a later one follows the
+ * last period and asks for its end); a start that does not follow the last period is set with
+ * Dates…, and a code other than the proposed one (or a name) with Rename…. Saves (StepOptions). */
+export async function addPeriod(page: Page, p: PeriodInput, opts: StepOptions = {}) {
+  if (opts.advanced) return addPeriodAdvanced(page, p, opts)
+  const panel = await onSection(page, "pricing")
+  await panel.getByRole("button", { name: "Add period", exact: true }).click()
+  // the new column's end date has the focus (its start too, when no dated period comes before)
+  const end = panel.getByLabel(/^End date: /)
+  await expect(end).toBeVisible()
+  const code = ((await end.getAttribute("aria-label")) ?? "").replace(/^End date: /, "")
+  const start = panel.getByLabel(`Start date: ${code}`, { exact: true })
+  if (await start.count()) await typeIn(opts.budget, start, p.from)
+  await typeIn(opts.budget, end, p.to)
+  // the start the column takes: the one typed, or the day after the last period (the end's min)
+  const startNow = await end.getAttribute("min")
+  await end.press("Enter")
+  const menu = panel.getByRole("button", { name: `Period actions: ${code}`, exact: true })
+  await expect(menu).toBeVisible()
+  if (startNow !== p.from) {
+    // a start that does not follow the last period: Dates…
+    await menu.click()
+    await page.getByRole("menuitem", { name: "Dates…" }).click()
+    const pop = page.getByRole("dialog", { name: `Dates: ${code}` })
+    await byLabel(pop, "From").fill(p.from)
+    await byLabel(pop, "To (inclusive)").fill(p.to)
+    await pop.getByRole("button", { name: "Apply", exact: true }).click()
+    await expect(pop).toBeHidden()
+  }
+  if (p.code !== code || p.name) {
+    await menu.click()
+    await page.getByRole("menuitem", { name: "Rename…" }).click()
+    const pop = page.getByRole("dialog", { name: `Rename ${code}` })
+    await byLabel(pop, "Code").fill(p.code)
+    if (p.name) await byLabel(pop, "Name").fill(p.name)
+    await pop.getByRole("button", { name: "Apply", exact: true }).click()
+    await expect(pop).toBeHidden()
+    await expect(panel.getByRole("button", { name: `Period actions: ${p.code}`, exact: true })).toBeVisible()
+  }
+  await saved(page, opts)
+}
+
+async function addPeriodAdvanced(page: Page, p: PeriodInput, opts: StepOptions) {
   const panel = await openTab(page, "periods")
   const n = await addRow(panel, "Add period", "Code")
   await cell(panel, "Code", n).fill(p.code)
   if (p.name) await cell(panel, "Name", n).fill(p.name)
   await cell(panel, "From", n).fill(p.from)
   await cell(panel, "To (inclusive)", n).fill(p.to)
-  await saveDraft(page)
+  await saved(page, opts)
 }
 
-/** Room prices tab: set the base-person (or room) rate of `room` for `period` (or for
- * all periods). Saves, then checks the server-resolved nightly price in the grid. */
-export async function setBaseRate(page: Page, r: { room: string; period?: string; amount: string }) {
+// ─── room prices ─────────────────────────────────────────────────────────
+
+/** Set the base-person (or room) rate of `room` for `period` (or for all periods): the workspace
+ * types the amount into the matrix cell and commits it with Enter. Saves (StepOptions), then checks
+ * the amount in the cell. */
+export async function setBaseRate(page: Page, r: { room: string; period?: string; amount: string }, opts: StepOptions = {}) {
+  if (opts.advanced) return setBaseRateAdvanced(page, r, opts)
+  const panel = await onSection(page, "pricing")
+  const grid = priceMatrix(panel)
+  const target = priceCell(panel, r.room, r.period)
+  await target.click()
+  await expect(target).toBeFocused()
+  await page.keyboard.type(r.amount)
+  await expect(grid.getByRole("textbox", { name: `Price: ${r.room} · ${r.period ?? "All periods"}`, exact: true })).toBeVisible()
+  await page.keyboard.press("Enter")
+  await expect(grid.getByRole("textbox"), `the price "${r.amount}" was not taken`).toHaveCount(0)
+  await saved(page, opts)
+  await expect(target).toContainText(displayAmount(r.amount))
+}
+
+async function setBaseRateAdvanced(page: Page, r: { room: string; period?: string; amount: string }, opts: StepOptions) {
   const panel = await openTab(page, "rates")
   const where = `${r.room} · ${r.period ?? "All periods"}`
   const button = panel.getByRole("button", { name: `Edit price: ${where}`, exact: true })
@@ -294,9 +483,11 @@ export async function setBaseRate(page: Page, r: { room: string; period?: string
   await byLabel(dlg, "Value").fill(r.amount)
   await dlg.getByRole("button", { name: "Apply", exact: true }).click()
   await expect(dlg).toBeHidden()
-  await saveDraft(page)
+  await saved(page, opts)
   if (r.period) await expect(button).toContainText(displayAmount(r.amount))
 }
+
+// ─── child ages and occupancy ────────────────────────────────────────────
 
 export interface ChildBandInput {
   code: string
@@ -309,9 +500,63 @@ export interface ChildBandInput {
   percent: string
 }
 
-/** Child ages + Occupancy tabs: the age bands with one "percentage of base" child rule
- * each, and optionally the 3rd adult (extra bed) at `thirdAdultPercent` %. Saves. */
-export async function addOccupancyRules(page: Page, o: { thirdAdultPercent?: string; bands?: ChildBandInput[] }) {
+/** The age bands with one "percentage of base" child rule each, and optionally the 3rd adult
+ * (extra bed) at `thirdAdultPercent` %. The workspace creates the bands in the child ages drawer
+ * (Up to + Enter per band; a label typed in, the infant switch, a code other than the proposed one
+ * under Advanced) and types `n%` into the ladder's All periods cells. Saves (StepOptions). */
+export async function addOccupancyRules(page: Page, o: { thirdAdultPercent?: string; bands?: ChildBandInput[] }, opts: StepOptions = {}) {
+  if (opts.advanced) return addOccupancyRulesAdvanced(page, o, opts)
+  const bands = o.bands ?? []
+  const panel = await onSection(page, "pricing")
+  await openRegion(page, "Occupancy & child pricing")
+  const labels: string[] = []
+  if (bands.length) {
+    await panel.getByRole("button", { name: "Child ages…", exact: true }).click()
+    const drawer = page.getByRole("dialog", { name: "Child age bands", exact: true })
+    await expect(drawer).toBeVisible()
+    const upTo = drawer.getByLabel(/^Up to \(not incl\.\) age: /)
+    const had = await upTo.count()
+    await drawer.getByRole("button", { name: "Add age band", exact: true }).click()
+    const draft = (field: string) => drawer.getByLabel(`${field}: new band`, { exact: true })
+    for (const b of bands) {
+      const to = draft("Up to (not incl.) age")
+      await expect(to).toBeFocused()
+      if ((await draft("From age").inputValue()) !== b.fromAge) await typeIn(opts.budget, draft("From age"), b.fromAge)
+      if (b.label) await typeIn(opts.budget, draft("Label"), b.label)
+      await typeIn(opts.budget, to, b.toAge)
+      await to.press("Enter")
+    }
+    // the band that Enter started after the last one is dropped when the drawer closes
+    await expect(upTo).toHaveCount(had + bands.length + 1)
+    let codes = false
+    for (const [i, b] of bands.entries()) {
+      const k = had + i
+      const infant = drawer.getByRole("switch", { name: /^Infant band: / }).nth(k)
+      if ((await infant.isChecked()) !== Boolean(b.infant)) await infant.setChecked(Boolean(b.infant))
+      labels.push(await drawer.getByLabel(/^Label: /).nth(k).inputValue())
+      const code = drawer.getByLabel(/^Code: /).nth(k)
+      if (!codes) {
+        await drawer.getByLabel("Advanced: show band codes", { exact: true }).check()
+        codes = true
+      }
+      if ((await code.inputValue()) !== b.code.toUpperCase()) {
+        await code.fill(b.code)
+        await code.press("Enter")
+        await expect(code).toHaveValue(b.code.toUpperCase())
+      }
+    }
+    if (codes) await drawer.getByLabel("Advanced: show band codes", { exact: true }).uncheck()
+    await drawer.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(drawer).toBeHidden()
+  }
+  const ladder = occupancyLadder(panel)
+  if (o.thirdAdultPercent !== undefined)
+    await typeIntoCell(page, ladder, ladderCell(panel, /3rd adult|Extra adult \(3rd\)/), `${o.thirdAdultPercent}%`)
+  for (const [i, b] of bands.entries()) await typeIntoCell(page, ladder, ladderCell(panel, labels[i]), `${b.percent}%`)
+  await saved(page, opts)
+}
+
+async function addOccupancyRulesAdvanced(page: Page, o: { thirdAdultPercent?: string; bands?: ChildBandInput[] }, opts: StepOptions) {
   const bands = o.bands ?? []
   if (bands.length) {
     const ages = await openTab(page, "ages")
@@ -339,17 +584,58 @@ export async function addOccupancyRules(page: Page, o: { thirdAdultPercent?: str
     await cell(occ, "Rule", n).selectOption("PERCENT_OF")
     await cell(occ, "Value", n).fill(b.percent)
   }
-  await saveDraft(page)
+  await saved(page, opts)
 }
+
+// ─── boards ──────────────────────────────────────────────────────────────
 
 export type BoardCode = "RO" | "BB" | "HB" | "FB" | "AI" | "UAI"
 
-/** Boards tab: a supplement board (per adult per night, children pay `childPercent`
- * of it). On an empty version the included base board (`base`, default BB) is added
- * first. Saves. */
+/** A supplement board (per adult per night, children pay `childPercent` of it). On a version
+ * without boards the included base board (`base`, default BB) is added first. The workspace uses
+ * the Boards section: "Add board", `+amount` typed into the board's All periods cell (an amount per
+ * adult; a bare number would be per room, O1), and the row's terms popover for the children's
+ * share and infants. Saves (StepOptions). */
 export async function addBoard(
   page: Page,
   b: { board: BoardCode; adultAmount: string; childPercent?: string; infantFree?: boolean; base?: BoardCode },
+  opts: StepOptions = {},
+) {
+  if (opts.advanced) return addBoardAdvanced(page, b, opts)
+  await onSection(page, "pricing")
+  const region = await openRegion(page, "Boards")
+  const grid = boardsGrid(region)
+  const add = region.getByRole("combobox", { name: "Add board", exact: true })
+  if ((await grid.count()) === 0) {
+    await choose(opts.budget, add, b.base ?? "BB")
+    await expect(grid).toBeVisible()
+    await expect(grid.getByRole("gridcell", { name: /: base board, included/ })).toHaveCount(1)
+  }
+  await choose(opts.budget, add, b.board)
+  const editor = grid.getByRole("textbox")
+  await expect(editor).toBeFocused()
+  const name = ((await editor.getAttribute("aria-label")) ?? "").replace(/^Supplement: /, "").replace(/ · All periods$/, "")
+  await page.keyboard.type(b.adultAmount.startsWith("-") ? b.adultAmount : `+${b.adultAmount}`)
+  await page.keyboard.press("Enter")
+  await expect(editor, `the supplement "${b.adultAmount}" was not taken`).toHaveCount(0)
+  const child = b.childPercent ?? "50"
+  const infants = b.infantFree ?? true
+  if (child !== "50" || !infants) {
+    await region.getByRole("button", { name: `Board terms: ${name}`, exact: true }).click()
+    const pop = page.getByRole("dialog", { name: `Board terms: ${name}`, exact: true })
+    await typeIn(opts.budget, pop.getByLabel(/^Children pay/), child)
+    await pop.getByLabel(/^Infants free/).setChecked(infants)
+    await pop.getByRole("button", { name: "Apply", exact: true }).click()
+    await expect(pop).toBeHidden()
+  }
+  await expect(region.locator(`[data-board-row="${b.board}|"]`)).toContainText(`children ${child} %`)
+  await saved(page, opts)
+}
+
+async function addBoardAdvanced(
+  page: Page,
+  b: { board: BoardCode; adultAmount: string; childPercent?: string; infantFree?: boolean; base?: BoardCode },
+  opts: StepOptions,
 ) {
   const panel = await openTab(page, "boards")
   if ((await panel.getByLabel(/^Board \d+$/).count()) === 0) {
@@ -363,33 +649,52 @@ export async function addBoard(
   await cell(panel, "Adult amount / %", n).fill(b.adultAmount)
   await cell(panel, "Child % of adult", n).fill(b.childPercent ?? "50")
   await cell(panel, "Infants free", n).setChecked(b.infantFree ?? true)
-  await saveDraft(page)
+  await saved(page, opts)
 }
 
-/** Rate plans tab (optional): sell the contract under a rate plan (label as shown,
- * e.g. "Flexible"). A version without rate plans sells without one. Saves. */
-export async function addRatePlan(page: Page, p: { plan: string; refundable?: boolean }) {
+/** Rate plans (optional; a Commercial rules table): sell the contract under a rate plan (label as
+ * shown, e.g. "Flexible"). A version without rate plans sells without one. Saves (StepOptions). */
+export async function addRatePlan(page: Page, p: { plan: string; refundable?: boolean }, opts: StepOptions = {}) {
   const panel = await openTab(page, "plans")
   const n = await addRow(panel, "Add rate plan", "Rate plan")
   await cell(panel, "Rate plan", n).selectOption({ label: p.plan })
   await cell(panel, "Refundable", n).setChecked(p.refundable ?? true)
-  await saveDraft(page)
+  await saved(page, opts)
 }
 
-/** The version on screen is published and frozen: status, read-only badge, the
- * immutability notice, no save/publish, and no editable price cells. */
-export async function expectPublishedReadOnly(page: Page) {
+// ─── published versions ──────────────────────────────────────────────────
+
+/** The version on screen is published and frozen: status, read-only badge, the immutability notice,
+ * no save/publish; the workspace's grids are read-only (aria-readonly, typing opens no editor, no
+ * "Edit price:" trigger), with no "Add room" and no pricing basis popover trigger. */
+export async function expectPublishedReadOnly(page: Page, opts: Pick<StepOptions, "advanced"> = {}) {
   await expect(page.getByText("Published", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("Read-only", { exact: true })).toBeVisible()
-  await expect(page.getByText("Published versions are immutable")).toBeVisible()
+  await expect(page.getByText("Published versions are immutable", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Save/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Publish", exact: true })).toHaveCount(0)
-  const rates = await openTab(page, "rates")
-  await expect(rates.getByRole("table", { name: "Room prices by period" })).toBeVisible()
-  await expect(rates.getByRole("button", { name: /^Edit price:/ })).toHaveCount(0)
-  const rooms = await openTab(page, "rooms")
-  await expect(rooms.getByRole("button", { name: "Add room type" })).toHaveCount(0)
-  await expect(rooms.getByRole("combobox")).toHaveCount(0)
+  if (opts.advanced) {
+    const rates = await openTab(page, "rates")
+    await expect(rates.getByRole("table", { name: "Room prices by period" })).toBeVisible()
+    await expect(rates.getByRole("button", { name: /^Edit price:/ })).toHaveCount(0)
+    const rooms = await openTab(page, "rooms")
+    await expect(rooms.getByRole("button", { name: "Add room type" })).toHaveCount(0)
+    await expect(rooms.getByRole("combobox")).toHaveCount(0)
+    return
+  }
+  const panel = await onSection(page, "pricing")
+  const grid = priceMatrix(panel)
+  await expect(grid).toBeVisible()
+  await expect(grid).toHaveAttribute("aria-readonly", "true")
+  // typing into a cell opens no editor
+  const first = grid.getByRole("gridcell").first()
+  await first.click()
+  await page.keyboard.type("5")
+  await page.keyboard.press("Enter")
+  await expect(panel.getByRole("textbox")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Edit price:/ })).toHaveCount(0)
+  await expect(panel.getByLabel("Add room", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Pricing basis:/ })).toHaveCount(0)
 }
 
 /** Publish the draft open in the editor (server check → change note → Publish) and
@@ -441,6 +746,8 @@ export async function changeContractRate(
   return publishVersion(page, c.note ?? `E2E rate change to ${c.newRate}`)
 }
 
+// ─── price test ──────────────────────────────────────────────────────────
+
 export interface PreviewInput {
   room: string
   /** Board code, e.g. "HB". */
@@ -463,11 +770,19 @@ export interface PreviewResult {
   steps: string[]
 }
 
-/** Preview & audit section of the version on screen: prices a stay on the server exactly as
- * the booking engine would and returns the total and the explanation. */
-export async function previewPrice(page: Page, p: PreviewInput): Promise<PreviewResult> {
-  await openSection(page, "pricing") // leaving the section resets the calculator
-  const panel = await openSection(page, "preview")
+/** Prices a stay on the server exactly as the booking engine would, for the version on screen, and
+ * returns the total and the explanation. The workspace uses the context header's Price test drawer
+ * (non-modal, any section; closed again afterwards); `{advanced: true}` uses Preview & audit. */
+export async function previewPrice(page: Page, p: PreviewInput, opts: Pick<StepOptions, "advanced"> = {}): Promise<PreviewResult> {
+  let panel: Locator
+  if (opts.advanced) {
+    await openSection(page, "pricing") // leaving the section resets the calculator
+    panel = await openSection(page, "preview")
+  } else {
+    await page.getByRole("button", { name: "Price test", exact: true }).click()
+    panel = page.getByRole("dialog", { name: "Price test", exact: true })
+    await expect(panel).toBeVisible()
+  }
   await byLabel(panel, "Room type").selectOption({ label: p.room })
   if (p.board) await byLabel(panel, "Board").selectOption(p.board)
   if (p.ratePlan) await byLabel(panel, "Rate plan").selectOption({ label: p.ratePlan })
@@ -491,5 +806,9 @@ export async function previewPrice(page: Page, p: PreviewInput): Promise<Preview
   const why = panel.getByRole("list").filter({ hasText: "Rule applied:" })
   await expect(why).toHaveCount(1)
   const steps = await why.getByRole("listitem").allInnerTexts()
+  if (!opts.advanced) {
+    await panel.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(panel).toBeHidden()
+  }
   return { total: totalText.replace(/[^\d.-]/g, ""), totalText, steps: steps.map((s) => s.replace(/\s+/g, " ").trim()) }
 }

@@ -261,10 +261,11 @@ test("navigation: every new sub-section opens its screen for a user who holds it
       await expect(rows.first()).toBeVisible()
       expect(await rows.count(), entry).toBeGreaterThan(0)
     }
-    // a row opens its version on the matching tab
+    // a row opens its version on the matching table: Commercial rules, Rate plans
     await rows.first().click()
     await expect(page).toHaveURL(/\/tex\/rates\/contracts\/[^/]+\/versions\/[^/#]+#plans$/)
-    await expect(page.getByRole("tab", { name: /Rate plans/, selected: true })).toBeVisible()
+    await expect(page.getByRole("tablist", { name: "Version sections", exact: true }).getByRole("tab", { name: /^Commercial rules/, selected: true })).toBeVisible()
+    await expect(page.getByRole("tablist", { name: "Rule tables", exact: true }).getByRole("tab", { name: /^Rate plans/, selected: true })).toBeVisible()
   })
 
   await test.step("Rates & Contracts: restrictions across contracts, as ranges", async () => {

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { answerOf, holdNext, login, pageApi, texPath, trackErrors } from "./helpers"
-import { addPeriod, addRooms, addRow, cell, createContract, isoDate, openDraft, openTab, saveDraft, uniqueRunId } from "./flows/contracts"
+import { addPeriod, addRooms, boardsGrid, createContract, isoDate, openDraft, priceMatrix, saveDraft, uniqueRunId } from "./flows/contracts"
 
 // Editors never lose what the user typed: Discard returns to the last save (not to the version
 // as first opened), and an edit made while a save is in flight survives the save's answer and
@@ -52,17 +52,19 @@ test("contract version: Discard returns to the last save, and the next save keep
   const version = await newDraft(page, uniqueRunId())
 
   await addRooms(page, [{ room: ROOM, base: true }])
-  const boards = await openTab(page, "boards")
-  await addRow(boards, "Add board", "Board")
+  // a board added in the workspace's Boards section (the first one is the base board, written at once)
+  const boards = page.getByRole("region", { name: "Boards", exact: true })
+  await boards.getByRole("combobox", { name: "Add board", exact: true }).selectOption("BB")
+  await expect(boardsGrid(page).getByRole("rowheader").filter({ hasText: "Bed & breakfast" })).toBeVisible()
   const discard = page.getByRole("button", { name: "Discard", exact: true })
   await expect(discard).toBeEnabled()
   await discard.click()
 
   // back to the saved version: the room saved a moment ago is there, the unsaved board is not
   await expect(page.getByRole("button", { name: /^Save/ })).toBeDisabled()
-  await expect(boards.getByLabel(/^Board \d+$/)).toHaveCount(0)
-  const rooms = await openTab(page, "rooms")
-  await expect(cell(rooms, "Room type", 1)).toHaveValue(ROOM_ID)
+  await expect(boardsGrid(page)).toHaveCount(0)
+  await expect(boards.locator("[data-board-row]")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: `Room actions: ${ROOM}`, exact: true })).toBeVisible()
 
   // another edit and save: the server still has the room
   await addPeriod(page, { code: "S1", from: isoDate(7), to: isoDate(60) })
@@ -80,36 +82,35 @@ test("contract version: an edit made while a save is in flight is kept and saved
   await login(page, "revenue@demo.tex")
   const version = await newDraft(page, uniqueRunId())
 
-  const rooms = await openTab(page, "rooms")
-  await addRow(rooms, "Add room type", "Room type")
-  await cell(rooms, "Room type", 1).selectOption({ label: ROOM })
+  await addRooms(page, [{ room: ROOM }], { save: false })
 
-  // the save reaches the server; its answer is held while the user adds a period
+  // the save reaches the server; its answer is held while the user adds a period column
   const flight = await holdNext(page, "kamra.tex.api.contracts.save_version")
   const save = page.getByRole("button", { name: /^Save/ })
   await save.click()
   await flight.held
-  const periods = await openTab(page, "periods")
-  await addRow(periods, "Add period", "Code")
-  await cell(periods, "Code", 1).fill("S1")
-  await cell(periods, "From", 1).fill(isoDate(7))
-  await cell(periods, "To (inclusive)", 1).fill(isoDate(60))
+  await page.getByRole("button", { name: "Add period", exact: true }).click()
+  await page.getByLabel("Start date: P1", { exact: true }).fill(isoDate(7))
+  await page.getByLabel("End date: P1", { exact: true }).fill(isoDate(60))
+  await page.getByLabel("End date: P1", { exact: true }).press("Enter")
+  const column = page.getByRole("button", { name: "Period actions: P1", exact: true })
+  await expect(column).toBeVisible()
   flight.release()
   await expect(page.locator("[aria-live]").getByRole("status").filter({ hasText: "Draft saved" })).toBeVisible()
 
-  // the period typed meanwhile is still there and still unsaved; the saved room too
+  // the period added meanwhile is still there and still unsaved; the saved room too
   await expect(save).not.toHaveAttribute("aria-busy", "true")
-  await expect(cell(periods, "Code", 1)).toHaveValue("S1")
+  await expect(column).toBeVisible()
+  await expect(priceMatrix(page).getByRole("columnheader").filter({ has: page.getByRole("button", { name: "Period actions: P1" }) })).toHaveCount(1)
   await expect(save).toBeEnabled()
   expect((await readVersion(page, version)).periods).toEqual([])
-  await openTab(page, "rooms")
-  await expect(cell(rooms, "Room type", 1)).toHaveValue(ROOM_ID)
+  await expect(page.getByRole("button", { name: `Room actions: ${ROOM}`, exact: true })).toBeVisible()
 
   // the next save sends both
   await saveDraft(page)
   const saved = await readVersion(page, version)
   expect(saved.rooms.map((r) => r.room_type)).toEqual([ROOM_ID])
-  expect(saved.periods.map((p) => p.period_code)).toEqual(["S1"])
+  expect(saved.periods.map((p) => p.period_code)).toEqual(["P1"])
 
   noErrors()
 })
