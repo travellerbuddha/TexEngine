@@ -527,3 +527,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   last one's end and saves their labels, keeps codes under Advanced, and shows inherited bands
   read-only until they are customised. Band codes are shown as labels. No server change; no area
   status changes. O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S11 review follow-up on branch `pricing-workspace` (ADR-061). In
+  a single room's view, occupancy prices set for all rooms now show as coming from All rooms. They
+  used to read "×1.00 default" or "not sellable", which the engine does not do. A cell without a
+  rule of its own shows the rule the engine uses. The sample party's line never shows another
+  party's totals, and changing the party no longer greys out the room price matrix. Sample parties
+  stay within the server's limits. No server change; no area status changes. Verdict unchanged:
+  NOT READY.

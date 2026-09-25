@@ -6230,3 +6230,140 @@ less). No new endpoint and no new call kind.
   the window order, the cross-hotel rate plan / policy gap in `build_terms`, a weekly contract
   above the overlay's row cap not previewed unsaved, `Money` cutting resolved amounts, and
   issues not anchored in cells (S15).
+
+**S11 review follow-up (2026-09-25).** One medium and four low verifier findings on S11, all
+addressed.
+1. *(medium) A room scope's ladder made false claims about the engine.* `ladderModel` read only the
+   rules naming the scoped room (version and policy), so in a room scope a slot priced only by an
+   All-rooms rule read "×1.00 default" ("every adult pays the full base person price") or "No rule
+   · not sellable" ("a party with such a child cannot be sold"). The engine applies All-rooms
+   rules to every room (`qualifiers_match`: a blank room matches any), and the resolved line
+   under the grid priced such a party. The verifier's probe: All-rooms rules for adult 3 (×0.7),
+   INF (×0) and CHA (×0.5), seen from SUP, gave default / missing / missing. This hit every row in
+   the usual workflow (rules for All rooms, then one room for an override). An S6 unit test
+   asserted the behaviour.
+2. *(low) The resolved line could show another party's totals.* The ladder marked a party as
+   answered during render. The first render after a party change still saw the previous answer,
+   so the old party's totals showed, dimmed, under the new party until the new answer came (for
+   good, if that call failed).
+3. *(low) Sample parties ignored the server's limits* (12 adults, 8 children): a room above them
+   could make `price_matrix` refuse the whole call, the room matrix preview included. In a large
+   room with many bands, the 60-party cap cut off common parties with children.
+4. *(low) The ⓘ note* was shown on an infant band row from a band-less combination rule, which
+   the infant's band rule beats (G-31).
+5. *(low) Wording and details:* "included" (§3.6.2: "included in the room price"); the policy
+   source only in the tooltip; the single-use default without "(no single-use rule)"; a party
+   change, or opening or closing the section, dimmed the whole room matrix as "updating"; the
+   sample party was not cleared when the section unmounted.
+
+**Decision (S11 review follow-up).** Frontend only; no endpoint, payload, price or rule change.
+- *A cell without an own rule shows the rule the engine would use* (`occupancy.ts` `fallback` and
+  `engineRank`). A room scope now reads its own rules and the All-rooms rules, both version and
+  inherited policy rules. The All rooms scope still reads only its own. The candidates are the
+  plain rules (no combination) of the slot and of its general slots: every adult; a band-less
+  child; for a child position row, also the position row and the band row. They must hold in the
+  column's period. The cell shows the one `occupancy.specificity` (CASCADE) would pick: an
+  infant's band first (G-31), then origin (version > hotel + market > market > hotel > global,
+  read from the source `policy:<id>/r<rev>/<scope>`), level (override > combination > period >
+  room > none), qualifiers and slot. The winner is shown by where it comes from:
+  - `inherited`: the slot's All-periods rule of the scope;
+  - `general`: a general rule of the scope;
+  - `all-rooms` (new): "↳ ×0.70" over "All rooms". The tooltip says "Family Suite has no rule of
+    its own for this guest: the All rooms rule ×0.70 applies. Type a value to set one for Family
+    Suite.";
+  - `policy`.
+  "×1.00 default" and "No rule · not sellable" remain only for slots that no applicable rule
+  prices, as D12 and §3.6.2 intend. Other consequences, in the All rooms scope too:
+  - a period rule of All rooms shows in a room's period column over the room's All-periods rule
+    (level PERIOD > ROOM);
+  - a general period rule beats the slot's All-periods rule;
+  - an infant band's rule beats band-less rules, and a policy rule naming the band beats a
+    version rule without one.
+  Limits: the own cell still shows its own rule, because it is what the cell edits. An "Always
+  wins" rule of another scope that beats it is not shown there. Special combinations stay in the
+  ⓘ note. A version frozen before occupancy precedence v2 (LEGACY) is ranked as CASCADE in its
+  read-only ladder; its resolved line uses the frozen ranking. All-rooms rules also shape a room
+  scope's rows:
+  - a rule for adult 1 or 2 splits the BASE pair;
+  - an every-adult rule or a child position rule gets its row;
+  - an All-rooms "also with children" single-use rule is the room's single-use row, unless the
+    room has one of its own.
+  *Rejected alternative:* looking up the All rooms scope only before a cell falls back to the
+  default (the verifier's render-time option). It removes the false default. But it still shows
+  a room's All-periods rule where an All-rooms period rule wins, and it ignores origin and G-31.
+  The S6 unit test "the all-rooms rule belongs to the All rooms scope" is changed on purpose.
+- *The resolved line takes a party's totals only from an answer that priced that party.*
+  `useDraftPreview` tags each matrix answer with the parties it was asked for (`partiesFor`,
+  `draftPreview.sampleKey` of the request's `parties` / `party_room`), and the ladder compares that
+  tag with the chosen party. Another party's totals are never shown. The line reads "…" until the
+  answer comes, and "—" ("The server could not calculate this party…") when that call failed. An
+  answer for the same party about an older state stays, dimmed "updating".
+- *A party change no longer dims the room matrix.* `stale` now compares the answer's `pricesKey`
+  (the matrix key without the parties) with the state's, because the rooms' prices do not depend
+  on the sample party. `pricesLoading` (a call for other room prices is in flight) drives the
+  matrix's "Updating…". The call itself is still made again (deviation 6).
+- *Sample parties stay within the server's limits.* `partyOptions` offers at most 12 adults and 8
+  children (`PARTY_ADULTS_MAX` and `PARTY_CHILDREN_MAX`, mirroring `api/contracts.py`). Above the
+  60-party cap it keeps the common parties: adults only first, then by party size (two adults
+  first, then fewer children). It lists them in the usual order.
+- *The ⓘ note* no longer takes a band-less combination rule on an infant row whose cell a rule
+  naming the band prices (`LadderRow.infant`).
+- *Wording (§3.6.2):* included places read "included in the room price". Policy cells show their
+  source in the cell ("×0.40" over "from Hotel policy"); in a room scope, the tooltip adds "· All
+  rooms" for a policy rule without a room. The single-use default reads "×1.00 default" over "(no
+  single-use rule)".
+- *Leaving the section clears the party.* OccupancySection sets the sample party to null when it
+  unmounts, so later matrix calls go without it.
+- *Strings:* 6 new keys in the six catalogues (`cell.all_rooms_tip`, `cell.policy_from`,
+  `cell.default_single_sub`, `party_failed`, `state.all-rooms`, `state.failed`); `cell.included`
+  now holds the full wording; `cell.policy_tag` is removed.
+
+**Tests (S11 review follow-up).**
+- `npm run test:unit` 235 (226 + 9):
+  - `workspace-occupancy.test.ts` (+7; one S6 assertion changed on purpose):
+    - the verifier's SUP probe: all-rooms ×0.7, ×0 and ×0.5 in All periods and P1; CHB missing;
+      adult 4 and single use default; the All rooms scope unchanged;
+    - the owner's example seen from Superior: the All-rooms P4 rule, rows shaped by All-rooms
+      rules, the "also with children" variant;
+    - ranking in a room scope: period > room > All rooms, general rules, an own INHERIT row, an
+      All-rooms Always wins rule;
+    - policy rules: version before policy, All-rooms policy rules reach a room, market over
+      global;
+    - G-31: an infant's band rule over a room's band-less rule, and a policy band rule over a
+      version band-less one;
+    - the ⓘ note on infant rows;
+    - sample parties within 12 / 8, with the common ones kept in the usual order;
+  - `draft-preview.test.ts` (+2): `sampleKey` (as sent vs. as chosen, field order, nothing sent)
+    and `pricesKey` (ignores the party, follows edits, refreshes and saves).
+- Fail-first: with the new exports stubbed to the S11 behaviour, 10 of the 52 tests in the two
+  files failed. Examples: 3rd adult in SUP expected `all-rooms`, got `default`; SUP P4 expected
+  all-rooms ×0.8, got inherited ×0.9; `infant` was undefined; the ⓘ note appeared on INF; a
+  14-adult room gave parties that `price_matrix` refuses; the party key and prices key failed.
+- `npm run test:dom` 29/29, unchanged.
+
+**Verification (S11 review follow-up).**
+- Frontend: `tsc -b`, `npm run build`, `npm run i18n:tex`, `test:unit` 235/235, `test:dom` 29/29.
+- Integration, migrated with this tree (no server change): `test_pricing_workspace_api` 50,
+  `test_age_bands` 11 and `test_pricing_policies` 14, all OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186): a scratch spec, 3/3, and each check
+  fails on the S11 sources (`4d91520`):
+  1. The verifier's rules seen from Family Suite show "↳ ×0.70", "↳ ×0.00" and "↳ ×0.50", each
+     over "All rooms". Child 7–11.99 reads "No rule · not sellable", the 4th adult "×1.00
+     default", and single use "×1.00 default (no single-use rule)". The resolved line for 2 adults
+     and an infant reads 161.00 / 184.00 / 230.00 / 299.00. Typing x0.1 writes a Family Suite rule,
+     and the scope gets its •. On S11 the cells read "×1.00 default".
+  2. While the answer for "3 adults" is held, the line reads "…" (not 161.00), no room-matrix
+     cell is "updating" and "Updating…" is not shown; then it reads 241.50. A failed call for "1
+     adult" reads "—" ("could not be calculated"). After leaving Pricing, the next `price_matrix`
+     call has no `party_room`. On S11, "3 adults" showed "resolved occupancy total, updating, EUR
+     161.00".
+  3. Under ROOM basis, "1st adult" reads "included in the room price". On S11 it read "included".
+  The S11 scratch spec passes 4/4 (its "included" expectation updated). `contract-admin`,
+  `critical-journey` and `editor-edits` (3) pass: 5 passed.
+
+**O1–O5 after the S11 review follow-up:** unchanged.
+
+**Open after the S11 review follow-up.** Everything open after S11, plus:
+- the own cell is not re-ranked against another scope's "Always wins" rule;
+- a LEGACY-frozen version's ladder uses the CASCADE ranking (its resolved line is the truth);
+- a sample-party change still asks for the whole `price_matrix` again (deviation 6).
