@@ -1,7 +1,10 @@
 // TEX i18n completeness (R-49): every key of every area exists in all six
 // languages, plural entries carry an "other" form, and placeholders match English.
+// Also (PRICING_WORKSPACE_UX.md §3.20, slice S15): every key used as a string literal in
+// src/tex (t("…"), t('…'), tOrdinal("…"); not template literals, which build keys at run time)
+// must exist in the English catalogue of its area (the area whose keys share its first segment).
 import { readdirSync, readFileSync, existsSync } from "node:fs"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 
 const LANGS = ["en", "tr", "de", "ru", "ro", "pl"]
 const roots = [["admin", "src/tex/i18n/locales"], ["booking", "src/booking/i18n/locales"]]
@@ -44,8 +47,56 @@ for (const [label, root] of roots) {
     }
   }
 }
+// ─── literal keys used in the code ─────────────────────────────────────────
+const ADMIN_ROOT = "src/tex/i18n/locales"
+const english = new Map() // area → Set of its English keys
+const areaOf = new Map() // first key segment ("rates", "core", …) → areas whose keys use it
+if (existsSync(ADMIN_ROOT)) {
+  for (const d of readdirSync(ADMIN_ROOT, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue
+    const f = join(ADMIN_ROOT, d.name, "en.json")
+    if (!existsSync(f)) continue
+    const keys = new Set(Object.keys(JSON.parse(readFileSync(f, "utf8"))))
+    english.set(d.name, keys)
+    for (const k of keys) {
+      const head = k.split(".")[0]
+      if (!areaOf.has(head)) areaOf.set(head, new Set())
+      areaOf.get(head).add(d.name)
+    }
+  }
+}
+function* sources(dir) {
+  for (const d of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, d.name)
+    if (d.isDirectory()) {
+      if (d.name !== "node_modules") yield* sources(p)
+    } else if (/\.(ts|tsx)$/.test(d.name) && !/\.d\.ts$/.test(d.name)) yield p
+  }
+}
+// t("key" …) / t('key' …) / tOrdinal("key" …) (i18n.t too): nothing word-like before the name (not .at( or format()),
+// and the literal must end the argument (a "rates." + x concatenation builds a key at run time)
+const LITERAL = /(?<![\w$])(?:t|tOrdinal)\(\s*(["'])([A-Za-z0-9_.\-]+)\1\s*[,)]/g
+let used = 0
+if (existsSync("src/tex")) {
+  for (const file of sources("src/tex")) {
+    const text = readFileSync(file, "utf8")
+    for (const m of text.matchAll(LITERAL)) {
+      const key = m[2]
+      if (!key.includes(".")) continue // not a catalogue key (e.g. a one-word helper argument)
+      used++
+      const areas = areaOf.get(key.split(".")[0])
+      if (areas && [...areas].some((a) => english.get(a).has(key))) continue
+      const line = text.slice(0, m.index).split("\n").length
+      const where = areas ? [...areas].map((a) => `${a}/en.json`).join(" or ") : "any area's en.json (no area has this prefix)"
+      console.error(`✗ ${relative(".", file)}:${line}: t("${key}") is missing from ${where}`)
+      problems++
+    }
+  }
+}
+
 if (problems) {
   console.error(`\n${problems} i18n problem(s)`)
   process.exit(1)
 }
+console.log(`Literal keys in src/tex: ${used} found in their area's en.json`)
 console.log("TEX i18n catalogs complete for", LANGS.join(", "))
