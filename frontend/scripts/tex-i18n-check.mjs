@@ -88,17 +88,21 @@ function* sources(dir) {
 // t("key" …) / t('key' …) / tOrdinal("key" …) (i18n.t too): nothing word-like before the name (not .at( or format()),
 // and the literal must end the argument (a "rates." + x concatenation builds a key at run time)
 const LITERAL = /(?<![\w$])(?:t|tOrdinal)\(\s*(["'])([A-Za-z0-9_.\-]+)\1\s*[,)]/g
+// and t(cond ? "key.a" : "key.b" …): both keys of a conditional argument (S16 re-review 3: keys such
+// as rates.ws.bulk.matrix_only_ro and rates.occ.sum.single_any were built this way, out of the scan)
+const TERNARY = /(?<![\w$])(?:t|tOrdinal)\(\s*[^()"'`,;]*?\?\s*(["'])([A-Za-z0-9_.\-]+)\1\s*:\s*(["'])([A-Za-z0-9_.\-]+)\3\s*[,)]/g
 let used = 0
 if (existsSync("src/tex")) {
   for (const file of sources("src/tex")) {
     const text = readFileSync(file, "utf8")
-    for (const m of text.matchAll(LITERAL)) {
-      const key = m[2]
+    const found = [...text.matchAll(LITERAL)].map((m) => ({ key: m[2], index: m.index }))
+    for (const m of text.matchAll(TERNARY)) found.push({ key: m[2], index: m.index }, { key: m[4], index: m.index })
+    for (const { key, index } of found) {
       if (!key.includes(".")) continue // not a catalogue key (e.g. a one-word helper argument)
       used++
       const areas = areaOf.get(key.split(".")[0])
       if (areas && [...areas].some((a) => english.get(a).has(key))) continue
-      const line = text.slice(0, m.index).split("\n").length
+      const line = text.slice(0, index).split("\n").length
       const where = areas ? [...areas].map((a) => `${a}/en.json`).join(" or ") : "any area's en.json (no area has this prefix)"
       console.error(`✗ ${relative(".", file)}:${line}: t("${key}") is missing from ${where}`)
       problems++

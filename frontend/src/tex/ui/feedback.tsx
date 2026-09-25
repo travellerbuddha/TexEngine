@@ -11,13 +11,21 @@ interface Toast {
 
 const ToastCtx = createContext<(tone: ToastTone, message: ReactNode) => void>(() => undefined)
 
+/** How long a toast stays: 4.5 s (an error 8 s), longer for a long text, about 60 ms a character up
+ * to 15 s, so a sentence that teaches something (the ladder's "Copy, paste and fill work in the room
+ * price matrix…", some 190 characters in German) can be read before it goes (S16 re-review 3). */
+function toastDuration(tone: ToastTone, message: ReactNode): number {
+  const base = tone === "error" ? 8000 : 4500
+  return typeof message === "string" ? Math.max(base, Math.min(15000, message.length * 60)) : base
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const seq = useRef(0)
   const push = useCallback((tone: ToastTone, message: ReactNode) => {
     const id = ++seq.current
     setToasts((t) => [...t, { id, tone, message }])
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === "error" ? 8000 : 4500)
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), toastDuration(tone, message))
   }, [])
   return (
     <ToastCtx.Provider value={push}>
