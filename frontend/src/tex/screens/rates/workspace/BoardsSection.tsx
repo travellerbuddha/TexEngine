@@ -32,6 +32,7 @@ import {
   Input,
   Notice,
   Popover,
+  revealElement,
   Select,
   useGridNavigation,
   useGridSelection,
@@ -223,6 +224,23 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && r >= 0 && r < rows.length, [canEdit, rows])
   const selection = useGridSelection({ rows: rows.length, cols: cols.length, isEditable })
   const gridEl = useRef<HTMLDivElement | null>(null)
+  // "Show in grid" (S14): the section opens, then the board cell of the rule is focused
+  const { show, onShown } = props
+  const [reveal, setReveal] = useState<string | null>(null)
+  useEffect(() => {
+    if (!show || show.target.kind !== "board") return
+    const { board, room, period } = show.target
+    onShown?.(show.n)
+    setOpen(true)
+    setReveal(boardCellId(board, room, period))
+  }, [show, onShown, setOpen])
+  useEffect(() => {
+    if (!reveal || !open) return
+    setReveal(null)
+    const el = Array.from(gridEl.current?.querySelectorAll<HTMLElement>("[data-cellid]") ?? []).find((x) => x.dataset.cellid === reveal)
+    if (el) revealElement(el)
+    else sectionRef.current?.scrollIntoView({ block: "start" })
+  }, [reveal, open])
   const cellAt = (r: number, c: number): BoardRef | null => {
     const row = rows[r]
     const period = cols[c]

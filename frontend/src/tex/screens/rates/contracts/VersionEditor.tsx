@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { FilePlus2 } from "lucide-react"
 import { useTexQuery, useTexMutation } from "../../../lib/api"
@@ -13,14 +13,15 @@ import type { ContractBundle, Row, VersionDoc, VersionSetting, VersionTable } fr
 import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } from "../lib/util"
 import { ContextHeader } from "../workspace/ContextHeader"
 import { PricingSection } from "../workspace/PricingSection"
+import type { ShowRequest, ShowTarget } from "../workspace/priceTest.ts"
 import { SECTIONS, DEFAULT_RULE_TABLE, type EditorPlace, type PricingRegion, type RuleTableId, type SectionId } from "../workspace/sections.ts"
 import { useDraftPreview, type SampleRequest } from "../workspace/useDraftPreview"
 import { useWorkspaceHistory } from "../workspace/useWorkspaceHistory"
 import { CommercialRulesSection } from "./sections/CommercialRulesSection"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
 import { OffersTab } from "./tabs/OffersTab"
-import { PreviewTab, PriceTestPanel } from "./tabs/PreviewTab"
-import type { TabProps } from "./tabs/shared"
+import { PreviewTab, PriceTestPanel, type PriceTestPrefill } from "./tabs/PreviewTab"
+import type { MatrixCellRef, TabProps } from "./tabs/shared"
 
 const initialPlace = (): EditorPlace => parseEditorHash(window.location.hash) ?? { section: "pricing" }
 
@@ -55,11 +56,28 @@ export default function VersionEditor() {
   const [state, setState] = useState<EditorState>()
   const [base, setBase] = useState("")
   const [section, setSection] = useState<SectionId>(() => initialPlace().section)
+  const sectionRef = useRef(section)
+  sectionRef.current = section
   const [ruleTable, setRuleTable] = useState<RuleTableId>(() => initialPlace().table ?? DEFAULT_RULE_TABLE)
   const [region, setRegion] = useState<PricingRegion | undefined>(() => initialPlace().region)
   const [publishing, setPublishing] = useState(false)
   const [drafting, setDrafting] = useState(false)
-  const [testing, setTesting] = useState(false)
+  // the Price test drawer (S14): open with where it starts (a matrix cell's "Test this price", or
+  // the header's Price test from the matrix cell that last had the focus)
+  const [testing, setTesting] = useState<PriceTestPrefill | null>(null)
+  const testSeq = useRef(0)
+  const activeCell = useRef<MatrixCellRef | null>(null)
+  const onMatrixCell = useCallback((cell: MatrixCellRef) => {
+    activeCell.current = cell
+  }, [])
+  const openTest = useCallback((at?: MatrixCellRef | null) => {
+    testSeq.current += 1
+    setTesting({ room: at?.room, period: at?.period, n: testSeq.current })
+  }, [])
+  // "Show in grid" (S14): the drawer closes, Pricing opens, and the grid holding the target focuses it
+  const [show, setShow] = useState<ShowRequest | null>(null)
+  const showSeq = useRef(0)
+  const onShown = useCallback((n: number) => setShow((s) => (s && s.n === n ? null : s)), [])
 
   // old and new hashes (§2): #rates, #occupancy, #plans … land on the section that holds them now
   useEffect(() => {
@@ -161,6 +179,15 @@ export default function VersionEditor() {
     setRegion(undefined)
     window.history.replaceState(null, "", `#${editorHash({ section: next, table: ruleTable })}`)
   }
+  const showInGrid = useCallback((target: ShowTarget) => {
+    showSeq.current += 1
+    setTesting(null)
+    if (sectionRef.current !== "pricing") {
+      setSection("pricing")
+      window.history.replaceState(null, "", `#${editorHash({ section: "pricing" })}`)
+    }
+    setShow({ target, n: showSeq.current })
+  }, [])
   const changeTable = (table: RuleTableId) => {
     setRuleTable(table)
     window.history.replaceState(null, "", `#${editorHash({ section: "rules", table })}`)
@@ -214,7 +241,27 @@ export default function VersionEditor() {
 
   const props: TabProps | undefined =
     doc && state
-      ? { doc, state, readOnly: !editable, issues, setTable: recordTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview, history, epoch, setSampleParty: setSamples }
+      ? {
+          doc,
+          state,
+          readOnly: !editable,
+          issues,
+          setTable: recordTable,
+          setSetting,
+          setSelling,
+          lookups: lookups.data,
+          dirty,
+          onSave,
+          preview,
+          history,
+          epoch,
+          setSampleParty: setSamples,
+          onPriceTest: doc.can_preview ? openTest : undefined,
+          onMatrixCell,
+          showInGrid,
+          show,
+          onShown,
+        }
       : undefined
 
   const draftAction =
@@ -279,7 +326,7 @@ export default function VersionEditor() {
           onSave={() => void onSave()}
           onDiscard={() => load(doc)}
           onPublish={() => setPublishing(true)}
-          onPriceTest={() => setTesting(true)}
+          onPriceTest={() => openTest(activeCell.current)}
           setSelling={setSelling}
           onBasisApplied={onBasisApplied}
           draftAction={draftAction}
@@ -308,9 +355,11 @@ export default function VersionEditor() {
         </CardBody>
       </Card>
 
+      {/* non-modal (§3.13): the matrix beside it stays usable, and "Test this price" on another
+          cell starts it again there */}
       {props && testing && (
-        <Drawer open onClose={() => setTesting(false)} title={t("rates.ws.price_test")} width="lg">
-          <PriceTestPanel {...props} layout="drawer" />
+        <Drawer open onClose={() => setTesting(null)} title={t("rates.ws.price_test")} width="lg" modal={false}>
+          <PriceTestPanel {...props} layout="drawer" prefill={testing} />
         </Drawer>
       )}
       {doc && cd && publishing && (

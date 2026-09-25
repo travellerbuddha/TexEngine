@@ -13,7 +13,9 @@ import type { PricingRegion } from "./sections.ts"
  * The Pricing section (PRICING_WORKSPACE_UX.md §2, §3): the price model where it is read and
  * entered. The room price matrix (S9) is edited inline and priced live by the server; under it,
  * Occupancy & child pricing (S11) with the child ages drawer, then Boards (S13), whose grid
- * highlights the matrix's active period (#occupancy, #ages and #boards open them). A viewer without
+ * highlights the matrix's active period (#occupancy, #ages and #boards open them). The Price test
+ * (S14) starts from the matrix's focused cell or a cell's "Test this price", and its "Show in grid"
+ * focuses the matrix cell, ladder cell, combination card or board cell of a rule. A viewer without
  * cost (an agent's catalogue) sees what sells, without amounts and without any cost call; the
  * matrix is not rendered for it. The Advanced "Room prices" and "Boards" tables stay under
  * Commercial rules.
@@ -25,7 +27,7 @@ export function PricingSection(props: TabProps & { region?: PricingRegion }) {
   if (!props.history) return <RatesTab {...props} />
   return (
     <div className="space-y-6">
-      <PriceMatrix key={props.epoch ?? 0} {...props} history={props.history} onActivePeriod={matrixPeriod.set} />
+      <PriceMatrix key={props.epoch ?? 0} {...props} history={props.history} onActivePeriod={matrixPeriod.set} onActiveCell={props.onMatrixCell} />
       <OccupancySection {...props} history={props.history} region={props.region} />
       <BoardsSection key={`boards:${props.epoch ?? 0}`} {...props} history={props.history} region={props.region} matrixPeriod={matrixPeriod} />
     </div>

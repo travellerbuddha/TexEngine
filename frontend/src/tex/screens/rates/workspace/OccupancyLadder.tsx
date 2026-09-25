@@ -12,7 +12,7 @@
 // sellable". The resolved line shows the server's occupancy total of a sample party per period
 // (price_matrix parties, GAP-2b), from an answer that priced that very party; the client adds
 // nothing up.
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { AlertTriangle, Info, Loader2 } from "lucide-react"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -21,6 +21,7 @@ import {
   editorSwallowsShortcut,
   editShortcut,
   Money,
+  revealElement,
   Select,
   useGridNavigation,
   useGridSelection,
@@ -74,6 +75,8 @@ interface Draft {
 }
 
 const keyOf = (c: LadderRef) => `${c.row}\u0000${c.period}`
+/** The DOM id of a ladder cell (data-cellid): "Show in grid" (S14) and issue anchoring (S15) find it. */
+export const ladderCellId = (row: string, period: string) => `occ:${row}|${period}`
 
 /** A rule as a ladder cell and the section summary show it (display only, from the stored
  * strings): ×0.70, 50%, +10%, +25.00, −25.00, 25.00. */
@@ -122,6 +125,8 @@ export interface OccupancyLadderProps {
   onShowCard?: (id: string) => void
   /** the party's name ("2 adults + 1 child 7–11.99") */
   partyName: (party: PartyOption) => string
+  /** a cell to bring into view and focus (ladderCellId; "Show in grid", S14); `n` repeats a request */
+  focus?: { cellId: string; n: number } | null
 }
 
 export function OccupancyLadder(p: OccupancyLadderProps) {
@@ -189,6 +194,15 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && r < rows.length && Boolean(rows[r]?.editable), [canEdit, rows])
   const selection = useGridSelection({ rows: navRows, cols: cols.length, isEditable })
   const gridEl = useRef<HTMLDivElement | null>(null)
+  // only requests made while mounted (a remount after Discard or a scope change does not replay one)
+  const focused = useRef(p.focus?.n ?? 0)
+  useEffect(() => {
+    if (!p.focus || p.focus.n === focused.current) return
+    focused.current = p.focus.n
+    const id = p.focus.cellId
+    const el = Array.from(gridEl.current?.querySelectorAll<HTMLElement>("[data-cellid]") ?? []).find((x) => x.dataset.cellid === id)
+    if (el) revealElement(el)
+  }, [p.focus])
   const cellAt = (r: number, c: number): LadderRef | null => {
     const row = rows[r]
     const period = cols[c]
@@ -644,6 +658,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     const stateText = resolved && stale ? t("rates.ws.cell.stale_state", { state }) : state
     const value = [view.value, note].filter(Boolean).join(" · ")
     return {
+      cellId: ref ? ladderCellId(ref.row, ref.period) : undefined,
       label: value ? t("rates.ws.cell.label", { cell: name, state: stateText, value }) : t("rates.ws.cell.label_bare", { cell: name, state: stateText }),
       tone: view.tone,
       content: view.content,

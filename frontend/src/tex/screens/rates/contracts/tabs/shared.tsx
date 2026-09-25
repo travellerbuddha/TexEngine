@@ -4,6 +4,7 @@ import { IssueList } from "../../components/common"
 import type { EditorState, SellingForm } from "../../lib/tables"
 import type { Issue, Lookups, Row, VersionDoc, VersionSetting, VersionTable } from "../../lib/types"
 import { issueTable } from "../../lib/util"
+import type { ShowRequest, ShowTarget } from "../../workspace/priceTest.ts"
 import type { DraftPreview, SampleRequest } from "../../workspace/useDraftPreview"
 import type { WorkspaceHistory } from "../../workspace/useWorkspaceHistory"
 
@@ -30,6 +31,23 @@ export interface TabProps {
   epoch?: number
   /** The occupancy ladder asks the live preview to price a sample party (GAP-2b, S11); null stops it. */
   setSampleParty?: (request: SampleRequest | null) => void
+  /** "Test this price" on a matrix cell: the Price test for that room and period (S14); absent
+   * when the viewer may not use the Price test (`can_preview`). */
+  onPriceTest?: (cell: MatrixCellRef) => void
+  /** The matrix cell that got the focus: the header's Price test starts from it (S14). */
+  onMatrixCell?: (cell: MatrixCellRef) => void
+  /** "Show in grid" from the Price test (S14): Pricing shows and focuses the target. */
+  showInGrid?: (target: ShowTarget) => void
+  /** A pending "Show in grid" request: the grid that holds the target focuses it and calls
+   * `onShown(n)`, which clears it (a later remount does not replay it). */
+  show?: ShowRequest | null
+  onShown?: (n: number) => void
+}
+
+/** A matrix cell: its room and period ("" = All periods). */
+export interface MatrixCellRef {
+  room: string
+  period: string
 }
 
 export function roomOptions(doc: VersionDoc): Option[] {

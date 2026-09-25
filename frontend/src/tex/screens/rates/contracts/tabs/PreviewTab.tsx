@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react"
-import { Calculator, CheckCircle2, Minus, Plus, XCircle } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Calculator, CheckCircle2, LocateFixed, Minus, Plus, XCircle } from "lucide-react"
 import { cn } from "../../../../../lib/utils"
 import { tex, TexApiError } from "../../../../lib/api"
 import { useSession } from "../../../../lib/session"
-import { addDays, date as fmtDate, dateTime, money, nightsBetween, weekday } from "../../../../lib/format"
+import { date as fmtDate, dateTime, minorUnits as currencyMinorUnits, money, nightsBetween, weekday } from "../../../../lib/format"
 import { useSiteClock } from "../../../../lib/siteDay"
 import { useTexT } from "../../../../i18n"
 import {
@@ -25,12 +25,18 @@ import {
   Notice,
   Select,
   Skeleton,
+  Switch,
 } from "../../../../ui"
 import { BOARDS, enumLabel, enumOptions } from "../../lib/options"
 import { IssueList } from "../../components/common"
 import { overlayPayloadOf } from "../../lib/tables"
-import type { ExplainStep, NightLine, PreviewResult, VersionDoc } from "../../lib/types"
+import type { ExplainStep, NightLine, PreviewChild, PreviewResult, VersionDoc } from "../../lib/types"
 import { decText, splitCsv, toFrappeDatetime, versionLabel } from "../../lib/util"
+import { bandCode, effectiveBands } from "../../workspace/bands.ts"
+import { MATRIX_DEBOUNCE_MS } from "../../workspace/draftPreview.ts"
+import { ExplainLadderView, useStepText } from "../../workspace/ExplainLadder"
+import { childPayload, prefillOf, showTargetOf, withChildMode, type ChildEntry, type ChildMode, type ShowTarget } from "../../workspace/priceTest.ts"
+import { useBandLabels } from "../../workspace/useBandLabels"
 import type { DraftPreview } from "../../workspace/useDraftPreview"
 import { contractRoomOptions, TabIntro, type TabProps } from "./shared"
 
@@ -51,10 +57,18 @@ export function PreviewTab(props: TabProps) {
   )
 }
 
-/** The price test ("Why this price", preview_price): shown when the server says the viewer may see
- * contract cost on this version's hotel (`can_preview`, GAP-10); an editor's unsaved changes are
- * priced as shown (the read-only overlay, GAP-1), without a save. */
-export function PriceTestPanel(props: TabProps & { layout?: "page" | "drawer" }) {
+/** Where the Price test starts (S14): "Test this price" on a matrix cell, or the header's Price
+ * test from the matrix cell that last had the focus; `n` repeats a request. */
+export interface PriceTestPrefill {
+  room?: string
+  period?: string
+  n: number
+}
+
+/** The price test ("Why this price", preview_price, PRICING_WORKSPACE_UX.md §3.13): shown when the
+ * server says the viewer may see contract cost on this version's hotel (`can_preview`, GAP-10); an
+ * editor's unsaved changes are priced as shown (the read-only overlay, GAP-1), without a save. */
+export function PriceTestPanel(props: TabProps & { layout?: "page" | "drawer"; prefill?: PriceTestPrefill | null }) {
   const { t } = useTexT()
   const { can } = useSession()
   const { doc } = props
@@ -62,19 +76,29 @@ export function PriceTestPanel(props: TabProps & { layout?: "page" | "drawer" })
   return (
     <div className="space-y-4">
       {doc.editable && props.dirty && <Notice tone="info">{props.preview?.savedOnly ? t("rates.preview.unsaved") : t("rates.preview.priced_unsaved")}</Notice>}
-      <Calculator_ {...props} />
+      <PriceTestForm {...props} />
     </div>
   )
 }
 
-/** Two weeks after the site's today (G-91), or the contract's first stay day when later. */
-function defaultDates(today: string, stayFrom?: string | null): [string, string] {
-  let a = addDays(today, 14)
-  if (stayFrom && stayFrom > a) a = stayFrom
-  return [a, addDays(a, 3)]
+interface Form {
+  room_type: string
+  board: string
+  rate_plan: string
+  check_in: string
+  check_out: string
+  adults: number
+  children: ChildEntry[]
+  market: string
+  channel: string
+  currency: string
+  sale_at: string
+  promo: string
 }
 
-function Calculator_({ doc, state, dirty, preview, layout = "page" }: TabProps & { layout?: "page" | "drawer" }) {
+const CHILD_MODES: ChildMode[] = ["years", "months", "dob"]
+
+function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, showInGrid }: TabProps & { layout?: "page" | "drawer"; prefill?: PriceTestPrefill | null }) {
   const { t } = useTexT()
   const { boot, can } = useSession()
   const canCost = doc.can_preview ?? can("price.view_cost", doc.contract_doc.property)
@@ -83,65 +107,119 @@ function Calculator_({ doc, state, dirty, preview, layout = "page" }: TabProps &
   const boardCodes = Array.from(new Set(state.tables.boards.map((b) => String(b.board)).filter(Boolean)))
   const baseBoard = String(state.tables.boards.find((b) => b.is_base)?.board ?? boardCodes[0] ?? "BB")
   const plans = state.tables.rate_plans.map((r) => String(r.rate_plan)).filter(Boolean)
-  const [ci0, co0] = defaultDates(clock.today(), null)
-  const [f, setF] = useState({
-    room_type: rooms[0]?.value ?? "",
-    board: baseBoard,
-    rate_plan: plans[0] ?? "",
-    check_in: ci0,
-    check_out: co0,
-    adults: 2,
-    children: [] as string[],
-    market: doc.contract_doc.market,
-    channel: boot.settings.default_sales_channel || "DIRECT_WEB",
-    currency: doc.contract_doc.contract_currency,
-    sale_at: "",
-    promo: "",
+  const stay = state.selling ?? doc.selling
+  /** the stay a request (or none) starts from: the active matrix cell's room and period (§3.13) */
+  const prefillFrom = (at: PriceTestPrefill | null | undefined) =>
+    prefillOf({
+      rooms: rooms.map((r) => r.value),
+      baseRoom: String(state.tables.rooms.find((r) => r.is_base)?.room_type ?? ""),
+      periods: state.tables.periods.map((p) => ({ code: String(p.period_code ?? "").trim(), start: String(p.start_date ?? ""), end: String(p.end_date ?? "") })),
+      stayFrom: stay?.stay_from,
+      stayTo: stay?.stay_to,
+      active: at ? { room: at.room, period: at.period } : null,
+      today: clock.today(),
+    })
+  const [f, setF] = useState<Form>(() => {
+    const start = prefillFrom(prefill)
+    return {
+      room_type: start.room,
+      board: baseBoard,
+      rate_plan: plans[0] ?? "",
+      check_in: start.checkIn,
+      check_out: start.checkOut,
+      adults: 2,
+      children: [],
+      market: doc.contract_doc.market,
+      channel: boot.settings.default_sales_channel || "DIRECT_WEB",
+      currency: doc.contract_doc.contract_currency,
+      sale_at: "",
+      promo: "",
+    }
   })
+  // another "Test this price" while the drawer is open: its room and dates
+  const applied = useRef(prefill?.n ?? 0)
+  useEffect(() => {
+    if (!prefill || prefill.n === applied.current) return
+    applied.current = prefill.n
+    const start = prefillFrom(prefill)
+    setF((x) => ({ ...x, room_type: start.room, check_in: start.checkIn, check_out: start.checkOut }))
+    // the request's content is its number
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill])
+
   const [res, setRes] = useState<PreviewResult>()
   const [err, setErr] = useState<TexApiError>()
   const [busy, setBusy] = useState(false)
-  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }))
+  const [live, setLive] = useState(false)
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }))
+  const setChild = (i: number, c: ChildEntry) => set("children", f.children.map((x, j) => (j === i ? c : x)))
   const nights = f.check_in && f.check_out ? nightsBetween(f.check_in, f.check_out) : 0
-  const childOk = f.children.every((a) => /^\d{1,2}$/.test(a) && parseInt(a, 10) <= 17)
+  const children = f.children.map(childPayload)
+  const childOk = children.every((c) => c !== null)
   const valid = Boolean(f.room_type && f.board && nights > 0 && nights <= 90 && childOk && (plans.length === 0 || f.rate_plan))
+  const withData = Boolean(doc.editable && dirty && !preview?.savedOnly)
+  const args = {
+    version: doc.name,
+    room_type: f.room_type,
+    board: f.board,
+    rate_plan: f.rate_plan || null,
+    check_in: f.check_in,
+    check_out: f.check_out,
+    adults: f.adults,
+    children: children as PreviewChild[],
+    market: f.market || null,
+    channel: f.channel,
+    currency: f.currency || null,
+    sale_at: toFrappeDatetime(f.sale_at),
+    promo_codes: splitCsv(f.promo).map((c) => c.toUpperCase()),
+  }
+  // what a result answers: the inputs and the draft priced (its fingerprint, or the saved draft)
+  const key = JSON.stringify([args, withData ? (preview?.key ?? "") : "saved", doc.modified])
+  const [resKey, setResKey] = useState("")
+  const latest = useRef({ args, key, withData, state })
+  latest.current = { args, key, withData, state }
+  const flight = useRef<AbortController | null>(null)
+  useEffect(() => () => flight.current?.abort(), [])
 
-  const run = async () => {
-    if (!valid) return
+  const run = useCallback(async () => {
+    const { args: a, key: k, withData: wd, state: st } = latest.current
+    flight.current?.abort()
+    const ctl = new AbortController()
+    flight.current = ctl
     setBusy(true)
     setErr(undefined)
     try {
       const r = await tex<PreviewResult>(
         "contracts",
         "preview_price",
-        {
-          version: doc.name,
-          room_type: f.room_type,
-          board: f.board,
-          rate_plan: f.rate_plan || null,
-          check_in: f.check_in,
-          check_out: f.check_out,
-          adults: f.adults,
-          children: f.children.map((a) => parseInt(a, 10)),
-          market: f.market || null,
-          channel: f.channel,
-          currency: f.currency || null,
-          sale_at: toFrappeDatetime(f.sale_at),
-          promo_codes: splitCsv(f.promo).map((c) => c.toUpperCase()),
-          // unsaved edits are priced as shown, never saved (the read-only overlay, GAP-1); above
-          // the overlay's row cap the saved draft is priced, as the notice says
-          ...(doc.editable && dirty && !preview?.savedOnly ? { data: overlayPayloadOf(state) } : {}),
-        },
-        { post: true },
+        // unsaved edits are priced as shown, never saved (the read-only overlay, GAP-1); above the
+        // overlay's row cap the saved draft is priced, as the notice says
+        { ...a, ...(wd ? { data: overlayPayloadOf(st) } : {}) },
+        { post: true, signal: ctl.signal },
       )
+      if (ctl.signal.aborted) return
       setRes(r)
+      setResKey(k)
     } catch (e) {
+      if ((e as Error | undefined)?.name === "AbortError") return
       setErr(e instanceof TexApiError ? e : new TexApiError(String(e), 0, "Error"))
     } finally {
-      setBusy(false)
+      if (flight.current === ctl) {
+        flight.current = null
+        setBusy(false)
+      }
     }
-  }
+  }, [])
 
+  // Live: after a result, a settled edit (of the form, or of the draft: its fingerprint) prices again
+  useEffect(() => {
+    if (!live || !valid || key === resKey) return
+    const timer = setTimeout(() => void run(), MATRIX_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [live, valid, key, resKey, run])
+  const stale = Boolean(res && resKey !== key)
+
+  const modeLabel = (m: ChildMode) => t(`rates.pt.child_mode.${m}`)
   return (
     <>
       <Card>
@@ -151,7 +229,7 @@ function Calculator_({ doc, state, dirty, preview, layout = "page" }: TabProps &
             className="space-y-4"
             onSubmit={(e) => {
               e.preventDefault()
-              void run()
+              if (valid) void run()
             }}
           >
             <FormGrid cols={layout === "drawer" ? 2 : 4}>
@@ -197,23 +275,40 @@ function Calculator_({ doc, state, dirty, preview, layout = "page" }: TabProps &
             </FormGrid>
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-zinc-800">{t("rates.f.children_ages")}</legend>
-              <p className="text-xs text-zinc-500">{t("rates.h.children_ages")}</p>
+              <p className="text-xs text-zinc-500">
+                {t("rates.h.children_ages")} {t("rates.pt.children_exact")}
+              </p>
               <div className="flex flex-wrap items-center gap-2">
-                {f.children.map((a, i) => (
-                  <span key={i} className="inline-flex items-center gap-1">
-                    <Input
-                      aria-label={t("rates.preview.child_age", { n: i + 1 })}
-                      inputMode="numeric"
-                      value={a}
-                      onChange={(e) => set("children", f.children.map((x, j) => (j === i ? e.target.value.replace(/\D/g, "").slice(0, 2) : x)))}
-                      className="w-16! text-right"
-                      aria-invalid={!/^\d{1,2}$/.test(a) || parseInt(a, 10) > 17 ? true : undefined}
-                    />
-                    <IconButton size="sm" label={t("rates.preview.remove_child", { n: i + 1 })} icon={<Minus className="size-4" />} onClick={() => set("children", f.children.filter((_, j) => j !== i))} />
-                  </span>
-                ))}
+                {f.children.map((c, i) => {
+                  const n = i + 1
+                  const bad = children[i] === null
+                  return (
+                    <span key={i} className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 p-1">
+                      {c.mode === "dob" ? (
+                        <Input type="date" aria-label={t("rates.pt.child_dob", { n })} value={c.value} max={f.check_in || undefined} onChange={(e) => setChild(i, { ...c, value: e.target.value })} className="w-40!" aria-invalid={bad || undefined} />
+                      ) : (
+                        <Input
+                          aria-label={c.mode === "months" ? t("rates.pt.child_months", { n }) : t("rates.preview.child_age", { n })}
+                          inputMode="numeric"
+                          value={c.value}
+                          onChange={(e) => setChild(i, { ...c, value: e.target.value.replace(/\D/g, "").slice(0, c.mode === "months" ? 3 : 2) })}
+                          className="w-16! text-right"
+                          aria-invalid={bad || undefined}
+                        />
+                      )}
+                      <Select
+                        aria-label={t("rates.pt.child_mode_label", { n })}
+                        value={c.mode}
+                        onChange={(e) => setChild(i, withChildMode(c, e.target.value as ChildMode))}
+                        options={CHILD_MODES.map((m) => ({ value: m, label: modeLabel(m) }))}
+                        className="h-9! w-auto! text-xs!"
+                      />
+                      <IconButton size="sm" label={t("rates.preview.remove_child", { n })} icon={<Minus className="size-4" />} onClick={() => set("children", f.children.filter((_, j) => j !== i))} />
+                    </span>
+                  )
+                })}
                 {f.children.length < 6 && (
-                  <Button variant="secondary" size="sm" icon={<Plus className="size-4" aria-hidden />} onClick={() => set("children", [...f.children, "5"])}>
+                  <Button variant="secondary" size="sm" icon={<Plus className="size-4" aria-hidden />} onClick={() => set("children", [...f.children, { mode: "years", value: "5" }])}>
                     {t("rates.preview.add_child")}
                   </Button>
                 )}
@@ -223,24 +318,68 @@ function Calculator_({ doc, state, dirty, preview, layout = "page" }: TabProps &
               <Button type="submit" loading={busy} disabled={!valid} icon={<Calculator className="size-4" aria-hidden />} shortcut="↵">
                 {t("rates.preview.run")}
               </Button>
+              {res && (
+                <Switch checked={live} onChange={setLive} label={<span className="text-sm font-normal">{t("rates.pt.live")}</span>} description={t("rates.pt.live_hint")} />
+              )}
               <span className="text-xs text-zinc-500">{t("rates.preview.on_version", { v: versionLabel(doc.name, doc.version_no), status: t(`rates.version_status.${doc.status}`) })}</span>
             </div>
             <InlineError error={err} />
           </form>
         </CardBody>
       </Card>
-      {res && <PreviewResultView res={res} canCost={canCost} />}
+      {res && (
+        <div className={cn("space-y-3 transition-opacity", stale && "opacity-60")} aria-busy={busy || undefined}>
+          {stale && (
+            <p role="status" className="text-xs text-zinc-600">
+              {live ? t("rates.pt.updating") : t("rates.pt.stale")}
+            </p>
+          )}
+          <PreviewResultView res={res} canCost={canCost} layout={layout} doc={doc} state={state} preview={preview} showInGrid={showInGrid} />
+        </div>
+      )}
     </>
   )
 }
 
-function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: boolean }) {
+function PreviewResultView({
+  res,
+  canCost,
+  layout,
+  doc,
+  state,
+  preview,
+  showInGrid,
+}: {
+  res: PreviewResult
+  canCost: boolean
+  layout: "page" | "drawer"
+  doc: VersionDoc
+  state: TabProps["state"]
+  preview?: DraftPreview
+  showInGrid?: (target: ShowTarget) => void
+}) {
   const { t } = useTexT()
   const ccy = res.currency ?? ""
   const contractCcy = res.contract?.currency ?? ccy
   const nights = res.nights ?? []
   const [night, setNight] = useState<string>(nights[0]?.date ?? "")
   const steps = useMemo(() => (res.explanation ?? []).filter((s) => !s.night || !night || s.night === night), [res.explanation, night])
+  // band codes are shown as labels everywhere (D13): the draft's bands, else the inherited ones
+  const bands = useMemo(() => effectiveBands(state.tables, preview?.matrix?.age_bands), [state.tables, preview?.matrix?.age_bands])
+  const labels = useBandLabels(bands)
+  const names = useMemo(() => new Map(doc.room_types.map((r) => [r.name, r.room_type_name || r.name])), [doc.room_types])
+  const roomName = useCallback((rt: string) => names.get(rt) ?? rt, [names])
+  const stepText = useStepText(labels, roomName)
+  const allCodes = useMemo(() => bands.map(bandCode).filter(Boolean), [bands])
+  // "Show in grid": the draft row each rule id names, looked up once per rule id and table state
+  const targets = useMemo(() => new Map<string, ShowTarget | null>(), [state.tables])
+  const targetOf = (ruleId: string | null | undefined): ShowTarget | null => {
+    if (!showInGrid || !ruleId) return null
+    if (!targets.has(ruleId)) targets.set(ruleId, showTargetOf(state.tables, ruleId))
+    return targets.get(ruleId) ?? null
+  }
+  const minorUnits = doc.contract_doc.minor_units ?? currencyMinorUnits(contractCcy)
+  const page = layout === "page"
 
   if (!res.sellable)
     return (
@@ -248,7 +387,7 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
         <ul className="mt-1 list-disc pl-5">
           {res.reasons.map((r, i) => (
             <li key={i}>
-              <span className="font-mono text-xs opacity-70">{r.code}</span> {r.message}
+              <span className="font-mono text-xs opacity-70">{r.code}</span> {labels.display(r.message, r.code === "NO_CHILD_RULE" ? allCodes : undefined)}
             </li>
           ))}
         </ul>
@@ -258,8 +397,8 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
   const tot = res.totals ?? {}
   return (
     <div className="space-y-5" aria-live="polite">
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      <div className={cn("grid gap-5", page && "lg:grid-cols-3")}>
+        <Card className={page ? "lg:col-span-2" : undefined}>
           <CardHeader
             title={t("rates.preview.result")}
             description={res.contract ? `${res.contract.code} · V${res.contract.version_no} · ${res.contract.market} · ${enumLabel(t, "basis", res.contract.basis)}` : undefined}
@@ -299,7 +438,7 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
                 </>
               )}
             </div>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+            <dl className={cn("grid grid-cols-2 gap-x-6 gap-y-1 text-sm", page && "sm:grid-cols-3")}>
               {(["accommodation_gross", "accommodation_discount", "accommodation", "extras", "discounts", "subtotal", "tax", "tax_added"] as const).map((k) =>
                 tot[k] !== undefined ? (
                   <div key={k} className="flex justify-between gap-2 border-b border-zinc-100 py-1">
@@ -366,6 +505,13 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
         </Card>
       </div>
 
+      {/* the Explain ladder (§3.13.1): the stages in engine order, every value a server field */}
+      <Card>
+        <CardBody>
+          <ExplainLadderView res={res} stepText={stepText} periods={state.tables.periods} minorUnits={minorUnits} sellMinorUnits={currencyMinorUnits(ccy)} />
+        </CardBody>
+      </Card>
+
       <Card>
         <CardHeader title={t("rates.preview.nightly")} description={t("rates.preview.nightly_hint", { contract: contractCcy, sell: ccy })} />
         <DataTable<NightLine>
@@ -411,7 +557,7 @@ function PreviewResultView({ res, canCost }: { res: PreviewResult; canCost: bool
         <CardBody>
           <ol className="space-y-1.5" aria-label={t("rates.preview.why")}>
             {steps.map((s, i) => (
-              <StepItem key={i} s={s} />
+              <StepItem key={i} s={s} text={stepText(s)} display={labels.display} target={targetOf(s.rule?.rule_id)} onShow={showInGrid} />
             ))}
           </ol>
           <p className="mt-4 text-xs text-zinc-500">
@@ -445,30 +591,44 @@ const STAGE_TONE: Record<string, "neutral" | "info" | "success" | "warning" | "d
   total: "brand",
 }
 
-function StepItem({ s }: { s: ExplainStep }) {
+/** One step of "Why this price": the stage, the sentence (localised, band labels), the rule that
+ * won with its level, what it overrode, and "Show in grid" when the rule is a row of the draft. */
+function StepItem({ s, text, display, target, onShow }: { s: ExplainStep; text: string; display: (text: string) => string; target: ShowTarget | null; onShow?: (target: ShowTarget) => void }) {
   const { t } = useTexT()
   const stage = t(`rates.stage.${s.stage}`)
+  const ruleLabel = s.rule ? display(s.rule.label || s.rule.rule_id) : ""
   return (
     <li className={cn("flex flex-wrap items-start gap-2 rounded-md px-2 py-1.5 text-sm", s.stage === "total" ? "bg-tex-50" : "hover:bg-zinc-50")}>
       <Badge tone={STAGE_TONE[s.stage] ?? "neutral"} className="min-w-20 justify-center">
         {stage.startsWith("rates.stage.") ? s.stage : stage}
       </Badge>
       <div className="min-w-0 flex-1">
-        <p className="text-zinc-900">{s.text}</p>
+        <p className="text-zinc-900">{text}</p>
         {(s.rule || s.overridden.length > 0) && (
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
             {s.rule && (
               <>
                 <span>{t("rates.preview.won")}</span>
                 {s.rule.level && <Badge tone="neutral">{t(`rates.level.${s.rule.level}`)}</Badge>}
-                <span className="font-medium text-zinc-700">{s.rule.label || s.rule.rule_id}</span>
+                <span className="font-medium text-zinc-700">{ruleLabel}</span>
                 {s.rule.source && <span className="font-mono">({s.rule.source})</span>}
               </>
             )}
             {s.overridden.length > 0 && (
               <span>
-                · {t("rates.preview.overrode")} {s.overridden.map((o) => o.label || o.rule_id).join(", ")}
+                · {t("rates.preview.overrode")} {s.overridden.map((o) => display(o.label || o.rule_id)).join(", ")}
               </span>
+            )}
+            {target && onShow && (
+              <button
+                type="button"
+                onClick={() => onShow(target)}
+                aria-label={t("rates.pt.show_in_grid_rule", { rule: ruleLabel })}
+                className="inline-flex items-center gap-0.5 rounded px-1 font-medium text-tex-700 underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:outline-none"
+              >
+                <LocateFixed className="size-3" aria-hidden />
+                {t("rates.pt.show_in_grid")}
+              </button>
             )}
           </p>
         )}

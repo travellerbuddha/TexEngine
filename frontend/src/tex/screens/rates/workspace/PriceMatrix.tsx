@@ -13,19 +13,22 @@
 // server's apply_op_values with a preview; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z / Ctrl+Y and the toolbar
 // undo and redo. A bulk operation shows "Applied to N cells · Undo" for 10 s.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
-import { AlertTriangle, Loader2, Pin } from "lucide-react"
+import { AlertTriangle, Calculator, Loader2, Pencil, Pin } from "lucide-react"
 import { tex, TexApiError } from "../../../lib/api"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import {
   Badge,
   Checkbox,
+  ContextMenu,
   editorSwallowsShortcut,
   editShortcut,
   fillDownPlan,
   fillRightPlan,
+  MenuItem,
   Money,
   Notice,
+  revealElement,
   Select,
   Tooltip,
   useGridNavigation,
@@ -140,11 +143,17 @@ export function PriceMatrix({
   preview,
   history,
   onActivePeriod,
+  onActiveCell,
+  onPriceTest,
+  show,
+  onShown,
 }: TabProps & {
   history: WorkspaceHistory
   /** the period ("" = All periods) of the cell that gets the focus: the boards grid highlights
    * the same column (§3.12, S13) */
   onActivePeriod?: (period: string) => void
+  /** the cell (room, period) that gets the focus: the header's Price test starts from it (S14) */
+  onActiveCell?: (cell: CellRef) => void
 }) {
   const { t, locale } = useTexT()
   const tables = state.tables
@@ -219,6 +228,9 @@ export function PriceMatrix({
   const [pending, setPending] = useState<Record<string, string | null>>({})
   const [pop, setPop] = useState<{ cell: CellRef; initial: PopoverRule } | null>(null)
   const popAnchor = useRef<HTMLElement | null>(null)
+  // the cell's context menu (S14): "Edit rule…" and "Test this price"
+  const [cellMenu, setCellMenu] = useState<{ cell: CellRef; editable: boolean } | null>(null)
+  const cellMenuAnchor = useRef<HTMLElement | null>(null)
   const [freshPeriod, setFreshPeriod] = useState<string | null>(null)
   const freshDone = useCallback(() => setFreshPeriod(null), [])
   // the polite live region: bulk results, undo and redo (§3.19). The same text twice is announced
@@ -372,6 +384,31 @@ export function PriceMatrix({
     else initial = { op: room?.role === "derived" ? "MULTIPLY" : "ABSOLUTE", value: "", base }
     setPop({ cell, initial })
   }
+
+  /** The context menu of a cell (a right-click or long press, Shift+F10, the ContextMenu key):
+   * "Edit rule…" on an editable cell and "Test this price" when the viewer may use the Price test;
+   * without the second, an editable cell opens its rule popover at once, as before (S9). */
+  const openCellMenu = (cell: CellRef, anchor: HTMLElement, editable: boolean) => {
+    if (!onPriceTest) {
+      if (editable) openPopover(cell, anchor)
+      return
+    }
+    cellMenuAnchor.current = anchor
+    setCellMenu({ cell, editable: editable && pending[keyOf(cell)] === undefined })
+  }
+  const cellMenuRef = useRef(openCellMenu)
+  cellMenuRef.current = openCellMenu
+
+  // "Show in grid" (S14): the cell of a room price rule is brought into view and focused
+  useEffect(() => {
+    if (!show || show.target.kind !== "matrix") return
+    const { room, period } = show.target
+    requestAnimationFrame(() => {
+      const el = gridEl.current?.querySelector<HTMLElement>(`[data-cellid="${CSS.escape(cellIdOf({ room, period }))}"]`)
+      if (el) revealElement(el)
+    })
+    onShown?.(show.n)
+  }, [show, onShown])
 
   const nextEditableRow = (r: number, c: number, dir: 1 | -1) => {
     for (let i = r + dir; i >= 0 && i < rows.length; i += dir) if (isEditable(i, c)) return i
@@ -634,6 +671,13 @@ export function PriceMatrix({
   }, [])
 
   const onKey = (e: KeyboardEvent<HTMLElement>, at: GridCell): boolean | void => {
+    const cell = cellAt(at.r, at.c)
+    // the keyboard's context menu, on every cell (read-only and resolved ones too: Test this price)
+    if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+      e.preventDefault()
+      if (cell) openCellMenu(cell, e.currentTarget, isEditable(at.r, at.c))
+      return true
+    }
     if (!canEdit) return
     const shortcut = editShortcut(e)
     if (shortcut) {
@@ -642,8 +686,7 @@ export function PriceMatrix({
       onShortcut(shortcut)
       return true
     }
-    const cell = cellAt(at.r, at.c)
-    if ((e.key === "Enter" && e.altKey) || (e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+    if (e.key === "Enter" && e.altKey) {
       e.preventDefault()
       if (cell && isEditable(at.r, at.c)) openPopover(cell, e.currentTarget)
       return true
@@ -881,12 +924,13 @@ export function PriceMatrix({
       stale: resolved && stale,
       error: view.error,
       trigger: editable && waiting === undefined ? { label: t("rates.rates.edit_cell", { cell: cellName(cell) }), onOpen: (el) => openPopover(cell, el) } : undefined,
-      onContextMenu: editable
-        ? (e: MouseEvent<HTMLElement>) => {
-            e.preventDefault()
-            openPopover(cell, e.currentTarget)
-          }
-        : undefined,
+      onContextMenu:
+        editable || onPriceTest
+          ? (e: MouseEvent<HTMLElement>) => {
+              e.preventDefault()
+              cellMenuRef.current(cell, e.currentTarget, editable)
+            }
+          : undefined,
     }
   }
   // computed when the draft, the server's answers, the entries in flight or the language change;
@@ -1002,11 +1046,16 @@ export function PriceMatrix({
           aria-multiselectable={canEdit || undefined}
           ref={setGrid}
           onFocus={(e) => {
-            // a cell (or its editor) got the focus: its column is the matrix's active period
-            if (!onActivePeriod) return
+            // a cell (or its editor) got the focus: its column is the matrix's active period, and
+            // its room and period are where the header's Price test starts
             const at = (e.target as HTMLElement).closest<HTMLElement>("[data-cell]")?.dataset.cell
-            const period = at ? cols[Number(at.split(":")[1])] : undefined
-            if (period !== undefined) onActivePeriod(period)
+            if (!at) return
+            const [r, c] = at.split(":").map(Number)
+            const period = cols[c]
+            const room = rows[r]?.room
+            if (period === undefined) return
+            onActivePeriod?.(period)
+            if (room) onActiveCell?.({ room, period })
           }}
           className="w-max min-w-full text-sm"
         >
@@ -1126,6 +1175,28 @@ export function PriceMatrix({
             refocus(cell)
           }}
         />
+      )}
+      {cellMenu && (
+        <ContextMenu open onClose={() => setCellMenu(null)} anchorRef={cellMenuAnchor} label={t("rates.ws.cell.menu", { cell: cellName(cellMenu.cell) })}>
+          {cellMenu.editable && (
+            <MenuItem
+              icon={<Pencil className="size-4" />}
+              shortcut="Alt+↵"
+              keyshortcuts="Alt+Enter"
+              onSelect={() => {
+                const anchor = cellMenuAnchor.current
+                if (anchor) openPopover(cellMenu.cell, anchor)
+              }}
+            >
+              {t("rates.ws.cell.menu_edit")}
+            </MenuItem>
+          )}
+          {onPriceTest && (
+            <MenuItem icon={<Calculator className="size-4" />} onSelect={() => onPriceTest(cellMenu.cell)}>
+              {t("rates.ws.cell.menu_test")}
+            </MenuItem>
+          )}
+        </ContextMenu>
       )}
       {adjusting && (
         <AdjustPopover

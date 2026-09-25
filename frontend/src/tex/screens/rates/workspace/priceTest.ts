@@ -113,6 +113,12 @@ export type ShowTarget =
   | { kind: "occupancy"; key: string }
   | { kind: "board"; board: string; room: string; period: string }
 
+/** A "Show in grid" request; `n` tells a repeated request from the last one. */
+export interface ShowRequest {
+  target: ShowTarget
+  n: number
+}
+
 const SHOWN_TABLES = ["period_rates", "occupancy_rules", "boards"] as const
 type ShownTable = (typeof SHOWN_TABLES)[number]
 
