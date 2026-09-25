@@ -11,11 +11,11 @@ import { date as fmtDate } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Field, FormGrid, Input, Menu, MenuItem, MenuSeparator, Notice, Popover } from "../../../ui"
 import { WeekdayPicker } from "../components/pickers"
-import { displayText, parseShorthand, type ShOp } from "../lib/shorthand"
+import { displayText, type ShOp } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
 import { splitCsv } from "../lib/util"
 import type { MatrixPeriod } from "./model.ts"
-import { setPeriodAdjustment, setPeriodFields } from "./matrixView.ts"
+import { parsePeriodAdjust, periodAdjustEditText, setPeriodAdjustment, setPeriodFields } from "./matrixView.ts"
 import { addPeriod, copyPreviousPeriod, deletePeriod, duplicatePeriod, isoDay, isoOfDay, movePeriod, periodDependents, renamePeriod } from "./periods.ts"
 import { str } from "./rows.ts"
 import type { Edit } from "./RoomRowHeader"
@@ -31,6 +31,9 @@ export interface PeriodHeaderProps {
   fresh: boolean
   onFreshDone: () => void
   decimalMark: "." | ","
+  /** the contract currency's minor units: the night adjustment's +/- amounts are parsed with them
+   * (O5: AMBIGUOUS only below 3 decimals) */
+  minorUnits: number
 }
 
 type Open = "rename" | "dates" | "adjust" | "delete" | null
@@ -340,10 +343,9 @@ function DatesPopover(p: PopProps) {
 
 function AdjustPopover(p: PopProps) {
   const { t } = useTexT()
-  const row = p.tables.periods.find((x) => str(x.period_code) === p.period.code)
-  const current = row && str(row.adjustment_op) ? displayText(str(row.adjustment_op) as ShOp, str(row.adjustment_value), "period_adjust", { decimalMark: p.decimalMark }) : ""
-  const [text, setText] = useState(current.replace("×", "x").replace("−", "-"))
-  const parsed = parseShorthand(text, "period_adjust")
+  // ASCII text that reads back to the stored adjustment with the contract's minor units (O5)
+  const [text, setText] = useState(() => periodAdjustEditText(p.tables, p.period.code, { decimalMark: p.decimalMark, minorUnits: p.minorUnits }))
+  const parsed = parsePeriodAdjust(text, { minorUnits: p.minorUnits })
   const reading = !parsed.ok
     ? t(`rates.sh.err.${parsed.code}`)
     : parsed.kind === "clear"

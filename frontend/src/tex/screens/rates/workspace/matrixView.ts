@@ -9,7 +9,7 @@
 // inputs are never changed; an edit that changes nothing returns the same tables object (so the
 // workspace history records nothing); values stay decimal strings, compared canonically, never
 // computed. The server computes every amount (apply_op_values, price_matrix).
-import { editText, type ShOp, type ShResult } from "../lib/shorthand.ts"
+import { editText, parseShorthand, type ShFormatOptions, type ShOp, type ShParseOptions, type ShResult } from "../lib/shorthand.ts"
 import type { Tables } from "../lib/tables.ts"
 import type { Row } from "../lib/types.ts"
 import {
@@ -315,6 +315,24 @@ export function setPeriodFields(tables: Tables, code: string, patch: PeriodField
   const periods = [...tables.periods]
   periods[idx] = { ...row, ...changes }
   return { ...tables, periods }
+}
+
+/** "Night adjustment…": parses the popover's text in the `period_adjust` context with the
+ * contract currency's minor units. O5 counts the adjustment's ADD / SUBTRACT as amounts, so
+ * "+12.345" is AMBIGUOUS below 3 decimals and ADD 12.345 in KWD, BHD, OMR, JOD or TND; factors and
+ * percentages are exempt. */
+export function parsePeriodAdjust(text: string, opts?: ShParseOptions): ShResult {
+  return parseShorthand(text, "period_adjust", { minorUnits: opts?.minorUnits })
+}
+
+/** The text "Night adjustment…" starts from: the period's adjustment as ASCII shorthand in the
+ * viewer's decimal mark, which parsePeriodAdjust with the same minor units reads back to the
+ * same adjustment ("+12.345" in a 3-decimal currency, "+12.3450" below); "" without one. */
+export function periodAdjustEditText(tables: Pick<Tables, "periods">, code: string, opts?: ShFormatOptions): string {
+  const row = tables.periods.find((p) => str(p.period_code) === code)
+  const op = str(row?.adjustment_op)
+  if (!row || !op) return ""
+  return editText(op as ShOp, str(row.adjustment_value), "period_adjust", opts)
 }
 
 /** "Night adjustment…": the `period_adjust` shorthand (§3.4.4) on the period's adjustment_op /

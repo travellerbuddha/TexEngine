@@ -670,6 +670,7 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
                 fresh={freshPeriod === p.code}
                 onFreshDone={freshDone}
                 decimalMark={decimalMark}
+                minorUnits={minorUnits}
               />
             ))}
             <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} />

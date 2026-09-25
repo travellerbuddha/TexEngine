@@ -17,6 +17,8 @@ import {
   finishEntry,
   gridRows,
   moveRoom,
+  parsePeriodAdjust,
+  periodAdjustEditText,
   planEntry,
   readingOf,
   setPeriodAdjustment,
@@ -286,6 +288,44 @@ test("periods: dates, weekdays and priority on the period's row; unchanged gives
   assert.deepEqual([p2?.start_date, p2?.end_date, p2?.weekdays, p2?.priority], ["2027-05-01", "2027-05-30", "Fri,Sat", 5])
   assert.equal(setPeriodFields(out, "P2", { end_date: "2027-05-30" }), out)
   assert.equal(setPeriodFields(t, "P9", { end_date: "2027-05-30" }), t)
+})
+
+test("periods: the night adjustment's +/- amounts are refused as AMBIGUOUS only below 3 decimals (O5, S9 review)", () => {
+  // O5 lists the period adjustment's ADD / SUBTRACT as amounts: 12.345 is a price in KWD
+  assert.deepEqual(parsePeriodAdjust("+12.345", { minorUnits: 2 }), { ok: false, code: "AMBIGUOUS", op: "ADD" })
+  assert.deepEqual(parsePeriodAdjust("+12.345", { minorUnits: 3 }), { ok: true, kind: "rule", op: "ADD", value: "12.345" })
+  assert.deepEqual(parsePeriodAdjust("+2.500", { minorUnits: 3 }), { ok: true, kind: "rule", op: "ADD", value: "2.5" })
+  assert.deepEqual(parsePeriodAdjust("-2,500", { minorUnits: 3 }), { ok: true, kind: "rule", op: "SUBTRACT", value: "2.5" })
+  assert.deepEqual(parsePeriodAdjust("-2.500", { minorUnits: 0 }), { ok: false, code: "AMBIGUOUS", op: "SUBTRACT" })
+  assert.deepEqual(parsePeriodAdjust("+12.345"), { ok: false, code: "AMBIGUOUS", op: "ADD" }, "no minor units: the parser's default, 2")
+  // factors and percentages are exempt at any minor units
+  assert.deepEqual(parsePeriodAdjust("+1.125%", { minorUnits: 2 }), { ok: true, kind: "rule", op: "ADJUST_PERCENT", value: "1.125" })
+  assert.deepEqual(parsePeriodAdjust("x1.150", { minorUnits: 0 }), { ok: true, kind: "rule", op: "MULTIPLY", value: "1.15" })
+  assert.deepEqual(parsePeriodAdjust("100", { minorUnits: 3 }), { ok: false, code: "OP_NOT_ALLOWED", op: "ABSOLUTE" })
+  assert.deepEqual(parsePeriodAdjust("", { minorUnits: 3 }), { ok: true, kind: "clear" })
+})
+
+test("periods: the night adjustment re-opens as text that reads back to the stored adjustment (S9 review)", () => {
+  const withAdj = (op: string, value: string): Tables => ({
+    ...owner(),
+    periods: owner().periods.map((p) => (p.period_code === "P3" ? { ...p, adjustment_op: op, adjustment_value: value } : p)),
+  })
+  const kwd = withAdj("ADD", "12.345")
+  assert.equal(periodAdjustEditText(kwd, "P3", { minorUnits: 3 }), "+12.345")
+  assert.equal(periodAdjustEditText(kwd, "P3", { minorUnits: 3, decimalMark: "," }), "+12,345")
+  assert.equal(periodAdjustEditText(kwd, "P3", { minorUnits: 2 }), "+12.3450", "below 3 decimals one zero keeps it from reading as AMBIGUOUS")
+  for (const minorUnits of [0, 2, 3]) {
+    for (const decimalMark of [".", ","] as const) {
+      const text = periodAdjustEditText(kwd, "P3", { minorUnits, decimalMark })
+      const again = setPeriodAdjustment(kwd, "P3", parsePeriodAdjust(text, { minorUnits }))
+      assert.ok("tables" in again && again.tables === kwd, `${minorUnits} decimals, "${decimalMark}": "${text}" reads back unchanged`)
+    }
+  }
+  assert.equal(periodAdjustEditText(withAdj("SUBTRACT", "2.500"), "P3", { minorUnits: 3 }), "-2.5")
+  assert.equal(periodAdjustEditText(withAdj("MULTIPLY", "1.1"), "P3", { minorUnits: 2 }), "x1.1")
+  assert.equal(periodAdjustEditText(withAdj("ADJUST_PERCENT", "-10"), "P3", { minorUnits: 2, decimalMark: "," }), "-10%")
+  assert.equal(periodAdjustEditText(owner(), "P3", { minorUnits: 3 }), "", "no adjustment")
+  assert.equal(periodAdjustEditText(kwd, "P9", { minorUnits: 3 }), "", "an unknown period")
 })
 
 test("periods: the night adjustment takes the period_adjust shorthand", () => {
