@@ -5939,3 +5939,294 @@ change.
   skips `_validate_links` and the window order; the cross-hotel rate plan / policy gap in
   `build_terms`; a weekly contract above the overlay's row cap is not previewed unsaved. Issues
   are not anchored in cells yet (S15); occupancy and boards are S11 and S13.
+
+**Decision (implemented in S11: Occupancy & child pricing, the child ages drawer, band labels).**
+Branch `pricing-workspace`, frontend only (no server file changes), commits `2f155eb` (pure
+modules and unit tests), `ae96a90` (the non-modal Drawer and `tOrdinal`), `72fe4c5` (the
+screens) and `26a3f5d` (closing the drawer drops an uncommitted band). Pricing shows the region under the room price matrix; the Advanced "Child ages" and
+"Occupancy rules" tables stay under Commercial rules.
+- *The section* (`workspace/OccupancySection.tsx`, §3.6.1) is a disclosure, "Occupancy & child
+  pricing" (a button in the `h2`, `aria-expanded`). Its open state is kept per viewer in
+  `localStorage` (`tex.rates.ws.occupancy_open`, read and written in try/catch); without a stored
+  choice a draft without occupancy rules opens it. `#occupancy` opens it and scrolls to it;
+  `#ages` opens the drawer. Its header holds:
+  - the rooms scope: All rooms or one contract room; a scope with rules of its own is marked "•",
+    explained to screen readers by `aria-describedby`;
+  - child 1 ordering (`child_ordering`);
+  - under ROOM basis, the extra-adult unit (`room_basis_extra_unit`) and "Children fill empty
+    included places" (`room_basis_children_fill_included`, a Switch);
+  - "Child ages…".
+  Closed, it reads as one line from `occupancy.ladderSummary`: "Adults: 1A ×1.50 · 3rd ×0.70 |
+  Children: Infant 0–2.99 ×0.00 · … | 1 special combination · 1 period override". The
+  single-use rule is a ladder row, not a special combination.
+- *The ladder* (`workspace/OccupancyLadder.tsx`, §3.6.2) is a keyboard grid named "Occupancy and
+  child pricing by period", on the matrix's `columnTemplate` (the "+ Period" column is an empty
+  filler, so the period columns line up while neither grid is scrolled sideways). Its rows come
+  from `ladderModel(tables, scope, basis, …)`:
+  - `maxAdults` and `includedAdults` come from the server's `price_matrix` capacity: the largest
+    `max_adults` of the scope's rooms, and the included adults of the scoped room or else the base
+    room. Before the first answer, the rows' own values (else the room type's) are used;
+  - `bands` are the version's `age_bands`, or `price_matrix.age_bands` when it has none
+    (`bands.effectiveBands`; months become years with `monthsToYears`);
+  - `inherited` is `price_matrix.inherited_rules`. The served shape (`period`, `adults` /
+    `children`) is read as rows by `occupancy.fromInheritedRule`;
+  - `defaults` is `price_matrix.occupancy_defaults`;
+  - `extraUnit` is the version's `room_basis_extra_unit`.
+  The model now also gives each row a `unit`, the thing its relative rules and the adult default
+  are applied to: the base person price (PERSON); under ROOM the per-person share (room ÷ included
+  adults, the default) or the room price (`ROOM_PRICE`, and always for the single-use combination,
+  which replaces the room price). It also gives `basis` and `includedAdults`. Row labels:
+  - single use: "1 Adult (single use)" (PERSON), "Single use (1 adult)" (ROOM), "1 Adult (also
+    with children)" for an `ADULT 1` `1+*` rule;
+  - "2 Adults" BASE (PERSON, no rule for positions 1–2), whose header reads "×1.00 each
+    (default) = 2 × base person price";
+  - ordinal adults ("3rd adult"; under ROOM "Extra adult (3rd)", and "1st adult · included in
+    the room price (2 adults per room)"), by `tOrdinal`;
+  - one row per band by its label, and child position rows "Child 2 · Child 7–11.99";
+  - under each label, the unit in words ("from the base person price", "from the per-person
+    share (room ÷ 2)", "from the room price").
+  A band code is never rendered where a label exists; an undefined code (OCC_UNKNOWN_BAND) is
+  shown as "Band ZZZ (not defined)" with a warning.
+- *Cells* use `parseShorthand(text, "occupancy", {minorUnits})` and `occupancy.planOccEntries` /
+  `applyOccEntry`: every relative entry is a rule of the row's slot (never adjusted once, unlike
+  the base room, O4). The editing model is the matrix's (S9):
+  - typing, F2, Enter and a double click edit; Enter / Shift+Enter commit and move to the next
+    editable row, Tab moves sideways; Escape reverts;
+  - an invalid entry stays as an error draft (`aria-invalid`, the message by
+    `aria-describedby`);
+  - Ctrl/Cmd+Enter writes every selected cell, Delete clears them, as one entry with the undo
+    toast;
+  - Ctrl/Cmd+Z / Shift+Z / Y undo and redo; Alt+Enter, Shift+F10, the ContextMenu key, a right
+    click or the ▾ trigger open the rule popover.
+  The reading line says what the commit stores, without arithmetic: "3rd adult · All periods
+  pays ×0.70 of the base person price", "… pays the base person price +10%", "… pays a fixed
+  25.00", for single use "one adult alone pays ×1.50 of the base person price (replaces the
+  total)", a removal, or the refusal (AMBIGUOUS in 0- and 2-decimal currencies for amounts).
+  The states render as follows (a glyph or a word, never colour alone):
+  - `rule`: ×0.70;
+  - `inherited`: ↳ ×0.70;
+  - `period-override`: ◆ ×0.80 over an OVERRIDE tag, amber, with the tip "P4 replaces the
+    all-periods rule ×0.70: ×0.80";
+  - `inherit-rule`: ↳ inherit;
+  - `general`: ↳ and the scope's rule for every adult or child;
+  - `policy`: the value in italics with a "policy" tag; the tooltip names the source
+    ("Hotel policy · PP-1 r2", parsed by `occupancy.policySource`);
+  - `default`: "×1.00 default" (the BASE pair: "×1.00 each") in muted italics, the server's
+    value formatted for display, with "Engine default: every adult pays the full base person
+    price. Type a value to set a rule." (under ROOM: "an extra adult pays ×1.00 of the
+    per-person share (room ÷ 2)");
+  - `missing`: "No rule · not sellable" on two small lines, dashed red;
+  - `included`: "included". A rule stored for an included place says it has no effect.
+  "Always wins" and FIXED rules carry a small tag. The ⓘ precedence note
+  (`occupancy.combinationNotes`, from `groupCombinations`, no ranking re-implemented) marks the
+  cells that a special combination outranks for some party: same target, positions and bands
+  equal or "any", and a room and period the cell covers. It is not shown on "Always wins" rules,
+  included places or the single-use row. The note is the cell's tooltip and part of its
+  accessible name: "Special combinations win over period rules unless the rule is marked Always
+  wins: 2 Adults + 2 Children".
+- *The rule popover* (`OccRulePopover` in `RuleEditorPopover.tsx`, §3.5), named "Edit rule:
+  {slot} · {period}". The guest and the band are fixed by the row. It offers:
+  - the rule (the `occupancy` ops, FIXED and INHERIT included) and its value (the AMBIGUOUS guard
+    for amounts);
+  - Rooms: all rooms, or chosen rooms, one row each;
+  - "Always wins (override)" with its help text;
+  - Note;
+  - Applies to: this period, All periods, or selected periods.
+  `occupancy.applyOccRule` writes one row per room × period, keeps the row a cell shows (its
+  key) and drops its twins. The op chosen is the op stored. Remove deletes the cell's own rows in
+  the ladder's scope. Focus returns to the cell. The applies-to control is shared with the room
+  popover (`AppliesToField`).
+- *The resolved line* (§3.6.2, GAP-2b): "Resolved · {room}" with a "Sample party" select of the
+  room's valid combinations (`occupancy.partyOptions`: `validCombinations` of the room's
+  capacity × the bands as multisets, at most 60; two adults by default). The room is the scoped
+  one, else the base room. The chosen party goes into the page's one live preview:
+  `TabProps.setSampleParty` → `VersionEditor` → `useDraftPreview({parties, partyRoom})` →
+  `price_matrix(parties, party_room)`. Its cells show `party_cells[0]` per period (Money in the
+  contract currency; "Not sellable" with the server's reason, band codes replaced). An answer
+  for another party is never shown for the chosen one ("…" until it comes). Nothing is summed on
+  the client. Parties are asked only while the section is open. A party room that the page's
+  state does not hold is not sent. An answer about the saved draft (a clean draft, a draft above
+  the overlay's cap, a published version) carries the party only for a room the saved draft
+  holds (`draftPreview.matrixRequest(savedRooms)`), because `price_matrix` refuses the whole
+  call for a party room outside the contract. The line then says to save.
+- *The child ages drawer* (`workspace/ChildAgesDrawer.tsx`, §3.8) is `Drawer` md with the new
+  `modal={false}`: a side panel with `role="dialog"` and no `aria-modal`, no backdrop, trap or
+  scroll lock. Focus moves in on open and back to the opener on close; Escape inside it closes it
+  (a Popover or tooltip in it first). The page beside it stays usable, which is the design's
+  "non-blocking drawer" for the zero-modal acceptance budget. It holds:
+  - *Bands:* one line each, with Label, From, Up to (not incl.), Infant and remove. "Add band"
+    starts a new band from the previous end (`bands.nextBandFrom`: 2.99 → 3) and focuses its Up
+    to. The new band is a draft row rendered under the key it will have, so the focus stays in
+    it when it is committed. Committing a valid Up to adds it (`bands.addBand`: the next free
+    code, INF only for an infant band, then CHA, CHB …). Enter there starts the next band;
+    Escape or Close drop an empty one. The label shows the generated label (in the viewer's
+    language and decimal mark) until the user types one; a band committed with a blank label is
+    saved with the generated label (`addBand` / `updateBand`), and a generated label follows the
+    ages when they change, while a typed one stays. A first band from 0 up to at most 3 years
+    (`bands.defaultInfant`, whole months) is an infant band unless the user unticks it. Bands
+    saved without a name (blank, or the code) are only named on "Name them"
+    (`bands.nameBands`, one entry); nothing is renamed silently. Removing a band whose code
+    occupancy rules name asks inline ("2 occupancy rules name this band; they are removed with
+    it") and removes them in the same entry (`bands.removeBand`). Each commit is one history
+    entry.
+  - *Advanced: show band codes:* a Code column; a rename goes through `renameBandCode` (the
+    rules follow), errors inline.
+  - *AgeStrip* (`bands.bandCoverage`, on the months scale the server check uses, neighbours
+    compared as `ages.band_findings` does): segments by label, gaps striped, overlaps amber, a
+    minimum child age, and the counts in words ("No gaps or overlaps", "1 gap · 1 overlap").
+    AGE_BANDS stays the authority.
+  - *Inherited bands:* when the version has none, the served bands are listed read-only with
+    their source ("Inherited from Hotel policy") and "Customise for this contract"
+    (`bands.customiseBands`: the same codes, so inherited rules keep matching; a label equal to
+    its code becomes the generated label; one entry).
+  - *Child rules:* `age_basis`, `children_over_max_as_adults`, `infants_count_as_occupants`.
+  Read-only viewers see everything disabled.
+- *Band labels* (`workspace/useBandLabels.ts`) bind the pure `bands.ts` to `t()`: `gen(band)`,
+  `labelOf(code)` (the code itself when no band has it) and `display(text, codes?)`
+  (`displayBandCodes`: `[CODE]` always, bare codes when named). The ladder, the drawer, the
+  popover, the party names and the resolved line's reasons use them; S12, S14 and S15 will too.
+- *Ages* are read and written with integer maths on the typed digits only (`bands.ageMonths`:
+  years → whole months, rounded half up as `ages.years_to_months`; `monthsToYears`: at most two
+  decimals that give the same months back, 36 → "3", 35 → "2.92"). Ages are not money (§3.14 (f));
+  nothing is computed in binary floating point.
+- *Ordinals:* `i18n.translateOrdinal` / `useTexT().tOrdinal(key, n)` pick the entry's form by
+  `Intl.PluralRules(locale, {type: "ordinal"})` (en one/two/few/other, ro one/other, the others
+  other), falling back to `other`; plural entries may now carry `two`.
+- *Strings:* 168 new keys in the six catalogues (`rates.occ.ladder.*`, `rates.occ.cell` states,
+  `rates.occ.read.*`, `rates.occ.pop.*`, `rates.occ.sum.*`, `rates.occ.party.*`, `rates.occ.h.*`,
+  `rates.bands.*` including `label_infant` / `label_child`, and `rates.combo.*` for the card
+  names S12 will reuse).
+
+**Deviations from the slice text, with reasons (S11).**
+1. *Files beyond the slice list:*
+   - `ui/overlay.tsx`, with a DOM harness check: the non-modal Drawer (deviation 2);
+   - `MatrixCell.tsx`: the `wrap` and `stack` view options, for the two-line missing and
+     override cells;
+   - `draftPreview.ts` and `useDraftPreview.ts`: the saved rooms guard and `SampleRequest`;
+   - `contracts/VersionEditor.tsx` and `contracts/tabs/shared.tsx`: the sample party must reach
+     the page's single `useDraftPreview` ("one matrix call per page", S8);
+   - `RuleEditorPopover.tsx`: the popover variant;
+   - `bands.ts` and `occupancy.ts`: the pure helpers;
+   - `tests/unit/bands.test.ts` and `draft-preview.test.ts`.
+2. *The drawer is not modal.* The slice says "Drawer md", and the existing Drawer is modal. §1.3
+   and S16 budget zero modal dialogs ("2 non-blocking drawers"), so `Drawer` gained
+   `modal={false}` instead. S14 can use it for the Price test drawer (S8 deviation 4).
+3. *ROOM basis: each included adult position is a row of its own* ("1st adult · included in the
+   room price (2 adults per room)"), not one "Adults included: 2 (per room)" row as in §3.6.2.
+   A rule stored for an included position stays visible, marked as having no effect: the
+   engine skips it, and it may have been entered under PERSON before a basis switch.
+4. *Engine defaults are shown in every cell* ("×1.00 default", the BASE pair "×1.00 each"). The
+   full sentence "×1.00 each (default) = 2 × base person price" is on the BASE row's header,
+   not one text across the period columns as in the §3.1 mock-up, because every column stays a
+   grid cell for the keyboard and for screen readers.
+5. *The version settings the region and the drawer edit are not in the undo history.* These are
+   `child_ordering`, the two ROOM-basis options, `age_basis` and the two child switches. They are
+   written with `setSetting`, as the Settings table does, and saved with Save; the history holds
+   tables only (§3.10). The drawer says so.
+6. *The resolved line prices the chosen party only*, one party per matrix call, instead of every
+   offered party (up to 12 are allowed): choosing another party asks again (the server's
+   figures: 0.24 s unsaved on the realistic contract, 0.29 s with 12 parties). The saved-draft
+   guard of deviation 1 is new behaviour.
+7. *Removing a band also removes the occupancy rules that name its code*, after an inline
+   confirmation with their count. The slice does not say; such rules could never apply again
+   (OCC_UNKNOWN_BAND).
+8. *The ladder has the matrix's editing model, not S10's bulk tools* (Fill, copy and paste,
+   Adjust…, header selection), which the slice does not ask for. Ctrl/Cmd+R and Ctrl/Cmd+D are
+   kept from the browser while a ladder cell has the focus and do nothing there.
+9. *The ⓘ note does not link to the combination card yet*: the cards are S12's. The tooltip and
+   the accessible name name the combinations.
+10. *Generated labels use the viewer's decimal mark* ("Kind 3–6,99" in German): §3.8 asks for the
+    editor's language, and the mark is part of it. They are saved as typed data.
+
+**Tests (S11).** `npm run test:unit` 226 (207 + 19):
+- `workspace-occupancy.test.ts` (+11): the ROOM ladder rows (included positions not editable,
+  extra adults and children priced from the per-person share or the room price, single use
+  from the room price, PERSON all from the person price); default cells carry the server's
+  value string (`"1.000000000"`, `"0.9"`, a child default if one were served); served inherited
+  rules read as ladder rules (and `policySource`); the summary; the scopes with rules;
+  `applyOccRule` (rooms × periods, Always wins and note, in place with twins dropped, unchanged,
+  Remove); `planOccEntries` all or nothing (AMBIGUOUS); `occReadingOf`; `occEditText` (FIXED
+  as `=25`); `combinationNotes` (periods, room scopes, Always wins, single use); `partyOptions`
+  / `defaultParty`;
+- `bands.test.ts` (+7): `ageMonths` / `monthsToYears` (round trip 0–216 months),
+  `nextBandFrom` / `defaultInfant`, inherited bands shown and customised (a label equal to the
+  code becomes the generated one), `addBand`, `updateBand` (generated labels follow, typed ones
+  stay, blank ones are written), `nameBands` / `removeBand`, `bandCoverage`;
+- `draft-preview.test.ts` (+1): the saved rooms guard.
+Fail-first: before the pure additions, both files failed to load (`SyntaxError: … does not
+provide an export named 'addBand'` / `'PARTY_OPTIONS_MAX'`); the draft-preview case failed on
+the unchanged `matrixRequest` (the party was sent for a room the saved draft does not hold).
+`npm run test:dom` 29 (28 + 1: the non-modal Drawer: no `aria-modal`, the page takes clicks
+beside it, Escape outside leaves it open, a Popover in it closes first, focus back to the
+opener).
+
+**Verification (S11).**
+- Frontend: `tsc -b`, `npm run build` and `npm run i18n:tex` (168 new keys in the six
+  catalogues), `npm run test:unit` 226/226, `npm run test:dom` 29/29.
+- Integration, migrated with this tree (S11 changes no server file):
+  `test_pricing_workspace_api` 50, `test_age_bands` 11 and `test_pricing_policies` 14, all OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186), a scratch Playwright spec 4/4
+  (S16 owns the committed workspace specs):
+  - (1–7) ×0.70 for all periods and ×0.80 in P4 give "◆ ×0.80 OVERRIDE", with the reading line
+    "3rd adult · All periods pays ×0.70 of the base person price";
+  - the 4th adult shows "×1.00 default";
+  - the drawer, which opens no `aria-modal` dialog, creates 2.99 / 6.99 / 11.99 with Enter. The
+    From fields pre-fill 0 / 3 / 7, the first band is an infant band, and "No gaps or overlaps"
+    is shown;
+  - the band rows show "No rule · not sellable", and no INF / CHA / CHB text is on the page;
+  - x0 / x0.25 / x0.5 go down the band rows with Enter;
+  - the resolved line for Standard with 2 adults + 1 child (Child 7–11.99) reads 175.00 /
+    200.00 / 250.00 / 325.00. `price_matrix` got `party_room` with children `["CHB"]`, and no
+    `save_version` was made;
+  - after Save, `get_version` shows INF "Infant 0–2.99" (infant), CHA "Child 3–6.99" and CHB
+    "Child 7–11.99", and the five rules;
+  - switching the unpublished contract to ROOM in the basis popover gives "Single use (1 adult)",
+    "Extra adult (3rd) · from the per-person share (room ÷ 2)", "1st adult: included", "Extra
+    adult (4th): ×1.00 default" and no "2 Adults" row, and the extra-adult unit select turns it
+    into "from the room price";
+  - (8) `#ages` opens the drawer. Two bands saved without names get the notice and are named by
+    "Name them"; the code is hidden until Advanced, and a rename cascades. The closed section
+    reads "Adults: 3rd ×0.70 | Children: Child 3–11.99 50% | 1 special combination".
+    `#occupancy` opens it, and the band's cells carry the ⓘ note naming "2 Adults + 2 Children";
+  - (9) Alt+Enter opens "Edit rule: 4th adult · P2". ×0.9 for Family Suite with Always wins
+    stays out of the All rooms scope and shows "◆ ×0.90 WINS OVERRIDE" in the Family Suite
+    scope (marked •); Ctrl+Z restores the default. `abc` stays as an error draft with the parser's
+    message, and Escape drops it;
+  - (10) a published version: the ladder is `aria-readonly` with no textbox and no "Edit rule:"
+    trigger, and the resolved line is priced from the frozen version (325.00 in P4) with no
+    `validate_version`. The drawer's fields are disabled, with no "Add age band". At 375 px the
+    page does not scroll sideways.
+- The existing editor specs run on the tree unchanged: `contract-admin`, `critical-journey`,
+  `editor-edits` (3), `entry-branding` (9; the two-factor case skipped as before) and
+  `policy-revisions`: 15 passed.
+
+**Performance after S11.** The ladder has at most a few dozen cells (positions up to the largest
+`max_adults`, bands, child positions) × the period columns. Its model (`ladderModel`, 2–3 ms at
+40 rooms × 40 periods with 480 rules, S6) and cell views are recomputed when the draft, the
+server's answer or the language change, and the cells are memoised as in the matrix. On the
+server, the open section adds one sample party to the page's `price_matrix` call (S3–S8
+figures: 0.24 s unsaved on the realistic contract, 0.29 s with 12 parties; one party costs
+less). No new endpoint and no new call kind.
+
+**O1–O5 after S11** (all five provisional, owner input 13):
+- *O5 (AMBIGUOUS)* now also covers the occupancy ladder and its popover: an amount (`=1.500`,
+  `+1.500`, FIXED) is refused in 0- and 2-decimal currencies and read as 1.5 in 3-decimal ones;
+  factors and percentages are exempt (unit test `planOccEntries`);
+- *O4* does not apply to the ladder: every relative occupancy entry is stored as a rule;
+- *O1–O3 (boards)* are unchanged; the board cells are S13's.
+
+**Open after S11.**
+- *S16 must carry the scratch scenarios (1–10 above) into the committed workspace specs*, with
+  S10's.
+- The ladder and the matrix scroll sideways separately; their period columns line up only while
+  neither is scrolled.
+- The ⓘ note's link to its card (S12). The ladder has no fill, copy and paste or Adjust….
+- The version settings of the region and the drawer are not undoable (deviation 5).
+- Still open from S10 (not changed by S11): the five low review items of the S10 verdict (a
+  Ctrl/Cmd+Click selection copied as its bounding block, the paste anchor on a resolved row,
+  WebKit copy/paste events, the focus after Adjust…, and the missing committed coverage of the
+  clipboard, shortcuts and Adjust…). Still open from S8 and S9: the modal Price test drawer until
+  S14, no server-side validation concurrency guard, the overlay skipping `_validate_links` and
+  the window order, the cross-hotel rate plan / policy gap in `build_terms`, a weekly contract
+  above the overlay's row cap not previewed unsaved, `Money` cutting resolved amounts, and
+  issues not anchored in cells (S15).

@@ -519,3 +519,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   is pasted. Ctrl/Cmd+R and Ctrl/Cmd+D typed in a cell no longer reload the page. The undo
   toast returns the focus to the grid. No server change; no area status changes. Verdict
   unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S11 on branch `pricing-workspace` (ADR-061): Occupancy &
+  child pricing under the room price matrix. Adult, single-use and child-band prices are typed
+  per period in one grid, which shows the engine's defaults ("×1.00 default"), children who
+  cannot be sold ("No rule · not sellable"), period overrides and the server's occupancy total
+  for a sample party. The child ages drawer does not block the page. It creates bands from the
+  last one's end and saves their labels, keeps codes under Advanced, and shows inherited bands
+  read-only until they are customised. Band codes are shown as labels. No server change; no area
+  status changes. O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
