@@ -138,21 +138,22 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
     history.apply(t("rates.bands.h.edit", { label: name }), (tb) => updateBand(tb, band._key, patch, gen))
   }
 
-  const onCommit = (item: Row | BandDraftState, isDraft: boolean, field: BandField, text: string, enter: boolean) => {
+  /** Commits a field; false when it is refused (a code in use or not a code: the text typed stays). */
+  const onCommit = (item: Row | BandDraftState, isDraft: boolean, field: BandField, text: string, enter: boolean): boolean => {
     if (isDraft) {
       const d = item as BandDraftState
       const next: BandDraftState =
         field === "label" ? { ...d, label: text, labelTouched: text.trim() !== "" } : field === "from" ? { ...d, from: text } : field === "to" ? { ...d, to: text } : d
       setDraft(next)
       if (field === "to" && text.trim()) commitDraft(next, enter)
-      return
+      return true
     }
     const band = item as Row
     if (field === "code") {
       const res = renameBandCode(history.current() ?? tables, str(band.band_code), text)
       if ("error" in res) {
         setCodeErrors((e) => ({ ...e, [band._key]: t(`rates.bands.err.${res.error}`) }))
-        return
+        return false
       }
       setCodeErrors((e) => {
         const n = { ...e }
@@ -163,7 +164,7 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
         const r = renameBandCode(tb, str(band.band_code), text)
         return "error" in r ? tb : r.tables
       })
-      return
+      return true
     }
     commitBand(band, field === "label" ? { label: text } : field === "from" ? { from_age: text } : { to_age: text })
     // Enter in the last band's Up to starts the next band
@@ -172,6 +173,7 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
       setDraft(n)
       focusNext.current = { key: n.key, field: "to" }
     }
+    return true
   }
 
   const remove = (band: Row, confirmed: boolean) => {
@@ -400,7 +402,11 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
 const gridCols = (codes: boolean) => (codes ? "grid-cols-[minmax(0,1fr)_4rem_4.5rem_2.5rem_4.5rem_2rem]" : "grid-cols-[minmax(0,1fr)_4rem_4.5rem_2.5rem_2rem]")
 
 /** A field that keeps what is typed and commits it on Enter or when it loses the focus. While it
- * does not have the focus it shows the stored value (an undo, another edit). */
+ * does not have the focus it shows the stored value (an undo, another edit); a commit the version
+ * takes shows what was stored at once, also when that is what the field showed before (a name
+ * cleared is stored as the generated one, a code upper-cased), so nothing typed is left behind to
+ * mark the field changed (S16 re-review 2). A commit refused (`onCommit` returns false: a code in
+ * use) keeps the typed text, which stays a change. */
 function CommitInput(p: {
   field: string
   label: string
@@ -409,15 +415,25 @@ function CommitInput(p: {
   decimal?: boolean
   disabled?: boolean
   invalid?: boolean
-  onCommit: (text: string, enter: boolean) => void
+  onCommit: (text: string, enter: boolean) => boolean | void
 }) {
   const [text, setText] = useState(p.value)
   const focused = useRef(false)
+  // bumped by a commit the version took: the next render shows the stored value
+  const [taken, setTaken] = useState(0)
+  const shown = useRef(0)
   useEffect(() => {
+    if (taken !== shown.current) {
+      shown.current = taken
+      setText(p.value)
+      return
+    }
     if (!focused.current) setText(p.value)
-  }, [p.value])
+  }, [p.value, taken])
   const commit = (enter: boolean) => {
-    if (text !== p.value || (enter && text !== "")) p.onCommit(text, enter)
+    if (text !== p.value || (enter && text !== "")) {
+      if (p.onCommit(text, enter) !== false) setTaken((n) => n + 1)
+    }
   }
   const common = {
     "data-band-field": p.field,
