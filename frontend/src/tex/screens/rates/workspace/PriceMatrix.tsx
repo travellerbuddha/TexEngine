@@ -187,6 +187,9 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     })
   const focusAt = (r: number, c: number) =>
     requestAnimationFrame(() => {
+      // an edit started before this frame (a key typed at once after Escape) keeps the focus: taking
+      // it would commit that edit's first keys on blur
+      if (editingRef.current) return
       gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
     })
 
@@ -418,7 +421,8 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
         return reading.replacesFixed ? t("rates.sh.read.replaces_fixed", { reading: s, amount: amount(reading.replacesFixed) }) : s
       }
       case "adjust":
-        return t("rates.sh.read.adjust", { cell: name, current: amount(reading.current), rule: opText(reading.op, reading.value) })
+        // "50%" (PERCENT_OF: 35.00 from 70.00) must not read like "+50%" (ADJUST_PERCENT: 105.00)
+        return t(reading.op === "PERCENT_OF" ? "rates.sh.read.adjust_pct" : "rates.sh.read.adjust", { cell: name, current: amount(reading.current), rule: opText(reading.op, reading.value) })
     }
   }
 
@@ -565,7 +569,9 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
         value: waiting === null ? view.value : amount(waiting),
       }
     }
-    const stateText = t(`rates.ws.state.${view.state}`)
+    const state = t(`rates.ws.state.${view.state}`)
+    // a resolved value older than the state on screen says so to a screen reader too (§3.3.3)
+    const stateText = resolved && stale ? t("rates.ws.cell.stale_state", { state }) : state
     return {
       cellId: resolved ? undefined : cellIdOf(cell),
       label: view.value ? t("rates.ws.cell.label", { cell: cellName(cell), state: stateText, value: view.value }) : t("rates.ws.cell.label_bare", { cell: cellName(cell), state: stateText }),

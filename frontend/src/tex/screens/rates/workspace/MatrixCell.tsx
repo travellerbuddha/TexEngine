@@ -242,7 +242,11 @@ export function CellEditor({ label, initialText, selectAll, readingFor, onKey, o
       <input
         ref={ref}
         type="text"
-        inputMode="decimal"
+        // the full keyboard: a phone's decimal keypad has no x, %, + or =, so a formula could not be
+        // typed into a cell there (§3.21 keeps single-cell editing on phones)
+        inputMode="text"
+        autoCapitalize="off"
+        autoCorrect="off"
         autoComplete="off"
         spellCheck={false}
         aria-label={label}
