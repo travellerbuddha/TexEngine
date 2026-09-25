@@ -25,3 +25,16 @@ export const TONE: Record<CellTone, string> = {
  * colour). */
 // outline-solid: the cell's outline-none sets the outline style Tailwind's outline-2 reads
 export const SELECTED = "aria-selected:bg-sky-50 aria-selected:outline-2 aria-selected:outline-solid aria-selected:-outline-offset-2 aria-selected:outline-tex-400"
+
+/** A resolved value that is not the state on screen's (S16 re-review): read in a muted but
+ * compliant ink, italic, instead of dimmed (55 % opacity composited to about 3.4:1). The ! wins over
+ * the tone's own text colour. */
+export const STALE = "italic text-zinc-600!"
+
+/** How a cell's accessible name says why its resolved value is not the state on screen's. */
+export const STALE_STATE = {
+  current: "rates.ws.cell.stale_state",
+  updating: "rates.ws.cell.stale_state",
+  failed: "rates.ws.cell.failed_state",
+  as_saved: "rates.ws.cell.saved_state",
+} as const

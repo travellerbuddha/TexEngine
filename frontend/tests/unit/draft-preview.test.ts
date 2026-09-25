@@ -16,6 +16,7 @@ import {
   previewMode,
   previewSource,
   pricesKey,
+  resolvedStatus,
   sampleKey,
   storedIssues,
   validateDelay,
@@ -336,4 +337,18 @@ test("the rooms' prices of an answer do not depend on the sample party (S11 revi
   assert.notEqual(pricesKey("overlay", { ...a, tick: 1 }), pricesKey("overlay", a), "a refresh")
   assert.notEqual(pricesKey("saved", { ...a, modified: "m2" }), pricesKey("saved", a), "a save")
   assert.equal(pricesKey("catalogue", a), "")
+})
+
+test("the resolved prices are updating only while this state's answer is on its way (S16 re-review)", () => {
+  const at = { key: "k2", forKey: "k1", stale: true, savedOnly: false }
+  assert.equal(resolvedStatus({ ...at, matrixState: "busy" }), "updating")
+  // the call failed: an older state's prices, and nothing on its way
+  assert.equal(resolvedStatus({ ...at, matrixState: "failed" }), "failed")
+  // above the overlay's cap with unsaved changes: the saved draft's prices until a save
+  assert.equal(resolvedStatus({ ...at, forKey: "base", matrixState: "ready", savedOnly: true }), "as_saved")
+  assert.equal(resolvedStatus({ ...at, forKey: "base", matrixState: "busy", savedOnly: true }), "updating")
+  // this state's prices, a refetch for another sample party or a failed refetch of the same state
+  for (const matrixState of ["ready", "busy", "failed"] as const) assert.equal(resolvedStatus({ key: "k2", forKey: "k2", stale: false, savedOnly: false, matrixState }), "current")
+  // no answer yet
+  assert.equal(resolvedStatus({ key: "k1", stale: true, savedOnly: false, matrixState: "busy" }), "updating")
 })

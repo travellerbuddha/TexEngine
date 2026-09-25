@@ -6,6 +6,7 @@ import { parseShorthand } from "../../src/tex/screens/rates/lib/shorthand.ts"
 import {
   applyOccEntry,
   applyOccRule,
+  applyOccRuleAs,
   builderCanEdit,
   builderFromCard,
   builderValueText,
@@ -1192,4 +1193,33 @@ test("an INHERIT twin is refused too: the engine skips one of the two, and they 
   const card = groupCombinations(forced).find((c) => c.combination === "2+2")
   assert.equal(card?.rules.length, 2)
   assert.equal(card?.expressible, false)
+})
+
+test("the rule popover adds a child position row, and switches single use to 'also when children travel' (§3.6.2, S16 re-review)", () => {
+  const t = example()
+  const cha = { target: "CHILD" as const, position: 0, age_band: "CHA", combination: "" }
+  const rule = { op: "MULTIPLY", value: "0.5", is_override: false, note: "" }
+  // "Child 2" on the CHA band row: a {CHILD, position 2, CHA} rule; the band's own rule stays
+  const out = applyOccRuleAs(t, cha, [""], [""], rule, { position: 2 })
+  const pos = out.occupancy_rules.filter((x) => x.target === "CHILD" && x.position === 2)
+  assert.deepEqual(pos.map((x) => [x.age_band, x.combination, x.op, x.value, x.period_code]), [["CHA", "", "MULTIPLY", "0.5", ""]])
+  assert.ok(out.occupancy_rules.some((x) => x.age_band === "CHA" && x.position === 0 && x.value === "0.25"))
+  // the ladder shows it as a position row under the bands
+  assert.deepEqual(kinds(ladderModel(out, null, "PERSON", OPTS)).slice(-1), ["child2"])
+  // position 0 ("every child in this band") is the band row's own rule
+  assert.deepEqual(applyOccRuleAs(t, cha, [""], [""], rule, { position: 0 }), applyOccRule(t, cha, [""], [""], rule))
+  // single use: the whole 1+0 combination switched to Adult 1 in 1+* for the cell written
+  const single = { target: "COMBINATION" as const, position: 0, age_band: "", combination: "1+0" }
+  const sw = applyOccRuleAs(t, single, [""], [""], { op: "MULTIPLY", value: "1.5", is_override: false, note: "" }, { single: "children" })
+  assert.deepEqual(sw.occupancy_rules.filter((x) => x.combination === "1+0"), [])
+  assert.deepEqual(sw.occupancy_rules.filter((x) => x.combination === "1+*").map((x) => [x.target, x.position, x.op, x.value]), [["ADULT", 1, "MULTIPLY", "1.5"]])
+  const m = ladderModel(sw, null, "PERSON", OPTS)
+  assert.deepEqual(m.rows[0].identity, { target: "ADULT", position: 1, age_band: "", combination: "1+*", room_type: "" })
+  // and back
+  const back = applyOccRuleAs(sw, m.rows[0].identity!, [""], [""], { op: "MULTIPLY", value: "1.4", is_override: false, note: "" }, { single: "whole" })
+  assert.deepEqual(back.occupancy_rules.filter((x) => x.combination === "1+*"), [])
+  assert.deepEqual(back.occupancy_rules.filter((x) => x.combination === "1+0").map((x) => [x.target, x.value]), [["COMBINATION", "1.4"]])
+  // the same form is the plain popover, and Remove never switches
+  assert.equal(applyOccRuleAs(t, single, [""], [""], { op: "MULTIPLY", value: "1.5", is_override: false, note: "" }, { single: "whole" }), t)
+  assert.deepEqual(applyOccRuleAs(t, single, [""], [""], null, { single: "children" }), applyOccRule(t, single, [""], [""], null))
 })

@@ -8,7 +8,9 @@
 // The occupancy ladder's variant (OccRulePopover, slice S11), named "Edit rule: {slot} · {period}":
 // the guest and age band are fixed by the row; the rule (the occupancy ops, FIXED and INHERIT
 // included), its value, the Rooms scope (all rooms, or chosen rooms: one row per room), "Always
-// wins (override)", a note and the periods it applies to.
+// wins (override)", a note and the periods it applies to. On a child band row it can name one child
+// position instead ("Child 2 · 7–11.99", a position row of its own), and on the single-use row
+// (PERSON basis) switch it to "also when children travel" (§3.6.2, S16 re-review).
 import { useMemo, useState, type RefObject } from "react"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, DECIMAL_PLACES, DecimalInput, Field, Input, Popover, Segmented, Select } from "../../../ui"
@@ -16,7 +18,7 @@ import { enumOptions } from "../lib/options"
 import { displayText, isAmountOp, normaliseDecimal, OPS_BY_CONTEXT, type ShOp } from "../lib/shorthand"
 import { ALL_PERIODS, isRelativeOp } from "./model.ts"
 import type { PopoverRule } from "./matrixView.ts"
-import type { OccRule } from "./occupancy.ts"
+import type { OccRule, SlotSwitch } from "./occupancy.ts"
 
 type AppliesTo = "this" | "all" | "selected"
 
@@ -182,11 +184,17 @@ export interface OccRulePopoverProps {
   initial: OccRule
   /** the cell has a row of its own (Remove is offered) */
   hasRule: boolean
-  /** the reading sentence of a rule for this row (no arithmetic) */
-  reading: (op: string, value: string, where: string) => string
+  /** the reading sentence of a rule for this row, or for the slot it is switched to (no arithmetic) */
+  reading: (op: string, value: string, where: string, to?: SlotSwitch) => string
+  /** a child band row: the child positions a rule may name instead (1…positions; 0 none) */
+  positions?: number
+  /** the single-use row that may switch form (PERSON basis): the form it has */
+  single?: "whole" | "children"
+  /** the guest's name for a switched slot ("Child 2 · Child 3–6.99") */
+  slotNameAs?: (to: SlotSwitch) => string
   minorUnits: number
   ccy: string
-  onApply: (rooms: string[], periods: string[], rule: OccRule | null) => void
+  onApply: (rooms: string[], periods: string[], rule: OccRule | null, to?: SlotSwitch) => void
 }
 
 /** The ladder cell's rule popover (§3.5): the op chosen is the op stored, one row per room and
@@ -201,6 +209,11 @@ export function OccRulePopover(p: OccRulePopoverProps) {
   const [chosen, setChosen] = useState<string[]>(() => (p.period ? [p.period] : []))
   const [roomsScope, setRoomsScope] = useState<RoomsScope>(p.scope ? "chosen" : "all")
   const [roomsChosen, setRoomsChosen] = useState<string[]>(() => (p.scope ? [p.scope] : []))
+  // a child position instead of the band row ("0" = every child in the band), the single-use form
+  const [position, setPosition] = useState("0")
+  const [single, setSingle] = useState(p.single)
+  const to: SlotSwitch | undefined = position !== "0" ? { position: Number(position) } : single && single !== p.single ? { single } : undefined
+  const slotName = to && p.slotNameAs ? p.slotNameAs(to) : p.slotName
   const opts = useMemo(() => enumOptions(t, "op", OPS_BY_CONTEXT.occupancy), [t])
   const inherit = op === "INHERIT"
   const allCell = p.period === ALL_PERIODS
@@ -212,12 +225,12 @@ export function OccRulePopover(p: OccRulePopoverProps) {
   const ready = (inherit || (checked?.ok ?? false)) && targets.length > 0 && rooms.length > 0
   const canon = checked?.ok ? checked.value : value
   const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.rates.all_periods") : targets.join(", ")
-  const reading = ready ? p.reading(op, inherit ? "" : canon, `${p.slotName} · ${where}`) : ""
+  const reading = ready ? p.reading(op, inherit ? "" : canon, `${slotName} · ${where}`, to) : ""
   const suffix = op === "ADJUST_PERCENT" || op === "PERCENT_OF" ? "%" : op === "MULTIPLY" ? "×" : p.ccy
 
   const apply = () => {
     if (!ready) return
-    p.onApply(rooms, targets, { op, value: inherit ? "" : canon, is_override: isOverride, note: note.trim() })
+    p.onApply(rooms, targets, { op, value: inherit ? "" : canon, is_override: isOverride, note: note.trim() }, to)
   }
 
   return (
@@ -236,6 +249,24 @@ export function OccRulePopover(p: OccRulePopoverProps) {
           <Field label={t("rates.f.value")} required error={valueError}>
             <DecimalInput value={value} onValueChange={setValue} decimals={DECIMAL_PLACES} allowNegative={op === "ADJUST_PERCENT"} suffix={suffix} />
           </Field>
+        )}
+        {(p.positions ?? 0) > 0 && (
+          <Field label={t("rates.occ.pop.position")} hint={t("rates.occ.pop.position_help")}>
+            <Select
+              value={position}
+              onChange={(e) => setPosition(e.target.value)}
+              options={[
+                { value: "0", label: t("rates.occ.pop.position_any") },
+                ...Array.from({ length: p.positions ?? 0 }, (_, i) => ({ value: String(i + 1), label: t("rates.occ.pop.position_n", { n: i + 1 }) })),
+              ]}
+            />
+          </Field>
+        )}
+        {p.single && (
+          <div className="space-y-0.5">
+            <Checkbox label={t("rates.occ.pop.single_children")} checked={single === "children"} onChange={(e) => setSingle(e.target.checked ? "children" : "whole")} />
+            <p className="pl-6 text-xs text-zinc-500">{t("rates.occ.pop.single_children_help")}</p>
+          </div>
         )}
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm font-medium text-zinc-800">{t("rates.occ.pop.rooms")}</legend>
@@ -276,7 +307,7 @@ export function OccRulePopover(p: OccRulePopoverProps) {
         </Field>
         {reading && <p className="rounded-md bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700">{reading}</p>}
         <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-          {p.hasRule && (
+          {p.hasRule && !to && (
             <Button variant="ghost" size="sm" className="mr-auto text-rose-700! hover:bg-rose-50!" onClick={() => p.onApply([p.scope], [p.period], null)}>
               {t("rates.rates.remove_rule")}
             </Button>

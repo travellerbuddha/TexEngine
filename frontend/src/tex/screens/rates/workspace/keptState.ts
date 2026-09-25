@@ -29,3 +29,11 @@ export function keptInput(store: KeptStore | null | undefined): boolean {
   }
   return false
 }
+
+/** Inputs on the page that hold typed text not committed to the version yet (S16 re-review): a grid's
+ * open cell editor, and the fields that commit on Enter or blur (the child-age band fields, a new
+ * period's inline dates) mark themselves `data-uncommitted` and, once their text differs from what
+ * is stored, `data-changed`; a base-room entry still waiting for the server's adjustment is marked
+ * the same way. Ctrl/Cmd+S commits such a field before the save reads the tables; the tab asks
+ * before it closes while one is there. */
+export const UNCOMMITTED_INPUT = "[data-cell-editor][data-changed], [data-uncommitted][data-changed]"

@@ -13,7 +13,7 @@ import type { ContractBundle, Issue, Row, VersionDoc, VersionSetting, VersionTab
 import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } from "../lib/util"
 import { effectiveBands } from "../workspace/bands.ts"
 import { ContextHeader } from "../workspace/ContextHeader"
-import { keptInput, type KeptStore } from "../workspace/keptState.ts"
+import { keptInput, UNCOMMITTED_INPUT, type KeptStore } from "../workspace/keptState.ts"
 import { anchorIssues, issueMessage, issuePlace } from "../workspace/issues.ts"
 import { PricingSection } from "../workspace/PricingSection"
 import type { ShowRequest, ShowTarget } from "../workspace/priceTest.ts"
@@ -175,7 +175,8 @@ export default function VersionEditor() {
 
   // Ctrl/Cmd+S saves (a cell editor commits its entry first, see onSave); warn before leaving with
   // unsaved edits, and with input that is not in the version yet: an error draft, an open
-  // combination builder, a changed cell editor (S16 review)
+  // combination builder, a changed cell editor (S16 review), a changed child-age band field or new
+  // period date, a base-room entry waiting for the server's adjustment (S16 re-review)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // by letter on every layout (Russian: Ctrl + the key marked S types "ы"; ui/keys.ts)
@@ -185,7 +186,7 @@ export default function VersionEditor() {
       }
     }
     const onUnload = (e: BeforeUnloadEvent) => {
-      if (dirty || keptInput(kept) || document.querySelector("[data-cell-editor][data-changed]")) e.preventDefault()
+      if (dirty || keptInput(kept) || document.querySelector(UNCOMMITTED_INPUT)) e.preventDefault()
     }
     window.addEventListener("keydown", onKey)
     window.addEventListener("beforeunload", onUnload)
@@ -436,9 +437,10 @@ export default function VersionEditor() {
       )}
 
       {/* non-modal (§3.13): the matrix beside it stays usable, and "Test this price" on another
-          cell starts it again there */}
+          cell starts it again there; on a desktop the page makes room for it (md, 28rem: at
+          1440 px the matrix keeps about 750 px beside it; S16 re-review) */}
       {props && testing && (
-        <Drawer open onClose={() => setTesting(null)} title={t("rates.ws.price_test")} width="lg" modal={false}>
+        <Drawer open onClose={() => setTesting(null)} title={t("rates.ws.price_test")} width="md" modal={false}>
           <PriceTestPanel {...props} layout="drawer" prefill={testing} />
         </Drawer>
       )}

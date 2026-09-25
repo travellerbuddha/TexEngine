@@ -116,6 +116,7 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
   }
   const baseRoom = baseRoomOf(tables) ?? ""
   const maxAdults = scope ? capOf(scope).max_adults : rooms.reduce((m, rt) => Math.max(m, capOf(rt).max_adults), 2)
+  const maxChildren = scope ? capOf(scope).max_children : rooms.reduce((m, rt) => Math.max(m, capOf(rt).max_children), 0)
   const includedAdults = basis === "ROOM" ? capOf(scope || baseRoom || rooms[0] || "").included_adults : 0
 
   // ─── bands, inherited rules, the ladder ─────────────────────────────────
@@ -357,6 +358,7 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
               anchored={props.anchored}
               issueText={props.issueText}
               issuesStale={props.issuesStale}
+              maxChildren={maxChildren}
             />
             <CombinationCards
               key={`combos:${props.epoch ?? 0}`}

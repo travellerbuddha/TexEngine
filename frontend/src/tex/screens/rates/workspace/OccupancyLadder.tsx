@@ -20,16 +20,20 @@ import {
   Badge,
   editorKeyAction,
   editShortcut,
+  focusHeaderLane,
+  headerLaneKeyDown,
   Money,
   revealElement,
   Select,
   useGridNavigation,
   useGridSelection,
   useScrollSyncRef,
+  useToast,
   type GridCell,
   type GridEditRequest,
 } from "../../../ui"
-import { sampleKey } from "./draftPreview.ts"
+import { useMatrixOnlyBulk } from "./useMatrixOnlyBulk"
+import { resolvedStatus, sampleKey } from "./draftPreview.ts"
 import type { DraftPreview } from "./useDraftPreview"
 import { parseShorthand } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
@@ -42,11 +46,12 @@ import { useKeptState } from "./useKeptState"
 import { columnTemplate, decimalMarkOf } from "./matrixView.ts"
 import { ALL_PERIODS, type Basis } from "./model.ts"
 import {
-  applyOccRule,
+  applyOccRuleAs,
   occEditText,
   occReadingOf,
   planOccEntries,
   policySource,
+  switchedSlot,
   type CombinationCard,
   type LadderCell,
   type LadderModel,
@@ -54,6 +59,7 @@ import {
   type OccEntryItem,
   type OccRule,
   type PartyOption,
+  type SlotSwitch,
 } from "./occupancy.ts"
 import { ladderCellId, type AnchoredIssues } from "./issues.ts"
 import { OccRulePopover } from "./RuleEditorPopover"
@@ -61,6 +67,8 @@ import { isSet, str } from "./rows.ts"
 import type { BandLabels } from "./useBandLabels"
 import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
+import type { LadderCellStateKey } from "./stateKeys.ts"
+import { STALE_STATE } from "./cellTone.ts"
 
 /** A ladder cell: a row of the model (by its id) and a period ("" = All periods). */
 interface LadderRef {
@@ -138,6 +146,8 @@ export interface OccupancyLadderProps {
   anchored?: AnchoredIssues
   issueText?: (issue: Issue) => string
   issuesStale?: boolean
+  /** the most children a room in scope holds: the child positions a band row's popover offers */
+  maxChildren?: number
 }
 
 export function OccupancyLadder(p: OccupancyLadderProps) {
@@ -194,6 +204,12 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     if (row.kind === "single" && row.identity?.target === "COMBINATION") return t("rates.occ.ladder.single_sub", { unit: unitWord(row) })
     return t("rates.occ.ladder.unit_sub", { unit: unitWord(row) })
   }
+  /** The row as the popover's switched slot names it (a child position, the other single-use form). */
+  const rowAs = (row: LadderRow, to?: SlotSwitch): LadderRow => {
+    if (!to || !row.identity) return row
+    const identity = { ...switchedSlot(row.identity, to), room_type: row.identity.room_type }
+    return "position" in to ? { ...row, kind: "child", position: identity.position, identity } : { ...row, identity }
+  }
   /** The reading sentence of a rule in this row (§3.4.1, §3.11): no arithmetic. */
   const ruleReading = (row: LadderRow, op: string, value: string, cell: string) => {
     const single = row.kind === "single" && row.identity?.target === "COMBINATION"
@@ -209,6 +225,9 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   // sideways in step with the other grids of the Pricing section (§3.1)
   const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
+  // copy, paste and the fills are the matrix's: here they say so (S16 re-review)
+  const matrixOnly = useMatrixOnlyBulk(gridEl)
+  const toast = useToast()
   // only requests made while mounted (a remount after Discard or a scope change does not replay one)
   const focused = useRef(p.focus?.n ?? 0)
   useEffect(() => {
@@ -419,6 +438,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       // reload or bookmark the page while a ladder cell has the focus
       e.preventDefault()
       if (shortcut === "undo" || shortcut === "redo") stepHistory(shortcut)
+      else matrixOnly()
       return true
     }
     const cell = cellAt(at.r, at.c)
@@ -433,7 +453,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       e.preventDefault()
       const label = cells.length === 1 ? t("rates.occ.h.clear", { cell: cellName(cells[0]) }) : t("rates.occ.h.clear_many", { count: cells.length })
       const res = commitItems(cells, "", label)
-      if (!res.ok) say(t("rates.ws.bulk_error", { cell: cellName(res.cell), error: errorText(res.code) }))
+      // a refusal is shown as the matrix shows it (a toast, announced), not only to screen readers
+      if (!res.ok) toast.error(t("rates.ws.bulk_error", { cell: cellName(res.cell), error: errorText(res.code) }))
       return true
     }
     if (e.key === "Escape" && cell && drafts[keyOf(cell)] && !selection.multiple) {
@@ -443,7 +464,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     }
   }
 
-  const nav = useGridNavigation({ rows: navRows, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey })
+  // one tab stop (§3.19): the sample party select is reached with ArrowLeft from the resolved line
+  const nav = useGridNavigation({ rows: navRows, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey, onEdge: (edge, cell) => focusHeaderLane(gridEl.current, edge, cell) })
   const setGrid = useCallback(
     (el: HTMLDivElement | null) => {
       gridEl.current = el
@@ -453,7 +475,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   )
 
   // ─── what each cell shows ──────────────────────────────────────────────
-  type View = { tone: CellTone; content: ReactNode; state: string; value?: string; tooltip?: string; error?: string; wrap?: boolean; stack?: boolean }
+  type View = { tone: CellTone; content: ReactNode; state: LadderCellStateKey; value?: string; tooltip?: string; error?: string; wrap?: boolean; stack?: boolean }
   const tag = (text: string) => <span className="ml-1 rounded bg-white/70 px-0.5 align-middle text-[9px] font-semibold tracking-wide uppercase">{text}</span>
 
   const ladderView = (row: LadderRow, period: string, cell: LadderCell): View => {
@@ -604,11 +626,14 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   // its answer comes, "—" when that call failed). An answer for this party about an older state
   // stays, dimmed, while the new one is on its way.
   const matrix = preview?.matrix
-  const stale = Boolean(preview && (preview.stale || preview.forKey !== preview.key))
+  // what the resolved line is against the state on screen (S16 re-review; as in the matrix)
+  const status = preview ? resolvedStatus(preview) : "current"
+  const stale = status !== "current"
   const wanted = p.party && p.partyRoom ? sampleKey([{ adults: p.party.adults, children: p.party.children }], p.partyRoom) : ""
   const partyCell = wanted && preview?.partiesFor === wanted ? matrix?.party_cells?.[0] : undefined
   const matrixState = preview?.matrixState
-  const partyPending = showResolved && (stale || (!partyCell && matrixState === "busy"))
+  // a spinner only while a call is in flight: for other prices, or for this party
+  const partyPending = showResolved && Boolean(preview?.loading) && (status === "updating" || !partyCell)
   const allCodes = useMemo(() => labels.bands.map((b) => str(b.band_code ?? b.code).toUpperCase()).filter(Boolean), [labels.bands])
 
   const resolvedView = (period: string): View => {
@@ -635,7 +660,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       if (matrixState === "failed") return { tone: "resolved", content: "—", state: "failed", tooltip: t("rates.occ.ladder.party_failed") }
       // the answer for the state on screen priced no party: it is about the saved draft (a clean
       // draft, above the overlay's cap, a published version), which does not hold this room
-      if (matrix && matrixState === "ready" && !stale) return { tone: "resolved", content: "—", state: "no_party", tooltip: t("rates.occ.ladder.party_unsaved") }
+      if (matrix && matrixState === "ready" && status !== "updating") return { tone: "resolved", content: "—", state: "no_party", tooltip: t("rates.occ.ladder.party_unsaved") }
       return { tone: "resolved", content: "…", state: "loading" }
     }
     const v = partyCell.cells?.[period]
@@ -690,7 +715,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       }
     }
     const state = t(`rates.occ.state.${view.state}`)
-    const stateText = resolved && stale ? t("rates.ws.cell.stale_state", { state }) : state
+    const stateText = resolved && stale ? t(STALE_STATE[status], { state }) : state
     const value = [view.value, note].filter(Boolean).join(" · ")
     const cellId = ref ? ladderCellId(ref.row, ref.period, p.scope) : undefined
     return {
@@ -719,7 +744,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     () => Array.from({ length: navRows }, (_, r) => cols.map((period, c) => cellView(r, period, c))),
     // everything cellView reads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, cols, navRows, model, tables, drafts, canEdit, t, tOrdinal, decimalMark, minorUnits, doc.status, ccy, labels, p.notes, p.cards, partyCell, stale, matrix, matrixState, p.partyRoom, p.scope, basis, issueAt],
+    [rows, cols, navRows, model, tables, drafts, canEdit, t, tOrdinal, decimalMark, minorUnits, doc.status, ccy, labels, p.notes, p.cards, partyCell, stale, status, matrix, matrixState, p.partyRoom, p.scope, basis, issueAt],
   )
   const selectedKey = (r: number) => {
     let out = ""
@@ -786,6 +811,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
           aria-readonly={readOnly || undefined}
           aria-multiselectable
           ref={setGrid}
+          onKeyDownCapture={(e) => void headerLaneKeyDown(e, gridEl.current, nav.focusCell, { rows: navRows, cols: cols.length })}
           className="w-max min-w-full text-sm"
         >
           <div role="row" className="sticky top-0 z-[2] grid bg-white" style={{ gridTemplateColumns: template }}>
@@ -837,6 +863,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
                 <span className="truncate text-[12px] font-medium text-zinc-700">{t("rates.occ.ladder.resolved", { room: p.roomName(p.partyRoom) })}</span>
                 <Select
                   aria-label={t("rates.occ.ladder.party")}
+                  tabIndex={navRows > 0 && cols.length > 0 ? -1 : 0}
+                  data-lane-rows={String(rows.length)}
                   value={p.party.id}
                   className="h-7! py-0! text-xs!"
                   options={p.parties.map((x) => ({ value: x.id, label: p.partyName(x) }))}
@@ -897,13 +925,19 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
               scope={p.scope}
               initial={pop.initial}
               hasRule={Boolean(row.cells[cell.period]?.rule)}
-              reading={(op, value, where) => ruleReading(row, op, value, where)}
+              reading={(op, value, where, to) => ruleReading(rowAs(row, to), op, value, where)}
+              // §3.6.2: a band row's rule for one child position (a position row of its own), and the
+              // single-use row's "also when children travel" form (PERSON basis: under ROOM the
+              // included adult 1 takes no rule)
+              positions={row.kind === "band" ? p.maxChildren : 0}
+              single={row.kind === "single" && basis === "PERSON" ? (row.identity.target === "ADULT" ? "children" : "whole") : undefined}
+              slotNameAs={(to) => slotName(rowAs(row, to))}
               minorUnits={minorUnits}
               ccy={ccy}
-              onApply={(rooms, periods, rule) => {
+              onApply={(rooms, periods, rule, to) => {
                 dropDrafts(periods.map((period) => ({ row: cell.row, period })))
-                const label = rule ? t("rates.occ.h.rule", { cell: cellName(cell) }) : t("rates.occ.h.clear", { cell: cellName(cell) })
-                history.apply(label, (tb) => applyOccRule(tb, slot, rooms, periods, rule))
+                const label = rule ? t("rates.occ.h.rule", { cell: to ? `${slotName(rowAs(row, to))} · ${periodName(cell.period)}` : cellName(cell) }) : t("rates.occ.h.clear", { cell: cellName(cell) })
+                history.apply(label, (tb) => applyOccRuleAs(tb, slot, rooms, periods, rule, to))
                 setPop(null)
                 refocus(cell)
               }}

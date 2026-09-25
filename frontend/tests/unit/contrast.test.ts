@@ -7,7 +7,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readdirSync, readFileSync } from "node:fs"
-import { SELECTED, TONE } from "../../src/tex/screens/rates/workspace/cellTone.ts"
+import { SELECTED, STALE, TONE } from "../../src/tex/screens/rates/workspace/cellTone.ts"
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8")
 const TAILWIND = read("../../node_modules/tailwindcss/theme.css")
@@ -116,6 +116,15 @@ test("the workspace's other state texts and the selection outline", () => {
   assertContrast(outline, "white", 3, "the selection outline on a cell")
   assertContrast(outline, "sky-50", 3, "the selection outline on the selection tint")
   assertContrast(outline, "amber-50", 3, "the selection outline on an override cell")
+})
+
+test("a stale resolved value reads at 4.5:1: a muted ink, not dimmed (S16 re-review)", () => {
+  // opacity-55 over zinc-800 on zinc-50 composited to about 3.4:1, and "updating" could last
+  assert.ok(!/opacity/.test(STALE), "a stale cell is not dimmed with opacity")
+  const fg = /(?:^|\s)text-([a-z]+-[0-9]+)!?(?=\s|$)/.exec(STALE)?.[1]
+  assert.ok(fg, "a stale cell has its own text colour")
+  const bg = /(?:^|\s)bg-([a-z]+-[0-9]+)(?=\s|$)/.exec(TONE.resolved)?.[1] ?? "white"
+  assertContrast(fg, bg, 4.5, "a stale resolved cell")
 })
 
 // a text or background shade the dark theme does not remap keeps its light value there

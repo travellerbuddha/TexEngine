@@ -13,7 +13,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Trash2, X } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
-import { Button, DecimalInput, Drawer, Field, IconButton, Input, Notice, Select, Switch } from "../../../ui"
+import { Button, DecimalInput, Drawer, Field, IconButton, Input, isSaveShortcut, Notice, Select, Switch } from "../../../ui"
 import { newKey } from "../lib/keys"
 import { AGE_BASIS, enumOptions } from "../lib/options"
 import type { EditorState } from "../lib/tables"
@@ -421,6 +421,10 @@ function CommitInput(p: {
   }
   const common = {
     "data-band-field": p.field,
+    // typed text not in the version yet (keptState.UNCOMMITTED_INPUT): Ctrl/Cmd+S commits it first,
+    // and the tab asks before it closes (S16 re-review)
+    "data-uncommitted": "",
+    "data-changed": text !== p.value ? "" : undefined,
     "aria-label": p.label,
     "aria-invalid": p.invalid || undefined,
     disabled: p.disabled,
@@ -433,6 +437,9 @@ function CommitInput(p: {
       commit(false)
     },
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+      // Ctrl/Cmd+S: commit what is typed; the version editor's save (a window listener, after
+      // this) then sends it
+      if (isSaveShortcut(e)) return commit(false)
       if (e.key !== "Enter") return
       e.preventDefault()
       commit(true)

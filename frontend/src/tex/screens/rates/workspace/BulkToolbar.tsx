@@ -95,6 +95,7 @@ const SHORTCUTS = [
   "extend",
   "add",
   "header",
+  "header_range",
   "select_all",
   "clear_selection",
   "edit",

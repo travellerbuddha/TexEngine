@@ -334,6 +334,11 @@ function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, s
               {live ? t("rates.pt.updating") : t("rates.pt.stale")}
             </p>
           )}
+          {/* a short summary for assistive tech; the result below is not a live region (a re-price
+              would queue every changed line of the ladder and the tables) */}
+          <p role="status" className="sr-only">
+            {res.sellable ? t("rates.pt.announce_total", { total: money(res.totals?.total ?? "", res.currency ?? "") }) : t("rates.preview.unsellable")}
+          </p>
           <PreviewResultView res={res} canCost={canCost} layout={layout} doc={doc} state={state} preview={preview} showInGrid={showInGrid} />
         </div>
       )}
@@ -362,7 +367,10 @@ function PreviewResultView({
   const ccy = res.currency ?? ""
   const contractCcy = res.contract?.currency ?? ccy
   const nights = res.nights ?? []
-  const [night, setNight] = useState<string>(nights[0]?.date ?? "")
+  // All nights by default; a night picked for an earlier result that this one does not have (other
+  // dates, Live, another Test this price) is All nights again, not a filter that hides every step
+  const [picked, setNight] = useState("")
+  const night = nights.some((n) => n.date === picked) ? picked : ""
   const steps = useMemo(() => (res.explanation ?? []).filter((s) => !s.night || !night || s.night === night), [res.explanation, night])
   // band codes are shown as labels everywhere (D13): the draft's bands, else the inherited ones
   const bands = useMemo(() => effectiveBands(state.tables, preview?.matrix?.age_bands), [state.tables, preview?.matrix?.age_bands])
@@ -396,7 +404,7 @@ function PreviewResultView({
 
   const tot = res.totals ?? {}
   return (
-    <div className="space-y-5" aria-live="polite">
+    <div className="space-y-5">
       <div className={cn("grid gap-5", page && "lg:grid-cols-3")}>
         <Card className={page ? "lg:col-span-2" : undefined}>
           <CardHeader

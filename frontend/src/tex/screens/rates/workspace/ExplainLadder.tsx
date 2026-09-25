@@ -108,9 +108,11 @@ export interface ExplainLadderViewProps {
 export function ExplainLadderView({ res, stepText, periods, minorUnits, sellMinorUnits }: ExplainLadderViewProps) {
   const { t } = useTexT()
   const ladder = useMemo(() => explainLadder(res), [res])
-  const [night, setNight] = useState("")
+  const [picked, setNight] = useState("")
   const titleId = useId()
   const nights = res.nights ?? []
+  // a night picked for an earlier result that this one does not have is All nights again (S16 re-review)
+  const night = nights.some((n) => n.date === picked) ? picked : ""
   const sellCcy = res.currency ?? ""
   const contractCcy = res.contract?.currency ?? sellCcy
   const two = contractCcy !== sellCcy

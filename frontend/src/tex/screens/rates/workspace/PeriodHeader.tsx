@@ -9,11 +9,11 @@ import { AlertOctagon, AlertTriangle, ArrowLeft, ArrowRight, CalendarRange, Copy
 import { cn } from "../../../../lib/utils"
 import { date as fmtDate } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, Field, FormGrid, Input, Menu, MenuItem, MenuSeparator, Notice, Popover, useTooltip } from "../../../ui"
+import { Badge, Button, Field, FormGrid, Input, isSaveShortcut, Menu, MenuItem, MenuSeparator, Notice, Popover, useTooltip } from "../../../ui"
 import { WeekdayPicker } from "../components/pickers"
 import { displayText, type ShOp } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
-import { splitCsv } from "../lib/util"
+import { splitCsv, WEEKDAY_CODES, weekdayName } from "../lib/util"
 import type { MatrixPeriod } from "./model.ts"
 import { parsePeriodAdjust, periodAdjustEditText, setPeriodAdjustment, setPeriodFields } from "./matrixView.ts"
 import { addPeriod, copyPreviousPeriod, deletePeriod, duplicatePeriod, isoDay, isoOfDay, movePeriod, periodDependents, renamePeriod } from "./periods.ts"
@@ -38,7 +38,9 @@ export interface PeriodHeaderProps {
   minorUnits: number
   /** selecting the column's editable cells (header click, the menu's "Select prices"); the
    * column's index in the grid is `index + 1` (All periods is column 0) */
-  onSelect?: (c: number, add: boolean) => void
+  onSelect?: (c: number, add: boolean, extend?: boolean) => void
+  /** the menu button's tabIndex in the grid's header lane (ui/grid.ts; -1 while the grid has a cell) */
+  laneTab?: number
   /** validation issues about the period itself (PERIOD_RANGE, PERIOD_OVERLAP, PERIOD_DUPLICATE;
    * S15): a glyph, the messages in the header's description; the header can then take the focus */
   issue?: CellIssue
@@ -110,7 +112,7 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
   const adjust = period.adjusted ? p.tables.periods.find((x) => str(x.period_code) === code) : undefined
   const adjustText = adjust ? displayText(str(adjust.adjustment_op) as ShOp, str(adjust.adjustment_value), "period_adjust", { decimalMark: p.decimalMark }) : ""
   const weekdays = splitCsv(period.weekdays)
-  const select = p.onSelect ? (add: boolean) => p.onSelect?.(p.index + 1, add) : undefined
+  const select = p.onSelect ? (add: boolean, extend = false) => p.onSelect?.(p.index + 1, add, extend) : undefined
   const issueId = useId()
   const issue = p.issue
   const IssueIcon = issue?.level === "ERROR" ? AlertOctagon : AlertTriangle
@@ -158,7 +160,13 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
         )}
         {!p.readOnly && (
           <span ref={wrap} className="ml-auto shrink-0">
-            <Menu label={t("rates.ws.period.menu", { period: code })} icon={<MoreHorizontal className="size-4" aria-hidden />} size="sm" className="size-6!">
+            <Menu
+              label={t("rates.ws.period.menu", { period: code })}
+              icon={<MoreHorizontal className="size-4" aria-hidden />}
+              size="sm"
+              className="size-6!"
+              buttonProps={{ tabIndex: p.laneTab ?? -1, "data-lane-col": String(p.index + 1) }}
+            >
               {select && (
                 <>
                   <MenuItem icon={<SquareDashedMousePointer className="size-4" />} onSelect={() => select(false)}>
@@ -235,7 +243,7 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
       ) : (
         <span className="truncate text-[11px] text-zinc-500 tabular-nums">{compactRange(period.start, period.end, locale) || t("rates.ws.period.no_dates")}</span>
       )}
-      {weekdays.length > 0 && <span className="truncate text-[10px] text-zinc-500">{t("rates.periods.only_days", { days: weekdays.join(", ") })}</span>}
+      {weekdays.length > 0 && <span className="truncate text-[10px] text-zinc-500">{t("rates.periods.only_days", { days: weekdays.map(dayName).join(", ") })}</span>}
 
       {open === "rename" && <RenamePopover {...p} anchor={anchor} onClose={close} nameFirst={nameFirst} />}
       {open === "dates" && <DatesPopover {...p} anchor={anchor} onClose={close} />}
@@ -244,6 +252,12 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
       {tip.tooltip}
     </div>
   )
+}
+
+/** A stored weekday code ("Fri") in the viewer's language, as the periods table shows it. */
+const dayName = (code: string) => {
+  const i = WEEKDAY_CODES.findIndex((c) => c.toLowerCase() === code.slice(0, 3).toLowerCase())
+  return i < 0 ? code : weekdayName(i)
 }
 
 /** The inline dates of a column just added: the end date is focused; Enter or leaving the field
@@ -271,7 +285,9 @@ function FreshDates(p: PeriodHeaderProps) {
     p.onFreshDone()
   }
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+    // Ctrl/Cmd+S commits the dates first; the version editor's save then sends them (S16 re-review)
+    if (isSaveShortcut(e)) finish(true)
+    else if (e.key === "Enter") {
       e.preventDefault()
       finish(true)
     } else if (e.key === "Escape") {
@@ -280,9 +296,13 @@ function FreshDates(p: PeriodHeaderProps) {
       finish(false)
     }
   }
+  // typed dates not in the version yet (keptState.UNCOMMITTED_INPUT): the tab asks before it closes
+  const changed = start !== period.start || end !== period.end
   return (
     <span
       className="flex flex-col gap-0.5"
+      data-uncommitted=""
+      data-changed={changed ? "" : undefined}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) finish(true)
       }}
@@ -504,7 +524,7 @@ function PopActions({ onCancel, disabled }: { onCancel: () => void; disabled?: b
 
 /** The "+ Period" column header: adds a period after the last one (next free code, the day after
  * the last period ends, as long as it) and hands its end date to the header for inline editing. */
-export function AddPeriodHeader({ readOnly, edit, onAdded }: { readOnly: boolean; edit: Edit; onAdded: (code: string) => void }) {
+export function AddPeriodHeader({ readOnly, edit, onAdded, col, laneTab = -1 }: { readOnly: boolean; edit: Edit; onAdded: (code: string) => void; col?: number; laneTab?: number }) {
   const { t } = useTexT()
   return (
     <div role="columnheader" className="flex items-end border-b border-zinc-200 bg-white px-1.5 py-1.5">
@@ -514,6 +534,8 @@ export function AddPeriodHeader({ readOnly, edit, onAdded }: { readOnly: boolean
           size="sm"
           aria-label={t("rates.periods.add")}
           data-add-period=""
+          data-lane-col={col === undefined ? undefined : String(col)}
+          tabIndex={laneTab}
           icon={<Plus className="size-4" aria-hidden />}
           onClick={() => {
             let code = ""

@@ -17,14 +17,15 @@ import { int, str } from "./rows.ts"
 export type Edit = (label: string, fn: (tables: Tables) => Tables) => boolean
 
 /** A click on a row or column header selects its editable cells (§3.10; Ctrl/Cmd adds them to the
- * selection), unless it is on the header's own controls (its menu, a popover portaled from it, an
- * input). The mousedown's default is prevented, so no text is selected. */
-export function headerPick(e: MouseEvent<HTMLElement>, pick?: (add: boolean) => void) {
+ * selection, Shift extends it to every row or column from the last one picked, §3.9), unless it is
+ * on the header's own controls (its menu, a popover portaled from it, an input). The mousedown's
+ * default is prevented, so no text is selected. */
+export function headerPick(e: MouseEvent<HTMLElement>, pick?: (add: boolean, extend: boolean) => void) {
   if (!pick || e.button !== 0) return
   const target = e.target as HTMLElement
   if (!e.currentTarget.contains(target) || target.closest('button,input,select,textarea,a,label,[role="menu"],[role="dialog"]')) return
   e.preventDefault()
-  pick(e.metaKey || e.ctrlKey)
+  pick(e.metaKey || e.ctrlKey, e.shiftKey)
 }
 
 export interface RoomRowHeaderProps {
@@ -46,7 +47,11 @@ export interface RoomRowHeaderProps {
   /** the row's index in the grid, and selecting its editable cells (header click, the menu's
    * "Select prices"); absent on a resolved row */
   r?: number
-  onSelect?: (r: number, add: boolean) => void
+  onSelect?: (r: number, add: boolean, extend?: boolean) => void
+  /** the grid rows the room stands for ("0 1"), and the menu button's tabIndex: the grid's header
+   * lane (ui/grid.ts; -1 while the grid has a cell to Tab to) */
+  laneRows?: string
+  laneTab?: number
   /** the room was removed (its header, menu and confirmation are gone): the matrix moves the focus
    * to the nearest cell left (S16 review) */
   onRemoved?: (roomIndex: number) => void
@@ -75,7 +80,7 @@ function RoomRowHeaderImpl(p: RoomRowHeaderProps) {
   const name = p.roomName(room.room_type)
   const isBase = room.role === "base"
   const close = () => setOpen(null)
-  const select = p.onSelect && p.r !== undefined ? (add: boolean) => p.onSelect?.(p.r as number, add) : undefined
+  const select = p.onSelect && p.r !== undefined ? (add: boolean, extend = false) => p.onSelect?.(p.r as number, add, extend) : undefined
 
   return (
     <div
@@ -94,7 +99,13 @@ function RoomRowHeaderImpl(p: RoomRowHeaderProps) {
           {isBase && <span className="shrink-0 rounded bg-tex-50 px-1 text-[10px] font-semibold text-tex-700 ring-1 ring-tex-200 ring-inset">{t("rates.ws.room.base")}</span>}
           {!p.readOnly && (
             <span ref={wrap} className="ml-auto shrink-0">
-              <Menu label={t("rates.ws.room.menu", { room: name })} icon={<MoreHorizontal className="size-4" aria-hidden />} size="sm" className="size-6!">
+              <Menu
+                label={t("rates.ws.room.menu", { room: name })}
+                icon={<MoreHorizontal className="size-4" aria-hidden />}
+                size="sm"
+                className="size-6!"
+                buttonProps={{ tabIndex: p.laneTab ?? -1, "data-lane-rows": p.laneRows }}
+              >
                 {select && (
                   <>
                     <MenuItem icon={<SquareDashedMousePointer className="size-4" />} onSelect={() => select(false)}>

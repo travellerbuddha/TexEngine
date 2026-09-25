@@ -212,6 +212,22 @@ export function callState(p: CallInput): CallState {
   return p.answered === p.key ? "ready" : "busy"
 }
 
+/** What the resolved prices on screen are against the state on screen (S16 re-review):
+ * - current: they are this state's (or only the sample parties are being asked again);
+ * - updating: this state's answer is on its way (in flight, or asked for after the pause);
+ * - failed: this state's call failed: the prices shown are an older state's, and nothing is on its
+ *   way (not "updating" for ever);
+ * - as_saved: above the overlay's row cap with unsaved changes, they are the saved draft's until a
+ *   save (not "updating" either). */
+export type ResolvedStatus = "current" | "updating" | "failed" | "as_saved"
+
+export function resolvedStatus(p: { key: string; forKey?: string; stale: boolean; matrixState: CallState; savedOnly: boolean }): ResolvedStatus {
+  if (!p.stale && p.forKey === p.key) return "current"
+  if (p.matrixState === "failed") return "failed"
+  if (p.matrixState === "busy") return "updating"
+  return p.savedOnly ? "as_saved" : "current"
+}
+
 const isIssue = (x: unknown): x is Issue => {
   if (!x || typeof x !== "object") return false
   const i = x as Record<string, unknown>

@@ -17,6 +17,8 @@
 // "board:{board}|{room}|{period}" for anchoring (S15) and "Show in grid" (S14).
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { AlertTriangle, ChevronDown, ChevronRight, SlidersHorizontal, X } from "lucide-react"
+import { useMatrixOnlyBulk } from "./useMatrixOnlyBulk"
+import { AddMenu } from "./AddMenu"
 import { cn } from "../../../../lib/utils"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -28,6 +30,8 @@ import {
   editorKeyAction,
   editShortcut,
   Field,
+  focusHeaderLane,
+  headerLaneKeyDown,
   IconButton,
   Input,
   Notice,
@@ -37,6 +41,7 @@ import {
   useGridNavigation,
   useGridSelection,
   useScrollSyncRef,
+  useToast,
   type GridCell,
   type GridEditRequest,
 } from "../../../ui"
@@ -74,6 +79,7 @@ import { isSet, str } from "./rows.ts"
 import type { PricingRegion } from "./sections.ts"
 import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
+import type { BoardCellStateKey } from "./stateKeys.ts"
 
 const OPEN_KEY = "tex.rates.ws.boards_open"
 
@@ -173,7 +179,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const titleId = useId()
   const bodyId = useId()
   const sectionRef = useRef<HTMLElement>(null)
-  const addRef = useRef<HTMLSelectElement>(null)
+  const addRef = useRef<HTMLSpanElement>(null)
+  const focusAdd = () => addRef.current?.querySelector<HTMLElement>("button")?.focus()
 
   // ─── open / closed, #boards ─────────────────────────────────────────────
   const [open, setOpenState] = useState(() => readOpen(tables.boards.length === 0))
@@ -234,6 +241,9 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   // sideways in step with the other grids of the Pricing section (§3.1)
   const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
+  // copy, paste and the fills are the matrix's: here they say so (S16 re-review)
+  const matrixOnly = useMatrixOnlyBulk(gridEl)
+  const toast = useToast()
   // "Show in grid" (S14): the section opens, then the board cell of the rule is focused
   const { show, onShown } = props
   const [reveal, setReveal] = useState<string | null>(null)
@@ -445,6 +455,13 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
         if (!row || row.pending || !anchor) return
         closing.current = true
         setEditing(null)
+        // what is typed is committed first, as Enter commits it (or kept as the cell's error draft,
+        // as a blur keeps it): the terms popover is about the row, not this entry (S16 re-review)
+        if (drafts[keyOf(cell)] || text !== editTextOf(cell)) {
+          const res = commitText([cell], text)
+          if (res.ok && res.asked) return // the removal's confirmation takes the focus
+          if (!res.ok) setDrafts((d) => ({ ...d, [keyOf(res.cell)]: { text, code: res.code } }))
+        }
         openTerms(row, anchor)
         return
       }
@@ -489,6 +506,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       // bookmark the page while a boards cell has the focus
       e.preventDefault()
       if (shortcut === "undo" || shortcut === "redo") stepHistory(shortcut)
+      else matrixOnly()
       return true
     }
     const cell = cellAt(at.r, at.c)
@@ -504,7 +522,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       e.preventDefault()
       const label = cells.length === 1 ? t("rates.brd.h.clear", { cell: cellName(cells[0]) }) : t("rates.brd.h.clear_many", { count: cells.length })
       const res = commitItems(cells, "", label)
-      if (!res.ok) say(t("rates.ws.bulk_error", { cell: cellName(res.cell), error: errorText(res.code) }))
+      // a refusal is shown as the matrix shows it (a toast, announced), not only to screen readers
+      if (!res.ok) toast.error(t("rates.ws.bulk_error", { cell: cellName(res.cell), error: errorText(res.code) }))
       return true
     }
     if (e.key === "Escape" && cell && drafts[keyOf(cell)] && !selection.multiple) {
@@ -514,7 +533,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     }
   }
 
-  const nav = useGridNavigation({ rows: rows.length, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey })
+  // one tab stop (§3.19): a row's terms (or discard) button is reached with ArrowLeft from its first cell
+  const nav = useGridNavigation({ rows: rows.length, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey, onEdge: (edge, cell) => focusHeaderLane(gridEl.current, edge, cell) })
   const setGrid = useCallback(
     (el: HTMLDivElement | null) => {
       gridEl.current = el
@@ -541,7 +561,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     if (!focusNext) return
     setFocusNext(null)
     if (!rows.length) {
-      addRef.current?.focus()
+      focusAdd()
       return
     }
     const at = focusNext === "active" ? nav.active : positionOf(focusNext)
@@ -551,7 +571,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   }, [focusNext, rows])
 
   // ─── what each cell shows ──────────────────────────────────────────────
-  type View = { tone: CellTone; content: ReactNode; state: string; value?: string; tooltip?: string; error?: string; stack?: boolean }
+  type View = { tone: CellTone; content: ReactNode; state: BoardCellStateKey; value?: string; tooltip?: string; error?: string; stack?: boolean }
   const unitLine = (text: string) => <span className="max-w-full truncate text-[10px] leading-tight opacity-80">{text}</span>
 
   const boardView = (row: BoardRow, period: string, cell: BoardCell): View => {
@@ -578,7 +598,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
         }
       }
       const v = str(own.adult_amount)
-      if (!v) return { tone: "missing", content: "—", state: "no_value", value: t("rates.brd.cell.no_value"), tooltip: `${applies} ${t("rates.brd.cell.no_value_tip", { board: row.board })}` }
+      if (!v) return { tone: "missing", content: "—", state: "no_value", value: t("rates.brd.cell.no_value"), tooltip: `${applies} ${t("rates.brd.cell.no_value_tip", { board: boardName(row.board) })}` }
       const op = str(own.op)
       const short = ruleShort(op, v)
       return {
@@ -604,7 +624,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       return { tone: "muted", content: `↳ ${text}`, state: "inherited", value: `${ruleWords(src)} (${sourceName(src)})`, tooltip: `${applies} ${t("rates.brd.cell.follows", { source: sourceName(src) })}` }
     }
     if (row.pending) return { tone: "muted", content: "—", state: "pending", tooltip: t("rates.brd.cell.pending_tip") }
-    return { tone: "muted", content: "—", state: "empty", tooltip: t("rates.brd.cell.none_tip", { board: row.board, rooms, period: periodName(period) }) }
+    return { tone: "muted", content: "—", state: "empty", tooltip: t("rates.brd.cell.none_tip", { board: boardName(row.board), rooms, period: periodName(period) }) }
   }
 
   const draftView = (draft: Draft): View => {
@@ -684,19 +704,19 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
         return { text: t("rates.brd.read.remove_board", { board: boardName(row.board), count: reading.rows }), invalid: false }
       case "clear":
         return {
-          text: reading.follows ? t("rates.brd.read.clear_follows", { cell: name, source: `${ruleWords(reading.follows)} (${sourceName(reading.follows)})` }) : t("rates.brd.read.clear_none", { cell: name, board: row.board }),
+          text: reading.follows ? t("rates.brd.read.clear_follows", { cell: name, source: `${ruleWords(reading.follows)} (${sourceName(reading.follows)})` }) : t("rates.brd.read.clear_none", { cell: name, board: boardName(row.board) }),
           invalid: false,
         }
       case "base":
         return {
           text: reading.previous.length
-            ? t("rates.brd.read.base_moves", { cell: name, board: row.board, previous: reading.previous.join(", ") })
-            : t("rates.brd.read.base", { cell: name, board: row.board }),
+            ? t("rates.brd.read.base_moves", { cell: name, board: boardName(row.board), previous: reading.previous.join(", ") })
+            : t("rates.brd.read.base", { cell: name, board: boardName(row.board) }),
           invalid: false,
         }
       case "rule": {
         const text = t("rates.brd.read.rule", { cell: name, rule: ruleShort(reading.op, reading.value), unit: unitFull(reading.op, reading.child_percent, reading.infant_free) })
-        return { text: reading.wasBase ? t("rates.brd.read.was_base", { reading: text, board: row.board }) : text, invalid: false }
+        return { text: reading.wasBase ? t("rates.brd.read.was_base", { reading: text, board: boardName(row.board) }) : text, invalid: false }
       }
     }
   }
@@ -735,7 +755,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const discardPending = (row: BoardRow) => {
     setPending((p) => p.filter((x) => rowIdOf(x) !== row.id))
     dropDrafts(cols.map((period) => ({ row: row.id, period })))
-    requestAnimationFrame(() => addRef.current?.focus())
+    requestAnimationFrame(focusAdd)
   }
 
   const summary = useMemo(() => boardSummary(tables), [tables])
@@ -791,15 +811,13 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
             <p className="text-xs text-zinc-600">{t("rates.brd.sum.none")}</p>
           ))}
         {canEdit && (
-          <Select
+          <AddMenu
             ref={addRef}
-            aria-label={t("rates.brd.add")}
-            value=""
-            className="ml-auto h-8! w-56! text-xs!"
-            placeholder={available.length ? t("rates.brd.add_placeholder") : t("rates.brd.all_added")}
-            disabled={!available.length}
-            options={available.map((b) => ({ value: b, label: `${boardName(b)} (${b})` }))}
-            onChange={(e) => onAdd(e.target.value)}
+            label={t("rates.brd.add")}
+            className="ml-auto inline-flex flex-wrap items-center gap-2"
+            emptyText={t("rates.brd.all_added")}
+            items={available.map((b) => ({ value: b, label: `${boardName(b)} (${b})` }))}
+            onAdd={onAdd}
           />
         )}
       </div>
@@ -830,6 +848,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                   aria-readonly={readOnly || undefined}
                   aria-multiselectable
                   ref={setGrid}
+                  onKeyDownCapture={(e) => void headerLaneKeyDown(e, gridEl.current, nav.focusCell, { rows: rows.length, cols: cols.length })}
                   className="w-max min-w-full text-sm"
                 >
                   <div role="row" className="sticky top-0 z-[2] grid bg-white" style={{ gridTemplateColumns: template }}>
@@ -867,7 +886,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                           {/* the name wraps rather than being cut on phones (the row header is 9rem there) */}
                           <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                             {row.depth ? (
-                              <span className="min-w-0 text-[13px] leading-tight break-words text-zinc-800">{t("rates.brd.row.room", { board: row.board, room: roomName(row.room_type) })}</span>
+                              <span className="min-w-0 text-[13px] leading-tight break-words text-zinc-800">{t("rates.brd.row.room", { board: boardName(row.board), room: roomName(row.room_type) })}</span>
                             ) : (
                               <>
                                 <span className="min-w-0 text-[13px] leading-tight font-medium break-words text-zinc-900">{boardName(row.board)}</span>
@@ -884,6 +903,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                             size="sm"
                             className="size-7!"
                             label={t("rates.brd.row.terms", { row: rowLabel(row) })}
+                            tabIndex={-1}
+                            data-lane-rows={String(r)}
                             aria-haspopup="dialog"
                             aria-expanded={pop?.row === row.id}
                             icon={<SlidersHorizontal className="size-3.5" aria-hidden />}
@@ -895,6 +916,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                             size="sm"
                             className="size-7!"
                             label={t("rates.brd.row.discard", { row: rowLabel(row) })}
+                            tabIndex={-1}
+                            data-lane-rows={String(r)}
                             icon={<X className="size-3.5" aria-hidden />}
                             onClick={() => discardPending(row)}
                           />
@@ -944,7 +967,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
             let next = setBoardTerms(now, popRow.identity, { child_percent: v.child_percent, infant_free: v.infant_free ? 1 : 0, label: v.label })
             if (v.room !== popRow.room_type) {
               const moved = moveBoardRows(next, popRow.identity, v.room)
-              if ("error" in moved) return t("rates.brd.pop.rooms_taken", { board: popRow.board, room: v.room ? roomName(v.room) : allRooms })
+              if ("error" in moved) return t("rates.brd.pop.rooms_taken", { board: boardName(popRow.board), room: v.room ? roomName(v.room) : allRooms })
               next = moved.tables
             }
             history.commit(t("rates.brd.h.terms", { row: rowLabel(popRow) }), now, next)
@@ -962,7 +985,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
           onRemove={() => {
             const now = history.current() ?? tables
             const next = popRow.depth === 0 ? removeBoard(now, popRow.board).tables : removeBoardRow(now, popRow.identity).tables
-            const label = popRow.depth === 0 ? t("rates.brd.h.remove", { board: popRow.board }) : t("rates.brd.h.remove_row", { row: rowLabel(popRow) })
+            const label = popRow.depth === 0 ? t("rates.brd.h.remove", { board: boardName(popRow.board) }) : t("rates.brd.h.remove_row", { row: rowLabel(popRow) })
             setPop(null)
             if (history.commit(label, now, next)) toastDone(t("rates.brd.removed", { boards: rowLabel(popRow) }))
             setFocusNext("active")
@@ -1082,9 +1105,10 @@ function BoardTermsPopover(p: {
           {p.terms.mixed ? ` ${t("rates.brd.pop.mixed")}` : ""}
         </p>
         {board && p.addRooms.length > 0 && (
-          <Field label={t("rates.brd.pop.add_room")} hint={t("rates.brd.pop.add_room_help", { board: p.row.board })}>
-            <Select value="" placeholder={t("rates.brd.pop.add_room_placeholder")} options={p.addRooms} onChange={(e) => e.target.value && p.onAddRoom(e.target.value)} />
-          </Field>
+          <div className="space-y-1">
+            <AddMenu label={t("rates.brd.pop.add_room")} items={p.addRooms} onAdd={p.onAddRoom} />
+            <p className="text-xs text-zinc-500">{t("rates.brd.pop.add_room_help", { board: p.rowLabel })}</p>
+          </div>
         )}
         {removing ? (
           <div role="group" aria-label={t("rates.brd.confirm.title")} className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-sm text-amber-900">

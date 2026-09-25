@@ -489,6 +489,38 @@ export function applyOccRule(tables: Tables, slot: Omit<OccIdentity, "room_type"
   return changed ? { ...tables, occupancy_rules: rows } : tables
 }
 
+/** Where the ladder's rule popover writes instead of its row's own slot (§3.6.2, S16 re-review):
+ * a band row's rule for one child position, or the single-use row in its other form. */
+export type SlotSwitch = { position: number } | { single: "whole" | "children" }
+
+type Slot = Omit<OccIdentity, "room_type">
+/** "1 Adult (single use)": the whole 1+0 combination, or "also when children travel" (Adult 1 in 1+*). */
+export const SINGLE_WHOLE: Slot = { target: "COMBINATION", position: 0, age_band: "", combination: "1+0" }
+export const SINGLE_CHILDREN: Slot = { target: "ADULT", position: 1, age_band: "", combination: "1+*" }
+
+/** The slot a popover's rule is written to: `slot` itself, a position of a band row's children
+ * ({CHILD, position n, band}), or the other form of the single-use row. */
+export function switchedSlot(slot: Slot, to?: SlotSwitch): Slot {
+  if (!to) return slot
+  if ("position" in to) return to.position > 0 && slot.target === "CHILD" && slot.position === 0 && slot.age_band ? { ...slot, position: to.position } : slot
+  return to.single === "children" ? SINGLE_CHILDREN : SINGLE_WHOLE
+}
+
+const sameSlotOf = (a: Slot, b: Slot) => a.target === b.target && a.position === b.position && a.age_band === b.age_band && a.combination === b.combination
+
+/** The rule popover with a slot switch (§3.6.2 "position rows added through the popover"; "the
+ * popover can switch [single use] to also when children travel"): the rule is written to the
+ * switched slot for each room × period (applyOccRule). A child position rule is a row of its own,
+ * so the band's rule stays; the single-use row switched to its other form loses the old form's
+ * rows of the same cells (one form per cell, one history entry). Remove (`rule` null) and no
+ * switch are applyOccRule on the row's slot. */
+export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly string[], periods: readonly string[], rule: OccRule | null, to?: SlotSwitch): Tables {
+  const target = switchedSlot(slot, to)
+  if (!rule || !to || sameSlotOf(target, slot)) return applyOccRule(tables, slot, rooms, periods, rule)
+  const written = applyOccRule(tables, target, rooms, periods, rule)
+  return "single" in to ? applyOccRule(written, slot, rooms, periods, null) : written
+}
+
 /** One ladder cell of a gesture and what was typed for it. */
 export interface OccEntryItem {
   id: OccIdentity

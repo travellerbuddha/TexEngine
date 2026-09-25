@@ -8,7 +8,7 @@ import { AlertOctagon, AlertTriangle, ChevronDown } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTooltip, type GridCellProps, type GridNavigationApi } from "../../../ui"
 import type { CellIssue } from "./useCellIssues"
-import { SELECTED, TONE, type CellTone } from "./cellTone.ts"
+import { SELECTED, STALE, TONE, type CellTone } from "./cellTone.ts"
 
 export type { CellTone } from "./cellTone.ts"
 
@@ -181,7 +181,7 @@ function MatrixCellImpl({ nav, view, tint, editor, blockStart, highlight }: Matr
         tint && SELECTED,
         blockStart && "border-t-2 border-t-zinc-200",
         TONE[tone],
-        stale && "opacity-55",
+        stale && STALE,
         highlight && "shadow-[inset_2px_0_0_var(--color-tex-300),inset_-2px_0_0_var(--color-tex-300)]",
         // an anchored issue: an underline across the cell (the glyph says it without colour)
         issue && !editor && "after:absolute after:inset-x-1 after:bottom-0.5 after:h-0.5 after:rounded-full after:content-['']",

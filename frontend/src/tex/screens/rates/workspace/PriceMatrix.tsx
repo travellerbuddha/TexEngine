@@ -29,8 +29,9 @@ import {
   Money,
   Notice,
   revealElement,
-  Select,
   Tooltip,
+  focusHeaderLane,
+  headerLaneKeyDown,
   useGridNavigation,
   useGridSelection,
   useScrollSyncRef,
@@ -44,6 +45,7 @@ import { displayText, editText, parseShorthand, type ShOp, type ShResult } from 
 import type { Tables } from "../lib/tables"
 import type { ApplyOpResult, Row } from "../lib/types"
 import { decText } from "../lib/util"
+import { AddMenu } from "./AddMenu"
 import { AdjustPopover } from "./AdjustPopover"
 import { applyAdjust, answersInOrder, planFill, serverCalls, type AdjustTarget, type FillStep } from "./bulk.ts"
 import { BulkToolbar, FillConfirm, UndoToastView } from "./BulkToolbar"
@@ -80,6 +82,9 @@ import { RuleEditorPopover } from "./RuleEditorPopover"
 import { int, str } from "./rows.ts"
 import { useCellIssues } from "./useCellIssues"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
+import type { MatrixCellStateKey } from "./stateKeys.ts"
+import { resolvedStatus } from "./draftPreview.ts"
+import { STALE_STATE } from "./cellTone.ts"
 
 const SHOW_RESOLVED_KEY = "tex.rates.ws.show_resolved"
 
@@ -207,7 +212,10 @@ export function PriceMatrix({
   // ─── the server's resolved prices (live preview) ─────────────────────
   const matrix = preview?.matrix
   const resolvedRooms = useMemo(() => new Map((matrix?.rooms ?? []).map((r) => [r.room_type, r])), [matrix])
-  const stale = Boolean(preview && (preview.stale || preview.forKey !== preview.key))
+  // what the resolved prices on screen are (S16 re-review): only "updating" while this state's answer
+  // is on its way; a failed call or the saved draft's prices above the overlay cap say so instead
+  const status = preview ? resolvedStatus(preview) : "current"
+  const stale = status !== "current"
   const includedAdults = (rt: string): number => {
     const fromServer = resolvedRooms.get(rt)?.capacity?.included_adults
     if (fromServer) return fromServer
@@ -730,7 +738,11 @@ export function PriceMatrix({
     }
   }
 
-  const nav = useGridNavigation({ rows: rows.length, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey })
+  // one tab stop (§3.19): the headers' controls are reached with the arrows from the first row or column
+  const nav = useGridNavigation({ rows: rows.length, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey, onEdge: (edge, cell) => focusHeaderLane(gridEl.current, edge, cell) })
+  // with no cell (no room yet) the grid has no tab stop: its header controls stay Tab stops
+  const laneTab = rows.length > 0 && cols.length > 0 ? -1 : 0
+  const laneRowsOf = (roomIndex: number) => rows.flatMap((x, i) => (x.roomIndex === roomIndex ? [String(i)] : [])).join(" ")
   const setGrid = useCallback(
     (el: HTMLDivElement | null) => {
       gridEl.current = el
@@ -747,21 +759,21 @@ export function PriceMatrix({
   const { selectRow, selectCol } = selection
   const focusCellEl = (r: number, c: number) => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
   const pickRow = useCallback(
-    (r: number, add: boolean) => {
+    (r: number, add: boolean, extend = false) => {
       const { cols: cs, isEditable: ed } = shape.current
       const c = cs.findIndex((_, i) => ed(r, i))
       if (c < 0) return
-      selectRow(r, { add })
+      selectRow(r, { add, extend })
       focusCellEl(r, c)
     },
     [selectRow],
   )
   const pickCol = useCallback(
-    (c: number, add: boolean) => {
+    (c: number, add: boolean, extend = false) => {
       const { rows: rs, isEditable: ed } = shape.current
       const r = rs.findIndex((_, i) => ed(i, c))
       if (r < 0) return
-      selectCol(c, { add })
+      selectCol(c, { add, extend })
       focusCellEl(r, c)
     },
     [selectCol],
@@ -775,7 +787,7 @@ export function PriceMatrix({
     requestAnimationFrame(() => {
       const { rows: rs, cols: cs, nav: n } = shape.current
       if (!rs.length || !cs.length) {
-        sectionRef.current?.querySelector<HTMLElement>("[data-add-room], [data-add-period]")?.focus()
+        sectionRef.current?.querySelector<HTMLElement>("[data-add-room] button, [data-add-period]")?.focus()
         return
       }
       if ("room" in what) {
@@ -816,7 +828,7 @@ export function PriceMatrix({
     }
   }
 
-  type View = { tone: CellTone; content: ReactNode; state: string; value?: string; tooltip?: string; error?: string }
+  type View = { tone: CellTone; content: ReactNode; state: MatrixCellStateKey; value?: string; tooltip?: string; error?: string }
 
   const entryView = (cell: CellRef, mc: RoomCell | undefined): View => {
     const rule = mc?.rule
@@ -961,7 +973,7 @@ export function PriceMatrix({
     }
     const state = t(`rates.ws.state.${view.state}`)
     // a resolved value older than the state on screen says so to a screen reader too (§3.3.3)
-    const stateText = resolved && stale ? t("rates.ws.cell.stale_state", { state }) : state
+    const stateText = resolved && stale ? t(STALE_STATE[status], { state }) : state
     const cellId = resolved ? undefined : cellIdOf(cell)
     return {
       cellId,
@@ -990,7 +1002,7 @@ export function PriceMatrix({
     () => rows.map((row, r) => cols.map((period, c) => cellView(row, r, period, c))),
     // everything cellView reads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, cols, model, tables, resolvedRooms, matrix, stale, drafts, pending, canEdit, t, decimalMark, minorUnits, doc.status, ccy, names, issueAt],
+    [rows, cols, model, tables, resolvedRooms, matrix, stale, status, drafts, pending, canEdit, t, decimalMark, minorUnits, doc.status, ccy, names, issueAt],
   )
   // a period header's issues, as one stable object per header (the headers are memoised)
   const periodIssues = useMemo(() => new Map(model.periods.map((p) => [p.code, issueAt(periodHeaderId(p.code))])), [model.periods, issueAt])
@@ -1034,15 +1046,26 @@ export function PriceMatrix({
             </Badge>
           </Tooltip>
         )}
-        <span role="status" aria-live="polite" className="inline-flex min-h-5 items-center gap-1 text-xs text-zinc-500">
-          {preview && (preview.pricesLoading || stale) && (
+        {/* the prices' state is shown, not announced: the live region is for bulk and undo messages */}
+        <span className="inline-flex min-h-5 items-center gap-1 text-xs text-zinc-500" data-resolved-status={status}>
+          {preview?.pricesLoading ? (
             <>
               <Loader2 className="size-3.5 animate-spin" aria-hidden />
               {t("rates.ws.updating")}
             </>
-          )}
-          <span className="sr-only">{announce}</span>
+          ) : status === "failed" ? (
+            <>
+              <AlertTriangle className="size-3.5 text-amber-600" aria-hidden />
+              {t("rates.ws.not_updated")}
+            </>
+          ) : null}
         </span>
+        <span role="status" aria-live="polite" className="sr-only">
+          {announce}
+        </span>
+        {/* a base-room entry waiting for the server's adjustment is typed input not in the version
+            yet: the tab asks before it closes (keptState.UNCOMMITTED_INPUT, S16 re-review) */}
+        {Object.keys(pending).length > 0 && <span hidden data-uncommitted="" data-changed="" data-pending-adjustment="" />}
         <span className="ml-auto">
           <Checkbox label={t("rates.ws.show_resolved")} checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
         </span>
@@ -1097,6 +1120,7 @@ export function PriceMatrix({
           aria-readonly={readOnly || undefined}
           aria-multiselectable
           ref={setGrid}
+          onKeyDownCapture={(e) => void headerLaneKeyDown(e, gridEl.current, nav.focusCell, { rows: rows.length, cols: cols.length })}
           onFocus={(e) => {
             // a cell (or its editor) got the focus: its column is the matrix's active period, and
             // its room and period are where the header's Price test starts
@@ -1114,11 +1138,11 @@ export function PriceMatrix({
           <div role="row" className="sticky top-0 z-[2] grid bg-white" style={{ gridTemplateColumns: template }}>
             <div role="columnheader" className="sticky left-0 z-[4] flex items-end gap-1.5 border-r border-b border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600">
               {t("rates.f.room_type")}
-              {stale && <Loader2 className="size-3 animate-spin text-zinc-400" aria-hidden />}
+              {preview?.pricesLoading && <Loader2 className="size-3 animate-spin text-zinc-400" aria-hidden />}
             </div>
             <div
               role="columnheader"
-              onMouseDown={(e) => headerPick(e, canEdit ? (add) => pickCol(0, add) : undefined)}
+              onMouseDown={(e) => headerPick(e, canEdit ? (add, extend) => pickCol(0, add, extend) : undefined)}
               className="flex flex-col justify-end border-r border-b border-zinc-200 bg-white px-2 py-1.5 text-left"
             >
               <span className="text-xs font-semibold text-zinc-800">{t("rates.rates.all_periods")}</span>
@@ -1143,9 +1167,10 @@ export function PriceMatrix({
                 onDuplicated={setRenamePeriodCode}
                 renameNow={renamePeriodCode === p.code}
                 onRenameOpened={renameOpened}
+                laneTab={laneTab}
               />
             ))}
-            <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} />
+            <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} col={cols.length} laneTab={laneTab} />
           </div>
 
           {rows.map((row, r) => {
@@ -1169,6 +1194,8 @@ export function PriceMatrix({
                   r={r}
                   onSelect={canEdit && row.editable ? pickRow : undefined}
                   onRemoved={onRoomRemoved}
+                  laneRows={laneRowsOf(row.roomIndex)}
+                  laneTab={laneTab}
                 />
                 <MatrixRowCells
                   r={r}
@@ -1191,18 +1218,12 @@ export function PriceMatrix({
 
       {canEdit && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Select
-            aria-label={t("rates.ws.room.add")}
-            data-add-room=""
-            value=""
-            className="h-8! w-72! text-xs!"
-            placeholder={available.length ? t("rates.ws.room.add_placeholder") : t("rates.ws.room.all_added")}
-            disabled={!available.length}
-            options={available.map((r) => ({ value: r.name, label: r.room_type_name || r.name }))}
-            onChange={(e) => {
-              const rt = e.target.value
-              if (rt) edit(t("rates.ws.h.add_room", { room: roomName(rt) }), (tb) => addRoom(tb, rt))
-            }}
+          <AddMenu
+            label={t("rates.ws.room.add")}
+            marker="add-room"
+            emptyText={t("rates.ws.room.all_added")}
+            items={available.map((r) => ({ value: r.name, label: r.room_type_name || r.name }))}
+            onAdd={(rt) => edit(t("rates.ws.h.add_room", { room: roomName(rt) }), (tb) => addRoom(tb, rt))}
           />
           {model.rooms.length > 0 && !model.baseRoom && <span className="text-xs text-amber-800">{t("rates.ws.room.no_base")}</span>}
         </div>
