@@ -764,10 +764,12 @@ export function PriceMatrix({
   // (S16 re-review 2)
   const [focusRoom, setFocusRoom] = useState<string | null>(null)
   useEffect(() => {
-    if (!focusRoom) return
+    if (!focusRoom || !rows.some((x) => model.rooms[x.roomIndex]?.room_type === focusRoom)) return
     setFocusRoom(null)
-    const r = rows.findIndex((x) => model.rooms[x.roomIndex]?.room_type === focusRoom)
-    if (r >= 0) nav.focusCell(r, 0)
+    // the cell itself (its onFocus makes it the active cell): the grid's own focusCell focuses the
+    // active cell of a render that may come after the next frame
+    const id = cellIdOf({ room: focusRoom, period: ALL_PERIODS })
+    requestAnimationFrame(() => gridEl.current?.querySelector<HTMLElement>(`[data-cellid="${CSS.escape(id)}"]`)?.focus())
     // after the render that shows the room
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRoom, rows])
