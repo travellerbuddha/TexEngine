@@ -143,11 +143,12 @@ test.describe("pricing workspace, S16 re-review 2", () => {
     await page.keyboard.press("Escape")
     const lane = /ArrowUp on the first row or ArrowLeft on the first column reaches the headers' actions/
     await expect(priceMatrix(page)).toHaveAccessibleDescription(lane)
+    // each grid says its own lane (S16 re-review 3): the ladder's sample party, a board row's terms
     await expand(page, "occupancy")
-    await expect(ladder(page)).toHaveAccessibleDescription(lane)
+    await expect(ladder(page)).toHaveAccessibleDescription(/ArrowLeft on the first column of the resolved line reaches its sample party/)
     await expand(page, "boards")
-    await expect(boards(page)).toHaveAccessibleDescription(lane)
-    await expect(page.locator("section#occupancy")).toContainText("reaches the headers' actions")
+    await expect(boards(page)).toHaveAccessibleDescription(/ArrowLeft on the first column reaches the row's board terms/)
+    await expect(page.locator("section#occupancy")).toContainText("reaches its sample party")
     noErrors()
   })
 

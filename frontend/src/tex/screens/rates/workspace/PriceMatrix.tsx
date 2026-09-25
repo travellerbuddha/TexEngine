@@ -266,11 +266,12 @@ export function PriceMatrix({
     setFreshPeriod(null)
     if (code === null) return
     refocusIfLost(() => {
-      const { cols: cs, rows: rs, nav: n } = shape.current
-      const c = cs.indexOf(code)
+      const c = shape.current.cols.indexOf(code)
       if (c < 0) return
-      if (rs.length) n.focusCell(0, c)
-      else gridEl.current?.querySelector<HTMLElement>(`[data-lane-col="${c}"]`)?.focus()
+      // the cell itself (its onFocus makes it the active cell; the grid's focusCell, called from a
+      // frame, would focus the active cell of a render that comes later), else the period's menu
+      const grid = gridEl.current
+      ;(grid?.querySelector<HTMLElement>(`[data-cell="0:${c}"]`) ?? grid?.querySelector<HTMLElement>(`[data-lane-col="${c}"]`))?.focus()
     })
   }, [])
   // the period Duplicate just made (unnamed): its header opens Rename… (S16 review)
