@@ -6,6 +6,7 @@
 // Pure: no runtime imports.
 import type { Tables } from "../lib/tables.ts"
 import type { PreviewChild, Row } from "../lib/types.ts"
+import type { PricingRegion } from "./sections.ts"
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/
 
@@ -107,11 +108,17 @@ export function withChildMode(c: ChildEntry, mode: ChildMode): ChildEntry {
 
 /** Where "Show in grid" goes for a rule of a quote: a room price cell (room × period, "" = All
  * periods), an occupancy rule (the ladder cell or the combination card that shows it; the
- * occupancy section decides) or a board cell. */
+ * occupancy section decides) or a board cell. A validation issue (S15, issues.issuePlace) can also
+ * lead to a ladder cell in a rooms scope, a combination card, a period's column header, or a
+ * region of Pricing (the matrix, Occupancy, the child ages drawer, Boards). */
 export type ShowTarget =
   | { kind: "matrix"; room: string; period: string }
   | { kind: "occupancy"; key: string }
   | { kind: "board"; board: string; room: string; period: string }
+  | { kind: "ladder"; scope: string; row: string; period: string }
+  | { kind: "card"; id: string }
+  | { kind: "period"; period: string }
+  | { kind: "region"; region: PricingRegion | "matrix" }
 
 /** A "Show in grid" request; `n` tells a repeated request from the last one. */
 export interface ShowRequest {
