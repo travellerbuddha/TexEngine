@@ -12,13 +12,18 @@ a band) is an ERROR; a rule inherited from a pricing policy that this contract c
 use simply never applies and is a WARNING (``OCC_INHERITED_*_UNUSED``). A pricing
 policy is checked on its own before it goes live (``policy_issues``).
 
-Board rules (ADR-061, GAP-5) are checked like room rules: a rule naming a room or period the
-contract does not have, and two rules of one board for the same room and period (the engine
-would settle them by row name), are ERRORs.
+The Pricing Workspace's additions are opt-in (ADR-061, "Existing semantics kept, the
+workspace's additions opt-in"); without them every caller gets main's issues, in main's shape:
 
-Each issue may carry a ``ref`` (ADR-061 D9, GAP-4): what it is about - the rule(s), room,
-period, age band(s), party and board - so the workspace can mark the cell or row and show band
-labels for the codes in the message. Codes and messages do not depend on it.
+* ``board_checks`` (GAP-5): board rules are checked like room rules - a rule naming a room or
+  period the contract does not have, and two rules of one board for the same room and period
+  (the engine would settle them by row name), are ERRORs;
+* ``Issue.to_dict(ref=True)`` (D9, GAP-4): what an issue is about - the rule(s), room, period,
+  age band(s), party and board - so the workspace can mark the cell or row and show band labels
+  for the codes in the message. Codes and messages do not depend on it.
+
+``hidden`` is not an addition but a guard: a viewer without cost is never told what a pricing
+policy's formula decides (S16 review), whoever asks.
 """
 
 from __future__ import annotations
@@ -52,9 +57,10 @@ class Issue:
 	# issue has; None when it is about the contract as a whole. Not part of the issue's identity.
 	ref: dict | None = field(default=None, compare=False)
 
-	def to_dict(self) -> dict:
+	def to_dict(self, *, ref: bool = False) -> dict:
+		"""Main's three keys; with ``ref`` (the workspace's, D9) also ``"ref"`` when there is one."""
 		out = {"level": self.level, "code": self.code, "message": self.message}
-		if self.ref:
+		if ref and self.ref:
 			out["ref"] = dict(self.ref)
 		return out
 
@@ -84,8 +90,9 @@ def _cell_rule(t: ContractTerms, room_type: str, period: Period) -> str | None:
 
 
 def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_warnings: int = 200,
-                   hidden: frozenset[str] = frozenset()) -> list[Issue]:
-	"""The issues of ``t``. ``hidden``: ids of occupancy rules the viewer may not read (a pricing
+                   hidden: frozenset[str] = frozenset(), board_checks: bool = False) -> list[Issue]:
+	"""The issues of ``t``. ``board_checks``: the workspace's board rule checks (GAP-5, opt-in:
+	without them the issues are main's). ``hidden``: ids of occupancy rules the viewer may not read (a pricing
 	policy's formulas, which are cost: ADR-061, S16 review). No issue whose presence depends on one
 	of their ops or values is reported then: OCC_POLICY_OVERRIDE_OUTRANKED for a hidden override,
 	and the sweep's negative total of a party one of them takes part in or missing child rule where
@@ -220,22 +227,8 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	# boards
 	if not any(b.is_base for b in t.boards):
 		issues.append(_err("NO_BASE_BOARD", "no base board is included in the room price"))
-	for b in t.boards:
-		where = dict(rule_id=b.rule_id, board=b.board, room_type=b.room_type, period=b.period)
-		if b.room_type and b.room_type not in t.rooms:
-			issues.append(_err("BOARD_UNKNOWN_ROOM", f"board rule {b.rule_id} ({b.board}) names unknown room "
-			                   f"{b.room_type}", **where))
-		if b.period and b.period not in codes:
-			issues.append(_err("BOARD_UNKNOWN_PERIOD", f"board rule {b.rule_id} ({b.board}) names unknown period "
-			                   f"{b.period}", **where))
-	# one rule per board, room and period: the engine would take the one with the greatest row name
-	same_scope: dict[tuple, list[str]] = {}
-	for b in t.boards:
-		same_scope.setdefault((b.board, b.room_type, b.period), []).append(b.rule_id)
-	for (board, rt, period), ids in sorted(same_scope.items(), key=lambda kv: str(kv[0])):
-		if len(ids) > 1:
-			issues.append(_err("BOARD_DUPLICATE", f"board {board} has {len(ids)} rules for the same room and period",
-			                   rule_id=ids[0], rule_ids=ids, board=board, room_type=rt, period=period))
+	if board_checks:
+		issues.extend(_board_issues(t, codes))
 	board_codes = {b.board for b in t.boards}
 	for rp in t.rate_plans.values():
 		for bd in sorted(rp.boards or ()):
@@ -252,6 +245,31 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	if sweep_combinations and not any(i.level == "ERROR" for i in issues):
 		issues.extend(_sweep(t, max_warnings, hidden))
 	return issues
+
+
+def _board_issues(t: ContractTerms, codes: list[str]) -> list[Issue]:
+	"""The workspace's board rule checks (ADR-061 GAP-5; ``validate_terms(board_checks=True)``): a
+	rule naming a room or period the contract does not have, and two or more rules of one board for
+	the same room and period (the engine would take the one with the greatest row name), are ERRORs.
+	Main published such rows (a rule for an unknown room or period never applies), so an existing
+	caller is not told about them."""
+	out: list[Issue] = []
+	for b in t.boards:
+		where = dict(rule_id=b.rule_id, board=b.board, room_type=b.room_type, period=b.period)
+		if b.room_type and b.room_type not in t.rooms:
+			out.append(_err("BOARD_UNKNOWN_ROOM", f"board rule {b.rule_id} ({b.board}) names unknown room "
+			                f"{b.room_type}", **where))
+		if b.period and b.period not in codes:
+			out.append(_err("BOARD_UNKNOWN_PERIOD", f"board rule {b.rule_id} ({b.board}) names unknown period "
+			                f"{b.period}", **where))
+	same_scope: dict[tuple, list[str]] = {}
+	for b in t.boards:
+		same_scope.setdefault((b.board, b.room_type, b.period), []).append(b.rule_id)
+	for (board, rt, period), ids in sorted(same_scope.items(), key=lambda kv: str(kv[0])):
+		if len(ids) > 1:
+			out.append(_err("BOARD_DUPLICATE", f"board {board} has {len(ids)} rules for the same room and period",
+			                rule_id=ids[0], rule_ids=ids, board=board, room_type=rt, period=period))
+	return out
 
 
 def _signature(r: OccupancyRule) -> tuple:
@@ -602,7 +620,7 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 	bands = {b.code: b for b in t.age_bands}
 	periods = {p.code: p for p in t.periods}
 	# the infant warning as the live check gives it (its stored message may name hidden rules)
-	infants = {x.ref.get("age_band"): x.to_dict() for x in _infant_generic(t, hidden)}
+	infants = {x.ref.get("age_band"): x for x in _infant_generic(t, hidden)}
 	out = []
 	for i in issues:
 		if not isinstance(i, dict):
@@ -616,7 +634,7 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 			band = ref.get("age_band")
 			if not isinstance(band, str) or band not in infants:
 				continue
-			i = infants.pop(band)
+			i = infants.pop(band).to_dict(ref="ref" in i)       # the stored row's shape (main's has no ref)
 		elif code in _SWEEP_HIDEABLE:
 			spec, p = t.rooms.get(ref.get("room_type")), periods.get(ref.get("period"))
 			a, c, band = ref.get("adults"), ref.get("children") or 0, bands.get(ref.get("age_band"))

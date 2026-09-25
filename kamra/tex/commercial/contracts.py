@@ -388,7 +388,9 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		                             ["rate_plan_name", "tex_inclusions", "tex_cancellation_policy",
 		                              "tex_payment_policy", "property"], as_dict=True) or {}
 		# never another hotel's rate plan or terms, as for room types (S16 review: the overlay and
-		# the price test read them back); a policy of no hotel is shared
+		# the price test read them back); a policy of no hotel is shared. A tenancy fix, so it holds
+		# for every caller, never opt-in (ADR-061, "Existing semantics kept"): main priced,
+		# validated and published such a draft
 		if rp_doc and rp_doc.get("property") != contract.property:
 			frappe.throw(_("Rate plan {0} belongs to another hotel").format(rp.rate_plan))
 		for doctype, name in (("TEX Cancellation Policy", rp.cancellation_policy),
@@ -441,23 +443,27 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 	)
 
 
-def validate_version(name: str, *, formula: bool = True) -> dict:
+def validate_version(name: str, *, formula: bool = True, workspace: bool = False) -> dict:
 	version = frappe.get_doc("TEX Contract Version", name)
 	scope.require("contract.edit", scope.property_of("TEX Contract Version", name))
-	return validate_doc(version, formula=formula)
+	return validate_doc(version, formula=formula, workspace=workspace)
 
 
-def validate_doc(version, *, formula: bool = True) -> dict:
+def validate_doc(version, *, formula: bool = True, workspace: bool = False) -> dict:
 	"""Validation of a version document as it is: a loaded draft, or a draft with unsaved changes
 	applied in memory (ADR-061). The caller checks who may validate it. Without ``formula`` (a
 	viewer who may not read the pricing policies' formulas, S16 review) no issue whose presence
-	depends on an inherited rule's value is reported (``validate_terms(hidden=…)``)."""
+	depends on an inherited rule's value is reported (``validate_terms(hidden=…)``), whoever asks.
+	``workspace`` (the Pricing Workspace's opt-in, ADR-061): its board checks (GAP-5) and each
+	issue's ``ref`` (D9); without it the issues are main's."""
 	try:
 		terms = build_terms(version)
 	except frappe.ValidationError as e:
 		return {"ok": False, "issues": [{"level": "ERROR", "code": "BUILD", "message": str(e)}]}
-	issues = validate.validate_terms(terms, hidden=frozenset() if formula else policy_rules(terms))
-	return {"ok": not any(i.level == "ERROR" for i in issues), "issues": [i.to_dict() for i in issues]}
+	issues = validate.validate_terms(terms, hidden=frozenset() if formula else policy_rules(terms),
+	                                 board_checks=workspace)
+	return {"ok": not any(i.level == "ERROR" for i in issues),
+	        "issues": [i.to_dict(ref=workspace) for i in issues]}
 
 
 def policy_rules(terms) -> frozenset[str]:
@@ -524,7 +530,11 @@ def new_draft(contract: str, based_on: str | None = None) -> str:
 	return doc.name
 
 
-def publish(name: str, effective_from=None, change_note: str | None = None) -> dict:
+def publish(name: str, effective_from=None, change_note: str | None = None, *, workspace: bool = False) -> dict:
+	"""Freeze a draft and put it on sale at ``effective_from``. ``workspace`` (the Pricing
+	Workspace's opt-in, ADR-061): its board checks block the publish as its live check reports them
+	(GAP-5), and the report stored and returned carries each issue's ``ref`` (D9); without it a
+	publish decides and stores exactly what main did."""
 	version = frappe.get_doc("TEX Contract Version", name)
 	contract = frappe.get_doc("TEX Contract", version.contract)
 	scope.require("contract.publish", contract.property)
@@ -539,7 +549,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 	frappe.db.get_value("TEX Contract", contract.name, "name", for_update=True)
 	previous = _previous_version(contract.name, name, eff)
 	terms = build_terms(version, at=eff)
-	issues = validate.validate_terms(terms)
+	issues = validate.validate_terms(terms, board_checks=workspace)
 	errors = [i for i in issues if i.level == "ERROR"]
 	if errors:
 		frappe.throw(_("Cannot publish: {0}").format("; ".join(i.message for i in errors[:8])),
@@ -573,7 +583,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 	version.published_by = frappe.session.user
 	version.payload = json.dumps(payload, sort_keys=True, ensure_ascii=False)
 	version.payload_hash = digest
-	version.validation_report = json.dumps([i.to_dict() for i in issues])
+	version.validation_report = json.dumps([i.to_dict(ref=workspace) for i in issues])
 	if change_note:
 		version.change_note = change_note
 	version.save(ignore_permissions=True)
@@ -596,7 +606,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None) -> d
 	      reason=change_note)
 	clear_terms_cache()
 	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff),
-	        "warnings": [i.to_dict() for i in issues]}
+	        "warnings": [i.to_dict(ref=workspace) for i in issues]}
 
 
 def _previous_version(contract: str, publishing: str, at) -> frappe._dict | None:

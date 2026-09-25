@@ -1,12 +1,15 @@
 """Validation issues say what they are about (ADR-061 D9, GAP-4), and board rules are checked like
-room rules (GAP-5).
+room rules (GAP-5), for the Pricing Workspace: both are its opt-in (ADR-061, "Existing semantics
+kept, the workspace's additions opt-in"), so every other caller gets main's issues.
 
 * An ``Issue`` carries an optional ``ref``: the rule(s), room, period, age band(s), party and board
   it names, so the Pricing Workspace can mark the cell or row and replace band codes by labels.
-  ``to_dict`` adds ``"ref"`` only when there is one. Codes and messages are unchanged.
-* New ERRORs: a board rule naming a room or period the contract does not have
-  (``BOARD_UNKNOWN_ROOM`` / ``BOARD_UNKNOWN_PERIOD``), and two or more rules of one board for the
-  same room and period (``BOARD_DUPLICATE``), which the engine would otherwise settle by row name.
+  ``to_dict(ref=True)`` adds ``"ref"`` only when there is one; ``to_dict()`` is main's three keys.
+  Codes and messages are unchanged.
+* With ``board_checks``, new ERRORs: a board rule naming a room or period the contract does not
+  have (``BOARD_UNKNOWN_ROOM`` / ``BOARD_UNKNOWN_PERIOD``), and two or more rules of one board for
+  the same room and period (``BOARD_DUPLICATE``), which the engine would otherwise settle by row
+  name. Without it they are not reported, as on main.
 """
 
 import unittest
@@ -60,10 +63,16 @@ class TestIssueShape(unittest.TestCase):
 		self.assertEqual(validate.Issue("ERROR", "X", "m", {"room_type": "STD"}).ref, {"room_type": "STD"})
 
 	def test_to_dict_adds_ref_only_when_there_is_one(self):
-		self.assertEqual(validate.Issue("ERROR", "X", "m").to_dict(), {"level": "ERROR", "code": "X", "message": "m"})
-		self.assertEqual(validate.Issue("ERROR", "X", "m", {}).to_dict(), {"level": "ERROR", "code": "X", "message": "m"})
-		self.assertEqual(validate.Issue("WARNING", "X", "m", {"period": "P1"}).to_dict(),
+		self.assertEqual(validate.Issue("ERROR", "X", "m").to_dict(ref=True),
+		                 {"level": "ERROR", "code": "X", "message": "m"})
+		self.assertEqual(validate.Issue("ERROR", "X", "m", {}).to_dict(ref=True),
+		                 {"level": "ERROR", "code": "X", "message": "m"})
+		self.assertEqual(validate.Issue("WARNING", "X", "m", {"period": "P1"}).to_dict(ref=True),
 		                 {"level": "WARNING", "code": "X", "message": "m", "ref": {"period": "P1"}})
+
+	def test_to_dict_is_mains_unless_the_ref_is_asked_for(self):
+		self.assertEqual(validate.Issue("WARNING", "X", "m", {"period": "P1"}).to_dict(),
+		                 {"level": "WARNING", "code": "X", "message": "m"})
 
 	def test_an_issue_is_still_hashable(self):
 		self.assertEqual(len({validate.Issue("ERROR", "X", "m", {"rule_ids": ["a", "b"]})}), 1)
@@ -72,7 +81,7 @@ class TestIssueShape(unittest.TestCase):
 		t = replace(fx.terms(), currency="EURO", sale_from=date(2028, 1, 1), stay_from=date(2028, 1, 1))
 		issues = validate.validate_terms(t)
 		self.assertEqual([i.code for i in issues], ["CURRENCY", "SALE_WINDOW", "STAY_WINDOW"])
-		self.assertTrue(all(i.ref is None and "ref" not in i.to_dict() for i in issues))
+		self.assertTrue(all(i.ref is None and "ref" not in i.to_dict(ref=True) for i in issues))
 		self.assertIsNone(found(replace(fx.terms(), boards=fx.board_rules()[1:]), "NO_BASE_BOARD")[0].ref)
 
 	def test_missing_parts_are_left_out_zero_is_kept(self):
@@ -280,45 +289,62 @@ class TestSweepRefs(unittest.TestCase):
 		                              "age_band": "CHB", "rule_id": "O-CHB", "rule_ids": ["O-CHB", "O-CHB-DUP"]})
 
 
+BOARD_CHECKS = {"board_checks": True}
+
+
 class TestBoardRules(unittest.TestCase):
 	def test_the_fixture_boards_are_clean(self):
 		# AI (base) and UAI (+20 per adult): none of the new checks fires
-		self.assertEqual([i.code for i in validate.validate_terms(fx.terms()) if i.code.startswith("BOARD_")], [])
+		self.assertEqual([i.code for i in validate.validate_terms(fx.terms(), **BOARD_CHECKS)
+		                  if i.code.startswith("BOARD_")], [])
+
+	def test_without_board_checks_the_issues_are_mains(self):
+		"""An existing caller is not told about board rows main published (ADR-061)."""
+		for t in (with_boards(uai("B-X", room_type="ZZZ")), with_boards(uai("B-Y", room_type="SUP", period="PZ")),
+		          with_boards(uai("B-UAI2")), replace(fx.terms(), boards=(uai("B-X", room_type="ZZZ"),))):
+			self.assertEqual([i.code for i in validate.validate_terms(t) if i.code.startswith("BOARD_")], [])
+			# the checks add their own issues only (their errors stop the sweep, as any error does)
+			plain = validate.validate_terms(t, sweep_combinations=False)
+			checked = validate.validate_terms(t, sweep_combinations=False, **BOARD_CHECKS)
+			self.assertEqual([i for i in checked if not i.code.startswith("BOARD_")], plain)
+			self.assertTrue([i for i in checked if i.code.startswith("BOARD_")])
 
 	def test_a_board_rule_for_an_unknown_room(self):
-		issues = found(with_boards(uai("B-X", room_type="ZZZ")), "BOARD_UNKNOWN_ROOM")
+		issues = found(with_boards(uai("B-X", room_type="ZZZ")), "BOARD_UNKNOWN_ROOM", **BOARD_CHECKS)
 		self.assertEqual([(i.level, i.message, i.ref) for i in issues], [
 			("ERROR", "board rule B-X (UAI) names unknown room ZZZ",
 			 {"rule_id": "B-X", "board": "UAI", "room_type": "ZZZ"})])
 
 	def test_a_board_rule_for_an_unknown_period(self):
-		issues = found(with_boards(uai("B-Y", room_type="SUP", period="PZ")), "BOARD_UNKNOWN_PERIOD")
+		issues = found(with_boards(uai("B-Y", room_type="SUP", period="PZ")), "BOARD_UNKNOWN_PERIOD", **BOARD_CHECKS)
 		self.assertEqual([(i.level, i.message, i.ref) for i in issues], [
 			("ERROR", "board rule B-Y (UAI) names unknown period PZ",
 			 {"rule_id": "B-Y", "board": "UAI", "room_type": "SUP", "period": "PZ"})])
 
 	def test_two_rules_of_one_board_for_the_same_room_and_period(self):
-		issues = found(with_boards(uai("B-UAI2")), "BOARD_DUPLICATE")
+		issues = found(with_boards(uai("B-UAI2")), "BOARD_DUPLICATE", **BOARD_CHECKS)
 		self.assertEqual([(i.level, i.message, i.ref) for i in issues], [
 			("ERROR", "board UAI has 2 rules for the same room and period",
 			 {"rule_id": "B-UAI", "rule_ids": ["B-UAI", "B-UAI2"], "board": "UAI"})])
 		scoped = found(with_boards(uai("S1", room_type="SUP", period="P1"), uai("S2", room_type="SUP", period="P1"),
-		                           uai("S3", room_type="SUP", period="P1")), "BOARD_DUPLICATE")
+		                           uai("S3", room_type="SUP", period="P1")), "BOARD_DUPLICATE", **BOARD_CHECKS)
 		self.assertEqual([(i.message, i.ref) for i in scoped], [
 			("board UAI has 3 rules for the same room and period",
 			 {"rule_id": "S1", "rule_ids": ["S1", "S2", "S3"], "board": "UAI", "room_type": "SUP", "period": "P1"})])
 		# two base rows of the included board are twins too
-		self.assertEqual(len(found(with_boards(BoardRule("B-AI2", "AI", is_base=True)), "BOARD_DUPLICATE")), 1)
+		self.assertEqual(len(found(with_boards(BoardRule("B-AI2", "AI", is_base=True)), "BOARD_DUPLICATE",
+		                           **BOARD_CHECKS)), 1)
 
 	def test_rules_of_one_board_for_different_scopes_are_fine(self):
 		t = with_boards(uai("B-SUP", room_type="SUP"), uai("B-SUP-P1", room_type="SUP", period="P1"),
 		                uai("B-P1", period="P1"), BoardRule("B-HB", "HB", op=Op.ADD, adult_amount=D(10)))
-		self.assertEqual(validate.validate_terms(t), [])
+		self.assertEqual(validate.validate_terms(t, **BOARD_CHECKS), [])
 
 	def test_board_errors_block_publishing_and_come_after_the_base_board_check(self):
 		t = replace(fx.terms(), boards=(uai("B-X", room_type="ZZZ"), uai("B-Y", period="PZ")))
-		self.assertEqual([i.code for i in validate.validate_terms(t)],
+		self.assertEqual([i.code for i in validate.validate_terms(t, **BOARD_CHECKS)],
 		                 ["NO_BASE_BOARD", "BOARD_UNKNOWN_ROOM", "BOARD_UNKNOWN_PERIOD"])
+		self.assertEqual([i.code for i in validate.validate_terms(t)], ["NO_BASE_BOARD"])
 
 
 if __name__ == "__main__":

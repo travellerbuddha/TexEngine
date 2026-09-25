@@ -176,10 +176,7 @@ class TestRestBypass(TexTestCase):
 		info = contract_api.get_version(version)                 # what the modify drawer needs, nothing more
 		self.assertTrue(info["cost_hidden"])
 		self.assertLessEqual(set(info), {"name", "contract", "version_no", "status", "rooms", "boards", "rate_plans",
-		                                 "room_types", "rate_plan_options", "contract_doc", "editable", "cost_hidden",
-		                                 "can_preview", "can_publish", "can_edit_contract"})
-		# what the Pricing Workspace may offer (ADR-061): nothing to someone who only sells
-		self.assertEqual((info["can_preview"], info["can_publish"], info["can_edit_contract"]), (False, False, False))
+		                                 "room_types", "rate_plan_options", "contract_doc", "editable", "cost_hidden"})
 		self.assertTrue(all(set(r) <= {"room_type"} for r in info["rooms"]))
 		self.assertTrue(all(set(b) <= {"board"} for b in info["boards"]))
 		self.assertTrue(all(set(r) <= {"rate_plan", "refundable"} for r in info["rate_plans"]))

@@ -357,10 +357,10 @@ class TestHiddenPolicyRules(unittest.TestCase):
 		probe = rule("V-PROBE", COMBINATION, Op.SUBTRACT, "251", adults=2, children=1)
 		t = cascaded(fx.bands(), (*fx.occ_rules(), probe), layers=(TestPolicyOverride.OVR, self.LADDER))
 		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
-		stored = [i.to_dict() for i in validate.validate_terms(t)]
+		stored = [i.to_dict(ref=True) for i in validate.validate_terms(t)]
 		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED", {i["code"] for i in stored})
 		shown = validate.visible_issues(t, stored, hidden)
-		self.assertEqual(shown, [i.to_dict() for i in validate.validate_terms(t, hidden=hidden)])
+		self.assertEqual(shown, [i.to_dict(ref=True) for i in validate.validate_terms(t, hidden=hidden)])
 		self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", {i["code"] for i in shown})
 		self.assertEqual(validate.visible_issues(t, stored, frozenset()), stored)
 		# a party priced with the version's own rules only is still said (fx.occ_rules name adults 1-3)
@@ -369,6 +369,12 @@ class TestHiddenPolicyRules(unittest.TestCase):
 		bare = [{"level": "WARNING", "code": "NEGATIVE_OCCUPANCY_PRICE", "message": "x"}, "junk"]
 		self.assertEqual(validate.visible_issues(t, bare, hidden), [])
 		self.assertEqual(validate.visible_issues(t, bare[:1], frozenset()), bare[:1])
+		# a report an existing caller's publish stored (main's keys, no ref; ADR-061): every row of a
+		# code that can depend on a hidden rule is left out, the rest is given as stored
+		mains = [i.to_dict() for i in validate.validate_terms(t)]
+		self.assertEqual(validate.visible_issues(t, mains, hidden),
+		                 [i for i in mains if i["code"] not in validate.HIDEABLE_CODES])
+		self.assertEqual(validate.visible_issues(t, mains, frozenset()), mains)
 
 	# a global policy's band-less child rules: one prices, one defers (INHERIT)
 	GENERIC = inherit.PolicyLayer(
@@ -388,17 +394,17 @@ class TestHiddenPolicyRules(unittest.TestCase):
 		self.assertEqual([i.ref["rule_ids"] for i in full], [["G-ANY-A"]])
 		seen = [i for i in validate.validate_terms(t, hidden=hidden) if i.code == "OCC_INFANT_GENERIC"]
 		self.assertEqual(seen, [])
-		stored = [i.to_dict() for i in validate.validate_terms(t)]
+		stored = [i.to_dict(ref=True) for i in validate.validate_terms(t)]
 		self.assertNotIn("OCC_INFANT_GENERIC", {i["code"] for i in validate.visible_issues(t, stored, hidden)})
 		self.assertIn("OCC_INFANT_GENERIC", validate.HIDEABLE_CODES)
 		# a band-less child rule of the version's own is named, the hidden ones are not, whatever their op
 		own = cascaded((), (rule("V-ANY", CHILD, Op.PERCENT_OF, "40"),), layers=(self.GENERIC,))
 		live = [i for i in validate.validate_terms(own, hidden=hidden) if i.code == "OCC_INFANT_GENERIC"]
 		self.assertEqual([(i.ref["rule_ids"], "G-ANY" in i.message) for i in live], [(["V-ANY"], False)])
-		stored = [i.to_dict() for i in validate.validate_terms(own)]
+		stored = [i.to_dict(ref=True) for i in validate.validate_terms(own)]
 		self.assertIn("G-ANY-A", next(i["message"] for i in stored if i["code"] == "OCC_INFANT_GENERIC"))
 		shown = [i for i in validate.visible_issues(own, stored, hidden) if i["code"] == "OCC_INFANT_GENERIC"]
-		self.assertEqual(shown, [i.to_dict() for i in live])
+		self.assertEqual(shown, [i.to_dict(ref=True) for i in live])
 		# a hidden rule naming the infant band: said to no viewer without cost, INHERIT or not
 		for op, value in ((Op.INHERIT, None), (Op.MULTIPLY, "0")):
 			with self.subTest(op=op):
@@ -406,7 +412,7 @@ class TestHiddenPolicyRules(unittest.TestCase):
 				t = cascaded((), (rule("V-ANY", CHILD, Op.PERCENT_OF, "40"),), layers=(layer,))
 				hide = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
 				self.assertNotIn("OCC_INFANT_GENERIC", [i.code for i in validate.validate_terms(t, hidden=hide)])
-				stored = [i.to_dict() for i in validate.validate_terms(t)]
+				stored = [i.to_dict(ref=True) for i in validate.validate_terms(t)]
 				self.assertNotIn("OCC_INFANT_GENERIC", {i["code"] for i in validate.visible_issues(t, stored, hide)})
 
 	def test_a_hidden_infant_rule_that_defers_hides_the_party_as_one_that_prices(self):

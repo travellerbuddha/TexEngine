@@ -161,6 +161,16 @@ def plain(data):
 	return json.loads(as_json(data))
 
 
+def without_row_names(q):
+	"""A quote with each rule's row name (``rule_id``) blanked: a save replaces a table's rows, so
+	the same rule has a new row name after every save."""
+	if isinstance(q, dict):
+		return {k: (None if k == "rule_id" else without_row_names(v)) for k, v in q.items()}
+	if isinstance(q, list):
+		return [without_row_names(v) for v in q]
+	return q
+
+
 class ExistingCallerCase(TexTestCase):
 	def setUp(self):
 		super().setUp()
@@ -267,7 +277,8 @@ class TestSaveAsOnMain(ExistingCallerCase):
 				find(data[table], **match).update(zero)
 				api.save_version(self.v, as_json(data))
 				self.assertEqual(tables(self.v), stored)                   # stored as 0
-				self.assertEqual(api.preview_price(self.v, **self.args(board="UAI", children=[4])), blank_quote)
+				zero_quote = self.assert_mains(self.v, board="UAI", children=[4])
+				self.assertEqual(without_row_names(plain(zero_quote)), without_row_names(plain(blank_quote)))
 
 	def test_unknown_and_twin_board_rows_publish_as_on_main(self):
 		data = tables(self.v)

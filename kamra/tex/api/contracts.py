@@ -62,6 +62,14 @@ class OverlayTooLarge(frappe.ValidationError):
 	which has no cap (ADR-061, S8 review follow-up)."""
 
 
+def _workspace(flag, *new_args) -> bool:
+	"""Whether a call asks for the Pricing Workspace's additions (ADR-061, "Existing semantics kept,
+	the workspace's additions opt-in"): the ``workspace`` flag it sends (``1``/``true``), or an
+	argument only the workspace sends (``data``, ``parties``). Without either, an endpoint answers
+	an existing caller exactly as main did; the security and tenancy fixes hold either way."""
+	return str(flag).strip().lower() in ("1", "true") or any(_has_data(a) for a in new_args)
+
+
 @frappe.whitelist()
 def list_contracts(property: str | None = None, status: str | None = None, market: str | None = None):
 	props = [property] if property else sorted(scope.permitted_properties())
@@ -167,8 +175,9 @@ def _sees_cost(prop: str | None) -> bool:
 	return scope.has_capability("price.view_cost", prop) or scope.has_capability("contract.edit", prop)
 
 
-def _catalogue(v, prop: str) -> dict:
-	"""What selling needs from a version (rooms, boards, rate plans), without any amount."""
+def _catalogue(v, prop: str, workspace: bool = False) -> dict:
+	"""What selling needs from a version (rooms, boards, rate plans), without any amount; for the
+	workspace also what it may offer (nothing: ``can_*`` false)."""
 	c = frappe.db.get_value("TEX Contract", v.contract, ["name", "property", "contract_code", "contract_name",
 	                                                     "market", "contract_currency", "status"], as_dict=True)
 	return {
@@ -182,34 +191,41 @@ def _catalogue(v, prop: str) -> dict:
 		"rate_plan_options": frappe.get_all("Rate Plan", filters={"property": prop, "disabled": 0},
 		                                    fields=["name", "rate_plan_name", "code", "tex_refundable"]),
 		"contract_doc": dict(c or {}), "editable": False, "cost_hidden": True,
-		"can_preview": False, "can_publish": False, "can_edit_contract": False,
+		**({"can_preview": False, "can_publish": False, "can_edit_contract": False} if workspace else {}),
 	}
 
 
 @frappe.whitelist()
-def get_version(name: str):
+def get_version(name: str, workspace=None):
+	"""A version as its viewer may read it. ``workspace`` (ADR-061 GAP-10, opt-in): also what the
+	workspace may offer the viewer, whether the pricing basis is locked, the overlay's row cap and
+	the currency's minor units. The report stored at publish is given to an editor without cost as
+	the live check gives it, whoever asks (S16 re-review; a security fix, ADR-061)."""
+	ws = _workspace(workspace)
 	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)
 	scope.require("price.view", prop)
 	if not _sees_cost(prop):
-		return _catalogue(v, prop)
+		return _catalogue(v, prop, ws)
 	out = doc_dict(v, exclude=("payload",))
 	# the report stored at publish, as the live check gives it to this viewer (S16 re-review)
 	out["validation_report"] = svc.stored_report(v, formula=scope.has_capability("price.view_cost", prop))
 	out["editable"] = v.status == "Draft" and scope.has_capability("contract.edit", prop)
-	# what the workspace may offer this viewer (ADR-061); the endpoints check again
-	out["can_preview"] = scope.has_capability("price.view_cost", prop)
-	out["can_publish"] = scope.has_capability("contract.publish", prop)
-	out["can_edit_contract"] = scope.has_capability("contract.edit", prop)
-	# the header's pricing basis is fixed once a version was published (the controller's own test)
-	out["basis_locked"] = svc.is_published(v.contract)
-	if out["editable"]:
-		# what the workspace previews with unsaved changes; above it, it asks for the saved draft
-		out["overlay_max_rows"] = OVERLAY_MAX_ROWS
+	if ws:
+		# what the workspace may offer this viewer (ADR-061); the endpoints check again
+		out["can_preview"] = scope.has_capability("price.view_cost", prop)
+		out["can_publish"] = scope.has_capability("contract.publish", prop)
+		out["can_edit_contract"] = scope.has_capability("contract.edit", prop)
+		# the header's pricing basis is fixed once a version was published (the controller's own test)
+		out["basis_locked"] = svc.is_published(v.contract)
+		if out["editable"]:
+			# what the workspace previews with unsaved changes; above it, it asks for the saved draft
+			out["overlay_max_rows"] = OVERLAY_MAX_ROWS
 	c = frappe.get_doc("TEX Contract", v.contract)
 	out["contract_doc"] = {f: c.get(f) for f in ("name", "property", "contract_code", "contract_name", "market",
 	                                             "pricing_basis", "contract_currency", "status")}
-	out["contract_doc"]["minor_units"] = money.minor_units(c.contract_currency)
+	if ws:
+		out["contract_doc"]["minor_units"] = money.minor_units(c.contract_currency)
 	out.update(_selling(v, c))
 	out["room_types"] = frappe.get_all("Room Type", filters={"property": c.property, "disabled": 0},
 	                                   fields=["name", "room_type_name", "adults_capacity", "children_capacity",
@@ -253,10 +269,13 @@ def _set_selling(v, selling) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
-def save_version(name: str, data):
+def save_version(name: str, data, workspace=None):
 	"""Replace the draft's settings, selling terms and child tables in one call. The editor saves
 	on demand (Save, Ctrl+S), never per keystroke; each save that changes something is audited
-	old → new by the version's controller (G-74)."""
+	old → new by the version's controller (G-74). ``workspace`` (ADR-061, opt-in): a blank rule
+	value is refused (GAP-8) instead of being stored as 0 as main stores it, and the answer is
+	``get_version``'s for the workspace."""
+	ws = _workspace(workspace)
 	data = parse(data, {})
 	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)
@@ -271,9 +290,10 @@ def save_version(name: str, data):
 	for t in VERSION_TABLES:
 		if t in data:
 			v.set(t, _clean_rows(data[t]))
-	_require_values(v)
+	if ws:
+		_require_values(v)
 	v.save(ignore_permissions=True)
-	return get_version(name)
+	return get_version(name, workspace=1 if ws else None)
 
 
 def _clean_rows(rows) -> list[dict]:
@@ -429,23 +449,30 @@ def _heavy(kind: str):
 
 
 @frappe.whitelist()
-def validate_version(name: str, data=None):
+def validate_version(name: str, data=None, workspace=None):
 	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061).
-	Bounded per user (``_heavy``): near the row cap one call takes 10–16 s.
+	For the workspace (``workspace`` or ``data``, opt-in): its board checks (GAP-5), each issue's
+	``ref`` (D9), and bounded per user (``_heavy``: near the row cap one call takes 10–16 s).
+	Without them the issues are main's and the call is not bounded, as on main.
 
 	A viewer without ``price.view_cost`` gets no issue whose presence depends on the value of an
 	inherited pricing-policy rule (its formula is cost, G-11): an overlay probe rule would otherwise
-	find it by bisection without a save or an audit entry (S16 review; ``validate_terms(hidden=…)``)."""
-	with _heavy("validate"):
+	find it by bisection without a save or an audit entry (S16 review; ``validate_terms(hidden=…)``).
+	A security fix: it holds for every caller."""
+	ws = _workspace(workspace, data)
+	with _heavy("validate") if ws else nullcontext():
 		formula = scope.has_capability("price.view_cost", scope.property_of("TEX Contract Version", name))
 		if _has_data(data):
-			return svc.validate_doc(_overlay(name, data), formula=formula)
-		return svc.validate_version(name, formula=formula)
+			return svc.validate_doc(_overlay(name, data), formula=formula, workspace=True)
+		return svc.validate_version(name, formula=formula, workspace=ws)
 
 
 @frappe.whitelist(methods=["POST"])
-def publish_version(name: str, effective_from: str | None = None, change_note: str | None = None):
-	return svc.publish(name, effective_from=effective_from or None, change_note=text(change_note, 500))
+def publish_version(name: str, effective_from: str | None = None, change_note: str | None = None, workspace=None):
+	"""Publish a draft. ``workspace`` (ADR-061, opt-in): the workspace's board checks block it as its
+	live check reports them, and the stored report carries each issue's ``ref``."""
+	return svc.publish(name, effective_from=effective_from or None, change_note=text(change_note, 500),
+	                   workspace=_workspace(workspace))
 
 
 @frappe.whitelist(methods=["POST"])
@@ -469,19 +496,48 @@ def withdraw_version(name: str, reason: str):
 @frappe.whitelist(methods=["POST"])
 def preview_price(version: str, room_type: str, board: str, check_in: str, check_out: str, adults: int = 2,
                   children=None, rate_plan: str | None = None, market: str | None = None, channel: str = "DIRECT_WEB",
-                  currency: str | None = None, sale_at: str | None = None, promo_codes=None, data=None):
+                  currency: str | None = None, sale_at: str | None = None, promo_codes=None, data=None,
+                  workspace=None):
 	"""Price a stay on any version — including an unpublished draft — with the full
-	explanation (contract editor 'test price' panel; also answers 'which rule won'). With
-	``data``: on the draft with those unsaved changes (ADR-061). ``children``: each an age in
-	whole years, ``{age_months}`` or ``{dob}`` (``_child_specs``). Each night of the quote reports
-	the running totals the Explain ladder shows (``subtotal_*``, GAP-12)."""
+	explanation (contract editor 'test price' panel; also answers 'which rule won').
+
+	For the Pricing Workspace's price test (``workspace`` or ``data``, opt-in, ADR-061): with
+	``data`` on the draft with those unsaved changes (GAP-1); ``children`` each an age in whole
+	years, ``{age_months}`` or ``{dob}``, anything else refused (``_child_specs``, GAP-6); each night
+	reports the running totals the Explain ladder shows (``subtotal_*``, GAP-12). Without them the
+	answer is main's: each child ``int()`` of what was sent, main's night keys."""
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view_cost", prop)
+	if not _workspace(workspace, data):
+		return _mains_preview(v, version, prop, room_type, board, check_in, check_out, adults, children, rate_plan,
+		                      market, channel, currency, sale_at, promo_codes)
 	# with data it builds the matrix's overlay (up to 5,000 rows): bounded per user as the matrix is
 	with _heavy("preview") if _has_data(data) else nullcontext():
 		return _preview_price(v, version, prop, room_type, board, check_in, check_out, adults, children, rate_plan,
 		                      market, channel, currency, sale_at, promo_codes, data)
+
+
+def _mains_preview(v, version, prop, room_type, board, check_in, check_out, adults, children, rate_plan, market,
+                   channel, currency, sale_at, promo_codes) -> dict:
+	"""``preview_price`` for an existing caller: main's body, unchanged (ADR-061)."""
+	at = frappe.utils.get_datetime(sale_at) if sale_at else now_datetime()
+	try:
+		terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v, at=at)
+	except frappe.ValidationError as e:
+		return {"sellable": False, "reasons": [{"code": "BUILD", "message": str(e)}]}
+	kids = tuple(ChildSpec(age=int(a)) for a in (parse(children, []) or []))
+	req = StayRequest(property=prop, room_type=room_type, board=board, rate_plan=rate_plan or None,
+	                  check_in=getdate(check_in), check_out=getdate(check_out), adults=as_int(adults, 2, lo=1, hi=12),
+	                  children=kids, sale_at=at, market=(market or terms.market).upper(), channel=channel,
+	                  sell_currency=(currency or terms.currency).upper(),
+	                  promo_codes=tuple(parse(promo_codes, []) or ()))
+	try:
+		ctx = ctxmod.build_context(terms, req)
+		q = engine.price_stay(ctx, req)
+	except (Unsellable, PricingError) as e:
+		return {"sellable": False, "reasons": [{"code": getattr(e, "code", "PRICING_ERROR"), "message": str(e)}]}
+	return q.to_dict(internal=True)
 
 
 def _preview_price(v, version, prop, room_type, board, check_in, check_out, adults, children, rate_plan, market,
@@ -506,7 +562,7 @@ def _preview_price(v, version, prop, room_type, board, check_in, check_out, adul
 		q = engine.price_stay(ctx, req)
 	except (Unsellable, PricingError) as e:
 		return {"sellable": False, "reasons": [{"code": getattr(e, "code", "PRICING_ERROR"), "message": str(e)}]}
-	return q.to_dict(internal=True)
+	return q.to_dict(internal=True, subtotals=True)
 
 
 # the most children a preview prices (ADR-061 GAP-6); ages the way a guest's are given (0–17 years)
@@ -706,13 +762,15 @@ def _party_cells(terms, room_type: str, parties, hidden_rules: frozenset[str] = 
 
 
 @frappe.whitelist()
-def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_room: str | None = None):
-	"""Nightly unit (base person / room price) per room × period for the editor grid. With
-	``data``: of the draft with those unsaved changes (ADR-061); a draft that cannot be built
-	answers ``build_error``. ``adults`` is accepted for older callers and unused: the unit does
-	not depend on the party.
+def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_room: str | None = None,
+                 workspace=None):
+	"""Nightly unit (base person / room price) per room × period for the editor grid. ``adults`` is
+	accepted for older callers and unused: the unit does not depend on the party. Without the
+	workspace's arguments the answer is main's (ADR-061, "Existing semantics kept").
 
-	Besides the cells (ADR-061, GAP-2/2b/3): each cell's source (``rooms[].sources``, the rule that
+	For the Pricing Workspace (``workspace``, ``data`` or ``parties``, opt-in): with ``data`` of the
+	draft with those unsaved changes (GAP-1; a draft that cannot be built answers ``build_error``),
+	and besides the cells (GAP-2/2b/3): each cell's source (``rooms[].sources``, the rule that
 	priced it), each room's effective capacity, the age bands with their origin, the occupancy
 	rules inherited from pricing policies and the engine's defaults (``occupancy_defaults``); with
 	``parties`` (``[{adults, children: [band code]}]``) and ``party_room``, the occupancy total of
@@ -727,10 +785,31 @@ def price_matrix(version: str, adults: int = 2, data=None, parties=None, party_r
 	scope.require("price.view", prop)
 	if not _sees_cost(prop):
 		frappe.throw(_("Not permitted: {0}.").format("price.view_cost"), frappe.PermissionError)
+	if not _workspace(workspace, data, parties):
+		return _mains_matrix(v, version)
 	if _has_data(data) or _has_data(parties):
 		with _heavy("matrix"):
 			return _price_matrix(v, version, prop, data, parties, party_room)
 	return _price_matrix(v, version, prop, data, parties, party_room)
+
+
+def _mains_matrix(v, version: str) -> dict:
+	"""``price_matrix`` for an existing caller: main's body, unchanged (ADR-061)."""
+	from kamra.tex.pricing import rooms as room_math
+
+	terms = svc.load_terms(version) if v.status != "Draft" else svc.build_terms(v)
+	out = []
+	for rt in sorted(terms.rooms):
+		row = {"room_type": rt, "name": terms.rooms[rt].name, "cells": {}}
+		for p in terms.periods:
+			try:
+				row["cells"][p.code] = str(room_math.room_unit(terms, rt, p))
+			except Unsellable as u:
+				row["cells"][p.code] = None
+				row.setdefault("errors", {})[p.code] = u.message
+		out.append(row)
+	return {"periods": [{"code": p.code, "name": p.name, "start": str(p.start), "end": str(p.end)}
+	                    for p in terms.periods], "rooms": out, "basis": terms.basis.value, "currency": terms.currency}
 
 
 def _price_matrix(v, version: str, prop: str, data, parties, party_room: str | None) -> dict:

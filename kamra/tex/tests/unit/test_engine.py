@@ -322,7 +322,9 @@ class TestReportedSubtotals(unittest.TestCase):
 	"""GAP-12: each night reports the running totals the engine already holds — after the adults,
 	after the children (before a combination rule) and occupancy + board (before the period
 	adjustment) — for the Explain ladder's Occupancy, Child and Board stages. No price, total,
-	explanation step or engine version changes; the guest view never carries them."""
+	explanation step or engine version changes; the guest view never carries them. They are in a
+	quote's dict only when asked for (``to_dict(subtotals=True)``, the workspace's price test;
+	ADR-061, "Existing semantics kept"): a stored quote keeps main's night keys."""
 
 	def spec(self, **kw):
 		return engine.price_stay(fx.ctx(spec_terms(), markups=(DE_MARKUP,)), spec_request(**kw))
@@ -333,15 +335,18 @@ class TestReportedSubtotals(unittest.TestCase):
 		self.assertEqual(q.explanation.summary_lines(), SPEC_SUMMARY)
 		self.assertEqual([(s["code"], s["before"], s["after"]) for s in d["explanation"]], SPEC_STEPS)
 		self.assertEqual(d["totals"], SPEC_TOTALS)
-		self.assertEqual({k: v for k, v in d["nights"][0].items() if k not in SUBTOTALS}, SPEC_NIGHT)
+		self.assertEqual(d["nights"][0], SPEC_NIGHT)                     # main's keys, main's values
 		self.assertEqual(d["engine_version"], "tex-pricing/1.0")
+		asked = q.to_dict(subtotals=True)
+		self.assertEqual({k: v for k, v in asked["nights"][0].items() if k not in SUBTOTALS}, SPEC_NIGHT)
+		self.assertEqual({**asked, "nights": None}, {**d, "nights": None})
 		self.assertEqual(q.engine_version, engine.ENGINE_VERSION)
 
 	def test_the_spec_examples_subtotals(self):
 		n = self.spec().nights[0]
 		self.assertEqual((n.unit, n.subtotal_adults, n.subtotal_children, n.occupancy, n.subtotal_board),
 		                 (D("120"), D("240"), D("300"), D("300"), D("300")))
-		self.assertEqual({k: n.to_dict()[k] for k in SUBTOTALS},
+		self.assertEqual({k: n.to_dict(subtotals=True)[k] for k in SUBTOTALS},
 		                 {"subtotal_adults": "240.000000", "subtotal_children": "300.000000",
 		                  "subtotal_board": "300.000000"})
 
@@ -415,7 +420,8 @@ class TestReportedSubtotals(unittest.TestCase):
 
 		q = self.spec(board="UAI")
 		self.assertEqual(set(q.to_dict(internal=False)["nights"][0]), {"date", "amount"})
-		internal = q.to_dict()
+		self.assertEqual(set(q.to_dict(internal=False, subtotals=True)["nights"][0]), {"date", "amount"})
+		internal = q.to_dict(subtotals=True)
 		self.assertTrue(set(SUBTOTALS) <= set(internal["nights"][0]))
 		for staff in (False, True):
 			shown = quoting.strip_internal(json.loads(json.dumps(internal)), staff=staff)
