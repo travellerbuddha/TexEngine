@@ -296,8 +296,8 @@ def rules_taking_part(terms: ContractTerms, spec: RoomSpec, period: Period, unit
 	"""The ids of the occupancy rules that take part in pricing ``party`` in one night of ``period``:
 	each slot's winner and the whole-combination rule, as ``price_occupancy`` resolves them. Also
 	when the party cannot be priced: the rules resolved before the failure (which is all of them
-	for a negative total) and the rules an ambiguity names. A viewer who may not read some rules
-	(ADR-061, S16 review) is told nothing about a party one of them takes part in."""
+	for a negative total) and the rules an ambiguity names. Whether a viewer who may not read some
+	rules is told about the party is ``depends_on``'s answer (ADR-061, S16 re-review)."""
 	ex = Explanation()
 	named: tuple = ()
 	try:
@@ -305,3 +305,27 @@ def rules_taking_part(terms: ContractTerms, spec: RoomSpec, period: Period, unit
 	except Unsellable as u:
 		named = tuple(u.params.get("rules") or ())
 	return frozenset({s.rule.rule_id for s in ex.steps if s.rule is not None} | set(named))
+
+
+def depends_on(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decimal, party: Party,
+               rules: frozenset[str]) -> bool:
+	"""Whether what ``price_occupancy`` answers for ``party`` in ``period`` depends on the op or value
+	of one of ``rules`` (rules a viewer may not read: a pricing policy's formulas, ADR-061): a total,
+	or a negative total (NEGATIVE_OCCUPANCY_PRICE), one of them takes part in (``rules_taking_part``);
+	a child no rule prices (NO_CHILD_RULE) where one of them defers (INHERIT) for that child. Any other
+	failure is decided by which rules exist and where, not by a hidden op or value: a child band
+	without a rule, also when a hidden rule priced an adult before it, and an ambiguity (under
+	``CASCADE`` a contract's own rule never ties with a policy's)."""
+	if not rules:
+		return False
+	try:
+		price_occupancy(terms, spec, period, unit, party)
+	except Unsellable as u:
+		if u.code == "NO_CHILD_RULE":
+			position, band = u.params.get("position"), u.params.get("band")
+			return any(r.rule_id in rules and r.op == Op.INHERIT
+			           and qualifiers_match(r, spec.room_type, period.code, party.adults, party.child_count)
+			           and slot_matches(r, OccTarget.CHILD, position, band) for r in terms.occupancy_rules)
+		if u.code != "NEGATIVE_OCCUPANCY_PRICE":
+			return False
+	return bool(rules_taking_part(terms, spec, period, unit, party) & rules)

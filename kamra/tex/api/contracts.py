@@ -194,7 +194,8 @@ def get_version(name: str):
 	if not _sees_cost(prop):
 		return _catalogue(v, prop)
 	out = doc_dict(v, exclude=("payload",))
-	out["validation_report"] = json.loads(v.validation_report) if v.validation_report else None
+	# the report stored at publish, as the live check gives it to this viewer (S16 re-review)
+	out["validation_report"] = svc.stored_report(v, formula=scope.has_capability("price.view_cost", prop))
 	out["editable"] = v.status == "Draft" and scope.has_capability("contract.edit", prop)
 	# what the workspace may offer this viewer (ADR-061); the endpoints check again
 	out["can_preview"] = scope.has_capability("price.view_cost", prop)
@@ -677,16 +678,18 @@ def _occupancy_defaults() -> dict:
 
 
 def _party_cells(terms, room_type: str, parties, hidden_rules: frozenset[str] = frozenset()) -> list[dict]:
-	"""Each sample party's total per period. A party one of ``hidden_rules`` takes part in (an
-	inherited policy rule a viewer without cost may not read, S16 review: a slot's rule or the
-	whole-party rule) is left out, whether it prices or fails: its period is listed in ``hidden``,
-	without a total, slots or error, so no formula can be worked back (a total next to its slots, or
-	a failure such as a negative total that a probe rule of the draft provokes)."""
+	"""Each sample party's total per period. A party whose answer depends on the op or value of
+	one of ``hidden_rules`` (inherited policy rules a viewer without cost may not read, S16 review;
+	``matrix.party_hidden``) is left out: a total or a negative total one of them takes part in (a
+	slot's rule or the whole-party rule), whose period is listed in ``hidden`` without a total, slots
+	or error, so no formula can be worked back (a total next to its slots, or a negative total that a
+	probe rule of the draft provokes). A failure whose message carries no amount and does not depend
+	on a hidden value (a child band without a rule, an ambiguity) is said (S16 re-review)."""
 	out = []
 	for adults, kids in parties:
 		cell = {"cells": {}, "slots": {}, "errors": {}, "hidden": []}
 		for p in terms.periods:
-			if hidden_rules and matrix.party_rules(terms, room_type, p, adults, kids) & hidden_rules:
+			if hidden_rules and matrix.party_hidden(terms, room_type, p, adults, kids, hidden_rules):
 				cell["cells"][p.code] = None
 				cell["hidden"].append(p.code)
 				continue

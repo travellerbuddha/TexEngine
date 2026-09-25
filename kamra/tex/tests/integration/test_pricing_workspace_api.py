@@ -60,6 +60,7 @@ FINANCE = "pw-finance@example.com"     # price.view_cost without contract.edit
 AGENT = "pw-agent@example.com"         # sells only: the catalogue
 FOREIGN = "pw-foreign@example.com"     # a Revenue Manager of another hotel
 ROW_MESSAGE = "a value is required; clear the cell to remove the price."
+NO_CHD_RULE = "no occupancy rule for child 1 in band CHD (2A+1C)"
 
 
 def keyed(table: str, rows: list[dict]) -> list[dict]:
@@ -746,6 +747,59 @@ class TestInheritedTerms(WorkspaceCase):
 		cell = api.price_matrix(version, data=as_json(data), parties=json.dumps([{"adults": 4, "children": []}]),
 		                        party_room=self.std)["party_cells"][0]
 		self.assertEqual((set(cell["errors"]), cell["hidden"]), ({"LOW", "HIGH"}, []))
+
+	def test_a_child_band_without_a_rule_is_said_whoever_priced_the_adults(self):
+		"""A missing child rule depends on which rules exist, not on a hidden value: an editor without
+		cost is told a party is unsellable for it, also when a hidden policy rule priced the adults
+		(re-review of S16, finding 1). A total a hidden rule takes part in stays hidden."""
+		revisions.archive(POLICY, self.policy)
+		policy("PW Global Ladder", bands=[INF, {"band_code": "CHD", "label": "Child", "from_age": 3, "to_age": 11.99}],
+		       rules=[{"target": "ADULT", "position": 1, "op": "MULTIPLY", "value": 1},
+		              {"target": "ADULT", "position": 2, "op": "MULTIPLY", "value": 1}, child("INF", "MULTIPLY", 0)])
+		version = fx.create_contract(self.f, code="PW-RR-NCR", age_bands=[], occupancy_rules=[],
+		                             publish=False)["version"]
+		parties = json.dumps([{"adults": 2, "children": ["CHD"]}, {"adults": 2, "children": []}])
+		family, two = api.price_matrix(version, parties=parties, party_room=self.std)["party_cells"]
+		self.assertEqual(family["errors"], {"LOW": NO_CHD_RULE, "HIGH": NO_CHD_RULE})
+		missing = [i for i in api.validate_version(version)["issues"] if i["code"] == "NO_CHILD_RULE"]
+		self.assertTrue(missing)
+		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		self.as_user(EDITOR)
+		for label, kw in (("saved", {}), ("unsaved", {"data": as_json(data)})):
+			with self.subTest(label):
+				family, two = api.price_matrix(version, parties=parties, party_room=self.std, **kw)["party_cells"]
+				self.assertEqual((family["cells"], family["hidden"]), ({"LOW": None, "HIGH": None}, []))
+				self.assertEqual(family["errors"], {"LOW": NO_CHD_RULE, "HIGH": NO_CHD_RULE})
+				# priced by the policy's adult rules: hidden
+				self.assertEqual((two["cells"], two["errors"], sorted(two["hidden"])),
+				                 ({"LOW": None, "HIGH": None}, {}, ["HIGH", "LOW"]))
+				seen = [i for i in api.validate_version(version, **kw)["issues"] if i["code"] == "NO_CHILD_RULE"]
+				self.assertEqual([i["message"] for i in seen], [i["message"] for i in missing])
+
+	def test_the_report_frozen_at_publish_leaves_out_what_the_live_check_does(self):
+		"""get_version gives an editor without cost the report stored at publish as the live check
+		would give it (re-review of S16, low finding): no negative total a hidden policy rule takes part
+		in, no outranked policy override. Who sees cost gets the report as stored."""
+		# 1A: 100 − 150 (the engine's default prices the adult); 2A+1C: 200 + a policy-priced child − 260
+		version = fx.create_contract(self.f, code="PW-RR-REP", age_bands=[], occupancy_rules=[
+			{"target": "COMBINATION", "combination": "1+0", "op": "SUBTRACT", "value": 150},
+			{"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 260}])["version"]
+		negative = {(i["ref"]["adults"], i["ref"]["children"]) for i in api.get_version(version)["validation_report"]
+		            if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"}
+		self.assertEqual(negative, {(1, 0), (2, 1)})
+		policy("PW Hotel Override", property=fx.PROPERTY, rules=[child("INF", "FIXED", 15, is_override=1)])
+		contracts.publish(self.v)
+		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED",
+		              {i["code"] for i in api.get_version(self.v)["validation_report"]})
+		for user in (EDITOR, RM):
+			self.as_user(user)
+			with self.subTest(user):
+				shown = api.get_version(version)["validation_report"]
+				self.assertEqual({(i["ref"]["adults"], i["ref"]["children"]) for i in shown
+				                  if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"},
+				                 {(1, 0)} if user == EDITOR else {(1, 0), (2, 1)})
+				codes = {i["code"] for i in api.get_version(self.v)["validation_report"]}
+				self.assertEqual("OCC_POLICY_OVERRIDE_OUTRANKED" in codes, user == RM)
 
 	def test_the_live_check_does_not_compare_a_hidden_override_with_the_editors_rule(self):
 		"""OCC_POLICY_OVERRIDE_OUTRANKED shows up only while the version's rule differs from the

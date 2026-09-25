@@ -8,7 +8,8 @@ never recomputes a price itself:
 * ``party_total``: the occupancy total of a sample party in a room and period, built the way the
   publish sweep builds one (each child at the lower edge of its age band);
 * ``party_rules``: the occupancy rules that take part in pricing such a party, also when it cannot
-  be priced (a viewer who may not read some rules is told nothing about a party they price).
+  be priced; ``party_hidden``: whether what the party answers depends on the op or value of a rule
+  the viewer may not read (such a party's total or negative total is not shown to that viewer).
 
 And the one computation the workspace asks the server for instead of doing it (GAP-7, D2):
 ``adjust_amount``, an entered price changed once by an op, as the ARI grid's rate change does.
@@ -94,21 +95,48 @@ def party_total(terms: ContractTerms, room_type: str, period: Period, adults: in
 	return result.total, slots
 
 
-def party_rules(terms: ContractTerms, room_type: str, period: Period, adults: int, band_codes) -> frozenset[str]:
-	"""The ids of the occupancy rules that take part in pricing the sample party of ``party_total``:
-	each slot's winner and the whole-combination rule (``occupancy.rules_taking_part``), also when
-	the party cannot be priced. None when it fails before its occupancy is priced (a room not in
-	the contract, an unknown band, a party the room cannot hold, no unit)."""
+def _priced_night(terms: ContractTerms, room_type: str, period: Period, adults: int, band_codes):
+	"""The room, sample party and unit ``party_total`` prices the occupancy of; None when it fails
+	before its occupancy is priced (a room not in the contract, an unknown band, a party the room
+	cannot hold, no unit): those failures name no occupancy rule."""
 	spec = terms.rooms.get(room_type)
 	if spec is None:
-		return frozenset()
+		return None
 	try:
 		party = sample_party(terms, adults, band_codes, period.start)
 		occupancy.check_capacity(spec, party, terms.infants_count_as_occupants)
 		unit = rooms.room_unit(terms, room_type, period)
 	except (Unsellable, PricingError):
+		return None
+	return spec, party, unit
+
+
+def party_rules(terms: ContractTerms, room_type: str, period: Period, adults: int, band_codes) -> frozenset[str]:
+	"""The ids of the occupancy rules that take part in pricing the sample party of ``party_total``:
+	each slot's winner and the whole-combination rule (``occupancy.rules_taking_part``), also when
+	the party cannot be priced. An empty set when it fails before its occupancy is priced (a room
+	not in the contract, an unknown band, a party the room cannot hold, no unit)."""
+	night = _priced_night(terms, room_type, period, adults, band_codes)
+	if night is None:
 		return frozenset()
+	spec, party, unit = night
 	return occupancy.rules_taking_part(terms, spec, period, unit, party)
+
+
+def party_hidden(terms: ContractTerms, room_type: str, period: Period, adults: int, band_codes,
+                 rules: frozenset[str]) -> bool:
+	"""Whether what ``party_total`` answers for the sample party (a total and its slots, or why it
+	cannot be priced) depends on the op or value of one of ``rules``, rules the viewer may not read
+	(``occupancy.depends_on``, ADR-061 S16 re-review): a total or a negative total one of them takes
+	part in, a child no rule prices where one of them defers. A child band without any rule, an
+	ambiguity and a failure before the occupancy is priced do not."""
+	if not rules:
+		return False
+	night = _priced_night(terms, room_type, period, adults, band_codes)
+	if night is None:
+		return False
+	spec, party, unit = night
+	return occupancy.depends_on(terms, spec, period, unit, party, rules)
 
 
 def adjust_amount(current: Decimal, op: Op, value: Decimal, currency: str) -> Decimal:

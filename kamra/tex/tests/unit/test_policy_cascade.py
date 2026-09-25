@@ -309,3 +309,63 @@ class TestHiddenPolicyRules(unittest.TestCase):
 		self.assertTrue(any(i.ref["adults"] == 2 and i.ref["children"] == 1 and i.ref["age_band"] == "CHD"
 		                    for i in kept))
 
+
+	# the usual adult ladder of a global policy, an infant rule and no rule for the CHD band
+	LADDER = inherit.PolicyLayer(
+		"POL-G", 1, None, None,
+		bands=(AgeBand("INF", "Infant", 0, 36, is_infant=True), AgeBand("CHD", "Child", 36, 144)),
+		rules=(rule("G-A1", ADULT, Op.MULTIPLY, "1", position=1), rule("G-A2", ADULT, Op.MULTIPLY, "1", position=2),
+		       rule("G-A3", ADULT, Op.MULTIPLY, "0.70", position=3),
+		       rule("G-INF", CHILD, Op.MULTIPLY, "0", age_band="INF")))
+
+	def test_a_missing_child_rule_is_said_whoever_priced_the_adults(self):
+		"""NO_CHILD_RULE says that no rule prices a band: whether it shows depends on which rules
+		exist, not on any value, so it is said also when a hidden rule priced an adult before the
+		child (re-review of S16, finding 1). A negative total a hidden rule takes part in still goes."""
+		probe = rule("V-PROBE", COMBINATION, Op.SUBTRACT, "251", adults=2, children=1)
+		t = cascaded((), (probe,), layers=(self.LADDER,))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		self.assertEqual(hidden, {"G-A1", "G-A2", "G-A3", "G-INF"})
+		full = validate.validate_terms(t)
+		missing = [i for i in full if i.code == "NO_CHILD_RULE"]
+		self.assertTrue(missing)
+		self.assertTrue(all(i.ref["age_band"] == "CHD" for i in missing))
+		# 2 × 100 + 0 (INF) − 251: negative
+		self.assertIn(("NEGATIVE_OCCUPANCY_PRICE", "INF"),
+		              {(i.code, i.ref.get("age_band")) for i in full if i.ref})
+		seen = validate.validate_terms(t, hidden=hidden)
+		self.assertEqual([(i.message, i.ref) for i in seen if i.code == "NO_CHILD_RULE"],
+		                 [(i.message, i.ref) for i in missing])
+		self.assertNotIn("NEGATIVE_OCCUPANCY_PRICE", [i.code for i in seen])
+
+	def test_a_missing_child_rule_where_a_hidden_rule_defers_is_left_out(self):
+		"""A hidden rule that defers (INHERIT) for a band is why no rule prices it: its op is hidden
+		too, so the missing rule is not said for that band."""
+		defers = inherit.PolicyLayer("POL-G", 1, None, None, bands=self.LADDER.bands,
+		                             rules=(*self.LADDER.rules, rule("G-CHD", CHILD, Op.INHERIT, age_band="CHD")))
+		t = cascaded((), (), layers=(defers,))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		self.assertIn("NO_CHILD_RULE", [i.code for i in validate.validate_terms(t)])
+		self.assertNotIn("NO_CHILD_RULE", [i.code for i in validate.validate_terms(t, hidden=hidden)])
+		# a rule of the version's own for the band prices it: nothing to hide or say
+		own = cascaded((), (rule("V-CHD", CHILD, Op.PERCENT_OF, "50", age_band="CHD"),), layers=(defers,))
+		self.assertNotIn("NO_CHILD_RULE", [i.code for i in validate.validate_terms(own)])
+
+	def test_a_stored_report_is_filtered_as_the_live_check_is(self):
+		"""The report frozen at publish was made with nothing hidden: ``visible_issues`` leaves out of
+		it what ``validate_terms(hidden=…)`` leaves out (re-review of S16, low finding)."""
+		probe = rule("V-PROBE", COMBINATION, Op.SUBTRACT, "251", adults=2, children=1)
+		t = cascaded(fx.bands(), (*fx.occ_rules(), probe), layers=(TestPolicyOverride.OVR, self.LADDER))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		stored = [i.to_dict() for i in validate.validate_terms(t)]
+		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED", {i["code"] for i in stored})
+		shown = validate.visible_issues(t, stored, hidden)
+		self.assertEqual(shown, [i.to_dict() for i in validate.validate_terms(t, hidden=hidden)])
+		self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", {i["code"] for i in shown})
+		self.assertEqual(validate.visible_issues(t, stored, frozenset()), stored)
+		# a party priced with the version's own rules only is still said (fx.occ_rules name adults 1-3)
+		self.assertIn("NEGATIVE_OCCUPANCY_PRICE", {i["code"] for i in shown})
+		# a row that no longer says which party it is about, or that is not a dict, is left out
+		bare = [{"level": "WARNING", "code": "NEGATIVE_OCCUPANCY_PRICE", "message": "x"}, "junk"]
+		self.assertEqual(validate.visible_issues(t, bare, hidden), [])
+		self.assertEqual(validate.visible_issues(t, bare[:1], frozenset()), bare[:1])

@@ -201,6 +201,60 @@ class TestPartyRules(unittest.TestCase):
 		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, []), frozenset())
 
 
+class TestPartyHidden(unittest.TestCase):
+	"""Whether a sample party's answer depends on the op or value of a rule the viewer may not
+	read (re-review of S16, finding 1): a total or a negative total one of them takes part in, and
+	a missing child rule where one of them defers, are hidden; any other failure is said."""
+
+	def setUp(self):
+		self.t = fx.terms()
+		self.p1 = period(self.t, "P1")
+
+	def hidden(self, t, adults, kids, rules, room="STD"):
+		return matrix.party_hidden(t, room, self.p1, adults, kids, frozenset(rules))
+
+	def test_a_total_a_hidden_rule_takes_part_in(self):
+		self.assertTrue(self.hidden(self.t, 2, ["CHB"], {"O-CHB"}))
+		self.assertTrue(self.hidden(self.t, 2, [], {"O-A2"}))
+		self.assertFalse(self.hidden(self.t, 2, [], {"O-CHB"}))
+		self.assertFalse(self.hidden(self.t, 2, ["CHB"], set()))
+
+	def test_a_negative_total_a_hidden_rule_takes_part_in(self):
+		probe = OccupancyRule("V-PROBE", OccTarget.COMBINATION, Op.SUBTRACT, D("251"), adults=2, children=1)
+		t = replace(self.t, occupancy_rules=(*self.t.occupancy_rules, probe))
+		self.assertTrue(self.hidden(t, 2, ["CHB"], {"O-A1"}))
+		self.assertFalse(self.hidden(t, 2, ["CHB"], {"O-TEEN"}))
+
+	def test_a_missing_child_rule_is_said_whoever_priced_the_adults(self):
+		t = replace(self.t, occupancy_rules=tuple(r for r in self.t.occupancy_rules if r.rule_id != "O-TEEN"))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.party_total(t, "STD", self.p1, 2, ["TEEN"])
+		self.assertEqual(cm.exception.code, "NO_CHILD_RULE")
+		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, ["TEEN"]), {"O-A1", "O-A2"})
+		self.assertFalse(self.hidden(t, 2, ["TEEN"], {"O-A1", "O-A2"}))
+		# unless a hidden rule defers (INHERIT) for that child: its op is why no rule prices it
+		defers = OccupancyRule("P-TEEN", OccTarget.CHILD, Op.INHERIT, None, age_band="TEEN")
+		t = replace(t, occupancy_rules=(*t.occupancy_rules, defers))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.party_total(t, "STD", self.p1, 2, ["TEEN"])
+		self.assertEqual(cm.exception.code, "NO_CHILD_RULE")
+		self.assertTrue(self.hidden(t, 2, ["TEEN"], {"P-TEEN"}))
+		self.assertFalse(self.hidden(t, 2, ["TEEN"], {"O-A1"}))
+
+	def test_an_ambiguity_is_said(self):
+		twin = OccupancyRule("O-CHB-2", OccTarget.CHILD, Op.PERCENT_OF, D("40"), age_band="CHB")
+		t = replace(self.t, occupancy_rules=(*self.t.occupancy_rules, twin))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.party_total(t, "STD", self.p1, 2, ["CHB"])
+		self.assertEqual(cm.exception.code, "AMBIGUOUS_OCCUPANCY_RULES")
+		self.assertFalse(self.hidden(t, 2, ["CHB"], {"O-A1", "O-A2"}))
+
+	def test_a_failure_before_the_occupancy_is_priced_is_said(self):
+		for room, adults, kids in (("STD", 2, ["CHA", "CHA", "CHB"]), ("STD", 2, ["XX"]), ("NOPE", 2, [])):
+			with self.subTest(room=room, kids=kids):
+				self.assertFalse(self.hidden(self.t, adults, kids, {"O-A1", "O-A2"}, room=room))
+
+
 class TestBandLayer(unittest.TestCase):
 	"""Where a contract without bands of its own takes them from (``price_matrix`` names it)."""
 

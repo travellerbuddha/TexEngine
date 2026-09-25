@@ -87,8 +87,11 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
                    hidden: frozenset[str] = frozenset()) -> list[Issue]:
 	"""The issues of ``t``. ``hidden``: ids of occupancy rules the viewer may not read (a pricing
 	policy's formulas, which are cost: ADR-061, S16 review). No issue whose presence depends on one
-	of their values is reported then: the sweep's issues for a party one of them takes part in, and
-	OCC_POLICY_OVERRIDE_OUTRANKED for a hidden override."""
+	of their ops or values is reported then: OCC_POLICY_OVERRIDE_OUTRANKED for a hidden override,
+	and the sweep's negative total of a party one of them takes part in or missing child rule where
+	one of them defers (``occupancy.depends_on``). A child band without any rule and an ambiguity
+	are reported, whoever priced the adults (S16 re-review). ``visible_issues`` does the same to a
+	stored report."""
 	issues: list[Issue] = []
 	if len(t.currency) != 3:
 		issues.append(_err("CURRENCY", f"currency {t.currency!r} is not an ISO code"))
@@ -512,13 +515,28 @@ def policy_issues(bands: tuple[AgeBand, ...], rules: tuple[OccupancyRule, ...]) 
 	return issues
 
 
+def _sweep_party(t: ContractTerms, adults: int, children: int, band: AgeBand | None, p: Period) -> Party:
+	"""The party the sweep prices: ``children`` children, all at the lower edge of ``band``."""
+	slots = tuple(ChildSlot(i + 1, band.from_months, band, i) for i in range(children)) if band else ()
+	return Party(adults=adults, declared_adults=adults, children=slots, children_as_adults=(),
+	             infants=sum(1 for s in slots if s.band.is_infant), reference_date=p.start)
+
+
+# the sweep's issues whose presence can depend on a rule's op or value (``occupancy.depends_on``),
+# and every code ``validate_terms(hidden=…)`` may leave out
+_SWEEP_HIDEABLE = frozenset({"NEGATIVE_OCCUPANCY_PRICE", "NO_CHILD_RULE"})
+HIDEABLE_CODES = _SWEEP_HIDEABLE | {"OCC_POLICY_OVERRIDE_OUTRANKED"}
+
+
 def _sweep(t: ContractTerms, limit: int, hidden: frozenset[str] = frozenset()) -> list[Issue]:
 	"""Price every valid combination (all children in one band) once per period and
 	report the ones that cannot be priced. Ambiguous rules are an ERROR (the runtime
 	refuses to guess); a combination without a rule only makes that offer unsellable.
 	A combination is reported once, in the first period where it fails (``ref.period``).
-	A warning about a party one of the ``hidden`` rules takes part in is not reported: whether
-	it fails can depend on that rule's value (a negative total)."""
+	A failure whose presence depends on the op or value of one of the ``hidden`` rules is not
+	reported (``occupancy.depends_on``): a negative total one of them takes part in, a child no
+	rule prices where one of them defers. A child band without a rule is, whoever priced the
+	adults before it (S16 re-review)."""
 	out: list[Issue] = []
 	seen: set[tuple] = set()
 	for rt, spec in sorted(t.rooms.items()):
@@ -532,9 +550,7 @@ def _sweep(t: ContractTerms, limit: int, hidden: frozenset[str] = frozenset()) -
 					if a + c > spec.max_occupants:
 						continue
 					for band in (t.age_bands if c else (None,)):
-						slots = tuple(ChildSlot(i + 1, band.from_months, band, i) for i in range(c)) if band else ()
-						party = Party(adults=a, declared_adults=a, children=slots, children_as_adults=(),
-						              infants=sum(1 for s in slots if s.band.is_infant), reference_date=p.start)
+						party = _sweep_party(t, a, c, band, p)
 						try:
 							occupancy.price_occupancy(t, spec, p, unit, party)
 						except Unsellable as u:
@@ -542,8 +558,8 @@ def _sweep(t: ContractTerms, limit: int, hidden: frozenset[str] = frozenset()) -
 							if key in seen:
 								continue
 							level = "ERROR" if u.code == "AMBIGUOUS_OCCUPANCY_RULES" else "WARNING"
-							if hidden and level == "WARNING" and \
-									occupancy.rules_taking_part(t, spec, p, unit, party) & hidden:
+							if hidden and u.code in _SWEEP_HIDEABLE and \
+									occupancy.depends_on(t, spec, p, unit, party, hidden):
 								continue
 							seen.add(key)
 							tied = list(u.params.get("rules") or ()) or None
@@ -554,4 +570,41 @@ def _sweep(t: ContractTerms, limit: int, hidden: frozenset[str] = frozenset()) -
 							                      rule_id=tied[0] if tied else None, rule_ids=tied)))
 							if len(out) >= limit:
 								return out
+	return out
+
+
+def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> list:
+	"""A stored report of ``t`` (``Issue.to_dict`` rows: the one frozen at publish, made with
+	nothing hidden) as a viewer who may not read the ``hidden`` rules may see it, as
+	``validate_terms(t, hidden=hidden)`` leaves issues out (S16 re-review): no
+	OCC_POLICY_OVERRIDE_OUTRANKED about a hidden override, no sweep issue whose presence depends
+	on a hidden rule (``occupancy.depends_on``, for the party and period the row names). A row
+	that does not say which override or party it is about is left out; nothing is left out when
+	nothing is hidden."""
+	if not hidden:
+		return list(issues)
+	bands = {b.code: b for b in t.age_bands}
+	periods = {p.code: p for p in t.periods}
+	out = []
+	for i in issues:
+		if not isinstance(i, dict):
+			continue
+		ref = i.get("ref") if isinstance(i.get("ref"), dict) else {}
+		code = i.get("code")
+		if code == "OCC_POLICY_OVERRIDE_OUTRANKED":
+			if not ref.get("rule_id") or ref["rule_id"] in hidden:
+				continue
+		elif code in _SWEEP_HIDEABLE:
+			spec, p = t.rooms.get(ref.get("room_type")), periods.get(ref.get("period"))
+			a, c, band = ref.get("adults"), ref.get("children") or 0, bands.get(ref.get("age_band"))
+			if spec is None or p is None or not isinstance(a, int) or not isinstance(c, int) or (c and band is None):
+				continue
+			try:
+				unit = rooms.room_unit(t, spec.room_type, p)
+			except Unsellable:
+				continue
+			if occupancy.depends_on(t, spec, p, unit, _sweep_party(t, a, c, band, p), hidden):
+				continue
+		out.append(i)
+	return out
 	return out

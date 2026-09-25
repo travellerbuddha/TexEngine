@@ -456,9 +456,36 @@ def validate_doc(version, *, formula: bool = True) -> dict:
 		terms = build_terms(version)
 	except frappe.ValidationError as e:
 		return {"ok": False, "issues": [{"level": "ERROR", "code": "BUILD", "message": str(e)}]}
-	hidden = frozenset() if formula else frozenset(r.rule_id for r in terms.occupancy_rules if r.source != "version")
-	issues = validate.validate_terms(terms, hidden=hidden)
+	issues = validate.validate_terms(terms, hidden=frozenset() if formula else policy_rules(terms))
 	return {"ok": not any(i.level == "ERROR" for i in issues), "issues": [i.to_dict() for i in issues]}
+
+
+def policy_rules(terms) -> frozenset[str]:
+	"""The ids of the occupancy rules ``terms`` inherit from pricing policies: their formulas are
+	cost (G-11), which a viewer without ``price.view_cost`` may not read (ADR-061, S16 review)."""
+	return frozenset(r.rule_id for r in terms.occupancy_rules if r.source != "version")
+
+
+def stored_report(version, *, formula: bool = True) -> list | None:
+	"""The validation report stored when ``version`` was published (made with nothing hidden).
+	Without ``formula`` it is given as the live check gives a viewer without ``price.view_cost``
+	its issues (S16 re-review): ``validate.visible_issues`` of the frozen terms leaves out an
+	outranked policy override and a sweep issue whose presence depends on a policy rule's value;
+	if the frozen terms cannot be read, every issue of those codes is left out."""
+	if not version.validation_report:
+		return None
+	report = json.loads(version.validation_report)
+	if formula:
+		return report
+	if not isinstance(report, list):
+		return []
+	try:
+		terms = load_terms(version.name) if version.payload else None
+	except frappe.ValidationError:
+		terms = None
+	if terms is None:
+		return [i for i in report if isinstance(i, dict) and i.get("code") not in validate.HIDEABLE_CODES]
+	return validate.visible_issues(terms, report, policy_rules(terms))
 
 
 # ─── lifecycle ───────────────────────────────────────────────────────────
