@@ -112,6 +112,14 @@ export function Dialog({
   )
 }
 
+/**
+ * A side drawer. Modal by default (backdrop, focus trap, Esc, focus restored). With `modal={false}`
+ * it is a non-blocking side panel (PRICING_WORKSPACE_UX.md §1.3, §3.8: "2 non-blocking drawers"):
+ * role="dialog" without aria-modal, no backdrop, no focus trap and no scroll lock, so the page stays
+ * usable beside it. Focus moves into it on open and back to the opener on close (unless the user
+ * put it elsewhere); Escape closes it while the focus is inside it (a Popover, Menu or tooltip
+ * opened in it closes first: their Escape runs earlier, at the window).
+ */
 export function Drawer({
   open,
   onClose,
@@ -119,6 +127,7 @@ export function Drawer({
   children,
   footer,
   width = "md",
+  modal = true,
 }: {
   open: boolean
   onClose: () => void
@@ -126,12 +135,36 @@ export function Drawer({
   children?: ReactNode
   footer?: ReactNode
   width?: "md" | "lg" | "xl"
+  modal?: boolean
 }) {
+  if (!modal) return <SidePanel open={open} onClose={onClose} title={title} footer={footer} width={width}>{children}</SidePanel>
+  return <ModalDrawer open={open} onClose={onClose} title={title} footer={footer} width={width}>{children}</ModalDrawer>
+}
+
+const DRAWER_WIDTH = { md: "sm:max-w-md", lg: "sm:max-w-2xl", xl: "sm:max-w-4xl" }
+
+type DrawerProps = { open: boolean; onClose: () => void; title: ReactNode; children?: ReactNode; footer?: ReactNode; width: "md" | "lg" | "xl" }
+
+function DrawerBody({ titleId, title, onClose, children, footer }: { titleId: string; title: ReactNode; onClose: () => void; children?: ReactNode; footer?: ReactNode }) {
+  const { t } = useTexT()
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-5 py-3.5">
+        <h2 id={titleId} className="text-base font-semibold text-zinc-950">
+          {title}
+        </h2>
+        <IconButton label={t("core.action.close")} icon={<X className="size-4" />} size="sm" onClick={onClose} />
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 px-5 py-3">{footer}</div>}
+    </>
+  )
+}
+
+function ModalDrawer({ open, onClose, title, children, footer, width }: DrawerProps) {
   const panel = useModal(open, onClose)
   const titleId = useId()
-  const { t } = useTexT()
   if (!open) return null
-  const w = { md: "sm:max-w-md", lg: "sm:max-w-2xl", xl: "sm:max-w-4xl" }[width]
   return createPortal(
     <div className="tex-root fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" aria-hidden onClick={onClose} />
@@ -141,17 +174,53 @@ export function Drawer({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={cn("relative flex h-full w-full flex-col bg-white shadow-tex-pop", w)}
+        className={cn("relative flex h-full w-full flex-col bg-white shadow-tex-pop", DRAWER_WIDTH[width])}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-5 py-3.5">
-          <h2 id={titleId} className="text-base font-semibold text-zinc-950">
-            {title}
-          </h2>
-          <IconButton label={t("core.action.close")} icon={<X className="size-4" />} size="sm" onClick={onClose} />
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 px-5 py-3">{footer}</div>}
+        <DrawerBody titleId={titleId} title={title} onClose={onClose} footer={footer}>
+          {children}
+        </DrawerBody>
       </div>
+    </div>,
+    document.body,
+  )
+}
+
+function SidePanel({ open, onClose, title, children, footer, width }: DrawerProps) {
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const el = panel.current
+    if (!open || !el) return
+    const opener = document.activeElement as HTMLElement | null
+    const first = el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>(FOCUSABLE)
+    ;(first ?? el).focus({ preventScroll: true })
+    return () => {
+      // back to the opener only when the focus was in the panel (or went with it)
+      const now = document.activeElement
+      if (now && now !== document.body && !el.contains(now)) return
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
+    }
+  }, [open])
+  if (!open) return null
+  return createPortal(
+    <div
+      ref={panel}
+      role="dialog"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      data-side-panel=""
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing) return
+        e.stopPropagation()
+        closeRef.current()
+      }}
+      className={cn("tex-root fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-zinc-200 bg-white shadow-tex-pop outline-none", DRAWER_WIDTH[width])}
+    >
+      <DrawerBody titleId={titleId} title={title} onClose={onClose} footer={footer}>
+        {children}
+      </DrawerBody>
     </div>,
     document.body,
   )

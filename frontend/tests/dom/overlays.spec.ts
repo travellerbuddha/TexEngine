@@ -183,6 +183,33 @@ test("in a Drawer, the first Escape hides a tooltip and the second closes the Dr
   await expect(drawer).toBeHidden()
 })
 
+test("a non-modal Drawer: no aria-modal, the page stays usable, Escape inside closes it (a Popover in it first)", async ({ page }) => {
+  const opener = page.getByRole("button", { name: "Open side panel" })
+  await opener.click()
+  const panel = page.getByRole("dialog", { name: "Side panel title" })
+  await expect(panel).toBeVisible()
+  await expect(panel).not.toHaveAttribute("aria-modal", /.*/)
+  await expect(page.locator('[aria-modal="true"]')).toHaveCount(0)
+  // the focus moves in (its first control: Close, as in the modal Drawer)
+  await expect(panel.getByRole("button", { name: "Close" })).toBeFocused()
+  // the page beside it takes clicks and keys; Escape there leaves the panel open
+  await page.getByRole("button", { name: "Page button" }).click()
+  await expect(page.getByTestId("page-clicks")).toHaveText("1")
+  await page.keyboard.press("Escape")
+  await expect(panel).toBeVisible()
+  // a Popover opened in the panel closes on the first Escape, the panel on the second
+  await page.getByRole("button", { name: "Open panel popover" }).click()
+  const popover = page.getByRole("dialog", { name: "Popover panel popover" })
+  await expect(page.getByLabel("q1", { exact: true })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(popover).toBeHidden()
+  await expect(panel).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open panel popover" })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(panel).toBeHidden()
+  await expect(opener).toBeFocused()
+})
+
 test("Ctrl+A selects the whole grid on a Cyrillic layout too (key ф, code KeyA), but not AZERTY's Ctrl+Q", async ({ page }) => {
   const count = page.getByTestId("grid-selected")
   const cell = page.getByRole("gridcell", { name: "0:0" })

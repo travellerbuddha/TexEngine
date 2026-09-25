@@ -77,6 +77,27 @@ function DrawerCase() {
   )
 }
 
+/** A non-modal Drawer (a side panel, PRICING_WORKSPACE_UX.md §3.8): the page stays usable. */
+function SidePanelCase() {
+  const [open, setOpen] = useState(false)
+  const [clicks, setClicks] = useState(0)
+  return (
+    <>
+      <button type="button" className="rounded border px-2 py-1" onClick={() => setOpen(true)}>
+        Open side panel
+      </button>
+      <button type="button" className="rounded border px-2 py-1" onClick={() => setClicks((n) => n + 1)}>
+        Page button
+      </button>
+      <output data-testid="page-clicks">{clicks}</output>
+      <Drawer open={open} onClose={() => setOpen(false)} title="Side panel title" modal={false}>
+        <Field name="p1" />
+        <SmallPopover id="panel popover" fields={["q1", "q2"]} />
+      </Drawer>
+    </>
+  )
+}
+
 function Grid() {
   const selection = useGridSelection({ rows: 3, cols: 3 })
   const nav = useGridNavigation({ rows: 3, cols: 3, selection })
@@ -124,6 +145,10 @@ function Harness() {
       </div>
       <div className="mt-2">
         <Grid />
+      </div>
+      {/* on the left: the side panel covers the right of the page */}
+      <div className="mt-2 flex items-center gap-2">
+        <SidePanelCase />
       </div>
       {/* the page scrolls too */}
       <div style={{ height: 2000 }} />
