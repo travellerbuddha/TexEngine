@@ -6681,3 +6681,237 @@ plain number as a price (D10).
   and Standard, give two buttons with the same name. Their `data-card` targets differ.
 - The builder's scope is All or chosen rooms and periods. A card that mixes both cannot come from
   the grouping any more. A scope that mixes both still cannot be written in one save.
+
+**Decision (implemented in S13: Boards in the workspace).** Branch `pricing-workspace`, frontend
+only (no server file changes), commits `7464160` (pure logic and unit tests), `0714848` (the
+screen), `83dfa0f` (the grid reads the board rules once; wording) and `d56302a` (a cell's context
+menu opens its row's terms). Boards sit under Occupancy & child pricing in Pricing
+(`workspace/BoardsSection.tsx`, §3.12). The Advanced "Boards" table stays under Commercial rules.
+- *The section* is collapsible. Collapsed, it shows chips in `boards` order: "UAI BASE · AI −5 % ·
+  HB −20.00 per adult", plus "+N period or room rules" when there are any. A board with no rule for
+  all rooms and periods reads "{board}: some rooms or periods only". The open state is remembered
+  per viewer (localStorage). Without a stored choice, a draft without boards opens the section and
+  a draft with boards shows the chips. `#boards` opens the section and scrolls to it. "Add board"
+  is in the section header, so it can be used while the section is collapsed.
+- *The grid* ("Board supplements by period") is a keyboard grid on the matrix's column template
+  (All periods and the period columns, in line with the matrix and the ladder). It has one row
+  per board in `boards` order: the board's name, its code, a BASE badge and a line with its terms
+  ("per adult per night; children 30 %, infants free", the label first when there is one). Under
+  it, an indented row for each room with rules of its own ("HB · Garden Villa only"). It has the
+  ladder's editing model: type, F2 / Enter, Enter / Shift+Enter and Tab to move, Escape, error
+  drafts kept in the cell, Ctrl/Cmd+Enter over the selection, Delete / Backspace, Ctrl/Cmd+Z / Y
+  and the undo toast. Every change is one `useWorkspaceHistory` entry.
+- *Cells* read the `board` shorthand with the contract's minor units, through
+  `model.planBoardEntries` → `applyBoardEntry`:
+  - a bare `20` or `=20` is ABSOLUTE, 20 per room per night (O1);
+  - `+20` is ADD 20 per adult; `-20` is ADD −20 per adult (O2);
+  - `5%`, `+5%` and `-5%` are ADJUST_PERCENT (O3);
+  - `BASE` makes the board the base board. It sets is_base on its row and takes is_base from every
+    other board's rows (the radio behaviour). NO_BASE_BOARD stays the server's check, and the
+    section shows the Rule tables' "no board is marked as included" warning.
+  A new row takes child % and infants free from the rule it overrides, else the table defaults
+  (50 %, infants free). The cell shows the amount with its unit on a second line ("−20.00 / per
+  adult", "100.00 / per room", "−5% / of occupancy", "BASE / included"). A period rule has ◆ and
+  the amber tint. An inherited cell shows "↳ −20.00". A cell no rule reaches reads "—" with "not
+  offered". Tooltips say "Applies to {rooms} in {period}." and what an inherited cell follows.
+  Each cell has `data-cellid` = `board:{board}|{room}|{period}` ("" for All rooms / All
+  periods), and each row has `data-board-row` = `{board}|{room}`, for S14 and S15.
+- *The reading line always names the unit* (`model.boardReadingOf`, from the same plan as the
+  commit):
+  - "Half board · All periods: 100.00 per room per night (fixed)";
+  - "Half board · All periods: −20.00 per adult per night; children 50 %, infants free" (the child
+    share of the row that will be written);
+  - "All inclusive · All periods: −5% of the night's occupancy price";
+  - "…: AI becomes the base board, included in the room price; UAI is no longer included and needs
+    a supplement";
+  - a price typed into the base board adds "; UAI is then no longer the base board";
+  - a clear reads "remove this rule; it then follows {rule} ({row} · {period})" or "…; HB is then
+    not offered here";
+  - clearing a board's own All periods cell reads "Removes Half board and its 3 rules; you are
+    asked first".
+  A new row's empty editor explains the forms. Syntax errors and multipliers get board wording
+  ("Boards take no multiplier. Type 20 (per room per night), +20 or -20 (per adult), 5% or -5%,
+  or BASE.").
+- *Clear:* Delete, or an empty entry, on a period or room cell removes that cell's row. On a
+  board's own All periods cell (its rule for all rooms and periods), the whole board goes after an
+  inline confirmation: "Remove Half board from this version? 3 rules are removed." It has Remove
+  and Cancel, the focus on Remove, and Escape cancels. It is one history entry with the undo toast
+  ("Removed: Half board").
+- *Add board:* a select of RO / BB / HB / FB / AI / UAI that are not yet in the version. The
+  version's first board is written at once as the base board, with the new-row defaults (ADD, no
+  value, 50 %, infants free). A later board appears as a "new" row, and its All periods cell is
+  edited at once. It becomes rows of the table with its first value (deviation 2). × discards it.
+- *The row popover* ("Board terms: {row}", non-modal) opens from the row header's terms button, or
+  from a cell with Alt+Enter, Shift+F10, the ContextMenu key or a right-click. The focus returns to
+  where it came from. It has:
+  - children pay (% of the adult amount), infants free and the label, written to every rule of
+    the row ("These terms go to the row's 2 rules (All periods, P2)"; a note says when they differ
+    now);
+  - Rooms: all rooms or one contract room. It moves the row's rules, and is refused when the board
+    already has rules for that scope ("HB already has rules for Family Suite: edit that row
+    instead.");
+  - on a board's row, "Add a rule for one room": a new indented row whose All periods cell is
+    edited at once;
+  - Remove board (or Remove these rules on a room row), with an inline confirmation in the popover.
+  Apply is one history entry.
+- *The matrix's active period is highlighted.* When a matrix cell (or its editor) gets the focus,
+  `PriceMatrix`'s new `onActivePeriod` reports its column. `usePeriodChannel`, a small store read
+  with `useSyncExternalStore`, carries it to the boards grid only, so the rest of Pricing does not
+  re-render. The column's cells get inner side lines and its header a bar (`data-matrix-period`).
+  `MatrixRowCells` / `MatrixCell` gained an optional `hlC` / `highlight`, and only the cells whose
+  highlight changes re-render.
+- *Pure logic* (`workspace/model.ts`, no arithmetic on values): `planBoardEntries` (all or
+  nothing; `removes` names the boards a gesture removes; `BASE_SCOPE`); `boardReadingOf`;
+  `boardEditText` (20, +20, -20, +5%, BASE in the viewer's decimal mark, parsing back to the same
+  rule); `addBoard`; `boardModel(tables, pending)` (rows waiting for a value; the table is read
+  once); `boardCellOf`; `boardTermsOf` / `setBoardTerms`; `moveBoardRows`; `removeBoardRow`;
+  `boardSummary`.
+- *Strings:* 91 new keys (`rates.brd.*`) in the six catalogues.
+
+**Deviations from the slice text, with reasons (S13).**
+1. *Files beyond the slice list:*
+   - `model.ts`: the pure board logic above, next to S6's `applyBoardEntry`;
+   - `MatrixCell.tsx`: the column highlight;
+   - `PriceMatrix.tsx`: `onActivePeriod`;
+   - `sections.ts`: a comment only.
+2. *A board added after the first one is a pending row until its first value.* It is not a table
+   row with the new-row defaults, for two reasons. The server refuses a non-base board row without
+   a value (GAP-8: "a value is required; clear the cell to remove the price"). The overlay makes
+   the same check, so such a row would also stop the live preview until a value was typed. The
+   client never invents a value such as 0. The first board is base and needs no value, so it is
+   written at once. A pending row is screen state: it is not in the undo history, and it is dropped
+   by a reload or Discard.
+3. *BASE is taken only in a board's own All periods cell, and in one cell per gesture*
+   (`BASE_SCOPE`: "Type BASE in one board's All periods cell: the base board is included in every
+   room and period."). S6's `applyBoardEntry` accepts BASE in any cell. In a period or room cell,
+   BASE would take is_base from every other board's rows, which leaves the contract with a base
+   board for one period or room only. Ctrl/Cmd+Enter of BASE over several cells would leave only
+   the last one as base.
+4. *Clearing a board's own All periods cell removes the whole board* (its room and period rules
+   too), as the slice's confirmation says. A board with room rules only has no such rule, and
+   clearing its empty cell removes nothing. Removing just the rule for all rooms, and keeping a
+   room's rules, is done in the Rule tables.
+5. *Room scope in the row popover is two controls.* Rooms moves the row's rules to another scope.
+   "Add a rule for one room" adds an indented row. Without the second, room rules could only be
+   created in the Rule tables. The terms (child %, infants free, label) go to every rule of the
+   row, All periods and its period rules alike. The popover counts them and says when their terms
+   differ now. Period-specific terms stay in the Rule tables.
+6. *When the base moves to another board, the previous base keeps its stored value.* A board added
+   in this session has no value: its cell reads "— no supplement yet", and the server would refuse
+   the save until one is typed. A board loaded from the server has 0 (a blank value is stored as
+   0, GAP-8), so it reads "+0.00 per adult", which is what the engine prices. In both cases the
+   reading line says that the board "is no longer included and needs a supplement". Nothing is
+   filled in automatically.
+7. *No ▾ trigger in board cells.* The popover belongs to the row, not the cell (§3.12). It opens
+   from the row header's button, Alt+Enter, Shift+F10, the ContextMenu key or a right-click, so
+   each cell has no hidden button of its own.
+8. *No fill, copy, paste or Adjust… in the boards grid.* It has Ctrl/Cmd+Enter and Delete over a
+   selection, as the ladder does. Ctrl/Cmd+R / D are kept from the browser and do nothing there.
+9. *The highlight is a visual cue* (§3.12 "highlights"), taken from the matrix cell that last had
+   the focus. It is not announced. The matrix cell's own name already says its period.
+10. *No committed Playwright spec* (S16 owns them). The slice's checks ran as a scratch spec
+    (below).
+
+**Tests (S13).** `npm run test:unit` 257 (249 + 8), all in `workspace-model.test.ts` (37 → 45):
+- the slice's mappings through the grid's plan: HB `-20` → ADD "-20", `+20` → ADD "20", `20` →
+  ABSOLUTE "20"; AI `-5%` → ADJUST_PERCENT "-5", `5%` → "5"; UAI `base` while AI is base → UAI 1
+  and every other row 0; a period-scoped HB P4 row with the terms of the rule it overrides;
+- the plan: BASE refused in a period cell, in a room row and in two cells; clearing HB's own All
+  periods cell removes HB (`removes` ["HB"]); a period or room cell removes that row only; a board
+  with room rules only removes nothing; the second cell's error writes nothing; AMBIGUOUS `1.500`;
+  an unchanged entry gives the same tables;
+- the reading: the unit and the child share of the row that will be written (HB P4 30 %, HB ·
+  DLX 40 % without infants free, a new board 50 %), ABSOLUTE, `wasBase`, BASE naming the previous
+  base, unchanged, remove-board with 3 rules, clear following the All periods rule, BASE_SCOPE,
+  OP_NOT_ALLOWED;
+- the edit text of every board op parses back to the same rule; a base board that lost its base
+  starts empty;
+- Add board: the first board is base with the new-row defaults, a later one is pending, an
+  existing one is not added again; the owner's example typed as BASE, -5%, -20 and its chips;
+- pending rows in place (a new board last, a new room rule under its board);
+- `boardModel`'s cells equal the per-cell scan (`boardCellOf`) for four tables, including a
+  duplicate rule and a board with room rules only;
+- terms applied to every rule of the row (not to its room row), unchanged terms give the same
+  tables, `mixed`; Rooms moves a room rule and refuses a taken scope; `removeBoardRow`; the
+  summary.
+Fail-first: before the pure additions the file failed to load (`SyntaxError: The requested module
+'…/model.ts' does not provide an export named 'addBoard'`). With stub exports, 7 of 44 tests failed
+on assertions (all seven S13 tests), e.g. `+ '*/*:ADD:-20' - '*/*:ADD:20'` for HB `+20`, and
+`{kind: 'unchanged'}` for the reading. The equivalence test was added with the index (`83dfa0f`).
+It guards the index against the scan. `npm run test:dom` 29 (unchanged).
+
+**Verification (S13).**
+- Frontend: `tsc -b`, `npm run build`, `npm run i18n:tex` (91 new keys in the six catalogues),
+  `test:unit` 257/257, `test:dom` 29/29.
+- Integration, migrated with this tree (S13 changes no server file): `test_pricing_workspace_api`
+  50 OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186), a scratch spec 6/6
+  (`scratchpad/s13/e2e/s13-boards.spec.ts`):
+  1. On a draft without boards, `#boards` opens the section. Add board UAI gives the base board.
+     `BASE` typed into it reads "No change.". Add board AI opens its editor: `-5%` reads "All
+     inclusive · All periods: −5% of the night's occupancy price". Add board HB: `-20` reads "Half
+     board · All periods: −20.00 per adult per night; children 50 %, infants free". BASE moved to
+     AI shows UAI "no supplement yet", and Ctrl+Z restores it. The chips read "UAI BASE", "AI −5
+     %", "HB −20.00 per adult". There was no `save_version` before Save. After Save, `get_version`
+     has UAI base, AI ADJUST_PERCENT −5 and HB ADD −20 (50 %, infants free). In the Price test
+     (Standard, 2 adults, 3 nights in P1), board HB gives €324.00 with "board HB supplement -40.00"
+     per night, and UAI gives €453.60 with "board UAI included in the price".
+  2. `100` in HB reads "Half board · All periods: 100.00 per room per night (fixed)". `base` in a
+     period cell is refused with the BASE_SCOPE text (`aria-invalid`), and `x2` with "Boards take
+     no multiplier.". On a saved version, BASE moved to AI makes UAI read "+0.00 per adult per
+     night" (deviation 6), and Ctrl+Z restores it.
+  3. HB P2 `-25` reads "… children 50 %, infants free" and shows "◆ −25.00", with `data-cellid`
+     `board:HB||P2`. Delete removes that row only. Delete on HB's own All periods cell asks
+     "Remove Half board from this version? 1 rule is removed." (focus on Remove; Escape returns the
+     focus to the cell). Remove, then the toast's Undo, brings HB back.
+  4. The popover sets children 30 % (the focus returns to its button, and the row line reads "…
+     children 30 %, infants free"). "Add a rule for one room" → Garden Villa opens the new row's
+     editor: `-10` reads "… children 30 %, infants free". Clicking the matrix's Standard · P3
+     highlights P3 in the boards grid, and ArrowRight moves the highlight to P4. Rooms moves the
+     Garden Villa row to Family Suite (the focus goes to its All periods cell). Moving HB's rules
+     for all rooms onto Family Suite is refused. A right-click and Alt+Enter open the row's terms.
+     No `aria-modal` dialog appears.
+  5. A version with boards opens collapsed with the chips. `#boards` opens the section and scrolls
+     to it. At 375 px the page does not scroll sideways.
+  6. On a published version the grid is `aria-readonly`: no Add board, no terms button, and typing
+     or Delete opens no editor.
+- Earlier scratch specs on this tree: S11 4/4 and S12 5/5 + review 2/2
+  (`scratchpad/s12/e2e`); S10 review 3/3 and v2 review 5/5. S10 bulk passed 3/6. Its test 4
+  clicks `getByRole("columnheader").filter({hasText: "P2"})` on the whole page, which since S11
+  also matches the occupancy ladder's P2 header (the boards grid is collapsed in that draft).
+  With the locator scoped to the matrix grid, S10 bulk passes 6/6
+  (`scratchpad/s13/e2e-s10/s10-bulk-scoped.spec.ts`).
+- Committed specs: `editor-edits`, `contract-admin`, `critical-journey`, `entry-branding` (with
+  `TEX_E2E_BENCH=http://test.localhost:8016`) and `policy-revisions`: 15 passed, 1 skipped (the
+  two-factor case, as before).
+
+**Performance after S13.** `boardModel` reads the board rules once into a map, as `matrixModel`
+does. A per-cell scan took 885 ms at 4,800 rules (3 boards × 40 rooms × 40 periods: 123 grid rows
+× 41 columns, Node). The map takes 18 ms. A usual contract has a few board rules, and the model is
+built once per table change. The reading line plans each keystroke over the board rules (linear).
+Moving in the matrix re-renders only the boards grid, and in it only the cells of the old and the
+new highlighted column. No new call or endpoint: the boards grid uses no server data. The Price
+test prices board supplements as before.
+
+**O1–O5 after S13** (all five provisional, owner input 13):
+- *O1* is implemented in the board cells: a bare `100` is ABSOLUTE 100 per room per night, and
+  the reading line says "100.00 per room per night (fixed)" before commit (browser check 2).
+- *O2* is implemented: `-20` is ADD −20 per adult. The Price test shows "board HB supplement
+  -40.00" per night for 2 adults (browser check 1).
+- *O3* is implemented: `5%` / `-5%` is ADJUST_PERCENT, read as "% of the night's occupancy price".
+- *O5* covers the board amounts (ABSOLUTE, ADD): `1.500` is refused in 0- and 2-decimal
+  currencies (unit test). Percentages are exempt.
+- *O4* does not apply to boards.
+
+**Open after S13.**
+- *S16 must commit the S13 scratch scenarios 1–6* with S10's, S11's and S12's. S10 bulk test 4's
+  column-header locator must be scoped to the matrix grid ("Room prices by period").
+- *S14 and S15* can find board cells by `data-cellid` `board:{board}|{room}|{period}` (exported
+  as `BoardsSection.boardCellId`) and rows by `data-board-row`. The section opens with `#boards`.
+  As with `#occupancy` (S11 review), following the same hash again does not reopen it.
+- Pending rows (a new board, a new room rule) are screen state: not in the undo history, and gone
+  after a reload or Discard.
+- One `localStorage` key keeps the open state for every version, as with Occupancy (S11 review).
+- Period-specific board terms (child %, infants free, label per period) and removing a board's
+  rule for all rooms while keeping its room rules stay in the Rule tables.
+- Still open from S10–S12: their low review items.

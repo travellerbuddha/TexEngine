@@ -547,3 +547,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   room's price. The two are now separate cards, and a card saved unchanged keeps its rules. The
   builder no longer opens a card it cannot save back as it is. Such cards are edited in the rule
   tables. No server change; no area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S13 on branch `pricing-workspace` (ADR-061): boards are
+  entered on Pricing. When collapsed, the section reads "UAI BASE · AI −5 % · HB −20.00 per adult".
+  When expanded, it is a grid on the matrix's period columns, with a row for each room that has
+  rules of its own. A cell takes 20 (per room per night), +20 or -20 (per adult), 5% or -5%, or
+  BASE. Before commit, the reading line names the unit. Removing a board asks first. The owner's
+  example was typed, saved and priced in the Price test with board HB. No server change; no area
+  status changes. O1–O3 are now implemented in the board cells and remain owner input 13, as do
+  O4 and O5. Verdict unchanged: NOT READY.
