@@ -4123,7 +4123,8 @@ each fix has a test written first (the fail-first counts are at the end).
 *The Pricing Workspace is a UX over the existing contract-version tables. The server prices,
 validates and quotes the editor's unsaved state in memory (a read-only overlay) and never saves it;
 the client does no arithmetic on money. Design: `PRICING_WORKSPACE_UX.md` (revision 3). This ADR
-grows with the slices S1–S16; the implemented parts are marked.*
+grows with the slices S1–S16; the implemented parts are marked (all sixteen are implemented on
+branch `pricing-workspace`; S16 is the last section).*
 
 **Context.** Entering an ORS-style contract in the version editor took about 100 clicks, 7 tab
 switches, 7 modal dialogs and a forced save before any price could be checked
@@ -7310,3 +7311,185 @@ cell views are recomputed when the issues change, as when the tables do.
   AGE_BANDS issue about two bands goes to the drawer, whose bands are not marked.
 - Still open from S10–S14: their low review items; `#occupancy` / `#boards` followed a second time
   still do not reopen a collapsed section (an issue's click always opens it).
+
+**Decision (implemented in S16: the committed acceptance specs, the E2E helpers on the workspace,
+the scenario specs of S9–S15, the bundles).** Branch `pricing-workspace`, tests, documentation and
+the rebuilt bundles only (no source file of the app or the server changes): commits `22a0fe7` (the
+flows and the budget), `f3aa4bf` (the acceptance and mobile specs), `5aaa8be` (the S9–S15 specs),
+the documentation, and the bundles in a separate "build:" commit.
+- *`e2e/flows/contracts.ts` drives the workspace.* Every exported name and signature is kept; each
+  version-editor step takes an optional third argument `StepOptions` `{advanced?, budget?, save?}`.
+  By default a step uses the Pricing workspace and saves the draft when it is done, as the ten-tab
+  steps did:
+  - `addRooms` chooses each room in the matrix's "Add room" select (the first room of an empty
+    version is the base room; `base: true` on another room uses Set as base);
+  - `addPeriod` clicks "+ Period" and types the dates in the new column's header (a first period
+    asks for both dates, a later one follows the last period and asks for its end); a start that
+    does not follow the last period (read from the end field's `min`) is set with Dates…, and a code
+    other than the proposed `P{n}`, or a name, with Rename…;
+  - `setBaseRate` clicks the matrix cell "{room} · {period | All periods}: …", types the amount
+    (the "Price: {room} · {period}" editor opens), presses Enter and, after the save, expects
+    `displayAmount(amount)` in the cell;
+  - `addOccupancyRules` creates the bands in the child ages drawer (Up to + Enter per band, a label
+    typed in, the infant switch set, a code other than the proposed one renamed under "Advanced:
+    show band codes") and types `n%` (PERCENT_OF) into the ladder's All periods cells of the 3rd
+    adult ("Extra adult (3rd)" under ROOM) and of each band;
+  - `addBoard` uses the Boards section: "Add board" (the base board first on a version without
+    boards), `+amount` typed into the board's All periods cell (per adult; a bare number is per room,
+    O1), and the row's terms popover when the children's share or infants differ from the new-row
+    defaults (50 %, free);
+  - `previewPrice` uses the context header's Price test drawer (any section, no section switch), still
+    reads role=status "Total" and the one list containing "Rule applied:", and closes the drawer;
+  - `expectPublishedReadOnly` asserts "Published", "Read-only" and the notice "Published versions are
+    immutable", no Save or Publish, the matrix "Room prices by period" with `aria-readonly`, typing
+    into a cell opens no editor (no textbox), no "Edit price:" trigger, no "Add room" and no pricing
+    basis popover trigger;
+  - the new `setBasis(page, "PERSON" | "ROOM", budget?)` drives the basis popover (chip → basis →
+    Apply, saved at once as the header; a no-op when the contract already has that basis);
+  - `{advanced: true}` keeps the Rule tables path of every step (and Preview & audit for
+    `previewPrice`); `openTab`, `openSection`, `addRow` and `cell` are unchanged; `addRatePlan` stays
+    a Rule tables step (rate plans are not in the workspace); locators `priceMatrix`, `priceCell`,
+    `occupancyLadder`, `ladderCell` and `boardsGrid` are exported for the specs.
+- *`e2e/flows/budget.ts` (new): the interaction budget, counted in the page.* A capture listener
+  counts every trusted primary `pointerdown` (so a click made outside the wrappers is counted too); a
+  MutationObserver counts every change of the selected tab of "Version sections" and every modal
+  dialog that appears (`[aria-modal="true"]`, `role="alertdialog"`, `dialog:modal`); browser dialogs
+  count as modal. Playwright gestures without a pointer event are counted by the wrappers the flows
+  use: a native `<select>` choice is two clicks (open, pick) and a field filled without the focus is
+  one. Keyboard keys are never clicks. `Budget.attach(page)`, `start()`, `stop()`, `counts()`,
+  `log()` and `expectWithin(testInfo, limits)` (annotations and an attachment with the log);
+  `choose` / `typeIn` take an optional budget.
+- *`e2e/pricing-workspace.spec.ts` (new), desktop.* The contract is made through the API with
+  `pricing_basis: "ROOM"`; its draft is opened by URL and the budget starts. The 13 steps of §5.3 run
+  as `test.step`s with the assertions of §5.3 (the resolved rows 80.50 / 92.00 / 115.00 / 156.00 and
+  94.50 / 108.00 / 140.00 / 182.00, the OVERRIDE markers, "×1.00 default", band labels and no
+  visible `\b(INF|CHA|CHB)\b`, the combination card's two lines, the base board BB). Step 12 opens
+  the Price test with "Test this price" on Deluxe's resolved P2 cell (prefilled: Deluxe, 1–4 May,
+  BB, 2 adults), adds a child of 8, captures the `preview_price` answer, and asserts the ladder
+  "Nights 1–3 · P2" (the only table of nights): Base 80.00; Period "no amount (period used to choose
+  rules)" naming P2; Room 80.00 → 108.00; Occupancy (adults) 108.00 → 216.00; Children 216.00 →
+  270.00 with the CHILD_SLOT line 54.00; Board 270.00 → 270.00 "included"; Night cost 270.00; no
+  Special combination, Period adjustment or Rate plan row; and that the displayed Room / Occupancy /
+  Children / Board / Night cost values equal the answer's `nights[0]` `unit`, `subtotal_adults`,
+  `subtotal_children`, `occupancy`, `subtotal_board` and `cost` (GAP-12) cut to two decimals, with
+  no `save_version` request. Step 13 checks the order caption, "Whole stay", "Rule applied:" and
+  "Child 7–11.99" (no code). Then Save, and `get_version` must hold exactly "1.15", "1.2", "1.35",
+  "1.4" (P3 and P4), "0.7", "0.8", the combination "2+2" at positions 1 (CHB "0.5") and 2 (CHA
+  "0.25"), the band rules "0" / "0.25" / "0.5", the bands 2.99 / 6.99 / 11.99 with non-empty labels
+  and BB as the base board. A second test runs the edge checks on an API-made draft of the example:
+  `abc` (error draft, the parser's message), Escape reverting a typed price, `1.500` (AMBIGUOUS),
+  Ctrl+Z after the P3:P4 bulk entry (×1.35 back), a 2×2 TSV block with Windows line breaks, `+10%`
+  on the base P1 (one `apply_op_values`, 77.00 stored as a price) and `x1.20` over Superior's `=245`
+  (a formula again, 120.00). A third test checks the budget itself: the Publish dialog, a cell click,
+  a native select and two section switches count exactly `{clicks: 6, sectionSwitches: 2, modals: 1}`,
+  so the acceptance's zeros cannot come from a counter that does not count.
+- *`e2e/pricing-workspace-mobile.spec.ts` (new), desktop and Pixel 7* (the `mobile` project picks
+  it up by name). A version published through the API: `expectPublishedReadOnly`, the ladder
+  `aria-readonly` without a textbox or "Add combination", the resolved prices of the frozen version,
+  no sideways page scroll at the device's width and at 375 px, and no `validate_version` request and
+  no 403 answer. An agent (price.view only) on the same version: "Amounts are not shown to your
+  role.", the three rooms, no amount (`\d+[.,]\d\d`) in the page's main area, no resolved cell, no
+  Price test or basis chip, no page error, no sideways scroll, no request to `price_matrix`,
+  `validate_version` or `preview_price`, and no 403.
+- *`editor-edits.spec.ts`:* the Discard test adds the base board BB in the Boards section, Discards,
+  and expects Save disabled and no board row; the in-flight-save test adds a period column ("+
+  Period", its dates) while `save_version` is held: the column survives and stays unsaved, Save stays
+  enabled, `get_version` has no period, and the next save sends P1. *`entry-branding.spec.ts`:* a
+  Rate plans list row opens its version with "Commercial rules" selected in "Version sections" and
+  "Rate plans" selected in "Rule tables".
+- *The S9–S15 scenarios as committed specs* (the S10–S15 notes): `pricing-workspace-matrix` (S9,
+  8 tests; the published check publishes its own version instead of the demo CTR-00019),
+  `pricing-workspace-bulk` (S10 1–6, its review R1–R3 and second review V1–V5; the column-header
+  locators scoped to the matrix), `pricing-workspace-occupancy` (S11 1–10 as 4 tests, "included in
+  the room price"), `pricing-workspace-combinations` (S12 1–5 and its review R1–R2),
+  `pricing-workspace-boards` (S13 1–6), `pricing-workspace-price-test` (S14 1–5 and the 375 px
+  drawer check, without screenshots; S9's Shift+F10 step meets the cell menu first) and
+  `pricing-workspace-issues` (S15 1–5). They share `e2e/flows/workspace.ts` (new): the demo hotel's
+  rooms, the owner's example rows, API-made contracts and drafts, publish, `watchContracts`,
+  `archiveAll` (each spec archives the contracts it made) and `twoDecimals`. No spec writes files.
+- *Bundles:* `npm run build`; `kamra/public/frontend` rebuilt and committed on its own ("build:"
+  commit), `kamra/public/tex/tex-widget.js` rebuilt unchanged.
+
+**Deviations from the slice text, with reasons (S16).**
+1. *Files beyond the slice list:* `e2e/flows/workspace.ts` and the seven scenario specs above, which
+   the S10–S15 reports asked S16 to commit (with S9's). ARCHITECTURE_DECISIONS.md and
+   GO_LIVE_READINESS.md record the slice.
+2. *The rooms:* the design's Standard / Superior / Deluxe are the demo hotel's Standard Sea View
+   (base) / Family Suite / Garden Villa, so the specs run on the shared demo data.
+3. *Step 1's "base row 'Base person price'"* is asserted with step 2: a version without rooms has
+   no base row. Step 1 asserts the matrix's unit "Base person rate per night · EUR" instead, besides
+   the chip, `get_contract` PERSON, Save disabled and no modal.
+4. *Step 12's "Child" row* is labelled "Children" on screen (S14); the assertion accepts either.
+5. *The helpers keep saving after each step* (as the ten-tab steps did, so `contract-admin` and
+   `critical-journey` run unchanged); `{save: false}` leaves the draft unsaved (the acceptance spec
+   saves once, after step 13). `addRooms` with `base: false` on the workspace's first room throws
+   (the workspace makes the first room the base room): use `{advanced: true}`.
+6. *`setBaseRate` "focuses the gridcell 'Price: …'":* the gridcell is named "{room} · {period}: …";
+   "Price: {room} · {period}" is the editor the typing opens. The helper clicks the cell, types,
+   checks that editor and presses Enter.
+7. *The budget counts clicks in the page* rather than only in the wrappers (trusted pointer presses,
+   plus the wrapped selects and fills), so a helper cannot click uncounted.
+8. *Bundles are committed* as the slice asks (CI runs Playwright against them), in their own
+   "build:" commit on top, although the lane's general rule is that the bundles are rebuilt on
+   merge; the commit can be dropped and rebuilt without touching the rest.
+9. *The acceptance ran against the tree's Vite dev server* (bench :8016 with the tree's code, Vite
+   :5186), not the bench's :8000: the dev bench serves `/assets/kamra` from the main checkout, so the
+   committed bundles of this branch can only be exercised there after the merge.
+
+**Tests (S16).** Browser only (no unit, integration or source change):
+- new: `pricing-workspace` 3 (the 13 steps with the budget, the edge checks, the budget's own
+  check), `pricing-workspace-mobile` 2 × 2 projects, and the scenario specs `-matrix` 8, `-bulk` 14,
+  `-occupancy` 4, `-combinations` 7, `-boards` 6, `-price-test` 6, `-issues` 5;
+- changed: `editor-edits` (the two contract tests), `entry-branding` (`#plans`), and every contract
+  step of `contract-admin` and `critical-journey` through the rewritten flows.
+Fail-first:
+- against main `1575c8b` (the ten-tab editor, bench :8000, its bundles), `pricing-workspace`,
+  `pricing-workspace-mobile` and the two changed `editor-edits` tests fail, 9 of 9: the matrix
+  "Room prices by period" (a grid) is not found (5), the section tab "Pricing" is not found (2), and
+  the agent's "Amounts are not shown to your role." is not found (2);
+- S15's scenario 5 (a published version's stored report anchored by the saved rule's name), which
+  had no fail-first run in S15, fails against the S14 head's frontend (`ee8de20`, exported with `git
+  archive` and served by Vite :5186 on the same bench): "Every child (any age band) · All periods" has
+  no `data-issue` (expected "warning");
+- the budget's own check passes only when the counter counts: `{clicks: 6, sectionSwitches: 2,
+  modals: 1}` exactly.
+
+**Verification (S16).**
+- Frontend: `tsc -b`, `npm run build`, `npm run i18n:tex` (5,038 literal keys), `npm run test:unit`
+  287/287, `npm run test:dom` 30/30 (TEX_DOM_PORT 5186). The e2e folder type-checks with a scratch tsconfig
+  (`noUnusedLocals`; the committed `tsconfig` covers `src` only). Python unit 491 OK, ruff clean (no
+  Python change).
+- Integration, migrated with this tree (`migrate_test.sh`): `test_pricing_workspace_api` 50, `test_critical_journey` 31,
+  `test_money_fields` 9, `test_age_bands` 11, `test_audit_trail` 15, `test_security_regressions` 59,
+  `test_commercial_flows` 63, `test_concurrency` 8, `test_pricing_policies` 14 and
+  `test_snapshot_integrity` 13: 273 OK.
+- Upstream suites with this tree: eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- Browser, on the tree's own servers (bench :8016 with the tree's code, Vite :5186), the whole
+  Playwright suite (113 tests, desktop and Pixel 7): against Vite 105 passed and 1 skipped (the
+  two-factor sign-in, without a second factor configured, as before); the 7 failures were the specs
+  written for the bench (custom-host 3, pay-link 2: the booking engine served by the bench; manage-money
+  2: a job applies the change), which then passed against the bench :8016 with an RQ worker of the
+  tree (custom-host, pay-link and manage-money: 8 passed; the committed bundles restored, since the
+  bench serves `/assets` from the main checkout). The acceptance test measured 41 clicks, 0 section
+  switches and 0 modal dialogs in each of its four runs.
+
+**Performance (S16).** No app change. The acceptance test takes about 20–25 s, the nine workspace spec
+files (57 tests with the mobile project) about 5 min of the suite's 16.
+
+**O1–O5 after S16** (all five provisional, owner input 13): unchanged, and now covered by committed
+browser checks: O1 (board `100` read "per room per night", `pricing-workspace-boards` 2), O2 (`-20`
+stored as ADD −20 and priced "board HB supplement -40.00" for 2 adults, boards 1), O3 (`-5%` stored
+as ADJUST_PERCENT, boards 1), O4 (`+10%` on the base P1 adjusted once by `apply_op_values` to 77.00,
+`pricing-workspace` edge checks and `-matrix` 3) and O5 (`1.500` refused in a EUR price cell,
+`pricing-workspace` edge checks, `-matrix` 2 and `-bulk` 2 and 3).
+
+**Open after S16.**
+- The committed bundles of this branch run on the dev bench (:8000) only after the merge (it serves
+  `/assets/kamra` from the main checkout); the acceptance and the workspace specs should run once
+  against the bench then (`TEX_E2E_BASE=http://test.localhost:8000`).
+- The in-app keyboard help still says "Shift+F10" opens the rule editor; with `can_preview` it opens
+  the cell menu first (S14 review item).
+- Still open from S10–S15: their low review items (none changed by S16); `#occupancy` / `#boards`
+  followed a second time do not reopen a collapsed section.
+- Only Chromium was run (the container has no WebKit or Firefox).
+- CI has never run on GitHub (no base branch, owner item).

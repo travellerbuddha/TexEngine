@@ -115,7 +115,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     repository, not the version). Local changes that are not committed and pushed are not offered:
     deploy only pushed commits.
 13. Pricing Workspace shorthand (ADR-061, `PRICING_WORKSPACE_UX.md` §0.1): five provisional
-    decisions the workspace is being built with. O1: a bare number in a board cell is a price per
+    decisions the workspace is built with (complete on branch `pricing-workspace`, S16). O1: a bare number in a board cell is a price per
     room per night (ABSOLUTE), not per adult. O2: `-20` in a board cell is ADD −20 per adult. O3:
     `50%` in a board cell is ADJUST_PERCENT 50. O4: a relative entry (`x1.1`, `+10%`, `-5`) on the
     base room is applied once to its entered price and stored as a price. O5: an amount typed as
@@ -570,3 +570,12 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   band codes. The i18n check also fails on a key used in the code but missing from the catalogue.
   No server change; no area status changes. O1–O5 remain owner input 13. Verdict unchanged: NOT
   READY.
+- 2026-09-25: Pricing Workspace slice S16 on branch `pricing-workspace` (ADR-061), the last slice:
+  the committed browser specs. `pricing-workspace.spec.ts` enters the owner's 13-step contract in
+  one draft and measures 41 clicks, 0 section switches and 0 modal dialogs (limit 50 / 0 / 0), with
+  the Price test's ladder compared with the server's answer and no save before it;
+  `pricing-workspace-mobile.spec.ts` checks a published version on a phone and an agent's catalogue
+  (no amounts, no cost call). The contract E2E flows drive the workspace, and the S9–S15 checks are
+  committed specs. The bundles are rebuilt. The Pricing Workspace is complete on the branch (R-04
+  stays PARTIAL); O1–O5 remain owner input 13. No server change; no area status changes. Verdict
+  unchanged: NOT READY.
