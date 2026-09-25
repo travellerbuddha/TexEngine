@@ -34,9 +34,10 @@ import { isSet, newRow, str } from "./rows.ts"
 // ─── layout: one column template (§3.1) ────────────────────────────────────
 
 /** Column widths of the matrix, the occupancy ladder and the boards grid. Fixed widths (the row
- * header's depends on the viewport only), so the separate CSS grids of the rows and of the three
- * regions line their period columns up exactly. */
-export const MATRIX_WIDTHS = Object.freeze({ header: "clamp(9rem, 38vw, 16rem)", all: "7.5rem", period: "7.5rem", add: "7rem" })
+ * header's depends on the viewport only, and on a side panel open beside the page: tex.css sets
+ * --tex-row-header then), so the separate CSS grids of the rows and of the three regions line their
+ * period columns up exactly. */
+export const MATRIX_WIDTHS = Object.freeze({ header: "var(--tex-row-header, clamp(9rem, 38vw, 16rem))", all: "7.5rem", period: "7.5rem", add: "7rem" })
 
 /** `grid-template-columns` for a row: row header | All periods | one column per period | "+ Period"
  * (left out with `add: false`). */

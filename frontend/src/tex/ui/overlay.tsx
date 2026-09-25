@@ -125,9 +125,10 @@ export function Dialog({
  *
  * On a phone (below `sm`) the panel covers the whole page, so there it is the modal drawer: a page
  * under it that stayed in the tab order and the accessibility tree could not be seen (S16 review).
- * On a desktop (from `lg`) it sits beside the page instead of over it: the page (`.tex-page`, the
+ * On a wide desktop (a md panel from 80rem, lg from 96rem, xl from 120rem: where a few price columns
+ * still fit beside it) it sits beside the page instead of over it: the page (`.tex-page`, the
  * shell's content column) gives up the panel's width while it is open, so what the panel is used
- * with (the price matrix beside the Price test) stays on screen (S16 re-review).
+ * with (the price matrix beside the Price test) stays on screen (S16 re-review; tex.css).
  */
 export function Drawer({
   open,

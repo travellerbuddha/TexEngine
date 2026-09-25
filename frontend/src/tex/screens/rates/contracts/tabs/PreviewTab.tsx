@@ -13,6 +13,7 @@ import {
   CardBody,
   CardHeader,
   DataTable,
+  type Column,
   DescriptionList,
   EmptyState,
   ErrorState,
@@ -348,6 +349,9 @@ function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, s
   )
 }
 
+/** The nightly breakdown's columns in the Price test panel (layout "drawer"). */
+const DRAWER_NIGHTLY = new Set(["date", "cost", "sell", "final"])
+
 function PreviewResultView({
   res,
   canCost,
@@ -390,6 +394,21 @@ function PreviewResultView({
   }
   const minorUnits = doc.contract_doc.minor_units ?? currencyMinorUnits(contractCcy)
   const page = layout === "page"
+  const nightlyCols: Column<NightLine>[] = [
+    { key: "date", header: t("rates.preview.col.night"), cell: (n) => <span className="whitespace-nowrap">{weekday(n.date)} {fmtDate(n.date)}</span> },
+    { key: "period", header: t("rates.f.period"), hideBelow: "sm" },
+    { key: "unit", header: t("rates.preview.col.unit"), align: "right", hideBelow: "md", cell: (n) => decText(n.unit) },
+    { key: "occupancy", header: t("rates.preview.col.occupancy"), align: "right", hideBelow: "md", cell: (n) => decText(n.occupancy) },
+    { key: "board", header: t("rates.f.board"), align: "right", hideBelow: "md", cell: (n) => decText(n.board) },
+    ...(canCost
+      ? [
+          { key: "cost", header: t("rates.preview.col.cost"), align: "right" as const, cell: (n: NightLine) => decText(n.cost_net) },
+          { key: "sell_contract", header: t("rates.preview.col.markup"), align: "right" as const, hideBelow: "lg" as const, cell: (n: NightLine) => decText(n.sell_contract) },
+        ]
+      : []),
+    { key: "sell", header: t("rates.preview.col.sell"), align: "right", hideBelow: "sm", cell: (n) => decText(n.sell) },
+    { key: "final", header: t("rates.preview.col.final"), align: "right", cell: (n) => <span className="font-medium">{decText(n.final)}</span> },
+  ]
 
   if (!res.sellable)
     return (
@@ -529,21 +548,10 @@ function PreviewResultView({
           rows={nights}
           rowKey={(n) => n.date}
           dense
-          columns={[
-            { key: "date", header: t("rates.preview.col.night"), cell: (n) => <span className="whitespace-nowrap">{weekday(n.date)} {fmtDate(n.date)}</span> },
-            { key: "period", header: t("rates.f.period"), hideBelow: "sm" },
-            { key: "unit", header: t("rates.preview.col.unit"), align: "right", hideBelow: "md", cell: (n) => decText(n.unit) },
-            { key: "occupancy", header: t("rates.preview.col.occupancy"), align: "right", hideBelow: "md", cell: (n) => decText(n.occupancy) },
-            { key: "board", header: t("rates.f.board"), align: "right", hideBelow: "md", cell: (n) => decText(n.board) },
-            ...(canCost
-              ? [
-                  { key: "cost", header: t("rates.preview.col.cost"), align: "right" as const, cell: (n: NightLine) => decText(n.cost_net) },
-                  { key: "sell_contract", header: t("rates.preview.col.markup"), align: "right" as const, hideBelow: "lg" as const, cell: (n: NightLine) => decText(n.sell_contract) },
-                ]
-              : []),
-            { key: "sell", header: t("rates.preview.col.sell"), align: "right", hideBelow: "sm", cell: (n) => decText(n.sell) },
-            { key: "final", header: t("rates.preview.col.final"), align: "right", cell: (n) => <span className="font-medium">{decText(n.final)}</span> },
-          ]}
+          // in the Price test panel (md, beside the page) the columns hide by the viewport's width,
+          // not the panel's: there the night's cost, selling and final price are shown, the steps
+          // between them are in the Explain ladder above (S16 re-review 3; 784 px in a 405 px panel)
+          columns={page ? nightlyCols : nightlyCols.filter((c) => DRAWER_NIGHTLY.has(c.key)).map((c) => ({ ...c, hideBelow: undefined }))}
         />
       </Card>
 

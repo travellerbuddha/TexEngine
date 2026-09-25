@@ -52,13 +52,30 @@
 
 /* A non-modal side panel (ui/overlay.tsx Drawer modal={false}) sits beside the page on a desktop:
    the shell's content column gives up the panel's width (sm:max-w-md / 2xl / 4xl) while it is open
-   (S16 re-review: the Price test covered the matrix columns and the header's Save and Publish). */
-@media (min-width: 64rem) {
+   (S16 re-review: the Price test covered the matrix columns and the header's Save and Publish).
+   Only from a width where a few period columns still fit beside it; below, it lies over the page as
+   before. While it sits beside the page, the grids' sticky row header (matrixView MATRIX_WIDTHS,
+   sized by the viewport) is narrower, so the columns keep the room (S16 re-review 3: at 1024 px a
+   md panel left 32 px of price columns). */
+@media (min-width: 80rem) {
+  html[data-side-panel-open="md"] {
+    --tex-row-header: clamp(9rem, 12vw, 12rem);
+  }
   html[data-side-panel-open="md"] .tex-page {
     padding-right: 28rem;
   }
+}
+@media (min-width: 96rem) {
+  html[data-side-panel-open="lg"] {
+    --tex-row-header: clamp(9rem, 12vw, 12rem);
+  }
   html[data-side-panel-open="lg"] .tex-page {
     padding-right: 42rem;
+  }
+}
+@media (min-width: 120rem) {
+  html[data-side-panel-open="xl"] {
+    --tex-row-header: clamp(9rem, 12vw, 12rem);
   }
   html[data-side-panel-open="xl"] .tex-page {
     padding-right: 56rem;
