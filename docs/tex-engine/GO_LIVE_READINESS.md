@@ -579,3 +579,16 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   committed specs. The bundles are rebuilt. The Pricing Workspace is complete on the branch (R-04
   stays PARTIAL); O1–O5 remain owner input 13. No server change; no area status changes. Verdict
   unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 review follow-up on branch `pricing-workspace` (ADR-061).
+  - Server:
+    - `price_matrix` shows inherited pricing-policy formulas (and the sample-party totals priced
+      with them) only to a viewer with `price.view_cost`, as the policies API does;
+    - a blank night adjustment or rate plan value is refused (it priced as 0);
+    - `build_terms` refuses another hotel's rate plan or cancellation or payment policy;
+    - `validate_version`, and the matrix with unsaved data or sample parties, are bounded per user
+      (a budget a minute and a cap on calls running at once, 429).
+  - Workspace: a readable dark theme, visible selections, Ctrl/Cmd+S that saves what is typed, input
+    kept across section switches, the focus kept after removals, the header's Base room and ROOM
+    occupancy, grids that scroll together, and settings in the undo history.
+  - Open: the §3.18 one-screen fit; one shared inline-editing hook.
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.

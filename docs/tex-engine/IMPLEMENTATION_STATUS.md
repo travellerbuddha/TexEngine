@@ -870,7 +870,44 @@ with an RQ worker (8 passed). Fail-first: against main's ten-tab editor the new 
 changed editor tests fail (9 of 9); S15's scenario 5 fails on the S14 frontend. Tests, docs and
 bundles only.
 
-**Pricing Workspace status (R-04): COMPLETE (S1–S16, branch `pricing-workspace`).** Backend S2–S5
+**Pricing Workspace, S16 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).** The
+review found 1 high, 7 medium and 15 low items. All are fixed except three low ones, which ADR-061
+lists as open.
+- *Server:*
+  - `price_matrix` shows an inherited pricing-policy formula (op, value, and a sample party total
+    priced with it) only to a viewer with `price.view_cost`, as the policies API does; an editor
+    with `contract.edit` alone gets the rule's source and scope (`hidden`).
+  - A blank night adjustment or rate plan value with an op set is refused on save and in the
+    overlay (GAP-8; it was stored and priced as 0).
+  - `build_terms` refuses another hotel's rate plan, cancellation policy or payment policy.
+  - `validate_version`, and `price_matrix` with unsaved data or sample parties, are bounded per
+    user: a budget a minute and at most 3 / 6 calls running at once (429).
+- *Workspace:*
+  - The three grids scroll sideways together.
+  - The header has the Base room select and, for the ROOM basis, the included-adults stepper.
+  - The dark theme uses only remapped shades (a unit test checks the contrast).
+  - A selected cell has an outline, not only a tint, and a read-only range is shown.
+  - Ctrl/Cmd+S in a cell editor saves the typed entry; the tab asks before closing with unsaved
+    input.
+  - Error drafts and an open combination builder survive a section switch.
+  - The focus stays in the matrix after Remove room and Delete period.
+  - The Price test panel follows its opener in the Tab order and is modal on phones.
+  - Settings and selling terms are in the undo history.
+  - Also: plural strings, room names in English Explain sentences, Duplicate's unnamed copy with
+    Rename…, the dotted weekday border, aria-colcount, and no card around Pricing.
+
+Verification: unit 491 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,060 literal
+keys), `npm run test:unit` 296, `npm run test:dom` 31. All 38 integration modules migrated with the
+tree: 838 OK (10 skipped, as before), `test_pricing_workspace_api` 55 of them. Upstream suites:
+eval 76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite
+:5186): the nine workspace specs, `editor-edits`, `contract-admin` and `critical-journey` (desktop
+and Pixel 7), 72 tests. 71 passed on the first run. The failing one was `-bulk` V1, which asserted
+the old rule that a read-only cell in a range is not aria-selected; it was updated, and `-bulk`
+passed again with 14 of 14. The new `pricing-workspace-review.spec.ts` passed 10 of 10. Fail-first:
+see ADR-061 (the backend tests, the i18n check, the unit tests, and the review spec, 10 of 10 on the
+S16 frontend).
+
+**Pricing Workspace status (R-04): COMPLETE (S1–S16 and the S16 review follow-up, branch `pricing-workspace`).** Backend S2–S5
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of an internal quote reports its
 running subtotals after the adults, the children and the board, reported only, which the Explain
@@ -886,6 +923,10 @@ chooses the alternative:
 - *O4:* a relative entry on the base room is applied once by the server and stored as a price;
 - *O5:* `1.500` as an amount is refused as ambiguous in 0- and 2-decimal currencies (accepted in
   KWD, BHD, OMR, JOD, TND).
+
+Open after the review follow-up (ADR-061): the §3.18 one-screen fit of the owner example with the
+ladder is not met (the rows are taller than 28 px), and the three grids' inline editing is not
+one shared hook yet (only the key routing is shared).
 
 R-04 itself stays PARTIAL: its classification is not otherwise changed by this lane (see its row).
 

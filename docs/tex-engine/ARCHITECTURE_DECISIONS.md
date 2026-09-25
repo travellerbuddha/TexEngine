@@ -7493,3 +7493,218 @@ as ADJUST_PERCENT, boards 1), O4 (`+10%` on the base P1 adjusted once by `apply_
   followed a second time do not reopen a collapsed section.
 - Only Chromium was run (the container has no WebKit or Firefox).
 - CI has never run on GitHub (no base branch, owner item).
+
+**S16 review follow-up (2026-09-25).** The review of the finished workspace reported one high, seven
+medium and fifteen low findings. All are fixed except three low ones, which are recorded as open
+below (the §3.18 fit target, the full extraction of the grids' inline editing, and the optional
+publish error for a zeroing rate plan). Branch `pricing-workspace`; main `1575c8b` has no newer
+commit, so no merge was needed.
+
+**Decision (S16 review follow-up).**
+1. *Inherited policy formulas are cost (medium).* The policies API shows a TEX Pricing Policy only
+   with `price.view_cost` (READ_CAP, G-11). `price_matrix` now follows the same rule. A viewer
+   without `price.view_cost` (an editor with `contract.edit` only) still gets each inherited
+   occupancy rule's `rule_id`, `source`, target and scope, but `op` and `value` are null and
+   `hidden` is true. A sample party whose total uses such a rule gets no total, slots or error for
+   that period; the period is listed in the cell's new `hidden` list. Both fields are additive
+   (`hidden: false` / `[]` for everyone else). The ladder shows such a cell as "Policy rule · from
+   <scope>", with a tooltip that says the formula is shown only to users who may see cost, and the
+   resolved line shows "—" for a hidden total.
+2. *GAP-8 covers every value an op needs (low).* `_VALUE_REQUIRED` also refuses a blank
+   `periods.adjustment_value` when an adjustment op is set, and a blank `rate_plans.value` when an
+   op is set, in `save_version` and in the overlay. Frappe stored both as 0, and the draft then
+   priced every night, or every stay of that rate plan, at 0.00. A value of 0 typed by the user
+   stays a value.
+3. *Another hotel's rate plan or terms (low).* `build_terms`, which a save, the overlay, the price
+   test and publish all run, refuses a `rate_plans` row whose Rate Plan, explicit
+   `cancellation_policy` or explicit `payment_policy` belongs to another hotel ("… belongs to another
+   hotel"), as it already did for room types. A policy with no hotel is shared and stays allowed.
+   The overlay answers `build_error`, the live check reports BUILD, and the price test returns
+   unsellable with no rate plan block, so no other hotel's terms are read back.
+4. *Heavy reads are bounded per user (low; closes the open "server-side concurrency guard").*
+   `validate_version` (with or without `data`) and `price_matrix` with `data` or `parties` run under
+   `_heavy`. Each user has a budget per minute and a cap on calls running at once:
+   `HEAVY_LIMITS = {"validate": (60, 3), "matrix": (120, 6)}`. The counts are kept in redis, a
+   crashed call's slot is freed after 300 s, and a refusal is `RateLimitExceededError` (429). Only
+   web requests are counted; a job, the console or a test calling the function is not. The client
+   already keeps one validation in flight and debounces the matrix (300 ms), so an editor stays far
+   below the budget. A scripted client, or aborted fetches whose workers keep running, can no longer
+   hold more than three 10–16 s validations at once.
+5. *The three grids scroll sideways together (medium).* A `ScrollSyncGroup` (`ui/scroll-sync.ts`)
+   around the Pricing section keeps the `scrollLeft` of the matrix, the ladder and the boards grid
+   in step. Scrolling any one of them, including the scroll the browser makes to show a focused
+   cell, scrolls the other two, and a grid mounted later starts at the group's position. So P1…Pn
+   stay lined up, and the boards grid's highlight of the matrix's active period (§3.12) is on screen
+   whenever the matrix cell is. One shared scroll box was not used, because section headers,
+   notices and the combination cards sit between the grids, and each grid keeps its own vertical
+   scroll and sticky header.
+6. *The header's Base room and Base occupancy (medium).* §3.2 is now built:
+   - *Base room* is a popover with a select of the contract's rooms, the "Re-point formulas that use
+     X to Y" checkbox (on by default) and "Set as base". It calls the same `setBaseRoom` as the row
+     menu, through the workspace history.
+   - With the ROOM basis, *Base occupancy* is a popover stepper for the base room's
+     `included_adults`. It starts from the room's own value, else from the effective value the
+     server priced with. Typing 0 goes back to the room type's default. The hint names the value
+     the prices on screen include.
+   - Both are read-only text on a frozen version or for a viewer who cannot edit.
+7. *Dark theme contrast (high).* Every text and background shade the workspace uses is one that
+   index.css or tex.css remaps for `.dark`:
+   - override and fixed cells, and the Fill and Boards confirmation bars: amber-900 on amber-50;
+   - formula-default cells: zinc-700;
+   - the row header's derivation: zinc-600;
+   - the no-host warning and the fixed-price pin: amber-800;
+   - the undo toast's Undo: tex-300 (hover tex-200);
+   - the issue underline: amber-600;
+   - the overlap stripe: amber-600/40;
+   - the ladder note's hover: sky-900.
+   The cell tones moved to `workspace/cellTone.ts`. `tests/unit/contrast.test.ts` reads the palette
+   the app builds with (Tailwind's theme.css in oklch, the app's `@theme` and `.dark` blocks), checks
+   each tone and the other state texts at 4.5:1 in both themes and the selection outline at 3:1, and
+   fails on any unmapped text or background shade in the workspace.
+8. *A selection is not colour alone (medium), and read-only ranges are shown (low).* A selected
+   cell of a range has an inset 2 px tex-400 outline besides the sky-50 tint. The outline is also
+   drawn in forced-colors, which drops backgrounds. `useGridSelection.isSelected` (aria-selected and
+   the cue) now covers every cell of the ranges. `selected` (what fill, paste, clear and Adjust…
+   change) stays the editable cells. All three grids are `aria-multiselectable`, because Ctrl/Cmd+C
+   copies a range on a read-only version too.
+9. *Ctrl/Cmd+S saves what is typed (medium).* A cell editor routes Ctrl/Cmd+S (any layout) to
+   "commit and stay on the cell". The version editor's save then sends the tables that commit wrote
+   (`history.current()`, updated at once, before React renders). A refused entry keeps its editor
+   and refusal, and the save goes on without it. The tab asks before closing when the draft is
+   dirty, and also when a cell editor holds a changed entry, a grid holds an error draft, or a
+   combination builder is open. One case is not covered: a relative entry on the base room waits
+   for `apply_op_values`, so it is not part of a save made while it is pending. It is committed when
+   the answer comes, and the draft is then unsaved again.
+10. *Input survives a section switch (low).* The three grids' error drafts (the ladder's per rooms
+    scope) and the open combination builder, with its draft and "More", now live in a store the
+    version editor owns: `keptState.ts` holds the keys and the check, and `useKeptState.ts` the
+    context and the hook. There is one store per loaded version, so Discard and loading another
+    version start empty. A grid or builder mounted again takes its state back, and a builder that is
+    shown again does not take the focus.
+11. *Focus after Remove room / Delete period (medium).* The matrix moves the focus to the nearest
+    cell that is left: the same column in the next room (else the previous one), or the same row in
+    the next period (else the previous one). With no cell left it goes to "Add room" or "+ Period".
+    Ctrl/Cmd+Z then works where the user was.
+12. *The Price test panel (medium).*
+    - Below `sm`, `Drawer modal={false}` renders the modal drawer: it covers the page there, so the
+      page under it is taken out of reach (aria-modal, focus trap).
+    - On larger screens the side panel stays non-modal and is in the Tab order right after its
+      opener: Shift+Tab from its first control goes to the opener, and Tab from its last control
+      goes to what follows the opener.
+13. *Settings are in the undo history (low).* `useWorkspaceHistory` also records the version's
+    settings and its selling terms as two more recorded "tables", merged per field while the user
+    types, as the Advanced rule tables are. Child ordering, the ROOM extra unit and children fill,
+    the Advanced settings fields and the header's selling popover are undone in order with every
+    other edit. The pricing basis, a contract header field, stays outside the log (§3.10). The child
+    ages drawer's note now says that Undo puts these settings back.
+14. *The rest (low):*
+    - The five ladder strings with `{count}` are plural objects in all six languages, and the TEX
+      i18n check fails on a workspace string with a `{count}` that is not one.
+    - English Explain sentences name rooms instead of room type ids (`withRoomNames`; the server
+      text is otherwise unchanged).
+    - Duplicate leaves the copy unnamed and opens Rename… on it, with the focus in the name.
+    - A weekday-limited period has a real dotted top border (`[border-top-style:dotted]!`; the
+      bundle has the rule).
+    - The ladder's and the boards grid's `aria-colcount` is `cols + 1`.
+    - The ladder's before amounts are zinc-500.
+    - The Pricing section sits on the page surface without the Card; each grid is in its own white
+      hairline box (§3.18: no card-in-card). The other sections keep their card.
+    - The three grids route their cell-editor keys through one pure, unit-tested `editorKeyAction`.
+
+**Deviations from the findings' fixes, with reasons.**
+- *Rate limit:* a budget and a running-call cap per user, as the finding suggests. Two things differ:
+  - `frappe.rate_limiter.rate_limit` is not used, because it is per IP and endpoint and cannot tell
+    a plain matrix read from one with data;
+  - the saved-draft validation is bounded too, because it is as slow as the overlay's.
+- *No publish error for a rate plan or period adjustment that zeroes the price* (MULTIPLY /
+  PERCENT_OF 0; the finding marks it optional). The blank value, which was the reported fault, is
+  refused. An explicit 0 is a value the user typed, and refusing it would change what publish
+  accepts.
+- *`useInlineGridEditor` is not extracted.* Only the key routing is shared (`editorKeyAction`, the
+  part the Ctrl+S fix touched). The editing state, drafts, commit on blur, refocus and undo keys stay
+  in each grid (open below). A full extraction rewrites three 900–1,300 line components, which is
+  too much for a review follow-up.
+- *§3.18's fit target (the owner example and the ladder on one 1440×900 screen) is not met* (open
+  below). Removing the card saves its padding and border, but the rows stay taller than 28 px
+  because of the two-line row headers.
+- *No F6 shortcut* between the Price test panel and the grid (the finding says "consider").
+
+**Tests (S16 review follow-up).** Fail-first output is kept in the report.
+- *Integration, `test_pricing_workspace_api`, 55 (50 + 5):*
+  - an editor without cost gets the inherited rules without op or value, and the parties that use
+    them without a total (saved, unsaved and published); the policies API refuses the same user;
+  - a blank night adjustment and a blank rate plan value are refused on save and in the three
+    overlay calls, while no op and an explicit 0 pass;
+  - another hotel's rate plan, cancellation policy or payment policy is refused by the matrix, the
+    live check, the price test and publish, while a shared policy passes;
+  - the heavy-read budget per user and kind;
+  - the running-call cap, with its slot freed after a failure.
+  Fail-first: 2 failures and 8 errors on the unfixed code (the missing `hidden` key, `_in_request`
+  and `HEAVY_LIMITS`, `build_error`, and "ValidationError not raised" for the blank adjustment and
+  for publish).
+- *Unit, `npm run test:unit` 296 (287 + 9):*
+  - `contrast.test.ts` 4 (palette, tones, other states, the unmapped-shade scan: 13 hits on the
+    S16 tree);
+  - `keys.test.ts` +2 (the save shortcut and the editor key routing);
+  - `kept-state.test.ts` 1;
+  - `workspace-occupancy.test.ts` +1 (a hidden policy rule ranks without a value; fails on the S16
+    `occupancy.ts`);
+  - `explain-ladder.test.ts` +1 (room names in English sentences);
+  - `workspace-model.test.ts`: duplicatePeriod leaves the copy unnamed.
+- *i18n check:* on the S16 catalogue it fails with the five plain `{count}` strings.
+- *DOM, `npm run test:dom` 31 (30 + 1):*
+  - `history`: a setting is undone in order with a table entry;
+  - `keyboard`: a read-only cell in a range is aria-selected.
+- *E2E, `pricing-workspace-review.spec.ts`, 10 tests:* 10 periods scroll together at 1440×900 with
+  P8 aligned and on screen; Ctrl+S in an open editor (the save body, the stored 120, the focus); an
+  error draft across a section switch and the beforeunload prompt; the focus after Remove room and
+  Delete period, and Ctrl+Z; the header's Base room and the ROOM stepper (3 adults sent); the Price
+  test's Shift+Tab and Tab, and aria-modal at 375 px; a read-only range's outline and aria-selected;
+  Duplicate's unnamed copy with Rename…, and the dotted border; dark-theme contrast of override,
+  fixed and formula cells; the child ordering undone with Ctrl+Z. Fail-first: all 10 fail on the
+  S16 frontend (`ae5e7db`, served by Vite :5187 on the same bench).
+
+**Verification (S16 review follow-up).**
+- *Python:* unit 491 OK, ruff clean.
+- *Frontend:* `tsc -b`, `npm run build` (the bundle has the dotted-border and outline-solid
+  rules; the bundles were not committed), `npm run i18n:tex` (5,060 literal keys), `npm run
+  test:unit` 296/296, `npm run test:dom` 31/31 (TEX_DOM_PORT 5187).
+- *Integration:* all 38 modules migrated with this tree (`migrate_test.sh`), 838 OK (10 skipped, as
+  before). `test_pricing_workspace_api` 55, `test_critical_journey` 31, `test_commercial_flows` 63,
+  `test_security_regressions` 59, `test_pricing_policies` 14, `test_patches` 33 (3 skipped).
+- *Upstream suites with this tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):*
+  - the nine workspace specs, `editor-edits`, `contract-admin` and `critical-journey`, desktop and
+    Pixel 7: 72 tests, 71 passed;
+  - the failing one was `pricing-workspace-bulk` V1, whose assertion "aria-selected marks the
+    editable cells only" was the behaviour the review asked to change. It now expects the four cells
+    of the range, the resolved one aria-selected too; `-bulk` then passed 14/14;
+  - `pricing-workspace-review` passed 10/10 twice.
+- *Measured at 1440×900 after the change* (above): matrix at y=332 to 605, ladder at 802 to 1,219.
+- Main `1575c8b` had no newer commit: nothing to merge.
+
+**Measured for §3.18 after the follow-up** (the owner example, 1440×900, scrollY 0, Occupancy
+open): the matrix grid runs from y=332 to 605, the ladder from 802 to 1,219, and the page is
+1,676 px high. The matrix rows are 74/48/48/28/48/28 px and the ladder rows 41–58 px.
+
+**O1–O5 after the S16 review follow-up** (all five provisional, owner input 13): unchanged. No
+parser, op mapping or `apply_op_values` change.
+
+**Open after the S16 review follow-up.**
+- §3.18's fit target is not met (measured above). It needs a design change for the rows (28 px data
+  rows, single-line row headers or a sub-line shown only on hover), not a spacing fix.
+- The grids' inline editing is still written three times (PriceMatrix, OccupancyLadder,
+  BoardsSection). Only its key routing is shared (`editorKeyAction`). A `useInlineGridEditor` hook is
+  open.
+- A relative entry on the base room that is waiting for `apply_op_values` is not in a Ctrl/Cmd+S
+  made meanwhile. It is committed when the answer comes, and the draft is then unsaved again.
+- An error draft kept for a room or period that was then removed stays in the store until Discard
+  or reload, so the tab may still ask before it closes.
+- `HEAVY_LIMITS` are constants, not site settings.
+- There is no F6 shortcut between the Price test panel and the grid, and no publish error for an
+  explicit rate plan or period adjustment of MULTIPLY 0.
+- The E2E dark-theme check reads `rgb()` colours only. Every remapped shade is hex, so an
+  unremapped (oklch) colour reads as a failure there, which is what the check wants.
+- Still open from S16: the committed bundles run on the dev bench only after the merge; the
+  keyboard help's Shift+F10 wording; the S10–S15 low items; only Chromium was run; CI has never run
+  on GitHub.

@@ -451,9 +451,10 @@ test.describe("copy and paste over resolved rows, editor keys, the toast's focus
     for (const [p, v] of [["P1", "90.00"], ["P2", "95.00"]]) await expect(named(page, `${N.DLX} · ${p}: entered price, ${v}`)).toBeVisible()
     await cellOf(page, N.STD, "P1").click()
     for (let i = 0; i < 3; i++) await page.keyboard.press("Shift+ArrowDown")
-    // the range holds Standard, Family Suite, Family Suite's resolved row, Garden Villa (aria-selected
-    // marks the editable cells only)
-    await expect(grid(page).locator("[aria-selected='true']")).toHaveCount(3)
+    // the range holds Standard, Family Suite, Family Suite's resolved row, Garden Villa: all four are
+    // selected and shown (S16 review); the copy and the paste take the entry rows only
+    await expect(grid(page).locator("[aria-selected='true']")).toHaveCount(4)
+    await expect(resolved(page, N.SUP, "P1", "80.50")).toHaveAttribute("aria-selected", "true")
     await expect(focusedRole(page)).resolves.toMatch(/^gridcell:Garden Villa · P1: /)
     await page.keyboard.press("Control+c")
     await expect.poll(() => read(page)).toBe("70\nx1.15\n90\n")
