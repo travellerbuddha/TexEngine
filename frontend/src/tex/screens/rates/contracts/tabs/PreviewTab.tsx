@@ -34,7 +34,7 @@ import { overlayPayloadOf } from "../../lib/tables"
 import type { ExplainStep, Issue, NightLine, PreviewChild, PreviewResult, VersionDoc } from "../../lib/types"
 import { decText, splitCsv, toFrappeDatetime, versionLabel } from "../../lib/util"
 import { bandCode, effectiveBands } from "../../workspace/bands.ts"
-import { MATRIX_DEBOUNCE_MS } from "../../workspace/draftPreview.ts"
+import { MATRIX_DEBOUNCE_MS, WORKSPACE } from "../../workspace/draftPreview.ts"
 import { ExplainLadderView, useStepText } from "../../workspace/ExplainLadder"
 import { childPayload, prefillOf, showTargetOf, withChildMode, type ChildEntry, type ChildMode, type ShowTarget } from "../../workspace/priceTest.ts"
 import { useBandLabels } from "../../workspace/useBandLabels"
@@ -160,6 +160,9 @@ function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, s
   const valid = Boolean(f.room_type && f.board && nights > 0 && nights <= 90 && childOk && (plans.length === 0 || f.rate_plan))
   const withData = Boolean(doc.editable && dirty && !preview?.savedOnly)
   const args = {
+    // the workspace's opt-in flag (ADR-061): children as years, months or a date of birth (GAP-6)
+    // and each night's subtotals for the Explain ladder (GAP-12)
+    ...WORKSPACE,
     version: doc.name,
     room_type: f.room_type,
     board: f.board,

@@ -23,6 +23,7 @@ import {
   VALIDATE_DEBOUNCE_MAX_MS,
   VALIDATE_DEBOUNCE_MS,
   validationRequest,
+  WORKSPACE,
   type KeyInput,
 } from "../../src/tex/screens/rates/workspace/draftPreview.ts"
 
@@ -37,16 +38,16 @@ test("the mode follows the server's flags: overlay for an editable draft, saved 
 
 test("overlay: price_matrix is a POST with the unsaved payload, validation too", () => {
   const data = { rooms: [{ room_type: "STD", _key: "k1" }] }
-  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data }), { args: { version: "V-1", data }, post: true })
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data }), { args: { version: "V-1", data, workspace: 1 }, post: true })
   assert.deepEqual(
     matrixRequest("overlay", { version: "V-1", data, parties: [{ adults: 2, children: ["CHB"] }], partyRoom: "STD" }),
-    { args: { version: "V-1", data, parties: [{ adults: 2, children: ["CHB"] }], party_room: "STD" }, post: true },
+    { args: { version: "V-1", data, parties: [{ adults: 2, children: ["CHB"] }], party_room: "STD", workspace: 1 }, post: true },
   )
-  assert.deepEqual(validationRequest("overlay", { version: "V-1", data }), { args: { name: "V-1", data }, post: true })
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data }), { args: { name: "V-1", data, workspace: 1 }, post: true })
 })
 
 test("saved: a GET without data, and never a validation", () => {
-  assert.deepEqual(matrixRequest("saved", { version: "V-1", data: { rooms: [] } }), { args: { version: "V-1" }, post: false })
+  assert.deepEqual(matrixRequest("saved", { version: "V-1", data: { rooms: [] } }), { args: { version: "V-1", workspace: 1 }, post: false })
   assert.equal(validationRequest("saved", { version: "V-1", data: { rooms: [] } }), null)
 })
 
@@ -55,15 +56,15 @@ test("sample parties go with the saved draft only when its rooms hold the party 
   // the saved draft asked for by name (clean, over the overlay's cap) or a published version: a
   // room added since the last save is not a room of the answer, and price_matrix would refuse
   // the whole call for it; the ladder then shows no total for that room instead of losing the matrix
-  assert.deepEqual(matrixRequest("overlay", { version: "V-1", source: "saved", parties, partyRoom: "SUP", savedRooms: ["STD"] }), { args: { version: "V-1" }, post: false })
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", source: "saved", parties, partyRoom: "SUP", savedRooms: ["STD"] }), { args: { version: "V-1", workspace: 1 }, post: false })
   assert.deepEqual(matrixRequest("overlay", { version: "V-1", source: "saved", parties, partyRoom: "STD", savedRooms: ["STD"] }), {
-    args: { version: "V-1", parties, party_room: "STD" },
+    args: { version: "V-1", parties, party_room: "STD", workspace: 1 },
     post: false,
   })
-  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties, partyRoom: "SUP", savedRooms: ["STD", "DLX"] }), { args: { version: "V-1" }, post: false })
+  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties, partyRoom: "SUP", savedRooms: ["STD", "DLX"] }), { args: { version: "V-1", workspace: 1 }, post: false })
   // the overlay prices what is on screen: its rooms are the caller's to check
   assert.deepEqual(matrixRequest("overlay", { version: "V-1", data: {}, parties, partyRoom: "SUP", savedRooms: ["STD"] }), {
-    args: { version: "V-1", data: {}, parties, party_room: "SUP" },
+    args: { version: "V-1", data: {}, parties, party_room: "SUP", workspace: 1 },
     post: true,
   })
 })
@@ -74,8 +75,8 @@ test("catalogue: no request at all", () => {
 })
 
 test("parties without a room are not sent (the server would refuse them)", () => {
-  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties: [{ adults: 2, children: [] }] }), { args: { version: "V-1" }, post: false })
-  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties: [], partyRoom: "STD" }), { args: { version: "V-1" }, post: false })
+  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties: [{ adults: 2, children: [] }] }), { args: { version: "V-1", workspace: 1 }, post: false })
+  assert.deepEqual(matrixRequest("saved", { version: "V-1", parties: [], partyRoom: "STD" }), { args: { version: "V-1", workspace: 1 }, post: false })
 })
 
 test("the report stored at publish: a list of issues (as the server stores it), or an object with issues", () => {
@@ -214,17 +215,17 @@ test("the Check button and a clean state ask about the saved draft by name, with
   // clean: what is on screen is the saved draft, so no payload (and no overlay row cap)
   const clean = previewSource("overlay", { clean: true, rows: 3 })
   assert.equal(clean, "saved")
-  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data, source: clean! }), { args: { version: "V-1" }, post: false })
-  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: clean! }), { args: { name: "V-1" }, post: false })
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data, source: clean! }), { args: { version: "V-1", workspace: 1 }, post: false })
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: clean! }), { args: { name: "V-1", workspace: 1 }, post: false })
   // the Check button (validateNow) validates the saved draft, whatever the editor shows
   const now = previewSource("overlay", { clean: false, rows: 3, now: true })
   assert.equal(now, "saved")
-  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: now! }), { args: { name: "V-1" }, post: false })
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: now! }), { args: { name: "V-1", workspace: 1 }, post: false })
   // unsaved changes the overlay takes: the payload, as before
   const dirty = previewSource("overlay", { clean: false, rows: 3 })
   assert.equal(dirty, "overlay")
-  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data, source: dirty! }), { args: { version: "V-1", data }, post: true })
-  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: dirty! }), { args: { name: "V-1", data }, post: true })
+  assert.deepEqual(matrixRequest("overlay", { version: "V-1", data, source: dirty! }), { args: { version: "V-1", data, workspace: 1 }, post: true })
+  assert.deepEqual(validationRequest("overlay", { version: "V-1", data, source: dirty! }), { args: { name: "V-1", data, workspace: 1 }, post: true })
   // the other modes are unchanged: saved never validates, the catalogue asks nothing
   assert.equal(previewSource("saved", { clean: false, rows: 3 }), "saved")
   assert.equal(validationRequest("saved", { version: "V-1", source: "saved" }), null)
@@ -351,4 +352,20 @@ test("the resolved prices are updating only while this state's answer is on its 
   for (const matrixState of ["ready", "busy", "failed"] as const) assert.equal(resolvedStatus({ key: "k2", forKey: "k2", stale: false, savedOnly: false, matrixState }), "current")
   // no answer yet
   assert.equal(resolvedStatus({ key: "k1", stale: true, savedOnly: false, matrixState: "busy" }), "updating")
+})
+
+// ─── ADR-061 "Existing semantics kept, the workspace's additions opt-in" ─────────────────────────
+
+test("every request the workspace makes carries its opt-in flag (workspace: 1), whatever the mode and source", () => {
+  const data = { rooms: [{ room_type: "STD", _key: "k1" }] }
+  const parties = [{ adults: 2, children: ["CHB"] }]
+  for (const mode of ["overlay", "saved"] as const) {
+    for (const source of [undefined, "saved", "overlay"] as const) {
+      const m = matrixRequest(mode, { version: "V-1", data, parties, partyRoom: "STD", savedRooms: ["STD"], source })
+      assert.equal(m?.args.workspace, 1, `${mode}/${source ?? "-"}: price_matrix`)
+      const v = validationRequest(mode, { version: "V-1", data, source })
+      if (v) assert.equal(v.args.workspace, 1, `${mode}/${source ?? "-"}: validate_version`)
+    }
+  }
+  assert.deepEqual(WORKSPACE, { workspace: 1 })
 })

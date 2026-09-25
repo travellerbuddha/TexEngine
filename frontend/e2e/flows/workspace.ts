@@ -122,9 +122,10 @@ export async function newDraft(page: Page, prefix: string, data: Data, basis: "P
   return d
 }
 
-/** Publish a draft through the API (its terms must pass the publish check). */
+/** Publish a draft through the API as the workspace publishes it (its terms must pass the publish
+ * check; `workspace: 1`, ADR-061: its board checks, and a stored report anchored by each issue's ref). */
 export async function publish(page: Page, version: string) {
-  await api(page.request, "kamra.tex.api.contracts.publish_version", { name: version })
+  await api(page.request, "kamra.tex.api.contracts.publish_version", { name: version, workspace: 1 })
 }
 
 export const versionPath = (d: NewContract, hash = "") =>

@@ -248,7 +248,8 @@ test.describe.serial("anchored issues", () => {
       // infants are priced by a band-less child rule: OCC_INFANT_GENERIC names that rule (a warning)
       data.occupancy_rules = [...(data.occupancy_rules as Record<string, unknown>[]).filter((r) => r.age_band !== "INF"), occ({ target: "CHILD", value: "0.4" })]
     })
-    await api(page.request, "kamra.tex.api.contracts.publish_version", { name: d.version })
+    // published as the workspace publishes (ADR-061 opt-in): the stored report carries each issue's ref
+    await api(page.request, "kamra.tex.api.contracts.publish_version", { name: d.version, workspace: 1 })
     const v = await api<{ validation_report?: unknown; occupancy_rules: { name: string; target: string; age_band: string | null }[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
     const generic = v.occupancy_rules.find((r) => r.target === "CHILD" && !r.age_band)
     expect(JSON.stringify(v.validation_report)).toContain(generic?.name ?? "missing")

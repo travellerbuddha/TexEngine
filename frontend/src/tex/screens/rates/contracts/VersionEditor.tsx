@@ -12,6 +12,7 @@ import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, ty
 import type { ContractBundle, Issue, Row, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
 import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } from "../lib/util"
 import { effectiveBands } from "../workspace/bands.ts"
+import { WORKSPACE } from "../workspace/draftPreview.ts"
 import { ContextHeader } from "../workspace/ContextHeader"
 import { keptInput, UNCOMMITTED_INPUT, type KeptStore } from "../workspace/keptState.ts"
 import { anchorIssues, issueMessage, issuePlace } from "../workspace/issues.ts"
@@ -53,10 +54,11 @@ export default function VersionEditor() {
   const toast = useToast()
   const navigate = useNavigate()
   const { can } = useSession()
-  const q = useTexQuery<VersionDoc>("contracts", "get_version", { name: version }, [version])
+  // the workspace's opt-in flag (ADR-061): the version with what the workspace may offer (GAP-10)
+  const q = useTexQuery<VersionDoc>("contracts", "get_version", { name: version, ...WORKSPACE }, [version])
   const contract = useTexQuery<ContractBundle>("contracts", "get_contract", { name }, [name])
   const lookups = useLookups(q.data?.contract_doc.property)
-  const save = useTexMutation<{ name: string; data: Record<string, unknown> }, VersionDoc>("contracts", "save_version")
+  const save = useTexMutation<{ name: string; data: Record<string, unknown>; workspace: 1 }, VersionDoc>("contracts", "save_version")
   const [doc, setDoc] = useState<VersionDoc>()
   const [state, setState] = useState<EditorState>()
   const [base, setBase] = useState("")
@@ -165,7 +167,8 @@ export default function VersionEditor() {
     const sent = fresh && now ? { ...state, tables: now } : state
     if (fresh ? fingerprint(sent) === base : !dirty) return
     try {
-      const d = await save.run({ name: doc.name, data: payloadOf(sent) })
+      // opt-in (ADR-061): a blank value is refused (GAP-8) and the answer carries the workspace's flags
+      const d = await save.run({ name: doc.name, data: payloadOf(sent), ...WORKSPACE })
       settle(d, sent)
       toast.success(t("rates.version.saved"))
     } catch (e) {
@@ -451,6 +454,7 @@ export default function VersionEditor() {
           version={doc}
           contractCode={cd.contract_code}
           format={issueText}
+          workspace
           onDone={() => {
             q.reload()
             contract.reload()

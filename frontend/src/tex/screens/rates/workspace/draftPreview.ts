@@ -14,6 +14,14 @@
 // - catalogue (`doc.cost_hidden`, agents): no call at all.
 import type { Issue, SampleParty } from "../lib/types.ts"
 
+/** The flag the server's Pricing Workspace additions are opt-in by (ADR-061, "Existing semantics
+ * kept, the workspace's additions opt-in"). Without it every contract endpoint answers as it did
+ * before the workspace: no board checks and no issue refs, a blank rule value saved as 0, children
+ * read as whole years, no night subtotals, none of the matrix's or the version's workspace keys.
+ * The workspace sends it on each call whose answer it builds on: get_version, save_version,
+ * validate_version, publish_version, preview_price and price_matrix. */
+export const WORKSPACE = { workspace: 1 } as const
+
 export type PreviewMode = "overlay" | "saved" | "catalogue"
 
 export function previewMode(doc: { editable?: boolean; cost_hidden?: boolean }): PreviewMode {
@@ -177,15 +185,15 @@ export function matrixRequest(mode: PreviewMode, p: PreviewInput): PreviewReques
     args.parties = p.parties
     args.party_room = p.partyRoom
   }
-  return { args, post: overlay }
+  return { args: { ...args, ...WORKSPACE }, post: overlay }
 }
 
 /** contracts.validate_version, overlay mode only (an editor): a POST with the unsaved payload, or
  * the saved draft by name (a GET, as the Check button asked before the overlay). */
 export function validationRequest(mode: PreviewMode, p: PreviewInput): PreviewRequest | null {
   if (mode !== "overlay") return null
-  if (p.source === "saved") return { args: { name: p.version }, post: false }
-  return { args: { name: p.version, data: p.data }, post: true }
+  if (p.source === "saved") return { args: { name: p.version, ...WORKSPACE }, post: false }
+  return { args: { name: p.version, data: p.data, ...WORKSPACE }, post: true }
 }
 
 /** What a preview answer's call is doing, from the keys alone:
