@@ -5,11 +5,23 @@ import assert from "node:assert/strict"
 import { parseShorthand } from "../../src/tex/screens/rates/lib/shorthand.ts"
 import {
   applyOccEntry,
+  applyOccRule,
   canonCombination,
+  combinationNotes,
+  defaultParty,
+  fromInheritedRule,
   groupCombinations,
   ladderModel,
+  ladderSummary,
+  occEditText,
+  occReadingOf,
+  PARTY_OPTIONS_MAX,
+  partyOptions,
   persistCombination,
+  planOccEntries,
+  policySource,
   removeCombination,
+  scopesWithRules,
   validCombinations,
   type LadderOptions,
   type OccIdentity,
@@ -335,4 +347,213 @@ test("groupCombinations orders cards by adults, then children, and keeps rules t
   assert.equal(canonCombination("2+"), "2+*")
   assert.equal(canonCombination("*+1"), "*+1")
   assert.equal(canonCombination(""), "")
+})
+
+// ─── S11: the ladder on screen (§3.6, §3.11, D12) ─────────────────────────
+
+test("ROOM basis: included positions, and extra adults priced from the header's extra unit", () => {
+  const share = ladderModel(example(), null, "ROOM", { ...OPTS, includedAdults: 2, extraUnit: "PER_PERSON_SHARE" })
+  assert.equal(share.basis, "ROOM")
+  assert.equal(share.includedAdults, 2)
+  assert.deepEqual(kinds(share), ["single", "adult1", "adult2", "adult3", "adult4", "band:INF", "band:CHA", "band:CHB"])
+  for (const pos of [1, 2]) {
+    const row = share.rows.find((x) => x.kind === "adult" && x.position === pos)
+    assert.equal(row?.editable, false, `adult ${pos} is included`)
+    assert.equal(row?.cells[""].state, "included")
+  }
+  const fourth = share.rows.find((x) => x.kind === "adult" && x.position === 4)
+  assert.equal(fourth?.editable, true)
+  assert.equal(fourth?.unit, "person_share", "the per-person share (room ÷ included adults)")
+  assert.equal(fourth?.cells[""].state, "default")
+  assert.deepEqual(fourth?.cells[""].value, { op: "MULTIPLY", value: "1" }, "the server's default, as served")
+  assert.equal(share.rows.find((x) => x.band === "CHB")?.unit, "person_share", "children are priced from the slot unit too")
+  assert.equal(share.rows[0].unit, "room", "single use replaces the room price")
+  const room = ladderModel(example(), null, "ROOM", { ...OPTS, includedAdults: 2, extraUnit: "ROOM_PRICE" })
+  assert.equal(room.rows.find((x) => x.kind === "adult" && x.position === 3)?.unit, "room")
+  assert.equal(room.rows.find((x) => x.band === "INF")?.unit, "room")
+  // an unknown or missing unit reads as the per-person share (the engine's default)
+  assert.equal(ladderModel(example(), null, "ROOM", OPTS).rows.find((x) => x.position === 3)?.unit, "person_share")
+  // PERSON: every row is priced from the base person price, nothing is included
+  const person = ladderModel(example(), null, "PERSON", { ...OPTS, extraUnit: "ROOM_PRICE" })
+  assert.equal(person.basis, "PERSON")
+  assert.equal(person.includedAdults, 0)
+  assert.ok(person.rows.every((x) => x.unit === "person"))
+})
+
+test("default cells carry the server's default value string, never a client constant (D12)", () => {
+  const served = { adult: { rule_id: "GLOBAL:ADULT", target: "ADULT", op: "MULTIPLY", value: "1.000000000", source: "global-default", note: "" }, child: null }
+  const m = ladderModel(example(), null, "PERSON", { ...OPTS, defaults: served })
+  assert.deepEqual(m.rows.find((x) => x.position === 4)?.cells.P2.value, { op: "MULTIPLY", value: "1.000000000" })
+  assert.deepEqual(m.rows.find((x) => x.kind === "adults_base")?.cells[""].value, { op: "MULTIPLY", value: "1.000000000" })
+  const other = { adult: { ...served.adult, value: "0.9" }, child: null }
+  assert.deepEqual(ladderModel(example(), null, "PERSON", { ...OPTS, defaults: other }).rows.find((x) => x.position === 4)?.cells[""].value, { op: "MULTIPLY", value: "0.9" })
+  // a child default, should a server ever send one, is shown as a default too (not "missing")
+  const withChild = ladderModel(example(), null, "PERSON", { ...OPTS, defaults: { adult: served.adult, child: { op: "PERCENT_OF", value: "50" } } })
+  assert.deepEqual(withChild.rows.find((x) => x.band === "CHB")?.cells[""], { state: "default", rule: null, source: null, value: { op: "PERCENT_OF", value: "50" } })
+})
+
+test("inherited policy rules as served (period, adults/children) read as ladder rules", () => {
+  const served = [
+    { rule_id: "OR-1", target: "CHILD" as const, position: null, age_band: "CHB", adults: null, children: null, room_type: null, period: null, op: "MULTIPLY", value: "0.4", is_override: false, source: "policy:PP-1/r2/hotel" },
+    { rule_id: "OR-2", target: "ADULT" as const, position: 3, age_band: null, adults: null, children: null, room_type: "SUP", period: "P2", op: "MULTIPLY", value: "0.6", is_override: true, source: "policy:PP-1/r2/hotel" },
+    { rule_id: "OR-3", target: "CHILD" as const, position: 1, age_band: null, adults: 2, children: null, room_type: null, period: null, op: "MULTIPLY", value: "0.3", is_override: false, source: "policy:PP-2/r1/global" },
+  ]
+  const rows = served.map(fromInheritedRule)
+  assert.deepEqual(
+    rows.map((x) => [x.target, x.position, x.age_band, x.combination, x.room_type, x.period_code, x.op, x.value, x.is_override, x.source]),
+    [
+      ["CHILD", 0, "CHB", "", "", "", "MULTIPLY", "0.4", 0, "policy:PP-1/r2/hotel"],
+      ["ADULT", 3, "", "", "SUP", "P2", "MULTIPLY", "0.6", 1, "policy:PP-1/r2/hotel"],
+      ["CHILD", 1, "", "2+*", "", "", "MULTIPLY", "0.3", 0, "policy:PP-2/r1/global"],
+    ],
+  )
+  const m = ladderModel(example(), null, "PERSON", { ...OPTS, inherited: rows })
+  assert.equal(m.rows.find((x) => x.band === "CHB")?.cells.P1.state, "policy")
+  assert.deepEqual(policySource("policy:PP-1/r2/hotel+market"), { policy: "PP-1", revision: 2, scope: "hotel+market" })
+  assert.equal(policySource("version"), null)
+})
+
+test("the ladder summary: own All-periods rules of adults and children, special combinations, period overrides", () => {
+  const t = example([occ({ target: "CHILD", position: 1, age_band: "CHB", combination: "2+2", op: "MULTIPLY", value: "0.5" })])
+  const m = ladderModel(t, null, "PERSON", OPTS)
+  const s = ladderSummary(m, groupCombinations(t))
+  assert.deepEqual(
+    s.adults.map((x) => `${x.kind}${x.position || ""}:${x.op}:${x.value}`),
+    ["single:MULTIPLY:1.5", "adult3:MULTIPLY:0.7"],
+  )
+  assert.deepEqual(
+    s.children.map((x) => `${x.band}:${x.value}`),
+    ["INF:0", "CHA:0.25"],
+  )
+  assert.equal(s.combinations, 1, "the single-use row is a ladder row, not a special combination")
+  assert.equal(s.periodOverrides, 1)
+  const empty = ladderSummary(ladderModel(tablesOf({ periods: [r({ period_code: "P1" })] }), null, "PERSON", OPTS), [])
+  assert.deepEqual(empty, { adults: [], children: [], combinations: 0, periodOverrides: 0 })
+})
+
+test("rooms scopes with rules of their own (the dot on the scope select)", () => {
+  const t = example([occ({ target: "CHILD", age_band: "CHB", room_type: "SUP", op: "MULTIPLY", value: "0.5" })])
+  assert.deepEqual([...scopesWithRules(t)].sort(), ["", "SUP"])
+  assert.deepEqual([...scopesWithRules(tablesOf({}))], [])
+})
+
+test("applyOccRule (the ladder's rule popover): rooms × periods, Always wins and note; Remove clears the cell", () => {
+  const t = example()
+  const third = { target: "ADULT" as const, position: 3, age_band: "", combination: "" }
+  const out = applyOccRule(t, third, ["STD", "DLX"], ["P1", "P2"], { op: "MULTIPLY", value: "0.75", is_override: true, note: "family promo" })
+  const added = out.occupancy_rules.filter((x) => x.position === 3 && x.room_type)
+  assert.deepEqual(
+    added.map((x) => `${x.room_type}@${x.period_code}:${x.op}:${x.value}:${x.is_override}:${x.note}`),
+    ["STD@P1:MULTIPLY:0.75:1:family promo", "STD@P2:MULTIPLY:0.75:1:family promo", "DLX@P1:MULTIPLY:0.75:1:family promo", "DLX@P2:MULTIPLY:0.75:1:family promo"],
+  )
+  // an existing cell is updated in place (its key kept), its twins removed
+  const key = t.occupancy_rules[2]._key
+  const twin = occ({ target: "ADULT", position: 3, period_code: "P4", op: "MULTIPLY", value: "0.9" })
+  const upd = applyOccRule({ ...t, occupancy_rules: [...t.occupancy_rules, twin] }, third, [""], ["P4"], { op: "INHERIT", value: "", is_override: false, note: "" })
+  const p4 = upd.occupancy_rules.filter((x) => x.position === 3 && x.period_code === "P4")
+  assert.deepEqual(p4.map((x) => [x._key, x.op, x.value]), [[key, "INHERIT", ""]])
+  // the same rule again changes nothing (no history entry)
+  assert.equal(applyOccRule(t, third, [""], ["P4"], { op: "MULTIPLY", value: "0.80", is_override: false, note: "" }), t)
+  // Remove: the cell's rows only
+  const removed = applyOccRule(t, third, [""], ["P4"], null)
+  assert.deepEqual(
+    removed.occupancy_rules.filter((x) => x.position === 3).map((x) => x.period_code),
+    [""],
+  )
+  assert.equal(applyOccRule(t, third, ["SUP"], ["P4"], null), t, "nothing to remove")
+})
+
+test("planOccEntries: one gesture over many ladder cells, all or nothing", () => {
+  const t = example()
+  const band = (code: string) => ({ target: "CHILD" as const, position: 0, age_band: code, combination: "", room_type: "" })
+  const ok = planOccEntries(t, [
+    { id: band("INF"), period: "", parsed: parseShorthand("x0", "occupancy") },
+    { id: band("CHA"), period: "", parsed: parseShorthand("x0.25", "occupancy") },
+    { id: band("CHB"), period: "", parsed: parseShorthand("x0.5", "occupancy") },
+  ])
+  assert.ok("tables" in ok)
+  assert.deepEqual(
+    ok.tables.occupancy_rules.filter((x) => x.target === "CHILD" && !x.combination).map((x) => `${x.age_band}:${x.value}`),
+    ["INF:0", "CHA:0.25", "CHB:0.5"],
+  )
+  const bad = planOccEntries(t, [
+    { id: band("CHA"), period: "", parsed: parseShorthand("x0.3", "occupancy") },
+    { id: band("CHB"), period: "", parsed: parseShorthand("1.500", "occupancy") },
+  ])
+  assert.deepEqual(bad, { error: "AMBIGUOUS", index: 1 })
+  // the same entry twice changes nothing
+  const same = planOccEntries(t, [{ id: band("CHA"), period: "", parsed: parseShorthand("x0.25", "occupancy") }])
+  assert.ok("tables" in same)
+  assert.equal(same.tables, t)
+})
+
+test("occReadingOf: what a ladder entry stores, for the reading line", () => {
+  const t = example()
+  const third = { target: "ADULT" as const, position: 3, age_band: "", combination: "", room_type: "" }
+  assert.deepEqual(occReadingOf(t, third, "", parseShorthand("x0.7", "occupancy")), { kind: "unchanged" })
+  assert.deepEqual(occReadingOf(t, third, "P1", parseShorthand("x0.75", "occupancy")), { kind: "rule", op: "MULTIPLY", value: "0.75" })
+  assert.deepEqual(occReadingOf(t, third, "P4", parseShorthand("", "occupancy")), { kind: "clear", follows: { op: "MULTIPLY", value: "0.7" } })
+  assert.deepEqual(occReadingOf(t, third, "", parseShorthand("", "occupancy")), { kind: "clear", follows: null })
+  assert.deepEqual(occReadingOf(t, third, "", parseShorthand("abc", "occupancy")), { kind: "error", code: "SYNTAX" })
+  assert.deepEqual(occReadingOf(t, third, "", parseShorthand("1.500", "occupancy", { minorUnits: 3 })), { kind: "rule", op: "ABSOLUTE", value: "1.5" })
+  assert.deepEqual(occReadingOf(t, third, "P2", parseShorthand("", "occupancy")), { kind: "unchanged" }, "nothing to clear")
+})
+
+test("occEditText: the cell's own rule as occupancy shorthand; empty without one", () => {
+  const m = ladderModel(example(), null, "PERSON", OPTS)
+  const third = m.rows.find((x) => x.position === 3)
+  assert.equal(occEditText(third?.cells[""], { decimalMark: "," }), "x0,7")
+  assert.equal(occEditText(third?.cells.P1), "", "a period that follows all periods")
+  assert.equal(occEditText(m.rows.find((x) => x.position === 4)?.cells[""]), "", "a default")
+  const fixed = ladderModel(example([occ({ target: "ADULT", position: 4, op: "FIXED", value: "25" })]), null, "PERSON", OPTS)
+  assert.equal(occEditText(fixed.rows.find((x) => x.position === 4)?.cells[""]), "=25")
+})
+
+test("the precedence note: a special combination prices the same slot as a ladder cell", () => {
+  const t = example([
+    occ({ target: "CHILD", position: 1, age_band: "CHB", combination: "2+2", op: "MULTIPLY", value: "0.5" }),
+    occ({ target: "CHILD", position: 2, age_band: "CHA", combination: "2+2", room_type: "DLX", period_code: "P2", op: "MULTIPLY", value: "0.25" }),
+    occ({ target: "ADULT", position: 3, period_code: "P3", op: "MULTIPLY", value: "0.6", is_override: 1 }),
+  ])
+  const cards = groupCombinations(t)
+  const all = ladderModel(t, null, "PERSON", OPTS)
+  const notes = combinationNotes(all, cards, null)
+  const chb = all.rows.find((x) => x.band === "CHB")
+  const cha = all.rows.find((x) => x.band === "CHA")
+  assert.ok(chb && cha)
+  assert.equal(notes.get(`${chb.id}|P1`)?.length, 1)
+  assert.equal(notes.get(`${cha.id}|P1`), undefined, "the CHA card is scoped to P2")
+  assert.equal(notes.get(`${cha.id}|P2`)?.length, 1)
+  assert.equal(notes.get(`${cha.id}|`)?.length, 1, "the All-periods column holds for every period")
+  assert.equal(notes.get(`${all.rows.find((x) => x.position === 3)?.id}|P3`), undefined, "no card prices adult 3")
+  assert.equal(notes.get(`${all.rows[0].id}|`), undefined, "the single-use row is itself a combination")
+  // a room scope: the DLX-only card does not reach the SUP scope
+  const sup = ladderModel(t, "SUP", "PERSON", OPTS)
+  const supNotes = combinationNotes(sup, cards, "SUP")
+  assert.equal(supNotes.get(`${sup.rows.find((x) => x.band === "CHA")?.id}|P2`), undefined)
+  assert.equal(supNotes.get(`${sup.rows.find((x) => x.band === "CHB")?.id}|P2`)?.length, 1)
+  // "Always wins" beats special combinations: no note on such a cell
+  const always = example([
+    occ({ target: "ADULT", position: 3, combination: "3+0", op: "MULTIPLY", value: "0.5" }),
+    occ({ target: "ADULT", position: 3, period_code: "P3", op: "MULTIPLY", value: "0.6", is_override: 1 }),
+  ])
+  const am = ladderModel(always, null, "PERSON", OPTS)
+  const an = combinationNotes(am, groupCombinations(always), null)
+  const third = am.rows.find((x) => x.position === 3)
+  assert.equal(an.get(`${third?.id}|P3`), undefined)
+  assert.equal(an.get(`${third?.id}|P2`)?.length, 1)
+})
+
+test("sample parties: the valid combinations of the room, children at their bands", () => {
+  const cap = { room_type: "STD", max_adults: 2, max_children: 2, max_occupants: 3, min_adults: 1 }
+  const opts = partyOptions(cap, BANDS)
+  assert.deepEqual(
+    opts.map((p) => `${p.adults}+${p.children.join(",")}`),
+    ["1+", "2+", "1+INF", "1+CHA", "1+CHB", "1+INF,INF", "1+INF,CHA", "1+INF,CHB", "1+CHA,CHA", "1+CHA,CHB", "1+CHB,CHB", "2+INF", "2+CHA", "2+CHB"],
+  )
+  assert.equal(opts[1].id, "2+")
+  assert.equal(defaultParty(opts)?.id, "2+", "two adults when the room takes them")
+  assert.equal(defaultParty(partyOptions({ ...cap, max_adults: 1 }, BANDS))?.id, "1+")
+  assert.deepEqual(partyOptions({ ...cap, max_children: 1 }, []).map((p) => p.id), ["1+", "2+"], "no bands: adults only")
+  assert.ok(partyOptions({ max_adults: 4, max_children: 4, max_occupants: 8, min_adults: 1 }, BANDS).length <= PARTY_OPTIONS_MAX)
 })

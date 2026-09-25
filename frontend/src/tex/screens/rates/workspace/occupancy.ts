@@ -10,9 +10,9 @@
 // does not re-rank rules across scopes or levels (occupancy precedence v2): where that matters, the
 // server's resolved line and the precedence note are the truth (§3.6.2). No runtime imports except
 // each other and lib/shorthand.ts.
-import type { ShErrorCode, ShResult } from "../lib/shorthand.ts"
+import { editText, type ShErrorCode, type ShFormatOptions, type ShOp, type ShResult } from "../lib/shorthand.ts"
 import type { Tables } from "../lib/tables.ts"
-import type { Row } from "../lib/types.ts"
+import type { InheritedOccupancyRule, Row } from "../lib/types.ts"
 import { bandCode, type BandLike } from "./bands.ts"
 import { ALL_PERIODS, canonValue, type Basis } from "./model.ts"
 import { int, isSet, newRow, str } from "./rows.ts"
@@ -56,7 +56,15 @@ export interface LadderOptions {
   /** Inherited pricing-policy rules (non-version origin). */
   inherited?: readonly OccRuleLike[]
   defaults?: { adult: OccDefault | null; child: OccDefault | null } | null
+  /** ROOM basis: what extra adults and children are priced from (the version's
+   * room_basis_extra_unit: PER_PERSON_SHARE, the default, or ROOM_PRICE). */
+  extraUnit?: string
 }
+
+/** What a row's relative rules are applied to (§3.11), for its reading line and default text:
+ * the base person price (PERSON), the per-person share of the room price (ROOM, room ÷ included
+ * adults) or the room price (ROOM: a single-use combination, or ROOM_PRICE extra units). */
+export type LadderUnit = "person" | "person_share" | "room"
 
 export type LadderCellState =
   | "rule" // the slot's own All-periods rule
@@ -93,6 +101,8 @@ export interface LadderRow {
   editable: boolean
   /** A band code no band defines (OCC_UNKNOWN_BAND). */
   unknownBand: boolean
+  /** What the row's relative rules (and the adult default) are applied to. */
+  unit: LadderUnit
   cells: Record<string, LadderCell>
 }
 
@@ -101,6 +111,9 @@ export interface LadderModel {
   /** "" (All periods) then the period codes in table order. */
   periods: string[]
   counts: { periodOverrides: number }
+  basis: Basis
+  /** ROOM basis: the adults the room price covers (positions up to it are included); 0 for PERSON. */
+  includedAdults: number
 }
 
 /** "2+1" from "2A+1C", " 2 + 1 ", …; "*" for any ("2+" → "2+*"), as contracts.parse_combination
@@ -206,6 +219,7 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
   const ctx: Ctx = { version: tables.occupancy_rules.map(norm).filter(inScope), inherited: (opts.inherited ?? []).map(norm).filter(inScope), defaults: opts.defaults }
   const plain = [...ctx.version, ...ctx.inherited].filter((n) => !n.combination)
   const rows: LadderRow[] = []
+  const slotUnit: LadderUnit = basis === "PERSON" ? "person" : str(opts.extraUnit) === "ROOM_PRICE" ? "room" : "person_share"
   const add = (kind: LadderRowKind, position: number, band: string, id: OccIdentity | null, general: readonly OccIdentity[], slot: SlotKind, flags: { editable?: boolean; included?: boolean; unknownBand?: boolean } = {}) => {
     const probe = id ?? identity("ADULT", 1, "", "", scope)
     const cells: Record<string, LadderCell> = {}
@@ -213,7 +227,9 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
       const c = cellOf(ctx, probe, general, p, slot, Boolean(flags.included))
       cells[p] = id ? c : { ...c, rule: null }
     }
-    rows.push({ id: `${kind}:${position}:${band}`, kind, position, band, identity: id, editable: flags.editable ?? id !== null, unknownBand: Boolean(flags.unknownBand), cells })
+    // a whole-combination rule replaces (or adjusts) the unit itself: the room price under ROOM
+    const unit = basis === "ROOM" && id?.target === "COMBINATION" ? "room" : slotUnit
+    rows.push({ id: `${kind}:${position}:${band}`, kind, position, band, identity: id, editable: flags.editable ?? id !== null, unknownBand: Boolean(flags.unknownBand), unit, cells })
   }
 
   const anyAdult = identity("ADULT", 0, "", "", scope)
@@ -255,7 +271,7 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
 
   let periodOverrides = 0
   for (const row of rows) for (const p of periods) if (row.cells[p].state === "period-override") periodOverrides += 1
-  return { rows, periods, counts: { periodOverrides } }
+  return { rows, periods, counts: { periodOverrides }, basis, includedAdults: included }
 }
 
 export type OccEntryResult = { tables: Tables } | { error: ShErrorCode }
@@ -299,6 +315,242 @@ export function applyOccEntry(tables: Tables, id: OccIdentity, period: string, p
     else if (!rows.includes(r)) out.push(r)
   }
   return { tables: { ...tables, occupancy_rules: out } }
+}
+
+// ─── the ladder on screen (slice S11) ──────────────────────────────────────
+
+/** An occupancy rule inherited from a pricing policy, as price_matrix serves it (GAP-3: `period`,
+ * `adults` / `children` instead of the row fields), read as the ladder reads rules. */
+export function fromInheritedRule(r: InheritedOccupancyRule): OccRuleLike {
+  const any = (n: number | null | undefined) => (n === null || n === undefined ? "*" : String(n))
+  const combination = (r.adults === null || r.adults === undefined) && (r.children === null || r.children === undefined) ? "" : `${any(r.adults)}+${any(r.children)}`
+  return {
+    rule_id: str(r.rule_id),
+    target: str(r.target),
+    position: int(r.position),
+    age_band: str(r.age_band),
+    combination,
+    room_type: str(r.room_type),
+    period_code: str(r.period),
+    op: str(r.op),
+    value: str(r.value),
+    is_override: r.is_override ? 1 : 0,
+    note: "",
+    source: str(r.source),
+  }
+}
+
+/** The pricing policy a served rule or band comes from ("policy:<id>/r<rev>/<scope>"), or null. */
+export function policySource(source: unknown): { policy: string; revision: number; scope: string } | null {
+  const m = /^policy:(.+)\/r([0-9]+)\/([a-z+]+)$/.exec(str(source))
+  return m ? { policy: m[1], revision: int(m[2]), scope: m[3] } : null
+}
+
+/** A rule a cell's popover stores: the op chosen, its value (none for INHERIT), "Always wins" and a note. */
+export interface OccRule {
+  op: string
+  value: string
+  is_override: boolean
+  note: string
+}
+
+/** Rows of a slot in one room scope and period. */
+function slotRows(tables: Pick<Tables, "occupancy_rules">, id: OccIdentity, period: string): Norm[] {
+  return tables.occupancy_rules.map(norm).filter((n) => n.period === period && sameSlot(n, id))
+}
+
+/** The ladder's rule popover (§3.5, "Edit rule: {slot} · {period}"): writes the rule for each
+ * room (`[""]` = all rooms) × period of the slot, one row each; a cell that has rows keeps the one
+ * it shows (its key) and loses its twins. `null` (Remove) deletes those cells' rows. The op chosen
+ * is the op stored. The same tables when nothing changes. */
+export function applyOccRule(tables: Tables, slot: Omit<OccIdentity, "room_type">, rooms: readonly string[], periods: readonly string[], rule: OccRule | null): Tables {
+  let rows = tables.occupancy_rules
+  let changed = false
+  for (const room_type of rooms.length ? rooms : [""])
+    for (const period of periods) {
+      const id: OccIdentity = { ...slot, room_type: str(room_type) }
+      const same = slotRows({ occupancy_rules: rows }, id, period)
+      const mine = same.map((n) => n.src as Row)
+      if (!rule) {
+        if (!mine.length) continue
+        rows = rows.filter((r) => !mine.includes(r))
+        changed = true
+        continue
+      }
+      const fields = { op: rule.op, value: rule.op === "INHERIT" ? "" : rule.value, is_override: rule.is_override ? 1 : 0, note: str(rule.note) }
+      if (!mine.length) {
+        rows = [...rows, newRow("occupancy_rules", { target: id.target, position: id.position, age_band: id.age_band, combination: id.combination, room_type: id.room_type, period_code: period, ...fields })]
+        changed = true
+        continue
+      }
+      const keep = (pick(same) as Norm).src as Row
+      const equal =
+        mine.length === 1 && str(keep.op) === fields.op && canonValue(keep.value) === canonValue(fields.value) && isSet(keep.is_override) === rule.is_override && str(keep.note) === fields.note
+      if (equal) continue
+      rows = rows.flatMap((r) => (r === keep ? [{ ...r, ...fields }] : mine.includes(r) ? [] : [r]))
+      changed = true
+    }
+  return changed ? { ...tables, occupancy_rules: rows } : tables
+}
+
+/** One ladder cell of a gesture and what was typed for it. */
+export interface OccEntryItem {
+  id: OccIdentity
+  period: string
+  parsed: ShResult
+}
+
+/** One gesture over one or many ladder cells (a typed entry, Ctrl/Cmd+Enter over a selection,
+ * Delete): every cell its own entry (applyOccEntry), all or nothing; `index` names the cell
+ * that refused. The same tables when nothing changes. */
+export function planOccEntries(tables: Tables, items: readonly OccEntryItem[]): { tables: Tables } | { error: ShErrorCode; index: number } {
+  let out = tables
+  for (let i = 0; i < items.length; i++) {
+    const res = applyOccEntry(out, items[i].id, items[i].period, items[i].parsed)
+    if ("error" in res) return { error: res.error, index: i }
+    out = res.tables
+  }
+  return { tables: out }
+}
+
+/** What committing a parsed entry into a ladder cell would store, for its reading line (no arithmetic). */
+export type OccReading =
+  | { kind: "error"; code: ShErrorCode }
+  | { kind: "unchanged" }
+  /** the cell's rows are removed; a period cell then follows the slot's All-periods rule, if any */
+  | { kind: "clear"; follows: { op: string; value: string } | null }
+  | { kind: "rule"; op: string; value: string }
+
+export function occReadingOf(tables: Tables, id: OccIdentity, period: string, parsed: ShResult): OccReading {
+  const res = applyOccEntry(tables, id, period, parsed)
+  if ("error" in res) return { kind: "error", code: res.error }
+  if (!parsed.ok || parsed.kind === "base") return { kind: "error", code: "SYNTAX" }
+  if (res.tables === tables) return { kind: "unchanged" }
+  if (parsed.kind === "clear") {
+    const all = period === ALL_PERIODS ? null : pick(slotRows(tables, id, ALL_PERIODS), false)
+    return { kind: "clear", follows: all ? valueOf(all.src) : null }
+  }
+  return { kind: "rule", op: parsed.op, value: parsed.value }
+}
+
+/** The text an edit of a ladder cell starts from: its own rule as `occupancy` shorthand (FIXED as
+ * "=v"); empty when it has none (it inherits, a default, or its own INHERIT row). */
+export function occEditText(cell: LadderCell | undefined, opts?: ShFormatOptions): string {
+  const rule = cell?.rule
+  if (!rule || str(rule.op) === "INHERIT") return ""
+  return editText(str(rule.op) as ShOp, str(rule.value), "occupancy", opts)
+}
+
+/** Rooms scopes ("" = All rooms) that have occupancy rules of their own: the dot on the scope select. */
+export function scopesWithRules(tables: Pick<Tables, "occupancy_rules">): Set<string> {
+  return new Set(tables.occupancy_rules.map((r) => str(r.room_type)))
+}
+
+/** A card that only holds the single-use rule the ladder shows as its first row. */
+function isSingleCard(card: Pick<CombinationCard, "combination" | "rules">): boolean {
+  if (card.combination === "1+0") return card.rules.every((r) => r.target === "COMBINATION")
+  if (card.combination === "1+*") return card.rules.every((r) => r.target === "ADULT" && r.position === 1)
+  return false
+}
+
+export interface SummaryItem {
+  rowId: string
+  kind: LadderRowKind
+  position: number
+  band: string
+  unknownBand: boolean
+  op: string
+  value: string
+}
+
+export interface LadderSummary {
+  adults: SummaryItem[]
+  children: SummaryItem[]
+  /** special combinations (cards other than the single-use row) */
+  combinations: number
+  periodOverrides: number
+}
+
+/** The collapsed section's summary (§3.6.1): the scope's own All-periods rules of adults and of
+ * children, the number of special combinations and of period overrides. */
+export function ladderSummary(model: LadderModel, cards: readonly CombinationCard[]): LadderSummary {
+  const adults: SummaryItem[] = []
+  const children: SummaryItem[] = []
+  for (const row of model.rows) {
+    const cell = row.cells[ALL_PERIODS]
+    if (!row.identity || cell?.state !== "rule" || !cell.value) continue
+    const item = { rowId: row.id, kind: row.kind, position: row.position, band: row.band, unknownBand: row.unknownBand, op: cell.value.op, value: cell.value.value }
+    if (row.kind === "band" || row.kind === "child" || row.kind === "child_any") children.push(item)
+    else adults.push(item)
+  }
+  return { adults, children, combinations: cards.filter((c) => !isSingleCard(c)).length, periodOverrides: model.counts.periodOverrides }
+}
+
+/** The ⓘ precedence note (§3.6.2): the cells a special combination outranks for some party,
+ * because a card prices the same slot (same target; positions and bands equal or "any") in a room
+ * and period the cell covers. Not on "Always wins" rules (they beat combinations), included
+ * places, the single-use row or the cards the single-use row shows. Keyed `${row.id}|${period}`,
+ * the card ids as values. Computed from the grouping (§3.7.4); no ranking is re-implemented. */
+export function combinationNotes(model: LadderModel, cards: readonly CombinationCard[], scopeRoom: string | null): Map<string, string[]> {
+  const scope = str(scopeRoom)
+  const live = cards.filter((c) => !isSingleCard(c))
+  const out = new Map<string, string[]>()
+  if (!live.length) return out
+  for (const row of model.rows) {
+    const id = row.identity
+    if (!id || row.kind === "single" || id.target === "COMBINATION") continue
+    for (const p of model.periods) {
+      const cell = row.cells[p]
+      if (!cell || cell.state === "included" || (cell.source && isSet(cell.source.is_override))) continue
+      const hits = live.filter(
+        (card) =>
+          (!scope || card.rooms.includes("") || card.rooms.includes(scope)) &&
+          (p === ALL_PERIODS || card.periods.includes(ALL_PERIODS) || card.periods.includes(p)) &&
+          card.rules.some(
+            (r) => r.target === id.target && (!id.position || !r.position || r.position === id.position) && (!id.age_band || !r.age_band || r.age_band === id.age_band),
+          ),
+      )
+      if (hits.length) out.set(`${row.id}|${p}`, hits.map((c) => c.id))
+    }
+  }
+  return out
+}
+
+/** A sample party of the resolved line (§3.6.2, GAP-2b): adults and each child's band code (the
+ * server prices a child at its band's lower edge). */
+export interface PartyOption {
+  id: string
+  adults: number
+  children: string[]
+}
+
+/** At most this many sample parties are offered (the select stays usable on large rooms). */
+export const PARTY_OPTIONS_MAX = 60
+
+/** The sample parties a room can host (validCombinations), each child in every band: the
+ * multisets of band codes in band order. Adults-only parties when there are no bands. */
+export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[]): PartyOption[] {
+  const codes = [...new Set(bands.map(bandCode).filter(Boolean))]
+  const out: PartyOption[] = []
+  const multisets = (n: number, from: number): string[][] => {
+    if (n === 0) return [[]]
+    const res: string[][] = []
+    for (let i = from; i < codes.length; i++) for (const rest of multisets(n - 1, i)) res.push([codes[i], ...rest])
+    return res
+  }
+  for (const combo of validCombinations([capacity])) {
+    if (combo.children > 0 && !codes.length) continue
+    for (const children of multisets(combo.children, 0)) {
+      out.push({ id: `${combo.adults}+${children.join(",")}`, adults: combo.adults, children })
+      if (out.length >= PARTY_OPTIONS_MAX) return out
+    }
+  }
+  return out
+}
+
+/** The party the resolved line starts with: two adults when the room takes them, else the first. */
+export function defaultParty(options: readonly PartyOption[]): PartyOption | null {
+  return options.find((p) => p.adults === 2 && !p.children.length) ?? options[0] ?? null
 }
 
 // ─── special combinations (§3.7) ─────────────────────────────────────────
