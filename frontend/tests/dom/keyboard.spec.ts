@@ -265,6 +265,49 @@ test("Menu: Escape closes and returns focus; Tab and Shift+Tab close and move on
   expect(await ranLog(page)).toEqual([])
 })
 
+test("ContextMenu: a right-click, Shift+F10 or the ContextMenu key opens it on its first item; Enter runs an item; Escape and Tab return the focus", async ({ page }) => {
+  const cell = page.getByTestId("ctx-cell")
+  const menu = page.getByRole("menu", { name: "Cell actions: Superior · P2" })
+  const item = (name: string) => page.getByRole("menuitem", { name, exact: true })
+  await cell.click({ button: "right" })
+  await expect(menu).toBeVisible()
+  await expect(item("Edit rule…")).toBeFocused()
+  expect(await item("Edit rule…").getAttribute("aria-keyshortcuts")).toBe("Alt+Enter")
+  await page.keyboard.press("ArrowDown")
+  await expect(item("Test this price")).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(menu).toBeHidden()
+  await expect(cell).toBeFocused()
+  expect(await ranLog(page)).toEqual(["ctx:test"])
+
+  // Shift+F10: typeahead, Escape back to the cell
+  await page.keyboard.press("Shift+F10")
+  await expect(item("Edit rule…")).toBeFocused()
+  await page.keyboard.press("t")
+  await expect(item("Test this price")).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(menu).toBeHidden()
+  await expect(cell).toBeFocused()
+
+  // the ContextMenu key; Tab closes it and the focus stays on the cell
+  await page.keyboard.press("ContextMenu")
+  await expect(item("Edit rule…")).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(menu).toBeHidden()
+  await expect(cell).toBeFocused()
+
+  // a click elsewhere closes it; Space runs an item too
+  await cell.click({ button: "right" })
+  await expect(menu).toBeVisible()
+  await page.getByTestId("after").click()
+  await expect(menu).toBeHidden()
+  await cell.focus()
+  await page.keyboard.press("Shift+F10")
+  await page.keyboard.press(" ")
+  await expect(menu).toBeHidden()
+  expect(await ranLog(page)).toEqual(["ctx:test", "ctx:edit"])
+})
+
 test("Menu: inside a modal Drawer it is portaled into the Drawer, stays anchored, and Escape closes it before the Drawer", async ({ page }) => {
   await page.getByTestId("drawer-btn").click()
   const drawer = page.getByRole("dialog", { name: "Bands" })

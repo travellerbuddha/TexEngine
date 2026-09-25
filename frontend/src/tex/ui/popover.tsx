@@ -342,6 +342,43 @@ function menuItems(panel: HTMLElement | null): HTMLElement[] {
   return panel ? Array.from(panel.querySelectorAll<HTMLElement>('[role="menuitem"]')) : []
 }
 
+/** The keys of an open role="menu" (Menu, ContextMenu): arrows, Home/End and first-letter
+ * typeahead move between items; Tab leaves (`onTab` closes the menu and puts the focus back). */
+function onMenuKeys(e: ReactKeyboardEvent<HTMLDivElement>, panel: HTMLElement | null, onTab: () => void) {
+  const items = menuItems(panel)
+  if (!items.length) return
+  const i = items.indexOf(document.activeElement as HTMLElement)
+  const go = (n: number) => {
+    e.preventDefault()
+    items[(n + items.length) % items.length].focus()
+  }
+  switch (e.key) {
+    case "ArrowDown":
+      return go(i + 1)
+    case "ArrowUp":
+      return go(i < 0 ? -1 : i - 1)
+    case "Home":
+      return go(0)
+    case "End":
+      return go(-1)
+    case "Tab":
+      onTab()
+      return
+  }
+  if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey) return
+  const lang = document.documentElement.lang || undefined
+  const key = e.key.toLocaleLowerCase(lang)
+  for (let step = 1; step <= items.length; step++) {
+    const item = items[(i + step + items.length) % items.length]
+    const name = (item.dataset.text ?? item.textContent ?? "").trim().toLocaleLowerCase(lang)
+    if (name.startsWith(key)) {
+      e.preventDefault()
+      item.focus()
+      return
+    }
+  }
+}
+
 export interface MenuProps {
   /** Accessible name of the menu, and of the button when it shows only an icon. */
   label: string
@@ -377,42 +414,12 @@ export function Menu({ label, children, icon, text, placement = "bottom-start", 
     return from.current === "last" ? items[items.length - 1] : items[0]
   })
 
-  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    const items = menuItems(panelRef.current)
-    if (!items.length) return
-    const i = items.indexOf(document.activeElement as HTMLElement)
-    const go = (n: number) => {
-      e.preventDefault()
-      items[(n + items.length) % items.length].focus()
-    }
-    switch (e.key) {
-      case "ArrowDown":
-        return go(i + 1)
-      case "ArrowUp":
-        return go(i < 0 ? -1 : i - 1)
-      case "Home":
-        return go(0)
-      case "End":
-        return go(-1)
-      case "Tab":
-        // leave from the button, so Tab / Shift+Tab continue in page order
-        buttonRef.current?.focus()
-        close()
-        return
-    }
-    if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey) return
-    const lang = document.documentElement.lang || undefined
-    const key = e.key.toLocaleLowerCase(lang)
-    for (let step = 1; step <= items.length; step++) {
-      const item = items[(i + step + items.length) % items.length]
-      const name = (item.dataset.text ?? item.textContent ?? "").trim().toLocaleLowerCase(lang)
-      if (name.startsWith(key)) {
-        e.preventDefault()
-        item.focus()
-        return
-      }
-    }
-  }
+  const onMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) =>
+    onMenuKeys(e, panelRef.current, () => {
+      // leave from the button, so Tab / Shift+Tab continue in page order
+      buttonRef.current?.focus()
+      close()
+    })
 
   const toggle = () => {
     from.current = "first"
@@ -473,6 +480,55 @@ export function Menu({ label, children, icon, text, placement = "bottom-start", 
           portalTarget(buttonRef.current),
         )}
     </>
+  )
+}
+
+export interface ContextMenuProps {
+  open: boolean
+  onClose: () => void
+  /** What the menu is for (a grid cell): it is placed next to it and the focus returns to it. */
+  anchorRef: RefObject<HTMLElement | null>
+  /** Accessible name of the menu. */
+  label: string
+  /** MenuItem / MenuSeparator elements. */
+  children: ReactNode
+  placement?: FloatingPlacement
+}
+
+/**
+ * A context menu (role="menu") opened by the page, not by a button of its own: from a right-click
+ * (or a long press), Shift+F10 or the ContextMenu key on an element such as a grid cell. It has
+ * the Menu's keys (arrows, Home/End, typeahead, Enter/Space, Escape); Escape, Tab, an outside
+ * pointerdown or choosing an item close it, and the focus goes back to the element.
+ */
+export function ContextMenu({ open, onClose, anchorRef, label, children, placement = "bottom-start" }: ContextMenuProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  const close = useCallback(() => closeRef.current(), [])
+  const ctx = useMemo(() => ({ close }), [close])
+  useFloatingPosition(open, anchorRef, panelRef, placement)
+  useDismiss(open, close, anchorRef, panelRef)
+  useFocusInOut(open, anchorRef, panelRef, () => menuItems(panelRef.current)[0])
+  if (!open) return null
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="menu"
+      aria-label={label}
+      tabIndex={-1}
+      onKeyDown={(e) =>
+        onMenuKeys(e, panelRef.current, () => {
+          e.preventDefault()
+          anchorRef.current?.focus()
+          close()
+        })
+      }
+      className="tex-root fixed z-[55] min-w-44 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-tex-pop outline-none sm:max-w-xs"
+    >
+      <MenuCtx.Provider value={ctx}>{children}</MenuCtx.Provider>
+    </div>,
+    portalTarget(anchorRef.current),
   )
 }
 

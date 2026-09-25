@@ -5,6 +5,7 @@ import { StrictMode, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import "../../src/index.css"
 import {
+  ContextMenu,
   Drawer,
   Menu,
   MenuItem,
@@ -124,6 +125,40 @@ function RowMenu() {
         Remove room
       </MenuItem>
     </Menu>
+  )
+}
+
+/** A cell's context menu (S14): opened by a right-click, Shift+F10 or the ContextMenu key. */
+function ContextMenuCase() {
+  const [open, setOpen] = useState(false)
+  const cell = useRef<HTMLDivElement>(null)
+  return (
+    <>
+      <div
+        ref={cell}
+        tabIndex={0}
+        data-testid="ctx-cell"
+        className={button}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          setOpen(true)
+        }}
+        onKeyDown={(e) => {
+          if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+            e.preventDefault()
+            setOpen(true)
+          }
+        }}
+      >
+        Superior · P2
+      </div>
+      <ContextMenu open={open} onClose={() => setOpen(false)} anchorRef={cell} label="Cell actions: Superior · P2">
+        <MenuItem onSelect={log("ctx:edit")} shortcut="Alt+↵" keyshortcuts="Alt+Enter">
+          Edit rule…
+        </MenuItem>
+        <MenuItem onSelect={log("ctx:test")}>Test this price</MenuItem>
+      </ContextMenu>
+    </>
   )
 }
 
@@ -259,6 +294,7 @@ function Harness() {
           After
         </button>
         <DrawerCase />
+        <ContextMenuCase />
       </div>
       <div className="mt-6">
         <GridCase />

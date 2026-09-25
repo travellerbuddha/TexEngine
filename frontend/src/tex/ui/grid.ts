@@ -278,3 +278,15 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
 
   return { active, gridRef, cellProps, focusCell }
 }
+
+/**
+ * Brings an element a link points to into view (a grid cell or a card: "Show in grid", S14; issue
+ * anchoring, S15), focuses it and outlines it for a moment, so the eye finds it after the jump.
+ * The outline fades (no movement), and the focus stays.
+ */
+export function revealElement(el: HTMLElement) {
+  el.scrollIntoView({ block: "center", inline: "nearest" })
+  el.focus({ preventScroll: true })
+  const ring = "inset 0 0 0 2px var(--color-tex-500)"
+  el.animate?.([{ boxShadow: ring }, { boxShadow: ring, offset: 0.7 }, { boxShadow: "inset 0 0 0 2px transparent" }], { duration: 1800 })
+}
