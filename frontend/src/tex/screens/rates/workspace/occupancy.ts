@@ -119,6 +119,10 @@ export interface LadderRow {
   infant: boolean
   /** What the row's relative rules (and the adult default) are applied to. */
   unit: LadderUnit
+  /** The single-use row: a rule of its form that reaches the scope is not the scope's own (a rule of
+   * All rooms seen from a room, or a pricing policy's), so switching the row's form would leave that
+   * rule applying (S16 re-review 3). False on every other row. */
+  foreign: boolean
   cells: Record<string, LadderCell>
 }
 
@@ -280,10 +284,15 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
   const periods = [ALL_PERIODS, ...tables.periods.map((p) => str(p.period_code)).filter(Boolean)]
   // a blank room_type matches every room (occupancy.qualifiers_match)
   const reaches = (n: Norm) => n.room_type === scope || n.room_type === ""
+  // a special combination's rules are the card's (§3.7.4, D8): the single-use row, the only row that
+  // reads rules with a combination, neither shows nor counts them (S16 re-review 3)
+  const version = tables.occupancy_rules.map((r) => norm(r))
+  const inherited = (opts.inherited ?? []).map((r) => norm(r, true))
+  const cards = new Set([...cardRows(version), ...cardRows(inherited)])
   const ctx: Ctx = {
     scope,
-    version: tables.occupancy_rules.map((r) => norm(r)).filter(reaches),
-    inherited: (opts.inherited ?? []).map((r) => norm(r, true)).filter(reaches),
+    version: version.filter((n) => reaches(n) && !cards.has(n.src)),
+    inherited: inherited.filter((n) => reaches(n) && !cards.has(n.src)),
     defaults: opts.defaults,
   }
   const all = [...ctx.version, ...ctx.inherited]
@@ -308,6 +317,7 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
     }
     // a whole-combination rule replaces (or adjusts) the unit itself: the room price under ROOM
     const unit = basis === "ROOM" && id?.target === "COMBINATION" ? "room" : slotUnit
+    const foreign = kind === "single" && id !== null && all.some((n) => sameGuest(n, id) && (n.policy || n.room_type !== scope))
     rows.push({
       id: `${kind}:${position}:${band}`,
       kind,
@@ -318,6 +328,7 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
       unknownBand: Boolean(flags.unknownBand),
       infant: Boolean(flags.infant),
       unit,
+      foreign,
       cells,
     })
   }
@@ -371,7 +382,11 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
   return { rows, periods, counts: { periodOverrides }, basis, includedAdults: included }
 }
 
-export type OccEntryResult = { tables: Tables } | { error: ShErrorCode }
+/** An occupancy entry's refusal: the shorthand's, or "CARD" (a special combination holds the cell
+ * of a single-use rule, S16 re-review 3). */
+export type OccErrorCode = ShErrorCode | "CARD"
+
+export type OccEntryResult = { tables: Tables } | { error: OccErrorCode }
 
 /** Applies a parsed `occupancy` entry to a ladder cell: the op and value are stored as a rule on
  * the row's identity and the column's period (relative ops are always rules here); clear removes
@@ -382,8 +397,9 @@ export type OccEntryResult = { tables: Tables } | { error: ShErrorCode }
 export function applyOccEntry(tables: Tables, id: OccIdentity, period: string, parsed: ShResult): OccEntryResult {
   if (!parsed.ok) return { error: parsed.code }
   if (parsed.kind === "base") return { error: "SYNTAX" }
-  const same = tables.occupancy_rules.map((r) => norm(r)).filter((n) => n.period === period && sameSlot(n, id))
+  const same = slotRows(tables, id, period)
   const rows = same.map((n) => n.src as Row)
+  if (parsed.kind !== "clear" && cardHeld(tables, id.combination, id.room_type, period)) return { error: "CARD" }
   if (parsed.kind === "clear") {
     if (!rows.length) return { tables }
     return { tables: { ...tables, occupancy_rules: tables.occupancy_rules.filter((r) => !rows.includes(r)) } }
@@ -452,9 +468,38 @@ export interface OccRule {
   note: string
 }
 
-/** Rows of a slot in one room scope and period. */
+/** Rows of a slot in one room scope and period; never a special combination's (a card is edited
+ * as a whole in the builder, D8; only the single-use row's slots have a combination). */
 function slotRows(tables: Pick<Tables, "occupancy_rules">, id: OccIdentity, period: string): Norm[] {
-  return tables.occupancy_rules.map((r) => norm(r)).filter((n) => n.period === period && sameSlot(n, id))
+  const norms = tables.occupancy_rules.map((r) => norm(r))
+  const cards = id.combination ? cardRows(norms) : null
+  return norms.filter((n) => n.period === period && sameSlot(n, id) && !cards?.has(n.src))
+}
+
+/** The rows of special combinations (§3.7.4): rows with a combination whose cell (combination,
+ * room, period, "Always wins"; for a policy's rules also their source) is not a single-use card
+ * (isSingleUseCard). A builder card such as "1 adult + any children" with an Adult 1 rule is one;
+ * the single-use row neither shows, counts nor rewrites its rules (S16 re-review 3). */
+function cardRows(norms: readonly Norm[]): Set<Row | OccRuleLike> {
+  const cells = new Map<string, Norm[]>()
+  for (const n of norms) {
+    if (!n.combination) continue
+    const key = JSON.stringify([n.combination, n.room_type, n.period, n.is_override, n.policy ? str(n.src.source) : ""])
+    const list = cells.get(key)
+    if (list) list.push(n)
+    else cells.set(key, [n])
+  }
+  const out = new Set<Row | OccRuleLike>()
+  for (const list of cells.values()) if (!isSingleUseCard({ combination: list[0].combination, rules: list })) for (const n of list) out.add(n.src)
+  return out
+}
+
+/** A special combination holds the cell (combination, room, period) of the version. */
+function cardHeld(tables: Pick<Tables, "occupancy_rules">, combination: string, room: string, period: string): boolean {
+  if (!combination) return false
+  const norms = tables.occupancy_rules.map((r) => norm(r))
+  const cards = cardRows(norms)
+  return norms.some((n) => cards.has(n.src) && n.combination === combination && n.room_type === room && n.period === period)
 }
 
 /** The ladder's rule popover (§3.5, "Edit rule: {slot} · {period}"): writes the rule for each
@@ -462,6 +507,9 @@ function slotRows(tables: Pick<Tables, "occupancy_rules">, id: OccIdentity, peri
  * it shows (its key) and loses its twins. `null` (Remove) deletes those cells' rows. The op chosen
  * is the op stored. The same tables when nothing changes. */
 export function applyOccRule(tables: Tables, slot: Omit<OccIdentity, "room_type">, rooms: readonly string[], periods: readonly string[], rule: OccRule | null): Tables {
+  // a rule written into a cell a special combination holds would join (or rewrite) the card: nothing
+  // is written (singleWriteRefusal says why; S16 re-review 3)
+  if (rule && singleWriteRefusal(tables, slot, rooms, periods)) return tables
   let rows = tables.occupancy_rules
   let changed = false
   for (const room_type of rooms.length ? rooms : [""])
@@ -522,10 +570,15 @@ export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly strin
   const target = switchedSlot(slot, to)
   if (!rule || !to || sameSlotOf(target, slot)) return applyOccRule(tables, slot, rooms, periods, rule)
   if (!("single" in to)) return applyOccRule(tables, target, rooms, periods, rule)
+  // a card's cell reached, or a relative rule carried into the other form: nothing is written
+  if (singleWriteRefusal(tables, slot, rooms, periods, to)) return tables
   const written = new Set((rooms.length ? rooms : [""]).map(str))
   const norms = tables.occupancy_rules.map((r) => norm(r))
-  const taken = new Set(norms.filter((n) => written.has(n.room_type) && sameGuest(n, { ...target, room_type: "" })).map((n) => `${n.room_type}|${n.period}`))
-  const old = new Map(norms.filter((n) => written.has(n.room_type) && sameGuest(n, { ...slot, room_type: "" })).map((n) => [n.src as Row, n]))
+  // a special combination's rules are the card's: they keep their form (S16 re-review 3)
+  const cards = cardRows(norms)
+  const mine = norms.filter((n) => written.has(n.room_type) && !cards.has(n.src))
+  const taken = new Set(mine.filter((n) => sameGuest(n, { ...target, room_type: "" })).map((n) => `${n.room_type}|${n.period}`))
+  const old = new Map(mine.filter((n) => sameGuest(n, { ...slot, room_type: "" })).map((n) => [n.src as Row, n]))
   const rows = tables.occupancy_rules.flatMap((r) => {
     const n = old.get(r)
     if (!n) return [r]
@@ -535,6 +588,38 @@ export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly strin
     return [{ ...r, target: target.target, position: target.position, age_band: target.age_band, combination: target.combination }]
   })
   return applyOccRule({ ...tables, occupancy_rules: rows }, target, rooms, periods, rule)
+}
+
+/** Why the single-use row may not write a rule (S16 re-review 3): a special combination holds a
+ * cell the write reaches ("card": the rule would join the card or rewrite its rule, and a card is
+ * edited as a whole in the builder, D8), or the whole-row switch would carry a relative rule (Plus
+ * or minus %, Add, Subtract) of another period or room into the other form, where it applies to
+ * another amount (a whole combination's relative rule to the party total, an adult's to the slot
+ * unit: "relative"). Replacing rules and INHERIT keep their price in either form. */
+export type SingleRefusal = "card" | "relative"
+
+/** Rules whose meaning is the same as a whole 1+0 combination and as Adult 1 of 1+* (price_occupancy:
+ * a replacing combination op prices from the unit, as an adult's does). */
+const SWITCH_SAFE_OPS = new Set(["ABSOLUTE", "FIXED", "MULTIPLY", "PERCENT_OF", "INHERIT"])
+
+const isSingleSlot = (slot: Slot) => sameSlotOf(slot, SINGLE_WHOLE) || sameSlotOf(slot, SINGLE_CHILDREN)
+
+/** What refuses writing a rule to the single-use row's `slot` (or, with `to`, switching its form)
+ * for `rooms` × `periods`; null when nothing does, and for any other row. */
+export function singleWriteRefusal(tables: Pick<Tables, "occupancy_rules">, slot: Slot, rooms: readonly string[], periods: readonly string[], to?: SlotSwitch): SingleRefusal | null {
+  const target = switchedSlot(slot, to)
+  if (!isSingleSlot(slot) || !isSingleSlot(target)) return null
+  const written = [...new Set((rooms.length ? rooms : [""]).map(str))]
+  const norms = tables.occupancy_rules.map((r) => norm(r))
+  const cards = cardRows(norms)
+  const held = new Set(norms.filter((n) => cards.has(n.src) && n.combination === target.combination).map((n) => `${n.room_type}|${n.period}`))
+  const writes = new Set(written.flatMap((room) => periods.map((p) => `${room}|${p}`)))
+  if ([...writes].some((c) => held.has(c))) return "card"
+  if (sameSlotOf(target, slot)) return null
+  const moved = norms.filter((n) => !cards.has(n.src) && written.includes(n.room_type) && sameGuest(n, { ...slot, room_type: "" }))
+  if (moved.some((n) => held.has(`${n.room_type}|${n.period}`))) return "card"
+  if (moved.some((n) => !writes.has(`${n.room_type}|${n.period}`) && !SWITCH_SAFE_OPS.has(n.op))) return "relative"
+  return null
 }
 
 /** One ladder cell of a gesture and what was typed for it. */
@@ -547,7 +632,7 @@ export interface OccEntryItem {
 /** One gesture over one or many ladder cells (a typed entry, Ctrl/Cmd+Enter over a selection,
  * Delete): every cell its own entry (applyOccEntry), all or nothing; `index` names the cell
  * that refused. The same tables when nothing changes. */
-export function planOccEntries(tables: Tables, items: readonly OccEntryItem[]): { tables: Tables } | { error: ShErrorCode; index: number } {
+export function planOccEntries(tables: Tables, items: readonly OccEntryItem[]): { tables: Tables } | { error: OccErrorCode; index: number } {
   let out = tables
   for (let i = 0; i < items.length; i++) {
     const res = applyOccEntry(out, items[i].id, items[i].period, items[i].parsed)
@@ -559,7 +644,7 @@ export function planOccEntries(tables: Tables, items: readonly OccEntryItem[]): 
 
 /** What committing a parsed entry into a ladder cell would store, for its reading line (no arithmetic). */
 export type OccReading =
-  | { kind: "error"; code: ShErrorCode }
+  | { kind: "error"; code: OccErrorCode }
   | { kind: "unchanged" }
   /** the cell's rows are removed; a period cell then follows the slot's All-periods rule, if any */
   | { kind: "clear"; follows: { op: string; value: string } | null }
@@ -593,7 +678,7 @@ export function scopesWithRules(tables: Pick<Tables, "occupancy_rules">): Set<st
 /** A card that only holds the single-use rule the ladder shows as its first row ("1 Adult (single
  * use)", or its "also with children" variant): not a special combination, so the summary, the ⓘ
  * notes and the combination cards leave it out. */
-export function isSingleUseCard(card: Pick<CombinationCard, "combination" | "rules">): boolean {
+export function isSingleUseCard(card: { combination: string; rules: readonly Pick<CardRule, "target" | "position">[] }): boolean {
   if (card.combination === "1+0") return card.rules.every((r) => r.target === "COMBINATION")
   if (card.combination === "1+*") return card.rules.every((r) => r.target === "ADULT" && r.position === 1)
   return false

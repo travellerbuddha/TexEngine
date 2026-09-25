@@ -22,6 +22,7 @@ import {
   editShortcut,
   focusHeaderLane,
   headerLaneKeyDown,
+  refocusIfLost,
   Money,
   revealElement,
   Select,
@@ -51,6 +52,7 @@ import {
   occReadingOf,
   planOccEntries,
   policySource,
+  singleWriteRefusal,
   switchedSlot,
   type CombinationCard,
   type LadderCell,
@@ -163,6 +165,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const cols = model.periods
   const periodRows = useMemo(() => new Map(tables.periods.map((x) => [str(x.period_code), x])), [tables.periods])
   const showResolved = Boolean(p.partyRoom && p.party && preview && preview.mode !== "catalogue")
+  // the grid's only header lane control is the resolved line's sample party select
+  const laneNote = showResolved ? t("rates.kbd.lane_note_ladder") : ""
   const navRows = rows.length + (showResolved ? 1 : 0)
   const template = columnTemplate(cols.length - 1)
   const rowIndex = useMemo(() => new Map(rows.map((x, i) => [x.id, i])), [rows])
@@ -438,6 +442,9 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const stepHistory = (which: "undo" | "redo", fromToast = false) => {
     const label = fromToast ? undoToast.undo() : which === "undo" ? history.undo() : history.redo()
     if (label) say(t(which === "undo" ? "rates.ws.bulk.undone" : "rates.ws.bulk.redone", { label }))
+    // a keyboard undo or redo that removed the focused cell's row: the active cell takes the focus
+    // back (the toast's Undo has its own way back, onToastFocusBack)
+    if (!fromToast) refocusIfLost(() => latest.current.focusActive())
   }
   const latest = useRef<{ stepHistory: typeof stepHistory; focusActive: () => void }>({ stepHistory, focusActive: () => {} })
   latest.current = { stepHistory, focusActive: () => void focusAt(nav.active.r, nav.active.c) }
@@ -812,14 +819,14 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const headerCell = "border-r border-b border-zinc-200 bg-white px-2 py-1 text-left"
   return (
     <div className="space-y-1.5">
-      {canEdit && (
+      {/* the header lane as this grid has it: the resolved line's sample party (S16 re-review 3) */}
+      {(canEdit || laneNote) && (
         <p className="text-xs text-zinc-500">
-          {t("rates.occ.ladder.hint")} {t("rates.kbd.lane_note")}
+          {canEdit && t("rates.occ.ladder.hint")}
+          {canEdit && laneNote && " "}
+          {laneNote && <span id={laneNoteId}>{laneNote}</span>}
         </p>
       )}
-      <span id={laneNoteId} className="sr-only">
-        {t("rates.kbd.lane_note")}
-      </span>
       <span role="status" aria-live="polite" className="sr-only">
         {announce}
       </span>
@@ -827,7 +834,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         <div
           role="grid"
           aria-label={t("rates.occ.ladder.caption")}
-          aria-describedby={laneNoteId}
+          aria-describedby={laneNote ? laneNoteId : undefined}
           aria-rowcount={navRows + 1}
           aria-colcount={cols.length + 1}
           aria-readonly={readOnly || undefined}
@@ -951,9 +958,15 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
               // §3.6.2: a band row's rule for one child position (a position row of its own), and the
               // single-use row's "also when children travel" form (PERSON basis: under ROOM the
               // included adult 1 takes no rule). The form switches for the whole row; with both
-              // forms shown (a row each) each row keeps its own (S16 re-review 2).
+              // forms shown (a row each) each row keeps its own (S16 re-review 2). Only a row of the
+              // scope's own rules switches: a rule of All rooms or of a pricing policy would still
+              // apply, which the popover says instead (S16 re-review 3).
               positions={row.kind === "band" ? p.maxChildren : 0}
-              single={row.kind === "single" && basis === "PERSON" && singleRows === 1 ? (row.identity.target === "ADULT" ? "children" : "whole") : undefined}
+              single={row.kind === "single" && basis === "PERSON" && singleRows === 1 && !row.foreign ? (row.identity.target === "ADULT" ? "children" : "whole") : undefined}
+              singleForeign={row.kind === "single" && basis === "PERSON" && singleRows === 1 && row.foreign}
+              // a write the single-use row refuses: a special combination's cell, a relative rule
+              // carried into the other form (S16 re-review 3)
+              refusal={(rooms, periods, to) => singleWriteRefusal(history.current() ?? tables, slot, rooms, periods, to)}
               slotNameAs={(to) => slotName(rowAs(row, to))}
               minorUnits={minorUnits}
               ccy={ccy}

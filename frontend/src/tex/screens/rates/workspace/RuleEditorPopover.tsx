@@ -11,15 +11,18 @@
 // wins (override)", a note and the periods it applies to. On a child band row it can name one child
 // position instead ("Child 2 · 7–11.99", a position row of its own), and on the single-use row
 // (PERSON basis) switch it to "also when children travel" (§3.6.2, S16 re-review): the whole row
-// switches, every period keeping its value (S16 re-review 2).
-import { useMemo, useState, type RefObject } from "react"
+// switches, every period keeping its value (S16 re-review 2). A write the single-use row refuses (a
+// special combination's cell, a relative rule the switch would carry) is said, and Apply waits;
+// a row whose rule comes from All rooms or a pricing policy says so instead of switching (S16
+// re-review 3).
+import { useId, useMemo, useState, type RefObject } from "react"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, DECIMAL_PLACES, DecimalInput, Field, Input, Popover, Segmented, Select } from "../../../ui"
 import { enumOptions } from "../lib/options"
 import { displayText, isAmountOp, normaliseDecimal, OPS_BY_CONTEXT, type ShOp } from "../lib/shorthand"
 import { ALL_PERIODS, isRelativeOp } from "./model.ts"
 import type { PopoverRule } from "./matrixView.ts"
-import type { OccRule, SlotSwitch } from "./occupancy.ts"
+import type { OccRule, SingleRefusal, SlotSwitch } from "./occupancy.ts"
 
 type AppliesTo = "this" | "all" | "selected"
 
@@ -191,6 +194,10 @@ export interface OccRulePopoverProps {
   positions?: number
   /** the single-use row that may switch form (PERSON basis): the form it has */
   single?: "whole" | "children"
+  /** the single-use row whose rule comes from All rooms or a pricing policy: it does not switch here */
+  singleForeign?: boolean
+  /** why a rule may not be written for these rooms and periods (with the switch, if any), or null */
+  refusal?: (rooms: string[], periods: string[], to?: SlotSwitch) => SingleRefusal | null
   /** the guest's name for a switched slot ("Child 2 · Child 3–6.99") */
   slotNameAs?: (to: SlotSwitch) => string
   minorUnits: number
@@ -218,12 +225,17 @@ export function OccRulePopover(p: OccRulePopoverProps) {
   const opts = useMemo(() => enumOptions(t, "op", OPS_BY_CONTEXT.occupancy), [t])
   const inherit = op === "INHERIT"
   const allCell = p.period === ALL_PERIODS
+  const ids = useId()
+  const singleHelpId = `${ids}-single-help`
+  const singleNoteId = `${ids}-single-note`
+  const refusedId = `${ids}-refused`
 
   const targets = applies === "all" ? [ALL_PERIODS] : applies === "selected" ? chosen : [p.period]
   const rooms = roomsScope === "all" ? [""] : roomsChosen
   const checked = inherit ? null : normaliseDecimal(value, { amount: isAmountOp("occupancy", op as ShOp), minorUnits: p.minorUnits })
   const valueError = !inherit && value.trim() !== "" && checked && !checked.ok ? t(`rates.sh.err.${checked.code}`) : undefined
-  const ready = (inherit || (checked?.ok ?? false)) && targets.length > 0 && rooms.length > 0
+  const refused = targets.length > 0 && rooms.length > 0 ? (p.refusal?.(rooms, targets, to) ?? null) : null
+  const ready = (inherit || (checked?.ok ?? false)) && targets.length > 0 && rooms.length > 0 && !refused
   const canon = checked?.ok ? checked.value : value
   const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.rates.all_periods") : targets.join(", ")
   const reading = ready ? p.reading(op, inherit ? "" : canon, `${slotName} · ${where}`, to) : ""
@@ -265,11 +277,22 @@ export function OccRulePopover(p: OccRulePopoverProps) {
         )}
         {p.single && (
           <div className="space-y-0.5">
-            <Checkbox label={t("rates.occ.pop.single_children")} checked={single === "children"} onChange={(e) => setSingle(e.target.checked ? "children" : "whole")} />
-            <p className="pl-6 text-xs text-zinc-500">{t("rates.occ.pop.single_children_help")}</p>
-            {single !== p.single && <p className="pl-6 text-xs font-medium text-zinc-700">{t("rates.occ.pop.single_whole_row")}</p>}
+            <Checkbox
+              label={t("rates.occ.pop.single_children")}
+              checked={single === "children"}
+              onChange={(e) => setSingle(e.target.checked ? "children" : "whole")}
+              aria-describedby={`${singleHelpId} ${singleNoteId}`}
+            />
+            <p id={singleHelpId} className="pl-6 text-xs text-zinc-500">
+              {t("rates.occ.pop.single_children_help")}
+            </p>
+            {/* what Apply now does, said when the box changes (a live region there from the start) */}
+            <p id={singleNoteId} role="status" aria-live="polite" className="pl-6 text-xs font-medium text-zinc-700">
+              {single !== p.single ? t("rates.occ.pop.single_whole_row") : ""}
+            </p>
           </div>
         )}
+        {p.singleForeign && <p className="text-xs text-zinc-600">{t("rates.occ.pop.single_foreign")}</p>}
         <fieldset className="space-y-2">
           <legend className="mb-1 text-sm font-medium text-zinc-800">{t("rates.occ.pop.rooms")}</legend>
           <Segmented<RoomsScope>
@@ -308,6 +331,9 @@ export function OccRulePopover(p: OccRulePopoverProps) {
           <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={140} />
         </Field>
         {reading && <p className="rounded-md bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700">{reading}</p>}
+        <p id={refusedId} role="status" aria-live="polite" className={refused ? "rounded-md bg-rose-50 px-2.5 py-1.5 text-sm text-rose-800" : "sr-only"}>
+          {refused === "card" ? t("rates.occ.pop.refused_card") : refused === "relative" ? t("rates.occ.pop.refused_relative") : ""}
+        </p>
         <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
           {p.hasRule && !to && (
             <Button variant="ghost" size="sm" className="mr-auto text-rose-700! hover:bg-rose-50!" onClick={() => p.onApply([p.scope], [p.period], null)}>
@@ -317,7 +343,7 @@ export function OccRulePopover(p: OccRulePopoverProps) {
           <Button variant="secondary" size="sm" onClick={p.onClose}>
             {t("core.action.cancel")}
           </Button>
-          <Button size="sm" type="submit" disabled={!ready}>
+          <Button size="sm" type="submit" disabled={!ready} aria-describedby={refused ? refusedId : undefined}>
             {t("core.action.apply")}
           </Button>
         </div>

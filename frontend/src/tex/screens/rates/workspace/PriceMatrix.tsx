@@ -32,6 +32,7 @@ import {
   Tooltip,
   focusHeaderLane,
   headerLaneKeyDown,
+  refocusIfLost,
   useGridNavigation,
   useGridSelection,
   useScrollSyncRef,
@@ -255,7 +256,23 @@ export function PriceMatrix({
   const [cellMenu, setCellMenu] = useState<{ cell: CellRef; editable: boolean } | null>(null)
   const cellMenuAnchor = useRef<HTMLElement | null>(null)
   const [freshPeriod, setFreshPeriod] = useState<string | null>(null)
-  const freshDone = useCallback(() => setFreshPeriod(null), [])
+  const freshRef = useRef(freshPeriod)
+  freshRef.current = freshPeriod
+  // the new period's inline dates are gone once committed (Enter, Ctrl/Cmd+S) or kept (Escape): the
+  // focus they held goes to the period's first cell (its header menu without rooms), not to the page
+  // (S16 re-review 3); leaving them for another element keeps that element's focus
+  const freshDone = useCallback(() => {
+    const code = freshRef.current
+    setFreshPeriod(null)
+    if (code === null) return
+    refocusIfLost(() => {
+      const { cols: cs, rows: rs, nav: n } = shape.current
+      const c = cs.indexOf(code)
+      if (c < 0) return
+      if (rs.length) n.focusCell(0, c)
+      else gridEl.current?.querySelector<HTMLElement>(`[data-lane-col="${c}"]`)?.focus()
+    })
+  }, [])
   // the period Duplicate just made (unnamed): its header opens Rename… (S16 review)
   const [renamePeriodCode, setRenamePeriodCode] = useState<string | null>(null)
   const renameOpened = useCallback(() => setRenamePeriodCode(null), [])
@@ -544,6 +561,9 @@ export function PriceMatrix({
   const stepHistory = (which: "undo" | "redo", fromToast = false) => {
     const label = fromToast ? undoToast.undo() : which === "undo" ? history.undo() : history.redo()
     if (label) say(t(which === "undo" ? "rates.ws.bulk.undone" : "rates.ws.bulk.redone", { label }))
+    // a keyboard undo or redo that removed the focused cell's row (Undo of Add room): the active cell
+    // takes the focus back (the toolbar keeps its button's; the toast has onToastFocusBack)
+    if (!fromToast) refocusIfLost(() => bulk.current.focusActive())
   }
 
   /** Fill → / Fill ↓ over the selection (fillRightPlan / fillDownPlan). A price into a formula row
@@ -1087,14 +1107,12 @@ export function PriceMatrix({
           <Checkbox label={t("rates.ws.show_resolved")} checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
         </span>
       </div>
+      {/* the header lane (the rows' and periods' menus, + Period) is an editor's only (S16 re-review 3) */}
       {canEdit && (
         <p className="text-xs text-zinc-500">
-          {t("rates.ws.matrix_hint")} {t("rates.kbd.lane_note")}
+          {t("rates.ws.matrix_hint")} <span id={laneNoteId}>{t("rates.kbd.lane_note")}</span>
         </p>
       )}
-      <span id={laneNoteId} className="sr-only">
-        {t("rates.kbd.lane_note")}
-      </span>
       {canEdit && (
         <BulkToolbar
           canFillRight={fillRightPlan(selection.selected).length > 0}
@@ -1139,7 +1157,7 @@ export function PriceMatrix({
         <div
           role="grid"
           aria-label={t("rates.rates.caption")}
-          aria-describedby={laneNoteId}
+          aria-describedby={canEdit ? laneNoteId : undefined}
           aria-rowcount={rows.length + 1}
           aria-colcount={cols.length + 2}
           aria-readonly={readOnly || undefined}

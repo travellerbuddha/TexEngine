@@ -32,6 +32,7 @@ import {
   Field,
   focusHeaderLane,
   headerLaneKeyDown,
+  refocusIfLost,
   IconButton,
   Input,
   Notice,
@@ -494,6 +495,9 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const stepHistory = (which: "undo" | "redo", fromToast = false) => {
     const label = fromToast ? undoToast.undo() : which === "undo" ? history.undo() : history.redo()
     if (label) say(t(which === "undo" ? "rates.ws.bulk.undone" : "rates.ws.bulk.redone", { label }))
+    // a keyboard undo or redo that removed the focused cell's row: the active cell takes the focus
+    // back (the toast's Undo has its own way back, onToastFocusBack)
+    if (!fromToast) refocusIfLost(() => latest.current.focusActive())
   }
   const latest = useRef<{ stepHistory: typeof stepHistory; focusActive: () => void }>({ stepHistory, focusActive: () => {} })
   latest.current = { stepHistory, focusActive: () => void focusAt(nav.active.r, nav.active.c) }
@@ -827,14 +831,12 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       <div id={bodyId}>
         {open && (
           <div className="space-y-1.5">
+            {/* the header lane as this grid has it: a row's terms button, for an editor (S16 re-review 3) */}
             {canEdit && rows.length > 0 && (
               <p className="text-xs text-zinc-500">
-                {t("rates.brd.hint")} {t("rates.kbd.lane_note")}
+                {t("rates.brd.hint")} <span id={laneNoteId}>{t("rates.kbd.lane_note_boards")}</span>
               </p>
             )}
-            <span id={laneNoteId} className="sr-only">
-              {t("rates.kbd.lane_note")}
-            </span>
             {tables.boards.length > 0 && !hasBase && <Notice tone="warning">{t("rates.boards.no_base")}</Notice>}
             {!rows.length && <Notice tone="info">{canEdit ? t("rates.brd.none") : t("rates.brd.none_ro")}</Notice>}
             {confirm && (
@@ -852,7 +854,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                 <div
                   role="grid"
                   aria-label={t("rates.brd.caption")}
-                  aria-describedby={laneNoteId}
+                  aria-describedby={canEdit ? laneNoteId : undefined}
                   aria-rowcount={rows.length + 1}
                   aria-colcount={cols.length + 1}
                   aria-readonly={readOnly || undefined}

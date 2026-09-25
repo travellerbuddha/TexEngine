@@ -5,7 +5,9 @@
 // lists here, and tests/unit/state-keys.test.ts checks that every key they build is in all six
 // catalogues (S16 review: "rates.occ.state.cost_hidden" was missing and read as the raw key).
 import type { ShErrorCode } from "../lib/shorthand.ts"
+import { STALE_STATE } from "./cellTone.ts"
 import type { EntryError } from "./matrixView.ts"
+import type { OccErrorCode } from "./occupancy.ts"
 
 /** The room price matrix's cell states (rates.ws.state.*). */
 export const MATRIX_CELL_STATES = [
@@ -56,18 +58,20 @@ export const BOARD_CELL_STATES = ["base", "rule", "period-override", "inherited"
 export type BoardCellStateKey = (typeof BOARD_CELL_STATES)[number]
 
 /** Every entry error a grid, popover or builder names with rates.sh.err.* (the shorthand's own and the matrix's). */
-export const SH_ERROR_CODES = ["SYNTAX", "PLACES", "DIGITS", "RANGE", "AMBIGUOUS", "OP_NOT_ALLOWED", "BASE_NO_PRICE", "BASE_FORMULA", "NO_BASE_ROOM", "NEGATIVE", "NO_VALUE", "CHANGED", "PENDING"] as const
+export const SH_ERROR_CODES = ["SYNTAX", "PLACES", "DIGITS", "RANGE", "AMBIGUOUS", "OP_NOT_ALLOWED", "BASE_NO_PRICE", "BASE_FORMULA", "NO_BASE_ROOM", "NEGATIVE", "NO_VALUE", "CHANGED", "PENDING", "CARD"] as const
 export type ShErrorKey = (typeof SH_ERROR_CODES)[number]
 // the list holds every code the types allow (a new code without a key fails to compile)
 type Complete<Union, Listed> = [Exclude<Union, Listed>] extends [never] ? true : never
-export const SH_ERROR_CODES_COMPLETE: Complete<ShErrorCode | EntryError, ShErrorKey> = true
+export const SH_ERROR_CODES_COMPLETE: Complete<ShErrorCode | EntryError | OccErrorCode, ShErrorKey> = true
 
-/** The i18n keys the grids build from these lists. */
+/** The i18n keys the grids build from these lists, and the ones they pick from a map (a resolved
+ * value's stale state, cellTone.STALE_STATE; S16 re-review 3). */
 export function stateKeys(): string[] {
   return [
     ...MATRIX_CELL_STATES.map((s) => `rates.ws.state.${s}`),
     ...LADDER_CELL_STATES.map((s) => `rates.occ.state.${s}`),
     ...BOARD_CELL_STATES.map((s) => `rates.brd.state.${s}`),
     ...SH_ERROR_CODES.map((c) => `rates.sh.err.${c}`),
+    ...new Set(Object.values(STALE_STATE)),
   ]
 }

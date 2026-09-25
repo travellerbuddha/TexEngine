@@ -156,6 +156,19 @@ function isPrintable(e: KeyboardEvent<HTMLElement>): boolean {
   return !(e.ctrlKey || e.altKey) || e.getModifierState("AltGraph")
 }
 
+/** After a keyboard undo or redo (S16 re-review 3): the change may remove the focused cell's row
+ * (a room just added, the single-use row in its other form), which leaves the focus on the page's
+ * body, where the grid's keys (arrows, a further Ctrl/Cmd+Z) no longer reach it. Once the change is
+ * rendered, `focus` puts it back on the grid's active cell (by position), unless something else
+ * holds it. */
+export function refocusIfLost(focus: () => void) {
+  requestAnimationFrame(() => {
+    const a = document.activeElement
+    if (a && a !== document.body && a.isConnected) return
+    focus()
+  })
+}
+
 /** Roving tabindex + keyboard map for a rows × cols grid (the AriGrid pattern). */
 export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSize = 10, onEdge }: GridNavigationOptions): GridNavigationApi {
   const [own, setOwn] = useState<GridCell>({ r: 0, c: 0 })

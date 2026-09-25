@@ -5,7 +5,8 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { LADDER_CELL_STATES, stateKeys } from "../../src/tex/screens/rates/workspace/stateKeys.ts"
+import { LADDER_CELL_STATES, SH_ERROR_CODES, stateKeys } from "../../src/tex/screens/rates/workspace/stateKeys.ts"
+import { STALE_STATE } from "../../src/tex/screens/rates/workspace/cellTone.ts"
 
 const LANGS = ["en", "tr", "de", "ru", "ro", "pl"]
 const catalogue = (lang: string): Record<string, unknown> => JSON.parse(readFileSync(new URL(`../../src/tex/i18n/locales/rates/${lang}.json`, import.meta.url), "utf8"))
@@ -31,4 +32,11 @@ test("the grids' state literals are the listed ones", () => {
   const used = (text: string) => new Set([...text.matchAll(/state: (?:[^"\n]*\? )?"([a-z_-]+)"(?: : "([a-z_-]+)")?/g)].flatMap((m) => [m[1], m[2]]).filter(Boolean))
   const ladder = used(read("OccupancyLadder.tsx"))
   for (const s of LADDER_CELL_STATES) assert.ok(ladder.has(s), `ladder state ${s} is not used`)
+})
+
+test("the keys picked from a map are listed too: a resolved value's stale state, the ladder's CARD refusal (S16 re-review 3)", () => {
+  const keys = new Set(stateKeys())
+  for (const k of Object.values(STALE_STATE)) assert.ok(keys.has(k), k)
+  assert.ok(keys.has("rates.ws.cell.failed_state") && keys.has("rates.ws.cell.saved_state"))
+  assert.ok((SH_ERROR_CODES as readonly string[]).includes("CARD"))
 })
