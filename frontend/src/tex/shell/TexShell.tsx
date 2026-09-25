@@ -514,7 +514,7 @@ export function TexShell({ children }: { children: ReactNode }) {
           </aside>
         </div>
       )}
-      <div className="min-w-0 lg:pl-60">
+      <div className="tex-page min-w-0 lg:pl-60">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-zinc-200 bg-white/90 px-3 backdrop-blur sm:px-5">
           <IconButton className="lg:hidden" label={t("core.shell.open_nav")} icon={<Menu className="size-5" />} onClick={() => setMobileNav(true)} />
           <div className="flex min-w-0 flex-1 items-center gap-2">

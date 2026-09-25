@@ -394,6 +394,9 @@ export interface MenuProps {
   size?: ButtonSize
   disabled?: boolean
   className?: string
+  /** More props of the menu button: `tabIndex` -1 for a button in a grid's header (reached with
+   * the arrow keys, not Tab: one tab stop per grid, §3.19) and its `data-lane-*` attributes. */
+  buttonProps?: { tabIndex?: number } & { [key: `data-${string}`]: string | undefined }
 }
 
 /**
@@ -401,7 +404,7 @@ export interface MenuProps {
  * Home/End and first-letter typeahead move focus between items; Enter/Space activate; Escape
  * closes and returns focus to the button; Tab closes and moves on from the button.
  */
-export function Menu({ label, children, icon, text, placement = "bottom-start", variant = "ghost", size = "sm", disabled, className }: MenuProps) {
+export function Menu({ label, children, icon, text, placement = "bottom-start", variant = "ghost", size = "sm", disabled, className, buttonProps }: MenuProps) {
   const [open, setOpen] = useState(false)
   const from = useRef<"first" | "last">("first")
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -441,7 +444,7 @@ export function Menu({ label, children, icon, text, placement = "bottom-start", 
   return (
     <>
       {text ? (
-        <Button ref={buttonRef} variant={variant} size={size} icon={icon} disabled={disabled} className={className} onClick={toggle} onKeyDown={onButtonKeyDown} {...aria}>
+        <Button ref={buttonRef} variant={variant} size={size} icon={icon} disabled={disabled} className={className} onClick={toggle} onKeyDown={onButtonKeyDown} {...aria} {...buttonProps}>
           {text}
         </Button>
       ) : (
@@ -454,6 +457,7 @@ export function Menu({ label, children, icon, text, placement = "bottom-start", 
             onClick={toggle}
             onKeyDown={onButtonKeyDown}
             {...aria}
+            {...buttonProps}
             className={cn(
               "inline-flex shrink-0 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900",
               "disabled:cursor-not-allowed disabled:opacity-50",

@@ -125,6 +125,9 @@ export function Dialog({
  *
  * On a phone (below `sm`) the panel covers the whole page, so there it is the modal drawer: a page
  * under it that stayed in the tab order and the accessibility tree could not be seen (S16 review).
+ * On a desktop (from `lg`) it sits beside the page instead of over it: the page (`.tex-page`, the
+ * shell's content column) gives up the panel's width while it is open, so what the panel is used
+ * with (the price matrix beside the Price test) stays on screen (S16 re-review).
  */
 export function Drawer({
   open,
@@ -201,11 +204,29 @@ function nextTabbable(from: HTMLElement, skip: HTMLElement): HTMLElement | null 
   return null
 }
 
+// the widths of the side panels open now: the page gives up the widest (html[data-side-panel], tex.css)
+const openPanels: DrawerProps["width"][] = []
+function syncSidePanels() {
+  const order = ["md", "lg", "xl"] as const
+  const widest = openPanels.reduce<DrawerProps["width"] | "">((w, x) => (w === "" || order.indexOf(x) > order.indexOf(w) ? x : w), "")
+  if (widest) document.documentElement.dataset.sidePanel = widest
+  else delete document.documentElement.dataset.sidePanel
+}
+
 function SidePanel({ open, onClose, title, children, footer, width }: DrawerProps) {
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  useEffect(() => {
+    if (!open) return
+    openPanels.push(width)
+    syncSidePanels()
+    return () => {
+      openPanels.splice(openPanels.indexOf(width), 1)
+      syncSidePanels()
+    }
+  }, [open, width])
   useEffect(() => {
     const el = panel.current
     if (!open || !el) return

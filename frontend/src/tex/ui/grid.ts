@@ -53,8 +53,8 @@ export interface GridSelectionApi {
   /** More than the active cell is selected. */
   multiple: boolean
   click: (r: number, c: number, mods?: { shift?: boolean; meta?: boolean }) => void
-  selectRow: (r: number, opts?: { add?: boolean }) => void
-  selectCol: (c: number, opts?: { add?: boolean }) => void
+  selectRow: (r: number, opts?: { add?: boolean; extend?: boolean }) => void
+  selectCol: (c: number, opts?: { add?: boolean; extend?: boolean }) => void
   selectAll: () => void
   clear: () => void
 }
@@ -84,11 +84,11 @@ export function useGridSelection({ rows, cols, isEditable }: GridSelectionOption
     [dispatch],
   )
   const selectRow = useCallback(
-    (r: number, opts: { add?: boolean } = {}) => dispatch({ type: "selectRow", r, isEditable: latest.current.isEditable, add: opts.add }),
+    (r: number, opts: { add?: boolean; extend?: boolean } = {}) => dispatch({ type: "selectRow", r, isEditable: latest.current.isEditable, add: opts.add, extend: opts.extend }),
     [dispatch],
   )
   const selectCol = useCallback(
-    (c: number, opts: { add?: boolean } = {}) => dispatch({ type: "selectCol", c, isEditable: latest.current.isEditable, add: opts.add }),
+    (c: number, opts: { add?: boolean; extend?: boolean } = {}) => dispatch({ type: "selectCol", c, isEditable: latest.current.isEditable, add: opts.add, extend: opts.extend }),
     [dispatch],
   )
   const selectAll = useCallback(() => {
@@ -117,6 +117,9 @@ export interface GridNavigationOptions {
   selection?: GridSelectionApi
   /** Rows moved by PageUp / PageDown (default 10). */
   pageSize?: number
+  /** ArrowUp on the first row or ArrowLeft on the first column: return true when it moved the focus
+   * out of the cells (to the header's control: `focusHeaderLane`). */
+  onEdge?: (edge: "top" | "left", cell: GridCell) => boolean | void
 }
 
 export interface GridCellProps {
@@ -154,7 +157,7 @@ function isPrintable(e: KeyboardEvent<HTMLElement>): boolean {
 }
 
 /** Roving tabindex + keyboard map for a rows × cols grid (the AriGrid pattern). */
-export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSize = 10 }: GridNavigationOptions): GridNavigationApi {
+export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSize = 10, onEdge }: GridNavigationOptions): GridNavigationApi {
   const [own, setOwn] = useState<GridCell>({ r: 0, c: 0 })
   const root = useRef<HTMLElement | null>(null)
   const gridRef = useCallback((el: HTMLElement | null) => {
@@ -199,6 +202,9 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
         const dr = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0
         const dc = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
         e.preventDefault()
+        // past the first row or column: the header's control, when there is one (§3.19)
+        const edge = dr === -1 && r === 0 ? "top" : dc === -1 && c === 0 ? "left" : null
+        if (edge && !e.shiftKey && !mod && onEdge?.(edge, active)) return
         if (selection) selection.dispatch({ type: "move", dr, dc, extend: e.shiftKey })
         else setOwn({ r: clampTo(r + dr, rows), c: clampTo(c + dc, cols) })
         focusActive()
@@ -277,6 +283,72 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
   })
 
   return { active, gridRef, cellProps, focusCell }
+}
+
+/*
+ * The header lane (§3.19 "one tab stop per grid", S16 re-review): the controls of a grid's row and
+ * column headers (a room's or period's menu button, "+ Period", a board's terms, the sample party)
+ * are not Tab stops of their own. They carry `tabIndex={-1}` and say which header they are:
+ * `data-lane-col="c"` (the column's index among the cells; one past the last for a control after
+ * them) or `data-lane-rows="r0 r1 …"` (every cell row the header stands for). ArrowUp on the first
+ * row or ArrowLeft on the first column goes to them (`focusHeaderLane`, from `onEdge`); on them the
+ * arrows move along the header and back into the cells (`headerLaneKeyDown`, the grid's
+ * onKeyDownCapture); Enter or Space opens a menu button's menu as ever.
+ */
+
+/** Focus the control of the column header above `cell` (edge "top") or of the row header left of it
+ * ("left"); false when that header has none. */
+export function focusHeaderLane(root: HTMLElement | null, edge: "top" | "left", cell: GridCell): boolean {
+  const el = root?.querySelector<HTMLElement>(edge === "top" ? `[data-lane-col="${cell.c}"]` : `[data-lane-rows~="${cell.r}"]`)
+  if (!el) return false
+  el.focus()
+  return true
+}
+
+const laneRows = (el: HTMLElement) => (el.dataset.laneRows ?? "").split(" ").filter(Boolean).map(Number)
+
+/** The arrow keys on a header lane control: along the header, and into the cells (ArrowDown from a
+ * column header, ArrowRight from a row header). Returns true when it handled the key (the event is
+ * then stopped, so a menu button's own ArrowDown does not open its menu). */
+export function headerLaneKeyDown(e: KeyboardEvent<HTMLElement>, root: HTMLElement | null, focusCell: (r: number, c: number) => void, size: { rows: number; cols: number }): boolean {
+  const el = e.target as HTMLElement
+  if (!root || !(el instanceof HTMLElement) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false
+  if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return false
+  const col = el.dataset.laneCol
+  const rows = el.dataset.laneRows !== undefined ? laneRows(el) : null
+  if (col === undefined && !rows) return false
+  // a select keeps its own ArrowUp / ArrowDown (the next option)
+  if (el.tagName === "SELECT" && (e.key === "ArrowUp" || e.key === "ArrowDown")) return false
+  const stop = () => {
+    e.preventDefault()
+    e.stopPropagation()
+    return true
+  }
+  const cols = Array.from(root.querySelectorAll<HTMLElement>("[data-lane-col]"))
+  const rowLanes = Array.from(root.querySelectorAll<HTMLElement>("[data-lane-rows]"))
+  if (col !== undefined) {
+    const c = Number(col)
+    if (e.key === "ArrowDown") {
+      if (size.rows > 0 && size.cols > 0) focusCell(0, Math.min(c, size.cols - 1))
+      return stop()
+    }
+    if (e.key === "ArrowUp") return stop()
+    const others = cols.map((x) => ({ x, c: Number(x.dataset.laneCol) })).filter((o) => (e.key === "ArrowLeft" ? o.c < c : o.c > c))
+    const next = others.sort((a, b) => (e.key === "ArrowLeft" ? b.c - a.c : a.c - b.c))[0]
+    next?.x.focus()
+    return stop()
+  }
+  const r0 = Math.min(...(rows as number[]))
+  const r1 = Math.max(...(rows as number[]))
+  if (e.key === "ArrowRight") {
+    if (size.rows > 0 && size.cols > 0) focusCell(r0, 0)
+    return stop()
+  }
+  if (e.key === "ArrowLeft") return stop()
+  const others = rowLanes.map((x) => ({ x, rs: laneRows(x) })).filter((o) => o.rs.length && (e.key === "ArrowUp" ? Math.max(...o.rs) < r0 : Math.min(...o.rs) > r1))
+  const next = others.sort((a, b) => (e.key === "ArrowUp" ? Math.max(...b.rs) - Math.max(...a.rs) : Math.min(...a.rs) - Math.min(...b.rs)))[0]
+  next?.x.focus()
+  return stop()
 }
 
 /**

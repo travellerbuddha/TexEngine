@@ -34,9 +34,9 @@ export type GridAction =
   /** Pointer: plain = collapse, `shift` = extend from the anchor, `meta` (Ctrl/Cmd) = add a range. */
   | { type: "click"; r: number; c: number; shift?: boolean; meta?: boolean }
   /** Row header click: the row's editable cells (`add` keeps the current selection). */
-  | { type: "selectRow"; r: number; isEditable?: GridEditable; add?: boolean }
+  | { type: "selectRow"; r: number; isEditable?: GridEditable; add?: boolean; extend?: boolean }
   /** Column header click: the column's editable cells, skipping read-only rows. */
-  | { type: "selectCol"; c: number; isEditable?: GridEditable; add?: boolean }
+  | { type: "selectCol"; c: number; isEditable?: GridEditable; add?: boolean; extend?: boolean }
   /** Ctrl/Cmd+A: every editable cell of the grid (see `editableCells`). */
   | { type: "selectAll"; cells: readonly GridCell[] }
   /** Escape: collapse the selection onto the active cell. */
@@ -157,15 +157,25 @@ export function gridSelectionReducer(s: GridSelection, a: GridAction): GridSelec
     }
     case "selectRow": {
       if (a.r < 0 || a.r >= s.rows) return s
+      // Shift: every row from the anchor's to this one (a header range, §3.9)
+      const [r0, r1] = a.extend ? [Math.min(s.anchor.r, a.r), Math.max(s.anchor.r, a.r)] : [a.r, a.r]
       const list: GridCell[] = []
-      for (let c = 0; c < s.cols; c++) if (!a.isEditable || a.isEditable(a.r, c)) list.push({ r: a.r, c })
-      return selectList(s, list, a.add)
+      for (let r = r0; r <= r1; r++) for (let c = 0; c < s.cols; c++) if (!a.isEditable || a.isEditable(r, c)) list.push({ r, c })
+      if (!a.extend) return selectList(s, list, a.add)
+      const active = list.find((p) => p.r === a.r)
+      return active ? { ...s, active, ranges: a.add ? [...s.ranges, ...rangesOf(list)] : rangesOf(list) } : s
     }
     case "selectCol": {
       if (a.c < 0 || a.c >= s.cols) return s
+      // Shift: every column from the anchor's to this one (a header range, §3.9)
+      const [c0, c1] = a.extend ? [Math.min(s.anchor.c, a.c), Math.max(s.anchor.c, a.c)] : [a.c, a.c]
       const list: GridCell[] = []
-      for (let r = 0; r < s.rows; r++) if (!a.isEditable || a.isEditable(r, a.c)) list.push({ r, c: a.c })
-      return selectList(s, list, a.add)
+      for (let c = c0; c <= c1; c++) for (let r = 0; r < s.rows; r++) if (!a.isEditable || a.isEditable(r, c)) list.push({ r, c })
+      if (!a.extend) return selectList(s, list, a.add)
+      // the anchor stays, so a further Shift+click extends from the same column; the clicked
+      // column's first editable cell is active (the focus goes there)
+      const active = list.filter((p) => p.c === a.c).sort(readingOrder)[0]
+      return active ? { ...s, active, ranges: a.add ? [...s.ranges, ...rangesOf(list)] : rangesOf(list) } : s
     }
     case "selectAll": {
       const seen = new Set<number>()

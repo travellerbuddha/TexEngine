@@ -450,6 +450,31 @@ test("Grid: one tab stop, roving tabindex, Shift+Arrow shows read-only cells but
   expect(await page.evaluate(() => window.scrollY)).toBe(y0)
 })
 
+test("Grid: the header buttons are no Tab stops; ArrowUp / ArrowLeft reach them, the arrows move along and back (S16 re-review)", async ({ page }) => {
+  const focused = () => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.getAttribute("data-cell") ?? null)
+  await cell(page, 1, 0).click()
+  // Tab leaves the grid from its one tab stop (no header button in between)
+  await page.keyboard.press("Tab")
+  expect(await page.evaluate(() => Boolean(document.querySelector('[data-testid="grid"]')?.contains(document.activeElement)))).toBe(false)
+  await cell(page, 0, 2).click()
+  await page.keyboard.press("ArrowUp")
+  await expect.poll(focused).toBe("col2")
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(focused).toBe("col3")
+  await page.keyboard.press("ArrowDown")
+  await expect.poll(focused).toBe("0:3")
+  await cell(page, 2, 0).click()
+  await page.keyboard.press("ArrowLeft")
+  await expect.poll(focused).toBe("row2")
+  await page.keyboard.press("ArrowUp")
+  await expect.poll(focused).toBe("row1")
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(focused).toBe("1:0")
+  // Shift+Arrow still extends the selection at the edge instead
+  await page.keyboard.press("Shift+ArrowLeft")
+  await expect.poll(focused).toBe("1:0")
+})
+
 test("Grid: typing, Enter, F2 and double-click ask to edit; onKey runs first", async ({ page }) => {
   await cell(page, 0, 4).click()
   await page.keyboard.press("7")

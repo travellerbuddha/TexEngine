@@ -14,6 +14,8 @@ import {
   Tooltip,
   fillDownPlan,
   fillRightPlan,
+  focusHeaderLane,
+  headerLaneKeyDown,
   useGridNavigation,
   useGridSelection,
   useTooltip,
@@ -218,10 +220,13 @@ function GridCellView({ r, c, nav }: { r: number; c: number; nav: GridNavigation
 function GridCase() {
   const [edit, setEdit] = useState("")
   const selection = useGridSelection({ rows: ROWS, cols: COLS, isEditable })
+  const root = useRef<HTMLTableElement | null>(null)
   const nav = useGridNavigation({
     rows: ROWS,
     cols: COLS,
     selection,
+    // the header buttons are the header lane (one tab stop per grid, S16 re-review)
+    onEdge: (edge, cell) => focusHeaderLane(root.current, edge, cell),
     onEdit: (cell, req) => setEdit(`${cell.r}:${cell.c}:${req.text ?? "<select-all>"}`),
     // the caller's keys run first: Delete clears (CLEAR semantics in the workspace)
     onKey: (e) => {
@@ -241,13 +246,24 @@ function GridCase() {
   const cols = Array.from({ length: COLS }, (_, i) => i)
   return (
     <div className="flex flex-wrap items-start gap-4">
-      <table role="grid" aria-label="Prices" aria-multiselectable data-testid="grid" ref={nav.gridRef} className="border-collapse">
+      <table
+        role="grid"
+        aria-label="Prices"
+        aria-multiselectable
+        data-testid="grid"
+        ref={(el) => {
+          root.current = el
+          nav.gridRef(el)
+        }}
+        onKeyDownCapture={(e) => void headerLaneKeyDown(e, root.current, nav.focusCell, { rows: ROWS, cols: COLS })}
+        className="border-collapse"
+      >
         <thead>
           <tr>
             <td />
             {cols.map((c) => (
               <th key={c} role="columnheader">
-                <button type="button" data-testid={`col${c}`} className="px-2" onClick={(e) => selection.selectCol(c, { add: e.ctrlKey || e.metaKey })}>
+                <button type="button" data-testid={`col${c}`} tabIndex={-1} data-lane-col={String(c)} className="px-2" onClick={(e) => selection.selectCol(c, { add: e.ctrlKey || e.metaKey })}>
                   {`P${c + 1}`}
                 </button>
               </th>
@@ -258,7 +274,7 @@ function GridCase() {
           {rows.map((r) => (
             <tr key={r}>
               <th role="rowheader">
-                <button type="button" data-testid={`row${r}`} className="px-2" onClick={(e) => selection.selectRow(r, { add: e.ctrlKey || e.metaKey })}>
+                <button type="button" data-testid={`row${r}`} tabIndex={-1} data-lane-rows={String(r)} className="px-2" onClick={(e) => selection.selectRow(r, { add: e.ctrlKey || e.metaKey })}>
                   {`R${r}`}
                 </button>
               </th>

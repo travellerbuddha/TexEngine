@@ -130,6 +130,24 @@ test("selectRow selects the row's editable cells", () => {
   assert.deepEqual(selectedCells(s, editable), cells([2, 0], [2, 2], [2, 3]))
 })
 
+test("Shift on a column or row header extends from the anchor's column or row (§3.9, S16 re-review)", () => {
+  // the review's gesture: click the P3 header, then Shift+click the P4 header → P3:P4
+  const editable = (r: number) => r !== 1
+  const p3 = reduce(gridSelectionInit(4, 6), { type: "selectCol", c: 3, isEditable: editable })
+  const p3p4 = reduce(p3, { type: "selectCol", c: 4, isEditable: editable, extend: true })
+  assert.deepEqual(selectedCells(p3p4, editable), cells([0, 3], [0, 4], [2, 3], [2, 4], [3, 3], [3, 4]))
+  assert.deepEqual(p3p4.active, { r: 0, c: 4 }, "the clicked column's first editable cell is active")
+  assert.deepEqual(p3p4.anchor, { r: 0, c: 3 }, "the anchor stays")
+  // a further Shift+click extends from the same anchor, leftwards too
+  const p1p3 = reduce(p3p4, { type: "selectCol", c: 1, isEditable: editable, extend: true })
+  assert.deepEqual(new Set(selectedCells(p1p3, editable).map((x) => x.c)), new Set([1, 2, 3]))
+  // rows the same way
+  const r0 = reduce(gridSelectionInit(4, 3), { type: "selectRow", r: 0, isEditable: editable })
+  const r0r3 = reduce(r0, { type: "selectRow", r: 3, isEditable: editable, extend: true })
+  assert.deepEqual(new Set(selectedCells(r0r3, editable).map((x) => x.r)), new Set([0, 2, 3]))
+  assert.deepEqual(r0r3.active, { r: 3, c: 0 })
+})
+
 test("selectAll takes the editable list, keeps an editable active cell, and compresses ranges", () => {
   const editable = (r: number, c: number) => r !== 1 && c < 3
   const list = editableCells(4, 4, editable)
