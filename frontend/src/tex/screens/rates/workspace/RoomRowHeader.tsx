@@ -3,8 +3,8 @@
 // row's label, and the room menu: Set as base (re-point formulas), Derive from…, Capacity…
 // (a Drawer; the effective capacity from the server as placeholders), Move up / down, Remove
 // (inline confirmation with the dependent rows). Every change is one workspace history entry.
-import { memo, useMemo, useRef, useState, type RefObject } from "react"
-import { ArrowDown, ArrowUp, GitBranch, MoreHorizontal, Star, Trash2, Users } from "lucide-react"
+import { memo, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react"
+import { ArrowDown, ArrowUp, GitBranch, MoreHorizontal, SquareDashedMousePointer, Star, Trash2, Users } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, Drawer, Field, FormGrid, Input, Menu, MenuItem, MenuSeparator, Notice, Popover, Select } from "../../../ui"
@@ -15,6 +15,17 @@ import { CAPACITY_FIELDS, moveRoom, roomHasFormulas, setRoomCapacity, type Capac
 import { int, str } from "./rows.ts"
 
 export type Edit = (label: string, fn: (tables: Tables) => Tables) => boolean
+
+/** A click on a row or column header selects its editable cells (§3.10; Ctrl/Cmd adds them to the
+ * selection), unless it is on the header's own controls (its menu, a popover portaled from it, an
+ * input). The mousedown's default is prevented, so no text is selected. */
+export function headerPick(e: MouseEvent<HTMLElement>, pick?: (add: boolean) => void) {
+  if (!pick || e.button !== 0) return
+  const target = e.target as HTMLElement
+  if (!e.currentTarget.contains(target) || target.closest('button,input,select,textarea,a,label,[role="menu"],[role="dialog"]')) return
+  e.preventDefault()
+  pick(e.metaKey || e.ctrlKey)
+}
 
 export interface RoomRowHeaderProps {
   room: MatrixRoom
@@ -32,6 +43,10 @@ export interface RoomRowHeaderProps {
   /** the effective capacity the server priced with (price_matrix), for the Capacity… placeholders */
   capacity?: RoomCapacity
   edit: Edit
+  /** the row's index in the grid, and selecting its editable cells (header click, the menu's
+   * "Select prices"); absent on a resolved row */
+  r?: number
+  onSelect?: (r: number, add: boolean) => void
 }
 
 type Open = "base" | "derive" | "remove" | "capacity" | null
@@ -57,10 +72,12 @@ function RoomRowHeaderImpl(p: RoomRowHeaderProps) {
   const name = p.roomName(room.room_type)
   const isBase = room.role === "base"
   const close = () => setOpen(null)
+  const select = p.onSelect && p.r !== undefined ? (add: boolean) => p.onSelect?.(p.r as number, add) : undefined
 
   return (
     <div
       role="rowheader"
+      onMouseDown={(e) => headerPick(e, select)}
       className={cn(
         "sticky left-0 z-[1] flex min-h-7 min-w-0 flex-col justify-center border-r border-b border-zinc-200 bg-white py-0.5 pr-1 pl-3 text-left",
         row.first && "border-t-2 border-t-zinc-200",
@@ -75,6 +92,14 @@ function RoomRowHeaderImpl(p: RoomRowHeaderProps) {
           {!p.readOnly && (
             <span ref={wrap} className="ml-auto shrink-0">
               <Menu label={t("rates.ws.room.menu", { room: name })} icon={<MoreHorizontal className="size-4" aria-hidden />} size="sm" className="size-6!">
+                {select && (
+                  <>
+                    <MenuItem icon={<SquareDashedMousePointer className="size-4" />} onSelect={() => select(false)}>
+                      {t("rates.ws.room.select")}
+                    </MenuItem>
+                    <MenuSeparator />
+                  </>
+                )}
                 <MenuItem icon={<Star className="size-4" />} disabled={isBase} onSelect={() => setOpen("base")}>
                   {t("rates.ws.room.set_base")}
                 </MenuItem>

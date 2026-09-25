@@ -5,17 +5,44 @@
 // it is stored as ABSOLUTE (O4, apply_op_values); on every other room it writes a formula from the
 // room's default base. Resolved rows show the server's prices for what is on screen (the live
 // preview, S8); the client computes no amount. Every change is one workspace history entry.
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+//
+// Bulk tools (§3.10, slice S10): header clicks select a row's or column's cells; Fill → / Fill ↓
+// (Ctrl/Cmd+R, Ctrl/Cmd+D) copy the first cell's rule, a price into a formula row only after an
+// inline confirmation; Ctrl/Cmd+C / V copy and paste TSV (the browser's clipboard events while a
+// cell has focus: no clipboard permission is asked); Adjust… changes entered prices by the
+// server's apply_op_values with a preview; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z / Ctrl+Y and the toolbar
+// undo and redo. A bulk operation shows "Applied to N cells · Undo" for 10 s.
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { AlertTriangle, Loader2, Pin } from "lucide-react"
 import { tex, TexApiError } from "../../../lib/api"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Checkbox, Money, Notice, Select, Tooltip, useGridNavigation, useGridSelection, type GridCell, type GridEditRequest } from "../../../ui"
+import {
+  Badge,
+  Checkbox,
+  editShortcut,
+  fillDownPlan,
+  fillRightPlan,
+  Money,
+  Notice,
+  Select,
+  Tooltip,
+  useGridNavigation,
+  useGridSelection,
+  useToast,
+  type EditShortcut,
+  type GridCell,
+  type GridEditRequest,
+} from "../../../ui"
 import type { TabProps } from "../contracts/tabs/shared"
-import { displayText, parseShorthand, type ShOp, type ShResult } from "../lib/shorthand"
+import { displayText, editText, parseShorthand, type ShOp, type ShResult } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
 import type { ApplyOpResult, Row } from "../lib/types"
 import { decText } from "../lib/util"
+import { AdjustPopover } from "./AdjustPopover"
+import { applyAdjust, answersInOrder, planFill, serverCalls, type AdjustTarget, type FillStep } from "./bulk.ts"
+import { BulkToolbar, FillConfirm, UndoToastView } from "./BulkToolbar"
+import { copyBlock, decodeTSV, encodeTSV, pasteOrigin, planPaste } from "./clipboard.ts"
 import { CellEditor, MatrixRowCells, type CellTone, type CellView } from "./MatrixCell"
 import { ALL_PERIODS, isRelativeOp, matrixModel, type MatrixRoom, type NeedsServer, type RoomCell } from "./model.ts"
 import {
@@ -26,11 +53,12 @@ import {
   clearCells,
   columnTemplate,
   decimalMarkOf,
-  finishEntry,
+  finishItems,
   gestureCells,
   gridRows,
-  planEntry,
+  planItems,
   readingOf,
+  type AdjustAnswer,
   type CellRef,
   type EntryError,
   type GridRow,
@@ -38,10 +66,10 @@ import {
   type Reading,
 } from "./matrixView.ts"
 import { AddPeriodHeader, PeriodHeader, PeriodStrip } from "./PeriodHeader"
-import { RoomRowHeader } from "./RoomRowHeader"
+import { headerPick, RoomRowHeader } from "./RoomRowHeader"
 import { RuleEditorPopover } from "./RuleEditorPopover"
 import { int, str } from "./rows.ts"
-import type { WorkspaceHistory } from "./useWorkspaceHistory"
+import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
 
 const SHOW_RESOLVED_KEY = "tex.rates.ws.show_resolved"
 
@@ -83,6 +111,20 @@ interface Draft {
   text: string
   code?: EntryError
   message?: string
+}
+
+/** One cell of a gesture with what was typed or pasted for it (the error draft keeps the text). */
+interface TextItem {
+  cell: CellRef
+  parsed: ShResult
+  text: string
+}
+
+/** A fill waiting for "Set a fixed price override?" (§3.10). */
+interface PendingFill {
+  dir: "right" | "down"
+  steps: FillStep[]
+  fixed: number
 }
 
 const keyOf = (c: CellRef) => `${c.room}\u0000${c.period}`
@@ -165,10 +207,24 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   const popAnchor = useRef<HTMLElement | null>(null)
   const [freshPeriod, setFreshPeriod] = useState<string | null>(null)
   const freshDone = useCallback(() => setFreshPeriod(null), [])
+  // the polite live region: bulk results, undo and redo (§3.19). The same text twice is announced
+  // twice (a zero-width space tells them apart).
   const [announce, setAnnounce] = useState("")
+  const say = useCallback((text: string) => setAnnounce((prev) => (prev === text ? `${text}\u200b` : text)), [])
+  const toast = useToast()
+  const undoToast = useUndoToast(history)
+  const [fillAsk, setFillAsk] = useState<PendingFill | null>(null)
+  const [adjusting, setAdjusting] = useState<CellRef[] | null>(null)
+  const adjustRef = useRef<HTMLButtonElement | null>(null)
 
   const historyApply = history.apply
   const edit = useCallback((label: string, fn: (tb: Tables) => Tables) => historyApply(label, fn), [historyApply])
+  /** The toast and the announcement of a bulk operation that was committed. */
+  const bulkDone = (count: number) => {
+    const message = t("rates.ws.bulk.applied", { count })
+    undoToast.show(message)
+    say(message)
+  }
   const dropDrafts = (cells: CellRef[]) =>
     setDrafts((d) => {
       if (!cells.some((c) => d[keyOf(c)])) return d
@@ -194,10 +250,12 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     })
 
   /** The base-room cells of an entry are adjusted once by the server (O4, §3.4.5): one
-   * apply_op_values call for all of them; the whole gesture is then one history entry. Every cell
-   * of the gesture is pending until the answer, and the answer completes nothing when one of them
-   * was changed meanwhile (`sentFrom`, CHANGED). */
-  const adjust = async (cells: CellRef[], parsed: ShResult, sent: NeedsServer[], label: string, text: string, sentFrom: Tables) => {
+   * apply_op_values call per op and value (a typed entry or Ctrl/Cmd+Enter makes one; a paste may
+   * make several); the whole gesture is then one history entry. Every cell of the gesture is
+   * pending until the answers, and they complete nothing when one of the cells was changed
+   * meanwhile (`sentFrom`, CHANGED). */
+  const adjust = async (items: TextItem[], sent: NeedsServer[], label: string, sentFrom: Tables, bulk: boolean) => {
+    const cells = items.map((x) => x.cell)
     const waiting = gestureCells(cells, sent)
     const keys = waiting.map((w) => keyOf(w.cell))
     setPending((p) => {
@@ -206,14 +264,19 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
       return n
     })
     const first = { room: sent[0].room, period: sent[0].targetPeriod }
+    const textOf = (c: CellRef) => items.find((x) => x.cell.room === c.room && x.cell.period === c.period)?.text ?? ""
     const gen = history.generation()
     try {
-      const answers = await tex<ApplyOpResult[]>("contracts", "apply_op_values", { version: doc.name, values: sent.map((s) => s.current), op: sent[0].op, value: sent[0].value }, { post: true })
+      const calls = serverCalls(sent)
+      const results = await Promise.all(
+        calls.map((c) => tex<ApplyOpResult[]>("contracts", "apply_op_values", { version: doc.name, values: c.values, op: c.op, value: c.value }, { post: true })),
+      )
+      const answers = answersInOrder(calls, results, sent.length)
       // the version was reloaded or discarded meanwhile: the answer is for a draft that is gone
       if (history.generation() !== gen) return
       let failed: { error: EntryError; cell: CellRef } | null = null
-      history.apply(label, (tb) => {
-        const done = finishEntry(tb, cells, parsed, sent, answers, sentFrom)
+      const committed = history.apply(label, (tb) => {
+        const done = finishItems(tb, items, sent, answers, sentFrom)
         if ("error" in done) {
           failed = done
           return tb
@@ -221,10 +284,11 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
         return done.tables
       })
       const f = failed as { error: EntryError; cell: CellRef } | null
-      if (f) setDrafts((d) => ({ ...d, [keyOf(f.cell)]: { text, code: f.error } }))
-      else setAnnounce(t("rates.ws.adjusted", { count: sent.length }))
+      if (f) setDrafts((d) => ({ ...d, [keyOf(f.cell)]: { text: textOf(f.cell), code: f.error } }))
+      else if (committed && bulk) bulkDone(items.length)
+      else say(t("rates.ws.adjusted", { count: sent.length }))
     } catch (e) {
-      setDrafts((d) => ({ ...d, [keyOf(first)]: { text, message: e instanceof TexApiError || e instanceof Error ? e.message : String(e) } }))
+      setDrafts((d) => ({ ...d, [keyOf(first)]: { text: textOf(first), message: e instanceof TexApiError || e instanceof Error ? e.message : String(e) } }))
     } finally {
       setPending((p) => {
         const n = { ...p }
@@ -234,9 +298,11 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     }
   }
 
-  /** Commits `text` into `cells` as one gesture: stored at once, or (base-room relative entries)
-   * after the server's adjustment. Refused as a whole when one cell cannot take it. */
-  const commitText = (cells: CellRef[], text: string): { ok: true } | { ok: false; code: EntryError; cell: CellRef } => {
+  /** Commits one gesture (each cell its own entry: typed, Ctrl/Cmd+Enter, paste): stored at once,
+   * or (base-room relative entries) after the server's adjustment. Refused as a whole when one
+   * cell cannot take its entry. `bulk`: a toast with Undo follows (§3.10). */
+  const commitItems = (items: TextItem[], label: string, bulk: boolean): { ok: true } | { ok: false; code: EntryError; cell: CellRef } => {
+    const cells = items.map((x) => x.cell)
     // a cell still waiting for the server takes no other entry; a cell whose row or column is gone
     // (or no longer editable) takes none either
     const busy = cells.find((x) => pending[keyOf(x)] !== undefined)
@@ -246,15 +312,24 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
       return !at || !isEditable(at.r, at.c)
     })
     if (gone) return { ok: false, code: "CHANGED", cell: gone }
-    const parsed = parseShorthand(text, "room", { minorUnits })
     const now = history.current() ?? tables
-    const plan = planEntry(now, cells, parsed)
+    const plan = planItems(now, items)
     if ("error" in plan) return { ok: false, code: plan.error, cell: plan.cell }
-    const label = cells.length === 1 ? t("rates.ws.h.price", { cell: cellName(cells[0]) }) : t("rates.ws.h.prices", { count: cells.length })
     dropDrafts(cells)
-    if (plan.server.length) void adjust(cells, parsed, plan.server, label, text, now)
-    else history.commit(label, now, plan.tables)
+    if (plan.server.length) void adjust(items, plan.server, label, now, bulk)
+    else if (history.commit(label, now, plan.tables) && bulk) bulkDone(items.length)
     return { ok: true }
+  }
+
+  /** Commits `text` into `cells` as one gesture (a typed entry; Ctrl/Cmd+Enter over a selection). */
+  const commitText = (cells: CellRef[], text: string) => {
+    const parsed = parseShorthand(text, "room", { minorUnits })
+    const label = cells.length === 1 ? t("rates.ws.h.price", { cell: cellName(cells[0]) }) : t("rates.ws.h.prices", { count: cells.length })
+    return commitItems(
+      cells.map((cell) => ({ cell, parsed, text })),
+      label,
+      cells.length > 1,
+    )
   }
 
   const onEdit = (at: GridCell, req: GridEditRequest) => {
@@ -370,8 +445,173 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     if (!res.ok) setDrafts((d) => ({ ...d, [keyOf(res.cell)]: { text, code: res.code } }))
   }
 
+  // ─── bulk tools (§3.10, S10) ─────────────────────────────────────────
+  const refOf = (p: GridCell): CellRef | null => cellAt(p.r, p.c)
+
+  /** Undo / redo (keys, toolbar, toast): recorded rows are put back, nothing calls the server. */
+  const stepHistory = (which: "undo" | "redo", fromToast = false) => {
+    const label = fromToast ? undoToast.undo() : which === "undo" ? history.undo() : history.redo()
+    if (label) say(t(which === "undo" ? "rates.ws.bulk.undone" : "rates.ws.bulk.redone", { label }))
+  }
+
+  /** Fill → / Fill ↓ over the selection (fillRightPlan / fillDownPlan). A price into a formula row
+   * waits for the inline "Set a fixed price override?"; a formula into a price row is refused. */
+  const fill = (dir: "right" | "down", confirmed?: FillStep[]) => {
+    if (!canEdit) return
+    const steps: FillStep[] =
+      confirmed ??
+      (dir === "right" ? fillRightPlan(selection.selected) : fillDownPlan(selection.selected)).flatMap((x) => {
+        const from = refOf(x.from)
+        const to = refOf(x.to)
+        return from && to ? [{ from, to }] : []
+      })
+    if (!steps.length) return say(t("rates.ws.fill.nothing"))
+    const busy = steps.find((x) => pending[keyOf(x.to)] !== undefined || pending[keyOf(x.from)] !== undefined)
+    if (busy) return void toast.error(t("rates.ws.bulk_error", { cell: cellName(busy.to), error: errorText("PENDING") }))
+    const now = history.current() ?? tables
+    const plan = planFill(now, steps)
+    if ("error" in plan) return void toast.error(t("rates.ws.bulk_error", { cell: cellName(plan.cell), error: t(plan.error === "FILL_FORMULA" ? "rates.ws.fill.err_formula" : "rates.sh.err.NO_BASE_ROOM") }))
+    if (plan.fixed.length && !confirmed) {
+      setFillAsk({ dir, steps, fixed: plan.fixed.length })
+      return
+    }
+    setFillAsk(null)
+    dropDrafts(steps.map((x) => x.to))
+    const label = t(dir === "right" ? "rates.ws.h.fill_right" : "rates.ws.h.fill_down", { count: plan.count })
+    if (history.commit(label, now, plan.tables)) bulkDone(plan.count)
+    else say(t("rates.ws.bulk.unchanged"))
+  }
+
+  /** The text Ctrl/Cmd+C copies for a cell: the canonical edit text of its own rule ("." as the
+   * decimal mark, §1.4 stable codes), a resolved row's exact server amount (with the trailing zero
+   * edit text gives an amount that would read as AMBIGUOUS), "" for nothing. */
+  const copyText = (r: number, c: number): string => {
+    const row = rows[r]
+    const period = cols[c]
+    if (!row || period === undefined) return ""
+    if (row.kind !== "resolved") return cellEditText(modelCell({ room: row.room, period }), { minorUnits })
+    const v = period === ALL_PERIODS ? undefined : resolvedRooms.get(row.room)?.cells[period]
+    return typeof v === "string" && v ? editText("ABSOLUTE", v, "room", { minorUnits }) : ""
+  }
+
+  const onCopy = (e: ClipboardEvent) => {
+    const block = copyBlock(selection.state.ranges, copyText)
+    if (!block.length || !e.clipboardData) return
+    e.clipboardData.setData("text/plain", encodeTSV(block))
+    e.preventDefault()
+    const count = block.reduce((n, row) => n + row.length, 0)
+    say(t("rates.ws.bulk.copied", { count }))
+  }
+
+  const onPaste = (e: ClipboardEvent) => {
+    if (!canEdit || !e.clipboardData) return
+    e.preventDefault()
+    const block = decodeTSV(e.clipboardData.getData("text/plain"))
+    const origin = pasteOrigin(selection.state)
+    const res = planPaste(block, origin, selection.selected, isEditable, (text) => parseShorthand(text, "room", { minorUnits }), {
+      rows: rows.length,
+      cols: cols.length,
+      label: ({ r, c }) => `${periodName(cols[c] ?? "")} · ${roomName(rows[r]?.room ?? "")}`,
+    })
+    if (!res.ok) {
+      if (res.code === "EMPTY") return say(t("rates.ws.paste.empty"))
+      if (res.code === "NO_TARGET") return void toast.error(t("rates.ws.paste.no_target"))
+      if (res.code === "SHAPE") return void toast.error(t("rates.ws.paste.shape", { rows: res.rows, cols: res.cols, available_rows: res.availableRows, available_cols: res.availableCols }))
+      const lines = res.errors.map((x) => t("rates.ws.paste.cell_error", { cell: x.where ?? "", text: x.text, error: errorText(x.code) }))
+      if (res.count > res.errors.length) lines.push(t("rates.ws.paste.more", { count: res.count - res.errors.length }))
+      return void toast.error(
+        <span className="block">
+          <span className="block font-medium">{t("rates.ws.paste.refused")}</span>
+          {lines.map((l, i) => (
+            <span key={i} className="block">
+              {l}
+            </span>
+          ))}
+        </span>,
+      )
+    }
+    const items: TextItem[] = res.items.flatMap((x) => {
+      const cell = refOf(x.cell)
+      return cell ? [{ cell, parsed: x.parsed, text: x.text }] : []
+    })
+    const label = items.length === 1 ? t("rates.ws.h.price", { cell: cellName(items[0].cell) }) : t("rates.ws.h.paste", { count: items.length })
+    const done = commitItems(items, label, items.length > 1)
+    if (!done.ok) toast.error(t("rates.ws.bulk_error", { cell: cellName(done.cell), error: errorText(done.code) }))
+  }
+
+  /** The Adjust… popover's Apply: the server's amounts, as ABSOLUTE, in one history entry. */
+  const applyAdjusted = (targets: AdjustTarget[], answers: AdjustAnswer[], count: number): string | void => {
+    const busy = targets.find((x) => pending[keyOf(x.cell)] !== undefined)
+    if (busy) return t("rates.ws.bulk_error", { cell: cellName(busy.cell), error: errorText("PENDING") })
+    let refused: { error: string; cell: CellRef } | null = null
+    const committed = history.apply(t("rates.ws.h.adjust", { count }), (tb) => {
+      const r = applyAdjust(tb, targets, answers)
+      if ("error" in r) {
+        refused = r
+        return tb
+      }
+      return r.tables
+    })
+    const f = refused as { error: string; cell: CellRef } | null
+    if (f) return t("rates.ws.bulk_error", { cell: cellName(f.cell), error: errorText(f.error) })
+    dropDrafts(targets.map((x) => x.cell))
+    setAdjusting(null)
+    if (committed) bulkDone(count)
+  }
+
+  const openAdjust = () => {
+    const cells = selectedRefs()
+    if (cells.length) setAdjusting(cells)
+  }
+
+  // stable callbacks for the memoised toolbar and toast (the latest handlers through a ref)
+  const bulk = useRef({ fill, openAdjust, stepHistory })
+  bulk.current = { fill, openAdjust, stepHistory }
+  const onToolbarFill = useCallback((dir: "right" | "down") => bulk.current.fill(dir), [])
+  const onToolbarAdjust = useCallback(() => bulk.current.openAdjust(), [])
+  const onToolbarUndo = useCallback(() => bulk.current.stepHistory("undo"), [])
+  const onToolbarRedo = useCallback(() => bulk.current.stepHistory("redo"), [])
+  const onToastUndo = useCallback(() => bulk.current.stepHistory("undo", true), [])
+
+  /** The editing shortcuts of a focused cell: undo, redo, fill right, fill down (layout-free). */
+  const onShortcut = (which: EditShortcut) => {
+    if (which === "undo" || which === "redo") stepHistory(which)
+    else fill(which === "fill_right" ? "right" : "down")
+  }
+
+  // the clipboard events reach the document while a cell (a focusable element that is not
+  // editable) has the focus, not always the cell itself: they are taken there, for this grid's
+  // cells only, and the latest handlers are read through a ref
+  const clip = useRef({ onCopy, onPaste })
+  clip.current = { onCopy, onPaste }
+  useEffect(() => {
+    const mine = () => {
+      const a = document.activeElement
+      return a instanceof HTMLElement && a.getAttribute("role") === "gridcell" && Boolean(gridEl.current?.contains(a))
+    }
+    const copy = (e: ClipboardEvent) => {
+      if (mine()) clip.current.onCopy(e)
+    }
+    const paste = (e: ClipboardEvent) => {
+      if (mine()) clip.current.onPaste(e)
+    }
+    document.addEventListener("copy", copy)
+    document.addEventListener("paste", paste)
+    return () => {
+      document.removeEventListener("copy", copy)
+      document.removeEventListener("paste", paste)
+    }
+  }, [])
+
   const onKey = (e: KeyboardEvent<HTMLElement>, at: GridCell): boolean | void => {
     if (!canEdit) return
+    const shortcut = editShortcut(e)
+    if (shortcut) {
+      // only while the grid has focus: Ctrl+R / Ctrl+D would reload / bookmark the page
+      e.preventDefault()
+      onShortcut(shortcut)
+      return true
+    }
     const cell = cellAt(at.r, at.c)
     if ((e.key === "Enter" && e.altKey) || (e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
       e.preventDefault()
@@ -383,7 +623,8 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
       if (!cells.length) return
       e.preventDefault()
       dropDrafts(cells)
-      edit(cells.length === 1 ? t("rates.ws.h.clear", { cell: cellName(cells[0]) }) : t("rates.ws.h.clear_many", { count: cells.length }), (tb) => clearCells(tb, cells))
+      const done = edit(cells.length === 1 ? t("rates.ws.h.clear", { cell: cellName(cells[0]) }) : t("rates.ws.h.clear_many", { count: cells.length }), (tb) => clearCells(tb, cells))
+      if (done && cells.length > 1) bulkDone(cells.length)
       return true
     }
     if (e.key === "Escape" && cell && drafts[keyOf(cell)] && !selection.multiple) {
@@ -400,6 +641,34 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
       nav.gridRef(el)
     },
     [nav],
+  )
+
+  // header clicks (and the headers' "Select prices" menu items) select a row's or a column's
+  // editable cells and focus the first of them, so the keys (Ctrl+R, Ctrl+C …) act on them at
+  // once. Stable callbacks: the headers are memoised.
+  const shape = useRef({ rows, cols, isEditable })
+  shape.current = { rows, cols, isEditable }
+  const { selectRow, selectCol } = selection
+  const focusCellEl = (r: number, c: number) => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
+  const pickRow = useCallback(
+    (r: number, add: boolean) => {
+      const { cols: cs, isEditable: ed } = shape.current
+      const c = cs.findIndex((_, i) => ed(r, i))
+      if (c < 0) return
+      selectRow(r, { add })
+      focusCellEl(r, c)
+    },
+    [selectRow],
+  )
+  const pickCol = useCallback(
+    (c: number, add: boolean) => {
+      const { rows: rs, isEditable: ed } = shape.current
+      const r = rs.findIndex((_, i) => ed(i, c))
+      if (r < 0) return
+      selectCol(c, { add })
+      focusCellEl(r, c)
+    },
+    [selectCol],
   )
 
   // ─── what each cell shows ────────────────────────────────────────────
@@ -653,6 +922,36 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
         </span>
       </div>
       {canEdit && <p className="text-xs text-zinc-500">{t("rates.ws.matrix_hint")}</p>}
+      {canEdit && (
+        <BulkToolbar
+          canFillRight={fillRightPlan(selection.selected).length > 0}
+          canFillDown={fillDownPlan(selection.selected).length > 0}
+          canAdjust={selectedRefs().length > 0}
+          onFill={onToolbarFill}
+          onAdjust={onToolbarAdjust}
+          adjustRef={adjustRef}
+          adjustOpen={adjusting !== null}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
+          onUndo={onToolbarUndo}
+          onRedo={onToolbarRedo}
+        />
+      )}
+      {fillAsk && (
+        <FillConfirm
+          message={t("rates.ws.fill.confirm_body", { count: fillAsk.fixed })}
+          onConfirm={() => {
+            const ask = fillAsk
+            setFillAsk(null)
+            fill(ask.dir, ask.steps)
+            focusAt(nav.active.r, nav.active.c)
+          }}
+          onCancel={() => {
+            setFillAsk(null)
+            focusAt(nav.active.r, nav.active.c)
+          }}
+        />
+      )}
       {preview?.buildError && (
         <Notice tone="warning" title={t("rates.ws.build_error")}>
           {preview.buildError}
@@ -679,7 +978,11 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
               {t("rates.f.room_type")}
               {stale && <Loader2 className="size-3 animate-spin text-zinc-400" aria-hidden />}
             </div>
-            <div role="columnheader" className="flex flex-col justify-end border-r border-b border-zinc-200 bg-white px-2 py-1.5 text-left">
+            <div
+              role="columnheader"
+              onMouseDown={(e) => headerPick(e, canEdit ? (add) => pickCol(0, add) : undefined)}
+              className="flex flex-col justify-end border-r border-b border-zinc-200 bg-white px-2 py-1.5 text-left"
+            >
               <span className="text-xs font-semibold text-zinc-800">{t("rates.rates.all_periods")}</span>
               <span className="text-[11px] text-zinc-500">{t("rates.ws.default")}</span>
             </div>
@@ -696,6 +999,7 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
                 onFreshDone={freshDone}
                 decimalMark={decimalMark}
                 minorUnits={minorUnits}
+                onSelect={canEdit ? pickCol : undefined}
               />
             ))}
             <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} />
@@ -719,6 +1023,8 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
                   count={model.rooms.length}
                   capacity={resolvedRooms.get(room.room_type)?.capacity}
                   edit={edit}
+                  r={r}
+                  onSelect={canEdit && row.editable ? pickRow : undefined}
                 />
                 <MatrixRowCells
                   r={r}
@@ -784,6 +1090,21 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
           }}
         />
       )}
+      {adjusting && (
+        <AdjustPopover
+          anchorRef={adjustRef}
+          onClose={() => setAdjusting(null)}
+          version={doc.name}
+          tables={tables}
+          cells={adjusting}
+          minorUnits={minorUnits}
+          ccy={ccy}
+          cellName={cellName}
+          amount={amount}
+          onApply={applyAdjusted}
+        />
+      )}
+      <UndoToastView toast={undoToast.toast} onUndo={onToastUndo} onDismiss={undoToast.dismiss} onHold={undoToast.hold} />
     </section>
   )
 }

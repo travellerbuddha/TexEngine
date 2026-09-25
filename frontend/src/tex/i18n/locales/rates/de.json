@@ -1206,5 +1206,133 @@
  "rates.ws.strip.overlaps": {
   "one": "{count} Überschneidung",
   "other": "{count} Überschneidungen"
- }
+ },
+ "rates.ws.bulk.toolbar": "Mehrfachbearbeitung",
+ "rates.ws.bulk.fill_right": "Nach rechts füllen →",
+ "rates.ws.bulk.fill_down": "Nach unten füllen ↓",
+ "rates.ws.bulk.adjust": "Anpassen…",
+ "rates.ws.bulk.undo": "Rückgängig",
+ "rates.ws.bulk.redo": "Wiederholen",
+ "rates.ws.bulk.applied": {
+  "one": "Auf {count} Zelle angewendet",
+  "other": "Auf {count} Zellen angewendet"
+ },
+ "rates.ws.bulk.undone": "Rückgängig gemacht: {label}",
+ "rates.ws.bulk.redone": "Wiederholt: {label}",
+ "rates.ws.bulk.copied": {
+  "one": "{count} Zelle kopiert",
+  "other": "{count} Zellen kopiert"
+ },
+ "rates.ws.bulk.unchanged": "Nichts hat sich geändert.",
+ "rates.ws.fill.nothing": "Markieren Sie mindestens zwei Zellen in einer Zeile (nach rechts füllen) oder einer Spalte (nach unten füllen).",
+ "rates.ws.fill.err_formula": "Eine Formel wird nur in Formelzeilen kopiert; diese Zeile enthält eingegebene Preise. Geben Sie den Preis hier ein oder nutzen Sie Anpassen….",
+ "rates.ws.fill.confirm_title": "Festpreis statt Formel",
+ "rates.ws.fill.confirm_body": {
+  "one": "{count} Zelle einer Formelzeile bekäme statt ihrer Formel einen Festpreis. Festpreis setzen?",
+  "other": "{count} Zellen von Formelzeilen bekämen statt ihrer Formel einen Festpreis. Festpreis setzen?"
+ },
+ "rates.ws.fill.confirm": "Festpreis setzen",
+ "rates.ws.h.fill_right": {
+  "one": "Nach rechts füllen ({count} Zelle)",
+  "other": "Nach rechts füllen ({count} Zellen)"
+ },
+ "rates.ws.h.fill_down": {
+  "one": "Nach unten füllen ({count} Zelle)",
+  "other": "Nach unten füllen ({count} Zellen)"
+ },
+ "rates.ws.h.paste": {
+  "one": "In {count} Zelle einfügen",
+  "other": "In {count} Zellen einfügen"
+ },
+ "rates.ws.h.adjust": {
+  "one": "{count} Preis anpassen",
+  "other": "{count} Preise anpassen"
+ },
+ "rates.ws.h.table": "Regeltabelle: {table}",
+ "rates.ws.paste.empty": "Die Zwischenablage enthält keinen Text zum Einfügen.",
+ "rates.ws.paste.no_target": "Fügen Sie in eine Preis- oder Formelzeile ein: berechnete Zeilen rechnet der Server.",
+ "rates.ws.paste.shape": "Der eingefügte Block ist {rows}×{cols} groß, hier sind aber nur {available_rows}×{available_cols} bearbeitbare Zellen verfügbar.",
+ "rates.ws.paste.refused": "Es wurde nichts eingefügt.",
+ "rates.ws.paste.cell_error": "{cell}: „{text}“: {error}",
+ "rates.ws.paste.more": {
+  "one": "und {count} weitere Zelle",
+  "other": "und {count} weitere Zellen"
+ },
+ "rates.ws.room.select": "Preise markieren",
+ "rates.ws.period.select": "Preise markieren",
+ "rates.ws.adjust.title": "Preise anpassen",
+ "rates.ws.adjust.op_label": "Änderung",
+ "rates.ws.adjust.op.up_pct": "+ %",
+ "rates.ws.adjust.op.down_pct": "− %",
+ "rates.ws.adjust.op.up_amount": "+ Betrag",
+ "rates.ws.adjust.op.down_amount": "− Betrag",
+ "rates.ws.adjust.op.times": "×",
+ "rates.ws.adjust.amount_hint": "Ein Betrag in {ccy}.",
+ "rates.ws.adjust.targets": {
+  "one": "{count} eingegebener Preis markiert",
+  "other": "{count} eingegebene Preise markiert"
+ },
+ "rates.ws.adjust.skipped_formulas": {
+  "one": "{count} Formelzelle übersprungen",
+  "other": "{count} Formelzellen übersprungen"
+ },
+ "rates.ws.adjust.skipped_other": {
+  "one": "{count} Zelle ohne eigenen Preis übersprungen",
+  "other": "{count} Zellen ohne eigenen Preis übersprungen"
+ },
+ "rates.ws.adjust.no_targets": "Kein eingegebener Preis ist markiert. Anpassen… ändert Zellen mit eigenem Preis; Formeln folgen ihrem Basiszimmer.",
+ "rates.ws.adjust.enter_value": "Geben Sie einen Wert ein, um die neuen Preise zu sehen.",
+ "rates.ws.adjust.calculating": "Wird auf dem Server berechnet…",
+ "rates.ws.adjust.nothing": "Es ändert sich nichts.",
+ "rates.ws.adjust.line": "{cell}: {before} → {after}",
+ "rates.ws.adjust.more": {
+  "one": "+{count} weitere",
+  "other": "+{count} weitere"
+ },
+ "rates.ws.adjust.unchanged": {
+  "one": "{count} Preis bleibt gleich",
+  "other": "{count} Preise bleiben gleich"
+ },
+ "rates.kbd.title": "Tastenkürzel",
+ "rates.kbd.keys": "Tasten",
+ "rates.kbd.action": "Aktion",
+ "rates.kbd.mac_note": "Auf dem Mac verwenden Sie Cmd statt Strg.",
+ "rates.kbd.move": "Aktive Zelle bewegen",
+ "rates.kbd.move.keys": "Pfeiltasten, Pos1, Ende, Strg+Pos1, Strg+Ende, Bild↑, Bild↓",
+ "rates.kbd.extend": "Markierung erweitern",
+ "rates.kbd.extend.keys": "Umschalt+Pfeil, Umschalt+Klick",
+ "rates.kbd.add": "Zelle zur Markierung hinzufügen",
+ "rates.kbd.add.keys": "Strg+Klick",
+ "rates.kbd.header": "Deren Preise markieren",
+ "rates.kbd.header.keys": "Klick auf eine Zeilen- oder Spaltenüberschrift",
+ "rates.kbd.select_all": "Alle Preise markieren",
+ "rates.kbd.select_all.keys": "Strg+A",
+ "rates.kbd.clear_selection": "Markierung aufheben",
+ "rates.kbd.clear_selection.keys": "Esc",
+ "rates.kbd.edit": "Zelle bearbeiten",
+ "rates.kbd.edit.keys": "Tippen, F2, Eingabe, Doppelklick",
+ "rates.kbd.commit": "Eingabe übernehmen und weitergehen",
+ "rates.kbd.commit.keys": "Eingabe, Umschalt+Eingabe, Tab, Umschalt+Tab",
+ "rates.kbd.revert": "Eingabe verwerfen",
+ "rates.kbd.revert.keys": "Esc (beim Bearbeiten)",
+ "rates.kbd.bulk": "Eingabe auf alle markierten Zellen anwenden",
+ "rates.kbd.bulk.keys": "Strg+Eingabe (beim Bearbeiten)",
+ "rates.kbd.rule": "Regeleditor öffnen",
+ "rates.kbd.rule.keys": "Alt+Eingabe, Umschalt+F10",
+ "rates.kbd.delete": "Markierte Zellen leeren",
+ "rates.kbd.delete.keys": "Entf, Rücktaste",
+ "rates.kbd.fill_right": "Nach rechts füllen: erste Zelle jeder Zeile kopieren",
+ "rates.kbd.fill_right.keys": "Strg+R",
+ "rates.kbd.fill_down": "Nach unten füllen: oberste Zelle jeder Spalte kopieren",
+ "rates.kbd.fill_down.keys": "Strg+D",
+ "rates.kbd.copy": "Markierung kopieren (tabulatorgetrennt)",
+ "rates.kbd.copy.keys": "Strg+C",
+ "rates.kbd.paste": "Einfügen, z. B. aus einer Tabellenkalkulation",
+ "rates.kbd.paste.keys": "Strg+V",
+ "rates.kbd.undo": "Rückgängig",
+ "rates.kbd.undo.keys": "Strg+Z",
+ "rates.kbd.redo": "Wiederholen",
+ "rates.kbd.redo.keys": "Strg+Umschalt+Z, Strg+Y",
+ "rates.kbd.save": "Entwurf speichern",
+ "rates.kbd.save.keys": "Strg+S"
 }

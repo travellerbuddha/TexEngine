@@ -1230,5 +1230,146 @@
   "one": "{count} suprapunere",
   "few": "{count} suprapuneri",
   "other": "{count} de suprapuneri"
- }
+ },
+ "rates.ws.bulk.toolbar": "Instrumente în masă",
+ "rates.ws.bulk.fill_right": "Completează → dreapta",
+ "rates.ws.bulk.fill_down": "Completează ↓ în jos",
+ "rates.ws.bulk.adjust": "Ajustează…",
+ "rates.ws.bulk.undo": "Anulează",
+ "rates.ws.bulk.redo": "Refă",
+ "rates.ws.bulk.applied": {
+  "one": "Aplicat pe {count} celulă",
+  "few": "Aplicat pe {count} celule",
+  "other": "Aplicat pe {count} de celule"
+ },
+ "rates.ws.bulk.undone": "Anulat: {label}",
+ "rates.ws.bulk.redone": "Refăcut: {label}",
+ "rates.ws.bulk.copied": {
+  "one": "{count} celulă copiată",
+  "few": "{count} celule copiate",
+  "other": "{count} de celule copiate"
+ },
+ "rates.ws.bulk.unchanged": "Nu s-a schimbat nimic.",
+ "rates.ws.fill.nothing": "Selectați cel puțin două celule pe un rând (completează la dreapta) sau într-o coloană (completează în jos).",
+ "rates.ws.fill.err_formula": "O formulă se copiază doar pe rândurile de formule; acest rând are prețuri introduse. Tastați prețul aici sau folosiți Ajustează….",
+ "rates.ws.fill.confirm_title": "Preț fix în locul formulei",
+ "rates.ws.fill.confirm_body": {
+  "one": "{count} celulă a unui rând de formule ar primi un preț fix în locul formulei. Setați prețul fix?",
+  "few": "{count} celule ale rândurilor de formule ar primi un preț fix în locul formulei. Setați prețul fix?",
+  "other": "{count} de celule ale rândurilor de formule ar primi un preț fix în locul formulei. Setați prețul fix?"
+ },
+ "rates.ws.fill.confirm": "Setează prețul fix",
+ "rates.ws.h.fill_right": {
+  "one": "Completează la dreapta ({count} celulă)",
+  "few": "Completează la dreapta ({count} celule)",
+  "other": "Completează la dreapta ({count} de celule)"
+ },
+ "rates.ws.h.fill_down": {
+  "one": "Completează în jos ({count} celulă)",
+  "few": "Completează în jos ({count} celule)",
+  "other": "Completează în jos ({count} de celule)"
+ },
+ "rates.ws.h.paste": {
+  "one": "Lipire în {count} celulă",
+  "few": "Lipire în {count} celule",
+  "other": "Lipire în {count} de celule"
+ },
+ "rates.ws.h.adjust": {
+  "one": "Ajustează {count} preț",
+  "few": "Ajustează {count} prețuri",
+  "other": "Ajustează {count} de prețuri"
+ },
+ "rates.ws.h.table": "Tabel de reguli: {table}",
+ "rates.ws.paste.empty": "Clipboardul nu conține text de lipit.",
+ "rates.ws.paste.no_target": "Lipiți pe un rând de prețuri sau formule: rândurile calculate sunt calculate de server.",
+ "rates.ws.paste.shape": "Blocul lipit are {rows}×{cols}, dar aici sunt disponibile doar {available_rows}×{available_cols} celule editabile.",
+ "rates.ws.paste.refused": "Nu s-a lipit nimic.",
+ "rates.ws.paste.cell_error": "{cell}: „{text}”: {error}",
+ "rates.ws.paste.more": {
+  "one": "și încă {count} celulă",
+  "few": "și încă {count} celule",
+  "other": "și încă {count} de celule"
+ },
+ "rates.ws.room.select": "Selectează prețurile",
+ "rates.ws.period.select": "Selectează prețurile",
+ "rates.ws.adjust.title": "Ajustează prețurile",
+ "rates.ws.adjust.op_label": "Modificare",
+ "rates.ws.adjust.op.up_pct": "+ %",
+ "rates.ws.adjust.op.down_pct": "− %",
+ "rates.ws.adjust.op.up_amount": "+ sumă",
+ "rates.ws.adjust.op.down_amount": "− sumă",
+ "rates.ws.adjust.op.times": "×",
+ "rates.ws.adjust.amount_hint": "O sumă în {ccy}.",
+ "rates.ws.adjust.targets": {
+  "one": "{count} preț introdus selectat",
+  "few": "{count} prețuri introduse selectate",
+  "other": "{count} de prețuri introduse selectate"
+ },
+ "rates.ws.adjust.skipped_formulas": {
+  "one": "{count} celulă cu formulă omisă",
+  "few": "{count} celule cu formulă omise",
+  "other": "{count} de celule cu formulă omise"
+ },
+ "rates.ws.adjust.skipped_other": {
+  "one": "{count} celulă fără preț propriu omisă",
+  "few": "{count} celule fără preț propriu omise",
+  "other": "{count} de celule fără preț propriu omise"
+ },
+ "rates.ws.adjust.no_targets": "Niciun preț introdus nu este selectat. Ajustează… modifică celulele care au propriul preț; formulele urmează camera de bază.",
+ "rates.ws.adjust.enter_value": "Introduceți o valoare pentru a vedea prețurile noi.",
+ "rates.ws.adjust.calculating": "Se calculează pe server…",
+ "rates.ws.adjust.nothing": "Nu se schimbă nimic.",
+ "rates.ws.adjust.line": "{cell}: {before} → {after}",
+ "rates.ws.adjust.more": {
+  "one": "încă {count}",
+  "few": "încă {count}",
+  "other": "încă {count}"
+ },
+ "rates.ws.adjust.unchanged": {
+  "one": "{count} preț rămâne la fel",
+  "few": "{count} prețuri rămân la fel",
+  "other": "{count} de prețuri rămân la fel"
+ },
+ "rates.kbd.title": "Comenzi rapide",
+ "rates.kbd.keys": "Taste",
+ "rates.kbd.action": "Acțiune",
+ "rates.kbd.mac_note": "Pe Mac, folosiți Cmd în loc de Ctrl.",
+ "rates.kbd.move": "Mută celula activă",
+ "rates.kbd.move.keys": "Săgeți, Home, End, Ctrl+Home, Ctrl+End, PageUp, PageDown",
+ "rates.kbd.extend": "Extinde selecția",
+ "rates.kbd.extend.keys": "Shift+Săgeată, Shift+Clic",
+ "rates.kbd.add": "Adaugă o celulă la selecție",
+ "rates.kbd.add.keys": "Ctrl+Clic",
+ "rates.kbd.header": "Selectează prețurile acesteia",
+ "rates.kbd.header.keys": "Clic pe antetul unui rând sau al unei coloane",
+ "rates.kbd.select_all": "Selectează toate prețurile",
+ "rates.kbd.select_all.keys": "Ctrl+A",
+ "rates.kbd.clear_selection": "Anulează selecția",
+ "rates.kbd.clear_selection.keys": "Escape",
+ "rates.kbd.edit": "Editează celula",
+ "rates.kbd.edit.keys": "Tastare, F2, Enter, dublu clic",
+ "rates.kbd.commit": "Păstrează intrarea și mută",
+ "rates.kbd.commit.keys": "Enter, Shift+Enter, Tab, Shift+Tab",
+ "rates.kbd.revert": "Renunță la intrare",
+ "rates.kbd.revert.keys": "Escape (la editare)",
+ "rates.kbd.bulk": "Aplică intrarea pe toate celulele selectate",
+ "rates.kbd.bulk.keys": "Ctrl+Enter (la editare)",
+ "rates.kbd.rule": "Deschide editorul de reguli",
+ "rates.kbd.rule.keys": "Alt+Enter, Shift+F10",
+ "rates.kbd.delete": "Golește celulele selectate",
+ "rates.kbd.delete.keys": "Delete, Backspace",
+ "rates.kbd.fill_right": "Completează la dreapta: copiază prima celulă a fiecărui rând",
+ "rates.kbd.fill_right.keys": "Ctrl+R",
+ "rates.kbd.fill_down": "Completează în jos: copiază celula de sus a fiecărei coloane",
+ "rates.kbd.fill_down.keys": "Ctrl+D",
+ "rates.kbd.copy": "Copiază selecția (separată prin tab)",
+ "rates.kbd.copy.keys": "Ctrl+C",
+ "rates.kbd.paste": "Lipește, de ex. dintr-o foaie de calcul",
+ "rates.kbd.paste.keys": "Ctrl+V",
+ "rates.kbd.undo": "Anulează",
+ "rates.kbd.undo.keys": "Ctrl+Z",
+ "rates.kbd.redo": "Refă",
+ "rates.kbd.redo.keys": "Ctrl+Shift+Z, Ctrl+Y",
+ "rates.kbd.save": "Salvează ciorna",
+ "rates.kbd.save.keys": "Ctrl+S"
 }

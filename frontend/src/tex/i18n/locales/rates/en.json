@@ -1206,5 +1206,133 @@
  "rates.ws.strip.overlaps": {
   "one": "{count} overlap",
   "other": "{count} overlaps"
- }
+ },
+ "rates.ws.bulk.toolbar": "Bulk tools",
+ "rates.ws.bulk.fill_right": "Fill →",
+ "rates.ws.bulk.fill_down": "Fill ↓",
+ "rates.ws.bulk.adjust": "Adjust…",
+ "rates.ws.bulk.undo": "Undo",
+ "rates.ws.bulk.redo": "Redo",
+ "rates.ws.bulk.applied": {
+  "one": "Applied to {count} cell",
+  "other": "Applied to {count} cells"
+ },
+ "rates.ws.bulk.undone": "Undone: {label}",
+ "rates.ws.bulk.redone": "Redone: {label}",
+ "rates.ws.bulk.copied": {
+  "one": "Copied {count} cell",
+  "other": "Copied {count} cells"
+ },
+ "rates.ws.bulk.unchanged": "Nothing changed.",
+ "rates.ws.fill.nothing": "Select at least two cells in a row (Fill →) or in a column (Fill ↓).",
+ "rates.ws.fill.err_formula": "A formula is copied only into formula rows; this row holds entered prices. Type the price here, or use Adjust….",
+ "rates.ws.fill.confirm_title": "Fixed price override",
+ "rates.ws.fill.confirm_body": {
+  "one": "{count} cell of a formula row would get a fixed price instead of its formula. Set a fixed price override?",
+  "other": "{count} cells of formula rows would get a fixed price instead of their formula. Set a fixed price override?"
+ },
+ "rates.ws.fill.confirm": "Set fixed price",
+ "rates.ws.h.fill_right": {
+  "one": "Fill right ({count} cell)",
+  "other": "Fill right ({count} cells)"
+ },
+ "rates.ws.h.fill_down": {
+  "one": "Fill down ({count} cell)",
+  "other": "Fill down ({count} cells)"
+ },
+ "rates.ws.h.paste": {
+  "one": "Paste into {count} cell",
+  "other": "Paste into {count} cells"
+ },
+ "rates.ws.h.adjust": {
+  "one": "Adjust {count} price",
+  "other": "Adjust {count} prices"
+ },
+ "rates.ws.h.table": "Rule table: {table}",
+ "rates.ws.paste.empty": "The clipboard holds no text to paste.",
+ "rates.ws.paste.no_target": "Paste into a price or formula row: resolved rows are calculated by the server.",
+ "rates.ws.paste.shape": "The pasted block is {rows}×{cols} but only {available_rows}×{available_cols} editable cells are available here.",
+ "rates.ws.paste.refused": "Nothing was pasted.",
+ "rates.ws.paste.cell_error": "{cell}: “{text}”: {error}",
+ "rates.ws.paste.more": {
+  "one": "and {count} more cell",
+  "other": "and {count} more cells"
+ },
+ "rates.ws.room.select": "Select prices",
+ "rates.ws.period.select": "Select prices",
+ "rates.ws.adjust.title": "Adjust prices",
+ "rates.ws.adjust.op_label": "Change",
+ "rates.ws.adjust.op.up_pct": "+ %",
+ "rates.ws.adjust.op.down_pct": "− %",
+ "rates.ws.adjust.op.up_amount": "+ amount",
+ "rates.ws.adjust.op.down_amount": "− amount",
+ "rates.ws.adjust.op.times": "×",
+ "rates.ws.adjust.amount_hint": "An amount in {ccy}.",
+ "rates.ws.adjust.targets": {
+  "one": "{count} entered price selected",
+  "other": "{count} entered prices selected"
+ },
+ "rates.ws.adjust.skipped_formulas": {
+  "one": "{count} formula cell skipped",
+  "other": "{count} formula cells skipped"
+ },
+ "rates.ws.adjust.skipped_other": {
+  "one": "{count} cell without a price of its own skipped",
+  "other": "{count} cells without a price of their own skipped"
+ },
+ "rates.ws.adjust.no_targets": "No entered price is selected. Adjust… changes cells that hold a price of their own; formulas follow their base room.",
+ "rates.ws.adjust.enter_value": "Enter a value to see the new prices.",
+ "rates.ws.adjust.calculating": "Calculating on the server…",
+ "rates.ws.adjust.nothing": "Nothing changes.",
+ "rates.ws.adjust.line": "{cell}: {before} → {after}",
+ "rates.ws.adjust.more": {
+  "one": "+{count} more",
+  "other": "+{count} more"
+ },
+ "rates.ws.adjust.unchanged": {
+  "one": "{count} price stays the same",
+  "other": "{count} prices stay the same"
+ },
+ "rates.kbd.title": "Keyboard shortcuts",
+ "rates.kbd.keys": "Keys",
+ "rates.kbd.action": "Action",
+ "rates.kbd.mac_note": "On a Mac, use Cmd where Ctrl is shown.",
+ "rates.kbd.move": "Move the active cell",
+ "rates.kbd.move.keys": "Arrows, Home, End, Ctrl+Home, Ctrl+End, PageUp, PageDown",
+ "rates.kbd.extend": "Extend the selection",
+ "rates.kbd.extend.keys": "Shift+Arrow, Shift+Click",
+ "rates.kbd.add": "Add a cell to the selection",
+ "rates.kbd.add.keys": "Ctrl+Click",
+ "rates.kbd.header": "Select its prices",
+ "rates.kbd.header.keys": "Click a row or column header",
+ "rates.kbd.select_all": "Select every price",
+ "rates.kbd.select_all.keys": "Ctrl+A",
+ "rates.kbd.clear_selection": "Clear the selection",
+ "rates.kbd.clear_selection.keys": "Escape",
+ "rates.kbd.edit": "Edit the cell",
+ "rates.kbd.edit.keys": "Type, F2, Enter, double-click",
+ "rates.kbd.commit": "Keep the entry and move",
+ "rates.kbd.commit.keys": "Enter, Shift+Enter, Tab, Shift+Tab",
+ "rates.kbd.revert": "Revert the entry",
+ "rates.kbd.revert.keys": "Escape (while editing)",
+ "rates.kbd.bulk": "Apply the entry to every selected cell",
+ "rates.kbd.bulk.keys": "Ctrl+Enter (while editing)",
+ "rates.kbd.rule": "Open the rule editor",
+ "rates.kbd.rule.keys": "Alt+Enter, Shift+F10",
+ "rates.kbd.delete": "Clear the selected cells",
+ "rates.kbd.delete.keys": "Delete, Backspace",
+ "rates.kbd.fill_right": "Fill right: copy each row's first cell across",
+ "rates.kbd.fill_right.keys": "Ctrl+R",
+ "rates.kbd.fill_down": "Fill down: copy each column's top cell down",
+ "rates.kbd.fill_down.keys": "Ctrl+D",
+ "rates.kbd.copy": "Copy the selection (tab-separated)",
+ "rates.kbd.copy.keys": "Ctrl+C",
+ "rates.kbd.paste": "Paste, e.g. from a spreadsheet",
+ "rates.kbd.paste.keys": "Ctrl+V",
+ "rates.kbd.undo": "Undo",
+ "rates.kbd.undo.keys": "Ctrl+Z",
+ "rates.kbd.redo": "Redo",
+ "rates.kbd.redo.keys": "Ctrl+Shift+Z, Ctrl+Y",
+ "rates.kbd.save": "Save the draft",
+ "rates.kbd.save.keys": "Ctrl+S"
 }

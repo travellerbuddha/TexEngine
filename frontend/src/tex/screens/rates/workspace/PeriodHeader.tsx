@@ -5,7 +5,7 @@
 // (no pricing effect), Delete… (inline confirmation with the dependent rows). Every change is one
 // workspace history entry; a rename rewrites the period's rules in the three tables.
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
-import { ArrowLeft, ArrowRight, CalendarRange, Copy, CopyPlus, MoreHorizontal, Pencil, Percent, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, ArrowRight, CalendarRange, Copy, CopyPlus, MoreHorizontal, Pencil, Percent, Plus, SquareDashedMousePointer, Trash2 } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { date as fmtDate } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -18,7 +18,7 @@ import type { MatrixPeriod } from "./model.ts"
 import { parsePeriodAdjust, periodAdjustEditText, setPeriodAdjustment, setPeriodFields } from "./matrixView.ts"
 import { addPeriod, copyPreviousPeriod, deletePeriod, duplicatePeriod, isoDay, isoOfDay, movePeriod, periodDependents, renamePeriod } from "./periods.ts"
 import { str } from "./rows.ts"
-import type { Edit } from "./RoomRowHeader"
+import { headerPick, type Edit } from "./RoomRowHeader"
 
 export interface PeriodHeaderProps {
   period: MatrixPeriod
@@ -34,6 +34,9 @@ export interface PeriodHeaderProps {
   /** the contract currency's minor units: the night adjustment's +/- amounts are parsed with them
    * (O5: AMBIGUOUS only below 3 decimals) */
   minorUnits: number
+  /** selecting the column's editable cells (header click, the menu's "Select prices"); the
+   * column's index in the grid is `index + 1` (All periods is column 0) */
+  onSelect?: (c: number, add: boolean) => void
 }
 
 type Open = "rename" | "dates" | "adjust" | "delete" | null
@@ -84,10 +87,12 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
   const adjust = period.adjusted ? p.tables.periods.find((x) => str(x.period_code) === code) : undefined
   const adjustText = adjust ? displayText(str(adjust.adjustment_op) as ShOp, str(adjust.adjustment_value), "period_adjust", { decimalMark: p.decimalMark }) : ""
   const weekdays = splitCsv(period.weekdays)
+  const select = p.onSelect ? (add: boolean) => p.onSelect?.(p.index + 1, add) : undefined
 
   return (
     <div
       role="columnheader"
+      onMouseDown={(e) => headerPick(e, select)}
       className={cn(
         "flex min-w-0 flex-col justify-end gap-0.5 border-r border-b border-zinc-200 px-2 py-1.5 text-left",
         p.index % 2 ? "bg-zinc-50" : "bg-white",
@@ -104,6 +109,14 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
         {!p.readOnly && (
           <span ref={wrap} className="ml-auto shrink-0">
             <Menu label={t("rates.ws.period.menu", { period: code })} icon={<MoreHorizontal className="size-4" aria-hidden />} size="sm" className="size-6!">
+              {select && (
+                <>
+                  <MenuItem icon={<SquareDashedMousePointer className="size-4" />} onSelect={() => select(false)}>
+                    {t("rates.ws.period.select")}
+                  </MenuItem>
+                  <MenuSeparator />
+                </>
+              )}
               <MenuItem icon={<Pencil className="size-4" />} onSelect={() => setOpen("rename")}>
                 {t("rates.ws.period.rename")}
               </MenuItem>

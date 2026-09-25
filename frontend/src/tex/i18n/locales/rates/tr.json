@@ -1206,5 +1206,133 @@
  "rates.ws.strip.overlaps": {
   "one": "{count} çakışma",
   "other": "{count} çakışma"
- }
+ },
+ "rates.ws.bulk.toolbar": "Toplu araçlar",
+ "rates.ws.bulk.fill_right": "Sağa doldur →",
+ "rates.ws.bulk.fill_down": "Aşağı doldur ↓",
+ "rates.ws.bulk.adjust": "Ayarla…",
+ "rates.ws.bulk.undo": "Geri al",
+ "rates.ws.bulk.redo": "Yinele",
+ "rates.ws.bulk.applied": {
+  "one": "{count} hücreye uygulandı",
+  "other": "{count} hücreye uygulandı"
+ },
+ "rates.ws.bulk.undone": "Geri alındı: {label}",
+ "rates.ws.bulk.redone": "Yinelendi: {label}",
+ "rates.ws.bulk.copied": {
+  "one": "{count} hücre kopyalandı",
+  "other": "{count} hücre kopyalandı"
+ },
+ "rates.ws.bulk.unchanged": "Hiçbir şey değişmedi.",
+ "rates.ws.fill.nothing": "Bir satırda (Sağa doldur) veya bir sütunda (Aşağı doldur) en az iki hücre seçin.",
+ "rates.ws.fill.err_formula": "Formül yalnızca formül satırlarına kopyalanır; bu satırda girilmiş fiyatlar var. Fiyatı buraya yazın veya Ayarla… kullanın.",
+ "rates.ws.fill.confirm_title": "Sabit fiyatla geçersiz kılma",
+ "rates.ws.fill.confirm_body": {
+  "one": "Formül satırındaki {count} hücre, formülü yerine sabit bir fiyat alacak. Sabit fiyat uygulansın mı?",
+  "other": "Formül satırlarındaki {count} hücre, formülleri yerine sabit bir fiyat alacak. Sabit fiyat uygulansın mı?"
+ },
+ "rates.ws.fill.confirm": "Sabit fiyatı uygula",
+ "rates.ws.h.fill_right": {
+  "one": "Sağa doldur ({count} hücre)",
+  "other": "Sağa doldur ({count} hücre)"
+ },
+ "rates.ws.h.fill_down": {
+  "one": "Aşağı doldur ({count} hücre)",
+  "other": "Aşağı doldur ({count} hücre)"
+ },
+ "rates.ws.h.paste": {
+  "one": "{count} hücreye yapıştır",
+  "other": "{count} hücreye yapıştır"
+ },
+ "rates.ws.h.adjust": {
+  "one": "{count} fiyatı ayarla",
+  "other": "{count} fiyatı ayarla"
+ },
+ "rates.ws.h.table": "Kural tablosu: {table}",
+ "rates.ws.paste.empty": "Panoda yapıştırılacak metin yok.",
+ "rates.ws.paste.no_target": "Bir fiyat veya formül satırına yapıştırın: hesaplanan satırları sunucu hesaplar.",
+ "rates.ws.paste.shape": "Yapıştırılan blok {rows}×{cols}, ancak burada yalnızca {available_rows}×{available_cols} düzenlenebilir hücre var.",
+ "rates.ws.paste.refused": "Hiçbir şey yapıştırılmadı.",
+ "rates.ws.paste.cell_error": "{cell}: “{text}”: {error}",
+ "rates.ws.paste.more": {
+  "one": "ve {count} hücre daha",
+  "other": "ve {count} hücre daha"
+ },
+ "rates.ws.room.select": "Fiyatları seç",
+ "rates.ws.period.select": "Fiyatları seç",
+ "rates.ws.adjust.title": "Fiyatları ayarla",
+ "rates.ws.adjust.op_label": "Değişiklik",
+ "rates.ws.adjust.op.up_pct": "+ %",
+ "rates.ws.adjust.op.down_pct": "− %",
+ "rates.ws.adjust.op.up_amount": "+ tutar",
+ "rates.ws.adjust.op.down_amount": "− tutar",
+ "rates.ws.adjust.op.times": "×",
+ "rates.ws.adjust.amount_hint": "{ccy} cinsinden bir tutar.",
+ "rates.ws.adjust.targets": {
+  "one": "{count} girilmiş fiyat seçili",
+  "other": "{count} girilmiş fiyat seçili"
+ },
+ "rates.ws.adjust.skipped_formulas": {
+  "one": "{count} formül hücresi atlandı",
+  "other": "{count} formül hücresi atlandı"
+ },
+ "rates.ws.adjust.skipped_other": {
+  "one": "kendi fiyatı olmayan {count} hücre atlandı",
+  "other": "kendi fiyatı olmayan {count} hücre atlandı"
+ },
+ "rates.ws.adjust.no_targets": "Seçili girilmiş fiyat yok. Ayarla… kendi fiyatı olan hücreleri değiştirir; formüller temel odalarını izler.",
+ "rates.ws.adjust.enter_value": "Yeni fiyatları görmek için bir değer girin.",
+ "rates.ws.adjust.calculating": "Sunucuda hesaplanıyor…",
+ "rates.ws.adjust.nothing": "Hiçbir şey değişmiyor.",
+ "rates.ws.adjust.line": "{cell}: {before} → {after}",
+ "rates.ws.adjust.more": {
+  "one": "+{count} tane daha",
+  "other": "+{count} tane daha"
+ },
+ "rates.ws.adjust.unchanged": {
+  "one": "{count} fiyat aynı kalıyor",
+  "other": "{count} fiyat aynı kalıyor"
+ },
+ "rates.kbd.title": "Klavye kısayolları",
+ "rates.kbd.keys": "Tuşlar",
+ "rates.kbd.action": "İşlem",
+ "rates.kbd.mac_note": "Mac'te Ctrl yerine Cmd kullanın.",
+ "rates.kbd.move": "Etkin hücreyi taşı",
+ "rates.kbd.move.keys": "Oklar, Home, End, Ctrl+Home, Ctrl+End, PageUp, PageDown",
+ "rates.kbd.extend": "Seçimi genişlet",
+ "rates.kbd.extend.keys": "Shift+Ok, Shift+Tık",
+ "rates.kbd.add": "Seçime hücre ekle",
+ "rates.kbd.add.keys": "Ctrl+Tık",
+ "rates.kbd.header": "Fiyatlarını seç",
+ "rates.kbd.header.keys": "Satır veya sütun başlığına tıklayın",
+ "rates.kbd.select_all": "Tüm fiyatları seç",
+ "rates.kbd.select_all.keys": "Ctrl+A",
+ "rates.kbd.clear_selection": "Seçimi temizle",
+ "rates.kbd.clear_selection.keys": "Escape",
+ "rates.kbd.edit": "Hücreyi düzenle",
+ "rates.kbd.edit.keys": "Yazın, F2, Enter, çift tık",
+ "rates.kbd.commit": "Girişi tut ve ilerle",
+ "rates.kbd.commit.keys": "Enter, Shift+Enter, Tab, Shift+Tab",
+ "rates.kbd.revert": "Girişi geri al",
+ "rates.kbd.revert.keys": "Escape (düzenlerken)",
+ "rates.kbd.bulk": "Girişi seçili tüm hücrelere uygula",
+ "rates.kbd.bulk.keys": "Ctrl+Enter (düzenlerken)",
+ "rates.kbd.rule": "Kural düzenleyiciyi aç",
+ "rates.kbd.rule.keys": "Alt+Enter, Shift+F10",
+ "rates.kbd.delete": "Seçili hücreleri temizle",
+ "rates.kbd.delete.keys": "Delete, Backspace",
+ "rates.kbd.fill_right": "Sağa doldur: her satırın ilk hücresini kopyala",
+ "rates.kbd.fill_right.keys": "Ctrl+R",
+ "rates.kbd.fill_down": "Aşağı doldur: her sütunun üst hücresini kopyala",
+ "rates.kbd.fill_down.keys": "Ctrl+D",
+ "rates.kbd.copy": "Seçimi kopyala (sekmeyle ayrılmış)",
+ "rates.kbd.copy.keys": "Ctrl+C",
+ "rates.kbd.paste": "Yapıştır, örneğin bir tablodan",
+ "rates.kbd.paste.keys": "Ctrl+V",
+ "rates.kbd.undo": "Geri al",
+ "rates.kbd.undo.keys": "Ctrl+Z",
+ "rates.kbd.redo": "Yinele",
+ "rates.kbd.redo.keys": "Ctrl+Shift+Z, Ctrl+Y",
+ "rates.kbd.save": "Taslağı kaydet",
+ "rates.kbd.save.keys": "Ctrl+S"
 }
