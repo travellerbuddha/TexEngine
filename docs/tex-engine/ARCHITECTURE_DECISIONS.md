@@ -8376,8 +8376,12 @@ commit (it adds only the design document to `6b0102c`, the branch's base).
 - *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the fourteen
   `pricing-workspace*` spec files (desktop, and the mobile spec on Pixel 7 too) 98/98, and
   `editor-edits`, `contract-admin`, `critical-journey` and `policy-revisions` 6/6: 104 passed.
-- Not run for this follow-up: the other 30 integration modules and the upstream suites (eval,
-  journey, banquet); with the defaults main's again, the code they reach answers as on main.
+- *Full integration regression, migrated with this tree:* all 39 modules, 859 tests: 858 OK (10
+  skipped, as before) and 1 error, `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails`,
+  run at 21:2x UTC (just after midnight on the site's Europe/Istanbul clock). It fails the same way
+  against main's code (`6b0102c`) run at the same time and passed in this branch's earlier full runs:
+  it depends on the time of day, not on this change.
+- Not run for this follow-up: the upstream suites (eval, journey, banquet).
 
 **O1–O5 after the existing-semantics follow-up** (all five provisional, owner input 13): unchanged.
 No parser, op mapping or `apply_op_values` change.

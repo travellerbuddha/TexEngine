@@ -1022,7 +1022,9 @@ The owner's rule: the workspace changes the UX only; no existing pricing semanti
 Verification: unit 516 OK, ruff clean; `tsc -b`, `npm run build` (bundles not committed), `npm run
 i18n:tex`, `npm run test:unit` 311. Integration with the tree migrated: `test_existing_semantics` 13,
 `test_pricing_workspace_api` 63, `test_commercial_flows` 63, `test_age_bands` 11, `test_money_fields`
-9, `test_critical_journey` 31, `test_security_regressions` 59, `test_pricing_policies` 14, all OK.
+9, `test_critical_journey` 31, `test_security_regressions` 59, `test_pricing_policies` 14, all OK; then
+all 39 modules: 859 tests, 858 OK (10 skipped) and 1 error, `test_system_status`'s FX-age test run just
+after the site's midnight (it fails the same way against main's code at that time; not this change).
 Playwright on the tree's own servers (bench :8016, Vite :5186): the fourteen `pricing-workspace*`
 spec files 98/98 (with the new `pricing-workspace-optin`) and `editor-edits`, `contract-admin`,
 `critical-journey` and `policy-revisions` 6/6: 104 passed. Fail-first: `pricing-workspace-optin` fails
