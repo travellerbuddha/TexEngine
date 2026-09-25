@@ -8,8 +8,8 @@ never recomputes a price itself:
 * ``party_total``: the occupancy total of a sample party in a room and period, built the way the
   publish sweep builds one (each child at the lower edge of its age band);
 * ``party_rules``: the occupancy rules that take part in pricing such a party, also when it cannot
-  be priced; ``party_hidden``: whether what the party answers depends on the op or value of a rule
-  the viewer may not read (such a party's total or negative total is not shown to that viewer).
+  be priced; ``party_hidden``: whether what the party answers can depend on the op or value of a
+  rule the viewer may not read (such a party's total, slots or failure is not shown to that viewer).
 
 And the one computation the workspace asks the server for instead of doing it (GAP-7, D2):
 ``adjust_amount``, an entered price changed once by an op, as the ARI grid's rate change does.
@@ -126,10 +126,13 @@ def party_rules(terms: ContractTerms, room_type: str, period: Period, adults: in
 def party_hidden(terms: ContractTerms, room_type: str, period: Period, adults: int, band_codes,
                  rules: frozenset[str]) -> bool:
 	"""Whether what ``party_total`` answers for the sample party (a total and its slots, or why it
-	cannot be priced) depends on the op or value of one of ``rules``, rules the viewer may not read
-	(``occupancy.depends_on``, ADR-061 S16 re-review): a total or a negative total one of them takes
-	part in, a child no rule prices where one of them defers. A child band without any rule, an
-	ambiguity and a failure before the occupancy is priced do not."""
+	cannot be priced) can depend on the op or value of one of ``rules``, rules the viewer may not read
+	(``occupancy.depends_on``, ADR-061 S16 re-review 4). The answer is the same whatever their ops, so
+	"hidden" says nothing of them either: a party is hidden when a hidden rule may price one of its
+	slots and the party gets through them all (its total), or when such a slot may fail or not by a
+	hidden op (a child only hidden rules price, a tie under a hidden rule). A failure no hidden rule
+	decides (a child band without any rule, also after policy-priced adults; a tie of the viewer's
+	rules) and a failure before the occupancy is priced are said."""
 	if not rules:
 		return False
 	night = _priced_night(terms, room_type, period, adults, band_codes)

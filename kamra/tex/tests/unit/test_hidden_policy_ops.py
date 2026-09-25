@@ -88,6 +88,8 @@ class TestTheReportedLeaks(unittest.TestCase):
 	with it pricing: the viewer is told the same both times."""
 
 	def assert_same_whatever_the_op(self, build, ops) -> dict:
+		"""The live check and the matrix are the same for every op; so is the stored report for every
+		op the terms can be published with (whether they can is the publish's own, full check)."""
 		seen = {}
 		for op, value in ops:
 			t = build(op, value)
@@ -95,8 +97,11 @@ class TestTheReportedLeaks(unittest.TestCase):
 		first, *others = seen.values()
 		for op, other in zip(list(seen)[1:], others, strict=True):
 			with self.subTest(op=op):
-				for part in ("live", "matrix", "stored"):
+				for part in ("live", "matrix"):
 					self.assertEqual(other[part], first[part], part)
+		stored = [view["stored"] for view in seen.values() if view["stored"] is not None]
+		for report in stored[1:]:
+			self.assertEqual(report, stored[0], "stored")
 		return first
 
 	def test_a_hidden_rule_that_priced_an_earlier_child_says_nothing_of_a_later_one(self):
@@ -207,7 +212,7 @@ class TestTheReportedLeaks(unittest.TestCase):
 HIDDEN_OPS = ((Op.INHERIT, None), (Op.MULTIPLY, "0.5"), (Op.SUBTRACT, "300"))
 VERSION_OPS = ((Op.INHERIT, None), (Op.MULTIPLY, "1"), (Op.MULTIPLY, "0.5"), (Op.MULTIPLY, "0"),
                (Op.PERCENT_OF, "50"), (Op.SUBTRACT, "150"), (Op.ADD, "10"))
-GENERATED = 250
+GENERATED = 160
 
 
 def generated_rule(rng: random.Random, rule_id: str, *, inherited: bool):

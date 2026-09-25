@@ -734,13 +734,13 @@ def _occupancy_defaults() -> dict:
 
 
 def _party_cells(terms, room_type: str, parties, hidden_rules: frozenset[str] = frozenset()) -> list[dict]:
-	"""Each sample party's total per period. A party whose answer depends on the op or value of
+	"""Each sample party's total per period. A party whose answer can depend on the op or value of
 	one of ``hidden_rules`` (inherited policy rules a viewer without cost may not read, S16 review;
-	``matrix.party_hidden``) is left out: a total or a negative total one of them takes part in (a
-	slot's rule or the whole-party rule), whose period is listed in ``hidden`` without a total, slots
-	or error, so no formula can be worked back (a total next to its slots, or a negative total that a
-	probe rule of the draft provokes). A failure whose message carries no amount and does not depend
-	on a hidden value (a child band without a rule, an ambiguity) is said (S16 re-review)."""
+	``matrix.party_hidden``) is left out: its period is listed in ``hidden`` without a total, slots or
+	error, so no formula can be worked back (a total next to its slots, or a negative total that a
+	probe rule of the draft provokes), and which periods are hidden is the same whatever the hidden
+	rules' ops, INHERIT or not (S16 re-review 4). A failure no hidden rule decides (a child band
+	without a rule, a tie of the draft's own rules) is said (S16 re-review)."""
 	out = []
 	for adults, kids in parties:
 		cell = {"cells": {}, "slots": {}, "errors": {}, "hidden": []}
