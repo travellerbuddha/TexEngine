@@ -83,7 +83,12 @@ def _cell_rule(t: ContractTerms, room_type: str, period: Period) -> str | None:
 	return next((r.rule_id for r in rooms._candidates(t, room_type, period) if r.op != Op.INHERIT), None)
 
 
-def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_warnings: int = 200) -> list[Issue]:
+def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_warnings: int = 200,
+                   hidden: frozenset[str] = frozenset()) -> list[Issue]:
+	"""The issues of ``t``. ``hidden``: ids of occupancy rules the viewer may not read (a pricing
+	policy's formulas, which are cost: ADR-061, S16 review). No issue whose presence depends on one
+	of their values is reported then: the sweep's issues for a party one of them takes part in, and
+	OCC_POLICY_OVERRIDE_OUTRANKED for a hidden override."""
 	issues: list[Issue] = []
 	if len(t.currency) != 3:
 		issues.append(_err("CURRENCY", f"currency {t.currency!r} is not an ISO code"))
@@ -199,6 +204,8 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 		                   "precedence with different values; make one more specific or remove one",
 		                   rule_id=a.rule_id, rule_ids=[a.rule_id, b.rule_id], **slot))
 	for r, top, where, slot in _outranked_overrides(t):
+		if r.rule_id in hidden:
+			continue
 		issues.append(_warn("OCC_POLICY_OVERRIDE_OUTRANKED",
 		                    f"pricing-policy override {r.rule_id} ({r.source}) no longer prices {where}: "
 		                    f"{top.rule_id} ({top.source}) does - a contract's own rule, a more specific "
@@ -248,7 +255,7 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 			issues.append(_err("OFFER_FREE_NIGHTS", f"offer {o.promo_id}: stay X pay Y needs X > Y"))
 
 	if sweep_combinations and not any(i.level == "ERROR" for i in issues):
-		issues.extend(_sweep(t, max_warnings))
+		issues.extend(_sweep(t, max_warnings, hidden))
 	return issues
 
 
@@ -505,11 +512,13 @@ def policy_issues(bands: tuple[AgeBand, ...], rules: tuple[OccupancyRule, ...]) 
 	return issues
 
 
-def _sweep(t: ContractTerms, limit: int) -> list[Issue]:
+def _sweep(t: ContractTerms, limit: int, hidden: frozenset[str] = frozenset()) -> list[Issue]:
 	"""Price every valid combination (all children in one band) once per period and
 	report the ones that cannot be priced. Ambiguous rules are an ERROR (the runtime
 	refuses to guess); a combination without a rule only makes that offer unsellable.
-	A combination is reported once, in the first period where it fails (``ref.period``)."""
+	A combination is reported once, in the first period where it fails (``ref.period``).
+	A warning about a party one of the ``hidden`` rules takes part in is not reported: whether
+	it fails can depend on that rule's value (a negative total)."""
 	out: list[Issue] = []
 	seen: set[tuple] = set()
 	for rt, spec in sorted(t.rooms.items()):
@@ -532,8 +541,11 @@ def _sweep(t: ContractTerms, limit: int) -> list[Issue]:
 							key = (rt, a, c, band.code if band else None, u.code)
 							if key in seen:
 								continue
-							seen.add(key)
 							level = "ERROR" if u.code == "AMBIGUOUS_OCCUPANCY_RULES" else "WARNING"
+							if hidden and level == "WARNING" and \
+									occupancy.rules_taking_part(t, spec, p, unit, party) & hidden:
+								continue
+							seen.add(key)
 							tied = list(u.params.get("rules") or ()) or None
 							out.append(Issue(level, u.code, f"{rt} {a}A+{c}C"
 							                 f"{' [' + band.code + ']' if band else ''}: {u.message}",

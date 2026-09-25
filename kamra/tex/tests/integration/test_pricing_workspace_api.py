@@ -688,6 +688,79 @@ class TestInheritedTerms(WorkspaceCase):
 		self.as_user(RM)
 		self.assertEqual(find(api.price_matrix(version)["inherited_rules"], target="ADULT")["op"], "MULTIPLY")
 
+	def hidden_policy(self) -> str:
+		"""A draft that inherits a global policy with a child rule (CHD 37 % of the unit) and a whole
+		party rule (2A+0C −10 %), neither of which an editor without cost may read."""
+		revisions.archive(POLICY, self.policy)
+		policy("PW Global Hidden", bands=[{"band_code": "CHD", "label": "Child", "from_age": 0, "to_age": 11.99}],
+		       rules=[child("CHD", "PERCENT_OF", 37),
+		              {"target": "COMBINATION", "combination": "2+0", "op": "ADJUST_PERCENT", "value": -10}])
+		return fx.create_contract(self.f, code="PW-S16-HID", age_bands=[], occupancy_rules=[], publish=False)["version"]
+
+	def test_a_whole_party_policy_rule_hides_the_partys_total(self):
+		"""A whole-party rule of a policy is not a slot rule: the total it priced (180 next to slots of
+		100 + 100) would show its −10 % (review of S16, finding 1a)."""
+		version = self.hidden_policy()
+		parties = json.dumps([{"adults": 2, "children": []}, {"adults": 1, "children": []}])
+		two, one = api.price_matrix(version, parties=parties, party_room=self.std)["party_cells"]
+		self.assertEqual({k: D(c) for k, c in two["cells"].items()}, {"LOW": D("180"), "HIGH": D("216")})
+		self.assertEqual({k: D(c) for k, c in one["cells"].items()}, {"LOW": D("100"), "HIGH": D("120")})
+		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		self.as_user(EDITOR)
+		for label, kw in (("saved", {}), ("unsaved", {"data": as_json(data)})):
+			with self.subTest(label):
+				two, one = api.price_matrix(version, parties=parties, party_room=self.std, **kw)["party_cells"]
+				self.assertEqual(two["cells"], {"LOW": None, "HIGH": None})
+				self.assertEqual((two["slots"], two["errors"], sorted(two["hidden"])), ({}, {}, ["HIGH", "LOW"]))
+				# the engine's adult default alone prices one adult: shown
+				self.assertEqual({k: D(c) for k, c in one["cells"].items()}, {"LOW": D("100"), "HIGH": D("120")})
+				self.assertEqual(one["hidden"], [])
+
+	def test_a_failure_of_a_party_a_hidden_rule_prices_says_nothing(self):
+		"""An error of a party a hidden policy rule takes part in would be a threshold oracle: an
+		overlay probe "2A+1C SUBTRACT X" is refused as a negative price exactly when X is above the
+		policy-priced total (review of S16, finding 1b). The editor is told the period is hidden, not
+		why; the live check leaves the sweep's issue out too (review of S16, low finding)."""
+		version = self.hidden_policy()
+		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		data["occupancy_rules"].append({"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 238,
+		                                "_key": "probe"})
+		parties = json.dumps([{"adults": 2, "children": ["CHD"]}])
+		# 2 × 100 + 37 = 237 in LOW, 2 × 120 + 44.40 = 284.40 in HIGH
+		cell = api.price_matrix(version, data=as_json(data), parties=parties, party_room=self.std)["party_cells"][0]
+		self.assertIn("negative price", cell["errors"]["LOW"])
+		self.assertEqual(D(cell["cells"]["HIGH"]), D("46.40"))
+		full = api.validate_version(version, data=as_json(data))["issues"]
+		self.assertIn("NEGATIVE_OCCUPANCY_PRICE", {i["code"] for i in full})
+		self.as_user(EDITOR)
+		for x in (200, 238, 300):
+			data["occupancy_rules"][-1]["value"] = x
+			with self.subTest(x=x):
+				cell = api.price_matrix(version, data=as_json(data), parties=parties,
+				                        party_room=self.std)["party_cells"][0]
+				self.assertEqual(cell["cells"], {"LOW": None, "HIGH": None})
+				self.assertEqual((cell["slots"], cell["errors"], sorted(cell["hidden"])), ({}, {}, ["HIGH", "LOW"]))
+				issues = api.validate_version(version, data=as_json(data))["issues"]
+				self.assertNotIn("NEGATIVE_OCCUPANCY_PRICE", {i["code"] for i in issues})
+		# an error no hidden rule takes part in is still said: a party the room cannot host
+		cell = api.price_matrix(version, data=as_json(data), parties=json.dumps([{"adults": 4, "children": []}]),
+		                        party_room=self.std)["party_cells"][0]
+		self.assertEqual((set(cell["errors"]), cell["hidden"]), ({"LOW", "HIGH"}, []))
+
+	def test_the_live_check_does_not_compare_a_hidden_override_with_the_editors_rule(self):
+		"""OCC_POLICY_OVERRIDE_OUTRANKED shows up only while the version's rule differs from the
+		policy override's (op, value): an equality oracle for an editor without cost (review of S16,
+		low finding). Saved or unsaved, that editor's check leaves it out."""
+		policy("PW Hotel Override", property=fx.PROPERTY, rules=[child("INF", "FIXED", 15, is_override=1)])
+		data = self.payload()
+		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED",
+		              {i["code"] for i in api.validate_version(self.v, data=as_json(data))["issues"]})
+		self.as_user(EDITOR)
+		for kw in ({"data": as_json(data)}, {}):
+			with self.subTest(saved=not kw):
+				codes = {i["code"] for i in api.validate_version(self.v, **kw)["issues"]}
+				self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", codes)
+
 # 2 adults; 2 adults + a CHB child (a code in any case); an unknown band; more children than STD holds
 PARTIES = ({"adults": 2, "children": []}, {"adults": 2, "children": ["chb"]}, {"adults": 1, "children": ["XX"]},
            {"adults": 2, "children": ["CHA", "CHA", "CHB"]})
@@ -773,7 +846,7 @@ class TestHeavyReads(WorkspaceCase):
 	def tearDown(self):
 		try:
 			frappe.cache.delete(*[api._heavy_key(kind, what, user) for kind in api.HEAVY_LIMITS
-			                      for what in ("minute", "running") for user in (EDITOR, RM)])
+			                      for what in ("minute", "slots") for user in (EDITOR, RM)])
 		finally:
 			super().tearDown()
 
@@ -817,7 +890,69 @@ class TestHeavyReads(WorkspaceCase):
 			with self.assertRaises(frappe.ValidationError):
 				api.validate_version(self.v, data="[1]")
 			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
-			self.assertEqual(int(frappe.cache.get(api._heavy_key("validate", "running", EDITOR)) or 0), 0)
+			self.assertEqual(frappe.cache.zcard(api._heavy_key("validate", "slots", EDITOR)), 0)
+
+	def test_the_budget_window_always_expires(self):
+		"""The budget is counted and given its window in one step: a window that ran out between two
+		separate calls (SET NX EX, then INCR) left a counter without a TTL, and the user was refused
+		for good after 60 checks (review of S16, low finding). A counter left that way is healed."""
+		data = as_json(self.payload())
+		budget = api._heavy_key("validate", "minute", EDITOR)
+		self.as_user(EDITOR)
+		incr = frappe.cache.incr
+
+		def window_runs_out(key, *args, **kw):          # the window ends between the two steps
+			frappe.cache.delete(key)
+			return incr(key, *args, **kw)
+
+		with mock.patch.object(api, "_in_request", return_value=True), \
+		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (2, 3)}):
+			with mock.patch.object(frappe.cache, "incr", side_effect=window_runs_out):
+				api.validate_version(self.v, data=data)
+			self.assertTrue(0 < frappe.cache.ttl(budget) <= api.HEAVY_WINDOW)
+			# a counter a race left without a TTL gets one on its next use
+			frappe.cache.set(budget, 5)
+			with self.assertRaises(frappe.RateLimitExceededError):
+				api.validate_version(self.v, data=data)
+			self.assertTrue(0 < frappe.cache.ttl(budget) <= api.HEAVY_WINDOW)
+			frappe.cache.delete(budget)
+			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+
+	def test_a_leaked_slot_ages_out_while_the_user_keeps_trying(self):
+		"""A call whose worker was killed never frees its slot. It is freed 300 s after that call
+		started, however often the user retries meanwhile (a retry used to push the whole counter's
+		TTL back to 300 s)."""
+		data = as_json(self.payload())
+		self.as_user(EDITOR)
+		clock = [1_000_000.0]
+		with mock.patch.object(api, "_in_request", return_value=True), \
+		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (100, 1)}), \
+		     mock.patch.object(api, "_now", side_effect=lambda: clock[0]):
+			leaked = api._heavy("validate")
+			leaked.__enter__()                             # a worker killed inside the call: never exits
+			for step in (100, 100, 99):                    # retries at 100, 200 and 299 s
+				clock[0] += step
+				with self.assertRaises(frappe.RateLimitExceededError):
+					api.validate_version(self.v, data=data)
+			clock[0] += 2                                  # 301 s after the leaked call started
+			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+
+	def test_a_price_test_with_unsaved_data_is_bounded_too(self):
+		"""preview_price with data builds the same overlay as the matrix: it has a budget and a cap
+		of its own (review of S16, low finding); without data it is not counted."""
+		data = as_json(self.payload())
+		self.as_user(RM)
+		with mock.patch.object(api, "_in_request", return_value=True), \
+		     mock.patch.dict(api.HEAVY_LIMITS, {"preview": (2, 6)}):
+			self.assertTrue(self.preview(data=data)["sellable"])
+			self.assertTrue(self.preview(data=data)["sellable"])
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self.preview(data=data)
+			for _ in range(3):
+				self.assertTrue(self.preview()["sellable"])
+			with mock.patch.dict(api.HEAVY_LIMITS, {"preview": (100, 1)}), api._heavy("preview"):
+				with self.assertRaises(frappe.RateLimitExceededError):
+					self.preview(data=data)
 
 class TestAnchoredIssues(WorkspaceCase):
 	def test_a_duplicated_room_rule_is_anchored_in_the_validation_json(self):

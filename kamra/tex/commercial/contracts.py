@@ -441,20 +441,23 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 	)
 
 
-def validate_version(name: str) -> dict:
+def validate_version(name: str, *, formula: bool = True) -> dict:
 	version = frappe.get_doc("TEX Contract Version", name)
 	scope.require("contract.edit", scope.property_of("TEX Contract Version", name))
-	return validate_doc(version)
+	return validate_doc(version, formula=formula)
 
 
-def validate_doc(version) -> dict:
+def validate_doc(version, *, formula: bool = True) -> dict:
 	"""Validation of a version document as it is: a loaded draft, or a draft with unsaved changes
-	applied in memory (ADR-061). The caller checks who may validate it."""
+	applied in memory (ADR-061). The caller checks who may validate it. Without ``formula`` (a
+	viewer who may not read the pricing policies' formulas, S16 review) no issue whose presence
+	depends on an inherited rule's value is reported (``validate_terms(hidden=…)``)."""
 	try:
 		terms = build_terms(version)
 	except frappe.ValidationError as e:
 		return {"ok": False, "issues": [{"level": "ERROR", "code": "BUILD", "message": str(e)}]}
-	issues = validate.validate_terms(terms)
+	hidden = frozenset() if formula else frozenset(r.rule_id for r in terms.occupancy_rules if r.source != "version")
+	issues = validate.validate_terms(terms, hidden=hidden)
 	return {"ok": not any(i.level == "ERROR" for i in issues), "issues": [i.to_dict() for i in issues]}
 
 

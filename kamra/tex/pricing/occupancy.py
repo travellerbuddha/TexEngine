@@ -290,3 +290,18 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 		raise Unsellable("NEGATIVE_OCCUPANCY_PRICE", "occupancy rules produce a negative price")
 	return OccupancyResult(total=total, unit=unit, slot_unit=slot_unit, slots=tuple(slots),
 	                       combination_rule=combo_ref, after_adults=after_adults, after_children=after_children)
+
+
+def rules_taking_part(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decimal, party: Party) -> frozenset[str]:
+	"""The ids of the occupancy rules that take part in pricing ``party`` in one night of ``period``:
+	each slot's winner and the whole-combination rule, as ``price_occupancy`` resolves them. Also
+	when the party cannot be priced: the rules resolved before the failure (which is all of them
+	for a negative total) and the rules an ambiguity names. A viewer who may not read some rules
+	(ADR-061, S16 review) is told nothing about a party one of them takes part in."""
+	ex = Explanation()
+	named: tuple = ()
+	try:
+		price_occupancy(terms, spec, period, unit, party, explain=ex)
+	except Unsellable as u:
+		named = tuple(u.params.get("rules") or ())
+	return frozenset({s.rule.rule_id for s in ex.steps if s.rule is not None} | set(named))

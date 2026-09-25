@@ -276,3 +276,36 @@ class TestPolicyOverride(unittest.TestCase):
 		t = cascaded(fx.bands(), tuple(r for r in fx.occ_rules() if r.rule_id != "O-INF"), layers=(self.OVR,))
 		self.assertEqual(occ(t, 2, 1).total, D("215"))
 		self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", warnings(t))
+
+
+class TestHiddenPolicyRules(unittest.TestCase):
+	"""A viewer who may not read a pricing policy's formulas (``hidden``, S16 review) gets no
+	issue whose presence depends on one: the sweep's issues for a party a hidden rule takes part in
+	(a probe "2A+1C SUBTRACT X" is a threshold oracle) and OCC_POLICY_OVERRIDE_OUTRANKED (it shows
+	only while the version's rule differs from the override: an equality oracle)."""
+
+	OVR = TestPolicyOverride.OVR
+
+	def test_an_outranked_override_is_left_out(self):
+		t = cascaded(fx.bands(), fx.occ_rules(), layers=(self.OVR,))
+		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED", warnings(t))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED",
+		                 [i.code for i in validate.validate_terms(t, hidden=hidden)])
+
+	def test_the_sweep_says_nothing_about_a_party_a_hidden_rule_prices(self):
+		probe = rule("V-PROBE", COMBINATION, Op.SUBTRACT, "251", adults=2, children=1)
+		t = cascaded((), (probe,), layers=(GLOBAL,))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		negative = [i for i in validate.validate_terms(t) if i.code == "NEGATIVE_OCCUPANCY_PRICE"]
+		self.assertTrue(any(i.ref["adults"] == 2 and i.ref["children"] == 1 for i in negative))
+		self.assertNotIn("NEGATIVE_OCCUPANCY_PRICE", [i.code for i in validate.validate_terms(t, hidden=hidden)])
+		# a party no hidden rule prices is still reported: the version's own rules only
+		own = rule("V-CHD", CHILD, Op.PERCENT_OF, "50", age_band="CHD")
+		t = cascaded((), (probe, own, rule("V-A1", ADULT, Op.MULTIPLY, "1", position=1),
+		                  rule("V-A2", ADULT, Op.MULTIPLY, "1", position=2)), layers=(GLOBAL,))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		kept = [i for i in validate.validate_terms(t, hidden=hidden) if i.code == "NEGATIVE_OCCUPANCY_PRICE"]
+		self.assertTrue(any(i.ref["adults"] == 2 and i.ref["children"] == 1 and i.ref["age_band"] == "CHD"
+		                    for i in kept))
+

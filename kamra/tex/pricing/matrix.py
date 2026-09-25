@@ -6,7 +6,9 @@ never recomputes a price itself:
 * ``unit_source``: which room rule priced a room's unit in a period, whether it is the period's
   own rule or the rule for every period, the rooms it was derived through and the rules it beat;
 * ``party_total``: the occupancy total of a sample party in a room and period, built the way the
-  publish sweep builds one (each child at the lower edge of its age band).
+  publish sweep builds one (each child at the lower edge of its age band);
+* ``party_rules``: the occupancy rules that take part in pricing such a party, also when it cannot
+  be priced (a viewer who may not read some rules is told nothing about a party they price).
 
 And the one computation the workspace asks the server for instead of doing it (GAP-7, D2):
 ``adjust_amount``, an entered price changed once by an op, as the ARI grid's rate change does.
@@ -20,7 +22,7 @@ from kamra.tex.money import ZERO, D, quantize, to_str, to_str_min
 from kamra.tex.pricing import ages, occupancy, ops, rooms
 from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.explain import Explanation
-from kamra.tex.pricing.model import ContractTerms, Period, PricingError
+from kamra.tex.pricing.model import ContractTerms, Period, PricingError, Unsellable
 
 
 def rule_value(value: Decimal | None) -> str | None:
@@ -90,6 +92,23 @@ def party_total(terms: ContractTerms, room_type: str, period: Period, adults: in
 	          "rule_id": s.rule.rule_id if s.rule else None, "included": s.included}
 	         for s in result.slots]
 	return result.total, slots
+
+
+def party_rules(terms: ContractTerms, room_type: str, period: Period, adults: int, band_codes) -> frozenset[str]:
+	"""The ids of the occupancy rules that take part in pricing the sample party of ``party_total``:
+	each slot's winner and the whole-combination rule (``occupancy.rules_taking_part``), also when
+	the party cannot be priced. None when it fails before its occupancy is priced (a room not in
+	the contract, an unknown band, a party the room cannot hold, no unit)."""
+	spec = terms.rooms.get(room_type)
+	if spec is None:
+		return frozenset()
+	try:
+		party = sample_party(terms, adults, band_codes, period.start)
+		occupancy.check_capacity(spec, party, terms.infants_count_as_occupants)
+		unit = rooms.room_unit(terms, room_type, period)
+	except (Unsellable, PricingError):
+		return frozenset()
+	return occupancy.rules_taking_part(terms, spec, period, unit, party)
 
 
 def adjust_amount(current: Decimal, op: Op, value: Decimal, currency: str) -> Decimal:

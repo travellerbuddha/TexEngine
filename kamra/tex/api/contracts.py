@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
+import time
+from contextlib import contextmanager, nullcontext
 from datetime import date
 
 import frappe
@@ -35,11 +36,24 @@ ROW_BOOKKEEPING = ("name", "parent", "parenttype", "parentfield", "doctype", "id
 OVERLAY_MAX_ROWS = 5000
 # per user (ADR-061, S16 review): the calls a minute and the calls running at once of the workspace's
 # heavy reads — "validate": validate_version (10–16 s near the row cap, with or without data);
-# "matrix": price_matrix with unsaved data or sample parties. An aborted fetch does not stop the
-# server, so the client's one-call-in-flight is no bound.
-HEAVY_LIMITS = {"validate": (60, 3), "matrix": (120, 6)}
+# "matrix": price_matrix with unsaved data or sample parties; "preview": preview_price with unsaved
+# data (the same overlay; the price test's Live mode). An aborted fetch does not stop the server, so
+# the client's one-call-in-flight is no bound.
+HEAVY_LIMITS = {"validate": (60, 3), "matrix": (120, 6), "preview": (120, 6)}
 HEAVY_WINDOW = 60              # seconds of a budget
-HEAVY_RUNNING_TTL = 300        # a crashed call's slot is freed after this many seconds
+HEAVY_RUNNING_TTL = 300        # a crashed call's slot is freed this many seconds after the call started
+# the budget in one step: counted, and given its window when it has none. Two separate steps (SET NX
+# EX, then INCR) left a counter without a TTL when the window ran out between them, and its user was
+# refused for good (S16 review); a counter left so is healed by its next use.
+_BUDGET_SCRIPT = """local n = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n"""
+# a call's slot is its start time in a sorted set: slots older than the TTL are dropped first, so a
+# crashed call's slot ages out however often its user retries meanwhile; → the calls running now
+_SLOT_SCRIPT = """redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', tonumber(ARGV[1]) - tonumber(ARGV[2]))
+redis.call('ZADD', KEYS[1], ARGV[1], ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return redis.call('ZCARD', KEYS[1])"""
 
 
 class OverlayTooLarge(frappe.ValidationError):
@@ -385,41 +399,47 @@ def _heavy_key(kind: str, what: str, user: str | None = None) -> str:
 	return frappe.cache.make_key(f"tex:heavy:{kind}:{what}:{user or frappe.session.user}")
 
 
+def _now() -> float:
+	return time.time()
+
+
 @contextmanager
 def _heavy(kind: str):
 	"""A heavy read of ``kind`` (``HEAVY_LIMITS``) by the session user: refused with
 	``RateLimitExceededError`` (429) above its budget a minute, or while as many of the user's own
-	calls of that kind are still running (ADR-061, S16 review)."""
+	calls of that kind are still running (ADR-061, S16 review). Both counts are kept in redis, each in
+	one atomic step (``_BUDGET_SCRIPT``, ``_SLOT_SCRIPT``)."""
 	if not _in_request():
 		yield
 		return
 	per_minute, at_once = HEAVY_LIMITS[kind]
-	budget = _heavy_key(kind, "minute")
-	frappe.cache.set(budget, 0, ex=HEAVY_WINDOW, nx=True)
-	if frappe.cache.incr(budget) > per_minute:
+	if frappe.cache.eval(_BUDGET_SCRIPT, 1, _heavy_key(kind, "minute"), HEAVY_WINDOW) > per_minute:
 		frappe.throw(_("Too many price checks in a minute; wait a moment and try again."),
 		             frappe.RateLimitExceededError)
-	running = _heavy_key(kind, "running")
-	count = frappe.cache.incr(running)
-	frappe.cache.expire(running, HEAVY_RUNNING_TTL)
+	slots, token = _heavy_key(kind, "slots"), frappe.generate_hash(length=16)
+	count = frappe.cache.eval(_SLOT_SCRIPT, 1, slots, repr(_now()), HEAVY_RUNNING_TTL, token)
 	try:
 		if count > at_once:
 			frappe.throw(_("Your other price checks are still running; try again when they have finished."),
 			             frappe.RateLimitExceededError)
 		yield
 	finally:
-		if frappe.cache.decr(running) <= 0:
-			frappe.cache.delete(running)
+		frappe.cache.zrem(slots, token)
 
 
 @frappe.whitelist()
 def validate_version(name: str, data=None):
 	"""Validate the saved draft, or with ``data`` the draft with those unsaved changes (ADR-061).
-	Bounded per user (``_heavy``): near the row cap one call takes 10–16 s."""
+	Bounded per user (``_heavy``): near the row cap one call takes 10–16 s.
+
+	A viewer without ``price.view_cost`` gets no issue whose presence depends on the value of an
+	inherited pricing-policy rule (its formula is cost, G-11): an overlay probe rule would otherwise
+	find it by bisection without a save or an audit entry (S16 review; ``validate_terms(hidden=…)``)."""
 	with _heavy("validate"):
+		formula = scope.has_capability("price.view_cost", scope.property_of("TEX Contract Version", name))
 		if _has_data(data):
-			return svc.validate_doc(_overlay(name, data))
-		return svc.validate_version(name)
+			return svc.validate_doc(_overlay(name, data), formula=formula)
+		return svc.validate_version(name, formula=formula)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -457,6 +477,14 @@ def preview_price(version: str, room_type: str, board: str, check_in: str, check
 	v = frappe.get_doc("TEX Contract Version", version)
 	prop = scope.property_of("TEX Contract Version", version)
 	scope.require("price.view_cost", prop)
+	# with data it builds the matrix's overlay (up to 5,000 rows): bounded per user as the matrix is
+	with _heavy("preview") if _has_data(data) else nullcontext():
+		return _preview_price(v, version, prop, room_type, board, check_in, check_out, adults, children, rate_plan,
+		                      market, channel, currency, sale_at, promo_codes, data)
+
+
+def _preview_price(v, version, prop, room_type, board, check_in, check_out, adults, children, rate_plan, market,
+                   channel, currency, sale_at, promo_codes, data) -> dict:
 	at = frappe.utils.get_datetime(sale_at) if sale_at else now_datetime()
 	kids = _child_specs(children, getdate(check_in))
 	draft = _overlay(version, data) if _has_data(data) else None
@@ -649,22 +677,24 @@ def _occupancy_defaults() -> dict:
 
 
 def _party_cells(terms, room_type: str, parties, hidden_rules: frozenset[str] = frozenset()) -> list[dict]:
-	"""Each sample party's total per period. A total priced with one of ``hidden_rules`` (an
-	inherited policy rule a viewer without cost may not read, S16 review) is left out: its period is
-	listed in ``hidden``, without a total, slots or error, so no formula can be worked back."""
+	"""Each sample party's total per period. A party one of ``hidden_rules`` takes part in (an
+	inherited policy rule a viewer without cost may not read, S16 review: a slot's rule or the
+	whole-party rule) is left out, whether it prices or fails: its period is listed in ``hidden``,
+	without a total, slots or error, so no formula can be worked back (a total next to its slots, or
+	a failure such as a negative total that a probe rule of the draft provokes)."""
 	out = []
 	for adults, kids in parties:
 		cell = {"cells": {}, "slots": {}, "errors": {}, "hidden": []}
 		for p in terms.periods:
+			if hidden_rules and matrix.party_rules(terms, room_type, p, adults, kids) & hidden_rules:
+				cell["cells"][p.code] = None
+				cell["hidden"].append(p.code)
+				continue
 			try:
 				total, slots = matrix.party_total(terms, room_type, p, adults, kids)
 			except (Unsellable, PricingError) as e:
 				cell["cells"][p.code] = None
 				cell["errors"][p.code] = getattr(e, "message", None) or str(e)
-				continue
-			if any(s["rule_id"] in hidden_rules for s in slots):
-				cell["cells"][p.code] = None
-				cell["hidden"].append(p.code)
 				continue
 			cell["cells"][p.code] = money.to_str(total)
 			cell["slots"][p.code] = slots

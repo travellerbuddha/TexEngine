@@ -9,8 +9,8 @@ from decimal import Decimal
 
 from kamra.tex.money import quantize, to_str
 from kamra.tex.pricing import engine, matrix, ops
-from kamra.tex.pricing.enums import ChildOrdering, Op, PricingBasis
-from kamra.tex.pricing.model import ChildSpec, PricingError, RoomRule, Unsellable
+from kamra.tex.pricing.enums import ChildOrdering, OccTarget, Op, PricingBasis
+from kamra.tex.pricing.model import ChildSpec, OccupancyRule, PricingError, RoomRule, Unsellable
 from kamra.tex.tests.unit import fixtures as fx
 
 D = Decimal
@@ -158,6 +158,47 @@ class TestPartyTotal(unittest.TestCase):
 		with self.assertRaises(Unsellable) as cm:
 			matrix.party_total(t, "STD", period(t, "P1"), 2, ["TEEN"])
 		self.assertEqual(cm.exception.code, "NO_CHILD_RULE")
+
+
+class TestPartyRules(unittest.TestCase):
+	"""The rules that take part in pricing a sample party, also when it cannot be priced: a
+	viewer who may not read some rules is told nothing about a party one of them prices (S16
+	review: a whole-party rule is not a slot rule, and a failure's message is an oracle too)."""
+
+	def setUp(self):
+		self.t = fx.terms()
+		self.p1 = period(self.t, "P1")
+
+	def test_each_slots_winner_and_the_whole_party_rule(self):
+		self.assertEqual(matrix.party_rules(self.t, "STD", self.p1, 2, ["CHB"]), {"O-A1", "O-A2", "O-CHB"})
+		combo = OccupancyRule("O-2A0C", OccTarget.COMBINATION, Op.ADJUST_PERCENT, D("-10"), adults=2, children=0)
+		t = replace(self.t, occupancy_rules=(*self.t.occupancy_rules, combo))
+		total, slots = matrix.party_total(t, "STD", self.p1, 2, [])
+		self.assertEqual((total, {s["rule_id"] for s in slots}), (D("180"), {"O-A1", "O-A2"}))
+		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, []), {"O-A1", "O-A2", "O-2A0C"})
+
+	def test_a_party_that_cannot_be_priced(self):
+		probe = OccupancyRule("V-PROBE", OccTarget.COMBINATION, Op.SUBTRACT, D("251"), adults=2, children=1)
+		t = replace(self.t, occupancy_rules=(*self.t.occupancy_rules, probe))
+		with self.assertRaises(Unsellable) as cm:
+			matrix.party_total(t, "STD", self.p1, 2, ["CHB"])
+		self.assertEqual(cm.exception.code, "NEGATIVE_OCCUPANCY_PRICE")
+		# every rule priced before the total fell below zero
+		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, ["CHB"]), {"O-A1", "O-A2", "O-CHB", "V-PROBE"})
+		# the rules an ambiguity names
+		twin = OccupancyRule("O-CHB-2", OccTarget.CHILD, Op.PERCENT_OF, D("40"), age_band="CHB")
+		t = replace(self.t, occupancy_rules=(*self.t.occupancy_rules, twin))
+		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, ["CHB"]), {"O-A1", "O-A2", "O-CHB", "O-CHB-2"})
+		# a child without a rule: the rules resolved before it
+		t = replace(self.t, occupancy_rules=tuple(r for r in self.t.occupancy_rules if r.rule_id != "O-TEEN"))
+		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, ["TEEN"]), {"O-A1", "O-A2"})
+
+	def test_no_rule_takes_part_before_the_occupancy_is_priced(self):
+		for room, adults, kids in (("STD", 2, ["CHA", "CHA", "CHB"]), ("STD", 2, ["XX"]), ("NOPE", 2, [])):
+			with self.subTest(room=room, kids=kids):
+				self.assertEqual(matrix.party_rules(self.t, room, self.p1, adults, kids), frozenset())
+		t = replace(self.t, room_rules=tuple(r for r in self.t.room_rules if r.rule_id != "R-STD-P1"))
+		self.assertEqual(matrix.party_rules(t, "STD", self.p1, 2, []), frozenset())
 
 
 class TestBandLayer(unittest.TestCase):
