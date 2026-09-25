@@ -19,7 +19,8 @@ import {
   planFill,
   serverCalls,
 } from "../../src/tex/screens/rates/workspace/bulk.ts"
-import { finishItems, planItems } from "../../src/tex/screens/rates/workspace/matrixView.ts"
+import { cellCopyText, finishItems, planItems } from "../../src/tex/screens/rates/workspace/matrixView.ts"
+import { matrixModel } from "../../src/tex/screens/rates/workspace/model.ts"
 
 let seq = 0
 const r = (fields: Record<string, string | number | null>): Row => ({ _key: `b${++seq}`, ...fields })
@@ -103,16 +104,88 @@ test("a formula is never copied into a price row: the whole fill is refused at t
   assert.deepEqual(planFill(t, [{ from: at("SUP", "P4"), to: at("STD", "P4") }]), { error: "FILL_FORMULA", cell: at("STD", "P4") })
 })
 
-test("an empty or inherited source clears its targets; an INHERIT row is copied as INHERIT", () => {
+test("Fill → within a row: a source that follows all periods makes the targets follow them too; an INHERIT row is copied as INHERIT", () => {
   const t = owner()
-  // Superior P1 follows all periods: copied over P4's own ×1.2, P4 follows all periods too
+  // Superior P1 follows all periods: copied over P4's own ×1.2, P4 follows all periods too (the
+  // price Superior P1 shows); nothing is counted as cleared
   const res = planFill(t, [{ from: at("SUP", "P1"), to: at("SUP", "P4") }])
   assert.ok("tables" in res)
   assert.deepEqual(ratesOf(res.tables, "SUP"), ["*:MULTIPLY:1.15:STD", "P2:ABSOLUTE:245:-"])
+  assert.deepEqual(res.cleared, [])
   const inh = { ...t, period_rates: [...t.period_rates, rate("DLX", "P1", "INHERIT", "")] }
   const res2 = planFill(inh, [{ from: at("DLX", "P1"), to: at("DLX", "P2") }])
   assert.ok("tables" in res2)
   assert.deepEqual(ratesOf(res2.tables, "DLX"), ["*:MULTIPLY:1.35:STD", "P1:INHERIT::-", "P2:INHERIT::-"])
+  assert.deepEqual(res2.cleared, [])
+})
+
+test("Fill ↓ copies what a following source shows: the All-periods rule it follows, never the target's own", () => {
+  // Superior P1 shows "follows all periods, ×1.15"; Deluxe P1 holds an override ×1.5. Filled down,
+  // Deluxe P1 gets ×1.15 from Standard (as built in S10 it was cleared and showed Deluxe's ×1.35)
+  const t = { ...owner(), period_rates: [...owner().period_rates, rate("DLX", "P1", "MULTIPLY", "1.5", "STD")] }
+  const res = planFill(t, [{ from: at("SUP", "P1"), to: at("DLX", "P1") }])
+  assert.ok("tables" in res, JSON.stringify(res))
+  assert.deepEqual(ratesOf(res.tables, "DLX"), ["*:MULTIPLY:1.35:STD", "P1:MULTIPLY:1.15:STD"])
+  assert.deepEqual(res.fixed, [])
+  assert.deepEqual(res.cleared, [])
+  // an INHERIT row prices by its room's All-periods rule too: Deluxe P1 (INHERIT, ×1.35) filled
+  // down onto Superior P1 gives Superior P1 ×1.35
+  const inh = { ...owner(), period_rates: [...owner().period_rates, rate("DLX", "P1", "INHERIT", "")] }
+  const res2 = planFill(inh, [{ from: at("DLX", "P1"), to: at("SUP", "P1") }])
+  assert.ok("tables" in res2)
+  assert.deepEqual(ratesOf(res2.tables, "SUP"), ["*:MULTIPLY:1.15:STD", "P2:ABSOLUTE:245:-", "P4:MULTIPLY:1.2:STD", "P1:MULTIPLY:1.35:STD"])
+  // the Family room's P1 follows its All-periods price 90: into a formula row it is a fixed price
+  // override (confirmed first), and a following formula is never copied into a price row
+  const price = planFill(owner(), [{ from: at("FAM", "P1"), to: at("SUP", "P1") }])
+  assert.ok("tables" in price)
+  assert.deepEqual(price.fixed, [at("SUP", "P1")])
+  assert.equal(ratesOf(price.tables, "SUP").at(-1), "P1:ABSOLUTE:90:-")
+  assert.deepEqual(planFill(owner(), [{ from: at("SUP", "P1"), to: at("FAM", "P1") }]), { error: "FILL_FORMULA", cell: at("FAM", "P1") })
+})
+
+test("a source that shows no rule clears its targets, and the plan names the cells it cleared", () => {
+  const t = owner()
+  // Standard has no All-periods price: a row-header selection filled right clears P1..P4
+  const across = planFill(
+    t,
+    ["P1", "P2", "P3", "P4"].map((p) => ({ from: at("STD", ""), to: at("STD", p) })),
+  )
+  assert.ok("tables" in across)
+  assert.deepEqual(ratesOf(across.tables, "STD"), [])
+  assert.deepEqual(across.cleared, [at("STD", "P1"), at("STD", "P2"), at("STD", "P3"), at("STD", "P4")])
+  assert.equal(across.count, 4)
+  // filled down onto Deluxe's All periods: its ×1.35 is removed and named
+  const down = planFill(t, [{ from: at("STD", ""), to: at("DLX", "") }])
+  assert.ok("tables" in down)
+  assert.deepEqual(ratesOf(down.tables, "DLX"), [])
+  assert.deepEqual(down.cleared, [at("DLX", "")])
+  // a target that held nothing is not cleared (nothing changed there)
+  const none = planFill(t, [{ from: at("STD", ""), to: at("FAM", "P3") }])
+  assert.ok("tables" in none)
+  assert.equal(none.tables, t)
+  assert.deepEqual(none.cleared, [])
+})
+
+test("Ctrl/Cmd+C copies what a cell shows: its own rule, else the All-periods rule it follows (an INHERIT row too); nothing for no rule", () => {
+  const t = { ...owner(), period_rates: [...owner().period_rates, rate("DLX", "P1", "INHERIT", "")] }
+  const m = matrixModel(t, "PERSON")
+  const cell = (room: string, period: string) => m.rooms.find((x) => x.room_type === room)?.cells[period]
+  const copy = (room: string, period: string) => cellCopyText(cell(room, period), { minorUnits: 2 })
+  assert.equal(copy("STD", "P1"), "70")
+  assert.equal(copy("SUP", "P4"), "x1.2")
+  assert.equal(copy("SUP", "P2"), "245")
+  // follows all periods
+  assert.equal(copy("SUP", "P1"), "x1.15")
+  assert.equal(copy("FAM", "P3"), "90")
+  // its own INHERIT row: priced by Deluxe's All-periods ×1.35
+  assert.equal(copy("DLX", "P1"), "x1.35")
+  // no rule at all: Standard's All periods
+  assert.equal(copy("STD", ""), "")
+  assert.equal(cellCopyText(undefined), "")
+  // the text parses back to what the cell shows: pasted into Superior P1 it stores nothing new
+  const back = planItems(t, [{ cell: at("SUP", "P1"), parsed: sh(copy("SUP", "P1")) }])
+  assert.ok("tables" in back)
+  assert.equal(back.tables, t)
 })
 
 test("a copied formula never derives a room from itself: it takes the target's default base", () => {

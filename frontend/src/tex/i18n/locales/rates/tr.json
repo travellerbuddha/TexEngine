@@ -1232,6 +1232,10 @@
   "other": "Formül satırlarındaki {count} hücre, formülleri yerine sabit bir fiyat alacak. Sabit fiyat uygulansın mı?"
  },
  "rates.ws.fill.confirm": "Sabit fiyatı uygula",
+ "rates.ws.fill.cleared": {
+  "one": "{count} hücre temizlendi (boş bir hücreden kopyalandı)",
+  "other": "{count} hücre temizlendi (boş hücrelerden kopyalandı)"
+ },
  "rates.ws.h.fill_right": {
   "one": "Sağa doldur ({count} hücre)",
   "other": "Sağa doldur ({count} hücre)"

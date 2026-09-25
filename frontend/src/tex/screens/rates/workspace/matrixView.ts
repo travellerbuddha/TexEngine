@@ -288,6 +288,18 @@ export function cellEditText(cell: RoomCell | undefined, opts?: { decimalMark?: 
   return editText(str(rule.op) as ShOp, str(rule.value), "room", opts)
 }
 
+/** The text Ctrl/Cmd+C copies for an entry cell (§3.10, S10 review): the canonical edit text of
+ * the rule the cell shows, which is its own rule, or (no rule of its own, or its own INHERIT row,
+ * which the engine skips) its room's All-periods rule; empty when it shows no rule. What a cell
+ * shows is what a spreadsheet gets, and the text pasted back into the same cell stores nothing
+ * new (a period rule equal to the All-periods rule is not stored). */
+export function cellCopyText(cell: RoomCell | undefined, opts?: { decimalMark?: "." | ","; minorUnits?: number }): string {
+  const own = cell?.rule
+  const rule = own && str(own.op) !== "INHERIT" ? own : cell?.defaultRule
+  if (!rule || str(rule.op) === "INHERIT") return ""
+  return editText(str(rule.op) as ShOp, str(rule.value), "room", opts)
+}
+
 /** The decimal mark of a locale ("," for de-DE, tr-TR …). The parser accepts both marks. */
 export function decimalMarkOf(locale: string): "." | "," {
   try {

@@ -1232,6 +1232,10 @@
   "other": "{count} cells of formula rows would get a fixed price instead of their formula. Set a fixed price override?"
  },
  "rates.ws.fill.confirm": "Set fixed price",
+ "rates.ws.fill.cleared": {
+  "one": "{count} cell cleared (copied from an empty cell)",
+  "other": "{count} cells cleared (copied from empty cells)"
+ },
  "rates.ws.h.fill_right": {
   "one": "Fill right ({count} cell)",
   "other": "Fill right ({count} cells)"

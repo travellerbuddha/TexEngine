@@ -1259,6 +1259,11 @@
   "other": "{count} de celule ale rândurilor de formule ar primi un preț fix în locul formulei. Setați prețul fix?"
  },
  "rates.ws.fill.confirm": "Setează prețul fix",
+ "rates.ws.fill.cleared": {
+  "one": "{count} celulă golită (copiată dintr-o celulă goală)",
+  "few": "{count} celule golite (copiate din celule goale)",
+  "other": "{count} de celule golite (copiate din celule goale)"
+ },
  "rates.ws.h.fill_right": {
   "one": "Completează la dreapta ({count} celulă)",
   "few": "Completează la dreapta ({count} celule)",

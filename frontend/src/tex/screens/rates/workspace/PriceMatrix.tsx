@@ -7,7 +7,7 @@
 // preview, S8); the client computes no amount. Every change is one workspace history entry.
 //
 // Bulk tools (§3.10, slice S10): header clicks select a row's or column's cells; Fill → / Fill ↓
-// (Ctrl/Cmd+R, Ctrl/Cmd+D) copy the first cell's rule, a price into a formula row only after an
+// (Ctrl/Cmd+R, Ctrl/Cmd+D) copy the rule the first cell shows, a price into a formula row only after an
 // inline confirmation; Ctrl/Cmd+C / V copy and paste TSV (the browser's clipboard events while a
 // cell has focus: no clipboard permission is asked); Adjust… changes entered prices by the
 // server's apply_op_values with a preview; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z / Ctrl+Y and the toolbar
@@ -48,6 +48,7 @@ import { ALL_PERIODS, isRelativeOp, matrixModel, type MatrixRoom, type NeedsServ
 import {
   addRoom,
   applyPopover,
+  cellCopyText,
   cellEditText,
   cellPosition,
   clearCells,
@@ -219,9 +220,11 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
 
   const historyApply = history.apply
   const edit = useCallback((label: string, fn: (tb: Tables) => Tables) => historyApply(label, fn), [historyApply])
-  /** The toast and the announcement of a bulk operation that was committed. */
-  const bulkDone = (count: number) => {
-    const message = t("rates.ws.bulk.applied", { count })
+  /** The toast and the announcement of a bulk operation that was committed (`note`: what else the
+   * user must know, e.g. the cells a fill cleared). */
+  const bulkDone = (count: number, note?: string) => {
+    const applied = t("rates.ws.bulk.applied", { count })
+    const message = note ? `${applied} · ${note}` : applied
     undoToast.show(message)
     say(message)
   }
@@ -478,18 +481,20 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     setFillAsk(null)
     dropDrafts(steps.map((x) => x.to))
     const label = t(dir === "right" ? "rates.ws.h.fill_right" : "rates.ws.h.fill_down", { count: plan.count })
-    if (history.commit(label, now, plan.tables)) bulkDone(plan.count)
+    // a source that shows no rule clears its targets: the toast says how many (S10 review)
+    if (history.commit(label, now, plan.tables)) bulkDone(plan.count, plan.cleared.length ? t("rates.ws.fill.cleared", { count: plan.cleared.length }) : undefined)
     else say(t("rates.ws.bulk.unchanged"))
   }
 
-  /** The text Ctrl/Cmd+C copies for a cell: the canonical edit text of its own rule ("." as the
-   * decimal mark, §1.4 stable codes), a resolved row's exact server amount (with the trailing zero
-   * edit text gives an amount that would read as AMBIGUOUS), "" for nothing. */
+  /** The text Ctrl/Cmd+C copies for a cell: the canonical edit text of the rule it shows (its own,
+   * else the All-periods rule it follows; "." as the decimal mark, §1.4 stable codes), a resolved
+   * row's exact server amount (with the trailing zero edit text gives an amount that would read as
+   * AMBIGUOUS), "" for nothing. */
   const copyText = (r: number, c: number): string => {
     const row = rows[r]
     const period = cols[c]
     if (!row || period === undefined) return ""
-    if (row.kind !== "resolved") return cellEditText(modelCell({ room: row.room, period }), { minorUnits })
+    if (row.kind !== "resolved") return cellCopyText(modelCell({ room: row.room, period }), { minorUnits })
     const v = period === ALL_PERIODS ? undefined : resolvedRooms.get(row.room)?.cells[period]
     return typeof v === "string" && v ? editText("ABSOLUTE", v, "room", { minorUnits }) : ""
   }

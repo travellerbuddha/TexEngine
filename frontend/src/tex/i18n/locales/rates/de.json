@@ -1232,6 +1232,10 @@
   "other": "{count} Zellen von Formelzeilen bekämen statt ihrer Formel einen Festpreis. Festpreis setzen?"
  },
  "rates.ws.fill.confirm": "Festpreis setzen",
+ "rates.ws.fill.cleared": {
+  "one": "{count} Zelle geleert (von einer leeren Zelle kopiert)",
+  "other": "{count} Zellen geleert (von leeren Zellen kopiert)"
+ },
  "rates.ws.h.fill_right": {
   "one": "Nach rechts füllen ({count} Zelle)",
   "other": "Nach rechts füllen ({count} Zellen)"

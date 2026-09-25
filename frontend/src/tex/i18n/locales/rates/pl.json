@@ -1286,6 +1286,12 @@
   "other": "{count} komórki wierszy formuł dostanie stałą cenę zamiast formuły. Ustawić stałą cenę?"
  },
  "rates.ws.fill.confirm": "Ustaw stałą cenę",
+ "rates.ws.fill.cleared": {
+  "one": "{count} komórka wyczyszczona (skopiowana z pustej komórki)",
+  "few": "{count} komórki wyczyszczone (skopiowane z pustych komórek)",
+  "many": "{count} komórek wyczyszczonych (skopiowanych z pustych komórek)",
+  "other": "{count} komórki wyczyszczone (skopiowane z pustych komórek)"
+ },
  "rates.ws.h.fill_right": {
   "one": "Wypełnij w prawo ({count} komórka)",
   "few": "Wypełnij w prawo ({count} komórki)",

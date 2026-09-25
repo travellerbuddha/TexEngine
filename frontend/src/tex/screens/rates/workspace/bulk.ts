@@ -31,16 +31,23 @@ export interface FillStep {
 
 export type FillPlan =
   /** `fixed`: targets in formula rows that get a price (a fixed price override): the screen asks
-   * "Set a fixed price override?" before it commits; `count`: the target cells */
-  | { tables: Tables; count: number; fixed: CellRef[] }
+   * "Set a fixed price override?" before it commits; `cleared`: targets whose rule was removed
+   * because their source shows no rule (the toast names them); `count`: the target cells */
+  | { tables: Tables; count: number; fixed: CellRef[]; cleared: CellRef[] }
   /** a formula copied into a price row (the base room or a manual room): refused as a whole */
   | { error: "FILL_FORMULA" | "NO_BASE_ROOM"; cell: CellRef }
 
 /**
  * Fill right ("copy across periods") and Fill down ("copy down rooms"), from the steps of
- * fillRightPlan / fillDownPlan, all or nothing (§3.10):
- * - the source cell's own rule is copied as it is (op and value): a price stays a price, INHERIT
- *   stays INHERIT, and a source without its own rule (it follows All periods) clears the target;
+ * fillRightPlan / fillDownPlan, all or nothing (§3.10). What is copied is the rule the source
+ * shows (S10 review):
+ * - within a room (Fill →) the source's own rule is copied as it is (op and value): a price stays
+ *   a price, INHERIT stays INHERIT; a source without a rule of its own follows All periods, so the
+ *   target's own rule is removed and the target follows the same All-periods rule;
+ * - into another room (Fill ↓) a source that follows All periods (no rule of its own, or its own
+ *   INHERIT row, which the engine skips) copies the All-periods rule it follows as if it were its
+ *   own, so the target shows what the source shows;
+ * - a source that shows no rule at all removes the target's rule: those targets are `cleared`;
  * - a formula keeps the room it derives from, unless that is the target room itself (then the
  *   target's default base), and goes into formula rows only: into a price row (the base room, where
  *   a relative entry would change the price once (O4), or a manual room) it is refused;
@@ -55,13 +62,20 @@ export function planFill(tables: Tables, steps: readonly FillStep[]): FillPlan {
   const role = new Map(model.rooms.map((x) => [x.room_type, x.role]))
   let acc = tables
   const fixed: CellRef[] = []
+  const cleared: CellRef[] = []
   for (const { from, to } of steps) {
     const target = { room: to.room, period: to.period }
-    const src: Row | null = cellOf(model, from)?.rule ?? null
+    const source = cellOf(model, from)
+    const own: Row | null = source?.rule ?? null
+    // the rule the source shows: its own, or the All-periods rule it follows
+    const shown: Row | null = own && str(own.op) !== "INHERIT" ? own : (source?.defaultRule ?? null)
+    const src: Row | null = from.room === to.room ? own : shown
     const formulaRow = role.get(to.room) === "derived"
     let next: Tables
-    if (!src) next = clearCells(acc, [target])
-    else if (str(src.op) === "INHERIT") next = upsertRoomRule(acc, to.room, to.period, { op: "INHERIT", value: "", base_room_type: "" })
+    if (!src) {
+      next = clearCells(acc, [target])
+      if (!shown && next !== acc) cleared.push(target)
+    } else if (str(src.op) === "INHERIT") next = upsertRoomRule(acc, to.room, to.period, { op: "INHERIT", value: "", base_room_type: "" })
     else if (isRelativeOp(src.op)) {
       if (!formulaRow) return { error: "FILL_FORMULA", cell: target }
       let base = str(src.base_room_type)
@@ -74,7 +88,7 @@ export function planFill(tables: Tables, steps: readonly FillStep[]): FillPlan {
     }
     acc = next
   }
-  return { tables: acc, count: steps.length, fixed }
+  return { tables: acc, count: steps.length, fixed, cleared }
 }
 
 // ─── Adjust… ────────────────────────────────────────────────────────────────
