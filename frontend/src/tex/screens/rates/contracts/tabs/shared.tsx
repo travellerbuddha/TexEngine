@@ -5,6 +5,7 @@ import type { EditorState, SellingForm } from "../../lib/tables"
 import type { Issue, Lookups, Row, VersionDoc, VersionSetting, VersionTable } from "../../lib/types"
 import { issueTable } from "../../lib/util"
 import type { DraftPreview } from "../../workspace/useDraftPreview"
+import type { WorkspaceHistory } from "../../workspace/useWorkspaceHistory"
 
 export interface TabProps {
   doc: VersionDoc
@@ -22,6 +23,11 @@ export interface TabProps {
   /** The editor's live preview (useDraftPreview): the resolved prices shown instead of fetching
    * them again, and no cost call for a viewer who may not make it. */
   preview?: DraftPreview
+  /** The workspace undo history (useWorkspaceHistory): every workspace edit goes through it. */
+  history?: WorkspaceHistory
+  /** Bumped each time the editor loads a version (and on Discard): workspace views keyed on it
+   * start afresh (no edit in progress, no error drafts). */
+  epoch?: number
 }
 
 export function roomOptions(doc: VersionDoc): Option[] {

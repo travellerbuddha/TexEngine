@@ -15,6 +15,7 @@ import { ContextHeader } from "../workspace/ContextHeader"
 import { PricingSection } from "../workspace/PricingSection"
 import { SECTIONS, DEFAULT_RULE_TABLE, type EditorPlace, type PricingRegion, type RuleTableId, type SectionId } from "../workspace/sections.ts"
 import { useDraftPreview } from "../workspace/useDraftPreview"
+import { useWorkspaceHistory } from "../workspace/useWorkspaceHistory"
 import { CommercialRulesSection } from "./sections/CommercialRulesSection"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
 import { OffersTab } from "./tabs/OffersTab"
@@ -61,12 +62,22 @@ export default function VersionEditor() {
     return () => window.removeEventListener("hashchange", onHash)
   }, [])
 
-  const load = useCallback((d: VersionDoc) => {
-    const s = stateFromDoc(d)
-    setDoc(d)
-    setState(s)
-    setBase(fingerprint(s))
-  }, [])
+  const setTable = useCallback((k: VersionTable, rows: Row[]) => setState((s) => (s ? { ...s, tables: { ...s.tables, [k]: rows } } : s)), [])
+  // the workspace undo history (§3.10): cleared whenever a version is loaded, and by Discard
+  const history = useWorkspaceHistory(state, setTable)
+  const clearHistory = history.clear
+  const [epoch, setEpoch] = useState(0)
+  const load = useCallback(
+    (d: VersionDoc) => {
+      const s = stateFromDoc(d)
+      setDoc(d)
+      setState(s)
+      setBase(fingerprint(s))
+      clearHistory()
+      setEpoch((n) => n + 1)
+    },
+    [clearHistory],
+  )
   useEffect(() => {
     if (q.data) load(q.data)
   }, [q.data, load])
@@ -120,7 +131,6 @@ export default function VersionEditor() {
     }
   }, [onSave, dirty])
 
-  const setTable = useCallback((k: VersionTable, rows: Row[]) => setState((s) => (s ? { ...s, tables: { ...s.tables, [k]: rows } } : s)), [])
   const setSetting = useCallback((k: VersionSetting, v: string | number) => setState((s) => (s ? { ...s, settings: { ...s.settings, [k]: v } } : s)), [])
   const setSelling = useCallback((patch: Partial<SellingForm>) => setState((s) => (s?.selling ? { ...s, selling: { ...s.selling, ...patch } } : s)), [])
   // the tabs write the canonical hash (#pricing, #rules/<table>, #offers, #preview)
@@ -182,7 +192,7 @@ export default function VersionEditor() {
     )
 
   const props: TabProps | undefined =
-    doc && state ? { doc, state, readOnly: !editable, issues, setTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview } : undefined
+    doc && state ? { doc, state, readOnly: !editable, issues, setTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview, history, epoch } : undefined
 
   const draftAction =
     doc &&
