@@ -783,7 +783,8 @@ export interface CombinationCard {
   /** Scoped to specific periods (◆). */
   periodScoped: boolean
   /** The structured builder can edit it (builderCanEdit: no note, one rule per guest and band,
-   * guests the combination has); the others are edited in the rule tables. */
+   * guests the combination has, no negative value outside Plus/minus %, All or named rooms and
+   * periods); the others are edited in the rule tables. */
   expressible: boolean
 }
 
@@ -814,8 +815,10 @@ function countOf(part: string): number | null {
 /** Groups the rows with a combination into cards (§3.7.4): rows of the same combination, room,
  * period and override flag form a cell; cells with the same combination, flag and rules (target,
  * position, band, op, value, note; values canonical) form a card over rooms R × periods P, which
- * is split by room when its cells are not exactly R × P. Cards are ordered by adults, children,
- * then room and period table order (any "*" after numbers). */
+ * is split by room when its cells are not exactly R × P. All rooms (room_type blank) and named
+ * rooms are never one card, nor All periods and named periods: they are different scope choices
+ * of the builder, and different rules to the engine (a named room or period outranks All). Cards
+ * are ordered by adults, children, then room and period table order (any "*" after numbers). */
 export function groupCombinations(tables: Pick<Tables, "rooms" | "periods" | "occupancy_rules">): CombinationCard[] {
   const roomIdx = new Map<string, number>([["", -1]])
   tables.rooms.forEach((r, i) => roomIdx.has(str(r.room_type)) || roomIdx.set(str(r.room_type), i))
@@ -867,14 +870,24 @@ export function groupCombinations(tables: Pick<Tables, "rooms" | "periods" | "oc
       rules: g.rules,
       keys,
       periodScoped: periods.some((p) => p !== ALL_PERIODS),
-      expressible: builderCanEdit({ combination: g.combination, adults, children, rules: g.rules }),
+      expressible: builderCanEdit({ combination: g.combination, adults, children, rules: g.rules, rooms, periods }),
     }
   }
   for (const g of groups.values()) {
-    const rooms = new Set(g.cells.map((c) => c.room))
-    const periods = new Set(g.cells.map((c) => c.period))
-    if (g.cells.length === rooms.size * periods.size) cards.push(card(g, g.cells))
-    else for (const room of rooms) cards.push(card(g, g.cells.filter((c) => c.room === room)))
+    // All rooms / All periods apart from named ones, then the cross product or a split by room
+    const scopes = new Map<string, typeof g.cells>()
+    for (const c of g.cells) {
+      const k = `${c.room === "" ? "all" : "named"}|${c.period === ALL_PERIODS ? "all" : "named"}`
+      const list = scopes.get(k)
+      if (list) list.push(c)
+      else scopes.set(k, [c])
+    }
+    for (const cells of scopes.values()) {
+      const rooms = new Set(cells.map((c) => c.room))
+      const periods = new Set(cells.map((c) => c.period))
+      if (cells.length === rooms.size * periods.size) cards.push(card(g, cells))
+      else for (const room of rooms) cards.push(card(g, cells.filter((c) => c.room === room)))
+    }
   }
 
   // 4. order
@@ -1004,8 +1017,9 @@ export function readBuilderValue(text: string, op: string, minorUnits: number): 
 
 /** The text a Value field shows for a stored rule, read back to the same rule by readBuilderValue
  * with that rule chosen: the number alone ("0.5", "25", "-5" under Plus/minus %; an amount such as
- * 12.345 as "12.3450" so the AMBIGUOUS guard accepts it), any other negative value in its shorthand;
- * "" for INHERIT. */
+ * 12.345 as "12.3450" so the AMBIGUOUS guard accepts it); "" for INHERIT. A negative value of any
+ * other rule shows in its shorthand, which does not read back to that rule ("-5" for ADD -5 reads
+ * as SUBTRACT 5, "x-1" is refused): builderCanEdit keeps such cards out of the builder. */
 export function builderValueText(op: string, value: string, opts?: ShFormatOptions): string {
   if (op === "INHERIT") return ""
   const canon = normaliseDecimal(str(value))
@@ -1019,17 +1033,25 @@ export function builderValueText(op: string, value: string, opts?: ShFormatOptio
 
 const RE_COMBINATION = /^([0-9]+|\*)\+([0-9]+|\*)$/
 
-/** The structured builder can show a card as it is, so saving it unchanged writes the same rules:
- * a readable combination (not "any + any", at least one adult), no note, occupancy ops only, one
- * rule per adult position (1…adults), per child position (1…children) and band, and at most one
- * whole-stay rule (position 0, no band). Others are edited in the rule tables (§3.7.4). */
-export function builderCanEdit(card: Pick<CombinationCard, "combination" | "adults" | "children" | "rules">): boolean {
+/** The structured builder can show a card as it is, so saving it unchanged writes the same rows:
+ * a readable combination (not "any + any", at least one adult), All rooms or named rooms (not
+ * both; likewise periods), no note, occupancy ops only, no negative value except under Plus/minus
+ * %, one rule per adult position (1…adults), per child position (1…children) and band, and at most
+ * one whole-stay rule (position 0, no band). Others are edited in the rule tables (§3.7.4). */
+export function builderCanEdit(card: Pick<CombinationCard, "combination" | "adults" | "children" | "rules" | "rooms" | "periods">): boolean {
   const m = RE_COMBINATION.exec(card.combination)
   if (!m || (m[1] === "*" && m[2] === "*")) return false
   if (card.adults !== null && card.adults < 1) return false
+  // the builder's scope is All or named ones: Save would write All only and drop the named rows
+  const mixed = (list: readonly string[], all: string) => list.includes(all) && list.some((x) => x !== all)
+  if (mixed(card.rooms, "") || mixed(card.periods, ALL_PERIODS)) return false
   const seen = new Set<string>()
   for (const r of card.rules) {
     if (r.note || !(OPS_BY_CONTEXT.occupancy as readonly string[]).includes(r.op)) return false
+    if (r.op !== "ADJUST_PERCENT" && r.op !== "INHERIT") {
+      const d = normaliseDecimal(r.value)
+      if (d.ok && d.value.startsWith("-")) return false
+    }
     const slot = `${r.target}|${r.position}|${r.age_band}`
     if (seen.has(slot)) return false
     seen.add(slot)
@@ -1073,8 +1095,10 @@ export type BuilderIssue =
   | { code: "VALUE"; line: string; value: ShErrorCode }
   /** a second rule of one guest (and band) in this combination */
   | { code: "DUPLICATE" | "POSITION"; line: string }
-  /** the rule already exists in another card for the same rooms and periods (OCC_DUPLICATE):
-   * `keys` are that card's rows */
+  /** another card already has a rule for this guest and band in the same rooms and periods: the
+   * server's OCC_DUPLICATE for two non-INHERIT rules. With an INHERIT on either side the server
+   * accepts it, but the engine skips the INHERIT one and the two rows form one card the builder
+   * cannot open, so it is refused too. `keys` are the other card's rows */
   | { code: "TWIN"; line: string; keys: string[] }
 
 export interface CombinationPlan {
@@ -1091,7 +1115,8 @@ export interface CombinationPlan {
  * room × period, replacing the edited card's rows; blank lines write nothing (that guest keeps the
  * ladder's rules). Refused: a value the parser refuses, a second rule for one guest and band, an
  * adult the combination does not have, no rule, no room or period chosen, "any adults + any
- * children", and the twin of a row of another card (the server's OCC_DUPLICATE). Pure. */
+ * children", and the twin of a row of another card (the server's OCC_DUPLICATE; INHERIT twins
+ * included, see TWIN). Pure. */
 export function planCombination(tables: Pick<Tables, "rooms" | "periods" | "occupancy_rules">, draft: BuilderDraft, opts: BuilderOptions): CombinationPlan {
   const issues: BuilderIssue[] = []
   const combination = `${draft.adults}+${draft.children}`

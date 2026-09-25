@@ -40,7 +40,7 @@ export interface ComboText {
   rules: (rules: readonly CardRule[]) => string
   /** the children's age bands by label: "Child 1: Child 7–11.99 · Child 2: any age" */
   bands: (rules: readonly CardRule[]) => string
-  /** "All rooms · All periods", "Standard, Deluxe · P1, P2" */
+  /** "All rooms · All periods", "Standard, Deluxe · P1, P2"; All with named ones: "All rooms + Standard" */
   scope: (rooms: readonly string[], periods: readonly string[]) => string
   /** one rule as a cell shows it: "×0.50", "−5%", "25.00", "inherit" */
   rule: (op: string, value: string) => string
@@ -77,9 +77,12 @@ export function useComboText(labels: BandLabels, minorUnits: number, roomName: (
           })
           .join(" · "),
       scope: (rooms, periods) => {
-        const r = rooms.includes("") || !rooms.length ? t("rates.occ.ladder.all_rooms") : rooms.map(roomName).join(", ")
-        const p = periods.includes(ALL_PERIODS) || !periods.length ? t("rates.rates.all_periods") : periods.join(", ")
-        return `${r} · ${p}`
+        // All and named ones together (groupCombinations keeps them apart; never hide the named ones)
+        const list = (xs: readonly string[], all: string, allText: string, name: (x: string) => string) => {
+          const named = xs.filter((x) => x !== all).map(name).join(", ")
+          return !xs.length || xs.includes(all) ? (named ? `${allText} + ${named}` : allText) : named
+        }
+        return `${list(rooms, "", t("rates.occ.ladder.all_rooms"), roomName)} · ${list(periods, ALL_PERIODS, t("rates.rates.all_periods"), (x) => x)}`
       },
     }
   }, [t, labels, minorUnits, roomName])
