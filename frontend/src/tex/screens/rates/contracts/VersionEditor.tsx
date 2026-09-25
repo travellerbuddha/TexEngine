@@ -5,7 +5,7 @@ import { useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Button, Card, CardBody, Drawer, ErrorState, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
+import { Button, Card, CardBody, Drawer, ErrorState, Notice, PageHeader, shortcutLetter, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
 import { IssueCount } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
 import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm } from "../lib/tables"
@@ -23,6 +23,18 @@ import { PreviewTab, PriceTestPanel } from "./tabs/PreviewTab"
 import type { TabProps } from "./tabs/shared"
 
 const initialPlace = (): EditorPlace => parseEditorHash(window.location.hash) ?? { section: "pricing" }
+
+/** The name of a table in the history's labels ("Rule table: Room prices"). */
+const TABLE_LABEL: Record<VersionTable, string> = {
+  rooms: "rates.tab.rooms",
+  periods: "rates.tab.periods",
+  period_rates: "rates.tab.rates",
+  age_bands: "rates.tab.ages",
+  occupancy_rules: "rates.tab.occupancy_rules",
+  boards: "rates.tab.boards",
+  rate_plans: "rates.tab.plans",
+  offers: "rates.tab.offers",
+}
 
 /** Contract version editor, in four sections (PRICING_WORKSPACE_UX.md §2): Pricing, Commercial rules
  * (with the Advanced rule tables), Offers & promotions, Preview & audit, under a sticky commercial
@@ -66,6 +78,10 @@ export default function VersionEditor() {
   // the workspace undo history (§3.10): cleared whenever a version is loaded, and by Discard
   const history = useWorkspaceHistory(state, setTable)
   const clearHistory = history.clear
+  // the sections' table writes (the Advanced rule tables, Offers) go through the history too, so an
+  // undo in the matrix never puts back a table older than an edit made there (S10)
+  const record = history.record
+  const recordTable = useCallback((k: VersionTable, rows: Row[]) => void record(k, rows, t("rates.ws.h.table", { table: t(TABLE_LABEL[k]) })), [record, t])
   const [epoch, setEpoch] = useState(0)
   const load = useCallback(
     (d: VersionDoc) => {
@@ -115,7 +131,8 @@ export default function VersionEditor() {
   // Ctrl/Cmd+S saves; warn before leaving with unsaved edits
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      // by letter on every layout (Russian: Ctrl + the key marked S types "ы"; ui/keys.ts)
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && shortcutLetter(e) === "s") {
         e.preventDefault()
         void onSave()
       }
@@ -192,7 +209,7 @@ export default function VersionEditor() {
     )
 
   const props: TabProps | undefined =
-    doc && state ? { doc, state, readOnly: !editable, issues, setTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview, history, epoch } : undefined
+    doc && state ? { doc, state, readOnly: !editable, issues, setTable: recordTable, setSetting, setSelling, lookups: lookups.data, dirty, onSave, preview, history, epoch } : undefined
 
   const draftAction =
     doc &&
