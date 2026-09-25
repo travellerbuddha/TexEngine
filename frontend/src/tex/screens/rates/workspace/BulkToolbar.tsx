@@ -158,7 +158,7 @@ export function FillConfirm({ message, onConfirm, onCancel }: { message: string;
     <div
       role="group"
       aria-label={t("rates.ws.fill.confirm_title")}
-      className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+      className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
       onKeyDown={(e) => {
         if (e.key !== "Escape") return
         e.preventDefault()
@@ -232,7 +232,7 @@ function ToastButton({ children, onClick }: { children: ReactNode; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className={cn("rounded-md px-2 py-1 font-semibold text-sky-300 hover:bg-zinc-800 hover:text-sky-200", "focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none")}
+      className={cn("rounded-md px-2 py-1 font-semibold text-tex-300 hover:bg-zinc-800 hover:text-tex-200", "focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none")}
     >
       {children}
     </button>

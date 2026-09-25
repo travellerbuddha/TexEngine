@@ -978,6 +978,14 @@
  "rates.ws.details": "Detalii",
  "rates.ws.base_occ.label": "Ocupare de bază",
  "rates.ws.base_occ.person": "per persoană",
+ "rates.ws.base_occ.title": "Adulți incluși în prețul {room}",
+ "rates.ws.base_occ.hint": {
+  "one": "0 = valoarea implicită a tipului de cameră. Prețurile afișate includ {count} adult.",
+  "few": "0 = valoarea implicită a tipului de cameră. Prețurile afișate includ {count} adulți.",
+  "other": "0 = valoarea implicită a tipului de cameră. Prețurile afișate includ {count} de adulți."
+ },
+ "rates.ws.base_occ.less": "Un adult mai puțin",
+ "rates.ws.base_occ.more": "Un adult în plus",
  "rates.ws.base_occ.room": {
   "one": "{count} adult inclus",
   "few": "{count} adulți incluși",
@@ -1430,7 +1438,7 @@
   "few": "{count} reguli de ocupare numesc această grupă; sunt eliminate odată cu ea.",
   "other": "{count} de reguli de ocupare numesc această grupă; sunt eliminate odată cu ea."
  },
- "rates.bands.settings_note": "Aceste setări se salvează cu versiunea (Salvează); Anulează nu le modifică.",
+ "rates.bands.settings_note": "Aceste setări se salvează cu versiunea (Salvează); Anulează le readuce ca pe orice altă modificare.",
  "rates.bands.strip_caption": "Preț de adult de la {age}",
  "rates.bands.unnamed": {
   "one": "{count} grupă nu are denumire.",

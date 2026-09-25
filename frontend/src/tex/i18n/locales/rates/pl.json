@@ -986,6 +986,15 @@
  "rates.ws.details": "Szczegóły",
  "rates.ws.base_occ.label": "Obłożenie bazowe",
  "rates.ws.base_occ.person": "za osobę",
+ "rates.ws.base_occ.title": "Dorośli wliczeni w cenę {room}",
+ "rates.ws.base_occ.hint": {
+  "one": "0 = wartość domyślna typu pokoju. Ceny na ekranie obejmują {count} dorosłego.",
+  "few": "0 = wartość domyślna typu pokoju. Ceny na ekranie obejmują {count} dorosłych.",
+  "many": "0 = wartość domyślna typu pokoju. Ceny na ekranie obejmują {count} dorosłych.",
+  "other": "0 = wartość domyślna typu pokoju. Ceny na ekranie obejmują {count} dorosłego."
+ },
+ "rates.ws.base_occ.less": "O jednego dorosłego mniej",
+ "rates.ws.base_occ.more": "O jednego dorosłego więcej",
  "rates.ws.base_occ.room": {
   "one": "{count} osoba dorosła w cenie",
   "few": "{count} osoby dorosłe w cenie",
@@ -1472,7 +1481,7 @@
   "many": "{count} reguł obłożenia wskazuje ten przedział; zostaną usunięte razem z nim.",
   "other": "{count} reguły obłożenia wskazuje ten przedział; zostaną usunięte razem z nim."
  },
- "rates.bands.settings_note": "Te ustawienia zapisują się z wersją (Zapisz); Cofnij ich nie zmienia.",
+ "rates.bands.settings_note": "Te ustawienia zapisują się z wersją (Zapisz); Cofnij przywraca je jak każdą inną zmianę.",
  "rates.bands.strip_caption": "Cena dorosłego od {age}",
  "rates.bands.unnamed": {
   "one": "{count} przedział nie ma nazwy.",

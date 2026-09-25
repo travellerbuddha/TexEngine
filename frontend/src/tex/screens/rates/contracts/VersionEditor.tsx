@@ -5,20 +5,22 @@ import { useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Button, Card, CardBody, Drawer, ErrorState, Notice, PageHeader, shortcutLetter, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
+import { Button, Card, CardBody, Drawer, ErrorState, isSaveShortcut, Notice, PageHeader, Skeleton, TabPanel, Tabs, useToast } from "../../../ui"
 import { IssueCount } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
-import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm } from "../lib/tables"
+import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm, type Settings } from "../lib/tables"
 import type { ContractBundle, Issue, Row, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
 import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } from "../lib/util"
 import { effectiveBands } from "../workspace/bands.ts"
 import { ContextHeader } from "../workspace/ContextHeader"
+import { keptInput, type KeptStore } from "../workspace/keptState.ts"
 import { anchorIssues, issueMessage, issuePlace } from "../workspace/issues.ts"
 import { PricingSection } from "../workspace/PricingSection"
 import type { ShowRequest, ShowTarget } from "../workspace/priceTest.ts"
 import { SECTIONS, DEFAULT_RULE_TABLE, type EditorPlace, type PricingRegion, type RuleTableId, type SectionId } from "../workspace/sections.ts"
 import { useBandLabels } from "../workspace/useBandLabels"
 import { useDraftPreview, type SampleRequest } from "../workspace/useDraftPreview"
+import { KeptStateContext } from "../workspace/useKeptState"
 import { useWorkspaceHistory } from "../workspace/useWorkspaceHistory"
 import { CommercialRulesSection } from "./sections/CommercialRulesSection"
 import { NewDraftDialog, PublishDialog } from "./VersionActions"
@@ -96,14 +98,25 @@ export default function VersionEditor() {
   }, [])
 
   const setTable = useCallback((k: VersionTable, rows: Row[]) => setState((s) => (s ? { ...s, tables: { ...s.tables, [k]: rows } } : s)), [])
-  // the workspace undo history (§3.10): cleared whenever a version is loaded, and by Discard
-  const history = useWorkspaceHistory(state, setTable)
+  // the workspace undo history (§3.10): cleared whenever a version is loaded, and by Discard; it
+  // records the settings and the selling terms too (S16 review)
+  const writers = useMemo(
+    () => ({
+      settings: (settings: Settings) => setState((s) => (s ? { ...s, settings } : s)),
+      selling: (selling: SellingForm) => setState((s) => (s ? { ...s, selling } : s)),
+    }),
+    [],
+  )
+  const history = useWorkspaceHistory(state, setTable, writers)
   const clearHistory = history.clear
   // the sections' table writes (the Advanced rule tables, Offers) go through the history too, so an
   // undo in the matrix never puts back a table older than an edit made there (S10)
   const record = history.record
   const recordTable = useCallback((k: VersionTable, rows: Row[]) => void record(k, rows, t("rates.ws.h.table", { table: t(TABLE_LABEL[k]) })), [record, t])
   const [epoch, setEpoch] = useState(0)
+  // input not in the version yet (error drafts, an open builder), kept across section switches;
+  // a new store for every loaded version (Discard, another version)
+  const kept = useMemo<KeptStore>(() => new Map(), [epoch]) // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(
     (d: VersionDoc) => {
       const s = stateFromDoc(d)
@@ -140,10 +153,17 @@ export default function VersionEditor() {
   // the server's resolved prices and issues for what is on screen (overlay, saved or catalogue)
   const preview = useDraftPreview(doc, state, { fingerprint: fp, base, parties: sampleRoom ? samples?.parties : undefined, partyRoom: sampleRoom })
 
+  const tablesNow = history.current
   const onSave = useCallback(async () => {
     // one save at a time (Ctrl+S while one is in flight waits for the next press)
-    if (!doc || !state || !dirty || save.pending) return
-    const sent = state
+    if (!doc || !state || !editable || save.pending) return
+    // what a grid's open entry wrote just now: Ctrl/Cmd+S in a cell editor commits the entry before
+    // this handler runs, and React has not rendered it yet (S16 review; the old table editor wrote
+    // on every change, so a save always held what was on screen)
+    const now = tablesNow()
+    const fresh = Boolean(now && now !== state.tables)
+    const sent = fresh && now ? { ...state, tables: now } : state
+    if (fresh ? fingerprint(sent) === base : !dirty) return
     try {
       const d = await save.run({ name: doc.name, data: payloadOf(sent) })
       settle(d, sent)
@@ -151,19 +171,21 @@ export default function VersionEditor() {
     } catch (e) {
       toast.error((e as Error).message)
     }
-  }, [doc, state, dirty, save, settle, toast, t])
+  }, [doc, state, editable, dirty, base, tablesNow, save, settle, toast, t])
 
-  // Ctrl/Cmd+S saves; warn before leaving with unsaved edits
+  // Ctrl/Cmd+S saves (a cell editor commits its entry first, see onSave); warn before leaving with
+  // unsaved edits, and with input that is not in the version yet: an error draft, an open
+  // combination builder, a changed cell editor (S16 review)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // by letter on every layout (Russian: Ctrl + the key marked S types "ы"; ui/keys.ts)
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && shortcutLetter(e) === "s") {
+      if (isSaveShortcut(e)) {
         e.preventDefault()
         void onSave()
       }
     }
     const onUnload = (e: BeforeUnloadEvent) => {
-      if (dirty) e.preventDefault()
+      if (dirty || keptInput(kept) || document.querySelector("[data-cell-editor][data-changed]")) e.preventDefault()
     }
     window.addEventListener("keydown", onKey)
     window.addEventListener("beforeunload", onUnload)
@@ -171,10 +193,17 @@ export default function VersionEditor() {
       window.removeEventListener("keydown", onKey)
       window.removeEventListener("beforeunload", onUnload)
     }
-  }, [onSave, dirty])
+  }, [onSave, dirty, kept])
 
-  const setSetting = useCallback((k: VersionSetting, v: string | number) => setState((s) => (s ? { ...s, settings: { ...s.settings, [k]: v } } : s)), [])
-  const setSelling = useCallback((patch: Partial<SellingForm>) => setState((s) => (s?.selling ? { ...s, selling: { ...s.selling, ...patch } } : s)), [])
+  // settings and selling terms go through the history like the tables (one entry per field while
+  // the user types), so Ctrl/Cmd+Z undoes them in order with the rest
+  const recordSetting = history.setting
+  const recordSelling = history.selling
+  const setSetting = useCallback((k: VersionSetting, v: string | number) => void recordSetting(t(`rates.f.${k}`), { [k]: v }, `setting:${k}`), [recordSetting, t])
+  const setSelling = useCallback(
+    (patch: Partial<SellingForm>) => void recordSelling(t("rates.selling.title"), patch, `selling:${Object.keys(patch).sort().join(",")}`),
+    [recordSelling, t],
+  )
   // the tabs write the canonical hash (#pricing, #rules/<table>, #offers, #preview)
   const changeSection = (id: string) => {
     const next = id as SectionId
@@ -365,6 +394,7 @@ export default function VersionEditor() {
           draftAction={draftAction}
           issueText={issueText}
           onShowIssue={showIssue}
+          edit={history.apply}
         >
           {sections}
         </ContextHeader>
@@ -372,25 +402,38 @@ export default function VersionEditor() {
         <div className="mb-4">{sections}</div>
       )}
 
-      <Card>
-        <CardBody className="min-h-64">
-          {!props ? (
+      {!props ? (
+        <Card>
+          <CardBody className="min-h-64">
             <div className="space-y-3">
               <Skeleton className="h-6 w-64" />
               <Skeleton className="h-40 w-full" />
             </div>
-          ) : (
-            <TabPanel id={section}>
-              <IssueFormatContext.Provider value={issueText}>
-                {section === "pricing" && <PricingSection {...props} region={region} />}
-                {section === "rules" && <CommercialRulesSection {...props} table={ruleTable} onTable={changeTable} />}
-                {section === "offers" && <OffersTab {...props} />}
-                {section === "preview" && <PreviewTab {...props} />}
-              </IssueFormatContext.Provider>
-            </TabPanel>
-          )}
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      ) : (
+        <KeptStateContext.Provider value={kept}>
+          <TabPanel id={section}>
+            <IssueFormatContext.Provider value={issueText}>
+              {/* the Pricing workspace sits on the page surface: its grids' hairline boxes are its
+                  only frame (§3.18, no card-in-card); the other sections keep their card */}
+              {section === "pricing" ? (
+                <div className="min-h-64">
+                  <PricingSection {...props} region={region} />
+                </div>
+              ) : (
+                <Card>
+                  <CardBody className="min-h-64">
+                    {section === "rules" && <CommercialRulesSection {...props} table={ruleTable} onTable={changeTable} />}
+                    {section === "offers" && <OffersTab {...props} />}
+                    {section === "preview" && <PreviewTab {...props} />}
+                  </CardBody>
+                </Card>
+              )}
+            </IssueFormatContext.Provider>
+          </TabPanel>
+        </KeptStateContext.Provider>
+      )}
 
       {/* non-modal (§3.13): the matrix beside it stays usable, and "Test this price" on another
           cell starts it again there */}

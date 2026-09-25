@@ -10,7 +10,7 @@
 // and "+ Whole-stay price". A reading line says what Save writes; Save writes it through
 // occupancy.planCombination / persistCombination as one history entry, replacing the edited
 // card's rows. Nothing here computes a price.
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useRef, type ReactNode } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
@@ -40,6 +40,8 @@ import {
   type ComboChip,
 } from "./occupancy.ts"
 import { str } from "./rows.ts"
+import { KEPT } from "./keptState.ts"
+import { useKeptState } from "./useKeptState"
 import type { BandLabels } from "./useBandLabels"
 
 /** Child positions a builder offers for "any children" (the server prices at most 8 in a sample). */
@@ -78,14 +80,20 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
   const { t } = useTexT()
   const titleId = useId()
   const errId = useId()
-  const [draft, setDraft] = useState<BuilderDraft>(p.initial)
+  // kept by the editor while the builder is open (a section switch or a collapsed Occupancy
+  // unmounts it; coming back shows the draft as it was)
+  const [draft, setDraft, restored] = useKeptState<BuilderDraft>(KEPT.comboDraft, p.initial)
   // "More" starts open when the draft uses what it holds (an edited card's any / Always wins)
-  const [moreOpen, setMoreOpen] = useState(p.initial.isOverride || p.initial.adults === "*" || p.initial.children === "*")
-  // the panel opens with the focus in its first field (the opener may be gone: Add hides, a card is replaced)
+  const [moreOpen, setMoreOpen] = useKeptState(KEPT.comboMore, () => p.initial.isOverride || p.initial.adults === "*" || p.initial.children === "*")
+  // the panel opens with the focus in its first field (the opener may be gone: Add hides, a card is
+  // replaced); a builder shown again after a section switch leaves the focus where it is
   const firstRef = useRef<HTMLInputElement | null>(null)
   useEffect(() => {
+    if (restored) return
     const el = firstRef.current?.disabled ? firstRef.current?.closest("form")?.querySelector<HTMLElement>("input:not(:disabled), select, button") : firstRef.current
     el?.focus()
+    // only when the builder opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const fmt = { minorUnits: p.minorUnits, decimalMark: p.decimalMark }
   const plan = useMemo(() => planCombination(p.tables, draft, fmt), [p.tables, draft, p.minorUnits, p.decimalMark]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -418,7 +426,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
           </div>
         )}
       </div>
-      {!hostable && <p className="text-xs font-medium text-amber-700">{t("rates.combo.b.no_host", { name })}</p>}
+      {!hostable && <p className="text-xs font-medium text-amber-800">{t("rates.combo.b.no_host", { name })}</p>}
 
       <div className="grid gap-3 sm:grid-cols-2">
         {scopeField("rooms")}

@@ -74,3 +74,15 @@ export function bareBandCodes(code: string, params: Record<string, unknown> | un
   const band = child?.band.trim().toUpperCase()
   return band && known.has(band) ? [band] : []
 }
+
+/** The server's sentence with the step's room ids (its `room` and `base` params) as room names; the
+ * longer id first, and an id only where it is not part of a longer word. Text handling only. */
+export function withRoomNames(text: string, params: Record<string, unknown> | null | undefined, roomName: (roomType: string) => string): string {
+  const ids = [params?.room, params?.base].filter((v): v is string => typeof v === "string" && v !== "" && roomName(v) !== v)
+  let out = text
+  for (const id of [...new Set(ids)].sort((a, b) => b.length - a.length)) {
+    const re = new RegExp(`(?<![\\w-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "g")
+    out = out.replace(re, () => roomName(id))
+  }
+  return out
+}

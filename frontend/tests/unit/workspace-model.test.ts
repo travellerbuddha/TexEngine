@@ -776,7 +776,9 @@ test("duplicatePeriod copies the period rows with the next date range", () => {
   assert.ok("tables" in res)
   assert.equal(res.code, "P5")
   const p5 = res.tables.periods.find((p) => p.period_code === "P5")
-  assert.deepEqual([p5?.start_date, p5?.end_date, p5?.period_name], ["2027-08-01", "2027-08-31", "Jul"])
+  // the copy is not named after the source: "Jul" over 1–31 Aug would misname it (S16 review)
+  assert.deepEqual([p5?.start_date, p5?.end_date, p5?.period_name], ["2027-08-01", "2027-08-31", ""])
+  assert.equal(res.tables.periods.find((p) => p.period_code === "P4")?.period_name, "Jul", "the source keeps its name")
   assert.deepEqual(
     res.tables.periods.map((p) => p.period_code),
     ["P1", "P2", "P3", "P4", "P5"],

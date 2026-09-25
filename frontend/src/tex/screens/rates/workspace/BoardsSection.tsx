@@ -25,7 +25,7 @@ import {
   Button,
   Checkbox,
   DecimalInput,
-  editorSwallowsShortcut,
+  editorKeyAction,
   editShortcut,
   Field,
   IconButton,
@@ -36,6 +36,7 @@ import {
   Select,
   useGridNavigation,
   useGridSelection,
+  useScrollSyncRef,
   type GridCell,
   type GridEditRequest,
 } from "../../../ui"
@@ -46,6 +47,8 @@ import type { Row } from "../lib/types"
 import { decText } from "../lib/util"
 import { UndoToastView } from "./BulkToolbar"
 import { CellEditor, MatrixRowCells, type CellTone, type CellView } from "./MatrixCell"
+import { KEPT } from "./keptState.ts"
+import { useKeptState } from "./useKeptState"
 import { columnTemplate, decimalMarkOf } from "./matrixView.ts"
 import {
   addBoard,
@@ -228,6 +231,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   // ─── the keyboard grid ─────────────────────────────────────────────────
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && r >= 0 && r < rows.length, [canEdit, rows])
   const selection = useGridSelection({ rows: rows.length, cols: cols.length, isEditable })
+  // sideways in step with the other grids of the Pricing section (§3.1)
+  const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
   // "Show in grid" (S14): the section opens, then the board cell of the rule is focused
   const { show, onShown } = props
@@ -274,7 +279,8 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   editingRef.current = editing
   const editPos = editing ? positionOf(editing.cell) : null
   const closing = useRef(false)
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  // error drafts outlive the grid (a section switch, a collapsed section): the editor keeps them
+  const [drafts, setDrafts] = useKeptState<Record<string, Draft>>(KEPT.drafts("boards"), {})
   const [confirm, setConfirm] = useState<Confirming | null>(null)
   const [pop, setPop] = useState<{ row: string } | null>(null)
   const popAnchor = useRef<HTMLElement | null>(null)
@@ -416,40 +422,41 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
     const ed = editingRef.current
     if (!ed) return
     const cell = ed.cell
-    if (editorSwallowsShortcut(e)) {
-      e.preventDefault()
-      return
-    }
-    if (e.key === "Escape") {
-      e.preventDefault()
-      e.stopPropagation()
-      dropDrafts([cell])
-      finish(cell, null)
-      return
-    }
-    if (e.key === "Enter" && e.altKey) {
-      e.preventDefault()
-      const row = rowOf(cell)
-      const anchor = e.currentTarget.closest<HTMLElement>('[role="gridcell"]')
-      if (!row || row.pending || !anchor) return
-      closing.current = true
-      setEditing(null)
-      openTerms(row, anchor)
-      return
-    }
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      const cells = selectedRefs()
-      if (!cells.some((x) => x.row === cell.row && x.period === cell.period)) cells.push(cell)
-      return commitEditor(ed, text, cells, null)
-    }
-    if (e.key === "Enter") {
-      e.preventDefault()
-      return commitEditor(ed, text, [cell], e.shiftKey ? "up" : "down")
-    }
-    if (e.key === "Tab") {
-      e.preventDefault()
-      return commitEditor(ed, text, [cell], e.shiftKey ? "left" : "right")
+    // one routing for the three grids (ui/keys.ts); Ctrl/Cmd+S commits the entry first and the
+    // version editor saves it
+    const act = editorKeyAction(e)
+    if (!act) return
+    switch (act.kind) {
+      case "swallow":
+        e.preventDefault()
+        return
+      case "save":
+        return commitEditor(ed, text, [cell], null)
+      case "cancel":
+        e.preventDefault()
+        e.stopPropagation()
+        dropDrafts([cell])
+        finish(cell, null)
+        return
+      case "popover": {
+        e.preventDefault()
+        const row = rowOf(cell)
+        const anchor = e.currentTarget.closest<HTMLElement>('[role="gridcell"]')
+        if (!row || row.pending || !anchor) return
+        closing.current = true
+        setEditing(null)
+        openTerms(row, anchor)
+        return
+      }
+      case "bulk": {
+        e.preventDefault()
+        const cells = selectedRefs()
+        if (!cells.some((x) => x.row === cell.row && x.period === cell.period)) cells.push(cell)
+        return commitEditor(ed, text, cells, null)
+      }
+      case "commit":
+        e.preventDefault()
+        return commitEditor(ed, text, [cell], act.move)
     }
   }
 
@@ -814,14 +821,14 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
               {announce}
             </span>
             {rows.length > 0 && (
-              <div className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 pb-10">
+              <div ref={syncScroll} data-scroll-sync className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 bg-white pb-10">
                 <div
                   role="grid"
                   aria-label={t("rates.brd.caption")}
                   aria-rowcount={rows.length + 1}
-                  aria-colcount={cols.length + 2}
+                  aria-colcount={cols.length + 1}
                   aria-readonly={readOnly || undefined}
-                  aria-multiselectable={canEdit || undefined}
+                  aria-multiselectable
                   ref={setGrid}
                   className="w-max min-w-full text-sm"
                 >
@@ -979,7 +986,7 @@ function RemoveConfirm({ message, onConfirm, onCancel }: { message: string; onCo
     <div
       role="group"
       aria-label={t("rates.brd.confirm.title")}
-      className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+      className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
       onKeyDown={(e) => {
         if (e.key !== "Escape") return
         e.preventDefault()
@@ -1080,7 +1087,7 @@ function BoardTermsPopover(p: {
           </Field>
         )}
         {removing ? (
-          <div role="group" aria-label={t("rates.brd.confirm.title")} className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-sm text-amber-950">
+          <div role="group" aria-label={t("rates.brd.confirm.title")} className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-sm text-amber-900">
             <span className="min-w-0 flex-1">
               {board ? t("rates.brd.confirm.body", { boards: p.rowLabel, count: p.removeCount }) : t("rates.brd.pop.remove_row_body", { row: p.rowLabel, count: p.removeCount })}
             </span>

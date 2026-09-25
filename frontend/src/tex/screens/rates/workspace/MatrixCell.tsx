@@ -8,21 +8,9 @@ import { AlertOctagon, AlertTriangle, ChevronDown } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTooltip, type GridCellProps, type GridNavigationApi } from "../../../ui"
 import type { CellIssue } from "./useCellIssues"
+import { SELECTED, TONE, type CellTone } from "./cellTone.ts"
 
-export type CellTone = "plain" | "muted" | "override" | "fixed" | "missing" | "resolved" | "error" | "pending"
-
-const TONE: Record<CellTone, string> = {
-  plain: "text-zinc-900",
-  muted: "text-zinc-500",
-  // period override: amber tint with a corner triangle (the glyph ◆ says it without colour)
-  override:
-    "bg-amber-50 text-amber-950 before:absolute before:top-0 before:right-0 before:border-t-[7px] before:border-l-[7px] before:border-t-amber-500 before:border-l-transparent before:content-['']",
-  fixed: "bg-amber-50 text-amber-950",
-  missing: "text-rose-700 outline-1 -outline-offset-2 outline-dashed outline-rose-400",
-  resolved: "bg-zinc-50 text-zinc-800",
-  error: "text-rose-800 underline decoration-rose-500 decoration-wavy underline-offset-2",
-  pending: "text-zinc-600",
-}
+export type { CellTone } from "./cellTone.ts"
 
 /** What a cell shows (computed by PriceMatrix, memoised apart from the selection). */
 export interface CellView {
@@ -190,14 +178,14 @@ function MatrixCellImpl({ nav, view, tint, editor, blockStart, highlight }: Matr
       className={cn(
         "group relative flex h-full min-h-7 items-center justify-end border-r border-b border-zinc-100 px-2 text-[13px] tabular-nums outline-none select-none",
         "focus-visible:z-[1] focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
-        tint && "aria-selected:bg-sky-50",
+        tint && SELECTED,
         blockStart && "border-t-2 border-t-zinc-200",
         TONE[tone],
         stale && "opacity-55",
         highlight && "shadow-[inset_2px_0_0_var(--color-tex-300),inset_-2px_0_0_var(--color-tex-300)]",
         // an anchored issue: an underline across the cell (the glyph says it without colour)
         issue && !editor && "after:absolute after:inset-x-1 after:bottom-0.5 after:h-0.5 after:rounded-full after:content-['']",
-        issue && !editor && (issue.level === "ERROR" ? "after:bg-rose-500" : "after:bg-amber-500"),
+        issue && !editor && (issue.level === "ERROR" ? "after:bg-rose-500" : "after:bg-amber-600"),
         issue?.stale && "after:opacity-50",
         editor ? "z-[3] p-0" : undefined,
       )}
@@ -299,6 +287,9 @@ export function CellEditor({ label, initialText, selectAll, readingFor, onKey, o
         aria-label={label}
         aria-invalid={invalid || undefined}
         aria-describedby={readingId}
+        // what the version editor asks before the tab closes: a typed entry not committed yet
+        data-cell-editor=""
+        data-changed={text !== initialText ? "" : undefined}
         value={text}
         onChange={(e) => {
           setText(e.target.value)

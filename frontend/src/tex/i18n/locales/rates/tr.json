@@ -970,6 +970,13 @@
  "rates.ws.details": "Ayrıntılar",
  "rates.ws.base_occ.label": "Baz doluluk",
  "rates.ws.base_occ.person": "kişi başı",
+ "rates.ws.base_occ.title": "{room} fiyatına dahil yetişkinler",
+ "rates.ws.base_occ.hint": {
+  "one": "0 = oda tipinin varsayılanı. Ekrandaki fiyatlar {count} yetişkini içerir.",
+  "other": "0 = oda tipinin varsayılanı. Ekrandaki fiyatlar {count} yetişkini içerir."
+ },
+ "rates.ws.base_occ.less": "Bir yetişkin az",
+ "rates.ws.base_occ.more": "Bir yetişkin fazla",
  "rates.ws.base_occ.room": {
   "one": "{count} yetişkin dahil",
   "other": "{count} yetişkin dahil"
@@ -1388,7 +1395,7 @@
   "one": "{count} kişi kuralı bu grubu anıyor; grupla birlikte kaldırılır.",
   "other": "{count} kişi kuralı bu grubu anıyor; grupla birlikte kaldırılır."
  },
- "rates.bands.settings_note": "Bu ayarlar versiyonla kaydedilir (Kaydet); Geri al bunları değiştirmez.",
+ "rates.bands.settings_note": "Bu ayarlar versiyonla kaydedilir (Kaydet); Geri al onları diğer her değişiklik gibi geri getirir.",
  "rates.bands.strip_caption": "Yetişkin fiyatı {age} itibarıyla",
  "rates.bands.unnamed": {
   "one": "{count} grubun adı yok.",

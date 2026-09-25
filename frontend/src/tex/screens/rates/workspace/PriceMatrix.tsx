@@ -21,7 +21,7 @@ import {
   Badge,
   Checkbox,
   ContextMenu,
-  editorSwallowsShortcut,
+  editorKeyAction,
   editShortcut,
   fillDownPlan,
   fillRightPlan,
@@ -33,6 +33,7 @@ import {
   Tooltip,
   useGridNavigation,
   useGridSelection,
+  useScrollSyncRef,
   useToast,
   type EditShortcut,
   type GridCell,
@@ -48,6 +49,8 @@ import { applyAdjust, answersInOrder, planFill, serverCalls, type AdjustTarget, 
 import { BulkToolbar, FillConfirm, UndoToastView } from "./BulkToolbar"
 import { copyBlock, decodeTSV, encodeTSV, pasteOrigin, planPaste } from "./clipboard.ts"
 import { CellEditor, MatrixRowCells, type CellTone, type CellView } from "./MatrixCell"
+import { KEPT } from "./keptState.ts"
+import { useKeptState } from "./useKeptState"
 import { ALL_PERIODS, isRelativeOp, matrixModel, type MatrixRoom, type NeedsServer, type RoomCell } from "./model.ts"
 import {
   addRoom,
@@ -215,6 +218,8 @@ export function PriceMatrix({
   // ─── the keyboard grid ──────────────────────────────────────────────
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && Boolean(rows[r]?.editable), [canEdit, rows])
   const selection = useGridSelection({ rows: rows.length, cols: cols.length, isEditable })
+  // sideways in step with the other grids of the Pricing section (§3.1)
+  const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
   const cellAt = (r: number, c: number): CellRef | null => {
     const row = rows[r]
@@ -230,7 +235,8 @@ export function PriceMatrix({
   const editPos = editing ? cellPosition(rows, cols, editing.cell) : null
   // set when the editor is closed on purpose (commit, Escape): the blur that follows is not a commit
   const closing = useRef(false)
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  // error drafts outlive the grid (a section switch, a collapsed section): the editor keeps them
+  const [drafts, setDrafts] = useKeptState<Record<string, Draft>>(KEPT.drafts("matrix"), {})
   // the cells of an entry waiting for the server's adjustment: the base-room price sent, or null
   const [pending, setPending] = useState<Record<string, string | null>>({})
   const [pop, setPop] = useState<{ cell: CellRef; initial: PopoverRule } | null>(null)
@@ -240,6 +246,9 @@ export function PriceMatrix({
   const cellMenuAnchor = useRef<HTMLElement | null>(null)
   const [freshPeriod, setFreshPeriod] = useState<string | null>(null)
   const freshDone = useCallback(() => setFreshPeriod(null), [])
+  // the period Duplicate just made (unnamed): its header opens Rename… (S16 review)
+  const [renamePeriodCode, setRenamePeriodCode] = useState<string | null>(null)
+  const renameOpened = useCallback(() => setRenamePeriodCode(null), [])
   // the polite live region: bulk results, undo and redo (§3.19). The same text twice is announced
   // twice (a zero-width space tells them apart).
   const [announce, setAnnounce] = useState("")
@@ -467,41 +476,41 @@ export function PriceMatrix({
     const ed = editingRef.current
     if (!ed) return
     const cell = ed.cell
-    // Ctrl/Cmd+R and Ctrl/Cmd+D never reach the browser (reload, bookmark) while a cell is being
-    // edited either; no fill runs then. Ctrl/Cmd+Z stays the field's own undo.
-    if (editorSwallowsShortcut(e)) {
-      e.preventDefault()
-      return
-    }
-    if (e.key === "Escape") {
-      e.preventDefault()
-      e.stopPropagation()
-      dropDrafts([cell])
-      finish(cell, null)
-      return
-    }
-    if (e.key === "Enter" && e.altKey) {
-      e.preventDefault()
-      const anchor = e.currentTarget.closest<HTMLElement>('[role="gridcell"]')
-      closing.current = true
-      setEditing(null)
-      if (anchor) openPopover(cell, anchor, parseShorthand(text, "room", { minorUnits }))
-      return
-    }
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      // Ctrl/Cmd+Enter: every selected editable cell, each by its row's rule, as one entry
-      e.preventDefault()
-      const cells = selectedRefs()
-      if (!cells.some((x) => x.room === cell.room && x.period === cell.period)) cells.push(cell)
-      return commitEditor(ed, text, cells, null)
-    }
-    if (e.key === "Enter") {
-      e.preventDefault()
-      return commitEditor(ed, text, [cell], e.shiftKey ? "up" : "down")
-    }
-    if (e.key === "Tab") {
-      e.preventDefault()
-      return commitEditor(ed, text, [cell], e.shiftKey ? "left" : "right")
+    // one routing for the three grids (ui/keys.ts): Ctrl/Cmd+R and Ctrl/Cmd+D never reach the
+    // browser (reload, bookmark) and run no fill while a cell is being edited; Ctrl/Cmd+Z stays the
+    // field's own undo; Ctrl/Cmd+S commits the entry first and the version editor saves it
+    const act = editorKeyAction(e)
+    if (!act) return
+    switch (act.kind) {
+      case "swallow":
+        e.preventDefault()
+        return
+      case "save":
+        return commitEditor(ed, text, [cell], null)
+      case "cancel":
+        e.preventDefault()
+        e.stopPropagation()
+        dropDrafts([cell])
+        finish(cell, null)
+        return
+      case "popover": {
+        e.preventDefault()
+        const anchor = e.currentTarget.closest<HTMLElement>('[role="gridcell"]')
+        closing.current = true
+        setEditing(null)
+        if (anchor) openPopover(cell, anchor, parseShorthand(text, "room", { minorUnits }))
+        return
+      }
+      case "bulk": {
+        // Ctrl/Cmd+Enter: every selected editable cell, each by its row's rule, as one entry
+        e.preventDefault()
+        const cells = selectedRefs()
+        if (!cells.some((x) => x.room === cell.room && x.period === cell.period)) cells.push(cell)
+        return commitEditor(ed, text, cells, null)
+      }
+      case "commit":
+        e.preventDefault()
+        return commitEditor(ed, text, [cell], act.move)
     }
   }
 
@@ -733,8 +742,8 @@ export function PriceMatrix({
   // header clicks (and the headers' "Select prices" menu items) select a row's or a column's
   // editable cells and focus the first of them, so the keys (Ctrl+R, Ctrl+C …) act on them at
   // once. Stable callbacks: the headers are memoised.
-  const shape = useRef({ rows, cols, isEditable })
-  shape.current = { rows, cols, isEditable }
+  const shape = useRef({ rows, cols, isEditable, nav })
+  shape.current = { rows, cols, isEditable, nav }
   const { selectRow, selectCol } = selection
   const focusCellEl = (r: number, c: number) => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
   const pickRow = useCallback(
@@ -757,6 +766,31 @@ export function PriceMatrix({
     },
     [selectCol],
   )
+
+  // "Remove room" and "Delete period" take away the header, its menu and the confirmation that had
+  // the focus: it goes to the nearest cell left (the same column for a room, the same row for a
+  // period), so the keys (Ctrl/Cmd+Z) keep working where the user was; with no cell left, to "Add
+  // room" or "+ Period" (S16 review). After the render without the room or period.
+  const focusAfterRemoval = useCallback((what: { room: number } | { period: number }) => {
+    requestAnimationFrame(() => {
+      const { rows: rs, cols: cs, nav: n } = shape.current
+      if (!rs.length || !cs.length) {
+        sectionRef.current?.querySelector<HTMLElement>("[data-add-room], [data-add-period]")?.focus()
+        return
+      }
+      if ("room" in what) {
+        const last = rs[rs.length - 1].roomIndex
+        const room = Math.min(what.room, last)
+        const r = rs.findIndex((x) => x.roomIndex === room)
+        n.focusCell(r < 0 ? rs.length - 1 : r, Math.min(n.active.c, cs.length - 1))
+      } else {
+        // the period's column was `index + 1` (All periods is column 0): the next period, else the previous
+        n.focusCell(Math.min(n.active.r, rs.length - 1), Math.min(what.period + 1, cs.length - 1))
+      }
+    })
+  }, [])
+  const onRoomRemoved = useCallback((room: number) => focusAfterRemoval({ room }), [focusAfterRemoval])
+  const onPeriodRemoved = useCallback((period: number) => focusAfterRemoval({ period }), [focusAfterRemoval])
 
   // ─── what each cell shows ────────────────────────────────────────────
   const readingText = (cell: CellRef, reading: Reading): string => {
@@ -791,7 +825,7 @@ export function PriceMatrix({
       case "manual":
         return { tone: "plain", content: shortText(rule as Row), state: "manual", value: amount(rule?.value) }
       case "formula-default":
-        return { tone: "plain", content: <span className="text-slate-700">{shortText(rule as Row)}</span>, state: "formula-default", value: ruleText(rule as Row) }
+        return { tone: "plain", content: <span className="text-zinc-700">{shortText(rule as Row)}</span>, state: "formula-default", value: ruleText(rule as Row) }
       case "inherited":
         return { tone: "muted", content: `↳ ${shortText(def as Row)}`, state: "inherited", value: ruleText(def as Row) }
       case "period-override":
@@ -809,7 +843,7 @@ export function PriceMatrix({
           tone: "fixed",
           content: (
             <>
-              <Pin className="mr-1 inline size-3 -translate-y-px text-amber-700" aria-hidden />= {amount(rule?.value)}
+              <Pin className="mr-1 inline size-3 -translate-y-px text-amber-800" aria-hidden />= {amount(rule?.value)}
             </>
           ),
           state: "fixed-override",
@@ -1054,14 +1088,14 @@ export function PriceMatrix({
       {model.rooms.length === 0 && <Notice tone="info">{canEdit ? t("rates.ws.room.none") : t("rates.rooms.empty")}</Notice>}
 
       <PeriodStrip tables={tables} stayFrom={stay?.stay_from} stayTo={stay?.stay_to} />
-      <div className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 pb-12">
+      <div ref={syncScroll} data-scroll-sync className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 bg-white pb-12">
         <div
           role="grid"
           aria-label={t("rates.rates.caption")}
           aria-rowcount={rows.length + 1}
           aria-colcount={cols.length + 2}
           aria-readonly={readOnly || undefined}
-          aria-multiselectable={canEdit || undefined}
+          aria-multiselectable
           ref={setGrid}
           onFocus={(e) => {
             // a cell (or its editor) got the focus: its column is the matrix's active period, and
@@ -1105,6 +1139,10 @@ export function PriceMatrix({
                 minorUnits={minorUnits}
                 onSelect={canEdit ? pickCol : undefined}
                 issue={periodIssues.get(p.code)}
+                onRemoved={onPeriodRemoved}
+                onDuplicated={setRenamePeriodCode}
+                renameNow={renamePeriodCode === p.code}
+                onRenameOpened={renameOpened}
               />
             ))}
             <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} />
@@ -1130,6 +1168,7 @@ export function PriceMatrix({
                   edit={edit}
                   r={r}
                   onSelect={canEdit && row.editable ? pickRow : undefined}
+                  onRemoved={onRoomRemoved}
                 />
                 <MatrixRowCells
                   r={r}
@@ -1154,6 +1193,7 @@ export function PriceMatrix({
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Select
             aria-label={t("rates.ws.room.add")}
+            data-add-room=""
             value=""
             className="h-8! w-72! text-xs!"
             placeholder={available.length ? t("rates.ws.room.add_placeholder") : t("rates.ws.room.all_added")}

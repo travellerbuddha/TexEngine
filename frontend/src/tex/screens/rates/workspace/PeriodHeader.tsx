@@ -42,6 +42,14 @@ export interface PeriodHeaderProps {
   /** validation issues about the period itself (PERIOD_RANGE, PERIOD_OVERLAP, PERIOD_DUPLICATE;
    * S15): a glyph, the messages in the header's description; the header can then take the focus */
   issue?: CellIssue
+  /** the period was deleted (its header, menu and confirmation are gone): the matrix moves the
+   * focus to the nearest cell left (S16 review) */
+  onRemoved?: (index: number) => void
+  /** Duplicate made the period `code` (unnamed): the matrix opens Rename… on its header */
+  onDuplicated?: (code: string) => void
+  /** open Rename… now (a period just made by Duplicate), then call onRenameOpened */
+  renameNow?: boolean
+  onRenameOpened?: () => void
 }
 
 type Open = "rename" | "dates" | "adjust" | "delete" | null
@@ -89,6 +97,16 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
   )
   const close = () => setOpen(null)
   const code = period.code
+  // a copy made by Duplicate has no name: Rename… opens on it at once (S16 review)
+  const { renameNow, onRenameOpened, readOnly } = p
+  // Rename… from the menu starts in the code; on a copy, in its (empty) name
+  const [nameFirst, setNameFirst] = useState(false)
+  useEffect(() => {
+    if (!renameNow || readOnly) return
+    setNameFirst(true)
+    setOpen("rename")
+    onRenameOpened?.()
+  }, [renameNow, onRenameOpened, readOnly])
   const adjust = period.adjusted ? p.tables.periods.find((x) => str(x.period_code) === code) : undefined
   const adjustText = adjust ? displayText(str(adjust.adjustment_op) as ShOp, str(adjust.adjustment_value), "period_adjust", { decimalMark: p.decimalMark }) : ""
   const weekdays = splitCsv(period.weekdays)
@@ -120,7 +138,8 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
       className={cn(
         "flex min-w-0 flex-col justify-end gap-0.5 border-r border-b border-zinc-200 px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
         p.index % 2 ? "bg-zinc-50" : "bg-white",
-        weekdays.length > 0 && "border-t-2 border-t-dotted border-t-zinc-400",
+        // a dotted top border on a weekday-limited period (§3.18): Tailwind has no per-side style
+        weekdays.length > 0 && "border-t-2 border-t-zinc-400 [border-top-style:dotted]!",
         issue && (issue.level === "ERROR" ? "shadow-[inset_0_-2px_0_var(--color-rose-500)]" : "shadow-[inset_0_-2px_0_var(--color-amber-500)]"),
       )}
     >
@@ -148,7 +167,13 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
                   <MenuSeparator />
                 </>
               )}
-              <MenuItem icon={<Pencil className="size-4" />} onSelect={() => setOpen("rename")}>
+              <MenuItem
+                icon={<Pencil className="size-4" />}
+                onSelect={() => {
+                  setNameFirst(false)
+                  setOpen("rename")
+                }}
+              >
                 {t("rates.ws.period.rename")}
               </MenuItem>
               <MenuItem icon={<CalendarRange className="size-4" />} onSelect={() => setOpen("dates")}>
@@ -160,12 +185,16 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
               <MenuSeparator />
               <MenuItem
                 icon={<CopyPlus className="size-4" />}
-                onSelect={() =>
+                onSelect={() => {
+                  let made = ""
                   p.edit(t("rates.ws.h.duplicate_period", { period: code }), (tb) => {
                     const r = duplicatePeriod(tb, code)
-                    return "error" in r ? tb : r.tables
+                    if ("error" in r) return tb
+                    made = r.code
+                    return r.tables
                   })
-                }
+                  if (made) p.onDuplicated?.(made)
+                }}
               >
                 {t("rates.ws.period.duplicate")}
               </MenuItem>
@@ -208,7 +237,7 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
       )}
       {weekdays.length > 0 && <span className="truncate text-[10px] text-zinc-500">{t("rates.periods.only_days", { days: weekdays.join(", ") })}</span>}
 
-      {open === "rename" && <RenamePopover {...p} anchor={anchor} onClose={close} />}
+      {open === "rename" && <RenamePopover {...p} anchor={anchor} onClose={close} nameFirst={nameFirst} />}
       {open === "dates" && <DatesPopover {...p} anchor={anchor} onClose={close} />}
       {open === "adjust" && <AdjustPopover {...p} anchor={anchor} onClose={close} />}
       {open === "delete" && <DeletePopover {...p} anchor={anchor} onClose={close} />}
@@ -291,7 +320,7 @@ const PERIOD_ERRORS: Record<string, string> = {
   UNKNOWN_PERIOD: "rates.ws.period.err.UNKNOWN_PERIOD",
 }
 
-function RenamePopover(p: PopProps) {
+function RenamePopover(p: PopProps & { nameFirst?: boolean }) {
   const { t } = useTexT()
   const row = p.tables.periods.find((x) => str(x.period_code) === p.period.code)
   const [code, setCode] = useState(p.period.code)
@@ -325,11 +354,11 @@ function RenamePopover(p: PopProps) {
                 setCode(e.target.value)
                 setError("")
               }}
-              data-autofocus
+              data-autofocus={p.nameFirst ? undefined : true}
             />
           </Field>
           <Field label={t("rates.f.period_name")}>
-            <Input value={name} maxLength={140} onChange={(e) => setName(e.target.value)} />
+            <Input value={name} maxLength={140} onChange={(e) => setName(e.target.value)} data-autofocus={p.nameFirst ? true : undefined} />
           </Field>
         </FormGrid>
         {rules > 0 && <p className="text-xs text-zinc-500">{t("rates.ws.period.rename_rewrites", { count: rules })}</p>}
@@ -446,8 +475,9 @@ function DeletePopover(p: PopProps) {
             variant="danger"
             size="sm"
             onClick={() => {
-              p.edit(t("rates.ws.h.delete_period", { period: p.period.code }), (tb) => deletePeriod(tb, p.period.code).tables)
+              const removed = p.edit(t("rates.ws.h.delete_period", { period: p.period.code }), (tb) => deletePeriod(tb, p.period.code).tables)
               p.onClose()
+              if (removed) p.onRemoved?.(p.index)
             }}
           >
             {t("rates.ws.period.delete")}
@@ -483,6 +513,7 @@ export function AddPeriodHeader({ readOnly, edit, onAdded }: { readOnly: boolean
           variant="ghost"
           size="sm"
           aria-label={t("rates.periods.add")}
+          data-add-period=""
           icon={<Plus className="size-4" aria-hidden />}
           onClick={() => {
             let code = ""

@@ -4,7 +4,7 @@
 // matrix entry, and the "Family price" field a Rule table: every keystroke writes the whole
 // period_rates table through `record`, as the Advanced rule tables do in the version editor.
 // Open /tests/dom/history.html under `npx vite --config tests/dom/vite.config.ts` to try it by hand.
-import { StrictMode, useCallback, useRef, useState } from "react"
+import { StrictMode, useCallback, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import "../../src/index.css"
 import type { EditorState, Tables } from "../../src/tex/screens/rates/lib/tables"
@@ -25,9 +25,11 @@ let seq = 0
 const rate = (room: string, period: string, value: string): Row => ({ _key: `h${++seq}`, room_type: room, period_code: period, op: "ABSOLUTE", value })
 
 function Harness() {
-  const [state, setState] = useState<EditorState>(() => ({ settings: {} as EditorState["settings"], tables: empty() }))
+  const [state, setState] = useState<EditorState>(() => ({ settings: { child_ordering: "OLDEST_FIRST" } as EditorState["settings"], tables: empty() }))
   const setTable = useCallback((k: VersionTable, rows: Row[]) => setState((s) => ({ ...s, tables: { ...s.tables, [k]: rows } })), [])
-  const history = useWorkspaceHistory(state, setTable)
+  // the settings are recorded too (S16 review): the editor's writers put them back
+  const writers = useMemo(() => ({ settings: (settings: EditorState["settings"]) => setState((s) => ({ ...s, settings })) }), [])
+  const history = useWorkspaceHistory(state, setTable, writers)
   const toast = useUndoToast(history)
   const cell = useRef<HTMLDivElement | null>(null)
   const rates = state.tables.period_rates
@@ -68,6 +70,17 @@ function Harness() {
             history.record("period_rates", rows, "Rule table: Room prices")
           }}
         />
+      </label>
+      <label className="block">
+        Child order
+        <select
+          className="ml-2 rounded border px-2 py-1"
+          value={String(state.settings.child_ordering)}
+          onChange={(e) => history.setting("Child order", { child_ordering: e.target.value }, "setting:child_ordering")}
+        >
+          <option value="OLDEST_FIRST">oldest</option>
+          <option value="YOUNGEST_FIRST">youngest</option>
+        </select>
       </label>
       <output data-testid="rates" className="block">
         {rates.map((r) => `${r.room_type}:${r.period_code || "*"}:${r.value}`).join(",")}

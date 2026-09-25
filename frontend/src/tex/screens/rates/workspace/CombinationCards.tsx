@@ -15,6 +15,8 @@ import type { Tables } from "../lib/tables"
 import type { Issue } from "../lib/types"
 import { UndoToastView } from "./BulkToolbar"
 import { CombinationBuilder } from "./CombinationBuilder"
+import { KEPT } from "./keptState.ts"
+import { useKeptState, useKeptStore } from "./useKeptState"
 import { ALL_PERIODS, type Basis } from "./model.ts"
 import {
   builderFromCard,
@@ -138,7 +140,18 @@ export function CombinationCards(p: CombinationCardsProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const addRef = useRef<HTMLButtonElement | null>(null)
   const cards = useMemo(() => p.cards.filter((c) => !isSingleUseCard(c)), [p.cards])
-  const [open, setOpen] = useState<Open>(null)
+  // the open builder outlives the cards (a section switch, a collapsed Occupancy): the editor keeps
+  // it with its draft; opening or closing a builder starts its draft afresh
+  const kept = useKeptStore()
+  const [open, setOpenKept] = useKeptState<Open>(KEPT.comboOpen, null)
+  const setOpen = useCallback(
+    (next: Open) => {
+      kept?.delete(KEPT.comboDraft)
+      kept?.delete(KEPT.comboMore)
+      setOpenKept(next)
+    },
+    [kept, setOpenKept],
+  )
   const [highlight, setHighlight] = useState<string | null>(null)
   const [announce, setAnnounce] = useState("")
   const say = useCallback((s: string) => setAnnounce((prev) => (prev === s ? `${s}​` : s)), [])

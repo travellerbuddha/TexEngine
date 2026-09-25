@@ -5,8 +5,9 @@
 // server string (explainLadder), formatted for display only; a chain break is logged in dev builds.
 //
 // useStepText says a step in the viewer's language: English viewers read the server's sentence
-// with band codes shown as labels; other languages get rates.explain.<CODE> with the step's
-// params (room ids as room names, bands as labels, numbers in their decimal mark) when the
+// with band codes shown as labels and room ids as room names (S16 review: "Garden Villa = Standard
+// Sea View × 1.35", not the room type ids); other languages get rates.explain.<CODE> with the
+// step's params (room ids as room names, bands as labels, numbers in their decimal mark) when the
 // catalogue has that template, else the server's sentence as English viewers read it.
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react"
 import { useTexT } from "../../../i18n"
@@ -17,7 +18,7 @@ import type { ExplainStep, PreviewResult, Row } from "../lib/types"
 import { decText } from "../lib/util"
 import { bandCode } from "./bands.ts"
 import { explainLadder, type LadderStage, type NightBlock } from "./explainLadder.ts"
-import { bareBandCodes, isDecimalText, localNumber, parseChildLabel, parseOpText } from "./explainText.ts"
+import { bareBandCodes, isDecimalText, localNumber, parseChildLabel, parseOpText, withRoomNames } from "./explainText.ts"
 import { decimalMarkOf } from "./matrixView.ts"
 import { str } from "./rows.ts"
 import type { BandLabels } from "./useBandLabels"
@@ -35,7 +36,7 @@ export function useStepText(labels: BandLabels, roomName: (roomType: string) => 
     (s: ExplainStep) => {
       const codes = bareBandCodes(s.code, s.params ?? undefined, known)
       const key = `rates.explain.${s.code}`
-      if (lang === "en" || !s.params || !has(key)) return labels.display(s.text, codes)
+      if (lang === "en" || !s.params || !has(key)) return withRoomNames(labels.display(s.text, codes), s.params, roomName)
       // a signed percentage ("+10", "-7,5") with the sign in front, the % where the language puts it
       const pct = (n: string) => {
         const sign = n.startsWith("-") ? "−" : n.startsWith("+") ? "+" : ""
@@ -188,7 +189,7 @@ export function ExplainLadderView({ res, stepText, periods, minorUnits, sellMino
             ...s.lines.map((l) => (
               <tr key={`${s.id}:${l.index}`} data-line={l.step.code} className="text-xs text-zinc-600">
                 <td className="py-0.5 pr-3 pl-4">{stepText(l.step)}</td>
-                <td className="py-0.5 text-right text-zinc-400 tabular-nums">{fmt(l.step.before, s.beforeCurrency)}</td>
+                <td className="py-0.5 text-right text-zinc-500 tabular-nums">{fmt(l.step.before, s.beforeCurrency)}</td>
                 <td className="py-0.5 pl-2 text-right tabular-nums">{fmt(l.step.after, s.afterCurrency)}</td>
               </tr>
             )),

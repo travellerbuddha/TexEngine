@@ -970,6 +970,13 @@
  "rates.ws.details": "Details",
  "rates.ws.base_occ.label": "Base occupancy",
  "rates.ws.base_occ.person": "per person",
+ "rates.ws.base_occ.title": "Adults included in the price of {room}",
+ "rates.ws.base_occ.hint": {
+  "one": "0 = the room type's default. The prices on screen include {count} adult.",
+  "other": "0 = the room type's default. The prices on screen include {count} adults."
+ },
+ "rates.ws.base_occ.less": "One adult fewer",
+ "rates.ws.base_occ.more": "One adult more",
  "rates.ws.base_occ.room": {
   "one": "{count} adult included",
   "other": "{count} adults included"
@@ -1388,7 +1395,7 @@
   "one": "1 occupancy rule names this band; it is removed with it.",
   "other": "{count} occupancy rules name this band; they are removed with it."
  },
- "rates.bands.settings_note": "These settings are saved with the version (Save); Undo does not change them.",
+ "rates.bands.settings_note": "These settings are saved with the version (Save); Undo puts them back like any other edit.",
  "rates.bands.strip_caption": "Adult price from {age}",
  "rates.bands.unnamed": {
   "one": "1 band has no name.",

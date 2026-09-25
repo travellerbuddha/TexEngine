@@ -129,14 +129,15 @@ export function renamePeriod(tables: Tables, oldCode: string, newCode: string, n
 
 /** Duplicates a period: the next free code, the dates right after the source with the same length,
  * placed right after the source, and copies (new rows) of the source's period-scoped rows in all
- * three tables. */
+ * three tables. The copy has no name: the source's ("Jul") would name a column of other dates (S16
+ * review); the workspace opens Rename… on it. */
 export function duplicatePeriod(tables: Tables, code: string): { tables: Tables; code: string; counts: PeriodCounts } | { error: PeriodError } {
   const c = str(code)
   const idx = tables.periods.findIndex((p) => codeOf(p) === c)
   if (idx < 0) return { error: "UNKNOWN_PERIOD" }
   const src = tables.periods[idx]
   const next = nextPeriodCode(tables)
-  const copy = copyRow(src, { period_code: next, ...nextRange(src) })
+  const copy = copyRow(src, { period_code: next, period_name: "", ...nextRange(src) })
   const out: Tables = { ...tables, periods: [...tables.periods.slice(0, idx + 1), copy, ...tables.periods.slice(idx + 1)] }
   for (const t of PERIOD_TABLES) {
     const copies = tables[t].filter((r) => codeOf(r) === c).map((r) => copyRow(r, { period_code: next }))

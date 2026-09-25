@@ -47,6 +47,9 @@ export interface RoomRowHeaderProps {
    * "Select prices"); absent on a resolved row */
   r?: number
   onSelect?: (r: number, add: boolean) => void
+  /** the room was removed (its header, menu and confirmation are gone): the matrix moves the focus
+   * to the nearest cell left (S16 review) */
+  onRemoved?: (roomIndex: number) => void
 }
 
 type Open = "base" | "derive" | "remove" | "capacity" | null
@@ -131,7 +134,7 @@ function RoomRowHeaderImpl(p: RoomRowHeaderProps) {
       )}
       <span className={cn("truncate text-xs", row.kind === "resolved" ? "text-zinc-500" : "text-zinc-700", row.first ? "" : "pl-5")}>
         {p.rowLabel}
-        {row.first && !isBase && p.derivation && <span className="text-slate-500"> · {p.derivation}</span>}
+        {row.first && !isBase && p.derivation && <span className="text-zinc-600"> · {p.derivation}</span>}
       </span>
 
       {open === "base" && <SetBasePopover {...p} anchor={anchor} name={name} onClose={close} />}
@@ -235,8 +238,9 @@ function RemovePopover(p: PopProps) {
             variant="danger"
             size="sm"
             onClick={() => {
-              p.edit(t("rates.ws.h.remove_room", { room: p.name }), (tb) => removeRoom(tb, p.room.room_type).tables)
+              const removed = p.edit(t("rates.ws.h.remove_room", { room: p.name }), (tb) => removeRoom(tb, p.room.room_type).tables)
               p.onClose()
+              if (removed) p.onRemoved?.(p.index)
             }}
           >
             {t("rates.ws.room.remove")}

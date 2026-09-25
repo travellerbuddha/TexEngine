@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { useTexT } from "../../../i18n"
-import { Badge, Notice } from "../../../ui"
+import { Badge, Notice, ScrollSyncGroup } from "../../../ui"
 import { RatesTab } from "../contracts/tabs/RatesTab"
 import { contractRoomOptions, TabIntro, type TabProps } from "../contracts/tabs/shared"
 import { enumLabel } from "../lib/options"
@@ -18,7 +18,8 @@ import type { PricingRegion } from "./sections.ts"
  * focuses the matrix cell, ladder cell, combination card or board cell of a rule. A viewer without
  * cost (an agent's catalogue) sees what sells, without amounts and without any cost call; the
  * matrix is not rendered for it. The Advanced "Room prices" and "Boards" tables stay under
- * Commercial rules.
+ * Commercial rules. The three grids scroll sideways together (ScrollSyncGroup), so P1…Pn stay
+ * lined up however far the periods run.
  */
 export function PricingSection(props: TabProps & { region?: PricingRegion }) {
   // the matrix's active period reaches the boards grid only (no re-render of the rest of Pricing)
@@ -26,11 +27,14 @@ export function PricingSection(props: TabProps & { region?: PricingRegion }) {
   if (props.preview?.mode === "catalogue") return <CatalogueView {...props} />
   if (!props.history) return <RatesTab {...props} />
   return (
-    <div className="space-y-6">
-      <PriceMatrix key={props.epoch ?? 0} {...props} history={props.history} onActivePeriod={matrixPeriod.set} onActiveCell={props.onMatrixCell} />
-      <OccupancySection {...props} history={props.history} region={props.region} />
-      <BoardsSection key={`boards:${props.epoch ?? 0}`} {...props} history={props.history} region={props.region} matrixPeriod={matrixPeriod} />
-    </div>
+    // the three grids share one column template and scroll sideways together (§3.1)
+    <ScrollSyncGroup>
+      <div className="space-y-6">
+        <PriceMatrix key={props.epoch ?? 0} {...props} history={props.history} onActivePeriod={matrixPeriod.set} onActiveCell={props.onMatrixCell} />
+        <OccupancySection {...props} history={props.history} region={props.region} />
+        <BoardsSection key={`boards:${props.epoch ?? 0}`} {...props} history={props.history} region={props.region} matrixPeriod={matrixPeriod} />
+      </div>
+    </ScrollSyncGroup>
   )
 }
 

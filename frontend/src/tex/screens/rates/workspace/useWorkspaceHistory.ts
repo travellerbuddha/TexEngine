@@ -9,10 +9,25 @@
 // types), so undoing a matrix entry never puts back a table array older than an edit made there.
 // `useUndoToast` is the "Applied to N cells · Undo" toast of a bulk operation (10 s, the old
 // RateGrid's undo toast): its Undo undoes that entry only while it is still the last one.
+//
+// S16 review: the version's settings and its selling terms are recorded too (`setting`,
+// `selling`), so the workspace's own controls (child ordering, the ROOM-basis extra unit and
+// children-fill, the header's selling popover) and the Advanced settings fields are undone like any
+// other edit (§3.10: every workspace mutation; the pricing basis, a contract header field, stays
+// outside the log).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { EditorState, Tables } from "../lib/tables"
+import type { EditorState, SellingForm, Settings, Tables } from "../lib/tables"
 import type { Row, VersionTable } from "../lib/types"
 import { createHistory, diffTables } from "./history.ts"
+
+/** What the log records: the tables, and the settings and selling terms as two more "tables". */
+type Recorded = Tables & { settings?: Settings; selling?: SellingForm }
+
+/** How the log writes the settings and the selling terms back (the editor's state setters). */
+export interface HistoryWriters {
+  settings?: (settings: Settings) => void
+  selling?: (selling: SellingForm) => void
+}
 
 export interface WorkspaceHistory {
   /** Records `before` → `after` (the tables whose arrays differ) and writes the changed tables.
@@ -24,6 +39,11 @@ export interface WorkspaceHistory {
   /** The same, from the tables as they are now (including edits not rendered yet): for
    * answers that arrive later, such as a server adjustment. `edit` must be pure. */
   apply: (label: string, edit: (tables: Tables) => Tables) => boolean
+  /** Settings changed (merged per `merge` key while the user types, as `record`); false when
+   * nothing changed. */
+  setting: (label: string, patch: Partial<Settings>, merge?: string) => boolean
+  /** The draft's own selling terms changed (likewise). */
+  selling: (label: string, patch: Partial<SellingForm>, merge?: string) => boolean
   /** Undo / redo the last entry; the label of the entry, or null when there was none. */
   undo: () => string | null
   redo: () => string | null
@@ -44,8 +64,10 @@ export interface WorkspaceHistory {
   seq: () => number
 }
 
-export function useWorkspaceHistory(state: EditorState | undefined, setTable: (t: VersionTable, rows: Row[]) => void): WorkspaceHistory {
-  const log = useMemo(() => createHistory<Tables>(), [])
+export function useWorkspaceHistory(state: EditorState | undefined, setTable: (t: VersionTable, rows: Row[]) => void, writers: HistoryWriters = {}): WorkspaceHistory {
+  const log = useMemo(() => createHistory<Recorded>(), [])
+  const writersRef = useRef(writers)
+  writersRef.current = writers
   // re-render when the log changes (canUndo / canRedo / size)
   const counter = useRef(0)
   const [version, setVersion] = useState(0)
@@ -61,15 +83,33 @@ export function useWorkspaceHistory(state: EditorState | undefined, setTable: (t
     rendered.current = state?.tables
     latest.current = state?.tables
   }
+  // the settings and selling terms as last written, likewise
+  const extras = useRef<{ settings?: Settings; selling?: SellingForm }>({ settings: state?.settings, selling: state?.selling })
+  const renderedExtras = useRef({ settings: state?.settings, selling: state?.selling })
+  if (state?.settings !== renderedExtras.current.settings || state?.selling !== renderedExtras.current.selling) {
+    renderedExtras.current = { settings: state?.settings, selling: state?.selling }
+    extras.current = { settings: state?.settings, selling: state?.selling }
+  }
 
   const write = useCallback(
-    (patch: Partial<Tables>) => {
+    (patch: Partial<Recorded>) => {
+      const { settings, selling, ...tables } = patch
       const base = latest.current
-      if (base) latest.current = { ...base, ...patch }
-      for (const k of Object.keys(patch) as VersionTable[]) setTable(k, patch[k] as Row[])
+      if (base) latest.current = { ...base, ...(tables as Partial<Tables>) }
+      for (const k of Object.keys(tables) as VersionTable[]) setTable(k, tables[k] as Row[])
+      if (settings) {
+        extras.current = { ...extras.current, settings }
+        writersRef.current.settings?.(settings)
+      }
+      if (selling) {
+        extras.current = { ...extras.current, selling }
+        writersRef.current.selling?.(selling)
+      }
     },
     [setTable],
   )
+  /** The tables with the settings and selling terms, as the log undoes and redoes them. */
+  const recorded = useCallback((): Recorded | undefined => (latest.current ? { ...latest.current, ...extras.current } : undefined), [])
 
   const commitWith = useCallback(
     (label: string, before: Tables, after: Tables, merge?: string) => {
@@ -101,9 +141,26 @@ export function useWorkspaceHistory(state: EditorState | undefined, setTable: (t
     [commit],
   )
 
+  /** A settings or selling patch as one entry (merged per key while the user types). */
+  const commitExtra = useCallback(
+    <K extends "settings" | "selling">(which: K, label: string, patch: Partial<NonNullable<Recorded[K]>>, merge?: string) => {
+      const now = extras.current[which] as Record<string, unknown> | undefined
+      if (!now) return false
+      if (Object.entries(patch).every(([k, v]) => now[k] === v)) return false
+      const next = { ...now, ...patch }
+      log.commit(label, { [which]: now } as Partial<Recorded>, { [which]: next } as Partial<Recorded>, merge ? { merge, at: Date.now() } : undefined)
+      write({ [which]: next } as Partial<Recorded>)
+      bump()
+      return true
+    },
+    [log, write, bump],
+  )
+  const setting = useCallback((label: string, patch: Partial<Settings>, merge?: string) => commitExtra("settings", label, patch, merge), [commitExtra])
+  const selling = useCallback((label: string, patch: Partial<SellingForm>, merge?: string) => commitExtra("selling", label, patch, merge), [commitExtra])
+
   const step = useCallback(
     (which: "undo" | "redo") => {
-      const now = latest.current
+      const now = recorded()
       if (!now) return null
       const s = which === "undo" ? log.undo(now) : log.redo(now)
       if (!s) return null
@@ -112,7 +169,7 @@ export function useWorkspaceHistory(state: EditorState | undefined, setTable: (t
       bump()
       return s.label
     },
-    [log, write, bump],
+    [log, write, bump, recorded],
   )
   const undo = useCallback(() => step("undo"), [step])
   const redo = useCallback(() => step("redo"), [step])
@@ -126,7 +183,7 @@ export function useWorkspaceHistory(state: EditorState | undefined, setTable: (t
   const generation = useCallback(() => gen.current, [])
   const seq = useCallback(() => counter.current, [])
 
-  return { commit, record, apply, undo, redo, canUndo: log.canUndo(), canRedo: log.canRedo(), size: log.size(), clear, current, generation, version, seq }
+  return { commit, record, apply, setting, selling, undo, redo, canUndo: log.canUndo(), canRedo: log.canRedo(), size: log.size(), clear, current, generation, version, seq }
 }
 
 /** How long the undo toast of a bulk operation stays (the old RateGrid's, §1.4). */

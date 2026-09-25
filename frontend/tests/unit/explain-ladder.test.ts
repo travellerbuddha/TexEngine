@@ -5,7 +5,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { explainLadder, sameAmount, type LadderStage, type NightBlock } from "../../src/tex/screens/rates/workspace/explainLadder.ts"
-import { bareBandCodes, parseChildLabel, parseOpText } from "../../src/tex/screens/rates/workspace/explainText.ts"
+import { bareBandCodes, parseChildLabel, parseOpText, withRoomNames } from "../../src/tex/screens/rates/workspace/explainText.ts"
 import { addDaysIso, childPayload, prefillOf, ruleRowOf, showTargetOf, withChildMode } from "../../src/tex/screens/rates/workspace/priceTest.ts"
 import type { ExplainStep, PreviewResult, Row } from "../../src/tex/screens/rates/lib/types.ts"
 import type { Tables } from "../../src/tex/screens/rates/lib/tables.ts"
@@ -320,4 +320,18 @@ test("Show in grid: a rule id names a row of the draft (~key unsaved, the row's 
   assert.equal(showTargetOf(t, "~gone"), null)
   assert.equal(showTargetOf(t, ""), null)
   assert.equal(showTargetOf(t, null), null)
+})
+
+test("an English step sentence names rooms, not room type ids (S16 review)", () => {
+  const names: Record<string, string> = { "Aurora Beach Resort-VIL": "Garden Villa", "Aurora Beach Resort-STD": "Standard Sea View", "H-STD2": "Superior" }
+  const roomName = (rt: string) => names[rt] ?? rt
+  assert.equal(
+    withRoomNames("Aurora Beach Resort-VIL = Aurora Beach Resort-STD × 1.35 → 108.00", { room: "Aurora Beach Resort-VIL", base: "Aurora Beach Resort-STD", op: "× 1.35" }, roomName),
+    "Garden Villa = Standard Sea View × 1.35 → 108.00",
+  )
+  assert.equal(withRoomNames("Aurora Beach Resort-STD in P2: price 80.00", { room: "Aurora Beach Resort-STD", period: "P2" }, roomName), "Standard Sea View in P2: price 80.00")
+  // an id inside a longer one is left alone; an unknown room and a step without rooms are unchanged
+  assert.equal(withRoomNames("H-STD2 = H-STD × 1.10", { room: "H-STD2", base: "H-STD" }, roomName), "Superior = H-STD × 1.10")
+  assert.equal(withRoomNames("period P2 (May)", { period: "P2" }, roomName), "period P2 (May)")
+  assert.equal(withRoomNames("X in P1: price 1.00", null, roomName), "X in P1: price 1.00")
 })

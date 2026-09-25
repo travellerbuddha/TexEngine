@@ -9,6 +9,7 @@ import { DateRange, StatusBadge } from "../components/common"
 import type { EditorState, SellingForm } from "../lib/tables"
 import type { Issue, VersionDoc } from "../lib/types"
 import { versionLabel } from "../lib/util"
+import { BaseOccupancyChip, BaseRoomChip, type HeaderEdit } from "./BaseChips"
 import { BasisPopover, CHIP, CHIP_BUTTON } from "./BasisPopover"
 import { issuesBySection } from "./issues.ts"
 import type { DraftPreview } from "./useDraftPreview"
@@ -36,6 +37,8 @@ export interface ContextHeaderProps {
   /** a click on an issue of the live check (by its index in `preview.issues`): its cell, or the
    * section, region or rule table that holds it (S15) */
   onShowIssue?: (index: number) => void
+  /** a version edit through the workspace history (the Base room and Base occupancy chips) */
+  edit?: HeaderEdit
 }
 
 /**
@@ -143,9 +146,21 @@ export function ContextHeader(p: ContextHeaderProps) {
         )}
         {preview.mode !== "catalogue" && (
           <>
-            <Chip label={t("rates.f.is_base")}>{baseRoom ? roomName(baseRoom) : t("rates.common.none")}</Chip>
+            <Chip label={t("rates.f.is_base")}>
+              <BaseRoomChip tables={state.tables} roomName={roomName} edit={editable ? p.edit : undefined} />
+            </Chip>
             <Chip label={t("rates.ws.base_occ.label")}>
-              <BaseOccupancy basis={cd.pricing_basis} baseRoom={baseRoom} preview={preview} />
+              {cd.pricing_basis === "ROOM" ? (
+                <BaseOccupancyChip
+                  tables={state.tables}
+                  roomName={roomName}
+                  effective={preview.matrix?.rooms.find((r) => r.room_type === baseRoom)?.capacity?.included_adults}
+                  stale={preview.stale}
+                  edit={editable ? p.edit : undefined}
+                />
+              ) : (
+                t("rates.ws.base_occ.person")
+              )}
             </Chip>
           </>
         )}
@@ -179,16 +194,6 @@ function Chip({ label, children }: { label: ReactNode; children: ReactNode }) {
       <dd className="min-w-0 truncate text-zinc-900">{children}</dd>
     </div>
   )
-}
-
-/** PERSON: every adult pays the base person price (×1.00 by default); ROOM: the adults the base
- * room's price covers, as the server built them (the effective included_adults, GAP-3). */
-function BaseOccupancy({ basis, baseRoom, preview }: { basis?: string; baseRoom: string; preview: DraftPreview }) {
-  const { t } = useTexT()
-  if (basis !== "ROOM") return <>{t("rates.ws.base_occ.person")}</>
-  const cap = preview.matrix?.rooms.find((r) => r.room_type === baseRoom)?.capacity
-  if (!baseRoom || !cap) return <>—</>
-  return <span className={cn(preview.stale && "text-zinc-500")}>{t("rates.ws.base_occ.room", { count: cap.included_adults })}</span>
 }
 
 /** The selling terms in the header: a popover editing the draft's own terms when they are its own

@@ -480,7 +480,7 @@ function AgeStrip({ bands, labelOf }: { bands: readonly BandLike[]; labelOf: (ba
           <span key={`g${i}`} className="absolute inset-y-0 bg-[repeating-linear-gradient(45deg,#fecdd3_0_4px,#fff1f2_4px_8px)]" style={{ left: at(g.from), width: span(g.from, g.to) }} />
         ))}
         {cov.overlaps.map((o, i) => (
-          <span key={`o${i}`} className="absolute inset-y-0 bg-amber-400/60" style={{ left: at(o.from), width: span(o.from, o.to) }} />
+          <span key={`o${i}`} className="absolute inset-y-0 bg-amber-600/40" style={{ left: at(o.from), width: span(o.from, o.to) }} />
         ))}
       </div>
       <figcaption className="mt-1 flex flex-wrap justify-between gap-x-3 text-[11px] text-zinc-500">

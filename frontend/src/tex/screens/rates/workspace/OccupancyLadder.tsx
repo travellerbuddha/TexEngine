@@ -18,13 +18,14 @@ import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
 import {
   Badge,
-  editorSwallowsShortcut,
+  editorKeyAction,
   editShortcut,
   Money,
   revealElement,
   Select,
   useGridNavigation,
   useGridSelection,
+  useScrollSyncRef,
   type GridCell,
   type GridEditRequest,
 } from "../../../ui"
@@ -36,6 +37,8 @@ import type { Issue, VersionDoc } from "../lib/types"
 import { decText } from "../lib/util"
 import { UndoToastView } from "./BulkToolbar"
 import { CellEditor, MatrixRowCells, type CellTone, type CellView } from "./MatrixCell"
+import { KEPT } from "./keptState.ts"
+import { useKeptState } from "./useKeptState"
 import { columnTemplate, decimalMarkOf } from "./matrixView.ts"
 import { ALL_PERIODS, type Basis } from "./model.ts"
 import {
@@ -203,6 +206,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   // ─── the keyboard grid ─────────────────────────────────────────────────
   const isEditable = useCallback((r: number, c: number) => canEdit && c >= 0 && r < rows.length && Boolean(rows[r]?.editable), [canEdit, rows])
   const selection = useGridSelection({ rows: navRows, cols: cols.length, isEditable })
+  // sideways in step with the other grids of the Pricing section (§3.1)
+  const syncScroll = useScrollSyncRef()
   const gridEl = useRef<HTMLDivElement | null>(null)
   // only requests made while mounted (a remount after Discard or a scope change does not replay one)
   const focused = useRef(p.focus?.n ?? 0)
@@ -234,7 +239,8 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   editingRef.current = editing
   const editPos = editing ? positionOf(editing.cell) : null
   const closing = useRef(false)
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
+  // error drafts outlive the grid (a section switch, a collapsed section): the editor keeps them
+  const [drafts, setDrafts] = useKeptState<Record<string, Draft>>(KEPT.drafts("ladder", p.scope), {})
   const [pop, setPop] = useState<{ cell: LadderRef; initial: OccRule } | null>(null)
   const popAnchor = useRef<HTMLElement | null>(null)
   const [announce, setAnnounce] = useState("")
@@ -348,38 +354,39 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     const ed = editingRef.current
     if (!ed) return
     const cell = ed.cell
-    if (editorSwallowsShortcut(e)) {
-      e.preventDefault()
-      return
-    }
-    if (e.key === "Escape") {
-      e.preventDefault()
-      e.stopPropagation()
-      dropDrafts([cell])
-      finish(cell, null)
-      return
-    }
-    if (e.key === "Enter" && e.altKey) {
-      e.preventDefault()
-      const anchor = e.currentTarget.closest<HTMLElement>('[role="gridcell"]')
-      closing.current = true
-      setEditing(null)
-      if (anchor) openPopover(cell, anchor, text)
-      return
-    }
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      const cells = selectedRefs()
-      if (!cells.some((x) => x.row === cell.row && x.period === cell.period)) cells.push(cell)
-      return commitEditor(ed, text, cells, null)
-    }
-    if (e.key === "Enter") {
-      e.preventDefault()
-      return commitEditor(ed, text, [cell], e.shiftKey ? "up" : "down")
-    }
-    if (e.key === "Tab") {
-      e.preventDefault()
-      return commitEditor(ed, text, [cell], e.shiftKey ? "left" : "right")
+    // one routing for the three grids (ui/keys.ts); Ctrl/Cmd+S commits the entry first and the
+    // version editor saves it
+    const act = editorKeyAction(e)
+    if (!act) return
+    switch (act.kind) {
+      case "swallow":
+        e.preventDefault()
+        return
+      case "save":
+        return commitEditor(ed, text, [cell], null)
+      case "cancel":
+        e.preventDefault()
+        e.stopPropagation()
+        dropDrafts([cell])
+        finish(cell, null)
+        return
+      case "popover": {
+        e.preventDefault()
+        const anchor = e.currentTarget.closest<HTMLElement>('[role="gridcell"]')
+        closing.current = true
+        setEditing(null)
+        if (anchor) openPopover(cell, anchor, text)
+        return
+      }
+      case "bulk": {
+        e.preventDefault()
+        const cells = selectedRefs()
+        if (!cells.some((x) => x.row === cell.row && x.period === cell.period)) cells.push(cell)
+        return commitEditor(ed, text, cells, null)
+      }
+      case "commit":
+        e.preventDefault()
+        return commitEditor(ed, text, [cell], act.move)
     }
   }
 
@@ -770,14 +777,14 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       <span role="status" aria-live="polite" className="sr-only">
         {announce}
       </span>
-      <div className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 pb-10">
+      <div ref={syncScroll} data-scroll-sync className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 bg-white pb-10">
         <div
           role="grid"
           aria-label={t("rates.occ.ladder.caption")}
           aria-rowcount={navRows + 1}
-          aria-colcount={cols.length + 2}
+          aria-colcount={cols.length + 1}
           aria-readonly={readOnly || undefined}
-          aria-multiselectable={canEdit || undefined}
+          aria-multiselectable
           ref={setGrid}
           className="w-max min-w-full text-sm"
         >
@@ -863,7 +870,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
               type="button"
               aria-label={t("rates.occ.ladder.note_show", { name: p.cardName(card) })}
               onClick={() => p.onShowCard?.(card.id)}
-              className="rounded px-0.5 font-medium text-sky-800 underline underline-offset-2 hover:text-sky-950 focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:outline-none"
+              className="rounded px-0.5 font-medium text-sky-800 underline underline-offset-2 hover:text-sky-900 focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:outline-none"
             >
               {p.cardName(card)}
             </button>
