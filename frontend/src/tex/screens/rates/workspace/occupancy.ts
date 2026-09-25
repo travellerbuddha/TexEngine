@@ -1133,27 +1133,26 @@ export function planCombination(tables: Pick<Tables, "rooms" | "periods" | "occu
   const rooms = draft.roomsAll ? [] : inOrder(draft.rooms, tables.rooms.map((r) => str(r.room_type)))
   const periods = draft.periodsAll ? [] : inOrder(draft.periods, tables.periods.map((p) => str(p.period_code)))
 
-  // the twins of other rows: same guest, band, combination, room, period and Always wins
+  // the twins of other rows: same guest, band, combination, room, period and Always wins (one pass
+  // over the rows, then a lookup per rule, room and period: cheap enough for every keystroke)
   if (!issues.length) {
     const replace = new Set(draft.replace)
-    const others = tables.occupancy_rules.filter((r) => !replace.has(r._key)).map((r) => norm(r))
-    for (const rule of rules) {
-      const keys: string[] = []
-      for (const room of rooms.length ? rooms : [""])
-        for (const period of periods.length ? periods : [ALL_PERIODS])
-          for (const n of others)
-            if (
-              n.combination === combination &&
-              n.target === rule.target &&
-              n.position === rule.position &&
-              n.age_band === rule.age_band &&
-              n.room_type === room &&
-              n.period === period &&
-              n.is_override === draft.isOverride
-            )
-              keys.push((n.src as Row)._key)
-      if (keys.length) issues.push({ code: "TWIN", line: rule.line, keys })
+    const sig = (target: string, position: number, band: string, room: string, period: string) => JSON.stringify([target, position, band, room, period])
+    const others = new Map<string, string[]>()
+    for (const r of tables.occupancy_rules) {
+      if (replace.has(r._key)) continue
+      const n = norm(r)
+      if (n.combination !== combination || n.is_override !== draft.isOverride) continue
+      const k = sig(n.target, n.position, n.age_band, n.room_type, n.period)
+      others.set(k, [...(others.get(k) ?? []), r._key])
     }
+    if (others.size)
+      for (const rule of rules) {
+        const keys: string[] = []
+        for (const room of rooms.length ? rooms : [""])
+          for (const period of periods.length ? periods : [ALL_PERIODS]) keys.push(...(others.get(sig(rule.target, rule.position, rule.age_band, room, period)) ?? []))
+        if (keys.length) issues.push({ code: "TWIN", line: rule.line, keys })
+      }
   }
 
   const cardRules: CardRule[] = rules.map(({ line: _line, ...r }) => ({ ...r, value: canonValue(r.value) })).sort(cardRuleSort)
