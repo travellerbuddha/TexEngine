@@ -8232,3 +8232,131 @@ New:
 - The switch refuses a relative rule in another period or room, even where adult 1 of 1A+0C is
   priced at exactly the unit and the price would not change.
 - The copy/paste notice is still a timed toast, not one kept until dismissed.
+
+**Existing semantics kept, the workspace's additions opt-in (2026-09-25).** The owner's rule for the
+workspace: it changes the UX only, and no existing pricing semantics change silently (O1–O5 stay
+provisional owner decisions). A check of the branch against main found that several of its changes
+altered what existing callers get, workspace or not: every internal quote (the price test, a TEX
+Quote's `result_json`, a reservation's pricing snapshot) carried three more keys per night
+(`subtotal_*`); `validate_version` and `publish` reported board rows main published as ERRORs and
+refused to publish them, gave each issue a `ref` key and stored it in the report frozen at publish;
+`save_version` refused a blank rule value that main stored as 0; `preview_price` refused children
+main priced (`7.5`, `"7.5"`, 18, 13 children) and read `{age_months}` / `{dob}`; `validate_version`
+of a saved draft was rate limited; `price_matrix`, `get_version` (also an agent's catalogue) and
+`save_version`'s answer had more keys. Branch `pricing-workspace`; main `1575c8b` has no newer
+commit (it adds only the design document to `6b0102c`, the branch's base).
+
+**Decision (existing semantics kept).**
+1. *Existing callers get main's answers.* An existing caller is one that sends what main takes. The
+   workspace's additions are opt-in: the flag `workspace` (`1`/`true`), or an argument only the
+   workspace sends (`data`, the read-only overlay; `parties`, the sample parties), turns them on
+   (`api/contracts.py _workspace`). Without them every contract endpoint answers as main did:
+   - `preview_price` runs main's body (`_mains_preview`): each child `int()` of what was sent,
+     main's night keys;
+   - `price_matrix` runs main's body (`_mains_matrix`): cells, errors, periods, basis, currency;
+   - `get_version` (and `save_version`'s answer, and an agent's catalogue) has main's keys;
+   - `save_version` stores a blank rule value as 0, as main does;
+   - `validate_version` has no board checks, gives each issue main's three keys and is not bounded
+     per user; `publish_version` decides, stores and returns exactly what main did.
+2. *The pure layer's defaults are main's:* `validate_terms(board_checks=False)` (the board checks
+   are `_board_issues`), `Issue.to_dict(ref=False)` (main's three keys; `ref=True` adds `ref` when
+   there is one), `RoomQuote.to_dict(subtotals=False)` and `NightPrice.to_dict(subtotals=False)`.
+   The engine still computes the subtotals and the validation still computes each `ref`; they reach
+   a dict only when asked for. `commercial.contracts.validate_version/validate_doc/publish` take
+   `workspace` and pass it on.
+3. *What the flag turns on (the workspace sends it).* `get_version`: `can_preview`, `can_publish`,
+   `can_edit_contract`, `basis_locked`, `overlay_max_rows`, `contract_doc.minor_units` (GAP-10; the
+   catalogue's three `can_*` as false). `save_version`: the blank-value refusal (GAP-8), and the
+   workspace's `get_version` answer. `validate_version`: the board checks (GAP-5), each issue's
+   `ref` (D9) and the per-user budget (`_heavy`). `publish_version`: the board checks block the
+   publish, and the stored report and the warnings carry each `ref`. `preview_price`: exact child
+   ages (GAP-6) and each night's subtotals (GAP-12). `price_matrix`: cell sources, capacity, age
+   bands with their origin, inherited rules and the engine's defaults (GAP-2/3). `data` and
+   `parties` imply the flag; `apply_op_values` is new and has no existing caller.
+4. *Security and tenancy fixes hold for every caller, never opt-in* (the deliberate, reported
+   differences from main; the list for the owner below): another hotel's rate plan, cancellation
+   policy or payment policy is refused wherever a draft's terms are built (`build_terms`), and an
+   editor without `price.view_cost` is not told what a pricing policy's formula decides (the live
+   check and the report stored at publish). The previous agent's draft test asserted main's
+   behaviour for the first; it now asserts the refusal.
+5. *The workspace sends the flag* (`WORKSPACE` in `draftPreview.ts`): `get_version` and
+   `save_version` in the version editor, `price_matrix` and `validate_version` in both preview modes
+   (`matrixRequest`, `validationRequest`), `preview_price` from the Price test, and the version
+   editor's publish dialog (`PublishDialog workspace`). The contract detail page and the ARI grid
+   open the same dialog without it and publish as main did. The rates tab's fallback `price_matrix`
+   (no live preview) reads main's keys only and sends no flag.
+
+**Every behaviour difference from main for an existing caller (the owner's list).**
+- *Kept, security and tenancy (deliberate, for every caller):*
+  1. A draft whose rate plan row names another hotel's rate plan, or whose rate plan row names
+     another hotel's cancellation or payment policy (a policy of no hotel is shared), is refused
+     wherever its terms are built: `validate_version` answers `ok: false` with one BUILD issue
+     ("… belongs to another hotel"), `preview_price` of the draft answers `sellable: false` with
+     reason BUILD, `price_matrix` of the draft and `publish` raise a ValidationError, and the ARI
+     grid on the draft (`grid.py`) refuses it. Main priced, validated, showed and published it.
+     Saving such a row is accepted, as on main (a save builds no terms). A version already
+     published is priced from its frozen payload and is not affected.
+  2. `validate_version` for an editor with `contract.edit` but without `price.view_cost` leaves out
+     each issue whose presence depends on an inherited pricing-policy rule's op or value:
+     OCC_POLICY_OVERRIDE_OUTRANKED about a policy override; the sweep's NEGATIVE_OCCUPANCY_PRICE of
+     a party a policy rule takes part in and NO_CHILD_RULE where a policy rule defers; and
+     OCC_INFANT_GENERIC names no policy rule and is not said for an infant band a policy rule names.
+     All four are WARNINGs, so `ok` and the publish decision do not change. Main told that editor
+     (an equality and threshold oracle on the policy formulas, which are cost, G-11).
+  3. `get_version`'s `validation_report` for that editor is the report stored at publish, filtered
+     the same way. A stored row that does not say what it is about (every report an existing
+     caller's publish stores, and every report published before the branch, has main's three keys)
+     is left out when its code is one of the four above. Who sees cost gets the report as stored.
+- *Opt-in (an existing caller gets main's behaviour; the workspace sends the flag):* the board
+  checks (GAP-5) in the live check and at publish; each issue's `ref` (D9), live and stored; the
+  blank-value refusal on save (GAP-8); the per-user budget of `validate_version`; exact child ages
+  in the price test (GAP-6); each night's subtotals (GAP-12); the matrix's and the version's
+  workspace keys (GAP-2/3/10); the overlay (`data`, GAP-1) and the sample parties (`parties`,
+  GAP-2b), which are new arguments; `apply_op_values` (GAP-7), a new endpoint.
+- *Consequence of the opt-in:* a draft with a board row for an unknown room or period, or two rows
+  of one board for the same scope, is refused by the workspace's publish and published by the
+  contract detail page's or the ARI grid's publish, as on main. Whether the board checks (or the
+  blank-value refusal) should hold for every caller is the owner's decision (owner input 14).
+
+**Tests (existing semantics kept).**
+- *Unit, `test_main_parity.py` with `parity_data/`* (the previous agent's untracked draft, checked
+  and completed). The corpus: 14 fixture payloads in every shape main accepts and 11 payloads
+  published on the dev site (10 of them still there with the same hash), 2,906 quotes (2,615
+  sellable) byte for byte (the sha256 of the internal dict and of the guest view), each payload's
+  issues, frozen hash and room units, and 97 drafts made from three of the payloads, each broken or
+  unusual in one way and together reaching every issue code main's validation reports (but the
+  sweep's AMBIGUOUS_OCCUPANCY_RULES, which an OCC_AMBIGUOUS error always precedes). The expected
+  results were recorded as the docstring says (`git archive 6b0102c kamra`, the file run as a script
+  with that `PYTHONPATH`, so every import is main's); the recording of the draft's file was
+  reproduced byte for byte, and the drafts' recording is identical on main and on the fixed branch.
+  `TestMainParity` (5) passes against main's code and this branch's; `TestWorkspaceOptIn` (3) checks
+  the switches. Fixed in the draft: the dev payload count (11, not 16); issues must be identical
+  (the draft let the board checks come on top as WARNINGs); the corpus's issues must have main's
+  keys. Fail-first on the branch before the fix: 2,615 of 2,906 quotes differ (the night keys), the
+  orphan-board payload's issues differ (three board ERRORs instead of main's warnings) and three
+  payloads' issues carry `ref`; 87 of the 97 drafts differ.
+- *Unit, updated:* `test_validate_refs` (+2: the board checks and `ref` are off by default; the rest
+  asks for them), `test_engine.TestReportedSubtotals` (main's night by default, the subtotals when
+  asked for, never in the guest view), `test_policy_cascade` (a stored report as the workspace
+  stores it, with refs, and as an existing caller's publish stores it, without). 516 OK.
+- *Integration, `test_existing_semantics`* (13; the previous agent's draft, completed): `preview_price`
+  against main's own body (a draft and a published version, every room, board and plan; children
+  `[]`, `[8]`, `["8"]`, `[8.0]`, `"[8, 1]"`, `[7.5]`, `[11.9]`, `[18]`, 13 children, `None`; `7.5`
+  priced as 7; `"seven"` refused by `int()`); `price_matrix`, `get_version` (Administrator, a
+  Revenue Manager, an agent's catalogue) and `save_version`'s answer against main's bodies; a blank
+  value saved and priced as 0 (the draft compared the quotes with their row names, which a save
+  renews: it failed on main too); board rows main published publish, unreported; main's issue keys
+  live, in publish's warnings and in the stored report; no rate limit on a saved draft's check; a
+  TEX Quote and a reservation snapshot with main's night keys; and `TestSecurityChanges` (3), the
+  deliberate differences. Run against main's code (`git archive 6b0102c` with this module, migrated
+  with it): 10 of 13 pass, the 3 security tests fail as designed. On the branch before the fix: 12
+  of 13 fail (68 failures and errors in subtests); after it, 13 of 13 pass.
+- *Integration, updated:* `test_pricing_workspace_api` calls as the workspace does (`wapi`: every
+  call with `workspace=1`; `publish(..., workspace=True)`); `bench_pricing_workspace` too;
+  `test_security_regressions` is main's again (the catalogue without the flag has main's keys).
+- *Frontend:* `npm run test:unit` (`draft-preview.test.ts`: every request of both modes and sources
+  carries `workspace: 1`; fail-first: the module had no `WORKSPACE` export). E2E
+  `pricing-workspace-optin.spec.ts`: opening a draft, an unsaved edit's live price and check, the
+  Price test, Save and Publish all send `workspace=1`. `pricing-workspace-issues` test 5 and
+  `flows/workspace.ts publish` publish as the workspace does (their read-only view anchors the
+  stored report by `ref`).
