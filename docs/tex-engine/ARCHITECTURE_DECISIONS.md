@@ -8036,7 +8036,7 @@ has no newer commit, so no merge was needed.
 - *Integration:* all 38 modules migrated with this tree (`migrate_test.sh`): 846 OK (10 skipped, as
   before), `test_pricing_workspace_api` 63 of them.
 - *Upstream suites with this tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
-- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the thirteen
+- *Browser, on the tree's own servers (bench :8016 with this tree, Vite :5186):* the twelve
   `pricing-workspace*` specs (desktop, and the mobile spec on Pixel 7 too): 88 of 88; `editor-edits`,
   `contract-admin` and `critical-journey`: 5 of 5.
 

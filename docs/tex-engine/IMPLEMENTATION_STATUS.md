@@ -964,7 +964,7 @@ Verification: unit 504 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:
 keys), `npm run test:unit` 306, `npm run test:dom` 32. All 38 integration modules migrated with the
 tree: 846 OK (10 skipped, as before), `test_pricing_workspace_api` 63 of them. Upstream suites: eval
 76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite :5186):
-the thirteen `pricing-workspace*` specs 88/88, and `editor-edits`, `contract-admin` and
+the twelve `pricing-workspace*` specs 88/88, and `editor-edits`, `contract-admin` and
 `critical-journey` 5/5. Fail-first: see ADR-061 (the backend tests, the unit tests, and the new
 `pricing-workspace-rereview2.spec.ts`, which fails 10 of 10 on the re-review frontend). Untracked
 test files of other work in the worktree are not counted (ADR-061).
