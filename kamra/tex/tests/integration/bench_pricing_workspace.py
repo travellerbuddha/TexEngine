@@ -34,6 +34,7 @@ from kamra.tex.tests.integration.test_pricing_workspace_api import (
 	find,
 	keyed,
 	pre_s3_matrix,
+	wapi,
 )
 
 OCC_KINDS = (("ADULT", 3, None, "MULTIPLY", "0.7"), ("CHILD", None, "CHA", "PERCENT_OF", "25"),
@@ -95,9 +96,9 @@ class BenchPricingWorkspace(WorkspaceCase):
 		        "periods": periods, "period_rates": rates, "age_bands": fx.default_age_bands(),
 		        "occupancy_rules": occ, "boards": boards}
 		t0 = time.perf_counter()
-		api.save_version(self.v, as_json(data))
+		wapi.save_version(self.v, as_json(data))
 		saved_in = round(time.perf_counter() - t0, 3)
-		doc = api.get_version(self.v)
+		doc = wapi.get_version(self.v)
 		payload = {t: keyed(t, doc[t]) for t in api.VERSION_TABLES}
 		ids = {r["name"]: f"~{r['_key']}" for t in api.VERSION_TABLES for r in payload[t]}
 		return payload, rts, saved_in, ids
@@ -114,19 +115,19 @@ class BenchPricingWorkspace(WorkspaceCase):
 		r = {"rows": rows, "cells": n_rooms * n_periods, "json_kb": round(len(body) / 1024, 1), "save_version": saved_in}
 		r["overlay_only"], _ = best_of(lambda: api._overlay(self.v, body))
 		r["matrix_pre_s3_keys"], _ = best_of(lambda: pre_s3_matrix(self.v))
-		r["matrix_saved"], m_saved = best_of(lambda: api.price_matrix(self.v))
-		r["matrix_overlay"], m_overlay = best_of(lambda: api.price_matrix(self.v, data=body))
+		r["matrix_saved"], m_saved = best_of(lambda: wapi.price_matrix(self.v))
+		r["matrix_overlay"], m_overlay = best_of(lambda: wapi.price_matrix(self.v, data=body))
 		r["matrix_saved_12_parties"], p_saved = best_of(
-			lambda: api.price_matrix(self.v, parties=parties, party_room=room))
+			lambda: wapi.price_matrix(self.v, parties=parties, party_room=room))
 		r["matrix_overlay_12_parties"], p_overlay = best_of(
-			lambda: api.price_matrix(self.v, data=body, parties=parties, party_room=room))
-		r["preview_saved"], q_saved = best_of(lambda: api.preview_price(self.v, **quote))
-		r["preview_overlay"], q_overlay = best_of(lambda: api.preview_price(self.v, data=body, **quote))
+			lambda: wapi.price_matrix(self.v, data=body, parties=parties, party_room=room))
+		r["preview_saved"], q_saved = best_of(lambda: wapi.preview_price(self.v, **quote))
+		r["preview_overlay"], q_overlay = best_of(lambda: wapi.preview_price(self.v, data=body, **quote))
 		prices = json.dumps([f"{100 + i % 50}.55" for i in range(api.ADJUST_VALUES_MAX)])
 		r["apply_op_values_500"], adjusted = best_of(
 			lambda: api.apply_op_values(self.v, values=prices, op="ADJUST_PERCENT", value="7.5"))
-		r["validate_saved"], v_saved = best_of(lambda: api.validate_version(self.v), n=1)
-		r["validate_overlay"], v_overlay = best_of(lambda: api.validate_version(self.v, data=body), n=1)
+		r["validate_saved"], v_saved = best_of(lambda: wapi.validate_version(self.v), n=1)
+		r["validate_overlay"], v_overlay = best_of(lambda: wapi.validate_version(self.v, data=body), n=1)
 		r["issues"] = len(v_saved["issues"])
 		print(f"PERF {label} {json.dumps(r)}")
 
@@ -190,15 +191,15 @@ class BenchPricingWorkspace(WorkspaceCase):
 			return False
 
 		r = {"rows": rows, "cells": 12 * 52, "json_kb": round(len(body) / 1024, 1), "save_version": saved_in}
-		r["get_version"], doc = best_of(lambda: api.get_version(self.v))
-		r["matrix_overlay_refused"], m_refused = best_of(lambda: refused(lambda: api.price_matrix(self.v, data=body)))
+		r["get_version"], doc = best_of(lambda: wapi.get_version(self.v))
+		r["matrix_overlay_refused"], m_refused = best_of(lambda: refused(lambda: wapi.price_matrix(self.v, data=body)))
 		r["validate_overlay_refused"], v_refused = best_of(
-			lambda: refused(lambda: api.validate_version(self.v, data=body)))
-		r["matrix_saved"], m_saved = best_of(lambda: api.price_matrix(self.v))
+			lambda: refused(lambda: wapi.validate_version(self.v, data=body)))
+		r["matrix_saved"], m_saved = best_of(lambda: wapi.price_matrix(self.v))
 		r["matrix_saved_12_parties"], p_saved = best_of(
-			lambda: api.price_matrix(self.v, parties=json.dumps(PARTIES), party_room=room))
-		r["preview_saved"], q_saved = best_of(lambda: api.preview_price(self.v, **quote))
-		r["validate_saved"], v_saved = best_of(lambda: api.validate_version(self.v), n=1)
+			lambda: wapi.price_matrix(self.v, parties=json.dumps(PARTIES), party_room=room))
+		r["preview_saved"], q_saved = best_of(lambda: wapi.preview_price(self.v, **quote))
+		r["validate_saved"], v_saved = best_of(lambda: wapi.validate_version(self.v), n=1)
 		r["issues"] = len(v_saved["issues"])
 		print(f"PERF above_cap_12x52 {json.dumps(r)}")
 

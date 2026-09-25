@@ -1,5 +1,11 @@
 """Pricing Workspace backend (ADR-061, slice S2).
 
+Every addition below is the workspace's opt-in (ADR-061, "Existing semantics kept, the workspace's
+additions opt-in"): each call here is made as the workspace makes it, with ``workspace=1``
+(``wapi``), or with ``data`` / ``parties``, which only the workspace sends; a publish is the
+workspace's (``publish(workspace=True)``). What an existing caller gets without them (main's
+answers) is ``test_existing_semantics``.
+
 * GAP-1: ``price_matrix``, ``validate_version`` and ``preview_price`` take the editor's unsaved
   ``data`` and apply it to the draft in memory (the read-only overlay). Nothing is saved or
   audited; each row's client key becomes its rule id (``~<_key>``).
@@ -78,6 +84,19 @@ def find(rows: list[dict], **match) -> dict:
 	return next(r for r in rows if all(r.get(k) == v for k, v in match.items()))
 
 
+class WorkspaceApi:
+	"""The contract endpoints as the Pricing Workspace calls them: each with ``workspace=1``, the flag
+	its additions are opt-in by (ADR-061, "Existing semantics kept, the workspace's additions
+	opt-in"). Without it an endpoint answers as on main (``test_existing_semantics``)."""
+
+	def __getattr__(self, name):
+		fn = getattr(api, name)
+		return lambda *a, **kw: fn(*a, **{"workspace": 1, **kw})
+
+
+wapi = WorkspaceApi()
+
+
 class WorkspaceCase(TexTestCase):
 	def setUp(self):
 		super().setUp()
@@ -104,7 +123,7 @@ class WorkspaceCase(TexTestCase):
 
 	def payload(self) -> dict:
 		"""The draft's saved state as the workspace posts it (every table, keyed rows)."""
-		doc = api.get_version(self.v)
+		doc = wapi.get_version(self.v)
 		return {t: keyed(t, doc[t]) for t in api.VERSION_TABLES}
 
 	def std_low(self, data: dict) -> dict:
@@ -113,7 +132,7 @@ class WorkspaceCase(TexTestCase):
 	def preview(self, version: str | None = None, **kw):
 		args = {"room_type": self.std, "board": "AI", "check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 11)),
 		        "adults": 2, "market": "DE", "rate_plan": self.f["rate_plans"]["FLEX"], **kw}
-		return api.preview_price(version or self.v, **args)
+		return wapi.preview_price(version or self.v, **args)
 
 	def untouched(self) -> tuple:
 		"""What a write would change: the draft's modified time, its audit events and its rows."""
@@ -132,31 +151,31 @@ class TestOverlayReads(WorkspaceCase):
 		data = self.payload()
 		self.std_low(data).update(op="ABSOLUTE", value="123.45")
 
-		m = api.price_matrix(self.v, data=as_json(data))
+		m = wapi.price_matrix(self.v, data=as_json(data))
 		std = find(m["rooms"], room_type=self.std)
 		dlx = find(m["rooms"], room_type=self.dlx)
 		self.assertEqual(D(std["cells"]["LOW"]), D("123.45"))
 		self.assertEqual(D(dlx["cells"]["LOW"]), D("123.45") * D("1.35"))     # the derived room follows
 		self.assertEqual(D(std["cells"]["HIGH"]), D("120"))
-		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+		self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
 		q = self.preview(data=data)
 		self.assertTrue(q["sellable"], q.get("reasons"))
 		self.assertEqual(D(q["nights"][0]["unit"]), D("123.45"))
 
 		# the draft as saved: unchanged, unaudited, the same rows
 		self.assertEqual(self.untouched(), before)
-		self.assertEqual(self.std_low(api.get_version(self.v))["value"], "100")
-		self.assertEqual(D(find(api.price_matrix(self.v)["rooms"], room_type=self.std)["cells"]["LOW"]), D("100"))
+		self.assertEqual(self.std_low(wapi.get_version(self.v))["value"], "100")
+		self.assertEqual(D(find(wapi.price_matrix(self.v)["rooms"], room_type=self.std)["cells"]["LOW"]), D("100"))
 		self.assertEqual(D(self.preview()["nights"][0]["unit"]), D("100"))
 
 	def test_validation_of_unsaved_data_reports_its_issues(self):
 		data = self.payload()
 		data["period_rates"].append({**self.std_low(data), "_key": "dup", "value": "90"})
-		report = api.validate_version(self.v, data=as_json(data))
+		report = wapi.validate_version(self.v, data=as_json(data))
 		self.assertFalse(report["ok"])
 		self.assertIn("ROOM_RULE_DUPLICATE", [i["code"] for i in report["issues"]])
-		self.assertTrue(api.validate_version(self.v)["ok"])                        # the saved draft
-		self.assertEqual(contracts.validate_version(self.v), api.validate_version(self.v))
+		self.assertTrue(wapi.validate_version(self.v)["ok"])                        # the saved draft
+		self.assertEqual(contracts.validate_version(self.v, workspace=True), wapi.validate_version(self.v))
 
 	def test_rule_ids_are_the_rows_client_keys(self):
 		data = self.payload()
@@ -172,7 +191,7 @@ class TestOverlayReads(WorkspaceCase):
 		ids = {s["rule"]["rule_id"] for s in q["explanation"] if s.get("rule") and s["rule"]["kind"] == "room_rule"}
 		self.assertEqual(ids, {f"~period_rates-{pos}"})
 		# the saved draft keeps its row names
-		saved = self.std_low(api.get_version(self.v))["name"]
+		saved = self.std_low(wapi.get_version(self.v))["name"]
 		q = self.preview()
 		ids = {s["rule"]["rule_id"] for s in q["explanation"] if s.get("rule") and s["rule"]["kind"] == "room_rule"}
 		self.assertEqual(ids, {saved})
@@ -192,12 +211,12 @@ class TestOverlayReads(WorkspaceCase):
 		           dict(room_type=self.std, board="AI", check_in=str(fx.d(7, 10)), check_out=str(fx.d(7, 12)), adults=3),
 		           dict(room_type=self.dlx, board="AI", children=json.dumps([13]))]
 
-		overlay_matrix = api.price_matrix(self.v, data=data)
+		overlay_matrix = wapi.price_matrix(self.v, data=data)
 		overlay_quotes = [self.preview(data=data, **p) for p in parties]
 		self.assertTrue(overlay_quotes[0]["sellable"] and overlay_quotes[1]["sellable"],
 		                [q.get("reasons") for q in overlay_quotes])
-		api.save_version(self.v, as_json(data))
-		saved_matrix = api.price_matrix(self.v)
+		wapi.save_version(self.v, as_json(data))
+		saved_matrix = wapi.price_matrix(self.v)
 		saved_quotes = [self.preview(**p) for p in parties]
 
 		def cells(m):
@@ -211,23 +230,23 @@ class TestOverlayReads(WorkspaceCase):
 
 		self.assertEqual(cells(overlay_matrix), cells(saved_matrix))
 		self.assertEqual([money(q) for q in overlay_quotes], [money(q) for q in saved_quotes])
-		self.assertEqual(find(api.get_version(self.v)["boards"], board="UAI", room_type=self.dlx)["child_percent"], "50")
+		self.assertEqual(find(wapi.get_version(self.v)["boards"], board="UAI", room_type=self.dlx)["child_percent"], "50")
 
 
 class TestOverlayRefusals(WorkspaceCase):
 	def calls(self, data):
-		return (("price_matrix", lambda: api.price_matrix(self.v, data=data)),
-		        ("validate_version", lambda: api.validate_version(self.v, data=data)),
+		return (("price_matrix", lambda: wapi.price_matrix(self.v, data=data)),
+		        ("validate_version", lambda: wapi.validate_version(self.v, data=data)),
 		        ("preview_price", lambda: self.preview(data=data)))
 
 	def test_a_published_version_is_never_overlaid(self):
 		data = self.payload()
-		contracts.publish(self.v)
+		contracts.publish(self.v, workspace=True)
 		for name, call in self.calls(data):
 			with self.subTest(endpoint=name), self.assertRaises(frappe.ValidationError) as cm:
 				call()
 			self.assertIn("Only draft versions can be previewed with unsaved changes", str(cm.exception))
-		self.assertTrue(api.price_matrix(self.v)["rooms"])                          # its frozen terms still read
+		self.assertTrue(wapi.price_matrix(self.v)["rooms"])                          # its frozen terms still read
 
 	def test_the_overlay_needs_contract_edit_at_the_versions_hotel(self):
 		data = self.payload()
@@ -237,8 +256,8 @@ class TestOverlayRefusals(WorkspaceCase):
 				with self.subTest(user=user, endpoint=name), self.assertRaises(frappe.PermissionError):
 					call()
 		self.as_user(RM)
-		self.assertTrue(api.price_matrix(self.v, data=data)["rooms"])
-		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+		self.assertTrue(wapi.price_matrix(self.v, data=data)["rooms"])
+		self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
 		self.assertIn("sellable", self.preview(data=data))
 
 	def test_a_blank_value_is_refused_on_save_and_in_the_overlay(self):
@@ -254,7 +273,7 @@ class TestOverlayRefusals(WorkspaceCase):
 			row[field] = blank
 			message = f"{label}, row {data[table].index(row) + 1}: {ROW_MESSAGE}"
 			with self.subTest(table=table, path="save"), self.assertRaises(frappe.ValidationError) as cm:
-				api.save_version(self.v, as_json(data))
+				wapi.save_version(self.v, as_json(data))
 			self.assertIn(message, str(cm.exception))
 			for name, call in self.calls(data):
 				with self.subTest(table=table, path=name), self.assertRaises(frappe.ValidationError) as cm:
@@ -278,7 +297,7 @@ class TestOverlayRefusals(WorkspaceCase):
 			row.update(blank)
 			message = f"{label}, row {data[table].index(row) + 1}: {ROW_MESSAGE}"
 			with self.subTest(table=table, path="save"), self.assertRaises(frappe.ValidationError) as cm:
-				api.save_version(self.v, as_json(data))
+				wapi.save_version(self.v, as_json(data))
 			self.assertIn(message, str(cm.exception))
 			for name, call in self.calls(data):
 				with self.subTest(table=table, path=name), self.assertRaises(frappe.ValidationError) as cm:
@@ -290,8 +309,8 @@ class TestOverlayRefusals(WorkspaceCase):
 		find(data["periods"], period_code="LOW").update(adjustment_op="", adjustment_value="")
 		find(data["rate_plans"], rate_plan=flex).update(op="", value=None)
 		find(data["periods"], period_code="HIGH").update(adjustment_op="ADD", adjustment_value="0")
-		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
-		api.save_version(self.v, as_json(data))
+		self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
+		wapi.save_version(self.v, as_json(data))
 
 	def test_another_hotels_rate_plan_or_terms_are_refused(self):
 		"""A rate plan row, or its explicit cancellation or payment policy, of another hotel is refused
@@ -317,10 +336,10 @@ class TestOverlayRefusals(WorkspaceCase):
 			data["rate_plans"] = [r for r in data["rate_plans"] if r["rate_plan"] != row["rate_plan"]]
 			data["rate_plans"].append({**row, "_key": "foreign"})
 			with self.subTest(what=what):
-				m = api.price_matrix(self.v, data=as_json(data))
+				m = wapi.price_matrix(self.v, data=as_json(data))
 				self.assertIn("belongs to another hotel", m["build_error"])
 				self.assertIn(name, m["build_error"])
-				report = api.validate_version(self.v, data=as_json(data))
+				report = wapi.validate_version(self.v, data=as_json(data))
 				self.assertEqual([i["code"] for i in report["issues"]], ["BUILD"])
 				q = self.preview(data=as_json(data), rate_plan=row["rate_plan"])
 				self.assertFalse(q["sellable"])
@@ -330,15 +349,15 @@ class TestOverlayRefusals(WorkspaceCase):
 		# saved, the draft does not publish either
 		data = self.payload()
 		data["rate_plans"].append({"rate_plan": plan, "refundable": 1, "_key": "foreign"})
-		api.save_version(self.v, as_json(data))
+		wapi.save_version(self.v, as_json(data))
 		with self.assertRaises(frappe.ValidationError) as cm:
-			contracts.publish(self.v)
+			contracts.publish(self.v, workspace=True)
 		self.assertIn("belongs to another hotel", str(cm.exception))
 		# a shared policy (no hotel) is anyone's
 		data = self.payload()
 		data["rate_plans"] = [r for r in data["rate_plans"] if r["rate_plan"] != plan]
 		find(data["rate_plans"], rate_plan=flex)["payment_policy"] = shared
-		self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+		self.assertTrue(wapi.validate_version(self.v, data=as_json(data))["ok"])
 		self.assertTrue(self.preview(data=as_json(data))["sellable"])
 
 	def test_inherit_and_the_included_board_need_no_value(self):
@@ -346,17 +365,17 @@ class TestOverlayRefusals(WorkspaceCase):
 		data["period_rates"].append({"room_type": self.dlx, "period_code": "HIGH", "op": "INHERIT", "value": "",
 		                             "_key": "inh"})
 		find(data["boards"], board="AI")["adult_amount"] = None                     # the included (base) board
-		self.assertTrue(api.price_matrix(self.v, data=data)["rooms"])
-		out = api.save_version(self.v, as_json(data))
+		self.assertTrue(wapi.price_matrix(self.v, data=data)["rooms"])
+		out = wapi.save_version(self.v, as_json(data))
 		self.assertEqual(find(out["period_rates"], room_type=self.dlx, period_code="HIGH")["value"], "0")
 
 	def test_more_than_nine_places_are_refused_as_save_refuses_them(self):
 		data = self.payload()
 		find(data["occupancy_rules"], target="ADULT", position=3)["value"] = "0.3333333333"
 		with self.assertRaises(frappe.ValidationError) as saved:
-			api.save_version(self.v, as_json(data))
+			wapi.save_version(self.v, as_json(data))
 		with self.assertRaises(frappe.ValidationError) as overlaid:
-			api.price_matrix(self.v, data=data)
+			wapi.price_matrix(self.v, data=data)
 		self.assertIn("9 decimal places", str(overlaid.exception))
 		self.assertEqual(str(overlaid.exception), str(saved.exception))
 
@@ -365,7 +384,7 @@ class TestOverlayRefusals(WorkspaceCase):
 		rate = {"room_type": self.std, "period_code": "LOW", "op": "ABSOLUTE", "value": "100"}
 		data["period_rates"] = [{**rate, "_key": f"r{i}"} for i in range(5001)]
 		with self.assertRaises(frappe.ValidationError) as cm:
-			api.price_matrix(self.v, data=data)
+			wapi.price_matrix(self.v, data=data)
 		self.assertIn("5000", str(cm.exception))
 
 	def test_above_the_row_cap_the_saved_draft_still_answers_by_name(self):
@@ -377,26 +396,26 @@ class TestOverlayRefusals(WorkspaceCase):
 		rows = sum(len(data[t]) for t in api.VERSION_TABLES)
 		self.std_low(data).update(op="ABSOLUTE", value="123.45")
 		with mock.patch.object(api, "OVERLAY_MAX_ROWS", rows - 1):
-			self.assertEqual(api.get_version(self.v)["overlay_max_rows"], rows - 1)
-			for call in (lambda: api.price_matrix(self.v, data=as_json(data)),
-			             lambda: api.validate_version(self.v, data=as_json(data)),
+			self.assertEqual(wapi.get_version(self.v)["overlay_max_rows"], rows - 1)
+			for call in (lambda: wapi.price_matrix(self.v, data=as_json(data)),
+			             lambda: wapi.validate_version(self.v, data=as_json(data)),
 			             lambda: self.preview(data=as_json(data))):
 				with self.assertRaises(api.OverlayTooLarge) as cm:
 					call()
 				self.assertIsInstance(cm.exception, frappe.ValidationError)
 				self.assertEqual(str(cm.exception), f"A draft previewed with unsaved changes has at most {rows - 1} "
 				                                    f"rows; this one has {rows}.")
-			api.save_version(self.v, as_json(data))            # a save has no cap
-			m = api.price_matrix(self.v)
+			wapi.save_version(self.v, as_json(data))            # a save has no cap
+			m = wapi.price_matrix(self.v)
 			self.assertEqual(D(find(m["rooms"], room_type=self.std)["cells"]["LOW"]), D("123.45"))
-			self.assertTrue(api.validate_version(self.v)["ok"])
+			self.assertTrue(wapi.validate_version(self.v)["ok"])
 			q = self.preview()
 			self.assertTrue(q["sellable"], q.get("reasons"))
 		# any other refusal keeps its own type (a blank value while a row is typed)
 		blank = self.payload()
 		self.std_low(blank)["value"] = ""
 		with self.assertRaises(frappe.ValidationError) as cm:
-			api.validate_version(self.v, data=as_json(blank))
+			wapi.validate_version(self.v, data=as_json(blank))
 		self.assertNotIsInstance(cm.exception, api.OverlayTooLarge)
 
 	def test_a_row_name_used_twice_in_a_table_is_refused(self):
@@ -418,16 +437,16 @@ class TestOverlayRefusals(WorkspaceCase):
 		for t in ("rooms", "periods"):
 			for r in data[t]:
 				r.pop("_key")
-		self.assertTrue(api.validate_version(self.v, data=data)["ok"])
-		api.save_version(self.v, as_json(twice))           # a save drops the keys
+		self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
+		wapi.save_version(self.v, as_json(twice))           # a save drops the keys
 
 	def test_a_build_error_is_answered_not_raised(self):
 		data = self.payload()
 		data["rooms"].append({"room_type": "PW no such room", "_key": "bad"})
-		m = api.price_matrix(self.v, data=data)
+		m = wapi.price_matrix(self.v, data=data)
 		self.assertEqual((m["rooms"], m["periods"]), ([], []))
 		self.assertTrue(m["build_error"])
-		report = api.validate_version(self.v, data=data)
+		report = wapi.validate_version(self.v, data=data)
 		self.assertEqual([i["code"] for i in report["issues"]], ["BUILD"])
 
 
@@ -440,12 +459,12 @@ class TestViewerFlags(WorkspaceCase):
 		}
 		for user, flags in expect.items():
 			self.as_user(user)
-			doc = api.get_version(self.v)
+			doc = wapi.get_version(self.v)
 			with self.subTest(user=user):
 				self.assertEqual((doc["editable"], doc["can_preview"], doc["can_publish"], doc["can_edit_contract"]),
 				                 flags)
 		self.as_user(AGENT)
-		doc = api.get_version(self.v)
+		doc = wapi.get_version(self.v)
 		self.assertTrue(doc["cost_hidden"])
 		self.assertEqual((doc["can_preview"], doc["can_publish"], doc["can_edit_contract"]), (False, False, False))
 
@@ -454,32 +473,32 @@ class TestViewerFlags(WorkspaceCase):
 		for user, cap in ((RM, api.OVERLAY_MAX_ROWS), (EDITOR, api.OVERLAY_MAX_ROWS), (FINANCE, None), (AGENT, None)):
 			self.as_user(user)
 			with self.subTest(user=user):
-				self.assertEqual(api.get_version(self.v).get("overlay_max_rows"), cap)
+				self.assertEqual(wapi.get_version(self.v).get("overlay_max_rows"), cap)
 		self.assertEqual(api.OVERLAY_MAX_ROWS, 5000)
 
 	def test_finance_reads_the_saved_matrix_but_never_validates(self):
 		self.as_user(FINANCE)
-		self.assertTrue(api.price_matrix(self.v)["rooms"])
+		self.assertTrue(wapi.price_matrix(self.v)["rooms"])
 		with self.assertRaises(frappe.PermissionError):
-			api.validate_version(self.v)
+			wapi.validate_version(self.v)
 
 	def test_the_basis_is_locked_once_a_version_was_published(self):
-		self.assertFalse(api.get_version(self.v)["basis_locked"])
-		contracts.publish(self.v)
-		self.assertTrue(api.get_version(self.v)["basis_locked"])
+		self.assertFalse(wapi.get_version(self.v)["basis_locked"])
+		contracts.publish(self.v, workspace=True)
+		self.assertTrue(wapi.get_version(self.v)["basis_locked"])
 		draft = contracts.new_draft(self.c["contract"])
-		doc = api.get_version(draft)
+		doc = wapi.get_version(draft)
 		self.assertTrue(doc["basis_locked"])
 		self.assertTrue(doc["can_edit_contract"])                                   # whatever the lock says
 
 	def test_minor_units_of_the_contract_currency(self):
-		self.assertEqual(api.get_version(self.v)["contract_doc"]["minor_units"], 2)
+		self.assertEqual(wapi.get_version(self.v)["contract_doc"]["minor_units"], 2)
 		fx.ensure_currency("KWD", "KD")
 		kwd = frappe.get_doc({"doctype": "TEX Contract", "property": fx.PROPERTY, "contract_code": "PW-KWD",
 		                      "contract_name": "PW KWD", "market": "DE", "contract_currency": "KWD",
 		                      "pricing_basis": "PERSON", "status": "Draft"}).insert(ignore_permissions=True)
 		draft = contracts.new_draft(kwd.name)
-		self.assertEqual(api.get_version(draft)["contract_doc"]["minor_units"], 3)
+		self.assertEqual(wapi.get_version(draft)["contract_doc"]["minor_units"], 3)
 
 
 class TestPricingBasis(WorkspaceCase):
@@ -490,10 +509,10 @@ class TestPricingBasis(WorkspaceCase):
 		after = header_values(frappe.get_doc("TEX Contract", self.c["contract"]))
 		self.assertEqual({k: v for k, v in after.items() if header[k] != v}, {"pricing_basis": "ROOM"})
 		self.assertEqual(self.untouched(), before)                                 # the draft is untouched
-		self.assertEqual(api.get_version(self.v)["contract_doc"]["pricing_basis"], "ROOM")
+		self.assertEqual(wapi.get_version(self.v)["contract_doc"]["pricing_basis"], "ROOM")
 
 	def test_the_basis_is_refused_after_publish(self):
-		contracts.publish(self.v)
+		contracts.publish(self.v, workspace=True)
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.save_contract(data={"name": self.c["contract"], "pricing_basis": "ROOM"})
 		self.assertIn("cannot change", str(cm.exception))
@@ -529,10 +548,10 @@ def old_keys(m: dict) -> dict:
 
 class TestMatrixProvenance(WorkspaceCase):
 	def rate_name(self, room_type: str, period_code: str | None) -> str:
-		return find(api.get_version(self.v)["period_rates"], room_type=room_type, period_code=period_code)["name"]
+		return find(wapi.get_version(self.v)["period_rates"], room_type=room_type, period_code=period_code)["name"]
 
 	def test_each_cell_names_the_rule_that_priced_it(self):
-		m = api.price_matrix(self.v)
+		m = wapi.price_matrix(self.v)
 		std, dlx = find(m["rooms"], room_type=self.std), find(m["rooms"], room_type=self.dlx)
 		self.assertEqual(std["sources"]["LOW"], {
 			"rule_id": self.rate_name(self.std, "LOW"), "scope": "PERIOD", "op": "ABSOLUTE", "value": "100",
@@ -547,7 +566,7 @@ class TestMatrixProvenance(WorkspaceCase):
 		data["period_rates"].remove(high)
 		dlx_high = {"room_type": self.dlx, "period_code": "LOW", "op": "ABSOLUTE", "value": "150", "_key": "fix"}
 		data["period_rates"].append(dlx_high)
-		m = api.price_matrix(self.v, data=data)
+		m = wapi.price_matrix(self.v, data=data)
 		std, dlx = find(m["rooms"], room_type=self.std), find(m["rooms"], room_type=self.dlx)
 		self.assertEqual(std["sources"]["LOW"]["rule_id"], f"~{self.std_low(data)['_key']}")
 		generic = find(data["period_rates"], room_type=self.dlx, period_code=None)["_key"]
@@ -560,7 +579,7 @@ class TestMatrixProvenance(WorkspaceCase):
 		self.assertIn("HIGH", std["errors"])
 
 	def test_capacity_is_the_effective_one(self):
-		m = api.price_matrix(self.v)
+		m = wapi.price_matrix(self.v)
 		# the contract rooms set nothing: the room types' capacity (fixtures: STD 3+2, DLX 3+3, 2 included)
 		self.assertEqual(find(m["rooms"], room_type=self.std)["capacity"], {
 			"max_adults": 3, "max_children": 2, "max_occupants": 5, "min_adults": 1, "included_adults": 2})
@@ -568,12 +587,12 @@ class TestMatrixProvenance(WorkspaceCase):
 			"max_adults": 3, "max_children": 3, "max_occupants": 6, "min_adults": 1, "included_adults": 2})
 		data = self.payload()
 		find(data["rooms"], room_type=self.dlx).update(max_adults=2, max_occupants=4, min_adults=2, included_adults=1)
-		m = api.price_matrix(self.v, data=data)
+		m = wapi.price_matrix(self.v, data=data)
 		self.assertEqual(find(m["rooms"], room_type=self.dlx)["capacity"], {
 			"max_adults": 2, "max_children": 3, "max_occupants": 4, "min_adults": 2, "included_adults": 1})
 
 	def test_the_versions_own_bands_and_the_engine_default(self):
-		m = api.price_matrix(self.v)
+		m = wapi.price_matrix(self.v)
 		self.assertEqual(m["age_bands"], [
 			{"code": "INF", "label": "Infant", "from_months": 0, "to_months": 36, "is_infant": True,
 			 "source": "version"},
@@ -590,18 +609,18 @@ class TestMatrixProvenance(WorkspaceCase):
 	def test_a_band_without_a_label_reports_its_code(self):
 		data = self.payload()
 		find(data["age_bands"], band_code="CHA")["label"] = ""
-		m = api.price_matrix(self.v, data=data)
+		m = wapi.price_matrix(self.v, data=data)
 		self.assertEqual(find(m["age_bands"], code="CHA")["label"], "CHA")
-		api.save_version(self.v, as_json(data))
-		self.assertEqual(find(api.price_matrix(self.v)["age_bands"], code="CHA")["label"], "CHA")
+		wapi.save_version(self.v, as_json(data))
+		self.assertEqual(find(wapi.price_matrix(self.v)["age_bands"], code="CHA")["label"], "CHA")
 
 	def test_the_existing_keys_are_unchanged(self):
 		baseline = pre_s3_matrix(self.v)
 		for kw in ({}, {"adults": 3}, {"parties": [{"adults": 2, "children": ["CHB"]}], "party_room": self.std}):
 			with self.subTest(**{k: str(v) for k, v in kw.items()}):
-				self.assertEqual(old_keys(api.price_matrix(self.v, **kw)), baseline)
-		contracts.publish(self.v)
-		self.assertEqual(old_keys(api.price_matrix(self.v)), pre_s3_matrix(self.v))
+				self.assertEqual(old_keys(wapi.price_matrix(self.v, **kw)), baseline)
+		contracts.publish(self.v, workspace=True)
+		self.assertEqual(old_keys(wapi.price_matrix(self.v)), pre_s3_matrix(self.v))
 
 
 class TestInheritedTerms(WorkspaceCase):
@@ -619,7 +638,7 @@ class TestInheritedTerms(WorkspaceCase):
 		self.inh = fx.create_contract(self.f, code="PW-S3-INH", age_bands=[], occupancy_rules=[], publish=False)
 
 	def test_bands_and_rules_inherited_from_a_policy(self):
-		m = api.price_matrix(self.inh["version"])
+		m = wapi.price_matrix(self.inh["version"])
 		self.assertEqual(m["age_bands"], [
 			{"code": "INF", "label": "Infant", "from_months": 0, "to_months": 36, "is_infant": True,
 			 "source": self.source},
@@ -635,11 +654,11 @@ class TestInheritedTerms(WorkspaceCase):
 		                  "period": None, "op": "MULTIPLY", "value": "0.8", "is_override": False})
 		self.assertEqual(find(rules, age_band="CHD")["value"], "50")
 		# a published version keeps saying where its frozen bands came from
-		contracts.publish(self.inh["version"])
-		self.assertEqual({b["source"] for b in api.price_matrix(self.inh["version"])["age_bands"]}, {self.source})
+		contracts.publish(self.inh["version"], workspace=True)
+		self.assertEqual({b["source"] for b in wapi.price_matrix(self.inh["version"])["age_bands"]}, {self.source})
 
 	def test_the_versions_own_rules_are_not_inherited(self):
-		m = api.price_matrix(self.v)
+		m = wapi.price_matrix(self.v)
 		self.assertEqual({b["source"] for b in m["age_bands"]}, {"version"})
 		# the fixture draft names adult 3, INF, CHA and CHB itself; the policy's rules still cascade
 		self.assertEqual(len(m["inherited_rules"]), 3)
@@ -654,16 +673,16 @@ class TestInheritedTerms(WorkspaceCase):
 		version = self.inh["version"]
 		parties = json.dumps([{"adults": 2, "children": []}, {"adults": 2, "children": ["CHD"]},
 		                      {"adults": 3, "children": []}])
-		full = api.price_matrix(version, parties=parties, party_room=self.std)
+		full = wapi.price_matrix(version, parties=parties, party_room=self.std)
 		self.assertEqual(find(full["inherited_rules"], target="ADULT")["value"], "0.8")
 		self.assertTrue(all(c["hidden"] == [] for c in full["party_cells"]))
 		self.assertEqual(D(full["party_cells"][1]["cells"]["LOW"]), D("250"))     # 2 × 100 + 50 % of 100
-		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		data = {t: keyed(t, rows) for t, rows in wapi.get_version(version).items() if t in api.VERSION_TABLES}
 		self.as_user(EDITOR)
 		with self.assertRaises(frappe.PermissionError):
 			policies.get_record(POLICY, self.policy)
 		for label, kw in (("saved", {}), ("unsaved", {"data": as_json(data)})):
-			m = api.price_matrix(version, parties=parties, party_room=self.std, **kw)
+			m = wapi.price_matrix(version, parties=parties, party_room=self.std, **kw)
 			with self.subTest(label):
 				rules = m["inherited_rules"]
 				self.assertEqual(len(rules), 3)
@@ -682,12 +701,12 @@ class TestInheritedTerms(WorkspaceCase):
 				self.assertNotIn("0.8", json.dumps(rules))
 		# a published version's frozen rules likewise
 		self.as_user("Administrator")
-		contracts.publish(version)
+		contracts.publish(version, workspace=True)
 		self.as_user(EDITOR)
-		m = api.price_matrix(version)
+		m = wapi.price_matrix(version)
 		self.assertEqual({(r["op"], r["value"]) for r in m["inherited_rules"]}, {(None, None)})
 		self.as_user(RM)
-		self.assertEqual(find(api.price_matrix(version)["inherited_rules"], target="ADULT")["op"], "MULTIPLY")
+		self.assertEqual(find(wapi.price_matrix(version)["inherited_rules"], target="ADULT")["op"], "MULTIPLY")
 
 	def hidden_policy(self) -> str:
 		"""A draft that inherits a global policy with a child rule (CHD 37 % of the unit) and a whole
@@ -703,14 +722,14 @@ class TestInheritedTerms(WorkspaceCase):
 		100 + 100) would show its −10 % (review of S16, finding 1a)."""
 		version = self.hidden_policy()
 		parties = json.dumps([{"adults": 2, "children": []}, {"adults": 1, "children": []}])
-		two, one = api.price_matrix(version, parties=parties, party_room=self.std)["party_cells"]
+		two, one = wapi.price_matrix(version, parties=parties, party_room=self.std)["party_cells"]
 		self.assertEqual({k: D(c) for k, c in two["cells"].items()}, {"LOW": D("180"), "HIGH": D("216")})
 		self.assertEqual({k: D(c) for k, c in one["cells"].items()}, {"LOW": D("100"), "HIGH": D("120")})
-		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		data = {t: keyed(t, rows) for t, rows in wapi.get_version(version).items() if t in api.VERSION_TABLES}
 		self.as_user(EDITOR)
 		for label, kw in (("saved", {}), ("unsaved", {"data": as_json(data)})):
 			with self.subTest(label):
-				two, one = api.price_matrix(version, parties=parties, party_room=self.std, **kw)["party_cells"]
+				two, one = wapi.price_matrix(version, parties=parties, party_room=self.std, **kw)["party_cells"]
 				self.assertEqual(two["cells"], {"LOW": None, "HIGH": None})
 				self.assertEqual((two["slots"], two["errors"], sorted(two["hidden"])), ({}, {}, ["HIGH", "LOW"]))
 				# the engine's adult default alone prices one adult: shown
@@ -723,28 +742,28 @@ class TestInheritedTerms(WorkspaceCase):
 		policy-priced total (review of S16, finding 1b). The editor is told the period is hidden, not
 		why; the live check leaves the sweep's issue out too (review of S16, low finding)."""
 		version = self.hidden_policy()
-		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		data = {t: keyed(t, rows) for t, rows in wapi.get_version(version).items() if t in api.VERSION_TABLES}
 		data["occupancy_rules"].append({"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 238,
 		                                "_key": "probe"})
 		parties = json.dumps([{"adults": 2, "children": ["CHD"]}])
 		# 2 × 100 + 37 = 237 in LOW, 2 × 120 + 44.40 = 284.40 in HIGH
-		cell = api.price_matrix(version, data=as_json(data), parties=parties, party_room=self.std)["party_cells"][0]
+		cell = wapi.price_matrix(version, data=as_json(data), parties=parties, party_room=self.std)["party_cells"][0]
 		self.assertIn("negative price", cell["errors"]["LOW"])
 		self.assertEqual(D(cell["cells"]["HIGH"]), D("46.40"))
-		full = api.validate_version(version, data=as_json(data))["issues"]
+		full = wapi.validate_version(version, data=as_json(data))["issues"]
 		self.assertIn("NEGATIVE_OCCUPANCY_PRICE", {i["code"] for i in full})
 		self.as_user(EDITOR)
 		for x in (200, 238, 300):
 			data["occupancy_rules"][-1]["value"] = x
 			with self.subTest(x=x):
-				cell = api.price_matrix(version, data=as_json(data), parties=parties,
+				cell = wapi.price_matrix(version, data=as_json(data), parties=parties,
 				                        party_room=self.std)["party_cells"][0]
 				self.assertEqual(cell["cells"], {"LOW": None, "HIGH": None})
 				self.assertEqual((cell["slots"], cell["errors"], sorted(cell["hidden"])), ({}, {}, ["HIGH", "LOW"]))
-				issues = api.validate_version(version, data=as_json(data))["issues"]
+				issues = wapi.validate_version(version, data=as_json(data))["issues"]
 				self.assertNotIn("NEGATIVE_OCCUPANCY_PRICE", {i["code"] for i in issues})
 		# an error no hidden rule takes part in is still said: a party the room cannot host
-		cell = api.price_matrix(version, data=as_json(data), parties=json.dumps([{"adults": 4, "children": []}]),
+		cell = wapi.price_matrix(version, data=as_json(data), parties=json.dumps([{"adults": 4, "children": []}]),
 		                        party_room=self.std)["party_cells"][0]
 		self.assertEqual((set(cell["errors"]), cell["hidden"]), ({"LOW", "HIGH"}, []))
 
@@ -759,21 +778,21 @@ class TestInheritedTerms(WorkspaceCase):
 		version = fx.create_contract(self.f, code="PW-RR-NCR", age_bands=[], occupancy_rules=[],
 		                             publish=False)["version"]
 		parties = json.dumps([{"adults": 2, "children": ["CHD"]}, {"adults": 2, "children": []}])
-		family, two = api.price_matrix(version, parties=parties, party_room=self.std)["party_cells"]
+		family, two = wapi.price_matrix(version, parties=parties, party_room=self.std)["party_cells"]
 		self.assertEqual(family["errors"], {"LOW": NO_CHD_RULE, "HIGH": NO_CHD_RULE})
-		missing = [i for i in api.validate_version(version)["issues"] if i["code"] == "NO_CHILD_RULE"]
+		missing = [i for i in wapi.validate_version(version)["issues"] if i["code"] == "NO_CHILD_RULE"]
 		self.assertTrue(missing)
-		data = {t: keyed(t, rows) for t, rows in api.get_version(version).items() if t in api.VERSION_TABLES}
+		data = {t: keyed(t, rows) for t, rows in wapi.get_version(version).items() if t in api.VERSION_TABLES}
 		self.as_user(EDITOR)
 		for label, kw in (("saved", {}), ("unsaved", {"data": as_json(data)})):
 			with self.subTest(label):
-				family, two = api.price_matrix(version, parties=parties, party_room=self.std, **kw)["party_cells"]
+				family, two = wapi.price_matrix(version, parties=parties, party_room=self.std, **kw)["party_cells"]
 				self.assertEqual((family["cells"], family["hidden"]), ({"LOW": None, "HIGH": None}, []))
 				self.assertEqual(family["errors"], {"LOW": NO_CHD_RULE, "HIGH": NO_CHD_RULE})
 				# priced by the policy's adult rules: hidden
 				self.assertEqual((two["cells"], two["errors"], sorted(two["hidden"])),
 				                 ({"LOW": None, "HIGH": None}, {}, ["HIGH", "LOW"]))
-				seen = [i for i in api.validate_version(version, **kw)["issues"] if i["code"] == "NO_CHILD_RULE"]
+				seen = [i for i in wapi.validate_version(version, **kw)["issues"] if i["code"] == "NO_CHILD_RULE"]
 				self.assertEqual([i["message"] for i in seen], [i["message"] for i in missing])
 
 	def test_the_report_frozen_at_publish_leaves_out_what_the_live_check_does(self):
@@ -783,22 +802,23 @@ class TestInheritedTerms(WorkspaceCase):
 		# 1A: 100 − 150 (the engine's default prices the adult); 2A+1C: 200 + a policy-priced child − 260
 		version = fx.create_contract(self.f, code="PW-RR-REP", age_bands=[], occupancy_rules=[
 			{"target": "COMBINATION", "combination": "1+0", "op": "SUBTRACT", "value": 150},
-			{"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 260}])["version"]
-		negative = {(i["ref"]["adults"], i["ref"]["children"]) for i in api.get_version(version)["validation_report"]
+			{"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 260}], publish=False)["version"]
+		contracts.publish(version, workspace=True)                # the workspace's publish stores each ref
+		negative = {(i["ref"]["adults"], i["ref"]["children"]) for i in wapi.get_version(version)["validation_report"]
 		            if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"}
 		self.assertEqual(negative, {(1, 0), (2, 1)})
 		policy("PW Hotel Override", property=fx.PROPERTY, rules=[child("INF", "FIXED", 15, is_override=1)])
-		contracts.publish(self.v)
+		contracts.publish(self.v, workspace=True)
 		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED",
-		              {i["code"] for i in api.get_version(self.v)["validation_report"]})
+		              {i["code"] for i in wapi.get_version(self.v)["validation_report"]})
 		for user in (EDITOR, RM):
 			self.as_user(user)
 			with self.subTest(user):
-				shown = api.get_version(version)["validation_report"]
+				shown = wapi.get_version(version)["validation_report"]
 				self.assertEqual({(i["ref"]["adults"], i["ref"]["children"]) for i in shown
 				                  if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"},
 				                 {(1, 0)} if user == EDITOR else {(1, 0), (2, 1)})
-				codes = {i["code"] for i in api.get_version(self.v)["validation_report"]}
+				codes = {i["code"] for i in wapi.get_version(self.v)["validation_report"]}
 				self.assertEqual("OCC_POLICY_OVERRIDE_OUTRANKED" in codes, user == RM)
 
 	def test_the_live_check_does_not_compare_a_hidden_override_with_the_editors_rule(self):
@@ -808,11 +828,11 @@ class TestInheritedTerms(WorkspaceCase):
 		policy("PW Hotel Override", property=fx.PROPERTY, rules=[child("INF", "FIXED", 15, is_override=1)])
 		data = self.payload()
 		self.assertIn("OCC_POLICY_OVERRIDE_OUTRANKED",
-		              {i["code"] for i in api.validate_version(self.v, data=as_json(data))["issues"]})
+		              {i["code"] for i in wapi.validate_version(self.v, data=as_json(data))["issues"]})
 		self.as_user(EDITOR)
 		for kw in ({"data": as_json(data)}, {}):
 			with self.subTest(saved=not kw):
-				codes = {i["code"] for i in api.validate_version(self.v, **kw)["issues"]}
+				codes = {i["code"] for i in wapi.validate_version(self.v, **kw)["issues"]}
 				self.assertNotIn("OCC_POLICY_OVERRIDE_OUTRANKED", codes)
 
 # 2 adults; 2 adults + a CHB child (a code in any case); an unknown band; more children than STD holds
@@ -822,14 +842,14 @@ PARTIES = ({"adults": 2, "children": []}, {"adults": 2, "children": ["chb"]}, {"
 
 class TestSampleParties(WorkspaceCase):
 	def test_sample_parties_are_priced_per_period(self):
-		m = api.price_matrix(self.v, parties=json.dumps(PARTIES), party_room=self.std)
+		m = wapi.price_matrix(self.v, parties=json.dumps(PARTIES), party_room=self.std)
 		two, family, unknown, crowded = m["party_cells"]
 		self.assertEqual({p: D(c) for p, c in two["cells"].items()}, {"LOW": D("200"), "HIGH": D("240")})
 		self.assertEqual(two["errors"], {})
 		self.assertEqual({p: D(c) for p, c in family["cells"].items()}, {"LOW": D("250"), "HIGH": D("300")})
 		kid = find(family["slots"]["LOW"], target="CHILD")
 		self.assertEqual((kid["position"], kid["age_band"], D(kid["amount"]), kid["included"]), (1, "CHB", D("50"), False))
-		chb = [r["name"] for r in api.get_version(self.v)["occupancy_rules"]
+		chb = [r["name"] for r in wapi.get_version(self.v)["occupancy_rules"]
 		       if r["target"] == "CHILD" and r["age_band"] == "CHB" and not r["combination"]]
 		self.assertEqual([kid["rule_id"]], chb)
 		adults = [s for s in family["slots"]["LOW"] if s["target"] == "ADULT"]
@@ -846,7 +866,7 @@ class TestSampleParties(WorkspaceCase):
 	def test_a_period_without_a_price_is_an_error_of_its_cell(self):
 		data = self.payload()
 		data["period_rates"].remove(find(data["period_rates"], room_type=self.std, period_code="HIGH"))
-		m = api.price_matrix(self.v, data=data, parties=[{"adults": 2, "children": []}], party_room=self.dlx)
+		m = wapi.price_matrix(self.v, data=data, parties=[{"adults": 2, "children": []}], party_room=self.dlx)
 		cell = m["party_cells"][0]
 		self.assertEqual(D(cell["cells"]["LOW"]), D("270"))            # 2 × 135
 		self.assertIsNone(cell["cells"]["HIGH"])
@@ -854,23 +874,23 @@ class TestSampleParties(WorkspaceCase):
 		self.assertNotIn("HIGH", cell["slots"])
 
 	def test_without_parties_there_are_no_party_cells(self):
-		self.assertNotIn("party_cells", api.price_matrix(self.v))
-		self.assertEqual(api.price_matrix(self.v, parties="[]", party_room=self.std)["party_cells"], [])
+		self.assertNotIn("party_cells", wapi.price_matrix(self.v))
+		self.assertEqual(wapi.price_matrix(self.v, parties="[]", party_room=self.std)["party_cells"], [])
 
 	def test_the_party_room_must_be_in_the_contract(self):
 		parties = [{"adults": 2, "children": []}]
 		for room in ("PW no such room", None, ""):
 			with self.subTest(room=room), self.assertRaises(frappe.ValidationError) as cm:
-				api.price_matrix(self.v, parties=parties, party_room=room)
+				wapi.price_matrix(self.v, parties=parties, party_room=room)
 			self.assertIn("is not a room of this contract", str(cm.exception))
 		# a room of the hotel the unsaved draft no longer contracts
 		data = self.payload()
 		data["rooms"].remove(find(data["rooms"], room_type=self.dlx))
 		data["period_rates"].remove(find(data["period_rates"], room_type=self.dlx))
 		with self.assertRaises(frappe.ValidationError) as cm:
-			api.price_matrix(self.v, data=data, parties=parties, party_room=self.dlx)
+			wapi.price_matrix(self.v, data=data, parties=parties, party_room=self.dlx)
 		self.assertIn("is not a room of this contract", str(cm.exception))
-		self.assertEqual(len(api.price_matrix(self.v, parties=parties, party_room=self.dlx)["party_cells"]), 1)
+		self.assertEqual(len(wapi.price_matrix(self.v, parties=parties, party_room=self.dlx)["party_cells"]), 1)
 
 	def test_malformed_parties_are_refused(self):
 		for parties in ({"adults": 2}, [{"adults": 2}] * 13, [{"adults": 0, "children": []}],
@@ -878,16 +898,16 @@ class TestSampleParties(WorkspaceCase):
 		                [{"adults": True, "children": []}], [{"adults": 2, "children": ["CHA"] * 9}],
 		                [{"adults": 2, "children": "CHA"}], [{"adults": 2, "children": [7]}], ["2A"], "not json"):
 			with self.subTest(parties=parties), self.assertRaises(frappe.ValidationError):
-				api.price_matrix(self.v, parties=parties if isinstance(parties, str) else json.dumps(parties),
+				wapi.price_matrix(self.v, parties=parties if isinstance(parties, str) else json.dumps(parties),
 				                 party_room=self.std)
 
 	def test_the_gate_is_the_matrixs_own(self):
 		self.as_user(FINANCE)                                          # sees cost, does not edit contracts
-		m = api.price_matrix(self.v, parties=[{"adults": 2, "children": ["CHB"]}], party_room=self.std)
+		m = wapi.price_matrix(self.v, parties=[{"adults": 2, "children": ["CHB"]}], party_room=self.std)
 		self.assertEqual(D(m["party_cells"][0]["cells"]["LOW"]), D("250"))
 		self.as_user(AGENT)
 		with self.assertRaises(frappe.PermissionError):
-			api.price_matrix(self.v, parties=[{"adults": 2, "children": []}], party_room=self.std)
+			wapi.price_matrix(self.v, parties=[{"adults": 2, "children": []}], party_room=self.std)
 
 
 
@@ -909,25 +929,25 @@ class TestHeavyReads(WorkspaceCase):
 		parties = [{"adults": 2, "children": []}]
 		self.as_user(EDITOR)
 		with mock.patch.object(api, "_in_request", return_value=True), mock.patch.dict(api.HEAVY_LIMITS, {"validate": (2, 3), "matrix": (3, 6)}):
-			self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
-			self.assertTrue(api.validate_version(self.v)["ok"])                   # the saved draft counts too
+			self.assertTrue(wapi.validate_version(self.v, data=as_json(data))["ok"])
+			self.assertTrue(wapi.validate_version(self.v)["ok"])                   # the saved draft counts too
 			with self.assertRaises(frappe.RateLimitExceededError) as cm:
-				api.validate_version(self.v, data=as_json(data))
+				wapi.validate_version(self.v, data=as_json(data))
 			self.assertIn("Too many", str(cm.exception))
 			# the matrix has its own budget, and a plain read of it is not counted
 			for _ in range(5):
-				self.assertTrue(api.price_matrix(self.v)["rooms"])
-			api.price_matrix(self.v, data=as_json(data))
-			api.price_matrix(self.v, parties=parties, party_room=self.std)
-			api.price_matrix(self.v, data=as_json(data), parties=parties, party_room=self.std)
+				self.assertTrue(wapi.price_matrix(self.v)["rooms"])
+			wapi.price_matrix(self.v, data=as_json(data))
+			wapi.price_matrix(self.v, parties=parties, party_room=self.std)
+			wapi.price_matrix(self.v, data=as_json(data), parties=parties, party_room=self.std)
 			with self.assertRaises(frappe.RateLimitExceededError):
-				api.price_matrix(self.v, parties=parties, party_room=self.std)
+				wapi.price_matrix(self.v, parties=parties, party_room=self.std)
 			# another user has a budget of their own
 			self.as_user(RM)
-			self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+			self.assertTrue(wapi.validate_version(self.v, data=as_json(data))["ok"])
 		# a direct call is never counted
 		self.as_user(EDITOR)
-		self.assertTrue(api.validate_version(self.v, data=as_json(data))["ok"])
+		self.assertTrue(wapi.validate_version(self.v, data=as_json(data))["ok"])
 
 	def test_calls_running_at_once(self):
 		data = as_json(self.payload())
@@ -936,14 +956,14 @@ class TestHeavyReads(WorkspaceCase):
 		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (100, 1), "matrix": (100, 1)}):
 			with api._heavy("validate"):
 				with self.assertRaises(frappe.RateLimitExceededError) as cm:
-					api.validate_version(self.v, data=data)
+					wapi.validate_version(self.v, data=data)
 				self.assertIn("still running", str(cm.exception))
-				self.assertTrue(api.price_matrix(self.v, data=data)["rooms"])      # the other kind is free
-			self.assertTrue(api.validate_version(self.v, data=data)["ok"])        # the slot is free again
+				self.assertTrue(wapi.price_matrix(self.v, data=data)["rooms"])      # the other kind is free
+			self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])        # the slot is free again
 			# a call that fails frees its slot too
 			with self.assertRaises(frappe.ValidationError):
-				api.validate_version(self.v, data="[1]")
-			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+				wapi.validate_version(self.v, data="[1]")
+			self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
 			self.assertEqual(frappe.cache.zcard(api._heavy_key("validate", "slots", EDITOR)), 0)
 
 	def test_the_budget_window_always_expires(self):
@@ -962,15 +982,15 @@ class TestHeavyReads(WorkspaceCase):
 		with mock.patch.object(api, "_in_request", return_value=True), \
 		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (2, 3)}):
 			with mock.patch.object(frappe.cache, "incr", side_effect=window_runs_out):
-				api.validate_version(self.v, data=data)
+				wapi.validate_version(self.v, data=data)
 			self.assertTrue(0 < frappe.cache.ttl(budget) <= api.HEAVY_WINDOW)
 			# a counter a race left without a TTL gets one on its next use
 			frappe.cache.set(budget, 5)
 			with self.assertRaises(frappe.RateLimitExceededError):
-				api.validate_version(self.v, data=data)
+				wapi.validate_version(self.v, data=data)
 			self.assertTrue(0 < frappe.cache.ttl(budget) <= api.HEAVY_WINDOW)
 			frappe.cache.delete(budget)
-			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+			self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
 
 	def test_a_leaked_slot_ages_out_while_the_user_keeps_trying(self):
 		"""A call whose worker was killed never frees its slot. It is freed 300 s after that call
@@ -987,9 +1007,9 @@ class TestHeavyReads(WorkspaceCase):
 			for step in (100, 100, 99):                    # retries at 100, 200 and 299 s
 				clock[0] += step
 				with self.assertRaises(frappe.RateLimitExceededError):
-					api.validate_version(self.v, data=data)
+					wapi.validate_version(self.v, data=data)
 			clock[0] += 2                                  # 301 s after the leaked call started
-			self.assertTrue(api.validate_version(self.v, data=data)["ok"])
+			self.assertTrue(wapi.validate_version(self.v, data=data)["ok"])
 
 	def test_a_price_test_with_unsaved_data_is_bounded_too(self):
 		"""preview_price with data builds the same overlay as the matrix: it has a budget and a cap
@@ -1013,23 +1033,23 @@ class TestAnchoredIssues(WorkspaceCase):
 		data = self.payload()
 		key = self.std_low(data)["_key"]
 		data["period_rates"].append({**self.std_low(data), "_key": "dup", "value": "90"})
-		report = json.loads(frappe.as_json(api.validate_version(self.v, data=as_json(data))))   # as the browser gets it
+		report = json.loads(frappe.as_json(wapi.validate_version(self.v, data=as_json(data))))   # as the browser gets it
 		dup = find(report["issues"], code="ROOM_RULE_DUPLICATE")
 		self.assertEqual(dup["message"], f"room {self.std} has two rules for period LOW")
 		self.assertEqual(dup["ref"], {"rule_id": f"~{key}", "rule_ids": [f"~{key}", "~dup"], "room_type": self.std,
 		                              "period": "LOW"})
 		# the saved draft's issue names the saved rows
-		api.save_version(self.v, as_json(data))
-		names = [r["name"] for r in api.get_version(self.v)["period_rates"]
+		wapi.save_version(self.v, as_json(data))
+		names = [r["name"] for r in wapi.get_version(self.v)["period_rates"]
 		         if r["room_type"] == self.std and r["period_code"] == "LOW"]
 		self.assertEqual(len(names), 2)
-		dup = find(api.validate_version(self.v)["issues"], code="ROOM_RULE_DUPLICATE")
+		dup = find(wapi.validate_version(self.v)["issues"], code="ROOM_RULE_DUPLICATE")
 		self.assertEqual(dup["ref"], {"rule_id": names[0], "rule_ids": names, "room_type": self.std, "period": "LOW"})
 
 	def test_an_issue_about_nothing_in_particular_has_no_ref(self):
 		data = self.payload()
 		data["boards"] = [b for b in data["boards"] if not b["is_base"]]
-		issue = find(api.validate_version(self.v, data=data)["issues"], code="NO_BASE_BOARD")
+		issue = find(wapi.validate_version(self.v, data=data)["issues"], code="NO_BASE_BOARD")
 		self.assertEqual(set(issue), {"level", "code", "message"})
 
 	def test_board_rules_for_an_unknown_room_or_period_or_twice_the_same(self):
@@ -1040,7 +1060,7 @@ class TestAnchoredIssues(WorkspaceCase):
 		data["boards"] += [{**supplement, "room_type": self.dlx, "_key": "dlx-only"},
 		                   {**supplement, "period_code": "NOPE", "_key": "orphan"},
 		                   {**supplement, "adult_amount": "25", "_key": "twin"}]
-		report = api.validate_version(self.v, data=data)
+		report = wapi.validate_version(self.v, data=data)
 		self.assertFalse(report["ok"])
 		room = find(report["issues"], code="BOARD_UNKNOWN_ROOM")
 		self.assertEqual(room["message"], f"board rule ~dlx-only (UAI) names unknown room {self.dlx}")
@@ -1057,13 +1077,13 @@ class TestAnchoredIssues(WorkspaceCase):
 		data = self.payload()
 		data["boards"].append({"board": "UAI", "op": "ADD", "adult_amount": "15", "child_percent": "50",
 		                       "period_code": "NOPE", "_key": "orphan"})
-		api.save_version(self.v, as_json(data))
-		row = find(api.get_version(self.v)["boards"], period_code="NOPE")["name"]
+		wapi.save_version(self.v, as_json(data))
+		row = find(wapi.get_version(self.v)["boards"], period_code="NOPE")["name"]
 		with self.assertRaises(frappe.ValidationError) as cm:
-			contracts.publish(self.v)
+			contracts.publish(self.v, workspace=True)
 		self.assertIn(f"board rule {row} (UAI) names unknown period NOPE", str(cm.exception))
 		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.v, "status"), "Draft")
-		issue = find(api.validate_version(self.v)["issues"], code="BOARD_UNKNOWN_PERIOD")
+		issue = find(wapi.validate_version(self.v)["issues"], code="BOARD_UNKNOWN_PERIOD")
 		self.assertEqual(issue["ref"], {"rule_id": row, "board": "UAI", "period": "NOPE"})
 
 	def test_the_fixture_contract_still_publishes(self):
@@ -1071,8 +1091,8 @@ class TestAnchoredIssues(WorkspaceCase):
 		self.assertEqual(frappe.db.get_value("TEX Contract Version", out["version"], "status"), "Published")
 		self.assertTrue(all(set(w) <= {"level", "code", "message", "ref"} and w["level"] == "WARNING"
 		                    for w in out["warnings"]), out["warnings"])
-		self.assertEqual(api.get_version(out["version"])["validation_report"], out["warnings"])
-		published = contracts.publish(self.v)                          # this test case's draft too
+		self.assertEqual(wapi.get_version(out["version"])["validation_report"], out["warnings"])
+		published = contracts.publish(self.v, workspace=True)          # this test case's draft too
 		self.assertEqual(frappe.db.get_value("TEX Contract Version", published["version"], "status"), "Published")
 
 
@@ -1211,7 +1231,7 @@ class TestApplyOpValues(WorkspaceCase):
 				self.call(["70"])
 
 	def test_only_drafts(self):
-		contracts.publish(self.v)
+		contracts.publish(self.v, workspace=True)
 		with self.assertRaises(frappe.ValidationError) as cm:
 			self.call(["70"])
 		self.assertIn("draft", str(cm.exception))
@@ -1234,11 +1254,11 @@ class TestApplyOpValues(WorkspaceCase):
 		[result] = self.call([low["value"]], op="ADJUST_PERCENT", value="10")
 		self.assertEqual(result, {"value": "110.00", "error": None})
 		low.update(op="ABSOLUTE", value=result["value"])
-		m = api.price_matrix(self.v, data=data)
+		m = wapi.price_matrix(self.v, data=data)
 		self.assertEqual(D(find(m["rooms"], room_type=self.std)["cells"]["LOW"]), D("110"))
 		self.assertEqual(D(find(m["rooms"], room_type=self.dlx)["cells"]["LOW"]), D("148.5"))   # the formula follows
-		api.save_version(self.v, as_json(data))
-		self.assertEqual((self.std_low(api.get_version(self.v))["op"], self.std_low(api.get_version(self.v))["value"]),
+		wapi.save_version(self.v, as_json(data))
+		self.assertEqual((self.std_low(wapi.get_version(self.v))["op"], self.std_low(wapi.get_version(self.v))["value"]),
 		                 ("ABSOLUTE", "110"))
 
 
