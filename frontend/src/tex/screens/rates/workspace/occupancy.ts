@@ -13,7 +13,17 @@
 // engine default (adults ×1; no child default, ADR-007: "not sellable"). Special combinations are
 // not ranked into the cells: the precedence note marks them, and the server's resolved line is the
 // truth for a party (§3.6.2). No runtime imports except each other and lib/shorthand.ts.
-import { editText, type ShErrorCode, type ShFormatOptions, type ShOp, type ShResult } from "../lib/shorthand.ts"
+import {
+  editText,
+  isAmountOp,
+  normaliseDecimal,
+  OPS_BY_CONTEXT,
+  parseShorthand,
+  type ShErrorCode,
+  type ShFormatOptions,
+  type ShOp,
+  type ShResult,
+} from "../lib/shorthand.ts"
 import type { Tables } from "../lib/tables.ts"
 import type { InheritedOccupancyRule, Row } from "../lib/types.ts"
 import { bandCode, type BandLike } from "./bands.ts"
@@ -530,8 +540,10 @@ export function scopesWithRules(tables: Pick<Tables, "occupancy_rules">): Set<st
   return new Set(tables.occupancy_rules.map((r) => str(r.room_type)))
 }
 
-/** A card that only holds the single-use rule the ladder shows as its first row. */
-function isSingleCard(card: Pick<CombinationCard, "combination" | "rules">): boolean {
+/** A card that only holds the single-use rule the ladder shows as its first row ("1 Adult (single
+ * use)", or its "also with children" variant): not a special combination, so the summary, the ⓘ
+ * notes and the combination cards leave it out. */
+export function isSingleUseCard(card: Pick<CombinationCard, "combination" | "rules">): boolean {
   if (card.combination === "1+0") return card.rules.every((r) => r.target === "COMBINATION")
   if (card.combination === "1+*") return card.rules.every((r) => r.target === "ADULT" && r.position === 1)
   return false
@@ -567,7 +579,7 @@ export function ladderSummary(model: LadderModel, cards: readonly CombinationCar
     if (row.kind === "band" || row.kind === "child" || row.kind === "child_any") children.push(item)
     else adults.push(item)
   }
-  return { adults, children, combinations: cards.filter((c) => !isSingleCard(c)).length, periodOverrides: model.counts.periodOverrides }
+  return { adults, children, combinations: cards.filter((c) => !isSingleUseCard(c)).length, periodOverrides: model.counts.periodOverrides }
 }
 
 /** The ⓘ precedence note (§3.6.2): the cells a special combination outranks for some party,
@@ -578,7 +590,7 @@ export function ladderSummary(model: LadderModel, cards: readonly CombinationCar
  * Keyed `${row.id}|${period}`, the card ids as values. Computed from the grouping (§3.7.4). */
 export function combinationNotes(model: LadderModel, cards: readonly CombinationCard[], scopeRoom: string | null): Map<string, string[]> {
   const scope = str(scopeRoom)
-  const live = cards.filter((c) => !isSingleCard(c))
+  const live = cards.filter((c) => !isSingleUseCard(c))
   const out = new Map<string, string[]>()
   if (!live.length) return out
   for (const row of model.rows) {
@@ -770,7 +782,8 @@ export interface CombinationCard {
   keys: string[]
   /** Scoped to specific periods (◆). */
   periodScoped: boolean
-  /** The structured builder can edit it (no rule carries a note). */
+  /** The structured builder can edit it (builderCanEdit: no note, one rule per guest and band,
+   * guests the combination has); the others are edited in the rule tables. */
   expressible: boolean
 }
 
@@ -781,6 +794,18 @@ export function isSingleUseRow(row: Row): boolean {
 }
 
 const TARGET_ORDER: Record<string, number> = { ADULT: 0, CHILD: 1, COMBINATION: 2 }
+
+/** A card's rules in display order: adults, children, the whole stay; then position and band. */
+function cardRuleSort(a: CardRule, b: CardRule): number {
+  const ja = JSON.stringify(a)
+  const jb = JSON.stringify(b)
+  return (
+    (TARGET_ORDER[a.target] ?? 9) - (TARGET_ORDER[b.target] ?? 9) ||
+    a.position - b.position ||
+    (a.age_band < b.age_band ? -1 : a.age_band > b.age_band ? 1 : 0) ||
+    (ja < jb ? -1 : ja > jb ? 1 : 0)
+  )
+}
 
 function countOf(part: string): number | null {
   return part === "*" || part === "" ? null : int(part)
@@ -811,16 +836,10 @@ export function groupCombinations(tables: Pick<Tables, "rooms" | "periods" | "oc
     cell.rules.push({ target: n.target, position: n.position, age_band: n.age_band, op: n.op, value: canonValue(r.value), note: str(r.note) })
     cells.set(key, cell)
   }
-  const ruleSort = (a: CardRule, b: CardRule) =>
-    (TARGET_ORDER[a.target] ?? 9) - (TARGET_ORDER[b.target] ?? 9) ||
-    a.position - b.position ||
-    (a.age_band < b.age_band ? -1 : a.age_band > b.age_band ? 1 : 0) ||
-    (JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0)
-
   // 2. merge cells with the same combination, flag and signature
   const groups = new Map<string, { combination: string; isOverride: boolean; rules: CardRule[]; cells: { room: string; period: string; rows: Row[] }[] }>()
   for (const cell of cells.values()) {
-    const rules = [...cell.rules].sort(ruleSort)
+    const rules = [...cell.rules].sort(cardRuleSort)
     const key = JSON.stringify([cell.combination, cell.isOverride, rules])
     const g = groups.get(key) ?? { combination: cell.combination, isOverride: cell.isOverride, rules, cells: [] }
     g.cells.push({ room: cell.room, period: cell.period, rows: cell.rows })
@@ -835,18 +854,20 @@ export function groupCombinations(tables: Pick<Tables, "rooms" | "periods" | "oc
     const keySet = new Set(part.flatMap((c) => c.rows.map((r) => r._key)))
     const keys = tables.occupancy_rules.filter((r) => keySet.has(r._key)).map((r) => r._key)
     const [a, c] = g.combination.split("+")
+    const adults = countOf(a ?? "")
+    const children = countOf(c ?? "")
     return {
       id: JSON.stringify([g.combination, g.isOverride, rooms, periods, g.rules]),
       combination: g.combination,
-      adults: countOf(a ?? ""),
-      children: countOf(c ?? ""),
+      adults,
+      children,
       isOverride: g.isOverride,
       rooms,
       periods,
       rules: g.rules,
       keys,
       periodScoped: periods.some((p) => p !== ALL_PERIODS),
-      expressible: g.rules.every((r) => !r.note),
+      expressible: builderCanEdit({ combination: g.combination, adults, children, rules: g.rules }),
     }
   }
   for (const g of groups.values()) {
@@ -867,4 +888,315 @@ export function groupCombinations(tables: Pick<Tables, "rooms" | "periods" | "oc
       first(x.periods, periodIdx) - first(y.periods, periodIdx) ||
       (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
   )
+}
+
+/** The card that holds a rule row (by its `_key`), or null: where "Show in grid" and an issue
+ * about the row lead (the card's element carries `data-card` = its id). */
+export function cardOfRow(cards: readonly CombinationCard[], key: string): string | null {
+  return cards.find((c) => c.keys.includes(key))?.id ?? null
+}
+
+// ─── the special combination builder (§3.7.1, slice S12) ─────────────────
+
+/** One rule line of the builder: a child (position, age band; several lines of one child name
+ * different bands), an adult (position) or the whole stay (position 0). `text` is what its Value
+ * field holds; `op` is its Rule select. */
+export interface BuilderLine {
+  id: string
+  position: number
+  /** "" = any age (child lines); always "" for adult and whole-stay lines */
+  age_band: string
+  op: string
+  text: string
+}
+
+/** The builder's state: the combination (never free text: steppers, chips and the "any" options),
+ * the rule lines, the rooms and periods it applies to, and the card it edits. */
+export interface BuilderDraft {
+  adults: number | "*"
+  children: number | "*"
+  /** any children ("a+*"): how many child positions have lines (1, 2, …) */
+  anyChildren: number
+  childLines: BuilderLine[]
+  adultLines: BuilderLine[]
+  whole: BuilderLine | null
+  roomsAll: boolean
+  rooms: string[]
+  periodsAll: boolean
+  periods: string[]
+  isOverride: boolean
+  /** the edited card's row keys ([] for a new combination): Save replaces exactly these */
+  replace: string[]
+}
+
+export interface BuilderOptions {
+  minorUnits: number
+  decimalMark?: "." | ","
+}
+
+let lineSeq = 0
+/** A new builder line (ids are only for the screen: React keys, focus, errors). */
+export function builderLine(patch: Partial<BuilderLine> = {}): BuilderLine {
+  lineSeq += 1
+  return { id: `bl${lineSeq}`, position: 1, age_band: "", op: "MULTIPLY", text: "", ...patch }
+}
+
+/** A new combination: two adults and one child unless told otherwise, all rooms, all periods. */
+export function newBuilderDraft(init: Partial<Pick<BuilderDraft, "adults" | "children" | "roomsAll" | "rooms">> = {}): BuilderDraft {
+  return ensureChildLines({
+    adults: 2,
+    children: 1,
+    anyChildren: 1,
+    childLines: [],
+    adultLines: [],
+    whole: null,
+    roomsAll: true,
+    rooms: [],
+    periodsAll: true,
+    periods: [],
+    isOverride: false,
+    replace: [],
+    ...init,
+  })
+}
+
+/** The child positions the builder shows: 1…children, or 1…anyChildren for any children. */
+export function shownChildPositions(draft: Pick<BuilderDraft, "children" | "anyChildren">): number[] {
+  const n = draft.children === "*" ? Math.max(1, draft.anyChildren) : Math.max(0, draft.children)
+  return Array.from({ length: n }, (_, i) => i + 1)
+}
+
+/** Every child position shown has at least one line (a blank line writes nothing). Lines of
+ * positions no longer shown are kept, hidden, so a count put back shows them again; they are
+ * never saved. The same draft when nothing is missing. */
+export function ensureChildLines(draft: BuilderDraft): BuilderDraft {
+  const missing = shownChildPositions(draft).filter((p) => !draft.childLines.some((l) => l.position === p))
+  if (!missing.length) return draft
+  const lines = [...draft.childLines, ...missing.map((position) => builderLine({ position }))]
+  return { ...draft, childLines: lines.sort((a, b) => a.position - b.position) }
+}
+
+const RE_PLAIN = /^[0-9]+(?:[.,][0-9]+)?$/
+const RE_SIGNED = /^[+-] *[0-9]+(?:[.,][0-9]+)?$/
+
+/** What a builder Value field holds: nothing, a rule, or the parser's refusal. */
+export type BuilderValue = { kind: "empty" } | { kind: "rule"; op: ShOp; value: string } | { kind: "error"; code: ShErrorCode }
+
+/** Reads a builder Value field (§3.7.1). The `occupancy` shorthand chooses the rule itself (x0.5
+ * Multiply, 50% Percentage of, +10% / -10% Plus/minus %, +25 Add, -25 Subtract, =25 Set price;
+ * "=25" keeps FIXED when FIXED is chosen, as FIXED has no shorthand of its own). A number alone is
+ * the value of the rule chosen in the Rule select (the design's "Rule [Multiply] Value [0.50]"),
+ * signed under Plus/minus %. Amounts keep the AMBIGUOUS guard (O5). No arithmetic. */
+export function readBuilderValue(text: string, op: string, minorUnits: number): BuilderValue {
+  if (op === "INHERIT") return { kind: "rule", op: "INHERIT", value: "" }
+  const s = text.replace(/[   ]/g, " ").replace(/^ +| +$/g, "")
+  if (s === "") return { kind: "empty" }
+  const chosen = (OPS_BY_CONTEXT.occupancy as readonly string[]).includes(op) ? (op as ShOp) : null
+  if (chosen && (RE_PLAIN.test(s) || (chosen === "ADJUST_PERCENT" && RE_SIGNED.test(s)))) {
+    const d = normaliseDecimal(s.replace(/^([+-]) +/, "$1"), { amount: isAmountOp("occupancy", chosen), minorUnits })
+    return d.ok ? { kind: "rule", op: chosen, value: d.value } : { kind: "error", code: d.code }
+  }
+  const p = parseShorthand(text, "occupancy", { minorUnits })
+  if (!p.ok) return { kind: "error", code: p.code }
+  if (p.kind !== "rule") return p.kind === "clear" ? { kind: "empty" } : { kind: "error", code: "SYNTAX" }
+  return { kind: "rule", op: chosen === "FIXED" && p.op === "ABSOLUTE" ? "FIXED" : p.op, value: p.value }
+}
+
+/** The text a Value field shows for a stored rule, read back to the same rule by readBuilderValue
+ * with that rule chosen: the number alone ("0.5", "25"; an amount such as 12.345 as "12.3450" so
+ * the AMBIGUOUS guard accepts it), a negative value in its shorthand ("-5%"); "" for INHERIT. */
+export function builderValueText(op: string, value: string, opts?: ShFormatOptions): string {
+  if (op === "INHERIT") return ""
+  const canon = normaliseDecimal(str(value))
+  if (!canon.ok) return str(value)
+  if (canon.value.startsWith("-")) return editText(op as ShOp, canon.value, "occupancy", opts)
+  if (isAmountOp("occupancy", op as ShOp)) return editText("ABSOLUTE", canon.value, "occupancy", opts)
+  return opts?.decimalMark === "," ? canon.value.replace(".", ",") : canon.value
+}
+
+const RE_COMBINATION = /^([0-9]+|\*)\+([0-9]+|\*)$/
+
+/** The structured builder can show a card as it is, so saving it unchanged writes the same rules:
+ * a readable combination (not "any + any", at least one adult), no note, occupancy ops only, one
+ * rule per adult position (1…adults), per child position (1…children) and band, and at most one
+ * whole-stay rule (position 0, no band). Others are edited in the rule tables (§3.7.4). */
+export function builderCanEdit(card: Pick<CombinationCard, "combination" | "adults" | "children" | "rules">): boolean {
+  const m = RE_COMBINATION.exec(card.combination)
+  if (!m || (m[1] === "*" && m[2] === "*")) return false
+  if (card.adults !== null && card.adults < 1) return false
+  const seen = new Set<string>()
+  for (const r of card.rules) {
+    if (r.note || !(OPS_BY_CONTEXT.occupancy as readonly string[]).includes(r.op)) return false
+    const slot = `${r.target}|${r.position}|${r.age_band}`
+    if (seen.has(slot)) return false
+    seen.add(slot)
+    if (r.target === "ADULT") {
+      if (r.position < 1 || r.age_band || (card.adults !== null && r.position > card.adults)) return false
+    } else if (r.target === "CHILD") {
+      if (r.position < 1 || (card.children !== null && r.position > card.children)) return false
+    } else if (r.target === "COMBINATION") {
+      if (r.position !== 0 || r.age_band || [...seen].filter((x) => x.startsWith("COMBINATION|")).length > 1) return false
+    } else return false
+  }
+  return card.rules.length > 0
+}
+
+/** A card in the builder (Edit), or null when the builder cannot show it (builderCanEdit). */
+export function builderFromCard(card: CombinationCard, opts: BuilderOptions): BuilderDraft | null {
+  if (!builderCanEdit(card)) return null
+  const text = (r: CardRule) => builderValueText(r.op, r.value, opts)
+  const children = card.children === null ? ("*" as const) : card.children
+  const childLines = card.rules.filter((r) => r.target === "CHILD").map((r) => builderLine({ position: r.position, age_band: r.age_band, op: r.op, text: text(r) }))
+  const whole = card.rules.find((r) => r.target === "COMBINATION")
+  return ensureChildLines({
+    adults: card.adults === null ? "*" : card.adults,
+    children,
+    anyChildren: children === "*" ? Math.max(1, ...childLines.map((l) => l.position)) : 1,
+    childLines,
+    adultLines: card.rules.filter((r) => r.target === "ADULT").map((r) => builderLine({ position: r.position, op: r.op, text: text(r) })),
+    whole: whole ? builderLine({ position: 0, op: whole.op, text: text(whole) }) : null,
+    roomsAll: card.rooms.includes(""),
+    rooms: card.rooms.filter(Boolean),
+    periodsAll: card.periods.includes(ALL_PERIODS),
+    periods: card.periods.filter(Boolean),
+    isOverride: card.isOverride,
+    replace: [...card.keys],
+  })
+}
+
+/** Why the builder cannot save (yet). `line` names the line a message belongs to. */
+export type BuilderIssue =
+  | { code: "NO_RULES" | "NO_ROOMS" | "NO_PERIODS" | "ANY_BOTH" }
+  | { code: "VALUE"; line: string; value: ShErrorCode }
+  /** a second rule of one guest (and band) in this combination */
+  | { code: "DUPLICATE" | "POSITION"; line: string }
+  /** the rule already exists in another card for the same rooms and periods (OCC_DUPLICATE):
+   * `keys` are that card's rows */
+  | { code: "TWIN"; line: string; keys: string[] }
+
+export interface CombinationPlan {
+  /** "a+c", "*" for any */
+  combination: string
+  /** the rules the lines give, in card order (the reading line), even while issues remain */
+  rules: CardRule[]
+  issues: BuilderIssue[]
+  /** what Save writes (persistCombination); null while issues remain */
+  spec: CombinationSpec | null
+}
+
+/** What Save would write (§3.7.3): every shown line with a value becomes a rule for each chosen
+ * room × period, replacing the edited card's rows; blank lines write nothing (that guest keeps the
+ * ladder's rules). Refused: a value the parser refuses, a second rule for one guest and band, an
+ * adult the combination does not have, no rule, no room or period chosen, "any adults + any
+ * children", and the twin of a row of another card (the server's OCC_DUPLICATE). Pure. */
+export function planCombination(tables: Pick<Tables, "rooms" | "periods" | "occupancy_rules">, draft: BuilderDraft, opts: BuilderOptions): CombinationPlan {
+  const issues: BuilderIssue[] = []
+  const combination = `${draft.adults}+${draft.children}`
+  if (draft.adults === "*" && draft.children === "*") issues.push({ code: "ANY_BOTH" })
+  const rules: (CardRule & { line: string })[] = []
+  const seen = new Set<string>()
+  const take = (target: OccTarget, l: BuilderLine) => {
+    const v = readBuilderValue(l.text, l.op, opts.minorUnits)
+    if (v.kind === "empty") return
+    if (v.kind === "error") {
+      issues.push({ code: "VALUE", line: l.id, value: v.code })
+      return
+    }
+    const age_band = target === "CHILD" ? str(l.age_band).toUpperCase() : ""
+    const slot = `${target}|${l.position}|${age_band}`
+    if (seen.has(slot)) {
+      issues.push({ code: "DUPLICATE", line: l.id })
+      return
+    }
+    seen.add(slot)
+    rules.push({ target, position: l.position, age_band, op: v.op, value: v.value, note: "", line: l.id })
+  }
+  const shown = new Set(shownChildPositions(draft))
+  for (const l of draft.adultLines) {
+    if (l.position < 1 || (draft.adults !== "*" && l.position > draft.adults)) issues.push({ code: "POSITION", line: l.id })
+    else take("ADULT", l)
+  }
+  for (const l of draft.childLines) if (shown.has(l.position)) take("CHILD", l)
+  if (draft.whole) take("COMBINATION", { ...draft.whole, position: 0 })
+  if (!rules.length && !issues.some((i) => "line" in i)) issues.push({ code: "NO_RULES" })
+  if (!draft.roomsAll && !draft.rooms.length) issues.push({ code: "NO_ROOMS" })
+  if (!draft.periodsAll && !draft.periods.length) issues.push({ code: "NO_PERIODS" })
+
+  const inOrder = (list: readonly string[], order: readonly string[]) =>
+    [...new Set(list)].sort((a, b) => {
+      const [i, j] = [order.indexOf(a), order.indexOf(b)]
+      return (i < 0 ? 1e9 : i) - (j < 0 ? 1e9 : j) || (a < b ? -1 : a > b ? 1 : 0)
+    })
+  const rooms = draft.roomsAll ? [] : inOrder(draft.rooms, tables.rooms.map((r) => str(r.room_type)))
+  const periods = draft.periodsAll ? [] : inOrder(draft.periods, tables.periods.map((p) => str(p.period_code)))
+
+  // the twins of other rows: same guest, band, combination, room, period and Always wins
+  if (!issues.length) {
+    const replace = new Set(draft.replace)
+    const others = tables.occupancy_rules.filter((r) => !replace.has(r._key)).map((r) => norm(r))
+    for (const rule of rules) {
+      const keys: string[] = []
+      for (const room of rooms.length ? rooms : [""])
+        for (const period of periods.length ? periods : [ALL_PERIODS])
+          for (const n of others)
+            if (
+              n.combination === combination &&
+              n.target === rule.target &&
+              n.position === rule.position &&
+              n.age_band === rule.age_band &&
+              n.room_type === room &&
+              n.period === period &&
+              n.is_override === draft.isOverride
+            )
+              keys.push((n.src as Row)._key)
+      if (keys.length) issues.push({ code: "TWIN", line: rule.line, keys })
+    }
+  }
+
+  const cardRules: CardRule[] = rules.map(({ line: _line, ...r }) => ({ ...r, value: canonValue(r.value) })).sort(cardRuleSort)
+  const pick = (target: OccTarget) => rules.filter((r) => r.target === target)
+  const whole = pick("COMBINATION")[0]
+  return {
+    combination,
+    rules: cardRules,
+    issues,
+    spec: issues.length
+      ? null
+      : {
+          adults: draft.adults,
+          children: draft.children,
+          rooms,
+          periods,
+          childRules: pick("CHILD").map((r) => ({ position: r.position, age_band: r.age_band, op: r.op, value: r.value })),
+          adultRules: pick("ADULT").map((r) => ({ position: r.position, op: r.op, value: r.value })),
+          whole: whole ? { op: whole.op, value: whole.value } : null,
+          isOverride: draft.isOverride,
+          replace: [...draft.replace],
+        },
+  }
+}
+
+/** A quick chip of the builder: a valid combination of some contract room, enabled when a room in
+ * the builder's scope can host it; `rooms` are the rooms that can (the tooltip of a greyed chip). */
+export interface ComboChip extends ValidCombination {
+  enabled: boolean
+}
+
+/** The quick chips (§3.7.2): the union of the contract rooms' valid combinations (the publish
+ * sweep's rule, validCombinations), each enabled when a room of `scoped` hosts it (null = all
+ * rooms). Nothing is hard-coded. */
+export function combinationChips(capacities: readonly CapacityLike[], scoped: readonly string[] | null): ComboChip[] {
+  const inScope = scoped === null ? null : new Set(scoped)
+  return validCombinations(capacities).map((c) => ({ ...c, enabled: inScope === null || c.rooms.some((r) => inScope.has(r)) }))
+}
+
+/** How a child position is named under the contract's child ordering (child 1 is the oldest by
+ * default, OLDEST_FIRST): "Child 1 (oldest)", the last of a known count "(youngest)"; under
+ * AS_ENTERED child 1 is the first in the booking. */
+export function childQualifier(ordering: string, position: number, children: number | "*"): "oldest" | "youngest" | "first" | null {
+  const order = str(ordering) || "OLDEST_FIRST"
+  const last = children !== "*" && children > 1 && position === children
+  if (order === "AS_ENTERED") return position === 1 ? "first" : null
+  const [first, end] = order === "YOUNGEST_FIRST" ? (["youngest", "oldest"] as const) : (["oldest", "youngest"] as const)
+  return position === 1 ? first : last ? end : null
 }

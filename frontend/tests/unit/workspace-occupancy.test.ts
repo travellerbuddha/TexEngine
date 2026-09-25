@@ -6,8 +6,19 @@ import { parseShorthand } from "../../src/tex/screens/rates/lib/shorthand.ts"
 import {
   applyOccEntry,
   applyOccRule,
+  builderFromCard,
+  builderValueText,
   canonCombination,
+  cardOfRow,
+  childQualifier,
+  combinationChips,
   combinationNotes,
+  ensureChildLines,
+  isSingleUseCard,
+  newBuilderDraft,
+  planCombination,
+  readBuilderValue,
+  shownChildPositions,
   defaultParty,
   fromInheritedRule,
   groupCombinations,
@@ -25,6 +36,8 @@ import {
   removeCombination,
   scopesWithRules,
   validCombinations,
+  type BuilderDraft,
+  type BuilderLine,
   type LadderOptions,
   type OccIdentity,
 } from "../../src/tex/screens/rates/workspace/occupancy.ts"
@@ -746,4 +759,282 @@ test("sample parties stay within the server's limits and keep the common ones wh
   assert.equal(defaultParty(opts)?.id, "2+")
   // a room within the limits and the cap keeps every party
   assert.equal(partyOptions({ max_adults: 2, max_children: 2, max_occupants: 4, min_adults: 1 }, BANDS).length, 2 + 3 + 6 + 3 + 6)
+})
+
+// ─── S12: the special combination builder and its cards (§3.7) ────────────
+
+const MU = { minorUnits: 2 }
+const line = (patch: Partial<BuilderLine>): BuilderLine => ({ id: `t${++seq}`, position: 1, age_band: "", op: "MULTIPLY", text: "", ...patch })
+
+test("builder values: a form sets the rule, a number alone takes the rule chosen, FIXED stays FIXED", () => {
+  // occupancy shorthand chooses the rule (§3.4.4)
+  assert.deepEqual(readBuilderValue("x0.5", "PERCENT_OF", 2), { kind: "rule", op: "MULTIPLY", value: "0.5" })
+  assert.deepEqual(readBuilderValue("50%", "MULTIPLY", 2), { kind: "rule", op: "PERCENT_OF", value: "50" })
+  assert.deepEqual(readBuilderValue("-10%", "MULTIPLY", 2), { kind: "rule", op: "ADJUST_PERCENT", value: "-10" })
+  assert.deepEqual(readBuilderValue("+25", "MULTIPLY", 2), { kind: "rule", op: "ADD", value: "25" })
+  assert.deepEqual(readBuilderValue("-25", "MULTIPLY", 2), { kind: "rule", op: "SUBTRACT", value: "25" })
+  assert.deepEqual(readBuilderValue("=25", "MULTIPLY", 2), { kind: "rule", op: "ABSOLUTE", value: "25" })
+  assert.deepEqual(readBuilderValue("=25", "FIXED", 2), { kind: "rule", op: "FIXED", value: "25" }, "FIXED has no shorthand of its own")
+  // a number alone is the value of the rule chosen (the mock's "Rule [Multiply] Value [0.50]")
+  assert.deepEqual(readBuilderValue("0,50", "MULTIPLY", 2), { kind: "rule", op: "MULTIPLY", value: "0.5" })
+  assert.deepEqual(readBuilderValue(" 25 ", "FIXED", 2), { kind: "rule", op: "FIXED", value: "25" })
+  assert.deepEqual(readBuilderValue("10", "ADJUST_PERCENT", 2), { kind: "rule", op: "ADJUST_PERCENT", value: "10" })
+  // amounts keep the AMBIGUOUS guard (O5); factors do not
+  assert.deepEqual(readBuilderValue("1.500", "ABSOLUTE", 2), { kind: "error", code: "AMBIGUOUS" })
+  assert.deepEqual(readBuilderValue("1.500", "ABSOLUTE", 3), { kind: "rule", op: "ABSOLUTE", value: "1.5" })
+  assert.deepEqual(readBuilderValue("1.500", "MULTIPLY", 2), { kind: "rule", op: "MULTIPLY", value: "1.5" })
+  assert.deepEqual(readBuilderValue("", "MULTIPLY", 2), { kind: "empty" })
+  assert.deepEqual(readBuilderValue("2+2", "MULTIPLY", 2), { kind: "error", code: "SYNTAX" })
+  assert.deepEqual(readBuilderValue("", "INHERIT", 2), { kind: "rule", op: "INHERIT", value: "" })
+  // what a field shows for a stored rule reads back to that rule
+  const cases: [string, string][] = [
+    ["MULTIPLY", "0.5"],
+    ["PERCENT_OF", "50"],
+    ["ADJUST_PERCENT", "10"],
+    ["ADJUST_PERCENT", "-5"],
+    ["ADD", "25"],
+    ["SUBTRACT", "25"],
+    ["ABSOLUTE", "12.345"],
+    ["FIXED", "245"],
+  ]
+  for (const [op, value] of cases) {
+    const text = builderValueText(op, value, { minorUnits: 2 })
+    assert.deepEqual(readBuilderValue(text, op, 2), { kind: "rule", op, value }, `${op} ${value} → ${text}`)
+  }
+  assert.equal(builderValueText("MULTIPLY", "0.500000000", { minorUnits: 2 }), "0.5")
+  assert.equal(builderValueText("MULTIPLY", "0.5", { minorUnits: 2, decimalMark: "," }), "0,5")
+  assert.equal(builderValueText("ADJUST_PERCENT", "-5", { minorUnits: 2 }), "-5%")
+  assert.equal(builderValueText("ABSOLUTE", "12.345", { minorUnits: 2 }), "12.3450", "not refused as AMBIGUOUS when read back")
+  assert.equal(builderValueText("INHERIT", "", { minorUnits: 2 }), "")
+})
+
+test("the builder writes 2A+2C (Child 1 7–11.99 ×0.50, Child 2 3–6.99 ×0.25) as ordinary occupancy rules", () => {
+  const t = example()
+  const draft = ensureChildLines({ ...newBuilderDraft(), adults: 2, children: 2 })
+  assert.deepEqual(shownChildPositions(draft), [1, 2])
+  assert.deepEqual(draft.childLines.map((x) => [x.position, x.age_band, x.op, x.text]), [
+    [1, "", "MULTIPLY", ""],
+    [2, "", "MULTIPLY", ""],
+  ])
+  const empty = planCombination(t, draft, MU)
+  assert.deepEqual(empty.issues, [{ code: "NO_RULES" }])
+  assert.equal(empty.spec, null)
+  const filled: BuilderDraft = {
+    ...draft,
+    childLines: [
+      { ...draft.childLines[0], age_band: "CHB", text: "x0.5" },
+      { ...draft.childLines[1], age_band: "cha", text: "0.25" },
+    ],
+  }
+  const plan = planCombination(t, filled, MU)
+  assert.deepEqual(plan.issues, [])
+  assert.equal(plan.combination, "2+2")
+  assert.deepEqual(plan.rules.map((x) => [x.target, x.position, x.age_band, x.op, x.value]), [
+    ["CHILD", 1, "CHB", "MULTIPLY", "0.5"],
+    ["CHILD", 2, "CHA", "MULTIPLY", "0.25"],
+  ])
+  assert.ok(plan.spec)
+  const out = persistCombination(t, plan.spec).tables
+  assert.deepEqual(
+    out.occupancy_rules.slice(t.occupancy_rules.length).map((x) => [x.target, x.position, x.age_band, x.combination, x.room_type, x.period_code, x.op, x.value, x.is_override, x.note]),
+    [
+      ["CHILD", 1, "CHB", "2+2", "", "", "MULTIPLY", "0.5", 0, ""],
+      ["CHILD", 2, "CHA", "2+2", "", "", "MULTIPLY", "0.25", 0, ""],
+    ],
+  )
+  const card = groupCombinations(out).find((c) => c.combination === "2+2")
+  assert.ok(card)
+  assert.equal(card.expressible, true)
+  assert.equal(isSingleUseCard(card), false)
+})
+
+test("editing a card replaces exactly its rows; saving it unchanged gives the same card back", () => {
+  const t = example([
+    occ({ target: "CHILD", position: 1, age_band: "CHB", combination: "2+2", op: "MULTIPLY", value: "0.5" }),
+    occ({ target: "CHILD", position: 2, age_band: "CHA", combination: "2+2", op: "MULTIPLY", value: "0.25" }),
+    occ({ target: "CHILD", position: 1, combination: "2+1", room_type: "DLX", op: "PERCENT_OF", value: "40" }),
+  ])
+  const card = groupCombinations(t).find((c) => c.combination === "2+2")
+  assert.ok(card)
+  const draft = builderFromCard(card, MU)
+  assert.ok(draft)
+  assert.deepEqual([draft.adults, draft.children, draft.roomsAll, draft.periodsAll, draft.isOverride], [2, 2, true, true, false])
+  assert.deepEqual(draft.replace, card.keys)
+  assert.deepEqual(draft.childLines.map((x) => [x.position, x.age_band, x.op, x.text]), [
+    [1, "CHB", "MULTIPLY", "0.5"],
+    [2, "CHA", "MULTIPLY", "0.25"],
+  ])
+  // unchanged: the same card (content), other rows untouched
+  const same = planCombination(t, draft, MU)
+  assert.deepEqual(same.issues, [], "a card never conflicts with its own rows")
+  assert.ok(same.spec)
+  const again = persistCombination(t, same.spec).tables
+  assert.deepEqual(groupCombinations(again).map((c) => c.id), groupCombinations(t).map((c) => c.id))
+  // child 2 becomes ×0.30: exactly the card's two rows go, two new ones come
+  const edited = planCombination(t, { ...draft, childLines: draft.childLines.map((x) => (x.position === 2 ? { ...x, text: "x0.3" } : x)) }, MU)
+  assert.ok(edited.spec)
+  const res = persistCombination(t, edited.spec)
+  assert.deepEqual(res.counts, { removed: 2, added: 2 })
+  const others = (rows: Row[]) => rows.filter((x) => !card.keys.includes(x._key))
+  assert.deepEqual(res.tables.occupancy_rules.slice(0, -res.counts.added), others(t.occupancy_rules), "every other row is untouched, in order")
+  assert.ok(res.tables.occupancy_rules.every((x) => !card.keys.includes(x._key)))
+  const now = groupCombinations(res.tables).find((c) => c.combination === "2+2")
+  assert.deepEqual(now?.rules.map((x) => [x.position, x.age_band, x.value]), [
+    [1, "CHB", "0.5"],
+    [2, "CHA", "0.3"],
+  ])
+  assert.equal(cardOfRow(groupCombinations(res.tables), res.tables.occupancy_rules.at(-1)?._key ?? ""), now?.id, "the card that holds a row (Show in grid)")
+  assert.equal(cardOfRow(groupCombinations(res.tables), "nope"), null)
+})
+
+test("the any-children card '2+*' and the any-adults card '*+1' (under More)", () => {
+  const t = example()
+  const d = ensureChildLines({ ...newBuilderDraft(), adults: 2, children: "*" as const, anyChildren: 1 })
+  assert.deepEqual(shownChildPositions(d), [1], "any children: the child positions the user asked for")
+  const plan = planCombination(t, { ...d, childLines: [{ ...d.childLines[0], text: "x0.5" }] }, MU)
+  assert.deepEqual(plan.issues, [])
+  assert.equal(plan.combination, "2+*")
+  const out = persistCombination(t, plan.spec as NonNullable<typeof plan.spec>).tables
+  const card = groupCombinations(out).find((c) => c.combination === "2+*")
+  assert.ok(card)
+  assert.equal(card.children, null)
+  const back = builderFromCard(card, MU)
+  assert.equal(back?.children, "*")
+  assert.equal(back?.anyChildren, 1)
+  // two child positions of any children
+  const two = ensureChildLines({ ...d, anyChildren: 2 })
+  assert.deepEqual(shownChildPositions(two), [1, 2])
+  // any adults with one child
+  const anyA = planCombination(t, ensureChildLines({ ...newBuilderDraft(), adults: "*" as const, children: 1, whole: line({ position: 0, op: "ADJUST_PERCENT", text: "-10%" }) }), MU)
+  assert.deepEqual(anyA.issues, [])
+  assert.equal(anyA.combination, "*+1")
+  assert.deepEqual(anyA.spec?.whole, { op: "ADJUST_PERCENT", value: "-10" })
+  // "any adults + any children" is no combination at all (OCC_COMBINATION_QUALIFIER)
+  const both = planCombination(t, { ...newBuilderDraft(), adults: "*", children: "*", whole: line({ position: 0, text: "x2" }) }, MU)
+  assert.deepEqual(both.issues, [{ code: "ANY_BOTH" }])
+})
+
+test("rooms {STD, DLX} × periods {P1, P2}: 4 rows per rule that group back into one card", () => {
+  const t = example()
+  const d = ensureChildLines({ ...newBuilderDraft(), adults: 3, children: 1, roomsAll: false, rooms: ["DLX", "STD"], periodsAll: false, periods: ["P2", "P1"] })
+  const plan = planCombination(
+    t,
+    {
+      ...d,
+      childLines: [{ ...d.childLines[0], age_band: "CHB", text: "50%" }],
+      adultLines: [line({ position: 3, text: "0.6" })],
+      whole: line({ position: 0, op: "ADJUST_PERCENT", text: "-5" }),
+    },
+    MU,
+  )
+  assert.deepEqual(plan.issues, [])
+  assert.deepEqual(plan.spec?.rooms, ["STD", "DLX"], "in table order")
+  assert.deepEqual(plan.spec?.periods, ["P1", "P2"])
+  const res = persistCombination(t, plan.spec as NonNullable<typeof plan.spec>)
+  assert.deepEqual(res.counts, { removed: 0, added: 12 })
+  const added = res.tables.occupancy_rules.slice(t.occupancy_rules.length)
+  for (const target of ["CHILD", "ADULT", "COMBINATION"]) {
+    assert.deepEqual(
+      added.filter((x) => x.target === target).map((x) => `${x.room_type}@${x.period_code}`),
+      ["STD@P1", "STD@P2", "DLX@P1", "DLX@P2"],
+      target,
+    )
+  }
+  const cards = groupCombinations(res.tables).filter((c) => c.combination === "3+1")
+  assert.equal(cards.length, 1)
+  assert.deepEqual([cards[0].rooms, cards[0].periods, cards[0].periodScoped], [["STD", "DLX"], ["P1", "P2"], true])
+  assert.deepEqual(cards[0].rules.map((x) => [x.target, x.position, x.age_band, x.op, x.value]), [
+    ["ADULT", 3, "", "MULTIPLY", "0.6"],
+    ["CHILD", 1, "CHB", "PERCENT_OF", "50"],
+    ["COMBINATION", 0, "", "ADJUST_PERCENT", "-5"],
+  ])
+  // the card opens in the builder as it was saved
+  const back = builderFromCard(cards[0], MU)
+  assert.ok(back)
+  assert.deepEqual([back.roomsAll, back.rooms, back.periodsAll, back.periods], [false, ["STD", "DLX"], false, ["P1", "P2"]])
+  assert.deepEqual(back.adultLines.map((x) => [x.position, x.op, x.text]), [[3, "MULTIPLY", "0.6"]])
+  assert.deepEqual([back.whole?.op, back.whole?.text], ["ADJUST_PERCENT", "-5%"])
+})
+
+test("the builder refuses what the server would refuse or ignore, and never a free-text combination", () => {
+  const t = example([occ({ target: "CHILD", position: 1, age_band: "CHB", combination: "2+2", op: "MULTIPLY", value: "0.5" })])
+  const base = ensureChildLines({ ...newBuilderDraft(), adults: 2, children: 2 })
+  const [c1, c2] = base.childLines
+  // a value the parser refuses stays on its line
+  const bad = planCombination(t, { ...base, childLines: [{ ...c1, text: "abc" }, c2] }, MU)
+  assert.deepEqual(bad.issues, [{ code: "VALUE", line: c1.id, value: "SYNTAX" }], "not also 'give a rule a value'")
+  // two rules of one child for one band; each child's band condition is independent otherwise
+  const dup = planCombination(t, { ...base, childLines: [{ ...c1, age_band: "CHA", text: "x0.3" }, { ...c1, id: "c1b", age_band: "CHA", text: "x0.4" }, c2] }, MU)
+  assert.deepEqual(dup.issues, [{ code: "DUPLICATE", line: "c1b" }])
+  const bands = planCombination(t, { ...base, childLines: [{ ...c1, age_band: "CHA", text: "x0.3" }, { ...c1, id: "c1b", age_band: "", text: "x0.4" }, c2] }, MU)
+  assert.deepEqual(bands.issues, [], "child 1: a CHA rule and a rule for any other age")
+  // an adult the combination does not have
+  const adult = planCombination(t, { ...base, adultLines: [line({ id: "a3", position: 3, text: "x0.6" })] }, MU)
+  assert.deepEqual(adult.issues, [{ code: "POSITION", line: "a3" }])
+  const twoAdults = planCombination(t, { ...base, adultLines: [line({ position: 2, text: "x0.9" }), line({ id: "a2b", position: 2, text: "x0.8" })] }, MU)
+  assert.deepEqual(twoAdults.issues, [{ code: "DUPLICATE", line: "a2b" }])
+  // chosen rooms / periods, none chosen
+  const scope = planCombination(t, { ...base, roomsAll: false, rooms: [], periodsAll: false, periods: [], whole: line({ position: 0, text: "x3" }) }, MU)
+  assert.deepEqual(scope.issues, [{ code: "NO_ROOMS" }, { code: "NO_PERIODS" }])
+  // the twin of another card's row (OCC_DUPLICATE): refused, naming its rows
+  const twin = planCombination(t, { ...base, childLines: [{ ...c1, age_band: "CHB", text: "x0.4" }, c2] }, MU)
+  const existing = t.occupancy_rules.at(-1)?._key
+  assert.deepEqual(twin.issues, [{ code: "TWIN", line: c1.id, keys: [existing] }])
+  // an Always-wins twin is another rule
+  assert.deepEqual(planCombination(t, { ...base, isOverride: true, childLines: [{ ...c1, age_band: "CHB", text: "x0.4" }, c2] }, MU).issues, [])
+  // hidden child lines (the count went down) are not saved
+  const fewer = planCombination(t, { ...base, children: 1, childLines: [{ ...c1, text: "x0.3" }, { ...c2, text: "x0.2" }] }, MU)
+  assert.deepEqual(fewer.rules.map((x) => x.position), [1])
+})
+
+test("cards the builder cannot express are edited in the rule tables; single-use cards stay in the ladder", () => {
+  const cards = groupCombinations(
+    example([
+      occ({ target: "COMBINATION", combination: "3+0", op: "MULTIPLY", value: "2.5", note: "promo" }),
+      occ({ target: "CHILD", position: 0, age_band: "CHA", combination: "2+1", op: "MULTIPLY", value: "0.5" }),
+      occ({ target: "ADULT", position: 3, combination: "2+2", op: "MULTIPLY", value: "0.5" }),
+      occ({ target: "ADULT", position: 2, combination: "2+3", op: "MULTIPLY", value: "0.9" }),
+      occ({ target: "ADULT", position: 1, combination: "1+*", op: "MULTIPLY", value: "1.2" }),
+    ]),
+  )
+  const by = (c: string) => cards.find((x) => x.combination === c)
+  assert.equal(by("3+0")?.expressible, false, "a note")
+  assert.equal(by("2+1")?.expressible, false, "a rule for every child of the combination")
+  assert.equal(by("2+2")?.expressible, false, "a 3rd adult in 2 adults")
+  assert.equal(by("2+3")?.expressible, true)
+  for (const c of ["3+0", "2+1", "2+2"]) assert.equal(builderFromCard(by(c) as NonNullable<ReturnType<typeof by>>, MU), null, c)
+  // the single-use row's cards are the ladder's first row, not special combinations
+  assert.equal(isSingleUseCard(by("1+0") as NonNullable<ReturnType<typeof by>>), true)
+  assert.equal(isSingleUseCard(by("1+*") as NonNullable<ReturnType<typeof by>>), true)
+  assert.equal(isSingleUseCard(by("2+3") as NonNullable<ReturnType<typeof by>>), false)
+})
+
+test("quick chips: the union of the rooms' valid combinations, greyed out where no room in scope can host them", () => {
+  const caps = [
+    { room_type: "STD", max_adults: 2, max_children: 1, max_occupants: 3, min_adults: 1 },
+    { room_type: "FAM", max_adults: 2, max_children: 2, max_occupants: 4, min_adults: 1 },
+  ]
+  const all = combinationChips(caps, null)
+  assert.deepEqual(
+    all.map((c) => `${c.adults}+${c.children}:${c.enabled ? "on" : "off"}:${c.rooms.join(",")}`),
+    ["1+0:on:STD,FAM", "2+0:on:STD,FAM", "1+1:on:STD,FAM", "1+2:on:FAM", "2+1:on:STD,FAM", "2+2:on:FAM"],
+  )
+  // Rooms = Standard (max_children 1): 2A+2C greys out and names the room that can
+  const std = combinationChips(caps, ["STD"])
+  const twoTwo = std.find((c) => c.adults === 2 && c.children === 2)
+  assert.deepEqual([twoTwo?.enabled, twoTwo?.rooms], [false, ["FAM"]])
+  assert.equal(std.find((c) => c.adults === 2 && c.children === 1)?.enabled, true)
+})
+
+test("child positions are named by the contract's child ordering", () => {
+  assert.equal(childQualifier("OLDEST_FIRST", 1, 2), "oldest")
+  assert.equal(childQualifier("OLDEST_FIRST", 2, 2), "youngest")
+  assert.equal(childQualifier("OLDEST_FIRST", 2, 3), null)
+  assert.equal(childQualifier("", 1, 1), "oldest", "the server's default is OLDEST_FIRST")
+  assert.equal(childQualifier("OLDEST_FIRST", 1, "*"), "oldest")
+  assert.equal(childQualifier("OLDEST_FIRST", 2, "*"), null)
+  assert.equal(childQualifier("YOUNGEST_FIRST", 1, 2), "youngest")
+  assert.equal(childQualifier("YOUNGEST_FIRST", 2, 2), "oldest")
+  assert.equal(childQualifier("AS_ENTERED", 1, 2), "first")
+  assert.equal(childQualifier("AS_ENTERED", 2, 2), null)
 })
