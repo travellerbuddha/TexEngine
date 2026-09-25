@@ -1,0 +1,581 @@
+{
+ "engine_version": "tex-pricing/1.0",
+ "sellable": true,
+ "reasons": [],
+ "currency": "EUR",
+ "request": {
+  "property": "Aurora Beach Resort",
+  "room_type": "Aurora Beach Resort-STD",
+  "board": "BB",
+  "rate_plan": "Aurora Beach Resort-NRF",
+  "check_in": "2027-05-10",
+  "check_out": "2027-05-12",
+  "adults": 2,
+  "children": [],
+  "sale_at": "2026-09-25T10:00:00",
+  "market": "DE",
+  "channel": "DIRECT_WEB",
+  "sell_currency": "EUR",
+  "promo_codes": [],
+  "member": false,
+  "extras": [],
+  "room_index": 0
+ },
+ "contract": {
+  "contract": "CTR-01280",
+  "code": "S14P-MUGQURAN",
+  "name": "S14 fixtures P mugquran",
+  "version": "CTR-01280-V1",
+  "version_no": 1,
+  "payload_hash": "",
+  "market": "DE",
+  "currency": "EUR",
+  "basis": "PERSON"
+ },
+ "rate_plan": {
+  "code": "Aurora Beach Resort-NRF",
+  "name": "Non-refundable saver",
+  "refundable": false
+ },
+ "promotions": [
+  {
+   "promo_id": "PRM-00001",
+   "name": "Early booker 10%",
+   "kind": "PROMO_CODE",
+   "applied": false,
+   "reason": "code not entered",
+   "discount": "0.000000",
+   "nights": [],
+   "value_added": "",
+   "source": "promotion:PRM-00001/r1",
+   "code": "EARLY10",
+   "stage": "SELL"
+  }
+ ],
+ "taxes": [],
+ "totals": {
+  "accommodation_gross": "361.15",
+  "accommodation_discount": "0",
+  "accommodation": "361.15",
+  "extras": "0",
+  "discounts": "0",
+  "subtotal": "361.15",
+  "tax": "0",
+  "tax_added": "0",
+  "total": "361.15",
+  "cost": "334.40",
+  "cost_contract_currency": "334.40",
+  "margin": "26.75",
+  "margin_percent": "7.41"
+ },
+ "fx": {
+  "from": "EUR",
+  "to": "EUR",
+  "mode": "IDENTITY",
+  "sell_rate": "1.000000",
+  "provider": null,
+  "provider_rate": null,
+  "provider_rate_id": null,
+  "rate_date": null,
+  "adjustment": null,
+  "policy_id": null,
+  "as_of": "2026-09-25T10:00:00"
+ },
+ "nights": [
+  {
+   "date": "2027-05-10",
+   "period": "P2",
+   "unit": "80.000000",
+   "occupancy": "160.000000",
+   "board": "0.000000",
+   "cost": "167.200000",
+   "cost_net": "167.200000",
+   "sell_contract": "180.576000",
+   "sell": "180.576000",
+   "final": "180.576000",
+   "subtotal_adults": "160.000000",
+   "subtotal_children": "160.000000",
+   "subtotal_board": "160.000000"
+  },
+  {
+   "date": "2027-05-11",
+   "period": "P2",
+   "unit": "80.000000",
+   "occupancy": "160.000000",
+   "board": "0.000000",
+   "cost": "167.200000",
+   "cost_net": "167.200000",
+   "sell_contract": "180.576000",
+   "sell": "180.576000",
+   "final": "180.576000",
+   "subtotal_adults": "160.000000",
+   "subtotal_children": "160.000000",
+   "subtotal_board": "160.000000"
+  }
+ ],
+ "explanation": [
+  {
+   "stage": "contract",
+   "text": "contract S14P-MUGQURAN v1 (DE, EUR, PERSON basis)",
+   "code": "CONTRACT",
+   "message": "contract {code} v{version} ({market}, {currency}, {basis} basis)",
+   "params": {
+    "code": "S14P-MUGQURAN",
+    "version": 1,
+    "market": "DE",
+    "basis": "PERSON"
+   },
+   "night": null,
+   "before": null,
+   "after": null,
+   "currency": "EUR",
+   "rule": {
+    "kind": "contract_version",
+    "rule_id": "CTR-01280-V1",
+    "level": null,
+    "source": "version",
+    "label": "S14 fixtures P mugquran"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "period",
+   "text": "period P2 (May)",
+   "code": "PERIOD",
+   "message": "period {period} ({name})",
+   "params": {
+    "period": "P2",
+    "name": "May"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": null,
+   "currency": null,
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "room",
+   "text": "Aurora Beach Resort-STD in P2: price 80.00",
+   "code": "ROOM_ABSOLUTE",
+   "message": "{room} in {period}: price {unit}",
+   "params": {
+    "room": "Aurora Beach Resort-STD",
+    "period": "P2",
+    "unit": "80.000000"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": "80.000000",
+   "currency": null,
+   "rule": {
+    "kind": "room_rule",
+    "rule_id": "~std-p2",
+    "level": "PERIOD",
+    "source": "version",
+    "label": "Aurora Beach Resort-STD @P2 = 80.00"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "occupancy",
+   "text": "Adult 1 × 1.00 80.00 = 80.00",
+   "code": "ADULT_SLOT",
+   "message": "Adult {pos} {op} {unit} = {amount}",
+   "params": {
+    "pos": 1,
+    "op": "× 1.00",
+    "unit": "80.000000",
+    "amount": "80.000000"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": "80.000000",
+   "currency": null,
+   "rule": {
+    "kind": "occupancy_rule",
+    "rule_id": "GLOBAL:ADULT",
+    "level": "GLOBAL",
+    "source": "global-default",
+    "label": "Adult × 1.00"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "occupancy",
+   "text": "Adult 2 × 1.00 80.00 = 80.00",
+   "code": "ADULT_SLOT",
+   "message": "Adult {pos} {op} {unit} = {amount}",
+   "params": {
+    "pos": 2,
+    "op": "× 1.00",
+    "unit": "80.000000",
+    "amount": "80.000000"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": "80.000000",
+   "currency": null,
+   "rule": {
+    "kind": "occupancy_rule",
+    "rule_id": "GLOBAL:ADULT",
+    "level": "GLOBAL",
+    "source": "global-default",
+    "label": "Adult × 1.00"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "occupancy",
+   "text": "occupancy 2A+0C = 160.00",
+   "code": "OCCUPANCY_TOTAL",
+   "message": "occupancy {adults}A+{children}C = {total}",
+   "params": {
+    "adults": 2,
+    "children": 0,
+    "total": "160.000000"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": "160.000000",
+   "currency": null,
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "board",
+   "text": "board BB included in the price",
+   "code": "BOARD_BASE",
+   "message": "board {board} included in the price",
+   "params": {
+    "board": "BB"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": null,
+   "currency": null,
+   "rule": {
+    "kind": "board_rule",
+    "rule_id": "~bd-bb",
+    "level": "VERSION",
+    "source": "version",
+    "label": "BB"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "period",
+   "text": "period P2 adjustment +10%",
+   "code": "PERIOD_ADJUSTMENT",
+   "message": "period {period} adjustment {op}",
+   "params": {
+    "period": "P2",
+    "op": "+10%"
+   },
+   "night": "2027-05-10",
+   "before": "160.000000",
+   "after": "176.000000",
+   "currency": null,
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "rate_plan",
+   "text": "rate plan Aurora Beach Resort-NRF -5%",
+   "code": "RATE_PLAN_ADJUSTMENT",
+   "message": "rate plan {code} {op}",
+   "params": {
+    "code": "Aurora Beach Resort-NRF",
+    "op": "-5%"
+   },
+   "night": "2027-05-10",
+   "before": "176.000000",
+   "after": "167.200000",
+   "currency": null,
+   "rule": {
+    "kind": "rate_plan",
+    "rule_id": "Aurora Beach Resort-NRF",
+    "level": null,
+    "source": "version",
+    "label": "Non-refundable saver"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "night",
+   "text": "contract cost 167.20 EUR",
+   "code": "NIGHT_COST",
+   "message": "contract cost {amount} {currency}",
+   "params": {
+    "amount": "167.200000"
+   },
+   "night": "2027-05-10",
+   "before": null,
+   "after": "167.200000",
+   "currency": "EUR",
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "period",
+   "text": "period P2 (May)",
+   "code": "PERIOD",
+   "message": "period {period} ({name})",
+   "params": {
+    "period": "P2",
+    "name": "May"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": null,
+   "currency": null,
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "room",
+   "text": "Aurora Beach Resort-STD in P2: price 80.00",
+   "code": "ROOM_ABSOLUTE",
+   "message": "{room} in {period}: price {unit}",
+   "params": {
+    "room": "Aurora Beach Resort-STD",
+    "period": "P2",
+    "unit": "80.000000"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": "80.000000",
+   "currency": null,
+   "rule": {
+    "kind": "room_rule",
+    "rule_id": "~std-p2",
+    "level": "PERIOD",
+    "source": "version",
+    "label": "Aurora Beach Resort-STD @P2 = 80.00"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "occupancy",
+   "text": "Adult 1 × 1.00 80.00 = 80.00",
+   "code": "ADULT_SLOT",
+   "message": "Adult {pos} {op} {unit} = {amount}",
+   "params": {
+    "pos": 1,
+    "op": "× 1.00",
+    "unit": "80.000000",
+    "amount": "80.000000"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": "80.000000",
+   "currency": null,
+   "rule": {
+    "kind": "occupancy_rule",
+    "rule_id": "GLOBAL:ADULT",
+    "level": "GLOBAL",
+    "source": "global-default",
+    "label": "Adult × 1.00"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "occupancy",
+   "text": "Adult 2 × 1.00 80.00 = 80.00",
+   "code": "ADULT_SLOT",
+   "message": "Adult {pos} {op} {unit} = {amount}",
+   "params": {
+    "pos": 2,
+    "op": "× 1.00",
+    "unit": "80.000000",
+    "amount": "80.000000"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": "80.000000",
+   "currency": null,
+   "rule": {
+    "kind": "occupancy_rule",
+    "rule_id": "GLOBAL:ADULT",
+    "level": "GLOBAL",
+    "source": "global-default",
+    "label": "Adult × 1.00"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "occupancy",
+   "text": "occupancy 2A+0C = 160.00",
+   "code": "OCCUPANCY_TOTAL",
+   "message": "occupancy {adults}A+{children}C = {total}",
+   "params": {
+    "adults": 2,
+    "children": 0,
+    "total": "160.000000"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": "160.000000",
+   "currency": null,
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "board",
+   "text": "board BB included in the price",
+   "code": "BOARD_BASE",
+   "message": "board {board} included in the price",
+   "params": {
+    "board": "BB"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": null,
+   "currency": null,
+   "rule": {
+    "kind": "board_rule",
+    "rule_id": "~bd-bb",
+    "level": "VERSION",
+    "source": "version",
+    "label": "BB"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "period",
+   "text": "period P2 adjustment +10%",
+   "code": "PERIOD_ADJUSTMENT",
+   "message": "period {period} adjustment {op}",
+   "params": {
+    "period": "P2",
+    "op": "+10%"
+   },
+   "night": "2027-05-11",
+   "before": "160.000000",
+   "after": "176.000000",
+   "currency": null,
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "rate_plan",
+   "text": "rate plan Aurora Beach Resort-NRF -5%",
+   "code": "RATE_PLAN_ADJUSTMENT",
+   "message": "rate plan {code} {op}",
+   "params": {
+    "code": "Aurora Beach Resort-NRF",
+    "op": "-5%"
+   },
+   "night": "2027-05-11",
+   "before": "176.000000",
+   "after": "167.200000",
+   "currency": null,
+   "rule": {
+    "kind": "rate_plan",
+    "rule_id": "Aurora Beach Resort-NRF",
+    "level": null,
+    "source": "version",
+    "label": "Non-refundable saver"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "night",
+   "text": "contract cost 167.20 EUR",
+   "code": "NIGHT_COST",
+   "message": "contract cost {amount} {currency}",
+   "params": {
+    "amount": "167.200000"
+   },
+   "night": "2027-05-11",
+   "before": null,
+   "after": "167.200000",
+   "currency": "EUR",
+   "rule": null,
+   "overridden": []
+  },
+  {
+   "stage": "markup",
+   "text": "DACH direct +8% +8%: 167.20 → 180.576",
+   "code": "MARKUP",
+   "message": "{label}: {cost} → {sell}",
+   "params": {
+    "label": "DACH direct +8% +8%",
+    "cost": "167.200000",
+    "sell": "180.576000"
+   },
+   "night": "2027-05-10",
+   "before": "167.200000",
+   "after": "180.576000",
+   "currency": null,
+   "rule": {
+    "kind": "markup",
+    "rule_id": "MKP-00001",
+    "level": "MARKET",
+    "source": "MKP-00001/r1",
+    "label": "DACH direct +8% +8%"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "markup",
+   "text": "DACH direct +8% +8%: 167.20 → 180.576",
+   "code": "MARKUP",
+   "message": "{label}: {cost} → {sell}",
+   "params": {
+    "label": "DACH direct +8% +8%",
+    "cost": "167.200000",
+    "sell": "180.576000"
+   },
+   "night": "2027-05-11",
+   "before": "167.200000",
+   "after": "180.576000",
+   "currency": null,
+   "rule": {
+    "kind": "markup",
+    "rule_id": "MKP-00001",
+    "level": "MARKET",
+    "source": "MKP-00001/r1",
+    "label": "DACH direct +8% +8%"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "promotion",
+   "text": "Early booker 10% not applied: code not entered",
+   "code": "PROMO_REJECTED",
+   "message": "{name} not applied: {reason}",
+   "params": {
+    "name": "Early booker 10%",
+    "reason": "code not entered"
+   },
+   "night": null,
+   "before": null,
+   "after": null,
+   "currency": null,
+   "rule": {
+    "kind": "promotion",
+    "rule_id": "PRM-00001",
+    "level": null,
+    "source": "promotion:PRM-00001/r1",
+    "label": "Early booker 10%"
+   },
+   "overridden": []
+  },
+  {
+   "stage": "total",
+   "text": "total 361.15 EUR",
+   "code": "TOTAL",
+   "message": "total {total} {currency}",
+   "params": {
+    "total": "361.150000"
+   },
+   "night": null,
+   "before": null,
+   "after": "361.150000",
+   "currency": "EUR",
+   "rule": null,
+   "overridden": []
+  }
+ ]
+}

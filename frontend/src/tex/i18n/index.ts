@@ -144,6 +144,12 @@ export function translateOrdinal(lang: TexLang, key: string, n: number, params?:
   return interpolate(form, all)
 }
 
+/** Whether a catalogue entry exists for `key` in `lang` or in English (the fallback): code that
+ * has its own fallback (e.g. a server sentence, S14's rates.explain.<CODE>) asks before t(). */
+export function hasTexKey(lang: TexLang, key: string): boolean {
+  return (CATALOGS[lang]?.[key] ?? CATALOGS.en?.[key]) !== undefined
+}
+
 /** Non-reactive translate (for code outside components). */
 export function tt(key: string, params?: Params) {
   return translate(current, key, params)
@@ -159,7 +165,8 @@ export function useTexT() {
   }, [])
   const t = useCallback((key: string, params?: Params) => translate(lang, key, params), [lang])
   const tOrdinal = useCallback((key: string, n: number, params?: Params) => translateOrdinal(lang, key, n, params), [lang])
-  return { t, tOrdinal, lang, locale: intlLocale(lang) }
+  const has = useCallback((key: string) => hasTexKey(lang, key), [lang])
+  return { t, tOrdinal, has, lang, locale: intlLocale(lang) }
 }
 
 /** Keys missing from a loaded language (dev aid; the build-time check is

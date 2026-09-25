@@ -260,8 +260,15 @@ export interface RuleRef {
 
 export interface ExplainStep {
   stage: string
+  /** the English sentence (the server's `message` with its params) */
   text: string
   code: string
+  /** the English template of `text` ("{room} = {base} {op} → {unit}") and its parameters: decimals
+   * as exact strings (at least 6 places), counts as numbers, codes and room ids as strings. The
+   * Price test localises a step from `code` and `params` (rates.explain.<CODE>, S14). Absent from
+   * quotes stored before the server sent them. */
+  message?: string
+  params?: Record<string, string | number | boolean | null>
   night: string | null
   before: string | null
   after: string | null
@@ -351,10 +358,22 @@ export interface ApplyOpResult {
   error: null | "NO_VALUE" | "NEGATIVE"
 }
 
+/** The stay a quote priced (engine `request_to_dict`): what the Price test asked for. */
+export interface QuoteRequest {
+  room_type: string
+  board: string
+  rate_plan: string | null
+  check_in: string
+  check_out: string
+  adults: number
+  children: { age: number | null; dob: string | null; age_months: number | null }[]
+}
+
 export interface PreviewResult {
   sellable: boolean
   reasons: { code: string; message: string }[]
   currency?: string
+  request?: QuoteRequest
   contract?: { code: string; name: string; version_no: number; market: string; currency: string; basis: string; payload_hash: string }
   rate_plan?: {
     code: string
