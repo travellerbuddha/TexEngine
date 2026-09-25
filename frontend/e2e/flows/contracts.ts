@@ -4,7 +4,7 @@
 // Helpers take a Page that is already logged in (see ../helpers.ts `login`).
 import { expect, type Locator, type Page } from "@playwright/test"
 import { answerOf, byLabel, esc, pageApi, texPath } from "../helpers"
-import { type Budget, choose, typeIn } from "./budget"
+import { type Budget, pickFrom, typeIn } from "./budget"
 
 // shared helpers (moved to ../helpers.ts); re-exported for existing imports
 export { APP_PREFIX, byLabel, isoDate, pageApi, texPath, uniqueRunId } from "../helpers"
@@ -362,7 +362,7 @@ export async function addRooms(page: Page, rooms: { room: string; base?: boolean
   if (opts.advanced) return addRoomsAdvanced(page, rooms, opts)
   const panel = await onSection(page, "pricing")
   for (const r of rooms) {
-    await choose(opts.budget, panel.getByLabel("Add room", { exact: true }), { label: r.room })
+    await pickFrom(panel.getByRole("button", { name: "Add room", exact: true }), r.room)
     const menu = panel.getByRole("button", { name: `Room actions: ${r.room}`, exact: true })
     await expect(menu).toBeVisible()
     const header = panel.getByRole("rowheader").filter({ has: page.getByRole("button", { name: `Room actions: ${r.room}`, exact: true }) })
@@ -605,13 +605,13 @@ export async function addBoard(
   await onSection(page, "pricing")
   const region = await openRegion(page, "Boards")
   const grid = boardsGrid(region)
-  const add = region.getByRole("combobox", { name: "Add board", exact: true })
+  const add = region.getByRole("button", { name: "Add board", exact: true })
   if ((await grid.count()) === 0) {
-    await choose(opts.budget, add, b.base ?? "BB")
+    await pickFrom(add, b.base ?? "BB")
     await expect(grid).toBeVisible()
     await expect(grid.getByRole("gridcell", { name: /: base board, included/ })).toHaveCount(1)
   }
-  await choose(opts.budget, add, b.board)
+  await pickFrom(add, b.board)
   const editor = grid.getByRole("textbox")
   await expect(editor).toBeFocused()
   const name = ((await editor.getAttribute("aria-label")) ?? "").replace(/^Supplement: /, "").replace(/ · All periods$/, "")
@@ -693,7 +693,7 @@ export async function expectPublishedReadOnly(page: Page, opts: Pick<StepOptions
   await page.keyboard.press("Enter")
   await expect(panel.getByRole("textbox")).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Edit price:/ })).toHaveCount(0)
-  await expect(panel.getByLabel("Add room", { exact: true })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Add room", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Pricing basis:/ })).toHaveCount(0)
 }
 

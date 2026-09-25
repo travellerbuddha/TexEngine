@@ -5,6 +5,7 @@
 // chips and #boards, a phone, and a read-only published version.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { api, login, trackErrors } from "./helpers"
+import { pickFrom } from "./flows/budget"
 import { archiveAll, DLX, newDraft as draftOf, ownerRates, periods, rooms, SUP, versionPath, watchContracts, Y } from "./flows/workspace"
 
 test.use({ locale: "en-US", actionTimeout: 15_000, navigationTimeout: 30_000 })
@@ -36,7 +37,7 @@ const grid = (page: Page) => page.getByRole("grid", { name: "Board supplements b
 const cell = (page: Page, name: string) => grid(page).getByRole("gridcell", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: `) })
 const editor = (page: Page) => grid(page).getByRole("textbox")
 const reading = (page: Page) => grid(page).getByRole("status")
-const addBoard = (page: Page, code: string) => section(page).getByRole("combobox", { name: "Add board" }).selectOption(code)
+const addBoard = (page: Page, code: string) => pickFrom(section(page).getByRole("button", { name: "Add board", exact: true }), code)
 /** the main line of a stacked cell (the unit is the second line) */
 const shown = (l: Locator) => l.locator("span").first().locator("xpath=./span[1]")
 
@@ -156,7 +157,8 @@ test.describe.serial("boards", () => {
     // AI BASE: UAI loses its base and needs a value
     await cell(page, "All inclusive · All periods").click()
     await page.keyboard.type("BASE")
-    await expect(reading(page)).toHaveText("All inclusive · All periods: AI becomes the base board, included in the room price; UAI is no longer included and needs a supplement")
+    // boards by name, as the row headers and cells name them (S16 re-review)
+    await expect(reading(page)).toHaveText("All inclusive · All periods: All inclusive becomes the base board, included in the room price; Ultra all inclusive is no longer included and needs a supplement")
     await page.keyboard.press("Enter")
     // a saved base row loads with the amount 0 (GAP-8): UAI now reads as a +0.00 supplement
     await expect(cell(page, "Ultra all inclusive · All periods")).toHaveAttribute("aria-label", /\+0\.00 per adult per night/)
@@ -213,14 +215,14 @@ test.describe.serial("boards", () => {
     await expect(section(page).locator('[data-board-row="HB|"]')).toContainText("per adult per night; children 30 %, infants free")
     // Add a rule for one room: an indented row edited at once
     await section(page).getByRole("button", { name: "Board terms: Half board" }).click()
-    await page.getByRole("dialog", { name: "Board terms: Half board" }).getByLabel(/^Add a rule for one room/).selectOption({ label: "Garden Villa" })
+    await pickFrom(page.getByRole("dialog", { name: "Board terms: Half board" }).getByRole("button", { name: "Add a rule for one room", exact: true }), "Garden Villa")
     await expect(editor(page)).toBeFocused()
     await expect(editor(page)).toHaveAccessibleName("Supplement: Half board · Garden Villa only · All periods")
     await page.keyboard.type("-10")
     await expect(reading(page)).toHaveText("Half board · Garden Villa only · All periods: −10.00 per adult per night; children 30 %, infants free")
     await page.keyboard.press("Enter")
     const row = section(page).locator('[data-board-row="HB|' + DLX + '"]')
-    await expect(row.getByRole("rowheader")).toContainText("HB · Garden Villa only")
+    await expect(row.getByRole("rowheader")).toContainText("Half board · Garden Villa only")
     // the matrix's active period (P3) is highlighted in the boards grid
     const matrix = page.getByRole("grid", { name: "Room prices by period" })
     await matrix.getByRole("gridcell", { name: /^Standard Sea View · P3: / }).click()
@@ -239,7 +241,7 @@ test.describe.serial("boards", () => {
     const pop3 = page.getByRole("dialog", { name: "Board terms: Half board" })
     await pop3.getByLabel(/^Rooms/).selectOption({ label: "Family Suite" })
     await pop3.getByRole("button", { name: "Apply" }).click()
-    await expect(pop3).toContainText("HB already has rules for Family Suite: edit that row instead.")
+    await expect(pop3).toContainText("Half board already has rules for Family Suite: edit that row instead.")
     await page.keyboard.press("Escape")
     // a cell's context menu (and Alt+Enter) opens its row's terms; Escape gives the focus back
     await cell(page, "All inclusive · P2").click({ button: "right" })
@@ -278,7 +280,7 @@ test.describe.serial("boards", () => {
     await page.goto(versionPath(d, "#boards"))
     await expect(grid(page)).toHaveAttribute("aria-readonly", "true")
     await expect(shown(cell(page, "Half board · All periods"))).toHaveText("−20.00")
-    await expect(section(page).getByRole("combobox", { name: "Add board" })).toHaveCount(0)
+    await expect(section(page).getByRole("button", { name: "Add board", exact: true })).toHaveCount(0)
     await expect(section(page).getByRole("button", { name: /^Board terms/ })).toHaveCount(0)
     await cell(page, "Half board · All periods").click()
     await page.keyboard.type("100")

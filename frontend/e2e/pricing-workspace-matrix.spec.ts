@@ -7,6 +7,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { api, login, trackErrors } from "./helpers"
 import { priceMatrix } from "./flows/contracts"
+import { pickFrom } from "./flows/budget"
 import { archiveAll, DLX, N, newContract, newDraft, ownerDraft, periods, publish, readVersion, STD, SUP, versionPath, watchContracts, Y, type NewContract } from "./flows/workspace"
 
 test.use({ locale: "en-US", actionTimeout: 15_000, navigationTimeout: 30_000 })
@@ -253,7 +254,7 @@ test.describe.serial("room price matrix", () => {
     await expect(rm).toBeVisible()
     await rm.getByRole("button", { name: "Remove room" }).click()
     await expect(page.getByRole("button", { name: `Room actions: ${N.DLX}` })).toHaveCount(0)
-    await page.getByLabel("Add room", { exact: true }).selectOption({ label: N.DLX })
+    await pickFrom(page.getByRole("button", { name: "Add room", exact: true }), N.DLX)
     await expect(page.getByRole("button", { name: `Room actions: ${N.DLX}` })).toBeVisible()
     noErrors()
   })
@@ -299,7 +300,7 @@ test.describe.serial("room price matrix", () => {
     await expect(priceMatrix(page).getByRole("textbox")).toHaveCount(0)
     await expect(page.getByRole("button", { name: /^Edit price:/ })).toHaveCount(0)
     await expect(page.getByRole("button", { name: /^Room actions:|^Period actions:|^Add period$/ })).toHaveCount(0)
-    await expect(page.getByLabel("Add room", { exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Add room", exact: true })).toHaveCount(0)
     await expect(resolved(page, N.SUP, "P1", "80.50")).toBeVisible()
     noErrors()
   })

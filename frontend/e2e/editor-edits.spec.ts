@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { answerOf, holdNext, login, pageApi, texPath, trackErrors } from "./helpers"
+import { pickFrom } from "./flows/budget"
 import { addPeriod, addRooms, boardsGrid, createContract, isoDate, openDraft, priceMatrix, saveDraft, uniqueRunId } from "./flows/contracts"
 
 // Editors never lose what the user typed: Discard returns to the last save (not to the version
@@ -54,7 +55,7 @@ test("contract version: Discard returns to the last save, and the next save keep
   await addRooms(page, [{ room: ROOM, base: true }])
   // a board added in the workspace's Boards section (the first one is the base board, written at once)
   const boards = page.getByRole("region", { name: "Boards", exact: true })
-  await boards.getByRole("combobox", { name: "Add board", exact: true }).selectOption("BB")
+  await pickFrom(boards.getByRole("button", { name: "Add board", exact: true }), "BB")
   await expect(boardsGrid(page).getByRole("rowheader").filter({ hasText: "Bed & breakfast" })).toBeVisible()
   const discard = page.getByRole("button", { name: "Discard", exact: true })
   await expect(discard).toBeEnabled()

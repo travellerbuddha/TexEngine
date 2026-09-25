@@ -7,7 +7,7 @@
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e pricing-workspace
 import { expect, test, type Locator, type Page, type Response } from "@playwright/test"
 import { answerOf, api, login, trackErrors } from "./helpers"
-import { Budget, choose } from "./flows/budget"
+import { Budget, choose, pickFrom } from "./flows/budget"
 import { addPeriod, addRooms, boardsGrid, ladderCell, occupancyLadder, priceCell, priceMatrix, saveDraft, setBasis } from "./flows/contracts"
 import { archiveAll, DLX, N, newContract, newDraft, openVersion, ownerDraft, readVersion, STD, SUP, twoDecimals, versionPath, watchContracts, Y } from "./flows/workspace"
 
@@ -197,7 +197,7 @@ test("the 13 steps of an ORS-style contract in one workspace: ≤ 50 clicks, no 
   await test.step("the base board BB, included", async () => {
     const boards = page.getByRole("region", { name: "Boards", exact: true })
     await expect(boards.getByRole("button", { name: "Boards", exact: true })).toHaveAttribute("aria-expanded", "true")
-    await choose(budget, boards.getByRole("combobox", { name: "Add board", exact: true }), "BB")
+    await pickFrom(boards.getByRole("button", { name: "Add board", exact: true }), "BB")
     await expect(boardsGrid(page).getByRole("gridcell", { name: /^Bed & breakfast · All periods: base board, included/ })).toBeVisible()
   })
 
@@ -418,7 +418,7 @@ test("the budget counts what it must: clicks, a native select as two, a section 
   await priceCell(page, N.STD, "P1").click()
   await page.keyboard.type("71")
   await page.keyboard.press("Enter")
-  await choose(budget, page.getByRole("region", { name: "Boards", exact: true }).getByRole("combobox", { name: "Add board", exact: true }), "HB")
+  await pickFrom(page.getByRole("region", { name: "Boards", exact: true }).getByRole("button", { name: "Add board", exact: true }), "HB")
   await page.keyboard.press("Escape")
   const sections = page.getByRole("tablist", { name: "Version sections", exact: true })
   await sections.getByRole("tab", { name: /^Commercial rules/ }).click()

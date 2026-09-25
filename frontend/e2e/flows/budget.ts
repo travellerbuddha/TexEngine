@@ -163,6 +163,15 @@ export class Budget {
 
 // ─── gestures that count on an optional budget (the flows take `budget?: Budget`) ───────────
 
+/** A menu button's item, e.g. the workspace's "Add room" / "Add board" menus: two clicks (open the
+ * menu, pick the item), which the page counts itself. A board is named by its code in the item
+ * ("Half board (HB)"). */
+export async function pickFrom(menu: Locator, item: string | RegExp) {
+  await menu.click()
+  const name = typeof item === "string" && /^[A-Z]{2,4}$/.test(item) ? new RegExp(`\\(${item}\\)$`) : item
+  await menu.page().getByRole("menuitem", { name, exact: typeof name === "string" }).click()
+}
+
 /** selectOption, counted as two clicks on a budget. */
 export async function choose(budget: Budget | undefined, locator: Locator, value: string | { label: string } | { value: string }) {
   if (budget) await budget.select(locator, value)

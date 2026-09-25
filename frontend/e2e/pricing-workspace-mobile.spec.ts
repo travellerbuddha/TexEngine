@@ -61,7 +61,7 @@ test("a published version is read-only in the workspace, fits a 375 px phone, an
   await page.waitForLoadState("networkidle")
   expect(await noHorizontalScroll(page), "no sideways page scroll at 375 px").toBe(true)
   await expect(page.getByRole("button", { name: /^Pricing basis:/ })).toHaveCount(0)
-  await expect(page.getByLabel("Add room", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Add room", exact: true })).toHaveCount(0)
   await expect(priceMatrix(page).getByRole("textbox")).toHaveCount(0)
 
   expect(calls.count("validate_version"), "a published version is never re-checked").toBe(0)
