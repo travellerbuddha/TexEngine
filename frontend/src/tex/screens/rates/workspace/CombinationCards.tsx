@@ -12,8 +12,9 @@ import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
 import { Badge, Button } from "../../../ui"
 import type { Tables } from "../lib/tables"
+import { UndoToastView } from "./BulkToolbar"
 import { CombinationBuilder } from "./CombinationBuilder"
-import type { Basis } from "./model.ts"
+import { ALL_PERIODS, type Basis } from "./model.ts"
 import {
   builderFromCard,
   groupCombinations,
@@ -28,10 +29,8 @@ import {
   type CombinationPlan,
 } from "./occupancy.ts"
 import { occRuleText } from "./OccupancyLadder"
-import { ALL_PERIODS } from "./model.ts"
 import type { BandLabels } from "./useBandLabels"
 import { useUndoToast, type WorkspaceHistory } from "./useWorkspaceHistory"
-import { UndoToastView } from "./BulkToolbar"
 
 /** How combinations read (cards, the builder's reading line, the ladder's ⓘ notes). */
 export interface ComboText {
