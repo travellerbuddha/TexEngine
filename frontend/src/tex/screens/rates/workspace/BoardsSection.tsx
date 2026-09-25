@@ -607,6 +607,14 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       readOnly: !editable,
       error: view.error,
       stack: view.stack,
+      // the context menu opens the row's terms, as Shift+F10 and the ContextMenu key do
+      onContextMenu:
+        editable && !row.pending
+          ? (e) => {
+              e.preventDefault()
+              openTerms(row, e.currentTarget)
+            }
+          : undefined,
     }
   }
   const cellViews = useMemo(
