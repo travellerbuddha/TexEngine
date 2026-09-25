@@ -125,6 +125,27 @@ export function previewKeys(mode: PreviewMode, p: KeyInput): { matrix: string; v
   }
 }
 
+/** The key of an answer's room prices: the matrix key without the sample parties ("" asks
+ * nothing). The rooms' prices do not depend on the parties, so an answer asked again only for
+ * another party still describes them (S11 review: the room matrix does not dim meanwhile). */
+export function pricesKey(mode: PreviewMode, p: KeyInput): string {
+  return previewKeys(mode, { ...p, parties: "" }).matrix
+}
+
+/** The key of sample parties priced in a room: the ones an answer priced (the `parties` and
+ * `party_room` it was asked with) or the ones a screen wants. Equal for equal parties, whatever
+ * the field order; "" when none is sent (no party, or no room). */
+export function sampleKey(parties: unknown, room: unknown): string {
+  const list: unknown[] = Array.isArray(parties) ? parties : []
+  const at = typeof room === "string" ? room : ""
+  if (!list.length || !at) return ""
+  const one = (x: unknown) => {
+    const party = (x ?? {}) as Partial<SampleParty>
+    return [Number(party.adults ?? 0), Array.isArray(party.children) ? party.children.map(String) : []]
+  }
+  return JSON.stringify([at, list.map(one)])
+}
+
 export interface PreviewInput {
   version: string
   /** the overlay payload (overlayPayloadOf(state)); sent in overlay mode only */

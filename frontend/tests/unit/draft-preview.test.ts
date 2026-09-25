@@ -15,6 +15,8 @@ import {
   previewKeys,
   previewMode,
   previewSource,
+  pricesKey,
+  sampleKey,
   storedIssues,
   validateDelay,
   VALIDATE_DEBOUNCE_MAX_MS,
@@ -296,4 +298,42 @@ test("a state already checked is not checked again, unless a check of another st
   assert.equal(alreadyChecked("k0", null, false), false)
   // back to k0 while k1 is checked: k1's answer would replace k0's, so k0 is asked again after it
   assert.equal(alreadyChecked("k0", "k0", true), false)
+})
+
+test("sample parties: an answer is known by the parties it priced, as sent (S11 review)", () => {
+  const party = [{ adults: 2, children: ["CHB"] }]
+  const sent = matrixRequest("overlay", { version: "V-1", data: {}, parties: party, partyRoom: "STD" })
+  assert.ok(sent)
+  const key = sampleKey(sent.args.parties, sent.args.party_room)
+  assert.notEqual(key, "")
+  // the ladder's chosen party, built afresh, has the same key; another party or room does not
+  assert.equal(sampleKey([{ adults: 2, children: ["CHB"] }], "STD"), key)
+  assert.equal(sampleKey([{ children: ["CHB"], adults: 2 }], "STD"), key, "field order does not matter")
+  assert.notEqual(sampleKey([{ adults: 2, children: [] }], "STD"), key)
+  assert.notEqual(sampleKey([{ adults: 2, children: ["CHA"] }], "STD"), key)
+  assert.notEqual(sampleKey(party, "SUP"), key)
+  // nothing sent (no party, or a room the saved draft does not hold): no key
+  const none = matrixRequest("saved", { version: "V-1", parties: party, partyRoom: "SUP", savedRooms: ["STD"] })
+  assert.equal(sampleKey(none?.args.parties, none?.args.party_room), "")
+  assert.equal(sampleKey(undefined, "STD"), "")
+  assert.equal(sampleKey([], "STD"), "")
+  assert.equal(sampleKey(party, ""), "")
+})
+
+test("the rooms' prices of an answer do not depend on the sample party (S11 review)", () => {
+  const a = { ...K, parties: sampleKey([{ adults: 2, children: [] }], "STD") }
+  const b = { ...K, parties: sampleKey([{ adults: 3, children: [] }], "STD") }
+  for (const mode of ["overlay", "saved"] as const) {
+    for (const fits of [true, false]) {
+      // another party asks again…
+      assert.notEqual(previewKeys(mode, { ...a, fits }).matrix, previewKeys(mode, { ...b, fits }).matrix, `${mode} ${fits}`)
+      // …but the rooms' prices it answers are those of the same state
+      assert.equal(pricesKey(mode, { ...a, fits }), pricesKey(mode, { ...b, fits }), `${mode} ${fits}`)
+      assert.equal(pricesKey(mode, { ...a, fits }), pricesKey(mode, { ...K, fits }), "no party")
+    }
+  }
+  assert.notEqual(pricesKey("overlay", { ...a, key: "fp2" }), pricesKey("overlay", a), "an edit")
+  assert.notEqual(pricesKey("overlay", { ...a, tick: 1 }), pricesKey("overlay", a), "a refresh")
+  assert.notEqual(pricesKey("saved", { ...a, modified: "m2" }), pricesKey("saved", a), "a save")
+  assert.equal(pricesKey("catalogue", a), "")
 })

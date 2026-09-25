@@ -3,13 +3,16 @@
 // special-combination cards. Every gesture writes ordinary TEX Occupancy Rule rows; nothing here
 // prices anything (resolved totals come from the server's price_matrix parties, GAP-2b).
 //
-// The ladder is a per-scope rule editor: the "All rooms" scope shows the rules with room_type blank,
-// a room scope the rules naming that room. A cell shows its own rule, the All-periods rule of the
-// same slot it inherits, a general rule of the scope (every adult / a band-less child rule), an
-// inherited pricing-policy rule, or the engine default (adults ×1; no child default, ADR-007). It
-// does not re-rank rules across scopes or levels (occupancy precedence v2): where that matters, the
-// server's resolved line and the precedence note are the truth (§3.6.2). No runtime imports except
-// each other and lib/shorthand.ts.
+// The ladder is a per-scope rule editor: the "All rooms" scope edits the rules with room_type blank,
+// a room scope the rules naming that room. A cell shows its own rule; without one, the rule the
+// engine would use for the slot among the plain rules that reach the scope. For a room these are its
+// own rules and the All-rooms rules (a blank room_type matches every room), version and inherited
+// pricing-policy rules alike, ranked as occupancy.specificity ranks them (CASCADE, `engineRank`).
+// That rule is the slot's All-periods rule (↳), a general rule of the scope (every adult, a band-less
+// child rule), a rule of All rooms, or a policy rule; only when none applies does the cell show the
+// engine default (adults ×1; no child default, ADR-007: "not sellable"). Special combinations are
+// not ranked into the cells: the precedence note marks them, and the server's resolved line is the
+// truth for a party (§3.6.2). No runtime imports except each other and lib/shorthand.ts.
 import { editText, type ShErrorCode, type ShFormatOptions, type ShOp, type ShResult } from "../lib/shorthand.ts"
 import type { Tables } from "../lib/tables.ts"
 import type { InheritedOccupancyRule, Row } from "../lib/types.ts"
@@ -72,7 +75,8 @@ export type LadderCellState =
   | "inherited" // no own period rule: the slot's All-periods rule applies (↳)
   | "inherit-rule" // an own INHERIT row (the engine skips it; `source`/`value` say what applies)
   | "general" // a general rule of the scope (every adult, any child band)
-  | "policy" // an inherited pricing-policy rule (shown with its source)
+  | "all-rooms" // a room scope: a version rule of All rooms (the slot's or a general one) applies
+  | "policy" // an inherited pricing-policy rule (shown with its source; its room_type says the scope)
   | "default" // no rule: the engine's adult default (×1.00 default)
   | "missing" // no rule for a child band: not sellable (NO_CHILD_RULE)
   | "included" // ROOM basis: an adult included in the room price
@@ -101,6 +105,8 @@ export interface LadderRow {
   editable: boolean
   /** A band code no band defines (OCC_UNKNOWN_BAND). */
   unknownBand: boolean
+  /** A child row of an infant band: a rule naming the band prices it before any band-less rule (G-31). */
+  infant: boolean
   /** What the row's relative rules (and the adult default) are applied to. */
   unit: LadderUnit
   cells: Record<string, LadderCell>
@@ -136,10 +142,12 @@ interface Norm {
   period: string
   op: string
   is_override: boolean
+  /** An inherited pricing-policy rule (price_matrix inherited_rules), not a row of the version. */
+  policy: boolean
   src: Row | OccRuleLike
 }
 
-function norm(r: Row | OccRuleLike): Norm {
+function norm(r: Row | OccRuleLike, policy = false): Norm {
   return {
     target: str(r.target).toUpperCase(),
     position: int(r.position),
@@ -149,12 +157,18 @@ function norm(r: Row | OccRuleLike): Norm {
     period: str(r.period_code),
     op: str(r.op),
     is_override: isSet(r.is_override),
+    policy,
     src: r,
   }
 }
 
 function sameSlot(n: Norm, id: OccIdentity): boolean {
   return n.target === id.target && n.position === id.position && n.age_band === id.age_band && n.combination === id.combination && n.room_type === id.room_type
+}
+
+/** The same guest slot, in any rooms scope. */
+function sameGuest(n: Norm, id: OccIdentity): boolean {
+  return n.target === id.target && n.position === id.position && n.age_band === id.age_band && n.combination === id.combination
 }
 
 /** The row a cell shows: a non-INHERIT "Always wins" row, else a non-INHERIT row, else an INHERIT row. */
@@ -167,7 +181,11 @@ const valueOf = (r: Row | OccRuleLike): { op: string; value: string } => ({ op: 
 type SlotKind = "adult" | "child"
 
 interface Ctx {
+  /** the rooms scope ("" = All rooms) */
+  scope: string
+  /** the version's rules that reach the scope: its own and, for a room, All rooms' */
   version: Norm[]
+  /** the inherited pricing-policy rules that reach the scope, likewise */
   inherited: Norm[]
   defaults: LadderOptions["defaults"]
 }
@@ -176,23 +194,55 @@ function at(rows: Norm[], id: OccIdentity, period: string): Norm[] {
   return rows.filter((n) => n.period === period && sameSlot(n, id))
 }
 
-/** What prices a slot when it has no own (non-INHERIT) rule in this column. */
-function fallback(ctx: Ctx, id: OccIdentity, general: readonly OccIdentity[], period: string, slot: SlotKind): Omit<LadderCell, "rule"> {
-  const periods = period === ALL_PERIODS ? [ALL_PERIODS] : [period, ALL_PERIODS]
-  if (period !== ALL_PERIODS) {
-    const all = pick(at(ctx.version, id, ALL_PERIODS), false)
-    if (all) return { state: "inherited", source: all.src, value: valueOf(all.src) }
+// Rule levels and policy weights as kamra/tex/pricing/enums.Level and inherit.weight_of number them.
+const LEVEL = { GLOBAL: 0, HOTEL: 1, MARKET: 2, VERSION: 4, ROOM: 5, PERIOD: 6, COMBINATION: 7, OVERRIDE: 8 } as const
+const POLICY_WEIGHT: Record<string, number> = { global: 0, hotel: 1, market: 2, "hotel+market": 3 }
+
+/** A rule's origin (base_level, scope_weight): a version rule, or the policy scope its source names
+ * (inherit.level_for; an unreadable source ranks as a global policy). */
+function originOf(n: Norm): [number, number] {
+  if (!n.policy) return [LEVEL.VERSION, 0]
+  const w = POLICY_WEIGHT[policySource(n.src.source)?.scope ?? ""] ?? 0
+  return [w & 2 ? LEVEL.MARKET : w & 1 ? LEVEL.HOTEL : LEVEL.GLOBAL, w]
+}
+
+/** occupancy.specificity (CASCADE) of a rule that matches a slot; the higher wins: an infant's band
+ * first (G-31), then origin (G-30: version > hotel + market > market > hotel > global), level
+ * (override > combination > period > room > none), qualifiers (period, room, exact combination)
+ * and the slot (position, band). Integers only. */
+function engineRank(n: Norm, infant: boolean): number[] {
+  const [base, weight] = originOf(n)
+  const [a, c] = n.combination.split("+")
+  const combo = n.combination !== ""
+  const level = n.is_override ? LEVEL.OVERRIDE : combo ? LEVEL.COMBINATION : n.period ? LEVEL.PERIOD : n.room_type ? LEVEL.ROOM : base
+  return [infant && n.age_band ? 1 : 0, base, weight, level, n.period ? 1 : 0, n.room_type ? 1 : 0, combo && a !== "*" && c !== "*" ? 1 : 0, n.position ? 1 : 0, n.age_band ? 1 : 0]
+}
+
+function outranks(x: readonly number[], y: readonly number[]): boolean {
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] > y[i]
+  return false
+}
+
+/** What prices a slot when it has no own (non-INHERIT) rule in this column: the rule the engine
+ * would pick (engineRank; the first of equal ones) among the version and policy rules of the slot
+ * (`id`) or of its general slots (`general`: every adult, a band-less child, …) that reach the scope
+ * in this period. It is the slot's All-periods rule (inherited), a general rule of the scope, a
+ * rule of All rooms (a room scope) or a policy rule; with none, the engine default. */
+function fallback(ctx: Ctx, id: OccIdentity, general: readonly OccIdentity[], period: string, slot: SlotKind, infant: boolean): Omit<LadderCell, "rule"> {
+  const guests = [id, ...general]
+  let best: Norm | null = null
+  let bestRank: number[] = []
+  for (const n of [...ctx.version, ...ctx.inherited]) {
+    if (n.op === "INHERIT" || (n.period && n.period !== period) || !guests.some((g) => sameGuest(n, g))) continue
+    const rank = engineRank(n, infant)
+    if (best && !outranks(rank, bestRank)) continue
+    best = n
+    bestRank = rank
   }
-  for (const g of general)
-    for (const p of periods) {
-      const hit = pick(at(ctx.version, g, p), false)
-      if (hit) return { state: "general", source: hit.src, value: valueOf(hit.src) }
-    }
-  for (const cand of [id, ...general])
-    for (const p of periods) {
-      const hit = pick(at(ctx.inherited, cand, p), false)
-      if (hit) return { state: "policy", source: hit.src, value: valueOf(hit.src) }
-    }
+  if (best) {
+    const state: LadderCellState = best.policy ? "policy" : best.room_type !== ctx.scope ? "all-rooms" : sameGuest(best, id) ? "inherited" : "general"
+    return { state, source: best.src, value: valueOf(best.src) }
+  }
   if (slot === "child") {
     const child = ctx.defaults?.child
     return child ? { state: "default", source: null, value: { op: child.op, value: child.value } } : { state: "missing", source: null, value: null }
@@ -201,45 +251,76 @@ function fallback(ctx: Ctx, id: OccIdentity, general: readonly OccIdentity[], pe
   return { state: "default", source: null, value: adult ? { op: adult.op, value: adult.value } : null }
 }
 
-function cellOf(ctx: Ctx, id: OccIdentity, general: readonly OccIdentity[], period: string, slot: SlotKind, included: boolean): LadderCell {
+function cellOf(ctx: Ctx, id: OccIdentity, general: readonly OccIdentity[], period: string, slot: SlotKind, included: boolean, infant: boolean): LadderCell {
   const own = pick(at(ctx.version, id, period))
   if (included) return { state: "included", rule: own ? (own.src as Row) : null, source: null, value: null }
   if (own && own.op !== "INHERIT") return { state: period === ALL_PERIODS ? "rule" : "period-override", rule: own.src as Row, source: own.src, value: valueOf(own.src) }
-  const fb = fallback(ctx, id, general, period, slot)
+  const fb = fallback(ctx, id, general, period, slot, infant)
   return own ? { ...fb, state: "inherit-rule", rule: own.src as Row } : { ...fb, rule: null }
 }
 
 const identity = (target: OccTarget, position: number, age_band: string, combination: string, room_type: string): OccIdentity => ({ target, position, age_band, combination, room_type })
 
-/** The ladder (§3.6.2) for one rooms scope (null = All rooms) and basis, with a cell per column. */
+/** The ladder (§3.6.2) for one rooms scope (null = All rooms) and basis, with a cell per column. A
+ * room scope's rows also follow the All-rooms rules that reach it (a rule for adult 1 splits the
+ * BASE pair, a child position rule gets its row), and its cells show them (`all-rooms`). */
 export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">, scopeRoom: string | null, basis: Basis, opts: LadderOptions): LadderModel {
   const scope = str(scopeRoom)
   const periods = [ALL_PERIODS, ...tables.periods.map((p) => str(p.period_code)).filter(Boolean)]
-  const inScope = (n: Norm) => n.room_type === scope
-  const ctx: Ctx = { version: tables.occupancy_rules.map(norm).filter(inScope), inherited: (opts.inherited ?? []).map(norm).filter(inScope), defaults: opts.defaults }
-  const plain = [...ctx.version, ...ctx.inherited].filter((n) => !n.combination)
+  // a blank room_type matches every room (occupancy.qualifiers_match)
+  const reaches = (n: Norm) => n.room_type === scope || n.room_type === ""
+  const ctx: Ctx = {
+    scope,
+    version: tables.occupancy_rules.map((r) => norm(r)).filter(reaches),
+    inherited: (opts.inherited ?? []).map((r) => norm(r, true)).filter(reaches),
+    defaults: opts.defaults,
+  }
+  const all = [...ctx.version, ...ctx.inherited]
+  const plain = all.filter((n) => !n.combination)
+  const infantBands = new Set(opts.bands.filter((b) => isSet(b.is_infant)).map(bandCode).filter(Boolean))
   const rows: LadderRow[] = []
   const slotUnit: LadderUnit = basis === "PERSON" ? "person" : str(opts.extraUnit) === "ROOM_PRICE" ? "room" : "person_share"
-  const add = (kind: LadderRowKind, position: number, band: string, id: OccIdentity | null, general: readonly OccIdentity[], slot: SlotKind, flags: { editable?: boolean; included?: boolean; unknownBand?: boolean } = {}) => {
+  const add = (
+    kind: LadderRowKind,
+    position: number,
+    band: string,
+    id: OccIdentity | null,
+    general: readonly OccIdentity[],
+    slot: SlotKind,
+    flags: { editable?: boolean; included?: boolean; unknownBand?: boolean; infant?: boolean } = {},
+  ) => {
     const probe = id ?? identity("ADULT", 1, "", "", scope)
     const cells: Record<string, LadderCell> = {}
     for (const p of periods) {
-      const c = cellOf(ctx, probe, general, p, slot, Boolean(flags.included))
+      const c = cellOf(ctx, probe, general, p, slot, Boolean(flags.included), Boolean(flags.infant))
       cells[p] = id ? c : { ...c, rule: null }
     }
     // a whole-combination rule replaces (or adjusts) the unit itself: the room price under ROOM
     const unit = basis === "ROOM" && id?.target === "COMBINATION" ? "room" : slotUnit
-    rows.push({ id: `${kind}:${position}:${band}`, kind, position, band, identity: id, editable: flags.editable ?? id !== null, unknownBand: Boolean(flags.unknownBand), unit, cells })
+    rows.push({
+      id: `${kind}:${position}:${band}`,
+      kind,
+      position,
+      band,
+      identity: id,
+      editable: flags.editable ?? id !== null,
+      unknownBand: Boolean(flags.unknownBand),
+      infant: Boolean(flags.infant),
+      unit,
+      cells,
+    })
   }
 
   const anyAdult = identity("ADULT", 0, "", "", scope)
   const anyChild = identity("CHILD", 0, "", "", scope)
 
   // 1 Adult (single use): the whole combination 1+0, or the "also when children travel" variant
+  // (the scope's own choice, else All rooms')
   const single = identity("COMBINATION", 0, "", "1+0", scope)
   const singleAlt = identity("ADULT", 1, "", "1+*", scope)
-  const all = [...ctx.version, ...ctx.inherited]
-  const singleId = !all.some((n) => sameSlot(n, single)) && all.some((n) => sameSlot(n, singleAlt)) ? singleAlt : single
+  const has = (id: OccIdentity, room: string) => all.some((n) => n.room_type === room && sameGuest(n, id))
+  const singleRoom = has(single, scope) || has(singleAlt, scope) ? scope : ""
+  const singleId = !has(single, singleRoom) && has(singleAlt, singleRoom) ? singleAlt : single
   add("single", 0, "", singleId, [], "adult")
 
   // adults: PERSON shows the BASE pair (positions 1–2, read-only, default) until a rule names one of them
@@ -258,14 +339,17 @@ export function ladderModel(tables: Pick<Tables, "periods" | "occupancy_rules">,
   const known = opts.bands.map(bandCode).filter(Boolean)
   const bandCodes = [...new Set(known)]
   for (const n of plain) if (n.target === "CHILD" && n.position === 0 && n.age_band && !bandCodes.includes(n.age_band)) bandCodes.push(n.age_band)
-  for (const code of bandCodes) add("band", 0, code, identity("CHILD", 0, code, "", scope), [anyChild], "child", { unknownBand: !known.includes(code) })
+  for (const code of bandCodes) add("band", 0, code, identity("CHILD", 0, code, "", scope), [anyChild], "child", { unknownBand: !known.includes(code), infant: infantBands.has(code) })
   const bandRank = (b: string) => (b ? (bandCodes.includes(b) ? bandCodes.indexOf(b) : bandCodes.length) : bandCodes.length + 1)
   const childPos = new Map<string, { position: number; band: string }>()
   for (const n of plain) if (n.target === "CHILD" && n.position > 0) childPos.set(`${n.position}|${n.age_band}`, { position: n.position, band: n.age_band })
   const ordered = [...childPos.values()].sort((a, b) => a.position - b.position || bandRank(a.band) - bandRank(b.band) || (a.band < b.band ? -1 : a.band > b.band ? 1 : 0))
   for (const c of ordered) {
     const general = c.band ? [identity("CHILD", c.position, "", "", scope), identity("CHILD", 0, c.band, "", scope), anyChild] : [anyChild]
-    add("child", c.position, c.band, identity("CHILD", c.position, c.band, "", scope), general, "child", { unknownBand: Boolean(c.band) && !known.includes(c.band) })
+    add("child", c.position, c.band, identity("CHILD", c.position, c.band, "", scope), general, "child", {
+      unknownBand: Boolean(c.band) && !known.includes(c.band),
+      infant: Boolean(c.band) && infantBands.has(c.band),
+    })
   }
   if (plain.some((n) => n.target === "CHILD" && n.position === 0 && !n.age_band)) add("child_any", 0, "", anyChild, [], "child")
 
@@ -285,7 +369,7 @@ export type OccEntryResult = { tables: Tables } | { error: ShErrorCode }
 export function applyOccEntry(tables: Tables, id: OccIdentity, period: string, parsed: ShResult): OccEntryResult {
   if (!parsed.ok) return { error: parsed.code }
   if (parsed.kind === "base") return { error: "SYNTAX" }
-  const same = tables.occupancy_rules.map(norm).filter((n) => n.period === period && sameSlot(n, id))
+  const same = tables.occupancy_rules.map((r) => norm(r)).filter((n) => n.period === period && sameSlot(n, id))
   const rows = same.map((n) => n.src as Row)
   if (parsed.kind === "clear") {
     if (!rows.length) return { tables }
@@ -356,7 +440,7 @@ export interface OccRule {
 
 /** Rows of a slot in one room scope and period. */
 function slotRows(tables: Pick<Tables, "occupancy_rules">, id: OccIdentity, period: string): Norm[] {
-  return tables.occupancy_rules.map(norm).filter((n) => n.period === period && sameSlot(n, id))
+  return tables.occupancy_rules.map((r) => norm(r)).filter((n) => n.period === period && sameSlot(n, id))
 }
 
 /** The ladder's rule popover (§3.5, "Edit rule: {slot} · {period}"): writes the rule for each
@@ -489,8 +573,9 @@ export function ladderSummary(model: LadderModel, cards: readonly CombinationCar
 /** The ⓘ precedence note (§3.6.2): the cells a special combination outranks for some party,
  * because a card prices the same slot (same target; positions and bands equal or "any") in a room
  * and period the cell covers. Not on "Always wins" rules (they beat combinations), included
- * places, the single-use row or the cards the single-use row shows. Keyed `${row.id}|${period}`,
- * the card ids as values. Computed from the grouping (§3.7.4); no ranking is re-implemented. */
+ * places, the single-use row or the cards the single-use row shows, nor from a band-less card rule
+ * on an infant row whose cell a rule naming the band prices (G-31: that rule wins for an infant).
+ * Keyed `${row.id}|${period}`, the card ids as values. Computed from the grouping (§3.7.4). */
 export function combinationNotes(model: LadderModel, cards: readonly CombinationCard[], scopeRoom: string | null): Map<string, string[]> {
   const scope = str(scopeRoom)
   const live = cards.filter((c) => !isSingleCard(c))
@@ -502,12 +587,18 @@ export function combinationNotes(model: LadderModel, cards: readonly Combination
     for (const p of model.periods) {
       const cell = row.cells[p]
       if (!cell || cell.state === "included" || (cell.source && isSet(cell.source.is_override))) continue
+      // G-31: an infant priced by a rule naming its band is not priced by a band-less rule
+      const bandPriced = row.infant && str(cell.source?.age_band) !== ""
       const hits = live.filter(
         (card) =>
           (!scope || card.rooms.includes("") || card.rooms.includes(scope)) &&
           (p === ALL_PERIODS || card.periods.includes(ALL_PERIODS) || card.periods.includes(p)) &&
           card.rules.some(
-            (r) => r.target === id.target && (!id.position || !r.position || r.position === id.position) && (!id.age_band || !r.age_band || r.age_band === id.age_band),
+            (r) =>
+              r.target === id.target &&
+              (!id.position || !r.position || r.position === id.position) &&
+              (!id.age_band || !r.age_band || r.age_band === id.age_band) &&
+              !(bandPriced && !r.age_band),
           ),
       )
       if (hits.length) out.set(`${row.id}|${p}`, hits.map((c) => c.id))
@@ -527,25 +618,42 @@ export interface PartyOption {
 /** At most this many sample parties are offered (the select stays usable on large rooms). */
 export const PARTY_OPTIONS_MAX = 60
 
-/** The sample parties a room can host (validCombinations), each child in every band: the
- * multisets of band codes in band order. Adults-only parties when there are no bands. */
+/** price_matrix refuses a sample party with more adults or children than this, and with it the
+ * whole call (kamra/tex/api/contracts.py PARTY_ADULTS_MAX, PARTY_CHILDREN_MAX). */
+export const PARTY_ADULTS_MAX = 12
+export const PARTY_CHILDREN_MAX = 8
+
+/** The sample parties a room can host (validCombinations, within the server's party limits), each
+ * child in every band: the multisets of band codes in band order. Adults-only parties when there
+ * are no bands. When there are more than PARTY_OPTIONS_MAX, the common ones are kept (adults only,
+ * then the smallest parties, two adults first); they are listed in the usual order either way. */
 export function partyOptions(capacity: CapacityLike, bands: readonly BandLike[]): PartyOption[] {
   const codes = [...new Set(bands.map(bandCode).filter(Boolean))]
-  const out: PartyOption[] = []
-  const multisets = (n: number, from: number): string[][] => {
-    if (n === 0) return [[]]
-    const res: string[][] = []
-    for (let i = from; i < codes.length; i++) for (const rest of multisets(n - 1, i)) res.push([codes[i], ...rest])
-    return res
+  const cap = { ...capacity, max_adults: Math.min(int(capacity.max_adults), PARTY_ADULTS_MAX), max_children: Math.min(int(capacity.max_children), PARTY_CHILDREN_MAX) }
+  const combos = validCombinations([cap]).filter((c) => c.children === 0 || codes.length > 0)
+  // the band multisets of n children, lazily (a large room with many bands has very many)
+  function* multisets(n: number, from: number): Generator<string[]> {
+    if (n === 0) {
+      yield []
+      return
+    }
+    for (let i = from; i < codes.length; i++) for (const rest of multisets(n - 1, i)) yield [codes[i], ...rest]
   }
-  for (const combo of validCombinations([capacity])) {
-    if (combo.children > 0 && !codes.length) continue
-    for (const children of multisets(combo.children, 0)) {
-      out.push({ id: `${combo.adults}+${children.join(",")}`, adults: combo.adults, children })
-      if (out.length >= PARTY_OPTIONS_MAX) return out
+  const commonness = (c: ValidCombination) => [c.children > 0 ? 1 : 0, c.adults + c.children, Math.abs(c.adults - 2), c.children]
+  const byCommon = combos.map((c, i) => ({ c, i })).sort((x, y) => {
+    const [a, b] = [commonness(x.c), commonness(y.c)]
+    for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return a[k] - b[k]
+    return x.i - y.i
+  })
+  const kept: { party: PartyOption; combo: number; seq: number }[] = []
+  fill: for (const { c, i } of byCommon) {
+    let seq = 0
+    for (const children of multisets(c.children, 0)) {
+      if (kept.length >= PARTY_OPTIONS_MAX) break fill
+      kept.push({ party: { id: `${c.adults}+${children.join(",")}`, adults: c.adults, children }, combo: i, seq: seq++ })
     }
   }
-  return out
+  return kept.sort((x, y) => x.combo - y.combo || x.seq - y.seq).map((k) => k.party)
 }
 
 /** The party the resolved line starts with: two adults when the room takes them, else the first. */

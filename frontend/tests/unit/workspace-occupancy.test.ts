@@ -15,6 +15,8 @@ import {
   ladderSummary,
   occEditText,
   occReadingOf,
+  PARTY_ADULTS_MAX,
+  PARTY_CHILDREN_MAX,
   PARTY_OPTIONS_MAX,
   partyOptions,
   persistCombination,
@@ -164,7 +166,12 @@ test("a room scope shows that room's rules; inherited policy rules show their so
   const sup = ladderModel(example(extra), "SUP", "PERSON", OPTS)
   assert.equal(sup.rows.find((row) => row.band === "CHB")?.cells[""].state, "rule")
   assert.equal(sup.rows.find((row) => row.band === "CHB")?.identity?.room_type, "SUP")
-  assert.equal(sup.rows.find((row) => row.kind === "adult" && row.position === 3)?.cells[""].state, "default", "the all-rooms rule belongs to the All rooms scope")
+  // (S11 review) an All-rooms rule prices every room with no rule of its own, so the room scope
+  // shows it as coming from All rooms, never as the engine default
+  const third = sup.rows.find((row) => row.kind === "adult" && row.position === 3)?.cells[""]
+  assert.equal(third?.state, "all-rooms", "the all-rooms rule applies to SUP")
+  assert.deepEqual(third?.value, { op: "MULTIPLY", value: "0.7" })
+  assert.equal(third?.rule, null, "SUP holds no row of its own for it")
   const inherited = [{ target: "CHILD", position: 0, age_band: "CHB", combination: "", room_type: "", period_code: "", op: "MULTIPLY", value: "0.4", source: "Hotel policy" }]
   const pol = ladderModel(example(), null, "PERSON", { ...OPTS, inherited })
   const cell = pol.rows.find((row) => row.band === "CHB")?.cells.P2
@@ -556,4 +563,187 @@ test("sample parties: the valid combinations of the room, children at their band
   assert.equal(defaultParty(partyOptions({ ...cap, max_adults: 1 }, BANDS))?.id, "1+")
   assert.deepEqual(partyOptions({ ...cap, max_children: 1 }, []).map((p) => p.id), ["1+", "2+"], "no bands: adults only")
   assert.ok(partyOptions({ max_adults: 4, max_children: 4, max_occupants: 8, min_adults: 1 }, BANDS).length <= PARTY_OPTIONS_MAX)
+})
+
+// ─── S11 review: what prices a slot in a room scope (the engine's ranking, D12) ──────────
+
+const cellOf = (m: ReturnType<typeof ladderModel>, pick: (row: ReturnType<typeof ladderModel>["rows"][number]) => boolean, period: string) => {
+  const row = m.rows.find(pick)
+  assert.ok(row, "row")
+  return row.cells[period]
+}
+const summary = (c: { state: string; value: { op: string; value: string } | null } | undefined) => (c ? `${c.state}${c.value ? ` ${c.value.op} ${c.value.value}` : ""}` : "none")
+
+test("a room scope: slots priced only by All-rooms rules show them, not the default or 'not sellable'", () => {
+  // the verifier's probe: All-rooms rules for adult 3 (×0.7), INF (×0) and CHA (×0.5), seen from SUP
+  const t = tablesOf({
+    rooms: [r({ room_type: "STD", is_base: 1 }), r({ room_type: "SUP", is_base: 0 })],
+    periods: [r({ period_code: "P1" })],
+    occupancy_rules: [
+      occ({ target: "ADULT", position: 3, op: "MULTIPLY", value: "0.7" }),
+      occ({ target: "CHILD", age_band: "INF", op: "MULTIPLY", value: "0" }),
+      occ({ target: "CHILD", age_band: "CHA", op: "MULTIPLY", value: "0.5" }),
+    ],
+  })
+  const sup = ladderModel(t, "SUP", "PERSON", OPTS)
+  for (const p of ["", "P1"]) {
+    assert.equal(summary(cellOf(sup, (x) => x.kind === "adult" && x.position === 3, p)), "all-rooms MULTIPLY 0.7", p)
+    assert.equal(summary(cellOf(sup, (x) => x.band === "INF", p)), "all-rooms MULTIPLY 0", p)
+    assert.equal(summary(cellOf(sup, (x) => x.band === "CHA", p)), "all-rooms MULTIPLY 0.5", p)
+    // no rule of any scope prices these
+    assert.equal(summary(cellOf(sup, (x) => x.band === "CHB", p)), "missing", p)
+    assert.equal(summary(cellOf(sup, (x) => x.kind === "adult" && x.position === 4, p)), "default MULTIPLY 1", p)
+    assert.equal(summary(cellOf(sup, (x) => x.kind === "single", p)), "default MULTIPLY 1", p)
+  }
+  const inf = cellOf(sup, (x) => x.band === "INF", "")
+  assert.equal(inf.rule, null)
+  assert.equal(inf.source?.room_type, "", "the source is the All-rooms row")
+  // the rows still write the room's own rules
+  assert.equal(sup.rows.find((x) => x.band === "INF")?.identity?.room_type, "SUP")
+  // the All rooms scope is unchanged
+  const all = ladderModel(t, null, "PERSON", OPTS)
+  assert.equal(summary(cellOf(all, (x) => x.band === "INF", "P1")), "inherited MULTIPLY 0")
+  assert.equal(summary(cellOf(all, (x) => x.band === "CHB", "P1")), "missing")
+})
+
+test("a room scope: the owner's example seen from Superior (single use, adult 3 with its P4 override, the bands)", () => {
+  const sup = ladderModel(example(), "SUP", "PERSON", OPTS)
+  assert.deepEqual(kinds(sup), ["single", "adults_base", "adult3", "adult4", "band:INF", "band:CHA", "band:CHB"])
+  assert.equal(summary(cellOf(sup, (x) => x.kind === "single", "P2")), "all-rooms MULTIPLY 1.5")
+  assert.equal(summary(cellOf(sup, (x) => x.position === 3, "P1")), "all-rooms MULTIPLY 0.7")
+  assert.equal(summary(cellOf(sup, (x) => x.position === 3, "P4")), "all-rooms MULTIPLY 0.8", "the All-rooms P4 rule")
+  assert.equal(summary(cellOf(sup, (x) => x.band === "CHA", "P3")), "all-rooms MULTIPLY 0.25")
+  assert.equal(summary(cellOf(sup, (x) => x.kind === "adults_base", "")), "default MULTIPLY 1")
+  assert.equal(sup.counts.periodOverrides, 0, "SUP has no period rule of its own")
+  // All-rooms rules shape the room scope's rows too: a position-1 rule splits the BASE pair, an
+  // every-adult rule and a child position rule get their rows
+  const more = ladderModel(
+    example([
+      occ({ target: "ADULT", position: 1, op: "MULTIPLY", value: "1.1" }),
+      occ({ target: "ADULT", op: "MULTIPLY", value: "0.95" }),
+      occ({ target: "CHILD", position: 2, age_band: "CHB", op: "MULTIPLY", value: "0.4" }),
+    ]),
+    "SUP",
+    "PERSON",
+    OPTS,
+  )
+  assert.deepEqual(kinds(more), ["single", "adult1", "adult2", "adult3", "adult4", "adult_any", "band:INF", "band:CHA", "band:CHB", "child2"])
+  assert.equal(summary(cellOf(more, (x) => x.kind === "adult" && x.position === 1, "")), "all-rooms MULTIPLY 1.1")
+  assert.equal(summary(cellOf(more, (x) => x.kind === "adult" && x.position === 2, "")), "all-rooms MULTIPLY 0.95", "the every-adult rule of All rooms")
+  assert.equal(more.rows.find((x) => x.kind === "child")?.identity?.room_type, "SUP")
+  // the "also with children" single-use variant of All rooms is the room's single-use row too
+  const alt = tablesOf({ periods: [r({ period_code: "P1" })], occupancy_rules: [occ({ target: "ADULT", position: 1, combination: "1+*", op: "MULTIPLY", value: "1.4" })] })
+  const altSup = ladderModel(alt, "SUP", "PERSON", OPTS)
+  assert.deepEqual(altSup.rows[0].identity, { target: "ADULT", position: 1, age_band: "", combination: "1+*", room_type: "SUP" })
+  assert.equal(summary(altSup.rows[0].cells.P1), "all-rooms MULTIPLY 1.4")
+})
+
+test("a room scope ranks like the engine: own rule, then period before room before All rooms (occupancy precedence v2)", () => {
+  const sup = ladderModel(
+    example([
+      occ({ target: "ADULT", position: 3, room_type: "SUP", op: "MULTIPLY", value: "0.9" }),
+      occ({ target: "CHILD", age_band: "CHB", room_type: "SUP", op: "MULTIPLY", value: "0.5" }),
+      occ({ target: "ADULT", room_type: "SUP", op: "MULTIPLY", value: "0.95" }),
+      occ({ target: "ADULT", position: 4, period_code: "P2", op: "MULTIPLY", value: "0.85" }),
+    ]),
+    "SUP",
+    "PERSON",
+    OPTS,
+  )
+  assert.equal(summary(cellOf(sup, (x) => x.position === 3, "")), "rule MULTIPLY 0.9")
+  assert.equal(summary(cellOf(sup, (x) => x.position === 3, "P1")), "inherited MULTIPLY 0.9")
+  // a period rule (All rooms, P4) outranks the room's all-periods rule (level PERIOD > ROOM)
+  assert.equal(summary(cellOf(sup, (x) => x.position === 3, "P4")), "all-rooms MULTIPLY 0.8")
+  assert.equal(summary(cellOf(sup, (x) => x.band === "CHB", "P1")), "inherited MULTIPLY 0.5")
+  // the room's every-adult rule beats the engine default and All rooms' all-periods rules…
+  assert.equal(summary(cellOf(sup, (x) => x.position === 4, "P1")), "general MULTIPLY 0.95")
+  // …but not an All-rooms period rule of the slot
+  assert.equal(summary(cellOf(sup, (x) => x.position === 4, "P2")), "all-rooms MULTIPLY 0.85")
+  // an own INHERIT row says what applies instead
+  const inh = ladderModel(example([occ({ target: "CHILD", age_band: "CHA", room_type: "SUP", op: "INHERIT", value: "" })]), "SUP", "PERSON", OPTS)
+  const cha = cellOf(inh, (x) => x.band === "CHA", "")
+  assert.equal(summary(cha), "inherit-rule MULTIPLY 0.25")
+  assert.equal(cha.rule?.op, "INHERIT")
+  // "Always wins" of All rooms beats the room's all-periods rule in a period
+  const wins = ladderModel(
+    example([occ({ target: "ADULT", position: 3, room_type: "SUP", op: "MULTIPLY", value: "0.9" }), occ({ target: "ADULT", position: 3, period_code: "P2", op: "MULTIPLY", value: "0.6", is_override: 1 })]),
+    "SUP",
+    "PERSON",
+    OPTS,
+  )
+  assert.equal(summary(cellOf(wins, (x) => x.position === 3, "P2")), "all-rooms MULTIPLY 0.6")
+})
+
+test("policy rules: a version rule of All rooms beats a room's policy rule (origin first), and All-rooms policy rules reach a room", () => {
+  const inherited = [
+    fromInheritedRule({ rule_id: "OR-1", target: "CHILD", position: null, age_band: "CHB", adults: null, children: null, room_type: null, period: null, op: "MULTIPLY", value: "0.4", is_override: false, source: "policy:PP-1/r2/hotel" }),
+    fromInheritedRule({ rule_id: "OR-2", target: "CHILD", position: null, age_band: "CHA", adults: null, children: null, room_type: "SUP", period: null, op: "MULTIPLY", value: "0.3", is_override: false, source: "policy:PP-1/r2/hotel" }),
+    fromInheritedRule({ rule_id: "OR-3", target: "ADULT", position: 4, age_band: null, adults: null, children: null, room_type: null, period: null, op: "MULTIPLY", value: "0.8", is_override: false, source: "policy:PP-2/r1/global" }),
+    fromInheritedRule({ rule_id: "OR-4", target: "ADULT", position: 4, age_band: null, adults: null, children: null, room_type: null, period: null, op: "MULTIPLY", value: "0.75", is_override: false, source: "policy:PP-3/r1/market" }),
+  ]
+  const sup = ladderModel(example(), "SUP", "PERSON", { ...OPTS, inherited })
+  const chb = cellOf(sup, (x) => x.band === "CHB", "P1")
+  assert.equal(summary(chb), "policy MULTIPLY 0.4")
+  assert.equal(chb.source?.room_type, "")
+  assert.equal(summary(cellOf(sup, (x) => x.band === "CHA", "P1")), "all-rooms MULTIPLY 0.25", "a version rule beats any policy rule")
+  assert.equal(summary(cellOf(sup, (x) => x.position === 4, "")), "policy MULTIPLY 0.75", "a market policy outranks a global one")
+  // the All rooms scope does not see the SUP policy rule
+  const all = ladderModel(example(), null, "PERSON", { ...OPTS, inherited })
+  assert.equal(summary(cellOf(all, (x) => x.band === "CHA", "P1")), "inherited MULTIPLY 0.25")
+  assert.equal(summary(cellOf(all, (x) => x.band === "CHB", "P1")), "policy MULTIPLY 0.4")
+})
+
+test("an infant is priced by a rule naming its band before any band-less rule (G-31)", () => {
+  const t = example([occ({ target: "CHILD", room_type: "SUP", op: "MULTIPLY", value: "0.5" })])
+  const sup = ladderModel(t, "SUP", "PERSON", OPTS)
+  assert.equal(sup.rows.find((x) => x.band === "INF")?.infant, true)
+  assert.equal(sup.rows.find((x) => x.band === "CHA")?.infant, false)
+  assert.equal(summary(cellOf(sup, (x) => x.band === "INF", "P1")), "all-rooms MULTIPLY 0", "the INF rule of All rooms, not the room's band-less rule")
+  assert.equal(summary(cellOf(sup, (x) => x.band === "CHA", "P1")), "general MULTIPLY 0.5", "a room rule outranks All rooms for a child who is not an infant")
+  assert.equal(summary(cellOf(sup, (x) => x.band === "CHB", "P1")), "general MULTIPLY 0.5")
+  // a policy rule naming the infant's band beats the version's band-less rule
+  const noInf = { ...example(), occupancy_rules: example().occupancy_rules.filter((x) => x.age_band !== "INF") }
+  const pol = [fromInheritedRule({ rule_id: "OR-9", target: "CHILD", position: null, age_band: "INF", adults: null, children: null, room_type: null, period: null, op: "MULTIPLY", value: "0.1", is_override: false, source: "policy:PP-1/r2/hotel" })]
+  const all = ladderModel({ ...noInf, occupancy_rules: [...noInf.occupancy_rules, occ({ target: "CHILD", op: "MULTIPLY", value: "0.5" })] }, null, "PERSON", { ...OPTS, inherited: pol })
+  assert.equal(summary(cellOf(all, (x) => x.band === "INF", "P1")), "policy MULTIPLY 0.1")
+  assert.equal(summary(cellOf(all, (x) => x.band === "CHA", "P1")), "inherited MULTIPLY 0.25")
+})
+
+test("the precedence note: a band-less combination rule does not outrank an infant's band rule (G-31)", () => {
+  const t = example([occ({ target: "CHILD", position: 1, combination: "2+1", op: "MULTIPLY", value: "0.2" })])
+  const m = ladderModel(t, null, "PERSON", OPTS)
+  const notes = combinationNotes(m, groupCombinations(t), null)
+  const id = (band: string) => m.rows.find((x) => x.band === band)?.id
+  assert.equal(notes.get(`${id("INF")}|P1`), undefined, "the infant is priced by its INF rule")
+  assert.equal(notes.get(`${id("CHA")}|P1`)?.length, 1)
+  assert.equal(notes.get(`${id("CHB")}|P1`)?.length, 1, "a band without a rule: the combination prices it")
+  // an infant band without a rule of its own: the band-less combination rule does price it
+  const bare = example([occ({ target: "CHILD", position: 1, combination: "2+1", op: "MULTIPLY", value: "0.2" })])
+  bare.occupancy_rules = bare.occupancy_rules.filter((x) => x.age_band !== "INF")
+  const bm = ladderModel(bare, null, "PERSON", OPTS)
+  assert.equal(combinationNotes(bm, groupCombinations(bare), null).get(`${bm.rows.find((x) => x.band === "INF")?.id}|P1`)?.length, 1)
+  // a combination rule naming the infant's band still outranks it
+  const named = example([occ({ target: "CHILD", position: 1, age_band: "INF", combination: "2+1", op: "MULTIPLY", value: "0" })])
+  const nm = ladderModel(named, null, "PERSON", OPTS)
+  assert.equal(combinationNotes(nm, groupCombinations(named), null).get(`${nm.rows.find((x) => x.band === "INF")?.id}|P1`)?.length, 1)
+})
+
+test("sample parties stay within the server's limits and keep the common ones when the list is capped", () => {
+  const big = { room_type: "VIL", max_adults: 14, max_children: 10, max_occupants: 24, min_adults: 1 }
+  const opts = partyOptions(big, BANDS)
+  assert.ok(opts.length <= PARTY_OPTIONS_MAX)
+  assert.ok(opts.every((p) => p.adults <= PARTY_ADULTS_MAX && p.children.length <= PARTY_CHILDREN_MAX), "price_matrix refuses more")
+  assert.equal(PARTY_ADULTS_MAX, 12)
+  assert.equal(PARTY_CHILDREN_MAX, 8)
+  const ids = opts.map((p) => p.id)
+  for (const id of ["1+", "2+", "12+", "2+INF", "2+CHB", "1+CHA", "2+INF,CHB", "2+CHA,CHB", "2+CHB,CHB", "3+CHB"]) assert.ok(ids.includes(id), id)
+  // shown in the usual order: adults only, then by adults and children
+  const order = (p: { adults: number; children: string[] }) => [p.children.length > 0 ? 1 : 0, p.adults, p.children.length]
+  for (let i = 1; i < opts.length; i++) {
+    const [a, b] = [order(opts[i - 1]), order(opts[i])]
+    assert.ok(a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] <= b[2]))), `${opts[i - 1].id} before ${opts[i].id}`)
+  }
+  assert.equal(defaultParty(opts)?.id, "2+")
+  // a room within the limits and the cap keeps every party
+  assert.equal(partyOptions({ max_adults: 2, max_children: 2, max_occupants: 4, min_adults: 1 }, BANDS).length, 2 + 3 + 6 + 3 + 6)
 })
