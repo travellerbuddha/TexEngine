@@ -179,6 +179,12 @@ export function CombinationCards(p: CombinationCardsProps) {
     if (!spec) return
     const name = text.name(spec.adults === "*" ? null : spec.adults, spec.children === "*" ? null : spec.children)
     const editing = open?.mode === "edit"
+    // an edited card saved as it was: nothing to record
+    if (open?.mode === "edit") {
+      const before = cards.find((c) => c.id === open.id)
+      const after = groupCombinations(persistCombination(history.current() ?? tables, spec).tables)
+      if (before && after.some((c) => c.id === before.id && c.keys.length === before.keys.length)) return closeBuilder(before.id)
+    }
     let added: string | null = null
     const done = history.apply(t(editing ? "rates.combo.h.edit" : "rates.combo.h.add", { name }), (tb) => {
       const res = persistCombination(tb, spec)

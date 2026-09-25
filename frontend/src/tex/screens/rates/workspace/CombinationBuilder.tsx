@@ -79,6 +79,8 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
   const titleId = useId()
   const errId = useId()
   const [draft, setDraft] = useState<BuilderDraft>(p.initial)
+  // "More" starts open when the draft uses what it holds (an edited card's any / Always wins)
+  const [moreOpen, setMoreOpen] = useState(p.initial.isOverride || p.initial.adults === "*" || p.initial.children === "*")
   // the panel opens with the focus in its first field (the opener may be gone: Add hides, a card is replaced)
   const firstRef = useRef<HTMLInputElement | null>(null)
   useEffect(() => {
@@ -134,7 +136,18 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
       return v.kind === "rule" ? { ...l, text: builderValueText(v.op, v.value, fmt) } : l
     })
   const removeLine = (id: string) =>
-    change((d) => ({ ...d, childLines: d.childLines.filter((l) => l.id !== id), adultLines: d.adultLines.filter((l) => l.id !== id), whole: d.whole?.id === id ? null : d.whole }))
+    change((d) => {
+      const line = d.childLines.find((l) => l.id === id)
+      // any children: removing the last child position's only line takes that position away
+      const lastAny = line && d.children === "*" && line.position === d.anyChildren && d.anyChildren > 1 && d.childLines.filter((l) => l.position === line.position).length === 1
+      return {
+        ...d,
+        anyChildren: lastAny ? d.anyChildren - 1 : d.anyChildren,
+        childLines: d.childLines.filter((l) => l.id !== id),
+        adultLines: d.adultLines.filter((l) => l.id !== id),
+        whole: d.whole?.id === id ? null : d.whole,
+      }
+    })
   const addChildBand = (position: number) => {
     const used = new Set(draft.childLines.filter((l) => l.position === position).map((l) => str(l.age_band).toUpperCase()))
     const free = bandCodes.find((c) => !used.has(c)) ?? ""
@@ -434,7 +447,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
         <p className="text-xs text-zinc-500">{t("rates.combo.b.value_hint", { unit: unitWord(guestUnit) })}</p>
       </div>
 
-      <details className="text-xs text-zinc-700">
+      <details className="text-xs text-zinc-700" open={moreOpen} onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
         <summary className="cursor-pointer font-medium select-none">{t("rates.combo.b.more")}</summary>
         <div className="mt-2 space-y-1.5 pl-1">
           <Checkbox
