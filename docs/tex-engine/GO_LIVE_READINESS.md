@@ -129,10 +129,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     policy or payment policy is refused wherever its terms are built (validate, price test,
     matrix, publish, ARI grid); (2) an editor without `price.view_cost` is not told what a
     pricing policy's formula decides by the live check, and (3) not in the report stored at
-    publish. Confirm them. Decide whether any addition should hold for every caller: today the
-    board checks (a board row for an unknown room or period, twin board rows) and the refusal of a
-    blank rule value apply only in the workspace, so the contract detail page's and the ARI grid's
-    publish still publish such a draft, and a blank value saved by another caller is stored as 0.
+    publish nor in the warnings a publish answers. Confirm them. Decide whether any addition
+    should hold for every caller: today the board checks (a board row for an unknown room or
+    period, twin board rows) and the refusal of a blank rule value apply only in the workspace, so
+    the contract detail page's and the ARI grid's publish still publish such a draft, and a blank
+    value saved by another caller is stored as 0.
 
 ## 4. Platform notes
 
@@ -658,3 +659,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   (over 2,000 draft versions left by E2E runs cut the version lists). The workspace is recorded
   PARTIAL; O1–O5 remain owner input 13, the existing-caller differences owner input 14. No area
   status changes. Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace S16 re-review 4 follow-up, security and cost group, on branch
+  `pricing-workspace` (ADR-061).
+  - An editor without `price.view_cost` no longer learns a hidden policy rule's op, INHERIT
+    included, from the sample parties, the live check or the stored report.
+  - A publisher without cost is answered the warnings `get_version` gives them, not the whole
+    stored report (owner input 14, difference 3).
+  - No area status changes. Verdict unchanged: NOT READY.

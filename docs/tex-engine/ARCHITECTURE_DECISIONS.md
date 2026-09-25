@@ -8492,3 +8492,119 @@ acceptance measured **41 clicks, 0 section switches, 0 modal dialogs** in each o
   the near-empty site.
 - The lane's rule records the workspace as COMPLETE only when every suite is green: it is PARTIAL in
   IMPLEMENTATION_STATUS.
+
+**S16 re-review 4 follow-up, security and cost group (2026-09-26).** Two findings of the fifth
+review: the medium "`depends_on` leak" and the low "publish_version warnings". Branch
+`pricing-workspace`.
+
+*Finding (medium).* `occupancy.depends_on` was to guarantee that a viewer without `price.view_cost`
+learns nothing of a hidden policy rule's op (S16 re-review 3, item 6). It did not. On NO_CHILD_RULE it
+checked only the failing child, not rules that priced earlier children; on AMBIGUOUS_OCCUPANCY_RULES
+it answered "not hidden" without looking. Two reproductions: (a) a policy rule G-C1 (child 1, CHD)
+and no rule for child 2 — with G-C1 pricing, 2A+[CHD,CHD] said "no occupancy rule for child 2" in the
+matrix and in 16 live-check warnings, with G-C1 = INHERIT it was hidden; (b) a policy rule G-INF (the
+infant band, which outranks the version's band-less rules, G-31) over two tied version rules — with
+G-INF = INHERIT the matrix said "rules V-X and V-Y both define child 1 band INF" and OCC_AMBIGUOUS
+named the INF slot, with G-INF pricing the party was hidden and OCC_AMBIGUOUS named the CHD slot.
+
+*Finding (low).* `publish_version` returned the report it stores, unfiltered, as `warnings`. A
+publisher with `contract.publish` but without `price.view_cost` read in it what `get_version` leaves
+out of the same report: an outranked policy override, a negative total a hidden rule takes part in.
+
+**Decision (S16 re-review 4 follow-up, security and cost group).**
+1. *`depends_on` decides without the hidden ops.* It no longer prices the party with the hidden rules
+   (nor tries them with another op). It walks the slots in `price_occupancy`'s order: priced adults,
+   the children after the included places, then the whole combination. The walk uses only which
+   rules match, their ranks and the ops of the rules the viewer reads. So its answer is the same
+   whatever the hidden ops, INHERIT included. A hidden rule "may decide" a slot when it matches
+   there and no readable rule that prices ranks above it. The party is hidden:
+   - when such a slot may fail or not by a hidden op: a child only hidden rules may price
+     (NO_CHILD_RULE if they all defer), or two rules of one rank that may both price (a tie under a
+     hidden rule, or between hidden rules);
+   - otherwise, when the party gets through every slot: its total, its slots and a negative total
+     then depend on the hidden rule.
+
+   A failure no hidden rule decides is said, also after a hidden rule priced an earlier slot that
+   cannot fail. This keeps the S16 re-review decision: a child band without a rule is said after
+   policy-priced adults. `unit` is kept in the signature but no amount is computed.
+   `_defers_where_it_would_win` is gone. `rules_taking_part` stays for `matrix.party_rules`.
+2. *The live check's other op-dependent issues (`validate_terms(hidden=…)`).*
+   - OCC_AMBIGUOUS depended on hidden ops through the rules ranked above the tie and through
+     `_reached` (whether the children before the slot are priced). A tie of the viewer's own rules
+     is now named at the first slot where no hidden rule ranked above it matches and the viewer's
+     rules price the children before it. That slot holds whatever the hidden ops.
+   - If there is no such slot, but some ops of the hidden rules would let the tie decide a price,
+     the tie is reported without a slot: "…both price any child of 2A+1C at the same precedence
+     with different values wherever the pricing policy's rules leave it to them…". Its ref is the
+     pair's own scope. It is still an ERROR.
+   - A tie involving a hidden rule is left out, and so is OCC_NO_VALUE of a hidden rule. A policy
+     cannot go live with either (`policy_issues`); both would say the rule does not defer.
+3. *The sweep and the stored report.*
+   - The sweep leaves out AMBIGUOUS_OCCUPANCY_RULES too when it can depend on a hidden op
+     (`_SWEEP_HIDEABLE`).
+   - A combination the sweep skips for that reason is reported in the next period where it fails
+     the same way independently of the hidden rules. This was already so, and it is now documented.
+   - `visible_issues` no longer filters a stored report's sweep rows one by one. That was not the
+     same whatever the ops. The sweep stores a combination only in its first failing period, so a
+     period decided by a hidden rule hid a later, independent failure in one op and not in another.
+     And the 200-issue limit, filled by hidden-dependent failures in one op, cut different later
+     rows.
+   - It now gives the stored sweep exactly as the live check's sweep gives it (`_visible_sweep`). A
+     stored row is kept when its failure cannot depend on a hidden op. Otherwise it moves to the
+     next period the live sweep would name (priced again from the frozen terms), or it is left out.
+     A stored sweep at its limit is run again. `HIDEABLE_CODES` adds AMBIGUOUS_OCCUPANCY_RULES,
+     OCC_AMBIGUOUS and OCC_NO_VALUE. The last two are ERRORs, which a published version's report
+     never holds, so they are left out if met.
+4. *Publish answers what `get_version` gives the caller.* The report is stored whole, as before.
+   The `warnings` returned are `stored_report(version, formula=has price.view_cost)`, for every
+   caller: the workspace's publish and an existing caller's alike. For an existing caller the rows
+   have main's keys, so every row of a hideable code is left out. This is the same security fix as
+   the stored report's (owner input 14, difference 3). Who sees cost gets the full report, unchanged.
+
+**Deviations (S16 re-review 4 follow-up, security and cost group).**
+- *The fix for item 1 is not the one the finding suggested.* The suggestion was: on any failure,
+  also hide when `rules_taking_part & rules` or `_defers_where_it_would_win`. That would hide a child
+  band without a rule after policy-priced adults. It contradicts the S16 re-review decision and its
+  tests (`test_a_missing_child_rule_is_said_whoever_priced_the_adults`, unit and integration). And it
+  would still decide from priced results with the actual ops, so it is not op-blind by construction.
+  The walk above hides everything that fix hides whose answer can depend on a hidden op, and says the
+  rest.
+- *More than the two reproductions.* Rule sets generated from a fixed seed (the new
+  `TestGeneratedRuleSets`) found the same class of leak in places the finding does not name:
+  - `_reached` in OCC_AMBIGUOUS;
+  - the stored report's first-period dedup and its limit;
+  - OCC_NO_VALUE of a hidden rule.
+
+  All are fixed here. Beyond the committed seed, 900 more sets (seeds 1–3, up to three hidden rules,
+  five ops) and 500 with LEGACY precedence and larger rooms (seeds 7, 8) found no leak.
+
+**Tests (S16 re-review 4 follow-up, security and cost group).**
+- *Unit (Python), 523 (516 + 7), new `test_hidden_policy_ops`:*
+  - `TestTheReportedLeaks`:
+    - reproduction (a), with G-C1 INHERIT and MULTIPLY 0.5;
+    - reproduction (b) in two variants (partial combinations; twins), with G-INF INHERIT and
+      MULTIPLY 0;
+    - a tie only a hidden rule may decide, named without its slot;
+    - a stored party moved to the period the live check names, under three ops;
+    - a stored sweep at its limit;
+    - a hidden rule without a value.
+
+    Each asserts that the live check, the matrix's sample parties (as `_party_cells` answers them)
+    and the stored report are identical whatever the op.
+  - `TestGeneratedRuleSets`: 160 generated rule sets, each run with every combination of the hidden
+    rules' ops. The rule sets vary the version's rules (any op, some naming a period), one or two
+    hidden rules in one or two policies, and PERSON or ROOM basis with or without included places.
+  - Fail-first, on the code before the fix: 309 failures, all six reproduction tests and 47 of the
+    250 rule sets then generated. The limit test was added after and failed there too (a patched
+    limit of 3: the stored rows shown were `[(1,1,TEEN)]` against the live `[(1,1,TEEN), (1,2,TEEN),
+    (1,3,TEEN)]`).
+- *Integration, `test_pricing_workspace_api`
+  `TestInheritedTerms.test_a_publisher_without_cost_is_told_the_warnings_get_version_gives_it`:*
+  - a publisher with `price.view`, `contract.edit` and `contract.publish`, without
+    `price.view_cost`, through the workspace's publish and an existing caller's: the answer's
+    warnings equal what `get_version` gives that user, with no OCC_POLICY_OVERRIDE_OUTRANKED and no
+    negative 2A+1C CHD total;
+  - the stored report is the full one;
+  - a Revenue Manager's warnings equal the stored report.
+
+  Fail-first: 2 failures (both of the publisher's subtests) on the code before item 4.

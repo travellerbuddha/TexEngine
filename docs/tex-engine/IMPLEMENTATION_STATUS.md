@@ -1100,6 +1100,25 @@ the price test.
 
 Recorded as **PARTIAL** below: the lane's rule allows COMPLETE only when every suite is green.
 
+**Pricing Workspace, S16 re-review 4 follow-up, security and cost group (2026-09-26, ADR-061, branch `pricing-workspace`).**
+Two findings of the fifth review. The fixes:
+- An editor without `price.view_cost` learns nothing of a hidden pricing-policy rule's op, not even
+  whether it defers (INHERIT). `occupancy.depends_on` now decides from which rules exist, their
+  ranks and the viewer's own rules' ops only. The same holds in the matrix's sample parties, the live
+  check (a tie is named at a slot no hidden rule may decide, else without its slot; a tie with a
+  hidden rule and a hidden rule's missing value are left out) and the report stored at publish
+  (its sweep is given exactly as the live check's).
+- `publish_version` answers its caller the warnings `get_version` gives that caller, not the whole
+  stored report.
+
+Tests with fail-first output are in ADR-061:
+- unit `test_hidden_policy_ops`: the two reproductions, each with INHERIT and a pricing op, four
+  more cases, and 160 generated rule sets under every combination of hidden ops;
+- integration: a publisher with `contract.publish` without `price.view_cost`.
+
+Unit 523 OK, ruff clean. The integration regression is in ADR-061. Status unchanged (PARTIAL): the
+final verification's open failures are not this group's.
+
 **Pricing Workspace status (R-04): PARTIAL (built: S1–S16, the S16 review, three re-review follow-ups and the existing-semantics follow-up, branch `pricing-workspace`; the final verification above is not green in every suite: two intermittent failures in the workspace's own specs (a key typed at once after Escape lost; one header-lane arrow step), and two outside it (`test_system_status`'s weekday-dependent FX test; two `entry-branding` navigation tests on the shared site's accumulated E2E data)).** Backend S2–S5 (opt-in: `workspace=1`; existing callers get main's answers)
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of the price test's internal quote
