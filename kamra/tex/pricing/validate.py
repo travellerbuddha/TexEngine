@@ -607,4 +607,3 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 				continue
 		out.append(i)
 	return out
-	return out
