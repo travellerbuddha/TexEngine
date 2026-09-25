@@ -17,7 +17,10 @@
 // Results are tagged with the fingerprint of the state they were computed for (`forKey`); `stale`
 // says they describe another state (or the version before a refresh) than the one on screen, and
 // `matrixState` / `issuesState` whether an answer is on its way, there, or failed for the state
-// on screen (callState). The client computes nothing from them.
+// on screen (callState). The occupancy ladder's sample parties go with the matrix call, but the
+// rooms' prices do not depend on them: an answer asked again only for another party is not stale
+// (pricesKey), and `partiesFor` names the parties an answer priced (sampleKey), so the ladder never
+// shows one party's totals for another. The client computes nothing from them.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { tex, TexApiError } from "../../../lib/api"
 import { fingerprint, overlayPayloadOf, type EditorState } from "../lib/tables"
@@ -34,6 +37,8 @@ import {
   previewKeys,
   previewMode,
   previewSource,
+  pricesKey,
+  sampleKey,
   storedIssues,
   validateDelay,
   validationRequest,
@@ -65,10 +70,16 @@ export interface DraftPreview {
   matrix?: PriceMatrix
   /** the fingerprint the matrix was computed for */
   forKey?: string
-  /** the matrix (or its build error) describes another state than the one on screen, or a refresh is on its way */
+  /** the matrix's room prices (or its build error) describe another state than the one on screen, or
+   * a refresh is on its way; not when only the sample parties changed (pricesKey) */
   stale: boolean
   /** a price_matrix call is in flight */
   loading: boolean
+  /** a price_matrix call for other room prices than the answer's is in flight (not one asked only
+   * for another sample party) */
+  pricesLoading: boolean
+  /** the sample parties the matrix's `party_cells` priced (sampleKey of what was sent; "" none) */
+  partiesFor?: string
   /** the matrix wanted: on its way (busy), there (ready), or its call failed (failed: `error`, until the state changes or refetch) */
   matrixState: CallState
   /** the price_matrix call for the state on screen failed (an older matrix may stay, stale) */
@@ -130,7 +141,7 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
   const version = doc?.name ?? ""
   const modified = doc?.modified ?? ""
   const { parties, partyRoom } = opts
-  const partiesJson = parties?.length && partyRoom ? JSON.stringify([parties, partyRoom]) : ""
+  const partiesJson = sampleKey(parties, partyRoom)
   const savedRooms = useMemo(() => (doc?.rooms ?? []).map((r) => String(r.room_type ?? "").trim()).filter(Boolean), [doc?.rooms])
   const partiesRef = useRef({ parties, partyRoom, savedRooms })
   partiesRef.current = { parties, partyRoom, savedRooms }
@@ -144,8 +155,10 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
   const [refused, setRefused] = useState<{ version: string; rows: number }>()
   const refusedRows = refused && refused.version === version ? refused.rows : null
   const fits = overlayFits({ rows, maxRows, refusedRows })
-  const keys = previewKeys(mode, { version, modified, tick, vtick, parties: partiesJson, rowKeys, key, fits })
+  const keyInput = { version, modified, tick, vtick, parties: partiesJson, rowKeys, key, fits }
+  const keys = previewKeys(mode, keyInput)
   const matrixKey = doc ? keys.matrix : ""
+  const prices = doc ? pricesKey(mode, keyInput) : ""
   const validKey = doc ? keys.valid : ""
   const source = previewSource(mode, { clean, rows, maxRows, refusedRows })
   const savedOnly = mode === "overlay" && !fits && !clean
@@ -154,18 +167,21 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
   const refuse = useCallback((n: number) => setRefused({ version, rows: n }), [version])
 
   // ─── resolved prices (price_matrix) ───────────────────────────────────
-  const [mx, setMx] = useState<{ full: string; forKey: string; matrix?: PriceMatrix; buildError?: string }>()
+  // `prices`: the answer's pricesKey; `parties`: the sampleKey of the parties it was asked with
+  const [mx, setMx] = useState<{ full: string; prices: string; parties: string; forKey: string; matrix?: PriceMatrix; buildError?: string }>()
   const [mxError, setMxError] = useState<Failure>()
-  const [mxLoading, setMxLoading] = useState(false)
+  // the pricesKey of the call in flight, null when none
+  const [mxLoading, setMxLoading] = useState<string | null>(null)
   const answered = useRef(false)
 
   useEffect(() => {
     if (!matrixKey) {
-      setMxLoading(false)
+      setMxLoading(null)
       return
     }
     const ctl = new AbortController()
     const full = matrixKey
+    const forPrices = prices
     const src = source ?? "saved"
     const forKey = describes(src)
     const fire = () => {
@@ -173,10 +189,12 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
       const req = matrixRequest(mode, { version, source: src, data: src === "overlay" && st ? overlayPayloadOf(st) : undefined, ...partiesRef.current })
       if (!req) return
       const sent = st ? overlayRows(st.tables) : 0
-      setMxLoading(true)
+      const priced = sampleKey(req.args.parties, req.args.party_room)
+      setMxLoading(forPrices)
       tex<PriceMatrixResponse>("contracts", "price_matrix", req.args, { post: req.post, signal: ctl.signal })
         .then((r) => {
-          setMx(r.build_error !== undefined ? { full, forKey, buildError: r.build_error } : { full, forKey, matrix: r })
+          const tag = { full, prices: forPrices, parties: priced, forKey }
+          setMx(r.build_error !== undefined ? { ...tag, buildError: r.build_error } : { ...tag, matrix: r })
         })
         .catch((e: unknown) => {
           if (isAbort(e)) return
@@ -186,7 +204,7 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
         .finally(() => {
           if (ctl.signal.aborted) return
           answered.current = true
-          setMxLoading(false)
+          setMxLoading(null)
         })
     }
     // the first answer at once, then after the user pauses
@@ -264,15 +282,17 @@ export function useDraftPreview(doc: VersionDoc | undefined, state: EditorState 
   const published = mode === "saved" && doc ? storedIssues(doc.validation_report) : undefined
   const live = mode === "overlay"
   const catalogue = mode === "catalogue"
-  const matrixState = catalogue ? "ready" : callState({ key: matrixKey, answered: mx?.full, failed: mxError?.key, running: mxLoading })
+  const matrixState = catalogue ? "ready" : callState({ key: matrixKey, answered: mx?.full, failed: mxError?.key, running: mxLoading !== null })
   const issuesState = live ? callState({ key: validKey, answered: iss?.full, failed: issError?.key, running: validating }) : "ready"
   return {
     mode,
     key,
     matrix: catalogue ? undefined : mx?.matrix,
     forKey: catalogue ? undefined : mx?.forKey,
-    stale: !catalogue && mx?.full !== matrixKey,
-    loading: !catalogue && mxLoading,
+    stale: !catalogue && mx?.prices !== prices,
+    loading: !catalogue && mxLoading !== null,
+    pricesLoading: !catalogue && mxLoading !== null && mxLoading !== mx?.prices,
+    partiesFor: catalogue ? undefined : mx?.parties,
     matrixState,
     error: matrixState === "failed" ? mxError?.error : undefined,
     buildError: catalogue ? undefined : mx?.buildError,

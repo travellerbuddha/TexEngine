@@ -5,10 +5,13 @@
 // matrix's editing model (type, F2 / Enter, Enter moves down, Tab sideways, Escape reverts, an
 // invalid entry stays as an error draft, Alt+Enter or ▾ opens the rule popover, Ctrl/Cmd+Enter
 // writes every selected cell, Delete clears): a relative entry is always stored as a rule of the
-// row's slot. Every change is one workspace history entry (S9). Engine defaults are shown, not
-// left blank: "×1.00 default" is the server's value (occupancy_defaults), a band without a rule is
-// "No rule · not sellable". The resolved line shows the server's occupancy total of a sample
-// party per period (price_matrix parties, GAP-2b); the client adds nothing up.
+// row's slot. Every change is one workspace history entry (S9). A cell without a rule of its own
+// shows the rule the engine would use (in a room scope, possibly one of All rooms or of a pricing
+// policy, with its source); only when none applies does it show the engine default: "×1.00
+// default" is the server's value (occupancy_defaults), a band without a rule is "No rule · not
+// sellable". The resolved line shows the server's occupancy total of a sample party per period
+// (price_matrix parties, GAP-2b), from an answer that priced that very party; the client adds
+// nothing up.
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { AlertTriangle, Info, Loader2 } from "lucide-react"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
@@ -24,6 +27,7 @@ import {
   type GridCell,
   type GridEditRequest,
 } from "../../../ui"
+import { sampleKey } from "./draftPreview.ts"
 import type { DraftPreview } from "./useDraftPreview"
 import { parseShorthand } from "../lib/shorthand"
 import type { Tables } from "../lib/tables"
@@ -430,6 +434,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         return {
           tone: "muted",
           content: t("rates.occ.ladder.cell.included"),
+          wrap: true,
           state: "included",
           tooltip: own ? t("rates.occ.ladder.cell.ignored_tip", { rule: ruleShort(str(own.op), str(own.value)), count: model.includedAdults }) : t("rates.occ.ladder.cell.included_tip", { count: model.includedAdults }),
         }
@@ -472,28 +477,67 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         }
       case "general":
         return { tone: "muted", content: `↳ ${short}`, state: "general", value: short, tooltip: t("rates.occ.ladder.cell.general_tip", { rule: short }) }
-      case "policy": {
-        const src = policySource(cell.source?.source)
-        const scope = src ? t(`rates.occ.ladder.source.${src.scope.replace("+", "_")}`) : t("rates.occ.ladder.source.policy")
+      case "all-rooms": {
+        // a room scope without a rule of its own for the slot: an All-rooms rule prices it
+        const allRooms = t("rates.occ.ladder.all_rooms")
+        const room = p.roomName(p.scope)
         return {
           tone: "muted",
           content: (
             <>
-              <i>{short}</i> <span className="text-[10px] not-italic">{t("rates.occ.ladder.cell.policy_tag")}</span>
+              <span>↳ {short}</span>
+              <span className="max-w-full truncate text-[10px]">{allRooms}</span>
             </>
           ),
+          stack: true,
+          state: "all-rooms",
+          value: `${short} (${allRooms})`,
+          tooltip: t("rates.occ.ladder.cell.all_rooms_tip", { room, rule: short }),
+        }
+      }
+      case "policy": {
+        const src = policySource(cell.source?.source)
+        const scope = src ? t(`rates.occ.ladder.source.${src.scope.replace("+", "_")}`) : t("rates.occ.ladder.source.policy")
+        const from = t("rates.occ.ladder.cell.policy_from", { source: scope })
+        // in a room scope, a policy rule without a room applies as the All-rooms rule of the policy
+        const allRooms = p.scope !== "" && str(cell.source?.room_type) === "" ? t("rates.occ.ladder.all_rooms") : ""
+        const source = [src ? `${scope} · ${src.policy} r${src.revision}` : str(cell.source?.source), allRooms].filter(Boolean).join(" · ")
+        return {
+          tone: "muted",
+          content: (
+            <>
+              <i>{short}</i>
+              <span className="max-w-full truncate text-[10px]">{from}</span>
+            </>
+          ),
+          stack: true,
           state: "policy",
-          value: `${short} (${scope})`,
-          tooltip: t("rates.occ.ladder.cell.policy_tip", { source: src ? `${scope} · ${src.policy} r${src.revision}` : str(cell.source?.source), rule: short }),
+          value: `${short} (${[from, allRooms].filter(Boolean).join(" · ")})`,
+          tooltip: t("rates.occ.ladder.cell.policy_tip", { source, rule: short }),
         }
       }
       case "default": {
         const each = row.kind === "adults_base"
         const text = short ? t(each ? "rates.occ.ladder.cell.default_each" : "rates.occ.ladder.cell.default", { rule: short }) : t("rates.occ.ladder.cell.default_bare")
+        if (row.kind === "single") {
+          // "×1.00 default (no single-use rule)" (§3.6.2)
+          const sub = t("rates.occ.ladder.cell.default_single_sub")
+          return {
+            tone: "muted",
+            content: (
+              <>
+                <i>{text}</i>
+                <span className="max-w-full truncate text-[10px]">{sub}</span>
+              </>
+            ),
+            stack: true,
+            state: "default",
+            value: `${text} ${sub}`,
+            tooltip: t("rates.occ.ladder.cell.default_single_tip"),
+          }
+        }
         const tip =
-          row.kind === "single"
-            ? t("rates.occ.ladder.cell.default_single_tip")
-            : row.identity?.target === "CHILD"
+          row.identity?.target === "CHILD"
               ? t("rates.occ.ladder.cell.default_child_tip", { rule: short })
               : basis === "ROOM"
                 ? t("rates.occ.ladder.cell.default_extra_tip", { rule: short, unit: unitWord(row) })
@@ -505,14 +549,16 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     }
   }
 
-  // the resolved line: the server's total for the chosen party; an answer for another party is
-  // never shown for this one ("…" until it arrives)
+  // the resolved line: the server's total for the chosen party, from an answer that priced this
+  // very party (partiesFor, as sent); another party's totals are never shown for it ("…" until
+  // its answer comes, "—" when that call failed). An answer for this party about an older state
+  // stays, dimmed, while the new one is on its way.
   const matrix = preview?.matrix
   const stale = Boolean(preview && (preview.stale || preview.forKey !== preview.key))
-  const answered = useRef<string | null>(null)
-  const partyId = p.party ? `${p.partyRoom}|${p.party.id}` : ""
-  if (preview && !preview.stale && matrix?.party_cells) answered.current = partyId
-  const partyCell = answered.current === partyId ? matrix?.party_cells?.[0] : undefined
+  const wanted = p.party && p.partyRoom ? sampleKey([{ adults: p.party.adults, children: p.party.children }], p.partyRoom) : ""
+  const partyCell = wanted && preview?.partiesFor === wanted ? matrix?.party_cells?.[0] : undefined
+  const matrixState = preview?.matrixState
+  const partyPending = showResolved && (stale || (!partyCell && matrixState === "busy"))
   const allCodes = useMemo(() => labels.bands.map((b) => str(b.band_code ?? b.code).toUpperCase()).filter(Boolean), [labels.bands])
 
   const resolvedView = (period: string): View => {
@@ -534,10 +580,16 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         error: msg,
       }
     }
-    // the answer is about the saved draft (above the overlay's cap), which does not hold this room
-    if (!partyCell && matrix && !stale && !matrix.party_cells) return { tone: "resolved", content: "—", state: "no_party", tooltip: t("rates.occ.ladder.party_unsaved") }
-    const v = partyCell?.cells?.[period]
-    if (v === undefined || v === null) return { tone: "resolved", content: partyCell ? "—" : "…", state: partyCell ? "no_price" : "loading" }
+    if (!partyCell) {
+      // the call that asked for this party failed
+      if (matrixState === "failed") return { tone: "resolved", content: "—", state: "failed", tooltip: t("rates.occ.ladder.party_failed") }
+      // the answer for the state on screen priced no party: it is about the saved draft (a clean
+      // draft, above the overlay's cap, a published version), which does not hold this room
+      if (matrix && matrixState === "ready" && !stale) return { tone: "resolved", content: "—", state: "no_party", tooltip: t("rates.occ.ladder.party_unsaved") }
+      return { tone: "resolved", content: "…", state: "loading" }
+    }
+    const v = partyCell.cells?.[period]
+    if (v === undefined || v === null) return { tone: "resolved", content: "—", state: "no_price" }
     return { tone: "resolved", content: <Money amount={v} currency={ccy} />, state: "occ_resolved", value: `${ccy} ${amount(v)}`, tooltip: t("rates.occ.ladder.resolved_tip") }
   }
 
@@ -613,7 +665,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     () => Array.from({ length: navRows }, (_, r) => cols.map((period, c) => cellView(r, period, c))),
     // everything cellView reads
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, cols, navRows, model, tables, drafts, canEdit, t, tOrdinal, decimalMark, minorUnits, doc.status, ccy, labels, p.notes, p.cards, partyCell, stale, p.partyRoom, basis],
+    [rows, cols, navRows, model, tables, drafts, canEdit, t, tOrdinal, decimalMark, minorUnits, doc.status, ccy, labels, p.notes, p.cards, partyCell, stale, matrix, matrixState, p.partyRoom, p.scope, basis],
   )
   const selectedKey = (r: number) => {
     let out = ""
@@ -679,7 +731,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
           <div role="row" className="sticky top-0 z-[2] grid bg-white" style={{ gridTemplateColumns: template }}>
             <div role="columnheader" className={`sticky left-0 z-[4] flex items-end gap-1.5 ${headerCell} text-xs font-semibold text-zinc-600`}>
               {t("rates.occ.ladder.guest")}
-              {stale && showResolved && <Loader2 className="size-3 animate-spin text-zinc-400" aria-hidden />}
+              {partyPending && <Loader2 className="size-3 animate-spin text-zinc-400" aria-hidden />}
             </div>
             {cols.map((code) => {
               const per = periodRows.get(code)

@@ -927,7 +927,7 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
           </Tooltip>
         )}
         <span role="status" aria-live="polite" className="inline-flex min-h-5 items-center gap-1 text-xs text-zinc-500">
-          {preview && (preview.loading || stale) && (
+          {preview && (preview.pricesLoading || stale) && (
             <>
               <Loader2 className="size-3.5 animate-spin" aria-hidden />
               {t("rates.ws.updating")}

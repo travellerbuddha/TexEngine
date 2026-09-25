@@ -143,6 +143,8 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
     // the request's content is its key
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askingKey, setSampleParty])
+  // leaving Pricing (or the editor) stops asking for the party: later matrix calls go without it
+  useEffect(() => () => setSampleParty?.(null), [setSampleParty])
 
   // ─── words ─────────────────────────────────────────────────────────────
   const partyName = (x: PartyOption) => {
