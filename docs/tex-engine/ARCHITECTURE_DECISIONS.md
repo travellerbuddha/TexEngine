@@ -6367,3 +6367,205 @@ addressed.
 - the own cell is not re-ranked against another scope's "Always wins" rule;
 - a LEGACY-frozen version's ladder uses the CASCADE ranking (its resolved line is the truth);
 - a sample-party change still asks for the whole `price_matrix` again (deviation 6).
+
+**Decision (implemented in S12: the special combination cards and the structured builder).**
+Branch `pricing-workspace`, frontend only (no server file changes), commits `1a67dfb` (pure
+modules and unit tests), `c2f39c1` (the screens), then `32e698a`, `e984f64`, `6cefc80` and
+`7dc1608` (fixes found in the browser checks, and the twin lookup). The cards and the builder sit
+under the occupancy ladder, in the open "Occupancy & child pricing" region. The Advanced
+"Occupancy rules" table stays under Commercial rules.
+- *The cards* (`workspace/CombinationCards.tsx`, §3.7.4) list `occupancy.groupCombinations(tables)`
+  under "Special combinations (n)". The single-use cards (`1+0` whole-party rules, the `1+*`
+  adult-1 variant) are left out: they are the ladder's first row, as in `ladderSummary`
+  (`occupancy.isSingleUseCard`, now exported). Each card shows:
+  - the main text "2 Adults + 2 Children → Child 1 ×0.50 · Child 2 ×0.25" (`rates.combo.*`
+    plurals; rules in card order: adults, children, whole party);
+  - a second line with the children's age bands by label, the rooms and the periods: "Child 1:
+    Child 7–11.99 · Child 2: Child 3–6.99 · All rooms · All periods". A band code appears only
+    when no band has it (D13);
+  - "◆ by period" when it holds for some periods only, and "Always wins" for an override card;
+  - Edit and Remove. Remove is one history entry with the undo toast ("Combination removed: …"),
+    and the focus moves to the next card's Edit. A card the builder cannot show gets "Edit in rule
+    tables" (`#rules/occupancy`) instead of Edit (deviation 7);
+  - `data-card` (the card's id, compared and never put into a selector) and `data-combination`
+    ("2+2"), for the ⓘ link, "Show in grid" (S14) and issue anchoring (S15).
+  `occupancy.cardOfRow(cards, key)` names the card that holds a rule row.
+- *The ⓘ note links to its cards* (S11 deviation 9 closed). When the ladder's active cell carries
+  the note, a line under the grid repeats it with one button per card ("Show combination 2 Adults
+  + 2 Children"). The button brings that card into view, focuses it and outlines it for 2 s.
+  `CombinationCards` takes the request as `show = {id, n}`; a remount does not replay it.
+- *The builder* (`workspace/CombinationBuilder.tsx`, §3.7.1–§3.7.3) is an inline panel: a `form`
+  with `role="group"`, never a modal. It opens under the cards for "Add combination" (Rooms
+  preset to the ladder's rooms scope), or in place of the card for Edit. The focus starts in
+  Adults. The combination is never free text:
+  - *Adults and Children* are number fields, bounded by the rooms' largest capacity.
+  - *Quick chips* come from `occupancy.combinationChips(capacities, scopedRooms)`: the union of
+    the contract rooms' `validCombinations`. The capacities are the page's `price_matrix`
+    capacities (the rows' values before the first answer), so no extra call is made. A chip no
+    room in scope can host is greyed (`aria-disabled`, dashed). Its Tooltip names the rooms that
+    can ("2 Adults + 2 Children: no room in scope can host it. Rooms that can: Family Suite,
+    Garden Villa."). An enabled chip's Tooltip gives the full name. A combination no room in scope
+    can host gets an amber warning and can still be saved.
+  - *Rooms and Periods*: All, or chosen ones (checkboxes). One rule row is written for each
+    room × period.
+  - *One line per child*, named by `child_ordering` (`occupancy.childQualifier`): "Child 1
+    (oldest)", "Child 2 (youngest)"; under YOUNGEST_FIRST the other way round; under AS_ENTERED
+    "Child 1 (first in the booking)". Each line has an age band select (labels, "Any age"), a Rule
+    select (the occupancy ops, FIXED and INHERIT included) and a Value. "Another age band for
+    Child 1" adds a line for the same child (deviation 3). A blank line writes nothing: that child
+    keeps the ladder's rules. With any children, "Rule for another child" adds child positions,
+    and removing the last one takes it away again.
+  - *The Value field* reads `occupancy` shorthand (`occupancy.readBuilderValue`). A form sets the
+    Rule: x0.5 Multiply, 50% Percentage of, ±10% Plus/minus %, +25 Add, -25 Subtract, =25 Set
+    price (and "=25" keeps FIXED when FIXED is chosen). A number alone takes the Rule chosen
+    (deviation 2). Choosing another Rule keeps the number typed: the op chosen is the op stored.
+    Leaving the field shows the value as stored (`builderValueText`: "0.5", a negative Plus/minus
+    % as "-5"), beside a ×, % or currency suffix. Amount rules keep the AMBIGUOUS guard (O5).
+    Refusals are shown on the line (`aria-invalid`, `aria-describedby`).
+  - *"Adult rule"* adds an adult line with a position select (1…adults). *"Price for the whole
+    party"* adds the COMBINATION line (deviation 4). Its hint says, without arithmetic, whether it
+    replaces the guests' sum per night ("pays ×2.50 of the base person price in total") or adjusts
+    it ("what its guests pay together changes by −5%").
+  - *More* (it opens by itself for a card that uses it): any number of children ("a+*"), any
+    number of adults ("*+c"; the two exclude each other), and Always wins (deviation 5).
+  - *The help text* says each child's band condition is checked on its own and that a combination
+    wins over period rules unless a rule is marked Always wins. It is shown in the open builder;
+    otherwise under the cards heading.
+  - *The reading line* (a polite live region) shows "Reads: 2 Adults + 2 Children → Child 1 ×0.50
+    · Child 2 ×0.25", the bands, rooms and periods, and why Save is not possible yet (deviation 6).
+  - *Save combination* (also Enter in a field) plans against the tables as last written
+    (`history.current`) and writes `persistCombination(spec)` as one history entry ("Add
+    combination: …" / "Edit combination: …"), replacing exactly the edited card's rows. An edited
+    card saved unchanged records nothing. The toast says "Combination applied: …" and the focus
+    goes to the saved card. Cancel returns the focus to Add or to the card's Edit.
+- *Pure logic* (`workspace/occupancy.ts`), with no arithmetic on values:
+  - `BuilderDraft` / `BuilderLine`, `newBuilderDraft`, `shownChildPositions`, `ensureChildLines`;
+  - `readBuilderValue` / `builderValueText`;
+  - `builderCanEdit` (now also `CombinationCard.expressible`), `builderFromCard`;
+  - `planCombination`, whose `issues` are VALUE, DUPLICATE (a second rule for one guest and band),
+    POSITION (an adult the combination lacks), NO_RULES, NO_ROOMS, NO_PERIODS, ANY_BOTH (the
+    server's OCC_COMBINATION_QUALIFIER) and TWIN (the same guest, band, combination, room, period
+    and flag as a row of another card: the server's OCC_DUPLICATE, naming that card);
+  - `combinationChips`, `childQualifier`, `cardOfRow`.
+- *Strings:* 77 new keys in the six catalogues (`rates.combo.*`, `rates.occ.ladder.note_line` /
+  `note_show`). The chip letters are localised ("2Y+2Ç", "2E+2K", …).
+
+**Deviations from the slice text, with reasons (S12).**
+1. *Files beyond the slice list:* `occupancy.ts` (the pure builder logic above) and
+   `OccupancyLadder.tsx` (the ⓘ note's links, which the S12 notes of S11 ask for).
+2. *A number alone in a Value field takes the Rule chosen.* The slice says the Value field takes
+   occupancy shorthand and syncs the Rule select, where a bare number is a price (the owner's
+   table, D10). §3.7.1's mock shows "Rule [Multiply] Value [0.50]". Reading "0.5" there as a fixed
+   price of 0.50 would store a price nobody meant. Every shorthand form still chooses the Rule;
+   only an unsigned number (signed under Plus/minus %) follows the select. The ladder's cells have
+   no Rule select and keep the owner's table. The reading line always says what is stored.
+3. *A child can have lines for several bands* ("Child 2 3–6.99 ×0.25" and "Child 2 7–11.99 ×0.50"
+   in one combination). §3.7.1 shows one line per child. ORS contracts price "2nd child 0–6.99
+   free, 7–11.99 50 %", and without this such a card could not be edited in the builder.
+4. *"Whole-stay price" reads "Price for the whole party" / "Whole party".* The COMBINATION rule
+   prices the party's occupancy total for each night (`occupancy.price_occupancy`,
+   `_REPLACING_COMBINATION_OPS`), not the stay. The hint says "Per night, …".
+5. *Always wins is offered under More.* §3.7.3 writes `is_override 0`, and so does a new
+   combination. Without the option, saving an edited override card would silently drop the flag.
+6. *The builder refuses what the server would refuse or ignore*, with the reason shown and Save
+   disabled: TWIN (OCC_DUPLICATE on validation), ANY_BOTH (OCC_COMBINATION_QUALIFIER), a second
+   rule for one guest and band, an adult position the combination does not have, no rule, and no
+   room or period chosen. A combination no room in scope can host only gets the amber warning:
+   rooms' capacities may change later.
+7. *Cards the builder cannot show are edited in the rule tables*, not "in the popover" (§3.7.4).
+   These are cards with a note, a rule for every child or adult of the combination (position 0),
+   a guest the combination does not have, two rules for one slot, or a non-occupancy op. The
+   ladder's popover edits plain slot rules only.
+8. *No committed Playwright spec* (S16 owns them); the slice's three dev-server checks and more
+   ran as a scratch spec (below).
+
+**Tests (S12).** `npm run test:unit` 244 (235 + 9), all in `workspace-occupancy.test.ts`:
+- builder values: forms set the rule, a number alone takes the chosen one, FIXED stays FIXED,
+  AMBIGUOUS for amounts only, and the field's text reads back to the stored rule;
+- the builder writes 2A+2C (Child 1 CHB ×0.5, Child 2 CHA ×0.25) as exactly the two CHILD rows;
+- editing a card replaces exactly its rows. Saved unchanged, it gives the same card back; other
+  rows are untouched and in order. `cardOfRow` names the card of a row;
+- the any-children card "2+*" (and back into the builder), any adults "*+1", and any + any
+  refused;
+- rooms {STD, DLX} × periods {P1, P2}: 4 rows per rule (child, adult 3, whole party) in table
+  order, grouped back into one ◆ card that opens in the builder as saved;
+- refusals: values, two rules for one child and band (a band rule next to an Any rule is fine),
+  adult 3 in 2 adults, two adult-2 rules, no room or period, the twin of another card's row (an
+  Always-wins twin is another rule), and hidden child lines are not saved;
+- cards the builder cannot express (note, every child, adult 3 in 2 adults) and the single-use
+  cards;
+- quick chips: the union, and 2A+2C greyed for a room with `max_children` 1, naming the room that
+  can host it;
+- child positions named by OLDEST_FIRST, YOUNGEST_FIRST and AS_ENTERED.
+Fail-first: before the pure additions the file failed to load (`SyntaxError: The requested module
+'…/occupancy.ts' does not provide an export named 'builderFromCard'`). Three expectations were
+corrected while implementing:
+- a refused value no longer also reports "no rule";
+- the untouched-rows check compared the wrong slice (a test bug);
+- a negative Plus/minus % shows as "-5", not "-5%". The browser check showed "-5% %" beside the
+  field's suffix.
+`npm run test:dom` 29 (unchanged).
+
+**Verification (S12).**
+- Frontend: `tsc -b`, `npm run build`, `npm run i18n:tex` (77 new keys in the six catalogues),
+  `test:unit` 244/244, `test:dom` 29/29.
+- Integration, migrated with this tree (S12 changes no server file): `test_pricing_workspace_api`
+  50 OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186), a scratch spec 5/5
+  (`scratchpad/s12/e2e/s12-combinations.spec.ts`; S16 owns the committed specs):
+  1. Add combination opens no `aria-modal` dialog, and the focus is in Adults. Chip 2A+2C; Child 1
+     (oldest) Child 7–11.99 `x0.5` (the Rule becomes Multiply); Child 2 (youngest) Child 3–6.99
+     `0.25`. The reading line reads "Reads: 2 Adults + 2 Children → Child 1 ×0.50 · Child 2 ×0.25".
+     After Save combination, the focused card reads "2 Adults + 2 Children → Child 1 ×0.50 · Child
+     2 ×0.25" over "Child 1: Child 7–11.99 · Child 2: Child 3–6.99 · All rooms · All periods". No
+     INF / CHA / CHB text is on the page, and there was no `save_version` before Save. After Save,
+     `get_version` has exactly CHILD 1 CHB "2+2" MULTIPLY 0.5 and CHILD 2 CHA "2+2" MULTIPLY 0.25
+     (all rooms, all periods, not override). The Child 7–11.99 · P2 cell names the combination in
+     its label; its "Show combination 2 Adults + 2 Children" button focuses the card.
+  2. Edit, saved unchanged: no toast, and the focus is back on Edit. Child 2 `x0.3` gives "… Child
+     2 ×0.30" (still 2 cards), and the toast's Undo restores ×0.25. Remove moves the focus to the
+     next card's "Edit in rule tables" (the 3+0 card with a note, "3 Adults → Whole party ×2.50",
+     links to `#rules/occupancy`). Undo brings the card back.
+  3. Standard with `max_children` 1: with All rooms 2A+2C is enabled; with Rooms = Standard it is
+     `aria-disabled`, with the tooltip "2 Adults + 2 Children: no room in scope can host it. Rooms
+     that can: Family Suite, Garden Villa.", and a forced click selects nothing. Standard + Garden
+     Villa × P1, P2 as 3A+1C, with Child 1 50% (the Rule becomes Percentage of), Adult 3 0.6 and
+     the whole party Plus/minus % -5 ("Per night, what its guests pay together changes by −5%."),
+     gives one card "◆ by period" over "Child 1: Any age · Standard Sea View, Garden Villa · P1,
+     P2". At 375 px the open builder does not make the page scroll sideways, and Enter in a Value
+     saves "… Child 1 40% …".
+  4. Under More, any number of children disables the Children field. "Rule for another child"
+     and its removal work. `x0.4` saves "2 Adults + any children → Child 1 ×0.40". A new 2A+2C
+     with Child 1 7–11.99 `x0.45` is refused, naming "2 Adults + 2 Children" (Save disabled).
+     Cancel returns the focus to Add combination.
+  5. A published version shows the card without Add, Edit or Remove. At 375 px there is no
+     sideways scroll.
+- The S11 scratch spec passes 4/4 on this tree (its "included" expectation updated for the S11
+  follow-up wording). The committed `editor-edits`, `contract-admin`, `critical-journey`,
+  `entry-branding` and `policy-revisions` give 15 passed and 1 skipped (the two-factor case, as
+  before). Run against a worktree's Vite server, `entry-branding`'s source-offer case needs
+  `TEX_E2E_BENCH=http://test.localhost:8016`: otherwise it compares with main's server on :8000,
+  whose source hash differs.
+
+**Performance after S12.** The builder plans on every keystroke. `planCombination` looks twins up
+by signature: 6.1 ms per plan at 5,000 occupancy rules with 40 rooms × 40 periods in scope (Node,
+the unit-test runtime). `groupCombinations` takes 9.6 ms at 5,000 rules and runs once per table
+change (it did in S11). The chips read the page's existing `price_matrix` capacities, so there is
+no new call or endpoint.
+
+**O1–O5 after S12** (all five provisional, owner input 13):
+- *O5* also covers the builder's amount values (Set price, Fixed amount, Add, Subtract), bare
+  numbers included;
+- *O4* does not apply: combination rules are stored as rules;
+- *O1–O3* are unchanged.
+
+**Open after S12.**
+- *S16 must commit the S12 scratch scenarios 1–5* with S10's and S11's.
+- *S14 "Show in grid" and S15 anchoring* can use `data-card` / `data-combination` and
+  `occupancy.cardOfRow`. The request that brings a card into view (`show`) lives in
+  OccupancySection today, so S14 must lift it (e.g. with the `#occupancy` region).
+- The builder has no note field. Notes stay in the rule tables, and a card with a note is edited
+  there.
+- An adult rule for a place included in a ROOM-basis price has no effect, and the builder does
+  not warn about it (the ladder does).
+- Still open from S10 and S11: their low review items.

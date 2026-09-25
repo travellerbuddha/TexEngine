@@ -534,3 +534,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   party's totals, and changing the party no longer greys out the room price matrix. Sample parties
   stay within the server's limits. No server change; no area status changes. Verdict unchanged:
   NOT READY.
+- 2026-09-25: Pricing Workspace slice S12 on branch `pricing-workspace` (ADR-061): special
+  combinations are built from chips and fields instead of typed text. Each one is a card, e.g. "2
+  Adults + 2 Children → Child 1 ×0.50 · Child 2 ×0.25", with its age bands by label, rooms and
+  periods. The builder offers only the party sizes the rooms can host and names the rooms for the
+  others. It prices each child by age band and writes ordinary occupancy rules as one undo entry.
+  It refuses a rule another combination already holds. No server change; no area status changes.
+  O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
