@@ -7,14 +7,17 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { parseShorthand, type ShContext } from "../../src/tex/screens/rates/lib/shorthand.ts"
 import { matrixModel, setBaseRoom } from "../../src/tex/screens/rates/workspace/model.ts"
+import { deletePeriod, renamePeriod } from "../../src/tex/screens/rates/workspace/periods.ts"
 import {
   addRoom,
   applyPopover,
   cellEditText,
+  cellPosition,
   clearCells,
   columnTemplate,
   decimalMarkOf,
   finishEntry,
+  gestureCells,
   gridRows,
   moveRoom,
   parsePeriodAdjust,
@@ -127,10 +130,17 @@ test("Ctrl+Enter over a selection: base cells go to the server in one list, othe
   assert.deepEqual(ratesOf(p.tables, "DLX"), ["*:MULTIPLY:1.35:STD", "P3:MULTIPLY:1.4:STD", "P4:MULTIPLY:1.4:STD"])
   assert.deepEqual(ratesOf(p.tables, "STD"), ratesOf(t, "STD"))
   // the server's answer completes the same gesture: one result, so one history entry
-  const done = finishEntry(t, cells, sh("x1.4"), p.server, [
-    { value: "98.00", error: null },
-    { value: "112.00", error: null },
-  ])
+  const done = finishEntry(
+    t,
+    cells,
+    sh("x1.4"),
+    p.server,
+    [
+      { value: "98.00", error: null },
+      { value: "112.00", error: null },
+    ],
+    t,
+  )
   assert.ok("tables" in done, JSON.stringify(done))
   assert.deepEqual(ratesOf(done.tables, "STD"), ["P1:ABSOLUTE:98.00:-", "P2:ABSOLUTE:112.00:-", "P3:ABSOLUTE:100:-", "P4:ABSOLUTE:130:-"])
   assert.deepEqual(ratesOf(done.tables, "DLX"), ["*:MULTIPLY:1.35:STD", "P3:MULTIPLY:1.4:STD", "P4:MULTIPLY:1.4:STD"])
@@ -142,7 +152,7 @@ test("+10% on the base room's P1 is adjusted by the server and stored as ABSOLUT
   const p = planned(planEntry(t, cells, sh("+10%")))
   assert.deepEqual(p.server, [{ room: "STD", targetPeriod: "P1", op: "ADJUST_PERCENT", value: "10", current: "70" }])
   assert.equal(p.tables, t, "nothing is written before the server answers")
-  const done = finishEntry(t, cells, sh("+10%"), p.server, [{ value: "77.00", error: null }])
+  const done = finishEntry(t, cells, sh("+10%"), p.server, [{ value: "77.00", error: null }], t)
   assert.ok("tables" in done)
   assert.deepEqual(ratesOf(done.tables, "STD")[0], "P1:ABSOLUTE:77.00:-")
 })
@@ -151,11 +161,97 @@ test("the server's per-price refusal, or a price changed meanwhile, completes no
   const t = owner()
   const cells = [{ room: "STD", period: "P1" }, { room: "SUP", period: "P3" }]
   const p = planned(planEntry(t, cells, sh("-100")))
-  assert.deepEqual(finishEntry(t, cells, sh("-100"), p.server, [{ value: null, error: "NEGATIVE" }]), { error: "NEGATIVE", cell: { room: "STD", period: "P1" } })
-  assert.deepEqual(finishEntry(t, cells, sh("-100"), p.server, []), { error: "NO_VALUE", cell: { room: "STD", period: "P1" } })
+  assert.deepEqual(finishEntry(t, cells, sh("-100"), p.server, [{ value: null, error: "NEGATIVE" }], t), { error: "NEGATIVE", cell: { room: "STD", period: "P1" } })
+  assert.deepEqual(finishEntry(t, cells, sh("-100"), p.server, [], t), { error: "NO_VALUE", cell: { room: "STD", period: "P1" } })
   // the user typed another P1 price while the call was out: the answer is for the old price
   const moved = { ...t, period_rates: t.period_rates.map((x) => (x.room_type === "STD" && x.period_code === "P1" ? { ...x, value: "72" } : x)) }
-  assert.deepEqual(finishEntry(moved, cells, sh("-100"), p.server, [{ value: "0.00", error: null }]), { error: "CHANGED", cell: { room: "STD", period: "P1" } })
+  assert.deepEqual(finishEntry(moved, cells, sh("-100"), p.server, [{ value: "0.00", error: null }], t), { error: "CHANGED", cell: { room: "STD", period: "P1" } })
+})
+
+test("while the server adjusts, every cell of the gesture is pending, the base ones with the price sent (S9 review)", () => {
+  const cells = [
+    { room: "STD", period: "P1" },
+    { room: "DLX", period: "P3" },
+    { room: "STD", period: "P2" },
+    { room: "SUP", period: "" },
+  ]
+  const p = planned(planEntry(owner(), cells, sh("+10%")))
+  assert.deepEqual(gestureCells(cells, p.server), [
+    { cell: { room: "STD", period: "P1" }, current: "70" },
+    { cell: { room: "DLX", period: "P3" }, current: null },
+    { cell: { room: "STD", period: "P2" }, current: "80" },
+    { cell: { room: "SUP", period: "" }, current: null },
+  ])
+  assert.deepEqual(gestureCells([], []), [])
+})
+
+test("an answer that arrives after a cell of its gesture was changed completes nothing (CHANGED, S9 review)", () => {
+  const t = owner()
+  const cells = [
+    { room: "STD", period: "P1" },
+    { room: "DLX", period: "P3" },
+  ]
+  const p = planned(planEntry(t, cells, sh("+10%")))
+  const answer = [{ value: "77.00", error: null }]
+  // while the call was out the user typed a price into Deluxe P3, a non-base cell of the gesture:
+  // the late answer must not overwrite it with the gesture's formula
+  const typed = planned(planEntry(t, [{ room: "DLX", period: "P3" }], sh("150"))).tables
+  assert.deepEqual(finishEntry(typed, cells, sh("+10%"), p.server, answer, t), { error: "CHANGED", cell: { room: "DLX", period: "P3" } })
+  // ... or removed Superior's own P4 rule of a gesture over it
+  const sup = [{ room: "STD", period: "P1" }, { room: "SUP", period: "P4" }]
+  const q = planned(planEntry(t, sup, sh("+10%")))
+  const cleared = clearCells(t, [{ room: "SUP", period: "P4" }])
+  assert.deepEqual(finishEntry(cleared, sup, sh("+10%"), q.server, answer, t), { error: "CHANGED", cell: { room: "SUP", period: "P4" } })
+  // the cell's period was renamed or deleted, or its room removed: no row for a column that is gone
+  const renamed = renamePeriod(t, "P3", "JUN")
+  assert.ok("tables" in renamed)
+  assert.deepEqual(finishEntry(renamed.tables, cells, sh("+10%"), p.server, answer, t), { error: "CHANGED", cell: { room: "DLX", period: "P3" } })
+  assert.deepEqual(finishEntry(deletePeriod(t, "P3").tables, cells, sh("+10%"), p.server, answer, t), { error: "CHANGED", cell: { room: "DLX", period: "P3" } })
+  const noDlx = { ...t, rooms: t.rooms.filter((x) => x.room_type !== "DLX") }
+  assert.deepEqual(finishEntry(noDlx, cells, sh("+10%"), p.server, answer, t), { error: "CHANGED", cell: { room: "DLX", period: "P3" } })
+  // an edit of another cell meanwhile is kept, and the gesture completes around it
+  const elsewhere = planned(planEntry(t, [{ room: "DLX", period: "P4" }], sh("150"))).tables
+  const done = finishEntry(elsewhere, cells, sh("+10%"), p.server, answer, t)
+  assert.ok("tables" in done, JSON.stringify(done))
+  assert.deepEqual(ratesOf(done.tables, "STD")[0], "P1:ABSOLUTE:77.00:-")
+  assert.deepEqual(ratesOf(done.tables, "DLX"), ["*:MULTIPLY:1.35:STD", "P4:ABSOLUTE:150:-", "P3:ADJUST_PERCENT:10:STD"])
+  // the same value typed again (70 as 70.00) is not a change
+  const same = planned(planEntry(t, [{ room: "STD", period: "P1" }], sh("70.00"))).tables
+  assert.ok("tables" in finishEntry(same, cells, sh("+10%"), p.server, answer, t))
+})
+
+test("the editor follows its cell, not a row index, when a room above it gains a resolved row (S9 review)", () => {
+  // Superior priced by period only (a manual room: no resolved row), Deluxe a formula room
+  const t = tablesOf({
+    rooms: owner().rooms,
+    periods: owner().periods,
+    period_rates: [rate("STD", "P1", "ABSOLUTE", "70"), rate("SUP", "P1", "ABSOLUTE", "90"), rate("DLX", "", "MULTIPLY", "1.35", "STD")],
+  })
+  const cols = ["", "P1", "P2", "P3", "P4"]
+  const before = gridRows(matrixModel(t, "PERSON"))
+  assert.deepEqual(
+    before.map((x) => [x.room, x.kind]),
+    [
+      ["STD", "base"],
+      ["SUP", "manual"],
+      ["DLX", "formula"],
+      ["DLX", "resolved"],
+    ],
+  )
+  const at = cellPosition(before, cols, { room: "DLX", period: "P2" })
+  assert.deepEqual(at, { r: 2, c: 2 })
+  // a late answer writes the gesture's formula into Superior's All periods: Superior gains a row
+  const after = gridRows(matrixModel(planned(planEntry(t, [{ room: "SUP", period: "" }], sh("x1.2"))).tables, "PERSON"))
+  assert.equal(after.length, before.length + 1)
+  const moved = cellPosition(after, cols, { room: "DLX", period: "P2" })
+  assert.deepEqual(moved, { r: 3, c: 2 })
+  assert.equal(after[3].room, "DLX")
+  assert.equal(after[3].editable, true)
+  // the row the editor used to be on is now Superior's resolved row, which takes no entry
+  assert.deepEqual([after[2].room, after[2].kind, after[2].editable], ["SUP", "resolved", false])
+  assert.equal(cellPosition(after, cols, { room: "NOPE", period: "P2" }), null)
+  assert.equal(cellPosition(after, cols, { room: "DLX", period: "P9" }), null)
+  assert.deepEqual(cellPosition(after, cols, { room: "SUP", period: "" }), { r: 1, c: 0 })
 })
 
 test("a selection with a cell that cannot take the entry applies nothing (all or nothing)", () => {

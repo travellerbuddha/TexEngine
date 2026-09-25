@@ -82,11 +82,23 @@ export interface CellRef {
   period: string
 }
 
+/** Where a cell is in the grid: its room's entry row (a resolved row takes no entry) and its
+ * period's column; null when the room or the period is gone. An edit is kept by its cell, not by a
+ * row index, so a room above it that gains or loses a resolved row (a late server answer, an undo)
+ * never moves the edit, or its commit, to another room. */
+export function cellPosition(rows: readonly GridRow[], cols: readonly string[], cell: CellRef): { r: number; c: number } | null {
+  const c = cols.indexOf(cell.period)
+  if (c < 0) return null
+  const r = rows.findIndex((x) => x.room === cell.room && x.editable)
+  return r < 0 ? null : { r, c }
+}
+
 /** Why an entry cannot be stored in a cell: the parser's code, the model's (BASE_NO_PRICE,
  * NO_BASE_ROOM), BASE_FORMULA (a base-room cell priced by a formula has no entered price to
- * adjust), and the server's per-price answers NEGATIVE / NO_VALUE, or CHANGED (the price was
- * edited while the server computed the adjustment). */
-export type EntryError = RoomEntryError | "BASE_FORMULA" | "NEGATIVE" | "NO_VALUE" | "CHANGED"
+ * adjust), and the server's per-price answers NEGATIVE / NO_VALUE, or CHANGED (a cell of the
+ * entry was edited, or its room or period removed, while the server computed the adjustment),
+ * PENDING (a cell is still waiting for such an answer). */
+export type EntryError = RoomEntryError | "BASE_FORMULA" | "NEGATIVE" | "NO_VALUE" | "CHANGED" | "PENDING"
 
 export type EntryPlan = { tables: Tables; server: NeedsServer[] } | { error: EntryError; cell: CellRef }
 
@@ -115,17 +127,44 @@ export function planEntry(tables: Tables, cells: readonly CellRef[], parsed: ShR
   return { tables: acc, server }
 }
 
+/** Every cell of an entry while the server adjusts its base-room prices, in the order given: all
+ * of them are pending (none takes another entry until the answer), the base-room ones with the
+ * price sent, the others with null. */
+export function gestureCells(cells: readonly CellRef[], server: readonly NeedsServer[]): { cell: CellRef; current: string | null }[] {
+  const sent = new Map(server.map((s) => [`${s.room}\u0000${s.targetPeriod}`, s.current]))
+  return cells.map((c) => ({ cell: { room: c.room, period: c.period }, current: sent.get(`${c.room}\u0000${c.period}`) ?? null }))
+}
+
 /** One apply_op_values answer per value sent (types.ts ApplyOpResult). */
 export interface AdjustAnswer {
   value: string | null
   error: string | null
 }
 
+/** The rows stored for a cell (its own rule; more than one only in hand-made data). */
+const ownRows = (tables: Tables, cell: CellRef) => tables.period_rates.filter((r) => str(r.room_type) === cell.room && str(r.period_code) === cell.period)
+
+/** A cell's own rows as a comparable text (op, canonical value, base room): no arithmetic. */
+function ownSignature(tables: Tables, cell: CellRef): string {
+  return ownRows(tables, cell)
+    .map((r) => `${str(r.op)}\u0001${canonValue(r.value)}\u0001${str(r.base_room_type)}`)
+    .join("\u0002")
+}
+
+/** The cell's room is in the contract and its period is All periods or one of the periods. */
+function cellExists(tables: Tables, cell: CellRef): boolean {
+  if (!tables.rooms.some((r) => str(r.room_type) === cell.room)) return false
+  return cell.period === ALL_PERIODS || tables.periods.some((p) => str(p.period_code) === cell.period)
+}
+
 /**
  * Completes an entry once the server has adjusted its base-room prices: the entry is planned again
- * on the tables as they are now (other edits may have landed meanwhile), and the answers are
- * written as ABSOLUTE into their cells, in one result (one history entry). Refused when a price
- * sent has changed since (CHANGED) or the server refused one (NEGATIVE, NO_VALUE).
+ * on the tables as they are now (edits of other cells may have landed meanwhile and are kept), and
+ * the answers are written as ABSOLUTE into their cells, in one result (one history entry). Refused
+ * as a whole with CHANGED when a cell of the gesture was changed since the entry was sent
+ * (`sentFrom`: its own rows differ, or its room or period is gone) or a price sent has changed,
+ * so a late answer never overwrites what the user typed meanwhile; and when the server refused a
+ * price (NEGATIVE, NO_VALUE).
  */
 export function finishEntry(
   tables: Tables,
@@ -133,7 +172,11 @@ export function finishEntry(
   parsed: ShResult,
   sent: readonly NeedsServer[],
   answers: readonly AdjustAnswer[],
+  sentFrom: Tables,
 ): { tables: Tables } | { error: EntryError; cell: CellRef } {
+  for (const cell of cells) {
+    if (!cellExists(tables, cell) || ownSignature(sentFrom, cell) !== ownSignature(tables, cell)) return { error: "CHANGED", cell: { room: cell.room, period: cell.period } }
+  }
   const plan = planEntry(tables, cells, parsed)
   if ("error" in plan) return plan
   const at = (s: NeedsServer): CellRef => ({ room: s.room, period: s.targetPeriod })
@@ -173,8 +216,6 @@ export type Reading =
   | { kind: "adjust"; op: ShOp; value: string; current: string }
   /** nothing would change */
   | { kind: "unchanged" }
-
-const ownRows = (tables: Tables, cell: CellRef) => tables.period_rates.filter((r) => str(r.room_type) === cell.room && str(r.period_code) === cell.period)
 
 export function readingOf(tables: Tables, room: string, period: string, parsed: ShResult): Reading {
   const cell = { room, period }

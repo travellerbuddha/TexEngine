@@ -22,10 +22,12 @@ import {
   addRoom,
   applyPopover,
   cellEditText,
+  cellPosition,
   clearCells,
   columnTemplate,
   decimalMarkOf,
   finishEntry,
+  gestureCells,
   gridRows,
   planEntry,
   readingOf,
@@ -68,10 +70,10 @@ function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) =>
 }
 
 /** The cell being edited and the text the edit starts from (the editor keeps what is typed, so
- * typing re-renders the editor only, not the grid). */
+ * typing re-renders the editor only, not the grid). Kept by its cell, not by a row index: rows
+ * that come and go above it (a room that gains a resolved row) never move the edit. */
 interface Editing {
-  r: number
-  c: number
+  cell: CellRef
   text: string
   selectAll: boolean
 }
@@ -153,10 +155,12 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   const [editing, setEditing] = useState<Editing | null>(null)
   const editingRef = useRef<Editing | null>(null)
   editingRef.current = editing
+  const editPos = editing ? cellPosition(rows, cols, editing.cell) : null
   // set when the editor is closed on purpose (commit, Escape): the blur that follows is not a commit
   const closing = useRef(false)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
-  const [pending, setPending] = useState<Record<string, string>>({})
+  // the cells of an entry waiting for the server's adjustment: the base-room price sent, or null
+  const [pending, setPending] = useState<Record<string, string | null>>({})
   const [pop, setPop] = useState<{ cell: CellRef; initial: PopoverRule } | null>(null)
   const popAnchor = useRef<HTMLElement | null>(null)
   const [freshPeriod, setFreshPeriod] = useState<string | null>(null)
@@ -187,12 +191,15 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     })
 
   /** The base-room cells of an entry are adjusted once by the server (O4, §3.4.5): one
-   * apply_op_values call for all of them; the whole gesture is then one history entry. */
-  const adjust = async (cells: CellRef[], parsed: ShResult, sent: NeedsServer[], label: string, text: string) => {
-    const keys = sent.map((s) => keyOf({ room: s.room, period: s.targetPeriod }))
+   * apply_op_values call for all of them; the whole gesture is then one history entry. Every cell
+   * of the gesture is pending until the answer, and the answer completes nothing when one of them
+   * was changed meanwhile (`sentFrom`, CHANGED). */
+  const adjust = async (cells: CellRef[], parsed: ShResult, sent: NeedsServer[], label: string, text: string, sentFrom: Tables) => {
+    const waiting = gestureCells(cells, sent)
+    const keys = waiting.map((w) => keyOf(w.cell))
     setPending((p) => {
       const n = { ...p }
-      sent.forEach((s, i) => (n[keys[i]] = s.current))
+      waiting.forEach((w, i) => (n[keys[i]] = w.current))
       return n
     })
     const first = { room: sent[0].room, period: sent[0].targetPeriod }
@@ -203,7 +210,7 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
       if (history.generation() !== gen) return
       let failed: { error: EntryError; cell: CellRef } | null = null
       history.apply(label, (tb) => {
-        const done = finishEntry(tb, cells, parsed, sent, answers)
+        const done = finishEntry(tb, cells, parsed, sent, answers, sentFrom)
         if ("error" in done) {
           failed = done
           return tb
@@ -227,13 +234,22 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   /** Commits `text` into `cells` as one gesture: stored at once, or (base-room relative entries)
    * after the server's adjustment. Refused as a whole when one cell cannot take it. */
   const commitText = (cells: CellRef[], text: string): { ok: true } | { ok: false; code: EntryError; cell: CellRef } => {
+    // a cell still waiting for the server takes no other entry; a cell whose row or column is gone
+    // (or no longer editable) takes none either
+    const busy = cells.find((x) => pending[keyOf(x)] !== undefined)
+    if (busy) return { ok: false, code: "PENDING", cell: busy }
+    const gone = cells.find((x) => {
+      const at = cellPosition(rows, cols, x)
+      return !at || !isEditable(at.r, at.c)
+    })
+    if (gone) return { ok: false, code: "CHANGED", cell: gone }
     const parsed = parseShorthand(text, "room", { minorUnits })
     const now = history.current() ?? tables
     const plan = planEntry(now, cells, parsed)
     if ("error" in plan) return { ok: false, code: plan.error, cell: plan.cell }
     const label = cells.length === 1 ? t("rates.ws.h.price", { cell: cellName(cells[0]) }) : t("rates.ws.h.prices", { count: cells.length })
     dropDrafts(cells)
-    if (plan.server.length) void adjust(cells, parsed, plan.server, label, text)
+    if (plan.server.length) void adjust(cells, parsed, plan.server, label, text, now)
     else history.commit(label, now, plan.tables)
     return { ok: true }
   }
@@ -244,7 +260,7 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     if (!cell || pending[keyOf(cell)] !== undefined) return
     const draft = drafts[keyOf(cell)]
     closing.current = false
-    setEditing({ r: at.r, c: at.c, text: req.text ?? draft?.text ?? editTextOf(cell), selectAll: req.text === undefined })
+    setEditing({ cell, text: req.text ?? draft?.text ?? editTextOf(cell), selectAll: req.text === undefined })
   }
 
   const openPopover = (cell: CellRef, anchor: HTMLElement, typed?: ShResult) => {
@@ -269,9 +285,12 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   }
 
   /** Ends the edit: `move` the active cell (Enter / Tab) or stay on it. */
-  const finish = (r: number, c: number, move: "down" | "up" | "left" | "right" | null) => {
+  const finish = (cell: CellRef, move: "down" | "up" | "left" | "right" | null) => {
     closing.current = true
     setEditing(null)
+    const at = cellPosition(rows, cols, cell)
+    if (!at) return
+    const { r, c } = at
     if (move === "down" || move === "up") nav.focusCell(nextEditableRow(r, c, move === "down" ? 1 : -1), c)
     else if (move === "left" || move === "right") nav.focusCell(r, Math.max(0, Math.min(cols.length - 1, c + (move === "right" ? 1 : -1))))
     else focusAt(r, c)
@@ -284,10 +303,10 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     const cell = cells[0]
     // an unchanged edit text is not committed again: ADD -5 edits as "-5", which reads back as
     // SUBTRACT 5 (the same arithmetic, another op; ADR-061 S1)
-    if (single && !drafts[keyOf(cell)] && text === editTextOf(cell)) return finish(ed.r, ed.c, move)
+    if (single && !drafts[keyOf(cell)] && text === editTextOf(cell)) return finish(ed.cell, move)
     const res = commitText(cells, text)
-    if (res.ok) return finish(ed.r, ed.c, move)
-    const own = res.cell.room === cellAt(ed.r, ed.c)?.room && res.cell.period === cellAt(ed.r, ed.c)?.period
+    if (res.ok) return finish(ed.cell, move)
+    const own = res.cell.room === ed.cell.room && res.cell.period === ed.cell.period
     return own ? errorText(res.code) : t("rates.ws.bulk_error", { cell: cellName(res.cell), error: errorText(res.code) })
   }
 
@@ -302,13 +321,12 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   const onEditorKey = (e: KeyboardEvent<HTMLInputElement>, text: string): string | void => {
     const ed = editingRef.current
     if (!ed) return
-    const cell = cellAt(ed.r, ed.c)
-    if (!cell) return
+    const cell = ed.cell
     if (e.key === "Escape") {
       e.preventDefault()
       e.stopPropagation()
       dropDrafts([cell])
-      finish(ed.r, ed.c, null)
+      finish(cell, null)
       return
     }
     if (e.key === "Enter" && e.altKey) {
@@ -340,10 +358,10 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     if (closing.current) return
     const ed = editingRef.current
     if (!ed) return
-    const cell = cellAt(ed.r, ed.c)
+    const cell = ed.cell
     closing.current = true
     setEditing(null)
-    if (!cell || (!drafts[keyOf(cell)] && text === editTextOf(cell))) return
+    if (!drafts[keyOf(cell)] && text === editTextOf(cell)) return
     // leaving the cell commits a valid entry; an invalid one stays as an error draft (§3.4.1)
     const res = commitText([cell], text)
     if (!res.ok) setDrafts((d) => ({ ...d, [keyOf(res.cell)]: { text, code: res.code } }))
@@ -490,8 +508,8 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     for (let c = 0; c < cols.length; c++) out += selection.isSelected(r, c) ? "1" : "0"
     return out
   }
-  const editorFor = (room: string, period: string, ed: Editing) => {
-    const cell = { room, period }
+  const editorFor = (ed: Editing) => {
+    const cell = ed.cell
     return (
       <CellEditor
         label={t("rates.ws.cell.input", { cell: cellName(cell) })}
@@ -535,15 +553,16 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
         error: message,
       }
     } else if (waiting !== undefined) {
+      // a base-room cell shows the price sent; another cell of the same entry what it holds now
       view = {
         tone: "pending",
         content: (
           <>
-            {amount(waiting)} → <Loader2 className="ml-0.5 inline size-3 animate-spin" aria-hidden />
+            {waiting === null ? view.content : amount(waiting)} → <Loader2 className="ml-0.5 inline size-3 animate-spin" aria-hidden />
           </>
         ),
         state: "pending",
-        value: amount(waiting),
+        value: waiting === null ? view.value : amount(waiting),
       }
     }
     const stateText = t(`rates.ws.state.${view.state}`)
@@ -704,8 +723,8 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
                   selState={nav.active.r === r ? selection.state : undefined}
                   tint={selection.multiple}
                   blockStart={row.first}
-                  editC={editing && editing.r === r ? editing.c : -1}
-                  editor={editing && editing.r === r ? editorFor(room.room_type, cols[editing.c], editing) : undefined}
+                  editC={editing && editPos && editPos.r === r ? editPos.c : -1}
+                  editor={editing && editPos && editPos.r === r ? editorFor(editing) : undefined}
                 />
                 <div aria-hidden className={row.first ? "border-t-2 border-b border-t-zinc-200 border-b-zinc-100" : "border-b border-zinc-100"} />
               </div>
