@@ -90,8 +90,9 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	of their ops or values is reported then: OCC_POLICY_OVERRIDE_OUTRANKED for a hidden override,
 	and the sweep's negative total of a party one of them takes part in or missing child rule where
 	one of them defers (``occupancy.depends_on``). A child band without any rule and an ambiguity
-	are reported, whoever priced the adults (S16 re-review). ``visible_issues`` does the same to a
-	stored report."""
+	are reported, whoever priced the adults (S16 re-review). OCC_INFANT_GENERIC names no hidden
+	rule and is not said for an infant band a hidden rule names (``_infant_generic``, S16 re-review
+	3). ``visible_issues`` does the same to a stored report."""
 	issues: list[Issue] = []
 	if len(t.currency) != 3:
 		issues.append(_err("CURRENCY", f"currency {t.currency!r} is not an ISO code"))
@@ -214,16 +215,7 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 		                    f"{top.rule_id} ({top.source}) does - a contract's own rule, a more specific "
 		                    "policy's rule and a rule naming an infant's band rank before any policy override",
 		                    rule_id=r.rule_id, rule_ids=[r.rule_id, top.rule_id], **slot))
-	generic = sorted(r.rule_id for r in t.occupancy_rules
-	                 if r.target == OccTarget.CHILD and r.age_band is None and r.op != Op.INHERIT)
-	for band in t.age_bands:
-		if generic and band.is_infant and not any(
-				r.target == OccTarget.CHILD and r.age_band == band.code and r.op != Op.INHERIT
-				for r in t.occupancy_rules):
-			issues.append(_warn("OCC_INFANT_GENERIC",
-			                    f"no rule names infant band {band.code}: infants are priced by the band-less child "
-			                    f"rules ({', '.join(generic)}) — add a {band.code} rule if infants stay free",
-			                    age_band=band.code, rule_id=generic[0], rule_ids=list(generic)))
+	issues.extend(_infant_generic(t, hidden))
 
 	# boards
 	if not any(b.is_base for b in t.boards):
@@ -515,6 +507,29 @@ def policy_issues(bands: tuple[AgeBand, ...], rules: tuple[OccupancyRule, ...]) 
 	return issues
 
 
+def _infant_generic(t: ContractTerms, hidden: frozenset[str] = frozenset()) -> list[Issue]:
+	"""OCC_INFANT_GENERIC: an infant band no rule names is priced by the band-less child rules,
+	which the warning names (INHERIT ones left out). With ``hidden`` rules (S16 re-review 3) a
+	hidden one is never named, whatever its op (naming only the ones that price would say which
+	defer), and an infant band a hidden rule names is not reported (whether that rule defers may be
+	why no rule prices the band)."""
+	generic = sorted(r.rule_id for r in t.occupancy_rules
+	                 if r.target == OccTarget.CHILD and r.age_band is None and r.op != Op.INHERIT
+	                 and r.rule_id not in hidden)
+	out: list[Issue] = []
+	for band in t.age_bands:
+		if not generic or not band.is_infant:
+			continue
+		named = [r for r in t.occupancy_rules if r.target == OccTarget.CHILD and r.age_band == band.code]
+		if any(r.op != Op.INHERIT for r in named) or any(r.rule_id in hidden for r in named):
+			continue
+		out.append(_warn("OCC_INFANT_GENERIC",
+		                 f"no rule names infant band {band.code}: infants are priced by the band-less child "
+		                 f"rules ({', '.join(generic)}) — add a {band.code} rule if infants stay free",
+		                 age_band=band.code, rule_id=generic[0], rule_ids=list(generic)))
+	return out
+
+
 def _sweep_party(t: ContractTerms, adults: int, children: int, band: AgeBand | None, p: Period) -> Party:
 	"""The party the sweep prices: ``children`` children, all at the lower edge of ``band``."""
 	slots = tuple(ChildSlot(i + 1, band.from_months, band, i) for i in range(children)) if band else ()
@@ -525,7 +540,7 @@ def _sweep_party(t: ContractTerms, adults: int, children: int, band: AgeBand | N
 # the sweep's issues whose presence can depend on a rule's op or value (``occupancy.depends_on``),
 # and every code ``validate_terms(hidden=…)`` may leave out
 _SWEEP_HIDEABLE = frozenset({"NEGATIVE_OCCUPANCY_PRICE", "NO_CHILD_RULE"})
-HIDEABLE_CODES = _SWEEP_HIDEABLE | {"OCC_POLICY_OVERRIDE_OUTRANKED"}
+HIDEABLE_CODES = _SWEEP_HIDEABLE | {"OCC_POLICY_OVERRIDE_OUTRANKED", "OCC_INFANT_GENERIC"}
 
 
 def _sweep(t: ContractTerms, limit: int, hidden: frozenset[str] = frozenset()) -> list[Issue]:
@@ -578,13 +593,16 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 	nothing hidden) as a viewer who may not read the ``hidden`` rules may see it, as
 	``validate_terms(t, hidden=hidden)`` leaves issues out (S16 re-review): no
 	OCC_POLICY_OVERRIDE_OUTRANKED about a hidden override, no sweep issue whose presence depends
-	on a hidden rule (``occupancy.depends_on``, for the party and period the row names). A row
-	that does not say which override or party it is about is left out; nothing is left out when
-	nothing is hidden."""
+	on a hidden rule (``occupancy.depends_on``, for the party and period the row names), and an
+	OCC_INFANT_GENERIC row as the live check gives it (its stored message may name hidden rules;
+	``_infant_generic``). A row that does not say which override, party or band it is about is left
+	out; nothing is left out when nothing is hidden."""
 	if not hidden:
 		return list(issues)
 	bands = {b.code: b for b in t.age_bands}
 	periods = {p.code: p for p in t.periods}
+	# the infant warning as the live check gives it (its stored message may name hidden rules)
+	infants = {x.ref.get("age_band"): x.to_dict() for x in _infant_generic(t, hidden)}
 	out = []
 	for i in issues:
 		if not isinstance(i, dict):
@@ -594,6 +612,11 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 		if code == "OCC_POLICY_OVERRIDE_OUTRANKED":
 			if not ref.get("rule_id") or ref["rule_id"] in hidden:
 				continue
+		elif code == "OCC_INFANT_GENERIC":
+			band = ref.get("age_band")
+			if not isinstance(band, str) or band not in infants:
+				continue
+			i = infants.pop(band)
 		elif code in _SWEEP_HIDEABLE:
 			spec, p = t.rooms.get(ref.get("room_type")), periods.get(ref.get("period"))
 			a, c, band = ref.get("adults"), ref.get("children") or 0, bands.get(ref.get("age_band"))

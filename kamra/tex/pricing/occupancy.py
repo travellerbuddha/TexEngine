@@ -35,7 +35,7 @@ level > period > room > exact combination > position > band, with the policy lev
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from kamra.tex.money import ZERO
@@ -311,8 +311,9 @@ def depends_on(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decim
                rules: frozenset[str]) -> bool:
 	"""Whether what ``price_occupancy`` answers for ``party`` in ``period`` depends on the op or value
 	of one of ``rules`` (rules a viewer may not read: a pricing policy's formulas, ADR-061): a total,
-	or a negative total (NEGATIVE_OCCUPANCY_PRICE), one of them takes part in (``rules_taking_part``);
-	a child no rule prices (NO_CHILD_RULE) where one of them defers (INHERIT) for that child. Any other
+	or a negative total (NEGATIVE_OCCUPANCY_PRICE), one of them takes part in (``rules_taking_part``)
+	or would take part in did it not defer (INHERIT: ``_defers_where_it_would_win``, S16 re-review
+	3); a child no rule prices (NO_CHILD_RULE) where one of them defers for that child. Any other
 	failure is decided by which rules exist and where, not by a hidden op or value: a child band
 	without a rule, also when a hidden rule priced an adult before it, and an ambiguity (under
 	``CASCADE`` a contract's own rule never ties with a policy's)."""
@@ -328,4 +329,23 @@ def depends_on(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decim
 			           and slot_matches(r, OccTarget.CHILD, position, band) for r in terms.occupancy_rules)
 		if u.code != "NEGATIVE_OCCUPANCY_PRICE":
 			return False
-	return bool(rules_taking_part(terms, spec, period, unit, party) & rules)
+	if rules_taking_part(terms, spec, period, unit, party) & rules:
+		return True
+	return _defers_where_it_would_win(terms, spec, period, unit, party, rules)
+
+
+def _defers_where_it_would_win(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decimal, party: Party,
+                               rules: frozenset[str]) -> bool:
+	"""One of ``rules`` defers (INHERIT) for a slot of ``party`` where, did it not defer, it would
+	take part (it outranks the slot's winner: e.g. a rule naming an infant band over a band-less
+	rule, G-31): whether it defers decides which rule prices the slot, so the answer depends on
+	its op (S16 re-review 3). Each such rule is tried with a pricing op in its place."""
+	for r in terms.occupancy_rules:
+		if r.rule_id not in rules or r.op != Op.INHERIT \
+				or not qualifiers_match(r, spec.room_type, period.code, party.adults, party.child_count):
+			continue
+		probe = replace(terms, occupancy_rules=tuple(
+			replace(x, op=Op.MULTIPLY, value=Decimal(1)) if x is r else x for x in terms.occupancy_rules))
+		if r.rule_id in rules_taking_part(probe, spec, period, unit, party):
+			return True
+	return False

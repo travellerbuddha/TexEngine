@@ -369,3 +369,69 @@ class TestHiddenPolicyRules(unittest.TestCase):
 		bare = [{"level": "WARNING", "code": "NEGATIVE_OCCUPANCY_PRICE", "message": "x"}, "junk"]
 		self.assertEqual(validate.visible_issues(t, bare, hidden), [])
 		self.assertEqual(validate.visible_issues(t, bare[:1], frozenset()), bare[:1])
+
+	# a global policy's band-less child rules: one prices, one defers (INHERIT)
+	GENERIC = inherit.PolicyLayer(
+		"POL-G", 1, None, None,
+		bands=(AgeBand("INF", "Infant", 0, 36, is_infant=True), AgeBand("CHD", "Child", 36, 144)),
+		rules=(rule("G-ANY-A", CHILD, Op.PERCENT_OF, "50"), rule("G-ANY-B", CHILD, Op.INHERIT, position=2)))
+
+	def test_the_infant_generic_warning_names_no_hidden_rule(self):
+		"""OCC_INFANT_GENERIC names the band-less child rules that price infants, INHERIT ones left out:
+		naming hidden rules there would say which of them defer. A viewer without cost is told only of
+		the version's own, and not at all where a hidden rule names the infant band (whether it defers
+		may be why no rule prices infants); the stored report the same (S16 re-review 3, low finding)."""
+		t = cascaded((), (), layers=(self.GENERIC,))
+		hidden = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+		self.assertEqual(hidden, {"G-ANY-A", "G-ANY-B"})
+		full = [i for i in validate.validate_terms(t) if i.code == "OCC_INFANT_GENERIC"]
+		self.assertEqual([i.ref["rule_ids"] for i in full], [["G-ANY-A"]])
+		seen = [i for i in validate.validate_terms(t, hidden=hidden) if i.code == "OCC_INFANT_GENERIC"]
+		self.assertEqual(seen, [])
+		stored = [i.to_dict() for i in validate.validate_terms(t)]
+		self.assertNotIn("OCC_INFANT_GENERIC", {i["code"] for i in validate.visible_issues(t, stored, hidden)})
+		self.assertIn("OCC_INFANT_GENERIC", validate.HIDEABLE_CODES)
+		# a band-less child rule of the version's own is named, the hidden ones are not, whatever their op
+		own = cascaded((), (rule("V-ANY", CHILD, Op.PERCENT_OF, "40"),), layers=(self.GENERIC,))
+		live = [i for i in validate.validate_terms(own, hidden=hidden) if i.code == "OCC_INFANT_GENERIC"]
+		self.assertEqual([(i.ref["rule_ids"], "G-ANY" in i.message) for i in live], [(["V-ANY"], False)])
+		stored = [i.to_dict() for i in validate.validate_terms(own)]
+		self.assertIn("G-ANY-A", next(i["message"] for i in stored if i["code"] == "OCC_INFANT_GENERIC"))
+		shown = [i for i in validate.visible_issues(own, stored, hidden) if i["code"] == "OCC_INFANT_GENERIC"]
+		self.assertEqual(shown, [i.to_dict() for i in live])
+		# a hidden rule naming the infant band: said to no viewer without cost, INHERIT or not
+		for op, value in ((Op.INHERIT, None), (Op.MULTIPLY, "0")):
+			with self.subTest(op=op):
+				layer = replace(self.GENERIC, rules=(*self.GENERIC.rules, rule("G-INF", CHILD, op, value, age_band="INF")))
+				t = cascaded((), (rule("V-ANY", CHILD, Op.PERCENT_OF, "40"),), layers=(layer,))
+				hide = frozenset(r.rule_id for r in t.occupancy_rules if r.source != "version")
+				self.assertNotIn("OCC_INFANT_GENERIC", [i.code for i in validate.validate_terms(t, hidden=hide)])
+				stored = [i.to_dict() for i in validate.validate_terms(t)]
+				self.assertNotIn("OCC_INFANT_GENERIC", {i["code"] for i in validate.visible_issues(t, stored, hide)})
+
+	def test_a_hidden_infant_rule_that_defers_hides_the_party_as_one_that_prices(self):
+		"""A hidden rule naming an infant band outranks a band-less rule of the version (G-31): whether
+		it defers (INHERIT) decides whether the version's rule prices the infant. What is answered for
+		the party then depends on its op, INHERIT or not, so it is hidden either way: a total, a
+		negative total, and the live check's NEGATIVE_OCCUPANCY_PRICE (S16 re-review 3, low finding)."""
+		own = (rule("V-A1", ADULT, Op.MULTIPLY, "1", position=1), rule("V-A2", ADULT, Op.MULTIPLY, "1", position=2),
+		       rule("V-ANY", CHILD, Op.SUBTRACT, "999"))
+		bands = (AgeBand("INF", "Infant", 0, 36, is_infant=True), AgeBand("CHD", "Child", 36, 144))
+		for op, value in ((Op.INHERIT, None), (Op.MULTIPLY, "0")):
+			with self.subTest(op=op):
+				layer = inherit.PolicyLayer("POL-G", 1, None, None, bands=bands,
+				                            rules=(rule("G-INF", CHILD, op, value, age_band="INF"),))
+				t = cascaded((), own, layers=(layer,))
+				hidden = frozenset({"G-INF"})
+				p1 = next(p for p in t.periods if p.code == "P1")
+				party = validate._sweep_party(t, 2, 1, next(b for b in t.age_bands if b.code == "INF"), p1)
+				spec = t.rooms["STD"]
+				self.assertTrue(occupancy.depends_on(t, spec, p1, rooms.room_unit(t, "STD", p1), party, hidden))
+				self.assertNotIn(("NEGATIVE_OCCUPANCY_PRICE", "INF"),
+				                 {(i.code, (i.ref or {}).get("age_band")) for i in validate.validate_terms(t, hidden=hidden)})
+		# a hidden rule that defers where a more specific rule of the version wins takes no part
+		layer = inherit.PolicyLayer("POL-G", 1, None, None, bands=bands, rules=(rule("G-A2", ADULT, Op.INHERIT, position=2),))
+		t = cascaded((), own, layers=(layer,))
+		p1 = next(p for p in t.periods if p.code == "P1")
+		party = validate._sweep_party(t, 2, 0, None, p1)
+		self.assertFalse(occupancy.depends_on(t, t.rooms["STD"], p1, rooms.room_unit(t, "STD", p1), party, frozenset({"G-A2"})))
