@@ -1003,15 +1003,18 @@ export function readBuilderValue(text: string, op: string, minorUnits: number): 
 }
 
 /** The text a Value field shows for a stored rule, read back to the same rule by readBuilderValue
- * with that rule chosen: the number alone ("0.5", "25"; an amount such as 12.345 as "12.3450" so
- * the AMBIGUOUS guard accepts it), a negative value in its shorthand ("-5%"); "" for INHERIT. */
+ * with that rule chosen: the number alone ("0.5", "25", "-5" under Plus/minus %; an amount such as
+ * 12.345 as "12.3450" so the AMBIGUOUS guard accepts it), any other negative value in its shorthand;
+ * "" for INHERIT. */
 export function builderValueText(op: string, value: string, opts?: ShFormatOptions): string {
   if (op === "INHERIT") return ""
   const canon = normaliseDecimal(str(value))
   if (!canon.ok) return str(value)
+  const mark = (v: string) => (opts?.decimalMark === "," ? v.replace(".", ",") : v)
+  if (op === "ADJUST_PERCENT") return mark(canon.value)
   if (canon.value.startsWith("-")) return editText(op as ShOp, canon.value, "occupancy", opts)
   if (isAmountOp("occupancy", op as ShOp)) return editText("ABSOLUTE", canon.value, "occupancy", opts)
-  return opts?.decimalMark === "," ? canon.value.replace(".", ",") : canon.value
+  return mark(canon.value)
 }
 
 const RE_COMBINATION = /^([0-9]+|\*)\+([0-9]+|\*)$/

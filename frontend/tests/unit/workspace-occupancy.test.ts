@@ -803,7 +803,8 @@ test("builder values: a form sets the rule, a number alone takes the rule chosen
   }
   assert.equal(builderValueText("MULTIPLY", "0.500000000", { minorUnits: 2 }), "0.5")
   assert.equal(builderValueText("MULTIPLY", "0.5", { minorUnits: 2, decimalMark: "," }), "0,5")
-  assert.equal(builderValueText("ADJUST_PERCENT", "-5", { minorUnits: 2 }), "-5%")
+  assert.equal(builderValueText("ADJUST_PERCENT", "-5", { minorUnits: 2 }), "-5", "signed, beside the Rule's % sign")
+  assert.equal(builderValueText("ADD", "-5", { minorUnits: 2 }), "-5", "a negative ADD reads back as SUBTRACT 5, the same arithmetic")
   assert.equal(builderValueText("ABSOLUTE", "12.345", { minorUnits: 2 }), "12.3450", "not refused as AMBIGUOUS when read back")
   assert.equal(builderValueText("INHERIT", "", { minorUnits: 2 }), "")
 })
@@ -953,7 +954,7 @@ test("rooms {STD, DLX} × periods {P1, P2}: 4 rows per rule that group back into
   assert.ok(back)
   assert.deepEqual([back.roomsAll, back.rooms, back.periodsAll, back.periods], [false, ["STD", "DLX"], false, ["P1", "P2"]])
   assert.deepEqual(back.adultLines.map((x) => [x.position, x.op, x.text]), [[3, "MULTIPLY", "0.6"]])
-  assert.deepEqual([back.whole?.op, back.whole?.text], ["ADJUST_PERCENT", "-5%"])
+  assert.deepEqual([back.whole?.op, back.whole?.text], ["ADJUST_PERCENT", "-5"])
 })
 
 test("the builder refuses what the server would refuse or ignore, and never a free-text combination", () => {

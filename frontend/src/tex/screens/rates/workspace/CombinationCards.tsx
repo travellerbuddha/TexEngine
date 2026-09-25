@@ -43,13 +43,17 @@ export interface ComboText {
   bands: (rules: readonly CardRule[]) => string
   /** "All rooms · All periods", "Standard, Deluxe · P1, P2" */
   scope: (rooms: readonly string[], periods: readonly string[]) => string
+  /** one rule as a cell shows it: "×0.50", "−5%", "25.00", "inherit" */
+  rule: (op: string, value: string) => string
 }
 
 export function useComboText(labels: BandLabels, minorUnits: number, roomName: (rt: string) => string): ComboText {
   const { t } = useTexT()
   return useMemo<ComboText>(() => {
-    const ruleText = (r: CardRule) => (r.op === "INHERIT" ? t("rates.ws.state.inherit_tag") : occRuleText(r.op, r.value, minorUnits))
+    const rule = (op: string, value: string) => (op === "INHERIT" ? t("rates.ws.state.inherit_tag") : occRuleText(op, value, minorUnits))
+    const ruleText = (r: CardRule) => rule(r.op, r.value)
     return {
+      rule,
       name: (adults, children) => {
         const a = adults === null ? t("rates.combo.any_adults") : t("rates.combo.adults", { count: adults })
         if (children === 0) return a
@@ -263,7 +267,8 @@ export function CombinationCards(p: CombinationCardsProps) {
           </Button>
         )}
       </div>
-      <p className="text-xs text-zinc-500">{t("rates.combo.help")}</p>
+      {/* the open builder says it itself */}
+      {!open && <p className="text-xs text-zinc-500">{t("rates.combo.help")}</p>}
       <span role="status" aria-live="polite" className="sr-only">
         {announce}
       </span>

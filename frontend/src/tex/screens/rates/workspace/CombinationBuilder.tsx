@@ -10,7 +10,7 @@
 // and "+ Whole-stay price". A reading line says what Save writes; Save writes it through
 // occupancy.planCombination / persistCombination as one history entry, replacing the edited
 // card's rows. Nothing here computes a price.
-import { useId, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
@@ -47,6 +47,9 @@ const MAX_CHILD_LINES = 8
 
 type Scope = "all" | "chosen"
 
+/** An example value per rule (a number alone takes the rule chosen). */
+const PLACEHOLDER: Record<string, string> = { MULTIPLY: "0.5", PERCENT_OF: "50", ADJUST_PERCENT: "-10", ABSOLUTE: "25", FIXED: "25", ADD: "25", SUBTRACT: "25" }
+
 export interface CombinationBuilderProps {
   initial: BuilderDraft
   /** the card being edited (its name in the title), or null for a new combination */
@@ -76,6 +79,12 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
   const titleId = useId()
   const errId = useId()
   const [draft, setDraft] = useState<BuilderDraft>(p.initial)
+  // the panel opens with the focus in its first field (the opener may be gone: Add hides, a card is replaced)
+  const firstRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    const el = firstRef.current?.disabled ? firstRef.current?.closest("form")?.querySelector<HTMLElement>("input:not(:disabled), select, button") : firstRef.current
+    el?.focus()
+  }, [])
   const fmt = { minorUnits: p.minorUnits, decimalMark: p.decimalMark }
   const plan = useMemo(() => planCombination(p.tables, draft, fmt), [p.tables, draft, p.minorUnits, p.decimalMark]) // eslint-disable-line react-hooks/exhaustive-deps
   const issueOf = (id: string) => plan.issues.find((i) => "line" in i && i.line === id)
@@ -208,7 +217,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
             autoComplete="off"
             spellCheck={false}
             disabled={inherit}
-            placeholder={inherit ? "" : "x0.5"}
+            placeholder={PLACEHOLDER[l.op] ?? ""}
             value={l.text}
             className={cn("h-8! pr-7 text-right text-xs! tabular-nums", message && "border-rose-500")}
             onChange={(e) => setText(l.id, e.target.value)}
@@ -255,7 +264,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
         <Select
           aria-label={t("rates.combo.b.adult_position")}
           value={String(l.position)}
-          className="h-8! w-16! text-xs!"
+          className="h-8! w-18! pr-7! pl-2! text-xs!"
           options={[...new Set([...adultPositions, l.position])].map((n) => ({ value: String(n), label: String(n) }))}
           onChange={(e) => editLine(l.id, (x) => ({ ...x, position: parseInt(e.target.value, 10) }))}
         />
@@ -268,7 +277,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
     const v = readBuilderValue(l.text, l.op, p.minorUnits)
     if (v.kind !== "rule") return undefined
     if (v.op === "INHERIT") return t("rates.combo.b.whole_read.inherit")
-    const rule = p.text.rules([{ target: "COMBINATION", position: 0, age_band: "", op: v.op, value: v.value, note: "" }])
+    const rule = p.text.rule(v.op, v.value)
     const unit = unitWord(p.basis === "ROOM" ? "room" : "person")
     if (v.op === "ABSOLUTE" || v.op === "FIXED") return t("rates.combo.b.whole_read.fixed", { rule })
     if (v.op === "MULTIPLY" || v.op === "PERCENT_OF") return t("rates.combo.b.whole_read.replace", { rule, unit })
@@ -355,6 +364,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
       <label className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700">
         {label}
         <Input
+          ref={which === "adults" ? firstRef : undefined}
           type="number"
           inputMode="numeric"
           min={min}
