@@ -4,10 +4,11 @@
 // child 1, under ROOM basis the extra-adult unit and whether children fill empty included places,
 // and "Child ages…" (the non-modal bands drawer, also opened by #ages). Collapsed, it reads as a
 // one-line summary of the ladder; expanded, it shows the ladder (OccupancyLadder) and its resolved
-// line. Its open state is remembered per viewer (localStorage); a draft without occupancy rules
+// line, then the special combination cards and their builder (CombinationCards, S12; the ladder's
+// ⓘ note links to them). Its open state is remembered per viewer (localStorage); a draft without occupancy rules
 // opens it by default, and #occupancy opens it and scrolls to it. The version settings it edits
 // are saved with Save (they are not table rows, so the undo history does not hold them).
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { minorUnits as currencyMinorUnits } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -17,6 +18,8 @@ import { CHILD_ORDERING, enumOptions, EXTRA_UNIT } from "../lib/options"
 import type { RoomCapacity } from "../lib/types"
 import { effectiveBands } from "./bands.ts"
 import { ChildAgesDrawer } from "./ChildAgesDrawer"
+import { CombinationCards, useComboText } from "./CombinationCards"
+import { decimalMarkOf } from "./matrixView.ts"
 import { baseRoomOf } from "./model.ts"
 import {
   combinationNotes,
@@ -59,7 +62,7 @@ function storeOpen(open: boolean) {
 
 export function OccupancySection(props: TabProps & { history: WorkspaceHistory; region?: PricingRegion }) {
   const { doc, state, readOnly, preview, history, setSetting, region, setSampleParty } = props
-  const { t, tOrdinal } = useTexT()
+  const { t, tOrdinal, locale } = useTexT()
   const tables = state.tables
   const settings = state.settings
   const basis = doc.contract_doc.pricing_basis
@@ -86,7 +89,7 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
 
   // ─── rooms, scope, capacity (the server's effective capacity, else the rows') ─────────
   const names = useMemo(() => new Map(doc.room_types.map((r) => [r.name, r.room_type_name || r.name])), [doc.room_types])
-  const roomName = (rt: string) => names.get(rt) ?? rt
+  const roomName = useCallback((rt: string) => names.get(rt) ?? rt, [names])
   const rooms = useMemo(() => tables.rooms.map((r) => str(r.room_type)).filter(Boolean), [tables.rooms])
   const [scopePick, setScope] = useState("")
   const scope = rooms.includes(scopePick) ? scopePick : ""
@@ -121,6 +124,10 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
     [tables, scope, basis, maxAdults, includedAdults, bands, inherited, matrix?.occupancy_defaults, extraUnit],
   )
   const cards = useMemo(() => groupCombinations(tables), [tables])
+  const comboText = useComboText(labels, minorUnits, roomName)
+  const capacities = rooms.map((rt) => capOf(rt))
+  const [showCard, setShowCard] = useState<{ id: string; n: number } | null>(null)
+  const onShowCard = useCallback((id: string) => setShowCard((s) => ({ id, n: (s?.n ?? 0) + 1 })), [])
   const notes = useMemo(() => combinationNotes(model, cards, scope || null), [model, cards, scope])
   const summary = ladderSummary(model, cards)
   const withRules = useMemo(() => scopesWithRules(tables), [tables])
@@ -152,12 +159,7 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
     if (!x.children.length) return adults
     return t("rates.occ.party.with_children", { adults, children: t("rates.occ.party.children", { count: x.children.length, bands: x.children.map(labels.labelOf).join(", ") }) })
   }
-  const cardName = (c: CombinationCard) => {
-    const adults = c.adults === null ? t("rates.combo.any_adults") : t("rates.combo.adults", { count: c.adults })
-    if (c.children === 0) return adults
-    const children = c.children === null ? t("rates.combo.any_children") : t("rates.combo.children", { count: c.children })
-    return t("rates.combo.name", { adults, children })
-  }
+  const cardName = (c: CombinationCard) => comboText.name(c.adults, c.children)
   const itemName = (x: SummaryItem) => {
     switch (x.kind) {
       case "single":
@@ -279,6 +281,27 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
               onParty={setPartyPick}
               cardName={cardName}
               partyName={partyName}
+              onShowCard={onShowCard}
+            />
+            <CombinationCards
+              key={`combos:${props.epoch ?? 0}`}
+              tables={tables}
+              readOnly={readOnly}
+              history={history}
+              cards={cards}
+              text={comboText}
+              labels={labels}
+              roomName={roomName}
+              capacities={capacities}
+              scope={scope}
+              basis={basis}
+              extraUnit={extraUnit}
+              includedAdults={model.includedAdults || includedAdults}
+              ordering={str(settings.child_ordering)}
+              minorUnits={minorUnits}
+              decimalMark={decimalMarkOf(locale)}
+              ccy={doc.contract_doc.contract_currency}
+              show={showCard}
             />
           </div>
         )}

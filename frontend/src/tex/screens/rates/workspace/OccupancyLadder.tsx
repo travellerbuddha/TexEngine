@@ -118,6 +118,8 @@ export interface OccupancyLadderProps {
   onParty: (id: string) => void
   /** the card names for the ⓘ notes ("2 Adults + 2 Children") */
   cardName: (card: CombinationCard) => string
+  /** the ⓘ note's link: brings that combination card into view and focuses it (S12) */
+  onShowCard?: (id: string) => void
   /** the party's name ("2 adults + 1 child 7–11.99") */
   partyName: (party: PartyOption) => string
 }
@@ -710,6 +712,12 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
     .filter((x) => x.code)
   const roomOptions = tables.rooms.map((x) => str(x.room_type)).filter(Boolean).map((rt) => ({ value: rt, label: p.roomName(rt) }))
 
+  // the active cell's ⓘ note, with links to the cards that outrank it (§3.6.2)
+  const activeRow = rows[nav.active.r]
+  const activePeriod = cols[nav.active.c]
+  const noteIds = activeRow && activePeriod !== undefined ? p.notes.get(`${activeRow.id}|${activePeriod}`) : undefined
+  const noteCards = noteIds && p.onShowCard ? p.cards.filter((x) => noteIds.includes(x.id)) : []
+
   const headerCell = "border-r border-b border-zinc-200 bg-white px-2 py-1 text-left"
   return (
     <div className="space-y-1.5">
@@ -799,6 +807,24 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
           )}
         </div>
       </div>
+
+      {noteCards.length > 0 && activeRow && (
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-sky-900">
+          <Info className="size-3.5 shrink-0 text-sky-700" aria-hidden />
+          <span>{t("rates.occ.ladder.note_line", { cell: cellName({ row: activeRow.id, period: activePeriod }) })}</span>
+          {noteCards.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              aria-label={t("rates.occ.ladder.note_show", { name: p.cardName(card) })}
+              onClick={() => p.onShowCard?.(card.id)}
+              className="rounded px-0.5 font-medium text-sky-800 underline underline-offset-2 hover:text-sky-950 focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:outline-none"
+            >
+              {p.cardName(card)}
+            </button>
+          ))}
+        </p>
+      )}
 
       {pop &&
         (() => {
