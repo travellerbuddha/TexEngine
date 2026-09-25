@@ -133,7 +133,19 @@ const keyOf = (c: CellRef) => `${c.room}\u0000${c.period}`
 /** The DOM id of an entry cell (data-cellid), stable while rows come and go. */
 const cellIdOf = (c: CellRef) => `${c.room}|${c.period}`
 
-export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps & { history: WorkspaceHistory }) {
+export function PriceMatrix({
+  doc,
+  state,
+  readOnly,
+  preview,
+  history,
+  onActivePeriod,
+}: TabProps & {
+  history: WorkspaceHistory
+  /** the period ("" = All periods) of the cell that gets the focus: the boards grid highlights
+   * the same column (§3.12, S13) */
+  onActivePeriod?: (period: string) => void
+}) {
   const { t, locale } = useTexT()
   const tables = state.tables
   const cd = doc.contract_doc
@@ -989,6 +1001,13 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
           aria-readonly={readOnly || undefined}
           aria-multiselectable={canEdit || undefined}
           ref={setGrid}
+          onFocus={(e) => {
+            // a cell (or its editor) got the focus: its column is the matrix's active period
+            if (!onActivePeriod) return
+            const at = (e.target as HTMLElement).closest<HTMLElement>("[data-cell]")?.dataset.cell
+            const period = at ? cols[Number(at.split(":")[1])] : undefined
+            if (period !== undefined) onActivePeriod(period)
+          }}
           className="w-max min-w-full text-sm"
         >
           <div role="row" className="sticky top-0 z-[2] grid bg-white" style={{ gridTemplateColumns: template }}>

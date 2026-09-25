@@ -62,6 +62,9 @@ export interface MatrixCellProps {
   /** the selection state, for the active cell only: it re-renders with every new selection, so
    * its keyboard handlers (the only ones that receive keys) always see the current one */
   selState?: unknown
+  /** the column another grid points at (the boards grid shows the matrix's active period, §3.12):
+   * a visual cue only, drawn as inner side lines so it never hides the cell's tone */
+  highlight?: boolean
 }
 
 export interface MatrixRowCellsProps {
@@ -80,6 +83,8 @@ export interface MatrixRowCellsProps {
   /** the column being edited in this row, else -1, and its editor */
   editC: number
   editor?: ReactNode
+  /** the highlighted column (MatrixCellProps.highlight), else -1 or absent */
+  hlC?: number
 }
 
 /**
@@ -92,7 +97,7 @@ export interface MatrixRowCellsProps {
  * or of the entries in flight gives every cell a new view.
  */
 export const MatrixRowCells = memo(
-  function MatrixRowCells({ r, views, nav, activeC, selected, selState, tint, blockStart, editC, editor }: MatrixRowCellsProps) {
+  function MatrixRowCells({ r, views, nav, activeC, selected, selState, tint, blockStart, editC, editor, hlC = -1 }: MatrixRowCellsProps) {
     return (
       <>
         {views.map((view, c) => (
@@ -106,6 +111,7 @@ export const MatrixRowCells = memo(
             active={c === activeC}
             selected={selected[c] === "1"}
             selState={c === activeC ? selState : undefined}
+            highlight={c === hlC}
           />
         ))}
       </>
@@ -120,7 +126,8 @@ export const MatrixRowCells = memo(
     a.tint === b.tint &&
     a.blockStart === b.blockStart &&
     a.editC === b.editC &&
-    a.editor === b.editor,
+    a.editor === b.editor &&
+    (a.hlC ?? -1) === (b.hlC ?? -1),
 )
 
 /**
@@ -137,10 +144,11 @@ export const MatrixCell = memo(
     a.active === b.active &&
     a.selected === b.selected &&
     a.selState === b.selState &&
+    a.highlight === b.highlight &&
     a.nav["data-cell"] === b.nav["data-cell"],
 )
 
-function MatrixCellImpl({ nav, view, tint, editor, blockStart }: MatrixCellProps) {
+function MatrixCellImpl({ nav, view, tint, editor, blockStart, highlight }: MatrixCellProps) {
   const { cellId, label, tone, tooltip, readOnly, stale, error, trigger, onContextMenu } = view
   const tip = useTooltip(editor ? null : tooltip)
   const errId = useId()
@@ -176,6 +184,7 @@ function MatrixCellImpl({ nav, view, tint, editor, blockStart }: MatrixCellProps
         blockStart && "border-t-2 border-t-zinc-200",
         TONE[tone],
         stale && "opacity-55",
+        highlight && "shadow-[inset_2px_0_0_var(--color-tex-300),inset_-2px_0_0_var(--color-tex-300)]",
         editor ? "z-[3] p-0" : undefined,
       )}
     >

@@ -4,6 +4,7 @@ import { Badge, Notice } from "../../../ui"
 import { RatesTab } from "../contracts/tabs/RatesTab"
 import { contractRoomOptions, TabIntro, type TabProps } from "../contracts/tabs/shared"
 import { enumLabel } from "../lib/options"
+import { BoardsSection, usePeriodChannel } from "./BoardsSection"
 import { OccupancySection } from "./OccupancySection"
 import { PriceMatrix } from "./PriceMatrix"
 import type { PricingRegion } from "./sections.ts"
@@ -11,18 +12,22 @@ import type { PricingRegion } from "./sections.ts"
 /**
  * The Pricing section (PRICING_WORKSPACE_UX.md §2, §3): the price model where it is read and
  * entered. The room price matrix (S9) is edited inline and priced live by the server; under it,
- * Occupancy & child pricing (S11) with the child ages drawer (#occupancy and #ages open them; the
- * boards region is S13's). A viewer without
+ * Occupancy & child pricing (S11) with the child ages drawer, then Boards (S13), whose grid
+ * highlights the matrix's active period (#occupancy, #ages and #boards open them). A viewer without
  * cost (an agent's catalogue) sees what sells, without amounts and without any cost call; the
- * matrix is not rendered for it. The Advanced "Room prices" table stays under Commercial rules.
+ * matrix is not rendered for it. The Advanced "Room prices" and "Boards" tables stay under
+ * Commercial rules.
  */
 export function PricingSection(props: TabProps & { region?: PricingRegion }) {
+  // the matrix's active period reaches the boards grid only (no re-render of the rest of Pricing)
+  const matrixPeriod = usePeriodChannel()
   if (props.preview?.mode === "catalogue") return <CatalogueView {...props} />
   if (!props.history) return <RatesTab {...props} />
   return (
     <div className="space-y-6">
-      <PriceMatrix key={props.epoch ?? 0} {...props} history={props.history} />
+      <PriceMatrix key={props.epoch ?? 0} {...props} history={props.history} onActivePeriod={matrixPeriod.set} />
       <OccupancySection {...props} history={props.history} region={props.region} />
+      <BoardsSection key={`boards:${props.epoch ?? 0}`} {...props} history={props.history} region={props.region} matrixPeriod={matrixPeriod} />
     </div>
   )
 }

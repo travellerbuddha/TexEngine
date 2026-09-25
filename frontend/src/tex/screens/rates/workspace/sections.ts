@@ -14,7 +14,7 @@ export type RuleTableId = (typeof RULE_TABLES)[number]
 export const DEFAULT_RULE_TABLE: RuleTableId = "plans"
 
 /** A part of Pricing an old hash asks for: the child ages drawer, the occupancy and the boards
- * regions (built in S11 and S13; until then the hash lands on Pricing). */
+ * regions (S11, S13): the hash opens that region and scrolls to it. */
 export type PricingRegion = "ages" | "occupancy" | "boards"
 const REGIONS: readonly string[] = ["ages", "occupancy", "boards"]
 
