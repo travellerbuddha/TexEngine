@@ -178,14 +178,36 @@ export function FillConfirm({ message, onConfirm, onCancel }: { message: string;
 }
 
 /** The toast of a bulk operation: "Applied to 8 cells · Undo" (§3.10). Its text is announced by
- * the matrix's polite live region; the toast itself is not a live region (no double reading). */
+ * the matrix's polite live region; the toast itself is not a live region (no double reading).
+ * Its Undo and close button take the toast away: when it held the focus (a keyboard user tabbed
+ * to it, or a click focused the button), `onFocusBack` puts the focus back where the user works
+ * (the matrix: the grid's active cell), so it never drops to the page. */
 export const UndoToastView = memo(UndoToastViewImpl)
 
-function UndoToastViewImpl({ toast, onUndo, onDismiss, onHold }: { toast: UndoToastState | null; onUndo: () => void; onDismiss: () => void; onHold: (on: boolean) => void }) {
+function UndoToastViewImpl({
+  toast,
+  onUndo,
+  onDismiss,
+  onHold,
+  onFocusBack,
+}: {
+  toast: UndoToastState | null
+  onUndo: () => void
+  onDismiss: () => void
+  onHold: (on: boolean) => void
+  onFocusBack?: () => void
+}) {
   const { t } = useTexT()
+  const box = useRef<HTMLDivElement | null>(null)
   if (!toast) return null
+  const leaving = (action: () => void) => () => {
+    const held = Boolean(box.current?.contains(document.activeElement))
+    action()
+    if (held) onFocusBack?.()
+  }
   return (
     <div
+      ref={box}
       data-testid="undo-toast"
       // bottom centre: the app's own toasts use the bottom-right corner (top on phones)
       className="pointer-events-auto fixed inset-x-3 bottom-3 z-[58] flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-900 px-3 py-2.5 text-sm text-white shadow-tex-pop sm:inset-x-auto sm:bottom-4 sm:left-1/2 sm:w-max sm:max-w-md sm:-translate-x-1/2"
@@ -197,8 +219,8 @@ function UndoToastViewImpl({ toast, onUndo, onDismiss, onHold }: { toast: UndoTo
       }}
     >
       <span className="min-w-0 flex-1">{toast.message}</span>
-      <ToastButton onClick={onUndo}>{t("rates.ws.bulk.undo")}</ToastButton>
-      <button type="button" aria-label={t("core.action.close")} onClick={onDismiss} className="rounded p-0.5 text-zinc-400 hover:bg-zinc-800 hover:text-white focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none">
+      <ToastButton onClick={leaving(onUndo)}>{t("rates.ws.bulk.undo")}</ToastButton>
+      <button type="button" aria-label={t("core.action.close")} onClick={leaving(onDismiss)} className="rounded p-0.5 text-zinc-400 hover:bg-zinc-800 hover:text-white focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none">
         <X className="size-4" aria-hidden />
       </button>
     </div>

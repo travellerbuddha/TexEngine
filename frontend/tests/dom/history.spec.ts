@@ -71,6 +71,30 @@ test("the toast of a bulk entry stays 10 s, longer while hovered or focused, and
   await expect(toast(page)).toHaveCount(0)
 })
 
+test("the toast's Undo and close button put the focus back where the user was when the toast goes while holding it (S10 review)", async ({ page }) => {
+  const cell = page.getByRole("gridcell", { name: "Active cell" })
+  await button(page, "Fill").click()
+  // a keyboard user reaches the toast's Undo and presses Enter: the toast goes, the focus returns
+  await toast(page).getByRole("button", { name: "Undo" }).focus()
+  await page.keyboard.press("Enter")
+  await expect(toast(page)).toHaveCount(0)
+  await expect(rates(page)).toHaveText("")
+  await expect(cell).toBeFocused()
+  // its close button too
+  await button(page, "Fill").click()
+  await toast(page).getByRole("button", { name: "Close" }).focus()
+  await page.keyboard.press("Space")
+  await expect(toast(page)).toHaveCount(0)
+  await expect(cell).toBeFocused()
+  // a toast that goes without holding the focus leaves the focus where it is
+  await button(page, "Fill").click()
+  await expect(button(page, "Fill")).toBeFocused()
+  await toast(page).getByRole("button", { name: "Undo" }).dispatchEvent("click")
+  await expect(toast(page)).toHaveCount(0)
+  await expect(button(page, "Fill")).toBeFocused()
+  expect(await ranLog(page)).toEqual(["toast:Fill", "toast:Fill"])
+})
+
 test("the toast goes with any later change: another entry, a Rule table keystroke, an undo", async ({ page }) => {
   await button(page, "Fill").click()
   await expect(toast(page)).toBeVisible()

@@ -4,7 +4,7 @@
 // matrix entry, and the "Family price" field a Rule table: every keystroke writes the whole
 // period_rates table through `record`, as the Advanced rule tables do in the version editor.
 // Open /tests/dom/history.html under `npx vite --config tests/dom/vite.config.ts` to try it by hand.
-import { StrictMode, useCallback, useState } from "react"
+import { StrictMode, useCallback, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import "../../src/index.css"
 import type { EditorState, Tables } from "../../src/tex/screens/rates/lib/tables"
@@ -29,6 +29,7 @@ function Harness() {
   const setTable = useCallback((k: VersionTable, rows: Row[]) => setState((s) => ({ ...s, tables: { ...s.tables, [k]: rows } })), [])
   const history = useWorkspaceHistory(state, setTable)
   const toast = useUndoToast(history)
+  const cell = useRef<HTMLDivElement | null>(null)
   const rates = state.tables.period_rates
   const family = String(rates.find((r) => r.room_type === "FAM")?.value ?? "")
 
@@ -74,7 +75,11 @@ function Harness() {
       <output data-testid="size" className="block">
         {history.size}
       </output>
-      <UndoToastView toast={toast.toast} onUndo={() => log("toast", toast.undo())} onDismiss={toast.dismiss} onHold={toast.hold} />
+      {/* the matrix's active cell: where the toast puts the focus back when it goes while holding it */}
+      <div role="gridcell" tabIndex={-1} ref={cell} aria-label="Active cell" className="inline-block rounded border px-2 py-1">
+        70
+      </div>
+      <UndoToastView toast={toast.toast} onUndo={() => log("toast", toast.undo())} onDismiss={toast.dismiss} onHold={toast.hold} onFocusBack={() => cell.current?.focus()} />
     </main>
   )
 }

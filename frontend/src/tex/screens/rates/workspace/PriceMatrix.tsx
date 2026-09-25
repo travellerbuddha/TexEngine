@@ -20,6 +20,7 @@ import { useTexT } from "../../../i18n"
 import {
   Badge,
   Checkbox,
+  editorSwallowsShortcut,
   editShortcut,
   fillDownPlan,
   fillRightPlan,
@@ -403,6 +404,12 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
     const ed = editingRef.current
     if (!ed) return
     const cell = ed.cell
+    // Ctrl/Cmd+R and Ctrl/Cmd+D never reach the browser (reload, bookmark) while a cell is being
+    // edited either; no fill runs then. Ctrl/Cmd+Z stays the field's own undo.
+    if (editorSwallowsShortcut(e)) {
+      e.preventDefault()
+      return
+    }
     if (e.key === "Escape") {
       e.preventDefault()
       e.stopPropagation()
@@ -500,7 +507,9 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   }
 
   const onCopy = (e: ClipboardEvent) => {
-    const block = copyBlock(selection.state.ranges, copyText)
+    // the entry rows of a selection that holds some (a paste writes entry rows only, so the block
+    // pastes back onto the same rooms); resolved rows only when they are all that is selected
+    const block = copyBlock(selection.state.ranges, copyText, (r) => Boolean(rows[r]?.editable))
     if (!block.length || !e.clipboardData) return
     e.clipboardData.setData("text/plain", encodeTSV(block))
     e.preventDefault()
@@ -570,13 +579,17 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
   }
 
   // stable callbacks for the memoised toolbar and toast (the latest handlers through a ref)
-  const bulk = useRef({ fill, openAdjust, stepHistory })
-  bulk.current = { fill, openAdjust, stepHistory }
+  const focusActive = () => focusAt(nav.active.r, nav.active.c)
+  const bulk = useRef({ fill, openAdjust, stepHistory, focusActive })
+  bulk.current = { fill, openAdjust, stepHistory, focusActive }
   const onToolbarFill = useCallback((dir: "right" | "down") => bulk.current.fill(dir), [])
   const onToolbarAdjust = useCallback(() => bulk.current.openAdjust(), [])
   const onToolbarUndo = useCallback(() => bulk.current.stepHistory("undo"), [])
   const onToolbarRedo = useCallback(() => bulk.current.stepHistory("redo"), [])
   const onToastUndo = useCallback(() => bulk.current.stepHistory("undo", true), [])
+  // the toast goes with its Undo or close button: when it held the focus, the focus goes back to
+  // the grid's active cell (as after the fill confirmation), not to the page
+  const onToastFocusBack = useCallback(() => bulk.current.focusActive(), [])
 
   /** The editing shortcuts of a focused cell: undo, redo, fill right, fill down (layout-free). */
   const onShortcut = (which: EditShortcut) => {
@@ -1109,7 +1122,7 @@ export function PriceMatrix({ doc, state, readOnly, preview, history }: TabProps
           onApply={applyAdjusted}
         />
       )}
-      <UndoToastView toast={undoToast.toast} onUndo={onToastUndo} onDismiss={undoToast.dismiss} onHold={undoToast.hold} />
+      <UndoToastView toast={undoToast.toast} onUndo={onToastUndo} onDismiss={undoToast.dismiss} onHold={undoToast.hold} onFocusBack={onToastFocusBack} />
     </section>
   )
 }

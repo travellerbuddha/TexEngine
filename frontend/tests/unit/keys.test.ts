@@ -2,7 +2,7 @@
 // (slice S7 review follow-up). Run with `npm run test:unit`.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { editShortcut, shortcutLetter } from "../../src/tex/ui/keys.ts"
+import { editorSwallowsShortcut, editShortcut, shortcutLetter } from "../../src/tex/ui/keys.ts"
 
 test("a Latin letter is the letter, in lower case", () => {
   assert.equal(shortcutLetter({ key: "a", code: "KeyA" }), "a")
@@ -70,4 +70,24 @@ test("no editing shortcut without Ctrl/Cmd, with Alt (AltGr), or with Shift on R
   assert.equal(editShortcut(k("c", { ctrl: true })), null, "copy and paste are the browser's clipboard events")
   assert.equal(editShortcut(k("v", { ctrl: true })), null)
   assert.equal(editShortcut(k("Enter", { ctrl: true })), null)
+})
+
+test("a cell editor keeps Ctrl/Cmd+R and Ctrl/Cmd+D from the browser (reload, bookmark), on every layout; undo stays the field's (S10 review)", () => {
+  assert.equal(editorSwallowsShortcut(k("r", { ctrl: true })), true)
+  assert.equal(editorSwallowsShortcut(k("r", { meta: true })), true)
+  assert.equal(editorSwallowsShortcut(k("d", { ctrl: true })), true)
+  assert.equal(editorSwallowsShortcut(k("d", { meta: true })), true)
+  assert.equal(editorSwallowsShortcut(k("к", { ctrl: true }, "KeyR")), true)
+  assert.equal(editorSwallowsShortcut(k("в", { ctrl: true }, "KeyD")), true)
+  // the field's own undo and redo, the clipboard and plain typing are left alone
+  assert.equal(editorSwallowsShortcut(k("z", { ctrl: true })), false)
+  assert.equal(editorSwallowsShortcut(k("Z", { ctrl: true, shift: true })), false)
+  assert.equal(editorSwallowsShortcut(k("y", { ctrl: true })), false)
+  assert.equal(editorSwallowsShortcut(k("c", { ctrl: true })), false)
+  assert.equal(editorSwallowsShortcut(k("v", { meta: true })), false)
+  assert.equal(editorSwallowsShortcut(k("r")), false)
+  assert.equal(editorSwallowsShortcut(k("d", { shift: true })), false)
+  // Ctrl+Shift+R (hard reload) and AltGr are not the grid's shortcuts
+  assert.equal(editorSwallowsShortcut(k("R", { ctrl: true, shift: true })), false)
+  assert.equal(editorSwallowsShortcut(k("d", { ctrl: true, alt: true })), false)
 })

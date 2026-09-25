@@ -37,3 +37,13 @@ export function editShortcut(e: { key: string; code?: string; ctrlKey?: boolean;
   if (letter === "d") return "fill_down"
   return null
 }
+
+/**
+ * True for the grid shortcuts a cell editor (an input inside a keyboard grid) must keep from the
+ * browser: Ctrl/Cmd+R (reload) and Ctrl/Cmd+D (bookmark), on any layout. No fill runs while a
+ * cell is being edited; Ctrl/Cmd+Z and Ctrl/Cmd+Y stay the field's own undo and redo.
+ */
+export function editorSwallowsShortcut(e: { key: string; code?: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean }): boolean {
+  const which = editShortcut(e)
+  return which === "fill_right" || which === "fill_down"
+}
