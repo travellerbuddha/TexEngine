@@ -5541,3 +5541,305 @@ engine prices, since each maps an entry onto an op the engine already has):
 - `Money` cuts resolved amounts to the currency's decimals (item 6): the owner decides; if
   rounding, half-up on the decimal string.
 - The other items under "Open after S9" are unchanged.
+
+**Decision (implemented in S10: the matrix's bulk tools).** Branch `pricing-workspace`, frontend
+only (no server file changes), commits `a2722ec` (pure modules and unit tests), `e5b70c7` (the
+history's React binding and the editor) and `05e18e8` (the screen). This section was written with
+the S10 review follow-up below: the build's own report was lost, so the review's verification is
+recorded here.
+- *Selection* is S7's `useGridSelection`, as S9 wired it (Shift+Arrow / Shift+Click extend,
+  Ctrl/Cmd+Click adds, Ctrl/Cmd+A, Escape clears, `aria-selected`). New: a click on a room's row
+  header, or on a period's or All periods' column header, selects that row's or column's editable
+  cells (resolved rows are passed over) and focuses the first of them; Ctrl/Cmd adds to the
+  selection. `RoomRowHeader.headerPick` ignores clicks on the header's own controls (its menu, an
+  input) and prevents the mousedown's text selection. For the keyboard, the room and period menus
+  have "Select prices".
+- *Fill → / Fill ↓* (toolbar; Ctrl/Cmd+R and Ctrl/Cmd+D while a grid cell has focus, with
+  `preventDefault`, so the browser neither reloads nor bookmarks) take S7's `fillRightPlan` /
+  `fillDownPlan` over the selected editable cells, then the pure `bulk.planFill`, all or nothing:
+  - the source cell's own rule is copied as it is (as built; see deviation 7 and the follow-up);
+  - a formula keeps the room it derives from, unless that is the target room (then the target's
+    default base; NO_BASE_ROOM when there is none);
+  - a formula is never copied into a price row (the base room, where a relative entry would change
+    the price once (O4), or a manual room): the whole fill is refused at that cell (FILL_FORMULA,
+    "A formula is copied only into formula rows; this row holds entered prices …");
+  - a price copied into a formula row is a fixed price override. The fill waits for an inline, non-modal
+    "Set a fixed price override?" line (`BulkToolbar.FillConfirm`); its button takes the focus,
+    and Escape or Cancel drop the fill;
+  - a period copy equal to the target room's All-periods rule is not stored (the period follows it);
+  - a cell still being calculated (S9's pending cells) refuses the fill (PENDING);
+  - one history entry, "Fill right (N cells)" / "Fill down (N cells)"; "Nothing changed." when the
+    fill changes nothing.
+- *Copy* (Ctrl/Cmd+C): `clipboard.copyBlock` over the selection's ranges gives the rows and
+  columns that hold a selected cell, with "" for the others. A column selected by its header
+  passes over the resolved rows, so it pastes back onto the same rows. `encodeTSV` joins it. An
+  entry cell gives the canonical edit text of its rule ("." as the decimal mark); a resolved row
+  gives the server's exact amount. "Copied N cells" is announced.
+- *Paste* (Ctrl/Cmd+V):
+  - `decodeTSV` trims one trailing line break, splits lines on CRLF, LF or CR, and keeps empty
+    cells (they clear).
+  - `planPaste`: one value fills every selected editable cell. A block runs from its anchor
+    (deviation 2) down the editable rows (resolved rows passed over) and right along the columns;
+    otherwise SHAPE ("The pasted block is 1×3 but only 3×2 editable cells are available here.").
+  - Every cell is parsed with `parseShorthand(text, "room", {minorUnits})`. Any failure refuses the
+    whole paste, naming at most three cells ("P3 · Standard Sea View: “1.500”: Is this 1500 or
+    1.5? …") and counting the rest ("and N more cells").
+  - NO_TARGET on a resolved row or a read-only cell; an empty clipboard is announced.
+  - The cells are one entry with a text each (`matrixView.planItems` / `finishItems`; each cell
+    by its row's rule, D11). Base-room relative entries go to `apply_op_values`, one call per op
+    and value with at most 500 prices each (`bulk.serverCalls`, `answersInOrder`). The paste is
+    committed when the answers land, under S9's pending and CHANGED rules.
+  - No clipboard permission is asked: the browser's copy and paste events carry the data
+    (deviation 1).
+- *Adjust…* (`AdjustPopover.tsx`, a non-modal Popover "Adjust prices" at the toolbar button):
+  - The op is a Segmented control: +%, −%, +amount, −amount, ×. `bulk.adjustRule` maps them to
+    ADJUST_PERCENT v, ADJUST_PERCENT −v, ADD, SUBTRACT and MULTIPLY. A typed sign is SYNTAX.
+    Amounts are currency-aware (O5). The value is a `DecimalInput`, focused on open.
+  - The targets (`adjustTargets`) are the selected entered prices: an own ABSOLUTE or FIXED row
+    with a value, in any row. Formula cells are counted as skipped. The other cells (no price,
+    INHERIT, a period following an All-periods price) are counted separately.
+  - The preview is the server's. 250 ms after the last keystroke, `apply_op_values` is asked
+    with the prices as they are now (at most 500 per call); a newer request aborts the older one.
+    The popover lists the first 8 "Standard Sea View · P1: 70.00 → 77.00" lines of the prices that
+    change, "+N more", the prices the server refuses and the unchanged count, in a polite status
+    region.
+  - Apply is disabled while the preview is pending, when nothing changes, or when a price is
+    refused (deviation 3). It writes the server's amounts as ABSOLUTE in one entry ("Adjust N
+    prices"). It is refused with CHANGED when a target no longer holds the price that was
+    previewed. The client computes no amount.
+- *Undo and redo*: the toolbar's Undo and Redo, and while a grid cell has focus Ctrl/Cmd+Z,
+  Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y. `ui/keys.editShortcut` matches them by letter on every layout
+  (`shortcutLetter`, so Russian я, н, к and в work) and never with Alt, which is AltGr on Windows.
+  In a cell editor, Ctrl/Cmd+Z is the field's own text undo. Each step is announced ("Undone:
+  {label}", "Redone: {label}") in the matrix's polite live region. Undo puts recorded arrays back
+  and calls no server (S9).
+- *The toast.* A bulk operation shows "Applied to N cells · Undo" for 10 s (`useUndoToast`,
+  `UndoToastView`, bottom centre). Bulk operations are Ctrl/Cmd+Enter or Delete over several
+  cells, a paste of several, a fill and Adjust…. The text is also announced in the live region;
+  the toast is not a live region itself. It goes with any later commit, undo or redo, and its Undo
+  undoes its own entry only. It is held while hovered or focused (deviation 4).
+- *History* (`history.ts`, `useWorkspaceHistory`): `record(table, rows, label)` (deviation 5).
+  `VersionEditor` hands the sections a recording `setTable`, so every Advanced rule table and
+  Offers edit is a history entry, "Rule table: {table}". Commits with the same merge key within
+  1.5 s (`MERGE_WINDOW_MS`) join one entry: one per table and burst of typing, never across an
+  undo. `seq()` gives the log's change counter at once, `version` as rendered. The log is still
+  cleared on load and on Discard (S9).
+- *The toolbar* (`BulkToolbar.tsx`) is memoised, so an arrow key does not re-render it. It is a
+  labelled group of ordinary buttons, not an ARIA toolbar, which would promise one tab stop with
+  arrow keys. Fill →, Fill ↓ and Adjust… are hidden below 768 px (deviation 9); Undo and Redo stay.
+  A Keyboard shortcuts popover (hidden below 768 px) lists every key of §3.10 and Ctrl/Cmd+S,
+  19 rows, with a note for Mac.
+- *Save*: Ctrl/Cmd+S matches by letter on every layout and not with AltGr (deviation 6).
+- 89 new keys in the six catalogues (`rates.ws.bulk.*`, `rates.ws.fill.*`, `rates.ws.paste.*`,
+  `rates.ws.adjust.*`, `rates.kbd.*`, the history labels).
+
+**Deviations from the slice text, with reasons (S10).** The build's report was lost; the review
+listed these deviations, and the reasons are taken from the code, its comments and commit
+messages.
+1. *Clipboard events are taken at the document*, filtered to this grid's focused gridcell and
+   read through a ref, not on the grid element as the slice says. A gridcell is focusable but not
+   editable, and the browser does not always deliver copy and paste to it. The document listeners
+   act only when the focused element is a `gridcell` inside this matrix, so other fields and
+   other grids keep their own clipboard.
+2. *A pasted block is anchored at the top-left of the range that holds the active cell*
+   (`pasteOrigin`), not at the active cell. Shift+Arrow moves the active cell to the far corner of
+   the range; anchoring there would paste P1:P4 copied from a spreadsheet at P4 and fail with
+   SHAPE. A single active cell is its own range, so the slice's case is unchanged.
+3. *Adjust…'s Apply is also disabled when any price is refused* (NEGATIVE, NO_VALUE). Apply is all
+   or nothing and would refuse anyway; the preview lists the refused prices.
+4. *The undo toast is held while hovered or focused*, so it can stay longer than 10 s. A keyboard
+   or pointer user who reaches its Undo must not lose it mid-way (in the spirit of WCAG 2.2.1,
+   timing adjustable). Released, it gets a fresh 10 s. A new toast always starts unheld.
+5. *The Advanced rule tables and Offers write through the history* (`record`), merged per table
+   within 1.5 s. This changes S8's sections: before, their `setTable` bypassed the log, and undoing
+   a matrix entry put back an older whole `period_rates` array, which silently dropped a Rule table
+   edit made after it (an S9 review finding). Now their edits are entries like any other and are
+   undone in order. They have no Undo button of their own (open item).
+6. *Ctrl/Cmd+S matches by letter on every layout and ignores AltGr* (`VersionEditor`). On a
+   Russian layout Ctrl + the key marked S gives `e.key` "ы" and did not save; Polish AltGr+S types
+   "ś" and must not save.
+7. *Fill of a source with no rule of its own cleared the target.* A period that follows All
+   periods has no row, so filling it copied "nothing". Within a row that is harmless (the targets
+   then follow the same All-periods rule). Across rooms it gave the target its own room's
+   All-periods rule, not what the source showed. **Changed by the S10 review follow-up** (below).
+8. *Files beyond the slice list:*
+   - `workspace/bulk.ts`: fill, Adjust… and the server calls, pure and unit-tested;
+   - `workspace/matrixView.ts`: `planItems` / `finishItems`, because a paste is one entry with a
+     text per cell;
+   - `workspace/history.ts`: the merge key;
+   - `ui/keys.ts`: `editShortcut`;
+   - `RoomRowHeader.tsx` and `PeriodHeader.tsx`: header selection and "Select prices";
+   - `contracts/VersionEditor.tsx`: `record` and Ctrl/Cmd+S;
+   - `tests/unit/workspace-bulk.test.ts`.
+9. *Fill and Adjust… (and the shortcuts popover) are hidden below 768 px.* The slice text lists
+   the toolbar without a breakpoint; §3.21 says bulk tools are hidden on phones. Undo and Redo
+   stay, because single-cell edits on phones are undoable too.
+
+**Tests (S10).** `npm run test:unit` 201 (171 + 30):
+- `tests/unit/clipboard.test.ts` (13): the TSV round trip; the trailing line break, CRLF and CR;
+  a cell's own tab or line break; the copied block of one and of several ranges; the paste anchor;
+  one value fills the selection; a 2×2 block at the active cell; an overflowing block → SHAPE;
+  an invalid cell applies nothing and names "P3 · Superior"; at most three named, all counted;
+  resolved rows are never targets; `1.500` is AMBIGUOUS with 2 minor units and a price with 3;
+  an empty clipboard.
+- `tests/unit/workspace-bulk.test.ts` (13): Fill → and Fill ↓; a price into a formula row listed
+  for the confirmation; a formula never into a price row; an empty or inherited source; a formula
+  never derived from its own room; a fill that changes nothing; the Adjust… ops, O5 on amounts,
+  targets, preview and Apply (ABSOLUTE, CHANGED, refusals); a paste as one entry of different texts
+  with base-room entries for the server, and its calls.
+- `history.test.ts` (+2): merged bursts per table; a pause, another table or an undo starts a new
+  entry. `keys.test.ts` (+2): the editing shortcuts on every layout; none without Ctrl/Cmd, with
+  Alt or with Shift on R, D and Y.
+- Fail-first: with the tests on the tree before S10, four files failed to load (163 tests, 159
+  passed, 4 failed): `clipboard.ts` and `bulk.ts` with `ERR_MODULE_NOT_FOUND`, and `history.ts`
+  (`MERGE_WINDOW_MS`) and `ui/keys.ts` (`editShortcut`) with "does not provide an export named".
+
+**Verification (S10)**, measured by the review on `05e18e8`:
+- *Build and checks:* `tsc -b` clean; `vite build` clean (built outside the tree); `npm run
+  i18n:tex` complete, and every literal and dynamic `t()` key the S10 files use exists in the six
+  catalogues; `npm run test:unit` 201/201; `npm run test:dom` 24/24.
+- *Browser:* the scratch S10 dev-server spec, 6/6 against this tree:
+  1. Garden Villa P3:P4 `x1.40` with Ctrl+Enter, then Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z;
+  2. the toast's Undo within 10 s, and the toast gone by itself at about 10 s;
+  3. Adjust +10 % on Standard P1:P4: the preview 70.00 → 77.00 …, Apply, Undo;
+  4. a 1×4 spreadsheet block pasted into Standard; SHAPE, INVALID and NO_TARGET;
+  5. header selection; Fill with its confirmation; the Russian layout;
+  6. Discard clears the history; the phone toolbar.
+- *Existing specs:* `editor-edits` and `contract-admin`, 4/4 against this tree.
+- No server change: Python tests unaffected.
+
+**Performance after S10** (the Vite dev server, i.e. development React, measured with S10's
+scratch perf check on the tree of the S10 review follow-up; keydown to the next painted frame in
+the page; the bulk timings are wall clock from the test until the cell shows the result, so they
+include Playwright's polling):
+- 3 rooms × 52 periods (265 cells): arrow keys median 35 ms (max 56), typing 5 ms (S9: 32 and
+  4 ms). Ctrl+A 0.22 s, Ctrl+C of everything 0.09 s, a 1×52 paste 0.27 s, Fill → across 52
+  periods 0.45 s, its undo 0.20 s, the Adjust… preview of 52 prices 0.35 s (250 ms debounce
+  included), Apply 0.39 s.
+- 3 rooms × 200 periods (1,005 cells): arrow keys median 76 ms (max 102), typing 7 ms (S9: 72 and
+  6 ms). Ctrl+A 0.54 s, Ctrl+C 0.17 s, a 1×200 paste 0.58 s, Fill → 0.80 s, its undo 0.96 s, the
+  preview of 200 prices 0.62 s, Apply 0.95 s.
+- `price_matrix` with the unsaved draft answered in 56–58 ms (3 × 52) and 128–170 ms (3 × 200),
+  as in S9.
+
+**O1–O5 after S10** (all five provisional, owner input 13):
+- *O4:* a paste, like a typed entry, sends base-room relative entries to `apply_op_values`, one
+  call per op and value. Adjust… is the explicit tool for relative changes of entered prices in
+  any row, through the same server path. Fill never copies a formula into the base room.
+- *O5:* pasted cells and Adjust…'s amounts (+amount, −amount) are parsed with the contract's minor
+  units; `1.500` is refused in 0- and 2-decimal currencies and accepted in 3-decimal ones.
+  Percentages and factors are exempt.
+- *O1–O3 (boards):* unchanged; S13.
+
+**S10 review follow-up (2026-09-25).** One medium and two low verifier findings on S10, all
+addressed.
+1. *(medium) S10 had no documentation*: no ADR section, the R-04 row still said the bulk tools
+   were not built, and no go-live change-log line. Written now: the sections above, the status
+   row, and the change log.
+2. *(low) Fill copied only a cell's own rule.* Family Suite P1 showed "follows all periods, ×1.15".
+   Filled down onto Garden Villa P1, which held an override ×1.5, it gave Garden Villa P1 "follows
+   all periods, ×1.35": the user copied ×1.15, got ×1.35, and lost the override. The toast still
+   said "Applied to 1 cell". A row-header click and Ctrl+R filled the empty All-periods cell across
+   and silently cleared every period price of the row. Ctrl/Cmd+C copied "" for following cells
+   and INHERIT rows.
+3. *(low) The React-bound behaviour had no committed test*: `useUndoToast` (10 s, hold, its own
+   entry only, hidden after a later change), `record()`'s merging, and the document-level
+   clipboard listeners were exercised only by the scratch spec.
+
+**Decision (S10 review follow-up).** Frontend only; no endpoint, payload, price or rule change.
+- *Fill takes the rule the source shows* (`bulk.planFill`):
+  - Within a room (Fill →) the source's own rule is copied as it is, INHERIT included. A source
+    without a rule of its own removes the target's rule, so the target follows the same
+    All-periods rule and shows what the source shows (unchanged).
+  - Into another room (Fill ↓), a source that follows All periods (no rule of its own, or its own
+    INHERIT row, which the engine skips) copies the All-periods rule it follows, as if it were its
+    own, under the same rules: a formula keeps its base unless that is the target room; a formula
+    never goes into a price row (FILL_FORMULA, now also for a following formula); a price into a
+    formula row asks first.
+  - A source that shows no rule at all still removes the target's rule, as a spreadsheet's fill
+    of an empty cell does. The plan lists those cells (`cleared`, only where something was
+    removed), and the toast and live region say so: "Applied to 4 cells · 4 cells cleared (copied
+    from empty cells)" (`rates.ws.fill.cleared`, six languages).
+- *Ctrl/Cmd+C copies what a cell shows* (`matrixView.cellCopyText`): the edit text of its own rule,
+  else of the All-periods rule it follows (also for an INHERIT row); "" only when it shows no rule.
+  A spreadsheet gets what the screen shows. Pasted back into the same cells it stores nothing new
+  (a period rule equal to the All-periods rule is not stored); pasted into another room it is a
+  typed entry there (D11: the row decides, so a formula derives from that room's default base).
+  An INHERIT row pasted back becomes "no row", with the same price. F2 on a following cell still
+  starts empty (§3.4.6).
+- *A committed DOM-harness test* (`tests/dom/history.{html,tsx,spec.ts}`, Playwright's clock) now
+  covers the undo toast and `record()` with the real hooks and the toast's view. The document-level
+  clipboard listeners and the grid's shortcuts remain covered by the scratch specs only (open item).
+
+**Tests (S10 review follow-up).**
+- `tests/unit/workspace-bulk.test.ts` 16 (13 + 3; one test reworded for Fill → within a row):
+  - Fill ↓ from Superior P1 (follows ×1.15) onto Deluxe P1 (×1.5 override) gives
+    `P1 MULTIPLY 1.15 from STD`;
+  - an INHERIT source filled into another room gives the All-periods rule it resolves by;
+  - a following price into a formula row is a fixed override; a following formula into a price
+    row is FILL_FORMULA;
+  - an empty All periods filled right clears P1–P4 and lists them in `cleared`; filled down onto
+    Deluxe's All periods it clears and lists it; a target that held nothing is not listed;
+  - `cellCopyText` for own, following, INHERIT and empty cells, and the copied text pasted back
+    stores nothing.
+  `npm run test:unit` 204.
+- `tests/dom/history.spec.ts` (3):
+  - the toast stays 10 s, is held while hovered or focused and restarts its 10 s when released;
+    its Undo undoes its own entry; a new toast starts unheld;
+  - the toast goes with another entry, a Rule table keystroke or an undo;
+  - Rule table keystrokes within 1.5 s are one entry, a later one its own, and one after an undo
+    never joins the undone entry; undo walks back through them before the earlier matrix entry.
+  `npm run test:dom` 27.
+- Fail-first:
+  - the new unit file does not load on `05e18e8` ("does not provide an export named
+    'cellCopyText'");
+  - with that export stubbed as `cellEditText`, 4 of 16 fail: `cleared` is undefined, and Deluxe
+    keeps `["*:MULTIPLY:1.35:STD"]` where `P1:MULTIPLY:1.15:STD` is expected;
+  - the DOM spec was written against the S10 code; each test fails under a mutation of the code it
+    covers (no hold; 5 s instead of 10 s; the toast kept after later changes; `record` bypassing
+    the log as before S10; no merge).
+
+**Verification (S10 review follow-up).**
+- *Build and unit tests:* `tsc -b`, `vite build` (to scratch), `npm run i18n:tex` (one new key in
+  the six catalogues), `npm run test:unit` 204/204, `npm run test:dom` 27/27. The new harness page
+  and spec also type-check.
+- *Integration, on the tree migrated with it:* `test_pricing_workspace_api` 50 OK.
+- *Browser, on the tree's own servers* (bench :8026, Vite :5196):
+  - the scratch S10 spec, 6/6;
+  - a scratch review check, 3/3: R1, the Family Suite → Garden Villa fill above (Garden Villa P1
+    "period override, Standard Sea View ×1.15", resolved 80.50, toast without "cleared", Ctrl+Z
+    back to ×1.5); R2, the Standard row header and Ctrl+R (toast and live region "Applied to 4
+    cells · 4 cells cleared (copied from empty cells)", Ctrl+Z restores 70.00 … 130.00); R3,
+    Ctrl+C of Family Suite P1:P2 gives `x1.15⇥x1.15`, pasted onto Garden Villa P1 it gives ×1.15
+    in P1 and P2, and pasted back onto Family Suite they still follow all periods;
+  - R1, R2 and R3 each fail on the S10 sources (`05e18e8`): Garden Villa P1 never shows ×1.15;
+    the toast reads "Applied to 4 cells" only; the clipboard holds a single tab;
+  - `contract-admin`, `critical-journey` and `editor-edits`: 5/5.
+
+**O1–O5 after the S10 review follow-up:** unchanged from "O1–O5 after S10". A following formula
+filled down into the base room is refused like any formula (O4).
+
+**Open after S10 and its review follow-up.**
+- *S16 must carry the scratch scenarios into the committed workspace specs*:
+  - from `s10-bulk.spec.ts`: Ctrl/Cmd+Enter with the undo and redo keys; the toast's Undo and
+    expiry on the real screen; Adjust… preview, Apply and Undo; paste and copy (SHAPE, INVALID,
+    NO_TARGET, resolved rows); header selection; Fill with the confirmation; the Rule table undo
+    interleaved with matrix entries; the Russian-layout shortcuts; Discard clearing the history;
+    the phone toolbar;
+  - from the review check: R1–R3.
+  The DOM harness covers `useUndoToast` and `record()` only. The document-level clipboard
+  listeners and the grid's shortcuts have no committed test until then.
+- Undo and Redo are only on Pricing's matrix toolbar (and Ctrl/Cmd+Z with a grid cell focused).
+  Entries made in a Rule table or in Offers are undone from there; inside a text field
+  Ctrl/Cmd+Z is the field's own text undo.
+- The toast can stay beyond 10 s while hovered or focused (deviation 4).
+- A fill from a cell that shows no rule clears its targets. That can be undone and is now named,
+  but it is not refused.
+- Not measured beyond 1,005 cells. Undoing a 200-period fill takes about 1 s in development React.
+- Still open from S9: `Money` cuts resolved amounts to the currency's decimals (the owner decides;
+  if rounding, half-up on the decimal string); keys typed before the refocus frame go nowhere;
+  Ctrl/Cmd+S while a cell is being edited saves without the editor's text. Still open from S8:
+  the modal Price test drawer until S14; no server-side validation concurrency guard; the overlay
+  skips `_validate_links` and the window order; the cross-hotel rate plan / policy gap in
+  `build_terms`; a weekly contract above the overlay's row cap is not previewed unsaved. Issues
+  are not anchored in cells yet (S15); occupancy and boards are S11 and S13.
