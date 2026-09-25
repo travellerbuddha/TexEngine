@@ -6916,3 +6916,225 @@ test prices board supplements as before.
 - Period-specific board terms (child %, infants free, label per period) and removing a board's
   rule for all rooms while keeping its room rules stay in the Rule tables.
 - Still open from S10–S12: their low review items.
+
+**Decision (implemented in S14: the Price test drawer and the Explain ladder).** Branch
+`pricing-workspace`, frontend only (no server file changes), commits `812e7f0` (pure logic, recorded
+fixtures and unit tests), `3c7949c` (design system: `ContextMenu`, `revealElement`), `25e6c77` (the
+screens) and `7669bd8` (`contract-admin.spec.ts`).
+- *The drawer* ("Price test", `PriceTestPanel` in the existing `Drawer` with `modal={false}`: no
+  `aria-modal`, the matrix stays usable beside it; this closes S8 deviation 4). It opens from the
+  header's Price test (starting from the matrix cell that last had the focus) and from a matrix
+  cell's context menu "Test this price" (starting from that cell). Another "Test this price" while
+  it is open starts it again there. Preview & audit keeps the full-size panel. Both are shown only
+  when `doc.can_preview`; the request carries `data` when the draft is editable and dirty (below
+  the overlay's row cap), with "Priced with your unsaved changes."; no save is made.
+- *Prefill* (pure `priceTest.prefillOf`): the active row's room (else the base room, else the
+  first); 3 nights from the active period's start (All periods or no active cell: the first period
+  that has not ended), clamped to the stay window so that the 3 nights fit in it (the engine refuses
+  a night after `stay_to`); the base board; 2 adults. Without periods, the former default (two weeks
+  after today, or the first stay day).
+- *Children:* whole years by default ("Age of child {n}", unchanged for the E2E helpers). A select
+  per child ("Child {n}: age given in": years / months (exact) / date of birth (exact)) sends
+  `{age_months}` (0–215) or `{dob}` (GAP-6). Switching carries whole months (×12, or the completed
+  years; integers only); a date of birth starts empty. An entry the server would refuse keeps
+  Calculate off and the field invalid.
+- *Calculate / Enter* prices the stay. After the first result, *Live* re-prices a settled edit of
+  the form or of the draft: the key is the request plus the draft's fingerprint (`preview.key`,
+  or the saved draft and `doc.modified`), debounced 300 ms (`MATRIX_DEBOUNCE_MS`); a newer call
+  aborts the older one. A result for older inputs is dimmed with "The stay or the contract changed
+  since this price. Calculate again to update it." ("Updating the price…" with Live).
+- *The Explain ladder* (pure `explainLadder(quote)`, `ExplainLadder.tsx`): the final price, then
+  one table per block of nights and one for the whole stay, each named by its caption ("Nights 1–3 ·
+  P2", "Whole stay"), with a row header per stage, "Before" and "After" columns, the explanation
+  steps as detail lines under their stage (with their own served before/after), and the caption
+  "Stages are shown in the order the engine applies them." Stages per night, in engine order
+  (§3.13.1): Base (the night's first ROOM_ABSOLUTE after), Period (the PERIOD step's code and name
+  and the period's dates; "no amount (period used to choose rules)"), Room (the ROOM_DERIVED steps'
+  first before → last after; an entered price reads "entered price, no derivation" with
+  `nights[].unit`), Occupancy (adults) (`unit` → `subtotal_adults`; ROOM_BASIS, ADULT_SLOT), Children
+  (only with children: `subtotal_adults` → `subtotal_children`; CHILD_SLOT, CHILD_INCLUDED,
+  CHILD_AS_ADULT), Special combination (only with a COMBINATION_RULE step: its before → after), Board
+  (`occupancy` → `subtotal_board`; "included" or "supplement {nights[].board}"), Period {code}
+  adjustment (applied to occupancy + board) and Rate plan (only with their steps), Night cost
+  (`cost`), Cost offers (only when `cost` ≠ `cost_net` or the stay has cost-offer steps), Markup
+  (`cost_net` → `sell_contract`), Currency conversion (`sell_contract` → `sell`, "1 EUR = 1.000000
+  EUR"), Promotion (`sell` → `final`). The stay: Cost offers and Promotion (when the stay has such
+  steps: the applied offers' first before → last after, rejected ones as lines), Tax
+  (`totals.subtotal` → `totals.total`, "tax {totals.tax}" or "{amount} included in the prices") and
+  the Final price (`totals.total`, the TOTAL step). A quote without the GAP-12 keys leaves Occupancy,
+  Children and Board blank ("not recorded in this quote"); nothing is computed. Consecutive nights
+  whose stages are string-identical form one block; the night selector ("Nights shown") defaults to
+  All nights, and one night shows its block alone ("Night 2 · P2"). Amounts are the served strings
+  formatted with the currency's minor units (`decText`; the currency code is added when the contract
+  and sell currencies differ).
+- *The chain check* (`chainBreaks`): per night, and within the stay block. Values are compared as
+  `normaliseDecimal` canonical strings; an unreadable string is never a mismatch. A break is logged
+  with `console.warn` in dev builds only.
+- *"Why this price"* keeps its DOM ("Rule applied:", the level badge, the label, "overrode"). Rule
+  labels, overridden labels and the step sentences pass through `useBandLabels.display` in every
+  language (the bracket rule, plus a child step's band printed bare when the band has no label); an
+  unsellable NO_CHILD_RULE reason is shown with every band code mapped. A step whose rule id names a
+  row of the draft (`~<_key>` unsaved, the saved row's name otherwise; pure `showTargetOf`) has
+  "Show in grid" ("Show in grid: {rule}"): the drawer closes, Pricing opens (from Preview & audit
+  too) and the target is brought into view, focused and outlined for a moment (`revealElement`):
+  the matrix cell (`data-cellid` `{room}|{period}`); for an occupancy rule its combination card
+  (single-use rows stay in the ladder), else its ladder cell in the rule's room scope (ladder cells
+  now carry `data-cellid` `occ:{row}|{period}`, `OccupancyLadder.ladderCellId`); a board cell
+  (`board:{board}|{room}|{period}`). The section opens for the request. A request is consumed once
+  (`show` / `onShown` in `VersionEditor`), so a remount never replays it.
+- *Localisation:* `ExplainStep` gains `message` and `params` (the server always sent them). A
+  non-English viewer gets `rates.explain.<CODE>` with the step's params when the catalogue has the
+  template (24 codes: CONTRACT, PERIOD, ROOM_ABSOLUTE, ROOM_DERIVED, ROOM_BASIS, ADULT_SLOT,
+  CHILD_SLOT, CHILD_INCLUDED, CHILD_AS_ADULT, COMBINATION_RULE, OCCUPANCY_TOTAL, BOARD_BASE,
+  BOARD_SUPPLEMENT, PERIOD_ADJUSTMENT, RATE_PLAN_ADJUSTMENT, NIGHT_COST, NO_MARKUP, MARKUP,
+  MARKUP_STACK, PROMO_APPLIED, PROMO_REJECTED, COUPON_REJECTED, TAX, TOTAL), else the server's
+  sentence as English viewers read it. Params: room ids become room names, a child's label
+  ("Child 1 (8y, CHB)", pure `parseChildLabel`) becomes "Kind 1 (8 J., {band label})", describe_op
+  strings (pure `parseOpText`) keep their number in the viewer's decimal mark ("× 1,30", "50 %
+  von"), decimals go through `decText`, boards and the basis get their names, a rate plan its name.
+  English viewers read the server text after the band-code mapping only. Stage labels are
+  `rates.pt.stage.*`. `useTexT()` gains `has(key)` (`hasTexKey`).
+- *The matrix cell's context menu* (`ContextMenu`, new in `ui/popover.tsx`: a role="menu" opened by
+  the page with the Menu's keys; the focus returns to the cell): "Edit rule…" (Alt+↵) on an editable
+  cell and "Test this price" when the viewer may use the Price test; resolved and read-only cells get
+  the menu too. It opens from a right-click (a long press), Shift+F10 and the ContextMenu key.
+  Alt+Enter and the ▾ trigger still open the rule popover directly.
+- *`contract-admin.spec.ts`* (lines 109-110) now reads `Child \[Child\] 50(\.00)?% of` and `Child
+  \[Infant\] 0(\.00)?% of`, the labels that spec gives the bands CHD and INF.
+- *Strings:* 83 new keys (`rates.pt.*`, `rates.explain.*`, `rates.ws.cell.menu*`) in the six
+  catalogues.
+
+**Deviations from the slice text, with reasons (S14).**
+1. *Files beyond the slice list:* `explainText.ts` and `priceTest.ts` (pure helpers, tested), the
+   design system (`ui/popover.tsx` `ContextMenu`, `ui/grid.ts` `revealElement`, the DOM harness
+   case), `i18n/index.ts` (`has`), `VersionEditor.tsx` (the non-modal drawer, the prefill request,
+   the Show in grid request), `tabs/shared.tsx` (the new TabProps), `PriceMatrix.tsx` (the cell
+   menu, the active cell, its show request), `OccupancySection.tsx` / `OccupancyLadder.tsx` and
+   `BoardsSection.tsx` (their show requests; ladder cell ids).
+2. *The context-menu gestures open a menu* on a matrix cell when the viewer may use the Price test.
+   S9 opened the rule popover directly from Shift+F10, the ContextMenu key and a right-click; now the
+   popover is one Enter away ("Edit rule…" is first and focused), and Alt+Enter and ▾ are unchanged.
+   Without `can_preview` the gestures open the popover as before. The menu is the only way to reach
+   "Test this price" from a resolved or read-only cell by keyboard. S9's scratch scenario "Shift+F10
+   opens it too" must press Enter first (the adapted copy passes, below).
+3. *Stay stages appear with only rejected offers.* Fixture (a) holds the demo market's rejected
+   "Early booker 10%", so its stay stages are Promotion (a line, no amounts), Tax and Final price. A
+   stage shown only for a step the ladder does not place (g) has no amounts and does not break the
+   chain.
+4. *The chain check's reading of "the previous amount-bearing stage":* a stage with only a value
+   (Base, Night cost, the final price, an entered Room) is compared by that value; a stage whose
+   night field is missing (e) resets the chain instead of reporting a break; at stay level Cost
+   offers, Promotion and Tax each start a chain (contract cost, the sell price and the subtotal with
+   extras and rounding are different quantities), each applied offer inside them starts from the
+   previous one's after, and the final price is compared with Tax's after.
+5. *Where detail lines go:* OCCUPANCY_TOTAL closes the last of Occupancy / Children / Special
+   combination; CHILD_AS_ADULT (a stay-level step) goes under every night's Children; the FX steps of
+   the accommodation go under every night's Currency conversion (identity conversions have none);
+   cost-offer and promotion steps are stay lines (the night stages show `cost` → `cost_net` and
+   `sell` → `final` only). Only consecutive identical nights are grouped, so blocks stay in date
+   order.
+6. *Two night selectors:* the ladder's ("Nights shown", All nights by default) and the Why list's
+   own ("Night", first night by default, as before, which keeps a long stay's list short).
+7. *The exact-age "toggle" is a select per child* (years / months / date of birth), which also names
+   the unit of the field; the form still takes at most 6 children (the server takes 12).
+8. *Templates exist for 24 codes;* FX, COUPON_APPLIED, EXTRA*, BOOKING_BASKET*, BASKET_FORFEIT and
+   any new code keep the server's sentence. Free text in params (promotion reasons, markup and rule
+   labels, tax categories, period names) stays as served; rule labels are identities and are only
+   band-mapped.
+9. *Show in grid* is offered for rules that are rows of this draft (room prices, occupancy rules,
+   board rules). A pricing policy's rule, the engine's adult default, markups, promotions and rate
+   plans have none. A ladder rule switches the ladder to its room scope.
+10. *No committed Playwright spec* (S16 owns them); only `contract-admin.spec.ts` changed. The
+    slice's checks ran as a scratch spec (below).
+
+**Tests (S14).** `npm run test:unit` 272 (257 + 15, `tests/unit/explain-ladder.test.ts` on the
+recorded fixtures `tests/fixtures/quote-deluxe-2a1c.json`, `quote-combination-2a2c.json`,
+`quote-period-adjust.json`, `quote-room-basis.json`: `preview_price` with the unsaved overlay on this
+tree's bench, trimmed to the keys the ladder reads):
+- (a) Deluxe 2A + child 8, 3 nights in P2, BB: the stage order; Base after `80.000000`; Period
+  without amount; Room `80.000000` → `108.000000`; Occupancy `108.000000` → `216.000000`; Children
+  `216.000000` → `270.000000` with the CHILD_SLOT line `54.000000`; Board `270.000000` →
+  `270.000000` (included); Night cost `270.000000`; no Special combination, Period adjustment or Rate
+  plan; one block "Nights 1–3"; no chain break; every value a served string;
+- (b) 2A+2C with a whole-party rule: Special combination's before is `subtotal_children`, its after
+  `occupancy`;
+- (c) a P2 night adjustment and a rate plan: Period adjustment after Board, before Rate plan and
+  Night cost, its before `subtotal_board`;
+- (d) ROOM basis: Occupancy starts from the room price, with the ROOM_BASIS line;
+- (e) without `subtotal_*`: Occupancy, Children and Board blank, missing, lines kept, no break;
+- (f) a night's `unit` edited: one break (`occupancy`, 109 after `room` 108) on that night, and the
+  night is a block of its own; canonical comparison (`216.000000` = `216`, unreadable → null);
+- (g) unknown codes: a board-stage step under Board, a rate-plan step shows an optional stage
+  without amounts, a stay tax step under Tax, a contract-stage step nowhere in the ladder;
+- stay promotions and cost offers (applied chain, a break inside), an unsellable quote;
+- `parseOpText`, `parseChildLabel`, `bareBandCodes`; `prefillOf` (active cell, All periods, no
+  cell, clamping to the stay window, the first period not ended, no periods); `childPayload` /
+  `withChildMode`; `showTargetOf` (`~key`, `~table-n`, a saved name, the engine default, a markup,
+  a removed row).
+`npm run test:dom` 30 (29 + the ContextMenu case: right-click, Shift+F10, the ContextMenu key,
+arrows, typeahead, Enter/Space, Escape and Tab back to the cell, an outside click).
+Fail-first: without the three pure modules the unit file fails to load (`ERR_MODULE_NOT_FOUND:
+…/workspace/explainLadder.ts`); `contract-admin.spec.ts` with its old regexes fails on this tree
+(`Expected pattern: /Rule applied: Version Child \[CHD\] 50(\.00)?% of/`; the list reads "Child
+[Child] 50% of" and "Child [Infant] 0% of"), and passes with the new ones.
+
+**Verification (S14).**
+- Frontend: `tsc -b`, `npm run build`, `npm run i18n:tex` (83 new keys in the six catalogues),
+  `test:unit` 272/272, `test:dom` 30/30. Python unit 491 OK (no server change).
+- Integration, migrated with this tree: `test_pricing_workspace_api` 50 OK.
+- Browser, on the tree's own servers (bench :8016, Vite :5186), a scratch spec 5/5
+  (`scratchpad/s14/e2e/s14-price-test.spec.ts`):
+  1. Deluxe ×1.35 typed unsaved; the right-click menu on Deluxe's resolved P2 cell has "Test this
+     price"; the drawer has no `aria-modal` and is prefilled (Deluxe, 1–4 May, BB, 2 adults, "Priced
+     with your unsaved changes."). Child 8, Calculate: the table "Nights 1–3 · P2" reads Base price
+     80.00; Period "no amount (period used to choose rules)"; Room 80.00 → 108.00; Occupancy (adults)
+     108.00 → 216.00; Children 216.00 → 270.00 with the child line 54.00; Board 270.00 → 270.00
+     "included"; Night cost 270.00; no Special combination, Period adjustment or Rate plan; the
+     served `nights[0]` fields are those strings; the order caption and "Whole stay" are shown; no
+     `save_version` request; one night selected shows "Night 2 · P2".
+  2. `{age_months: 143}` is sent and priced "Child 1 (11y11m, Child 7–11.99)"; 144 reads "child 1 is
+     above the oldest child band: priced as adult"; a date of birth is sent as `{dob}`.
+  3. With Superior · P4 focused, the header's Price test starts from Superior and 1 July. The Why
+     list reads "Child 1 [Child 7–11.99] @2A+2C" and "Child 2 [Child 3–6.99] @2A+2C" and no band
+     code. "Show in grid" on the Superior P4 rule closes the drawer and focuses Superior · P4; on the
+     2A+2C child rule it focuses the 2+2 card; on the band rule of a 2A+1C test it focuses the ladder
+     cell "Child 7–11.99 · All periods".
+  4. Live: 3 adults re-prices without Calculate; Standard P1 typed 75 in the matrix beside the open
+     drawer re-prices it; no `save_version`. Preview & audit prices with the ladder, and its "Show in
+     grid" opens Pricing (`#pricing`) on Standard · P1. Escape closes the drawer and the focus
+     returns to the Price test button.
+  5. German: the stage labels (Basispreis, Zeitraum, Zimmer, Belegung (Erwachsene), Kinder,
+     Verpflegung, Kosten der Nacht, Aufschlag, Währungsumrechnung, Aktion), the caption, and the
+     sentences "Garden Villa = Standard Sea View × 1,30 → 104,00", "Kind 1 (8 J., Child 7–11.99) ×
+     0,50 104,00 = 52,00", "Zeitraum P2 (May)", "Übernachtung mit Frühstück: im Preis enthalten".
+  At 375 px the drawer's body does not scroll sideways.
+- Committed specs: `contract-admin` (with the new regexes), `critical-journey`, `editor-edits`,
+  `entry-branding` (`TEX_E2E_BENCH=http://test.localhost:8016`) and `policy-revisions`: 15 passed, 1
+  skipped (the two-factor case, as before).
+- Earlier scratch specs on this tree: S11 rerun 4/4, S12 5/5 + review 2/2, S13 6/6, S10 bulk
+  (scoped) 6/6. S9's matrix spec passes 4/8 as it stands: its fifth test expects Shift+F10 to open
+  the popover (deviation 2), and the three after it did not run. A copy with that step reading "the
+  cell menu, Enter on Edit rule…" passes 8/8 (`scratchpad/s14/e2e-s9/s9-matrix-menu.spec.ts`).
+
+**Performance after S14.** `explainLadder` maps a 90-night quote (993 steps) in 4.6 ms (Node). The
+Why list looks each rule id up once per table state (a 5,000-row draft took 68.5 ms for 993
+uncached lookups; the cache leaves one per distinct rule). Live makes one `preview_price` call per
+settled edit (300 ms), aborting the older one; the drawer adds no other call.
+
+**O1–O5 after S14** (all five provisional, owner input 13): unchanged. The Price test prices what
+O1–O5 stored; the ladder shows the board supplement (O1–O3) and the base room's adjusted price (O4)
+as the server priced them.
+
+**Open after S14.**
+- *S16 must commit the S14 scratch scenarios 1–5* with those of S10–S13, and change S9's "Shift+F10
+  opens it too" step to the cell menu (Enter on "Edit rule…").
+- *S15* can reuse `revealElement`, the ladder's `data-cellid` (`occ:{row}|{period}`,
+  `ladderCellId`) and the `show` / `onShown` request of `TabProps` for issue anchoring.
+- Useful names for tests: dialog "Price test"; tables named by their captions ("Nights 1–3 · P2",
+  "Night 2 · P2", "Whole stay"), row headers per stage, detail rows `tr[data-line="<CODE>"]`, stage
+  rows `tr[data-stage]`; select "Nights shown"; "Child {n}: age given in", "Age of child {n} in
+  months", "Date of birth of child {n}"; switch "Live"; buttons "Show in grid: {rule}"; menu "Cell
+  actions: {room} · {period}" with "Edit rule…" and "Test this price".
+- The `#occupancy` / `#boards` hash still does not reopen a section followed a second time (S11 and
+  S13 review items); Show in grid always opens it.
+- Still open from S10–S13: their low review items.

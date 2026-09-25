@@ -555,3 +555,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   example was typed, saved and priced in the Price test with board HB. No server change; no area
   status changes. O1–O3 are now implemented in the board cells and remain owner input 13, as do
   O4 and O5. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S14 on branch `pricing-workspace` (ADR-061): the Price test
+  opens in a non-modal drawer from the header or a matrix cell's "Test this price", prefilled from
+  that cell, and prices unsaved edits without a save. A child's age can be given in months or by
+  date of birth. The Explain ladder shows the engine's stages in the order it applies them, with
+  the server's values before and after each stage; the browser computes nothing. "Why this price"
+  shows band labels instead of codes, speaks the viewer's language where a template exists and
+  links each rule to its cell or card. No server change; no area status changes. O1–O5 remain owner
+  input 13. Verdict unchanged: NOT READY.
