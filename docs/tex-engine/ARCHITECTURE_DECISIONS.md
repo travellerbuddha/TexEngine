@@ -7141,8 +7141,8 @@ as the server priced them.
 
 **Decision (implemented in S15: validation anchored in the workspace, band labels in every issue
 list, the literal i18n key scan).** Branch `pricing-workspace`, frontend only (no server file
-changes), commits `716e51f` (pure `issues.ts` and its tests), `665efd0` (the screens) and `6ee38ef`
-(the i18n check).
+changes), commits `716e51f` (pure `issues.ts` and its tests), `665efd0` (the screens), `6ee38ef`
+(the i18n check) and `c716e90` (`data-issue` on period headers).
 - *Anchoring* (pure `workspace/issues.ts`, `anchorIssues(issues, tables, {bands})` → `byCell`
   (anchor id → issues), `anchors` (per issue) and `unanchored`). The anchor ids are the grids'
   `data-cellid`: matrix `{room}|{period}`, board `board:{board}|{room}|{period}`, ladder
