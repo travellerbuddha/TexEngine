@@ -497,3 +497,18 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   base-room reading tells "50%" from "+50%". O1–O5 remain owner input 13, and their implemented
   behaviour is listed in ADR-061. Display note unchanged: resolved amounts are cut, not rounded.
   No server change; no area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S10 on branch `pricing-workspace` (ADR-061): the room price
+  matrix's bulk tools. Rows and columns are selected from their headers; prices and formulas are
+  filled across periods and down rooms, with a confirmation before a formula row gets a fixed
+  price; blocks are copied and pasted from spreadsheets, all or nothing; Adjust… changes selected
+  entered prices with the server's preview; undo and redo work from the toolbar and the keyboard,
+  and a bulk change can be undone from its toast for 10 s. Edits in the rule tables are undo
+  entries too, so undoing in the matrix no longer drops them. No server change; no area status
+  changes. O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S10 review follow-up on branch `pricing-workspace` (ADR-061).
+  Filling down from a cell that follows its room's default now copies what the cell shows,
+  instead of giving the target its own room's default (Family Suite ×1.15 onto Garden Villa gave
+  ×1.35 and dropped Garden Villa's override); copying such a cell copies what it shows. A fill
+  from an empty cell says how many cells it cleared. S10 is now documented in ADR-061, and the
+  undo toast has a committed browser test. No server change; no area status changes. Verdict
+  unchanged: NOT READY.
