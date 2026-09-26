@@ -239,6 +239,15 @@ def at_stored_price(snap: dict, stored) -> dict:
 	return {**snap, "totals": {**totals, "total": to_str(D(stored))}}
 
 
+def manual_price(res) -> D | None:
+	"""The price staff set on a room by hand (D-9, ADR-065): its stored price while its snapshot
+	records an ``override_amount``; None when the engine's price is the stored one."""
+	snap = json.loads(res.get("tex_pricing_snapshot") or "{}")
+	if snap.get("override_amount") in (None, ""):
+		return None
+	return from_db(res.get("tex_total_amount"), res.get("tex_currency") or snap.get("currency") or "EUR")
+
+
 def required_now(booking, override: dict | None = None) -> D:
 	"""What the booking's payment terms require to be paid by now: each live room's
 	``amount_due_now`` (its frozen payment policy on its stored price, the booking's payment

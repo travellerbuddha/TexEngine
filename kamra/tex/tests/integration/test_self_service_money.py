@@ -357,6 +357,21 @@ class TestGuards(GuestMoneyCase):
 		self.assertEqual(stay(b["rooms"][0]["reservation"])[0], str(fx.d(6, 13)))
 		self.assertEqual(public.booking_status(token=b["manage_token"])["changes_blocked"], "PAYMENT_PENDING")
 
+	def test_a_stay_priced_by_hand_is_not_changed_online(self):
+		"""Y-7b (D-9, ADR-065): a price staff set is never silently replaced by the engine's: the guest
+		cannot change such a stay online (extras may still be added, Y-7)."""
+		b = self.deposit_paid("gcm-manual")
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff set the price
+		p = modification.propose(res, {})
+		modification.apply(p["proposal_token"], reason="the price agreed by phone", override_amount="800")
+		from kamra.tex.services import guest_changes
+
+		with self.assertRaisesRegex(guest_changes.ChangeRefused, "can no longer be changed online"):
+			self.propose(b, (6, 14))
+		self.assertFalse(public.booking_status(token=b["manage_token"])["rooms"][0]["can_change"])
+		self.assertEqual(stay(res), (str(fx.d(6, 13)), D("800.00")))
+
 	def test_the_same_proposal_twice_opens_one_request(self):
 		b = self.deposit_paid("gcm-twice")
 		up = self.propose(b, (6, 14))

@@ -276,6 +276,45 @@ class TestManualOverride(DeterminismCase):
 		out = modification.apply(p["proposal_token"], reason="Corporate rate agreed by phone", override_amount="380")
 		self.assertEqual((out["new_total"], revision(out["revision"]).change_type), ("380.00", "Price Override"))
 
+	def priced_by_hand(self) -> str:
+		"""Staff price the stay by hand at 380 (the engine's 400). → the reservation."""
+		res = sell()
+		as_user(self.rm)
+		p = modification.propose(res, {})
+		modification.apply(p["proposal_token"], reason="Corporate rate agreed by phone", override_amount="380")
+		return res
+
+	def test_a_change_of_a_stay_priced_by_hand_needs_a_choice(self):
+		"""Y-7b (D-9, ADR-065): a later change shows the price set by hand and the change's price; it is
+		refused until staff choose one, never silently repriced."""
+		res = self.priced_by_hand()
+		p = modification.propose(res, {"check_out": str(fx.d(6, 13))})
+		self.assertEqual(p["manual_price"], {"amount": "380.00", "engine_total": "600.00"})
+		with self.assertRaisesRegex(frappe.ValidationError, r"380\.00.*600\.00"):
+			modification.apply(p["proposal_token"], reason="one more night")
+		self.assertEqual(D(frappe.db.get_value("Reservation", res, "tex_total_amount")), D("380.00"))
+
+	def test_the_price_set_by_hand_is_kept_when_staff_keep_it(self):
+		res = self.priced_by_hand()
+		p = modification.propose(res, {"check_out": str(fx.d(6, 13))})
+		out = crs_api.apply_modification(proposal_token=p["proposal_token"], reason="one more night, same price",
+		                                 override_amount=p["manual_price"]["amount"])
+		self.assertEqual(out["new_total"], "380.00")
+		rev = revision(out["revision"])
+		self.assertEqual((rev.pricing_basis, json.loads(rev.changes_json)["priced"]["total"]), ("MANUAL", "600.00"))
+
+	def test_staff_without_price_override_take_the_changes_price_and_it_is_audited(self):
+		res = self.priced_by_hand()
+		as_user(self.agent)
+		p = modification.propose(res, {"check_out": str(fx.d(6, 13))})
+		out = crs_api.apply_modification(proposal_token=p["proposal_token"], reason="one more night", reprice=1)
+		self.assertEqual(out["new_total"], "600.00")
+		self.assertEqual(D(frappe.db.get_value("Reservation", res, "tex_total_amount")), D("600.00"))
+		dropped = {"amount": "380.00", "engine_total": "600.00"}
+		self.assertEqual(json.loads(revision(out["revision"]).changes_json)["manual_price_dropped"], dropped)
+		as_user("Administrator")
+		self.assertEqual({k: last_audit("reservation.manual_price_dropped", res)[k] for k in dropped}, dropped)
+
 	def test_an_override_on_a_historical_sale_date(self):
 		res = sell()
 		sold_at = now_datetime()

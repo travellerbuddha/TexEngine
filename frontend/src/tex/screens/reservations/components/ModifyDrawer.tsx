@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, ArrowRight, Calculator, RotateCcw } from "lucide-react"
 import { useTexQuery, type TexApiError } from "../../../lib/api"
-import { addDays, date, isDecimal, nightsBetween } from "../../../lib/format"
+import { addDays, date, isDecimal, money, nightsBetween } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
 import {
@@ -154,6 +154,8 @@ export function ModifyDrawer({
   const [overrideAmount, setOverrideAmount] = useState("")
   // sell a change the restrictions refuse (restriction.edit; G-48)
   const [overrideRestrictions, setOverrideRestrictions] = useState(false)
+  // a stay priced by hand takes the change's price only when staff choose it (D-9)
+  const [reprice, setReprice] = useState(false)
   const [reason, setReason] = useState("")
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<TexApiError>()
@@ -176,6 +178,7 @@ export function ModifyDrawer({
     setOverride(false)
     setOverrideAmount("")
     setOverrideRestrictions(false)
+    setReprice(false)
     setReason("")
     setApplyError(undefined)
   }, [open, initial])
@@ -240,7 +243,10 @@ export function ModifyDrawer({
       const p = await proposeModification(res.name, changes, basis, basis === "HISTORICAL_SALE_DATE" ? localToServer(basisAt) : undefined)
       setProposal(p)
       setProposedSig(sig)
-      setOverrideAmount("")
+      // a price set by hand is kept unless staff use the change's price: filled in to keep (D-9)
+      if (p.manual_price) setOverride(canOverride)
+      setOverrideAmount(p.manual_price && canOverride ? p.manual_price.amount : "")
+      setReprice(false)
       setOverrideRestrictions(false)
       window.setTimeout(() => resultRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 50)
     } catch (e) {
@@ -254,13 +260,17 @@ export function ModifyDrawer({
   const overrideOk = !override || (isDecimal(overrideAmount) && cmpDecimal(overrideAmount, "0") >= 0)
   const restricted = Boolean(proposal && !proposal.sellable && proposal.restriction_override)
   const sellableNow = Boolean(proposal && (proposal.sellable || (restricted && overrideRestrictions)))
-  const canApply = Boolean(proposal && !stale && sellableNow && reason.trim().length > 2 && overrideOk && !applying)
+  const manual = proposal?.manual_price ?? null
+  // a stay priced by hand: keep that price (a final price) or use the change's, never silently (D-9)
+  const choiceOk = !manual || (canOverride && override) || reprice
+  const canApply = Boolean(proposal && !stale && sellableNow && reason.trim().length > 2 && overrideOk && choiceOk && !applying)
   const apply = async () => {
     if (!proposal || !canApply) return
     setApplying(true)
     setApplyError(undefined)
     try {
-      const r = await applyModification(proposal.proposal_token, reason.trim(), override ? overrideAmount : undefined, restricted && overrideRestrictions)
+      const keep = canOverride && override && !reprice
+      const r = await applyModification(proposal.proposal_token, reason.trim(), keep ? overrideAmount : undefined, restricted && overrideRestrictions, Boolean(manual) && reprice)
       toast.success(t("res.mod.applied", { rev: r.revision }))
       onApplied(r)
     } catch (e) {
@@ -489,9 +499,43 @@ export function ModifyDrawer({
                 <p className="text-xs text-zinc-600">{t("res.mod.override_restrictions_hint", { rules: proposal.restrictions.map((r) => r.message).join("; ") })}</p>
               </div>
             )}
+            {manual && (
+              <Notice tone="warning" title={t("res.mod.manual_title")}>
+                <p>
+                  {t("res.mod.manual_body", {
+                    manual: money(manual.amount, proposal.proposed.currency),
+                    engine: money(manual.engine_total, proposal.proposed.currency),
+                  })}
+                </p>
+                <Button
+                  size="sm"
+                  variant={reprice ? "primary" : "secondary"}
+                  className="mt-2"
+                  aria-pressed={reprice}
+                  onClick={() => {
+                    setReprice(true)
+                    setOverride(false)
+                  }}
+                >
+                  {t("res.mod.manual_use_change")}
+                </Button>
+                {reprice ? (
+                  <p className="mt-1 text-xs">{t("res.mod.manual_dropped", { manual: money(manual.amount, proposal.proposed.currency) })}</p>
+                ) : (
+                  !choiceOk && <p className="mt-1 text-xs">{t(canOverride ? "res.mod.manual_choose" : "res.mod.manual_choose_no_override")}</p>
+                )}
+              </Notice>
+            )}
             {canOverride && (
               <div className="space-y-2">
-                <Checkbox label={t("res.mod.override")} checked={override} onChange={(e) => setOverride(e.target.checked)} />
+                <Checkbox
+                  label={t("res.mod.override")}
+                  checked={override}
+                  onChange={(e) => {
+                    setOverride(e.target.checked)
+                    if (e.target.checked) setReprice(false)
+                  }}
+                />
                 {override && (
                   <Field label={t("res.mod.override_amount")} hint={t("res.mod.override_hint")} error={!overrideOk && overrideAmount ? t("res.mod.override_invalid") : undefined} required>
                     <DecimalInput id="mod-override" value={overrideAmount} onValueChange={setOverrideAmount} suffix={proposal.proposed.currency} className="max-w-48" />

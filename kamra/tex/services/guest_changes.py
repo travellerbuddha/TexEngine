@@ -220,8 +220,10 @@ def change_applying(booking: str) -> bool:
 
 
 def room_changeable(res) -> bool:
-	"""Guests change a room only before they arrive: confirmed, arriving today or later."""
-	return res.status == "Confirmed" and getdate(res.check_in_date) >= getdate(now_datetime())
+	"""Guests change a room only before they arrive: confirmed, arriving today or later, and not
+	priced by hand: a price staff set is changed only by staff (D-9, ADR-065)."""
+	return res.status == "Confirmed" and getdate(res.check_in_date) >= getdate(now_datetime()) \
+		and booking_svc.manual_price(res) is None
 
 
 def guard_room(res) -> None:
