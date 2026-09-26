@@ -7497,7 +7497,7 @@ as ADJUST_PERCENT, boards 1), O4 (`+10%` on the base P1 adjusted once by `apply_
 - Still open from S10–S15: their low review items (none changed by S16); `#occupancy` / `#boards`
   followed a second time do not reopen a collapsed section.
 - Only Chromium was run (the container has no WebKit or Firefox).
-- CI has never run on GitHub (no base branch, owner item).
+- CI had not run on GitHub yet (then an owner item; resolved 2026-09-26: PR #2 and PR #1 green).
 
 **S16 review follow-up (2026-09-25).** The review of the finished workspace reported one high, seven
 medium and fifteen low findings. All are fixed except three low ones, which are recorded as open
@@ -7711,8 +7711,8 @@ parser, op mapping or `apply_op_values` change.
 - The E2E dark-theme check reads `rgb()` colours only. Every remapped shade is hex, so an
   unremapped (oklch) colour reads as a failure there, which is what the check wants.
 - Still open from S16: the committed bundles run on the dev bench only after the merge; the
-  keyboard help's Shift+F10 wording; the S10–S15 low items; only Chromium was run; CI has never run
-  on GitHub.
+  keyboard help's Shift+F10 wording; the S10–S15 low items; only Chromium was run; CI had not run
+  on GitHub yet (resolved 2026-09-26).
 
 **S16 re-review follow-up (2026-09-25).** A second review of the finished workspace reported nine
 medium and twelve low findings. All nine medium ones are fixed. Of the low ones, eleven are fixed
@@ -7908,8 +7908,8 @@ parser, op mapping or `apply_op_values` change.
 - Between `sm` and `lg` a non-modal side panel still covers the page's right side. From `lg` the
   page makes room for it.
 - Still open from S16: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no F6 shortcut, an
-  error draft of a removed room or period kept until Discard, only Chromium run, CI never run on
-  GitHub.
+  error draft of a removed room or period kept until Discard, only Chromium run, CI not yet run on
+  GitHub (resolved 2026-09-26).
 
 **S16 re-review 2 follow-up (2026-09-25).** A third review of the workspace reported one high, four
 medium and eight low findings. All thirteen are fixed. Branch `pricing-workspace`; main `1575c8b`
@@ -8053,7 +8053,7 @@ editing written three times (`useInlineGridEditor` open), no clipboard or fills 
 boards grid, a base-room entry waiting for `apply_op_values` not in a Ctrl/Cmd+S made meanwhile,
 side panels covering the page between `sm` and `lg`, and S16's open items (the §3.18 one-screen fit,
 `HEAVY_LIMITS` as constants, no F6 shortcut, an error draft of a removed room or period kept until
-Discard, only Chromium run, CI never run on GitHub). New: a single-use rule of the other form that a
+Discard, only Chromium run, CI not yet run on GitHub, resolved 2026-09-26). New: a single-use rule of the other form that a
 room scope inherits from All rooms is switched only in the rooms the popover writes, so the room scope
 then shows both rows (by design: switching All rooms' rows from a room scope would change other
 rooms).
@@ -8224,7 +8224,7 @@ inline editing is written three times (`useInlineGridEditor` open); the ladder a
 have no clipboard or fills; a base-room entry waiting for `apply_op_values` is not in a Ctrl/Cmd+S
 made meanwhile. S16's open items remain: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no
 F6 shortcut, an error draft of a removed room or period kept until Discard, only Chromium run, CI
-never run on GitHub. Changed:
+not yet run on GitHub (resolved 2026-09-26). Changed:
 - Side panels now lie over the page below 80rem (md) instead of below `lg`. At 1024–1279 px the
   Price test covers the matrix's right side again, rather than leaving it no columns.
 - The re-review 2 item "a single-use rule of the other form that a room scope inherits from All

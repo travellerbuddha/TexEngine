@@ -224,7 +224,7 @@ See also [`GO_LIVE_READINESS.md`](GO_LIVE_READINESS.md) for the per-area launch 
 | Production certification of iyzico, Sipay and NestPay | R-40 | Merchant sandbox + production credentials. The code paths exist but are uncertified (`production_verified=False`), so a Production account for them is refused on save and at run time (ADR-041). |
 | Outgoing e-mail delivery | R-42, R-44 | An SMTP / e-mail account on the site, sender domain and SPF/DKIM. Booking e-mails are queued; each TEX Communication follows its queue entry (Sent / Failed with reason) and "resend" reports "queued" (ADR-047). |
 | Channel-manager provider certification (Channex, SiteMinder, RateGain, …) | R-44 | Provider API credentials, commercial access and their certification run. TEX has the provider-neutral layer and a sandbox adapter (`certified=False`, refused in Production); a real adapter is a subclass of `ChannelAdapter` (ADR-039). |
-| Pull request and CI on GitHub | R-61 | A base branch (e.g. `main`) in `travellerbuddha/texengine`; the repository has only the working branch. |
+| ~~Pull request and CI on GitHub~~ | R-61 | ~~A base branch (e.g. `main`) in `travellerbuddha/texengine`; the repository has only the working branch.~~ RESOLVED 2026-09-26: base `claude/inspiring-ptolemy-i6wdu2`; PR #2 (348b1325) and PR #1 (0669c51e) merged with CI green. |
 
 ## 6. Implementation order
 

@@ -1,4 +1,5 @@
-Branch: `claude/inspiring-ptolemy-i6wdu2` on origin (integrated: merge 93acf09 of `pricing-workspace` b80ef86 into 7f621de).
+Branch: `claude/inspiring-ptolemy-i6wdu2` on origin at 0669c51e (merge of PR #1, audit Part 1, over PR #2 348b1325, the CI
+baseline; both merged with GitHub CI green). Before them: merge 93acf09 of `pricing-workspace` b80ef86 into 7f621de.
 
 # TEX Engine — Handoff (2026-09-26 06:1x UTC)
 
@@ -6,7 +7,8 @@ Facts only. Checked with the commands in §6 on 2026-09-26.
 
 ## 1. Branch map
 
-Remote (`git ls-remote origin`): exactly one branch, `claude/inspiring-ptolemy-i6wdu2`. Every commit below is reachable from it except `worktree-wf_957bf605-4e5-1`.
+Remote: the base branch `claude/inspiring-ptolemy-i6wdu2` (0669c51e); work comes in through pull requests with GitHub CI.
+The table below is the state before PR #2 and PR #1. Every commit in it is reachable from the base except `worktree-wf_957bf605-4e5-1`.
 
 | Ref | SHA | Content | Merge? |
 |---|---|---|---|
@@ -105,7 +107,7 @@ Open gaps (FINAL_GAP_AUDIT.md §3–§5; severity = section):
 | G-83 | Remainder: double opt-in e-mail; old payment links until expiry | Low (remainder) |
 | G-97 | Contract version rates readable in Desk by Hotel Admin whatever the profile | Low |
 
-Blocked on owner input: payment production certification, SMTP, channel-manager certification, a GitHub base branch for PR/CI.
+Blocked on owner input: payment production certification, SMTP, channel-manager certification.
 
 Requirements not COMPLETE (IMPLEMENTATION_STATUS.md:1362–1423), with the linked gap:
 
