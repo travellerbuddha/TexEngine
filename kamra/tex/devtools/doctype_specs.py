@@ -1115,6 +1115,9 @@ PAYMENT_SPECS = [
 		F("completed_at", "Datetime", "Completed at"),
 		# K-2a: a pending charge of a booking is a payment in flight only until then
 		F("expires_at", "Datetime", "Attempt open until", read_only=1),
+		# B4: when the gateway captured the money, by its own clock (when it states it): a payment is
+		# late by this, never by when its news reached TEX
+		F("captured_at", "Datetime", "Captured at (gateway)", read_only=1),
 		SB("Outcome"),
 		F("raw_status", "Data", "Provider status"),
 		F("error_code", "Data", "Error code"),
@@ -1130,7 +1133,7 @@ PAYMENT_SPECS = [
 		F("reconciliation_note", "Small Text", "Why", read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-09-30 00:00:01.000000"}),   # the indexes, expires_at, then reconciliation came later
+	   extra={"modified": "2026-09-30 00:00:02.000000"}),   # the indexes, expires_at, reconciliation, captured_at came later
 
 	dt("TEX Payment Allocation", PM, [
 		F("property", "Link", "Hotel", "Property"),

@@ -1432,3 +1432,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - B1 (audit 1b) **COMPLETE**: a never-confirmed booking with a room cancelled keeps waiting for its payment (expires with its hold, confirmed by its payment, late money reconciled); p52 restores stuck ones · `TestPartialCancellation`.
 - B2 (audit 1b) **COMPLETE**: money a waiting booking held when it expired comes off it into reconciliation (never a negative balance), amount audited · `TestExpiryWithMoney`.
 - B3 (audit 1b) **COMPLETE**: a payment for a booking whose rooms are still held confirms it at the locked price, however late; released-and-free rooms → Action Required, sold rooms → refund or Action Required (ADR-062) · `TestLatePayment`.
+- B4 (audit 1b) **COMPLETE**: lateness by the gateway's capture time when stated (`captured_at`, p53); a delayed notification or reverify of money paid in time revives the expired booking while its rooms are free, else Action Required · `TestPaidInTime`.

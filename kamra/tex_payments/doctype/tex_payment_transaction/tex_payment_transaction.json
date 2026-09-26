@@ -27,6 +27,7 @@
   "actor",
   "completed_at",
   "expires_at",
+  "captured_at",
   "section_95",
   "raw_status",
   "error_code",
@@ -170,6 +171,12 @@
    "read_only": 1
   },
   {
+   "fieldname": "captured_at",
+   "fieldtype": "Datetime",
+   "label": "Captured at (gateway)",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_95",
    "fieldtype": "Section Break",
    "label": "Outcome"
@@ -221,7 +228,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-30 00:00:01.000000",
+ "modified": "2026-09-30 00:00:02.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Transaction",

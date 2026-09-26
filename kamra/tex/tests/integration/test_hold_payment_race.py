@@ -573,3 +573,97 @@ class TestExpiryWithMoney(HoldCase):
 		self.assertEqual(D(json.loads(expired[0])["paid"]), part)                      # the amount is on record
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
 		                                                     "reference_name": txn}))
+
+
+def captured(at):
+	"""The mock gateway states when it captured the money (B4), as a real gateway may."""
+	import dataclasses
+
+	from kamra.tex.payments.providers.simple import MockProvider
+
+	real = MockProvider.handle_callback
+
+	def handle(self, *args, **kw):
+		return dataclasses.replace(real(self, *args, **kw), captured_at=at)
+
+	return mock.patch.object(MockProvider, "handle_callback", handle)
+
+
+class TestPaidInTime(HoldCase):
+	"""B4 (audit 1b): a payment is late by the gateway's clock, when it states when it captured
+	the money, never by when its news reached TEX. A delayed notification, or staff verifying after
+	an outage, never leaves a booking paid in time cancelled: it gets back the rooms its expiry gave
+	back while they are still free and is confirmed; rooms sold meanwhile go to staff, never an
+	automatic refund."""
+
+	def paid_in_time(self, b: dict) -> tuple[dict, object]:
+		"""A pays within its checkout; the news is delayed until the expiry job has given its rooms back."""
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)
+		at = add_to_date(frappe.db.get_value("TEX Payment Transaction", payment["transaction"], "expires_at"),
+		                 minutes=-5)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		return payment, at
+
+	def test_a_delayed_notification_confirms_a_booking_paid_in_time(self):
+		b = self.book(rooms=2)
+		payment, at = self.paid_in_time(b)
+		with captured(at), mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		mailed.assert_called_once()
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed", "Confirmed"]))
+		self.assertFalse(txn_state(payment["transaction"]).reconciliation)
+		self.assertEqual(paid(b), D(b["due_now"]))
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D(b["total"]))
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", payment["transaction"], "captured_at"), at)
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.revive",
+		                                                     "reference_name": b["booking"]}))
+
+	def test_a_payment_captured_after_its_checkout_closed_is_late(self):
+		b = self.book()
+		payment, at = self.paid_in_time(b)
+		with captured(add_to_date(at, minutes=10)):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
+
+	def test_a_booking_paid_in_time_whose_room_was_sold_meanwhile_goes_to_staff(self):
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		a = self.book(room="DLX")
+		payment, at = self.paid_in_time(a)
+		b = self.book(room="DLX", method="Pay at Hotel", status="Confirmed")          # the last room, to B
+		with captured(at), mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		mailed.assert_not_called()
+		self.assertEqual(self.statuses(a), ("Cancelled", ["Cancelled"]))
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		dlx = self.f["room_types"]["DLX"]
+		self.assertEqual(frappe.db.count("Reservation", {"room_type": dlx, "status": ("in", [
+			"Confirmed", "Pending Payment", "Held", "Checked In"])}), 2)                # never oversold
+		t = txn_state(payment["transaction"])
+		self.assertEqual(t.reconciliation, "Action Required")        # paid in time: staff decide, no auto refund
+		self.assertIn("in time", t.reconciliation_note)
+
+	def test_money_it_held_before_its_expiry_comes_back_with_it(self):
+		b = self.book()
+		part = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		cash = pay.record_manual(booking=b["booking"], amount=str(part), method="Cash", reference="first half",
+		                         idempotency_key=f"b4-half-{b['booking']}")["transaction"]
+		payment, at = self.paid_in_time(b)
+		self.assertEqual(txn_state(cash).reconciliation, "Action Required")           # B2: off the expired booking
+		with captured(at):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertEqual(paid(b), D(b["due_now"]))
+		self.assertEqual(pay.allocated_of(cash), part)
+		self.assertEqual(txn_state(cash).reconciliation, "Resolved")
+
+	def test_a_booking_cancelled_on_purpose_is_never_revived(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		booking.cancel_reservation(self.rooms(b)[0], reason="the guest called to cancel")
+		with captured(now_datetime()):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")

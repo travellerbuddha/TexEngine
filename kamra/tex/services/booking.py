@@ -1147,6 +1147,63 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 	return True
 
 
+def revive_expired(booking: str, *, reason: str) -> list[str]:
+	"""B4: a booking that expired while its payment was already made (the gateway captured it in
+	time, its news came after the expiry) takes back the rooms its expiry gave back, at their locked
+	price, when they are still free: under the booking's lock, its rooms' (name order) and their
+	nights', recounted as a new sale of its contract is; its limited extras and coupon uses are
+	checked and taken again. It waits for its payment again, which confirms it. Rooms cancelled on
+	purpose stay cancelled. A room, extra or coupon gone meanwhile raises ``frappe.ValidationError``
+	(the caller undoes the whole step). → the rooms taken back (none: nothing to take back)."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status != "Cancelled" and b.status not in holds.HOLDING:
+		return []
+	rooms = [frappe.get_doc("Reservation", n, for_update=True) for n in sorted(r.reservation for r in b.rooms)]
+	back = [r for r in rooms if r.status == "Cancelled" and not cancelled_on_purpose(r.name)]
+	if not back:
+		return []
+	now = now_datetime()
+	stays = [(r, getdate(r.check_in_date), getdate(r.check_out_date)) for r in back]
+	avail.lock_nights(b.property, [(r.room_type, ci, co) for r, ci, co in stays])
+	need: dict[tuple, int] = defaultdict(int)
+	for r, ci, co in stays:
+		for night in avail.nights(ci, co):
+			need[(avail.pool_of(r.room_type)[0], night)] += 1
+	for r, ci, co in stays:
+		pool = avail.pool_of(r.room_type)[0]
+		_count, per_day = avail.stay_availability(b.property, r.room_type, r.tex_contract, ci, co, now.date(),
+		                                          locking=True)
+		if any(d.available < need[(pool, d.day)] for d in per_day):
+			frappe.throw(_("The rooms of booking {0} are no longer free.").format(booking), title=_("Sold out"))
+	snaps = {r.name: json.loads(r.tex_pricing_snapshot or "{}") for r, _ci, _co in stays}
+	extras = xinv.tracked(b.property)
+	extras_need = xinv.demand(list(snaps.values()), codes=set(extras))
+	if extras_need:
+		xinv.lock_days(b.property, extras_need)
+		xinv.check(b.property, extras_need, trk=extras)
+	frappe.flags.kamra_status_transition = True
+	try:
+		for r, _ci, _co in stays:
+			r.status = "Pending Payment"
+			r.hold_expires_on = now              # its payment confirms it now; nothing else keeps it
+			r.cancellation_reason = r.cancellation_note = r.cancelled_on = None
+			r.flags.tex_modification = True
+			r.flags.tex_inventory_checked = True     # its nights were locked and recounted above
+			r.save(ignore_permissions=True)
+			if extras_need:
+				xinv.allocate(b.property, booking, r.name, snaps[r.name], "Held", trk=extras)
+	finally:
+		frappe.flags.kamra_status_transition = False
+	b.status = "Pending Payment"
+	b.save(ignore_permissions=True)
+	_refresh_booking_after_change(booking)
+	sync_redemptions(booking)                  # its coupon uses, under their limits again
+	names = [r.name for r, _ci, _co in stays]
+	audit("booking.revive", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
+	      new={"reservations": names}, reason=reason)
+	return names
+
+
 def expire_pending_bookings() -> dict:
 	"""Scheduler: bookings whose hold is over, with no payment attempt open, expire with all their
 	rooms (``expire_booking``), each in its own transaction so a payment callback waits for at

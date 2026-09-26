@@ -13,8 +13,13 @@ d) cancelled, beyond what it still owes (its cancellation charges): as b) or c).
 In b)–d) the money stays on record on its charge, off the booking (never a negative balance); the
 note says what is free now and what the stay costs now against its locked price;
 ``payment.reconciliation_required`` is audited. Nothing is confirmed or sent to the PMS. A booking
-that expires with money already on it hands that money over the same way (B2). The caller holds
-the charge's lock (then the booking's): the order a payment callback takes."""
+that expires with money already on it hands that money over the same way (B2).
+
+Late is by the gateway's clock when it states it (B4): money captured while its checkout was open,
+whose news came after the expiry (a delayed notification, staff verifying after an outage), takes
+the booking back with its rooms while they are free (``revive``) and confirms it; when they are
+not, it goes to staff (``Action Required``), never refunded by itself. The caller holds the
+charge's lock (then the booking's): the order a payment callback takes."""
 
 from __future__ import annotations
 
@@ -36,6 +41,9 @@ BOOKING_CANCELLED = "BOOKING_CANCELLED"
 NOT_PAYABLE = "NOT_PAYABLE"
 EXPIRED_UNPAID = "EXPIRED_UNPAID"
 TAKES_MONEY = ("Confirmed", "Partially Cancelled")
+# what a payment made in time may undo: an expiry its news came after (B4)
+REVIVABLE = (ROOMS_RELEASED, BOOKING_CANCELLED)
+REVIVE_SAVEPOINT = "tex_revive_booking"
 CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
           BOOKING_CANCELLED: "it had been cancelled",
           NOT_PAYABLE: "it could not take payments",
@@ -74,14 +82,74 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 		return
 	booking_svc.expire_booking(booking, now=now, force=True)
 	free, detail = _today(booking, now)
-	state = "Refund Queued" if not free and pay.auto_refundable(txn) else "Action Required"
+	in_time = holds.paid_in_time(txn)
+	# paid in time, its news late: never refunded by itself — the hotel decides (B4)
+	state = "Refund Queued" if not free and not in_time and pay.auto_refundable(txn) else "Action Required"
 	ccy = txn.currency
 	cause = CAUSES.get(why, why)
 	note = (f"{to_str(from_db(txn.amount, ccy))} {ccy} arrived at {now:%Y-%m-%d %H:%M} for booking {booking} after "
-	        f"{cause}. Not confirmed: {detail}. "
+	        f"{cause}. "
+	        + (f"It was paid in time (captured at {get_datetime(txn.captured_at):%Y-%m-%d %H:%M}, its checkout open "
+	           f"until {holds.attempt_deadline(txn):%Y-%m-%d %H:%M}), but the booking could not take its rooms back. "
+	           if in_time else "")
+	        + f"Not confirmed: {detail}. "
 	        + ("The rooms are gone: the payment is refunded." if state == "Refund Queued" else
 	           "Book the stay again once the guest accepts it and allocate this payment to it, or refund it."))
 	_flag(txn, booking, why, state, note, from_db(txn.amount, ccy), rooms_free_now=free)
+
+
+def revive(txn, booking: str, amount) -> bool:
+	"""B4: money the gateway captured while its checkout was open, whose news came after the
+	booking expired, takes the booking back with the rooms its expiry gave back
+	(``booking.revive_expired``) — when they are still free, and when this money with what the
+	booking held when it expired (B2, still unused on its charges) pays what it had to pay now, so
+	it is confirmed at once. That money comes back to it and its charges leave reconciliation.
+	Anything else changes nothing: → False (the caller reconciles). → whether it was taken back."""
+	from kamra.tex.payments import service as pay
+	from kamra.tex.services import booking as booking_svc
+	from kamra.tex.services.txn import undo_step
+
+	if not holds.paid_in_time(txn):
+		return False
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	back = _held_when_expired(b)
+	if from_db(b.paid_amount, b.currency) + sum(back.values(), ZERO) + amount < from_db(b.amount_due_now, b.currency):
+		return False
+	frappe.db.savepoint(REVIVE_SAVEPOINT)
+	messages = frappe.local.message_log
+	mark = len(messages)
+	try:
+		if not booking_svc.revive_expired(booking, reason=f"payment {txn.name} captured in time"):
+			return False
+		for name, held in sorted(back.items()):
+			pay.allocate(name, booking=booking, amount=held, reason="the booking was taken back (paid in time)",
+			             _system=True, idempotency_key=f"revived:{booking}:{name}")
+			settled(name)
+	except frappe.ValidationError as e:
+		undo_step(e, REVIVE_SAVEPOINT)
+		del messages[mark:]       # a refusal here is a note for staff, never a message to the guest
+		return False
+	return True
+
+
+def _held_when_expired(b) -> dict:
+	"""The money booking ``b`` held when it expired (taken off it, B2), still unused on each charge
+	(not refunded, not allocated elsewhere, no refund in flight): charge → amount."""
+	from kamra.tex.payments import service as pay
+
+	out = {}
+	# a locking read: the releases as they are now, an expiry committed after this request began included
+	for r in frappe.db.sql("""SELECT `transaction`, amount, currency, idempotency_key FROM `tabTEX Payment Allocation`
+	                          WHERE booking=%s AND allocation_type='Release' LOCK IN SHARE MODE""", b.name, as_dict=True):
+		if r.idempotency_key != pay.ns_key(b.property, f"expired:{b.name}:{r.transaction}", "release"):
+			continue
+		txn = frappe.db.get_value(TXN, r.transaction, ["amount", "currency"], as_dict=True, for_update=True)
+		free = (from_db(txn.amount, txn.currency) - pay.allocated_of(r.transaction, lock=True)
+		        - pay.refunded_of(r.transaction, lock=True) - pay.in_flight_of(r.transaction, lock=True))
+		held = min(from_db(r.amount, r.currency), free)
+		if held > ZERO:
+			out[r.transaction] = held
+	return out
 
 
 def money_off_expired(booking: str, *, now: datetime | None = None):

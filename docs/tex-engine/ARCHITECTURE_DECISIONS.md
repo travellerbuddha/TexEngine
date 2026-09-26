@@ -9102,3 +9102,6 @@ main `1575c8b` is contained, so nothing was merged.
   refunds via TEX, else `Action Required`. In b)/c) the charge stays Succeeded, off the booking
   (never a negative balance), with today's availability and price in its note; a booking that
   expires with money on it hands that money over the same way (B2).
+- Late is by the gateway's clock when it states it (`Outcome.captured_at`, p53; B4): money captured
+  before its attempt's deadline whose news came after the expiry takes the rooms back while free
+  (plus its B2 money) and confirms; otherwise `Action Required`, never an automatic refund.

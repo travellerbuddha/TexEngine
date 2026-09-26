@@ -5,7 +5,8 @@ deadline, the ``hold_expires_on`` of its rooms. A payment attempt started before
 keeps them until the attempt's own deadline (``TEX Payment Transaction.expires_at``), recorded on
 the booking as ``payment_attempt_until``: a gateway checkout is open for ``CHECKOUT_MINUTES``; a
 bank transfer is open until the hold deadline and never extends it. Nothing else keeps the rooms:
-a Pending charge past its deadline is stale and holds no inventory.
+a Pending charge past its deadline is stale and holds no inventory. Its money is late by the
+gateway's clock when the gateway states it (``paid_in_time``, B4), never by when its news arrived.
 
 Locks: the booking row is the one place a hold is decided. ``open_attempt`` and
 ``booking.expire_booking`` lock the booking (then its rooms), so an attempt is either recorded
@@ -29,6 +30,8 @@ MIN_HOLD_MINUTES = 5
 # how long a gateway checkout started within the hold keeps the rooms (a hosted payment page's
 # life); finite, so a charge left Pending never holds inventory
 CHECKOUT_MINUTES = 30
+# how far a gateway's clock and TEX's may differ
+CLOCK_SKEW_MINUTES = 5
 TRANSFER = "Bank Transfer"
 
 
@@ -80,12 +83,22 @@ def in_flight(b, now: datetime | None = None) -> bool:
 	return bool(until) and get_datetime(until) > get_datetime(now or now_datetime())
 
 
-def attempt_deadline(txn) -> datetime:
-	"""When a charge stops counting as a payment in flight: its ``expires_at``; a charge recorded
-	before attempts had one, ``CHECKOUT_MINUTES`` after it was created."""
-	if txn.get("expires_at"):
-		return get_datetime(txn.expires_at)
-	return add_to_date(get_datetime(txn.creation), minutes=CHECKOUT_MINUTES)
+def attempt_deadline(txn) -> datetime | None:
+	"""When a charge's payment attempt closed: its ``expires_at``; None for a charge of no booking
+	waiting for its payment (it held no rooms)."""
+	return get_datetime(txn.expires_at) if txn.get("expires_at") else None
+
+
+def paid_in_time(txn) -> bool:
+	"""B4: whether the gateway captured (or authorised) the charge while its attempt was open, by
+	the gateway's own clock (``captured_at``), however late its news reached TEX (a delayed
+	notification, staff verifying after an outage). A charge whose gateway does not state that
+	time, or that held no rooms, is judged by when its news arrives. A time from before the
+	charge existed (a date without its time) is not believed."""
+	until, at = attempt_deadline(txn), txn.get("captured_at")
+	if not until or not at:
+		return False
+	return add_to_date(get_datetime(txn.creation), minutes=-CLOCK_SKEW_MINUTES) <= get_datetime(at) <= until
 
 
 def open_attempt(booking: str, method: str | None, now: datetime | None = None) -> datetime | None:

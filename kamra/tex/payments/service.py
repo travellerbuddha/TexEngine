@@ -426,6 +426,8 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	txn.error_message = (outcome.error_message or "")[:500] or None
 	txn.card_brand = outcome.card_brand
 	txn.card_last4 = outcome.card_last4
+	if outcome.status == "Succeeded" and outcome.captured_at:
+		txn.captured_at = outcome.captured_at        # the gateway's clock: whether it was paid in time (B4)
 	txn.completed_at = now_datetime()
 	txn.save(ignore_permissions=True)
 	if txn.status == "Succeeded":
@@ -655,6 +657,9 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 
 		if guest_changes.request_of_charge(txn):
 			why = None          # a guest change's payment: its request applies or refunds it (G-45)
+	if why in late_payments.REVIVABLE and _system and late_payments.revive(txn, booking, amount):
+		# paid in time, its news late: the booking has its rooms back (B4)
+		why = late_payments.problem(frappe.get_doc("TEX Booking", booking, for_update=True), amount=amount)
 	if why:
 		if not _system:
 			frappe.throw(late_payments.refusal(why, b, amount))         # staff: told why, never silent (K-2c)

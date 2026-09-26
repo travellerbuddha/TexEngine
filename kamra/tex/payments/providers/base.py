@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -46,6 +47,10 @@ class Outcome:
 	raw_status: str | None = None
 	error_code: str | None = None
 	error_message: str | None = None
+	# when the gateway captured (or authorised) the money, by its own clock, as a naive datetime in
+	# the site's time zone; None when it does not state it. A payment is late by this time, never
+	# by when its news reached TEX (B4)
+	captured_at: datetime | None = None
 
 
 class ProviderError(Exception):
