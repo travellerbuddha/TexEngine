@@ -580,6 +580,48 @@ class TestPartialCancellation(HoldCase):
 		migrate("p52_partly_cancelled_awaiting_payment")                # a second run changes nothing
 		self.assertEqual(self.statuses(waiting), ("Pending Payment", ["Cancelled", "Pending Payment"]))
 
+	def test_a_room_cancelled_after_part_of_the_money_came_confirms_the_rest(self):
+		"""D1 (audit 1c): two rooms, a link for each half; the guest pays the first, then cancels the
+		second room free of charge. What the booking owes now is paid: it is confirmed at once, and
+		nothing expires or goes to reconciliation later."""
+		b = self.book(rooms=2)
+		half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		links = [pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description=f"Half {i}",
+		                         booking=b["booking"]) for i in (1, 2)]
+		started = public.pay_link(token=links[0]["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(self.statuses(b)[0], "Pending Payment")
+		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			booking.cancel_reservation(self.rooms(b)[1], reason="one room less")
+		mailed.assert_called_once()
+		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Confirmed", "Cancelled"]))
+		self.assertEqual(paid(b), half)
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Confirmed", "Cancelled"]))
+		self.assertFalse(txn_state(started["transaction"]).reconciliation)
+
+	def test_p52_confirms_a_stuck_booking_whose_payment_was_taken(self):
+		"""D1 (audit 1c): before B1 a stuck booking (Partially Cancelled, never confirmed) took its
+		payment without confirming its rooms. p52 confirms it — never parks or expires it — and sends
+		no e-mail from the migration."""
+		from kamra.tex.tests.integration.test_patches import migrate, never_ran
+
+		b = self.book(rooms=2)
+		self.cancel_first(b)
+		due = D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now"))
+		# as the release before B1 left it: Partially Cancelled, its payment taken, its room still waiting
+		frappe.db.set_value("TEX Booking", b["booking"], {"status": "Partially Cancelled", "paid_amount": due,
+		                                                  "payment_status": "Paid"})
+		passes(b["booking"], 25)                                         # its hold is over
+		never_ran("p52_partly_cancelled_awaiting_payment")
+		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			migrate("p52_partly_cancelled_awaiting_payment")
+		mailed.assert_not_called()
+		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Cancelled", "Confirmed"]))
+		self.assertEqual(paid(b), due)
+		self.assertEqual(confirmations(b), 1)
+
 
 class TestExpiryWithMoney(HoldCase):
 	"""B2 (audit 1b): a booking waiting for its payment that was partly paid (a first of two links,

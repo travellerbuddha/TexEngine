@@ -828,10 +828,10 @@ def rooms_not_held(b) -> list[str]:
 	        and not (st == "Cancelled" and cancelled_on_purpose(n))]
 
 
-def confirm_booking(booking: str, *, reason: str | None = None) -> None:
+def confirm_booking(booking: str, *, reason: str | None = None, send_mail: bool = True) -> None:
 	"""Confirm a booking waiting for its payment, under its lock and its rooms' locks. A booking
 	whose rooms are not all held for it (released, or sold to someone else since) is never
-	confirmed and nothing is sent (``RoomsNotHeld``, K-2b)."""
+	confirmed and nothing is sent (``RoomsNotHeld``, K-2b). ``send_mail``: False from a migration."""
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.status == "Confirmed":
 		return
@@ -867,9 +867,23 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 	b.save(ignore_permissions=True)
 	audit("booking.confirm", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      reason=reason)
-	from kamra.tex.services import notify
+	if send_mail:
+		from kamra.tex.services import notify
 
-	notify.booking_confirmed(booking)
+		notify.booking_confirmed(booking)
+
+
+def confirm_if_paid(booking: str, *, reason: str, send_mail: bool = True) -> bool:
+	"""D1: a booking waiting for its payment that now has what it owes now — a room was cancelled
+	after part of the money came, or a stuck booking took its payment — is confirmed while its rooms
+	are held for it (else it expires with its hold). → whether it was confirmed."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status not in holds.HOLDING:
+		return False
+	if from_db(b.paid_amount, b.currency) < from_db(b.amount_due_now, b.currency) or rooms_not_held(b):
+		return False
+	confirm_booking(booking, reason=reason, send_mail=send_mail)
+	return True
 
 
 def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict:
@@ -1002,6 +1016,8 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
 		_refresh_booking_after_change(res.tex_booking)
+		# never confirmed: what it owes now may be paid already (a first half came before this room left)
+		confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was cancelled")
 	# a guest's change still waiting for this room is void; a payment of it arriving later is
 	# refunded (G-45)
 	from kamra.tex.services import guest_changes
@@ -1041,7 +1057,8 @@ def _refresh_booking_after_change(booking: str) -> None:
 		if b.status in holds.HOLDING and all(s in holds.HOLDING for s in statuses if s != "Cancelled"):
 			# never confirmed: it keeps waiting for its payment with the rooms it has left, which
 			# expire with its hold or are confirmed by its payment, never asking more than it costs (B1)
-			b.amount_due_now = min(from_db(b.amount_due_now, ccy), total)
+			# nor more than its rooms left require now (their deposits and the fees owed, D1)
+			b.amount_due_now = min(from_db(b.amount_due_now, ccy), required_now(b), total)
 		else:
 			b.status = "Partially Cancelled"
 	paid = from_db(b.paid_amount, ccy)
