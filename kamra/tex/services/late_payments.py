@@ -94,14 +94,16 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	booking_svc.expire_booking(booking, now=now, force=True)
 	free, detail = _today(booking, now)
 	in_time = holds.paid_in_time(txn)
-	# paid in time, its news late: never refunded by itself — the hotel decides (B4)
+	# paid in time, its news late: never refunded by itself — the hotel decides (B4, D4)
 	state = "Refund Queued" if not free and not in_time and pay.auto_refundable(txn) else "Action Required"
+	again = booking_svc.live_duplicate(booking) if in_time else None
 	ccy = txn.currency
 	cause = CAUSES.get(why, why)
 	note = (f"{to_str(from_db(txn.amount, ccy))} {ccy} arrived at {now:%Y-%m-%d %H:%M} for booking {booking} after "
 	        f"{cause}. "
 	        + (f"It was paid in time (captured at {get_datetime(txn.captured_at):%Y-%m-%d %H:%M}, its checkout open "
-	           f"until {holds.attempt_deadline(txn):%Y-%m-%d %H:%M}), but the booking could not take its rooms back. "
+	           f"until {holds.attempt_deadline(txn):%Y-%m-%d %H:%M}), but the booking could not take its rooms back"
+	           + (f": the guest has booking {again} for the same stay. " if again else ". ")
 	           if in_time else "")
 	        + f"Not confirmed: {detail}. "
 	        + ("The rooms are gone: the payment is refunded." if state == "Refund Queued" else
@@ -109,12 +111,30 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	_flag(txn, booking, why, state, note, from_db(txn.amount, ccy), rooms_free_now=free)
 
 
-def revive(txn, booking: str, amount) -> bool:
+def lock_expiry_money(booking: str, *, but: str) -> list[str]:
+	"""D4: the charges whose money ``booking`` held when it expired (B2) — which a revival takes back —
+	locked in name order before the booking is (every payment path locks a charge, then its booking;
+	a staff refund of one of them does). ``but``: the charge already locked. → their names."""
+	from kamra.tex.payments import service as pay
+
+	prop = frappe.db.get_value("TEX Booking", booking, "property")
+	rows = frappe.db.sql("""SELECT `transaction`, idempotency_key FROM `tabTEX Payment Allocation`
+	                        WHERE booking=%s AND allocation_type='Release'""", booking, as_dict=True)
+	names = sorted({r.transaction for r in rows if r.transaction != but
+	                and r.idempotency_key == pay.ns_key(prop, f"expired:{booking}:{r.transaction}", "release")})
+	for name in names:
+		frappe.db.get_value(TXN, name, "name", for_update=True)
+	return names
+
+
+def revive(txn, booking: str, amount, locked=()) -> bool:
 	"""B4: money the gateway captured while its checkout was open, whose news came after the
 	booking expired, takes the booking back with the rooms its expiry gave back
 	(``booking.revive_expired``) — when they are still free, and when this money with what the
 	booking held when it expired (B2, still unused on its charges) pays what it had to pay now, so
 	it is confirmed at once. That money comes back to it and its charges leave reconciliation.
+	Never when the guest has another live booking for the same stay (D4 c: staff decide). ``locked``:
+	the charges of that money, locked before the booking (``lock_expiry_money``); no other is taken.
 	Anything else changes nothing: → False (the caller reconciles). → whether it was taken back."""
 	from kamra.tex.payments import service as pay
 	from kamra.tex.services import booking as booking_svc
@@ -123,7 +143,9 @@ def revive(txn, booking: str, amount) -> bool:
 	if not holds.paid_in_time(txn):
 		return False
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
-	back = _held_when_expired(b)
+	if booking_svc.live_duplicate(booking):
+		return False
+	back = _held_when_expired(b, set(locked))
 	if from_db(b.paid_amount, b.currency) + sum(back.values(), ZERO) + amount < from_db(b.amount_due_now, b.currency):
 		return False
 	frappe.db.savepoint(REVIVE_SAVEPOINT)
@@ -143,16 +165,18 @@ def revive(txn, booking: str, amount) -> bool:
 	return True
 
 
-def _held_when_expired(b) -> dict:
+def _held_when_expired(b, locked: set) -> dict:
 	"""The money booking ``b`` held when it expired (taken off it, B2), still unused on each charge
-	(not refunded, not allocated elsewhere, no refund in flight): charge → amount."""
+	(not refunded, not allocated elsewhere, no refund in flight), of the charges ``locked`` before the
+	booking: charge → amount."""
 	from kamra.tex.payments import service as pay
 
 	out = {}
 	# a locking read: the releases as they are now, an expiry committed after this request began included
 	for r in frappe.db.sql("""SELECT `transaction`, amount, currency, idempotency_key FROM `tabTEX Payment Allocation`
 	                          WHERE booking=%s AND allocation_type='Release' LOCK IN SHARE MODE""", b.name, as_dict=True):
-		if r.idempotency_key != pay.ns_key(b.property, f"expired:{b.name}:{r.transaction}", "release"):
+		if r.transaction not in locked or r.idempotency_key != pay.ns_key(b.property, f"expired:{b.name}:{r.transaction}",
+		                                                                   "release"):
 			continue
 		txn = frappe.db.get_value(TXN, r.transaction, ["amount", "currency"], as_dict=True, for_update=True)
 		free = (from_db(txn.amount, txn.currency) - pay.allocated_of(r.transaction, lock=True)

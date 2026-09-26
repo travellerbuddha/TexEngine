@@ -59,12 +59,12 @@ class HoldCase(TexTestCase):
 		self.account = setup_site_and_payments(self.f)["account"]
 
 	def book(self, rooms: int = 1, method: str = "Card", room: str = "STD", status: str = "Pending Payment",
-	         rate_plan: str = "FLEX", **kw) -> dict:
+	         rate_plan: str = "FLEX", guest: dict | None = None, **kw) -> dict:
 		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
 		                     rooms=[{"adults": 2}] * rooms, market="DE", channel="DIRECT_WEB", currency="EUR")
 		offer = pick(res["properties"][0], room_code=room, rate_plan_code=rate_plan)
 		quotes = quoting.create_quotes([{"offer_key": r["offer_key"]} for r in offer["rooms"]])
-		b = booking.create_booking(quote_ids=[r["quote_id"] for r in quotes["rooms"]], guest=GUEST,
+		b = booking.create_booking(quote_ids=[r["quote_id"] for r in quotes["rooms"]], guest=guest or GUEST,
 		                           payment_method=method, **kw)
 		self.assertEqual(b["status"], status)
 		return b
@@ -769,10 +769,12 @@ class TestPaidInTime(HoldCase):
 		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
 
 	def test_a_booking_paid_in_time_whose_room_was_sold_meanwhile_goes_to_staff(self):
-		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		other = {"first_name": "Otto", "last_name": "Other", "email": "otto.d4@example.com"}
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed", guest=other)
 		a = self.book(room="DLX")
 		payment, at = self.paid_in_time(a)
-		b = self.book(room="DLX", method="Pay at Hotel", status="Confirmed")          # the last room, to B
+		b = self.book(room="DLX", method="Pay at Hotel", status="Confirmed",           # the last room, to B
+		              guest=dict(other, email="ben.d4@example.com"))
 		with captured(at), mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			self.assertEqual(self.pays(payment)["status"], "Succeeded")
 		mailed.assert_not_called()
@@ -784,6 +786,7 @@ class TestPaidInTime(HoldCase):
 		t = txn_state(payment["transaction"])
 		self.assertEqual(t.reconciliation, "Action Required")        # paid in time: staff decide, no auto refund
 		self.assertIn("in time", t.reconciliation_note)
+		self.assertIn("rooms free now: no", t.reconciliation_note)   # the room was sold, not a duplicate
 
 	def test_money_it_held_before_its_expiry_comes_back_with_it(self):
 		b = self.book()
@@ -845,6 +848,45 @@ class TestPaidInTime(HoldCase):
 		                  "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
 		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Bank Transfer"},
 		          {"property": fx.PROPERTY, "method": "Bank Transfer", "provider_account": bank, "priority": 5})
+
+	def test_a_guest_booked_again_for_the_stay_is_not_revived(self):
+		"""D4 c) (user decision): the guest already has another live booking for the same stay (staff
+		booked them again after the expiry): the paid-in-time booking is not revived, staff decide."""
+		b = self.book()
+		payment, at = self.paid_in_time(b)
+		again = self.book(method="Pay at Hotel", status="Confirmed")        # the same guest, the same dates
+		with captured(at):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		t = txn_state(payment["transaction"])
+		self.assertEqual(t.reconciliation, "Action Required")                # never refunded by itself
+		self.assertIn(again["booking"], t.reconciliation_note)
+
+	def test_a_revival_locks_the_charges_before_the_booking(self):
+		"""D4: every payment path locks a charge, then its booking. A revival takes back the money the
+		booking held when it expired (another charge): that charge is locked before the booking, never
+		after (a staff refund of it, charge then booking, would deadlock with it)."""
+		b = self.book()
+		part = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		cash = pay.record_manual(booking=b["booking"], amount=str(part), method="Cash", reference="half",
+		                         idempotency_key=f"d4-half-{b['booking']}")["transaction"]
+		payment, at = self.paid_in_time(b)
+		locks, real = [], frappe.db.sql
+
+		def sql(query, values=(), *args, **kw):
+			q = str(query).lower()
+			if "for update" in q:
+				locks.append((q, str(values)))
+			return real(query, values, *args, **kw)
+
+		with captured(at), mock.patch.object(frappe.db, "sql", side_effect=sql):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+		def first(table, name):
+			return next(i for i, (q, v) in enumerate(locks) if table in q and name in v)
+
+		self.assertLess(first("tabtex payment transaction", cash), first("tabtex booking", b["booking"]))
 
 	def test_a_booking_cancelled_on_purpose_is_never_revived(self):
 		b = self.book()

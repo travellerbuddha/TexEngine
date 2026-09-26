@@ -1164,6 +1164,27 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 	return True
 
 
+LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
+
+
+def live_duplicate(booking: str) -> str | None:
+	"""D4 c): another live booking of the same guest (profile or e-mail) at the same hotel for nights
+	of this booking's stay — staff booked the guest again after it expired. → its name, or None."""
+	b = frappe.get_doc("TEX Booking", booking)
+	who = [(f, v) for f, v in (("booker_guest", b.booker_guest), ("booker_email", b.booker_email)) if v]
+	if not who or not b.rooms:
+		return None
+	ci, co = min(getdate(r.check_in) for r in b.rooms), max(getdate(r.check_out) for r in b.rooms)
+	rows = frappe.db.sql(
+		f"""SELECT DISTINCT o.name FROM `tabTEX Booking` o JOIN `tabTEX Booking Room` r ON r.parent = o.name
+		    WHERE o.property=%(p)s AND o.name != %(b)s AND o.status IN %(live)s AND r.status != 'Cancelled'
+		      AND r.check_in < %(co)s AND r.check_out > %(ci)s
+		      AND ({" OR ".join(f"o.{f} = %({f})s" for f, _v in who)})
+		    ORDER BY o.name LIMIT 1""",  # nosemgrep -- the column names are constants
+		{"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, **dict(who)})
+	return rows[0][0] if rows else None
+
+
 def revive_expired(booking: str, *, reason: str) -> list[str]:
 	"""B4: a booking that expired while its payment was already made (the gateway captured it in
 	time, its news came after the expiry) takes back the rooms its expiry gave back, at their locked

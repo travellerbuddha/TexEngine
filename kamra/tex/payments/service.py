@@ -642,14 +642,17 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		return done
 	if txn.status != "Succeeded" or txn.txn_type != "Charge":
 		frappe.throw(_("Only successful charges can be allocated."))
+	from kamra.tex.services import late_payments
+
+	# money paid in time may take its expired booking back with the money it held (B4): those charges
+	# are locked now, before the booking — every payment path locks a charge, then its booking (D4)
+	locked = late_payments.lock_expiry_money(booking, but=transaction) if _system and holds.paid_in_time(txn) else []
 	# locked after the charge (the order a callback takes) and read as it is now (K-2b)
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.property != txn.property:
 		frappe.throw(_("A payment can only be allocated to a booking of the same hotel."))
 	if b.currency != txn.currency:
 		frappe.throw(_("Currency mismatch between payment and booking."))
-	from kamra.tex.services import late_payments
-
 	amount = quantize(D(amount), txn.currency)
 	why = late_payments.problem(b, amount=amount)
 	if why == late_payments.BOOKING_CANCELLED and _system:
@@ -657,7 +660,7 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 
 		if guest_changes.request_of_charge(txn):
 			why = None          # a guest change's payment: its request applies or refunds it (G-45)
-	if why in late_payments.REVIVABLE and _system and late_payments.revive(txn, booking, amount):
+	if why in late_payments.REVIVABLE and _system and late_payments.revive(txn, booking, amount, locked):
 		# paid in time, its news late: the booking has its rooms back (B4)
 		why = late_payments.problem(frappe.get_doc("TEX Booking", booking, for_update=True), amount=amount)
 	if why:

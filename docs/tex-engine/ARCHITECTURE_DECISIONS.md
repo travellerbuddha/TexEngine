@@ -9104,6 +9104,7 @@ main `1575c8b` is contained, so nothing was merged.
   booking that expires with money on it hands that money over the same way (B2).
 - Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE`
   (Istanbul time), the mock's server clock, a transfer's value date, ±5 min; iyzico and Sipay state
-  none, so their money is judged when its news arrives. Money paid in time whose news came after the
-  expiry takes the rooms back while free (plus its B2 money) and confirms; else `Action Required`.
+  none, so their money is judged when its news arrives. Paid in time, news after the expiry (user
+  decision, D4): rooms free → revived with its B2 money and confirmed; rooms sold, or the guest has
+  another live booking for the stay → `Action Required`, team told, no auto refund. Locks: charges, then booking.
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.
