@@ -179,6 +179,19 @@ def txn_state(name: str) -> dict:
 	                           as_dict=True)
 
 
+def pre_c6_fee(b: dict) -> None:
+	"""As a cancellation before C6 left a booking never confirmed: the rate's penalty on its first room
+	(NRF: the room's price), counted in its total (E6)."""
+	room = b["rooms"][0]["reservation"]
+	fee = D(frappe.db.get_value("Reservation", room, "tex_total_amount"))
+	frappe.db.set_value("Reservation", room, "cancellation_fee", fee)
+	live = [D(r.tex_total_amount) for r in frappe.get_all("Reservation", filters={"tex_booking": b["booking"],
+	                                                                             "status": ("!=", "Cancelled")},
+	                                                         fields=["tex_total_amount"])]
+	total = fee + sum(live, D(0))
+	frappe.db.set_value("TEX Booking", b["booking"], {"total_amount": total, "balance_amount": total - paid(b)})
+
+
 def confirmations(b: dict) -> int:
 	return frappe.db.count("TEX Audit Event", {"action": "booking.confirm", "reference_name": b["booking"]})
 
@@ -751,6 +764,34 @@ class TestPartialCancellation(HoldCase):
 		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Confirmed", "Cancelled"]))
 		self.assertEqual(paid(b), due)
 
+	def test_p52_drops_a_fee_from_before_c6_and_sends_no_mail(self):
+		"""E6 (audit 1c-son): a room cancelled before C6 carried the rate's penalty (NRF: its price) on a
+		booking never confirmed. p52 voids it: the booking owes what its room left requires; one whose
+		hold is over expires owing nothing, its money in reconciliation, and no e-mail leaves the migration."""
+		from kamra.tex.tests.integration.test_patches import migrate, never_ran
+
+		waiting, over = self.book(rooms=2, rate_plan="NRF"), self.book(rooms=2, rate_plan="NRF")
+		cash = pay.record_manual(booking=over["booking"], amount="50", method="Cash", reference="desk",
+		                         idempotency_key=f"e6-cash-{over['booking']}")["transaction"]
+		for b in (waiting, over):
+			self.cancel_first(b)
+			pre_c6_fee(b)
+			frappe.db.set_value("TEX Booking", b["booking"], "status", "Partially Cancelled")
+		passes(over["booking"], 25)                                      # its hold is over
+		never_ran("p52_partly_cancelled_awaiting_payment")
+		with mock.patch("kamra.tex.services.notify.reconciliation") as mailed:
+			migrate("p52_partly_cancelled_awaiting_payment")
+		mailed.assert_not_called()
+		left = D(frappe.db.get_value("Reservation", self.rooms(waiting)[1], "tex_total_amount"))
+		row = frappe.db.get_value("TEX Booking", waiting["booking"], ["status", "total_amount", "amount_due_now"],
+		                          as_dict=True)
+		self.assertEqual((row.status, D(row.total_amount), D(row.amount_due_now)), ("Pending Payment", left, left))
+		self.assertEqual(D(frappe.db.get_value("Reservation", self.rooms(waiting)[0], "cancellation_fee")), D(0))
+		self.assertEqual(self.statuses(over), ("Cancelled", ["Cancelled", "Cancelled"]))
+		self.assertEqual((D(frappe.db.get_value("TEX Booking", over["booking"], "total_amount")), paid(over)),
+		                 (D(0), D(0)))
+		self.assertEqual(txn_state(cash).reconciliation, "Action Required")
+
 	def test_p52_confirms_a_stuck_booking_whose_payment_was_taken(self):
 		"""D1 (audit 1c): before B1 a stuck booking (Partially Cancelled, never confirmed) took its
 		payment without confirming its rooms. p52 confirms it — never parks or expires it — and sends
@@ -856,6 +897,22 @@ class TestNeverConfirmedLeftovers(HoldCase):
 		migrate("p54_never_confirmed_leftovers")                   # a second run changes nothing
 		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "booking.leftover_cancelled",
 		                                                     "reference_name": b["booking"]}), 1)
+
+	def test_p54_leaves_a_leftover_owing_nothing_not_even_a_fee_from_before_c6(self):
+		"""E6 (audit 1c-son): the leftover's cancelled room carried the rate's penalty from before C6 (NRF:
+		its price). Cancelled by p54, it owes nothing: its total and its rooms' charges are nothing."""
+		from kamra.tex.tests.integration.test_patches import migrate, never_ran
+
+		b = self.book(rooms=2, rate_plan="NRF")
+		self.leftover(b)
+		pre_c6_fee(b)
+		self.assertGreater(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D(0))
+		never_ran("p54_never_confirmed_leftovers")
+		migrate("p54_never_confirmed_leftovers")
+		row = frappe.db.get_value("TEX Booking", b["booking"], ["status", "total_amount", "balance_amount"], as_dict=True)
+		self.assertEqual((row.status, D(row.total_amount), D(row.balance_amount)), ("Cancelled", D(0), D(0)))
+		self.assertEqual([D(frappe.db.get_value("Reservation", r, "cancellation_fee") or 0) for r in self.rooms(b)],
+		                 [D(0), D(0)])
 
 
 class TestExpiryWithMoney(HoldCase):

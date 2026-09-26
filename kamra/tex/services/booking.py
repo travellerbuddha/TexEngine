@@ -1097,19 +1097,32 @@ def _close_links_if_settled(b) -> None:
 
 
 def _void_fees(b, ccy: str) -> D:
-	"""The charges of the rooms of booking ``b``, which ends never confirmed, are void (the reports
-	read them), audited. → the booking's total: nothing."""
+	"""Booking ``b`` ends never confirmed: its rooms' charges are void. → its total: nothing."""
+	void_fees(b, reason="ended never confirmed: nothing is owed (C6)")
+	for row in b.rooms:
+		row.amount = ZERO
+	return quantize(ZERO, ccy)
+
+
+def void_fees(b, *, reason: str, keep_clawback: bool = False) -> None:
+	"""C6, E1, E6: the charges of the cancelled rooms of booking ``b``, never confirmed, are void — the
+	reports read them — audited ``booking.fees_void``. ``keep_clawback``: the booking goes on, and what
+	a room carried for the rooms it left keeps its charge (E1)."""
+	ccy = b.currency or "EUR"
 	void = {}
 	for row in b.rooms:
-		fee = from_db(frappe.db.get_value("Reservation", row.reservation, "cancellation_fee"), ccy)
-		if fee:
-			frappe.db.set_value("Reservation", row.reservation, "cancellation_fee", 0, update_modified=False)
-			void[row.reservation] = to_str(fee)
-		row.amount = ZERO
+		r = frappe.db.get_value("Reservation", row.reservation, ["status", "cancellation_fee", "tex_pricing_snapshot"],
+		                        as_dict=True)
+		if not r or r.status != "Cancelled":
+			continue
+		claw = json.loads(r.tex_pricing_snapshot or "{}").get("basket_clawback") if keep_clawback else None
+		fee, keep = from_db(r.cancellation_fee, ccy), quantize(D(claw["amount"]) if claw else ZERO, ccy)
+		if fee != keep:
+			frappe.db.set_value("Reservation", row.reservation, "cancellation_fee", keep, update_modified=False)
+			void[row.reservation] = {"fee": to_str(fee), "now": to_str(keep)}
 	if void:
 		audit("booking.fees_void", reference_doctype="TEX Booking", reference_name=b.name, property=b.property,
-		      old=void, reason="ended never confirmed: nothing is owed (C6)")
-	return quantize(ZERO, ccy)
+		      old=void, reason=reason)
 
 
 def resend_confirmation(booking: str) -> dict:
@@ -1160,14 +1173,15 @@ def booking_summary(booking: str, *, replay: bool = False) -> dict:
 	}
 
 
-def expire_booking(booking: str, *, now: datetime | None = None, force: bool = False) -> bool:
+def expire_booking(booking: str, *, now: datetime | None = None, force: bool = False, send_mail: bool = True) -> bool:
 	"""A booking waiting for its payment whose hold is over, with no payment attempt open, gives
 	back all its rooms at once (K-2a): the booking is locked, then its rooms in name order (the
 	order every change of a TEX booking takes), and the rooms and the booking are cancelled in
 	this one transaction; their held extras and coupon uses are released with them. A payment
 	attempt started within the hold keeps the rooms until its own deadline (``holds``), never
 	longer; a booking none of whose rooms is held any more follows them at once. ``force``: its
-	money arrived and cannot confirm it (``late_payments``, K-2b). → whether it expired."""
+	money arrived and cannot confirm it (``late_payments``, K-2b). ``send_mail``: False from a migration
+	(E6). → whether it expired."""
 	now = get_datetime(now or now_datetime())
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.status not in holds.HOLDING:
@@ -1201,7 +1215,7 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 		# reconciliation, never a negative balance (B2)
 		from kamra.tex.services import late_payments
 
-		late_payments.money_off_expired(booking, now=now)
+		late_payments.money_off_expired(booking, now=now, send_mail=send_mail)
 	audit("booking.expire", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      old={"status": b.status}, new={"status": frappe.db.get_value("TEX Booking", booking, "status"),
 	                                     "reservations": holding, "hold_deadline": str(deadline) if deadline else None,

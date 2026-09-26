@@ -3,7 +3,8 @@
 room cancelled, "Partially Cancelled", never confirmed — was counted as confirmed and took money.
 
 Each one is cancelled with its rooms (``booking._refresh_booking_after_change``: status, total,
-coupon uses released); the money it held comes off it into reconciliation for staff
+coupon uses released), owing nothing — a fee its rooms were charged before C6 included (E6); the
+money it held comes off it into reconciliation for staff
 (``late_payments.money_off_expired``); ``booking.leftover_cancelled`` is audited. No e-mail is sent
 from the migration. A booking one of whose rooms was ever confirmed is left as it is. A second run
 finds none."""
@@ -33,6 +34,7 @@ def execute():
 		if not states or any(s != "Cancelled" for s in states) or ever_confirmed(name):
 			continue
 		b = frappe.get_doc("TEX Booking", name, for_update=True)
+		booking.void_fees(b, reason="p54: never confirmed, every room cancelled (C6)")
 		booking._refresh_booking_after_change(name)
 		paid = from_db(b.paid_amount, b.currency)
 		parked = late_payments.money_off_expired(name, send_mail=False) if paid > ZERO else ZERO
