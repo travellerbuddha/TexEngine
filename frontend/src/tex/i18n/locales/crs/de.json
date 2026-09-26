@@ -225,6 +225,9 @@
  "crs.link.email": "E-Mail des Gastes",
  "crs.link.email_hint": "Optional; wird auf der Zahlungsseite angezeigt.",
  "crs.link.expires": "Gültig für",
+ "crs.link.expires_hint": "Bei einer Buchung, die auf Zahlung wartet, bleiben die Zimmer bis zum Ablauf des Links reserviert (höchstens die Link-Haltezeit des Hotels).",
+ "crs.link.valid_until": "Der Link kann bis {date} bezahlt werden.",
+ "crs.link.rooms_held": "Die Zimmer der Buchung sind für den Gast bis {date} reserviert.",
  "crs.link.for": "Für Buchung {ref}",
  "crs.link.hours": {
   "one": "{count} Stunde",

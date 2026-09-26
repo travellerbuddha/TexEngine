@@ -9095,13 +9095,13 @@ main `1575c8b` is contained, so nothing was merged.
   cancels them together; the PMS job never touches TEX rooms. A never-confirmed booking with a
   room cancelled on purpose keeps waiting for its payment with the rest (B1).
 - An attempt started within the hold keeps the rooms until its own finite deadline (checkout 30
-  min, transfer = the hold); none starts after the hold; a stale Pending charge holds nothing.
+  min, transfer = the hold); none starts after it; a stale Pending charge holds nothing. A payment
+  link sent for the booking holds its rooms for the link hold (default 24 h) and expires with it (B6).
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
-  at the locked price (nothing is taken again); b) rooms given back and still free: no automatic
-  revival, `Action Required`; c) rooms sold to someone else: `Refund Queued` when the gateway
-  refunds via TEX, else `Action Required`. In b)/c) the charge stays Succeeded, off the booking
-  (never a negative balance), with today's availability and price in its note; a booking that
-  expires with money on it hands that money over the same way (B2).
+  at the locked price; b) rooms given back and still free: no automatic revival, `Action Required`;
+  c) rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
+  the charge stays Succeeded, off the booking, with today's availability and price in its note; a
+  booking that expires with money on it hands that money over the same way (B2).
 - Late is by the gateway's clock when it states it (`Outcome.captured_at`, p53; B4): money captured
   before its attempt's deadline whose news came after the expiry takes the rooms back while free
   (plus its B2 money) and confirms; otherwise `Action Required`, never an automatic refund.

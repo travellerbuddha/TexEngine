@@ -22,7 +22,7 @@ from __future__ import annotations
 from email.utils import formataddr
 
 import frappe
-from frappe.utils import escape_html, validate_email_address
+from frappe.utils import escape_html, get_datetime, validate_email_address
 
 from kamra.tex.lib_text import AFTER_EXPIRY_NEXT, render
 from kamra.tex.money import from_db, to_str
@@ -174,9 +174,11 @@ def payment_link(link_name: str, url: str, lang: str = "en") -> bool:
 			return False
 		hotel = frappe.db.get_value("Property", link.property, "property_name") or link.property
 		lang = lang if lang in LANGS else "en"
+		# until when it can be paid: the booking's rooms are held until then too (B6)
+		expires = f"{get_datetime(link.expires_at):%Y-%m-%d %H:%M}" if link.expires_at else "-"
 		subject, body = render("payment_link", lang, hotel=escape_html(hotel), ref=escape_html(link.booking or link.name),
 		                       name=escape_html(link.guest_name or ""), total=escape_html(_amount(link.amount, link.currency)),
-		                       link=url)
+		                       expires=expires, link=url)
 		guest = frappe.db.get_value("TEX Booking", link.booking, "booker_guest") if link.booking else None
 	except Exception as e:
 		if transaction_lost(e):

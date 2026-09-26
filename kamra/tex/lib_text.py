@@ -76,13 +76,20 @@ T: dict[str, dict[str, tuple[str, str]]] = {
 		       "jednak termin płatności za rezerwację upłynął, zanim została ona w pełni opłacona, dlatego rezerwacja "
 		       "nie mogła zostać potwierdzona.<br><br>{next}"),
 	},
+	# {expires}: until when the link can be paid (B6)
 	"payment_link": {
-		"en": ("Payment request from {hotel}", "Dear {name},<br><br>{hotel} asks you to pay {total} for {ref}."),
-		"tr": ("{hotel} ödeme talebi", "Sayın {name},<br><br>{hotel}, {ref} için {total} tutarında ödeme talep ediyor."),
-		"de": ("Zahlungsaufforderung von {hotel}", "Guten Tag {name},<br><br>{hotel} bittet Sie, {total} für {ref} zu bezahlen."),
-		"ru": ("Запрос на оплату от {hotel}", "Здравствуйте, {name}!<br><br>{hotel} просит вас оплатить {total} за {ref}."),
-		"ro": ("Cerere de plată de la {hotel}", "Stimate/Stimată {name},<br><br>{hotel} vă roagă să plătiți {total} pentru {ref}."),
-		"pl": ("Prośba o płatność od {hotel}", "Dzień dobry {name},<br><br>{hotel} prosi o zapłatę {total} za {ref}."),
+		"en": ("Payment request from {hotel}", "Dear {name},<br><br>{hotel} asks you to pay {total} for {ref}. "
+		                                       "The link is valid until {expires}."),
+		"tr": ("{hotel} ödeme talebi", "Sayın {name},<br><br>{hotel}, {ref} için {total} tutarında ödeme talep ediyor. "
+		                              "Bağlantı {expires} tarihine kadar geçerlidir."),
+		"de": ("Zahlungsaufforderung von {hotel}", "Guten Tag {name},<br><br>{hotel} bittet Sie, {total} für {ref} zu "
+		                                           "bezahlen. Der Link ist bis {expires} gültig."),
+		"ru": ("Запрос на оплату от {hotel}", "Здравствуйте, {name}!<br><br>{hotel} просит вас оплатить {total} за {ref}. "
+		                                      "Ссылка действительна до {expires}."),
+		"ro": ("Cerere de plată de la {hotel}", "Stimate/Stimată {name},<br><br>{hotel} vă roagă să plătiți {total} "
+		                                        "pentru {ref}. Linkul este valabil până la {expires}."),
+		"pl": ("Prośba o płatność od {hotel}", "Dzień dobry {name},<br><br>{hotel} prosi o zapłatę {total} za {ref}. "
+		                                       "Link jest ważny do {expires}."),
 	},
 }
 

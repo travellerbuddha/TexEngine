@@ -95,6 +95,10 @@ export interface CreatedLink {
   token?: string
   replay?: boolean
   emailed?: boolean
+  /** When the link stops working (B6). */
+  expires_at?: string | null
+  /** A booking awaiting payment: its rooms are held until then, and the link expires then (B6). */
+  rooms_held_until?: string | null
 }
 
 export interface MethodOption {

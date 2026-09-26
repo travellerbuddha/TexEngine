@@ -237,6 +237,9 @@
  "crs.link.email": "E-mail gościa",
  "crs.link.email_hint": "Opcjonalnie; widoczny na stronie płatności.",
  "crs.link.expires": "Ważny przez",
+ "crs.link.expires_hint": "W przypadku rezerwacji oczekującej na płatność pokoje są trzymane do wygaśnięcia linku (najdłużej przez czas trzymania dla linków hotelu).",
+ "crs.link.valid_until": "Link można opłacić do {date}.",
+ "crs.link.rooms_held": "Pokoje z rezerwacji są trzymane dla gościa do {date}.",
  "crs.link.for": "Dla rezerwacji {ref}",
  "crs.link.hours": {
   "one": "{count} godzina",

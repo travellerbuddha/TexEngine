@@ -1307,10 +1307,10 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		provider_for(provider_account)
 	token = secrets.token_urlsafe(24)
 	expires_at = add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60)))
-	# a link of a booking waiting for its payment never outlives the booking's hold; a standalone
-	# link keeps its own validity (K-2d)
+	# a link of a booking waiting for its payment holds its rooms for the link hold and expires with
+	# it (B6); a standalone link keeps its own validity (K-2d)
 	held = booking or (frappe.db.get_value("Reservation", reservation, "tex_booking") if reservation else None)
-	expires_at = holds.link_expiry(held, expires_at)
+	expires_at, rooms_held_until = holds.hold_for_link(held, expires_at)
 	doc = frappe.get_doc({
 		"doctype": "TEX Payment Link", "property": property, "status": "Active", "amount": amount,
 		"currency": currency, "description": (description or "")[:500],
@@ -1328,8 +1328,11 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 
 		emailed = notify.payment_link(doc.name, url, language)
 	audit("payment_link.create", reference_doctype="TEX Payment Link", reference_name=doc.name, property=property,
-	      new={"amount": to_str(amount), "currency": currency, "booking": booking, "emailed": emailed})
-	return {"link": doc.name, "url": url, "token": token, "emailed": emailed}
+	      new={"amount": to_str(amount), "currency": currency, "booking": booking, "emailed": emailed,
+	           "expires_at": str(expires_at)})
+	# when the link stops working and, for a booking waiting for its payment, until when its rooms are held
+	return {"link": doc.name, "url": url, "token": token, "emailed": emailed, "expires_at": str(expires_at),
+	        "rooms_held_until": str(rooms_held_until) if rooms_held_until else None}
 
 
 def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -> dict:
@@ -1350,7 +1353,8 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 		emailed = notify.payment_link(link.name, url, language)
 	audit("payment_link.reissue", reference_doctype="TEX Payment Link", reference_name=name, property=link.property,
 	      new={"emailed": emailed})
-	return {"link": link.name, "url": url, "token": token, "emailed": emailed}
+	return {"link": link.name, "url": url, "token": token, "emailed": emailed,
+	        "expires_at": str(link.expires_at) if link.expires_at else None}
 
 
 def link_by_token(token: str):

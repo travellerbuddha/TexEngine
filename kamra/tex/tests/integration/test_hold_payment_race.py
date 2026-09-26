@@ -39,6 +39,8 @@ def passes(booking_name: str, minutes: int) -> None:
 	if frappe.db.has_column("TEX Payment Transaction", "expires_at"):
 		frappe.db.sql("""UPDATE `tabTEX Payment Transaction` SET expires_at = expires_at - INTERVAL %(m)s MINUTE
 		                 WHERE booking=%(b)s AND expires_at IS NOT NULL""", {"m": minutes, "b": booking_name})
+	frappe.db.sql("""UPDATE `tabTEX Payment Link` SET expires_at = expires_at - INTERVAL %(m)s MINUTE
+	                 WHERE booking=%(b)s AND expires_at IS NOT NULL""", {"m": minutes, "b": booking_name})
 	if frappe.db.has_column("TEX Booking", "payment_attempt_until"):
 		frappe.db.sql("""UPDATE `tabTEX Booking` SET payment_attempt_until = payment_attempt_until
 		                 - INTERVAL %(m)s MINUTE WHERE name=%(b)s AND payment_attempt_until IS NOT NULL""",
@@ -750,3 +752,66 @@ class TestReconciliationVisible(HoldCase):
 		self.pays(self.start_payment(b))
 		self.assertIsNone(public.booking_status(token=b["manage_token"])["late_payment"])
 		self.assertNotIn(self.TEAM, self.recipients("TEX Booking", b["booking"]))
+
+
+def held_until(b: dict) -> list:
+	return frappe.get_all("Reservation", filters={"tex_booking": b["booking"]}, pluck="hold_expires_on")
+
+
+class TestPaymentLinkHold(HoldCase):
+	"""B6 (audit 1b), the real flow: an agent books by card (a 20-minute hold), then sends the guest a
+	payment link. Sending it holds the rooms for the link hold (the hotel's, else TEX Settings, 24 hours
+	by default); the link expires with the hold; the response and the e-mail say until when."""
+
+	def send_link(self, b: dict, **kw) -> dict:
+		return pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                       expires_hours=72, booking=b["booking"], **kw)
+
+	def test_a_link_holds_the_rooms_for_the_link_hold_and_its_payment_confirms(self):
+		b = self.book(method="Card")
+		out = self.send_link(b)
+		until = held_until(b)[0]
+		self.assertAlmostEqual((until - now_datetime()).total_seconds() / 60, 1440, delta=2)
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "expires_at"), until)
+		self.assertEqual((out["expires_at"], out["rooms_held_until"]), (str(until), str(until)))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.hold_extended",
+		                                                     "reference_name": b["booking"]}))
+		passes(b["booking"], 25)                                   # the card's 20 minutes are long over
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		started = public.pay_link(token=out["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def test_the_hotels_link_hold_decides(self):
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_hold_minutes_link", 120)
+		b = self.book(method="Card")
+		out = self.send_link(b)
+		until = held_until(b)[0]
+		self.assertAlmostEqual((until - now_datetime()).total_seconds() / 60, 120, delta=2)
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "expires_at"), until)
+
+	def test_the_link_expires_with_its_hold(self):
+		b = self.book(method="Card")
+		out = self.send_link(b)
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		pay.expire_links()
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "status"), "Expired")
+
+	def test_the_email_says_until_when(self):
+		from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
+
+		ensure_test_outbox()
+		b = self.book(method="Card")
+		out = self.send_link(b, guest_email=GUEST["email"], guest_name="Lena Kraus", send_email=True)
+		self.assertTrue(out["emailed"])
+		import email
+
+		queue = frappe.get_all("Email Queue", filters={"reference_doctype": "TEX Payment Link",
+		                                               "reference_name": out["link"]}, pluck="name")
+		msg = email.message_from_string(frappe.get_doc("Email Queue", queue[0]).message)
+		body = "".join(part.get_payload(decode=True).decode("utf-8", "replace") for part in msg.walk()
+		               if part.get_content_type() == "text/html")
+		self.assertIn(f"{held_until(b)[0]:%Y-%m-%d %H:%M}", body)

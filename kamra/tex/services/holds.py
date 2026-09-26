@@ -20,6 +20,8 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
+from kamra.tex.security.audit import audit
+
 HOLDING = ("Pending Payment", "Held")
 # K-2d: the hold of each payment method — (TEX Settings field, hotel override on Property, default)
 CARD, LINK = "Card", "Payment Link"
@@ -35,18 +37,35 @@ CLOCK_SKEW_MINUTES = 5
 TRANSFER = "Bank Transfer"
 
 
-def link_expiry(booking: str | None, wanted: datetime, now: datetime | None = None) -> datetime:
-	"""A payment link of a booking waiting for its payment never outlives the booking's hold (its
-	money would arrive once the rooms are gone): → the earlier of ``wanted`` and the hold deadline,
-	refused (``HoldExpired``) once the hold is over. A link of no held booking keeps ``wanted``."""
-	if not booking or frappe.db.get_value("TEX Booking", booking, "status") not in HOLDING:
-		return wanted
+def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = None) -> tuple[datetime, datetime | None]:
+	"""B6: a payment link sent for a booking waiting for its payment (an agent booked by card, then sends
+	the guest a link) holds the booking's rooms for the link hold (``resolve_hold_minutes`` for a payment
+	link: the hotel's, else TEX Settings, 24 hours by default), never beyond ``wanted``, and never
+	shortens a longer hold; the link lives as long as the hold. Under the booking's lock and its rooms'
+	(the order of every hold decision); refused (``HoldExpired``) once the hold is over. → (the link's
+	expiry, until when the rooms are held); a link of no booking waiting for its payment keeps ``wanted``
+	and holds nothing."""
+	wanted = get_datetime(wanted)
+	if not booking:
+		return wanted, None
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # as it is now
+	if b.status not in HOLDING:
+		return wanted, None
 	now = get_datetime(now or now_datetime())
-	deadline = hold_deadline(booking)
+	deadline = hold_deadline(booking, lock=True)
 	if not deadline or deadline <= now:
 		raise HoldExpired(_("The time to pay for booking {0} is over; its rooms are no longer held. "
 		                    "Please book again.").format(booking))
-	return min(get_datetime(wanted), deadline)
+	until = min(wanted, add_to_date(now, minutes=resolve_hold_minutes(b.property, LINK)))
+	if until > deadline:
+		for name in sorted(r.reservation for r in b.rooms):
+			status, held = frappe.db.get_value("Reservation", name, ["status", "hold_expires_on"], for_update=True)
+			if status in HOLDING and held:          # a room held without a deadline keeps none (never guessed)
+				frappe.db.set_value("Reservation", name, "hold_expires_on", until, update_modified=False)
+		audit("booking.hold_extended", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
+		      old={"hold_until": str(deadline)}, new={"hold_until": str(until)}, reason="payment link sent")
+		deadline = until
+	return min(wanted, deadline), deadline
 
 
 def resolve_hold_minutes(property: str, payment_method: str | None) -> int:
