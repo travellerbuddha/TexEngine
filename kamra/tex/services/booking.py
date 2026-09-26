@@ -918,7 +918,12 @@ def cancellation_penalty(reservation, today=None, *, basket: bool = True) -> tup
 	and — ``basket`` — what the room carries for the other rooms of its booking once it is gone
 	(``basket_clawback``: the discount they keep but no longer earn; review H1), explained in the
 	basis. A room that carried such a discount for the others passes it on, or has it credited when
-	it is no longer owed; the charge is then below the rate's penalty, and may be a credit."""
+	it is no longer owed; the charge is then below the rate's penalty, and may be a credit.
+
+	A room of a booking never confirmed (still waiting for its payment) is cancelled free of charge
+	(C6, user decision): nothing was paid, nothing is owed."""
+	if reservation.get("tex_booking") and reservation.status in holds.HOLDING:
+		return quantize(ZERO, reservation.tex_currency or "EUR"), {"rule": "never confirmed: no fee"}
 	pen, basis = _policy_penalty(reservation, today)
 	snap = json.loads(reservation.tex_pricing_snapshot or "{}")
 	if basket and snap.get("contract") and reservation.get("tex_booking") and snap.get("source") != "channel":

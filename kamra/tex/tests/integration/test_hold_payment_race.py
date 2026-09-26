@@ -374,6 +374,28 @@ class TestMoneyForBookingsThatCannotTakeIt(HoldCase):
 		self.assertEqual(paid(b), D(0))
 		self.assertEqual(pay.allocated_of(txn), D(0))
 
+	def test_a_booking_never_confirmed_owes_no_cancellation_fee(self):
+		"""C6 (user decision): a room of a booking never confirmed (never paid) is cancelled free of
+		charge, even at a non-refundable rate, and no debt is left once the rest expires."""
+		b = self.book(rooms=2, rate_plan="NRF")
+		out = booking.cancel_reservation(self.rooms(b)[0], reason="one room less")
+		self.assertEqual(D(out["penalty"]), D(0))
+		passes(b["booking"], 25)
+		run_expiry_jobs()
+		row = frappe.db.get_value("TEX Booking", b["booking"], ["status", "total_amount", "balance_amount"], as_dict=True)
+		self.assertEqual((row.status, D(row.total_amount), D(row.balance_amount)), ("Cancelled", D(0), D(0)))
+
+	def test_money_in_flight_is_never_kept_as_a_cancellation_fee(self):
+		"""C6 (user decision): a confirmed, unpaid booking is cancelled with its fee while the guest's
+		card payment is on its way: the payment is not silently taken as the fee — it goes to staff."""
+		b = self.book(rate_plan="NRF", status="Confirmed", confirm_without_payment=True)
+		payment = public.pay_booking(token=b["manage_token"], payment_method="Card")
+		booking.cancel_reservation(self.rooms(b)[0], reason="the guest cancelled")
+		self.assertGreater(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D(0))   # the fee
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(paid(b), D(0))
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
+
 	def test_a_cancellation_fee_is_still_paid_on_a_cancelled_booking(self):
 		b = self.book(rate_plan="NRF", method="Card", status="Confirmed", confirm_without_payment=True)
 		booking.cancel_reservation(self.rooms(b)[0], reason="the guest cancelled")

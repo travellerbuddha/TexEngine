@@ -9109,4 +9109,5 @@ main `1575c8b` is contained, so nothing was merged.
   none, so their money is judged when its news arrives. Paid in time, news after the expiry (user
   decision, D4): rooms free → revived with its B2 money and confirmed; rooms sold, or the guest has
   another live booking for the stay → `Action Required`, team told, no auto refund. Locks: charges, then booking.
+- A booking never confirmed owes no cancellation fee; money on its way is never kept as a fee (C6, user).
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.

@@ -52,11 +52,12 @@ CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
 REFUND_REASON = "the booking could not be confirmed: the payment arrived after its rooms were given back"
 
 
-def problem(b, amount=None) -> str | None:
+def problem(b, amount=None, *, in_flight: bool = False) -> str | None:
 	"""Why booking ``b`` (locked by the caller) may not take ``amount`` of money, or None when it
 	may. A confirmed (or partly cancelled) booking takes it. A cancelled one takes at most what it
-	still owes (its cancellation charges), else ``BOOKING_CANCELLED``. A booking waiting for its
-	payment takes it while its rooms are held for it, however late (B3 a), else
+	still owes (its cancellation charges) from staff, else ``BOOKING_CANCELLED``; money that was on
+	its way (``in_flight``: a gateway, a link, a transfer) is never kept as its fee (C6). A booking
+	waiting for its payment takes it while its rooms are held for it, however late (B3 a), else
 	``ROOMS_RELEASED``. Any other status: ``NOT_PAYABLE``."""
 	if b.status == "Partially Cancelled" and not confirmed_rooms(b.name):
 		# D2: never confirmed, left "Partially Cancelled" before B1 (its other rooms released by the old
@@ -66,6 +67,9 @@ def problem(b, amount=None) -> str | None:
 	if b.status in TAKES_MONEY:
 		return None
 	if b.status == "Cancelled":
+		if in_flight:
+			# money on its way when the booking was cancelled is never kept as its fee (C6, user decision)
+			return BOOKING_CANCELLED
 		owed = from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency)
 		return None if amount is not None and ZERO < amount <= owed else BOOKING_CANCELLED
 	if b.status not in holds.HOLDING:

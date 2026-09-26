@@ -663,7 +663,8 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	if b.currency != txn.currency:
 		frappe.throw(_("Currency mismatch between payment and booking."))
 	amount = quantize(D(amount), txn.currency)
-	why = late_payments.problem(b, amount=amount)
+	# money staff took themselves (the desk, points) may pay a fee; money on its way never does (C6)
+	why = late_payments.problem(b, amount=amount, in_flight=_system and txn.provider not in ("Manual", "Loyalty"))
 	if why == late_payments.BOOKING_CANCELLED and _system:
 		from kamra.tex.services import guest_changes
 
