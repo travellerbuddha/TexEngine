@@ -10,6 +10,7 @@ the API, ``/book/pay/…`` pages that payment providers return to); another site
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 
@@ -33,6 +34,19 @@ def booking_html() -> str:
 	from kamra.tex import entry
 
 	return page.replace("</head>", entry.source_meta() + "</head>", 1)
+
+
+def with_session_token(page: str) -> str:
+	"""The page with the session's CSRF token, for a signed-in user only (O-28).
+
+	Frappe asks every POST of a session that holds a token to echo it, `allow_guest` or not: staff who
+	had opened /kamra or /app saw the booking engine refuse its first call. A guest has no session token
+	and gets none. The engine loads no third-party tracker on a page that carries one (ADR-046 note)."""
+	if frappe.session.user == "Guest":
+		return page
+	token = json.dumps(frappe.sessions.get_csrf_token()).replace("<", "\\u003c")
+	tag = f"<script>window.csrf_token={token};</script>"
+	return page.replace("</head>", f"{tag}</head>", 1) if "</head>" in page else tag + page
 
 
 # payment pages send no Referer at all: a payment link e-mailed before G-83 carries its token
@@ -90,7 +104,7 @@ class BookingHostRenderer:
 
 	def render(self) -> Response:
 		policy = referrer_policy(self.path)
-		resp = Response(with_referrer_policy(pinned_page(self.slug), policy), status=200,
+		resp = Response(with_referrer_policy(with_session_token(pinned_page(self.slug)), policy), status=200,
 		                content_type="text/html; charset=utf-8")
 		resp.headers["Content-Security-Policy"] = f"frame-ancestors {frame_ancestors(self.slug)}"
 		resp.headers["Referrer-Policy"] = policy

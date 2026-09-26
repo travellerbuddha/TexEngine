@@ -251,6 +251,34 @@ class TestSecurityHygieneG83(G83Setup):
 		self.as_user("Guest")
 		self.assertEqual(public.payment_link(token=again["token"])["status"], "Active")
 
+	def test_o28_a_signed_in_users_booking_page_carries_the_session_csrf_token(self):
+		"""O-28: Frappe asks every POST of a session that holds a CSRF token to echo it, `allow_guest` or
+		not. Staff who had opened /kamra or /app got CSRFTokenError on the booking engine's first call.
+		The platform's page and a hotel's pinned host give a signed-in user the token, a guest none."""
+		from kamra.tex import booking_host
+		from kamra.www import book
+
+		page = "<html><head><title>booking</title></head><body></body></html>"
+		frappe.local.response_headers = {}
+		try:
+			with mock.patch("kamra.www.book.booking_html", return_value=page), \
+			     mock.patch("kamra.tex.booking_host.booking_html", return_value=page):
+				for user in (self.agent, "Guest"):
+					self.as_user(user)                        # set_user clears form_dict: path after it
+					frappe.form_dict.app_path = f"{SLUG}/manage"
+					served = book.get_context(frappe._dict()).spa_html
+					pinned = booking_host.BookingHostRenderer("manage")   # book.hotel.com/manage
+					pinned.slug = SLUG
+					on_host = pinned.render().get_data(as_text=True)
+					for html in (served, on_host):
+						if user == "Guest":
+							self.assertNotIn("csrf_token", html)
+						else:
+							token = json.dumps(frappe.sessions.get_csrf_token())
+							self.assertIn(f"<script>window.csrf_token={token};</script></head>", html)
+		finally:
+			frappe.form_dict.pop("app_path", None)
+
 	# ── 5. PMS webhook signing ────────────────────────────────────────────
 
 	def test_g83_a_pms_webhook_is_never_sent_unsigned(self):
