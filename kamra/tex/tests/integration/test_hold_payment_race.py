@@ -545,6 +545,30 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(results, {"expiry": "ran", "a_pays": "Succeeded"})
 		self.assert_a_settled(mailed.call_count)
 
+	def test_a_late_payment_holding_the_booking_before_the_expiry_job_confirms_it(self):
+		"""E7 (audit 1c-son): the same race in a forced order — the expiry job starts only once the late
+		payment holds A's lock, A's rooms still held for it. Only one outcome: A is confirmed at its
+		locked price (B3 a) and the job, waiting behind the payment, leaves it."""
+		from kamra.tex.services import late_payments
+
+		holds_the_lock = threading.Event()
+		judge = late_payments.problem
+
+		def payment_judges_a(b, *args, **kw):
+			if b.name == self.a["booking"]:
+				holds_the_lock.set()                               # ``allocate`` judges A under A's lock
+			return judge(b, *args, **kw)
+
+		def expiry_once_the_payment_holds_a():
+			return self.expiry() if holds_the_lock.wait(timeout=30) else "the payment never took A's lock"
+
+		with mock.patch("kamra.tex.services.late_payments.problem", payment_judges_a), \
+		     mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			results = self._race(("expiry", expiry_once_the_payment_holds_a, "Administrator"),
+			                     ("a_pays", self.late_payment, "Guest"))
+		self.assertEqual(results, {"expiry": "ran", "a_pays": "Succeeded"})
+		self.assertEqual(self.assert_a_settled(mailed.call_count), "Confirmed")
+
 	def test_a_charge_leaves_reconciliation_by_its_state_as_it_is_now(self):
 		"""E5 (audit 1c-son): ``settled`` decides by the charge's reconciliation as it is now (a locking
 		read), never as this transaction's snapshot saw it before another one changed it."""
