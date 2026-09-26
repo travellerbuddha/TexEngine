@@ -211,6 +211,9 @@ jobs:
             --kwargs "{'password': 'TexDemo#2026'}"
           bench --site test.localhost set-config -p tex_public_write_limit 1000
           bench --site test.localhost set-config -p tex_public_search_limit 1000
+          # new-site never ran the setup wizard, and Desk's sidebar is built only once it is done
+          bench --site test.localhost execute \
+            frappe.desk.page.setup_wizard.setup_wizard.enable_setup_wizard_complete --args "['frappe']"
           echo "127.0.0.1 test.localhost" | sudo tee -a /etc/hosts
           # --skip-assets: link the app's committed bundles where the web server looks
           mkdir -p sites/assets
