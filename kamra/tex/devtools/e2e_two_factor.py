@@ -51,7 +51,7 @@ def enable(password: str) -> dict:
 	twofactor.set_default(f"{USER}_otpsecret", encrypt(secret))
 	twofactor.set_default(f"{USER}_otplogin", 1)
 	frappe.db.set_single_value("System Settings", {"enable_two_factor_auth": 1, "two_factor_method": "OTP App"})
-	frappe.db.commit()
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- bench execute E2E devtool (not whitelisted): kept before clear_cache
 	frappe.clear_cache()
 	return {"user": USER, "secret": secret}
 
@@ -68,6 +68,6 @@ def disable() -> dict:
 		frappe.delete_doc("User", USER, ignore_permissions=True, force=True)
 	if frappe.db.exists("Role", ROLE):
 		frappe.delete_doc("Role", ROLE, ignore_permissions=True, force=True)
-	frappe.db.commit()
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- bench execute E2E devtool (not whitelisted): kept before clear_cache
 	frappe.clear_cache()
 	return {"enable_two_factor_auth": frappe.db.get_single_value("System Settings", "enable_two_factor_auth")}
