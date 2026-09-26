@@ -63,3 +63,4 @@ kamra.patches.tex.p52_partly_cancelled_awaiting_payment
 kamra.patches.tex.p53_payment_captured_at
 kamra.patches.tex.p54_never_confirmed_leftovers
 kamra.patches.tex.p55_web_transfer_hold
+kamra.patches.tex.p56_open_ended_versions

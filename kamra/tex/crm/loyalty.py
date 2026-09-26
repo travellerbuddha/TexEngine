@@ -213,12 +213,15 @@ def mature_and_expire(today: date | None = None) -> dict:
 	``expires_on`` (never more than the remaining balance)."""
 	today = today or getdate(nowdate())
 	matured = expired = 0
-	for name in frappe.get_all("TEX Loyalty Ledger", filters={"status": "Pending", "entry_type": "Earn",
-	                                                          "available_on": ("<=", today)}, pluck="name"):
+	# every earning TEX writes has its date; a Pending one without it (Desk) has nothing to wait for
+	for name in frappe.get_all("TEX Loyalty Ledger", filters={"status": "Pending", "entry_type": "Earn"},
+	                           or_filters=[["available_on", "is", "not set"], ["available_on", "<=", today]],
+	                           pluck="name"):
 		frappe.db.set_value("TEX Loyalty Ledger", name, "status", "Available")
 		matured += 1
-	for e in frappe.get_all("TEX Loyalty Ledger", filters={"status": "Available", "entry_type": "Earn",
-	                                                       "expires_on": ("<", today)},
+	# an earning without an expiry date never expires (NEW-1, ADR-064)
+	for e in frappe.get_all("TEX Loyalty Ledger", filters=[["status", "=", "Available"], ["entry_type", "=", "Earn"],
+	                                                       ["expires_on", "is", "set"], ["expires_on", "<", today]],
 	                        fields=["name", "guest", "program", "points", "booking", "property"]):
 		if frappe.db.exists("TEX Loyalty Ledger", {"entry_type": "Expire", "reason": f"expiry of {e.name}"}):
 			continue

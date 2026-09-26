@@ -107,6 +107,7 @@ BEHAVIOUR = {
 	"p54_never_confirmed_leftovers": "test_hold_payment_race.TestNeverConfirmedLeftovers."
 	                                 "test_p54_cancels_leftovers_and_parks_their_money_without_mail",
 	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
+	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
 }
 
 
@@ -1132,6 +1133,54 @@ class TestSmallPatches(PatchCase):
 		self.assertRerunChangesNothing("p55_web_transfer_hold")
 		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 720)
 		self.assertTrue(frappe.db.has_column("Property", "tex_hold_minutes_transfer_web"))
+
+	def test_p56_gives_versions_the_roll_superseded_their_state(self):
+		# NEW-1: the roll set every published version without an end Superseded and left active_to empty
+		from kamra.tex.commercial import contracts
+
+		def as_the_old_roll(version):
+			frappe.db.set_value("TEX Contract Version", version, "status", "Superseded")
+
+		def state(version):
+			return tuple(frappe.db.get_value("TEX Contract Version", version, ["status", "active_to"]))
+
+		def publish(contract, at=None):
+			version = contracts.new_draft(contract)
+			contracts.publish(version, effective_from=at)
+			return version
+
+		now = now_datetime()
+		live = fx.create_contract(self.f, code="P56-LIVE")                  # live, no end, nothing after it
+		as_the_old_roll(live["version"])
+		fixed = fx.create_contract(self.f, code="P56-FIX")                  # V2 scheduled, then corrected by V3
+		start = add_to_date(now, days=30)
+		v2 = publish(fixed["contract"], start)
+		as_the_old_roll(v2)
+		v3 = publish(fixed["contract"], add_to_date(now, days=10))
+		self.assertEqual(state(v2), ("Superseded", None))                 # the publish never saw it
+		self.assertEqual(contracts.active_version_header(fixed["contract"], start).version_id, v2)
+		replaced = fx.create_contract(self.f, code="P56-NEW")               # live, then a version from now on
+		as_the_old_roll(replaced["version"])
+		r2 = publish(replaced["contract"])
+		right = fx.create_contract(self.f, code="P56-OK")                   # superseded the right way
+		publish(right["contract"])
+		kept = state(right["version"])
+		self.assertEqual(kept[0], "Superseded")
+
+		self.first_run("p56_open_ended_versions")                           # a second run changes nothing
+		self.assertEqual(state(live["version"]), ("Published", None))
+		self.assertEqual(frappe.db.get_value("TEX Contract", live["contract"], "active_version"), live["version"])
+		self.assertEqual(state(v2), ("Withdrawn", get_datetime(frappe.db.get_value(
+			"TEX Contract Version", v2, "effective_from"))))
+		self.assertEqual(contracts.active_version_header(fixed["contract"], start).version_id, v3)
+		self.assertEqual(state(replaced["version"]), ("Superseded", get_datetime(frappe.db.get_value(
+			"TEX Contract Version", r2, "effective_from"))))
+		self.assertEqual(state(right["version"]), kept)
+		restored = frappe.get_all("TEX Audit Event", filters={"action": "contract.version_restored"},
+		                          fields=["reference_name", "new_value"])
+		self.assertEqual(sorted(e.reference_name for e in restored), sorted([live["version"], v2, replaced["version"]]))
+		self.assertEqual(json.loads(next(e.new_value for e in restored if e.reference_name == v2))["status"],
+		                 "Withdrawn")
 
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")
