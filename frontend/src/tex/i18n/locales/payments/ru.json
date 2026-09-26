@@ -142,6 +142,7 @@
  "payments.links.cancel_confirm": "Отменить ссылку",
  "payments.links.cancel_title": "Отмена ссылки на оплату",
  "payments.links.cancelled": "Ссылка на оплату отменена",
+ "payments.links.cancelled_held_until": "Ссылка на оплату отменена. Номера бронирования удерживаются до {date}.",
  "payments.links.caption": "Ссылки на оплату",
  "payments.links.col.actions": "Действия",
  "payments.links.col.created": "Создана",

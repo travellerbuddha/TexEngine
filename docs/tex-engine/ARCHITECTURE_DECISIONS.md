@@ -9097,7 +9097,9 @@ main `1575c8b` is contained, so nothing was merged.
   room cancelled on purpose keeps waiting for its payment with the rest (B1).
 - An attempt keeps the rooms until its own deadline: a card's at most 5 min (3DS) past the hold, a
   transfer's the hold; another starts while the rooms are held (C1); a stale charge holds none. A payment
-  link sent for the booking holds its rooms for the link hold (default 24 h) and expires with it (B6).
+  link sent for the booking holds its rooms for the link hold (default 24 h), never past the end of the
+  arrival day, and expires with it (B6, D7); a cancelled link's extension goes back, never below the
+  other links' expiry (open or paid) nor now + the booking's own hold (E3).
 - A transfer booked on the web holds 24 h (a hotel may change it), at most 2 rooms; staff 48 h (C2, user).
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
   at the locked price — its rooms, extra units and coupon uses are still held for it, so nothing is

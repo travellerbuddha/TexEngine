@@ -142,6 +142,7 @@
  "payments.links.cancel_confirm": "Linki iptal et",
  "payments.links.cancel_title": "Ödeme linkini iptal et",
  "payments.links.cancelled": "Ödeme linki iptal edildi",
+ "payments.links.cancelled_held_until": "Ödeme linki iptal edildi. Rezervasyonun odaları {date} tarihine kadar tutuluyor.",
  "payments.links.caption": "Ödeme linkleri",
  "payments.links.col.actions": "İşlemler",
  "payments.links.col.created": "Oluşturulma",

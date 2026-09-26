@@ -258,8 +258,9 @@ export default function Links() {
         confirmLabel={t("payments.links.cancel_confirm")}
         onConfirm={async (reason) => {
           if (!cancel) return
-          await tex("payments", "cancel_link", { name: cancel.name, reason }, { post: true })
-          toast.success(t("payments.links.cancelled"))
+          const out = await tex<{ rooms_held_until?: string | null }>("payments", "cancel_link", { name: cancel.name, reason }, { post: true })
+          // until when the booking's rooms stay held once this link no longer holds them (E3)
+          toast.success(out.rooms_held_until ? t("payments.links.cancelled_held_until", { date: dateTime(out.rooms_held_until) }) : t("payments.links.cancelled"))
           q.reload()
         }}
       />

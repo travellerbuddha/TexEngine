@@ -355,8 +355,9 @@ def links(property: str, status: str | None = None, booking: str | None = None, 
 def cancel_link(name: str, reason: str):
 	if not text(reason, 300):
 		frappe.throw(_("A reason is required."))
-	pay.cancel_link(name, text(reason, 300))
-	return {"ok": True}
+	held = pay.cancel_link(name, text(reason, 300))
+	# the dialog says until when the booking's rooms stay held (E3)
+	return {"ok": True, "rooms_held_until": str(held) if held else None}
 
 
 # ─── staff: provider accounts & method rules (secrets are write-only) ────

@@ -142,6 +142,7 @@
  "payments.links.cancel_confirm": "Anuluj link",
  "payments.links.cancel_title": "Anulowanie linku do płatności",
  "payments.links.cancelled": "Link do płatności anulowany",
+ "payments.links.cancelled_held_until": "Link do płatności anulowany. Pokoje rezerwacji pozostają zablokowane do {date}.",
  "payments.links.caption": "Linki do płatności",
  "payments.links.col.actions": "Akcje",
  "payments.links.col.created": "Utworzono",

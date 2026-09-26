@@ -142,6 +142,7 @@
  "payments.links.cancel_confirm": "Cancel link",
  "payments.links.cancel_title": "Cancel payment link",
  "payments.links.cancelled": "Payment link cancelled",
+ "payments.links.cancelled_held_until": "Payment link cancelled. The booking's rooms stay held until {date}.",
  "payments.links.caption": "Payment links",
  "payments.links.col.actions": "Actions",
  "payments.links.col.created": "Created",

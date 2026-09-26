@@ -142,6 +142,7 @@
  "payments.links.cancel_confirm": "Anulează linkul",
  "payments.links.cancel_title": "Anulare link de plată",
  "payments.links.cancelled": "Link de plată anulat",
+ "payments.links.cancelled_held_until": "Link de plată anulat. Camerele rezervării rămân reținute până la {date}.",
  "payments.links.caption": "Linkuri de plată",
  "payments.links.col.actions": "Acțiuni",
  "payments.links.col.created": "Creat",

@@ -46,8 +46,8 @@ TRANSFER = "Bank Transfer"
 def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = None) -> tuple[datetime, datetime | None]:
 	"""B6: a payment link sent for a booking waiting for its payment (an agent booked by card, then sends
 	the guest a link) holds the booking's rooms for the link hold (``resolve_hold_minutes`` for a payment
-	link: the hotel's, else TEX Settings, 24 hours by default), never beyond ``wanted`` nor the start of
-	the arrival day (D7), and never shortens a longer hold; the link lives as long as the hold. Under the booking's lock and its rooms'
+	link: the hotel's, else TEX Settings, 24 hours by default), never beyond ``wanted`` nor the end of
+	the arrival day (D7, E3), and never shortens a longer hold; the link lives as long as the hold. Under the booking's lock and its rooms'
 	(the order of every hold decision); refused (``HoldExpired``) once the hold is over, and for a
 	booking neither waiting nor confirmed (D5). → (the link's expiry, until when the rooms are held); a
 	link of a confirmed booking, or of none, keeps ``wanted`` and holds nothing."""
@@ -69,8 +69,8 @@ def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = 
 	if not deadline or deadline <= now:
 		raise HoldExpired(_("The time to pay for booking {0} is over; its rooms are no longer held. "
 		                    "Please book again.").format(booking))
-	# never past the start of the arrival day (D7)
-	arrival = datetime.combine(min(getdate(r.check_in) for r in b.rooms if r.status in HOLDING), time.min)
+	# never past the end of the arrival day (D7, E3): a link sent that day is paid by its night
+	arrival = datetime.combine(min(getdate(r.check_in) for r in b.rooms if r.status in HOLDING), time(23, 59, 59))
 	until = min(wanted, add_to_date(now, minutes=resolve_hold_minutes(b.property, LINK)), arrival)
 	if until > deadline:
 		for name in sorted(r.reservation for r in b.rooms):
@@ -83,32 +83,39 @@ def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = 
 	return min(wanted, deadline), deadline
 
 
-def after_link_closed(booking: str | None) -> None:
-	"""D7: a cancelled link no longer holds its booking's rooms. The hold goes back to the latest of
-	what the booking's own payment method gave it (before any link extended it) and the expiry of its
-	links still open; never longer than it is. Under the booking's lock (after the link's)."""
+def after_link_closed(booking: str | None, now: datetime | None = None) -> datetime | None:
+	"""D7, E3: a cancelled link no longer holds its booking's rooms. The hold goes back to the latest of
+	what the booking's own payment method gave it (before any link extended it), the expiry of its
+	other links — open, or paid in full or in part (they held the rooms while their money came) — and
+	now plus its payment method's hold (the guest may still pay, at the desk or by card); never longer
+	than it is. Under the booking's lock (after the link's). → until when its rooms are held (None:
+	they are not held for it)."""
 	if not booking:
-		return
+		return None
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.status not in HOLDING:
-		return
+		return None
 	first = frappe.get_all("TEX Audit Event", filters={"action": "booking.hold_extended", "reference_name": booking},
 	                       fields=["old_value"], order_by="event_time asc, creation asc", limit=1)
 	current = hold_deadline(booking, lock=True)
 	if not first or not current:
-		return
-	links = frappe.get_all("TEX Payment Link", filters={"booking": booking, "status": ("in", ["Active", "Partially Paid"])},
+		return current
+	links = frappe.get_all("TEX Payment Link", filters={"booking": booking,
+	                                                    "status": ("in", ["Active", "Partially Paid", "Paid"])},
 	                       pluck="expires_at")
-	back = max([get_datetime(json.loads(first[0].old_value)["hold_until"]),
+	floor = add_to_date(get_datetime(now or now_datetime()),
+	                    minutes=resolve_hold_minutes(b.property, b.payment_method, web=b.created_via == "Booking Engine"))
+	back = max([get_datetime(json.loads(first[0].old_value)["hold_until"]), floor,
 	            *(get_datetime(x) for x in links if x)])
 	if back >= current:
-		return
+		return current
 	for name in sorted(r.reservation for r in b.rooms):
 		status, held = frappe.db.get_value("Reservation", name, ["status", "hold_expires_on"], for_update=True)
 		if status in HOLDING and held:
 			frappe.db.set_value("Reservation", name, "hold_expires_on", back, update_modified=False)
 	audit("booking.hold_restored", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      old={"hold_until": str(current)}, new={"hold_until": str(back)}, reason="payment link cancelled")
+	return back
 
 
 def resolve_hold_minutes(property: str, payment_method: str | None, *, web: bool = False) -> int:

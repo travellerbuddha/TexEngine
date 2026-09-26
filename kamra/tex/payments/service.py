@@ -1445,7 +1445,8 @@ def expire_links() -> int:
 	return n
 
 
-def cancel_link(name: str, reason: str) -> None:
+def cancel_link(name: str, reason: str):
+	"""→ until when its booking's rooms are still held (None: not held, or no booking; E3)."""
 	_lock("TEX Payment Link", name)
 	link = frappe.get_doc("TEX Payment Link", name)
 	scope.require("payment.link", link.property)
@@ -1453,6 +1454,8 @@ def cancel_link(name: str, reason: str) -> None:
 		frappe.throw(_("Only active links can be cancelled."))
 	link.status = "Cancelled"
 	link.save(ignore_permissions=True)
-	holds.after_link_closed(link.booking)          # the rooms it held for the guest are no longer held for it (D7)
+	# the rooms it held for the guest are no longer held for it (D7)
+	held = holds.after_link_closed(link.booking)
 	audit("payment_link.cancel", reference_doctype="TEX Payment Link", reference_name=name, property=link.property,
 	      reason=reason)
+	return held

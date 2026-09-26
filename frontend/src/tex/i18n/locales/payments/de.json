@@ -142,6 +142,7 @@
  "payments.links.cancel_confirm": "Link stornieren",
  "payments.links.cancel_title": "Zahlungslink stornieren",
  "payments.links.cancelled": "Zahlungslink storniert",
+ "payments.links.cancelled_held_until": "Zahlungslink storniert. Die Zimmer der Buchung bleiben bis {date} reserviert.",
  "payments.links.caption": "Zahlungslinks",
  "payments.links.col.actions": "Aktionen",
  "payments.links.col.created": "Erstellt",
