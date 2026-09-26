@@ -9,8 +9,12 @@ before the fixtures' season) and no outside world:
 * the PMS / webhook adapters (``connect.adapters.get``, the outbox) and the channel adapter
   (``distribution.repository.adapter_for``: deliver_ari, process_inbound, daily_resync) are stubs
   that record and accept;
-* payment providers (``payments.service.provider_for``: the refunds of
-  ``late_payments.refund_queued`` and ``guest_changes.expire_awaiting``) are a stub that records;
+* payment providers (``payments.service.provider_for``, called as it is: ``(account_name, *,
+  purpose, transaction)``) are a stub that records a refund and refuses anything else. The seed holds
+  no queued refund and no guest change awaiting payment, so ``late_payments.refund_queued`` and
+  ``guest_changes.expire_awaiting`` run with nothing to do and never reach it: their refund paths are
+  not exercised here (``test_hold_payment_race`` and ``test_self_service_money`` cover them); the stub
+  only guarantees no real provider is called;
 * the domain check's DNS-over-HTTPS lookup (``services.sites.txt_records``) answers the token;
 * e-mail is only queued: ``EmailQueue.send`` records and delivers nothing;
 * any other connection to a host that is not this machine is refused and recorded (``socket``).
@@ -112,8 +116,10 @@ def outside_world(day: date):
 			return None
 
 	class Provider:
-		def __init__(self, account):
-			self.account = account
+		"""Stands in for ``payments.service.provider_for(account_name, *, purpose, transaction)``."""
+
+		def __init__(self, account_name, *, purpose="new", transaction=None, **kw):
+			self.account, self.purpose, self.transaction = account_name, purpose, transaction
 
 		def refund(self, provider_ref, amount, currency, *, reference=None):
 			calls["provider"].append(("refund", provider_ref, str(amount), currency))
@@ -176,6 +182,20 @@ class TestSchedulerTick(TexTestCase):
 			                  if e.name not in before and not e.method.startswith(ALERT_RECORD)], [])
 			self.assertEqual(calls["network"], [])
 			self.check(seed, calls)
+
+	def test_the_provider_stub_takes_what_provider_for_takes(self):
+		# review round 1: refunds call provider_for(account, purpose="settle", transaction=...)
+		import inspect
+
+		real = inspect.signature(pay.provider_for)
+		with outside_world(getdate(nowdate())) as calls:
+			stub = inspect.signature(pay.provider_for)
+			for name in real.parameters:
+				self.assertTrue(name in stub.parameters or any(
+					p.kind is inspect.Parameter.VAR_KEYWORD for p in stub.parameters.values()), name)
+			provider = pay.provider_for("ACC-SMOKE", purpose="settle", transaction="TXN-SMOKE")
+			out = provider.refund("ref-1", Decimal("10.00"), "EUR", reference="late:TXN-SMOKE")
+		self.assertEqual((out.status, calls["provider"]), ("Succeeded", [("refund", "ref-1", "10.00", "EUR")]))
 
 	# ─── the seed ────────────────────────────────────────────────────────
 
