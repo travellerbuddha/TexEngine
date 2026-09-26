@@ -33,7 +33,7 @@
   "error_message",
   "reason",
   "return_url",
-  "section_96",
+  "section_reconciliation",
   "reconciliation",
   "reconciliation_note"
  ],
@@ -201,7 +201,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_96",
+   "fieldname": "section_reconciliation",
    "fieldtype": "Section Break",
    "label": "Reconciliation"
   },

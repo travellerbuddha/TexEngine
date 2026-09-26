@@ -1118,7 +1118,8 @@ PAYMENT_SPECS = [
 		F("return_url", "Small Text", "Return URL", read_only=1),
 		# K-2b: money the gateway captured that could not safely confirm its booking (its hold was
 		# over, or its rooms were gone): recorded, kept off the booking, until refunded or resolved
-		SB("Reconciliation"),
+		# an explicit name: SB() numbers sections globally, a new one would rename every later section
+		F("section_reconciliation", "Section Break", "Reconciliation"),
 		F("reconciliation", "Select", "Reconciliation", ["", "Action Required", "Refund Queued", "Refunded",
 		                                                 "Resolved"], read_only=1, in_standard_filter=1),
 		F("reconciliation_note", "Small Text", "Why", read_only=1),
