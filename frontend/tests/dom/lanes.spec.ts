@@ -117,6 +117,8 @@ for (const lang of ["en", "de", "pl", "ru", "tr", "ro"]) {
       const right = Math.max(...Array.from(body.querySelectorAll("table, th, td, kbd")).map((x) => x.getBoundingClientRect().right))
       return { scroll: body.scrollWidth - body.clientWidth, past: Math.round(right - box.right), panel: Math.round(el.getBoundingClientRect().width) }
     })
+    // a row is still named by the keys as the catalogue writes them (the chips are for the eye)
+    if (lang === "en") await expect(dialog.getByRole("row", { name: /Ctrl\+Shift\+Z, Ctrl\+Y.*Redo/ })).toBeVisible()
     expect(m.scroll, "the popover body scrolls sideways").toBe(0)
     expect(m.past, "a key or action runs past the popover").toBeLessThanOrEqual(0)
     expect(m.panel).toBe(448)

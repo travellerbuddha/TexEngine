@@ -151,12 +151,14 @@ export function KeyboardShortcuts() {
             {SHORTCUTS.map((id) => (
               <tr key={id}>
                 <th scope="row" className="py-1 pr-3 align-top font-normal">
-                  <span className="flex flex-wrap gap-1">
+                  {/* read as the catalogue writes the keys ("Ctrl+Shift+Z, Ctrl+Y"); the chips are
+                      what the eye reads */}
+                  <span className="sr-only">{t(`rates.kbd.${id}.keys`)}</span>
+                  <span aria-hidden className="flex flex-wrap gap-1">
                     {keyChips(t(`rates.kbd.${id}.keys`)).map((k, i) => (
-                      <span key={i} className="inline-flex max-w-full">
-                        {i > 0 && <span className="sr-only">, </span>}
-                        <kbd className="max-w-full rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 font-sans text-xs break-words text-zinc-800">{k}</kbd>
-                      </span>
+                      <kbd key={i} className="max-w-full rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 font-sans text-xs break-words text-zinc-800">
+                        {k}
+                      </kbd>
                     ))}
                   </span>
                 </th>
