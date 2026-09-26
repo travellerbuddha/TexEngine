@@ -969,6 +969,39 @@ class TestInheritedTerms(WorkspaceCase):
 		self.assertIn("rules", told[RM])
 		self.assertIn("same precedence", told[RM])
 
+	def test_the_publish_audit_counts_the_warnings_a_viewer_without_cost_is_shown(self):
+		"""The publish audit recorded the full warning count: how many warnings a hidden policy rule's op
+		decides, readable by whoever reads the audit trail (``audit_log`` by reference needs
+		``reservation.view``; S16 re-review 5, low finding). It now counts the report as a viewer without
+		cost reads it: the same whatever the op. Here the CHD child of 2A+1C is priced by a policy rule at
+		50 % (the STD total is negative, one more warning) or at 500 %."""
+		revisions.archive(POLICY, self.policy)
+		rules = [{"target": "COMBINATION", "combination": "1+0", "op": "SUBTRACT", "value": 150},
+		         {"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 260},
+		         child("INF", "MULTIPLY", 0)]
+		counted, stored, shown, previous = {}, {}, {}, None
+		for value in (50, 500):
+			self.as_user("Administrator")
+			if previous:
+				revisions.archive(POLICY, previous)
+			previous = policy(f"PW RR5 CHD {value}", bands=[INF, {"band_code": "CHD", "label": "Child",
+			                                                      "from_age": 3, "to_age": 11.99}],
+			                  rules=[child("CHD", "PERCENT_OF", value)])
+			version = fx.create_contract(self.f, code=f"PW-RR5-AUD{value}", age_bands=[], occupancy_rules=rules,
+			                             publish=False)["version"]
+			self.as_user(RM)
+			wapi.publish_version(version)
+			event = frappe.get_all("TEX Audit Event", filters={"action": "contract.publish", "reference_name": version},
+			                       fields=["new_value"])[0]
+			counted[value] = json.loads(event.new_value)["warnings"]
+			stored[value] = len(json.loads(frappe.db.get_value("TEX Contract Version", version, "validation_report")))
+			self.as_user(EDITOR)
+			shown[value] = len(wapi.get_version(version)["validation_report"])
+		self.assertEqual(stored[50], stored[500] + 1)       # the full report depends on the policy's value
+		self.assertEqual(counted[50], counted[500])
+		self.assertEqual(counted[50], shown[50])
+		self.assertEqual(shown[50], shown[500])
+
 	def test_a_stored_report_is_worked_out_once_and_its_sweep_run_again_bounded(self):
 		"""get_version gives an editor without cost the report stored at publish as the live check gives
 		it; a stored sweep at its limit is the whole sweep run again, seconds on a large contract, on every
