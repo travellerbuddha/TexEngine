@@ -1407,6 +1407,52 @@ class TestReconciliationStates(HoldCase):
 				pay.refund(txn, amount=str(amount), reason="the guest asked", idempotency_key=f"c4-{txn}")
 		return frappe.db.get_value("TEX Payment Transaction", {"parent_transaction": txn, "txn_type": "Refund"}, "name")
 
+	def expired_with_a_refund_unanswered(self) -> tuple[dict, str, str]:
+		"""P1-3: a FLEX booking by card, never confirmed, holds a half link's charge C; 40 of C is refunded
+		off it and the gateway does not answer; the booking expires with it on its way. → (b, C, refund)."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b = self.book(method="Card")
+		half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		link = pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description="First half",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		c = started["transaction"]
+		with mock.patch.object(MockProvider, "refund", side_effect=RuntimeError("gateway timeout")):
+			with self.assertRaises(pay.RefundUnknown):
+				pay.refund(c, amount="40", reason="the guest asked", idempotency_key=f"p13-{c}", booking=b["booking"])
+		refund = frappe.db.get_value("TEX Payment Transaction", {"parent_transaction": c, "txn_type": "Refund"}, "name")
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		self.assertEqual(paid(b), D(40))                                  # the refund on its way stays on it
+		return b, c, refund
+
+	@staticmethod
+	def releases(c: str) -> list[tuple[str, D]]:
+		rows = frappe.get_all("TEX Payment Allocation", filters={"transaction": c, "allocation_type": "Release"},
+		                      fields=["idempotency_key", "amount"], order_by="creation asc, name asc")
+		return [(r.idempotency_key, D(r.amount)) for r in rows]
+
+	def test_a_refund_on_its_way_when_an_unconfirmed_booking_ended_leaves_no_money_on_it(self):
+		"""P1-3 (audit 2B, ADR-065): once the refund's outcome is known, a booking cancelled before it was
+		ever confirmed holds none of the money: whatever the outcome, it comes off into reconciliation."""
+		for outcome in ("Failed", "Succeeded"):
+			with self.subTest(outcome=outcome):
+				b, c, refund = self.expired_with_a_refund_unanswered()
+				expired = self.releases(c)
+				key = lambda raw: pay.ns_key(fx.PROPERTY, raw, "release")  # noqa: E731
+				self.assertEqual([k for k, _a in expired], [key(f"expired:{b['booking']}:{c}")])
+				with mock.patch("kamra.tex.services.notify.payment_after_expiry") as guest_mail:
+					pay.finish_unknown_refund(refund, outcome=outcome, reference="GW-P13", reason="seen at the gateway")
+				guest_mail.assert_not_called()
+				self.assertEqual((paid(b), pay.allocated_of(c)), (D(0), D(0)))
+				self.assertEqual(txn_state(c).reconciliation, "Action Required")
+				after = self.releases(c)
+				self.assertEqual(after[:1], expired)                           # the expiry's release as it was
+				self.assertEqual(after[1:], [(key(f"refund:{refund}:{b['booking']}:{c}"), D(40))])
+
 	def test_money_given_back_outside_tex_settles_it(self):
 		_b, txn = self.parked()
 		amount = frappe.db.get_value("TEX Payment Transaction", txn, "amount")

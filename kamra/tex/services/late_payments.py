@@ -23,6 +23,7 @@ charge's lock (then the booking's): the order a payment callback takes."""
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import datetime
 
@@ -30,7 +31,7 @@ import frappe
 from frappe import _
 from frappe.utils import get_datetime, getdate, now_datetime
 
-from kamra.tex.money import ZERO, from_db, quantize, to_str
+from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.services import holds
 
@@ -40,6 +41,7 @@ ROOMS_RELEASED = "ROOMS_RELEASED"
 BOOKING_CANCELLED = "BOOKING_CANCELLED"
 NOT_PAYABLE = "NOT_PAYABLE"
 EXPIRED_UNPAID = "EXPIRED_UNPAID"
+CANCELLED_UNPAID = "CANCELLED_UNPAID"
 TAKES_MONEY = ("Confirmed", "Partially Cancelled")
 CONFIRMED = ("Confirmed", "Checked In", "Checked Out", "No Show")
 # what a payment made in time may undo: an expiry its news came after (B4)
@@ -48,7 +50,8 @@ REVIVE_SAVEPOINT = "tex_revive_booking"
 CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
           BOOKING_CANCELLED: "it had been cancelled",
           NOT_PAYABLE: "it could not take payments",
-          EXPIRED_UNPAID: "its hold ended before it was paid in full"}
+          EXPIRED_UNPAID: "its hold ended before it was paid in full",
+          CANCELLED_UNPAID: "it was cancelled before it was ever confirmed"}
 REFUND_REASON = "the booking could not be confirmed: the payment arrived after its rooms were given back"
 
 
@@ -191,30 +194,87 @@ def _held_when_expired(b, locked: set) -> dict:
 	return out
 
 
+def money_off(booking: str, *, why: str, key: str, note: str | None = None, now: datetime | None = None,
+              guest_mail: bool = True, send_mail: bool = True) -> D:
+	"""The money a booking holds comes off it into reconciliation for staff (ADR-065): of each charge
+	(name order), what the booking holds of it less what a refund still waiting for its answer takes
+	(that money may be gone), released as ``{key}:{booking}:{charge}`` and flagged ``Action Required``
+	(``why``; ``note`` adds a sentence to the note). ``guest_mail``: the payer is told too
+	(``payment_after_expiry``, whose words fit an expiry only); else only the team. ``send_mail``
+	False (a migration): nobody. → the amount taken off."""
+	from kamra.tex.payments import service as pay
+	from kamra.tex.services import notify
+
+	now = get_datetime(now or now_datetime())
+	taken = ZERO
+	for name in charges_of(booking):
+		held = pay.booking_nets(name, lock=True).get(booking, ZERO) - pay.in_flight_from(name, booking, lock=True)
+		if held <= ZERO:
+			continue
+		pay.release(name, booking=booking, amount=held, reason=CAUSES[why],
+		            idempotency_key=f"{key}:{booking}:{name}", _system=True)
+		txn = frappe.get_doc(TXN, name)
+		text = _money_off_note(why, booking, held, txn.currency, now) + (f" {note}" if note else "")
+		_flag(txn, booking, why, "Action Required", text, held, send_mail=send_mail and guest_mail)
+		if send_mail and not guest_mail:
+			notify.team_notice(txn, booking, "Action Required", text, held)
+		taken += held
+	return taken
+
+
+def charges_of(booking: str) -> list[str]:
+	"""The charges a booking has allocations of (name order), read as they are now (a locking read:
+	money moves only under its charge's lock)."""
+	return sorted(set(frappe.db.sql_list("""SELECT `transaction` FROM `tabTEX Payment Allocation`
+	                                        WHERE booking=%s LOCK IN SHARE MODE""", booking)))
+
+
+def _money_off_note(why: str, booking: str, held, ccy: str, now: datetime) -> str:
+	if why == EXPIRED_UNPAID:
+		return (f"{to_str(held)} {ccy} of this payment was on booking {booking}, whose hold ended at "
+		        f"{now:%Y-%m-%d %H:%M} before it was paid in full: the booking expired with its rooms and the money "
+		        "came off it. Book the stay again once the guest accepts it and allocate this payment to it, or "
+		        "refund it.")
+	return (f"{to_str(held)} {ccy} of this payment was on booking {booking} at {now:%Y-%m-%d %H:%M}, when "
+	        f"{CAUSES.get(why, why)}: the money came off it. Refund it, or allocate it to the booking the guest "
+	        "keeps.")
+
+
 def money_off_expired(booking: str, *, now: datetime | None = None, send_mail: bool = True):
 	"""B2: the money a booking held when it expired before it was paid in full (a first of two
 	links, a part paid at the desk) comes off the cancelled booking — never a negative balance —
 	and each charge it came from goes to reconciliation for staff (``send_mail``: False from a
 	migration). → the amount taken off."""
-	from kamra.tex.payments import service as pay
+	return money_off(booking, why=EXPIRED_UNPAID, key="expired", now=now, guest_mail=send_mail, send_mail=send_mail)
 
-	now = get_datetime(now or now_datetime())
-	taken = ZERO
-	for name in sorted(set(frappe.get_all("TEX Payment Allocation", filters={"booking": booking},
-	                                      pluck="transaction"))):
-		held = pay.booking_nets(name, lock=True).get(booking, ZERO) - pay.in_flight_from(name, booking, lock=True)
-		if held <= ZERO:
-			continue
-		pay.release(name, booking=booking, amount=held, reason=CAUSES[EXPIRED_UNPAID],
-		            idempotency_key=f"expired:{booking}:{name}", _system=True)
-		txn = frappe.get_doc(TXN, name)
-		note = (f"{to_str(held)} {txn.currency} of this payment was on booking {booking}, whose hold ended at "
-		        f"{now:%Y-%m-%d %H:%M} before it was paid in full: the booking expired with its rooms and the money "
-		        "came off it. Book the stay again once the guest accepts it and allocate this payment to it, or "
-		        "refund it.")
-		_flag(txn, booking, EXPIRED_UNPAID, "Action Required", note, held, send_mail=send_mail)
-		taken += held
-	return taken
+
+def ended_unconfirmed(b) -> bool:
+	"""Booking ``b`` is cancelled and was never confirmed: no ``booking.confirm``, no ``booking.create``
+	recorded Confirmed (p54's reading), not a channel's booking."""
+	if b.status != "Cancelled" or b.get("channel_connection"):
+		return False
+	if frappe.db.exists("TEX Audit Event", {"action": "booking.confirm", "reference_name": b.name}):
+		return False
+	created = frappe.db.get_value("TEX Audit Event", {"action": "booking.create", "reference_name": b.name},
+	                              "new_value")
+	return (json.loads(created or "{}") or {}).get("status") != "Confirmed"
+
+
+def after_refund(refund: str, booking: str | None, *, key: str | None = None) -> D:
+	"""P1-3: the outcome of refund ``refund`` off ``booking`` is recorded (made, not made, corrected).
+	A booking cancelled before it was ever confirmed holds no money (``ended_unconfirmed``): what it
+	still holds — a refund on its way when it ended (the expiry left that money on it) — comes off it
+	into reconciliation (``refund:{refund}``, or ``key``), the team told, never the guest. Its charges
+	are locked (name order), then the booking: the order money coming in takes. → the amount taken off."""
+	if not booking:
+		return ZERO
+	for name in charges_of(booking):
+		frappe.db.get_value(TXN, name, "name", for_update=True)
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if not ended_unconfirmed(b):
+		return ZERO
+	return money_off(booking, why=CANCELLED_UNPAID, key=key or f"refund:{refund}", guest_mail=False,
+	                 note=f"Refund {refund} of it was on its way when the booking ended; its outcome is recorded now.")
 
 
 def _flag(txn, booking: str, why: str, state: str, note: str, amount, *, send_mail: bool = True, **extra) -> None:

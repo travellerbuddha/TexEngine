@@ -1021,9 +1021,12 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	if r.status == "Succeeded" and target and from_booking > 0:
 		# only what comes off the booking is taken from it; the rest was unallocated money
 		_take_off(txn, r, target, from_booking, reason)
-	if r.status == "Succeeded":
-		from kamra.tex.services import late_payments
+	from kamra.tex.services import late_payments
 
+	if txn.status == "Succeeded" and r.status in ("Succeeded", "Failed"):
+		# a booking that ended never confirmed while this refund was on its way holds no money (P1-3)
+		late_payments.after_refund(r.name, r.booking or booking)
+	if r.status == "Succeeded":
 		late_payments.settled(txn.name)          # a late payment in reconciliation, given back
 	audit("payment.refund", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "status": r.status,
@@ -1106,6 +1109,8 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 		_take_off(txn, r, target, from_booking, reason)
 	from kamra.tex.services import late_payments
 
+	# a booking that ended never confirmed while this refund was on its way holds no money (P1-3)
+	late_payments.after_refund(r.name, r.booking or target)
 	late_payments.settled(txn.name)             # its reconciliation follows the refund's outcome (C4)
 	audit("payment.refund_verified", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "outcome": outcome, "amount": to_str(amount),
@@ -1244,6 +1249,8 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 		r.save(ignore_permissions=True)
 	from kamra.tex.services import late_payments
 
+	# money put back on a booking that ended never confirmed comes off it again (P1-3)
+	late_payments.after_refund(r.name, booking or r.booking, key=f"refund-fix:{r.name}")
 	late_payments.settled(txn.name)             # a refund found not made opens its reconciliation again (C4)
 	audit("payment.refund_conflict_resolved", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "recorded": recorded, "outcome": outcome, "amount": to_str(amount),
