@@ -4,7 +4,7 @@
 // the ROOM basis labels, #ages / #occupancy, the rule popover with Always wins, and a read-only
 // published version. Every test starts from its own API-made draft of the owner's prices.
 import { expect, test, type Page } from "@playwright/test"
-import { api, login, trackErrors } from "./helpers"
+import { login, pageApiOk, trackErrors } from "./helpers"
 import { archiveAll, newDraft as draftOf, N, ownerRates, periods, rooms, versionPath, watchContracts, type Data } from "./flows/workspace"
 
 test.use({ locale: "en-US", actionTimeout: 15_000, navigationTimeout: 30_000 })
@@ -127,7 +127,7 @@ test.describe.serial("occupancy & child pricing", () => {
     // save: the bands carry their labels
     await page.getByRole("button", { name: /^Save/ }).click()
     await expect(page.getByText("Draft saved")).toBeVisible()
-    const v = await api<{ age_bands: { band_code: string; label: string; from_age: number; to_age: number; is_infant: number }[]; occupancy_rules: Record<string, unknown>[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
+    const v = await pageApiOk<{ age_bands: { band_code: string; label: string; from_age: number; to_age: number; is_infant: number }[]; occupancy_rules: Record<string, unknown>[] }>(page, "kamra.tex.api.contracts.get_version", { name: d.version })
     expect(v.age_bands.map((b) => [b.band_code, b.label, String(b.from_age), String(b.to_age), b.is_infant])).toEqual([
       ["INF", "Infant 0–2.99", "0", "2.99", 1],
       ["CHA", "Child 3–6.99", "3", "6.99", 0],
@@ -192,7 +192,7 @@ test.describe.serial("occupancy & child pricing", () => {
     await page.evaluate(() => (window.location.hash = "#occupancy"))
     await expect(toggle).toHaveAttribute("aria-expanded", "true")
     await expect(lcell(page, "Child 3–11.99", "P2")).toHaveAttribute("aria-label", /Special combinations win over period rules unless the rule is marked Always wins: 2 Adults \+ 2 Children/)
-    const v = await api<{ occupancy_rules: Record<string, unknown>[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
+    const v = await pageApiOk<{ occupancy_rules: Record<string, unknown>[] }>(page, "kamra.tex.api.contracts.get_version", { name: d.version })
     expect(v.occupancy_rules.some((r) => r.age_band === "CHD")).toBe(true) // not saved yet
     noErrors()
   })
@@ -245,7 +245,7 @@ test.describe.serial("occupancy & child pricing", () => {
       ],
     })
     made.push(d.contract)
-    await api(page.request, "kamra.tex.api.contracts.publish_version", { name: d.version })
+    await pageApiOk(page, "kamra.tex.api.contracts.publish_version", { name: d.version })
     await page.goto(versionPath(d, "#occupancy"))
     await expect(ladder(page)).toBeVisible()
     await expect(ladder(page)).toHaveAttribute("aria-readonly", "true")

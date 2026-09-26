@@ -4,7 +4,7 @@
 // the design's "Superior" and "Deluxe"), the contracts API calls a page makes, and clean-up.
 // The UI is driven by the specs and ./contracts.ts; the API only sets up, checks and cleans up.
 import { expect, type Browser, type Page, type Request } from "@playwright/test"
-import { api, login, texPath, uniqueRunId } from "../helpers"
+import { login, pageApiOk, texPath, uniqueRunId } from "../helpers"
 
 export const HOTEL = "Aurora Beach Resort"
 /** Room type ids of the demo hotel. */
@@ -98,7 +98,7 @@ export interface NewContract {
  * made through the API. */
 export async function newContract(page: Page, o: { prefix: string; basis?: "PERSON" | "ROOM"; currency?: string }): Promise<NewContract> {
   const run = uniqueRunId()
-  const c = await api<{ contract: { name: string } }>(page.request, "kamra.tex.api.contracts.save_contract", {
+  const c = await pageApiOk<{ contract: { name: string } }>(page, "kamra.tex.api.contracts.save_contract", {
     data: {
       property: HOTEL,
       contract_code: `${o.prefix}-${run}`,
@@ -111,21 +111,21 @@ export async function newContract(page: Page, o: { prefix: string; basis?: "PERS
     },
   })
   const contract = c.contract.name
-  const b = await api<{ versions: { name: string }[] }>(page.request, "kamra.tex.api.contracts.get_contract", { name: contract })
+  const b = await pageApiOk<{ versions: { name: string }[] }>(page, "kamra.tex.api.contracts.get_contract", { name: contract })
   return { contract, version: b.versions[0].name }
 }
 
 /** A new contract whose draft holds `data` (saved through the API). */
 export async function newDraft(page: Page, prefix: string, data: Data, basis: "PERSON" | "ROOM" = "PERSON"): Promise<NewContract> {
   const d = await newContract(page, { prefix, basis })
-  await api(page.request, "kamra.tex.api.contracts.save_version", { name: d.version, data })
+  await pageApiOk(page, "kamra.tex.api.contracts.save_version", { name: d.version, data })
   return d
 }
 
 /** Publish a draft through the API as the workspace publishes it (its terms must pass the publish
  * check; `workspace: 1`, ADR-061: its board checks, and a stored report anchored by each issue's ref). */
 export async function publish(page: Page, version: string) {
-  await api(page.request, "kamra.tex.api.contracts.publish_version", { name: version, workspace: 1 })
+  await pageApiOk(page, "kamra.tex.api.contracts.publish_version", { name: version, workspace: 1 })
 }
 
 export const versionPath = (d: NewContract, hash = "") =>
@@ -147,7 +147,7 @@ export interface Rows {
 }
 
 /** The saved rows of a version. */
-export const readVersion = (page: Page, version: string) => api<Rows>(page.request, "kamra.tex.api.contracts.get_version", { name: version })
+export const readVersion = (page: Page, version: string) => pageApiOk<Rows>(page, "kamra.tex.api.contracts.get_version", { name: version })
 
 /** The contracts API calls the page makes (by method name), with their request bodies. */
 export function watchContracts(page: Page) {

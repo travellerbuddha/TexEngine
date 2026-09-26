@@ -4,7 +4,7 @@
 // any children, the twin refusal, All-rooms and one-room cards kept apart, cards the builder cannot
 // express, and a read-only published version.
 import { expect, test, type Page } from "@playwright/test"
-import { api, login, trackErrors } from "./helpers"
+import { login, pageApiOk, trackErrors } from "./helpers"
 import { archiveAll, CAP, DLX, N, newDraft as draftOf, ownerBands, ownerRates, periods, STD, SUP, versionPath, watchContracts, type Data } from "./flows/workspace"
 
 test.use({ locale: "en-US", actionTimeout: 15_000, navigationTimeout: 30_000 })
@@ -125,7 +125,7 @@ test.describe("special combinations", () => {
     // Save: ordinary occupancy rules
     await page.getByRole("button", { name: /^Save/ }).first().click()
     await expect(page.getByText("Draft saved")).toBeVisible()
-    const v = await api<{ occupancy_rules: Record<string, unknown>[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
+    const v = await pageApiOk<{ occupancy_rules: Record<string, unknown>[] }>(page, "kamra.tex.api.contracts.get_version", { name: d.version })
     const combo = v.occupancy_rules.filter((r) => r.combination).map((r) => `${r.target}:${r.position}:${r.age_band}:${r.combination}:${r.room_type || ""}:${r.period_code || ""}:${r.op}:${Number(r.value)}:${r.is_override}`)
     expect(combo.sort()).toEqual(["CHILD:1:CHB:2+2:::MULTIPLY:0.5:0", "CHILD:2:CHA:2+2:::MULTIPLY:0.25:0"])
     // the ⓘ note on the CHB row links to the card
@@ -264,7 +264,7 @@ test.describe("special combinations", () => {
     await login(page, "revenue@demo.tex")
     const d = await newDraft(page, { extra: { occupancy_rules: [...RULES, { target: "CHILD", position: 1, age_band: "CHB", combination: "2+2", op: "MULTIPLY", value: "0.5" }] } })
     made.push(d.contract)
-    await api(page.request, "kamra.tex.api.contracts.publish_version", { name: d.version })
+    await pageApiOk(page, "kamra.tex.api.contracts.publish_version", { name: d.version })
     await page.goto(versionPath(d, "#occupancy"))
     await expect(card(page, "2+2").locator("p").first()).toHaveText("2 Adults + 2 Children → Child 1 ×0.50")
     await expect(combos(page).getByRole("button", { name: "Add combination" })).toHaveCount(0)
@@ -303,7 +303,7 @@ test.describe("All-rooms and one-room cards, cards for the rule tables (review f
     await expect(all).toHaveCount(1)
     await page.getByRole("button", { name: /^Save/ }).first().click()
     await expect(page.getByText("Draft saved")).toBeVisible()
-    const v = await api<{ occupancy_rules: Record<string, unknown>[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
+    const v = await pageApiOk<{ occupancy_rules: Record<string, unknown>[] }>(page, "kamra.tex.api.contracts.get_version", { name: d.version })
     const combo = v.occupancy_rules.filter((r) => r.combination).map((r) => `${r.target}:${r.position}:${r.age_band}:${r.combination}:${r.room_type || ""}:${r.period_code || ""}:${r.op}:${Number(r.value)}`)
     expect(combo.sort()).toEqual(["CHILD:1:CHB:2+2:::MULTIPLY:0.5", `CHILD:1:CHB:2+2:${STD}::MULTIPLY:0.5`])
     noErrors()

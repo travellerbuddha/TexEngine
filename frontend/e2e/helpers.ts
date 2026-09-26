@@ -74,6 +74,14 @@ export async function pageApi<T = unknown>(page: Page, method: string, args: Rec
   return { ok: r.ok(), status: r.status(), body, message: body.message as T }
 }
 
+/** `api` in the page's session: `pageApi` (the CSRF token echoed) that must succeed. For calls
+ * made once the page may have rendered the SPA, where a POST without the token is refused. */
+export async function pageApiOk<T = unknown>(page: Page, method: string, args: Record<string, unknown> = {}) {
+  const r = await pageApi<T>(page, method, args)
+  expect(r.ok, `${method}: ${JSON.stringify(r.body).slice(0, 400)}`).toBeTruthy()
+  return r.message
+}
+
 const isMethod = (url: string, method: string) => new URL(url).pathname.endsWith(`/api/method/${method}`)
 
 /** The page's next call to `method` (a whitelisted path such as "kamra.tex.api.contracts.save_version")
