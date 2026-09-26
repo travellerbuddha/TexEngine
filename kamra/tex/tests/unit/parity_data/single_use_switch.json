@@ -1,0 +1,3465 @@
+{
+ "about": "Written by frontend/tests/unit/single-use-switch.test.ts (UPDATE_SWITCH_PAIRS=1); priced by kamra/tex/tests/unit/test_single_use_switch.py.",
+ "rooms": [
+  "STD",
+  "SUP",
+  "DLX"
+ ],
+ "periods": [
+  "P1",
+  "P2",
+  "P3",
+  "P4"
+ ],
+ "scenarios": [
+  {
+   "name": "an Always-wins Adult 1 and single use as the whole 1+0",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "an Always-wins Adult 1 and single use as Adult 1 of 1+* (switched back to the whole 1+0)",
+   "from": "children",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "an Always-wins Adult 1 of one room reaches the All-rooms rule that moves",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "Always wins on both Adult 1 and the single-use rule (they would tie: the engine refuses the party)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": true
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 1
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 1
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 1
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 1
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "a special combination '1 adult' with an Adult 1 rule for P1 (its exact 1+0 outranks Adult 1 of 1+*)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "a whole-stay rule for any adults without children (*+0) takes 1A+0C once the whole 1+0 has gone",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "*+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "*+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "*+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "*+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "a pricing policy's whole-stay rule for one adult and any children",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [
+    {
+     "rule_id": "G-1A",
+     "target": "COMBINATION",
+     "position": null,
+     "age_band": null,
+     "adults": 1,
+     "children": null,
+     "room_type": null,
+     "period": null,
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": false,
+     "source": "policy:POL-G/r1/global"
+    }
+   ],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "the same policy rule served without its formula (a viewer without cost)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [
+    {
+     "rule_id": "G-1A",
+     "target": "COMBINATION",
+     "position": null,
+     "age_band": null,
+     "adults": 1,
+     "children": null,
+     "room_type": null,
+     "period": null,
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": false,
+     "source": "policy:POL-G/r1/global",
+     "hidden": true
+    }
+   ],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "one room switched while an All-rooms whole 1+0 would take its single use",
+   "from": "whole",
+   "rooms": [
+    "SUP"
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "1.3",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": "outranked",
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "a relative period rule over an Adult 1 rule (S16 re-review 3's refusal)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    "P1"
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "1.5",
+    "is_override": false
+   },
+   "pure": false,
+   "inherited": [],
+   "refusal": "relative",
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "ADJUST_PERCENT",
+     "value": "10",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "ADJUST_PERCENT",
+     "value": "10",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "ADJUST_PERCENT",
+     "value": "10",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "ADJUST_PERCENT",
+     "value": "10",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    }
+   ]
+  },
+  {
+   "name": "single use ×0.8 alone",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "single use ×0.8 as Adult 1 of 1+*, back to the whole 1+0",
+   "from": "children",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "All periods ×1.5 with P2 ×1.2 and a P4 price of 95 (period overrides move along)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "1.5",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P4",
+     "op": "ABSOLUTE",
+     "value": "95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P4",
+     "op": "ABSOLUTE",
+     "value": "95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.5",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "P4",
+     "op": "ABSOLUTE",
+     "value": "95",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "an Adult 1 rule that is not Always wins (Adult 1 of 1+* outranks it)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.1",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.1",
+     "is_override": 0
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.1",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "an Always-wins Adult 1 that defers (Inherit)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "INHERIT",
+     "value": "",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "INHERIT",
+     "value": "",
+     "is_override": 1
+    },
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "INHERIT",
+     "value": "",
+     "is_override": 1
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "a new value typed while switching",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.9",
+    "is_override": false
+   },
+   "pure": false,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "the rule written marked Always wins, no other Adult 1 rule",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": true
+   },
+   "pure": false,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 1
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 1
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "a pricing policy's Adult 1 rule (the version's Adult 1 of 1+* outranks it by origin)",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [
+    {
+     "rule_id": "G-A1",
+     "target": "ADULT",
+     "position": 1,
+     "age_band": null,
+     "adults": null,
+     "children": null,
+     "room_type": null,
+     "period": null,
+     "op": "MULTIPLY",
+     "value": "1.2",
+     "is_override": false,
+     "source": "policy:POL-G/r1/global"
+    }
+   ],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "one room's own rule switched, no All-rooms rule",
+   "from": "whole",
+   "rooms": [
+    "SUP"
+   ],
+   "periods": [
+    ""
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "1.3",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "SUP",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "1.3",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  },
+  {
+   "name": "a card for one adult in another period than the rules switched",
+   "from": "whole",
+   "rooms": [
+    ""
+   ],
+   "periods": [
+    "P2"
+   ],
+   "rule": {
+    "op": "MULTIPLY",
+    "value": "0.8",
+    "is_override": false
+   },
+   "pure": true,
+   "inherited": [],
+   "refusal": null,
+   "before": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ],
+   "stay": [
+    {
+     "target": "COMBINATION",
+     "position": 0,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ],
+   "after": [
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+*",
+     "room_type": "",
+     "period_code": "P2",
+     "op": "MULTIPLY",
+     "value": "0.8",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "INF",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "MULTIPLY",
+     "value": "0",
+     "is_override": 0
+    },
+    {
+     "target": "CHILD",
+     "position": 0,
+     "age_band": "CHD",
+     "combination": "",
+     "room_type": "",
+     "period_code": "",
+     "op": "PERCENT_OF",
+     "value": "50",
+     "is_override": 0
+    },
+    {
+     "target": "ADULT",
+     "position": 1,
+     "age_band": "",
+     "combination": "1+0",
+     "room_type": "",
+     "period_code": "P1",
+     "op": "MULTIPLY",
+     "value": "0.9",
+     "is_override": 0
+    }
+   ],
+   "unchecked": null
+  }
+ ]
+}

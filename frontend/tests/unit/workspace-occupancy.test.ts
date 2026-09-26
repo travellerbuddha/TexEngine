@@ -11,6 +11,7 @@ import {
   builderFromCard,
   builderValueText,
   canonCombination,
+  cardCovers,
   cardOfRow,
   childQualifier,
   combinationChips,
@@ -1265,11 +1266,30 @@ test("switching All periods while a period override exists takes the override al
   assert.equal(summary(m.rows[0].cells.P1), "inherited MULTIPLY 1.5")
   assert.equal(summary(m.rows[0].cells.P4), "period-override MULTIPLY 1.6")
   // a room's own rules of the old form switch with the rooms written, other rooms' stay
-  const rooms = example([occ({ target: "COMBINATION", combination: "1+0", room_type: "SUP", op: "MULTIPLY", value: "1.3" })])
-  assert.deepEqual(singleRules(applyOccRuleAs(rooms, SINGLE, ["SUP"], [""], RULE("1.4"), { single: "children" })), ["ADULT:1+*:SUP:ALL:1.4", "COMBINATION:1+0::ALL:1.5"])
-  // a cell that already has a rule of the new form keeps it (one rule per cell)
+  const rooms = tablesOf({
+    rooms: example().rooms,
+    periods: example().periods,
+    occupancy_rules: [occ({ target: "COMBINATION", combination: "1+0", room_type: "SUP", op: "MULTIPLY", value: "1.3" }), occ({ target: "COMBINATION", combination: "1+0", room_type: "DLX", op: "MULTIPLY", value: "1.2" })],
+  })
+  assert.deepEqual(singleRules(applyOccRuleAs(rooms, SINGLE, ["SUP"], [""], RULE("1.4"), { single: "children" })), ["ADULT:1+*:SUP:ALL:1.4", "COMBINATION:1+0:DLX:ALL:1.2"])
+  // with All rooms' whole 1+0 ×1.5 as well, it would price Superior's single use once the room's own
+  // whole rule has gone (×1.5, not the ×1.4 written): refused (final follow-up; the ladder offers no
+  // switch there either, the row being `foreign`)
+  const allRooms = example([occ({ target: "COMBINATION", combination: "1+0", room_type: "SUP", op: "MULTIPLY", value: "1.3" })])
+  assert.equal(singleWriteRefusal(allRooms, SINGLE, ["SUP"], [""], { single: "children" }), "outranked")
+  assert.equal(applyOccRuleAs(allRooms, SINGLE, ["SUP"], [""], RULE("1.4"), { single: "children" }), allRooms)
+  // a cell that already has a rule of the new form keeps it (one rule per cell), when single use keeps
+  // its price: the old form's P2 rule had the same value
+  const twins = example([
+    occ({ target: "COMBINATION", combination: "1+0", period_code: "P2", op: "MULTIPLY", value: "1.1" }),
+    occ({ target: "ADULT", position: 1, combination: "1+*", period_code: "P2", op: "MULTIPLY", value: "1.1" }),
+  ])
+  assert.deepEqual(singleRules(applyOccRuleAs(twins, SINGLE, [""], [""], RULE("1.5"), { single: "children" })), ["ADULT:1+*::ALL:1.5", "ADULT:1+*::P2:1.1"])
+  // a rule of the new form alone in P2 (×1.1) would take single use there from ×1.5 (the whole 1+0 of
+  // All periods, which replaces the total today) to ×1.1: refused, nothing written (final follow-up)
   const both = example([occ({ target: "ADULT", position: 1, combination: "1+*", period_code: "P2", op: "MULTIPLY", value: "1.1" })])
-  assert.deepEqual(singleRules(applyOccRuleAs(both, SINGLE, [""], [""], RULE("1.5"), { single: "children" })), ["ADULT:1+*::ALL:1.5", "ADULT:1+*::P2:1.1"])
+  assert.equal(singleWriteRefusal(both, SINGLE, [""], [""], { single: "children" }), "outranked")
+  assert.equal(applyOccRuleAs(both, SINGLE, [""], [""], RULE("1.5"), { single: "children" }), both)
 })
 
 test("both single-use forms reaching a scope are two rows, each showing its own rules (S16 re-review 2)", () => {
@@ -1313,6 +1333,10 @@ test("a special combination's Adult 1 rule is not the single-use row: the row ne
   const m = ladderModel(t, null, "PERSON", OPTS)
   assert.deepEqual(kinds(m).slice(0, 2), ["single", "adults_base"], "the whole-combination row alone, not 'also with children'")
   assert.equal(summary(m.rows[0].cells[""]), "default MULTIPLY 1")
+  // …with no rule of its own, but the card prices one adult without children (children = any): the
+  // row's cells carry its precedence note (final follow-up)
+  const card = groupCombinations(t).find((c) => !isSingleUseCard(c))
+  for (const p of m.periods) assert.deepEqual(combinationNotes(m, groupCombinations(t), null).get(`single:0:|${p}`), [card?.id], p)
   // "Also when children travel" on P2: a single-use rule of its own for P2, the card as it was
   const sw = applyOccRuleAs(t, SINGLE, [""], ["P2"], RULE("1.5"), { single: "children" })
   assert.deepEqual(cardRules(sw), ["ALL:ADULT1:1.2 CHILD1:0.3"])
@@ -1376,4 +1400,124 @@ test("the whole-row switch refuses to carry a relative rule into the other form 
   assert.equal(singleWriteRefusal(alt, SINGLE_ANY, [""], ["P2"], { single: "whole" }), "relative")
   // no switch: a plain write is never refused for its op
   assert.equal(singleWriteRefusal(rel, SINGLE, [""], ["P2"]), null)
+})
+
+// ─── the single-use switch keeps single use's price (final follow-up) ─────
+
+const ROOMS_PERIODS = () => ({ rooms: example().rooms, periods: example().periods })
+/** Adult 1 ×1, "Always wins": it outranks every other rule for adult 1, 1+* included. */
+const ALWAYS_A1 = () => occ({ target: "ADULT", position: 1, op: "MULTIPLY", value: "1", is_override: 1 })
+const WHOLE_08 = () => occ({ target: "COMBINATION", combination: "1+0", op: "MULTIPLY", value: "0.8" })
+const ALT_08 = () => occ({ target: "ADULT", position: 1, combination: "1+*", op: "MULTIPLY", value: "0.8" })
+
+test("the single-use switch is refused when another rule would price single use in the other form ('outranked', final follow-up)", () => {
+  // Adult 1 ×1 Always wins and single use ×0.8: the whole 1+0 combination replaces the total, so
+  // 1A+0C is ×0.8. As Adult 1 of 1+* the rule loses to the Always-wins Adult 1: 1A+0C would be ×1
+  const t = tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [ALWAYS_A1(), WHOLE_08()] })
+  const m = ladderModel(t, null, "PERSON", OPTS)
+  assert.deepEqual(m.rows.filter((x) => x.kind === "single").map((x) => [x.id, x.foreign]), [["single:0:", false]], "the switch is offered")
+  assert.equal(singleWriteRefusal(t, SINGLE, [""], [""], { single: "children" }), "outranked")
+  assert.equal(singleWriteRefusal(t, SINGLE, [""], [""], { single: "children" }, { rule: { op: "MULTIPLY", is_override: false } }), "outranked")
+  assert.equal(applyOccRuleAs(t, SINGLE, [""], [""], RULE("0.8"), { single: "children" }), t, "nothing is written")
+  // one period written: the row's All-periods rule moves too and loses in every other period
+  assert.equal(singleWriteRefusal(t, SINGLE, [""], ["P2"], { single: "children" }), "outranked")
+  // the rule written marked Always wins ties with the Always-wins Adult 1 (the engine refuses the party)
+  assert.equal(singleWriteRefusal(t, SINGLE, [""], [""], { single: "children" }, { rule: { op: "MULTIPLY", is_override: true } }), "outranked")
+  // the reverse: "also when children travel" ×0.8 loses to the Always-wins Adult 1 today (single use
+  // is ×1); as the whole combination it would price ×0.8
+  const alt = tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [ALWAYS_A1(), ALT_08()] })
+  assert.equal(singleWriteRefusal(alt, SINGLE_ANY, [""], [""], { single: "whole" }), "outranked")
+  assert.equal(applyOccRuleAs(alt, SINGLE_ANY, [""], [""], RULE("0.8"), { single: "whole" }), alt)
+  // an Always-wins Adult 1 of one room reaches the All-rooms rule that moves: refused as well
+  const sup = tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [{ ...ALWAYS_A1(), room_type: "SUP" }, WHOLE_08()] })
+  assert.equal(singleWriteRefusal(sup, SINGLE, [""], [""], { single: "children" }), "outranked")
+  // without it both forms price single use alike: switched, the price the same
+  const plain = tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [WHOLE_08()] })
+  assert.equal(singleWriteRefusal(plain, SINGLE, [""], [""], { single: "children" }), null)
+  assert.deepEqual(singleRules(applyOccRuleAs(plain, SINGLE, [""], [""], RULE("0.8"), { single: "children" })), ["ADULT:1+*::ALL:0.8"])
+  // an Always-wins Adult 1 that is itself INHERIT defers: nothing outranks the new form
+  const inherit = tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [{ ...ALWAYS_A1(), op: "INHERIT", value: "" }, WHOLE_08()] })
+  assert.equal(singleWriteRefusal(inherit, SINGLE, [""], [""], { single: "children" }), null)
+})
+
+test("other rules that would take single use over after a switch: a 1+0 card's Adult 1, a combination for any adults without children, a pricing policy's (final follow-up)", () => {
+  // the builder's "1 adult" card with an Adult 1 rule for P1: in P1 its exact 1+0 outranks Adult 1 of 1+*
+  const card = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [WHOLE_08()] }), { adults: 1, children: 0, rooms: [], periods: ["P1"], adultRules: [{ position: 1, op: "MULTIPLY", value: "0.9" }] }).tables
+  assert.equal(singleWriteRefusal(card, SINGLE, [""], [""], { single: "children" }), "outranked")
+  // written for P1 too, the switched rule still loses there (the card's exact combination)
+  assert.equal(singleWriteRefusal(card, SINGLE, [""], ["", "P1"], { single: "children" }), "outranked")
+  // a whole-stay rule for any number of adults without children (*+0): once the whole 1+0 has gone,
+  // it prices 1A+0C
+  const star = tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [WHOLE_08(), occ({ target: "COMBINATION", combination: "*+0", op: "MULTIPLY", value: "0.95" })] })
+  assert.equal(singleWriteRefusal(star, SINGLE, [""], [""], { single: "children" }), "outranked")
+  // a pricing policy's whole-stay rule for one adult and any children: outranked by the version's 1+0
+  // today, it would price 1A+0C after the switch (known only with the inherited rules)
+  const policy = [fromInheritedRule({ rule_id: "G-1A", target: "COMBINATION", position: 0, adults: 1, children: null, op: "MULTIPLY", value: "0.9", source: "policy:POL-G/r1/global" } as never)]
+  assert.equal(singleWriteRefusal(plainOf(WHOLE_08()), SINGLE, [""], [""], { single: "children" }, { inherited: policy }), "outranked")
+  assert.equal(singleWriteRefusal(plainOf(WHOLE_08()), SINGLE, [""], [""], { single: "children" }), null)
+  // a policy rule whose formula the viewer may not read is still a rule that takes over
+  const hidden = [fromInheritedRule({ rule_id: "G-1A", target: "COMBINATION", position: 0, adults: 1, children: null, op: "MULTIPLY", value: "", hidden: true, source: "policy:POL-G/r1/global" } as never)]
+  assert.equal(singleWriteRefusal(plainOf(WHOLE_08()), SINGLE, [""], [""], { single: "children" }, { inherited: hidden }), "outranked")
+  // whatever the card's value: the rule written would not price single use in P1
+  const same = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [WHOLE_08()] }), { adults: 1, children: 0, rooms: [], periods: ["P1"], adultRules: [{ position: 1, op: "MULTIPLY", value: "0.8" }] }).tables
+  assert.equal(singleWriteRefusal(same, SINGLE, [""], [""], { single: "children" }), "outranked")
+  // a card of another period than the row's rules reaches none of them: switched
+  const apart = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [{ ...WHOLE_08(), period_code: "P2" }] }), { adults: 1, children: 0, rooms: [], periods: ["P1"], adultRules: [{ position: 1, op: "MULTIPLY", value: "0.9" }] }).tables
+  assert.equal(singleWriteRefusal(apart, SINGLE, [""], ["P2"], { single: "children" }), null)
+})
+
+function plainOf(...rules: Row[]): Tables {
+  return tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: rules })
+}
+
+test("the single-use row names the special combination that prices one adult; a rule of its own that outranks the card has no note (final follow-up)", () => {
+  // the reviewer's case: the only card is "1 adult + any children: Adult 1 ×1.2, Child 1 ×0.3"; the
+  // engine prices 1A+0C by it (children = any includes none)
+  const t = persistCombination(tablesOf(ROOMS_PERIODS()), ANY_CHILDREN_CARD).tables
+  const cards = groupCombinations(t)
+  const card = cards.find((c) => !isSingleUseCard(c))
+  assert.ok(card)
+  const m = ladderModel(t, null, "PERSON", OPTS)
+  const notes = combinationNotes(m, cards, null)
+  for (const p of m.periods) assert.deepEqual(notes.get(`single:0:|${p}`), [card.id], p)
+  // a room scope: the All-rooms card reaches it
+  const sup = ladderModel(t, "SUP", "PERSON", OPTS)
+  assert.deepEqual(combinationNotes(sup, cards, "SUP").get("single:0:|P2"), [card.id])
+  // a card for two adults, or for one adult with two children and only child rules, does not price 1A+0C
+  const two = persistCombination(tablesOf(ROOMS_PERIODS()), { adults: 2, children: "*", rooms: [], periods: [], adultRules: [{ position: 1, op: "MULTIPLY", value: "1.1" }] }).tables
+  assert.equal(combinationNotes(ladderModel(two, null, "PERSON", OPTS), groupCombinations(two), null).get("single:0:|"), undefined)
+  const kids = persistCombination(tablesOf(ROOMS_PERIODS()), { adults: 1, children: 2, rooms: [], periods: [], childRules: [{ position: 2, age_band: "", op: "MULTIPLY", value: "0.2" }] }).tables
+  assert.equal(combinationNotes(ladderModel(kids, null, "PERSON", OPTS), groupCombinations(kids), null).get("single:0:|"), undefined)
+  // a single-use rule of its own (the exact 1+0) outranks the card's 1+* rules: no note
+  const own = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [occ({ target: "COMBINATION", combination: "1+0", op: "MULTIPLY", value: "1.5" })] }), { ...ANY_CHILDREN_CARD, whole: { op: "MULTIPLY", value: "1.3" } }).tables
+  const om = ladderModel(own, null, "PERSON", OPTS)
+  assert.equal(combinationNotes(om, groupCombinations(own), null).get("single:0:|P2"), undefined)
+  // …but a card's whole-stay rule for P2 outranks the All-periods single-use rule there (a period
+  // qualifier ranks before the exact combination)
+  const p2 = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [occ({ target: "COMBINATION", combination: "1+0", op: "MULTIPLY", value: "1.5" })] }), { adults: 1, children: "*", rooms: [], periods: ["P2"], whole: { op: "MULTIPLY", value: "1.3" } }).tables
+  const pm = ladderModel(p2, null, "PERSON", OPTS)
+  const pn = combinationNotes(pm, groupCombinations(p2), null)
+  assert.equal(pn.get("single:0:|P2")?.length, 1)
+  assert.equal(pn.get("single:0:|P1"), undefined)
+  // "also when children travel": a card's Adult 1 for one adult and two children prices that party's adult
+  const alt = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [ALT_08()] }), { adults: 1, children: 2, rooms: [], periods: ["P3"], adultRules: [{ position: 1, op: "MULTIPLY", value: "0.7" }] }).tables
+  const am = ladderModel(alt, null, "PERSON", OPTS)
+  assert.equal(am.rows[0].id, "single:1:")
+  const an = combinationNotes(am, groupCombinations(alt), null)
+  assert.equal(an.get("single:1:|P3")?.length, 1)
+  assert.equal(an.get("single:1:|P2"), undefined)
+  // an Always-wins single-use rule beats every special combination: no note
+  const always = persistCombination(tablesOf({ ...ROOMS_PERIODS(), occupancy_rules: [occ({ target: "COMBINATION", combination: "1+0", op: "MULTIPLY", value: "1.5", is_override: 1 })] }), ANY_CHILDREN_CARD).tables
+  const alm = ladderModel(always, null, "PERSON", OPTS)
+  assert.equal(combinationNotes(alm, groupCombinations(always), null).get("single:0:|"), undefined)
+  // where a card holds the cell's whole column, it prices one adult there (the ladder then shows the
+  // card, not the engine default); a card of P2 only does not hold All periods
+  assert.equal(cardCovers(card, null, ""), true)
+  assert.equal(cardCovers(card, "SUP", "P3"), true)
+  const p2card = groupCombinations(p2).find((c) => !isSingleUseCard(c))
+  assert.ok(p2card)
+  assert.equal(cardCovers(p2card, null, "P2"), true)
+  assert.equal(cardCovers(p2card, null, ""), false)
+  assert.equal(cardCovers({ rooms: ["DLX"], periods: [""] }, null, "P1"), false, "one room of All rooms")
+  assert.equal(cardCovers({ rooms: ["DLX"], periods: [""] }, "DLX", "P1"), true)
 })
