@@ -1027,6 +1027,20 @@ class TestPaymentLinkHold(HoldCase):
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "status"), "Expired")
 
+	def test_no_link_for_a_booking_that_expired(self):
+		"""D5 (audit 1c): a booking whose hold is over (cancelled) gets no link — never a silent 72-hour
+		link for rooms it no longer holds; a confirmed booking still gets one for its balance."""
+		b = self.book(method="Card")
+		passes(b["booking"], 25)
+		run_expiry_jobs()
+		with self.assertRaises(frappe.ValidationError):
+			self.send_link(b)
+		self.assertFalse(frappe.db.exists("TEX Payment Link", {"booking": b["booking"]}))
+		kept = self.book(method="Pay at Hotel", status="Confirmed")
+		out = pay.create_link(property=fx.PROPERTY, amount=kept["balance"], currency="EUR", description="Balance",
+		                      expires_hours=72, booking=kept["booking"])
+		self.assertIsNone(out["rooms_held_until"])
+
 	def test_the_email_says_until_when(self):
 		from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
 

@@ -1440,3 +1440,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - D2 (audit 1c) **COMPLETE**: a never-confirmed "Partially Cancelled" booking takes no money as a confirmed one; p54 cancels such leftovers, parks their money (audited, no mail) · `TestNeverConfirmedLeftovers`.
 - D3 (audit 1c) **PARTIAL**: capture time wired for the virtual POS (`EXTRA.TRXDATE`, Istanbul → site time), the mock (server clock) and bank transfers (staff's value date); iyzico/Sipay state none (fallback) · unit `test_gateways_state_when_they_captured_the_money`, `TestPaidInTime`.
 - D4 (audit 1c) **COMPLETE**: paid in time + rooms sold or the guest booked again for the stay → Action Required (no auto refund); a revival locks the B2 charges before the booking · `TestPaidInTime`.
+- D5 (audit 1c) **COMPLETE**: no payment link for a booking neither waiting nor confirmed (clear error); CRS "send link" hidden for it · `TestPaymentLinkHold.test_no_link_for_a_booking_that_expired`.

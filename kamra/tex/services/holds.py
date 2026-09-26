@@ -42,14 +42,21 @@ def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = 
 	the guest a link) holds the booking's rooms for the link hold (``resolve_hold_minutes`` for a payment
 	link: the hotel's, else TEX Settings, 24 hours by default), never beyond ``wanted``, and never
 	shortens a longer hold; the link lives as long as the hold. Under the booking's lock and its rooms'
-	(the order of every hold decision); refused (``HoldExpired``) once the hold is over. → (the link's
-	expiry, until when the rooms are held); a link of no booking waiting for its payment keeps ``wanted``
-	and holds nothing."""
+	(the order of every hold decision); refused (``HoldExpired``) once the hold is over, and for a
+	booking neither waiting nor confirmed (D5). → (the link's expiry, until when the rooms are held); a
+	link of a confirmed booking, or of none, keeps ``wanted`` and holds nothing."""
 	wanted = get_datetime(wanted)
 	if not booking:
 		return wanted, None
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # as it is now
 	if b.status not in HOLDING:
+		from kamra.tex.services import late_payments
+
+		# a confirmed booking's balance may be asked by a link; a cancelled or expired booking gets
+		# none — never a link for rooms it no longer holds (D5)
+		if b.status not in late_payments.TAKES_MONEY or not late_payments.confirmed_rooms(booking):
+			frappe.throw(_("Booking {0} is {1}: it cannot be paid by a link. Book the stay again.").format(
+				booking, _(b.status)))
 		return wanted, None
 	now = get_datetime(now or now_datetime())
 	deadline = hold_deadline(booking, lock=True)

@@ -12,6 +12,9 @@ import { Row } from "./controls"
 import { roomName } from "./OfferParts"
 import { PaymentLinkDialog } from "./PaymentLinkDialog"
 
+/** A booking a payment link may be sent for: waiting for its payment, or confirmed with a balance. */
+const LINKABLE = ["Pending Payment", "Held", "Confirmed", "Partially Cancelled"]
+
 /** Booking number, amounts due and the follow-up actions (R-25: send payment link). */
 export function Confirmation({
   booking,
@@ -39,7 +42,8 @@ export function Confirmation({
   const [linkOpen, setLinkOpen] = useState(false)
   const confirmed = booking.status === "Confirmed"
   const linkAmount = isPositive(booking.due_now) ? booking.due_now : booking.balance
-  const canLink = can("payment.link", booking.property) && isPositive(booking.balance)
+  // a cancelled or expired booking gets no link (the server refuses it too, D5)
+  const canLink = can("payment.link", booking.property) && isPositive(booking.balance) && LINKABLE.includes(booking.status)
   return (
     <Card>
       <CardBody className={compact ? "space-y-3" : "space-y-4"}>
