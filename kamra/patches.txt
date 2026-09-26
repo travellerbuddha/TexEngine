@@ -62,3 +62,4 @@ kamra.patches.tex.p51_hold_minutes_per_payment_method
 kamra.patches.tex.p52_partly_cancelled_awaiting_payment
 kamra.patches.tex.p53_payment_captured_at
 kamra.patches.tex.p54_never_confirmed_leftovers
+kamra.patches.tex.p55_web_transfer_hold

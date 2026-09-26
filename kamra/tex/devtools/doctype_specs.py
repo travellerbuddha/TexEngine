@@ -94,6 +94,8 @@ PLATFORM_SPECS = [
 		F("hold_minutes", "Int", "Hold duration, card payment (minutes)", default="20"),
 		F("hold_minutes_link", "Int", "Hold duration, payment link (minutes)", default="1440"),
 		F("hold_minutes_transfer", "Int", "Hold duration, bank transfer (minutes)", default="2880"),
+		# C2: a transfer booked on the web (anyone may): shorter; the call centre and staff keep the above
+		F("hold_minutes_transfer_web", "Int", "Hold duration, bank transfer booked on the web (minutes)", default="1440"),
 		F("manage_link_days", "Int", "Manage-booking link validity (days)", default="365"),
 		SB("Currency"),
 		F("fx_provider_default", "Select", "Default FX provider", ["TCMB", "ECB", "MANUAL"], default="TCMB"),
@@ -104,7 +106,7 @@ PLATFORM_SPECS = [
 		  description="E-mail addresses, one per line, told when a system-status check gets worse or "
 		              "recovers (ADR-047). Sent through the site's outgoing e-mail account."),
 	], perms=[SM, perm("Hotel Admin", "readonly")], issingle=True,
-	   extra={"modified": "2026-09-30 00:00:00.000000"}),         # the holds per payment method came later
+	   extra={"modified": "2026-09-30 00:00:01.000000"}),         # the holds per payment method came later
 
 	dt("TEX Enterprise", P, [
 		F("enterprise_name", "Data", "Enterprise", reqd=1, unique=1, in_list_view=1),

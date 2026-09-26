@@ -29,6 +29,9 @@ CARD, LINK = "Card", "Payment Link"
 HOLD_SETTINGS = {CARD: ("hold_minutes", "tex_hold_minutes_card", 20),
                  LINK: ("hold_minutes_link", "tex_hold_minutes_link", 1440),
                  "Bank Transfer": ("hold_minutes_transfer", "tex_hold_minutes_transfer", 2880)}
+# C2 (user decision): a transfer booked on the web — by anyone — holds shorter and takes few rooms
+WEB_TRANSFER = ("hold_minutes_transfer_web", "tex_hold_minutes_transfer_web", 1440)
+WEB_TRANSFER_MAX_ROOMS = 2
 MIN_HOLD_MINUTES = 5
 # how long a gateway checkout started within the hold keeps the rooms (a hosted payment page's
 # life); finite, so a charge left Pending never holds inventory
@@ -108,13 +111,15 @@ def after_link_closed(booking: str | None) -> None:
 	      old={"hold_until": str(current)}, new={"hold_until": str(back)}, reason="payment link cancelled")
 
 
-def resolve_hold_minutes(property: str, payment_method: str | None) -> int:
+def resolve_hold_minutes(property: str, payment_method: str | None, *, web: bool = False) -> int:
 	"""How long a booking of ``property`` paid by ``payment_method`` keeps its rooms waiting for
 	its payment (K-2d), the one place every booking and payment path asks: the hotel's override
 	for the method, else TEX Settings, else the default (card 20 minutes, payment link 24 hours,
-	bank transfer 48 hours). A method with no hold of its own (a gateway card checkout, anything
-	unknown) holds as a card does. Never below ``MIN_HOLD_MINUTES``."""
-	setting, override, default = HOLD_SETTINGS.get(payment_method or CARD, HOLD_SETTINGS[CARD])
+	bank transfer 48 hours; ``web``: a transfer booked on the public web, 24 hours, C2). A method with no
+	hold of its own (a gateway card checkout, anything unknown) holds as a card does. Never below
+	``MIN_HOLD_MINUTES``."""
+	setting, override, default = WEB_TRANSFER if web and payment_method == TRANSFER else HOLD_SETTINGS.get(
+		payment_method or CARD, HOLD_SETTINGS[CARD])
 	minutes = frappe.db.get_value("Property", property, override) if property else None
 	if not minutes:
 		minutes = frappe.db.get_single_value("TEX Settings", setting) or default

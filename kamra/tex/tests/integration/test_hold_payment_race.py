@@ -540,6 +540,29 @@ class TestHoldPolicy(HoldCase):
 		frappe.db.set_value("Property", fx.PROPERTY, "tex_hold_minutes_link", 0)          # left blank
 		self.assertEqual(self.hold_minutes(self.book(method="Payment Link")), 1440)
 
+	def guest_books(self, **kw) -> dict:
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the public booking engine
+		try:
+			return self.book(**kw)
+		finally:
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back to staff
+
+	def test_a_web_transfer_holds_24_hours_and_staff_bookings_48(self):
+		"""C2 (user decision): a bank transfer booked on the web keeps its rooms 24 hours (the hotel may
+		change it); one booked by the call centre or staff keeps 48."""
+		self.assertEqual(self.hold_minutes(self.guest_books(method="Bank Transfer")), 1440)
+		self.assertEqual(self.hold_minutes(self.book(method="Bank Transfer")), 2880)
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_hold_minutes_transfer_web", 600)
+		self.assertEqual(self.hold_minutes(self.guest_books(method="Bank Transfer")), 600)
+		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 1440)
+
+	def test_the_web_takes_at_most_two_rooms_by_bank_transfer(self):
+		"""C2 (user decision): one visitor must not lock many rooms for a day by choosing a transfer."""
+		with self.assertRaises(frappe.ValidationError):
+			self.guest_books(rooms=3, method="Bank Transfer")
+		self.guest_books(rooms=2, method="Bank Transfer")
+		self.book(rooms=3, method="Bank Transfer")                          # staff may
+
 	def test_a_payment_link_never_outlives_its_bookings_hold(self):
 		b = self.book(method="Payment Link")
 		out = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",

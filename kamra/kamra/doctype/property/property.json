@@ -97,6 +97,7 @@
   "tex_hold_minutes_card",
   "tex_hold_minutes_link",
   "tex_hold_minutes_transfer",
+  "tex_hold_minutes_transfer_web",
   "tex_tax_profile",
   "tex_section_9",
   "tex_tax_rules"
@@ -637,6 +638,12 @@
    "description": "How long a booking waiting for a bank transfer keeps its rooms. Blank: TEX Settings."
   },
   {
+   "fieldname": "tex_hold_minutes_transfer_web",
+   "fieldtype": "Int",
+   "label": "Hold, bank transfer on the web (minutes)",
+   "description": "How long a booking made on the web and waiting for a bank transfer keeps its rooms. Blank: TEX Settings."
+  },
+  {
    "fieldname": "tex_tax_profile",
    "fieldtype": "Select",
    "label": "Tax profile",
@@ -659,7 +666,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-30 00:00:00.000000",
+ "modified": "2026-09-30 00:00:01.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Property",

@@ -20,6 +20,7 @@
   "hold_minutes",
   "hold_minutes_link",
   "hold_minutes_transfer",
+  "hold_minutes_transfer_web",
   "manage_link_days",
   "section_5",
   "fx_provider_default",
@@ -114,6 +115,12 @@
    "default": "2880"
   },
   {
+   "fieldname": "hold_minutes_transfer_web",
+   "fieldtype": "Int",
+   "label": "Hold duration, bank transfer booked on the web (minutes)",
+   "default": "1440"
+  },
+  {
    "fieldname": "manage_link_days",
    "fieldtype": "Int",
    "label": "Manage-booking link validity (days)",
@@ -150,7 +157,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-30 00:00:00.000000",
+ "modified": "2026-09-30 00:00:01.000000",
  "modified_by": "Administrator",
  "module": "TEX Platform",
  "name": "TEX Settings",

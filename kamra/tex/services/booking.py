@@ -592,13 +592,19 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	for _row, _req, result in rows:
 		d, _kind = amount_due_now(result, payment_method)
 		due_now += d
+	if not staff and payment_method == holds.TRANSFER and due_now > 0 and len(rows) > holds.WEB_TRANSFER_MAX_ROOMS:
+		# one visitor must not lock many rooms for a day by choosing a transfer (C2, user decision)
+		frappe.throw(_("A bank transfer booking made online can hold at most {0} rooms. Please pay by card, or "
+		               "contact the hotel.").format(holds.WEB_TRANSFER_MAX_ROOMS))
 	if staff and confirm_without_payment and due_now > 0:
 		# confirming before the deposit arrives is a credit decision, not an agent default
 		scope.require("reservation.confirm_unpaid", property)
 	confirm = due_now == 0 or (staff and confirm_without_payment)
 	status = "Confirmed" if confirm else "Pending Payment"
-	# how long the rooms wait for the payment: by payment method and hotel (K-2d)
-	hold_until = None if confirm else add_to_date(now, minutes=holds.resolve_hold_minutes(property, payment_method))
+	# how long the rooms wait for the payment: by payment method and hotel (K-2d), shorter for a transfer
+	# booked on the web (C2)
+	hold_until = None if confirm else add_to_date(now, minutes=holds.resolve_hold_minutes(property, payment_method,
+	                                                                                      web=not staff))
 	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
 	                                                               language=language, staff=staff)
 	booker = booker or {}

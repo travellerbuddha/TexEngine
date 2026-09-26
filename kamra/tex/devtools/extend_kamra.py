@@ -76,6 +76,10 @@ EXT = {
 		  description="How long a booking waiting for a payment link keeps its rooms. Blank: TEX Settings."),
 		F("tex_hold_minutes_transfer", "Int", "Hold, bank transfer (minutes)",
 		  description="How long a booking waiting for a bank transfer keeps its rooms. Blank: TEX Settings."),
+		# C2: a transfer booked on the web (blank: TEX Settings, 24 hours)
+		F("tex_hold_minutes_transfer_web", "Int", "Hold, bank transfer on the web (minutes)",
+		  description="How long a booking made on the web and waiting for a bank transfer keeps its rooms. "
+		              "Blank: TEX Settings."),
 		F("tex_tax_profile", "Select", "Tax profile", ["Localization pack", "Custom"], default="Localization pack"),
 		SB("TEX tax rules", depends_on="eval:doc.tex_tax_profile=='Custom'"),
 		F("tex_tax_rules", "Table", "Tax rules", "TEX Tax Rule"),
