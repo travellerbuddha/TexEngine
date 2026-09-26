@@ -9133,3 +9133,18 @@ isolation; the code and every race test assume OFF (10.11's default).
 **Consequences.** ADR-032's retries cover only the endpoints wrapped in `retry_on_deadlock`. Working with it ON would
 need retries around about 20 endpoints, callbacks, jobs and Frappe's naming-series inserts, and series locks held
 across a gateway call would still fail under load: not done.
+
+## ADR-064 A nullable date filter says what NULL means (audit Part 2A)
+**Context.** `frappe.get_all`/`get_list` compare a nullable Date/Datetime as `IFNULL(field, '0001-01-01')` for `<`/`<=`: a row
+without the date is "long past" (NEW-1: the roll superseded every version without an end; points, grants and payment links
+without an expiry expired). `>`/`>=`, `frappe.db.get_value`/`count`/`exists`/`delete` and query-builder comparisons are plain SQL.
+**Decision.** A TEX filter comparing a nullable date says what NULL means in the same call: `[field, "is", "set"|"not set"]` or
+the field with `is` in `or_filters`; kept readings are written out (an FX rate without a fetch time was always known). p56 gives
+the versions the roll superseded the state their contract's later publishes would have given them.
+- Guard `unit/test_nullable_date_filters.py` (AST): get_all/get_list/db.get_value/get_values/count/exists/delete/set_value/
+  qb.get_query calls and `frappe.qb.DocType` comparisons in `kamra/`, field types from the DocType JSON; not raw SQL, Frappe-core
+  doctypes or filters built at run time; exceptions only in its reviewed `ALLOWED` list.
+- Smoke `integration/test_scheduler_smoke.py`: each `kamra.tex.scheduler` entry point once over seeded data, clock frozen
+  (freezegun, a kamra dev dependency), providers and network stubbed; a new "TEX …" Error Log or a broken seed fails it.
+- The Playwright run keeps the site scheduler off: wall-clock jobs (hold expiry, alerts) would act mid-spec; the smoke test
+  covers them deterministically.

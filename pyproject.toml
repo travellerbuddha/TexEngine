@@ -23,7 +23,8 @@ frappe = ">=16.0.0-dev,<17.0.0"
 
 # These dependencies are only installed when developer mode is enabled
 [tool.bench.dev-dependencies]
-# package_name = "~=1.1.0"
+# the scheduler smoke test freezes the clock with Frappe's freeze_time (ADR-064)
+freezegun = "~=1.5.5"
 
 # These apt dependencies will be installed from Ubuntu repositories when you host your app on Frappe Cloud
 [deploy.dependencies.apt]

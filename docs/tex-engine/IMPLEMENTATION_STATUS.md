@@ -1460,3 +1460,8 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - E5 (audit 1c-son) **COMPLETE**: `late_payments.settled` reads the charge's reconciliation with a locking read · `TestLastRoomRace.test_a_charge_leaves_reconciliation_by_its_state_as_it_is_now` (threads).
 - E6 (audit 1c-son) **COMPLETE**: p52/p54 void pre-C6 fees of never-confirmed bookings (p52 keeps a basket clawback); p52 expires with no mail · `TestPartialCancellation`, `TestNeverConfirmedLeftovers`.
 - K1–K4 (audit 1c-son) **COMPLETE**: payment report leaves out a refused capture and its refund together; a parked/refunded link page shows only the late notice; `providers/simple.py` loads without frappe; `hold_minutes_transfer_web` in the settings API · `TestMoneyShownRight`, unit `paylink-notices`, `TestProvidersWithoutBench`, `TestHoldSettings`.
+
+## 6. Audit Part 2A (2026-09-26)
+
+- DOC-0 **COMPLETE**: the docs no longer say GitHub PR/CI is blocked (CI green on PR #2, PR #1; CI/CD PARTIAL: scanning, image, registry, staging, deploy open) · `git grep`.
+- NEW-1 **COMPLETE**: scheduled jobs never read a missing date as past (contract roll, loyalty expiry, grant expiry, payment links); every nullable date filter says what NULL means; p56 repairs the roll (ADR-064) · `test_null_dates`, `test_patches` p56, `unit/test_nullable_date_filters`, `test_scheduler_smoke`.
