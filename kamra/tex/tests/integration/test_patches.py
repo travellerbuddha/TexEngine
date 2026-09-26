@@ -108,6 +108,7 @@ BEHAVIOUR = {
 	                                 "test_p54_cancels_leftovers_and_parks_their_money_without_mail",
 	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
 	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
+	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 }
 
 
@@ -1281,6 +1282,110 @@ class TestP48Evidence(PatchCase):
 				self.assertTrue(frappe.has_permission("Agent Action Log", "read"), role)
 			finally:
 				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+
+class TestP64AgentLogReadOnly(PatchCase):
+	"""Y-12 (audit Part 2A, review round 1): once a DocType has one Custom DocPerm row Frappe ignores its
+	JSON permissions, and the seed scripts wrote such rows for the Agent Action Log (Hotel Admin rwcd from
+	``seed_rbac_v2.ensure_hotel_admin``, Kamra Agent from ``ensure_agent_user``, Front Desk from
+	``seed_users``). p64 makes those rows read-only for every role but System Manager."""
+
+	P64 = "p64_agent_log_read_only"
+	DT = "Agent Action Log"
+	ROLES = ("Hotel Admin", "Kamra Agent", "Front Desk")
+
+	def tearDown(self):
+		super().tearDown()                       # the rollback takes the rows this test wrote
+		frappe.clear_cache(doctype=self.DT)
+
+	def custom_rows(self) -> list[dict]:
+		return frappe.get_all("Custom DocPerm", filters={"parent": self.DT}, order_by="role asc, permlevel asc",
+		                      fields=["role", "permlevel", "read", "write", "create", "delete", "share", "report",
+		                              "export", "print", "email"])
+
+	def seeded(self) -> None:
+		"""The rows the old seeds left: Hotel Admin rwcd, Kamra Agent r/w/c, Front Desk r/c, System Manager all."""
+		from kamra.scripts.fix_perms_fields import _grant
+
+		for role, (r, w, c, d) in (("System Manager", (1, 1, 1, 1)), ("Hotel Admin", (1, 1, 1, 1)),
+		                           ("Kamra Agent", (1, 1, 1, 0)), ("Front Desk", (1, 0, 1, 0))):
+			_grant(self.DT, role, r, w, c, delete=d)
+		frappe.clear_cache(doctype=self.DT)
+
+	def user(self, role: str) -> str:
+		user = fx.ensure_user(f"p64-{role.lower().replace(' ', '-')}@example.com", [role])
+		fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+		          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Hotel Admin" if role == "Hotel Admin" else "Reservations Agent"})
+		return user
+
+	def as_role(self, role: str):
+		frappe.set_user(self.user(role))  # nosemgrep: frappe-setuser -- the test acts as each role
+		scope.clear_cache()
+
+	def back(self) -> None:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		scope.clear_cache()
+
+	def insert(self) -> str:
+		return frappe.client.insert({"doctype": self.DT, "action_type": "p64_probe", "property": fx.PROPERTY,
+		                             "approval_status": "Executed"})["name"]
+
+	def test_p64_makes_the_seeded_rows_read_only(self):
+		from kamra.savings import log_action
+
+		self.seeded()
+		self.as_role("Hotel Admin")
+		try:
+			row = self.insert()                                            # the seeded rows let it write
+			self.assertTrue(frappe.db.exists(self.DT, row))
+		finally:
+			self.back()
+		system_manager = [r for r in self.custom_rows() if r.role == "System Manager"]
+		never_ran(self.P64)
+		seen = migrate(self.P64)
+		self.assertIn("3 Custom DocPerm row(s)", " ".join(str(c) for c in seen["print"].call_args_list))
+		self.assertEqual([r for r in self.custom_rows() if r.role == "System Manager"], system_manager)
+		for r in self.custom_rows():
+			if r.role != "System Manager":
+				self.assertEqual((r.read, r.write, r.create, r.delete, r.share), (1, 0, 0, 0, 0), r.role)
+				self.assertEqual((r.report, r.export, r.print, r.email), (1, 1, 1, 1), r.role)
+		for role in self.ROLES:
+			self.as_role(role)
+			try:
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					self.insert()
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.set_value(self.DT, row, "approval_status", "Approved")
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.delete(self.DT, row)
+				self.assertTrue(frappe.has_permission(self.DT, "read"), role)
+				logged = log_action("p64_normal", "Property", fx.PROPERTY, property=fx.PROPERTY)
+				self.assertTrue(logged and frappe.db.exists(self.DT, logged), role)
+			finally:
+				self.back()
+		rows = self.custom_rows()
+		again = migrate(self.P64)                                          # a second run changes nothing
+		self.assertEqual(self.custom_rows(), rows)
+		self.assertIn("0 Custom DocPerm row(s)", " ".join(str(c) for c in again["print"].call_args_list))
+
+	def test_p64_never_adds_a_row_to_a_log_without_custom_rows(self):
+		self.assertEqual(self.custom_rows(), [])
+		never_ran(self.P64)
+		migrate(self.P64)
+		self.assertEqual(self.custom_rows(), [])
+
+	def test_the_seed_gives_hotel_admin_the_log_read_only(self):
+		from kamra.scripts import seed_rbac_v2
+
+		fx.ensure_user("admin@kamra.local", ["System Manager"])           # the seed's demo admin (rolled back)
+		with mock.patch.object(seed_rbac_v2, "_grant") as grant:
+			seed_rbac_v2.ensure_hotel_admin()
+		calls = {c.args[0]: (c.args[1:], c.kwargs) for c in grant.call_args_list}
+		self.assertEqual(calls[self.DT], (("Hotel Admin", 1, 0, 0), {}))
+		for doctype, (args, kwargs) in calls.items():
+			if doctype != self.DT:
+				self.assertEqual((args, kwargs), (("Hotel Admin", 1, 1, 1), {"delete": 1}), doctype)
 
 
 class TestCommitGuard(PatchCase):
