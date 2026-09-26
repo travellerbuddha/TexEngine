@@ -4,10 +4,11 @@ A booking waiting for its payment holds its rooms until its hold deadline. A pay
 started before it keeps them until the attempt's own, finite deadline; a stale Pending charge
 keeps nothing. The booking and all its rooms expire together, in one transaction (K-2a).
 
-Money arriving once the hold truly ended never confirms the booking at its old price, and never
-takes rooms back: it is recorded, kept off the booking and put in reconciliation (``Action
-Required`` for staff, or ``Refund Queued`` when the rooms are gone and the gateway refunds by
-itself), audited, and no confirmation reaches the guest or the PMS (K-2b).
+Money for a booking whose rooms are still held for it confirms it at its locked price, however late
+it comes (B3 a). Money arriving once its rooms were given back never takes them back unless the
+gateway captured it in time (B4, D4): it is recorded, kept off the booking and put in
+reconciliation (``Action Required`` for staff, or ``Refund Queued`` when late money's rooms are gone
+and the gateway refunds by itself), audited, and no confirmation reaches the guest or the PMS.
 
 Time passes in these tests by moving every stored deadline of a booking into the past
 (``passes``): the hold of its rooms, and the start and deadline of its payment attempts."""
@@ -155,7 +156,7 @@ def confirmations(b: dict) -> int:
 
 
 class TestLatePayment(HoldCase):
-	"""K-2b: a late payment never confirms a booking whose rooms are not held for it."""
+	"""K-2b, B3: late money never confirms a booking whose rooms are not held for it; money for rooms still held does."""
 
 	def test_a_payment_within_the_hold_confirms_the_booking(self):
 		b = self.book(rooms=2)

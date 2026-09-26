@@ -9098,7 +9098,8 @@ main `1575c8b` is contained, so nothing was merged.
   min, transfer = the hold); none starts after it; a stale Pending charge holds nothing. A payment
   link sent for the booking holds its rooms for the link hold (default 24 h) and expires with it (B6).
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
-  at the locked price; b) late money, rooms given back and still free: `Action Required`;
+  at the locked price — its rooms, extra units and coupon uses are still held for it, so nothing is
+  judged again; b) late money, rooms given back and still free: `Action Required`;
   c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
   the charge stays Succeeded, off the booking, with today's availability and price in its note; a
   booking that expires with money on it hands that money over the same way (B2).
