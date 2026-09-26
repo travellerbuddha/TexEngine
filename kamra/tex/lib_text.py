@@ -48,13 +48,48 @@ T: dict[str, dict[str, tuple[str, str]]] = {
 		"pl": ("Płatność otrzymana — rezerwacja {ref} potwierdzona",
 		       "Dzień dobry {name},<br><br>otrzymaliśmy płatność. Twoja rezerwacja <b>{ref}</b> w {hotel} jest potwierdzona."),
 	},
+	# B5: money that reached a booking whose time to pay had ended (kept off it, in reconciliation);
+	# {next}: what happens to it (``AFTER_EXPIRY_NEXT``)
+	"payment_after_expiry": {
+		"en": ("About your payment for booking {ref} at {hotel}",
+		       "Dear {name},<br><br>we received your payment of {total} for booking <b>{ref}</b> at {hotel}, but the "
+		       "time to pay for the booking had ended before it was paid in full, so the booking could not be "
+		       "confirmed.<br><br>{next}"),
+		"tr": ("{hotel} {ref} numaralı rezervasyonunuzun ödemesi hakkında",
+		       "Sayın {name},<br><br>{hotel} için <b>{ref}</b> numaralı rezervasyonunuza ait {total} tutarındaki ödemeniz "
+		       "alındı; ancak rezervasyonun ödeme süresi, ödeme tamamlanmadan sona erdiği için rezervasyon "
+		       "onaylanamadı.<br><br>{next}"),
+		"de": ("Zu Ihrer Zahlung für die Buchung {ref} im {hotel}",
+		       "Guten Tag {name},<br><br>wir haben Ihre Zahlung von {total} für die Buchung <b>{ref}</b> im {hotel} "
+		       "erhalten. Die Zahlungsfrist der Buchung war jedoch abgelaufen, bevor sie vollständig bezahlt war, daher "
+		       "konnte die Buchung nicht bestätigt werden.<br><br>{next}"),
+		"ru": ("О вашей оплате бронирования {ref} в {hotel}",
+		       "Здравствуйте, {name}!<br><br>Мы получили вашу оплату {total} за бронирование <b>{ref}</b> в {hotel}, "
+		       "однако срок оплаты бронирования истёк до того, как оно было полностью оплачено, поэтому бронирование "
+		       "не удалось подтвердить.<br><br>{next}"),
+		"ro": ("Despre plata dvs. pentru rezervarea {ref} la {hotel}",
+		       "Stimate/Stimată {name},<br><br>am primit plata dvs. de {total} pentru rezervarea <b>{ref}</b> la {hotel}, "
+		       "însă termenul de plată al rezervării a expirat înainte ca aceasta să fie achitată integral, așa că "
+		       "rezervarea nu a putut fi confirmată.<br><br>{next}"),
+		"pl": ("W sprawie płatności za rezerwację {ref} w {hotel}",
+		       "Dzień dobry {name},<br><br>otrzymaliśmy Twoją płatność {total} za rezerwację <b>{ref}</b> w {hotel}, "
+		       "jednak termin płatności za rezerwację upłynął, zanim została ona w pełni opłacona, dlatego rezerwacja "
+		       "nie mogła zostać potwierdzona.<br><br>{next}"),
+	},
+	# {expires}: until when the link can be paid (B6)
 	"payment_link": {
-		"en": ("Payment request from {hotel}", "Dear {name},<br><br>{hotel} asks you to pay {total} for {ref}."),
-		"tr": ("{hotel} ödeme talebi", "Sayın {name},<br><br>{hotel}, {ref} için {total} tutarında ödeme talep ediyor."),
-		"de": ("Zahlungsaufforderung von {hotel}", "Guten Tag {name},<br><br>{hotel} bittet Sie, {total} für {ref} zu bezahlen."),
-		"ru": ("Запрос на оплату от {hotel}", "Здравствуйте, {name}!<br><br>{hotel} просит вас оплатить {total} за {ref}."),
-		"ro": ("Cerere de plată de la {hotel}", "Stimate/Stimată {name},<br><br>{hotel} vă roagă să plătiți {total} pentru {ref}."),
-		"pl": ("Prośba o płatność od {hotel}", "Dzień dobry {name},<br><br>{hotel} prosi o zapłatę {total} za {ref}."),
+		"en": ("Payment request from {hotel}", "Dear {name},<br><br>{hotel} asks you to pay {total} for {ref}. "
+		                                       "The link is valid until {expires}."),
+		"tr": ("{hotel} ödeme talebi", "Sayın {name},<br><br>{hotel}, {ref} için {total} tutarında ödeme talep ediyor. "
+		                              "Bağlantı {expires} tarihine kadar geçerlidir."),
+		"de": ("Zahlungsaufforderung von {hotel}", "Guten Tag {name},<br><br>{hotel} bittet Sie, {total} für {ref} zu "
+		                                           "bezahlen. Der Link ist bis {expires} gültig."),
+		"ru": ("Запрос на оплату от {hotel}", "Здравствуйте, {name}!<br><br>{hotel} просит вас оплатить {total} за {ref}. "
+		                                      "Ссылка действительна до {expires}."),
+		"ro": ("Cerere de plată de la {hotel}", "Stimate/Stimată {name},<br><br>{hotel} vă roagă să plătiți {total} "
+		                                        "pentru {ref}. Linkul este valabil până la {expires}."),
+		"pl": ("Prośba o płatność od {hotel}", "Dzień dobry {name},<br><br>{hotel} prosi o zapłatę {total} za {ref}. "
+		                                       "Link jest ważny do {expires}."),
 	},
 }
 
@@ -67,6 +102,19 @@ LINK_LABEL = {
 	                    "ro": "Finalizați sau gestionați rezervarea", "pl": "Dokończ lub zarządzaj rezerwacją"},
 	"payment_link": {"en": "Pay securely", "tr": "Güvenli ödeme yapın", "de": "Sicher bezahlen",
 	                 "ru": "Оплатить безопасно", "ro": "Plătiți în siguranță", "pl": "Zapłać bezpiecznie"},
+}
+
+# what happens to money a booking could not take (B5): refunded by itself, or the hotel decides
+AFTER_EXPIRY_NEXT = {
+	"refund": {"en": "The payment will be refunded to you.", "tr": "Ödemeniz size iade edilecektir.",
+	           "de": "Die Zahlung wird Ihnen erstattet.", "ru": "Оплата будет вам возвращена.",
+	           "ro": "Plata vă va fi rambursată.", "pl": "Płatność zostanie Ci zwrócona."},
+	"contact": {"en": "The hotel will contact you about this payment.",
+	            "tr": "Otel bu ödemeyle ilgili sizinle iletişime geçecektir.",
+	            "de": "Das Hotel wird sich wegen dieser Zahlung mit Ihnen in Verbindung setzen.",
+	            "ru": "Отель свяжется с вами по поводу этой оплаты.",
+	            "ro": "Hotelul vă va contacta în legătură cu această plată.",
+	            "pl": "Hotel skontaktuje się z Tobą w sprawie tej płatności."},
 }
 
 FOOTER = {

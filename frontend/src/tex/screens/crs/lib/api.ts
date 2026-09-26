@@ -123,6 +123,10 @@ export interface PaymentLinkResult {
   url?: string
   emailed?: boolean
   replay?: boolean
+  /** When the link stops working (B6). */
+  expires_at?: string | null
+  /** A booking awaiting payment: its rooms are held until then, and the link expires then (B6). */
+  rooms_held_until?: string | null
 }
 
 export function createPaymentLink(args: PaymentLinkArgs) {

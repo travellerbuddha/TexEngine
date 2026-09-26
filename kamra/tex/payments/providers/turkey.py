@@ -21,7 +21,14 @@ from decimal import Decimal
 
 import requests
 
-from kamra.tex.payments.providers.base import Checkout, Intent, Outcome, PaymentProvider, ProviderError
+from kamra.tex.payments.providers.base import (
+	Checkout,
+	Intent,
+	Outcome,
+	PaymentProvider,
+	ProviderError,
+	gateway_time,
+)
 
 TIMEOUT = 20
 ISO_NUMERIC = {"TRY": "949", "EUR": "978", "USD": "840", "GBP": "826"}
@@ -153,6 +160,8 @@ class IyzicoProvider(PaymentProvider):
 		amount = price if price is not None else paid
 		if price is not None and paid is not None and paid < price:
 			amount = paid
+		# no capture time: the checkout-form detail states none (``systemTime`` is its answer's time), so
+		# its money is judged when its news arrives (ADR-062, D3)
 		return Outcome(status="Succeeded", provider_ref=ref, amount=amount,
 		               currency=res.get("currency"), card_brand=res.get("cardAssociation"),
 		               card_last4=(res.get("lastFourDigits") or "")[-4:] or None, raw_status="SUCCESS")
@@ -288,6 +297,8 @@ class SipayProvider(PaymentProvider):
 				return Outcome(status="Failed", raw_status=state, error_message=data.get("status_description"))
 			# unknown / still processing: never fail a payment on an unconfirmed answer
 			return Outcome(status="Pending", raw_status=state or str(data.get("status_code")))
+		# no capture time: none of the check-status fields TEX reads is one (not certified yet), so its
+		# money is judged when its news arrives (ADR-062, D3)
 		return Outcome(status="Succeeded", provider_ref=str(data.get("order_no") or transaction),
 		               amount=_stated(data.get("amount")), currency=data.get("currency_code"),
 		               raw_status="completed")
@@ -353,6 +364,9 @@ class NestPayProvider(PaymentProvider):
 		numeric = str(params.get("currency") or "")
 		return Outcome(status="Succeeded" if approved else "Failed", provider_ref=params.get("TransId"),
 		               amount=_stated(params.get("amount")), raw_status=params.get("Response"),
+		               # the bank's transaction time, in its Istanbul time and covered by the hash (D3)
+		               captured_at=gateway_time(params.get("EXTRA.TRXDATE"), "%Y%m%d %H:%M:%S", "Europe/Istanbul")
+		               if approved else None,
 		               # a code TEX never sends stays as is, so it can never pass for the charge's currency
 		               currency=ISO_ALPHA.get(numeric, numeric) or None,
 		               card_last4=masked[-4:] if masked[-4:].isdigit() else None,

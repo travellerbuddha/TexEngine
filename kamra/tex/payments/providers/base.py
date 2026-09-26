@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -46,10 +47,29 @@ class Outcome:
 	raw_status: str | None = None
 	error_code: str | None = None
 	error_message: str | None = None
+	# when the gateway captured (or authorised) the money, by its own clock, as a naive datetime in
+	# the site's time zone; None when it does not state it. A payment is late by this time, never
+	# by when its news reached TEX (B4)
+	captured_at: datetime | None = None
 
 
 class ProviderError(Exception):
 	pass
+
+
+def gateway_time(value, fmt: str, zone: str) -> datetime | None:
+	"""A time a gateway stated in its own time zone (``zone``, e.g. a Turkish bank's Istanbul time),
+	as TEX keeps times: naive, in the site's time zone (``captured_at``, D3). None when it is absent
+	or unreadable: never guessed."""
+	from zoneinfo import ZoneInfo
+
+	from frappe.utils import get_system_timezone
+
+	try:
+		at = datetime.strptime(str(value or "").strip(), fmt).replace(tzinfo=ZoneInfo(zone))
+	except ValueError:
+		return None
+	return at.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
 
 
 class PaymentProvider(ABC):

@@ -13,7 +13,7 @@ import { DateRangePicker } from "../search/DateRangePicker"
 import { RoomsEditor, childOk } from "../search/GuestsPicker"
 import { Shell } from "../site/Layout"
 import { SiteProvider, useSite, useSiteData } from "../site/SiteContext"
-import type { BasketClawback, BookingRoom, BookingSummary, ChangeOutcome, ChangeResult, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
+import type { BasketClawback, BookingRoom, BookingSummary, ChangeOutcome, ChangeResult, LatePayment, PaymentStart, PendingChange, Proposal, Reason, Settlement } from "../types"
 import { Button, Field, Textarea } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -534,12 +534,25 @@ function Manage({ token }: { token: string | null }) {
   useEffect(() => {
     document.title = `${t("manage.title")} · ${site.name}`
   }, [t, site.name])
+  // back from a payment: "received" only once the booking took it; money it could no longer take is
+  // announced as such, never as received (B5). Decided on the first view, then only the server's
+  // late-payment verdict changes it (a cancellation made here afterwards has its own notice).
+  const [paidKind, setPaidKind] = useState<"paid" | LatePayment | null>(null)
+  useEffect(() => {
+    if (payStatus !== "succeeded" || !data) return
+    setPaidKind((k) => data.late_payment ?? k ?? (data.status === "Cancelled" ? "contact" : "paid"))
+  }, [payStatus, data])
+  // opened later: money the booking could not take is still announced (B5)
+  const late = data?.late_payment ?? null
   useEffect(() => {
     if (changeRequest) return
-    if (payStatus === "succeeded") setNotice({ tone: "ok", title: t("manage.paidTitle") })
-    else if (payStatus === "failed") setNotice({ tone: "bad", title: t("confirm.failedTitle"), body: t("confirm.failedBody") })
+    if (!payStatus && late) setNotice({ tone: "warn", title: t("manage.lateTitle"), body: t(late === "refund" ? "manage.lateRefund" : "manage.lateContact") })
+    else if (payStatus === "succeeded") {
+      if (paidKind === "paid") setNotice({ tone: "ok", title: t("manage.paidTitle") })
+      else if (paidKind) setNotice({ tone: "warn", title: t("manage.lateTitle"), body: t(paidKind === "refund" ? "manage.lateRefund" : "manage.lateContact") })
+    } else if (payStatus === "failed") setNotice({ tone: "bad", title: t("confirm.failedTitle"), body: t("confirm.failedBody") })
     else if (payStatus === "pending" || payStatus === "unverified") setNotice({ tone: "warn", title: t("confirm.verifyingTitle"), body: t("confirm.verifyingBody") })
-  }, [payStatus, t, changeRequest])
+  }, [payStatus, t, changeRequest, paidKind, late])
   // back from a change's payment: the change as the server has it now (made once the gateway
   // confirmed the payment, or not made and the payment refunded)
   const [recheck, setRecheck] = useState(0)

@@ -225,6 +225,9 @@
  "crs.link.email": "Misafir e-postası",
  "crs.link.email_hint": "İsteğe bağlı; ödeme sayfasında görünür.",
  "crs.link.expires": "Geçerlilik süresi",
+ "crs.link.expires_hint": "Ödeme bekleyen bir rezervasyonda odalar link sona erene kadar tutulur (en fazla otelin ödeme linki tutma süresi).",
+ "crs.link.valid_until": "Link {date} tarihine kadar ödenebilir.",
+ "crs.link.rooms_held": "Rezervasyonun odaları misafir için {date} tarihine kadar tutuluyor.",
  "crs.link.for": "{ref} rezervasyonu için",
  "crs.link.hours": {
   "one": "{count} saat",

@@ -15,7 +15,7 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, get_datetime, now_datetime
+from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.payments.providers import REGISTRY, account_problem, simple
@@ -23,6 +23,7 @@ from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
+from kamra.tex.services import holds
 from kamra.tex.services.txn import undo_step
 
 
@@ -321,9 +322,15 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		if not provider.can_add_checkout(txn.provider_ref):
 			_supersede(txn, "another checkout was asked for")
 	else:
+		# a booking waiting for its payment: the attempt is refused once its hold is over, else it
+		# keeps the rooms until its own deadline, never longer (K-2a)
+		held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
+		expires_at = holds.open_attempt(held, holds.TRANSFER if provider.name == holds.TRANSFER else method) \
+			if held else None
 		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
-		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation)
+		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation,
+		               expires_at=expires_at)
 	frappe.db.savepoint(CHECKOUT_SAVEPOINT)
 	try:
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
@@ -419,6 +426,8 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	txn.error_message = (outcome.error_message or "")[:500] or None
 	txn.card_brand = outcome.card_brand
 	txn.card_last4 = outcome.card_last4
+	if outcome.status == "Succeeded" and outcome.captured_at:
+		txn.captured_at = outcome.captured_at        # the gateway's clock: whether it was paid in time (B4)
 	txn.completed_at = now_datetime()
 	txn.save(ignore_permissions=True)
 	if txn.status == "Succeeded":
@@ -429,6 +438,15 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	      property=txn.property, new={"amount": to_str(from_db(txn.amount, txn.currency)), "currency": txn.currency,
 	                                  "provider": txn.provider, "booking": txn.booking, "link": txn.payment_link})
 	return {"transaction": txn.name, "status": txn.status}
+
+
+def complete_retrying(transaction: str, **kw) -> dict:
+	"""C3: ``complete`` run again when the database chose it as a deadlock victim. It is idempotent —
+	a rerun asks the gateway again and applies its verified outcome once — so a charge the gateway
+	captured never stays Pending (nor its money unreconciled) because of a deadlock."""
+	from kamra.tex.services.txn import retry_on_deadlock
+
+	return retry_on_deadlock(complete)(transaction, **kw)
 
 
 def _checked_capture(provider, outcome: Outcome, txn) -> Outcome:
@@ -566,7 +584,13 @@ def _after_charge(txn) -> None:
 			      property=link.property, new={"transaction": txn.name, "amount": to_str(amount),
 			                                   "status_before": closed, "currency": link.currency})
 		if link.booking and not txn.booking:
-			allocate(txn.name, booking=link.booking, amount=amount, reason="payment link", _system=True)
+			if allocate(txn.name, booking=link.booking, amount=amount, reason="payment link", _system=True) is None:
+				# its booking could not take the money (kept off it, in reconciliation): the link is closed,
+				# never shown "Paid" (C7)
+				frappe.db.set_value("TEX Payment Link", link.name, "status", closed or "Cancelled", update_modified=False)
+				audit("payment_link.closed", reference_doctype="TEX Payment Link", reference_name=link.name,
+				      property=link.property, new={"transaction": txn.name, "status": closed or "Cancelled",
+				                                   "why": "its booking could not take the payment"})
 			return
 	if txn.booking:
 		allocate(txn.name, booking=txn.booking, amount=amount, reason="booking payment", _system=True)
@@ -633,12 +657,34 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		return done
 	if txn.status != "Succeeded" or txn.txn_type != "Charge":
 		frappe.throw(_("Only successful charges can be allocated."))
-	b = frappe.get_doc("TEX Booking", booking)
+	from kamra.tex.services import late_payments
+
+	# money paid in time may take its expired booking back with the money it held (B4): those charges
+	# are locked now, before the booking — every payment path locks a charge, then its booking (D4)
+	locked = late_payments.lock_expiry_money(booking, but=transaction) if _system and holds.paid_in_time(txn) else []
+	# locked after the charge (the order a callback takes) and read as it is now (K-2b)
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.property != txn.property:
 		frappe.throw(_("A payment can only be allocated to a booking of the same hotel."))
 	if b.currency != txn.currency:
 		frappe.throw(_("Currency mismatch between payment and booking."))
 	amount = quantize(D(amount), txn.currency)
+	# money staff took themselves (the desk, points) may pay a fee; money on its way never does (C6)
+	why = late_payments.problem(b, amount=amount, in_flight=_system and txn.provider not in ("Manual", "Loyalty"))
+	if why == late_payments.BOOKING_CANCELLED and _system:
+		from kamra.tex.services import guest_changes
+
+		if guest_changes.request_of_charge(txn):
+			why = None          # a guest change's payment: its request applies or refunds it (G-45)
+	if why in late_payments.REVIVABLE and _system and late_payments.revive(txn, booking, amount, locked):
+		# paid in time, its news late: the booking has its rooms back (B4)
+		why = late_payments.problem(frappe.get_doc("TEX Booking", booking, for_update=True), amount=amount)
+	if why:
+		if not _system:
+			frappe.throw(late_payments.refusal(why, b, amount))         # staff: told why, never silent (K-2c)
+		# money its booking cannot take: recorded, kept off it, in reconciliation (K-2b, K-2c)
+		late_payments.reconcile(txn, booking, why)
+		return None
 	# a refund still waiting for its answer takes the unallocated money first: it is not free
 	free = (from_db(txn.amount, txn.currency) - allocated_of(transaction, lock=True) - refunded_of(transaction, lock=True)
 	        - in_flight_of(transaction, lock=True))
@@ -656,14 +702,18 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		audit("payment.allocate", reference_doctype="TEX Payment Allocation", reference_name=doc.name,
 		      property=txn.property, new={"transaction": transaction, "booking": booking, "amount": to_str(amount)},
 		      reason=reason)
+		late_payments.settled(transaction)      # staff booked the stay again with this money
 	return doc.name
 
 
-def release(transaction: str, *, booking: str, amount, reason: str, idempotency_key: str | None = None) -> str:
-	"""Take (part of) an allocation back from a booking — e.g. to transfer it."""
+def release(transaction: str, *, booking: str, amount, reason: str, idempotency_key: str | None = None,
+            _system: bool = False) -> str:
+	"""Take (part of) an allocation back from a booking — e.g. to transfer it. ``_system``: TEX takes
+	it back itself (a booking that expired before it was paid in full, B2)."""
 	_lock("TEX Payment Transaction", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
-	scope.require("payment.refund", txn.property)
+	if not _system:
+		scope.require("payment.refund", txn.property)
 	key, done = _replayed_allocation(txn.property, idempotency_key, "release", lock=True)
 	if done:
 		return done
@@ -847,7 +897,8 @@ def _taken_off(txn, refund_name: str) -> tuple[str | None, D]:
 
 
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
-           _system: bool = False, durable: bool = False, on_record=None, relock=None, on_conflict=None) -> dict:
+           _system: bool = False, durable: bool = False, on_record=None, relock=None, on_conflict=None,
+           _late: bool = False) -> dict:
 	"""Refund a successful charge, or money a gateway captured that TEX refused to count
 	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
 	stated, against the captured payment, and never touches a booking.
@@ -855,6 +906,8 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	``_system``: a refund TEX makes by itself for a guest's own change (G-45: an overpayment
 	under the hotel's refund policy, or a payment for a change that could not apply). Only
 	``services.guest_changes`` passes it, always naming the booking; staff need payment.refund.
+	``_late`` (with ``_system``): a late payment in reconciliation whose rooms are gone, never on
+	a booking (``services.late_payments.refund_queued``, K-2b).
 
 	``durable`` (the staff endpoint and the refund job): the refund is committed as Pending
 	before the gateway is asked. A gateway that answers "no" (``ProviderError`` or a Failed
@@ -881,7 +934,9 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	(``_share``), the idempotency key again too (re-review 4)."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	if _system:
-		if not booking:
+		if _late and txn.reconciliation != "Refund Queued":
+			frappe.throw(_("Only a late payment queued for its refund is refunded this way."))
+		if not booking and not _late:
 			frappe.throw(_("A refund TEX makes by itself names the booking it comes from."))
 	else:
 		scope.require("payment.refund", txn.property)
@@ -966,6 +1021,10 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	if r.status == "Succeeded" and target and from_booking > 0:
 		# only what comes off the booking is taken from it; the rest was unallocated money
 		_take_off(txn, r, target, from_booking, reason)
+	if r.status == "Succeeded":
+		from kamra.tex.services import late_payments
+
+		late_payments.settled(txn.name)          # a late payment in reconciliation, given back
 	audit("payment.refund", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "status": r.status,
 	                                  "booking": target, "from_booking": to_str(from_booking),
@@ -1045,6 +1104,9 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 	r.save(ignore_permissions=True)
 	if outcome == "Succeeded" and target and from_booking > 0:
 		_take_off(txn, r, target, from_booking, reason)
+	from kamra.tex.services import late_payments
+
+	late_payments.settled(txn.name)             # its reconciliation follows the refund's outcome (C4)
 	audit("payment.refund_verified", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "outcome": outcome, "amount": to_str(amount),
 	                                "currency": r.currency, "booking": target, "from_booking": to_str(from_booking)},
@@ -1111,6 +1173,9 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	r.save(ignore_permissions=True)
 	if target and from_booking > 0:
 		_take_off(txn, r, target, from_booking, reason)
+	from kamra.tex.services import late_payments
+
+	late_payments.settled(txn.name)             # money in reconciliation given back outside TEX (C4)
 	audit("payment.refund_outside", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "booking": target,
 	                                  "from_booking": to_str(from_booking), "reference": reference.strip()[:140]},
@@ -1177,27 +1242,55 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 		r.error_message = (f"{outcome} (the gateway's answer, recorded by {frappe.session.user} after it contradicted "
 		                   f"{recorded}): {reason.strip()}")[:500]
 		r.save(ignore_permissions=True)
+	from kamra.tex.services import late_payments
+
+	late_payments.settled(txn.name)             # a refund found not made opens its reconciliation again (C4)
 	audit("payment.refund_conflict_resolved", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "recorded": recorded, "outcome": outcome, "amount": to_str(amount),
 	                                "currency": r.currency, "booking": booking, "moved": to_str(moved)}, reason=reason)
 	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
 
 
-def mark_transfer_received(transaction: str, *, reference: str) -> dict:
+def mark_transfer_received(transaction: str, *, reference: str, value_date=None) -> dict:
+	"""Staff saw a bank transfer arrive. ``value_date``: the day the money was on the account (its
+	valör), which decides whether it was paid in time (D3); not before the charge, never in the
+	future."""
 	_lock_link_then_payment(transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)   # as it is now
 	scope.require("payment.refund", txn.property)
 	if txn.provider != "Bank Transfer" or txn.status != "Pending":
 		frappe.throw(_("Only pending bank transfers can be confirmed."))
+	now = now_datetime()
+	if value_date:
+		value_date = getdate(value_date)
+		if value_date > now.date() or value_date < get_datetime(txn.creation).date():
+			frappe.throw(_("The value date must be between the day the transfer was asked for and today."))
+		txn.captured_at = get_datetime(value_date)
+	txn.flags.tex_system_update = True
 	txn.status = "Succeeded"
 	txn.raw_status = "RECEIVED"
 	txn.provider_ref = reference[:140]
-	txn.completed_at = now_datetime()
+	txn.completed_at = now
 	txn.save(ignore_permissions=True)
 	_after_charge(txn)
 	audit("payment.transfer_received", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
-	      property=txn.property, new={"reference": reference})
-	return {"transaction": txn.name, "status": txn.status}
+	      property=txn.property, new={"reference": reference, "value_date": str(value_date) if value_date else None})
+	# money its booking could not take is in reconciliation: staff see it at once (K-2c)
+	return {"transaction": txn.name, "status": txn.status,
+	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}
+
+
+def refuse_if_it_cannot_take(booking: str, amount) -> None:
+	"""C5: staff paying a booking that cannot take the money (cancelled, expired, its rooms given back)
+	are told why and nothing is recorded — never money parked at the desk, nor points burned. The
+	booking is locked (a new charge follows it, locked by no one else)."""
+	from kamra.tex.services import late_payments
+
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	amount = quantize(D(amount), b.currency)
+	why = late_payments.problem(b, amount=amount)
+	if why:
+		frappe.throw(late_payments.refusal(why, b, amount))
 
 
 def record_manual(*, booking: str, amount, method: str, reference: str, reason: str | None = None,
@@ -1217,6 +1310,7 @@ def record_manual(*, booking: str, amount, method: str, reference: str, reason: 
 	amount = quantize(D(amount), b.currency)
 	if amount <= 0:
 		frappe.throw(_("Amount must be positive."))
+	refuse_if_it_cannot_take(booking, amount)
 	txn = _new_txn(property=b.property, txn_type="Charge", method="Manual", amount=amount, currency=b.currency,
 	               provider="Manual", provider_ref=reference.strip()[:140], idempotency_key=idempotency_key,
 	               booking=booking, reason=(f"{method}: {reason or ''}").strip()[:500])
@@ -1228,7 +1322,9 @@ def record_manual(*, booking: str, amount, method: str, reference: str, reason: 
 	audit("payment.manual", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
 	      property=b.property, new={"booking": booking, "amount": to_str(amount), "method": method,
 	                                "reference": reference}, reason=reason)
-	return {"transaction": txn.name, "status": txn.status}
+	# money taken for a booking that could not take it stays on record in reconciliation (K-2c)
+	return {"transaction": txn.name, "status": txn.status,
+	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}
 
 
 # ─── payment links ───────────────────────────────────────────────────────
@@ -1247,6 +1343,13 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		frappe.throw(_("The booking belongs to another hotel."))
 	if reservation and frappe.db.get_value("Reservation", reservation, "property") != property:
 		frappe.throw(_("The reservation belongs to another hotel."))
+	if reservation:
+		# a TEX room's link belongs to its booking: it holds the booking's rooms and its payment is
+		# allocated to it (D6)
+		of = frappe.db.get_value("Reservation", reservation, "tex_booking")
+		if booking and of and of != booking:
+			frappe.throw(_("The reservation belongs to another booking."))
+		booking = booking or of or None
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Amount must be positive."))
@@ -1262,10 +1365,14 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		# staff hear now why the account could not take the money, not the guest later (G-67)
 		provider_for(provider_account)
 	token = secrets.token_urlsafe(24)
+	expires_at = add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60)))
+	# a link of a booking waiting for its payment holds its rooms for the link hold and expires with
+	# it (B6); a standalone link keeps its own validity (K-2d)
+	expires_at, rooms_held_until = holds.hold_for_link(booking, expires_at)
 	doc = frappe.get_doc({
 		"doctype": "TEX Payment Link", "property": property, "status": "Active", "amount": amount,
 		"currency": currency, "description": (description or "")[:500],
-		"expires_at": add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60))),
+		"expires_at": expires_at,
 		"provider_account": provider_account, "booking": booking, "reservation": reservation,
 		"guest_name": guest_name, "guest_email": guest_email, "token_hash": link_token_hash(token),
 		# the URL embeds the bearer token: returned once, never stored (only its hash is)
@@ -1279,16 +1386,25 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 
 		emailed = notify.payment_link(doc.name, url, language)
 	audit("payment_link.create", reference_doctype="TEX Payment Link", reference_name=doc.name, property=property,
-	      new={"amount": to_str(amount), "currency": currency, "booking": booking, "emailed": emailed})
-	return {"link": doc.name, "url": url, "token": token, "emailed": emailed}
+	      new={"amount": to_str(amount), "currency": currency, "booking": booking, "emailed": emailed,
+	           "expires_at": str(expires_at)})
+	# when the link stops working and, for a booking waiting for its payment, until when its rooms are held
+	return {"link": doc.name, "url": url, "token": token, "emailed": emailed, "expires_at": str(expires_at),
+	        "rooms_held_until": str(rooms_held_until) if rooms_held_until else None}
 
 
 def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -> dict:
-	"""New token for an open link (the old URL stops working) — staff lost or resend."""
+	"""New token for an open link (the old URL stops working) — staff lost or resend. Never for a link
+	its booking cannot take the money of, or asking more than it owes (E4)."""
 	link = frappe.get_doc("TEX Payment Link", name)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("Only open links can be reissued."))
+	if link.booking:
+		why = link_refusal(link.booking, from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency),
+		                   link.currency, guest=False)
+		if why:
+			frappe.throw(why)
 	token = secrets.token_urlsafe(24)
 	link.flags.tex_system_update = True
 	link.token_hash = link_token_hash(token)
@@ -1301,7 +1417,57 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 		emailed = notify.payment_link(link.name, url, language)
 	audit("payment_link.reissue", reference_doctype="TEX Payment Link", reference_name=name, property=link.property,
 	      new={"emailed": emailed})
-	return {"link": link.name, "url": url, "token": token, "emailed": emailed}
+	return {"link": link.name, "url": url, "token": token, "emailed": emailed,
+	        "expires_at": str(link.expires_at) if link.expires_at else None}
+
+
+def link_refusal(booking: str, amount, currency: str, *, guest: bool) -> str | None:
+	"""E4: why a link of ``booking`` asking ``amount`` may not be paid, nor sent again: its booking cannot
+	take the money (cancelled, expired, its rooms given back: ``late_payments.problem``; a link's money
+	is on its way, never kept as a fee, C6), or owes less than the link asks (a link in another currency
+	is judged when its money comes). None when it may. Locks the booking (after the link: the order of
+	a link's payment). ``guest``: told to the guest, else to staff."""
+	from kamra.tex.services import late_payments
+
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	amount = quantize(D(amount), currency)
+	if late_payments.problem(b, amount=amount, in_flight=True):
+		return (_("This payment link can no longer be paid: its booking cannot take payments any more. Please "
+		          "contact the hotel.") if guest else
+		        _("Booking {0} ({1}) cannot take this link's payment: cancel the link.").format(b.name, _(b.status)))
+	owed = quantize(from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency), b.currency)
+	if currency != b.currency or amount <= owed:
+		return None
+	if guest:
+		return (_("This payment link can no longer be paid: its booking is paid in full.") if owed <= ZERO else
+		        _("This payment link asks {0} {1}, more than its booking still owes ({2} {1}). Please contact the "
+		          "hotel for a new link.").format(to_str(amount), currency, to_str(owed)))
+	return _("Booking {0} owes {1} {2}, less than this link asks ({3} {2}): cancel it and send a new link.").format(
+		b.name, to_str(max(owed, ZERO)), currency, to_str(amount))
+
+
+def close_links_of(booking: str, why: str) -> list[str]:
+	"""E4: the open links of a booking that takes no more money — paid in full, cancelled or expired — are
+	closed (``Cancelled``; ``Expired`` once past their own expiry), audited; a balance link of a booking
+	that still owes stays open. Called under
+	the booking's lock: a link a payment is being started for (locked by it: the order is link, then
+	booking) is skipped, never waited for; that payment finds the booking as it is now (``link_refusal``).
+	Each link is locked by its name (no gap or scan lock). → the links closed."""
+	closed = []
+	now = now_datetime()
+	for name in frappe.get_all("TEX Payment Link", filters={"booking": booking,
+	                                                        "status": ("in", ["Active", "Partially Paid"])},
+	                           pluck="name", order_by="name asc"):
+		row = frappe.db.sql("""SELECT status, property, expires_at FROM `tabTEX Payment Link` WHERE name=%s
+		                       FOR UPDATE SKIP LOCKED""", name, as_dict=True)
+		if not row or row[0].status not in ("Active", "Partially Paid"):
+			continue
+		status = "Expired" if row[0].expires_at and get_datetime(row[0].expires_at) <= now else "Cancelled"
+		frappe.db.set_value("TEX Payment Link", name, "status", status, update_modified=False)
+		audit("payment_link.closed", reference_doctype="TEX Payment Link", reference_name=name,
+		      property=row[0].property, new={"booking": booking, "status": status, "was": row[0].status, "why": why})
+		closed.append(name)
+	return closed
 
 
 def link_by_token(token: str):
@@ -1334,7 +1500,8 @@ def expire_links() -> int:
 	return n
 
 
-def cancel_link(name: str, reason: str) -> None:
+def cancel_link(name: str, reason: str):
+	"""→ until when its booking's rooms are still held (None: not held, or no booking; E3)."""
 	_lock("TEX Payment Link", name)
 	link = frappe.get_doc("TEX Payment Link", name)
 	scope.require("payment.link", link.property)
@@ -1342,5 +1509,8 @@ def cancel_link(name: str, reason: str) -> None:
 		frappe.throw(_("Only active links can be cancelled."))
 	link.status = "Cancelled"
 	link.save(ignore_permissions=True)
+	# the rooms it held for the guest are no longer held for it (D7)
+	held = holds.after_link_closed(link.booking)
 	audit("payment_link.cancel", reference_doctype="TEX Payment Link", reference_name=name, property=link.property,
 	      reason=reason)
+	return held

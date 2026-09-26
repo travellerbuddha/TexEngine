@@ -225,6 +225,9 @@
  "crs.link.email": "Guest email",
  "crs.link.email_hint": "Optional; shown on the payment page.",
  "crs.link.expires": "Valid for",
+ "crs.link.expires_hint": "For a booking awaiting payment, its rooms stay held until the link expires (at most the hotel's payment-link hold).",
+ "crs.link.valid_until": "The link can be paid until {date}.",
+ "crs.link.rooms_held": "The booking's rooms are held for the guest until {date}.",
  "crs.link.for": "For booking {ref}",
  "crs.link.hours": {
   "one": "{count} hour",

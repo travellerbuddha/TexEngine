@@ -40,9 +40,17 @@ import {
   TransferDialog,
 } from "./detail/Actions"
 import { allocKey, methodKey, typeKey, useEvent } from "./lib"
-import type { Allocation, Txn, TxnDetail } from "./types"
+import type { Allocation, Reconciliation, Txn, TxnDetail } from "./types"
 
 type Action = "refund" | "allocate" | "transfer" | "bank" | "finish" | "conflict" | null
+
+/** What staff are told about money its booking could not take (B5). */
+const RECON_KEY: Record<Reconciliation, string> = {
+  "Action Required": "payments.detail.recon_action_required",
+  "Refund Queued": "payments.detail.recon_refund_queued",
+  Refunded: "payments.detail.recon_refunded",
+  Resolved: "payments.detail.recon_resolved",
+}
 
 export default function TransactionDetail() {
   const { name = "" } = useParams()
@@ -151,6 +159,11 @@ export default function TransactionDetail() {
       ) : (
         <div className="space-y-5">
           <InlineError error={reverify.error} />
+          {d.reconciliation && (
+            <Notice tone={d.reconciliation === "Action Required" ? "warning" : "info"} title={t(RECON_KEY[d.reconciliation])}>
+              {d.reconciliation_note}
+            </Notice>
+          )}
           {d.status === "Pending" && d.provider === "Bank Transfer" && <Notice tone="warning">{t("payments.detail.pending_bank")}</Notice>}
           {d.status === "Pending" && (d.provider === "iyzico" || d.provider === "Sipay") && <Notice tone="warning">{t("payments.detail.pending_gateway")}</Notice>}
           {d.status === "Failed" && canReverify(d) && <Notice tone="info">{t("payments.detail.failed_gateway")}</Notice>}

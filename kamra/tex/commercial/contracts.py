@@ -49,6 +49,7 @@ from kamra.tex.pricing.model import (
 	RoomRule,
 	RoomSpec,
 )
+from kamra.tex.pricing.promotions import offer_currency
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, doc_values, row_values
 
@@ -412,6 +413,8 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 	offers = tuple(
 		Promotion(promo_id=o.offer_code.strip().upper(), name=o.offer_name or o.offer_code, kind=o.kind,
 		          value_type=PromoValueType(o.value_type), value=db_dec(o.value), stage=PromoStage(o.stage or "SELL"),
+		          # a fixed amount is in the contract's currency, as the contract screen shows it (K-1)
+		          currency=offer_currency(PromoValueType(o.value_type), None, contract.contract_currency),
 		          sale_from=o.sale_from and get_datetime(o.sale_from).date(),
 		          sale_to=o.sale_to and get_datetime(o.sale_to).date(),
 		          stay_from=o.stay_from and get_datetime(o.stay_from).date(),

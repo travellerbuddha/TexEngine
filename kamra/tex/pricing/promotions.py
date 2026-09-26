@@ -310,10 +310,33 @@ def in_currency(amount, from_ccy: str | None, to_ccy: str, fx: dict[str, FxSnaps
 	return D(amount) * snap.sell_rate
 
 
+FIXED_VALUES = frozenset({PromoValueType.FIXED_STAY, PromoValueType.FIXED_NIGHT})
+
+
+def offer_currency(value_type: PromoValueType, currency: str | None, contract_currency: str) -> str | None:
+	"""The currency of a contract offer's amount (K-1): a fixed amount is in the contract's
+	currency, as the contract screen shows it, also when a payload frozen before offers carried
+	one has none; a percentage, multiplier or free nights keeps what it has (none)."""
+	if value_type not in FIXED_VALUES:
+		return currency or None
+	return (currency or contract_currency).upper()
+
+
 def _fixed_in(p: Promotion, currency: str, fx: dict[str, FxSnapshot] | None,
               log: FxLog | None = None) -> Decimal | None:
 	"""Fixed promotion amount in ``currency`` (converted through an explicit snapshot)."""
 	return in_currency(p.value, p.currency, currency, fx, log=log, use=f"promotion:{p.promo_id}")
+
+
+def _no_fx(p: Promotion, currency: str, explain: Explanation | None, stage: str) -> PromoOutcome:
+	"""A fixed amount without a rate to the sell currency is not applied: never the raw figure,
+	never zero; the explanation names the missing pair (K-1)."""
+	if explain is not None:
+		explain.add(stage, "PROMO_NO_FX",
+		            "{name} not applied: no FX rate {from_currency}→{to_currency} to convert its fixed amount",
+		            rule=promo_ref(p), name=p.name, from_currency=p.currency, to_currency=currency)
+	return PromoOutcome(p.promo_id, p.name, p.kind, False, f"no FX to convert {p.currency}", source=p.source,
+	                    code=p.code)
 
 
 def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx: PromoContext,
@@ -347,16 +370,14 @@ def apply_promotions(promos: list[Promotion], amounts: dict[date, Decimal], ctx:
 		elif p.value_type == PromoValueType.FIXED_NIGHT:
 			amt = _fixed_in(p, currency, fx, fx_log)
 			if amt is None:
-				outcomes.append(PromoOutcome(p.promo_id, p.name, p.kind, False,
-				                             f"no FX to convert {p.currency}", source=p.source, code=p.code))
+				outcomes.append(_no_fx(p, currency, explain, stage))
 				continue
 			for n in nights:
 				running[n] = max(ZERO, running[n] - amt)
 		elif p.value_type == PromoValueType.FIXED_STAY:
 			amt = _fixed_in(p, currency, fx, fx_log)
 			if amt is None:
-				outcomes.append(PromoOutcome(p.promo_id, p.name, p.kind, False,
-				                             f"no FX to convert {p.currency}", source=p.source, code=p.code))
+				outcomes.append(_no_fx(p, currency, explain, stage))
 				continue
 			# spread over eligible nights, latest night first, never below zero
 			left = amt

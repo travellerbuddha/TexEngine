@@ -29,9 +29,9 @@ from kamra.tex.pricing.enums import LineKind
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import RuleRef
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
-from kamra.tex.services import quoting
+from kamra.tex.services import holds, quoting
 
 SOURCE_BY_CHANNEL = {"DIRECT_WEB": "Website", "CALL_CENTER": "Phone", "OTA": "OTA", "META": "Website"}
 CREATED_VIA = {"DIRECT_WEB": "Booking Engine", "META": "Booking Engine", "CALL_CENTER": "Call Center",
@@ -592,13 +592,19 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	for _row, _req, result in rows:
 		d, _kind = amount_due_now(result, payment_method)
 		due_now += d
+	if not staff and payment_method == holds.TRANSFER and due_now > 0 and len(rows) > holds.WEB_TRANSFER_MAX_ROOMS:
+		# one visitor must not lock many rooms for a day by choosing a transfer (C2, user decision)
+		frappe.throw(_("A bank transfer booking made online can hold at most {0} rooms. Please pay by card, or "
+		               "contact the hotel.").format(holds.WEB_TRANSFER_MAX_ROOMS))
 	if staff and confirm_without_payment and due_now > 0:
 		# confirming before the deposit arrives is a credit decision, not an agent default
 		scope.require("reservation.confirm_unpaid", property)
 	confirm = due_now == 0 or (staff and confirm_without_payment)
 	status = "Confirmed" if confirm else "Pending Payment"
-	hold_until = None if confirm else add_to_date(now, minutes=int(
-		frappe.db.get_single_value("TEX Settings", "hold_minutes") or 20))
+	# how long the rooms wait for the payment: by payment method and hotel (K-2d), shorter for a transfer
+	# booked on the web (C2)
+	hold_until = None if confirm else add_to_date(now, minutes=holds.resolve_hold_minutes(property, payment_method,
+	                                                                                      web=not staff))
 	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
 	                                                               language=language, staff=staff)
 	booker = booker or {}
@@ -807,17 +813,45 @@ def _check_redemption_limits(root: str, name: str, gkey: str | None, *, exclude_
 # ─── confirm / payments ──────────────────────────────────────────────────
 
 
-def confirm_booking(booking: str, *, reason: str | None = None) -> None:
-	b = frappe.get_doc("TEX Booking", booking)
+class RoomsNotHeld(frappe.ValidationError):
+	"""A booking whose rooms are not all held for it is never confirmed (K-2b)."""
+
+
+def cancelled_on_purpose(reservation: str) -> bool:
+	"""A room the guest or staff cancelled (it has its Cancellation revision): it left its booking.
+	A room released without one (an expired hold) was taken from it."""
+	return bool(frappe.db.exists("TEX Reservation Revision", {"reservation": reservation,
+	                                                         "change_type": "Cancellation"}))
+
+
+def rooms_not_held(b) -> list[str]:
+	"""The rooms of booking ``b`` that hold no inventory for it any more, read under their row
+	locks in name order (after the booking's lock: the order every TEX booking change takes). A
+	room cancelled on purpose is no longer part of the booking, so it is not missing (B1)."""
+	names = sorted(r.reservation for r in b.rooms)
+	states = {n: frappe.db.get_value("Reservation", n, "status", for_update=True) for n in names}
+	return [n for n, st in states.items() if st not in (*holds.HOLDING, "Confirmed")
+	        and not (st == "Cancelled" and cancelled_on_purpose(n))]
+
+
+def confirm_booking(booking: str, *, reason: str | None = None, send_mail: bool = True) -> None:
+	"""Confirm a booking waiting for its payment, under its lock and its rooms' locks. A booking
+	whose rooms are not all held for it (released, or sold to someone else since) is never
+	confirmed and nothing is sent (``RoomsNotHeld``, K-2b). ``send_mail``: False from a migration."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.status == "Confirmed":
 		return
 	if b.status not in ("Pending Payment", "Held"):
 		frappe.throw(_("Booking {0} cannot be confirmed from {1}.").format(booking, b.status))
+	gone = rooms_not_held(b)
+	if gone:
+		raise RoomsNotHeld(_("Booking {0} cannot be confirmed: its rooms {1} are no longer held for it.").format(
+			booking, ", ".join(gone)))
 	now = now_datetime()
 	frappe.flags.kamra_status_transition = True
 	try:
 		for row in b.rooms:
-			res = frappe.get_doc("Reservation", row.reservation)
+			res = frappe.get_doc("Reservation", row.reservation, for_update=True)
 			if res.status in ("Pending Payment", "Held"):
 				res.status = "Confirmed"
 				res.hold_expires_on = None
@@ -825,7 +859,7 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 				res.tex_locked_at = now
 				res.flags.tex_modification = True
 				res.save(ignore_permissions=True)
-			row.status = "Confirmed"
+			row.status = res.status          # a room cancelled before the payment stays cancelled (B1)
 	finally:
 		frappe.flags.kamra_status_transition = False
 	xinv.confirm(booking)            # held extras units become confirmed (G-19)
@@ -834,13 +868,28 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 		d = frappe.get_doc("TEX Promotion Redemption", r)
 		d.status = "Committed"
 		d.save(ignore_permissions=True)
-	b.status = "Confirmed"
+	# a booking one of whose rooms was cancelled before its payment is confirmed with the rest (B1)
+	b.status = "Partially Cancelled" if any(r.status == "Cancelled" for r in b.rooms) else "Confirmed"
 	b.save(ignore_permissions=True)
 	audit("booking.confirm", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      reason=reason)
-	from kamra.tex.services import notify
+	if send_mail:
+		from kamra.tex.services import notify
 
-	notify.booking_confirmed(booking)
+		notify.booking_confirmed(booking)
+
+
+def confirm_if_paid(booking: str, *, reason: str, send_mail: bool = True) -> bool:
+	"""D1: a booking waiting for its payment that now has what it owes now — a room was cancelled
+	after part of the money came, or a stuck booking took its payment — is confirmed while its rooms
+	are held for it (else it expires with its hold). → whether it was confirmed."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status not in holds.HOLDING:
+		return False
+	if from_db(b.paid_amount, b.currency) < from_db(b.amount_due_now, b.currency) or rooms_not_held(b):
+		return False
+	confirm_booking(booking, reason=reason, send_mail=send_mail)
+	return True
 
 
 def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict:
@@ -854,8 +903,11 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 	total = from_db(b.total_amount, b.currency)
 	b.paid_amount = paid
 	b.balance_amount = total - paid
-	b.payment_status = "Paid" if paid >= total else ("Partially Paid" if paid > 0 else "Unpaid")
+	# nothing owed and nothing paid (an expired booking whose money came off it) is not "Paid" (C7)
+	b.payment_status = "Paid" if paid >= total and paid > 0 else ("Partially Paid" if paid > 0 else "Unpaid")
 	b.save(ignore_permissions=True)
+	if amount > ZERO:
+		_close_links_if_settled(b)
 	if b.status in ("Pending Payment", "Held") and paid >= from_db(b.amount_due_now, b.currency):
 		confirm_booking(booking, reason=f"payment {reference or ''}".strip())
 	return booking_summary(booking)
@@ -869,8 +921,15 @@ def cancellation_penalty(reservation, today=None, *, basket: bool = True) -> tup
 	and — ``basket`` — what the room carries for the other rooms of its booking once it is gone
 	(``basket_clawback``: the discount they keep but no longer earn; review H1), explained in the
 	basis. A room that carried such a discount for the others passes it on, or has it credited when
-	it is no longer owed; the charge is then below the rate's penalty, and may be a credit."""
-	pen, basis = _policy_penalty(reservation, today)
+	it is no longer owed; the charge is then below the rate's penalty, and may be a credit.
+
+	A room of a booking never confirmed (still waiting for its payment) owes no penalty (C6, user
+	decision); the discount the other rooms keep is no penalty and is still charged (E1). A booking
+	that ends never confirmed owes nothing at all (``_refresh_booking_after_change``)."""
+	if reservation.get("tex_booking") and reservation.status in holds.HOLDING:
+		pen, basis = quantize(ZERO, reservation.tex_currency or "EUR"), {"rule": "never confirmed: no fee"}
+	else:
+		pen, basis = _policy_penalty(reservation, today)
 	snap = json.loads(reservation.tex_pricing_snapshot or "{}")
 	if basket and snap.get("contract") and reservation.get("tex_booking") and snap.get("source") != "channel":
 		ccy = reservation.tex_currency or snap.get("currency") or "EUR"
@@ -973,6 +1032,8 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
 		_refresh_booking_after_change(res.tex_booking)
+		# never confirmed: what it owes now may be paid already (a first half came before this room left)
+		confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was cancelled")
 	# a guest's change still waiting for this room is void; a payment of it arriving later is
 	# refunded (G-45)
 	from kamra.tex.services import guest_changes
@@ -998,6 +1059,10 @@ def _refresh_booking_after_change(booking: str) -> None:
 		row.status, row.amount = r.status, amount
 		row.check_in, row.check_out, row.adults, row.children, row.room_type = (
 			r.check_in_date, r.check_out_date, r.adults, r.children, r.room_type)
+	if all(s == "Cancelled" for s in statuses) and b.status in holds.HOLDING:
+		# never confirmed and over (all its rooms cancelled, or expired): it owes nothing, not even
+		# what a room carried for the others (C6, E1); a revival charges that again
+		total = _void_fees(b, ccy)
 	b.total_amount = total
 	b.balance_amount = total - from_db(b.paid_amount, ccy)
 	if all(s == "Cancelled" for s in statuses):
@@ -1008,11 +1073,56 @@ def _refresh_booking_after_change(booking: str) -> None:
 			d = frappe.get_doc("TEX Promotion Redemption", red)
 			d.status = "Released"
 			d.save(ignore_permissions=True)
+	elif b.status in holds.HOLDING and all(s in holds.HOLDING for s in statuses if s != "Cancelled"):
+		# never confirmed: it keeps waiting for its payment with the rooms it has left, which expire
+		# with its hold or are confirmed by its payment (B1). After any change (a room cancelled, its
+		# dates, extras, coupon, a price staff set) it owes now what its rooms require now (their
+		# deposits and the fees owed), up or down, never more than it costs (D1, E2); the caller
+		# confirms it when that is paid (``confirm_if_paid``)
+		b.amount_due_now = min(required_now(b), total)
 	elif any(s == "Cancelled" for s in statuses):
 		b.status = "Partially Cancelled"
 	paid = from_db(b.paid_amount, ccy)
 	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
 	b.save(ignore_permissions=True)
+	_close_links_if_settled(b)
+
+
+def _close_links_if_settled(b) -> None:
+	"""E4: a booking cancelled (or expired), or owing nothing more, takes no link's money."""
+	if b.status == "Cancelled" or from_db(b.balance_amount, b.currency) <= ZERO:
+		from kamra.tex.payments import service as pay
+
+		pay.close_links_of(b.name, "booking cancelled" if b.status == "Cancelled" else "booking paid in full")
+
+
+def _void_fees(b, ccy: str) -> D:
+	"""Booking ``b`` ends never confirmed: its rooms' charges are void. → its total: nothing."""
+	void_fees(b, reason="ended never confirmed: nothing is owed (C6)")
+	for row in b.rooms:
+		row.amount = ZERO
+	return quantize(ZERO, ccy)
+
+
+def void_fees(b, *, reason: str, keep_clawback: bool = False) -> None:
+	"""C6, E1, E6: the charges of the cancelled rooms of booking ``b``, never confirmed, are void — the
+	reports read them — audited ``booking.fees_void``. ``keep_clawback``: the booking goes on, and what
+	a room carried for the rooms it left keeps its charge (E1)."""
+	ccy = b.currency or "EUR"
+	void = {}
+	for row in b.rooms:
+		r = frappe.db.get_value("Reservation", row.reservation, ["status", "cancellation_fee", "tex_pricing_snapshot"],
+		                        as_dict=True)
+		if not r or r.status != "Cancelled":
+			continue
+		claw = json.loads(r.tex_pricing_snapshot or "{}").get("basket_clawback") if keep_clawback else None
+		fee, keep = from_db(r.cancellation_fee, ccy), quantize(D(claw["amount"]) if claw else ZERO, ccy)
+		if fee != keep:
+			frappe.db.set_value("Reservation", row.reservation, "cancellation_fee", keep, update_modified=False)
+			void[row.reservation] = {"fee": to_str(fee), "now": to_str(keep)}
+	if void:
+		audit("booking.fees_void", reference_doctype="TEX Booking", reference_name=b.name, property=b.property,
+		      old=void, reason=reason)
 
 
 def resend_confirmation(booking: str) -> dict:
@@ -1063,16 +1173,159 @@ def booking_summary(booking: str, *, replay: bool = False) -> dict:
 	}
 
 
+def expire_booking(booking: str, *, now: datetime | None = None, force: bool = False, send_mail: bool = True) -> bool:
+	"""A booking waiting for its payment whose hold is over, with no payment attempt open, gives
+	back all its rooms at once (K-2a): the booking is locked, then its rooms in name order (the
+	order every change of a TEX booking takes), and the rooms and the booking are cancelled in
+	this one transaction; their held extras and coupon uses are released with them. A payment
+	attempt started within the hold keeps the rooms until its own deadline (``holds``), never
+	longer; a booking none of whose rooms is held any more follows them at once. ``force``: its
+	money arrived and cannot confirm it (``late_payments``, K-2b). ``send_mail``: False from a migration
+	(E6). → whether it expired."""
+	now = get_datetime(now or now_datetime())
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status not in holds.HOLDING:
+		return False
+	names = sorted(r.reservation for r in b.rooms)
+	states = {n: frappe.db.get_value("Reservation", n, "status", for_update=True) for n in names}
+	holding = [n for n in names if states[n] in holds.HOLDING]
+	deadline = holds.hold_deadline(booking, lock=True)
+	if holding and not force:
+		if holds.in_flight(b, now) or not deadline or deadline > now:
+			return False        # still on hold, or rooms held without a deadline (never guessed)
+	frappe.flags.kamra_status_transition = True
+	frappe.flags.kamra_cancelling = True
+	try:
+		for name in holding:
+			res = frappe.get_doc("Reservation", name, for_update=True)
+			res.cancellation_reason = "Payment failed" if res.status == "Pending Payment" else "Other"
+			res.cancellation_note = "Hold / payment window expired"
+			res.status = "Cancelled"
+			res.cancelled_on = now
+			res.hold_expires_on = None
+			res.flags.tex_modification = True
+			res.save(ignore_permissions=True)
+	finally:
+		frappe.flags.kamra_status_transition = False
+		frappe.flags.kamra_cancelling = False
+	_refresh_booking_after_change(booking)
+	paid = from_db(b.paid_amount, b.currency)
+	if paid > ZERO:
+		# paid in part before its hold ended: that money comes off the cancelled booking into
+		# reconciliation, never a negative balance (B2)
+		from kamra.tex.services import late_payments
+
+		late_payments.money_off_expired(booking, now=now, send_mail=send_mail)
+	audit("booking.expire", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
+	      old={"status": b.status}, new={"status": frappe.db.get_value("TEX Booking", booking, "status"),
+	                                     "reservations": holding, "hold_deadline": str(deadline) if deadline else None,
+	                                     "payment_attempt_until": str(b.payment_attempt_until or "") or None,
+	                                     "paid": to_str(paid), "currency": b.currency})
+	return True
+
+
+LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
+
+
+def live_duplicate(booking: str) -> str | None:
+	"""D4 c): another live booking of the same guest (profile or e-mail) at the same hotel for nights
+	of this booking's stay — staff booked the guest again after it expired. → its name, or None."""
+	b = frappe.get_doc("TEX Booking", booking)
+	who = [(f, v) for f, v in (("booker_guest", b.booker_guest), ("booker_email", b.booker_email)) if v]
+	if not who or not b.rooms:
+		return None
+	ci, co = min(getdate(r.check_in) for r in b.rooms), max(getdate(r.check_out) for r in b.rooms)
+	rows = frappe.db.sql(
+		f"""SELECT DISTINCT o.name FROM `tabTEX Booking` o JOIN `tabTEX Booking Room` r ON r.parent = o.name
+		    WHERE o.property=%(p)s AND o.name != %(b)s AND o.status IN %(live)s AND r.status != 'Cancelled'
+		      AND r.check_in < %(co)s AND r.check_out > %(ci)s
+		      AND ({" OR ".join(f"o.{f} = %({f})s" for f, _v in who)})
+		    ORDER BY o.name LIMIT 1""",  # nosemgrep -- the column names are constants
+		{"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, **dict(who)})
+	return rows[0][0] if rows else None
+
+
+def revive_expired(booking: str, *, reason: str) -> list[str]:
+	"""B4: a booking that expired while its payment was already made (the gateway captured it in
+	time, its news came after the expiry) takes back the rooms its expiry gave back, at their locked
+	price, when they are still free: under the booking's lock, its rooms' (name order) and their
+	nights', recounted as a new sale of its contract is; its limited extras and coupon uses are
+	checked and taken again. It waits for its payment again, which confirms it. Rooms cancelled on
+	purpose stay cancelled. A room, extra or coupon gone meanwhile raises ``frappe.ValidationError``
+	(the caller undoes the whole step). → the rooms taken back (none: nothing to take back)."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status != "Cancelled" and b.status not in holds.HOLDING:
+		return []
+	rooms = [frappe.get_doc("Reservation", n, for_update=True) for n in sorted(r.reservation for r in b.rooms)]
+	back = [r for r in rooms if r.status == "Cancelled" and not cancelled_on_purpose(r.name)]
+	if not back:
+		return []
+	now = now_datetime()
+	stays = [(r, getdate(r.check_in_date), getdate(r.check_out_date)) for r in back]
+	avail.lock_nights(b.property, [(r.room_type, ci, co) for r, ci, co in stays])
+	need: dict[tuple, int] = defaultdict(int)
+	for r, ci, co in stays:
+		for night in avail.nights(ci, co):
+			need[(avail.pool_of(r.room_type)[0], night)] += 1
+	for r, ci, co in stays:
+		pool = avail.pool_of(r.room_type)[0]
+		_count, per_day = avail.stay_availability(b.property, r.room_type, r.tex_contract, ci, co, now.date(),
+		                                          locking=True)
+		if any(d.available < need[(pool, d.day)] for d in per_day):
+			frappe.throw(_("The rooms of booking {0} are no longer free.").format(booking), title=_("Sold out"))
+	snaps = {r.name: json.loads(r.tex_pricing_snapshot or "{}") for r, _ci, _co in stays}
+	extras = xinv.tracked(b.property)
+	extras_need = xinv.demand(list(snaps.values()), codes=set(extras))
+	if extras_need:
+		xinv.lock_days(b.property, extras_need)
+		xinv.check(b.property, extras_need, trk=extras)
+	frappe.flags.kamra_status_transition = True
+	try:
+		for r, _ci, _co in stays:
+			r.status = "Pending Payment"
+			r.hold_expires_on = now              # its payment confirms it now; nothing else keeps it
+			r.cancellation_reason = r.cancellation_note = r.cancelled_on = None
+			r.flags.tex_modification = True
+			r.flags.tex_inventory_checked = True     # its nights were locked and recounted above
+			r.save(ignore_permissions=True)
+			if extras_need:
+				xinv.allocate(b.property, booking, r.name, snaps[r.name], "Held", trk=extras)
+	finally:
+		frappe.flags.kamra_status_transition = False
+	for r in rooms:
+		claw = json.loads(r.tex_pricing_snapshot or "{}").get("basket_clawback")
+		if r.status == "Cancelled" and claw:
+			# cancelled on purpose: what it carried for the rooms taken back is owed again (E1)
+			frappe.db.set_value("Reservation", r.name, "cancellation_fee", D(claw["amount"]), update_modified=False)
+	b.status = "Pending Payment"
+	b.save(ignore_permissions=True)
+	_refresh_booking_after_change(booking)
+	sync_redemptions(booking)                  # its coupon uses, under their limits again
+	names = [r.name for r, _ci, _co in stays]
+	audit("booking.revive", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
+	      new={"reservations": names}, reason=reason)
+	return names
+
+
 def expire_pending_bookings() -> dict:
-	"""Scheduler: bookings whose payment hold expired follow their reservations."""
+	"""Scheduler: bookings whose hold is over, with no payment attempt open, expire with all their
+	rooms (``expire_booking``), each in its own transaction so a payment callback waits for at
+	most one booking's expiry (tests keep one transaction)."""
 	now = now_datetime()
 	n = 0
-	for name in frappe.get_all("TEX Booking", filters={"status": "Pending Payment"}, pluck="name"):
-		rooms = frappe.get_all("TEX Booking Room", filters={"parent": name}, pluck="reservation")
-		states = [frappe.db.get_value("Reservation", r, "status") for r in rooms]
-		if states and all(s == "Cancelled" for s in states):
-			_refresh_booking_after_change(name)
-			n += 1
+	for name in frappe.get_all("TEX Booking", filters={"status": ("in", list(holds.HOLDING))}, pluck="name"):
+		frappe.db.savepoint("tex_expire_booking")
+		try:
+			n += expire_booking(name, now=now)
+		except Exception:
+			try:
+				frappe.db.rollback(save_point="tex_expire_booking")
+			except Exception:
+				frappe.db.rollback()     # a deadlock victim's transaction is gone with its savepoint
+			log_exception(f"TEX booking expiry failed for {name}")
+			continue
+		if not frappe.flags.in_test:
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- one booking's expiry per transaction
 	return {"expired": n, "at": str(now)}
 
 

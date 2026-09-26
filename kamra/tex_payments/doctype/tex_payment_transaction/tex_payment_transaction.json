@@ -26,12 +26,17 @@
   "card_last4",
   "actor",
   "completed_at",
+  "expires_at",
+  "captured_at",
   "section_95",
   "raw_status",
   "error_code",
   "error_message",
   "reason",
-  "return_url"
+  "return_url",
+  "section_reconciliation",
+  "reconciliation",
+  "reconciliation_note"
  ],
  "fields": [
   {
@@ -160,6 +165,18 @@
    "label": "Completed at"
   },
   {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Attempt open until",
+   "read_only": 1
+  },
+  {
+   "fieldname": "captured_at",
+   "fieldtype": "Datetime",
+   "label": "Captured at (gateway)",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_95",
    "fieldtype": "Section Break",
    "label": "Outcome"
@@ -189,10 +206,29 @@
    "fieldtype": "Small Text",
    "label": "Return URL",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_reconciliation",
+   "fieldtype": "Section Break",
+   "label": "Reconciliation"
+  },
+  {
+   "fieldname": "reconciliation",
+   "fieldtype": "Select",
+   "label": "Reconciliation",
+   "options": "\nAction Required\nRefund Queued\nRefunded\nResolved",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "reconciliation_note",
+   "fieldtype": "Small Text",
+   "label": "Why",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-09-29 00:00:00.000000",
+ "modified": "2026-09-30 00:00:02.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Transaction",

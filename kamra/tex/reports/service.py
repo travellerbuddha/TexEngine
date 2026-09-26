@@ -683,6 +683,14 @@ def _cancel_figures(b: dict) -> dict:
 # ─── payments (the bookings of the selected stays) ───────────────────────────────────────────
 
 
+# a payment's booking: its own, else its charge's (a refund that touched no booking: a late payment's,
+# C7), else its payment link's (a link's charge)
+_TXN_OF_BOOKING = """`tabTEX Payment Transaction` t
+		LEFT JOIN `tabTEX Payment Transaction` pt ON pt.name = t.parent_transaction
+		LEFT JOIN `tabTEX Payment Link` pl ON pl.name = COALESCE(t.payment_link, pt.payment_link)
+		JOIN `tabTEX Booking` b ON b.name = COALESCE(t.booking, pt.booking, pl.booking)"""
+
+
 def _payment(sel: Selection) -> dict:
 	"""Booking value and paid in the booking's currency; payments in their own currency (a payment
 	in another currency than its booking is in that currency's row, as in the payments by method)."""
@@ -696,7 +704,9 @@ def _payment(sel: Selection) -> dict:
 	bccy = "COALESCE(NULLIF(b.currency, ''), NULLIF(bp.currency, ''), 'EUR')"
 	tccy = f"COALESCE(NULLIF(t.currency, ''), {bccy})"
 	where = f"b.property IN %(hotels)s AND b.status != 'Draft' AND b.name IN ({stays})"
-	txn = f"t.property IN %(hotels)s AND {where}"
+	# a capture TEX refused to count (G-67) is no charge (Failed), so its refund is no refund of the
+	# booking's money: both left out, never one alone (K1)
+	txn = f"t.property IN %(hotels)s AND {where} AND NOT (t.txn_type = 'Refund' AND IFNULL(pt.status, 'Succeeded') != 'Succeeded')"
 	if sel.filters["currency"]:
 		where += f" AND {bccy} IN %(currency)s"
 		txn += f" AND {tccy} IN %(currency)s"
@@ -716,7 +726,7 @@ def _payment(sel: Selection) -> dict:
 		         AS x_refunded,
 		       CAST(SUM(CASE WHEN t.txn_type = 'Charge' AND t.status = 'Pending' THEN t.amount ELSE 0 END) AS CHAR)
 		         AS x_pending
-		FROM `tabTEX Payment Transaction` t JOIN `tabTEX Booking` b ON b.name = t.booking
+		FROM {_TXN_OF_BOOKING}
 		JOIN `tabProperty` bp ON bp.name = b.property
 		WHERE {txn}
 		GROUP BY x_key, x_ccy""", params, as_dict=True)
@@ -725,7 +735,7 @@ def _payment(sel: Selection) -> dict:
 		       SUM(t.txn_type = 'Charge') AS x_charges, SUM(t.txn_type = 'Refund') AS x_refunds,
 		       CAST(SUM(CASE WHEN t.txn_type = 'Charge' THEN t.amount ELSE 0 END) AS CHAR) AS x_charged,
 		       CAST(SUM(CASE WHEN t.txn_type = 'Refund' THEN t.amount ELSE 0 END) AS CHAR) AS x_refunded
-		FROM `tabTEX Payment Transaction` t JOIN `tabTEX Booking` b ON b.name = t.booking
+		FROM {_TXN_OF_BOOKING}
 		JOIN `tabProperty` bp ON bp.name = b.property
 		WHERE t.status = 'Succeeded' AND t.txn_type IN ('Charge', 'Refund') AND {txn}
 		GROUP BY x_method, x_provider, x_ccy""", params, as_dict=True)

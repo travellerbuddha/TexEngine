@@ -101,6 +101,38 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.pending_payments_check(2, NOW - timedelta(minutes=90), NOW)["issues"][0]["params"],
 		                 {"count": 2, "minutes": 90})
 
+	def test_holds_past_their_deadline_fail(self):
+		"""D9 (audit 1c): a booking still holding rooms well after its hold ended (its expiry keeps
+		failing) blocks inventory: the check fails, with the count and the age of the oldest."""
+		ok = c.overdue_holds_check(0, None, NOW)
+		self.assertEqual((ok["key"], ok["status"], ok["scope"]), ("holds.overdue", c.OK, "hotel"))
+		out = c.overdue_holds_check(2, NOW - timedelta(minutes=45), NOW, properties=["H1"])
+		self.assertEqual((out["status"], out["issues"][0]["reason"], out["issues"][0]["params"]),
+		                 (c.FAIL, "hold_overdue", {"count": 2, "minutes": 45}))
+		self.assertIn("hold_overdue", c.REASONS)
+		self.assertIn("holds.overdue", c.TITLES)
+
+	def test_money_in_reconciliation_is_shown_with_its_age(self):
+		"""B5: payments kept off every booking wait for staff (or a queued refund): each kind with its
+		count and the age of its oldest item; staff have a day, a queued refund an hour."""
+		ok = c.reconciliation_check(action=0, action_since=None, refund=0, refund_since=None, now=NOW)
+		self.assertEqual((ok["key"], ok["status"], ok["scope"]), ("payments.reconciliation", c.OK, "hotel"))
+		out = c.reconciliation_check(action=2, action_since=NOW - timedelta(minutes=90), refund=1,
+		                             refund_since=NOW - timedelta(minutes=10), now=NOW, properties=["H1"])
+		self.assertEqual(out["status"], c.WARN)
+		self.assertEqual([(i["reason"], i["params"]) for i in out["issues"]],
+		                 [("reconciliation_action", {"count": 2, "hours": 1.5}),
+		                  ("reconciliation_refund", {"count": 1, "hours": 0.2})])
+		self.assertEqual((out["since"], out["properties"]), (str(NOW - timedelta(minutes=90)), ["H1"]))
+		old = c.reconciliation_check(action=1, action_since=NOW - timedelta(hours=c.RECONCILIATION_ACTION_FAIL_HOURS),
+		                             refund=0, refund_since=None, now=NOW)
+		self.assertEqual(old["status"], c.FAIL)
+		stuck = c.reconciliation_check(action=0, action_since=None, refund=1, now=NOW,
+		                               refund_since=NOW - timedelta(minutes=c.RECONCILIATION_REFUND_FAIL_MINUTES))
+		self.assertEqual(stuck["status"], c.FAIL)
+		self.assertIn("reconciliation_action", c.REASONS)
+		self.assertIn("payments.reconciliation", c.TITLES)
+
 
 class TestFx(unittest.TestCase):
 	def pair(self, rate_date, max_age=4):

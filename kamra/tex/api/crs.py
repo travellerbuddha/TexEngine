@@ -272,6 +272,7 @@ def cancellation_preview(reservation: str):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def cancel(reservation: str, reason: str, waive_penalty: int = 0):
 	return booking_svc.cancel_reservation(reservation, reason=text(reason, 500),
 	                                      waive_penalty=bool(int(waive_penalty or 0)))

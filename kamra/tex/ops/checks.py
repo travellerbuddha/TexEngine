@@ -57,6 +57,13 @@ PAYMENT_PENDING_WINDOW_HOURS = 48
 CALLBACK_ERROR_WINDOW_HOURS = 24
 # captures TEX refused to count / links paid twice (audit trail) counted over this window
 PAYMENT_AUDIT_WINDOW_DAYS = 7
+# money kept off every booking (reconciliation, B5): staff act on it within this many hours, and a
+# queued automatic refund runs within this many minutes; FAIL beyond
+# a booking still holding rooms this long after its hold ended (the expiry runs every 5 minutes): its
+# expiry keeps failing and its rooms stay blocked (D9)
+EXPIRY_LATE_MINUTES = 20
+RECONCILIATION_ACTION_FAIL_HOURS = 24
+RECONCILIATION_REFUND_FAIL_MINUTES = 60
 
 # the latest provider rate of a currency pair in use is older than this many business days:
 # WARN (weekends are not counted: TCMB and the ECB publish on weekdays). FAIL once it is
@@ -86,6 +93,8 @@ TITLES: dict[str, str] = {
 	"connections": "Integration connections",
 	"payments.pending": "Pending card payments",
 	"payments.callbacks": "Payment callbacks",
+	"payments.reconciliation": "Payments in reconciliation",
+	"holds.overdue": "Holds past their deadline",
 	"fx.rates": "FX rates",
 	"mail.account": "Outgoing e-mail account",
 	"mail.delivery": "Guest e-mail delivery",
@@ -121,6 +130,12 @@ REASONS: dict[str, str] = {
 	                  "again, then record the outcome (Payments → the refund).",
 	"refund_conflict": "{count} refund(s) were answered by the gateway differently from the outcome recorded for them: "
 	                   "check them at the gateway and record what it actually did (Payments → the refund).",
+	"hold_overdue": "{count} booking(s) still hold rooms although their hold ended; the oldest ended {minutes} "
+	                "minutes ago: their expiry keeps failing (see the Error Log).",
+	"reconciliation_action": "{count} payment(s) are kept off their booking and wait for staff (Payments → the "
+	                         "payment); the oldest has waited {hours} hours.",
+	"reconciliation_refund": "{count} payment(s) are queued for an automatic refund; the oldest has waited {hours} "
+	                         "hours.",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
@@ -312,6 +327,29 @@ def callbacks_check(*, errors: int, overpaid: int, mismatches: int, refunds_unkn
 	if overpaid:
 		issues.append(issue("overpaid", WARN, count=overpaid, days=PAYMENT_AUDIT_WINDOW_DAYS))
 	return make("payments.callbacks", issues, scope="hotel", properties=properties)
+
+
+def overdue_holds_check(count: int, oldest: datetime | None, now: datetime, properties: Iterable[str] = ()) -> dict:
+	"""D9: bookings still holding rooms ``EXPIRY_LATE_MINUTES`` after their hold ended, with no payment
+	attempt open: their expiry keeps failing and the rooms are blocked."""
+	issues = [issue("hold_overdue", FAIL, count=count, minutes=minutes_since(oldest, now))] if count else []
+	return make("holds.overdue", issues, scope="hotel", since=oldest, properties=properties)
+
+
+def reconciliation_check(*, action: int, action_since: datetime | None, refund: int, refund_since: datetime | None,
+                         now: datetime, properties: Iterable[str] = ()) -> dict:
+	"""Money kept off every booking (B5): waiting for staff (``Action Required``) or for its queued
+	automatic refund, each with the age of its oldest item in hours."""
+	issues = []
+	for reason, count, since, fail_minutes in (
+			("reconciliation_action", action, action_since, RECONCILIATION_ACTION_FAIL_HOURS * 60),
+			("reconciliation_refund", refund, refund_since, RECONCILIATION_REFUND_FAIL_MINUTES)):
+		if count:
+			age = minutes_since(since, now)
+			issues.append(issue(reason, FAIL if age is not None and age >= fail_minutes else WARN, count=count,
+			                    hours=round(age / 60, 1) if age is not None else None))
+	oldest = min((t for t in (action_since, refund_since) if t), default=None)
+	return make("payments.reconciliation", issues, scope="hotel", since=oldest, properties=properties)
 
 
 def fx_check(pairs: list[dict], today: date, properties: Iterable[str] = ()) -> dict:

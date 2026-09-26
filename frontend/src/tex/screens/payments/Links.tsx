@@ -18,6 +18,8 @@ interface Shown {
   emailedTo?: string | null
   emailFailed?: boolean
   reissued?: boolean
+  expiresAt?: string | null
+  heldUntil?: string | null
 }
 
 export default function Links() {
@@ -65,6 +67,8 @@ export default function Links() {
         title: t("payments.links.created_title", { name: r.link }),
         emailedTo: r.emailed === true ? emailTo : null,
         emailFailed: Boolean(emailTo) && r.emailed === false,
+        expiresAt: r.expires_at,
+        heldUntil: r.rooms_held_until,
       })
     else if (r.replay) toast.info(t("payments.links.replay_hint"))
   }
@@ -235,13 +239,13 @@ export default function Links() {
       {property && (
         <CreateLinkDialog open={creating && canLink} onClose={closeCreate} property={property} defaultCurrency={prop?.currency || "EUR"} onCreated={onCreated} />
       )}
-      <LinkUrlDialog open={Boolean(shown)} onClose={closeShown} url={shown?.url ?? ""} title={shown?.title ?? ""} emailedTo={shown?.emailedTo} emailFailed={shown?.emailFailed} reissued={shown?.reissued} />
+      <LinkUrlDialog open={Boolean(shown)} onClose={closeShown} url={shown?.url ?? ""} title={shown?.title ?? ""} emailedTo={shown?.emailedTo} emailFailed={shown?.emailFailed} reissued={shown?.reissued} expiresAt={shown?.expiresAt} heldUntil={shown?.heldUntil} />
       <ReissueDialog
         link={reissue}
         onClose={closeReissue}
         onDone={(url, l, email) => {
           q.reload()
-          setShown({ url, title: t("payments.links.reissued_title", { name: l.name }), reissued: true, emailedTo: email.to, emailFailed: email.failed })
+          setShown({ url, title: t("payments.links.reissued_title", { name: l.name }), reissued: true, emailedTo: email.to, emailFailed: email.failed, expiresAt: l.expires_at })
         }}
       />
       <ConfirmDialog
@@ -254,8 +258,9 @@ export default function Links() {
         confirmLabel={t("payments.links.cancel_confirm")}
         onConfirm={async (reason) => {
           if (!cancel) return
-          await tex("payments", "cancel_link", { name: cancel.name, reason }, { post: true })
-          toast.success(t("payments.links.cancelled"))
+          const out = await tex<{ rooms_held_until?: string | null }>("payments", "cancel_link", { name: cancel.name, reason }, { post: true })
+          // until when the booking's rooms stay held once this link no longer holds them (E3)
+          toast.success(out.rooms_held_until ? t("payments.links.cancelled_held_until", { date: dateTime(out.rooms_held_until) }) : t("payments.links.cancelled"))
           q.reload()
         }}
       />

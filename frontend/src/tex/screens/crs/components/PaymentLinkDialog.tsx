@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Copy, ExternalLink } from "lucide-react"
 import { idempotencyKey } from "../../../lib/api"
-import { isDecimal } from "../../../lib/format"
+import { dateTime, isDecimal } from "../../../lib/format"
 import { TEX_LANGS, useTexT } from "../../../i18n"
 import { Button, Checkbox, DecimalInput, Dialog, Field, FormGrid, Input, InlineError, Notice, Select, useToast } from "../../../ui"
 import { createPaymentLink, reissuePaymentLink, type PaymentLinkResult } from "../lib/api"
@@ -28,6 +28,11 @@ function LinkResult({ result, onReissue }: { result: PaymentLinkResult; onReissu
   return (
     <div className="space-y-3">
       <Notice tone="success">{result.emailed ? t("crs.link.ready_emailed") : t("crs.link.ready")}</Notice>
+      {result.expires_at && (
+        <Notice tone="info">
+          {[t("crs.link.valid_until", { date: dateTime(result.expires_at) }), result.rooms_held_until ? t("crs.link.rooms_held", { date: dateTime(result.rooms_held_until) }) : null].filter(Boolean).join(" ")}
+        </Notice>
+      )}
       <Field label={t("crs.link.url")} hint={t("crs.link.url_once")}>
         <Input id="crs-link-url" readOnly value={url} onFocus={(e) => e.currentTarget.select()} data-autofocus />
       </Field>
@@ -177,7 +182,7 @@ export function PaymentLinkDialog({
             <Field label={t("crs.link.amount")} required error={amount && !isPositive(amount) ? t("crs.link.amount_positive") : undefined}>
               <DecimalInput id="crs-link-amount" value={amount} onValueChange={setAmount} suffix={currency} data-autofocus />
             </Field>
-            <Field label={t("crs.link.expires")}>
+            <Field label={t("crs.link.expires")} hint={booking || reservation ? t("crs.link.expires_hint") : undefined}>
               <Select
                 id="crs-link-expires"
                 value={hours}

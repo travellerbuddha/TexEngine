@@ -98,6 +98,15 @@ BEHAVIOUR = {
 	"p47_g64_site_slugs": "test_patches.TestReportingPatches.test_p47_reports_sites_named_like_an_admin_page_once",
 	"p48_crm_privacy_third_review": "test_crm_third_review.TestP48."
 	                                "test_p48_marks_earlier_erasures_and_removes_what_they_left",
+	"p49_payment_attempt_deadline": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p50_payment_reconciliation": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p51_hold_minutes_per_payment_method": "test_patches.TestSmallPatches.test_p51_gives_each_payment_method_its_hold",
+	"p52_partly_cancelled_awaiting_payment": "test_hold_payment_race.TestPartialCancellation."
+	                                         "test_p52_puts_stuck_bookings_back_to_waiting_for_their_payment",
+	"p53_payment_captured_at": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p54_never_confirmed_leftovers": "test_hold_payment_race.TestNeverConfirmedLeftovers."
+	                                 "test_p54_cancels_leftovers_and_parks_their_money_without_mail",
+	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
 }
 
 
@@ -1055,7 +1064,14 @@ class TestSmallPatches(PatchCase):
 				 ("TEX Payment Allocation", "idempotency_key")),
 				("p20_guest_change_requests", [("tex_booking", "doctype", "tex_guest_change_request"),
 				                               ("kamra", "doctype", "property")],
-				 ("Property", "tex_lower_price_refund"))):
+				 ("Property", "tex_lower_price_refund")),
+				("p49_payment_attempt_deadline", [("tex_payments", "doctype", "tex_payment_transaction"),
+				                                  ("tex_booking", "doctype", "tex_booking")],
+				 ("TEX Booking", "payment_attempt_until")),
+				("p50_payment_reconciliation", [("tex_payments", "doctype", "tex_payment_transaction")],
+				 ("TEX Payment Transaction", "reconciliation")),
+				("p53_payment_captured_at", [("tex_payments", "doctype", "tex_payment_transaction")],
+				 ("TEX Payment Transaction", "captured_at"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
 			self.assertTrue(frappe.db.has_column(*field), patch)            # synced on this site
 
@@ -1091,6 +1107,31 @@ class TestSmallPatches(PatchCase):
 		self.assertEqual(frappe.db.get_value("TEX Audit Event", hotel, ["hotel_group", "property"]),
 		                 (None, fx.PROPERTY))
 		self.assertFalse(frappe.db.exists("TEX Audit Scope", {"event": hotel}))
+
+	def test_p51_gives_each_payment_method_its_hold(self):
+		frappe.db.sql("""DELETE FROM `tabSingles` WHERE doctype='TEX Settings'
+		                 AND field IN ('hold_minutes_link', 'hold_minutes_transfer')""")
+		frappe.db.set_single_value("TEX Settings", "hold_minutes", 25)
+		seen = self.first_run("p51_hold_minutes_per_payment_method")
+		self.assertEqual(seen["reload_doc"], [("tex_platform", "doctype", "tex_settings"),
+		                                      ("kamra", "doctype", "property")])
+		self.assertEqual([frappe.db.get_single_value("TEX Settings", f) for f in
+		                  ("hold_minutes", "hold_minutes_link", "hold_minutes_transfer")], [25, 1440, 2880])
+		frappe.db.set_single_value("TEX Settings", "hold_minutes_link", 600)     # an administrator's value
+		self.assertRerunChangesNothing("p51_hold_minutes_per_payment_method")
+		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_link"), 600)
+		self.assertTrue(frappe.db.has_column("Property", "tex_hold_minutes_transfer"))
+
+	def test_p55_gives_web_transfers_their_hold(self):
+		frappe.db.sql("""DELETE FROM `tabSingles` WHERE doctype='TEX Settings' AND field='hold_minutes_transfer_web'""")
+		seen = self.first_run("p55_web_transfer_hold")
+		self.assertEqual(seen["reload_doc"], [("tex_platform", "doctype", "tex_settings"),
+		                                      ("kamra", "doctype", "property")])
+		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 1440)
+		frappe.db.set_single_value("TEX Settings", "hold_minutes_transfer_web", 720)   # an administrator's value
+		self.assertRerunChangesNothing("p55_web_transfer_hold")
+		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 720)
+		self.assertTrue(frappe.db.has_column("Property", "tex_hold_minutes_transfer_web"))
 
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")

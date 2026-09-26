@@ -23,7 +23,7 @@ from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import content, guest_changes, modification, quoting, sites
+from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, sites
 from kamra.tex.services.txn import retry_on_deadlock, undo_step
 
 
@@ -492,6 +492,7 @@ def booking_status(token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def pay_booking(token: str, payment_method: str = "Card", provider_account: str | None = None,
                 return_url: str | None = None):
 	"""Start (or retry after a failed attempt) the payment still due on a booking,
@@ -529,6 +530,7 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60)
+@retry_on_deadlock
 def mock_pay(transaction: str, outcome: str, sig: str):
 	"""Sandbox payment page action (only Mock provider accounts reach this)."""
 	import hmac
@@ -547,7 +549,7 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 
 	# the sandbox payment page stands in for a gateway's page: its answer is a gateway return (G-74)
 	with audit_source("Gateway Return"):
-		out = pay.complete(transaction, params={"outcome": outcome, "sig": sig})
+		out = pay.complete_retrying(transaction, params={"outcome": outcome, "sig": sig})
 	txn = frappe.db.get_value("TEX Payment Transaction", transaction, ["booking", "payment_link", "return_url"],
 	                          as_dict=True)
 	return {**out, "booking": txn.booking, "return_url": txn.return_url}
@@ -564,11 +566,14 @@ def payment_link(token: str):
 	        "paid": to_str(from_db(link.paid_amount, link.currency)), "currency": link.currency,
 	        "status": link.status, "expires_at": str(link.expires_at), "guest_name": link.guest_name,
 	        "hotel": frappe.db.get_value("Property", link.property, "property_name"),
-	        "methods": [m for m in methods if m["method"] == "Card"]}
+	        "methods": [m for m in methods if m["method"] == "Card"],
+	        # its booking could not take the money: "refund" / "contact" (B5)
+	        "late_payment": late_payments.guest_notice(link.booking)}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def pay_link(token: str, provider_account: str | None = None):
 	from kamra.tex.payments import service as pay
 
@@ -580,6 +585,10 @@ def pay_link(token: str, provider_account: str | None = None):
 	if now.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("This payment link is {0}.").format(now.status.lower()))
 	due = from_db(now.amount, now.currency) - from_db(now.paid_amount, now.currency)
+	why = pay.link_refusal(link.booking, due, now.currency, guest=True) if link.booking else None
+	if why:
+		# its booking takes no more money, or less than it asks: never 200 paid for 100 (E4)
+		frappe.throw(why)
 	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
 	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
 	if link.provider_account:
@@ -798,7 +807,9 @@ def _guest_booking(b) -> dict:
 	        # being applied comes first (G-45)
 	        "changes_blocked": blocked,
 	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
-	        "can_pay_online": bool(guest_changes.card_account(b))}
+	        "can_pay_online": bool(guest_changes.card_account(b)),
+	        # money that came when the booking could no longer take it: "refund" / "contact" (B5)
+	        "late_payment": late_payments.guest_notice(b.name)}
 
 
 def _own_reservation(b, reservation: str) -> None:
@@ -808,6 +819,7 @@ def _own_reservation(b, reservation: str) -> None:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)

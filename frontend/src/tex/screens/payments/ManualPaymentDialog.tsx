@@ -63,13 +63,15 @@ export function ManualPaymentDialog({
     setPending(true)
     setError(null)
     try {
-      const r = await tex<{ transaction: string; replay?: boolean }>(
+      const r = await tex<{ transaction: string; replay?: boolean; reconciliation?: string | null }>(
         "payments",
         "record_manual",
         { booking, amount, method, reference: reference.trim(), reason: reason.trim() || undefined, idempotency_key: key },
         { post: true },
       )
-      toast.success(r.replay ? t("payments.manual.replay") : t("payments.manual.done"))
+      // money its booking could no longer take is recorded, but kept off it: said as such (B5)
+      if (r.reconciliation) toast.info(t("payments.recon.recorded", { state: r.reconciliation }))
+      else toast.success(r.replay ? t("payments.manual.replay") : t("payments.manual.done"))
       onClose()
       onDone?.(r.transaction)
     } catch (e) {

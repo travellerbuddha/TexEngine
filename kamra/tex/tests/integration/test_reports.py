@@ -310,6 +310,7 @@ class TestViews(ReportCase):
 
 	def test_cancellation_view(self):
 		kept, free, fee = sell("g46-c-kept"), sell("g46-c-free"), sell("g46-c-fee", rate="NRF")
+		pay(fee)                           # confirmed: only a confirmed stay owes a fee (C6)
 		booking.cancel_reservation(free["reservation"], reason="plans changed")
 		booking.cancel_reservation(fee["reservation"], reason="plans changed")
 		values = {k: D(frappe.db.get_value("Reservation", b["reservation"], "tex_total_amount"))
@@ -636,6 +637,7 @@ class TestReviewMoney(ReportCase):
 		with_vat(10)
 		sell("g46r-kept")
 		gone = sell("g46r-gone", rate="NRF")
+		pay(gone)                          # confirmed: only a confirmed stay owes a fee (C6)
 		booking.cancel_reservation(gone["reservation"], reason="plans changed")
 		fee = D(frappe.db.get_value("Reservation", gone["reservation"], "cancellation_fee"))
 		self.assertGreater(fee, 0)

@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from unittest import mock
 
@@ -96,8 +96,9 @@ class TestGatewaySignatures(unittest.TestCase):
 			simple.MockProvider(Acc(environment="Production"), "s")
 		p = simple.MockProvider(Acc(environment="Sandbox"), "secret")
 		good = simple.mock_signature("secret", "PTX-1", "success")
-		self.assertEqual(p.handle_callback("PTX-1", {"outcome": "success", "sig": good}, {}, b"").status,
-		                 "Succeeded")
+		with mock.patch.object(simple, "_now", return_value=datetime(2027, 1, 1, 12, 0)):
+			self.assertEqual(p.handle_callback("PTX-1", {"outcome": "success", "sig": good}, {}, b"").status,
+			                 "Succeeded")
 		with self.assertRaises(turkey.ProviderError):
 			p.handle_callback("PTX-2", {"outcome": "success", "sig": good}, {}, b"")     # sig bound to txn
 		fail = simple.mock_signature("secret", "PTX-1", "fail")
@@ -193,6 +194,27 @@ class TestProviderRegistry(unittest.TestCase):
 		self.assertEqual(account_problem("Mock", "Production", None, settling=True), "mock")
 		self.assertEqual(account_problem("Nope", "Sandbox", None, settling=True), "unknown")
 
+	def test_gateways_state_when_they_captured_the_money(self):
+		"""D3 (audit 1c): the virtual POS states its transaction time (``EXTRA.TRXDATE``, the bank's
+		Istanbul time, covered by its hash): TEX keeps it in the site's time zone, and never guesses an
+		unreadable one. The mock states its server's clock, never a time the browser sent."""
+		p = turkey.NestPayProvider(_Acc(secrets={"store_key": "SK"}, environment="Sandbox"))
+		params = {"oid": "PTX-8", "Response": "Approved", "ProcReturnCode": "00", "mdStatus": "1",
+		          "amount": "10.00", "TransId": "T8", "EXTRA.TRXDATE": "20270820 10:00:05"}
+		params["HASH"] = turkey.nestpay_hash_v3(params, "SK")
+		with mock.patch("frappe.utils.get_system_timezone", return_value="Europe/Berlin"):
+			self.assertEqual(p.handle_callback("PTX-8", dict(params), {}, b"").captured_at,
+			                 datetime(2027, 8, 20, 9, 0, 5))
+			odd = {**{k: v for k, v in params.items() if k != "HASH"}, "EXTRA.TRXDATE": "soon"}
+			odd["HASH"] = turkey.nestpay_hash_v3(odd, "SK")
+			self.assertIsNone(p.handle_callback("PTX-8", odd, {}, b"").captured_at)
+		m = simple.MockProvider(_Acc(environment="Sandbox"), "secret")
+		good = simple.mock_signature("secret", "PTX-1", "success")
+		with mock.patch.object(simple, "_now", return_value=datetime(2027, 1, 1, 12, 0)):
+			out = m.handle_callback("PTX-1", {"outcome": "success", "sig": good, "captured_at": "2020-01-01 00:00"},
+			                        {}, b"")
+		self.assertEqual(out.captured_at, datetime(2027, 1, 1, 12, 0))
+
 	def test_nestpay_reports_the_currency_it_charged(self):
 		p = turkey.NestPayProvider(_Acc(secrets={"store_key": "SK"}, environment="Sandbox"))
 		params = {"oid": "PTX-7", "Response": "Approved", "ProcReturnCode": "00", "mdStatus": "1",
@@ -275,3 +297,18 @@ class TestProviderRegistry(unittest.TestCase):
 			self.assertEqual(p.handle_callback("PTX-9", {}, {}, b"").status, "Failed")
 		with mock.patch.object(turkey.requests, "post", answer({"status_code": 1})):
 			self.assertEqual(p.handle_callback("PTX-9", {}, {}, b"").status, "Pending")   # never failed on doubt
+
+
+class TestProvidersWithoutBench(unittest.TestCase):
+	def test_the_gateway_providers_load_without_frappe(self):
+		"""K3 (audit 1c-son): the pure gateway modules load without a bench (no frappe), as the tests of
+		this directory run."""
+		import subprocess
+		import sys
+		from pathlib import Path
+
+		code = ("import sys; sys.modules['frappe'] = None\n"
+		        "import kamra.tex.payments.providers.simple, kamra.tex.payments.providers.turkey")
+		out = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[4],
+		                     capture_output=True, text=True, timeout=60)
+		self.assertEqual(out.returncode, 0, out.stderr[-800:])

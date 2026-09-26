@@ -231,6 +231,9 @@
  "crs.link.email": "E-mailul oaspetelui",
  "crs.link.email_hint": "Opțional; apare pe pagina de plată.",
  "crs.link.expires": "Valabil",
+ "crs.link.expires_hint": "Pentru o rezervare care așteaptă plata, camerele rămân reținute până la expirarea linkului (cel mult durata de reținere pentru linkuri a hotelului).",
+ "crs.link.valid_until": "Linkul poate fi plătit până la {date}.",
+ "crs.link.rooms_held": "Camerele rezervării sunt reținute pentru oaspete până la {date}.",
  "crs.link.for": "Pentru rezervarea {ref}",
  "crs.link.hours": {
   "one": "{count} oră",

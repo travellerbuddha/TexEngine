@@ -20,6 +20,8 @@ export function LinkUrlDialog({
   emailedTo,
   emailFailed,
   reissued,
+  expiresAt,
+  heldUntil,
 }: {
   open: boolean
   onClose: () => void
@@ -28,6 +30,10 @@ export function LinkUrlDialog({
   emailedTo?: string | null
   emailFailed?: boolean
   reissued?: boolean
+  /** When the link stops working, as the server set it (B6). */
+  expiresAt?: string | null
+  /** A booking awaiting payment: its rooms are held until then, and the link expires then (B6). */
+  heldUntil?: string | null
 }) {
   const { t } = useTexT()
   const [copied, setCopied] = useState(false)
@@ -67,6 +73,11 @@ export function LinkUrlDialog({
           </Notice>
         )}
         {emailFailed && <Notice tone="warning">{t("payments.links.email_failed")}</Notice>}
+        {expiresAt && (
+          <Notice tone="info">
+            {[t("payments.links.valid_until", { date: dateTime(expiresAt) }), heldUntil ? t("payments.links.rooms_held", { date: dateTime(heldUntil) }) : null].filter(Boolean).join(" ")}
+          </Notice>
+        )}
         {reissued && <Notice tone="warning">{t("payments.links.reissued_note")}</Notice>}
         <p className="flex items-start gap-1.5 text-xs text-zinc-500">
           <KeyRound className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -205,7 +216,7 @@ export function CreateLinkDialog({
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} />
         </Field>
         <FormGrid>
-          <Field label={t("payments.links.expiry")}>
+          <Field label={t("payments.links.expiry")} hint={booking ? t("payments.links.expiry_hint") : undefined}>
             <Select value={expires} onChange={(e) => setExpires(e.target.value)} options={EXPIRY.map((h) => ({ value: String(h), label: h < 168 ? t("payments.links.hours", { count: h }) : t("payments.links.days", { count: h / 24 }) }))} />
           </Field>
           <Field label={t("payments.links.account")} hint={t("payments.links.account_hint")}>

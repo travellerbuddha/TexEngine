@@ -385,7 +385,9 @@ def build_context(terms: ContractTerms, req: StayRequest, *, gkey: str | None = 
 		except Exception:
 			continue      # the extra is then reported as not convertible
 	promo_fx = {}
-	for ccy in sorted({p.currency for p in promos if p.currency and p.currency != sell}):
+	# the promotions' and the contract offers' fixed amounts (an offer's is in the contract's
+	# currency, K-1): converted with these rates, never taken as the sell currency
+	for ccy in sorted({p.currency for p in (*promos, *terms.offers) if p.currency and p.currency != sell}):
 		try:
 			promo_fx[ccy] = rate(ccy)
 		except Exception:

@@ -9090,6 +9090,35 @@ main `1575c8b` is contained, so nothing was merged.
 - `lists.versions` lists archived contracts' versions by default (by design); on the shared site
   its 500 most recent are archived E2E drafts.
 
+## ADR-062 Payment holds and late payments (audit K-2, 1b)
+
+- The TEX Booking row decides a hold. Expiry locks the booking, then its rooms (name order), and
+  cancels them together; the PMS job never touches TEX rooms. A never-confirmed booking with a
+  room cancelled on purpose keeps waiting for its payment with the rest (B1).
+- An attempt keeps the rooms until its own deadline: a card's at most 5 min (3DS) past the hold, a
+  transfer's the hold; a new one starts before the hold ends or while one is open (C1); stale ones hold none. A payment
+  link sent for the booking holds its rooms for the link hold (default 24 h), never past the end of the
+  arrival day, and expires with it (B6, D7); a cancelled link's extension goes back, never below the
+  other links' expiry (open or paid) nor now + the booking's own hold (E3).
+- A transfer booked on the web holds 24 h (a hotel may change it), at most 2 rooms; staff 48 h (C2, user).
+- Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
+  at the locked price — its rooms, extra units and coupon uses are still held for it, so nothing is
+  judged again; b) late money, rooms given back and still free: `Action Required`;
+  c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
+  the charge stays Succeeded, off the booking, with today's availability and price in its note; a
+  booking that expires with money on it puts that money in `Action Required`, always (B2).
+- Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE` (Istanbul
+  time) and the mock's server clock, ±5 min; a transfer's value date by day (the hold's last day is in time);
+  iyzico and Sipay state none: judged when the news arrives. Paid in time, news after the expiry (D4, user):
+  revived and confirmed only when its rooms are free, this money plus what it held at the expiry covers
+  `amount_due_now` and its limited extras and coupons are still free; else, or when the guest has another
+  live booking for the stay, `Action Required`, team told, no auto refund.
+- Locks: money coming in (callback, link, transfer, manual, allocation, revival): link → charges → booking →
+  rooms; the expiry job and money going out (refund phase 2, outside TEX, finish/resolve): booking, then charges.
+- A booking never confirmed owes no cancellation penalty (a room still carries the basket discount the
+  others keep, E1) and nothing once it ends; money on its way is never kept as a fee (C6, user).
+- Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.
+
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
 read or UPDATE of a row changed after the snapshot then fails with 1020 and rolls back, so a booking that waited for
