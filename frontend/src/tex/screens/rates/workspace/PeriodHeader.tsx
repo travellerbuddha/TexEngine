@@ -535,7 +535,7 @@ export function AddPeriodHeader({ readOnly, edit, onAdded, col, laneTab = -1 }: 
         <Button
           variant="ghost"
           size="sm"
-          aria-label={t("rates.periods.add")}
+          aria-label={t("rates.ws.period.add_label")}
           data-add-period=""
           data-lane-col={col === undefined ? undefined : String(col)}
           tabIndex={laneTab}

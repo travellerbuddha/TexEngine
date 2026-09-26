@@ -190,7 +190,7 @@ export function PriceMatrix({
   // ─── names and texts ─────────────────────────────────────────────────
   const names = useMemo(() => new Map(doc.room_types.map((r) => [r.name, r.room_type_name || r.name])), [doc.room_types])
   const roomName = useCallback((rt: string) => names.get(rt) ?? rt, [names])
-  const periodName = (code: string) => code || t("rates.rates.all_periods")
+  const periodName = (code: string) => code || t("rates.ws.all_periods")
   const cellName = (c: CellRef) => `${roomName(c.room)} · ${periodName(c.period)}`
   const amount = (v: unknown) => decText(str(v), minorUnits)
   const opText = (op: string, value: string) => displayText(op as ShOp, value, "room", { decimalMark })
@@ -1195,7 +1195,7 @@ export function PriceMatrix({
               onMouseDown={(e) => headerPick(e, canEdit ? (add, extend) => pickCol(0, add, extend) : undefined)}
               className="flex flex-col justify-end border-r border-b border-zinc-200 bg-white px-2 py-1.5 text-left"
             >
-              <span className="text-xs font-semibold text-zinc-800">{t("rates.rates.all_periods")}</span>
+              <span className="text-xs font-semibold text-zinc-800">{t("rates.ws.all_periods")}</span>
               <span className="text-[11px] text-zinc-500">{t("rates.ws.default")}</span>
             </div>
             {model.periods.map((p, i) => (

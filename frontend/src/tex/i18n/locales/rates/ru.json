@@ -1146,6 +1146,8 @@
   "other": "{count} цены относятся к номерам или периодам, которых больше нет в этой версии: см. Коммерческие правила › Цены номеров."
  },
  "rates.ws.period.add": "Период",
+ "rates.ws.period.add_label": "Добавить период",
+ "rates.ws.all_periods": "Все периоды",
  "rates.ws.period.adjust": "Корректировка ночи…",
  "rates.ws.period.adjust_hint": "например, +10%, -5%, x1.1, +20 или -20. Оставьте пустым, если не нужна.",
  "rates.ws.period.adjust_none": "{period}: без корректировки ночи",

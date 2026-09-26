@@ -1146,6 +1146,8 @@
   "other": "{count} ceny dotyczy pokoi lub okresów, których nie ma już w tej wersji: zobacz Zasady handlowe › Ceny pokoi."
  },
  "rates.ws.period.add": "Okres",
+ "rates.ws.period.add_label": "Dodaj okres",
+ "rates.ws.all_periods": "Wszystkie okresy",
  "rates.ws.period.adjust": "Korekta nocy…",
  "rates.ws.period.adjust_hint": "np. +10%, -5%, x1.1, +20 lub -20. Zostaw puste, jeśli brak.",
  "rates.ws.period.adjust_none": "{period}: bez korekty nocy",

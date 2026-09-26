@@ -5,7 +5,7 @@
 // the child-age fields, Alt+Enter in the boards grid keeping what was typed, one tab stop per grid
 // with the headers on the arrow keys, Shift+click on a column header, the Price test beside the
 // matrix at 1440×900, a word on Ctrl+V in the ladder, board names in row headers, and German weekday
-// names and "+ Zeitraum". Every test makes its own API draft of the owner's example.
+// names and "+ Periode". Every test makes its own API draft of the owner's example.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { login, trackErrors } from "./helpers"
 import { priceMatrix } from "./flows/contracts"
@@ -290,7 +290,7 @@ test.describe("pricing workspace, S16 re-review", () => {
     noErrors()
   })
 
-  test("German: a weekday-limited period names its days in German; + Zeitraum is named by what it shows", async ({ page }) => {
+  test("German: a weekday-limited period names its days in German; + Periode is named by what it shows (the workspace says Periode throughout, final follow-up)", async ({ page }) => {
     const noErrors = trackErrors(page)
     const draft = ownerDraft()
     draft.periods = [...periods(), { period_code: "P5", period_name: "WE", start_date: `${Y}-04-01`, end_date: `${Y}-07-31`, weekdays: "Fri,Sat", priority: 1 }]
@@ -300,8 +300,12 @@ test.describe("pricing workspace, S16 re-review", () => {
     await expect(p5).toContainText("nur ")
     await expect(p5).not.toContainText("Fri")
     await expect(p5).toContainText(new Intl.DateTimeFormat("de", { weekday: "short" }).format(new Date(2024, 0, 5, 12)))
-    const add = page.getByRole("button", { name: "Zeitraum hinzufügen" })
-    await expect(add).toHaveText("Zeitraum")
+    const add = page.getByRole("button", { name: "Periode hinzufügen" })
+    await expect(add).toHaveText("Periode")
+    // one word for a period in the matrix: its menus say Periodenaktionen, its first column Alle Perioden
+    await expect(m.getByRole("columnheader").filter({ hasText: "Alle Perioden" })).toHaveCount(1)
+    await expect(m.getByRole("button", { name: "Periodenaktionen: P1" })).toHaveCount(1)
+    expect(await m.textContent()).not.toMatch(/Zeitr/)
     noErrors()
   })
 })

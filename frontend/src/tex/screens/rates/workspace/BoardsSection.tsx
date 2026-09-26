@@ -213,7 +213,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
   const hlC = hlPeriod === null ? -1 : cols.indexOf(hlPeriod)
 
   const allRooms = t("rates.occ.ladder.all_rooms")
-  const periodName = (code: string) => code || t("rates.rates.all_periods")
+  const periodName = (code: string) => code || t("rates.ws.all_periods")
   const boardName = (code: string) => enumLabel(t, "board", code)
   const rowLabel = (row: Pick<BoardRow, "board" | "room_type">) => (row.room_type ? t("rates.brd.row.room", { board: boardName(row.board), room: roomName(row.room_type) }) : boardName(row.board))
   const amount = (v: string) => decText(v, minorUnits)
@@ -880,7 +880,7 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
                           data-matrix-period={c === hlC || undefined}
                           className={cn(headerCell, c === hlC && "shadow-[inset_0_-3px_0_var(--color-tex-400)]")}
                         >
-                          <span className="block truncate text-xs font-semibold text-zinc-800">{code ? code : t("rates.rates.all_periods")}</span>
+                          <span className="block truncate text-xs font-semibold text-zinc-800">{code ? code : t("rates.ws.all_periods")}</span>
                           <span className="block truncate text-[11px] text-zinc-500">{code ? str(per?.period_name) || " " : t("rates.ws.default")}</span>
                         </div>
                       )

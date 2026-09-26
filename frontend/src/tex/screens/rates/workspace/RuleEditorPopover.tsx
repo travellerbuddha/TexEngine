@@ -67,7 +67,7 @@ export function RuleEditorPopover(p: RuleEditorPopoverProps) {
   const baseName = p.baseOptions.find((b) => b.value === base)?.label ?? base
   const canon = checked?.ok ? checked.value : value
   const rule = displayText(op as ShOp, canon, "room", { decimalMark: p.decimalMark })
-  const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.rates.all_periods") : targets.join(", ")
+  const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.ws.all_periods") : targets.join(", ")
   const cell = `${p.roomName} · ${where}`
   const reading = !ready
     ? ""
@@ -146,7 +146,7 @@ function AppliesToField(p: {
         onChange={p.onApplies}
         options={[
           ...(p.allCell ? [] : [{ value: "this" as const, label: t("rates.ws.pop.this_period", { period: p.periodName }) }]),
-          { value: p.allCell ? ("this" as const) : ("all" as const), label: t("rates.rates.all_periods") },
+          { value: p.allCell ? ("this" as const) : ("all" as const), label: t("rates.ws.all_periods") },
           ...(p.periods.length ? [{ value: "selected" as const, label: t("rates.ws.pop.selected_periods") }] : []),
         ]}
       />
@@ -238,7 +238,7 @@ export function OccRulePopover(p: OccRulePopoverProps) {
   const refused = targets.length > 0 && rooms.length > 0 ? (p.refusal?.(rooms, targets, to, { op, is_override: isOverride }) ?? null) : null
   const ready = (inherit || (checked?.ok ?? false)) && targets.length > 0 && rooms.length > 0 && !refused
   const canon = checked?.ok ? checked.value : value
-  const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.rates.all_periods") : targets.join(", ")
+  const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.ws.all_periods") : targets.join(", ")
   const reading = ready ? p.reading(op, inherit ? "" : canon, `${slotName} · ${where}`, to) : ""
   const suffix = op === "ADJUST_PERCENT" || op === "PERCENT_OF" ? "%" : op === "MULTIPLY" ? "×" : p.ccy
 

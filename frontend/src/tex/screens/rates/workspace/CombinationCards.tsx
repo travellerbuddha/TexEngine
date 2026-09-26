@@ -87,7 +87,7 @@ export function useComboText(labels: BandLabels, minorUnits: number, roomName: (
           const named = xs.filter((x) => x !== all).map(name).join(", ")
           return !xs.length || xs.includes(all) ? (named ? `${allText} + ${named}` : allText) : named
         }
-        return `${list(rooms, "", t("rates.occ.ladder.all_rooms"), roomName)} · ${list(periods, ALL_PERIODS, t("rates.rates.all_periods"), (x) => x)}`
+        return `${list(rooms, "", t("rates.occ.ladder.all_rooms"), roomName)} · ${list(periods, ALL_PERIODS, t("rates.ws.all_periods"), (x) => x)}`
       },
     }
   }, [t, labels, minorUnits, roomName])

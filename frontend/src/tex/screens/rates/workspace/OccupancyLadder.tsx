@@ -179,7 +179,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   const singleRows = rows.filter((x) => x.kind === "single").length
 
   // ─── words ─────────────────────────────────────────────────────────────
-  const periodName = (code: string) => code || t("rates.rates.all_periods")
+  const periodName = (code: string) => code || t("rates.ws.all_periods")
   const amount = (v: string) => decText(v, minorUnits)
   const ruleShort = (op: string, value: string) => occRuleText(op, value, minorUnits)
   const unitWord = (row: LadderRow) => t(`rates.occ.unit.${row.unit}`, { count: model.includedAdults })
@@ -884,7 +884,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
               const per = periodRows.get(code)
               return (
                 <div role="columnheader" key={code || "all"} className={headerCell}>
-                  <span className="block truncate text-xs font-semibold text-zinc-800">{code ? code : t("rates.rates.all_periods")}</span>
+                  <span className="block truncate text-xs font-semibold text-zinc-800">{code ? code : t("rates.ws.all_periods")}</span>
                   <span className="block truncate text-[11px] text-zinc-500">{code ? str(per?.period_name) || " " : t("rates.ws.default")}</span>
                 </div>
               )

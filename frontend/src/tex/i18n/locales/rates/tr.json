@@ -1108,6 +1108,8 @@
   "other": "{count} fiyat bu versiyonda artık olmayan oda veya dönemlere ait: Ticari kurallar › Oda fiyatları bölümüne bakın."
  },
  "rates.ws.period.add": "Dönem",
+ "rates.ws.period.add_label": "Dönem ekle",
+ "rates.ws.all_periods": "Tüm dönemler",
  "rates.ws.period.adjust": "Gecelik ayar…",
  "rates.ws.period.adjust_hint": "ör. +10%, -5%, x1.1, +20 veya -20. Ayar yoksa boş bırakın.",
  "rates.ws.period.adjust_none": "{period}: gecelik ayar yok",

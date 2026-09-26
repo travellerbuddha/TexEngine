@@ -1127,6 +1127,8 @@
   "other": "{count} de prețuri se referă la camere sau perioade care nu mai sunt în această versiune: vedeți Reguli comerciale › Prețuri camere."
  },
  "rates.ws.period.add": "Perioadă",
+ "rates.ws.period.add_label": "Adaugă perioadă",
+ "rates.ws.all_periods": "Toate perioadele",
  "rates.ws.period.adjust": "Ajustare pe noapte…",
  "rates.ws.period.adjust_hint": "de ex. +10%, -5%, x1.1, +20 sau -20. Lăsați gol pentru niciuna.",
  "rates.ws.period.adjust_none": "{period}: fără ajustare pe noapte",

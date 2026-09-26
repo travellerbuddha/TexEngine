@@ -1108,6 +1108,8 @@
   "other": "{count} prices refer to rooms or periods that are no longer in this version: see Commercial rules › Room prices."
  },
  "rates.ws.period.add": "Period",
+ "rates.ws.period.add_label": "Add period",
+ "rates.ws.all_periods": "All periods",
  "rates.ws.period.adjust": "Night adjustment…",
  "rates.ws.period.adjust_hint": "e.g. +10%, -5%, x1.1, +20 or -20. Leave empty for none.",
  "rates.ws.period.adjust_none": "{period}: no night adjustment",

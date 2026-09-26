@@ -351,7 +351,7 @@ export function CombinationBuilder(p: CombinationBuilderProps) {
           value={all ? "all" : "chosen"}
           onChange={(v) => set(which === "rooms" ? { roomsAll: v === "all" } : { periodsAll: v === "all" })}
           options={[
-            { value: "all", label: t(which === "rooms" ? "rates.occ.ladder.all_rooms" : "rates.rates.all_periods") },
+            { value: "all", label: t(which === "rooms" ? "rates.occ.ladder.all_rooms" : "rates.ws.all_periods") },
             ...(options.length ? [{ value: "chosen" as const, label: chosenLabel }] : []),
           ]}
         />
