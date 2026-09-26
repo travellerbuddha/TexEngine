@@ -95,10 +95,18 @@ jobs:
           npm install -g yarn
 
       - name: Configure MariaDB
+        # innodb_snapshot_isolation OFF (ADR-063): ON by default from 11.6.2, it turns TEX's
+        # "wait for the lock, then recount" into error 1020 for the waiter. Checked, not assumed.
         run: |
           mysql -h 127.0.0.1 -uroot -proot -e "
             SET GLOBAL character_set_server = 'utf8mb4';
-            SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+            SET GLOBAL collation_server = 'utf8mb4_unicode_ci';
+            SET GLOBAL innodb_snapshot_isolation = OFF;"
+          off=$(mysql -h 127.0.0.1 -uroot -proot -N -B -e "SELECT @@GLOBAL.innodb_snapshot_isolation = 0")
+          if [ "$off" != "1" ]; then
+            echo "::error::innodb_snapshot_isolation is still ON (ADR-063)"
+            exit 1
+          fi
 
       - name: Init bench
         run: |
