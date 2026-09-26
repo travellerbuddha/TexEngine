@@ -45,9 +45,9 @@ def setup_site_and_payments(f: dict, **contract) -> dict:
 	return {"account": acc}
 
 
-def guest_books(session="sess-1", method="Card", guest=None, before_book=None) -> dict:
+def guest_books(session="sess-1", method="Card", guest=None, before_book=None, extras=None) -> dict:
 	"""search → quote → book through the public API, as an anonymous visitor.
-	``before_book`` runs between the quote and the booking."""
+	``before_book`` runs between the quote and the booking; ``extras`` default: one airport transfer."""
 	frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
 	res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
 	                    rooms=[{"adults": 2, "children": [8]}], market="DE", session_id=session)
@@ -56,7 +56,7 @@ def guest_books(session="sess-1", method="Card", guest=None, before_book=None) -
 	rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
 	offer = next(o for o in prop["offers"] if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
 	assert "contract" not in offer, "guest offers must not expose contract ids"
-	q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=[{"code": "TRF", "quantity": 1}],
+	q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=extras or [{"code": "TRF", "quantity": 1}],
 	                 session_id=session)
 	assert q["ok"], q
 	if before_book:

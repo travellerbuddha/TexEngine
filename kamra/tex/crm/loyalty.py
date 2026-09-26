@@ -98,6 +98,22 @@ def stay_fingerprint(res) -> str:
 	return hashlib.sha256(json.dumps(basis, default=str).encode()).hexdigest()[:32]
 
 
+def extra_units(snap: dict, code: str | None) -> tuple[int, str | None]:
+	"""Units of the extra ``code`` a price snapshot sold → (units, None), or (0, the quantity) when one
+	is not a whole number. A snapshot quantity is a decimal string ("2.000000", ``to_str6``): read as
+	Decimal, never ``int()``, which raised in the reservation's update hook and rolled back its
+	confirmation (Y-10)."""
+	units = 0
+	for e in snap.get("extras") or []:
+		if not e.get("ok") or e.get("code") != code:
+			continue
+		q = D(e.get("quantity") or 1)
+		if q != q.to_integral_value():
+			return 0, str(e.get("quantity"))
+		units += int(q)
+	return units, None
+
+
 def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 	"""Deterministic earn calculation for one reservation → (points, explanation)."""
 	ci, co = getdate(res.check_in_date), getdate(res.check_out_date)
@@ -130,8 +146,11 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 		else:  # EXTRA: points per booked unit of a specific extra (from the price snapshot)
 			snap = json.loads(res.tex_pricing_snapshot or "{}")
 			code = frappe.db.get_value("TEX Extra", r.extra, "extra_code") if r.extra else None
-			qty = sum(int(e.get("quantity") or 1) for e in snap.get("extras") or [] if e.get("ok")
-			          and e.get("code") == code)
+			qty, odd = extra_units(snap, code)
+			if odd is not None:
+				lines.append({"rule": r.basis, "rate": str(rate), "points": "0",
+				              "note": f"quantity {odd} of {code} is not a whole number"})
+				continue
 			pts = rate * qty
 		total += pts
 		lines.append({"rule": r.basis, "rate": str(rate), "points": str(pts)})
