@@ -1414,5 +1414,6 @@ def cancel_link(name: str, reason: str) -> None:
 		frappe.throw(_("Only active links can be cancelled."))
 	link.status = "Cancelled"
 	link.save(ignore_permissions=True)
+	holds.after_link_closed(link.booking)          # the rooms it held for the guest are no longer held for it (D7)
 	audit("payment_link.cancel", reference_doctype="TEX Payment Link", reference_name=name, property=link.property,
 	      reason=reason)

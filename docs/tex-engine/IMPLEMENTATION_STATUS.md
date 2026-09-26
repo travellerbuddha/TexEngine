@@ -1442,3 +1442,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - D4 (audit 1c) **COMPLETE**: paid in time + rooms sold or the guest booked again for the stay → Action Required (no auto refund); a revival locks the B2 charges before the booking · `TestPaidInTime`.
 - D5 (audit 1c) **COMPLETE**: no payment link for a booking neither waiting nor confirmed (clear error); CRS "send link" hidden for it · `TestPaymentLinkHold.test_no_link_for_a_booking_that_expired`.
 - D6 (audit 1c) **COMPLETE**: a link made for a TEX reservation records its booking, so it holds its rooms and its payment is allocated to it · `TestPaymentLinkHold.test_a_link_for_a_reservation_pays_its_booking`.
+- D7 (audit 1c) **COMPLETE**: a link hold ends at the latest when the arrival day begins; cancelling a link gives its extension back (to the other open links or the method's own hold) · `TestPaymentLinkHold`.

@@ -1053,6 +1053,34 @@ class TestPaymentLinkHold(HoldCase):
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 		self.assertEqual(pay.allocated_of(started["transaction"]), D(b["due_now"]))
 
+	def test_a_link_never_holds_the_rooms_past_the_arrival_day(self):
+		"""D7 (audit 1c): the link hold ends at the latest when the arrival day begins."""
+		from datetime import datetime, time, timedelta
+
+		from kamra.tex.services import holds
+
+		b = self.book(method="Card")
+		arrival = datetime.combine(fx.d(6, 10), time.min)
+		frappe.db.sql("UPDATE `tabReservation` SET hold_expires_on=%s WHERE tex_booking=%s",
+		              (arrival - timedelta(hours=2), b["booking"]))
+		expires, held = holds.hold_for_link(b["booking"], arrival + timedelta(days=2),
+		                                    now=arrival - timedelta(hours=3))[:2]
+		self.assertEqual((expires, held, held_until(b)[0]), (arrival, arrival, arrival))
+
+	def test_cancelling_a_link_gives_its_extension_back(self):
+		"""D7 (audit 1c): a cancelled link no longer holds the rooms: the hold goes back to what the
+		booking's other open links, or its own payment method, give it."""
+		b = self.book(method="Card")
+		base = held_until(b)[0]
+		first, second = self.send_link(b), self.send_link(b)
+		kept = frappe.db.get_value("TEX Payment Link", second["link"], "expires_at")
+		pay.cancel_link(first["link"], reason="sent twice")
+		self.assertEqual(held_until(b)[0], kept)                     # the other open link keeps its hold
+		pay.cancel_link(second["link"], reason="the guest pays at the desk")
+		self.assertEqual(held_until(b)[0], base)
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.hold_restored",
+		                                                     "reference_name": b["booking"]}))
+
 	def test_the_email_says_until_when(self):
 		from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
 
