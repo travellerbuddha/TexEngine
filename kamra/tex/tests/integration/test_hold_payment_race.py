@@ -1101,6 +1101,50 @@ class TestExpiryFailureVisible(HoldCase):
 		self.assertGreaterEqual(checks["scheduler.errors"]["count"], 1)
 
 
+class TestDeadlockRetries(HoldCase):
+	"""C3 (audit 1c): a payment's outcome chosen as a deadlock victim is applied again (``complete`` is
+	idempotent), never left Pending unreconciled; the guest's and staff's payment endpoints run again
+	too."""
+
+	def test_a_payment_callback_that_deadlocks_is_applied_again(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		real_allocate, real_rollback, calls = pay.allocate, frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def allocate(*args, **kw):
+			calls.append(1)
+			if len(calls) == 1:
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+			return real_allocate(*args, **kw)
+
+		def rollback(*args, **kw):                    # the test's own transaction stands for the request's
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		with mock.patch.object(pay, "allocate", side_effect=allocate), \
+				mock.patch.object(frappe.db, "rollback", side_effect=rollback):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(len(calls), 2)
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def test_the_payment_endpoints_run_again_on_a_deadlock(self):
+		from kamra.tex.api import crs
+		from kamra.tex.api import payments as payments_api
+
+		def retried(fn) -> bool:
+			while fn is not None:
+				if fn.__code__.co_qualname == "retry_on_deadlock.<locals>.wrapper":     # wraps copies __qualname__
+					return True
+				fn = getattr(fn, "__wrapped__", None)
+			return False
+
+		for fn in (public.pay_booking, public.pay_link, public.manage_cancel, public.mock_pay, crs.cancel,
+		           payments_api.allocate, payments_api.transfer, payments_api.mark_transfer_received,
+		           payments_api.record_manual, payments_api.create_link, payments_api.cancel_link,
+		           payments_api.reverify):
+			self.assertTrue(retried(fn), fn.__name__)
+
+
 class TestPaymentLinkHold(HoldCase):
 	"""B6 (audit 1b), the real flow: an agent books by card (a 20-minute hold), then sends the guest a
 	payment link. Sending it holds the rooms for the link hold (the hotel's, else TEX Settings, 24 hours

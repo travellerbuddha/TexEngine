@@ -1447,3 +1447,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - D9 (audit 1c) **COMPLETE**: status check `holds.overdue` (bookings still holding rooms 20 min after their hold, FAIL) and booking-expiry failures counted in TEX job errors · `TestExpiryFailureVisible`, unit `test_holds_past_their_deadline_fail`.
 - C1 (audit 1c) **COMPLETE**: a card attempt runs at most 5 min (3DS margin) past the hold (no fixed 30 min); a new attempt may start while the rooms are held (a declined card retries) · `TestAtomicExpiry`.
 - C2 (audit 1c) **COMPLETE**: a bank transfer booked on the web holds 24 h (`hold_minutes_transfer_web`, hotel override, p55) and takes at most 2 rooms; call centre/staff keep 48 h · `TestHoldPolicy`.
+- C3 (audit 1c) **COMPLETE**: a payment outcome chosen as a deadlock victim is applied again (`complete_retrying`: callback, sandbox, reverify); pay_booking/pay_link/manage_cancel/crs.cancel and staff payment endpoints retry · `TestDeadlockRetries`.

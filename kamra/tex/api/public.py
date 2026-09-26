@@ -492,6 +492,7 @@ def booking_status(token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def pay_booking(token: str, payment_method: str = "Card", provider_account: str | None = None,
                 return_url: str | None = None):
 	"""Start (or retry after a failed attempt) the payment still due on a booking,
@@ -529,6 +530,7 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60)
+@retry_on_deadlock
 def mock_pay(transaction: str, outcome: str, sig: str):
 	"""Sandbox payment page action (only Mock provider accounts reach this)."""
 	import hmac
@@ -547,7 +549,7 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 
 	# the sandbox payment page stands in for a gateway's page: its answer is a gateway return (G-74)
 	with audit_source("Gateway Return"):
-		out = pay.complete(transaction, params={"outcome": outcome, "sig": sig})
+		out = pay.complete_retrying(transaction, params={"outcome": outcome, "sig": sig})
 	txn = frappe.db.get_value("TEX Payment Transaction", transaction, ["booking", "payment_link", "return_url"],
 	                          as_dict=True)
 	return {**out, "booking": txn.booking, "return_url": txn.return_url}
@@ -571,6 +573,7 @@ def payment_link(token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def pay_link(token: str, provider_account: str | None = None):
 	from kamra.tex.payments import service as pay
 
@@ -812,6 +815,7 @@ def _own_reservation(b, reservation: str) -> None:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)

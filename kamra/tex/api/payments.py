@@ -67,7 +67,8 @@ def callback(txn: str | None = None, **_ignored):
 		"Gateway Return" if req is not None and req.method == "GET" else "Webhook")
 	try:
 		with audit_source(source):
-			out = pay.complete(row.name, params=params, headers=headers, body=body)
+			# a deadlock victim is applied again, never left Pending (C3)
+			out = pay.complete_retrying(row.name, params=params, headers=headers, body=body)
 		status = out["status"]
 	except ProviderError:
 		# forged or garbled callback: the transaction stays as it was
@@ -167,6 +168,7 @@ def transaction(name: str):
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.view", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
+@retry_on_deadlock
 def reverify(transaction: str):
 	"""Ask the gateway again for a Pending or Failed charge (iyzico / Sipay support a
 	status query): a charge the gateway did capture is recovered, never lost."""
@@ -184,7 +186,7 @@ def reverify(transaction: str):
 	out, error = None, None
 	for params in attempts:
 		try:
-			res = pay.complete(transaction, params=params)
+			res = pay.complete_retrying(transaction, params=params)
 		except ProviderError as e:
 			error = e                                  # this token is not verifiable: try the next
 			continue
@@ -258,6 +260,7 @@ def refund_outside(transaction: str, amount, reason: str, reference: str, idempo
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
+@retry_on_deadlock
 def allocate(transaction: str, booking: str, amount, reason: str, idempotency_key: str | None = None):
 	return {"allocation": pay.allocate(transaction, booking=booking, amount=amount, reason=text(reason, 300) or "",
 	                                   idempotency_key=text(idempotency_key, 140))}
@@ -265,6 +268,7 @@ def allocate(transaction: str, booking: str, amount, reason: str, idempotency_ke
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
+@retry_on_deadlock
 def transfer(transaction: str, from_booking: str, to_booking: str, amount, reason: str,
              idempotency_key: str | None = None):
 	if not text(reason, 300):
@@ -275,6 +279,7 @@ def transfer(transaction: str, from_booking: str, to_booking: str, amount, reaso
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
+@retry_on_deadlock
 def mark_transfer_received(transaction: str, reference: str, value_date: str | None = None):
 	if not text(reference, 140):
 		frappe.throw(_("The bank reference is required."))
@@ -283,6 +288,7 @@ def mark_transfer_received(transaction: str, reference: str, value_date: str | N
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("booking", "TEX Booking"))
+@retry_on_deadlock
 def record_manual(booking: str, amount, method: str, reference: str, idempotency_key: str,
                   reason: str | None = None):
 	return pay.record_manual(booking=booking, amount=amount, method=text(method, 40) or "Other",
@@ -301,6 +307,7 @@ def methods(property: str, market: str | None = None, currency: str | None = Non
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.link")
+@retry_on_deadlock
 def create_link(property: str, amount, currency: str, description: str, expires_hours=72,
                 provider_account: str | None = None, booking: str | None = None, reservation: str | None = None,
                 guest_name: str | None = None, guest_email: str | None = None, idempotency_key: str | None = None,
@@ -344,6 +351,7 @@ def links(property: str, status: str | None = None, booking: str | None = None, 
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.link", property_arg=None, doc_arg=("name", "TEX Payment Link"))
+@retry_on_deadlock
 def cancel_link(name: str, reason: str):
 	if not text(reason, 300):
 		frappe.throw(_("A reason is required."))

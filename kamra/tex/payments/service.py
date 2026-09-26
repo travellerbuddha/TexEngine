@@ -440,6 +440,15 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	return {"transaction": txn.name, "status": txn.status}
 
 
+def complete_retrying(transaction: str, **kw) -> dict:
+	"""C3: ``complete`` run again when the database chose it as a deadlock victim. It is idempotent —
+	a rerun asks the gateway again and applies its verified outcome once — so a charge the gateway
+	captured never stays Pending (nor its money unreconciled) because of a deadlock."""
+	from kamra.tex.services.txn import retry_on_deadlock
+
+	return retry_on_deadlock(complete)(transaction, **kw)
+
+
 def _checked_capture(provider, outcome: Outcome, txn) -> Outcome:
 	"""A gateway's success counts only for exactly this charge (G-67): a gateway that reports
 	amounts must state the amount it captured (missing or 0 is not trusted), any stated amount
