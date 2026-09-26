@@ -316,7 +316,9 @@ def settled(transaction: str) -> None:
 	corrected)."""
 	from kamra.tex.payments import service as pay
 
-	row = frappe.db.get_value(TXN, transaction, ["reconciliation", "amount", "currency", "property"], as_dict=True)
+	# a locking read: its state as it is now, never this transaction's older snapshot of it (E5)
+	row = frappe.db.get_value(TXN, transaction, ["reconciliation", "amount", "currency", "property"], as_dict=True,
+	                          for_update=True)
 	if not row or not row.reconciliation:
 		return
 	amount = from_db(row.amount, row.currency)

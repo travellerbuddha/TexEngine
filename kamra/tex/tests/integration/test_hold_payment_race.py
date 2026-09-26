@@ -532,6 +532,37 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(results, {"expiry": "ran", "a_pays": "Succeeded"})
 		self.assert_a_settled(mailed.call_count)
 
+	def test_a_charge_leaves_reconciliation_by_its_state_as_it_is_now(self):
+		"""E5 (audit 1c-son): ``settled`` decides by the charge's reconciliation as it is now (a locking
+		read), never as this transaction's snapshot saw it before another one changed it."""
+		from kamra.tex.services import late_payments
+
+		self.expiry()
+		self.late_payment()                                        # A expired; its money in reconciliation
+		txn = self.payment["transaction"]
+		frappe.db.set_value("TEX Payment Transaction", txn, "reconciliation", "Resolved", update_modified=False)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection reads it
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "reconciliation"), "Resolved")
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+
+		def staff_queue_the_refund():                              # another request, its own connection
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.db.set_value("TEX Payment Transaction", txn, "reconciliation", "Refund Queued",
+				                    update_modified=False)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its own request
+			finally:
+				frappe.destroy()
+
+		other = threading.Thread(target=staff_queue_the_refund)
+		other.start()
+		other.join(timeout=30)
+		frappe.db.sql("SELECT name FROM `tabTEX Payment Transaction` WHERE name=%s FOR UPDATE", txn)   # its lock
+		late_payments.settled(txn)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- read what was decided
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "reconciliation"), "Refund Queued")
+
 	def test_the_expiry_job_a_late_payment_and_a_new_guest_race_for_the_last_room(self):
 		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			results = self._race(("expiry", self.expiry, "Administrator"), ("a_pays", self.late_payment, "Guest"),
