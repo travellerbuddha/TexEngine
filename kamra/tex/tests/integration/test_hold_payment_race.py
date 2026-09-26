@@ -888,6 +888,37 @@ class TestChangesOfABookingWaitingForItsPayment(HoldCase):
 		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
 		self.assertEqual(paid(b), D(b["due_now"]))
 
+	def test_a_price_staff_raised_is_owed_in_full_and_the_old_amount_confirms_nothing(self):
+		"""P1-6 (audit 2B, ADR-065): what a room owes now is read from its stored price, never from the
+		engine's total its snapshot explains."""
+		from kamra.tex.services import modification
+
+		b = self.book(rate_plan="NRF")                                  # all of it paid now
+		total = D(b["total"])
+		payment = self.start_payment(b)                                 # the old amount
+		p = modification.propose(self.rooms(b)[0], {})
+		modification.apply(p["proposal_token"], reason="the price agreed by phone", override_amount=str(total + 100))
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now")), total + 100)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		self.assertEqual(paid(b), total)
+
+	def test_a_price_staff_lowered_lowers_the_deposit_and_its_payment_confirms(self):
+		from kamra.tex.money import quantize
+		from kamra.tex.services import modification
+
+		b = self.book()                                                 # FLEX: 30% now
+		lower = D(b["total"]) - 100
+		p = modification.propose(self.rooms(b)[0], {})
+		modification.apply(p["proposal_token"], reason="the price agreed by phone", override_amount=str(lower))
+		due = quantize(lower * D("0.3"), "EUR")
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now")), due)
+		payment = self.start_payment(b)
+		self.assertEqual(D(frappe.db.get_value("TEX Payment Transaction", payment["transaction"], "amount")), due)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertEqual(paid(b), due)
+
 
 class TestNeverConfirmedLeftovers(HoldCase):
 	"""D2 (audit 1c): before B1, a booking waiting for its payment with a room cancelled became

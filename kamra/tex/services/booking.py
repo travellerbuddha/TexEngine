@@ -229,12 +229,22 @@ def pay_at_hotel_allowed(result: dict) -> bool:
 	return bool(policy.get("allow_pay_at_hotel")) or policy.get("deposit_type") == "NONE"
 
 
+def at_stored_price(snap: dict, stored) -> dict:
+	"""A room's frozen terms at its stored price (``tex_total_amount``, ADR-065): the snapshot's
+	``totals.total`` is the engine's figure, which a price staff set replaced. → ``snap`` itself
+	when they agree or it has no total, else a shallow copy with the stored price as its total."""
+	totals = snap.get("totals") or {}
+	if not totals.get("total") or stored is None or D(totals["total"]) == D(stored):
+		return snap
+	return {**snap, "totals": {**totals, "total": to_str(D(stored))}}
+
+
 def required_now(booking, override: dict | None = None) -> D:
 	"""What the booking's payment terms require to be paid by now: each live room's
-	``amount_due_now`` (its frozen payment policy, the booking's payment method), with
-	``override`` ({reservation: priced result}) standing in for a room being changed, plus the
-	cancellation fee of each cancelled room. A room whose rate cannot be paid at the hotel
-	counts as paid by card (G-45)."""
+	``amount_due_now`` (its frozen payment policy on its stored price, the booking's payment
+	method), with ``override`` ({reservation: priced result}) standing in for a room being
+	changed, plus the cancellation fee of each cancelled room. A room whose rate cannot be paid
+	at the hotel counts as paid by card (G-45)."""
 	b = frappe.get_doc("TEX Booking", booking) if isinstance(booking, str) else booking
 	ccy = b.currency or "EUR"
 	method = b.payment_method
@@ -247,7 +257,8 @@ def required_now(booking, override: dict | None = None) -> D:
 		if r.status in ("Cancelled", "No Show"):
 			total += from_db(r.cancellation_fee, ccy)
 			continue
-		result = (override or {}).get(row.reservation) or json.loads(r.tex_pricing_snapshot or "{}")
+		result = (override or {}).get(row.reservation) or at_stored_price(
+			json.loads(r.tex_pricing_snapshot or "{}"), from_db(r.tex_total_amount, ccy))
 		if not (result.get("totals") or {}).get("total"):
 			total += from_db(r.tex_total_amount, ccy)       # not priced by TEX: all of it
 			continue
