@@ -7,6 +7,7 @@ import { isPositive, isZero } from "../lib/format"
 import { getItem, rememberPayment, rememberReturn, setItem } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import { payLinkPath } from "../lib/mount"
+import { payLinkNotices } from "../lib/paylink"
 import type { PaymentLinkInfo, PaymentStart } from "../types"
 import { Button } from "../ui/controls"
 import { Alert, EmptyState, Spinner } from "../ui/feedback"
@@ -64,7 +65,7 @@ export default function PayLinkPage() {
 
   // gateway result may land a moment after the guest returns
   useEffect(() => {
-    if (!link || status !== "succeeded" || link.status === "Paid" || polls.current >= 5) return
+    if (!link || status !== "succeeded" || link.status === "Paid" || link.late_payment || polls.current >= 5) return
     const h = setTimeout(() => {
       polls.current++
       void load()
@@ -118,8 +119,8 @@ export default function PayLinkPage() {
       </PlainShell>
     )
 
-  const payable = link.status === "Active" || link.status === "Partially Paid"
-  const paid = link.status === "Paid"
+  const notices = payLinkNotices(link, status)
+  const { payable, paid } = notices
   let head = t("paylink.heading")
   let Icon = CreditCard
   let tone = "text-brand-ink"
@@ -148,17 +149,17 @@ export default function PayLinkPage() {
           </h1>
           {link.hotel && <p className="mt-1 text-soft">{link.hotel}</p>}
         </div>
-        {status === "failed" && payable && (
+        {notices.failed && (
           <Alert tone="bad" className="mt-5" title={t("confirm.failedTitle")}>
             {t("confirm.failedBody")}
           </Alert>
         )}
-        {(status === "pending" || status === "unverified" || (status === "succeeded" && !paid)) && (
+        {notices.verifying && (
           <Alert tone="warn" className="mt-5" title={t("confirm.verifyingTitle")}>
             {t("confirm.verifyingBody")}
           </Alert>
         )}
-        {link.late_payment && (
+        {notices.late && (
           <Alert tone="warn" className="mt-5">
             {t(link.late_payment === "refund" ? "manage.lateRefund" : "manage.lateContact")}
           </Alert>
@@ -223,7 +224,7 @@ export default function PayLinkPage() {
             </p>
           </div>
         )}
-        {!payable && !paid && <p className="mt-5 text-center text-sm text-soft">{t("paylink.closedBody")}</p>}
+        {notices.closed && <p className="mt-5 text-center text-sm text-soft">{t("paylink.closedBody")}</p>}
       </section>
     </PlainShell>
   )
