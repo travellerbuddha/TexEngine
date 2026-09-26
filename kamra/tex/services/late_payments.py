@@ -305,21 +305,30 @@ def _price_today(rooms: list, now: datetime):
 
 def settled(transaction: str) -> None:
 	"""A charge in reconciliation whose money is all refunded, or allocated to a booking by staff,
-	leaves it (``Refunded`` / ``Resolved``). Called under the charge's lock."""
+	leaves it (``Refunded`` / ``Resolved``); a refund still waiting for its answer settles nothing
+	(it may not be made). One that left it whose money is loose again — a refund found not made after
+	all — goes back to ``Action Required`` (C4). Called under the charge's lock, after every way its
+	money moves (allocation, refund through the gateway or outside it, a refund's outcome recorded or
+	corrected)."""
 	from kamra.tex.payments import service as pay
 
 	row = frappe.db.get_value(TXN, transaction, ["reconciliation", "amount", "currency", "property"], as_dict=True)
-	if not row or row.reconciliation not in OPEN:
+	if not row or not row.reconciliation:
 		return
 	amount = from_db(row.amount, row.currency)
 	refunded = pay.refunded_of(transaction, lock=True)
-	left = amount - pay.allocated_of(transaction, lock=True) - refunded - pay.in_flight_of(transaction, lock=True)
-	if left > ZERO:
+	left = amount - pay.allocated_of(transaction, lock=True) - refunded
+	if row.reconciliation in OPEN:
+		if left > ZERO or pay.in_flight_of(transaction, lock=True) > ZERO:
+			return
+		state = "Refunded" if refunded >= amount else "Resolved"
+	elif left > ZERO:
+		state = "Action Required"
+	else:
 		return
-	state = "Refunded" if refunded >= amount else "Resolved"
 	frappe.db.set_value(TXN, transaction, "reconciliation", state, update_modified=False)
-	audit("payment.reconciliation_" + state.lower(), reference_doctype=TXN, reference_name=transaction,
-	      property=row.property, new={"state": state})
+	audit("payment.reconciliation_" + state.lower().replace(" ", "_"), reference_doctype=TXN,
+	      reference_name=transaction, property=row.property, new={"state": state, "left": to_str(left)})
 
 
 def refund_queued() -> dict:

@@ -1097,6 +1097,9 @@ def finish_unknown_refund(refund_txn: str, *, outcome: str, reference: str | Non
 	r.save(ignore_permissions=True)
 	if outcome == "Succeeded" and target and from_booking > 0:
 		_take_off(txn, r, target, from_booking, reason)
+	from kamra.tex.services import late_payments
+
+	late_payments.settled(txn.name)             # its reconciliation follows the refund's outcome (C4)
 	audit("payment.refund_verified", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "outcome": outcome, "amount": to_str(amount),
 	                                "currency": r.currency, "booking": target, "from_booking": to_str(from_booking)},
@@ -1163,6 +1166,9 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	r.save(ignore_permissions=True)
 	if target and from_booking > 0:
 		_take_off(txn, r, target, from_booking, reason)
+	from kamra.tex.services import late_payments
+
+	late_payments.settled(txn.name)             # money in reconciliation given back outside TEX (C4)
 	audit("payment.refund_outside", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "booking": target,
 	                                  "from_booking": to_str(from_booking), "reference": reference.strip()[:140]},
@@ -1229,6 +1235,9 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 		r.error_message = (f"{outcome} (the gateway's answer, recorded by {frappe.session.user} after it contradicted "
 		                   f"{recorded}): {reason.strip()}")[:500]
 		r.save(ignore_permissions=True)
+	from kamra.tex.services import late_payments
+
+	late_payments.settled(txn.name)             # a refund found not made opens its reconciliation again (C4)
 	audit("payment.refund_conflict_resolved", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=r.property, new={"of": txn.name, "recorded": recorded, "outcome": outcome, "amount": to_str(amount),
 	                                "currency": r.currency, "booking": booking, "moved": to_str(moved)}, reason=reason)

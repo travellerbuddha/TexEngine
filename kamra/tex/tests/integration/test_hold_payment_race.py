@@ -1145,6 +1145,56 @@ class TestDeadlockRetries(HoldCase):
 			self.assertTrue(retried(fn), fn.__name__)
 
 
+class TestReconciliationStates(HoldCase):
+	"""C4 (audit 1c): a charge in reconciliation leaves it only when its money is settled — refunded
+	(through the gateway, or outside it and recorded), or allocated by staff. A refund still waiting
+	for its answer settles nothing; a refund found not made after all opens it again."""
+
+	def parked(self) -> tuple[dict, str]:
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)
+		run_expiry_jobs()
+		self.pays(payment)
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
+		return b, payment["transaction"]
+
+	def refund_unanswered(self, txn: str) -> str:
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		amount = frappe.db.get_value("TEX Payment Transaction", txn, "amount")
+		with mock.patch.object(MockProvider, "refund", side_effect=RuntimeError("gateway timeout")):
+			with self.assertRaises(pay.RefundUnknown):
+				pay.refund(txn, amount=str(amount), reason="the guest asked", idempotency_key=f"c4-{txn}")
+		return frappe.db.get_value("TEX Payment Transaction", {"parent_transaction": txn, "txn_type": "Refund"}, "name")
+
+	def test_money_given_back_outside_tex_settles_it(self):
+		_b, txn = self.parked()
+		amount = frappe.db.get_value("TEX Payment Transaction", txn, "amount")
+		pay.refund_outside(txn, amount=str(amount), reason="refunded at the desk", reference="cash 7",
+		                   idempotency_key=f"c4-out-{txn}")
+		self.assertEqual(txn_state(txn).reconciliation, "Refunded")
+
+	def test_a_refund_waiting_for_its_answer_settles_nothing_until_staff_record_it(self):
+		_b, txn = self.parked()
+		refund = self.refund_unanswered(txn)
+		self.assertEqual(txn_state(txn).reconciliation, "Action Required")        # it may not have been made
+		pay.finish_unknown_refund(refund, outcome="Succeeded", reference="GW-1", reason="seen at the gateway")
+		self.assertEqual(txn_state(txn).reconciliation, "Refunded")
+
+	def test_a_refund_found_not_made_opens_it_again(self):
+		_b, txn = self.parked()
+		refund = self.refund_unanswered(txn)
+		pay.finish_unknown_refund(refund, outcome="Succeeded", reference="GW-2", reason="looked refunded")
+		self.assertEqual(txn_state(txn).reconciliation, "Refunded")
+		frappe.get_doc({"doctype": "TEX Audit Event", "action": "payment.refund_outcome_conflict", "event_time":
+		                now_datetime(), "reference_doctype": "TEX Payment Transaction", "reference_name": refund,
+		                "property": fx.PROPERTY, "new_value": '{"recorded": "Succeeded", "gateway": "Failed"}'}).insert(
+			ignore_permissions=True)
+		pay.correct_refund(refund, outcome="Failed", reason="the gateway never paid it back")
+		self.assertEqual(txn_state(txn).reconciliation, "Action Required")
+
+
 class TestPaymentLinkHold(HoldCase):
 	"""B6 (audit 1b), the real flow: an agent books by card (a 20-minute hold), then sends the guest a
 	payment link. Sending it holds the rooms for the link hold (the hotel's, else TEX Settings, 24 hours

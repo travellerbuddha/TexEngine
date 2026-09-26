@@ -1448,3 +1448,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - C1 (audit 1c) **COMPLETE**: a card attempt runs at most 5 min (3DS margin) past the hold (no fixed 30 min); a new attempt may start while the rooms are held (a declined card retries) · `TestAtomicExpiry`.
 - C2 (audit 1c) **COMPLETE**: a bank transfer booked on the web holds 24 h (`hold_minutes_transfer_web`, hotel override, p55) and takes at most 2 rooms; call centre/staff keep 48 h · `TestHoldPolicy`.
 - C3 (audit 1c) **COMPLETE**: a payment outcome chosen as a deadlock victim is applied again (`complete_retrying`: callback, sandbox, reverify); pay_booking/pay_link/manage_cancel/crs.cancel and staff payment endpoints retry · `TestDeadlockRetries`.
+- C4 (audit 1c) **COMPLETE**: reconciliation follows the money — a refund in flight settles nothing; refund_outside, finish_unknown_refund and correct_refund update it (a refund found not made reopens it) · `TestReconciliationStates`.
