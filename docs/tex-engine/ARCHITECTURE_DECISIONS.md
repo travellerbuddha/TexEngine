@@ -3024,6 +3024,8 @@ Medium, 3 Low; patch p48).**
   - the purge reads old events through the new index `(occurred_at, session_id)` without a lock
     (`PURGE_OLD`) and deletes them by primary key (`PURGE_EVENTS`), 500 at a time, each batch committed
     by the job (`_commit`, skipped in tests). A new event (at the end of that index) never waits for it.
+    (Since ADR-061's final follow-up, main-side group: one statement per event, `PURGE_EVENT`; one
+    `name IN` statement for a batch that is most of a small funnel was read as a scan and locked it.)
 - *H-1: the merge locked the profiles but read a stale snapshot.* Under REPEATABLE READ (and
   `innodb_snapshot_isolation` off on MariaDB 10.11) the request's read view is made by its first read,
   long before the merge takes its locks; every plain read after that (`_records_hotels`, the profiles,
@@ -4072,7 +4074,9 @@ each fix has a test written first (the fail-first counts are at the end).
   user id).
 - *L5:* `lists.version_rows` reads the versions most recently changed first (it was unordered)
   and their rows in that order (a join on the version), so a cut keeps the recent ones; `truncated`
-  is set when the 2000-version cap is hit too, not only the 5000-row cap.
+  is set when the 2000-version cap is hit too, not only the 5000-row cap. (Since ADR-061's final
+  follow-up, main-side group: "current" leaves out archived contracts' versions, and the cap counts
+  only versions with a row in the table.)
 - *L6:* a Communications row links its guest's profile only when the viewer may open it, as
   `require_guest` judges (a booking at one of their hotels, or a profile of their enterprise:
   `crm.service.openable_guests`). The other rows say "No booking at your hotels: the profile is not
@@ -8954,3 +8958,102 @@ main `1575c8b` is contained, so nothing was merged.
   version list that leaves archived contracts out); neither is the workspace's.
 - As before: the §3.18 one-screen fit of the owner example with the ladder, one shared inline-edit
   hook for the three grids, O1–O5 (owner input 13).
+
+**Final follow-up, main-side group (2026-09-26).** The final verification's failures outside the
+workspace, which kept "every suite green" from this branch as from main: the FX status test's
+weekday, the version tables' cap on the shared site's archived E2E drafts, `entry-branding`'s
+placeholder-row race, and the disposable site's missing config with the funnel purge's lock wait
+there. Main `1575c8b` is contained, so nothing was merged.
+
+**Decision (final follow-up, main-side group).**
+1. *The FX status test pins the site's day and says what every weekday gives.* The product is
+   right (ADR-047): the warning counts business days (more than `FX_WARN_BUSINESS_DAYS`, 2), so a
+   Monday morning before the fetch is no alarm; the failure counts calendar days (the policy's
+   `max_age_days`). The test wrote a rate three calendar days old under a 4-day policy and expected
+   the warning, which exists only from Wednesday to Friday (three days then hold three weekdays).
+   It now pins `system.status`'s "now" to each day of the coming week, Monday to Sunday (a subtest
+   and a savepoint each), under a 7-day policy, and asserts for each day: no rate fails
+   `fx_missing`; 8 days old fails `fx_stale` (8 of 7); 7 days warns `fx_old` (the policy's age
+   itself is not stale); the newest date with 3 business days warns with its calendar age (3 from
+   Wednesday to Friday, 4 on Saturday, 5 from Sunday to Tuesday); the oldest date with 2 business
+   days says nothing; today's rate says nothing. The per-weekday ages are a table written by hand,
+   not `business_days`; the same table is a pure unit test (`test_system_checks`).
+2. *The current version tables leave out archived contracts, and the cap counts only versions
+   with a row in the table.* `lists.version_rows` counted the Draft and Published versions of
+   archived contracts as current. The shared site's hotel had 2,498 archived contracts' drafts and
+   252 of their Published versions (E2E runs archive what they make), each changed after every
+   live version, so the 2,000-version cap was nearly all theirs (1,979 of the 2,000, checked on
+   the site): the Price periods and Occupancy rules tables showed archived rows, and Rate plans none
+   (none of those 2,000 has a rate plan), `truncated` for every user. "current" is now the Draft and Published versions of the
+   contracts that are not archived (an archived contract sells nothing and is drafted no more);
+   "all" and a version status still list the archived contracts' versions. The cap counts only
+   versions with a row in the table (`EXISTS` on the child table; an empty version shows nothing),
+   read the most recently changed first; `truncated` still says when either cap cut something. The
+   tables' "current" hint says archived contracts are under All versions (six languages).
+3. *`entry-branding` counts and opens the rows of the lists' answers.* While a list loads,
+   `DataTable` shows five placeholder rows without a click handler; the step counted them
+   (`rows.count() > 0` held before any answer) and clicked the first one about 70 ms before
+   `lists.version_rows` answered (the final verification's run 1). The step now waits for each
+   list's answer (`lists.versions`, or `lists.version_rows` with its section), checks that it has
+   rows, then waits for rows with `tabindex="0"` (a data row that opens its version) and requires
+   every row to be one before it clicks. No product change: a placeholder row is correct while
+   loading.
+4. *The disposable site is configured as the shared one, and the funnel purge deletes each old
+   event alone by its primary key.* `disposable_test.sh` (a scratch script outside the repo) now
+   sets `developer_mode` (a payment's `http://` return URL is allowed as on a development site)
+   and, where the new site has none, an `encryption_key` (a Fernet key, as Frappe makes one;
+   `SigningKeyMissing` otherwise), and records both in its summary. There
+   `test_new_events_never_wait_for_a_purge` still waited out its lock (1205): the purge deleted a
+   batch in one statement, `DELETE … WHERE name IN (…)`, and on a funnel where the batch is most of
+   the table the optimizer reads that as a scan, which locks every row and gap until the batch
+   commits. Reproduced on a copy of the table (MariaDB 10.11, REPEATABLE READ; a second session
+   inserting with a 2 s lock wait): 5 rows, 3 deleted: plan `ALL`, every primary-key record locked
+   (`X`), the insert times out; 500 rows, 400 deleted: `ALL`, times out; 1,000 rows, 500 deleted,
+   and 10 to 100 rows, 3 deleted: `range` on `PRIMARY`, no wait. `FORCE INDEX` in the multi-table
+   form did not help on the small tables (still `ALL`). An equality on the primary key is read
+   through it at every size (`range`, 1 row), so `PURGE_EVENT` deletes one event per statement
+   (`PURGE_EVENTS` is gone); a new or quiet site's first purge no longer holds the funnel for its
+   batch. The shared site's funnel (5,680 rows) never showed it, which is why only the near-empty
+   disposable site did.
+
+**Deviations (final follow-up, main-side group).**
+- *The FX test's policy is 7 days, not 4.* A rate three business days old is 5 calendar days old
+  from Sunday to Tuesday, stale under 4 days: only a 7-day policy lets every weekday show the
+  warning, the failure, the quiet case and their boundaries. The 4-day case is still in the unit
+  tests (`test_old_warns_stale_and_missing_fail`).
+- *`lists.versions` (Contract versions) is unchanged.* It lists every version by default (its
+  subtitle: "what sells now, what is scheduled, drafts and history"), the 500 most recently changed
+  first, archived contracts' included, and says when it cut; its status filter is explicit. On the
+  shared site its first 500 are archived E2E drafts; the E2E step needs only rows.
+- *The withdrawal's `FORGET_CASES` and `FORGET_EVENTS` keep `name IN`.* They have the purge's
+  shape, but they name one guest's events, never most of a live funnel, and
+  `test_crm_privacy_review` passes 28/28 on the disposable site; left as is (open below).
+- *The purge runs one statement per event* (500 per batch): slower than one statement, and bounded
+  by the batch; it is a daily job.
+
+**Tests (final follow-up, main-side group).** Fail-first output is from the tests on the code before
+the fixes (`a18a3b5`: the new tests, the old product).
+- Integration `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails` (rewritten, 7
+  pinned days) and unit `test_every_weekday_warns_after_two_business_days`. Fail first: the old
+  test errors on this Saturday site date (`TypeError: 'NoneType' object is not subscriptable`, the
+  final verification and every run after it); its 3-day rate under the 4-day policy reads `ok`, not
+  `warn`, on Saturday, Sunday, Monday and Tuesday (`checks.fx_check` for the pinned week). The new
+  test passes on the old product (the product was right).
+- Integration `test_entry_branding.test_archived_contracts_never_crowd_the_current_versions_out`:
+  2,020 archived contracts' versions (one Published) changed after every other version, each with a
+  period, an occupancy rule and a rate plan; the current table of each section lists the live
+  version and a draft, nothing archived, the most recently changed first, not cut; "all" lists the
+  2,000 most recent, archived ones, in that order, and says it cut. Fail first: 3 failures, one per
+  section, `Items in the first set but not the second: 'CTR-03756-V1', 'CTR-03757-V1'` (the live
+  version and the draft missing).
+- Integration `test_crm_third_review.test_each_old_event_is_deleted_alone_by_its_primary_key`:
+  each DELETE of the purge names one event and its plan reads one row through `PRIMARY`. Fail
+  first: `AssertionError: 1 != 3 : one DELETE per event` (`DELETE … WHERE name IN %(names)s` with
+  three names). `test_the_purge_reads_through_an_index_and_deletes_by_primary_key` explains
+  `PURGE_EVENT`. On a disposable site with the new config and the old product,
+  `test_new_events_never_wait_for_a_purge` errors with 1205 (20 of 21 pass, the other 7
+  second-connection tests included).
+- E2E `entry-branding.spec.ts` "navigation: every new sub-section …" waits for the answers. A
+  scratch proof (not committed; the lists' answers held back 2.5 s by `page.route`): the old step,
+  marked expected to fail, failed (it clicked a placeholder row and the page stayed on the list);
+  the new step passed.
