@@ -213,6 +213,9 @@ class TestTheReportedLeaks(unittest.TestCase):
 				stored = [i.to_dict(ref=True) for i in validate.validate_terms(t, max_warnings=3)]
 				self.assertEqual(sum(i["code"] == "NO_CHILD_RULE" for i in stored), 3)
 				self.assertIn("CHD", {i["ref"]["age_band"] for i in stored})     # a party G-C1 decides was stored
+				# what get_version bounds (S16 re-review 5): a stored sweep at its limit only
+				self.assertTrue(validate.reruns_sweep(stored))
+				self.assertFalse(validate.reruns_sweep(stored[:2]))
 				shown[op] = validate.visible_issues(t, stored, hidden_of(t))
 				self.assertEqual(shown[op], [i.to_dict(ref=True) for i in
 				                             validate.validate_terms(t, hidden=hidden_of(t), max_warnings=3)])

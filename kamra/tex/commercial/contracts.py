@@ -9,7 +9,10 @@ payload: a policy change reaches a contract only when it is republished.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 
@@ -472,12 +475,23 @@ def policy_rules(terms) -> frozenset[str]:
 	return frozenset(r.rule_id for r in terms.occupancy_rules if r.source != "version")
 
 
-def stored_report(version, *, formula: bool = True) -> list | None:
+# a stored report as a viewer without cost reads it, by (payload hash, report hash, sweep limit): a
+# published version's payload and report never change, and working it out can mean running the whole
+# sweep again (S16 re-review 5). Per process, as the frozen terms are (``_TERMS``); the oldest goes first.
+_VISIBLE: dict[tuple, list] = {}
+_VISIBLE_MAX = 256
+
+
+def stored_report(version, *, formula: bool = True, bound=None) -> list | None:
 	"""The validation report stored when ``version`` was published (made with nothing hidden).
 	Without ``formula`` it is given as the live check gives a viewer without ``price.view_cost``
 	its issues (S16 re-review): ``validate.visible_issues`` of the frozen terms leaves out an
 	outranked policy override and a sweep issue whose presence depends on a policy rule's value;
-	if the frozen terms cannot be read, every issue of those codes is left out."""
+	if the frozen terms cannot be read, every issue of those codes is left out.
+
+	That is worked out once per report (``_VISIBLE``). ``bound``: a context manager factory the
+	work runs in when it may run the sweep again (``validate.reruns_sweep``: a stored sweep at its
+	limit), e.g. the API's per-user bound on heavy checks (S16 re-review 5)."""
 	if not version.validation_report:
 		return None
 	report = json.loads(version.validation_report)
@@ -491,7 +505,15 @@ def stored_report(version, *, formula: bool = True) -> list | None:
 		terms = None
 	if terms is None:
 		return [i for i in report if isinstance(i, dict) and i.get("code") not in validate.HIDEABLE_CODES]
-	return validate.visible_issues(terms, report, policy_rules(terms))
+	key = (terms.payload_hash, hashlib.sha256(version.validation_report.encode()).hexdigest(), validate.SWEEP_LIMIT)
+	visible = _VISIBLE.get(key)
+	if visible is None:
+		with bound() if bound and validate.reruns_sweep(report) else nullcontext():
+			visible = validate.visible_issues(terms, report, policy_rules(terms))
+		while len(_VISIBLE) >= _VISIBLE_MAX:
+			_VISIBLE.pop(next(iter(_VISIBLE)))
+		_VISIBLE[key] = visible
+	return copy.deepcopy(visible)
 
 
 # ─── lifecycle ───────────────────────────────────────────────────────────
@@ -537,7 +559,10 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	publish decides and stores exactly what main did. The report is stored whole; the ``warnings``
 	returned are that report as ``get_version`` gives it to the caller (``stored_report``): to a
 	publisher without ``price.view_cost``, without what depends on a pricing policy's formulas (S16
-	re-review 4; a security fix for every caller, like the stored report's)."""
+	re-review 4; a security fix for every caller, like the stored report's); to one who neither sees
+	cost nor edits contracts, None (``get_version`` gives it no report, S16 re-review 5). A refused
+	publish names to a publisher without ``price.view_cost`` only the errors its own live check shows
+	(``_refusal``, S16 re-review 5)."""
 	version = frappe.get_doc("TEX Contract Version", name)
 	contract = frappe.get_doc("TEX Contract", version.contract)
 	scope.require("contract.publish", contract.property)
@@ -555,7 +580,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	issues = validate.validate_terms(terms, board_checks=workspace)
 	errors = [i for i in issues if i.level == "ERROR"]
 	if errors:
-		frappe.throw(_("Cannot publish: {0}").format("; ".join(i.message for i in errors[:8])),
+		frappe.throw(_("Cannot publish: {0}").format(_refusal(terms, errors, contract.property, workspace)),
 		             title=_("Contract has errors"))
 	payload = serialize.normalise_payload(serialize.terms_to_payload(terms))
 	digest = serialize.payload_hash(payload)
@@ -608,11 +633,39 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	           "collections": diffs.payload_diff(json.loads(previous.payload) if previous else None, payload)},
 	      reason=change_note)
 	clear_terms_cache()
-	# the report just stored, as get_version gives it to this caller: a publisher without
-	# price.view_cost is told only what that viewer's live check tells (S16 re-review 4)
-	formula = scope.has_capability("price.view_cost", contract.property)
-	warnings = [i.to_dict(ref=workspace) for i in issues] if formula else stored_report(version, formula=False)
+	# the report just stored, as get_version gives it to this caller: all of it to who sees cost; to an
+	# editor without price.view_cost what that viewer's live check tells (S16 re-review 4); nothing to
+	# who neither sees cost nor edits contracts, whom get_version gives the catalogue (S16 re-review 5)
+	if scope.has_capability("price.view_cost", contract.property):
+		warnings = [i.to_dict(ref=workspace) for i in issues]
+	elif scope.has_capability("contract.edit", contract.property):
+		warnings = stored_report(version, formula=False)
+	else:
+		warnings = None
 	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff), "warnings": warnings}
+
+
+# a refused publish's message to a publisher without cost when every error depends on a pricing
+# policy's rules (``_refusal``): it names none of them
+UNEXPLAINED_REFUSAL = ("the rules this draft inherits from a pricing policy make it unpublishable; someone who "
+                       "may see cost can say why")
+
+
+def _refusal(terms, errors: list, prop: str, workspace: bool) -> str:
+	"""What a refused publish names (S16 re-review 5). Who sees cost: the full check's ``errors``, as
+	before. A publisher without ``price.view_cost``: only the errors its own live check shows
+	(``validate_terms(hidden=policy_rules)``), which no hidden policy rule's op decides, so the message
+	reads the same whatever those ops are; when that check shows none, every error depends on a hidden
+	rule and none is named (``UNEXPLAINED_REFUSAL``). The refusal itself still says that the full check
+	failed. With the viewer's check showing an error no op decides it is refused whatever the ops;
+	otherwise not being refused is a real, audited publish (ADR-061)."""
+	hidden = policy_rules(terms)
+	if hidden and not scope.has_capability("price.view_cost", prop):
+		errors = [i for i in validate.validate_terms(terms, hidden=hidden, board_checks=workspace)
+		          if i.level == "ERROR"]
+		if not errors:
+			return _(UNEXPLAINED_REFUSAL)
+	return "; ".join(i.message for i in errors[:8])
 
 
 def _previous_version(contract: str, publishing: str, at) -> frappe._dict | None:

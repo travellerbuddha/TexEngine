@@ -208,8 +208,10 @@ def get_version(name: str, workspace=None):
 	if not _sees_cost(prop):
 		return _catalogue(v, prop, ws)
 	out = doc_dict(v, exclude=("payload",))
-	# the report stored at publish, as the live check gives it to this viewer (S16 re-review)
-	out["validation_report"] = svc.stored_report(v, formula=scope.has_capability("price.view_cost", prop))
+	# the report stored at publish, as the live check gives it to this viewer (S16 re-review); worked
+	# out once per report, and a stored sweep at its limit run again as a bounded check (S16 re-review 5)
+	out["validation_report"] = svc.stored_report(v, formula=scope.has_capability("price.view_cost", prop),
+	                                             bound=lambda: _heavy("validate"))
 	out["editable"] = v.status == "Draft" and scope.has_capability("contract.edit", prop)
 	if ws:
 		# what the workspace may offer this viewer (ADR-061); the endpoints check again
@@ -472,8 +474,10 @@ def publish_version(name: str, effective_from: str | None = None, change_note: s
 	"""Publish a draft. ``workspace`` (ADR-061, opt-in): the workspace's board checks block it as its
 	live check reports them, and the stored report carries each issue's ``ref``. The ``warnings``
 	answered are the stored report as ``get_version`` gives it to the caller: without
-	``price.view_cost``, nothing that depends on a pricing policy's formulas (S16 re-review 4; a
-	security fix, for every caller)."""
+	``price.view_cost``, nothing that depends on a pricing policy's formulas (S16 re-review 4); without
+	``contract.edit`` either, None (S16 re-review 5). A refused publish names to a caller without
+	``price.view_cost`` only the errors its own live check shows (S16 re-review 5). Security fixes,
+	for every caller."""
 	return svc.publish(name, effective_from=effective_from or None, change_note=text(change_note, 500),
 	                   workspace=_workspace(workspace))
 

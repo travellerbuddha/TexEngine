@@ -703,6 +703,13 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 	return out + _visible_sweep(t, swept, hidden)
 
 
+def reruns_sweep(issues: list) -> bool:
+	"""Whether ``visible_issues`` may run the sweep again for the stored report ``issues``: its sweep
+	rows reached ``SWEEP_LIMIT`` (``_visible_sweep``), seconds on a large contract, which the caller
+	bounds (S16 re-review 5). An upper bound: a row that does not say its party is counted too."""
+	return sum(1 for i in issues if isinstance(i, dict) and i.get("code") in _SWEEP_HIDEABLE) >= SWEEP_LIMIT
+
+
 def _stored_party(t: ContractTerms, ref: dict):
 	"""The room, period, party and band a stored sweep row names, or None when it does not say."""
 	spec = t.rooms.get(ref.get("room_type"))
