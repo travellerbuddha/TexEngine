@@ -213,7 +213,11 @@ jobs:
           # --skip-assets: link the app's committed bundles where the web server looks
           mkdir -p sites/assets
           [ -e sites/assets/kamra ] || ln -s "$(pwd)/apps/kamra/kamra/public" sites/assets/kamra
+          # jobs run as on a live site: a paid guest change and a refund are made by a job
+          bench --site test.localhost enable-scheduler
           nohup bench serve --port 8000 > serve.log 2>&1 &
+          nohup bench worker --queue short,default > worker.log 2>&1 &
+          nohup bench schedule > schedule.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://test.localhost:8000/api/method/ping > /dev/null && break
             sleep 2
@@ -233,3 +237,14 @@ jobs:
             apps/kamra/e2e-report
             apps/kamra/e2e-results
             frappe-bench/serve.log
+
+      - name: Upload bench logs (web server, worker, scheduler)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-logs
+          path: |
+            frappe-bench/serve.log
+            frappe-bench/worker.log
+            frappe-bench/schedule.log
+          if-no-files-found: ignore
