@@ -82,8 +82,10 @@ def _jobs(now) -> dict:
 
 
 def _job_errors(now) -> dict:
+	# a booking whose expiry failed is logged on its own (the job goes on with the others, D9)
 	row = frappe.db.sql("""SELECT COUNT(*) n, MIN(creation) since FROM `tabError Log`
-	                       WHERE method LIKE 'TEX job %%' AND creation >= %(t)s""",
+	                       WHERE (method LIKE 'TEX job %%' OR method LIKE 'TEX booking expiry failed %%')
+	                         AND creation >= %(t)s""",
 	                    {"t": now - timedelta(hours=C.JOB_ERROR_WINDOW_HOURS)}, as_dict=True)[0]
 	return C.job_errors_check(int(row.n or 0), since=row.since)
 
@@ -250,6 +252,20 @@ def _payments_callbacks(props, now) -> dict:
 	                         refunds_unknown=len(unknown), refund_conflicts=len(conflicts), properties=hotels)
 
 
+def _overdue_holds(props, now) -> dict:
+	"""D9: bookings still holding rooms after their hold ended, beyond the expiry's own delay, with no
+	payment attempt open."""
+	params = {"cut": now - timedelta(minutes=C.EXPIRY_LATE_MINUTES), "now": now, "holding": ("Pending Payment", "Held")}
+	cond = _scope("b.property", props, params)
+	rows = frappe.db.sql(f"""SELECT b.property, COUNT(DISTINCT b.name) n, MIN(r.hold_expires_on) since
+	                         FROM `tabTEX Booking` b JOIN `tabReservation` r ON r.tex_booking = b.name
+	                         WHERE b.status IN %(holding)s AND r.status IN %(holding)s AND r.hold_expires_on < %(cut)s
+	                           AND (b.payment_attempt_until IS NULL OR b.payment_attempt_until < %(now)s){cond}
+	                         GROUP BY b.property""", params, as_dict=True)
+	n, oldest, hotels = _sum(rows)
+	return C.overdue_holds_check(n, oldest, now, hotels)
+
+
 def _payments_reconciliation(props, now) -> dict:
 	"""Money kept off every booking (B5), per state, aged from when it went to reconciliation."""
 	params: dict = {}
@@ -348,6 +364,7 @@ HOTEL_PROBES = (
 	("outbox.pms", _outbox_pms), ("outbox.channel", _outbox_channel), ("channel.inbound", _channel_inbound),
 	("connections", _connections), ("payments.pending", _payments_pending),
 	("payments.callbacks", _payments_callbacks), ("payments.reconciliation", _payments_reconciliation),
+	("holds.overdue", _overdue_holds),
 	("fx.rates", _fx), ("mail.account", _mail_account),
 	("mail.delivery", _mail_delivery),
 )

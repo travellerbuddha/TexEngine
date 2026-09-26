@@ -1030,6 +1030,25 @@ def held_until(b: dict) -> list:
 	return frappe.get_all("Reservation", filters={"tex_booking": b["booking"]}, pluck="hold_expires_on")
 
 
+class TestExpiryFailureVisible(HoldCase):
+	"""D9 (audit 1c): a booking whose expiry keeps failing ("TEX booking expiry failed …") keeps its
+	rooms held: the status page shows it — the hotel's check of holds past their deadline fails, and
+	the failures count among the TEX job errors."""
+
+	def test_a_hold_its_expiry_cannot_end_is_on_the_status_page(self):
+		from kamra.tex.ops import status as system_status
+
+		b = self.book()
+		passes(b["booking"], 45)
+		with mock.patch("kamra.tex.services.booking.expire_booking", side_effect=frappe.ValidationError("broken")):
+			booking.expire_pending_bookings()
+		self.assertEqual(self.statuses(b)[0], "Pending Payment")                   # its rooms are still held
+		checks = {c["key"]: c for c in system_status.collect(properties=[fx.PROPERTY], platform=True)}
+		self.assertEqual(checks["holds.overdue"]["status"], "fail")
+		self.assertIn(fx.PROPERTY, checks["holds.overdue"]["properties"])
+		self.assertGreaterEqual(checks["scheduler.errors"]["count"], 1)
+
+
 class TestPaymentLinkHold(HoldCase):
 	"""B6 (audit 1b), the real flow: an agent books by card (a 20-minute hold), then sends the guest a
 	payment link. Sending it holds the rooms for the link hold (the hotel's, else TEX Settings, 24 hours

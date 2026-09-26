@@ -88,6 +88,17 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.pending_payments_check(2, NOW - timedelta(minutes=90), NOW)["issues"][0]["params"],
 		                 {"count": 2, "minutes": 90})
 
+	def test_holds_past_their_deadline_fail(self):
+		"""D9 (audit 1c): a booking still holding rooms well after its hold ended (its expiry keeps
+		failing) blocks inventory: the check fails, with the count and the age of the oldest."""
+		ok = c.overdue_holds_check(0, None, NOW)
+		self.assertEqual((ok["key"], ok["status"], ok["scope"]), ("holds.overdue", c.OK, "hotel"))
+		out = c.overdue_holds_check(2, NOW - timedelta(minutes=45), NOW, properties=["H1"])
+		self.assertEqual((out["status"], out["issues"][0]["reason"], out["issues"][0]["params"]),
+		                 (c.FAIL, "hold_overdue", {"count": 2, "minutes": 45}))
+		self.assertIn("hold_overdue", c.REASONS)
+		self.assertIn("holds.overdue", c.TITLES)
+
 	def test_money_in_reconciliation_is_shown_with_its_age(self):
 		"""B5: payments kept off every booking wait for staff (or a queued refund): each kind with its
 		count and the age of its oldest item; staff have a day, a queued refund an hour."""
