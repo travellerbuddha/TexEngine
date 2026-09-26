@@ -425,9 +425,11 @@ def adapters():
 # ─── audit trail ─────────────────────────────────────────────────────────
 
 # A record's trail, read by reference, needs what reading the record itself needs (Y-1): a contract's
-# events carry its rates (a publish's collections, a draft's edits) and are cost (G-11); a payment's
-# carry amounts, the provider and the bank reference.
-TRAIL_COST = frozenset({"TEX Contract", "TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy",
+# events carry its rates (a publish's collections, a draft's edits) and are cost (G-11: who sees cost
+# or edits contracts, ``contracts._sees_cost``); a payment's carry amounts, the provider and the bank
+# reference. Markups and pricing policies are read by their own API with price.view_cost alone
+# (``policies.READ_CAP``), so their trail takes that path.
+TRAIL_COST = frozenset({"TEX Contract", "TEX Contract Version",
                         # a contract version's rate tables
                         "TEX Price Period", "TEX Period Rate", "TEX Child Age Band", "TEX Occupancy Rule",
                         "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan", "TEX Contract Offer",
@@ -435,7 +437,7 @@ TRAIL_COST = frozenset({"TEX Contract", "TEX Contract Version", "TEX Markup Rule
 TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link": "payment.view",
                     "TEX Payment Allocation": "payment.view", "Reservation": "reservation.view",
                     "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view"}
-VERSION_TABLES = TRAIL_COST - {"TEX Contract", "TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy"}
+VERSION_TABLES = TRAIL_COST - {"TEX Contract", "TEX Contract Version"}
 
 
 def _trail_property(doctype: str, name: str) -> str | None:
@@ -457,8 +459,8 @@ def _trail_property(doctype: str, name: str) -> str | None:
 
 def _require_trail(doctype: str, prop: str) -> None:
 	"""Contract cost: ``price.view_cost`` or ``contract.edit`` (G-11); payments ``payment.view``; a
-	stay ``reservation.view``; a commercial policy what the policies API reads it with; anything
-	else ``settings.admin``."""
+	stay ``reservation.view``; a commercial policy what the policies API reads it with (markups and
+	pricing policies: ``price.view_cost``); anything else ``settings.admin``."""
 	from kamra.tex.api import policies
 
 	if doctype in TRAIL_COST:

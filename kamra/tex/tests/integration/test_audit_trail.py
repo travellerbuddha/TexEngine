@@ -515,6 +515,29 @@ class TestTrailByReference(AuditCase):
 		             if r["action"] == "contract.publish"]
 		self.assertTrue(published and published[0]["new_value"]["collections"])
 
+	def test_markups_and_pricing_policies_need_cost_as_their_own_api(self):
+		# review round 1: their own API reads them with price.view_cost only (policies.READ_CAP); a
+		# contract's trail still takes price.view_cost or contract.edit (G-11, contracts._sees_cost)
+		from kamra.tex.security.audit import audit
+		from kamra.tex.tests.integration.test_channel_binding import grant as bind
+		from kamra.tex.tests.integration.test_channel_binding import profile
+		from kamra.tex.tests.integration.test_patches import put
+
+		editor = fx.ensure_user("y1-editor@example.com", ["Call Center Agent"])
+		bind(editor, fx.PROPERTY, profile("Y1 Contract editor without cost",
+		                                  ["price.view", "contract.edit", "reservation.view"]))
+		as_user("Administrator")
+		records = {"TEX Markup Rule": put("TEX Markup Rule", property=fx.PROPERTY, tex_status="Active"),
+		           "TEX Pricing Policy": put("TEX Pricing Policy", property=fx.PROPERTY, tex_status="Active")}
+		for doctype, name in records.items():
+			audit(f"{doctype.lower().replace(' ', '_')}.save", reference_doctype=doctype, reference_name=name,
+			      property=fx.PROPERTY, new={"formula": "COST * 1.25"})
+		for doctype, name in records.items():
+			with self.assertRaises(frappe.PermissionError, msg=doctype):
+				self.trail(editor, doctype, name)
+			self.assertTrue(self.trail(self.revenue, doctype, name), doctype)
+		self.assertTrue(self.trail(editor, "TEX Contract Version", self.version))
+
 	def test_payment_events_need_payment_view(self):
 		with self.assertRaises(frappe.PermissionError):
 			self.trail(self.viewer, "TEX Payment Transaction", self.txn)
