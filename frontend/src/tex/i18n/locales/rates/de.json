@@ -933,7 +933,7 @@
  "rates.lists.which": "Versionen",
  "rates.lists.which_current": "Aktuell",
  "rates.lists.which_all": "Alle Versionen",
- "rates.lists.which_current_hint": "Aus den Versionen, die jetzt oder später verkaufen, und aus Entwürfen. Ersetzte und zurückgezogene Versionen stehen unter Alle Versionen.",
+ "rates.lists.which_current_hint": "Aus den Versionen, die jetzt oder später verkaufen, und aus Entwürfen, von Verträgen, die nicht archiviert sind. Ersetzte und zurückgezogene Versionen sowie archivierte Verträge stehen unter Alle Versionen.",
  "rates.lists.which_all_hint": "Aus jeder Version, auch ersetzten und zurückgezogenen: Darauf verkaufte Reservierungen behalten diese Bedingungen.",
  "rates.lists.all_days": "Jeden Tag",
  "rates.lists.position": "Position {n}",

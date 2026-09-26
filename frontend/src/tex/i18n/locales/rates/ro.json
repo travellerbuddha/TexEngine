@@ -941,7 +941,7 @@
  "rates.lists.which": "Versiuni",
  "rates.lists.which_current": "Curente",
  "rates.lists.which_all": "Toate versiunile",
- "rates.lists.which_current_hint": "Din versiunile care vând acum sau mai târziu și din ciorne. Versiunile înlocuite și retrase sunt la Toate versiunile.",
+ "rates.lists.which_current_hint": "Din versiunile care vând acum sau mai târziu și din ciorne, ale contractelor nearhivate. Versiunile înlocuite și retrase, precum și contractele arhivate, sunt la Toate versiunile.",
  "rates.lists.which_all_hint": "Din toate versiunile, inclusiv cele înlocuite și retrase: rezervările vândute pe ele își păstrează aceste condiții.",
  "rates.lists.all_days": "În fiecare zi",
  "rates.lists.position": "poziția {n}",

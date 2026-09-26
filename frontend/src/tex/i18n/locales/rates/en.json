@@ -933,7 +933,7 @@
  "rates.lists.which": "Versions",
  "rates.lists.which_current": "Current",
  "rates.lists.which_all": "All versions",
- "rates.lists.which_current_hint": "From the versions that sell now or later and from drafts. Superseded and withdrawn versions are under All versions.",
+ "rates.lists.which_current_hint": "From the versions that sell now or later and from drafts, of contracts that are not archived. Superseded and withdrawn versions, and archived contracts, are under All versions.",
  "rates.lists.which_all_hint": "From every version, including superseded and withdrawn ones: reservations sold on them keep these terms.",
  "rates.lists.all_days": "Every day",
  "rates.lists.position": "position {n}",

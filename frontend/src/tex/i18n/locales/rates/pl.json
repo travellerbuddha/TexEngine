@@ -949,7 +949,7 @@
  "rates.lists.which": "Wersje",
  "rates.lists.which_current": "Bieżące",
  "rates.lists.which_all": "Wszystkie wersje",
- "rates.lists.which_current_hint": "Z wersji, które sprzedają teraz lub później, oraz ze szkiców. Zastąpione i wycofane wersje są w zakładce Wszystkie wersje.",
+ "rates.lists.which_current_hint": "Z wersji, które sprzedają teraz lub później, oraz ze szkiców umów, które nie są zarchiwizowane. Zastąpione i wycofane wersje oraz zarchiwizowane umowy są w zakładce Wszystkie wersje.",
  "rates.lists.which_all_hint": "Ze wszystkich wersji, także zastąpionych i wycofanych: rezerwacje sprzedane na nich zachowują te warunki.",
  "rates.lists.all_days": "Codziennie",
  "rates.lists.position": "pozycja {n}",
