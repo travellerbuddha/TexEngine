@@ -359,6 +359,7 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
               issueText={props.issueText}
               issuesStale={props.issuesStale}
               maxChildren={maxChildren}
+              inherited={inherited}
             />
             <CombinationCards
               key={`combos:${props.epoch ?? 0}`}

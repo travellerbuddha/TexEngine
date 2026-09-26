@@ -196,8 +196,9 @@ export interface OccRulePopoverProps {
   single?: "whole" | "children"
   /** the single-use row whose rule comes from All rooms or a pricing policy: it does not switch here */
   singleForeign?: boolean
-  /** why a rule may not be written for these rooms and periods (with the switch, if any), or null */
-  refusal?: (rooms: string[], periods: string[], to?: SlotSwitch) => SingleRefusal | null
+  /** why a rule may not be written for these rooms and periods (with the switch, if any, and the
+   * rule's op and "Always wins" as chosen), or null */
+  refusal?: (rooms: string[], periods: string[], to: SlotSwitch | undefined, rule: { op: string; is_override: boolean }) => SingleRefusal | null
   /** the guest's name for a switched slot ("Child 2 · Child 3–6.99") */
   slotNameAs?: (to: SlotSwitch) => string
   minorUnits: number
@@ -234,7 +235,7 @@ export function OccRulePopover(p: OccRulePopoverProps) {
   const rooms = roomsScope === "all" ? [""] : roomsChosen
   const checked = inherit ? null : normaliseDecimal(value, { amount: isAmountOp("occupancy", op as ShOp), minorUnits: p.minorUnits })
   const valueError = !inherit && value.trim() !== "" && checked && !checked.ok ? t(`rates.sh.err.${checked.code}`) : undefined
-  const refused = targets.length > 0 && rooms.length > 0 ? (p.refusal?.(rooms, targets, to) ?? null) : null
+  const refused = targets.length > 0 && rooms.length > 0 ? (p.refusal?.(rooms, targets, to, { op, is_override: isOverride }) ?? null) : null
   const ready = (inherit || (checked?.ok ?? false)) && targets.length > 0 && rooms.length > 0 && !refused
   const canon = checked?.ok ? checked.value : value
   const where = applies === "this" ? p.periodName : applies === "all" ? t("rates.rates.all_periods") : targets.join(", ")
@@ -332,7 +333,13 @@ export function OccRulePopover(p: OccRulePopoverProps) {
         </Field>
         {reading && <p className="rounded-md bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700">{reading}</p>}
         <p id={refusedId} role="status" aria-live="polite" className={refused ? "rounded-md bg-rose-50 px-2.5 py-1.5 text-sm text-rose-800" : "sr-only"}>
-          {refused === "card" ? t("rates.occ.pop.refused_card") : refused === "relative" ? t("rates.occ.pop.refused_relative") : ""}
+          {refused === "card"
+            ? t("rates.occ.pop.refused_card")
+            : refused === "relative"
+              ? t("rates.occ.pop.refused_relative")
+              : refused === "outranked"
+                ? t("rates.occ.pop.refused_outranked")
+                : ""}
         </p>
         <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
           {p.hasRule && !to && (

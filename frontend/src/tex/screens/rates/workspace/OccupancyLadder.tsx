@@ -49,6 +49,7 @@ import { columnTemplate, decimalMarkOf } from "./matrixView.ts"
 import { ALL_PERIODS, type Basis } from "./model.ts"
 import {
   applyOccRuleAs,
+  cardCovers,
   occEditText,
   occReadingOf,
   planOccEntries,
@@ -61,6 +62,7 @@ import {
   type LadderRow,
   type OccEntryItem,
   type OccRule,
+  type OccRuleLike,
   type PartyOption,
   type SlotSwitch,
 } from "./occupancy.ts"
@@ -151,6 +153,9 @@ export interface OccupancyLadderProps {
   issuesStale?: boolean
   /** the most children a room in scope holds: the child positions a band row's popover offers */
   maxChildren?: number
+  /** the pricing-policy rules that reach the version (price_matrix inherited_rules, as the model
+   * read them): the single-use switch is checked against them too (singleWriteRefusal) */
+  inherited?: readonly OccRuleLike[]
 }
 
 export function OccupancyLadder(p: OccupancyLadderProps) {
@@ -617,6 +622,29 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
         const each = row.kind === "adults_base"
         const text = short ? t(each ? "rates.occ.ladder.cell.default_each" : "rates.occ.ladder.cell.default", { rule: short }) : t("rates.occ.ladder.cell.default_bare")
         if (row.kind === "single") {
+          // a special combination that prices one adult here (combinationNotes, final follow-up): where
+          // it holds the whole column it prices single use, not the engine default; where it holds
+          // only some rooms, the default holds for the others
+          const hit = p.notes.get(`${row.id}|${period}`) ?? []
+          const pricing = p.cards.filter((x) => hit.includes(x.id))
+          const covering = pricing.filter((x) => cardCovers(x, p.scope || null, period))
+          if (covering.length) {
+            const byCard = t("rates.occ.ladder.cell.single_card")
+            const names = covering.map(p.cardName).join(", ")
+            return {
+              tone: "muted",
+              content: (
+                <>
+                  <i>{byCard}</i>
+                  <span className="max-w-full truncate text-[10px]">{names}</span>
+                </>
+              ),
+              stack: true,
+              state: "default",
+              value: byCard,
+              tooltip: t("rates.occ.ladder.cell.single_card_tip"),
+            }
+          }
           // "×1.00 default (no single-use rule)" (§3.6.2)
           const sub = t("rates.occ.ladder.cell.default_single_sub")
           return {
@@ -630,7 +658,7 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
             stack: true,
             state: "default",
             value: `${text} ${sub}`,
-            tooltip: t("rates.occ.ladder.cell.default_single_tip"),
+            tooltip: t(pricing.length ? "rates.occ.ladder.cell.default_single_some_tip" : "rates.occ.ladder.cell.default_single_tip"),
           }
         }
         const tip =
@@ -969,15 +997,16 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
               single={row.kind === "single" && basis === "PERSON" && singleRows === 1 && !row.foreign ? (row.identity.target === "ADULT" ? "children" : "whole") : undefined}
               singleForeign={row.kind === "single" && basis === "PERSON" && singleRows === 1 && row.foreign}
               // a write the single-use row refuses: a special combination's cell, a relative rule
-              // carried into the other form (S16 re-review 3)
-              refusal={(rooms, periods, to) => singleWriteRefusal(history.current() ?? tables, slot, rooms, periods, to)}
+              // carried into the other form (S16 re-review 3), a switch after which another rule
+              // would price one adult (an Always-wins Adult 1, a card's, a policy's: final follow-up)
+              refusal={(rooms, periods, to, rule) => singleWriteRefusal(history.current() ?? tables, slot, rooms, periods, to, { rule, inherited: p.inherited })}
               slotNameAs={(to) => slotName(rowAs(row, to))}
               minorUnits={minorUnits}
               ccy={ccy}
               onApply={(rooms, periods, rule, to) => {
                 dropDrafts(periods.map((period) => ({ row: cell.row, period })))
                 const label = rule ? t("rates.occ.h.rule", { cell: to ? `${slotName(rowAs(row, to))} · ${periodName(cell.period)}` : cellName(cell) }) : t("rates.occ.h.clear", { cell: cellName(cell) })
-                history.apply(label, (tb) => applyOccRuleAs(tb, slot, rooms, periods, rule, to))
+                history.apply(label, (tb) => applyOccRuleAs(tb, slot, rooms, periods, rule, to, { inherited: p.inherited }))
                 setPop(null)
                 if (rule && to && "single" in to) refocusId({ row: to.single === "children" ? "single:1:" : "single:0:", period: cell.period })
                 else refocus(cell)

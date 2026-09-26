@@ -510,7 +510,13 @@ export function applyOccRule(tables: Tables, slot: Omit<OccIdentity, "room_type"
   // a rule written into a cell a special combination holds would join (or rewrite) the card: nothing
   // is written (singleWriteRefusal says why; S16 re-review 3)
   if (rule && singleWriteRefusal(tables, slot, rooms, periods)) return tables
-  let rows = tables.occupancy_rules
+  const out = writeRows(tables.occupancy_rules, slot, rooms, periods, rule)
+  return out === tables.occupancy_rules ? tables : { ...tables, occupancy_rules: out }
+}
+
+/** applyOccRule's rows, unchecked: the same array when nothing changes. */
+function writeRows(from: Row[], slot: Omit<OccIdentity, "room_type">, rooms: readonly string[], periods: readonly string[], rule: OccRule | null): Row[] {
+  let rows = from
   let changed = false
   for (const room_type of rooms.length ? rooms : [""])
     for (const period of periods) {
@@ -536,7 +542,7 @@ export function applyOccRule(tables: Tables, slot: Omit<OccIdentity, "room_type"
       rows = rows.flatMap((r) => (r === keep ? [{ ...r, ...fields }] : mine.includes(r) ? [] : [r]))
       changed = true
     }
-  return changed ? { ...tables, occupancy_rules: rows } : tables
+  return changed ? rows : from
 }
 
 /** Where the ladder's rule popover writes instead of its row's own slot (§3.6.2, S16 re-review):
@@ -566,20 +572,44 @@ const sameSlotOf = (a: Slot, b: Slot) => a.target === b.target && a.position ===
  * the new form (its key, op, value, "Always wins" and note kept; dropped where that cell already
  * has a row of the new form), then the rule is written to the periods chosen; one history entry.
  * Remove (`rule` null) and no switch are applyOccRule on the row's slot. */
-export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly string[], periods: readonly string[], rule: OccRule | null, to?: SlotSwitch): Tables {
+export function applyOccRuleAs(
+  tables: Tables,
+  slot: Slot,
+  rooms: readonly string[],
+  periods: readonly string[],
+  rule: OccRule | null,
+  to?: SlotSwitch,
+  opts: { inherited?: readonly OccRuleLike[] } = {},
+): Tables {
   const target = switchedSlot(slot, to)
   if (!rule || !to || sameSlotOf(target, slot)) return applyOccRule(tables, slot, rooms, periods, rule)
   if (!("single" in to)) return applyOccRule(tables, target, rooms, periods, rule)
-  // a card's cell reached, or a relative rule carried into the other form: nothing is written
-  if (singleWriteRefusal(tables, slot, rooms, periods, to)) return tables
+  // a card's cell reached, a relative rule carried into the other form, or single use priced
+  // otherwise after the switch: nothing is written
+  if (singleWriteRefusal(tables, slot, rooms, periods, to, { rule, inherited: opts.inherited })) return tables
+  return switchSingleUnchecked(tables, slot, to, rooms, periods, rule)
+}
+
+/** The single-use row's form switch as applyOccRuleAs writes it once singleWriteRefusal allows it:
+ * the old form's rows moved (moveSingleForm), then the rule written to the new form. Unchecked:
+ * exported for the test that prices it with the engine (a refused switch, written anyway, changes
+ * the price of one adult; single-use-switch.test.ts). */
+export function switchSingleUnchecked(tables: Tables, slot: Slot, to: { single: "whole" | "children" }, rooms: readonly string[], periods: readonly string[], rule: OccRule): Tables {
+  const target = switchedSlot(slot, to)
+  return applyOccRule({ ...tables, occupancy_rules: moveSingleForm(tables.occupancy_rules, slot, target, rooms) }, target, rooms, periods, rule)
+}
+
+/** The single-use row's rules of the old form in the rooms written, as rows of the new form (their
+ * key, op, value, "Always wins" and note kept; dropped where that cell already has a row of the new
+ * form). A special combination's rules are the card's: they keep their form (S16 re-review 3). */
+function moveSingleForm(from: readonly Row[], slot: Slot, target: Slot, rooms: readonly string[]): Row[] {
   const written = new Set((rooms.length ? rooms : [""]).map(str))
-  const norms = tables.occupancy_rules.map((r) => norm(r))
-  // a special combination's rules are the card's: they keep their form (S16 re-review 3)
+  const norms = from.map((r) => norm(r))
   const cards = cardRows(norms)
   const mine = norms.filter((n) => written.has(n.room_type) && !cards.has(n.src))
   const taken = new Set(mine.filter((n) => sameGuest(n, { ...target, room_type: "" })).map((n) => `${n.room_type}|${n.period}`))
   const old = new Map(mine.filter((n) => sameGuest(n, { ...slot, room_type: "" })).map((n) => [n.src as Row, n]))
-  const rows = tables.occupancy_rules.flatMap((r) => {
+  return from.flatMap((r) => {
     const n = old.get(r)
     if (!n) return [r]
     const cell = `${n.room_type}|${n.period}`
@@ -587,7 +617,6 @@ export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly strin
     taken.add(cell)
     return [{ ...r, target: target.target, position: target.position, age_band: target.age_band, combination: target.combination }]
   })
-  return applyOccRule({ ...tables, occupancy_rules: rows }, target, rooms, periods, rule)
 }
 
 /** Why the single-use row may not write a rule (S16 re-review 3): a special combination holds a
@@ -595,8 +624,13 @@ export function applyOccRuleAs(tables: Tables, slot: Slot, rooms: readonly strin
  * edited as a whole in the builder, D8), or the whole-row switch would carry a relative rule (Plus
  * or minus %, Add, Subtract) of another period or room into the other form, where it applies to
  * another amount (a whole combination's relative rule to the party total, an adult's to the slot
- * unit: "relative"). Replacing rules and INHERIT keep their price in either form. */
-export type SingleRefusal = "card" | "relative"
+ * unit: "relative"). Replacing rules and INHERIT keep their price in either form, unless another
+ * rule decides single use once the form has changed ("outranked", final follow-up): an "Always
+ * wins" rule for Adult 1 (or any Adult 1 rule that ranks above Adult 1 of 1+*, such as a card's
+ * exact 1+0 one) takes one adult from the switched rule, and a whole-stay rule the old form
+ * outranked (a card's *+0, a pricing policy's) takes the total once the whole 1+0 has gone. The
+ * switch then refuses rather than change a price silently. */
+export type SingleRefusal = "card" | "relative" | "outranked"
 
 /** Rules whose meaning is the same as a whole 1+0 combination and as Adult 1 of 1+* (price_occupancy:
  * a replacing combination op prices from the unit, as an adult's does). */
@@ -605,8 +639,18 @@ const SWITCH_SAFE_OPS = new Set(["ABSOLUTE", "FIXED", "MULTIPLY", "PERCENT_OF", 
 const isSingleSlot = (slot: Slot) => sameSlotOf(slot, SINGLE_WHOLE) || sameSlotOf(slot, SINGLE_CHILDREN)
 
 /** What refuses writing a rule to the single-use row's `slot` (or, with `to`, switching its form)
- * for `rooms` × `periods`; null when nothing does, and for any other row. */
-export function singleWriteRefusal(tables: Pick<Tables, "occupancy_rules">, slot: Slot, rooms: readonly string[], periods: readonly string[], to?: SlotSwitch): SingleRefusal | null {
+ * for `rooms` × `periods`; null when nothing does, and for any other row. `rule` is the rule the
+ * popover writes (its op and "Always wins"; a replacing one when not given), `inherited` the
+ * pricing-policy rules that reach the version (price_matrix inherited_rules): with them the switch
+ * is checked against every rule the engine ranks. */
+export function singleWriteRefusal(
+  tables: Pick<Tables, "occupancy_rules">,
+  slot: Slot,
+  rooms: readonly string[],
+  periods: readonly string[],
+  to?: SlotSwitch,
+  opts: { rule?: Pick<OccRule, "op" | "is_override">; inherited?: readonly OccRuleLike[] } = {},
+): SingleRefusal | null {
   const target = switchedSlot(slot, to)
   if (!isSingleSlot(slot) || !isSingleSlot(target)) return null
   const written = [...new Set((rooms.length ? rooms : [""]).map(str))]
@@ -619,7 +663,81 @@ export function singleWriteRefusal(tables: Pick<Tables, "occupancy_rules">, slot
   const moved = norms.filter((n) => !cards.has(n.src) && written.includes(n.room_type) && sameGuest(n, { ...slot, room_type: "" }))
   if (moved.some((n) => held.has(`${n.room_type}|${n.period}`))) return "card"
   if (moved.some((n) => !writes.has(`${n.room_type}|${n.period}`) && !SWITCH_SAFE_OPS.has(n.op))) return "relative"
-  return null
+  // single use (one adult, no children) must price as it would with the same rule written without
+  // the switch, in every room and period (PERSON basis: the switch is offered there only)
+  const rule: OccRule = { op: str(opts.rule?.op) || "MULTIPLY", value: WRITTEN, is_override: Boolean(opts.rule?.is_override), note: "" }
+  const stay = writeRows(tables.occupancy_rules, slot, rooms, periods, rule)
+  const switched = writeRows(moveSingleForm(tables.occupancy_rules, slot, target, rooms), target, rooms, periods, rule)
+  const inherited = (opts.inherited ?? []).map((r) => norm(r, true))
+  return samePrices([...stay.map((r) => norm(r)), ...inherited], [...switched.map((r) => norm(r)), ...inherited]) ? null : "outranked"
+}
+
+/** The value of the rule a single-use write stores, in singleWriteRefusal's comparison: the same in
+ * either form, and unlike any stored value. */
+const WRITTEN = "\u0000written"
+
+/** Ops that replace the party total as a whole-combination rule (occupancy._REPLACING_COMBINATION_OPS). */
+const REPLACING_OPS = new Set(["ABSOLUTE", "FIXED", "MULTIPLY", "PERCENT_OF"])
+
+/** The rule a set of candidates for one slot gives, as price_occupancy's _pick: the highest ranked
+ * that does not defer (INHERIT); "ambiguous" when two of that rank price differently (the engine
+ * refuses the party); null when none. */
+function winner(cands: readonly Norm[]): Norm | "ambiguous" | null {
+  let top: number[] | null = null
+  let tied: Norm[] = []
+  for (const n of cands) {
+    if (n.op === "INHERIT") continue
+    const rank = engineRank(n, false)
+    if (!top || outranks(rank, top)) {
+      top = rank
+      tied = [n]
+    } else if (!outranks(top, rank)) tied.push(n)
+  }
+  if (!tied.length) return null
+  return new Set(tied.map(priceOf)).size > 1 ? "ambiguous" : tied[0]
+}
+
+/** A rule's op and value as they price (FIXED reads as ABSOLUTE); a hidden policy formula by its rule. */
+function priceOf(n: Norm): string {
+  if (n.policy && isSet(n.src.hidden)) return `hidden:${str(n.src.rule_id)}`
+  return `${n.op === "FIXED" ? "ABSOLUTE" : n.op}:${canonValue(n.src.value)}`
+}
+
+/** One adult without children (1A+0C): its combination "a+c" qualifies ("" = every party). */
+function qualifiesSingle(n: Norm): boolean {
+  if (!n.combination) return true
+  const m = /^(1|\*)\+(0|\*)$/.exec(n.combination)
+  return m !== null
+}
+
+/** What prices one adult without children in a room and period, under PERSON basis, as
+ * price_occupancy resolves it (no arithmetic, the rules' ops and values only): the whole-combination
+ * rule when it replaces the total; else Adult 1's rule (the engine default ×1 without one) and a
+ * relative whole-combination rule after it, which on Adult 1 ×1 is that rule on the unit, as an
+ * adult's relative rule is. */
+function singlePrice(cands: readonly Norm[], room: string, period: string): string {
+  const here = cands.filter((n) => (n.room_type === "" || n.room_type === room) && (n.period === "" || n.period === period))
+  const combo = winner(here.filter((n) => n.target === "COMBINATION"))
+  if (combo === "ambiguous") return "ambiguous"
+  if (combo && REPLACING_OPS.has(combo.op)) return priceOf(combo)
+  const adult = winner(here.filter((n) => n.target === "ADULT"))
+  if (adult === "ambiguous") return "ambiguous"
+  const a = adult ? priceOf(adult) : "MULTIPLY:1"
+  if (!combo) return a
+  return a === "MULTIPLY:1" || a === "PERCENT_OF:100" ? priceOf(combo) : `${a}|${priceOf(combo)}`
+}
+
+/** Both rule sets price one adult without children alike in every room and period their rules name
+ * (and in any other: a room or period no rule names). */
+function samePrices(a: readonly Norm[], b: readonly Norm[]): boolean {
+  const relevant = (ns: readonly Norm[]) =>
+    ns.filter((n) => qualifiesSingle(n) && (n.target === "COMBINATION" || (n.target === "ADULT" && (n.position === 0 || n.position === 1) && !n.age_band)))
+  const [ca, cb] = [relevant(a), relevant(b)]
+  const OTHER = "\u0000other"
+  const rooms = [OTHER, ...new Set([...ca, ...cb].map((n) => n.room_type).filter(Boolean))]
+  const periods = [OTHER, ...new Set([...ca, ...cb].map((n) => n.period).filter(Boolean))]
+  for (const room of rooms) for (const period of periods) if (singlePrice(ca, room, period) !== singlePrice(cb, room, period)) return false
+  return true
 }
 
 /** One ladder cell of a gesture and what was typed for it. */
@@ -720,17 +838,32 @@ export function ladderSummary(model: LadderModel, cards: readonly CombinationCar
 /** The ⓘ precedence note (§3.6.2): the cells a special combination outranks for some party,
  * because a card prices the same slot (same target; positions and bands equal or "any") in a room
  * and period the cell covers. Not on "Always wins" rules (they beat combinations), included
- * places, the single-use row or the cards the single-use row shows, nor from a band-less card rule
- * on an infant row whose cell a rule naming the band prices (G-31: that rule wins for an infant).
+ * places or the cards the single-use row shows, nor from a band-less card rule on an infant row
+ * whose cell a rule naming the band prices (G-31: that rule wins for an infant). The single-use
+ * row (final follow-up) has the note where a card prices its party (one adult without children;
+ * "also when children travel": one adult and any children) through a whole-stay or Adult 1 rule:
+ * wherever it has no rule of its own (the card, not the engine default, prices one adult there),
+ * and where the card's rule ranks at or above the row's own (its rules are combination rules too).
  * Keyed `${row.id}|${period}`, the card ids as values. Computed from the grouping (§3.7.4). */
 export function combinationNotes(model: LadderModel, cards: readonly CombinationCard[], scopeRoom: string | null): Map<string, string[]> {
   const scope = str(scopeRoom)
   const live = cards.filter((c) => !isSingleUseCard(c))
   const out = new Map<string, string[]>()
   if (!live.length) return out
+  const reaches = (card: CombinationCard, p: string) =>
+    (!scope || card.rooms.includes("") || card.rooms.includes(scope)) && (p === ALL_PERIODS || card.periods.includes(ALL_PERIODS) || card.periods.includes(p))
   for (const row of model.rows) {
     const id = row.identity
-    if (!id || row.kind === "single" || id.target === "COMBINATION") continue
+    if (id && row.kind === "single") {
+      for (const p of model.periods) {
+        const cell = row.cells[p]
+        if (!cell || (cell.source && isSet(cell.source.is_override))) continue
+        const hits = live.filter((card) => reaches(card, p) && singleCardPrices(card, id, cell, scope, p))
+        if (hits.length) out.set(`${row.id}|${p}`, hits.map((c) => c.id))
+      }
+      continue
+    }
+    if (!id || id.target === "COMBINATION") continue
     for (const p of model.periods) {
       const cell = row.cells[p]
       if (!cell || cell.state === "included" || (cell.source && isSet(cell.source.is_override))) continue
@@ -738,8 +871,7 @@ export function combinationNotes(model: LadderModel, cards: readonly Combination
       const bandPriced = row.infant && str(cell.source?.age_band) !== ""
       const hits = live.filter(
         (card) =>
-          (!scope || card.rooms.includes("") || card.rooms.includes(scope)) &&
-          (p === ALL_PERIODS || card.periods.includes(ALL_PERIODS) || card.periods.includes(p)) &&
+          reaches(card, p) &&
           card.rules.some(
             (r) =>
               r.target === id.target &&
@@ -752,6 +884,41 @@ export function combinationNotes(model: LadderModel, cards: readonly Combination
     }
   }
   return out
+}
+
+/** A card prices the single-use row's party in a cell (combinationNotes): its combination holds one
+ * adult (and no children, for the whole 1+0 form), and a whole-stay rule or an Adult 1 rule (a rule
+ * for every adult too) of it decides the party's price there. Without a single-use rule in the cell
+ * any such rule does; with one, a rule of the card for the same slot that ranks at or above it
+ * (occupancy.specificity: both are combination rules, a period or room qualifier first), a
+ * whole-stay rule after "also when children travel" (it replaces or adjusts the total), or an Adult
+ * 1 rule under a whole 1+0 rule that only adjusts the total. */
+function singleCardPrices(card: CombinationCard, id: OccIdentity, cell: LadderCell, scope: string, period: string): boolean {
+  const whole = id.target === "COMBINATION"
+  if (card.adults !== null && card.adults !== 1) return false
+  if (whole && card.children !== null && card.children !== 0) return false
+  const own = cell.source ? norm(cell.source, cell.state === "policy") : null
+  const ownRank = own ? engineRank(own, false) : null
+  const room = scope && card.rooms.includes(scope) ? scope : card.rooms.includes("") ? "" : (card.rooms[0] ?? "")
+  const at = period && card.periods.includes(period) ? period : card.periods.includes(ALL_PERIODS) ? ALL_PERIODS : (card.periods[0] ?? "")
+  const rankOf = (r: CardRule) =>
+    engineRank(norm({ target: r.target, position: r.position, age_band: r.age_band, combination: card.combination, room_type: room, period_code: at, op: r.op, is_override: card.isOverride ? 1 : 0 }), false)
+  return card.rules.some((r) => {
+    const combo = r.target === "COMBINATION"
+    const adult1 = r.target === "ADULT" && !r.age_band && (r.position === 0 || r.position === 1)
+    if (!combo && !adult1) return false
+    if (!own || !ownRank) return true
+    if (whole ? combo : adult1) return !outranks(ownRank, rankOf(r))
+    return whole ? !REPLACING_OPS.has(own.op) : true
+  })
+}
+
+/** A card holds the whole column of a ladder cell: every room of the scope and the cell's period
+ * (all of them for the All-periods column). Where it does, a single-use cell without a rule of its
+ * own is priced by it, not by the engine default (OccupancyLadder, final follow-up). */
+export function cardCovers(card: Pick<CombinationCard, "rooms" | "periods">, scopeRoom: string | null, period: string): boolean {
+  const scope = str(scopeRoom)
+  return (card.rooms.includes("") || (scope !== "" && card.rooms.includes(scope))) && (card.periods.includes(ALL_PERIODS) || (period !== ALL_PERIODS && card.periods.includes(period)))
 }
 
 /** A sample party of the resolved line (§3.6.2, GAP-2b): adults and each child's band code (the
