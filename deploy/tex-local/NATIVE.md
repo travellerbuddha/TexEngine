@@ -111,14 +111,18 @@ Frappe does not run natively on Windows, so run everything inside Ubuntu on WSL2
 5. Open `http://localhost:8000/...` in your Windows browser. WSL forwards `localhost` to
    Linux. If the page does not load, see [Troubleshooting](#7-troubleshooting).
 
-### MariaDB character set (all systems)
+### MariaDB character set and snapshot isolation (all systems)
 
-Frappe needs `utf8mb4`. Add this file, then restart MariaDB:
+Frappe needs `utf8mb4`. TEX needs `innodb_snapshot_isolation` off: MariaDB 11.6.2 and later
+turn it on by default, and then a booking that waited for the last room gets an error instead
+of "sold out" (ADR-063). The `loose-` prefix lets an older MariaDB without the setting start
+anyway. Add this file, then restart MariaDB:
 
 ```ini
 [mysqld]
 character-set-server = utf8mb4
 collation-server = utf8mb4_unicode_ci
+loose-innodb_snapshot_isolation = 0
 
 [mysql]
 default-character-set = utf8mb4
@@ -130,7 +134,9 @@ default-character-set = utf8mb4
 | macOS (Homebrew) | `$(brew --prefix)/etc/my.cnf.d/tex.cnf` | `brew services restart mariadb@11.8` |
 
 To check: `mariadb -uroot -p -e "SELECT @@character_set_server, @@collation_server"` should
-print `utf8mb4  utf8mb4_unicode_ci`. The setup script prints a warning when it does not.
+print `utf8mb4  utf8mb4_unicode_ci`, and `mariadb -uroot -p -e "SELECT @@GLOBAL.innodb_snapshot_isolation"`
+should print `0` (MariaDB before 10.6.18 has no such setting: an error there is fine). The setup
+script prints a warning when either is not so.
 
 ---
 

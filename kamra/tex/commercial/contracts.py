@@ -375,7 +375,7 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		                             occupancy_rules_of(version.occupancy_rules, base_level=Level.VERSION, source="version"),
 		                             _policy_layers(contract.property, contract.market, at))
 	except inherit.PolicyAmbiguous as e:   # never ranked by guesswork (PRICING_POLICY_AMBIGUOUS)
-		frappe.throw(_("Pricing policies cannot be combined: {0}.").format(e), title=_("Pricing policy ambiguous"))
+		frappe.throw(_("Pricing policies cannot be combined: {0}.").format(str(e)), title=_("Pricing policy ambiguous"))
 
 	board_rules = tuple(
 		BoardRule(rule_id=b.name, board=b.board, is_base=bool(b.is_base), op=Op(b.op or "ADD"),

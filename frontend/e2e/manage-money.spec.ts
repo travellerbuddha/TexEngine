@@ -316,7 +316,10 @@ test("a pay-at-hotel booking is extended: nothing is charged, the page says what
     expect(moneyAmount((await notice.innerText()).replace(/^Your booking was updated/, ""))).toBe(p.difference)
     const atHotel = page.getByRole("status").filter({ hasText: "To pay at the hotel" })
     await expect(atHotel).toBeVisible()
-    expect(moneyAmount((await atHotel.innerText()).replace(/^To pay at the hotel/, ""))).toBe(p.new_total)
+    // the notice can show before the page has read the changed booking again: wait for the new total
+    await expect
+      .poll(async () => moneyAmount((await atHotel.innerText()).replace(/^To pay at the hotel/, "")))
+      .toBe(p.new_total)
 
     const after = await status(page.request, b.token)
     expect(after.rooms[0].check_out).toBe(longer)

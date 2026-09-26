@@ -399,12 +399,13 @@ page_renderer = ["kamra.mcp_http.MCPPageRenderer", "kamra.tex.booking_host.Booki
 # ----------------
 # Preserve AioSell's Basic-auth header for the channel webhook before Frappe's
 # own api-key auth rejects it (see kamra.channels.aiosell.preserve_webhook_auth).
-before_request = ["kamra.channels.aiosell.preserve_webhook_auth"]
+# Every request and background job runs with MariaDB snapshot isolation OFF (ADR-063).
+before_request = ["kamra.channels.aiosell.preserve_webhook_auth", "kamra.tex.ops.snapshot_isolation.turn_off"]
 # after_request = ["kamra.utils.after_request"]
 
 # Job Events
 # ----------
-# before_job = ["kamra.utils.before_job"]
+before_job = ["kamra.tex.ops.snapshot_isolation.turn_off"]
 # after_job = ["kamra.utils.after_job"]
 
 # User Data Protection

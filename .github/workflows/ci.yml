@@ -61,7 +61,8 @@ jobs:
   evals:
     name: Backend eval harness
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # every integration module runs now (~40 s each), then the journey and the browser E2E
+    timeout-minutes: 90
 
     services:
       mariadb:
@@ -95,10 +96,18 @@ jobs:
           npm install -g yarn
 
       - name: Configure MariaDB
+        # innodb_snapshot_isolation OFF (ADR-063): ON by default from 11.6.2, it turns TEX's
+        # "wait for the lock, then recount" into error 1020 for the waiter. Checked, not assumed.
         run: |
           mysql -h 127.0.0.1 -uroot -proot -e "
             SET GLOBAL character_set_server = 'utf8mb4';
-            SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+            SET GLOBAL collation_server = 'utf8mb4_unicode_ci';
+            SET GLOBAL innodb_snapshot_isolation = OFF;"
+          off=$(mysql -h 127.0.0.1 -uroot -proot -N -B -e "SELECT @@GLOBAL.innodb_snapshot_isolation = 0")
+          if [ "$off" != "1" ]; then
+            echo "::error::innodb_snapshot_isolation is still ON (ADR-063)"
+            exit 1
+          fi
 
       - name: Init bench
         run: |
@@ -151,12 +160,21 @@ jobs:
           # this site is made for the run and thrown away with it: the tests that empty the site or
           # run every patch over it (test_patches' whole-site tests, ADR-058 review) run here
           bench --site test.localhost set-config -p tex_disposable_test_site 1
-          # discovered, never listed: a new module can't be skipped silently
+          # discovered, never listed: a new module can't be skipped silently. Every module runs;
+          # a red one is listed and fails the step at the end, it never hides the modules after it
+          total=0; red=()
           for f in apps/kamra/kamra/tex/tests/integration/test_*.py; do
             m=$(basename "$f" .py)
-            bench --site test.localhost run-tests --module kamra.tex.tests.integration.$m 2>&1 | tee tex_$m.out
-            grep -qE "^OK( \(skipped=[0-9]+\))?$" tex_$m.out
+            total=$((total + 1))
+            bench --site test.localhost run-tests --module kamra.tex.tests.integration.$m 2>&1 | tee tex_$m.out || true
+            grep -qE "^OK( \(skipped=[0-9]+\))?$" tex_$m.out || red+=("$m")
           done
+          echo "TEX integration modules: $((total - ${#red[@]}))/$total passed"
+          [ "$total" -gt 0 ] || { echo "::error::no integration module found"; exit 1; }
+          if [ ${#red[@]} -gt 0 ]; then
+            printf '::error::red integration module: %s\n' "${red[@]}"
+            exit 1
+          fi
 
       - name: Run front-desk persona journey
         run: |
@@ -187,15 +205,32 @@ jobs:
       - name: Browser E2E (Playwright, R-58 journey + booking/CRS/contract specs)
         run: |
           cd frappe-bench
+          # Desk's own bundles: bench init --skip-assets built none, and a spec opens Desk (/app)
+          bench build --app frappe
           bench --site test.localhost execute kamra.tex.devtools.demo_seed.execute \
             --kwargs "{'password': 'TexDemo#2026'}"
           bench --site test.localhost set-config -p tex_public_write_limit 1000
           bench --site test.localhost set-config -p tex_public_search_limit 1000
+          # new-site never ran the setup wizard, and Desk's sidebar is built only once it is done
+          bench --site test.localhost execute \
+            frappe.desk.page.setup_wizard.setup_wizard.enable_setup_wizard_complete --args "['frappe']"
+          # one test user signs in with a second factor (kamra.tex.devtools.e2e_two_factor)
+          bench --site test.localhost execute kamra.tex.devtools.e2e_two_factor.enable \
+            --kwargs "{'password': 'TexDemo#2026'}" | tail -n 1 > two_factor.json
+          TEX_E2E_2FA_USER=$(python3 -c "import json; print(json.load(open('two_factor.json'))['user'])")
+          TEX_E2E_2FA_SECRET=$(python3 -c "import json; print(json.load(open('two_factor.json'))['secret'])")
+          echo "::add-mask::$TEX_E2E_2FA_SECRET"
+          export TEX_E2E_2FA_USER TEX_E2E_2FA_SECRET
           echo "127.0.0.1 test.localhost" | sudo tee -a /etc/hosts
           # --skip-assets: link the app's committed bundles where the web server looks
           mkdir -p sites/assets
           [ -e sites/assets/kamra ] || ln -s "$(pwd)/apps/kamra/kamra/public" sites/assets/kamra
+          # a paid guest change and a refund are made by a job (queue short): a worker runs them.
+          # The site's scheduler stays off: its every-15-minutes contract roll supersedes live
+          # versions without an end (IFNULL(active_to) <= now), which empties the current tables
           nohup bench serve --port 8000 > serve.log 2>&1 &
+          nohup bench worker --queue short,default > worker.log 2>&1 &
+          nohup bench schedule > schedule.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://test.localhost:8000/api/method/ping > /dev/null && break
             sleep 2
@@ -215,3 +250,14 @@ jobs:
             apps/kamra/e2e-report
             apps/kamra/e2e-results
             frappe-bench/serve.log
+
+      - name: Upload bench logs (web server, worker, scheduler)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-logs
+          path: |
+            frappe-bench/serve.log
+            frappe-bench/worker.log
+            frappe-bench/schedule.log
+          if-no-files-found: ignore

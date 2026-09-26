@@ -24,7 +24,7 @@ from kamra.tex.security.scope import require_capability
 
 CAP = "system.monitor"
 # per IP; an uptime monitor polls once a minute. site_config ``tex_ping_limit`` may raise it
-PING_LIMIT = {"limit": lambda: max(30, int(frappe.conf.get("tex_ping_limit") or 0)), "seconds": 60}
+PING_LIMIT = {"limit": lambda: max(30, int(frappe.conf.get("tex_ping_limit") or 0)), "seconds": 60}  # nosemgrep: frappe-breaks-multitenancy -- the lambda reads frappe.conf per call, on the request's site
 # the every-minute TEX job must have run this recently for ``scheduler`` to be true
 PING_JOB = "kamra.tex.scheduler.every_minute"
 

@@ -4,7 +4,7 @@
 // undo, the row terms popover and a rule for one room, the matrix's active period, the collapsed
 // chips and #boards, a phone, and a read-only published version.
 import { expect, test, type Locator, type Page } from "@playwright/test"
-import { api, login, trackErrors } from "./helpers"
+import { login, pageApiOk, trackErrors } from "./helpers"
 import { pickFrom } from "./flows/budget"
 import { archiveAll, DLX, newDraft as draftOf, ownerRates, periods, rooms, SUP, versionPath, watchContracts, Y } from "./flows/workspace"
 
@@ -102,7 +102,7 @@ test.describe.serial("boards", () => {
     // Save: ordinary board rows
     await page.getByRole("button", { name: /^Save/ }).first().click()
     await expect(page.getByText("Draft saved")).toBeVisible()
-    const v = await api<{ boards: Record<string, unknown>[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
+    const v = await pageApiOk<{ boards: Record<string, unknown>[] }>(page, "kamra.tex.api.contracts.get_version", { name: d.version })
     expect(v.boards.map((b) => `${b.board}:${b.is_base}:${b.is_base ? "" : `${b.op}:${Number(b.adult_amount)}:${Number(b.child_percent)}:${b.infant_free}`}:${b.room_type || ""}:${b.period_code || ""}`)).toEqual([
       "UAI:1:::",
       "AI:0:ADJUST_PERCENT:-5:50:1::",
@@ -276,7 +276,7 @@ test.describe.serial("boards", () => {
     await login(page, "revenue@demo.tex")
     const d = await newDraft(page, OWNER)
     made.push(d.contract)
-    await api(page.request, "kamra.tex.api.contracts.publish_version", { name: d.version })
+    await pageApiOk(page, "kamra.tex.api.contracts.publish_version", { name: d.version })
     await page.goto(versionPath(d, "#boards"))
     await expect(grid(page)).toHaveAttribute("aria-readonly", "true")
     await expect(shown(cell(page, "Half board · All periods"))).toHaveText("−20.00")

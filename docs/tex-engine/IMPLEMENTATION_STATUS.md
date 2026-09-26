@@ -32,6 +32,7 @@ several critical defects with probes and scratch tests that the suite does not c
 
 **CI.** `.github/workflows/ci.yml` runs all of the above including Playwright. It has never
 run on GitHub, because the repository has no base branch (BLOCKED, owner).
+**CI baseline (2026-09-26, PARTİ 1.5, ADR-063, PR #2).** GitHub CI runs on MariaDB 11.8 with `innodb_snapshot_isolation` OFF (set and checked; TEX also turns it off per request and job, and the status page fails while it is ON); every integration module runs and the red ones are listed at the end; Semgrep ERROR 6 → 0; the marketplace simulation passes. Local 11.8.9: `test_concurrency` 10/10 with it OFF (ON: 5 of 8 red, error 1020), 40/40 integration modules, 531 unit tests.
 
 **Resumed (2026-09-24) after a pause at the owner's request.** Everything is merged and pushed on `claude/inspiring-ptolemy-i6wdu2` (last code commit `3a5cc03`): G-41, G-45 (four review rounds), G-49, G-50, G-51, G-52, G-56, G-72, G-74, G-83, G-91, G-92, G-93, G-94, G-96, TEX operations. Open gaps: 0 Critical, 0 High, 24 Medium, 6 Low. The full regression on `3a5cc03` passed after the pause began: migrate from main, 28 integration modules (531 tests), the upstream suites (76/76, 13/13, banquet 101) and 39 Playwright tests with an RQ worker. Next: the remaining Medium gaps (G-84, G-65, G-66, G-76, G-81, …), a Playwright run of `site-day`, `pay-link`, `crs-actions` and `system-status` on the final commit, and the owner inputs in GO_LIVE_READINESS §3 (items 10–11 are new).
 
