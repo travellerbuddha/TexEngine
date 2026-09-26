@@ -1421,3 +1421,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-60 | Implementation order | **COMPLETE** (process) | phases followed pricing-first | — |
 | R-61 | Process rules | **COMPLETE** (process) | docs + ADRs + this single-state status | — |
 | R-62 | Definition of done | PARTIAL | — | FINAL_GAP_AUDIT §1 (Critical) is closed; priorities 1 (pricing) and 9 (security) still have High items open (§2), so not done. |
+
+## 5. Independent audit fixes (2026-09-26)
+
+- K-1 **COMPLETE**: a contract fixed offer is in the contract currency (frozen payload; legacy payload read so), converted to the sell currency via `promo_fx`, not applied without a rate (`PROMO_NO_FX`) · `unit/test_contract_offer_currency`, `integration/test_contract_offer_currency`.

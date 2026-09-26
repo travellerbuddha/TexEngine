@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -42,6 +43,7 @@ from kamra.tex.pricing.model import (
 	RoomSpec,
 	StayRequest,
 )
+from kamra.tex.pricing.promotions import offer_currency
 
 PAYLOAD_SCHEMA = "tex.contract.v1"
 
@@ -219,6 +221,13 @@ def normalise_payload(payload: dict) -> dict:
 	return json.loads(canonical_json(payload))
 
 
+def _offer(o: dict, contract_currency: str) -> Promotion:
+	"""A contract offer of a frozen payload; a fixed amount frozen without a currency (before K-1)
+	is in the contract's currency. The payload itself is never rewritten."""
+	p = promotion_from_dict({**o, "source": "contract"})
+	return replace(p, currency=offer_currency(p.value_type, p.currency, contract_currency))
+
+
 def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> ContractTerms:
 	if payload.get("schema") != PAYLOAD_SCHEMA:
 		raise PricingError(f"unsupported contract payload schema {payload.get('schema')!r}")
@@ -282,7 +291,7 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		property=c["property"], market=c["market"], currency=c["currency"].upper(),
 		basis=PricingBasis(c.get("basis") or "PERSON"), rooms=rooms, periods=periods, room_rules=room_rules,
 		occupancy_rules=occ, age_bands=bands, boards=board_rules, rate_plans=rate_plans,
-		offers=tuple(promotion_from_dict({**o, "source": "contract"}) for o in payload.get("offers") or []),
+		offers=tuple(_offer(o, c["currency"]) for o in payload.get("offers") or []),
 		sale_from=_d(c.get("sale_from")), sale_to=_d(c.get("sale_to")),
 		stay_from=_d(c.get("stay_from")), stay_to=_d(c.get("stay_to")), channels=_set(c.get("channels")),
 		priority=_int(c.get("priority")),
