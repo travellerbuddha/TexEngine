@@ -811,12 +811,21 @@ class RoomsNotHeld(frappe.ValidationError):
 	"""A booking whose rooms are not all held for it is never confirmed (K-2b)."""
 
 
+def cancelled_on_purpose(reservation: str) -> bool:
+	"""A room the guest or staff cancelled (it has its Cancellation revision): it left its booking.
+	A room released without one (an expired hold) was taken from it."""
+	return bool(frappe.db.exists("TEX Reservation Revision", {"reservation": reservation,
+	                                                         "change_type": "Cancellation"}))
+
+
 def rooms_not_held(b) -> list[str]:
 	"""The rooms of booking ``b`` that hold no inventory for it any more, read under their row
-	locks in name order (after the booking's lock: the order every TEX booking change takes)."""
+	locks in name order (after the booking's lock: the order every TEX booking change takes). A
+	room cancelled on purpose is no longer part of the booking, so it is not missing (B1)."""
 	names = sorted(r.reservation for r in b.rooms)
 	states = {n: frappe.db.get_value("Reservation", n, "status", for_update=True) for n in names}
-	return [n for n, st in states.items() if st not in (*holds.HOLDING, "Confirmed")]
+	return [n for n, st in states.items() if st not in (*holds.HOLDING, "Confirmed")
+	        and not (st == "Cancelled" and cancelled_on_purpose(n))]
 
 
 def confirm_booking(booking: str, *, reason: str | None = None) -> None:
@@ -844,7 +853,7 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 				res.tex_locked_at = now
 				res.flags.tex_modification = True
 				res.save(ignore_permissions=True)
-			row.status = "Confirmed"
+			row.status = res.status          # a room cancelled before the payment stays cancelled (B1)
 	finally:
 		frappe.flags.kamra_status_transition = False
 	xinv.confirm(booking)            # held extras units become confirmed (G-19)
@@ -853,7 +862,8 @@ def confirm_booking(booking: str, *, reason: str | None = None) -> None:
 		d = frappe.get_doc("TEX Promotion Redemption", r)
 		d.status = "Committed"
 		d.save(ignore_permissions=True)
-	b.status = "Confirmed"
+	# a booking one of whose rooms was cancelled before its payment is confirmed with the rest (B1)
+	b.status = "Partially Cancelled" if any(r.status == "Cancelled" for r in b.rooms) else "Confirmed"
 	b.save(ignore_permissions=True)
 	audit("booking.confirm", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      reason=reason)
@@ -1028,7 +1038,12 @@ def _refresh_booking_after_change(booking: str) -> None:
 			d.status = "Released"
 			d.save(ignore_permissions=True)
 	elif any(s == "Cancelled" for s in statuses):
-		b.status = "Partially Cancelled"
+		if b.status in holds.HOLDING and all(s in holds.HOLDING for s in statuses if s != "Cancelled"):
+			# never confirmed: it keeps waiting for its payment with the rooms it has left, which
+			# expire with its hold or are confirmed by its payment, never asking more than it costs (B1)
+			b.amount_due_now = min(from_db(b.amount_due_now, ccy), total)
+		else:
+			b.status = "Partially Cancelled"
 	paid = from_db(b.paid_amount, ccy)
 	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
 	b.save(ignore_permissions=True)

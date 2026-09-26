@@ -101,6 +101,8 @@ BEHAVIOUR = {
 	"p49_payment_attempt_deadline": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p50_payment_reconciliation": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p51_hold_minutes_per_payment_method": "test_patches.TestSmallPatches.test_p51_gives_each_payment_method_its_hold",
+	"p52_partly_cancelled_awaiting_payment": "test_hold_payment_race.TestPartialCancellation."
+	                                         "test_p52_puts_stuck_bookings_back_to_waiting_for_their_payment",
 }
 
 

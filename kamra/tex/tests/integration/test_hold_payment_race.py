@@ -452,3 +452,63 @@ class TestHoldPolicy(HoldCase):
 		                      expires_hours=72)
 		expires = frappe.db.get_value("TEX Payment Link", out["link"], "expires_at")
 		self.assertAlmostEqual((expires - now_datetime()).total_seconds() / 3600, 72, delta=0.1)
+
+
+class TestPartialCancellation(HoldCase):
+	"""B1 (audit 1b): a room of a booking still waiting for its payment is cancelled (by staff, or by
+	the guest on the manage page). The booking was never confirmed: it keeps waiting for its payment
+	with the rooms it has left, which expire with its hold, are confirmed by its payment, and whose
+	late payment is judged as any other late payment."""
+
+	def cancel_first(self, b: dict) -> None:
+		booking.cancel_reservation(self.rooms(b)[0], reason="one room less")
+
+	def test_the_booking_keeps_waiting_for_its_payment(self):
+		b = self.book(rooms=2)
+		self.cancel_first(b)
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Cancelled", "Pending Payment"]))
+		row = frappe.db.get_value("TEX Booking", b["booking"], ["total_amount", "amount_due_now"], as_dict=True)
+		self.assertLessEqual(row.amount_due_now, row.total_amount)          # never asks more than it costs
+
+	def test_the_rooms_left_expire_with_its_hold(self):
+		b = self.book(rooms=2)
+		self.cancel_first(b)
+		passes(b["booking"], 25)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled", "Cancelled"]))
+
+	def test_its_payment_confirms_the_rooms_left(self):
+		b = self.book(rooms=2)
+		payment = self.start_payment(b)
+		self.cancel_first(b)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Cancelled", "Confirmed"]))
+		self.assertEqual(confirmations(b), 1)
+
+	def test_its_late_payment_is_judged_as_a_late_payment(self):
+		b = self.book(rooms=2)
+		payment = self.start_payment(b)
+		self.cancel_first(b)
+		passes(b["booking"], 60)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled", "Cancelled"]))
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
+		self.assertEqual(paid(b), D(0))
+
+	def test_p52_puts_stuck_bookings_back_to_waiting_for_their_payment(self):
+		from kamra.tex.tests.integration.test_patches import migrate, never_ran
+
+		stuck, waiting, confirmed = self.book(rooms=2), self.book(rooms=2), self.book(rooms=2)
+		self.pays(self.start_payment(confirmed))
+		for b in (stuck, waiting, confirmed):
+			self.cancel_first(b)
+			# as the release before B1 left it
+			frappe.db.set_value("TEX Booking", b["booking"], "status", "Partially Cancelled")
+		passes(stuck["booking"], 25)                                    # its hold is over
+		never_ran("p52_partly_cancelled_awaiting_payment")
+		migrate("p52_partly_cancelled_awaiting_payment")
+		self.assertEqual(self.statuses(stuck), ("Cancelled", ["Cancelled", "Cancelled"]))
+		self.assertEqual(self.statuses(waiting), ("Pending Payment", ["Cancelled", "Pending Payment"]))
+		self.assertEqual(self.statuses(confirmed), ("Partially Cancelled", ["Cancelled", "Confirmed"]))
+		migrate("p52_partly_cancelled_awaiting_payment")                # a second run changes nothing
+		self.assertEqual(self.statuses(waiting), ("Pending Payment", ["Cancelled", "Pending Payment"]))
