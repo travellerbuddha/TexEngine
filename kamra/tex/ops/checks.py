@@ -94,6 +94,7 @@ TITLES: dict[str, str] = {
 	"payments.pending": "Pending card payments",
 	"payments.callbacks": "Payment callbacks",
 	"payments.reconciliation": "Payments in reconciliation",
+	"payments.overpaid": "Bookings paid more than they cost",
 	"holds.overdue": "Holds past their deadline",
 	"fx.rates": "FX rates",
 	"mail.account": "Outgoing e-mail account",
@@ -136,6 +137,8 @@ REASONS: dict[str, str] = {
 	                         "payment); the oldest has waited {hours} hours.",
 	"reconciliation_refund": "{count} payment(s) are queued for an automatic refund; the oldest has waited {hours} "
 	                         "hours.",
+	"bookings_overpaid": "{count} booking(s) hold more money than they cost ({cancelled} of them cancelled): refund "
+	                     "the excess, or move it to the booking it was meant for (Payments).",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
@@ -350,6 +353,14 @@ def reconciliation_check(*, action: int, action_since: datetime | None, refund: 
 			                    hours=round(age / 60, 1) if age is not None else None))
 	oldest = min((t for t in (action_since, refund_since) if t), default=None)
 	return make("payments.reconciliation", issues, scope="hotel", since=oldest, properties=properties)
+
+
+def overpaid_bookings_check(count: int, cancelled: int, oldest: datetime | None,
+                            properties: Iterable[str] = ()) -> dict:
+	"""P1-7 (audit 2B): bookings holding more money than they cost (``cancelled`` of them cancelled),
+	since the oldest one's last change: staff refund the excess or move it."""
+	issues = [issue("bookings_overpaid", WARN, count=count, cancelled=cancelled)] if count else []
+	return make("payments.overpaid", issues, scope="hotel", since=oldest, properties=properties)
 
 
 def fx_check(pairs: list[dict], today: date, properties: Iterable[str] = ()) -> dict:

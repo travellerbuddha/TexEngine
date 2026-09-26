@@ -685,6 +685,25 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		# money its booking cannot take: recorded, kept off it, in reconciliation (K-2b, K-2c)
 		late_payments.reconcile(txn, booking, why)
 		return None
+	if _system and txn.provider not in ("Manual", "Loyalty"):
+		from kamra.tex.services import guest_changes
+
+		if not guest_changes.request_of_charge(txn):
+			# money that came by itself (a gateway, a link, a transfer) is taken up to what the booking owes;
+			# the rest stays on the charge for staff, never twice on the booking (P1-7, ADR-065). A guest
+			# change's payment is its request's to apply (G-45); staff allocate knowingly
+			now = frappe.db.get_value("TEX Booking", booking, ["total_amount", "paid_amount", "currency"],
+			                          as_dict=True, for_update=True)
+			owed = max(ZERO, from_db(now.total_amount, now.currency) - from_db(now.paid_amount, now.currency))
+			if amount > owed:
+				excess = amount - owed
+				late_payments.keep_off(txn, booking, late_payments.OVERPAID, excess, (
+					f"{to_str(excess)} {txn.currency} of this payment is more than booking {booking} owed "
+					f"({to_str(owed)} {txn.currency}): it stays on the payment, off the booking. Refund it, or "
+					"allocate it to the booking the guest meant."))
+				amount = owed
+				if amount <= ZERO:
+					return None
 	# a refund still waiting for its answer takes the unallocated money first: it is not free
 	free = (from_db(txn.amount, txn.currency) - allocated_of(transaction, lock=True) - refunded_of(transaction, lock=True)
 	        - in_flight_of(transaction, lock=True))

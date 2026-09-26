@@ -1001,8 +1001,9 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	Locks the booking, then the reservation (then the guest's change requests): the order every
 	change to a TEX booking takes (review of ADR-044)."""
 	res = frappe.get_doc("Reservation", reservation)
+	was = None
 	if res.tex_booking:
-		frappe.db.get_value("TEX Booking", res.tex_booking, "name", for_update=True)
+		was = frappe.db.get_value("TEX Booking", res.tex_booking, "status", for_update=True)
 		res = frappe.get_doc("Reservation", reservation, for_update=True)
 	if not _guest_authorized:
 		scope.require("reservation.cancel", res.property)
@@ -1052,6 +1053,14 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
 		_refresh_booking_after_change(res.tex_booking)
+		b = frappe.db.get_value("TEX Booking", res.tex_booking, ["status", "paid_amount", "currency"], as_dict=True)
+		if was in holds.HOLDING and b.status == "Cancelled" and from_db(b.paid_amount, b.currency) > ZERO:
+			# over before it was ever confirmed: it owes nothing and holds no money; what it held comes
+			# off it for staff, the team told (P1-7, ADR-065). Never in the refresh: an expiry keys its own
+			from kamra.tex.services import late_payments
+
+			late_payments.money_off(res.tex_booking, why=late_payments.CANCELLED_UNPAID, key="cancelled",
+			                        guest_mail=False)
 		# never confirmed: what it owes now may be paid already (a first half came before this room left)
 		confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was cancelled")
 	# a guest's change still waiting for this room is void; a payment of it arriving later is

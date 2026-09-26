@@ -374,6 +374,37 @@ class TestMoneyForBookingsThatCannotTakeIt(HoldCase):
 			loyalty.redeem(guest, b["booking"], 50, idempotency_key=f"c5-{b['booking']}")
 		self.assertEqual(loyalty.balances(guest, prog.name)["available"], before)
 
+	def test_money_on_a_booking_cancelled_before_it_was_confirmed_comes_off_it(self):
+		"""P1-7 a (audit 2B, ADR-065): a booking waiting for its payment, part paid, is cancelled (by staff,
+		or by the guest online): its money comes off it into reconciliation for staff — never left on a
+		cancelled booking owing nothing — and the guest gets no late-payment e-mail."""
+		import json
+
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_self_service", 1)
+		for how in ("staff", "online"):
+			with self.subTest(how=how):
+				b = self.book(method="Card")
+				half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+				link = pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR",
+				                       description="First half", booking=b["booking"])
+				started = public.pay_link(token=link["token"])
+				public.mock_pay(transaction=started["transaction"], outcome="success",
+				                sig=started["fields"]["success_sig"])
+				t = started["transaction"]
+				self.assertEqual((self.statuses(b)[0], paid(b)), ("Pending Payment", half))
+				with mock.patch("kamra.tex.services.notify.payment_after_expiry") as guest_mail:
+					if how == "staff":
+						booking.cancel_reservation(self.rooms(b)[0], reason="the guest called to cancel")
+					else:
+						public.manage_cancel(token=b["manage_token"], reservation=self.rooms(b)[0], reason="plans")
+				guest_mail.assert_not_called()
+				self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+				self.assertEqual((paid(b), pay.allocated_of(t)), (D(0), D(0)))
+				self.assertEqual(txn_state(t).reconciliation, "Action Required")
+				why = frappe.get_all("TEX Audit Event", filters={"action": "payment.reconciliation_required",
+				                                                 "reference_name": t}, pluck="new_value")
+				self.assertEqual([json.loads(v)["why"] for v in why], ["CANCELLED_UNPAID"])
+
 	def test_staff_cannot_allocate_money_to_a_cancelled_booking(self):
 		source = self.book(method="Pay at Hotel", status="Confirmed")
 		txn = pay.record_manual(booking=source["booking"], amount="100", method="Cash", reference="till 4",
@@ -1695,6 +1726,25 @@ class TestPaymentLinkHold(HoldCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "cancelled"):
 			public.pay_link(token=second["token"])
 		self.assertEqual(paid(b), half)
+
+	def test_a_second_links_money_for_a_booking_already_paid_is_kept_off_it(self):
+		"""P1-7 b (audit 2B, ADR-065): two links for what the booking owes, both opened; the first pays it
+		(and closes the second); the second's open checkout is paid too: the booking takes at most what it
+		owes, the rest stays on the charge for staff (OVERPAID), never twice on the booking."""
+		import json
+
+		b = self.book(rate_plan="NRF")
+		first, second = self.send_link(b), self.send_link(b)
+		t1, t2 = public.pay_link(token=first["token"]), public.pay_link(token=second["token"])
+		for t in (t1, t2):
+			public.mock_pay(transaction=t["transaction"], outcome="success", sig=t["fields"]["success_sig"])
+		total = D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount"))
+		self.assertEqual((self.statuses(b)[0], paid(b)), ("Confirmed", total))
+		self.assertEqual(pay.allocated_of(t2["transaction"]), D(0))
+		self.assertEqual(txn_state(t2["transaction"]).reconciliation, "Action Required")
+		why = frappe.get_all("TEX Audit Event", filters={"action": "payment.reconciliation_required",
+		                                                 "reference_name": t2["transaction"]}, pluck="new_value")
+		self.assertEqual([json.loads(v)["why"] for v in why], ["OVERPAID"])
 
 	def test_a_link_asking_more_than_the_booking_owes_is_refused(self):
 		"""E4: a link left open (being paid when its booking was settled) never takes more than the
