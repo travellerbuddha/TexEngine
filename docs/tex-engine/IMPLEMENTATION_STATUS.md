@@ -1126,6 +1126,40 @@ Open: a refused publish still names every ERROR to a publisher without cost (ADR
 
 Status unchanged (PARTIAL): the final verification's open failures are not this group's.
 
+**Pricing Workspace, S16 re-review 5 follow-up, security and cost group (2026-09-26, ADR-061, branch `pricing-workspace`).**
+One medium and three low findings of the sixth review. The fixes:
+- A refused publish names, to a publisher without `price.view_cost`, only the errors that
+  publisher's own live check shows (`validate.refusal_errors`). Those are the same whatever a
+  hidden policy rule's op. If there are none, the refusal names nothing. Who sees cost is told the
+  full check's errors, as before.
+- Publish answers the warnings `get_version` gives the caller, to the letter: None to a caller with
+  neither `price.view_cost` nor `contract.edit`.
+- For a viewer without cost, the stored report is worked out once per report and process. Running
+  a stored sweep at its limit again is bounded, as `validate_version` is.
+- The publish audit counts the warnings that a viewer without cost is shown. The audit trail is read
+  with `reservation.view`, and the full count said how many warnings a policy's formulas decide.
+
+Tests with fail-first output are in ADR-061:
+- integration: the reproduction (INHERIT and MULTIPLY 0, same message), the no-error message, the
+  bounded and cached report, a publish-only profile, and the audit count under two policy values;
+- unit `TestRefusals`: the reproduction and 160 generated rule sets, each refused under every op.
+
+Verification:
+- Unit 525 OK, ruff clean.
+- Integration, all 40 modules: 865 tests, 864 OK (10 skipped) and 1 error. The error is
+  `test_system_status`'s weekday-dependent FX test; the site date was a Saturday.
+- After the audit count fix: 9 affected modules OK.
+- Upstream: 76/76, 13/13, banquet 101.
+- Details in ADR-061.
+
+Open:
+- `admin.audit_log` by reference needs only `reservation.view`. A republish's or a draft save's
+  audit entry shows changed contract rates old → new to a Reservations Agent. This is pre-existing
+  (ADR-053).
+- Refused publishes are neither audited nor limited.
+
+Status unchanged (PARTIAL).
+
 **Pricing Workspace status (R-04): PARTIAL (built: S1–S16, the S16 review, three re-review follow-ups and the existing-semantics follow-up, branch `pricing-workspace`; the final verification above is not green in every suite: two intermittent failures in the workspace's own specs (a key typed at once after Escape lost; one header-lane arrow step), and two outside it (`test_system_status`'s weekday-dependent FX test; two `entry-branding` navigation tests on the shared site's accumulated E2E data)).** Backend S2–S5 (opt-in: `workspace=1`; existing callers get main's answers)
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
 refs, exact child ages, `apply_op_values` and **GAP-12**: each night of the price test's internal quote

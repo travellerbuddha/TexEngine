@@ -124,12 +124,17 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     the workspace.
 14. Pricing Workspace and existing callers (ADR-061, "Existing semantics kept, the workspace's
     additions opt-in"). Existing callers of the contract endpoints get main's answers; the
-    workspace's additions are opt-in (`workspace=1`). Three differences hold for every caller,
+    workspace's additions are opt-in (`workspace=1`). Four differences hold for every caller,
     as security and tenancy fixes: (1) a draft naming another hotel's rate plan, cancellation
     policy or payment policy is refused wherever its terms are built (validate, price test,
     matrix, publish, ARI grid); (2) an editor without `price.view_cost` is not told what a
     pricing policy's formula decides by the live check, and (3) not in the report stored at
-    publish nor in the warnings a publish answers. Confirm them. Decide whether any addition
+    publish nor in the warnings a publish answers (none at all to a caller with neither
+    `price.view_cost` nor `contract.edit`); (4) a refused publish names, to a publisher without
+    `price.view_cost`, only the errors of their own live check, and none when every error depends
+    on a pricing policy's rules. Confirm them. Decide also who may read a contract version's audit
+    entries: today `reservation.view` is enough, and a republish's or a draft save's entry shows
+    changed contract rates old → new (ADR-061, S16 re-review 5 follow-up, Open). Decide whether any addition
     should hold for every caller: today the board checks (a board row for an unknown room or
     period, twin board rows) and the refusal of a blank rule value apply only in the workspace, so
     the contract detail page's and the ARI grid's publish still publish such a draft, and a blank
@@ -665,4 +670,14 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     included, from the sample parties, the live check or the stored report.
   - A publisher without cost is answered the warnings `get_version` gives them, not the whole
     stored report (owner input 14, difference 3).
+  - No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace S16 re-review 5 follow-up, security and cost group, on branch
+  `pricing-workspace` (ADR-061).
+  - A refused publish no longer tells a publisher without cost a hidden policy rule's op (owner
+    input 14, difference 4).
+  - A publish-only caller gets no warnings.
+  - The publish audit counts only the warnings a viewer without cost is shown.
+  - The stored report is worked out once, and running its sweep again is bounded.
+  - Open, for the owner: a contract version's audit entries show changed contract rates to anyone
+    with `reservation.view` (owner input 14; pre-existing).
   - No area status changes. Verdict unchanged: NOT READY.

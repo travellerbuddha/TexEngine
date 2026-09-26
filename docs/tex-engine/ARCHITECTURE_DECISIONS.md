@@ -8632,7 +8632,180 @@ is contained, so nothing was merged.
   audited.
   - Filtering the messages alone would not close the channel: the refusal itself is the answer.
     That needs an owner decision on publish semantics for such publishers.
+  - *Corrected in the S16 re-review 5 follow-up (below).* This reasoning was wrong. A publisher
+    can add an error that no op decides, for example a rule naming an unknown band. Then every
+    publish is refused, and only the message carries the bit. The message is now filtered. What
+    remains is described there.
 - *The publish audit* records `warnings: len(issues)`, the full count.
 - `test_existing_semantics.HIDEABLE` mirrors the old `HIDEABLE_CODES` and was left unchanged. The
   three codes added here are ERRORs, which a published version's report never holds, so its
   assertions are unaffected.
+
+**S16 re-review 5 follow-up, security and cost group (2026-09-26).** The sixth review raised one
+medium and three low findings for this group. Branch `pricing-workspace`.
+
+*Finding (medium).* A refused publish named every ERROR of the full check.
+- `publish` throws "Cannot publish: …" before anything is written or audited, and nothing limits
+  how often `publish_version` is called.
+- Take a publisher with `contract.edit` and `contract.publish` but without `price.view_cost`. They
+  add an error that no op decides, for example a version rule naming an unknown band (`save_version`
+  does not validate). Now every publish is refused.
+- The other errors then carry the hidden rule's op. Two version rules V-X and V-Y tie on the child
+  of 2A+1C, under a policy rule G-INF that names the infant band. With G-INF = INHERIT, the refusal
+  named the tie at "child 1 (INF)". With G-INF pricing, it named "child 1 (CHD)".
+- The re-review 4 follow-up had kept this open, because "the refusal itself is one bit". That was
+  wrong here: the refusal is forced, so only the message carries the bit.
+
+*Findings (low).*
+1. Take a caller with `contract.publish` but neither `contract.edit` nor `price.view_cost` (no
+   default profile is like this). Publish answered them the filtered report. `get_version` gives
+   the same caller the catalogue, with no report.
+2. The publish audit records the full warning count.
+3. For a viewer without cost, `get_version` ran the whole sweep again whenever the stored sweep had
+   reached its limit (200 rows). It did so on every call, with no bound.
+
+**Decision (S16 re-review 5 follow-up, security and cost group).**
+1. *A refused publish names, to a publisher without cost, only the errors of their own live check.*
+   - The refusal itself is unchanged: a publish is refused whenever the full check has an ERROR.
+     Who sees cost is told the full check's errors, as before.
+   - A caller without `price.view_cost` is told the ERRORs of `validate_terms(terms,
+     hidden=policy_rules(terms), board_checks=workspace)` (`validate.refusal_errors`). That is what
+     the caller's own live check shows, and none of it depends on a hidden op.
+   - If that list is empty, every error depends on a hidden rule. The message then names none:
+     "Cannot publish: the rules this draft inherits from a pricing policy make it unpublishable;
+     someone who may see cost can say why" (`UNEXPLAINED_REFUSAL`).
+   - This holds for every caller, the workspace's publish and an existing caller's alike. It is a
+     security fix: owner input 14, difference 4.
+   - What remains: the refusal still says that the full check failed.
+     - If the viewer's check shows an error that no op decides, the publish is refused whatever the
+       ops. The refusal then says nothing.
+     - Otherwise, whether it is refused can depend on a hidden op. This is the case when the
+       viewer's check is clean, or shows only a tie that a hidden rule may decide (named without
+       its slot). Not being refused is then a real, audited publish that puts the draft on sale.
+       This is the same one-shot exposure the re-review 4 follow-up accepted for the publish's
+       warnings.
+2. *Publish's warnings are exactly what `get_version` gives the caller.* It uses the same predicate
+   (`_sees_cost`):
+   - who has `price.view_cost` gets the full report;
+   - an editor without it gets the filtered report (`stored_report(formula=False)`);
+   - a caller with neither `price.view_cost` nor `contract.edit` gets None. `get_version` gives that
+     caller the catalogue.
+3. *The stored report is worked out once, and running the sweep again is bounded.*
+   - `stored_report(formula=False)` is kept per process, as the frozen terms are (`_TERMS`). The
+     key is (payload hash, report hash, sweep limit); a published version's payload and report
+     never change. It holds at most 256 reports and drops the oldest first. It returns a deep copy.
+   - When the stored sweep reached its limit (`validate.reruns_sweep`), the work runs inside the
+     caller's bound. `get_version` passes `_heavy("validate")`: 60 a minute and 3 at once per
+     user, web requests only.
+   - A publish, which already runs the full check, stays unbounded as before. Its answer fills the
+     cache for the `get_version` that follows.
+4. *The publish audit counts the warnings a viewer without cost is shown.*
+   - The `contract.publish` entry recorded `warnings: len(issues)`, the full count. That count says
+     how many warnings a hidden rule's op decides. It is readable by whoever reads the audit trail,
+     and `audit_log` by reference needs only `reservation.view`.
+   - The entry now records `len(stored_report(version, formula=False))`: the report as a viewer
+     without `price.view_cost` reads it, the same whatever those ops.
+   - That report is worked out once. It is also the answer to an editor without cost, and it fills
+     the cache for `get_version`.
+   - The full report stays stored on the version for those who see cost.
+
+**Deviations (S16 re-review 5 follow-up, security and cost group).**
+- *Low 2: the count of the filtered report,* the first of the finding's three options. There is no
+  per-field redaction in `audit_log`, so recording both counts "behind the cost capability" would
+  have needed one.
+- *Low 3 takes both suggestions:* the cache, and the bound on a miss that runs the sweep again. The
+  cache is per process, not in redis. A process entry cannot outlive a deploy that changes the
+  filter, and each worker works a report out once.
+- *`validate.refusal_errors` is new and pure.* The medium finding's fix is `contracts._refusal`,
+  but which errors are named is `refusal_errors`, so a unit test can check it without a bench.
+
+**Tests (S16 re-review 5 follow-up, security and cost group).**
+- *Integration, `test_pricing_workspace_api` (`TestInheritedTerms`): four new tests, one extended.*
+  - `test_a_refused_publish_tells_a_publisher_without_cost_what_its_live_check_tells`: the
+    reproduction on one draft. The draft has the V-X/V-Y tie and a rule naming band NOPE, under a
+    global policy whose infant rule is INHERIT in one run and MULTIPLY 0 in the other. It runs
+    through the workspace's publish and an existing caller's.
+    - The publisher without cost is told the same both times: "Cannot publish: " and their
+      `validate_version` errors (NOPE, and the tie at the CHD child).
+    - A Revenue Manager is told the INF slot in one run and the CHD slot in the other, as before.
+    - The draft stays a draft without a payload.
+  - `test_a_refusal_the_publishers_live_check_does_not_explain_names_nothing`: the viewer's check's
+    errors are removed (patched). The publisher without cost is told `UNEXPLAINED_REFUSAL`; a
+    Revenue Manager is told the tie.
+  - `test_a_stored_report_is_worked_out_once_and_its_sweep_run_again_bounded`, with a sweep limit
+    of 1 and an editor without cost:
+    - `get_version` is refused (429) while another check of theirs runs;
+    - it is then worked out once (`visible_issues` is called once);
+    - it is served again from the cache inside a running check;
+    - its sweep is the live one: the 1A+0C row only.
+  - `test_a_publisher_without_cost_is_told_the_warnings_get_version_gives_it`: two new subtests for
+    a publish-only profile (`price.view`, `contract.publish`), via the workspace and an existing
+    caller. The warnings are None, and `get_version` has no `validation_report`.
+  - `test_the_publish_audit_counts_the_warnings_a_viewer_without_cost_is_shown`: two identical
+    drafts, published under a global policy that prices the CHD child at 50 % (one more negative
+    total) and at 500 %. The stored reports hold 4 and 3 warnings. An editor without cost is shown 3
+    both times, and the audit entry records 3 both times. Fail-first, on the code before that fix:
+    `counted {50: 4, 500: 3}`, "4 != 3". This test was written after the others, when the audit's
+    reach was checked (see Open).
+  - Fail-first on the code before the fix (`5c3dfee` plus the tests): 4 tests, 5 failures and
+    1 error.
+    - Both refusal subtests failed: "…child 1 (INF) of TEX Test Resort-DLX 2A+1C…" != "…child 1
+      (CHD)…".
+    - Both publish-only subtests failed: the filtered rows, and `[]` is not None.
+    - The bound test failed: "RateLimitExceededError not raised".
+    - The no-error test errored: `UNEXPLAINED_REFUSAL` was missing, and the publisher had been
+      told the tie.
+- *Unit, 525 (523 + 2), `test_hidden_policy_ops.TestRefusals`:*
+  - the reproduction, with G-INF INHERIT and MULTIPLY 0;
+  - 160 generated rule sets. Each has a rule naming an unknown band, and most have two tied
+    version rules, so every op is refused. Every combination of the hidden rules' ops is tried, and
+    the message must be the same each time.
+  - Against the old behaviour (`refusal_errors` patched to return the full check's errors): 19
+    failures. The stored-sweep limit test also asserts `reruns_sweep`.
+- *Beyond the committed seeds (a script, not committed):*
+  - 1,500 generated sets (seeds 200–224), every one refused: no set was told differently under
+    different ops. With the old message, 50 sets were.
+  - 600 sets without a forced refusal (seeds 100–109): 189 were refused, none told differently.
+    4 refusals got the no-error message; each was a tie between two hidden rules of one policy,
+    which `policy_issues` keeps from going live.
+
+**Verification (S16 re-review 5 follow-up, security and cost group).** Main `1575c8b` is contained,
+so nothing was merged.
+- *Unit:* 525 OK. ruff is clean.
+- *Integration, all 40 modules, on `0283f86`* (before the audit count fix), migrated with the tree:
+  - 865 tests: 864 OK (10 skipped) and 1 error.
+  - The error is `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails`. The site date
+    was a Saturday, and this test depends on the weekday; it is not this group's.
+  - `test_pricing_workspace_api` passed 67, `test_existing_semantics` 13, the perf module 2.
+- *Integration after the audit count fix (`52fe929`):* 9 modules, all OK:
+  - `test_pricing_workspace_api` 68, `test_existing_semantics` 13, `test_pricing_policies` 14,
+    `test_cost_stage_privacy` 4, `test_security_regressions` 59;
+  - `test_commercial_flows` 63, `test_legacy_pricing_review` 23, `test_audit_trail` 15,
+    `test_security_hygiene` 14.
+- *Upstream with the tree (`0283f86`):* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Not run:* there is no frontend change, so no `tsc`, build, i18n or Playwright run. The frontend
+  never reads publish's `warnings`.
+
+**Open after the S16 re-review 5 follow-up, security and cost group.**
+- *The audit trail shows contract-rate changes to anyone who may view reservations.* This is
+  pre-existing on main `1575c8b` (ADR-053) and was checked with a probe that was not committed.
+  - `admin.audit_log`, filtered by a reference (`reference_doctype`, `reference_name`), needs only
+    `reservation.view` on the hotel. It returns each event's `new_value`.
+  - A Reservations Agent, who has no cost capability, read these entries for a republished
+    version:
+    - the `contract.publish` entry's `collections.room_rules.changed`: `{"value": ["100",
+      "123.45"]}`;
+    - the draft save's `collections.period_rates.changed`: the same.
+  - Changed occupancy rules, boards and offers of the version would show the same way.
+  - Pricing-policy rules appear by key only: a revised policy is a new source, so its rules show as
+    removed and added. A first publish lists row keys only.
+  - Contract rates are cost (G-11). Who may read which audit values is for the owner to decide
+    (ADR-053, ADR-056; GO_LIVE owner input 14).
+- *Refused publishes are neither audited nor limited.* A refusal still says that the full check
+  failed. Where the viewer's own check shows no error that no op decides, that can depend on a
+  hidden op, and a probe that is not refused publishes the draft, which is audited (decision 1).
+  A limit on refused publishes for callers without cost is possible if the owner wants one.
+- *`get_version` can answer 429.* For a viewer without cost, while three of that viewer's checks
+  run, it answers 429 on a published version whose stored sweep reached its limit and that this
+  process has not worked out yet.
+- *The report cache is per process.* Each worker works a report out once and keeps at most 256.
