@@ -34,11 +34,13 @@ def passes(booking_name: str, minutes: int) -> None:
 	"""``minutes`` go by for a booking: every deadline and start time it stored moves back."""
 	frappe.db.sql("""UPDATE `tabReservation` SET hold_expires_on = hold_expires_on - INTERVAL %(m)s MINUTE
 	                 WHERE tex_booking=%(b)s AND hold_expires_on IS NOT NULL""", {"m": minutes, "b": booking_name})
-	frappe.db.sql("""UPDATE `tabTEX Payment Transaction` SET creation = creation - INTERVAL %(m)s MINUTE
-	                 WHERE booking=%(b)s""", {"m": minutes, "b": booking_name})
+	# its charges: its own, and those of its payment links
+	of_booking = """(booking=%(b)s OR payment_link IN (SELECT name FROM `tabTEX Payment Link` WHERE booking=%(b)s))"""
+	frappe.db.sql(f"""UPDATE `tabTEX Payment Transaction` SET creation = creation - INTERVAL %(m)s MINUTE
+	                  WHERE {of_booking}""", {"m": minutes, "b": booking_name})
 	if frappe.db.has_column("TEX Payment Transaction", "expires_at"):
-		frappe.db.sql("""UPDATE `tabTEX Payment Transaction` SET expires_at = expires_at - INTERVAL %(m)s MINUTE
-		                 WHERE booking=%(b)s AND expires_at IS NOT NULL""", {"m": minutes, "b": booking_name})
+		frappe.db.sql(f"""UPDATE `tabTEX Payment Transaction` SET expires_at = expires_at - INTERVAL %(m)s MINUTE
+		                  WHERE {of_booking} AND expires_at IS NOT NULL""", {"m": minutes, "b": booking_name})
 	frappe.db.sql("""UPDATE `tabTEX Payment Link` SET expires_at = expires_at - INTERVAL %(m)s MINUTE
 	                 WHERE booking=%(b)s AND expires_at IS NOT NULL""", {"m": minutes, "b": booking_name})
 	if frappe.db.has_column("TEX Booking", "payment_attempt_until"):
@@ -430,13 +432,19 @@ class TestLastRoomRace(IntegrationTestCase):
 		t = txn_state(self.payment["transaction"])
 		self.assertEqual(t.status, "Succeeded")                                    # the money is never lost
 		audit = frappe.db.count("TEX Audit Event", {"action": "booking.confirm", "reference_name": self.a["booking"]})
+		expired_by = frappe.get_all("TEX Audit Event", filters={"action": "booking.expire",
+		                                                         "reference_name": self.a["booking"]}, pluck="source")
 		if status == "Confirmed":
+			self.assertEqual(expired_by, [])
 			self.assertEqual(rooms, ["Confirmed"])
 			self.assertEqual(pay.allocated_of(self.payment["transaction"]), D(self.a["due_now"]))
 			self.assertFalse(t.reconciliation)
 			self.assertEqual((audit, confirmations), (1, 1))
 		else:
 			self.assertEqual((status, rooms), ("Cancelled", ["Cancelled"]))
+			# B3 a): a payment that found A's rooms still held would have confirmed A, so the expiry job
+			# gave them back before the payment came — never the payment itself (D8)
+			self.assertEqual(expired_by, ["System"])
 			self.assertEqual(pay.allocated_of(self.payment["transaction"]), D(0))
 			self.assertIn(t.reconciliation, ("Action Required", "Refund Queued"))
 			self.assertEqual((audit, confirmations), (0, 0))                           # nothing sent to A
@@ -602,6 +610,19 @@ class TestPartialCancellation(HoldCase):
 		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Confirmed", "Cancelled"]))
 		self.assertFalse(txn_state(started["transaction"]).reconciliation)
 
+	def test_the_guest_cancelling_a_room_online_leaves_the_rest_waiting_for_what_it_needs(self):
+		"""D8 (audit 1c): the manage page's cancel of a room of a booking still waiting for its payment:
+		the rest keeps waiting, owing only its own deposit, and the guest's payment of it confirms it."""
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_self_service", 1)
+		b = self.book(rooms=2)
+		public.manage_cancel(token=b["manage_token"], reservation=self.rooms(b)[1], reason="one room less")
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment", "Cancelled"]))
+		due = D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now"))
+		self.assertEqual(due, (D(b["due_now"]) / 2).quantize(D("0.01")))       # one room's deposit left
+		self.assertEqual(self.pays(self.start_payment(b))["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Partially Cancelled", ["Confirmed", "Cancelled"]))
+		self.assertEqual(paid(b), due)
+
 	def test_p52_confirms_a_stuck_booking_whose_payment_was_taken(self):
 		"""D1 (audit 1c): before B1 a stuck booking (Partially Cancelled, never confirmed) took its
 		payment without confirming its rooms. p52 confirms it — never parks or expires it — and sends
@@ -696,6 +717,30 @@ class TestExpiryWithMoney(HoldCase):
 		self.assertEqual(D(json.loads(expired[0])["paid"]), part)                      # the amount is on record
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
 		                                                     "reference_name": txn}))
+
+	def test_a_part_paid_in_time_and_a_late_rest_are_each_flagged_once(self):
+		"""D8 (audit 1c): T1 pays a first half within the hold; T2 (the rest) is paid after it ended. T1
+		comes off the expired booking and T2 is kept off it: each flagged exactly once, however often
+		the job runs or the gateway calls."""
+		b = self.book(method="Card")
+		half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		links = [pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description=f"Half {i}",
+		                         booking=b["booking"]) for i in (1, 2)]
+		t1 = public.pay_link(token=links[0]["token"])
+		public.mock_pay(transaction=t1["transaction"], outcome="success", sig=t1["fields"]["success_sig"])
+		t2 = public.pay_link(token=links[1]["token"])                      # started within the hold
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		for _ in range(2):
+			public.mock_pay(transaction=t2["transaction"], outcome="success", sig=t2["fields"]["success_sig"])
+			run_expiry_jobs()
+		self.assertEqual((paid(b), pay.allocated_of(t1["transaction"]), pay.allocated_of(t2["transaction"])),
+		                 (D(0), D(0), D(0)))
+		for t in (t1, t2):
+			self.assertEqual(txn_state(t["transaction"]).reconciliation, "Action Required")
+			self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.reconciliation_required",
+			                                                     "reference_name": t["transaction"]}), 1)
 
 	def test_a_first_link_paid_before_the_hold_ended_goes_to_reconciliation(self):
 		"""The real flow: booked by card, the agent sends a link for half; the guest pays it; the rest

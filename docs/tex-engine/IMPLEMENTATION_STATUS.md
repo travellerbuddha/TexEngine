@@ -1443,3 +1443,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - D5 (audit 1c) **COMPLETE**: no payment link for a booking neither waiting nor confirmed (clear error); CRS "send link" hidden for it · `TestPaymentLinkHold.test_no_link_for_a_booking_that_expired`.
 - D6 (audit 1c) **COMPLETE**: a link made for a TEX reservation records its booking, so it holds its rooms and its payment is allocated to it · `TestPaymentLinkHold.test_a_link_for_a_reservation_pays_its_booking`.
 - D7 (audit 1c) **COMPLETE**: a link hold ends at the latest when the arrival day begins; cancelling a link gives its extension back (to the other open links or the method's own hold) · `TestPaymentLinkHold`.
+- D8 (audit 1c) **COMPLETE**: both thread races pin B3 a) (a cancelled A was expired by the job, never by its payment); tests for guest manage_cancel, part-paid T1 + late T2 flagged once each (plus D1/D5–D7 tests) · `test_hold_payment_race`.
