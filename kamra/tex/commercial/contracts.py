@@ -562,7 +562,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	re-review 4; a security fix for every caller, like the stored report's); to one who neither sees
 	cost nor edits contracts, None (``get_version`` gives it no report, S16 re-review 5). A refused
 	publish names to a publisher without ``price.view_cost`` only the errors its own live check shows
-	(``_refusal``, S16 re-review 5)."""
+	(``_refusal``), and the audit counts the warnings such a viewer is shown (S16 re-review 5)."""
 	version = frappe.get_doc("TEX Contract Version", name)
 	contract = frappe.get_doc("TEX Contract", version.contract)
 	scope.require("contract.publish", contract.property)
@@ -625,10 +625,15 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 		contract.status = "Active"
 	contract.flags.tex_lifecycle = True
 	contract.save(ignore_permissions=True)
-	# what was frozen, and how it differs from what sold before (G-74, ADR-053)
+	# the report just stored as a viewer without price.view_cost reads it: the same whatever a pricing
+	# policy's formulas (worked out once, ``stored_report``)
+	visible = stored_report(version, formula=False) or []
+	# what was frozen, and how it differs from what sold before (G-74, ADR-053). The warnings counted
+	# are the ones a viewer without cost is shown: the audit trail is read with reservation.view, and
+	# the full count would say how many a policy's formulas decide (S16 re-review 5)
 	audit("contract.publish", reference_doctype="TEX Contract Version", reference_name=version.name,
 	      property=contract.property, old={"selling": selling_before},
-	      new={"payload_hash": digest, "effective_from": str(eff), "warnings": len(issues), "selling": selling,
+	      new={"payload_hash": digest, "effective_from": str(eff), "warnings": len(visible), "selling": selling,
 	           "previous": {"version": previous.name, "payload_hash": previous.payload_hash} if previous else None,
 	           "collections": diffs.payload_diff(json.loads(previous.payload) if previous else None, payload)},
 	      reason=change_note)
@@ -639,7 +644,7 @@ def publish(name: str, effective_from=None, change_note: str | None = None, *, w
 	if scope.has_capability("price.view_cost", contract.property):
 		warnings = [i.to_dict(ref=workspace) for i in issues]
 	elif scope.has_capability("contract.edit", contract.property):
-		warnings = stored_report(version, formula=False)
+		warnings = visible
 	else:
 		warnings = None
 	return {"version": version.name, "payload_hash": digest, "effective_from": str(eff), "warnings": warnings}
