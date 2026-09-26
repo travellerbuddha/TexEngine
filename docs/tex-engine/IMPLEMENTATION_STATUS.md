@@ -1425,3 +1425,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 ## 5. Independent audit fixes (2026-09-26)
 
 - K-1 **COMPLETE**: a contract fixed offer is in the contract currency (frozen payload; legacy payload read so), converted to the sell currency via `promo_fx`, not applied without a rate (`PROMO_NO_FX`) · `unit/test_contract_offer_currency`, `integration/test_contract_offer_currency`.
+- K-2a **COMPLETE**: a TEX booking and all its rooms expire together under the booking lock; a payment attempt started within the hold keeps them only until its finite deadline (`expires_at`, p49) · `integration/test_hold_payment_race.TestAtomicExpiry`.

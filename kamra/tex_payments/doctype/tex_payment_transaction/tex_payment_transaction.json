@@ -26,6 +26,7 @@
   "card_last4",
   "actor",
   "completed_at",
+  "expires_at",
   "section_95",
   "raw_status",
   "error_code",
@@ -160,6 +161,12 @@
    "label": "Completed at"
   },
   {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Attempt open until",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_95",
    "fieldtype": "Section Break",
    "label": "Outcome"
@@ -192,7 +199,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-29 00:00:00.000000",
+ "modified": "2026-09-30 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Transaction",

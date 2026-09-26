@@ -28,6 +28,7 @@
   "payment_status",
   "payment_method",
   "amount_due_now",
+  "payment_attempt_until",
   "section_68",
   "rooms",
   "section_69",
@@ -188,6 +189,12 @@
    "options": "currency"
   },
   {
+   "fieldname": "payment_attempt_until",
+   "fieldtype": "Datetime",
+   "label": "Payment attempt open until",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_68",
    "fieldtype": "Section Break",
    "label": "Rooms"
@@ -256,7 +263,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-30 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Booking",

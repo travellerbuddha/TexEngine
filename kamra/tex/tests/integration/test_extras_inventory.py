@@ -134,7 +134,13 @@ class TestExtrasCapacity(ExtrasCase):
 		res = b["rooms"][0]["reservation"]
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
 		frappe.db.set_value("Reservation", res, "hold_expires_on", add_to_date(now_datetime(), minutes=-1))
-		expire_holds()                               # the legacy job cancels with a plain save
+		# its checkout is over too: a payment attempt keeps the rooms only until then (K-2a)
+		frappe.db.set_value("TEX Booking", b["booking"], "payment_attempt_until",
+		                    add_to_date(now_datetime(), minutes=-1))
+		expire_holds()                               # the PMS job leaves a TEX booking's rooms alone
+		from kamra.tex.services import booking as booking_svc
+
+		booking_svc.expire_pending_bookings()        # the booking and its rooms expire together (K-2a)
 		self.assertEqual(frappe.db.get_value("Reservation", res, ["status", "cancellation_reason"]),
 		                 ("Cancelled", "Payment failed"))             # G-86: it used to fail on the reason
 		self.assertEqual(self.sold("SPA", fx.d(6, 10)), 0)

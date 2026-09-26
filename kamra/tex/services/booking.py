@@ -29,9 +29,9 @@ from kamra.tex.pricing.enums import LineKind
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import RuleRef
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
-from kamra.tex.services import quoting
+from kamra.tex.services import holds, quoting
 
 SOURCE_BY_CHANNEL = {"DIRECT_WEB": "Website", "CALL_CENTER": "Phone", "OTA": "OTA", "META": "Website"}
 CREATED_VIA = {"DIRECT_WEB": "Booking Engine", "META": "Booking Engine", "CALL_CENTER": "Call Center",
@@ -1063,16 +1063,66 @@ def booking_summary(booking: str, *, replay: bool = False) -> dict:
 	}
 
 
+def expire_booking(booking: str, *, now: datetime | None = None) -> bool:
+	"""A booking waiting for its payment whose hold is over, with no payment attempt open, gives
+	back all its rooms at once (K-2a): the booking is locked, then its rooms in name order (the
+	order every change of a TEX booking takes), and the rooms and the booking are cancelled in
+	this one transaction; their held extras and coupon uses are released with them. A payment
+	attempt started within the hold keeps the rooms until its own deadline (``holds``), never
+	longer. → whether it expired."""
+	now = get_datetime(now or now_datetime())
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status not in holds.HOLDING or holds.in_flight(b, now):
+		return False
+	names = sorted(r.reservation for r in b.rooms)
+	for name in names:
+		frappe.db.get_value("Reservation", name, "name", for_update=True)
+	holding = [n for n in names if frappe.db.get_value("Reservation", n, "status") in holds.HOLDING]
+	deadline = holds.hold_deadline(booking, lock=True)
+	if (deadline and deadline > now) or (holding and not deadline):
+		return False            # still on hold, or rooms held without a deadline (never guessed)
+	frappe.flags.kamra_status_transition = True
+	frappe.flags.kamra_cancelling = True
+	try:
+		for name in holding:
+			res = frappe.get_doc("Reservation", name)
+			res.cancellation_reason = "Payment failed" if res.status == "Pending Payment" else "Other"
+			res.cancellation_note = "Hold / payment window expired"
+			res.status = "Cancelled"
+			res.cancelled_on = now
+			res.hold_expires_on = None
+			res.flags.tex_modification = True
+			res.save(ignore_permissions=True)
+	finally:
+		frappe.flags.kamra_status_transition = False
+		frappe.flags.kamra_cancelling = False
+	_refresh_booking_after_change(booking)
+	audit("booking.expire", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
+	      old={"status": b.status}, new={"status": frappe.db.get_value("TEX Booking", booking, "status"),
+	                                     "reservations": holding, "hold_deadline": str(deadline) if deadline else None,
+	                                     "payment_attempt_until": str(b.payment_attempt_until or "") or None})
+	return True
+
+
 def expire_pending_bookings() -> dict:
-	"""Scheduler: bookings whose payment hold expired follow their reservations."""
+	"""Scheduler: bookings whose hold is over, with no payment attempt open, expire with all their
+	rooms (``expire_booking``), each in its own transaction so a payment callback waits for at
+	most one booking's expiry (tests keep one transaction)."""
 	now = now_datetime()
 	n = 0
-	for name in frappe.get_all("TEX Booking", filters={"status": "Pending Payment"}, pluck="name"):
-		rooms = frappe.get_all("TEX Booking Room", filters={"parent": name}, pluck="reservation")
-		states = [frappe.db.get_value("Reservation", r, "status") for r in rooms]
-		if states and all(s == "Cancelled" for s in states):
-			_refresh_booking_after_change(name)
-			n += 1
+	for name in frappe.get_all("TEX Booking", filters={"status": ("in", list(holds.HOLDING))}, pluck="name"):
+		frappe.db.savepoint("tex_expire_booking")
+		try:
+			n += expire_booking(name, now=now)
+		except Exception:
+			try:
+				frappe.db.rollback(save_point="tex_expire_booking")
+			except Exception:
+				frappe.db.rollback()     # a deadlock victim's transaction is gone with its savepoint
+			log_exception(f"TEX booking expiry failed for {name}")
+			continue
+		if not frappe.flags.in_test:
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- one booking's expiry per transaction
 	return {"expired": n, "at": str(now)}
 
 

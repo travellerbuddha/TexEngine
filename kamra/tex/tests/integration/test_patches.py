@@ -98,6 +98,7 @@ BEHAVIOUR = {
 	"p47_g64_site_slugs": "test_patches.TestReportingPatches.test_p47_reports_sites_named_like_an_admin_page_once",
 	"p48_crm_privacy_third_review": "test_crm_third_review.TestP48."
 	                                "test_p48_marks_earlier_erasures_and_removes_what_they_left",
+	"p49_payment_attempt_deadline": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
 
@@ -1055,7 +1056,10 @@ class TestSmallPatches(PatchCase):
 				 ("TEX Payment Allocation", "idempotency_key")),
 				("p20_guest_change_requests", [("tex_booking", "doctype", "tex_guest_change_request"),
 				                               ("kamra", "doctype", "property")],
-				 ("Property", "tex_lower_price_refund"))):
+				 ("Property", "tex_lower_price_refund")),
+				("p49_payment_attempt_deadline", [("tex_payments", "doctype", "tex_payment_transaction"),
+				                                  ("tex_booking", "doctype", "tex_booking")],
+				 ("TEX Booking", "payment_attempt_until"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
 			self.assertTrue(frappe.db.has_column(*field), patch)            # synced on this site
 

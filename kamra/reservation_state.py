@@ -146,19 +146,26 @@ def find_by_idempotency(property: str, key: str) -> str | None:
 
 
 def expire_holds() -> dict:
-	"""Release Held / Pending Payment reservations past hold_expires_on."""
+	"""Release Held / Pending Payment reservations past hold_expires_on.
+
+	A TEX booking's rooms are not released here: the booking and all its rooms expire together,
+	under the booking's lock, and a payment attempt in flight keeps them until its deadline
+	(``kamra.tex.services.booking.expire_booking``, K-2a)."""
 	import frappe
 	from frappe.utils import now_datetime
 
 	if not frappe.db.has_column("Reservation", "hold_expires_on"):
 		return {"expired": 0}
 	now = now_datetime()
+	filters = {
+		"status": ("in", ["Held", "Pending Payment"]),
+		"hold_expires_on": ("<", now),
+	}
+	if frappe.db.has_column("Reservation", "tex_booking"):
+		filters["tex_booking"] = ("is", "not set")
 	rows = frappe.get_all(
 		"Reservation",
-		filters={
-			"status": ("in", ["Held", "Pending Payment"]),
-			"hold_expires_on": ("<", now),
-		},
+		filters=filters,
 		pluck="name",
 		limit=200,
 	)

@@ -23,6 +23,7 @@ from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
+from kamra.tex.services import holds
 from kamra.tex.services.txn import undo_step
 
 
@@ -321,9 +322,15 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		if not provider.can_add_checkout(txn.provider_ref):
 			_supersede(txn, "another checkout was asked for")
 	else:
+		# a booking waiting for its payment: the attempt is refused once its hold is over, else it
+		# keeps the rooms until its own deadline, never longer (K-2a)
+		held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
+		expires_at = holds.open_attempt(held, holds.TRANSFER if provider.name == holds.TRANSFER else method) \
+			if held else None
 		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
-		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation)
+		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation,
+		               expires_at=expires_at)
 	frappe.db.savepoint(CHECKOUT_SAVEPOINT)
 	try:
 		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,

@@ -786,6 +786,8 @@ BOOKING_SPECS = [
 		                                                  "Pay at Hotel"], default="Unpaid", in_standard_filter=1),
 		F("payment_method", "Data", "Payment method"),
 		F("amount_due_now", "Currency", "Due now", options="currency"),
+		# K-2a: a payment attempt started within the hold keeps the rooms until then, never longer
+		F("payment_attempt_until", "Datetime", "Payment attempt open until", read_only=1),
 		SB("Rooms"),
 		F("rooms", "Table", "Rooms", "TEX Booking Room"),
 		SB("Service"),
@@ -799,7 +801,8 @@ BOOKING_SPECS = [
 		F("manage_token_expires", "Datetime", "Manage link expires", read_only=1),
 		F("booking_site", "Link", "Booking site", "TEX Booking Site"),
 	], perms=BOOKING, autoname="TEX-.YYYY.-.#####", naming_rule="Expression (old style)", title_field="booker_name",
-	   search_fields="booker_name,booker_email,property,status"),
+	   search_fields="booker_name,booker_email,property,status",
+	   extra={"modified": "2026-09-30 00:00:00.000000"}),         # payment_attempt_until came later (K-2a)
 
 	dt("TEX Quote", B, [
 		F("property", "Link", "Hotel", "Property", in_list_view=1),
@@ -1105,6 +1108,8 @@ PAYMENT_SPECS = [
 		F("card_last4", "Data", "Card last 4", length=4),
 		F("actor", "Link", "Actor", "User"),
 		F("completed_at", "Datetime", "Completed at"),
+		# K-2a: a pending charge of a booking is a payment in flight only until then
+		F("expires_at", "Datetime", "Attempt open until", read_only=1),
 		SB("Outcome"),
 		F("raw_status", "Data", "Provider status"),
 		F("error_code", "Data", "Error code"),
@@ -1113,7 +1118,7 @@ PAYMENT_SPECS = [
 		F("return_url", "Small Text", "Return URL", read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-09-29 00:00:00.000000"}),         # the indexes above came later
+	   extra={"modified": "2026-09-30 00:00:00.000000"}),         # the indexes, then expires_at came later
 
 	dt("TEX Payment Allocation", PM, [
 		F("property", "Link", "Hotel", "Property"),
