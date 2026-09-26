@@ -1413,6 +1413,32 @@ class TestMoneyShownRight(HoldCase):
 		t = out["totals"]["EUR"]
 		self.assertEqual((D(t["charged"]), D(t["refunded"])), (D(a["due_now"]), D(a["due_now"])))
 
+	def test_a_capture_tex_refused_and_its_refund_are_both_left_out_of_the_payment_report(self):
+		"""K1 (audit 1c-son): a capture TEX refused to count (G-67: the gateway stated another amount) is
+		no charge of the booking, and the refund giving it back is no refund of the booking's money: both
+		are left out, never one without the other."""
+		import dataclasses
+
+		from kamra.tex.api import reports as rep_api
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b = self.book(room="DLX")
+		payment = self.start_payment(b)
+		real = MockProvider.handle_callback
+
+		def another_amount(provider, *args, **kw):
+			return dataclasses.replace(real(provider, *args, **kw), amount="1.00")
+
+		with mock.patch.object(MockProvider, "handle_callback", another_amount):
+			self.assertEqual(self.pays(payment)["status"], "Failed")
+		r = pay.refund(payment["transaction"], amount="1.00", reason="captured but refused",
+		               idempotency_key=f"k1-{b['booking']}")
+		self.assertEqual(r["status"], "Succeeded")
+		out = rep_api.report(view="payment", property=fx.PROPERTY, stay_from=str(fx.d(6, 1)), stay_to=str(fx.d(6, 30)))
+		t = out["totals"]["EUR"]
+		self.assertEqual((D(t["charged"]), D(t["refunded"])), (D(0), D(0)))
+		self.assertEqual([(m["charges"], m["refunds"]) for m in out["methods"]], [])
+
 	def test_a_link_whose_money_was_parked_is_not_paid(self):
 		b = self.book()
 		link = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",

@@ -704,7 +704,9 @@ def _payment(sel: Selection) -> dict:
 	bccy = "COALESCE(NULLIF(b.currency, ''), NULLIF(bp.currency, ''), 'EUR')"
 	tccy = f"COALESCE(NULLIF(t.currency, ''), {bccy})"
 	where = f"b.property IN %(hotels)s AND b.status != 'Draft' AND b.name IN ({stays})"
-	txn = f"t.property IN %(hotels)s AND {where}"
+	# a capture TEX refused to count (G-67) is no charge (Failed), so its refund is no refund of the
+	# booking's money: both left out, never one alone (K1)
+	txn = f"t.property IN %(hotels)s AND {where} AND NOT (t.txn_type = 'Refund' AND IFNULL(pt.status, 'Succeeded') != 'Succeeded')"
 	if sel.filters["currency"]:
 		where += f" AND {bccy} IN %(currency)s"
 		txn += f" AND {tccy} IN %(currency)s"
