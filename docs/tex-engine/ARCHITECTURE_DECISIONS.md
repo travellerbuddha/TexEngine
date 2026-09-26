@@ -9143,7 +9143,7 @@ the field with `is` in `or_filters`; kept readings are written out (an FX rate w
 the versions the roll superseded the state their contract's later publishes would have given them.
 - Guard `unit/test_nullable_date_filters.py` (AST): get_all/get_list/db.get_value/get_values/count/exists/delete/set_value/
   qb.get_query calls and `frappe.qb.DocType` comparisons in `kamra/`, field types from the DocType JSON; not raw SQL, Frappe-core
-  doctypes or filters built at run time; exceptions only in its reviewed `ALLOWED` list.
+  doctypes or run-time doctypes; a filter or qb table it cannot read fails it; exceptions only in reviewed `ALLOWED`/`UNREADABLE`.
 - Smoke `integration/test_scheduler_smoke.py`: each `kamra.tex.scheduler` entry point once over seeded data, clock frozen
   (freezegun, a kamra dev dependency), providers and network stubbed; a new "TEX …" Error Log or a broken seed fails it.
 - The Playwright run keeps the site scheduler off: wall-clock jobs (hold expiry, alerts) would act mid-spec; the smoke test

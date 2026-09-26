@@ -23,18 +23,25 @@ What this guard covers:
   ``a if c else b``);
 * dict filters, ``[field, op, value]`` and ``[doctype, field, op, value]`` lists, ``or_filters``;
 * query-builder comparisons ``T.field <op> value`` where ``T = frappe.qb.DocType(<doctype>)`` in
-  the same function or at module level;
+  the same function or at module level, one name or a tuple (``E, S = DocType(a), DocType(b)``), or
+  ``frappe.qb.DocType(<doctype>).field`` written in place;
 * a field is nullable when its DocType JSON in this repository gives it type Date or Datetime and
   neither ``reqd`` nor ``not_nullable``; ``creation`` / ``modified`` are never NULL.
+
+What it cannot read, it lists (``Unread``), and ``test_nothing_unreadable_is_left_out`` is red for
+each until it is made readable or given a reviewed ``UNREADABLE`` entry with its reason:
+* one of the calls above whose filters it cannot read while what builds them holds a comparison
+  operator (a filter from a parameter or a helper, a comprehension);
+* a ``frappe.qb.DocType(...)`` table whose doctype it cannot read, compared with ``<``/``<=``/``>``/``>=``.
 
 What it does not cover (it cannot tell, so it says nothing):
 * raw SQL (``frappe.db.sql``): plain SQL semantics, NULL matches no comparison;
 * doctypes whose JSON is not in this repository (Frappe core: Error Log, Email Queue, …) and
   custom fields added to them at install;
-* a doctype or filter computed at run time (a parameter, a helper's return value, a comprehension);
+* a call whose doctype is computed at run time (a parameter, a helper's return value);
   ``test_resolution_is_not_silently_empty`` checks that the scanner does resolve the known calls;
-* other APIs (``frappe.get_doc(dt, filters)``, reports, ``frappe.qb`` tables taken from a function
-  argument).
+* other APIs (``frappe.get_doc(dt, filters)``, reports), query-builder columns read by subscript
+  (``T["field"]``) or through ``Field``/``Criterion`` objects, and tables passed in as arguments.
 """
 
 from __future__ import annotations
@@ -66,6 +73,8 @@ ALLOWED: dict[tuple[str, str, str, str], str] = {
 		"legacy Kamra PMS laundry report, not a TEX flow. >= leaves an order without a delivery time out of "
 		"the window, which is right: its revenue has no day to fall on",
 }
+# (path under the repo, function, what) -> why a call the scanner cannot read is safe (reviewed)
+UNREADABLE: dict[tuple[str, str, str], str] = {}
 
 
 def doctype_fields() -> dict[str, dict[str, dict]]:
@@ -99,6 +108,10 @@ def dotted(node) -> str:
 	return ""
 
 
+def is_qb_table(node) -> bool:
+	return isinstance(node, ast.Call) and dotted(node.func) in ("frappe.qb.DocType", "DocType") and bool(node.args)
+
+
 def text(node) -> str | None:
 	return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
@@ -108,6 +121,22 @@ class Cond:
 	doctype: str | None          # a [doctype, field, op, value] row names its own (child) doctype
 	field: str
 	op: str
+
+
+@dataclass
+class Unread:
+	"""A call or query-builder table the scanner could not read while a comparison is in play."""
+	path: str
+	function: str
+	line: int
+	what: str
+
+	@property
+	def key(self):
+		return (self.path, self.function, self.what)
+
+	def __str__(self):
+		return f"{self.path}:{self.line} {self.function}: {self.what} cannot be read"
 
 
 @dataclass
@@ -144,6 +173,7 @@ class Scope:
 		self.strings: dict[str, str] = {}
 		self.values: dict[str, list] = {}           # name -> every expression that builds it
 		self.tables: dict[str, str] = {}             # name -> doctype of frappe.qb.DocType(...)
+		self.unknown_tables: dict[str, str] = {}     # name -> the DocType(...) argument it cannot read
 		for node in body:
 			for sub in ast.walk(node) if parent else [node]:
 				self._note(sub)
@@ -153,6 +183,11 @@ class Scope:
 			for target in node.targets:
 				if isinstance(target, ast.Name):
 					self._assign(target.id, node.value)
+				elif isinstance(target, ast.Tuple | ast.List) and isinstance(node.value, ast.Tuple | ast.List) \
+						and len(target.elts) == len(node.value.elts):
+					for name, value in zip(target.elts, node.value.elts, strict=True):  # E, S = DocType(a), DocType(b)
+						if isinstance(name, ast.Name):
+							self._assign(name.id, value)
 				elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
 					key = text(target.slice)
 					if key is not None:
@@ -173,10 +208,11 @@ class Scope:
 	def _assign(self, name: str, value):
 		if (s := text(value)) is not None:
 			self.strings[name] = s
-		elif isinstance(value, ast.Call) and dotted(value.func) in ("frappe.qb.DocType", "DocType") \
-				and value.args:
+		elif is_qb_table(value):
 			if (dt := self.string(value.args[0])) is not None:
 				self.tables[name] = dt
+			else:
+				self.unknown_tables[name] = ast.unparse(value.args[0])
 		self.values.setdefault(name, []).append(value)
 
 	def string(self, node) -> str | None:
@@ -195,6 +231,14 @@ class Scope:
 		while scope:
 			if name in scope.tables:
 				return scope.tables[name]
+			scope = scope.parent
+		return None
+
+	def unknown_table(self, name: str) -> str | None:
+		scope = self
+		while scope:
+			if name in scope.unknown_tables:
+				return scope.unknown_tables[name]
 			scope = scope.parent
 		return None
 
@@ -297,7 +341,7 @@ class Scanner(ast.NodeVisitor):
 		self.scope, self.function = self.module, "<module>"
 		self.findings: list[Finding] = []
 		self.resolved = 0                          # calls whose doctype and filters were read
-		self.unresolved: list[str] = []
+		self.unresolved: list[Unread] = []
 
 	def visit_FunctionDef(self, node):
 		outer = (self.scope, self.function)
@@ -342,7 +386,8 @@ class Scanner(ast.NodeVisitor):
 				# not readable here (a parameter, a document name, a computed filter): listed when what
 				# builds it holds a comparison operator
 				if self._holds_comparison(group):
-					self.unresolved.append(f"{self.path}:{call.lineno} {self.function}: {api}({doctype!r})")
+					what = f"{api}({ast.unparse(_arg(call, 0, 'doctype', 'dt', 'table'))})"
+					self.unresolved.append(Unread(self.path, self.function, call.lineno, what))
 				return
 			rows += more
 		self.resolved += 1
@@ -384,15 +429,28 @@ class Scanner(ast.NodeVisitor):
 				compares.append(node)
 		for node in compares:
 			for side in (node.left, node.comparators[0]):
-				if isinstance(side, ast.Attribute) and isinstance(side.value, ast.Name):
-					doctype = self.scope.table(side.value.id)
-					if doctype and nullable_date(self.fields, doctype, side.attr) \
-							and (side.value.id, side.attr) not in checked:
-						self.findings.append(Finding(self.path, self.function, node.lineno, "frappe.qb",
-						                             doctype, side.attr, QB_OPS[type(node.ops[0])]))
+				if not isinstance(side, ast.Attribute):
+					continue
+				if is_qb_table(side.value):                                # frappe.qb.DocType("X").field < y
+					doctype, key = self.scope.string(side.value.args[0]), None
+					if doctype is None:
+						self.unresolved.append(Unread(self.path, self.function, node.lineno,
+						                              f"frappe.qb.DocType({ast.unparse(side.value.args[0])})"))
+						continue
+				elif isinstance(side.value, ast.Name):
+					doctype, key = self.scope.table(side.value.id), (side.value.id, side.attr)
+					if doctype is None and (unknown := self.scope.unknown_table(side.value.id)) is not None:
+						self.unresolved.append(Unread(self.path, self.function, node.lineno,
+						                              f"frappe.qb.DocType({unknown})"))
+						continue
+				else:
+					continue
+				if doctype and nullable_date(self.fields, doctype, side.attr) and key not in checked:
+					self.findings.append(Finding(self.path, self.function, node.lineno, "frappe.qb",
+					                             doctype, side.attr, QB_OPS[type(node.ops[0])]))
 
 
-def scan() -> tuple[list[Finding], int, list[str]]:
+def scan() -> tuple[list[Finding], int, list[Unread]]:
 	fields = doctype_fields()
 	findings, resolved, unresolved = [], 0, []
 	for path in sorted(APP.rglob("*.py")):
@@ -404,7 +462,7 @@ def scan() -> tuple[list[Finding], int, list[str]]:
 		scanner.visit(tree)
 		findings += {(f.line, f.doctype, f.field, f.op): f for f in scanner.findings}.values()
 		resolved += scanner.resolved
-		unresolved += scanner.unresolved
+		unresolved += {(u.line, u.what): u for u in scanner.unresolved}.values()
 	return findings, resolved, unresolved
 
 
@@ -424,6 +482,17 @@ class TestNullableDateFilters(unittest.TestCase):
 		for key, reason in ALLOWED.items():
 			self.assertIn(key, keys, f"stale ALLOWED entry: {key}")
 			self.assertGreater(len(reason.strip()), 20, f"ALLOWED entry without a reason: {key}")
+
+	def test_nothing_unreadable_is_left_out(self):
+		# a call it cannot read never drops out of the guard in silence (review round 1)
+		open_ = [u for u in self.unresolved if u.key not in UNREADABLE]
+		self.assertEqual(open_, [], "the guard cannot read these; make them readable (literal filters, a "
+		                 "frappe.qb.DocType of a string) or add a reviewed UNREADABLE entry with its reason:\n"
+		                 + "\n".join(map(str, open_)))
+		keys = {u.key for u in self.unresolved}
+		for key, reason in UNREADABLE.items():
+			self.assertIn(key, keys, f"stale UNREADABLE entry: {key}")
+			self.assertGreater(len(reason.strip()), 20, f"UNREADABLE entry without a reason: {key}")
 
 	def test_resolution_is_not_silently_empty(self):
 		# the scanner reads the calls it claims to read: a broken resolver would pass everything
@@ -454,12 +523,24 @@ def qb(now):
 def qb_explicit(now):
 	v = frappe.qb.DocType("TEX Contract Version")
 	return frappe.qb.from_(v).select(v.name).where(v.active_to.isnull() | (v.active_to > now))
+def qb_tuple(now):
+	v, s = frappe.qb.DocType("TEX Contract Version"), frappe.qb.DocType("TEX Audit Scope")
+	return frappe.qb.from_(v).select(v.name).where(v.active_to <= now)
+def unreadable(now, more):
+	return frappe.get_all(DT, filters=[["active_to", "<=", now], *more])
+def qb_unknown(doctype, now):
+	t = frappe.qb.DocType(doctype)
+	return frappe.qb.from_(t).select(t.name).where(t.active_to < now)
 '''
 		tree = ast.parse(src)
 		scanner = Scanner("probe.py", tree, doctype_fields())
 		scanner.visit(tree)
 		self.assertEqual(sorted((f.function, f.field, f.op) for f in scanner.findings),
-		                 [("built", "active_to", "<"), ("qb", "active_to", "<"), ("roll", "active_to", "<=")])
+		                 [("built", "active_to", "<"), ("qb", "active_to", "<"), ("qb_tuple", "active_to", "<="),
+		                  ("roll", "active_to", "<=")])
+		# what it cannot read, it lists: the guard is red for these until they are made readable or reviewed
+		self.assertEqual(sorted((u.function, u.what) for u in scanner.unresolved),
+		                 [("qb_unknown", "frappe.qb.DocType(doctype)"), ("unreadable", "frappe.get_all(DT)")])
 
 
 if __name__ == "__main__":
