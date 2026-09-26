@@ -1,4 +1,5 @@
-"""Guest notifications (transactional e-mail) for TEX bookings and payment links.
+"""Guest notifications (transactional e-mail) for TEX bookings and payment links, and the hotel
+reservations team's notice of money kept off a booking (B5).
 
 Bearer secrets (manage-booking tokens, payment-link tokens) exist in clear only at
 the moment they are created; they go straight into the e-mail and are never stored
@@ -23,7 +24,7 @@ from email.utils import formataddr
 import frappe
 from frappe.utils import escape_html, validate_email_address
 
-from kamra.tex.lib_text import render
+from kamra.tex.lib_text import AFTER_EXPIRY_NEXT, render
 from kamra.tex.money import from_db, to_str
 from kamra.tex.security.audit import log_exception
 from kamra.tex.services.txn import transaction_lost, undo_step
@@ -185,3 +186,64 @@ def payment_link(link_name: str, url: str, lang: str = "en") -> bool:
 	return _deliver(link.guest_email, subject, body, reference=("TEX Payment Link", link.name), guest=guest,
 	                property=link.property, template="payment_link", booking=link.booking,
 	                log_title=f"TEX payment-link e-mail {link_name}")["queued"]
+
+
+def reconciliation(txn, booking: str, state: str, note: str, amount) -> None:
+	"""B5: money kept off its booking (reconciliation). The hotel's reservations team is e-mailed (the
+	hotel's e-mail, else the TEX Settings status-alert recipients); the guest who paid — not money staff
+	took at the desk, whom they already told — is told the booking could not take it and what happens
+	to it (``payment_after_expiry``). Best-effort: never fails the payment."""
+	team_notice(txn, booking, state, note, amount)
+	if txn.provider != "Manual":
+		payment_after_expiry(booking, "refund" if state == "Refund Queued" else "contact", amount, txn.currency)
+
+
+def team_recipients(property: str) -> list[str]:
+	from kamra.tex.ops import alerts
+
+	email = (frappe.db.get_value("Property", property, "email") or "").strip()
+	return [email] if email and validate_email_address(email) else alerts.recipients()
+
+
+def team_notice(txn, booking: str | None, state: str, note: str, amount) -> None:
+	"""The hotel's reservations team: a payment is in reconciliation (``state``), why, and where to act."""
+	try:
+		to = team_recipients(txn.property)
+		subject = f"TEX: payment {txn.name} for booking {booking or '-'} is in reconciliation ({state})"
+		body = (f"A payment of <b>{escape_html(to_str(amount))} {escape_html(txn.currency)}</b> ({escape_html(txn.name)}, "
+		        f"{escape_html(txn.method or '')}) could not be taken by booking <b>{escape_html(booking or '-')}</b>: it is kept "
+		        f"off the booking in reconciliation, <b>{escape_html(state)}</b>.<br><br>{escape_html(note)}<br><br>"
+		        "Open TEX → Payments → this payment to allocate or refund it.")
+	except Exception as e:
+		if transaction_lost(e):
+			raise
+		log_exception(f"TEX reconciliation notice {txn.name}")
+		return
+	for address in to:
+		_deliver(address, subject, body, reference=("TEX Payment Transaction", txn.name), guest=None,
+		         property=txn.property, template="reconciliation_notice", booking=booking,
+		         log_title=f"TEX reconciliation notice {txn.name}")
+
+
+def payment_after_expiry(booking: str, next_step: str, amount, currency: str) -> None:
+	"""The guest: their payment of ``amount`` came when the booking could no longer take it; ``next_step``
+	"refund" (refunded by itself) or "contact" (the hotel decides)."""
+	try:
+		b = frappe.get_doc("TEX Booking", booking)
+		if not b.booker_email:
+			return
+		lang = (b.language or "en")[:2]
+		lang = lang if lang in LANGS else "en"
+		hotel = frappe.db.get_value("Property", b.property, "property_name") or b.property
+		subject, body = render("payment_after_expiry", lang, hotel=escape_html(hotel), ref=escape_html(b.name),
+		                       name=escape_html(b.booker_name or ""),
+		                       total=escape_html(f"{to_str(amount)} {currency}"),
+		                       next=AFTER_EXPIRY_NEXT[next_step][lang])
+	except Exception as e:
+		if transaction_lost(e):
+			raise                            # reads only: nothing to undo, but the transaction is gone
+		log_exception(f"TEX late payment e-mail {booking}")
+		return
+	_deliver(b.booker_email, subject, body, reference=("TEX Booking", b.name), guest=b.booker_guest,
+	         property=b.property, template="payment_after_expiry", booking=b.name,
+	         log_title=f"TEX late payment e-mail {booking}", booking_site=b.booking_site)

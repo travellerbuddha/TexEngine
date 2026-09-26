@@ -198,7 +198,20 @@ export default function Transactions() {
                         </div>
                       ),
                     },
-                    { key: "status", header: t("core.label.status"), hideBelow: "sm", cell: (r) => <TxnStatusBadge status={r.status} /> },
+                    {
+                      key: "status",
+                      header: t("core.label.status"),
+                      hideBelow: "sm",
+                      cell: (r) => (
+                        <span className="inline-flex flex-wrap gap-1">
+                          <TxnStatusBadge status={r.status} />
+                          {/* kept off every booking, waiting for staff or its refund (B5) */}
+                          {(r.reconciliation === "Action Required" || r.reconciliation === "Refund Queued") && (
+                            <Badge tone="warning">{t("payments.recon.badge")}</Badge>
+                          )}
+                        </span>
+                      ),
+                    },
                     ...(q.data?.some(reverifiable)
                       ? [
                           {

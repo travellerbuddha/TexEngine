@@ -147,7 +147,13 @@ function Confirmation({ booking }: { booking: string }) {
   let tone = "text-ok"
   let title = t("confirm.confirmedTitle")
   let body = payAtHotel ? t("confirm.confirmedPayAtHotel") : t("confirm.confirmedBody")
-  if (data.status === "Cancelled") {
+  if (data.status === "Cancelled" && data.late_payment) {
+    // its money came when it could no longer take it: never "payment received" (B5)
+    Icon = Clock
+    tone = "text-warn"
+    title = t("manage.lateTitle")
+    body = t(data.late_payment === "refund" ? "manage.lateRefund" : "manage.lateContact")
+  } else if (data.status === "Cancelled") {
     Icon = XCircle
     tone = "text-bad"
     title = t("confirm.cancelledTitle")

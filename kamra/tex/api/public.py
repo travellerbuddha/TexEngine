@@ -23,7 +23,7 @@ from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import content, guest_changes, modification, quoting, sites
+from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, sites
 from kamra.tex.services.txn import retry_on_deadlock, undo_step
 
 
@@ -564,7 +564,9 @@ def payment_link(token: str):
 	        "paid": to_str(from_db(link.paid_amount, link.currency)), "currency": link.currency,
 	        "status": link.status, "expires_at": str(link.expires_at), "guest_name": link.guest_name,
 	        "hotel": frappe.db.get_value("Property", link.property, "property_name"),
-	        "methods": [m for m in methods if m["method"] == "Card"]}
+	        "methods": [m for m in methods if m["method"] == "Card"],
+	        # its booking could not take the money: "refund" / "contact" (B5)
+	        "late_payment": late_payments.guest_notice(link.booking)}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -798,7 +800,9 @@ def _guest_booking(b) -> dict:
 	        # being applied comes first (G-45)
 	        "changes_blocked": blocked,
 	        # the hotel takes cards online for this booking (a balance paid at the hotel may be paid now)
-	        "can_pay_online": bool(guest_changes.card_account(b))}
+	        "can_pay_online": bool(guest_changes.card_account(b)),
+	        # money that came when the booking could no longer take it: "refund" / "contact" (B5)
+	        "late_payment": late_payments.guest_notice(b.name)}
 
 
 def _own_reservation(b, reservation: str) -> None:

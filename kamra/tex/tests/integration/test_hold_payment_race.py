@@ -667,3 +667,86 @@ class TestPaidInTime(HoldCase):
 			self.assertEqual(self.pays(payment)["status"], "Succeeded")
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
+
+
+class TestReconciliationVisible(HoldCase):
+	"""B5 (audit 1b): money kept off its booking is seen. The status page counts it with its age, the
+	hotel's reservations team is e-mailed, the staff API says what happened to it, and the guest is
+	told the payment came after the booking's time to pay — never "payment received"."""
+
+	TEAM = "reservations.b5@example.com"
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
+
+		ensure_test_outbox()
+		frappe.db.set_value("Property", fx.PROPERTY, "email", self.TEAM)
+
+	def late(self, room: str = "STD") -> tuple[dict, dict]:
+		b = self.book(room=room)
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)
+		run_expiry_jobs()
+		return b, payment
+
+	def recipients(self, doctype: str, name: str) -> list[str]:
+		queues = frappe.get_all("Email Queue", filters={"reference_doctype": doctype, "reference_name": name},
+		                        pluck="name")
+		return frappe.get_all("Email Queue Recipient", filters={"parent": ("in", queues or [""])}, pluck="recipient")
+
+	def reconciliation(self) -> dict:
+		from kamra.tex.ops import status as system_status
+
+		return next(c for c in system_status.collect(properties=[fx.PROPERTY]) if c["key"] == "payments.reconciliation")
+
+	def test_the_status_page_counts_it_with_its_age(self):
+		before = self.reconciliation()
+		waiting = sum(i["params"]["count"] for i in before["issues"] if i["reason"] == "reconciliation_action")
+		_b, payment = self.late()
+		self.pays(payment)
+		check = self.reconciliation()
+		action = next(i for i in check["issues"] if i["reason"] == "reconciliation_action")
+		self.assertEqual(action["params"]["count"], waiting + 1)
+		self.assertIn(fx.PROPERTY, check["properties"])
+		if not waiting:
+			self.assertEqual((check["status"], action["params"]["hours"]), ("warn", 0.0))
+		frappe.db.sql("""UPDATE `tabTEX Audit Event` SET event_time = event_time - INTERVAL 25 HOUR
+		                 WHERE action='payment.reconciliation_required' AND reference_name=%s""", payment["transaction"])
+		self.assertEqual(self.reconciliation()["status"], "fail")              # a day with no one acting on it
+
+	def test_the_reservations_team_and_the_guest_are_told(self):
+		b, payment = self.late()
+		self.pays(payment)
+		self.assertIn(self.TEAM, self.recipients("TEX Payment Transaction", payment["transaction"]))
+		self.assertIn(GUEST["email"], self.recipients("TEX Booking", b["booking"]))
+		sent = frappe.get_all("TEX Communication", filters={"booking": b["booking"]}, pluck="template")
+		self.assertIn("payment_after_expiry", sent)
+		self.assertNotIn("payment_received", sent)
+
+	def test_the_staff_api_and_the_guest_page_say_what_happened(self):
+		from kamra.tex.api import payments as payments_api
+
+		b, payment = self.late()
+		self.pays(payment)
+		detail = payments_api.transaction(payment["transaction"])
+		self.assertEqual(detail["reconciliation"], "Action Required")
+		self.assertIn(b["booking"], detail["reconciliation_note"])
+		listed = payments_api.transactions(property=fx.PROPERTY, booking=b["booking"])
+		self.assertEqual(listed[0]["reconciliation"], "Action Required")
+		guest = public.booking_status(token=b["manage_token"])
+		self.assertEqual((guest["status"], guest["late_payment"]), ("Cancelled", "contact"))
+
+	def test_money_whose_rooms_were_sold_is_announced_as_a_refund(self):
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		a, payment = self.late(room="DLX")
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")              # the last room, to B
+		self.pays(payment)
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Refund Queued")
+		self.assertEqual(public.booking_status(token=a["manage_token"])["late_payment"], "refund")
+
+	def test_a_booking_that_took_its_money_announces_nothing(self):
+		b = self.book()
+		self.pays(self.start_payment(b))
+		self.assertIsNone(public.booking_status(token=b["manage_token"])["late_payment"])
+		self.assertNotIn(self.TEAM, self.recipients("TEX Booking", b["booking"]))

@@ -250,6 +250,23 @@ def _payments_callbacks(props, now) -> dict:
 	                         refunds_unknown=len(unknown), refund_conflicts=len(conflicts), properties=hotels)
 
 
+def _payments_reconciliation(props, now) -> dict:
+	"""Money kept off every booking (B5), per state, aged from when it went to reconciliation."""
+	params: dict = {}
+	cond = _scope("t.property", props, params)
+	rows = frappe.db.sql(f"""SELECT t.property, t.reconciliation state, COUNT(*) n,
+	                                MIN(IFNULL((SELECT MAX(a.event_time) FROM `tabTEX Audit Event` a
+	                                            WHERE a.action = 'payment.reconciliation_required'
+	                                              AND a.reference_name = t.name), t.completed_at)) since
+	                         FROM `tabTEX Payment Transaction` t
+	                         WHERE t.reconciliation IN ('Action Required', 'Refund Queued'){cond}
+	                         GROUP BY t.property, t.reconciliation""", params, as_dict=True)
+	action, action_since, hotels = _sum([r for r in rows if r.state == "Action Required"])
+	refund, refund_since, refund_hotels = _sum([r for r in rows if r.state == "Refund Queued"])
+	return C.reconciliation_check(action=action, action_since=action_since, refund=refund, refund_since=refund_since,
+	                              now=now, properties=hotels | refund_hotels)
+
+
 def fx_pairs(props, now) -> list[dict]:
 	"""The provider currency pairs the active FX policies of these hotels (and the global
 	ones) use, each with the date of its latest rate as pricing would find it."""
@@ -330,7 +347,8 @@ PLATFORM_PROBES = (
 HOTEL_PROBES = (
 	("outbox.pms", _outbox_pms), ("outbox.channel", _outbox_channel), ("channel.inbound", _channel_inbound),
 	("connections", _connections), ("payments.pending", _payments_pending),
-	("payments.callbacks", _payments_callbacks), ("fx.rates", _fx), ("mail.account", _mail_account),
+	("payments.callbacks", _payments_callbacks), ("payments.reconciliation", _payments_reconciliation),
+	("fx.rates", _fx), ("mail.account", _mail_account),
 	("mail.delivery", _mail_delivery),
 )
 

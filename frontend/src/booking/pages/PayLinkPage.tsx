@@ -123,7 +123,12 @@ export default function PayLinkPage() {
   let head = t("paylink.heading")
   let Icon = CreditCard
   let tone = "text-brand-ink"
-  if (paid) {
+  if (link.late_payment) {
+    // its booking could no longer take the money: never "paid — thank you" (B5)
+    head = t("manage.lateTitle")
+    Icon = Clock
+    tone = "text-warn"
+  } else if (paid) {
     head = t("paylink.paidTitle")
     Icon = CheckCircle2
     tone = "text-ok"
@@ -151,6 +156,11 @@ export default function PayLinkPage() {
         {(status === "pending" || status === "unverified" || (status === "succeeded" && !paid)) && (
           <Alert tone="warn" className="mt-5" title={t("confirm.verifyingTitle")}>
             {t("confirm.verifyingBody")}
+          </Alert>
+        )}
+        {link.late_payment && (
+          <Alert tone="warn" className="mt-5">
+            {t(link.late_payment === "refund" ? "manage.lateRefund" : "manage.lateContact")}
           </Alert>
         )}
         {payError && (

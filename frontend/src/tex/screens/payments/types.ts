@@ -29,7 +29,14 @@ export interface Txn {
   amount: string
   created: string
   completed_at: string | null
+  /** Money its booking could not take, kept off every booking (K-2b, B5), and why. */
+  reconciliation?: Reconciliation | null
+  reconciliation_note?: string | null
+  /** When the gateway captured the money, by its clock (B4). */
+  captured_at?: string | null
 }
+
+export type Reconciliation = "Action Required" | "Refund Queued" | "Refunded" | "Resolved"
 
 export interface Allocation {
   name: string

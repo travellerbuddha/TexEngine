@@ -376,7 +376,11 @@ export interface BookingSummary {
   changes_blocked?: "PAYMENT_PENDING" | "REFUND_PENDING" | "CHANGE_APPLYING" | null
   /** the hotel takes card payments online for this booking */
   can_pay_online?: boolean
+  /** money that came when the booking could no longer take it: refunded, or the hotel will contact the guest (B5) */
+  late_payment?: LatePayment | null
 }
+
+export type LatePayment = "refund" | "contact"
 
 export interface BookResponse extends BookingSummary {
   /** manage token; on a retried request (idempotent_replay) a signed 24 h resume token */
@@ -425,6 +429,8 @@ export interface PaymentLinkInfo {
   guest_name?: string | null
   hotel?: string | null
   methods: { method: string; provider_account: string; label: string; sandbox: boolean }[]
+  /** its booking could not take the money: refunded, or the hotel will contact the guest (B5) */
+  late_payment?: LatePayment | null
 }
 
 /** What a room carries for the other rooms of its booking once a change or a cancellation takes

@@ -282,9 +282,11 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
   const valid = reference.trim().length > 0
   const submit = async () => {
     if (!valid) return
-    const r = await a.run(() => tex("payments", "mark_transfer_received", { transaction: txn.name, reference: reference.trim() }, { post: true }))
+    const r = await a.run(() => tex<{ reconciliation?: string | null }>("payments", "mark_transfer_received", { transaction: txn.name, reference: reference.trim() }, { post: true }))
     if (r === undefined) return
-    toast.success(t("payments.bank.done"))
+    // money its booking could no longer take is recorded, but kept off it: said as such (B5)
+    if (r.reconciliation) toast.info(t("payments.recon.recorded", { state: r.reconciliation }))
+    else toast.success(t("payments.bank.done"))
     onDone()
     onClose()
   }

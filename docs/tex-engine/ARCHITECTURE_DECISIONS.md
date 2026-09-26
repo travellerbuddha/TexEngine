@@ -9105,3 +9105,4 @@ main `1575c8b` is contained, so nothing was merged.
 - Late is by the gateway's clock when it states it (`Outcome.captured_at`, p53; B4): money captured
   before its attempt's deadline whose news came after the expiry takes the rooms back while free
   (plus its B2 money) and confirms; otherwise `Action Required`, never an automatic refund.
+- Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.

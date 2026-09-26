@@ -92,12 +92,16 @@ def _txn_row(r) -> dict:
 	                                  "provider_ref", "booking", "payment_link", "card_brand", "card_last4",
 	                                  "error_code", "error_message", "reason", "parent_transaction", "actor")},
 	        "amount": to_str(from_db(r.amount, r.currency)), "created": str(r.creation),
-	        "completed_at": str(r.completed_at) if r.completed_at else None}
+	        "completed_at": str(r.completed_at) if r.completed_at else None,
+	        # money kept off every booking, and why (K-2b, B5); the gateway's capture time (B4)
+	        "reconciliation": r.get("reconciliation") or None, "reconciliation_note": r.get("reconciliation_note"),
+	        "captured_at": str(r.captured_at) if r.get("captured_at") else None}
 
 
 _TXN_FIELDS = ["name", "property", "txn_type", "status", "method", "amount", "currency", "provider",
                "provider_ref", "booking", "payment_link", "card_brand", "card_last4", "error_code",
-               "error_message", "reason", "parent_transaction", "actor", "creation", "completed_at"]
+               "error_message", "reason", "parent_transaction", "actor", "creation", "completed_at", "reconciliation",
+               "reconciliation_note", "captured_at"]
 
 
 @frappe.whitelist()

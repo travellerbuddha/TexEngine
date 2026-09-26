@@ -186,6 +186,25 @@ def _flag(txn, booking: str, why: str, state: str, note: str, amount, **extra) -
 	audit("payment.reconciliation_required", reference_doctype=TXN, reference_name=txn.name, property=txn.property,
 	      new={"booking": booking, "why": why, "state": state, "amount": to_str(amount), "currency": txn.currency,
 	           **extra})
+	from kamra.tex.services import notify
+
+	notify.reconciliation(txn, booking, state, note, amount)      # the team and the guest are told (B5)
+
+
+def guest_notice(booking: str | None) -> str | None:
+	"""What the guest's page says about money the booking could not take (B5): "refund" when it is
+	refunded (or queued for it), "contact" when the hotel decides, None when there is none. Only a
+	cancelled booking has any: money it could not take cancelled (or expired) it."""
+	if not booking or frappe.db.get_value("TEX Booking", booking, "status") != "Cancelled":
+		return None
+	states = set(frappe.db.sql_list(
+		"""SELECT reconciliation FROM `tabTEX Payment Transaction` WHERE txn_type='Charge'
+		   AND reconciliation IN ('Action Required', 'Refund Queued', 'Refunded')
+		   AND (booking=%(b)s OR payment_link IN (SELECT name FROM `tabTEX Payment Link` WHERE booking=%(b)s))""",
+		{"b": booking}))
+	if "Action Required" in states:
+		return "contact"
+	return "refund" if states else None
 
 
 def refusal(why: str, b, amount) -> str:
@@ -298,6 +317,9 @@ def refund_queued() -> dict:
 		if state:
 			frappe.db.set_value(TXN, name, {"reconciliation": state, "reconciliation_note": (
 				(txn.reconciliation_note or "") + f" Refund: {note}.")[:1000]}, update_modified=False)
+			from kamra.tex.services import notify
+
+			notify.team_notice(txn, txn.booking, state, f"The automatic refund did not go through: {note}.", free)
 		if not frappe.flags.in_test:
 			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- one charge's refund per transaction
 	return {"refunded": done}
