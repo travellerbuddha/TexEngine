@@ -17,7 +17,7 @@ from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_to_date, now_datetime
+from frappe.utils import add_days, add_to_date, now_datetime, nowdate
 
 from kamra.reservation_state import expire_holds
 from kamra.tex.api import public
@@ -227,6 +227,7 @@ class TestLatePayment(HoldCase):
 		payment = self.start_payment(a)                                           # started within the hold
 		frappe.db.sql("UPDATE `tabReservation` SET status='Cancelled' WHERE tex_booking=%s", a["booking"])
 		b = self.book(room="DLX", method="Pay at Hotel", status="Confirmed")    # the last room, to B
+		passes(a["booking"], 60)                                  # paid once its checkout had closed
 		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			self.assertEqual(self.pays(payment)["status"], "Succeeded")
 		mailed.assert_not_called()
@@ -762,7 +763,7 @@ class TestPaidInTime(HoldCase):
 	def test_a_payment_captured_after_its_checkout_closed_is_late(self):
 		b = self.book()
 		payment, at = self.paid_in_time(b)
-		with captured(add_to_date(at, minutes=10)):
+		with captured(add_to_date(at, minutes=20)):                # 15 minutes past its deadline
 			self.assertEqual(self.pays(payment)["status"], "Succeeded")
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
@@ -797,6 +798,53 @@ class TestPaidInTime(HoldCase):
 		self.assertEqual(paid(b), D(b["due_now"]))
 		self.assertEqual(pay.allocated_of(cash), part)
 		self.assertEqual(txn_state(cash).reconciliation, "Resolved")
+
+	def test_a_capture_within_the_clocks_tolerance_is_in_time_and_one_from_the_future_is_not(self):
+		b = self.book()
+		payment, at = self.paid_in_time(b)
+		with captured(add_to_date(at, minutes=7)):                 # 2 minutes past its deadline
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		c = self.book()
+		payment, _at = self.paid_in_time(c)
+		with captured(add_to_date(now_datetime(), hours=1)):       # a time still to come is not believed
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(c), ("Cancelled", ["Cancelled"]))
+
+	def transfer(self, b: dict) -> str:
+		return public.pay_booking(token=b["manage_token"], payment_method="Bank Transfer")["transaction"]
+
+	def test_a_bank_transfer_is_late_by_its_value_date(self):
+		"""D3 (audit 1c): staff record the transfer's value date; money on the account before its hold
+		ended takes its booking back, however late it was seen."""
+		self.transfer_account()
+		b = self.book(method="Bank Transfer")
+		txn = self.transfer(b)
+		passes(b["booking"], 3 * 24 * 60)                          # the 48-hour hold ended a day ago
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		out = pay.mark_transfer_received(txn, reference="EFT-D3-1", value_date=add_days(nowdate(), -2))
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def test_a_transfer_valued_after_its_hold_is_late_and_a_future_one_is_refused(self):
+		self.transfer_account()
+		b = self.book(method="Bank Transfer")
+		txn = self.transfer(b)
+		passes(b["booking"], 3 * 24 * 60)
+		run_expiry_jobs()
+		with self.assertRaises(frappe.ValidationError):
+			pay.mark_transfer_received(txn, reference="EFT-D3-2", value_date=add_days(nowdate(), 1))
+		out = pay.mark_transfer_received(txn, reference="EFT-D3-2", value_date=nowdate())
+		self.assertEqual(out["reconciliation"], "Action Required")
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+
+	def transfer_account(self):
+		bank = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Bank Transfer"},
+		                 {"label": "Bank transfer", "property": fx.PROPERTY, "provider": "Bank Transfer",
+		                  "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Bank Transfer"},
+		          {"property": fx.PROPERTY, "method": "Bank Transfer", "provider_account": bank, "priority": 5})
 
 	def test_a_booking_cancelled_on_purpose_is_never_revived(self):
 		b = self.book()

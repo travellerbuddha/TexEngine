@@ -76,6 +76,8 @@
  "payments.bank.expected": "Beklenen:",
  "payments.bank.reference": "Banka referansı",
  "payments.bank.reference_hint": "Banka ekstresindeki referans veya işlem numarası.",
+ "payments.bank.value_date": "Valör tarihi",
+ "payments.bank.value_date_hint": "Paranın otelin hesabına geçtiği gün (banka ekstresi). Havalenin zamanında gelip gelmediğini bu belirler.",
  "payments.bank.title": "Havaleyi onayla",
  "payments.booking_status.cancelled": "İptal edildi",
  "payments.booking_status.confirmed": "Onaylandı",

@@ -76,6 +76,8 @@
  "payments.bank.expected": "Expected:",
  "payments.bank.reference": "Bank reference",
  "payments.bank.reference_hint": "The reference or transaction number on the bank statement.",
+ "payments.bank.value_date": "Value date",
+ "payments.bank.value_date_hint": "The day the money was on the hotel's account (bank statement). It decides whether the transfer came in time.",
  "payments.bank.title": "Confirm bank transfer",
  "payments.booking_status.cancelled": "Cancelled",
  "payments.booking_status.confirmed": "Confirmed",

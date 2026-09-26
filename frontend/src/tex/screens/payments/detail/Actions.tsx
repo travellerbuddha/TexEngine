@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { tex } from "../../../lib/api"
+import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Button, DecimalInput, Dialog, Field, InlineError, Input, Money, Notice, Segmented, Select, Textarea, useToast } from "../../../ui"
 import { BookingPicker } from "../components/BookingPicker"
@@ -272,17 +273,25 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
   const { t } = useTexT()
   const toast = useToast()
   const a = useAction(open)
+  const today = useSiteToday()
   const [reference, setReference] = useState("")
+  const [valueDate, setValueDate] = useState(today)
   const close = useEvent(() => {
     if (!a.pending) onClose()
   })
   useEffect(() => {
-    if (open) setReference("")
-  }, [open])
-  const valid = reference.trim().length > 0
+    if (open) {
+      setReference("")
+      setValueDate(today)
+    }
+  }, [open, today])
+  const created = txn.created.slice(0, 10)
+  const valid = reference.trim().length > 0 && Boolean(valueDate) && valueDate <= today && valueDate >= created
   const submit = async () => {
     if (!valid) return
-    const r = await a.run(() => tex<{ reconciliation?: string | null }>("payments", "mark_transfer_received", { transaction: txn.name, reference: reference.trim() }, { post: true }))
+    const r = await a.run(() =>
+      tex<{ reconciliation?: string | null }>("payments", "mark_transfer_received", { transaction: txn.name, reference: reference.trim(), value_date: valueDate }, { post: true }),
+    )
     if (r === undefined) return
     // money its booking could no longer take is recorded, but kept off it: said as such (B5)
     if (r.reconciliation) toast.info(t("payments.recon.recorded", { state: r.reconciliation }))
@@ -305,6 +314,10 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
         </p>
         <Field label={t("payments.bank.reference")} required hint={t("payments.bank.reference_hint")}>
           <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={140} autoComplete="off" data-autofocus />
+        </Field>
+        {/* the valör decides whether the transfer came in time (D3) */}
+        <Field label={t("payments.bank.value_date")} required hint={t("payments.bank.value_date_hint")}>
+          <Input type="date" value={valueDate} min={created} max={today} onChange={(e) => setValueDate(e.target.value)} />
         </Field>
         <Notice tone="warning">{t("payments.bank.check_amount")}</Notice>
         <InlineError error={a.error} />

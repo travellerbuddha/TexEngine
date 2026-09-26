@@ -76,6 +76,8 @@
  "payments.bank.expected": "Erwartet:",
  "payments.bank.reference": "Bankreferenz",
  "payments.bank.reference_hint": "Referenz- oder Transaktionsnummer auf dem Kontoauszug.",
+ "payments.bank.value_date": "Valutadatum",
+ "payments.bank.value_date_hint": "Der Tag, an dem das Geld auf dem Hotelkonto war (Kontoauszug). Er entscheidet, ob die Überweisung rechtzeitig kam.",
  "payments.bank.title": "Überweisung bestätigen",
  "payments.booking_status.cancelled": "Storniert",
  "payments.booking_status.confirmed": "Bestätigt",

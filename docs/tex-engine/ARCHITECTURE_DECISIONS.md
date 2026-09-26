@@ -9098,11 +9098,12 @@ main `1575c8b` is contained, so nothing was merged.
   min, transfer = the hold); none starts after it; a stale Pending charge holds nothing. A payment
   link sent for the booking holds its rooms for the link hold (default 24 h) and expires with it (B6).
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
-  at the locked price; b) rooms given back and still free: no automatic revival, `Action Required`;
-  c) rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
+  at the locked price; b) late money, rooms given back and still free: `Action Required`;
+  c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
   the charge stays Succeeded, off the booking, with today's availability and price in its note; a
   booking that expires with money on it hands that money over the same way (B2).
-- Late is by the gateway's clock when it states it (`Outcome.captured_at`, p53; B4): money captured
-  before its attempt's deadline whose news came after the expiry takes the rooms back while free
-  (plus its B2 money) and confirms; otherwise `Action Required`, never an automatic refund.
+- Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE`
+  (Istanbul time), the mock's server clock, a transfer's value date, ±5 min; iyzico and Sipay state
+  none, so their money is judged when its news arrives. Money paid in time whose news came after the
+  expiry takes the rooms back while free (plus its B2 money) and confirms; else `Action Required`.
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.

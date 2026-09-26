@@ -76,6 +76,8 @@
  "payments.bank.expected": "Ожидается:",
  "payments.bank.reference": "Банковская ссылка",
  "payments.bank.reference_hint": "Номер ссылки или операции в банковской выписке.",
+ "payments.bank.value_date": "Дата валютирования",
+ "payments.bank.value_date_hint": "День поступления денег на счёт отеля (по выписке). От него зависит, пришёл ли перевод вовремя.",
  "payments.bank.title": "Подтверждение банковского перевода",
  "payments.booking_status.cancelled": "Отменено",
  "payments.booking_status.confirmed": "Подтверждено",

@@ -15,7 +15,7 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, get_datetime, now_datetime
+from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
 from kamra.tex.payments.providers import REGISTRY, account_problem, simple
@@ -1223,20 +1223,30 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
 
 
-def mark_transfer_received(transaction: str, *, reference: str) -> dict:
+def mark_transfer_received(transaction: str, *, reference: str, value_date=None) -> dict:
+	"""Staff saw a bank transfer arrive. ``value_date``: the day the money was on the account (its
+	valör), which decides whether it was paid in time (D3); not before the charge, never in the
+	future."""
 	_lock_link_then_payment(transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)   # as it is now
 	scope.require("payment.refund", txn.property)
 	if txn.provider != "Bank Transfer" or txn.status != "Pending":
 		frappe.throw(_("Only pending bank transfers can be confirmed."))
+	now = now_datetime()
+	if value_date:
+		value_date = getdate(value_date)
+		if value_date > now.date() or value_date < get_datetime(txn.creation).date():
+			frappe.throw(_("The value date must be between the day the transfer was asked for and today."))
+		txn.captured_at = get_datetime(value_date)
+	txn.flags.tex_system_update = True
 	txn.status = "Succeeded"
 	txn.raw_status = "RECEIVED"
 	txn.provider_ref = reference[:140]
-	txn.completed_at = now_datetime()
+	txn.completed_at = now
 	txn.save(ignore_permissions=True)
 	_after_charge(txn)
 	audit("payment.transfer_received", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
-	      property=txn.property, new={"reference": reference})
+	      property=txn.property, new={"reference": reference, "value_date": str(value_date) if value_date else None})
 	# money its booking could not take is in reconciliation: staff see it at once (K-2c)
 	return {"transaction": txn.name, "status": txn.status,
 	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}

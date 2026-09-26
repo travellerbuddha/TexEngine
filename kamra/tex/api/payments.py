@@ -275,10 +275,10 @@ def transfer(transaction: str, from_booking: str, to_booking: str, amount, reaso
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
-def mark_transfer_received(transaction: str, reference: str):
+def mark_transfer_received(transaction: str, reference: str, value_date: str | None = None):
 	if not text(reference, 140):
 		frappe.throw(_("The bank reference is required."))
-	return pay.mark_transfer_received(transaction, reference=text(reference, 140))
+	return pay.mark_transfer_received(transaction, reference=text(reference, 140), value_date=text(value_date, 10) or None)
 
 
 @frappe.whitelist(methods=["POST"])

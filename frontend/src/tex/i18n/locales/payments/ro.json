@@ -76,6 +76,8 @@
  "payments.bank.expected": "Așteptat:",
  "payments.bank.reference": "Referință bancară",
  "payments.bank.reference_hint": "Referința sau numărul tranzacției din extrasul bancar.",
+ "payments.bank.value_date": "Data valutei",
+ "payments.bank.value_date_hint": "Ziua în care banii au intrat în contul hotelului (extras bancar). Ea decide dacă transferul a sosit la timp.",
  "payments.bank.title": "Confirmare transfer bancar",
  "payments.booking_status.cancelled": "Anulată",
  "payments.booking_status.confirmed": "Confirmată",

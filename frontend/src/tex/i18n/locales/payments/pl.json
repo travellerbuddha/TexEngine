@@ -76,6 +76,8 @@
  "payments.bank.expected": "Oczekiwano:",
  "payments.bank.reference": "Referencja bankowa",
  "payments.bank.reference_hint": "Numer referencyjny lub numer transakcji z wyciągu bankowego.",
+ "payments.bank.value_date": "Data waluty",
+ "payments.bank.value_date_hint": "Dzień, w którym pieniądze wpłynęły na konto hotelu (wyciąg bankowy). Decyduje, czy przelew dotarł na czas.",
  "payments.bank.title": "Potwierdzenie przelewu",
  "payments.booking_status.cancelled": "Anulowana",
  "payments.booking_status.confirmed": "Potwierdzona",

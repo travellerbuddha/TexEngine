@@ -109,15 +109,23 @@ def attempt_deadline(txn) -> datetime | None:
 
 
 def paid_in_time(txn) -> bool:
-	"""B4: whether the gateway captured (or authorised) the charge while its attempt was open, by
-	the gateway's own clock (``captured_at``), however late its news reached TEX (a delayed
-	notification, staff verifying after an outage). A charge whose gateway does not state that
-	time, or that held no rooms, is judged by when its news arrives. A time from before the
-	charge existed (a date without its time) is not believed."""
+	"""B4, D3: whether the gateway captured (or authorised) the charge while its attempt was open, by
+	the gateway's own clock (``captured_at``: the virtual POS's transaction time, the mock's server
+	clock, a bank transfer's value date), however late its news reached TEX (a delayed notification,
+	staff verifying after an outage). ``CLOCK_SKEW_MINUTES`` either side of the attempt; a time from
+	before the charge existed or after its news came is not believed. A charge whose gateway states
+	no time (iyzico, Sipay), or that held no rooms, is judged by when its news arrives."""
 	until, at = attempt_deadline(txn), txn.get("captured_at")
 	if not until or not at:
 		return False
-	return add_to_date(get_datetime(txn.creation), minutes=-CLOCK_SKEW_MINUTES) <= get_datetime(at) <= until
+	at, created = get_datetime(at), get_datetime(txn.creation)
+	if txn.get("provider") == TRANSFER:
+		# a value date is a day: money on the account by the day the hold ended is in time
+		return created.date() <= at.date() <= min(until.date(), get_datetime(txn.completed_at or now_datetime()).date())
+	skew = CLOCK_SKEW_MINUTES
+	news = get_datetime(txn.completed_at or now_datetime())
+	return (add_to_date(created, minutes=-skew) <= at <= add_to_date(until, minutes=skew)
+	        and at <= add_to_date(news, minutes=skew))
 
 
 def open_attempt(booking: str, method: str | None, now: datetime | None = None) -> datetime | None:
