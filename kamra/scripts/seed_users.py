@@ -32,7 +32,8 @@ ROLE_GRANTS = {
 		"Housekeeping Task": (1, 1, 1),
 		"Group Booking": (1, 1, 1),
 		"Company": (1, 0, 0),
-		"Agent Action Log": (1, 0, 1),
+		# read only: the log is written by kamra.savings.log_action alone (Y-12)
+		"Agent Action Log": (1, 0, 0),
 	},
 	"Revenue Manager": {
 		"Property": (1, 0, 0),

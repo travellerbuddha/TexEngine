@@ -1485,8 +1485,10 @@ def link_by_token(token: str):
 def expire_links() -> int:
 	"""Scheduler: active links past their expiry become Expired (audited, G-74)."""
 	n = 0
-	for name in frappe.get_all("TEX Payment Link", filters={"status": ("in", ["Active", "Partially Paid"]),
-	                                                        "expires_at": ("<", now_datetime())}, pluck="name"):
+	# a link without an expiry time never expires, as ``link_by_token`` reads it (NEW-1, ADR-064)
+	for name in frappe.get_all("TEX Payment Link", filters=[["status", "in", ["Active", "Partially Paid"]],
+	                                                        ["expires_at", "is", "set"],
+	                                                        ["expires_at", "<", now_datetime()]], pluck="name"):
 		link = frappe.get_doc("TEX Payment Link", name)
 		link.flags.tex_system_update = True
 		before = link.status

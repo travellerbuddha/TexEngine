@@ -690,9 +690,10 @@ def detect_abandoned(now=None) -> dict:
 		created += 1
 	# a case left at payment is recovered when its booking is paid, however long after its session
 	# went quiet (a payment link lives up to 60 days)
-	for a in frappe.get_all("TEX Abandoned Booking", filters={
-			"status": ("in", ["Open", "Contacted"]), "stage_reached": "payment_started",
-			"last_event_at": (">=", add_to_date(now, days=-RECOVERY_DAYS))}, fields=["name", "session_id"]):
+	for a in frappe.get_all("TEX Abandoned Booking", filters=[
+			["status", "in", ["Open", "Contacted"]], ["stage_reached", "=", "payment_started"],
+			["last_event_at", "is", "set"], ["last_event_at", ">=", add_to_date(now, days=-RECOVERY_DAYS)]],
+	                        fields=["name", "session_id"]):
 		booked = _paid_later(frappe.get_all("TEX Funnel Event", filters={"session_id": a.session_id,
 		                                                                  "event": "payment_started"},
 		                                    fields=["event", "payload"], order_by="occurred_at asc"))
@@ -721,9 +722,10 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	"""The hotel's abandoned bookings. Contact data is shown only while the guest profile's own
 	e-mail consent holds (withdrawn later: the case stays, anonymous; ADR-046, ADR-056)."""
 	scope.require("crm.view", property)
-	filters = {"property": property, "last_event_at": (">=", add_to_date(now_datetime(), days=-days))}
+	filters = [["property", "=", property], ["last_event_at", "is", "set"],
+	           ["last_event_at", ">=", add_to_date(now_datetime(), days=-days)]]
 	if status:
-		filters["status"] = status
+		filters.append(["status", "=", status])
 	rows = frappe.get_all("TEX Abandoned Booking", filters=filters,
 	                      fields=["name", "site", "stage_reached", "status", "guest", "email", "phone",
 	                              "consent_marketing", "value", "currency", "check_in", "check_out",
@@ -1221,8 +1223,9 @@ def purge_merge_copies(days: int | None = None) -> int:
 	(the merge events keep which records moved, never the duplicate's contact data). → how many."""
 	before = add_days(now_datetime(), -(days if days is not None else MERGE_COPY_DAYS))
 	sources = set()
-	for old in frappe.get_all("TEX Audit Event", filters={"action": "guest.merge", "event_time": ("<", before)},
-	                          pluck="old_value"):
+	# an event of unknown time is never old enough: a deleted copy cannot come back
+	for old in frappe.get_all("TEX Audit Event", filters=[["action", "=", "guest.merge"], ["event_time", "is", "set"],
+	                                                      ["event_time", "<", before]], pluck="old_value"):
 		try:
 			source = (json.loads(old or "{}") or {}).get("source")
 		except (ValueError, AttributeError):

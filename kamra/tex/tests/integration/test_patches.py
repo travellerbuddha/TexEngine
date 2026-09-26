@@ -107,6 +107,8 @@ BEHAVIOUR = {
 	"p54_never_confirmed_leftovers": "test_hold_payment_race.TestNeverConfirmedLeftovers."
 	                                 "test_p54_cancels_leftovers_and_parks_their_money_without_mail",
 	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
+	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
+	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 }
 
 
@@ -1133,6 +1135,54 @@ class TestSmallPatches(PatchCase):
 		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 720)
 		self.assertTrue(frappe.db.has_column("Property", "tex_hold_minutes_transfer_web"))
 
+	def test_p56_gives_versions_the_roll_superseded_their_state(self):
+		# NEW-1: the roll set every published version without an end Superseded and left active_to empty
+		from kamra.tex.commercial import contracts
+
+		def as_the_old_roll(version):
+			frappe.db.set_value("TEX Contract Version", version, "status", "Superseded")
+
+		def state(version):
+			return tuple(frappe.db.get_value("TEX Contract Version", version, ["status", "active_to"]))
+
+		def publish(contract, at=None):
+			version = contracts.new_draft(contract)
+			contracts.publish(version, effective_from=at)
+			return version
+
+		now = now_datetime()
+		live = fx.create_contract(self.f, code="P56-LIVE")                  # live, no end, nothing after it
+		as_the_old_roll(live["version"])
+		fixed = fx.create_contract(self.f, code="P56-FIX")                  # V2 scheduled, then corrected by V3
+		start = add_to_date(now, days=30)
+		v2 = publish(fixed["contract"], start)
+		as_the_old_roll(v2)
+		v3 = publish(fixed["contract"], add_to_date(now, days=10))
+		self.assertEqual(state(v2), ("Superseded", None))                 # the publish never saw it
+		self.assertEqual(contracts.active_version_header(fixed["contract"], start).version_id, v2)
+		replaced = fx.create_contract(self.f, code="P56-NEW")               # live, then a version from now on
+		as_the_old_roll(replaced["version"])
+		r2 = publish(replaced["contract"])
+		right = fx.create_contract(self.f, code="P56-OK")                   # superseded the right way
+		publish(right["contract"])
+		kept = state(right["version"])
+		self.assertEqual(kept[0], "Superseded")
+
+		self.first_run("p56_open_ended_versions")                           # a second run changes nothing
+		self.assertEqual(state(live["version"]), ("Published", None))
+		self.assertEqual(frappe.db.get_value("TEX Contract", live["contract"], "active_version"), live["version"])
+		self.assertEqual(state(v2), ("Withdrawn", get_datetime(frappe.db.get_value(
+			"TEX Contract Version", v2, "effective_from"))))
+		self.assertEqual(contracts.active_version_header(fixed["contract"], start).version_id, v3)
+		self.assertEqual(state(replaced["version"]), ("Superseded", get_datetime(frappe.db.get_value(
+			"TEX Contract Version", r2, "effective_from"))))
+		self.assertEqual(state(right["version"]), kept)
+		restored = frappe.get_all("TEX Audit Event", filters={"action": "contract.version_restored"},
+		                          fields=["reference_name", "new_value"])
+		self.assertEqual(sorted(e.reference_name for e in restored), sorted([live["version"], v2, replaced["version"]]))
+		self.assertEqual(json.loads(next(e.new_value for e in restored if e.reference_name == v2))["status"],
+		                 "Withdrawn")
+
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")
 		released = put("TEX Promotion Redemption", promotion="G76-PROMO", status="Released", modified=at)
@@ -1140,6 +1190,202 @@ class TestSmallPatches(PatchCase):
 		self.first_run("p34_redemption_released_at")
 		self.assertEqual(get_datetime(frappe.db.get_value("TEX Promotion Redemption", released, "released_at")), at)
 		self.assertIsNone(frappe.db.get_value("TEX Promotion Redemption", held, "released_at"))
+
+
+class TestP48Evidence(PatchCase):
+	"""Y-12 (audit Part 2A): p48 took every ``anonymize_guest`` row of the Agent Action Log as proof that
+	a profile had been erased, whatever its status, whoever wrote it, whatever the profile looks like;
+	a Hotel Admin could add such a row by REST for another tenant's guest, and p48 then erased that
+	guest for good. Proof is now a ``guest.erase`` event, or a row of an erasure that ran on a profile
+	that shows what the erasure left; and business roles only read the log."""
+
+	P48 = "p48_crm_privacy_third_review"
+
+	def guest(self, first: str) -> str:
+		return frappe.get_doc({"doctype": "Guest", "first_name": first, "last_name": "Kraus", "phone": "+49 30 1234",
+		                       "email": f"y12-{first.lower()}@example.com", "tex_consent_email": 1,
+		                       "date_of_birth": "1980-01-02"}).insert(ignore_permissions=True).name
+
+	def erased_by_the_old_endpoint(self, first: str) -> str:
+		"""What ``kamra.api.anonymize_guest`` left before the marker existed: its alias, no last name,
+		e-mail or phone, its note; the date of birth and consent it did not clear then are left."""
+		from kamra.patches.tex.p48_crm_privacy_third_review import ERASED_NOTE
+
+		g = self.guest(first)
+		alias = f"Guest {frappe.generate_hash(length=6).upper()}"
+		frappe.db.set_value("Guest", g, {"first_name": alias, "full_name": alias, "last_name": "", "email": "",
+		                                 "phone": "", "guest_notes": ERASED_NOTE})
+		return g
+
+	def log(self, guest: str, status: str, **values) -> str:
+		return put("Agent Action Log", action_type="anonymize_guest", reference_doctype="Guest", reference_name=guest,
+		           approval_status=status, **{"actor": "Administrator", **values})
+
+	def state(self, guest: str) -> dict:
+		return frappe.db.get_value("Guest", guest, ["tex_erased_at", "first_name", "last_name", "email", "phone",
+		                                            "tex_consent_email", "date_of_birth", "guest_notes"], as_dict=True)
+
+	def test_a_log_row_proves_an_erasure_only_with_what_the_erasure_left(self):
+		from kamra.patches.tex import p48_crm_privacy_third_review as p48
+		from kamra.tex.tests.integration.test_crm_segments import OTHER, other_tenant
+
+		_found, before = p48._erasures()
+		kept = {}
+		for status in ("Rejected", "Suggested", "Pending", "Executed"):       # no traces on the profile
+			g = self.guest(f"Kept{status}")
+			self.log(g, status, executed_at=now_datetime() if status in ("Executed", "Rejected") else None)
+			kept[g] = self.state(g)
+		# a Hotel Admin of another tenant added an Executed row for this tenant's guest (REST, before Y-12)
+		other_tenant()
+		intruder = fx.ensure_user("y12-intruder@example.com", ["Hotel Admin"])
+		victim = self.guest("Victim")
+		self.log(victim, "Executed", actor=intruder, owner=intruder, property=OTHER, executed_at=now_datetime())
+		kept[victim] = self.state(victim)
+		# real legacy erasures: an executed one, and one approved (the gate runs it right after)
+		real = self.erased_by_the_old_endpoint("Real")
+		self.log(real, "Executed", executed_at=now_datetime())
+		approved = self.erased_by_the_old_endpoint("Approved")
+		self.log(approved, "Approved", approver="Administrator", executed_at=now_datetime())
+
+		never_ran(self.P48)
+		seen = migrate(self.P48)
+		for g, was in kept.items():
+			self.assertEqual(self.state(g), was, g)
+			self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "guest.erase", "reference_name": g}), g)
+		for g in (real, approved):
+			now = self.state(g)
+			self.assertTrue(now.tex_erased_at, g)                              # marked
+			self.assertEqual((now.tex_consent_email, now.date_of_birth), (0, None), g)   # and finished
+			self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "guest.erase", "reference_name": g}), g)
+		printed = " ".join(str(c) for c in seen["print"].call_args_list)
+		self.assertIn(f"{before + 5} Agent Action Log erasure row(s) not taken as proof", printed)
+		self.assertEqual(rerun_changes(self.P48), {})
+
+	def test_business_roles_only_read_the_log_and_logging_goes_on(self):
+		from kamra.savings import log_action
+
+		guest = self.guest("Logged")
+		for role in ("Hotel Admin", "Kamra Agent"):
+			user = fx.ensure_user(f"y12-{role.lower().replace(' ', '-')}@example.com", [role])
+			frappe.set_user(user)  # nosemgrep: frappe-setuser -- the test acts as each role
+			try:
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.insert({"doctype": "Agent Action Log", "action_type": "anonymize_guest",
+					                      "reference_doctype": "Guest", "reference_name": guest,
+					                      "approval_status": "Executed"})
+				name = log_action("guest_note", "Guest", guest, rationale="Y-12")   # the normal path writes
+				self.assertTrue(name and frappe.db.exists("Agent Action Log", name), role)
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.set_value("Agent Action Log", name, "approval_status", "Approved")
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.delete("Agent Action Log", name)
+				self.assertTrue(frappe.has_permission("Agent Action Log", "read"), role)
+			finally:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+
+class TestP64AgentLogReadOnly(PatchCase):
+	"""Y-12 (audit Part 2A, review round 1): once a DocType has one Custom DocPerm row Frappe ignores its
+	JSON permissions, and the seed scripts wrote such rows for the Agent Action Log (Hotel Admin rwcd from
+	``seed_rbac_v2.ensure_hotel_admin``, Kamra Agent from ``ensure_agent_user``, Front Desk from
+	``seed_users``). p64 makes those rows read-only for every role but System Manager."""
+
+	P64 = "p64_agent_log_read_only"
+	DT = "Agent Action Log"
+	ROLES = ("Hotel Admin", "Kamra Agent", "Front Desk")
+
+	def tearDown(self):
+		super().tearDown()                       # the rollback takes the rows this test wrote
+		frappe.clear_cache(doctype=self.DT)
+
+	def custom_rows(self) -> list[dict]:
+		return frappe.get_all("Custom DocPerm", filters={"parent": self.DT}, order_by="role asc, permlevel asc",
+		                      fields=["role", "permlevel", "read", "write", "create", "delete", "share", "report",
+		                              "export", "print", "email"])
+
+	def seeded(self) -> None:
+		"""The rows the old seeds left: Hotel Admin rwcd, Kamra Agent r/w/c, Front Desk r/c, System Manager all."""
+		from kamra.scripts.fix_perms_fields import _grant
+
+		for role, (r, w, c, d) in (("System Manager", (1, 1, 1, 1)), ("Hotel Admin", (1, 1, 1, 1)),
+		                           ("Kamra Agent", (1, 1, 1, 0)), ("Front Desk", (1, 0, 1, 0))):
+			_grant(self.DT, role, r, w, c, delete=d)
+		frappe.clear_cache(doctype=self.DT)
+
+	def user(self, role: str) -> str:
+		user = fx.ensure_user(f"p64-{role.lower().replace(' ', '-')}@example.com", [role])
+		fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+		          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Hotel Admin" if role == "Hotel Admin" else "Reservations Agent"})
+		return user
+
+	def as_role(self, role: str):
+		frappe.set_user(self.user(role))  # nosemgrep: frappe-setuser -- the test acts as each role
+		scope.clear_cache()
+
+	def back(self) -> None:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		scope.clear_cache()
+
+	def insert(self) -> str:
+		return frappe.client.insert({"doctype": self.DT, "action_type": "p64_probe", "property": fx.PROPERTY,
+		                             "approval_status": "Executed"})["name"]
+
+	def test_p64_makes_the_seeded_rows_read_only(self):
+		from kamra.savings import log_action
+
+		self.seeded()
+		self.as_role("Hotel Admin")
+		try:
+			row = self.insert()                                            # the seeded rows let it write
+			self.assertTrue(frappe.db.exists(self.DT, row))
+		finally:
+			self.back()
+		system_manager = [r for r in self.custom_rows() if r.role == "System Manager"]
+		never_ran(self.P64)
+		seen = migrate(self.P64)
+		self.assertIn("3 Custom DocPerm row(s)", " ".join(str(c) for c in seen["print"].call_args_list))
+		self.assertEqual([r for r in self.custom_rows() if r.role == "System Manager"], system_manager)
+		for r in self.custom_rows():
+			if r.role != "System Manager":
+				self.assertEqual((r.read, r.write, r.create, r.delete, r.share), (1, 0, 0, 0, 0), r.role)
+				self.assertEqual((r.report, r.export, r.print, r.email), (1, 1, 1, 1), r.role)
+		for role in self.ROLES:
+			self.as_role(role)
+			try:
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					self.insert()
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.set_value(self.DT, row, "approval_status", "Approved")
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.delete(self.DT, row)
+				self.assertTrue(frappe.has_permission(self.DT, "read"), role)
+				logged = log_action("p64_normal", "Property", fx.PROPERTY, property=fx.PROPERTY)
+				self.assertTrue(logged and frappe.db.exists(self.DT, logged), role)
+			finally:
+				self.back()
+		rows = self.custom_rows()
+		again = migrate(self.P64)                                          # a second run changes nothing
+		self.assertEqual(self.custom_rows(), rows)
+		self.assertIn("0 Custom DocPerm row(s)", " ".join(str(c) for c in again["print"].call_args_list))
+
+	def test_p64_never_adds_a_row_to_a_log_without_custom_rows(self):
+		self.assertEqual(self.custom_rows(), [])
+		never_ran(self.P64)
+		migrate(self.P64)
+		self.assertEqual(self.custom_rows(), [])
+
+	def test_the_seed_gives_hotel_admin_the_log_read_only(self):
+		from kamra.scripts import seed_rbac_v2
+
+		fx.ensure_user("admin@kamra.local", ["System Manager"])           # the seed's demo admin (rolled back)
+		with mock.patch.object(seed_rbac_v2, "_grant") as grant:
+			seed_rbac_v2.ensure_hotel_admin()
+		calls = {c.args[0]: (c.args[1:], c.kwargs) for c in grant.call_args_list}
+		self.assertEqual(calls[self.DT], (("Hotel Admin", 1, 0, 0), {}))
+		for doctype, (args, kwargs) in calls.items():
+			if doctype != self.DT:
+				self.assertEqual((args, kwargs), (("Hotel Admin", 1, 1, 1), {"delete": 1}), doctype)
 
 
 class TestCommitGuard(PatchCase):

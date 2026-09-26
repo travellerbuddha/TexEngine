@@ -159,13 +159,14 @@ def expire_holds() -> dict:
 	now = now_datetime()
 	filters = {
 		"status": ("in", ["Held", "Pending Payment"]),
-		"hold_expires_on": ("<", now),
 	}
 	if frappe.db.has_column("Reservation", "tex_booking"):
 		filters["tex_booking"] = ("is", "not set")
+	# as before, said out loud (ADR-064): a legacy hold without an expiry time expires now
 	rows = frappe.get_all(
 		"Reservation",
 		filters=filters,
+		or_filters=[["hold_expires_on", "is", "not set"], ["hold_expires_on", "<", now]],
 		pluck="name",
 		limit=200,
 	)

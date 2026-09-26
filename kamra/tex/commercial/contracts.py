@@ -769,8 +769,10 @@ def _go_live(contract: str, version: str | None) -> None:
 def roll_version_statuses() -> None:
 	"""Scheduler: flip scheduled versions live and superseded ones to Superseded."""
 	now = now_datetime()
-	for v in frappe.get_all("TEX Contract Version", filters={"status": "Published", "active_to": ("<=", now)},
-	                        pluck="name"):
+	# a version without an end (live or scheduled) is never over: get_all reads a missing date as
+	# 0001-01-01 for <= (NEW-1, ADR-064)
+	for v in frappe.get_all("TEX Contract Version", filters=[["status", "=", "Published"], ["active_to", "is", "set"],
+	                                                         ["active_to", "<=", now]], pluck="name"):
 		_isolated(v, lambda v=v: _supersede(v))
 	for c in frappe.get_all("TEX Contract", filters={"status": "Active"}, pluck="name"):
 		live = active_version_header(c, now)

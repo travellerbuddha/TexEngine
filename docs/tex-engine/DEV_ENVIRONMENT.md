@@ -21,6 +21,7 @@ bench set-config -g db_host 127.0.0.1 (+ redis_cache/queue/socketio)
 git clone --depth 1 -b develop https://github.com/frappe/payments apps/payments
 ln -s /home/user/TexEngine apps/kamra
 uv pip install --python env/bin/python -e apps/payments -e apps/kamra
+bench setup requirements --dev kamra     # freezegun: the scheduler smoke test (ADR-064)
 printf "frappe\npayments\nkamra\n" > sites/apps.txt
 bench new-site test.localhost --db-root-password root --admin-password admin
 bench --site test.localhost install-app payments && bench --site test.localhost install-app kamra

@@ -7497,7 +7497,7 @@ as ADJUST_PERCENT, boards 1), O4 (`+10%` on the base P1 adjusted once by `apply_
 - Still open from S10–S15: their low review items (none changed by S16); `#occupancy` / `#boards`
   followed a second time do not reopen a collapsed section.
 - Only Chromium was run (the container has no WebKit or Firefox).
-- CI has never run on GitHub (no base branch, owner item).
+- CI had not run on GitHub yet (then an owner item; resolved 2026-09-26: PR #2 and PR #1 green).
 
 **S16 review follow-up (2026-09-25).** The review of the finished workspace reported one high, seven
 medium and fifteen low findings. All are fixed except three low ones, which are recorded as open
@@ -7711,8 +7711,8 @@ parser, op mapping or `apply_op_values` change.
 - The E2E dark-theme check reads `rgb()` colours only. Every remapped shade is hex, so an
   unremapped (oklch) colour reads as a failure there, which is what the check wants.
 - Still open from S16: the committed bundles run on the dev bench only after the merge; the
-  keyboard help's Shift+F10 wording; the S10–S15 low items; only Chromium was run; CI has never run
-  on GitHub.
+  keyboard help's Shift+F10 wording; the S10–S15 low items; only Chromium was run; CI had not run
+  on GitHub yet (resolved 2026-09-26).
 
 **S16 re-review follow-up (2026-09-25).** A second review of the finished workspace reported nine
 medium and twelve low findings. All nine medium ones are fixed. Of the low ones, eleven are fixed
@@ -7908,8 +7908,8 @@ parser, op mapping or `apply_op_values` change.
 - Between `sm` and `lg` a non-modal side panel still covers the page's right side. From `lg` the
   page makes room for it.
 - Still open from S16: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no F6 shortcut, an
-  error draft of a removed room or period kept until Discard, only Chromium run, CI never run on
-  GitHub.
+  error draft of a removed room or period kept until Discard, only Chromium run, CI not yet run on
+  GitHub (resolved 2026-09-26).
 
 **S16 re-review 2 follow-up (2026-09-25).** A third review of the workspace reported one high, four
 medium and eight low findings. All thirteen are fixed. Branch `pricing-workspace`; main `1575c8b`
@@ -8053,7 +8053,7 @@ editing written three times (`useInlineGridEditor` open), no clipboard or fills 
 boards grid, a base-room entry waiting for `apply_op_values` not in a Ctrl/Cmd+S made meanwhile,
 side panels covering the page between `sm` and `lg`, and S16's open items (the §3.18 one-screen fit,
 `HEAVY_LIMITS` as constants, no F6 shortcut, an error draft of a removed room or period kept until
-Discard, only Chromium run, CI never run on GitHub). New: a single-use rule of the other form that a
+Discard, only Chromium run, CI not yet run on GitHub, resolved 2026-09-26). New: a single-use rule of the other form that a
 room scope inherits from All rooms is switched only in the rooms the popover writes, so the room scope
 then shows both rows (by design: switching All rooms' rows from a room scope would change other
 rooms).
@@ -8224,7 +8224,7 @@ inline editing is written three times (`useInlineGridEditor` open); the ladder a
 have no clipboard or fills; a base-room entry waiting for `apply_op_values` is not in a Ctrl/Cmd+S
 made meanwhile. S16's open items remain: the §3.18 one-screen fit, `HEAVY_LIMITS` as constants, no
 F6 shortcut, an error draft of a removed room or period kept until Discard, only Chromium run, CI
-never run on GitHub. Changed:
+not yet run on GitHub (resolved 2026-09-26). Changed:
 - Side panels now lie over the page below 80rem (md) instead of below `lg`. At 1024–1279 px the
   Price test covers the matrix's right side again, rather than leaving it no columns.
 - The re-review 2 item "a single-use rule of the other form that a room scope inherits from All
@@ -9133,3 +9133,19 @@ isolation; the code and every race test assume OFF (10.11's default).
 **Consequences.** ADR-032's retries cover only the endpoints wrapped in `retry_on_deadlock`. Working with it ON would
 need retries around about 20 endpoints, callbacks, jobs and Frappe's naming-series inserts, and series locks held
 across a gateway call would still fail under load: not done.
+
+## ADR-064 A nullable date filter says what NULL means (audit Part 2A)
+**Context.** `frappe.get_all`/`get_list` compare a nullable Date/Datetime as `IFNULL(field, '0001-01-01')` for `<`/`<=`: a row
+without the date is "long past" (NEW-1: the roll superseded every version without an end; points, grants and payment links
+without an expiry expired). `>`/`>=`, `frappe.db.get_value`/`count`/`exists`/`delete` and query-builder comparisons are plain SQL.
+**Decision.** A TEX filter comparing a nullable date says what NULL means in the same call: `[field, "is", "set"|"not set"]` or
+the field with `is` in `or_filters`; kept readings are written out (an FX rate without a fetch time was always known). p56 gives
+the versions the roll superseded the state their contract's later publishes would have given them.
+- Guard `unit/test_nullable_date_filters.py` (AST): get_all/get_list/db.get_value/get_values/count/exists/delete/set_value/
+  qb.get_query calls and `frappe.qb.DocType` comparisons in `kamra/`, field types from the DocType JSON; not raw SQL, Frappe-core
+  doctypes or run-time doctypes; a filter or qb table it cannot read fails it; exceptions only in reviewed `ALLOWED`/`UNREADABLE`.
+- Smoke `integration/test_scheduler_smoke.py`: each `kamra.tex.scheduler` entry point once over seeded data, clock frozen
+  (freezegun, a kamra dev dependency), providers and network stubbed; a new "TEX …" Error Log or a broken seed fails it.
+- The Playwright run keeps the site scheduler off: wall-clock jobs (hold expiry, alerts) would act mid-spec; the smoke test
+  covers them deterministically.
+- O-16 (user): a guest cancels online only before the arrival day, but may still start a change on it (`room_changeable`).

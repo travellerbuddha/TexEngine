@@ -276,6 +276,8 @@ export interface BookingRoom {
   pending_change?: PendingChange | null
   /** the guest may change this room online (confirmed, not arrived yet) */
   can_change?: boolean
+  /** the guest may cancel this room online: only before the arrival day (O-16) */
+  can_cancel?: boolean
   /** the guest's latest change of this room and what came of it */
   last_change?: ChangeOutcome | null
 }

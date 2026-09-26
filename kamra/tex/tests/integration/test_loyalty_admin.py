@@ -193,3 +193,37 @@ class TestLoyaltyMigration(LoyaltyCase):
 		self.assertTrue(frappe.db.exists("TEX Profile Capability", {"parent": "Revenue Manager",
 		                                                            "capability": "loyalty.edit"}))
 		scope.clear_cache()
+
+
+class TestExtraEarning(LoyaltyCase):
+	"""Y-10 (audit Part 2A): a program earning per unit of an extra. The price snapshot stores a
+	quantity as "2.000000" (``to_str6``); ``int("2.000000")`` raised in the reservation's update hook,
+	so the confirmation (here: the payment's) was rolled back and the paid booking later expired."""
+
+	def test_points_per_extra_unit_confirm_the_booking(self):
+		spa = fx.ensure_live("TEX Extra", {"property": fx.PROPERTY, "extra_code": "SPA"},
+		                     {"property": fx.PROPERTY, "extra_code": "SPA", "extra_name": "Spa treatment",
+		                      "category": "Spa", "pricing_mode": "UNIT", "currency": "EUR", "amount": 50,
+		                      "tax_category": "SERVICE"})
+		club = self.create(earn_rules=[{"basis": "EXTRA", "rate": "5", "extra": spa}])
+		b = guest_books(session="y10-spa", extras=[{"code": "SPA", "quantity": 2}])
+		p = b["payment"]
+		public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		res = b["rooms"][0]["reservation"]
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		guest = frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+		earned = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn"},
+		                        fields=["points", "status", "program"])
+		self.assertEqual([(e.points, e.status, e.program) for e in earned], [(10, "Pending", club)])
+		self.assertEqual(loyalty.balances(guest, club)["pending"], 10)
+
+	def test_a_quantity_that_is_not_whole_earns_nothing_and_says_so(self):
+		prog = frappe._dict(currency="EUR", blackouts=[], earn_rules=[frappe._dict(
+			basis="EXTRA", rate="5", extra=None, date_from=None, date_to=None)])
+		res = frappe._dict(check_in_date=fx.d(6, 10), check_out_date=fx.d(6, 13), tex_currency="EUR",
+		                   tex_total_amount=100, tex_pricing_snapshot=frappe.as_json(
+			                   {"extras": [{"code": None, "quantity": "1.500000", "ok": True}]}))
+		points, lines = loyalty.points_for(prog, res, 1)
+		self.assertEqual(points, 0)
+		self.assertIn("not a whole number", lines[0]["note"])

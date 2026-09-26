@@ -55,7 +55,9 @@ def remove_expired_grants() -> dict:
 	mirrored User Permission behind (Frappe's own Desk/REST filters read them), and each ended
 	grant is audited once. The TEX scope already ignores mirrored rows (``scope._scope``)."""
 	today = frappe.utils.nowdate()
-	ended = frappe.get_all("TEX Access Grant", filters={"disabled": 0, "valid_until": ("<", today)},
+	# a grant without an end date never ends (NEW-1, ADR-064)
+	ended = frappe.get_all("TEX Access Grant", filters=[["disabled", "=", 0], ["valid_until", "is", "set"],
+	                                                    ["valid_until", "<", today]],
 	                       fields=["name", "user", "scope_level", "property", "hotel_group", "enterprise",
 	                               "permission_profile", "valid_until"], order_by="name asc")
 	users = []

@@ -17,6 +17,8 @@ import frappe
 from kamra.scripts.fix_perms_fields import ALL_DOCTYPES, _grant
 
 AGENT_EMAIL = "agent@kamra.local"
+# the audit log is written by kamra.savings alone: business roles read it (Y-12, p64)
+READ_ONLY = frozenset({"Agent Action Log"})
 
 
 def ensure_hotel_admin():
@@ -26,8 +28,11 @@ def ensure_hotel_admin():
 		}).insert(ignore_permissions=True)
 		print("created role: Hotel Admin")
 	for doctype in ALL_DOCTYPES:
-		_grant(doctype, "Hotel Admin", 1, 1, 1, delete=1)
-	print(f"Hotel Admin: full perms on {len(ALL_DOCTYPES)} doctypes")
+		if doctype in READ_ONLY:
+			_grant(doctype, "Hotel Admin", 1, 0, 0)
+		else:
+			_grant(doctype, "Hotel Admin", 1, 1, 1, delete=1)
+	print(f"Hotel Admin: full perms on {len(ALL_DOCTYPES) - len(READ_ONLY)} doctypes, read on {sorted(READ_ONLY)}")
 
 	# demo admin wears both hats
 	user = frappe.get_doc("User", "admin@kamra.local")
@@ -50,7 +55,7 @@ def ensure_agent_user():
 		"Discount Voucher": (1, 0, 0), "Guest": (1, 1, 1),
 		"Reservation": (1, 1, 1), "Housekeeping Task": (1, 1, 1),
 		"Group Booking": (1, 1, 1), "Company": (1, 0, 0),
-		"Agent Action Log": (1, 0, 1), "Folio": (1, 1, 1),
+		"Agent Action Log": (1, 0, 0), "Folio": (1, 1, 1),   # log: read only (Y-12)
 		"Night Audit Run": (1, 0, 1), "Service Ticket": (1, 1, 1),
 	}
 	for doctype, (r, w, c) in agent_grants.items():

@@ -45,9 +45,9 @@ def setup_site_and_payments(f: dict, **contract) -> dict:
 	return {"account": acc}
 
 
-def guest_books(session="sess-1", method="Card", guest=None, before_book=None) -> dict:
+def guest_books(session="sess-1", method="Card", guest=None, before_book=None, extras=None) -> dict:
 	"""search → quote → book through the public API, as an anonymous visitor.
-	``before_book`` runs between the quote and the booking."""
+	``before_book`` runs between the quote and the booking; ``extras`` default: one airport transfer."""
 	frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
 	res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
 	                    rooms=[{"adults": 2, "children": [8]}], market="DE", session_id=session)
@@ -56,7 +56,7 @@ def guest_books(session="sess-1", method="Card", guest=None, before_book=None) -
 	rp = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
 	offer = next(o for o in prop["offers"] if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == rp)
 	assert "contract" not in offer, "guest offers must not expose contract ids"
-	q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=[{"code": "TRF", "quantity": 1}],
+	q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], extras=extras or [{"code": "TRF", "quantity": 1}],
 	                 session_id=session)
 	assert q["ok"], q
 	if before_book:
@@ -264,6 +264,37 @@ class TestSelfService(TexTestCase):
 			                   check_in_date=fx.d(6, 10))
 			penalty, basis = booking.cancellation_penalty(res, today=fx.d(6, 1))
 			self.assertEqual((to_str(penalty), basis["rule"]), ("0.00", rule))
+
+	def test_no_online_cancellation_from_the_arrival_day(self):
+		# O-16 (audit Part 2A, user decision): from the arrival day the stay may have started; giving its
+		# nights back would resell a room the guest is in. A change still starts on the arrival day
+		# (``guest_changes.room_changeable``, unchanged): the stricter rule is the cancellation's alone
+		from frappe.utils import add_days, getdate
+
+		b = self._paid_booking("sess-o16")
+		token, res = b["manage_token"], b["rooms"][0]["reservation"]
+		arrival = getdate(frappe.db.get_value("Reservation", res, "check_in_date"))
+
+		def on(day):
+			return self.freeze_time(f"{day} 10:00:00.250000")
+
+		def room():
+			return public.booking_status(token=token)["rooms"][0]
+
+		for day in (add_days(arrival, 1), arrival):                       # arrived yesterday, arriving today
+			with on(day):
+				self.assertFalse(room()["can_cancel"], day)
+				with self.assertRaisesRegex(frappe.ValidationError, "no longer be changed online"):
+					public.manage_cancel(token=token, reservation=res)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		with on(arrival):                                                  # the change flow is still open
+			self.assertTrue(room()["can_change"])
+			self.assertIn("sellable", public.manage_propose(token=token, reservation=res,
+			                                                changes={"check_out": str(fx.d(6, 14))}))
+		with on(add_days(arrival, -1)):                                    # the day before: cancelled
+			self.assertTrue(room()["can_cancel"])
+			public.manage_cancel(token=token, reservation=res)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
 
 	def test_guest_cancels_with_policy_penalty(self):
 		b = self._paid_booking("sess-cx")

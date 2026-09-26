@@ -793,6 +793,8 @@ def _guest_booking(b) -> dict:
 		              "cancellation_basket": _basket_view(claw),
 		              # the guest may change this room online (confirmed, not arrived yet)
 		              "can_change": guest_changes.room_changeable(res),
+		              # ... and cancel it only before the arrival day (O-16)
+		              "can_cancel": _cancellable_online(res),
 		              "last_change": guest_changes.guest_outcome(last) if (last := guest_changes.last_request(res))
 		              else None})
 	credit, refund_due = guest_changes.guest_credit(b.name)
@@ -812,6 +814,15 @@ def _guest_booking(b) -> dict:
 	        "late_payment": late_payments.guest_notice(b.name)}
 
 
+def _cancellable_online(res) -> bool:
+	"""A guest cancels a room online only before the arrival day, by the site's day (O-16, user
+	decision): from that day the stay may have started, and giving its nights back would sell again
+	a room the guest is in. Stricter than a change on purpose: ``guest_changes.room_changeable``
+	still lets a confirmed stay be changed on its arrival day (ADR-064)."""
+	return res.status in ("Confirmed", "Pending Payment", "Held") \
+		and getdate(res.check_in_date) > getdate(now_datetime())
+
+
 def _own_reservation(b, reservation: str) -> None:
 	if reservation not in [r.reservation for r in b.rooms]:
 		frappe.throw(_("Invalid reservation."), frappe.PermissionError)
@@ -825,8 +836,9 @@ def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	_own_reservation(b, reservation)
 	if not _self_service_allowed(b):
 		frappe.throw(_("Please contact the hotel to cancel."))
-	if frappe.db.get_value("Reservation", reservation, "status") not in ("Confirmed", "Pending Payment", "Held"):
-		# arrived (or already closed): the hotel handles it at the desk
+	if not _cancellable_online(frappe.db.get_value("Reservation", reservation, ["status", "check_in_date"],
+	                                               as_dict=True)):
+		# the arrival day has come (or the stay is closed): the hotel handles it at the desk (O-16)
 		frappe.throw(_("This room can no longer be changed online. Please contact the hotel."),
 		             guest_changes.ChangeRefused)
 	frappe.flags.tex_source = "Guest"

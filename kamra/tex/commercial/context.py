@@ -176,10 +176,11 @@ def fx_policy(frm: str, to: str, property: str, at: datetime) -> fx_math.FxPolic
 
 def provider_rates(provider: str, at: datetime, days: int = 10) -> tuple[fx_math.ProviderRate, ...]:
 	on = get_datetime(at)
+	# a rate recorded without a fetch time (Desk, older rows) was always known: prices stay as they were
 	rows = frappe.get_all("TEX FX Rate",
 	                      filters={"provider": provider, "rate_date": ("between", [(on - timedelta(days=days)).date(),
-	                                                                             on.date()]),
-	                               "fetched_at": ("<=", on)},
+	                                                                             on.date()])},
+	                      or_filters=[["fetched_at", "is", "not set"], ["fetched_at", "<=", on]],
 	                      fields=["name", "provider", "base_currency", "quote_currency", "rate", "rate_date",
 	                              "rate_type"])
 	return tuple(fx_math.ProviderRate(r.name, r.provider, r.base_currency, r.quote_currency, db_dec(r.rate),

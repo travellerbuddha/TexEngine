@@ -127,6 +127,8 @@ jobs:
           cd frappe-bench
           bench get-app payments
           bench get-app kamra "${GITHUB_WORKSPACE}/apps/kamra"
+          # kamra's dev dependencies (freezegun: the scheduler smoke test freezes the clock, ADR-064)
+          bench setup requirements --dev kamra
           bench new-site test.localhost \
             --mariadb-user-host-login-scope='%' \
             --db-root-password root --admin-password admin
@@ -226,8 +228,8 @@ jobs:
           mkdir -p sites/assets
           [ -e sites/assets/kamra ] || ln -s "$(pwd)/apps/kamra/kamra/public" sites/assets/kamra
           # a paid guest change and a refund are made by a job (queue short): a worker runs them.
-          # The site's scheduler stays off: its every-15-minutes contract roll supersedes live
-          # versions without an end (IFNULL(active_to) <= now), which empties the current tables
+          # The site's scheduler stays off: jobs on the wall clock (hold expiry, alerts, the contract
+          # roll) would act in the middle of a spec; test_scheduler_smoke runs each of them (ADR-064)
           nohup bench serve --port 8000 > serve.log 2>&1 &
           nohup bench worker --queue short,default > worker.log 2>&1 &
           nohup bench schedule > schedule.log 2>&1 &

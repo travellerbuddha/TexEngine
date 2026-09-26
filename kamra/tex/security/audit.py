@@ -133,9 +133,11 @@ def _refused_lately(action: str, reference_doctype, reference_name, new, once_pe
 		return False
 	since = frappe.utils.add_to_date(now_datetime(), seconds=-REFUSAL_WINDOW_SECONDS)
 	want = {k: (new or {}).get(k) for k in once_per}
-	for raw in frappe.get_all("TEX Audit Event", filters={"action": action, "reference_doctype": reference_doctype,
-	                                                      "reference_name": reference_name,
-	                                                      "event_time": (">=", since)}, pluck="new_value"):
+	for raw in frappe.get_all("TEX Audit Event", filters=[["action", "=", action],
+	                                                      ["reference_doctype", "=", reference_doctype],
+	                                                      ["reference_name", "=", reference_name],
+	                                                      ["event_time", "is", "set"], ["event_time", ">=", since]],
+	                          pluck="new_value"):
 		try:
 			seen = json.loads(raw or "{}") or {}
 		except ValueError:
