@@ -585,6 +585,10 @@ def pay_link(token: str, provider_account: str | None = None):
 	if now.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("This payment link is {0}.").format(now.status.lower()))
 	due = from_db(now.amount, now.currency) - from_db(now.paid_amount, now.currency)
+	why = pay.link_refusal(link.booking, due, now.currency, guest=True) if link.booking else None
+	if why:
+		# its booking takes no more money, or less than it asks: never 200 paid for 100 (E4)
+		frappe.throw(why)
 	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
 	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
 	if link.provider_account:

@@ -906,6 +906,8 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 	# nothing owed and nothing paid (an expired booking whose money came off it) is not "Paid" (C7)
 	b.payment_status = "Paid" if paid >= total and paid > 0 else ("Partially Paid" if paid > 0 else "Unpaid")
 	b.save(ignore_permissions=True)
+	if amount > ZERO:
+		_close_links_if_settled(b)
 	if b.status in ("Pending Payment", "Held") and paid >= from_db(b.amount_due_now, b.currency):
 		confirm_booking(booking, reason=f"payment {reference or ''}".strip())
 	return booking_summary(booking)
@@ -1083,6 +1085,15 @@ def _refresh_booking_after_change(booking: str) -> None:
 	paid = from_db(b.paid_amount, ccy)
 	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
 	b.save(ignore_permissions=True)
+	_close_links_if_settled(b)
+
+
+def _close_links_if_settled(b) -> None:
+	"""E4: a booking cancelled (or expired), or owing nothing more, takes no link's money."""
+	if b.status == "Cancelled" or from_db(b.balance_amount, b.currency) <= ZERO:
+		from kamra.tex.payments import service as pay
+
+		pay.close_links_of(b.name, "booking cancelled" if b.status == "Cancelled" else "booking paid in full")
 
 
 def _void_fees(b, ccy: str) -> D:

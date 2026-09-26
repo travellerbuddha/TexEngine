@@ -1448,6 +1448,61 @@ class TestPaymentLinkHold(HoldCase):
 		run_expiry_jobs()
 		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
 
+	def test_the_second_link_of_a_booking_paid_in_full_cannot_be_paid(self):
+		"""E4 (audit 1c-son): the D1 confirmation leaves nothing owed (shortened after its first half was
+		paid): its other link is closed, audited, and cannot be paid — never 200 paid for 100."""
+		from kamra.tex.services import modification
+
+		b = self.book(rate_plan="NRF")
+		half = (D(b["total"]) / 2).quantize(D("0.01"))
+		first, second = (pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description=f"Half {i}",
+		                                 booking=b["booking"]) for i in (1, 2))
+		started = public.pay_link(token=first["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		p = modification.propose(self.rooms(b)[0], {"check_out": str(fx.d(6, 11))})
+		modification.apply(p["proposal_token"], reason="one night only")
+		self.assertEqual(self.statuses(b)[0], "Confirmed")
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", second["link"], "status"), "Cancelled")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment_link.closed",
+		                                                     "reference_name": second["link"]}))
+		with self.assertRaisesRegex(frappe.ValidationError, "cancelled"):
+			public.pay_link(token=second["token"])
+		self.assertEqual(paid(b), half)
+
+	def test_a_link_asking_more_than_the_booking_owes_is_refused(self):
+		"""E4: a link left open (being paid when its booking was settled) never takes more than the
+		booking still owes; a balance link sent after the deposit stays open and is paid."""
+		kept = self.book(method="Pay at Hotel", status="Confirmed")
+		too_much = pay.create_link(property=fx.PROPERTY, amount=str(D(kept["balance"]) + 50), currency="EUR",
+		                           description="Balance", booking=kept["booking"])
+		with self.assertRaisesRegex(frappe.ValidationError, "more than its booking still owes"):
+			public.pay_link(token=too_much["token"])
+		balance = pay.create_link(property=fx.PROPERTY, amount=kept["balance"], currency="EUR", description="Balance",
+		                          booking=kept["booking"])
+		started = public.pay_link(token=balance["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(paid(kept), D(kept["balance"]))
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", too_much["link"], "status"), "Cancelled")  # paid in full
+
+	def test_the_link_of_an_expired_booking_cannot_be_sent_again(self):
+		"""E4: a booking that expired closes its open links; one left open (being paid at that moment) is
+		never sent again: its booking cannot take the money."""
+		b = self.book(method="Card")
+		out = self.send_link(b)
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "status"), "Expired")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment_link.closed",
+		                                                     "reference_name": out["link"]}))
+		with self.assertRaisesRegex(frappe.ValidationError, "Only open links"):
+			pay.reissue_link(out["link"])
+		frappe.db.set_value("TEX Payment Link", out["link"], {"status": "Active",
+		                                                     "expires_at": add_to_date(now_datetime(), hours=1)})
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot take"):
+			pay.reissue_link(out["link"])
+		with self.assertRaisesRegex(frappe.ValidationError, "can no longer be paid"):
+			public.pay_link(token=out["token"])
+
 	def test_the_email_says_until_when(self):
 		from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
 

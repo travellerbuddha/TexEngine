@@ -1394,11 +1394,17 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 
 
 def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -> dict:
-	"""New token for an open link (the old URL stops working) — staff lost or resend."""
+	"""New token for an open link (the old URL stops working) — staff lost or resend. Never for a link
+	its booking cannot take the money of, or asking more than it owes (E4)."""
 	link = frappe.get_doc("TEX Payment Link", name)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("Only open links can be reissued."))
+	if link.booking:
+		why = link_refusal(link.booking, from_db(link.amount, link.currency) - from_db(link.paid_amount, link.currency),
+		                   link.currency, guest=False)
+		if why:
+			frappe.throw(why)
 	token = secrets.token_urlsafe(24)
 	link.flags.tex_system_update = True
 	link.token_hash = link_token_hash(token)
@@ -1413,6 +1419,55 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 	      new={"emailed": emailed})
 	return {"link": link.name, "url": url, "token": token, "emailed": emailed,
 	        "expires_at": str(link.expires_at) if link.expires_at else None}
+
+
+def link_refusal(booking: str, amount, currency: str, *, guest: bool) -> str | None:
+	"""E4: why a link of ``booking`` asking ``amount`` may not be paid, nor sent again: its booking cannot
+	take the money (cancelled, expired, its rooms given back: ``late_payments.problem``; a link's money
+	is on its way, never kept as a fee, C6), or owes less than the link asks (a link in another currency
+	is judged when its money comes). None when it may. Locks the booking (after the link: the order of
+	a link's payment). ``guest``: told to the guest, else to staff."""
+	from kamra.tex.services import late_payments
+
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	amount = quantize(D(amount), currency)
+	if late_payments.problem(b, amount=amount, in_flight=True):
+		return (_("This payment link can no longer be paid: its booking cannot take payments any more. Please "
+		          "contact the hotel.") if guest else
+		        _("Booking {0} ({1}) cannot take this link's payment: cancel the link.").format(b.name, _(b.status)))
+	owed = quantize(from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency), b.currency)
+	if currency != b.currency or amount <= owed:
+		return None
+	if guest:
+		return (_("This payment link can no longer be paid: its booking is paid in full.") if owed <= ZERO else
+		        _("This payment link asks {0} {1}, more than its booking still owes ({2} {1}). Please contact the "
+		          "hotel for a new link.").format(to_str(amount), currency, to_str(owed)))
+	return _("Booking {0} owes {1} {2}, less than this link asks ({3} {2}): cancel it and send a new link.").format(
+		b.name, to_str(max(owed, ZERO)), currency, to_str(amount))
+
+
+def close_links_of(booking: str, why: str) -> list[str]:
+	"""E4: the open links of a booking that takes no more money — paid in full, cancelled or expired — are
+	closed (``Cancelled``; ``Expired`` once past their own expiry), audited; a balance link of a booking
+	that still owes stays open. Called under
+	the booking's lock: a link a payment is being started for (locked by it: the order is link, then
+	booking) is skipped, never waited for; that payment finds the booking as it is now (``link_refusal``).
+	Each link is locked by its name (no gap or scan lock). → the links closed."""
+	closed = []
+	now = now_datetime()
+	for name in frappe.get_all("TEX Payment Link", filters={"booking": booking,
+	                                                        "status": ("in", ["Active", "Partially Paid"])},
+	                           pluck="name", order_by="name asc"):
+		row = frappe.db.sql("""SELECT status, property, expires_at FROM `tabTEX Payment Link` WHERE name=%s
+		                       FOR UPDATE SKIP LOCKED""", name, as_dict=True)
+		if not row or row[0].status not in ("Active", "Partially Paid"):
+			continue
+		status = "Expired" if row[0].expires_at and get_datetime(row[0].expires_at) <= now else "Cancelled"
+		frappe.db.set_value("TEX Payment Link", name, "status", status, update_modified=False)
+		audit("payment_link.closed", reference_doctype="TEX Payment Link", reference_name=name,
+		      property=row[0].property, new={"booking": booking, "status": status, "was": row[0].status, "why": why})
+		closed.append(name)
+	return closed
 
 
 def link_by_token(token: str):
