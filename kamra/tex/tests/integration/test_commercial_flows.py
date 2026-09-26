@@ -19,8 +19,8 @@ from kamra.tex.crm import service as crm
 from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
-from kamra.tex.pricing import serialize
-from kamra.tex.pricing.model import Unsellable
+from kamra.tex.pricing import engine, policy_money, serialize
+from kamra.tex.pricing.model import StayRequest, Unsellable
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
@@ -1422,3 +1422,64 @@ class TestNonRefundablePolicy(TexTestCase):
 		self.assertEqual(basis["rule"], "non-refundable")
 		self.assertEqual(penalty, D(room.tex_total_amount))
 		self.assertGreater(penalty, D(0))
+
+
+class TestPolicyCurrency(TexTestCase):
+	"""Y-3 A (ADR-067, D-1): a payment or cancellation policy's fixed amounts are in the policy's
+	currency, or the contract's when it names none; the currency is frozen with a policy that has a
+	fixed amount. A fixed policy in another currency than the contract's is not published, so a
+	fixed amount converts to the sale's currency at the one contract → sell rate the quote recorded."""
+
+	def fixed_policies(self, currency: str | None = None) -> tuple[str, str]:
+		pay = frappe.get_doc({"doctype": "TEX Payment Policy", "property": fx.PROPERTY, "policy_name": "Y3 100 now",
+		                      "deposit_type": "FIXED", "deposit_value": 100, "currency": currency}).insert(
+			ignore_permissions=True)
+		cxl = frappe.get_doc({"doctype": "TEX Cancellation Policy", "property": fx.PROPERTY,
+		                      "policy_name": "Y3 150 fee", "refundable": 1, "no_show_type": "NIGHTS",
+		                      "no_show_value": 1, "currency": currency,
+		                      "rules": [{"days_before_arrival": 7, "penalty_type": "FIXED", "penalty_value": 150}]}
+		                     ).insert(ignore_permissions=True)
+		return pay.name, cxl.name
+
+	def draft(self, code: str, pay: str, cxl: str) -> str:
+		v = fx.create_contract(self.f, code=code, publish=False)["version"]
+		doc = frappe.get_doc("TEX Contract Version", v)
+		row = next(r for r in doc.rate_plans if r.rate_plan == self.f["rate_plans"]["FLEX"])
+		row.payment_policy, row.cancellation_policy = pay, cxl
+		doc.save(ignore_permissions=True)
+		return v
+
+	def test_a_fixed_policy_in_another_currency_is_not_published(self):
+		pay, cxl = self.fixed_policies("TRY")
+		v = self.draft("Y3-TRY", pay, cxl)
+		issues = contracts.validate_version(v)["issues"]
+		self.assertEqual([(i["level"], i["code"]) for i in issues if i["code"] == "POLICY_CURRENCY"],
+		                 [("ERROR", "POLICY_CURRENCY")] * 2)
+		with self.assertRaises(frappe.ValidationError) as cm:
+			contracts.publish(v)
+		self.assertIn("are in TRY, the contract's currency is EUR", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", v, "status"), "Draft")
+
+	def test_a_fixed_policy_without_a_currency_is_frozen_in_the_contracts(self):
+		from kamra.tex.tests.integration.test_contract_offer_currency import _policy
+
+		pay, cxl = self.fixed_policies()
+		v = self.draft("Y3-EUR", pay, cxl)
+		contracts.publish(v)
+		payload = json.loads(frappe.db.get_value("TEX Contract Version", v, "payload"))
+		plans = {r["code"]: r for r in payload["rate_plans"]}
+		flex, nrf = plans[self.f["rate_plans"]["FLEX"]], plans[self.f["rate_plans"]["NRF"]]
+		self.assertEqual((flex["payment_policy"]["currency"], flex["cancellation_policy"]["currency"]), ("EUR", "EUR"))
+		self.assertNotIn("currency", nrf["payment_policy"])                  # FULL: no fixed amount, as before
+		self.assertNotIn("currency", nrf["cancellation_policy"])             # PERCENT rules: as before
+
+		# the helper Y-3 B uses: 100 EUR is 5,100.00 in a TRY sale at 51, and 100 in a EUR one
+		_policy("EUR", "TRY", 51)
+		terms = contracts.load_terms(v)
+		for sell, due in (("TRY", D("5100.00")), ("EUR", D("100"))):
+			req = StayRequest(property=fx.PROPERTY, room_type=self.f["room_types"]["STD"], board="AI",
+			                  rate_plan=self.f["rate_plans"]["FLEX"], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+			                  adults=2, sale_at=now_datetime().replace(microsecond=0), market="DE",
+			                  channel="DIRECT_WEB", sell_currency=sell)
+			q = engine.price_stay(context.build_context(terms, req), req).to_dict(internal=True)
+			self.assertEqual(policy_money.fixed_in_sell("100", q["rate_plan"]["payment_policy"], q), due, sell)

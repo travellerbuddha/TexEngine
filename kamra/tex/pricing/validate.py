@@ -247,6 +247,7 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 			if bd not in board_codes:
 				issues.append(_err("RATE_PLAN_BOARD", f"rate plan {rp.code} sells unknown board {bd}"))
 		issues.extend(_refundable_issues(rp))
+		issues.extend(_policy_currency_issues(rp, t.currency))
 
 	for o in t.offers:
 		if o.value_type == PromoValueType.PERCENT and not (ZERO < D(o.value) <= D(100)):
@@ -274,6 +275,20 @@ def _refundable_issues(rp: RatePlanTerms) -> list[Issue]:
 		return [_warn("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is non-refundable, so the rules of its "
 		              f"cancellation policy {name} never apply")]
 	return []
+
+
+def _policy_currency_issues(rp: RatePlanTerms, contract_currency: str) -> list[Issue]:
+	"""A payment or cancellation policy whose fixed amounts are in another currency than the
+	contract's (Y-3 A, ADR-067): an ERROR, so a fixed amount always converts to the sale's currency
+	at the one contract → sell rate a quote records. A policy without a currency is in the contract's."""
+	out = []
+	for kind, pol in (("cancellation", rp.cancellation_policy), ("payment", rp.payment_policy)):
+		ccy = ((pol or {}).get("currency") or "").upper()
+		if policy_money.has_fixed(pol) and ccy and ccy != contract_currency.upper():
+			out.append(_err("POLICY_CURRENCY", f"rate plan {rp.code}: the fixed amounts of {kind} policy "
+			                f"{pol.get('name') or pol.get('id')} are in {ccy}, the contract's currency is "
+			                f"{contract_currency}; give the policy the contract's currency (or none)"))
+	return out
 
 
 def _board_issues(t: ContractTerms, codes: list[str]) -> list[Issue]:

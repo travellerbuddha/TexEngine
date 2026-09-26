@@ -647,10 +647,14 @@ COMMERCIAL_SPECS = [
 		CB(),
 		F("no_show_type", "Select", "No-show penalty", ["PERCENT", "NIGHTS", "FIXED"], default="NIGHTS"),
 		F("no_show_value", "Float", "No-show value", default="1", **V),
+		# the fixed amounts' currency (ADR-067, D-1): frozen with a policy that has one
+		F("currency", "Link", "Currency (fixed amounts)", "Currency",
+		  description="Currency of the fixed penalties; empty: the contract's currency"),
 		SB("Rules"),
 		F("rules", "Table", "Rules", "TEX Cancellation Rule"),
 		F("description", "Small Text", "Guest-facing text"),
-	], perms=COMMERCIAL, autoname="CXP-.#####", naming_rule="Expression (old style)", title_field="policy_name"),
+	], perms=COMMERCIAL, autoname="CXP-.#####", naming_rule="Expression (old style)", title_field="policy_name",
+	   extra={"modified": "2026-10-01 00:00:00.000000"}),                # currency came later (ADR-067)
 
 	dt("TEX Payment Policy", C, [
 		F("policy_name", "Data", "Policy", reqd=1, in_list_view=1),
@@ -658,11 +662,15 @@ COMMERCIAL_SPECS = [
 		F("deposit_type", "Select", "Pay now", ["NONE", "PERCENT", "NIGHTS", "FULL", "FIXED"], default="FULL",
 		  in_list_view=1),
 		F("deposit_value", "Float", "Value", **V),
+		# the fixed deposit's currency (ADR-067, D-1): frozen with a policy that has one
+		F("currency", "Link", "Currency (fixed amounts)", "Currency",
+		  description="Currency of a fixed deposit; empty: the contract's currency"),
 		CB(),
 		F("balance_due_days", "Int", "Balance due (days before arrival)"),
 		F("allow_pay_at_hotel", "Check", "Balance payable at hotel"),
 		F("description", "Small Text", "Guest-facing text"),
-	], perms=COMMERCIAL, autoname="PAYP-.#####", naming_rule="Expression (old style)", title_field="policy_name"),
+	], perms=COMMERCIAL, autoname="PAYP-.#####", naming_rule="Expression (old style)", title_field="policy_name",
+	   extra={"modified": "2026-10-01 00:00:00.000000"}),                # currency came later (ADR-067)
 
 	dt("TEX Extra Price Rule", C, [
 		F("market", "Link", "Market", "TEX Market", in_list_view=1),

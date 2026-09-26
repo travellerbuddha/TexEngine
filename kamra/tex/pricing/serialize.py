@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from kamra.tex.money import D, D_or_none, to_str, to_str6
+from kamra.tex.pricing import policy_money
 from kamra.tex.pricing.enums import (
 	AgeBasis,
 	ChildOrdering,
@@ -276,12 +277,16 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		          period=b.get("period") or None, label=b.get("label") or "")
 		for b in payload.get("boards") or []
 	)
+	# a policy's fixed amounts frozen without a currency (before ADR-067) are in the contract's
+	# currency, as K-1 reads a fixed offer; the payload itself is never rewritten
 	rate_plans = {
 		r["code"]: RatePlanTerms(
 			code=r["code"], name=r.get("name") or r["code"], op=Op(r["op"]) if r.get("op") else None,
 			value=D_or_none(r.get("value")), refundable=bool(r.get("refundable", True)),
-			boards=_set(r.get("boards")), cancellation_policy=r.get("cancellation_policy"),
-			payment_policy=r.get("payment_policy"), inclusions=tuple(r.get("inclusions") or ()))
+			boards=_set(r.get("boards")),
+			cancellation_policy=policy_money.with_currency(r.get("cancellation_policy"), c["currency"]),
+			payment_policy=policy_money.with_currency(r.get("payment_policy"), c["currency"]),
+			inclusions=tuple(r.get("inclusions") or ()))
 		for r in payload.get("rate_plans") or []
 	}
 	return ContractTerms(

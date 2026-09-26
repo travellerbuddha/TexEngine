@@ -123,6 +123,7 @@ test("issues still map to their Advanced rule table (the per-table lists), BOARD
     ["BOARD_UNKNOWN_PERIOD", "boards"],
     ["RATE_PLAN_BOARD", "plans"],
     ["RATE_PLAN_REFUNDABLE", "plans"],
+    ["POLICY_CURRENCY", "plans"],
     ["SALE_WINDOW", "settings"],
     ["STAY_WINDOW", "settings"],
     ["CURRENCY", "settings"],

@@ -23,7 +23,7 @@ from frappe.utils import get_datetime, getdate, now_datetime
 from kamra.tex.commercial import diffs
 from kamra.tex.money import D, D_or_none, db_dec, db_dec_or_none
 from kamra.tex.pricing import ages as age_math
-from kamra.tex.pricing import inherit, occupancy, serialize, validate, versions
+from kamra.tex.pricing import inherit, occupancy, policy_money, serialize, validate, versions
 from kamra.tex.pricing.engine import GLOBAL_MARKET
 from kamra.tex.pricing.enums import (
 	AgeBasis,
@@ -314,25 +314,35 @@ def selling_source(version, contract):
 # ─── build terms from a draft ────────────────────────────────────────────
 
 
-def _cancellation_policy(name: str | None) -> dict | None:
+def _fixed_currency(policy: dict, p, contract_currency: str) -> dict:
+	"""A policy with a fixed amount is frozen with the currency of its fixed amounts: its own, else
+	the contract's (ADR-067, D-1). Any other policy is frozen as before, without one."""
+	if policy_money.has_fixed(policy):
+		policy["currency"] = (p.currency or contract_currency).upper()
+	return policy
+
+
+def _cancellation_policy(name: str | None, contract_currency: str) -> dict | None:
 	if not name:
 		return None
 	p = frappe.get_doc("TEX Cancellation Policy", name)
-	return {"id": p.name, "name": p.policy_name, "refundable": bool(p.refundable),
-	        "rules": [{"days_before_arrival": int(r.days_before_arrival or 0), "penalty_type": r.penalty_type,
-	                   "penalty_value": serialize.dec_str(db_dec(r.penalty_value))}
-	                  for r in sorted(p.rules, key=lambda r: -(r.days_before_arrival or 0))],
-	        "no_show": {"type": p.no_show_type, "value": serialize.dec_str(db_dec(p.no_show_value))},
-	        "description": p.description or ""}
+	return _fixed_currency({
+		"id": p.name, "name": p.policy_name, "refundable": bool(p.refundable),
+		"rules": [{"days_before_arrival": int(r.days_before_arrival or 0), "penalty_type": r.penalty_type,
+		           "penalty_value": serialize.dec_str(db_dec(r.penalty_value))}
+		          for r in sorted(p.rules, key=lambda r: -(r.days_before_arrival or 0))],
+		"no_show": {"type": p.no_show_type, "value": serialize.dec_str(db_dec(p.no_show_value))},
+		"description": p.description or ""}, p, contract_currency)
 
 
-def _payment_policy(name: str | None) -> dict | None:
+def _payment_policy(name: str | None, contract_currency: str) -> dict | None:
 	if not name:
 		return None
 	p = frappe.get_doc("TEX Payment Policy", name)
-	return {"id": p.name, "name": p.policy_name, "deposit_type": p.deposit_type,
-	        "deposit_value": serialize.dec_str(db_dec(p.deposit_value)), "balance_due_days": int(p.balance_due_days or 0),
-	        "allow_pay_at_hotel": bool(p.allow_pay_at_hotel), "description": p.description or ""}
+	return _fixed_currency({
+		"id": p.name, "name": p.policy_name, "deposit_type": p.deposit_type,
+		"deposit_value": serialize.dec_str(db_dec(p.deposit_value)), "balance_due_days": int(p.balance_due_days or 0),
+		"allow_pay_at_hotel": bool(p.allow_pay_at_hotel), "description": p.description or ""}, p, contract_currency)
 
 
 def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
@@ -406,8 +416,10 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 			code=rp.rate_plan, name=rp_doc.get("rate_plan_name") or rp.rate_plan,
 			op=Op(rp.op) if rp.op else None, value=db_dec_or_none(rp.value) if rp.op else None,
 			refundable=bool(rp.refundable), boards=_csv(rp.boards),
-			cancellation_policy=_cancellation_policy(rp.cancellation_policy or rp_doc.get("tex_cancellation_policy")),
-			payment_policy=_payment_policy(rp.payment_policy or rp_doc.get("tex_payment_policy")),
+			cancellation_policy=_cancellation_policy(rp.cancellation_policy or rp_doc.get("tex_cancellation_policy"),
+			                                         contract.contract_currency),
+			payment_policy=_payment_policy(rp.payment_policy or rp_doc.get("tex_payment_policy"),
+			                               contract.contract_currency),
 			inclusions=tuple(x.strip() for x in (rp_doc.get("tex_inclusions") or "").splitlines() if x.strip()))
 
 	offers = tuple(

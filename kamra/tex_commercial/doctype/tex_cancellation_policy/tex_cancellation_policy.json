@@ -11,6 +11,7 @@
   "column_53",
   "no_show_type",
   "no_show_value",
+  "currency",
   "section_54",
   "rules",
   "description"
@@ -56,6 +57,13 @@
    "precision": "9"
   },
   {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency (fixed amounts)",
+   "options": "Currency",
+   "description": "Currency of the fixed penalties; empty: the contract's currency"
+  },
+  {
    "fieldname": "section_54",
    "fieldtype": "Section Break",
    "label": "Rules"
@@ -73,7 +81,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-10-01 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX Cancellation Policy",

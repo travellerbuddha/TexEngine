@@ -31,6 +31,9 @@ every caller, never opt-in, that fail against main by design too:
 
 * a refundable rate plan row whose cancellation policy is non-refundable is refused
   (``RATE_PLAN_REFUNDABLE``): main published it and sold it as free cancellation (Y-4).
+* a payment or cancellation policy whose fixed amounts are in another currency than the contract's
+  is refused (``POLICY_CURRENCY``): main published it and read the amount in the sale's currency
+  (Y-3 A).
 
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
@@ -472,5 +475,25 @@ class TestPolicyMoneyChanges(ExistingCallerCase):
 		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.v, "status"), "Draft")
 		find(data["rate_plans"], rate_plan=self.flex)["refundable"] = 0
 		api.save_version(self.v, as_json(data))
+		self.assertTrue(api.validate_version(self.v)["ok"])
+		self.assertEqual(contracts.publish(self.v)["version"], self.v)
+
+	def test_a_fixed_policy_in_another_currency_is_refused(self):
+		"""Y-3 A: main published a policy's fixed deposit whatever its currency and took it in the sale's
+		currency. A fixed policy in another currency than the contract's is now an ERROR
+		(``POLICY_CURRENCY``, in main's shape) and not published; without a currency it is the contract's
+		and publishes as before."""
+		pay = fx.ensure("TEX Payment Policy", {"property": fx.PROPERTY, "policy_name": "PW 100 TRY"},
+		                {"property": fx.PROPERTY, "policy_name": "PW 100 TRY", "deposit_type": "FIXED",
+		                 "deposit_value": 100, "currency": "TRY"})
+		data = tables(self.v)
+		find(data["rate_plans"], rate_plan=self.flex)["payment_policy"] = pay
+		api.save_version(self.v, as_json(data))
+		report = api.validate_version(self.v)
+		self.assertEqual([(i["level"], i["code"]) for i in report["issues"]], [("ERROR", "POLICY_CURRENCY")])
+		self.assertTrue(all(set(i) == MAIN_ISSUE_KEYS for i in report["issues"]))
+		with self.assertRaises(frappe.ValidationError):
+			contracts.publish(self.v)
+		frappe.db.set_value("TEX Payment Policy", pay, "currency", None)
 		self.assertTrue(api.validate_version(self.v)["ok"])
 		self.assertEqual(contracts.publish(self.v)["version"], self.v)
