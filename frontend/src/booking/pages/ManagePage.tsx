@@ -6,6 +6,7 @@ import { ApiError, pub } from "../lib/api"
 import { MAX_ADULTS, MAX_CHILDREN, apiChild, type Party } from "../lib/criteria"
 import { parseRefusal, refusalText } from "../lib/extras"
 import { isNegative, isPositive, isZero } from "../lib/format"
+import { roomActions } from "../lib/manage"
 import { getItem, rememberPayment, removeItem, returnPathFor, setItem, siteManageToken } from "../lib/storage"
 import { continuePayment, resumeAt } from "../flow/payment"
 import { sitePath, siteUrl, useSiteSlug } from "../lib/mount"
@@ -220,9 +221,6 @@ function PendingChangeNotice({ room, change, currency, onPay, paying }: { room: 
     )
   return null
 }
-
-/** Reservation statuses extras can still be added to (services/addons.py OPEN_STATUSES). */
-const EXTRAS_OPEN = new Set(["Confirmed", "Pending Payment", "Held"])
 
 function CancelDialog({ room, currency, token, onClose, onDone }: { room: BookingRoom; currency: string; token: string; onClose: () => void; onDone: (n: Notice) => void }) {
   const i18n = useI18n()
@@ -637,7 +635,6 @@ function Manage({ token }: { token: string | null }) {
     )
   if (!data) return <Spinner label={t("common.loading")} className="py-10" />
 
-  const active = (r: BookingRoom) => !["Cancelled", "Checked Out", "No Show", "Checked In"].includes(r.status)
   const owes = data.status !== "Cancelled" && data.payment_status !== "Pay at Hotel" && (data.status === "Pending Payment" ? isPositive(data.due_now) : isPositive(data.balance))
   // pay at the hotel: what is due there, and the choice to pay it online when the hotel takes cards
   const atHotel = data.status !== "Cancelled" && data.payment_status === "Pay at Hotel" && isPositive(data.balance)
@@ -734,28 +731,32 @@ function Manage({ token }: { token: string | null }) {
               count={data.rooms.length}
               currency={data.currency}
               bookingStatus={data.status}
-              actions={
-                data.self_service && active(r) ? (
+              actions={(() => {
+                const can = roomActions(r, data)
+                return can.change || can.extras || can.cancel ? (
                   <>
-                    {!data.changes_blocked && r.can_change !== false && (
+                    {can.change && (
                       <Button variant="secondary" size="sm" onClick={() => setChange(r)}>
                         <CalendarCog className="size-4" aria-hidden />
                         {t("manage.change")}
                       </Button>
                     )}
-                    {EXTRAS_OPEN.has(r.status) && (
+                    {can.extras && (
                       <Button variant="secondary" size="sm" onClick={() => setAddExtras(r)}>
                         <Sparkles className="size-4" aria-hidden />
                         {t("manage.addExtras")}
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => setCancel(r)} className="text-bad">
-                      <XCircle className="size-4" aria-hidden />
-                      {t("manage.cancel")}
-                    </Button>
+                    {/* from the arrival day only the hotel cancels (O-16) */}
+                    {can.cancel && (
+                      <Button variant="ghost" size="sm" onClick={() => setCancel(r)} className="text-bad">
+                        <XCircle className="size-4" aria-hidden />
+                        {t("manage.cancel")}
+                      </Button>
+                    )}
                   </>
                 ) : undefined
-              }
+              })()}
             />
           ))}
         </ul>

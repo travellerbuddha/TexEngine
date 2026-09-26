@@ -265,6 +265,37 @@ class TestSelfService(TexTestCase):
 			penalty, basis = booking.cancellation_penalty(res, today=fx.d(6, 1))
 			self.assertEqual((to_str(penalty), basis["rule"]), ("0.00", rule))
 
+	def test_no_online_cancellation_from_the_arrival_day(self):
+		# O-16 (audit Part 2A, user decision): from the arrival day the stay may have started; giving its
+		# nights back would resell a room the guest is in. A change still starts on the arrival day
+		# (``guest_changes.room_changeable``, unchanged): the stricter rule is the cancellation's alone
+		from frappe.utils import add_days, getdate
+
+		b = self._paid_booking("sess-o16")
+		token, res = b["manage_token"], b["rooms"][0]["reservation"]
+		arrival = getdate(frappe.db.get_value("Reservation", res, "check_in_date"))
+
+		def on(day):
+			return self.freeze_time(f"{day} 10:00:00.250000")
+
+		def room():
+			return public.booking_status(token=token)["rooms"][0]
+
+		for day in (add_days(arrival, 1), arrival):                       # arrived yesterday, arriving today
+			with on(day):
+				self.assertFalse(room()["can_cancel"], day)
+				with self.assertRaisesRegex(frappe.ValidationError, "no longer be changed online"):
+					public.manage_cancel(token=token, reservation=res)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		with on(arrival):                                                  # the change flow is still open
+			self.assertTrue(room()["can_change"])
+			self.assertIn("sellable", public.manage_propose(token=token, reservation=res,
+			                                                changes={"check_out": str(fx.d(6, 14))}))
+		with on(add_days(arrival, -1)):                                    # the day before: cancelled
+			self.assertTrue(room()["can_cancel"])
+			public.manage_cancel(token=token, reservation=res)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
+
 	def test_guest_cancels_with_policy_penalty(self):
 		b = self._paid_booking("sess-cx")
 		out = public.manage_cancel(token=b["manage_token"], reservation=b["rooms"][0]["reservation"])

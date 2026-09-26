@@ -9148,3 +9148,4 @@ the versions the roll superseded the state their contract's later publishes woul
   (freezegun, a kamra dev dependency), providers and network stubbed; a new "TEX …" Error Log or a broken seed fails it.
 - The Playwright run keeps the site scheduler off: wall-clock jobs (hold expiry, alerts) would act mid-spec; the smoke test
   covers them deterministically.
+- O-16 (user): a guest cancels online only before the arrival day, but may still start a change on it (`room_changeable`).
