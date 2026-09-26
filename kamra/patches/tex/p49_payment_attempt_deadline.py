@@ -2,10 +2,11 @@
 records until when an attempt started within its hold keeps its rooms
 (``TEX Booking.payment_attempt_until``).
 
-Only the two DocTypes are synced. Existing rows stay empty: a Pending charge without a deadline
-counts as in flight for ``holds.CHECKOUT_MINUTES`` after it was created, and a booking without
-``payment_attempt_until`` has no attempt keeping its rooms, as before (nothing is backfilled, so
-a second run changes nothing)."""
+Only the two DocTypes are synced. Existing rows stay empty: a booking without
+``payment_attempt_until`` has no attempt keeping its rooms (``holds.in_flight`` reads only that),
+and a charge without ``expires_at`` has no deadline, so it keeps no rooms and its money is never
+judged paid in time (``holds.paid_in_time``); nothing is backfilled, so a second run changes
+nothing."""
 
 import frappe
 
