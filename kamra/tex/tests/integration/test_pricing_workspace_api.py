@@ -67,6 +67,7 @@ FINANCE = "pw-finance@example.com"     # price.view_cost without contract.edit
 AGENT = "pw-agent@example.com"         # sells only: the catalogue
 FOREIGN = "pw-foreign@example.com"     # a Revenue Manager of another hotel
 PUBLISHER = "pw-publisher@example.com" # contract.edit and contract.publish without price.view_cost
+PUBLISH_ONLY = "pw-publish-only@example.com"   # contract.publish without contract.edit or price.view_cost
 ROW_MESSAGE = "a value is required; clear the cell to remove the price."
 NO_CHD_RULE = "no occupancy rule for child 1 in band CHD (2A+1C)"
 
@@ -121,6 +122,15 @@ class WorkspaceCase(TexTestCase):
 
 	def as_user(self, user: str) -> None:
 		frappe.set_user(user)  # nosemgrep: frappe-setuser -- test context switch
+		scope.clear_cache()
+
+	def grant(self, user: str, profile: str, capabilities) -> None:
+		"""``user`` at the test hotel with a permission profile of exactly ``capabilities``."""
+		fx.ensure("TEX Permission Profile", {"profile_name": profile},
+		          {"profile_name": profile, "capabilities": [{"capability": c} for c in capabilities]})
+		fx.ensure_user(user, ["Revenue Manager"])
+		fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+		          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": profile})
 		scope.clear_cache()
 
 	def payload(self) -> dict:
@@ -844,14 +854,8 @@ class TestInheritedTerms(WorkspaceCase):
 		re-review 4, low finding). Its warnings are now exactly what get_version gives that caller, for
 		the workspace's publish and an existing caller's; the report stored is the full one, and who sees
 		cost is told it all."""
-		fx.ensure("TEX Permission Profile", {"profile_name": "PW Contract Publisher"},
-		          {"profile_name": "PW Contract Publisher",
-		           "capabilities": [{"capability": c} for c in ("price.view", "contract.edit", "contract.publish")]})
-		fx.ensure_user(PUBLISHER, ["Revenue Manager"])
-		fx.ensure("TEX Access Grant", {"user": PUBLISHER, "property": fx.PROPERTY},
-		          {"user": PUBLISHER, "scope_level": "Hotel", "property": fx.PROPERTY,
-		           "permission_profile": "PW Contract Publisher"})
-		scope.clear_cache()
+		self.grant(PUBLISHER, "PW Contract Publisher", ("price.view", "contract.edit", "contract.publish"))
+		self.grant(PUBLISH_ONLY, "PW Publish Only", ("price.view", "contract.publish"))
 		policy("PW Hotel Override", property=fx.PROPERTY, rules=[child("INF", "FIXED", 15, is_override=1)])
 		# 1A: 100 − 150 (the engine's default prices the adult); 2A+1C: 200 + a policy-priced CHD child
 		# (hidden) or the draft's own INF rule − 260; the draft's INF rule outranks the policy's override
@@ -863,7 +867,8 @@ class TestInheritedTerms(WorkspaceCase):
 			return {(i["ref"]["adults"], i["ref"]["children"], i["ref"].get("age_band")) for i in issues
 			        if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"}
 
-		for n, (user, workspace) in enumerate(((PUBLISHER, True), (PUBLISHER, False), (RM, True))):
+		for n, (user, workspace) in enumerate(((PUBLISHER, True), (PUBLISHER, False), (RM, True),
+		                                       (PUBLISH_ONLY, True), (PUBLISH_ONLY, False))):
 			with self.subTest(user=user, workspace=workspace):
 				self.as_user("Administrator")
 				version = fx.create_contract(self.f, code=f"PW-RR4-PUB{n}", age_bands=[], occupancy_rules=rules,
@@ -872,7 +877,14 @@ class TestInheritedTerms(WorkspaceCase):
 				answer = (wapi if workspace else api).publish_version(version)
 				stored = json.loads(frappe.db.get_value("TEX Contract Version", version, "validation_report"))
 				self.assertTrue({"OCC_POLICY_OVERRIDE_OUTRANKED", "NEGATIVE_OCCUPANCY_PRICE"} <= {i["code"] for i in stored})
-				shown = (wapi if workspace else api).get_version(version)["validation_report"]
+				doc = (wapi if workspace else api).get_version(version)
+				if user == PUBLISH_ONLY:
+					# get_version gives who neither sees cost nor edits contracts the catalogue, without
+					# a report: publish tells them nothing of it either (S16 re-review 5, low finding)
+					self.assertNotIn("validation_report", doc)
+					self.assertIsNone(answer["warnings"])
+					continue
+				shown = doc["validation_report"]
 				self.assertEqual(answer["warnings"], shown)
 				if user == RM:
 					self.assertEqual(answer["warnings"], stored)
@@ -883,6 +895,107 @@ class TestInheritedTerms(WorkspaceCase):
 					self.assertEqual(negative(answer["warnings"]), {(1, 0, None), (2, 1, "INF")})
 				else:   # main's rows say no party: every row of a code a policy rule can decide is left out
 					self.assertEqual(answer["warnings"], [i for i in stored if i["code"] not in validate.HIDEABLE_CODES])
+
+	def infant_policy(self, op: str, value=None) -> str:
+		"""A live global policy of the bands INF and CHD whose one rule names the infant band (G-31: it
+		outranks a version's band-less child rules for an infant), with ``op`` ``value``."""
+		return policy(f"PW RR5 Infant {op}", bands=[INF, {"band_code": "CHD", "label": "Child", "from_age": 3,
+		                                                   "to_age": 11.99}], rules=[child("INF", op, value)])
+
+	def test_a_refused_publish_tells_a_publisher_without_cost_what_its_live_check_tells(self):
+		"""A refused publish named every ERROR of the full check: "Cannot publish: …" before anything is
+		written or audited, as often as asked. V-X and V-Y tie on the child of 2A+1C, under a policy rule
+		naming the infant band: with that rule deferring (INHERIT) the full check names the tie at the
+		infant's slot, with it pricing at the CHD child's. A rule naming an unknown band makes every
+		publish fail, so a publisher without price.view_cost read the hidden rule's op from the refusal,
+		again and again without a trace (S16 re-review 5, medium finding). Such a publisher is now told
+		the errors its own live check shows, the same whatever the op; who sees cost, the full check's."""
+		self.grant(PUBLISHER, "PW Contract Publisher", ("price.view", "contract.edit", "contract.publish"))
+		revisions.archive(POLICY, self.policy)
+		rules = [{"target": "CHILD", "combination": "2+*", "op": "MULTIPLY", "value": 0},
+		         {"target": "CHILD", "combination": "*+1", "op": "MULTIPLY", "value": 0.1},
+		         child("NOPE", "MULTIPLY", 0)]
+		version = fx.create_contract(self.f, code="PW-RR5-REF", age_bands=[], occupancy_rules=rules,
+		                             publish=False)["version"]
+		told, live, previous = {}, {}, None
+		for op, value in (("INHERIT", None), ("MULTIPLY", 0)):
+			self.as_user("Administrator")
+			if previous:
+				revisions.archive(POLICY, previous)
+			previous = self.infant_policy(op, value)
+			for user in (PUBLISHER, RM):
+				self.as_user(user)
+				for label, endpoint in (("workspace", wapi), ("existing", api)):
+					with self.assertRaises(frappe.ValidationError) as refused:
+						endpoint.publish_version(version)
+					told[(op, user, label)] = str(refused.exception)
+			self.as_user(PUBLISHER)
+			live[op] = [i["message"] for i in wapi.validate_version(version)["issues"] if i["level"] == "ERROR"]
+		self.assertEqual(live["INHERIT"], live["MULTIPLY"])
+		for label in ("workspace", "existing"):
+			with self.subTest(label):
+				self.assertEqual(told[("INHERIT", PUBLISHER, label)], told[("MULTIPLY", PUBLISHER, label)])
+				self.assertEqual(told[("INHERIT", PUBLISHER, label)], "Cannot publish: " + "; ".join(live["INHERIT"]))
+				self.assertIn("names unknown age band NOPE", told[("INHERIT", PUBLISHER, label)])
+				self.assertNotIn("(INF)", told[("INHERIT", PUBLISHER, label)])
+				# who sees cost is told the full check, as before: where the tie prices depends on the op
+				self.assertIn("child 1 (INF)", told[("INHERIT", RM, label)])
+				self.assertIn("child 1 (CHD)", told[("MULTIPLY", RM, label)])
+		self.as_user("Administrator")
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", version, ["status", "payload"]), ("Draft", None))
+
+	def test_a_refusal_the_publishers_live_check_does_not_explain_names_nothing(self):
+		"""Where the full check fails and the live check of a publisher without cost shows no error, the
+		errors depend on a hidden rule: the refusal names none of them (S16 re-review 5, medium
+		finding). Here the live check's errors are taken away to reach that case."""
+		self.grant(PUBLISHER, "PW Contract Publisher", ("price.view", "contract.edit", "contract.publish"))
+		version = fx.create_contract(self.f, code="PW-RR5-GEN", age_bands=[], occupancy_rules=[
+			{"target": "CHILD", "combination": "2+*", "op": "MULTIPLY", "value": 0},
+			{"target": "CHILD", "combination": "*+1", "op": "MULTIPLY", "value": 0.1}], publish=False)["version"]
+		checks = validate.validate_terms
+
+		def no_error_the_viewer_sees(t, **kw):
+			issues = checks(t, **kw)
+			return [i for i in issues if i.level != "ERROR"] if kw.get("hidden") else issues
+
+		told = {}
+		with mock.patch.object(validate, "validate_terms", side_effect=no_error_the_viewer_sees):
+			for user in (PUBLISHER, RM):
+				self.as_user(user)
+				with self.assertRaises(frappe.ValidationError) as refused:
+					wapi.publish_version(version)
+				told[user] = str(refused.exception)
+		self.assertEqual(told[PUBLISHER], "Cannot publish: " + contracts.UNEXPLAINED_REFUSAL)
+		self.assertIn("rules", told[RM])
+		self.assertIn("same precedence", told[RM])
+
+	def test_a_stored_report_is_worked_out_once_and_its_sweep_run_again_bounded(self):
+		"""get_version gives an editor without cost the report stored at publish as the live check gives
+		it; a stored sweep at its limit is the whole sweep run again, seconds on a large contract, on every
+		get_version and without a bound (S16 re-review 5, low finding). It is now worked out once per
+		report, and running the sweep again is bounded as validate_version is (a web request only)."""
+		version = fx.create_contract(self.f, code="PW-RR5-SWP", age_bands=[], occupancy_rules=[
+			{"target": "COMBINATION", "combination": "1+0", "op": "SUBTRACT", "value": 150},
+			{"target": "COMBINATION", "combination": "2+1", "op": "SUBTRACT", "value": 260}], publish=False)["version"]
+		contracts.publish(version, workspace=True)
+		self.addCleanup(frappe.cache.delete, *[api._heavy_key("validate", what, EDITOR) for what in ("minute", "slots")])
+		self.as_user(EDITOR)
+		# the limit of 1 makes this report's sweep one at its limit (two stored rows)
+		with mock.patch.object(validate, "SWEEP_LIMIT", 1), mock.patch.object(api, "_in_request", return_value=True), \
+		     mock.patch.dict(api.HEAVY_LIMITS, {"validate": (100, 1)}):
+			with api._heavy("validate"):            # another check of this user's is running
+				with self.assertRaises(frappe.RateLimitExceededError):
+					wapi.get_version(version)
+			with mock.patch.object(validate, "visible_issues", wraps=validate.visible_issues) as worked:
+				first = wapi.get_version(version)["validation_report"]
+				with api._heavy("validate"):        # worked out already: neither run again nor bounded
+					self.assertEqual(wapi.get_version(version)["validation_report"], first)
+				self.assertEqual(worked.call_count, 1)
+			stored = json.loads(frappe.db.get_value("TEX Contract Version", version, "validation_report"))
+			self.assertGreater(sum(i["code"] == "NEGATIVE_OCCUPANCY_PRICE" for i in stored), 1)
+			# the live sweep, stopped at its limit: the first party no hidden rule takes part in
+			self.assertEqual([(i["ref"]["adults"], i["ref"]["children"]) for i in first
+			                  if i["code"] == "NEGATIVE_OCCUPANCY_PRICE"], [(1, 0)])
 
 # 2 adults; 2 adults + a CHB child (a code in any case); an unknown band; more children than STD holds
 PARTIES = ({"adults": 2, "children": []}, {"adults": 2, "children": ["chb"]}, {"adults": 1, "children": ["XX"]},
