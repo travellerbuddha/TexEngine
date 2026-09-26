@@ -694,6 +694,18 @@ class TestHoldPolicy(HoldCase):
 		self.assertAlmostEqual((expires - now_datetime()).total_seconds() / 3600, 72, delta=0.1)
 
 
+class TestHoldSettings(HoldCase):
+	def test_the_platform_settings_read_and_save_the_web_transfer_hold(self):
+		"""K4 (audit 1c-son): the web transfer hold (C2) is a platform setting like the other holds."""
+		import json
+
+		from kamra.tex.api import admin
+
+		admin.save_settings(json.dumps({"hold_minutes_transfer_web": 600}))
+		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 600)
+		self.assertEqual(admin.settings()["hold_minutes_transfer_web"], 600)
+
+
 class TestPartialCancellation(HoldCase):
 	"""B1 (audit 1b): a room of a booking still waiting for its payment is cancelled (by staff, or by
 	the guest on the manage page). The booking was never confirmed: it keeps waiting for its payment
