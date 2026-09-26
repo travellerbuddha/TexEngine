@@ -205,6 +205,8 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 		changes={"added": p["requests"], "addon": addon_id}, before=snap, after=merged, source=source)
 	if res.tex_booking:
 		booking_svc._refresh_booking_after_change(res.tex_booking)
+		# never confirmed: what it owes now may be paid already (E2)
+		booking_svc.confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was changed")
 		if guest:
 			frappe.db.set_value("TEX Booking", res.tex_booking, "guest_change_pending", 1)
 	audit("reservation.addon", reference_doctype="Reservation", reference_name=res.name, property=res.property,

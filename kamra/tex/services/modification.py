@@ -678,6 +678,8 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	if res.tex_booking:
 		booking_svc.sync_redemptions(res.tex_booking)
 		booking_svc._refresh_booking_after_change(res.tex_booking)
+		# never confirmed: what it owes now may be paid already (E2)
+		booking_svc.confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was changed")
 	audit("reservation.modify", reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	      old={"total": to_str(old_total), **{k: v[0] for k, v in changed_fields.items()}},
 	      new={"total": to_str(final_total), **{k: v[1] for k, v in changed_fields.items()}, "revision": rev,

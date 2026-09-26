@@ -742,6 +742,45 @@ class TestPartialCancellation(HoldCase):
 		self.assertEqual(confirmations(b), 1)
 
 
+class TestChangesOfABookingWaitingForItsPayment(HoldCase):
+	"""E2 (audit 1c-son): any change of a booking never confirmed — its dates, extras, coupon, a price
+	staff set, a room cancelled — makes it owe now what its rooms require now, up or down, never more
+	than it costs; money that already covers that confirms it at once."""
+
+	def test_shortened_after_its_first_half_was_paid_it_is_confirmed(self):
+		from kamra.tex.services import modification
+
+		b = self.book(rate_plan="NRF")                                  # 3 nights, all of it paid now
+		half = (D(b["total"]) / 2).quantize(D("0.01"))
+		links = [pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description=f"Half {i}",
+		                         booking=b["booking"]) for i in (1, 2)]
+		started = public.pay_link(token=links[0]["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(self.statuses(b)[0], "Pending Payment")
+		p = modification.propose(self.rooms(b)[0], {"check_out": str(fx.d(6, 11))})     # one night
+		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			modification.apply(p["proposal_token"], reason="one night only")
+		mailed.assert_called_once()
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertEqual(confirmations(b), 1)
+		night = D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount"))
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now")), night)
+
+	def test_a_higher_price_is_not_confirmed_by_the_old_amount(self):
+		from kamra.tex.services import modification
+
+		b = self.book(rate_plan="NRF")
+		payment = self.start_payment(b)                                 # the old amount, 3 nights
+		p = modification.propose(self.rooms(b)[0], {"check_out": str(fx.d(6, 14))})     # a fourth night
+		modification.apply(p["proposal_token"], reason="one night more")
+		row = frappe.db.get_value("TEX Booking", b["booking"], ["total_amount", "amount_due_now"], as_dict=True)
+		self.assertEqual(D(row.amount_due_now), D(row.total_amount))
+		self.assertGreater(D(row.amount_due_now), D(b["due_now"]))
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		self.assertEqual(paid(b), D(b["due_now"]))
+
+
 class TestNeverConfirmedLeftovers(HoldCase):
 	"""D2 (audit 1c): before B1, a booking waiting for its payment with a room cancelled became
 	"Partially Cancelled", and the old PMS job then released its other rooms: every room cancelled,

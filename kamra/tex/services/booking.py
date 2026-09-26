@@ -1071,14 +1071,15 @@ def _refresh_booking_after_change(booking: str) -> None:
 			d = frappe.get_doc("TEX Promotion Redemption", red)
 			d.status = "Released"
 			d.save(ignore_permissions=True)
+	elif b.status in holds.HOLDING and all(s in holds.HOLDING for s in statuses if s != "Cancelled"):
+		# never confirmed: it keeps waiting for its payment with the rooms it has left, which expire
+		# with its hold or are confirmed by its payment (B1). After any change (a room cancelled, its
+		# dates, extras, coupon, a price staff set) it owes now what its rooms require now (their
+		# deposits and the fees owed), up or down, never more than it costs (D1, E2); the caller
+		# confirms it when that is paid (``confirm_if_paid``)
+		b.amount_due_now = min(required_now(b), total)
 	elif any(s == "Cancelled" for s in statuses):
-		if b.status in holds.HOLDING and all(s in holds.HOLDING for s in statuses if s != "Cancelled"):
-			# never confirmed: it keeps waiting for its payment with the rooms it has left, which
-			# expire with its hold or are confirmed by its payment, never asking more than it costs (B1)
-			# nor more than its rooms left require now (their deposits and the fees owed, D1)
-			b.amount_due_now = min(from_db(b.amount_due_now, ccy), required_now(b), total)
-		else:
-			b.status = "Partially Cancelled"
+		b.status = "Partially Cancelled"
 	paid = from_db(b.paid_amount, ccy)
 	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
 	b.save(ignore_permissions=True)
