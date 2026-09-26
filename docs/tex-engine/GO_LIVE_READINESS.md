@@ -694,3 +694,15 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - The workspace stays PARTIAL (the FX weekday test and two `entry-branding` tests on the shared
     site's data are not this group's). O1–O5 remain owner input 13. No area status changes.
     Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace final follow-up, main-side group, on branch `pricing-workspace`
+  (ADR-061).
+  - The contract lists' current tables (Price periods, Occupancy rules, Rate plans) leave out
+    archived contracts' versions, and their version cap counts only versions with a row: archived
+    E2E drafts had cut the lists for every user on the shared site.
+  - The funnel purge deletes each old event alone by its primary key, so a small or quiet site's
+    purge never locks the funnel that bookings write to.
+  - The FX status test is pinned to every weekday (the check itself was right); `entry-branding`
+    waits for the lists' answers; the disposable test site gets the shared site's config.
+  - Integration: 868 tests OK in 40 modules (11 skipped, as ADR-061 lists), upstream green,
+    `entry-branding` 5 × 10/10. The workspace stays PARTIAL until a whole run of every suite is
+    recorded. No area status changes. Verdict unchanged: NOT READY.

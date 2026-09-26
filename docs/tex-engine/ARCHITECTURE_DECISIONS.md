@@ -9057,3 +9057,34 @@ the fixes (`a18a3b5`: the new tests, the old product).
   scratch proof (not committed; the lists' answers held back 2.5 s by `page.route`): the old step,
   marked expected to fail, failed (it clicked a placeholder row and the page stayed on the list);
   the new step passed.
+
+**Verification (final follow-up, main-side group).** On `59ef45a` (the group's code; docs after it);
+main `1575c8b` is contained, so nothing was merged.
+- *Unit:* 530 OK (the new weekday table), ruff clean. `npm run test:unit` 316/316,
+  `npm run test:dom` 42/42, `tsc -b`, `npm run build` (bundles not committed) and
+  `npm run i18n:tex` clean.
+- *Integration, all 40 modules* (migrated with the tree, from an archived copy of it): 868 tests,
+  all OK, 11 skipped: the 3 whole-site patch tests, the 7 second-connection tests of
+  `test_crm_third_review`, and `test_entry_branding`'s git-checkout test (the copy is not a
+  checkout); from the worktree `test_entry_branding` is 35/35, none skipped.
+- *Disposable site* (`disposable_test.sh` with the new config: made, tested, dropped):
+  `test_crm_third_review` 22/22 (none skipped), `test_patches` 33/33, `test_crm_privacy_review`
+  28/28.
+- *Upstream with the tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Playwright* on this group's servers (bench :8021 with the tree, `serve_tree.py`, an RQ worker,
+  Vite :5191; the site migrated with the tree; a second factor for one test user and a
+  `tex_source_url`, put back afterwards): the scratch race proof 2/2 (the old step failed as
+  expected, the new one passed); `entry-branding.spec.ts` five runs in a row, 10/10 each, "every
+  new sub-section …" (238) and "a restricted user …" (357) included.
+
+**Open after the final follow-up, main-side group.**
+- A whole green run of every suite on one commit (the whole Playwright suite included) is still to
+  be recorded before the workspace can be COMPLETE; this group ran the suites above.
+- In "all", an archived contract's active version still reads "live" (and a suspended one's too):
+  `_state` does not look at the contract's status, and there is no "archived" state to show
+  (pre-existing).
+- The withdrawal's `FORGET_CASES` / `FORGET_EVENTS` name their rows with `name IN`; on a funnel
+  where one guest's rows are most of the table (a new site) the optimizer could read them as a
+  scan, as the purge's was. Not reproduced (`test_crm_privacy_review` 28/28 on the disposable site).
+- `lists.versions` lists archived contracts' versions by default (by design); on the shared site
+  its 500 most recent are archived E2E drafts.
