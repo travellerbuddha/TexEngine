@@ -56,13 +56,25 @@
    Only from a width where a few period columns still fit beside it; below, it lies over the page as
    before. While it sits beside the page, the grids' sticky row header (matrixView MATRIX_WIDTHS,
    sized by the viewport) is narrower, so the columns keep the room (S16 re-review 3: at 1024 px a
-   md panel left 32 px of price columns). */
+   md panel left 32 px of price columns).
+   The shell's top bar keeps its whole width (final follow-up: at 1280 px it was cut to 592 px, and
+   the search button lay over the hotel selector): in the TEX shell the panel starts under the bar
+   (html[data-tex-shell], set by TexShell; the bar is h-14), and the bar does not give up the
+   panel's width with the page. */
+@media (min-width: 40rem) {
+  html[data-tex-shell] [data-side-panel] {
+    top: 3.5rem;
+  }
+}
 @media (min-width: 80rem) {
   html[data-side-panel-open="md"] {
     --tex-row-header: clamp(9rem, 12vw, 12rem);
   }
   html[data-side-panel-open="md"] .tex-page {
     padding-right: 28rem;
+  }
+  html[data-side-panel-open="md"] .tex-page > .tex-shell-bar {
+    margin-right: -28rem;
   }
 }
 @media (min-width: 96rem) {
@@ -72,6 +84,9 @@
   html[data-side-panel-open="lg"] .tex-page {
     padding-right: 42rem;
   }
+  html[data-side-panel-open="lg"] .tex-page > .tex-shell-bar {
+    margin-right: -42rem;
+  }
 }
 @media (min-width: 120rem) {
   html[data-side-panel-open="xl"] {
@@ -79,5 +94,8 @@
   }
   html[data-side-panel-open="xl"] .tex-page {
     padding-right: 56rem;
+  }
+  html[data-side-panel-open="xl"] .tex-page > .tex-shell-bar {
+    margin-right: -56rem;
   }
 }
