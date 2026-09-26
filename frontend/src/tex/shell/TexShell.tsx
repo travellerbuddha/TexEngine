@@ -472,6 +472,14 @@ export function TexShell({ children }: { children: ReactNode }) {
   const location = useLocation()
 
   useEffect(() => setMobileNav(false), [location.pathname])
+  // a side panel opened in the shell starts under its top bar (tex.css, final follow-up)
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.texShell = ""
+    return () => {
+      delete root.dataset.texShell
+    }
+  }, [])
   // the tab says the brand (TEX Settings), never the upstream product (G-60)
   useEffect(() => {
     document.title = boot.settings.brand_name || "TEX Engine"
@@ -514,8 +522,9 @@ export function TexShell({ children }: { children: ReactNode }) {
           </aside>
         </div>
       )}
-      <div className="min-w-0 lg:pl-60">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-zinc-200 bg-white/90 px-3 backdrop-blur sm:px-5">
+      <div className="tex-page min-w-0 lg:pl-60">
+        {/* tex-shell-bar: it keeps its whole width while a side panel sits beside the page (tex.css) */}
+        <header className="tex-shell-bar sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-zinc-200 bg-white/90 px-3 backdrop-blur sm:px-5">
           <IconButton className="lg:hidden" label={t("core.shell.open_nav")} icon={<Menu className="size-5" />} onClick={() => setMobileNav(true)} />
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <HotelSwitcher />

@@ -53,13 +53,22 @@ class NightPrice:
 	sell_contract: Decimal = ZERO   # after markup, contract currency
 	sell: Decimal = ZERO       # sell currency, before SELL promotions
 	final: Decimal = ZERO      # sell currency, after accommodation promotions
+	# the night's running totals, reported for the Explain ladder (ADR-061 GAP-12): in the dict only
+	# when asked for (the workspace's price test); a stored quote keeps main's keys
+	subtotal_adults: Decimal = ZERO     # the unit priced for the adults (ROOM basis: room + extra adults)
+	subtotal_children: Decimal = ZERO   # … + the children, before a whole-combination rule
+	subtotal_board: Decimal = ZERO      # occupancy + board, before the period adjustment
 
-	def to_dict(self) -> dict:
+	def to_dict(self, *, subtotals: bool = False) -> dict:
 		q = to_str6
-		return {"date": self.night.isoformat(), "period": self.period, "unit": q(self.unit),
-		        "occupancy": q(self.occupancy), "board": q(self.board), "cost": q(self.cost),
-		        "cost_net": q(self.cost_net), "sell_contract": q(self.sell_contract), "sell": q(self.sell),
-		        "final": q(self.final)}
+		out = {"date": self.night.isoformat(), "period": self.period, "unit": q(self.unit),
+		       "occupancy": q(self.occupancy), "board": q(self.board), "cost": q(self.cost),
+		       "cost_net": q(self.cost_net), "sell_contract": q(self.sell_contract), "sell": q(self.sell),
+		       "final": q(self.final)}
+		if subtotals:
+			out.update(subtotal_adults=q(self.subtotal_adults), subtotal_children=q(self.subtotal_children),
+			           subtotal_board=q(self.subtotal_board))
+		return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,9 +153,11 @@ class RoomQuote:
 	def total(self) -> Decimal:
 		return self.totals.get("total", ZERO)
 
-	def to_dict(self, *, internal: bool = True) -> dict:
+	def to_dict(self, *, internal: bool = True, subtotals: bool = False) -> dict:
 		"""JSON-safe dict. ``internal=False`` strips cost/margin and the rule-level
-		explanation (guest-facing)."""
+		explanation (guest-facing). ``subtotals``: each internal night also reports its running
+		subtotals (the Pricing Workspace's price test, ADR-061 GAP-12; opt-in, so a TEX Quote, a
+		reservation snapshot and every other caller keep main's keys)."""
 		from kamra.tex.pricing.serialize import request_to_dict
 
 		totals = {k: to_str(v) for k, v in self.totals.items()}
@@ -175,7 +186,7 @@ class RoomQuote:
 		if internal:
 			out["fx"] = self.fx
 			out["fx_rates"] = self.fx_rates
-			out["nights"] = [n.to_dict() for n in self.nights]
+			out["nights"] = [n.to_dict(subtotals=subtotals) for n in self.nights]
 			out["explanation"] = self.explanation.to_list()
 		else:
 			out["nights"] = [{"date": n.night.isoformat(), "amount": to_str(quantize(n.final, self.currency))}
@@ -460,6 +471,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 			occ = occupancy.price_occupancy(t, spec, period, unit, party, night=n, explain=ex)
 			brd = boards.price_board(t, req.board, req.room_type, period, party, occ.total, night=n, explain=ex)
 			amount = occ.total + brd
+			before_adjust = amount                     # reported as the night's subtotal_board (GAP-12)
 			if period.adjustment_op and period.adjustment_op != Op.INHERIT:
 				before = amount
 				amount = apply_op(period.adjustment_op, period.adjustment_value, reference=amount, current=amount)
@@ -476,7 +488,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 			ex.add("night", "NIGHT_COST", "contract cost {amount} {currency}", night=n, after=amount,
 			       currency=t.currency, amount=amount)
 			costs[n] = amount
-			partial[n] = (period.code, unit, occ.total, brd)
+			partial[n] = (period.code, unit, occ.total, brd, occ.after_adults, occ.after_children, before_adjust)
 
 		promo_ctx_base = dict(sale_date=sale_date, check_in=req.check_in, check_out=req.check_out, nights=nights,
 		                      market=req.market, channel=req.channel, room_type=req.room_type, board=req.board,
@@ -606,9 +618,10 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 		q.promotions.extend(rejected)
 
 		for n in nights:
-			per, unit, occ_total, brd = partial[n]
+			per, unit, occ_total, brd, after_adults, after_children, before_adjust = partial[n]
 			q.nights.append(NightPrice(n, per, unit, occ_total, brd, costs[n], cost_net[n], sells_cc[n], sells[n],
-			                           finals[n]))
+			                           finals[n], subtotal_adults=after_adults, subtotal_children=after_children,
+			                           subtotal_board=before_adjust))
 
 		# ── lines & rounding ──
 		lines: list[QuoteLine] = []

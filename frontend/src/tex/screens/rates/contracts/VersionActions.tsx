@@ -3,8 +3,9 @@ import { tex, TexApiError, useTexMutation } from "../../../lib/api"
 import { useTexT } from "../../../i18n"
 import { Button, Checkbox, ConfirmDialog, Dialog, Field, InlineError, Input, Notice, Select, Spinner, Textarea, useToast } from "../../../ui"
 import { IssueList } from "../components/common"
-import type { ValidationResult, VersionRow } from "../lib/types"
+import type { Issue, ValidationResult, VersionRow } from "../lib/types"
 import { toFrappeDatetime, versionLabel } from "../lib/util"
+import { WORKSPACE } from "../workspace/draftPreview.ts"
 
 /** Publish a draft: server validation first (errors block, warnings need a
  * confirmation), then an effective time and a change note for the audit trail. */
@@ -14,16 +15,24 @@ export function PublishDialog({
   version,
   contractCode,
   onDone,
+  format,
+  workspace = false,
 }: {
   open: boolean
   onClose: () => void
   version: { name: string; version_no: number }
   contractCode: string
   onDone: () => void
+  /** an issue's message as shown (the version editor: band codes as labels, D13) */
+  format?: (issue: Issue) => string
+  /** the Pricing Workspace publishes (ADR-061): its check and publish carry the opt-in flag (its
+   * board checks block, the stored report anchors each issue); other screens publish as before */
+  workspace?: boolean
 }) {
   const { t } = useTexT()
   const toast = useToast()
-  const publish = useTexMutation<{ name: string; effective_from: string | null; change_note: string }>("contracts", "publish_version")
+  const publish = useTexMutation<{ name: string; effective_from: string | null; change_note: string; workspace?: 1 }>("contracts", "publish_version")
+  const optIn = workspace ? WORKSPACE : {}
   const [check, setCheck] = useState<ValidationResult>()
   const [checkErr, setCheckErr] = useState<TexApiError>()
   const [checking, setChecking] = useState(false)
@@ -35,7 +44,7 @@ export function PublishDialog({
   const runCheck = () => {
     setChecking(true)
     setCheckErr(undefined)
-    tex<ValidationResult>("contracts", "validate_version", { name: version.name })
+    tex<ValidationResult>("contracts", "validate_version", { name: version.name, ...optIn })
       .then(setCheck)
       .catch((e: unknown) => setCheckErr(e instanceof TexApiError ? e : new TexApiError(String(e), 0, "Error")))
       .finally(() => setChecking(false))
@@ -59,7 +68,7 @@ export function PublishDialog({
   const submit = async () => {
     if (!ready) return
     try {
-      await publish.run({ name: version.name, effective_from: when === "later" ? toFrappeDatetime(at) : null, change_note: note.trim() })
+      await publish.run({ name: version.name, effective_from: when === "later" ? toFrappeDatetime(at) : null, change_note: note.trim(), ...optIn })
       toast.success(t("rates.version.published", { v: versionLabel(version.name, version.version_no), code: contractCode }))
       onDone()
       onClose()
@@ -103,7 +112,7 @@ export function PublishDialog({
           ) : checkErr ? (
             <InlineError error={checkErr} />
           ) : (
-            <IssueList issues={check?.issues} emptyOk={t("rates.version.check_ok")} />
+            <IssueList issues={check?.issues} emptyOk={t("rates.version.check_ok")} format={format} />
           )}
           {errors > 0 && <p className="text-sm text-rose-800">{t("rates.version.fix_errors")}</p>}
           {errors === 0 && warnings > 0 && (

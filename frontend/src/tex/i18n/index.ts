@@ -14,7 +14,8 @@ export const TEX_LANGS = [
 ] as const
 
 export type TexLang = (typeof TEX_LANGS)[number]["code"]
-type Plural = { zero?: string; one?: string; few?: string; many?: string; other: string }
+// cardinal forms (zero/one/few/many/other) and, for ordinal entries, "two" as well (en "2nd")
+type Plural = { zero?: string; one?: string; two?: string; few?: string; many?: string; other: string }
 type Entry = string | Plural
 type Catalog = Record<string, Entry>
 
@@ -119,6 +120,36 @@ export function translate(lang: TexLang, key: string, params?: Params): string {
   return interpolate(form, params)
 }
 
+// Intl.PluralRules objects are costly to build; tOrdinal runs for every ladder row
+const ordinalRules = new Map<string, Intl.PluralRules>()
+
+/**
+ * An ordinal ("3rd adult", "3. Erwachsener"): the entry's form for `n` under the language's
+ * ordinal rules (Intl.PluralRules with type "ordinal": en one/two/few/other, most others only
+ * other), falling back to "other"; `{n}` and `params` are interpolated. A plain string entry is
+ * used as it is.
+ */
+export function translateOrdinal(lang: TexLang, key: string, n: number, params?: Params): string {
+  const all = { ...params, n }
+  const entry = CATALOGS[lang]?.[key] ?? CATALOGS.en?.[key]
+  if (entry === undefined) return interpolate(key, all)
+  if (typeof entry === "string") return interpolate(entry, all)
+  const locale = intlLocale(lang)
+  let rules = ordinalRules.get(locale)
+  if (!rules) {
+    rules = new Intl.PluralRules(locale, { type: "ordinal" })
+    ordinalRules.set(locale, rules)
+  }
+  const form = entry[rules.select(n) as keyof Plural] ?? entry.other
+  return interpolate(form, all)
+}
+
+/** Whether a catalogue entry exists for `key` in `lang` or in English (the fallback): code that
+ * has its own fallback (e.g. a server sentence, S14's rates.explain.<CODE>) asks before t(). */
+export function hasTexKey(lang: TexLang, key: string): boolean {
+  return (CATALOGS[lang]?.[key] ?? CATALOGS.en?.[key]) !== undefined
+}
+
 /** Non-reactive translate (for code outside components). */
 export function tt(key: string, params?: Params) {
   return translate(current, key, params)
@@ -133,7 +164,9 @@ export function useTexT() {
     return () => window.removeEventListener("tex:lang", on)
   }, [])
   const t = useCallback((key: string, params?: Params) => translate(lang, key, params), [lang])
-  return { t, lang, locale: intlLocale(lang) }
+  const tOrdinal = useCallback((key: string, n: number, params?: Params) => translateOrdinal(lang, key, n, params), [lang])
+  const has = useCallback((key: string) => hasTexKey(lang, key), [lang])
+  return { t, tOrdinal, has, lang, locale: intlLocale(lang) }
 }
 
 /** Keys missing from a loaded language (dev aid; the build-time check is

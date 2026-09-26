@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react"
 import { tex, TexApiError, type TexModule } from "../../../lib/api"
 import { intlLocale, getTexLang } from "../../../i18n"
-import type { Issue, Lookups, Row } from "./types"
+import { editorHash, issueSection, issueTable, parseEditorHash, type SectionId } from "../workspace/sections.ts"
+import { newKey } from "./keys"
+import type { Issue, IssueRef, Lookups, Row } from "./types"
 
 /** Module name of the workstream-A helper endpoints (kamra/tex/api/ui_rates.py). */
 export const UI_RATES = "ui_rates" as TexModule
@@ -26,18 +28,17 @@ export function strVal(v: unknown): string {
   return v === null || v === undefined ? "" : String(v)
 }
 
-let keySeq = 0
-export function newKey(): string {
-  keySeq += 1
-  return `r${Date.now().toString(36)}${keySeq}`
-}
+export { newKey }
 
 export type FieldKind = "text" | "int" | "decimal" | "check" | "select" | "date" | "csv" | "weekdays"
 
 /** Normalise a server row for the editor: decimals → strings, ints → numbers,
- * checks → 0/1, everything else → string. Frappe bookkeeping keys are dropped. */
+ * checks → 0/1, everything else → string. Frappe bookkeeping keys are dropped, except the
+ * server row name, kept as `_name` (the rule id of a saved row, for issue anchoring); fromRow,
+ * payloadOf and the fingerprint ignore it. */
 export function toRow(src: Record<string, unknown>, kinds: Record<string, FieldKind>): Row {
   const out: Row = { _key: newKey() }
+  if (typeof src.name === "string" && src.name) out._name = src.name
   for (const [k, kind] of Object.entries(kinds)) {
     const v = src[k]
     if (kind === "int") out[k] = intVal(v)
@@ -109,10 +110,21 @@ export function decText(s: string | number | null | undefined, minDec = 2): stri
   const [ip, fp = ""] = str.replace(/^[-+]/, "").split(".")
   let frac = fp.replace(/0+$/, "")
   if (frac.length < minDec) frac = (frac + "0".repeat(minDec)).slice(0, minDec)
-  const locale = intlLocale(getTexLang())
-  const intTxt = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(BigInt(ip || "0"))
-  const sep = new Intl.NumberFormat(locale, { minimumFractionDigits: 1 }).formatToParts(1.1).find((p) => p.type === "decimal")?.value ?? "."
-  return `${neg ? "−" : ""}${intTxt}${frac ? sep + frac : ""}`
+  const { int, sep } = decFormat(intlLocale(getTexLang()))
+  return `${neg ? "−" : ""}${int.format(BigInt(ip || "0"))}${frac ? sep + frac : ""}`
+}
+
+// Intl.NumberFormat objects are costly to build and decText runs for every cell of the price
+// matrix: one integer formatter and the decimal mark per locale.
+const decFormats = new Map<string, { int: Intl.NumberFormat; sep: string }>()
+function decFormat(locale: string) {
+  let f = decFormats.get(locale)
+  if (!f) {
+    const sep = new Intl.NumberFormat(locale, { minimumFractionDigits: 1 }).formatToParts(1.1).find((p) => p.type === "decimal")?.value ?? "."
+    f = { int: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }), sep }
+    decFormats.set(locale, f)
+  }
+  return f
 }
 
 /** Datetime-local input value → "YYYY-MM-DD HH:MM:SS" for Frappe. */
@@ -121,29 +133,40 @@ export function toFrappeDatetime(v: string): string | null {
   return v.replace("T", " ") + (v.length === 16 ? ":00" : "")
 }
 
-/** Which version-editor tab a validation issue belongs to. */
-export function issueTab(code: string): string {
-  if (code.startsWith("OCC_")) return "occupancy"
-  if (code.startsWith("OFFER_")) return "offers"
-  if (code.startsWith("PERIOD_") || code === "NO_PERIODS") return "periods"
-  if (code.startsWith("ROOM_RULE") || code === "ROOM_NEGATIVE") return "rates"
-  if (code === "ROOM_CAPACITY" || code === "INCLUDED_ADULTS" || code === "NO_ROOMS") return "rooms"
-  if (code.startsWith("AGE_BANDS")) return "ages"   // AGE_BANDS (gaps, overlaps), AGE_BANDS_MIN_AGE (G-52)
-  if (code === "NO_BASE_BOARD") return "boards"
-  if (code === "RATE_PLAN_BOARD") return "plans"
-  return "settings"
+/** Which version-editor section (Pricing, Commercial rules, Offers, Preview & audit) a validation
+ * issue belongs to (PRICING_WORKSPACE_UX.md §2): BOARD_* and the child ages are Pricing, the
+ * selling windows and the currency Commercial rules. The Advanced rule tables list their own
+ * issues by `issueTable`. */
+export function issueTab(code: string, ref?: IssueRef): SectionId {
+  return issueSection(code, ref)
 }
 
-export function countIssues(issues: Issue[] | undefined, tab: string) {
+/** Errors and warnings of one section (the section badges). */
+export function countIssues(issues: Issue[] | undefined, section: string) {
   let errors = 0
   let warnings = 0
   for (const i of issues ?? []) {
-    if (issueTab(i.code) !== tab) continue
+    if (issueSection(i.code, i.ref) !== section) continue
     if (i.level === "ERROR") errors += 1
     else warnings += 1
   }
   return { errors, warnings }
 }
+
+/** Errors and warnings listed by one Advanced rule table (the inner tab badges). */
+export function countTableIssues(issues: Issue[] | undefined, table: string) {
+  let errors = 0
+  let warnings = 0
+  for (const i of issues ?? []) {
+    if (issueTable(i.code, i.ref) !== table) continue
+    if (i.level === "ERROR") errors += 1
+    else warnings += 1
+  }
+  return { errors, warnings }
+}
+
+// the section hashes and their aliases (#rates, #occupancy, #plans …)
+export { editorHash, issueTable, parseEditorHash }
 
 /** Version number from a name like "CTR-00019-V2"; falls back to the name. */
 export function versionLabel(name: string | null | undefined, versionNo?: number): string {

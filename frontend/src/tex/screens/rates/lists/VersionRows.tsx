@@ -17,8 +17,9 @@ export type Section = "periods" | "occupancy" | "rate_plans"
 const PRICE = ["price.view"] as const
 const COST = ["price.view_cost", "contract.edit"] as const
 
-// the version editor's tab for each section (VersionEditor TABS)
-const TAB: Record<Section, string> = { periods: "periods", occupancy: "occupancy", rate_plans: "plans" }
+// where each list opens its version (the editor's canonical hashes, PRICING_WORKSPACE_UX.md §2):
+// periods are columns of Pricing, occupancy its region there, rate plans a Commercial rules table
+const TAB: Record<Section, string> = { periods: "pricing", occupancy: "occupancy", rate_plans: "plans" }
 const TITLE: Record<Section, string> = { periods: "core.nav.sub.periods", occupancy: "core.nav.sub.occupancy", rate_plans: "core.nav.sub.rate_plans" }
 const ICON: Record<Section, ReactNode> = {
   periods: <CalendarDays className="size-5" />,

@@ -903,13 +903,16 @@ def _commit() -> None:
 
 
 # The purge (third review of ADR-056, M-6): old events are read through ``tex_funnel_time_session`` without
-# a lock and deleted by primary key, PURGE_BATCH at a time, each batch committed. A DELETE on
-# ``occurred_at`` without that index locked every funnel row and gap until the job ended, and every booking's
-# tracking waited behind it.
+# a lock and deleted by primary key, one statement per event, PURGE_BATCH at a time, each batch committed. A
+# DELETE on ``occurred_at`` without that index locked every funnel row and gap until the job ended, and every
+# booking's tracking waited behind it. One DELETE naming the whole batch (``name IN``) is no better where the
+# batch is most of the funnel (a new or quiet site: 3 events of 5, 400 of 500): the optimizer reads it as a
+# scan, which locks every row and gap until the batch commits. An equality on the primary key is read through
+# it whatever the table holds, so the purge locks the rows it deletes and nothing else.
 PURGE_BATCH = 500
 PURGE_OLD = """SELECT name FROM `tabTEX Funnel Event` WHERE occurred_at < %(cutoff)s
 	ORDER BY occurred_at LIMIT %(n)s"""
-PURGE_EVENTS = "DELETE FROM `tabTEX Funnel Event` WHERE name IN %(names)s"
+PURGE_EVENT = "DELETE FROM `tabTEX Funnel Event` WHERE name = %(name)s"
 
 
 FUNNEL_RETENTION_DAYS = 180         # funnel events older than this are deleted (reports refuse older windows)
@@ -917,14 +920,15 @@ FUNNEL_RETENTION_DAYS = 180         # funnel events older than this are deleted 
 
 def purge_funnel(days: int = FUNNEL_RETENTION_DAYS) -> int:
 	"""Data minimisation: funnel events older than ``days`` are deleted, oldest first, in small committed
-	batches (``PURGE_OLD``, ``PURGE_EVENTS``). → how many."""
+	batches (``PURGE_OLD``, ``PURGE_EVENT``). → how many."""
 	cutoff = now_datetime() - timedelta(days=days)
 	purged = 0
 	while True:
 		names = frappe.db.sql(PURGE_OLD, {"cutoff": cutoff, "n": PURGE_BATCH}, pluck=True)
 		if not names:
 			break
-		frappe.db.sql(PURGE_EVENTS, {"names": tuple(names)})
+		for name in names:
+			frappe.db.sql(PURGE_EVENT, {"name": name})
 		_commit()
 		purged += len(names)
 		if len(names) < PURGE_BATCH:

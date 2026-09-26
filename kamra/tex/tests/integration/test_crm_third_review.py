@@ -26,6 +26,7 @@ administrator only.
 """
 
 import json
+import re
 from contextlib import contextmanager
 from unittest import mock
 
@@ -141,7 +142,7 @@ class TestFunnelPurge(PrivacyCase):
 		                                                           0, "{}"))
 		cutoff = add_days(now_datetime(), -180)
 		for sql, params, index in ((crm.PURGE_OLD, {"cutoff": cutoff, "n": crm.PURGE_BATCH}, "tex_funnel_time_session"),
-		                           (crm.PURGE_EVENTS, {"names": ("none",)}, "PRIMARY")):
+		                           (crm.PURGE_EVENT, {"name": "none"}, "PRIMARY")):
 			self.assertNotIn("IFNULL", sql.upper())
 			[plan] = frappe.db.sql(f"EXPLAIN {sql}", params, as_dict=True)
 			self.assertEqual((plan.key, plan.type != "ALL"), (index, True), (sql, plan))
@@ -164,6 +165,30 @@ class TestFunnelPurge(PrivacyCase):
 			crm.purge_funnel()                                    # not committed: its locks are held
 		with own_connection() as visitor:
 			visit(visitor, "m6-during-purge", "m6-purge@example.com")   # waits at most WAIT s, or fails
+
+	def test_each_old_event_is_deleted_alone_by_its_primary_key(self):
+		"""One DELETE naming the whole batch (``name IN``) is read as a scan of the funnel when the batch is
+		most of it (a new or quiet site: 3 events of 5, 400 of 500), and the scan locks every row and gap
+		until the batch commits, so every booking's tracking waits (the disposable site's near-empty funnel
+		showed it: test_new_events_never_wait_for_a_purge timed out). An equality on the primary key is read
+		through it whatever the table holds: each DELETE names one event, and its plan reads one row."""
+		old = set(self.old_events(3))
+		deletes = []
+		real = frappe.db.sql
+
+		def sql(query, *args, **kwargs):
+			if re.match(r"\s*DELETE\b.*`tabTEX Funnel Event`", str(query), re.S | re.I):
+				deletes.append((str(query), args[0] if args else kwargs.get("values")))
+			return real(query, *args, **kwargs)
+
+		with mock.patch.object(crm, "_commit"), mock.patch.object(frappe.db, "sql", side_effect=sql):
+			purged = crm.purge_funnel()
+		self.assertGreaterEqual(purged, 3)
+		self.assertEqual([n for n in old if frappe.db.exists("TEX Funnel Event", n)], [])
+		self.assertEqual(len(deletes), purged, "one DELETE per event")
+		for query, values in deletes:
+			[plan] = real(f"EXPLAIN {query}", values, as_dict=True)
+			self.assertEqual((plan.key, plan.type != "ALL", int(plan.rows)), ("PRIMARY", True, 1), (query, values, plan))
 
 
 # ─── H-1: the merge reads what it moves with locking reads ───────────────

@@ -21,7 +21,7 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 | Area | Status | Evidence (code · tests) | Open items (gap ids) | Owner input | Exit criterion |
 |---|---|---|---|---|---|
 | Pricing | PARTIAL · **money blocker** | Pure Decimal engine `kamra/tex/pricing` (no frappe import, `TestPurity`); 315 unit tests; G-01…G-09, G-17, G-18, G-20, G-30, G-31, G-52, G-56 fixed with fail-first tests (G-30/G-31 closed: occupancy precedence v2, ADR-043, reviewed and the review's 8 findings fixed; `test_pricing_policies` 14; G-56/G-52, ADR-051: every FX rate a price used is in the price-locked snapshot and ORIGINAL_* reprices reuse it, `test_fx_snapshot` 4; age-band gaps refused at publish in months and a child's date of birth accepted and checked, `test_age_bands` 6); G-92 fixed (ADR-052): a TEX hotel's reservation is created only by TEX (booking service, channel sale) or a migration import recorded as "Imported" at its Decimal amount, the legacy auto-price never prices a TEX hotel, and a stay there changes its stay or price only through TEX (`test_legacy_pricing` 15); its review follow-up (ADR-052 review): import amounts are read strictly (never guessed), shown before import and correctable with `price.override`, the legacy check-out bills a locked stay from its locked amount or its TEX booking (G-96), and a hotel joining TEX sells at the Desk until an administrator sets it live (`test_legacy_pricing_review` 23, unit `test_import_amounts` 14); G-51 (ADR-054): modifications and the historical simulator are deterministic (a past sale time selects the contracts Active then and the simulator counts the coupon uses held then), a sale time is used or refused (`test_modification_determinism` 24); G-72 fixed (ADR-055): commercial decimal fields keep 9 places and hold exactly what was typed (more is refused), loaders read the exact Decimal (`money.db_dec`), FX rates keep 10 significant digits (`test_money_fields`); G-84 fixed (ADR-057): a coupon's minimum basket is the whole booking's — the booking engine and the CRS quote the rooms of a booking together, a booking is sold only at the price its rooms have together, a change is judged with the other rooms (`TestBookingBasket` 10 + unit 12); G-98 fixed (ADR-059 review follow-up): a cost-stage offer's discount, or a basket compared with the contract cost, never reaches a guest or staff without `price.view_cost` (every outcome carries its stage; unit `test_cost_stage_privacy` 5, integration 3) | a snapshot keeps the Decimal rate it used); live versions published before ADR-043 keep the legacy occupancy ranking (their sold price) until republished: at deploy run `devtools/precedence_report` (bench execute, read-only) and republish the versions it lists under `precedence` / `rebuild`, revise those under `cannot_rebuild`, archive the second policy of each scope under `ambiguous_policy_scopes` | — | G-72 migrated to Currency |
-| Contracts | PARTIAL | Immutable published versions with a verified payload hash (`TestContractImmutability`); selection (`TestContractSelection`); header lock and versioned selling terms, selection from the frozen version, audited status actions, header narrowings made before the upgrade kept and reported (p25), a suspend stops quotes and bookings in flight (G-50, ADR-045, `TestContractHeaderLock`, `TestContractHeaderLockReview`); selection for a past sale time reads the audited status of then, so an archived contract still reprices and simulates the stays it sold (G-51, ADR-054); every saved draft edit (any path) and every publish audited as a compact diff, a publish against the version it replaces (G-74, ADR-053, `TestContractAudit`); a sold stay's snapshot refers to its version's payload by hash, checked on every reprice, simulation and add-on, and records when it was priced (G-73, ADR-058, `test_snapshot_integrity`); e2e `contract-admin`, `policy-revisions` | None known in code; no CI run yet (no area is READY without CI evidence) | — | CI green on the release commit |
+| Contracts | PARTIAL | Immutable published versions with a verified payload hash (`TestContractImmutability`); selection (`TestContractSelection`); header lock and versioned selling terms, selection from the frozen version, audited status actions, header narrowings made before the upgrade kept and reported (p25), a suspend stops quotes and bookings in flight (G-50, ADR-045, `TestContractHeaderLock`, `TestContractHeaderLockReview`); selection for a past sale time reads the audited status of then, so an archived contract still reprices and simulates the stays it sold (G-51, ADR-054); every saved draft edit (any path) and every publish audited as a compact diff, a publish against the version it replaces (G-74, ADR-053, `TestContractAudit`); a sold stay's snapshot refers to its version's payload by hash, checked on every reprice, simulation and add-on, and records when it was priced (G-73, ADR-058, `test_snapshot_integrity`); e2e `contract-admin`, `policy-revisions` | None known in code; no CI run yet (no area is READY without CI evidence) | 13 (Pricing Workspace shorthand O1–O5, provisional), 14 (Pricing Workspace and existing callers) | CI green on the release commit |
 | Inventory | PARTIAL | Row-locked inventory days (`TestConcurrentLastRoom`, `TestConcurrentRoomTypes`); at a TEX hotel TEX inventory is the only capacity rule: oversell, pools and configured inventory sold by TEX are kept, and every reservation written outside TEX (migration imports, status moves; a Desk/REST insert at a hotel live in TEX is refused, ADR-052) takes the TEX lock and is checked against TEX inventory; a change is checked only on the nights it newly takes; a reservation books only its own hotel's room types (G-49 fixed and reviewed, ADR-048; `test_inventory` 31, `TestConcurrentDeskAndTexBooking`); allotment release and cutoff are separate, a cutoff gives the rooms back, channels hear both at the site's midnight (p27); extras capacity (G-19, `TestConcurrentLastExtra`); hold expiry (G-86); restrictions (G-48 fixed, ADR-057): the booking window, hotel/market-level cells and Booking Engine / Call Center scopes, enforced on every change of a booked stay for what it newly takes (staff, guest self-service, paid or approved guest changes; override only with `restriction.edit`, audited), channel bookings accepted with a warning and the booking window / advance days in the ARI (`test_restrictions` 25, e2e `restrictions-grid.spec.ts`) | G-41 remainder: one multi-channel contract's allotment cannot be split by channel (a contract per channel or channel-scoped restrictions instead; deferred, ADR-050); G-47; pools and configured inventory are set only in Desk | — | The allotment channel split decided; G-47 |
 | Booking Engine | PARTIAL | `/book/<slug>` SPA, rate-limited public API, `test_public_booking` (17), e2e booking desktop + mobile, post-booking extras (G-22); a guest's change settles its money (G-45 fixed, ADR-044, adversarial review fixed: no refund past a rate's terms, durable refunds that are never repeated after a gateway timeout, refunds capped by what is still over, the change applied by a job after the payment, money for staff explicit; second review fixed: refund runs one at a time and never around their own refund in flight, every unconfirmed refund can be closed from the payment screen and is flagged in the system status, nothing of a refund is dropped after an unanswered one, a paid change not yet applied is set aside, an arrival moved later inside a penalty window goes to the hotel, transient errors retried, lost jobs swept, channel changes in the same lock order; third review fixed: an outcome is recorded only once the refund's answer cannot come and is never overwritten by a late answer (a contradicting answer is an audited, alerted conflict that stops the change's refunds), a run keeps its hold and counts the refunds it made, money refunded outside TEX recorded, G-93; fourth review fixed: money handed back recorded against its own payments on any booking, limits read with locking reads, money being refunded never moves, a conflict stops every run until staff record the gateway's actual outcome) · `test_self_service_money` (75, fail-first), `test_distribution` (+2), unit `test_settlement`, `test_system_checks` | No money gap open. e2e `manage-money.spec.ts` (3) passed on the bench (with an RQ worker) before the second review; extended since, to be re-run; CI never ran | — | CI green including `manage-money.spec.ts` |
 | Multi-room | PARTIAL | `TestMultiRoom`, `TestBookingLevelTerms`, `TestBookingBasket` (G-84 fixed, ADR-057: the rooms of a booking are quoted together and a minimum basket is the basket of the rooms each promotion covers; a change or cancellation that takes the booking below it charges the changed room the discount the other rooms keep — review H1), `TestBasketReviewInputs`, `TestBasketClawbackMoney`, unit `test_booking_level`, `test_basket_clawback`, e2e two-room booking | Recorded limits (ADR-057 review follow-up): two minimum-basket promotions lost at once are forfeited one by one; a no-show is not a change; no CI evidence yet | — | CI green on GitHub |
@@ -114,6 +114,31 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     offered. An install without its git checkout sets `tex_source_commit` (else the offer links the
     repository, not the version). Local changes that are not committed and pushed are not offered:
     deploy only pushed commits.
+13. Pricing Workspace shorthand (ADR-061, `PRICING_WORKSPACE_UX.md` §0.1): five provisional
+    decisions the workspace is built with (branch `pricing-workspace`, S1–S16; PARTIAL until its final verification is green in every suite, IMPLEMENTATION_STATUS). O1: a bare number in a board cell is a price per
+    room per night (ABSOLUTE), not per adult. O2: `-20` in a board cell is ADD −20 per adult. O3:
+    `50%` in a board cell is ADJUST_PERCENT 50. O4: a relative entry (`x1.1`, `+10%`, `-5`) on the
+    base room is applied once to its entered price and stored as a price. O5: an amount typed as
+    `1.500` in a 0- or 2-decimal currency is refused as ambiguous (accepted in KWD, BHD, OMR, JOD,
+    TND). Confirm each, or choose its alternative (ADR-061), before hotel staff enter contracts in
+    the workspace.
+14. Pricing Workspace and existing callers (ADR-061, "Existing semantics kept, the workspace's
+    additions opt-in"). Existing callers of the contract endpoints get main's answers; the
+    workspace's additions are opt-in (`workspace=1`). Four differences hold for every caller,
+    as security and tenancy fixes: (1) a draft naming another hotel's rate plan, cancellation
+    policy or payment policy is refused wherever its terms are built (validate, price test,
+    matrix, publish, ARI grid); (2) an editor without `price.view_cost` is not told what a
+    pricing policy's formula decides by the live check, and (3) not in the report stored at
+    publish nor in the warnings a publish answers (none at all to a caller with neither
+    `price.view_cost` nor `contract.edit`); (4) a refused publish names, to a publisher without
+    `price.view_cost`, only the errors of their own live check, and none when every error depends
+    on a pricing policy's rules. Confirm them. Decide also who may read a contract version's audit
+    entries: today `reservation.view` is enough, and a republish's or a draft save's entry shows
+    changed contract rates old → new (ADR-061, S16 re-review 5 follow-up, Open). Decide whether any addition
+    should hold for every caller: today the board checks (a board row for an unknown room or
+    period, twin board rows) and the refusal of a blank rule value apply only in the workspace, so
+    the contract detail page's and the ARI grid's publish still publish such a draft, and a blank
+    value saved by another caller is stored as 0.
 
 ## 4. Platform notes
 
@@ -433,3 +458,251 @@ security or distribution blocker remains (owner rule). Several remain (§2).
     13/13, banquet 101; Playwright 59/59 (a real second factor for one test user, a
     `tex_source_url` set).
   - No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace backend slices S2–S3 on branch `pw-backend` (ADR-061): the editor's
+  unsaved draft is priced, validated and quoted in memory (read-only overlay), a blank rule value is
+  refused on save, and the price matrix names the rule behind each cell, the inherited bands and
+  rules, the engine's defaults and sample-party totals. Performance measured (ADR-061). The O1–O5
+  shorthand decisions are owner input 13. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace backend slice S4 on branch `pw-backend` (ADR-061): validation issues
+  say which rule, room, period, band, party or board they are about (messages unchanged).
+  **Behaviour change to announce to contract managers:** a draft with a board rule for a room or
+  period the contract does not have, or with two rules of one board for the same room and period,
+  can no longer be published (`BOARD_UNKNOWN_ROOM`, `BOARD_UNKNOWN_PERIOD`, `BOARD_DUPLICATE`);
+  such rows were priced by row order or never. Published versions are unchanged; none of the 273
+  versions with board rows on the development site is affected. No area status changes. Verdict
+  unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace backend slice S5 on branch `pw-backend` (ADR-061), the last backend
+  slice: the contract price test takes a child's age in months or by date of birth and refuses a
+  non-whole or adult age (it failed or truncated before); `apply_op_values` computes entered prices
+  changed once by an op (O4's server half, bulk Adjust…); each night of an internal quote reports its
+  subtotals after the adults, the children and the board (no price change; never shown to guests
+  or agents). O1–O5 remain owner input 13. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace lanes merged on branch `pricing-workspace` (ADR-061): the backend
+  slices S2–S5 with the shorthand parser (S1), the design-system Popover / Menu / Tooltip and keyboard
+  grid hooks (S7) and the pure workspace model (S6). The parse and storage of O1–O5 are on the branch
+  (reported per item in ADR-061); no workspace screen uses them yet (S8–S16). On the merged tree: 38
+  integration modules 831 OK, upstream suites 76/76, 13/13, banquet 101, Playwright 15/15 for the
+  contract, editor, journey, policy, booking and restrictions specs; performance re-measured
+  (ADR-061). O1–O5 remain owner input 13. No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-24: Pricing Workspace slice S8 on branch `pricing-workspace` (ADR-061): the contract version
+  editor is reorganised into four sections under a sticky context header; the former editors stay
+  as "Rule tables" and old links still land. Editors now see the server's prices and checks of
+  unsaved edits as they type (a read-only overlay; nothing is saved), with at most one validation
+  in flight per editor; the Price test prices unsaved edits; the pricing basis can be switched in
+  the editor before the first publish (the existing header save, audited). BOARD_* publish errors
+  count on Pricing. No server change; no area status changes. O1–O5 remain owner input 13.
+  Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S8 review follow-up on branch `pricing-workspace` (ADR-061). Editors
+  of a large contract (above 5,000 rows, e.g. a weekly contract of 12 rooms) again get the saved
+  draft's prices and checks and a working Check button; their unsaved changes are previewed only
+  after a save, and the screen says so. A live check that could not run now says so, with the
+  reason and Try again. Additive server change: the overlay's row-cap refusal is typed and
+  `get_version` reports the cap. No area status changes. O1–O5 remain owner input 13. Verdict
+  unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S9 on branch `pricing-workspace` (ADR-061): the contract
+  version's Pricing section is a room price matrix typed into with the shorthand and priced live by
+  the server before any save; rooms and periods are managed from the matrix; every change is one
+  undo entry. O4 (a relative entry on the base room changes its entered price once, on the server,
+  and stores the result) is built end to end and O5's "Is this 1500 or 1.5?" message is on screen;
+  both stay owner input 13 with O1–O3. Display note for the owner: resolved amounts are cut, not
+  rounded, to the currency's decimals by the existing formatter (ADR-061, open). No server change;
+  no area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S9 review follow-up on branch `pricing-workspace` (ADR-061). In a
+  3-decimal contract currency (KWD, BHD, OMR, JOD, TND) the night adjustment takes amounts such as
+  +12.345, as O5 says. An answer of the server that arrives after the user changed one of its cells
+  no longer overwrites that change, and the cell editor no longer jumps to another room. The
+  base-room reading tells "50%" from "+50%". O1–O5 remain owner input 13, and their implemented
+  behaviour is listed in ADR-061. Display note unchanged: resolved amounts are cut, not rounded.
+  No server change; no area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S10 on branch `pricing-workspace` (ADR-061): the room price
+  matrix's bulk tools. Rows and columns are selected from their headers; prices and formulas are
+  filled across periods and down rooms, with a confirmation before a formula row gets a fixed
+  price; blocks are copied and pasted from spreadsheets, all or nothing; Adjust… changes selected
+  entered prices with the server's preview; undo and redo work from the toolbar and the keyboard,
+  and a bulk change can be undone from its toast for 10 s. Edits in the rule tables are undo
+  entries too, so undoing in the matrix no longer drops them. No server change; no area status
+  changes. O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S10 review follow-up on branch `pricing-workspace` (ADR-061).
+  Filling down from a cell that follows its room's default now copies what the cell shows,
+  instead of giving the target its own room's default (Family Suite ×1.15 onto Garden Villa gave
+  ×1.35 and dropped Garden Villa's override); copying such a cell copies what it shows. A fill
+  from an empty cell says how many cells it cleared. S10 is now documented in ADR-061, and the
+  undo toast has a committed browser test. No server change; no area status changes. Verdict
+  unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S10 second review follow-up on branch `pricing-workspace`
+  (ADR-061). A block copied from the price matrix over a resolved row now pastes back onto the same
+  rooms. Before, it put one room's resolved price on the next room as a fixed price, with a
+  success toast. Copied text ends every row with a line break, so an empty cell clears where it
+  is pasted. Ctrl/Cmd+R and Ctrl/Cmd+D typed in a cell no longer reload the page. The undo
+  toast returns the focus to the grid. No server change; no area status changes. Verdict
+  unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S11 on branch `pricing-workspace` (ADR-061): Occupancy &
+  child pricing under the room price matrix. Adult, single-use and child-band prices are typed
+  per period in one grid, which shows the engine's defaults ("×1.00 default"), children who
+  cannot be sold ("No rule · not sellable"), period overrides and the server's occupancy total
+  for a sample party. The child ages drawer does not block the page. It creates bands from the
+  last one's end and saves their labels, keeps codes under Advanced, and shows inherited bands
+  read-only until they are customised. Band codes are shown as labels. No server change; no area
+  status changes. O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S11 review follow-up on branch `pricing-workspace` (ADR-061). In
+  a single room's view, occupancy prices set for all rooms now show as coming from All rooms. They
+  used to read "×1.00 default" or "not sellable", which the engine does not do. A cell without a
+  rule of its own shows the rule the engine uses. The sample party's line never shows another
+  party's totals, and changing the party no longer greys out the room price matrix. Sample parties
+  stay within the server's limits. No server change; no area status changes. Verdict unchanged:
+  NOT READY.
+- 2026-09-25: Pricing Workspace slice S12 on branch `pricing-workspace` (ADR-061): special
+  combinations are built from chips and fields instead of typed text. Each one is a card, e.g. "2
+  Adults + 2 Children → Child 1 ×0.50 · Child 2 ×0.25", with its age bands by label, rooms and
+  periods. The builder offers only the party sizes the rooms can host and names the rooms for the
+  others. It prices each child by age band and writes ordinary occupancy rules as one undo entry.
+  It refuses a rule another combination already holds. No server change; no area status changes.
+  O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S12 review follow-up on branch `pricing-workspace` (ADR-061). A
+  combination saved for all rooms and the same one for a single room used to merge into one card.
+  Editing and saving that card unchanged deleted the single room's rules, which could change that
+  room's price. The two are now separate cards, and a card saved unchanged keeps its rules. The
+  builder no longer opens a card it cannot save back as it is. Such cards are edited in the rule
+  tables. No server change; no area status changes. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S13 on branch `pricing-workspace` (ADR-061): boards are
+  entered on Pricing. When collapsed, the section reads "UAI BASE · AI −5 % · HB −20.00 per adult".
+  When expanded, it is a grid on the matrix's period columns, with a row for each room that has
+  rules of its own. A cell takes 20 (per room per night), +20 or -20 (per adult), 5% or -5%, or
+  BASE. Before commit, the reading line names the unit. Removing a board asks first. The owner's
+  example was typed, saved and priced in the Price test with board HB. No server change; no area
+  status changes. O1–O3 are now implemented in the board cells and remain owner input 13, as do
+  O4 and O5. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S14 on branch `pricing-workspace` (ADR-061): the Price test
+  opens in a non-modal drawer from the header or a matrix cell's "Test this price", prefilled from
+  that cell, and prices unsaved edits without a save. A child's age can be given in months or by
+  date of birth. The Explain ladder shows the engine's stages in the order it applies them, with
+  the server's values before and after each stage; the browser computes nothing. "Why this price"
+  shows band labels instead of codes, speaks the viewer's language where a template exists and
+  links each rule to its cell or card. No server change; no area status changes. O1–O5 remain owner
+  input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace slice S15 on branch `pricing-workspace` (ADR-061): validation
+  issues are shown on the matrix cell, period header, occupancy ladder cell, combination card or
+  board cell they are about, and the live check lists them by section; a click on one shows its
+  cell (or the region or rule table that holds it). Every issue list shows band labels instead of
+  band codes. The i18n check also fails on a key used in the code but missing from the catalogue.
+  No server change; no area status changes. O1–O5 remain owner input 13. Verdict unchanged: NOT
+  READY.
+- 2026-09-25: Pricing Workspace slice S16 on branch `pricing-workspace` (ADR-061), the last slice:
+  the committed browser specs. `pricing-workspace.spec.ts` enters the owner's 13-step contract in
+  one draft and measures 41 clicks, 0 section switches and 0 modal dialogs (limit 50 / 0 / 0), with
+  the Price test's ladder compared with the server's answer and no save before it;
+  `pricing-workspace-mobile.spec.ts` checks a published version on a phone and an agent's catalogue
+  (no amounts, no cost call). The contract E2E flows drive the workspace, and the S9–S15 checks are
+  committed specs. The bundles are rebuilt. The Pricing Workspace is complete on the branch (R-04
+  stays PARTIAL); O1–O5 remain owner input 13. No server change; no area status changes. Verdict
+  unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 review follow-up on branch `pricing-workspace` (ADR-061).
+  - Server:
+    - `price_matrix` shows inherited pricing-policy formulas (and the sample-party totals priced
+      with them) only to a viewer with `price.view_cost`, as the policies API does;
+    - a blank night adjustment or rate plan value is refused (it priced as 0);
+    - `build_terms` refuses another hotel's rate plan or cancellation or payment policy;
+    - `validate_version`, and the matrix with unsaved data or sample parties, are bounded per user
+      (a budget a minute and a cap on calls running at once, 429).
+  - Workspace: a readable dark theme, visible selections, Ctrl/Cmd+S that saves what is typed, input
+    kept across section switches, the focus kept after removals, the header's Base room and ROOM
+    occupancy, grids that scroll together, and settings in the undo history.
+  - Open: the §3.18 one-screen fit; one shared inline-editing hook.
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 re-review follow-up on branch `pricing-workspace` (ADR-061).
+  - Server:
+    - an editor without `price.view_cost` can no longer work back an inherited policy formula from
+      sample parties (a whole-party rule, or a failure a probe provokes) or from the live check;
+    - the per-user heavy-read budget is atomic and a leaked slot ages out;
+    - `preview_price` with unsaved data is bounded too.
+  - Workspace: the Price test's explanation after a second result, child position rows and "also
+    when children travel" in the ladder popover, Add room / Add board menus, no spinner that never
+    stops, Ctrl/Cmd+S and the tab-close prompt for every typed field, one tab stop per grid,
+    Shift+click header ranges, and the Price test beside the matrix on a desktop.
+  - Open: one shared inline-editing hook; no clipboard in the ladder and the boards grid (they say
+    where it works); the §3.18 one-screen fit.
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 re-review 2 follow-up on branch `pricing-workspace` (ADR-061).
+  - Server: an editor without `price.view_cost` is again told when a child band has no rule (the
+    live check and the sample parties); only what depends on a hidden policy rule's op or value
+    stays hidden, and the report stored at publish is filtered for that editor the same way.
+  - Workspace: "also when children travel" switches the whole single-use row, and a draft with both
+    single-use forms shows a row for each; the header lane is in the keyboard help and on each
+    grid; a cleared child-age name no longer makes the tab ask before closing; Add room focuses the
+    room it added; the Price test's first total is announced.
+  - Open: unchanged (one shared inline-editing hook; no clipboard in the ladder and the boards grid;
+    the §3.18 one-screen fit).
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace S16 re-review 3 follow-up on branch `pricing-workspace` (ADR-061).
+  - Server: an editor without `price.view_cost` no longer learns whether a hidden policy rule is
+    INHERIT (the infant warning and the sample parties).
+  - Workspace: the single-use row no longer rewrites a special combination's rules, switches only
+    the scope's own rules and refuses to carry a relative rule; the focus stays in the grid after a
+    keyboard undo; a refused new child-age band makes the tab ask before closing; smaller
+    accessibility, i18n and layout fixes.
+  - Open: unchanged, and side panels lie over the page below 80rem.
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace, existing semantics kept on branch `pricing-workspace` (ADR-061).
+  - Existing callers of the contract endpoints get main's answers again: quotes (and so TEX Quotes
+    and reservation snapshots) with main's night keys, main's issues and issue keys, blank values
+    saved as 0, children read as whole years, no rate limit on a saved draft's check, main's keys
+    from the matrix and the version. The workspace's additions are opt-in (`workspace=1`), and the
+    workspace sends the flag.
+  - Kept for every caller: another hotel's rate plan or terms refused; policy formulas hidden from
+    an editor without cost (live check and stored report). Owner input 14.
+  - Parity with main `6b0102c`: 2,906 quotes byte for byte, 25 payloads' issues, hashes and units,
+    97 broken drafts' issues (`test_main_parity`); the endpoints (`test_existing_semantics`).
+  - No area status changes; O1–O5 remain owner input 13. Verdict unchanged: NOT READY.
+- 2026-09-25: Pricing Workspace final verification on branch `pricing-workspace` (`ebf6631`; main
+  `1575c8b` contained) (ADR-061). Green: unit 516, ruff, frontend unit 311 and DOM 32, `tsc -b`,
+  build, i18n; the whole-site tests on a disposable site; upstream 76/76, 13/13, 101; the acceptance
+  in five runs, each 41 clicks, 0 section switches, 0 modal dialogs. Not green: integration 860 of
+  861 (`test_system_status`'s FX test depends on the site's weekday and fails the same on main's
+  code); Playwright 148 of 149 and 8/8 in run 1, 139 passed and 4 failed in run 2: two workspace
+  tests fail intermittently (keys typed at once after Escape lost, 2 of 6 runs; one header-lane
+  arrow step, 1 of 6), and two `entry-branding` navigation tests fail on the shared site's data
+  (over 2,000 draft versions left by E2E runs cut the version lists). The workspace is recorded
+  PARTIAL; O1–O5 remain owner input 13, the existing-caller differences owner input 14. No area
+  status changes. Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace S16 re-review 4 follow-up, security and cost group, on branch
+  `pricing-workspace` (ADR-061).
+  - An editor without `price.view_cost` no longer learns a hidden policy rule's op, INHERIT
+    included, from the sample parties, the live check or the stored report.
+  - A publisher without cost is answered the warnings `get_version` gives them, not the whole
+    stored report (owner input 14, difference 3).
+  - No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace S16 re-review 5 follow-up, security and cost group, on branch
+  `pricing-workspace` (ADR-061).
+  - A refused publish no longer tells a publisher without cost a hidden policy rule's op (owner
+    input 14, difference 4).
+  - A publish-only caller gets no warnings.
+  - The publish audit counts only the warnings a viewer without cost is shown.
+  - The stored report is worked out once, and running its sweep again is bounded.
+  - Open, for the owner: a contract version's audit entries show changed contract rates to anyone
+    with `reservation.view` (owner input 14; pre-existing).
+  - No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace final follow-up, workspace UX and keyboard group, on branch
+  `pricing-workspace` (ADR-061).
+  - The single-use switch no longer changes what one adult pays: it is refused where another rule
+    (an Always-wins Adult 1, a special combination's, a policy's) would decide single use in the
+    other form, checked against the engine's prices.
+  - "+ Period" is reachable by keyboard in a draft with rooms and no period; the single-use row
+    names a special combination that prices one adult; the shortcuts table, the shell's top bar
+    beside a side panel, the focus after a new period's dates and the German wording are fixed.
+  - The final verification's two intermittent workspace failures are fixed (each spec 10 of 10
+    runs green; every `pricing-workspace*` spec 107/107).
+  - The workspace stays PARTIAL (the FX weekday test and two `entry-branding` tests on the shared
+    site's data are not this group's). O1–O5 remain owner input 13. No area status changes.
+    Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace final follow-up, main-side group, on branch `pricing-workspace`
+  (ADR-061).
+  - The contract lists' current tables (Price periods, Occupancy rules, Rate plans) leave out
+    archived contracts' versions, and their version cap counts only versions with a row: archived
+    E2E drafts had cut the lists for every user on the shared site.
+  - The funnel purge deletes each old event alone by its primary key, so a small or quiet site's
+    purge never locks the funnel that bookings write to.
+  - The FX status test is pinned to every weekday (the check itself was right); `entry-branding`
+    waits for the lists' answers; the disposable test site gets the shared site's config.
+  - Integration: 868 tests OK in 40 modules (11 skipped, as ADR-061 lists), upstream green,
+    `entry-branding` 5 × 10/10. The workspace stays PARTIAL until a whole run of every suite is
+    recorded. No area status changes. Verdict unchanged: NOT READY.

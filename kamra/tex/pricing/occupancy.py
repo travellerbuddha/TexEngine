@@ -163,6 +163,11 @@ class OccupancyResult:
 	slot_unit: Decimal
 	slots: tuple[SlotPrice, ...]
 	combination_rule: RuleRef | None = None
+	# running totals of the computation, reported for the Explain ladder (ADR-061 GAP-12), never
+	# priced from: the base (ROOM basis: the room price) + the adult slots, then + the child slots
+	# (before a whole-combination rule; ``total`` is after it)
+	after_adults: Decimal = ZERO
+	after_children: Decimal = ZERO
 
 
 def check_capacity(spec: RoomSpec, party: Party, infants_count: bool) -> None:
@@ -225,6 +230,8 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 			            night=night, after=amount, rule=ref, overridden=overridden,
 			            pos=pos, op=describe_op(winner.op, winner.value), unit=slot_unit, amount=amount)
 
+	after_adults = base_total + sum((s.amount for s in slots), ZERO)     # reported only (GAP-12)
+
 	# ── children ──
 	fill = max(0, included_adults - party.adults) if terms.basis == PricingBasis.ROOM \
 		and terms.room_basis_children_fill_included else 0
@@ -256,6 +263,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 			            label=label, op=describe_op(winner.op, winner.value), unit=slot_unit, amount=amount)
 
 	total = base_total + sum((s.amount for s in slots), ZERO)
+	after_children = total                                               # reported only (GAP-12)
 
 	# ── whole-combination rules ──
 	combo_cands = [r for r in rules if slot_matches(r, OccTarget.COMBINATION, None, None)]
@@ -281,4 +289,102 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 	if total < ZERO:
 		raise Unsellable("NEGATIVE_OCCUPANCY_PRICE", "occupancy rules produce a negative price")
 	return OccupancyResult(total=total, unit=unit, slot_unit=slot_unit, slots=tuple(slots),
-	                       combination_rule=combo_ref)
+	                       combination_rule=combo_ref, after_adults=after_adults, after_children=after_children)
+
+
+def rules_taking_part(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decimal, party: Party) -> frozenset[str]:
+	"""The ids of the occupancy rules that take part in pricing ``party`` in one night of ``period``:
+	each slot's winner and the whole-combination rule, as ``price_occupancy`` resolves them. Also
+	when the party cannot be priced: the rules resolved before the failure (which is all of them
+	for a negative total) and the rules an ambiguity names. Whether a viewer who may not read some
+	rules is told about the party is ``depends_on``'s answer (ADR-061, S16 re-review)."""
+	ex = Explanation()
+	named: tuple = ()
+	try:
+		price_occupancy(terms, spec, period, unit, party, explain=ex)
+	except Unsellable as u:
+		named = tuple(u.params.get("rules") or ())
+	return frozenset({s.rule.rule_id for s in ex.steps if s.rule is not None} | set(named))
+
+
+def depends_on(terms: ContractTerms, spec: RoomSpec, period: Period, unit: Decimal, party: Party,
+               rules: frozenset[str]) -> bool:
+	"""Whether what ``price_occupancy`` answers for ``party`` in one night of ``period`` (a total and
+	its slots, or why it cannot be priced) can depend on the op or value of one of ``rules``: rules a
+	viewer may not read (a pricing policy's formulas, ADR-061). The answer itself never depends on
+	them: it is worked out from which rules exist, where they rank and the ops of the other rules
+	only, so a viewer told "hidden" or not learns nothing of a hidden rule's op, not even whether it
+	defers (INHERIT) (S16 re-review 4).
+
+	The slots are walked as ``price_occupancy`` walks them (adults, children, the whole combination).
+	A hidden rule may decide a slot when it matches there and no other rule that prices ranks above
+	it. Such a slot makes the answer depend on the hidden op when the slot may fail or not by it (a
+	child that no rule but a hidden one prices, NO_CHILD_RULE if they all defer; two rules of one rank
+	that may both price, AMBIGUOUS_OCCUPANCY_RULES), and otherwise when the party gets through every
+	slot (its total, its slots' amounts and a negative total then depend on it). A failure at a slot
+	no hidden rule decides is the same whatever the hidden ops, also after a hidden rule priced an
+	earlier slot that cannot fail (a child band without a rule after policy-priced adults: said).
+	``unit`` is not needed (no amount is computed); it is kept for the callers."""
+	if not rules:
+		return False
+	return _hidden_rule_decides(terms, spec, period, party, rules)
+
+
+_FIXED, _NONE, _FAILS, _TOUCHED, _OPEN = range(5)
+
+
+def _slot_outcome(candidates: list[OccupancyRule], key, hidden: frozenset[str], *, child: bool) -> int:
+	"""What one slot comes to, as far as it can be told without the ``hidden`` rules' ops: ``_FIXED``
+	a rule the viewer reads prices it; ``_NONE`` no rule prices it (a child: NO_CHILD_RULE); ``_FAILS``
+	the same tie whatever the hidden ops; ``_TOUCHED`` a hidden rule may price it and it cannot fail;
+	``_OPEN`` whether it fails depends on a hidden op."""
+	priced = [r for r in candidates if r.rule_id not in hidden and r.op != Op.INHERIT]
+	top = max((key(r) for r in priced), default=None)
+	deciding = [r for r in candidates if r.rule_id in hidden and (top is None or key(r) >= top)]
+	tied = [r for r in priced if key(r) == top]
+	if not deciding:
+		if top is None:
+			return _NONE
+		return _FAILS if len({(r.op, r.value) for r in tied}) > 1 else _FIXED
+	if top is None and child:
+		return _OPEN                                   # priced by a hidden rule, or by none if they all defer
+	contenders = deciding + tied
+	for i, x in enumerate(contenders):
+		for y in contenders[i + 1:]:
+			both_read = x.rule_id not in hidden and y.rule_id not in hidden
+			if key(x) == key(y) and not (both_read and (x.op, x.value) == (y.op, y.value)):
+				return _OPEN                               # a tie some ops of the hidden rules make, others avoid
+	return _TOUCHED
+
+
+def _hidden_rule_decides(terms: ContractTerms, spec: RoomSpec, period: Period, party: Party,
+                         hidden: frozenset[str]) -> bool:
+	"""``depends_on``'s walk over the slots of ``party``, in ``price_occupancy``'s order."""
+	rules = [r for r in terms.occupancy_rules
+	         if qualifiers_match(r, spec.room_type, period.code, party.adults, party.child_count)]
+	precedence = terms.occupancy_precedence
+
+	def rank(r: OccupancyRule) -> tuple:
+		return specificity(r, precedence=precedence)
+
+	slots = []
+	included_adults = 0 if terms.basis == PricingBasis.PERSON else max(1, spec.included_adults)
+	for pos in range(included_adults + 1, party.adults + 1):
+		slots.append(([r for r in rules if slot_matches(r, OccTarget.ADULT, pos, None)], rank, False))
+	fill = max(0, included_adults - party.adults) if terms.basis == PricingBasis.ROOM \
+		and terms.room_basis_children_fill_included else 0
+	for child in party.children[fill:]:
+		infant = child.band.is_infant
+		slots.append(([r for r in rules if slot_matches(r, OccTarget.CHILD, child.position, child.band.code)],
+		              lambda r, infant=infant: specificity(r, precedence=precedence, infant_slot=infant), True))
+	slots.append(([r for r in rules if slot_matches(r, OccTarget.COMBINATION, None, None)], rank, False))
+
+	touched = False
+	for candidates, key, child in slots:
+		outcome = _slot_outcome(candidates, key, hidden, child=child)
+		if outcome == _OPEN:
+			return True
+		if outcome == _FAILS or (outcome == _NONE and child):
+			return False                                   # the same failure whatever the hidden ops
+		touched = touched or outcome == _TOUCHED
+	return touched                                         # the total, the slots, a negative total

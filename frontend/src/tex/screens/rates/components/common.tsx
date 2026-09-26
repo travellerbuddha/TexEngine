@@ -25,8 +25,22 @@ export function DateRange({ from, to, className }: { from?: string | null; to?: 
   return <span className={cn("whitespace-nowrap", !from && !to && "text-zinc-500", className)}>{text}</span>
 }
 
-/** Server validation issues (validate_version): errors block publishing, warnings don't. */
-export function IssueList({ issues, emptyOk, compact }: { issues: Issue[] | undefined; emptyOk?: ReactNode; compact?: boolean }) {
+const asIs = (issue: Issue) => issue.message
+
+/** Server validation issues (validate_version): errors block publishing, warnings don't.
+ * `format` gives an issue's message as shown (the version editor shows band codes as their labels,
+ * D13); the server's message by default (the policy editor). */
+export function IssueList({
+  issues,
+  emptyOk,
+  compact,
+  format = asIs,
+}: {
+  issues: Issue[] | undefined
+  emptyOk?: ReactNode
+  compact?: boolean
+  format?: (issue: Issue) => string
+}) {
   const { t } = useTexT()
   if (!issues) return null
   if (!issues.length)
@@ -41,16 +55,16 @@ export function IssueList({ issues, emptyOk, compact }: { issues: Issue[] | unde
   return (
     <div className="space-y-2">
       {errors.length > 0 && (
-        <IssueGroup tone="danger" title={t("rates.validation.errors", { count: errors.length })} items={errors} compact={compact} />
+        <IssueGroup tone="danger" title={t("rates.validation.errors", { count: errors.length })} items={errors} compact={compact} format={format} />
       )}
       {warnings.length > 0 && (
-        <IssueGroup tone="warning" title={t("rates.validation.warnings", { count: warnings.length })} items={warnings} compact={compact} />
+        <IssueGroup tone="warning" title={t("rates.validation.warnings", { count: warnings.length })} items={warnings} compact={compact} format={format} />
       )}
     </div>
   )
 }
 
-function IssueGroup({ tone, title, items, compact }: { tone: "danger" | "warning"; title: string; items: Issue[]; compact?: boolean }) {
+function IssueGroup({ tone, title, items, compact, format }: { tone: "danger" | "warning"; title: string; items: Issue[]; compact?: boolean; format: (issue: Issue) => string }) {
   const Icon = tone === "danger" ? AlertOctagon : AlertTriangle
   const max = compact ? 6 : 50
   return (
@@ -68,7 +82,7 @@ function IssueGroup({ tone, title, items, compact }: { tone: "danger" | "warning
       <ul className="mt-1 list-disc space-y-0.5 pl-6">
         {items.slice(0, max).map((i, n) => (
           <li key={`${i.code}-${n}`}>
-            <span className="font-mono text-[11px] opacity-70">{i.code}</span> {i.message}
+            <span className="font-mono text-[11px] opacity-70">{i.code}</span> {format(i)}
           </li>
         ))}
         {items.length > max && <li>… +{items.length - max}</li>}

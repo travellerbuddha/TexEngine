@@ -6,12 +6,14 @@ from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 
-from kamra.tex.pricing import engine
+from kamra.tex.pricing import ages, engine, occupancy
 from kamra.tex.pricing.enums import (
 	ExtraPricingMode,
 	FxMode,
 	MarkupCombine,
+	OccTarget,
 	Op,
+	PricingBasis,
 	PromoAppliesTo,
 	PromoStage,
 	PromoValueType,
@@ -22,6 +24,8 @@ from kamra.tex.pricing.model import (
 	ExtraRequest,
 	FxSnapshot,
 	MarkupRule,
+	OccupancyRule,
+	Period,
 	PricingError,
 	Promotion,
 	RoomRule,
@@ -256,3 +260,169 @@ class TestChildrenAtBoundaries(unittest.TestCase):
 		# 2A + child 8 + infant: the infant's band rule (×0) beats the band-less 2A+2C child-2 rule (G-31)
 		q = engine.price_stay(fx.ctx(), fx.req(children=(8, 1)))
 		self.assertEqual(q.totals["total"], D("250.00"))
+
+
+# ─── GAP-12 (ADR-061): the running totals of a night, reported ──────────────
+
+# the spec example as the engine priced it before GAP-12 (captured on the S4 tip 564014a)
+SPEC_SUMMARY = [
+	"contract DE-S27 v1 (DE, EUR, PERSON basis)",
+	"[2027-06-02] period P1 (1–15 Jun)",
+	"[2027-06-02] STD in P1: price 100.00",
+	"[2027-06-02] FAM = STD × 1.20 → 120.00",
+	"[2027-06-02] Adult 1 × 1.00 120.00 = 120.00",
+	"[2027-06-02] Adult 2 × 1.00 120.00 = 120.00",
+	"[2027-06-02] Child 1 (8y, Child B) 50% of 120.00 = 60.00",
+	"[2027-06-02] occupancy 2A+1C = 300.00",
+	"[2027-06-02] board AI included in the price",
+	"[2027-06-02] period P1 adjustment +10%",
+	"[2027-06-02] contract cost 330.00 EUR",
+	"[2027-06-02] Germany markup +7%: 330.00 → 353.10",
+	"Early Booking −15%: −52.965 on 1 night(s)",
+	"total 300.13 EUR",
+]
+SPEC_STEPS = [
+	("CONTRACT", None, None), ("PERIOD", None, None), ("ROOM_ABSOLUTE", None, "100.000000"),
+	("ROOM_DERIVED", "100.000000", "120.000000"), ("ADULT_SLOT", None, "120.000000"),
+	("ADULT_SLOT", None, "120.000000"), ("CHILD_SLOT", None, "60.000000"), ("OCCUPANCY_TOTAL", None, "300.000000"),
+	("BOARD_BASE", None, None), ("PERIOD_ADJUSTMENT", "300.000000", "330.000000"),
+	("NIGHT_COST", None, "330.000000"), ("MARKUP", "330.000000", "353.100000"),
+	("PROMO_APPLIED", "353.100000", "300.135000"), ("TOTAL", None, "300.130000"),
+]
+SPEC_TOTALS = {"accommodation_gross": "353.10", "accommodation_discount": "52.97", "accommodation": "300.13",
+               "extras": "0", "discounts": "52.97", "subtotal": "300.13", "tax": "0", "tax_added": "0",
+               "total": "300.13", "cost": "330.00", "cost_contract_currency": "330.00", "margin": "-29.87",
+               "margin_percent": "-9.95"}
+SPEC_NIGHT = {"date": "2027-06-02", "period": "P1", "unit": "120.000000", "occupancy": "300.000000",
+              "board": "0.000000", "cost": "330.000000", "cost_net": "330.000000", "sell_contract": "353.100000",
+              "sell": "353.100000", "final": "300.135000"}
+SUBTOTALS = ("subtotal_adults", "subtotal_children", "subtotal_board")
+COMBO_2A2C = OccupancyRule("O-2A2C", OccTarget.COMBINATION, Op.ADJUST_PERCENT, D("-10"), adults=2, children=2)
+
+
+def steps_of(q, code, night):
+	return [s for s in q.explanation.steps if s.code == code and s.night == night.isoformat()]
+
+
+def room_basis_terms():
+	"""The ROOM basis contract of test_occupancy_and_rooms.TestRoomBasis: room 200 for 2 adults."""
+	rules = (RoomRule("R-STD-P1", "STD", "P1", Op.ABSOLUTE, D("200")),)
+	occ_rules = (
+		OccupancyRule("O-A3", OccTarget.ADULT, Op.MULTIPLY, D("0.70"), position=3),
+		OccupancyRule("O-CHB", OccTarget.CHILD, Op.PERCENT_OF, D("50"), age_band="CHB"),
+		OccupancyRule("O-INF", OccTarget.CHILD, Op.MULTIPLY, D("0"), age_band="INF"),
+		OccupancyRule("O-1A", OccTarget.COMBINATION, Op.PERCENT_OF, D("80"), adults=1, children=0),
+	)
+	return replace(fx.terms(), basis=PricingBasis.ROOM, room_rules=rules, occupancy_rules=occ_rules,
+	               periods=(Period("P1", "P1", date(2027, 6, 1), date(2027, 6, 30)),),
+	               rooms={"STD": RoomSpec("STD", "Standard", 3, 2, 4, included_adults=2)})
+
+
+class TestReportedSubtotals(unittest.TestCase):
+	"""GAP-12: each night reports the running totals the engine already holds — after the adults,
+	after the children (before a combination rule) and occupancy + board (before the period
+	adjustment) — for the Explain ladder's Occupancy, Child and Board stages. No price, total,
+	explanation step or engine version changes; the guest view never carries them. They are in a
+	quote's dict only when asked for (``to_dict(subtotals=True)``, the workspace's price test;
+	ADR-061, "Existing semantics kept"): a stored quote keeps main's night keys."""
+
+	def spec(self, **kw):
+		return engine.price_stay(fx.ctx(spec_terms(), markups=(DE_MARKUP,)), spec_request(**kw))
+
+	def test_the_spec_example_is_priced_and_explained_as_before(self):
+		q = self.spec()
+		d = q.to_dict()
+		self.assertEqual(q.explanation.summary_lines(), SPEC_SUMMARY)
+		self.assertEqual([(s["code"], s["before"], s["after"]) for s in d["explanation"]], SPEC_STEPS)
+		self.assertEqual(d["totals"], SPEC_TOTALS)
+		self.assertEqual(d["nights"][0], SPEC_NIGHT)                     # main's keys, main's values
+		self.assertEqual(d["engine_version"], "tex-pricing/1.0")
+		asked = q.to_dict(subtotals=True)
+		self.assertEqual({k: v for k, v in asked["nights"][0].items() if k not in SUBTOTALS}, SPEC_NIGHT)
+		self.assertEqual({**asked, "nights": None}, {**d, "nights": None})
+		self.assertEqual(q.engine_version, engine.ENGINE_VERSION)
+
+	def test_the_spec_examples_subtotals(self):
+		n = self.spec().nights[0]
+		self.assertEqual((n.unit, n.subtotal_adults, n.subtotal_children, n.occupancy, n.subtotal_board),
+		                 (D("120"), D("240"), D("300"), D("300"), D("300")))
+		self.assertEqual({k: n.to_dict(subtotals=True)[k] for k in SUBTOTALS},
+		                 {"subtotal_adults": "240.000000", "subtotal_children": "300.000000",
+		                  "subtotal_board": "300.000000"})
+
+	def test_every_night_chains_occupancy_child_and_board(self):
+		t = fx.with_rate_plans(fx.terms())
+		scenarios = {
+			"spec example": self.spec(),
+			"supplement board, period adjustment": self.spec(board="UAI"),
+			"two periods, rate plan, supplement": engine.price_stay(fx.ctx(t), fx.req(
+				rate_plan="NRF", board="UAI", children=(8, 1), check_in=date(2027, 6, 14),
+				check_out=date(2027, 6, 18))),
+			"adults only": engine.price_stay(fx.ctx(), fx.req(adults=3, room_type="SUITE", check_in=date(2027, 8, 3),
+			                                                  check_out=date(2027, 8, 5))),
+		}
+		for name, q in scenarios.items():
+			self.assertTrue(q.sellable, (name, q.reasons))
+			for n in q.nights:
+				with self.subTest(scenario=name, night=n.night):
+					self.assertFalse(steps_of(q, "COMBINATION_RULE", n.night))
+					self.assertEqual(n.subtotal_children, n.occupancy)
+					self.assertEqual(n.subtotal_board, n.occupancy + n.board)
+					adj = steps_of(q, "PERIOD_ADJUSTMENT", n.night)
+					if adj:
+						self.assertEqual(adj[0].before, n.subtotal_board)
+					else:
+						first = steps_of(q, "RATE_PLAN_ADJUSTMENT", n.night)
+						self.assertEqual(first[0].before if first else n.cost, n.subtotal_board)
+		self.assertEqual(steps_of(scenarios["supplement board, period adjustment"], "PERIOD_ADJUSTMENT",
+		                          date(2027, 6, 2))[0].before, D("350"))        # 300 + UAI 20 + 20 + 10
+		adults_only = scenarios["adults only"].nights[0]
+		self.assertEqual((adults_only.unit, adults_only.subtotal_adults, adults_only.subtotal_children),
+		                 (D("245"), D("661.5"), D("661.5")))                   # 245 + 245 + 0.70 × 245
+
+	def test_a_combination_rule_starts_from_the_childrens_subtotal(self):
+		t = fx.terms(occupancy_rules=(*fx.occ_rules(), COMBO_2A2C))
+		q = engine.price_stay(fx.ctx(t), fx.req(children=(8, 4), board="UAI"))
+		self.assertTrue(q.sellable, q.reasons)
+		n = q.nights[0]
+		combo = steps_of(q, "COMBINATION_RULE", n.night)[0]
+		self.assertEqual((n.subtotal_adults, n.subtotal_children), (D("200"), D("275")))   # 100 + 100 + 50 + 25
+		self.assertEqual(combo.before, n.subtotal_children)
+		self.assertEqual(combo.after, n.occupancy)
+		self.assertNotEqual(n.subtotal_children, n.occupancy)                            # 247.50
+		self.assertEqual(n.subtotal_board, D("307.5"))                                   # 247.50 + UAI 60
+
+	def test_room_basis(self):
+		t = room_basis_terms()
+		q = engine.price_stay(fx.ctx(t), fx.req(adults=3))
+		n = q.nights[0]
+		self.assertEqual((n.unit, n.subtotal_adults, n.subtotal_children, n.occupancy), (D("200"), D("270"),
+		                                                                              D("270"), D("270")))
+		# single use: the room price covers the adult, then the combination takes 80 % of the room
+		single = engine.price_stay(fx.ctx(t), fx.req(adults=1)).nights[0]
+		self.assertEqual((single.subtotal_adults, single.subtotal_children, single.occupancy),
+		                 (D("200"), D("200"), D("160")))
+
+	def test_the_occupancy_result_holds_the_running_totals(self):
+		t = fx.terms()
+		period = next(p for p in t.periods if p.code == "P1")
+		unit = D("100")
+		party = ages.classify_party(t, 2, (ChildSpec(age=8),), date(2027, 6, 2), date(2027, 1, 1))
+		r = occupancy.price_occupancy(t, t.rooms["STD"], period, unit, party)
+		self.assertEqual((r.after_adults, r.after_children, r.total), (2 * unit, D("250"), D("250")))
+		party = ages.classify_party(t, 2, (ChildSpec(age=8), ChildSpec(age=4)), date(2027, 6, 2), date(2027, 1, 1))
+		combo = occupancy.price_occupancy(replace(t, occupancy_rules=(*t.occupancy_rules, COMBO_2A2C)),
+		                                  t.rooms["STD"], period, unit, party)
+		self.assertEqual((combo.after_adults, combo.after_children, combo.total), (D("200"), D("275"), D("247.5")))
+
+	def test_guests_and_staff_without_cost_access_never_see_them(self):
+		from kamra.tex.services import quoting
+
+		q = self.spec(board="UAI")
+		self.assertEqual(set(q.to_dict(internal=False)["nights"][0]), {"date", "amount"})
+		self.assertEqual(set(q.to_dict(internal=False, subtotals=True)["nights"][0]), {"date", "amount"})
+		internal = q.to_dict(subtotals=True)
+		self.assertTrue(set(SUBTOTALS) <= set(internal["nights"][0]))
+		for staff in (False, True):
+			shown = quoting.strip_internal(json.loads(json.dumps(internal)), staff=staff)
+			self.assertEqual([set(n) for n in shown["nights"]], [{"date", "amount"}])

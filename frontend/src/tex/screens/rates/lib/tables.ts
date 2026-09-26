@@ -1,6 +1,8 @@
 // Field kinds and new-row defaults of the contract-version child tables
 // (TEX Contract Room, TEX Price Period, TEX Period Rate, TEX Child Age Band,
 // TEX Occupancy Rule, TEX Board Rule, TEX Contract Rate Plan, TEX Contract Offer).
+import { keepKeys, overSaved } from "../../../lib/edits"
+import { ROW_DEFAULTS } from "../workspace/rows"
 import type { Row, VersionDoc, VersionSetting, VersionTable } from "./types"
 import { fromRow, joinCsv, splitCsv, toRow, type FieldKind } from "./util"
 
@@ -85,51 +87,8 @@ export const KINDS: Record<VersionTable, Record<string, FieldKind>> = {
   },
 }
 
-export const NEW_ROW: Record<VersionTable, () => Omit<Row, "_key">> = {
-  rooms: () => ({ room_type: "", is_base: 0, max_adults: 0, max_children: 0, max_occupants: 0, min_adults: 0, included_adults: 0 }),
-  periods: () => ({ period_code: "", period_name: "", start_date: "", end_date: "", weekdays: "", adjustment_op: "", adjustment_value: "", priority: 0 }),
-  period_rates: () => ({ room_type: "", period_code: "", op: "ABSOLUTE", value: "", base_room_type: "" }),
-  age_bands: () => ({ band_code: "", label: "", from_age: "", to_age: "", is_infant: 0 }),
-  occupancy_rules: () => ({
-    target: "CHILD",
-    position: 0,
-    age_band: "",
-    combination: "",
-    room_type: "",
-    period_code: "",
-    op: "PERCENT_OF",
-    value: "",
-    is_override: 0,
-    note: "",
-  }),
-  boards: () => ({ board: "HB", is_base: 0, op: "ADD", adult_amount: "", child_percent: "50", infant_free: 1, room_type: "", period_code: "", label: "" }),
-  rate_plans: () => ({ rate_plan: "", op: "", value: "", refundable: 1, boards: "", cancellation_policy: "", payment_policy: "" }),
-  offers: () => ({
-    offer_code: "",
-    offer_name: "",
-    kind: "EARLY_BOOKING",
-    value_type: "PERCENT",
-    value: "",
-    stage: "SELL",
-    sale_from: "",
-    sale_to: "",
-    stay_from: "",
-    stay_to: "",
-    stay_match: "ANY_NIGHT",
-    min_nights: 0,
-    max_nights: 0,
-    min_lead_days: 0,
-    max_lead_days: 0,
-    room_types: "",
-    boards: "",
-    stackable: 1,
-    exclusive: 0,
-    priority: 0,
-    offer_group: "",
-    free_nights_stay: 0,
-    free_nights_pay: 0,
-  }),
-}
+/** New-row defaults per table (kept in the pure workspace module so its tests can use them). */
+export const NEW_ROW: Record<VersionTable, () => Omit<Row, "_key">> = ROW_DEFAULTS
 
 export type Tables = Record<VersionTable, Row[]>
 export type Settings = Record<VersionSetting, string | number>
@@ -216,4 +175,32 @@ export function payloadOf(s: EditorState): Record<string, unknown> {
 /** Stable fingerprint for dirty checking (ignores client row keys). */
 export function fingerprint(s: EditorState): string {
   return JSON.stringify(payloadOf(s))
+}
+
+/** The payload for the read-only draft overlay (`price_matrix` / `validate_version` / `preview_price`
+ * with `data`, §3.14): payloadOf plus each row's client `_key`, which the server turns into the
+ * rule ids it reports ("~" + _key), so results map back to rows. save_version never gets it (it
+ * would drop `_*` fields anyway), and the fingerprint stays payloadOf's. */
+export function overlayPayloadOf(s: EditorState): Record<string, unknown> {
+  const out = payloadOf(s)
+  for (const k of Object.keys(KINDS) as VersionTable[]) {
+    const rows = out[k] as Record<string, unknown>[]
+    out[k] = rows.map((row, i) => ({ ...row, _key: s.tables[k][i]._key }))
+  }
+  return out
+}
+
+/** The editor state once a save has answered (§3.16): the saved copy, with the client row keys of
+ * what was `sent` (keepKeys) and, on top, whatever the user changed while the save was in flight
+ * (a setting, a table, the selling terms; overSaved). Replacing the editor with the saved copy
+ * would drop those edits, and a later save would send them away too. */
+export function settleState(saved: EditorState, sent: EditorState, cur: EditorState | undefined): EditorState {
+  const keyed: EditorState = { ...saved, tables: keepKeys(saved.tables, sent.tables) }
+  if (!cur) return keyed
+  return {
+    ...keyed,
+    settings: overSaved(keyed.settings, sent.settings, cur.settings),
+    tables: overSaved(keyed.tables, sent.tables, cur.tables),
+    ...(JSON.stringify(cur.selling) !== JSON.stringify(sent.selling) ? { selling: cur.selling } : {}),
+  }
 }

@@ -14,14 +14,17 @@ const ALL = "" // period_code blank = rule for every period
 
 /** Room × period price grid (TEX Period Rate): base room absolute prices, derived
  * rooms via MULTIPLY / % / ADD of the base (R-10), period overrides. */
-export function RatesTab({ doc, state, readOnly, issues, setTable, dirty }: TabProps) {
+export function RatesTab({ doc, state, readOnly, issues, setTable, dirty, preview }: TabProps) {
   const { t } = useTexT()
   const ccy = doc.contract_doc.contract_currency
   const rooms = contractRoomOptions(doc, state)
   const periods = state.tables.periods.filter((p) => String(p.period_code || "").trim())
   const rules = state.tables.period_rates
   const [edit, setEdit] = useState<{ room: string; period: string } | null>(null)
-  const matrix = useTexQuery<PriceMatrix>("contracts", "price_matrix", { version: doc.name }, [doc.name, doc.modified])
+  // the editor's live preview when it has one (no second price_matrix call, and none for a viewer
+  // without cost); else the saved draft's matrix, as before
+  const own = useTexQuery<PriceMatrix>("contracts", "price_matrix", { version: doc.name }, [doc.name, doc.modified], !preview)
+  const matrix = preview ? { data: preview.stale ? undefined : preview.matrix, error: preview.error } : own
 
   const find = (room: string, period: string) => rules.find((r) => r.room_type === room && String(r.period_code || "").trim() === period)
   const known = new Set(rooms.map((r) => r.value))

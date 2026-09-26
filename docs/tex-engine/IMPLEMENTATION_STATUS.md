@@ -472,6 +472,857 @@ hotel sold out on the specs' random stay dates (a search without rates, `booking
 `demo_seed.release_test_bookings` released 645 future test-run stays under the bench lock (and 10
 more before the last run).
 
+**Pricing Workspace, slice S2 (2026-09-24, ADR-061, branch `pw-backend` on main `1575c8b`).**
+Backend only: `price_matrix`, `validate_version` and `preview_price` take the editor's unsaved
+`data` and work on the draft in memory (the read-only overlay: `contract.edit` and Draft only, the
+save's own checks, `~<_key>` rule ids, at most 5,000 rows, nothing saved or audited); a blank rule
+value is refused by `save_version` (it was stored and priced as 0); `get_version` adds
+`can_preview`, `can_publish`, `can_edit_contract`, `basis_locked` and `contract_doc.minor_units`.
+New `test_pricing_workspace_api` (17; on the base, 14 fail and 3 pass: the basis change before and
+after publish and Finance's saved-matrix read pin existing behaviour); `test_security_regressions`
+G-11 allows the three flags in an agent's catalogue answer (false). On the branch, migrated with
+it: all 38 integration modules **800 OK**, 10 skipped (the 3 whole-site patch tests and the 7
+concurrency tests of the ADR-056 third review, as before); 425 unit tests; ruff clean. No frontend
+change in this slice. The workspace UI and the other backend slices are not built yet (R-04).
+
+**Pricing Workspace, slice S3 (2026-09-24, ADR-061, branch `pw-backend`).** Backend and frontend
+types: `price_matrix` keeps its keys and adds, from the engine's own resolvers (pure
+`pricing/matrix.py`), the rule behind each cell (`rooms[].sources`: scope, derivation chain,
+overridden rules), each room's effective capacity, the age bands with their origin (the version or
+the pricing policy), the occupancy rules inherited from policies, the engine's adult default, and,
+with `parties` and `party_room`, each sample party's occupancy total per period (after the engine's
+capacity check). New `test_matrix` (18, pure); `test_pricing_workspace_api` 31 (+14; on the S2 tip
+all 14 fail). On the branch, migrated with it: all 38 integration modules **814 OK**, 10 skipped (as
+before); 443 unit tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b` and the build
+pass. No screen changes. Performance measured with the opt-in `bench_pricing_workspace` (ADR-061):
+on 12 rooms × 26 periods (1,406 rows) the unsaved-data matrix takes 0.25 s (0.33 s with 12 sample
+parties), the preview 0.24 s, validation 2.3 s; near the 5,000-row cap 0.70 s, 0.69 s and 10 s
+(validation costs the same without data; the UI slices must keep one validation in flight). O1–O5
+are provisional owner decisions (GO_LIVE_READINESS owner input 13), none implemented on this
+branch. The workspace UI (S6–S16) and backend slices S4–S5 are not built yet (R-04 stays PARTIAL).
+
+**Pricing Workspace, slice S4 (2026-09-24, ADR-061, branch `pw-backend`).** Backend and frontend
+types: each validation issue says what it is about in an optional `ref` (the rule or rules, room,
+period, other period, age band(s), party and board; row names, or `~<_key>` for unsaved rows), so
+the workspace can mark the cell or row and show band labels; codes and messages are unchanged
+(80 scenarios compared). New publish errors for board rules: an unknown room or period, and two
+rules of one board for the same room and period (`BOARD_UNKNOWN_ROOM`, `BOARD_UNKNOWN_PERIOD`,
+`BOARD_DUPLICATE`); drafts with such rows can no longer be published (announced in
+GO_LIVE_READINESS; none on the development site). The draft overlay refuses two rows of one table
+with the same key (S2/S3 review item). New `test_validate_refs` (37, pure; 31 fail on the S3 tip);
+`test_pricing_workspace_api` 37 (+6; 4 fail on the S3 tip, 2 pin existing behaviour). On the
+branch, migrated with it: all 38 integration modules **820 OK**, 10 skipped (as before); 480 unit
+tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b`, the build and `i18n:tex` pass. `bench_pricing_workspace`: validation with refs 1.9 s saved / 2.1 s unsaved on 12 rooms × 26 periods, 9.5 s near the cap (S3: 2.3 s, 10 s), so no slowdown. O1–O5 are unchanged by S4
+(none on this branch; owner input 13). The workspace UI (S6–S16) and backend slice S5 are not built
+yet (R-04 stays PARTIAL).
+
+**Pricing Workspace, slice S5 (2026-09-24, ADR-061, branch `pw-backend`).** The last backend slice,
+with frontend types. The price test (`preview_price`) takes each child as an age in whole years
+(unchanged quotes: compared with the pre-S5 code on a published and a draft version), in months or
+by date of birth (checked as a booking checks it), and refuses anything else instead of failing or
+truncating (`7.5`, adult ages, more than 12 children). `apply_op_values` changes up to 500 entered
+prices of a draft once by an op, as the ARI grid's rate change does (HALF_UP to the contract
+currency; read-only; `contract.edit`): the server half of O4 and of the bulk Adjust…. **GAP-12:**
+each night of an internal quote reports `subtotal_adults`, `subtotal_children` and `subtotal_board`,
+running totals the engine already held (reported only, internal only: no price, total,
+explanation or engine version changes; the guest view and `strip_internal` never carry them).
+Tests: `test_engine` `TestReportedSubtotals` (7) and `test_matrix` `TestAdjustAmount` (4), 10 of the
+11 failing on the S4 tip; `test_pricing_workspace_api` 48 (+11, 10 failing on the S4 tip); 11
+mutants killed. On the branch, migrated with it: all 38 integration modules **831 OK**, 10 skipped
+(as before); 491 unit tests; ruff; eval 76/76, journey 13/13, banquet 101 OK; `tsc -b`, the build and `i18n:tex` pass. `bench_pricing_workspace`: `apply_op_values`
+0.007 s for 500 prices; the overlay, matrix, preview and validation as after S4 (validation 2.1 s
+realistic, 9.6 s near the cap). O4's server half is on this branch (its cell commit is S9); O1–O3 and
+O5 are unchanged (S1, S13); all five stay owner input 13. The backend slices S2–S5 are done; the
+workspace UI (S6–S16) is not built yet (R-04 stays PARTIAL).
+
+**Pricing Workspace, lane merge (2026-09-24, ADR-061, branch `pricing-workspace`).** The backend
+lane (`pw-backend`, S2–S5) is merged into the frontend lane (S1 shorthand parser, S7 design-system
+Popover / Menu / Tooltip and keyboard grid hooks, S6 pure workspace model); no textual conflicts, and
+the S1, S7 and S6 decisions are recorded in ADR-061 with the backend's. On the merged tree:
+all 38 integration modules **831 OK**, 10 skipped (as before); 491 unit tests; ruff; `npm run
+test:unit` 121 and `npm run test:dom` 24; `tsc -b`, the build and `i18n:tex`; eval 76/76, journey
+13/13, banquet 101 OK; Playwright against the tree's own servers (`contract-admin`,
+`editor-edits`, `critical-journey`, `policy-revisions`, `booking` desktop and mobile,
+`restrictions-grid`) 15/15. `bench_pricing_workspace` on the merged tree (seconds, realistic 12 × 26
+/ near the row cap 12 × 40): the overlay 0.16 / 0.49, `price_matrix` with unsaved data 0.23 / 0.66,
+`preview_price` 0.22 / 0.69, `validate_version` 2.1 / 9.8, `apply_op_values` 0.007; as after S5.
+O1–O5 after the merge (all provisional, owner input 13): the parse of O1–O3 and O5
+(S1) and the model's storage of O1–O3 board entries and of O4's base-room adjustment (S6) are on the
+branch, and O4's server half (S5) with them; no workspace screen that uses them is built yet (S8–S16).
+R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S8 (2026-09-24, ADR-061, branch `pricing-workspace`).** The version
+editor has four sections (Pricing, Commercial rules, Offers & promotions, Preview & audit) under a
+sticky commercial context header; old tab links still land (`#rates`, `#occupancy`, `#plans` …).
+Commercial rules keeps every former editor as the "Rule tables". The header shows the contract's
+terms, the live check and the actions (Save, Discard, Check, Publish, and Price test for who may
+see cost); the pricing basis is switched there in a non-modal popover before the first publish.
+The server prices and checks what is on screen while it is edited, without a save (`useDraftPreview`:
+an editable draft through the read-only overlay, with one validation in flight; other cost viewers
+the saved version, never a validation; agents a catalogue with no cost call). BOARD_* issues count
+on Pricing. Frontend only. Verification: `npm run test:unit` 143, `test:dom` 24, build, i18n, 491
+Python unit tests, ruff; the pricing, contract, booking and security integration modules on this
+tree (see ADR-061); Playwright `contract-admin`, `critical-journey`, `editor-edits`,
+`entry-branding`, `policy-revisions`, `restrictions-grid` pass unchanged; the slice's manual checks
+pass (7/7). O1–O5 unchanged by S8 (owner input 13). The matrix, occupancy, boards, price-test and
+anchoring screens are S9–S15; R-04 stays PARTIAL.
+
+**Pricing Workspace, S8 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+- *Drafts above the overlay's row cap.* The Check button validates the saved draft by name, as
+  the design says; so does a draft with nothing unsaved. A draft above the overlay's 5,000-row
+  cap (a realistic weekly contract has 5,892 rows) is priced and checked by name too, with no
+  cap. Its unsaved changes are not previewed until they are saved, and the matrix, the live check
+  and the Price test say so ("Saved draft only").
+- *Server change (additive).* `get_version` says `overlay_max_rows`, and the overlay's refusal
+  is typed `OverlayTooLarge`: the same 417 and the same message.
+- *Failures are shown.* A refused live check or matrix now shows the server's reason and Try
+  again, where before it showed a spinner and older counts indefinitely. Undoing while a check
+  ran no longer leaves the chip stale.
+- *Verification.* `npm run test:unit` 148, `test_pricing_workspace_api` 50 (fail-first
+  recorded), the regression, upstream and Playwright runs in ADR-061, and four browser checks.
+  The benchmark above the cap is in ADR-061.
+
+R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S9 (2026-09-25, ADR-061, branch `pricing-workspace`).** Pricing shows
+the room price matrix: rooms × All periods and the period columns, typed into with the shorthand
+(prices and formulas, a reading line, Enter / Tab / Escape, error drafts that are never lost),
+priced live by the server without a save. A relative entry on the base room changes its entered
+price once on the server and stores the result (O4); on any other room it writes a formula;
+Ctrl/Cmd+Enter applies an entry to a selection as one change. A rule popover (Alt+Enter) stores
+any op as chosen. Rooms are added, made base, derived, sized, moved and removed, and periods added
+(with their end date), renamed (their rules follow), dated, adjusted per night, duplicated,
+copied, moved and deleted from the matrix's own menus; each change is one entry of the workspace
+undo history (its buttons are S10). Published versions are read-only. Frontend only. Verification:
+`npm run test:unit` 166, `test:dom` 24, build, i18n (153 keys), Python unit 491; a dev-server
+Playwright smoke 10/10 and `contract-admin`, `critical-journey`, `editor-edits`, `entry-branding`
+unchanged (ADR-061). O4 is now built end to end and O5's message is on screen (owner input 13).
+R-04 stays PARTIAL.
+
+**Pricing Workspace, S9 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+- *O5 in the night adjustment.* The period night adjustment's +/- amounts are parsed with the
+  contract currency's decimals, as O5 says. A KWD, BHD, OMR, JOD or TND contract takes `+12.345`,
+  and a stored adjustment re-opens as text that applies again. Before, both were refused as "Is
+  this 1500 or 1.5?".
+- *Late server adjustments.* While the server adjusts the base room's prices of an entry, every
+  cell of the entry waits: none can be edited, and an answer for a cell changed meanwhile stores
+  nothing ("This cell changed …"). An open editor stays on its own cell when rows above it change.
+- *Screen text.* On the base room, "50%" now reads "50% of 70.00", not like "+50%". Older resolved
+  prices are announced as "updating". Cells open the full keyboard on phones.
+- *Verification.* `npm run test:unit` 171 (fail-first recorded), `test:dom` 24,
+  `test_pricing_workspace_api` 50, a browser check 8/8 (also run on the unfixed sources, where it
+  failed), and `contract-admin`, `critical-journey` and `editor-edits` unchanged. The overlay's
+  performance on a realistic contract was measured again (12 rooms × 26 periods: overlay 0.16 s,
+  priced unsaved 0.25 s, checked unsaved 2.0 s; ADR-061).
+
+Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S10 (2026-09-25, ADR-061, branch `pricing-workspace`).** The room price
+matrix gets its bulk tools. A click on a row or column header selects its price cells. Fill → and
+Fill ↓ (toolbar, Ctrl/Cmd+R, Ctrl/Cmd+D) copy across periods and down rooms; a price copied into
+a formula row asks "Set a fixed price override?" first, and a formula is never copied into a
+price row. Ctrl/Cmd+C and Ctrl/Cmd+V exchange tab-separated text with spreadsheets, all or
+nothing, with the currency-aware parser (O5). Adjust… changes the selected entered prices by
++%, −%, +amount, −amount or ×, with the server's preview before Apply. Undo and Redo (toolbar,
+Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y, on every keyboard layout) are announced, and a bulk
+operation shows "Applied to N cells · Undo" for 10 s. Edits in the Advanced rule tables and
+Offers are now undo entries too, so an undo in the matrix never drops them. Ctrl/Cmd+S saves on
+every layout. Frontend only. Verification by the review: `npm run test:unit` 201, `test:dom` 24,
+build, i18n (89 keys); a dev-server check 6/6 and `contract-admin` and `editor-edits` unchanged.
+The documentation was added by the review follow-up. R-04 stays PARTIAL.
+
+**Pricing Workspace, S10 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+- *Fill down copies what a cell shows.* A period that follows its room's All-periods rule, filled
+  into another room, now copies that rule. Before, the target got its own room's rule: Family
+  Suite ×1.15 filled onto Garden Villa gave ×1.35 and dropped Garden Villa's override. Ctrl/Cmd+C
+  copies the rule such a cell shows instead of an empty text.
+- *A fill from an empty cell says what it cleared* ("Applied to 4 cells · 4 cells cleared (copied
+  from empty cells)"); it can be undone.
+- *Documentation:* ADR-061 now records S10 (decision, nine deviations with reasons, tests,
+  verification, performance) and the follow-up.
+- *Tests:* `npm run test:unit` 204 (fail-first recorded), `test:dom` 27 (a new harness test of
+  the undo toast and of the Rule tables' undo entries), `test_pricing_workspace_api` 50, a
+  browser check 3/3 (each fails on the S10 sources) with the S10 check 6/6, and
+  `contract-admin`, `critical-journey` and `editor-edits` unchanged.
+
+Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, S10 second review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+- *A copied range over a resolved row pastes back onto the same rooms.* Copy now leaves out the
+  resolved rows when the selection also holds rooms' entry rows, as the paste does. Before, a
+  Shift+Arrow range from Standard to Deluxe over Superior's resolved row, pasted one period to
+  the right, put Superior's resolved price on Deluxe as a fixed price and Deluxe's formula on
+  Family, with a success toast. Resolved cells selected on their own still copy the server's
+  amounts.
+- *Copied text ends every row with a line break*, as spreadsheets do, so a copied empty cell
+  clears where it is pasted.
+- *Ctrl/Cmd+R and Ctrl/Cmd+D typed in a cell editor* no longer reload the page or open the
+  bookmark dialog.
+- *The undo toast's Undo and close button return the focus to the grid's active cell.*
+- *Tests:* `npm run test:unit` 207 and `test:dom` 28 (fail-first recorded),
+  `test_pricing_workspace_api` 50, a browser check 5/5 (each fails on the previous sources) with
+  the S10 checks 9/9, and `contract-admin`, `critical-journey` and `editor-edits` unchanged.
+
+Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S11 (2026-09-25, ADR-061, branch `pricing-workspace`).** Pricing
+shows "Occupancy & child pricing" under the room price matrix. It is a collapsible region that
+remembers its state per viewer and opens by default on a draft without occupancy rules; it
+opens for `#occupancy`, and `#ages` opens its drawer. Its header holds the rooms scope, child 1
+ordering, under ROOM basis the extra-adult unit and whether children fill included places, and
+"Child ages…".
+- *The ladder* has one row per guest: single use, the adults (the "2 Adults" BASE pair under
+  PERSON, the included places and extra adults under ROOM) and the child bands by their labels,
+  over the matrix's period columns. Its cells take the occupancy shorthand with the matrix's
+  editing model: Enter moves down, and every change is one undo entry. Engine defaults are
+  shown ("×1.00 default", the server's value). A band without a rule reads "No rule · not
+  sellable", a period rule "◆ OVERRIDE", and policy values show their source. A special
+  combination that outranks a cell is noted.
+- *The rule popover* "Edit rule: {slot} · {period}" sets rooms, Always wins, a note and periods.
+- *The resolved line* shows the server's occupancy total per period for a chosen sample party.
+- *The child ages drawer* is a side panel that is not modal. "Add band" starts where the last
+  band ends, Enter adds the next one, and generated labels are saved. Bands without names are
+  named only on "Name them", and codes stay under Advanced (a rename follows into the rules). An
+  age strip marks gaps and overlaps. Inherited policy bands are read-only, with "Customise for
+  this contract", and the child rules are there too.
+- Band codes are shown as labels everywhere in the region.
+
+Verification: `npm run test:unit` 226 and `test:dom` 29 (fail-first recorded), build, i18n (168
+keys); `test_pricing_workspace_api` 50, `test_age_bands` 11 and `test_pricing_policies` 14; a
+browser check 4/4 (the slice's seven checks and more); and `contract-admin`, `critical-journey`,
+`editor-edits`, `entry-branding` and `policy-revisions` unchanged (15 passed). Frontend only.
+R-04 stays PARTIAL.
+
+**Pricing Workspace, S11 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+- *A room's ladder shows the rules that price it.* In a room scope, a guest priced only by an All
+  rooms rule used to read "×1.00 default" or "No rule · not sellable", though the engine applies
+  All rooms rules to every room and the resolved line priced the party. A cell without a rule of
+  its own now shows the rule the engine would use: "↳ ×0.70 / All rooms", a policy rule with its
+  source, or the room's own general rule, ranked as the engine ranks them (an infant's band first,
+  version before policy, period before room before All rooms). The default and "not sellable"
+  remain only where no rule applies.
+- *The resolved line never shows another party's totals*: "…" until the chosen party's answer
+  comes, "—" when that call fails. Changing the party no longer dims the room price matrix, and
+  leaving Pricing stops asking for the party.
+- *Sample parties stay within what the server accepts* (12 adults, 8 children); large rooms keep
+  the common parties.
+- *Wording:* "included in the room price" and "from Hotel policy" in the cells, and "(no
+  single-use rule)" under the single-use default. The special-combination note no longer appears
+  on an infant priced by its band's rule.
+- *Tests:* `npm run test:unit` 235 (fail-first recorded) and `test:dom` 29;
+  `test_pricing_workspace_api` 50, `test_age_bands` 11 and `test_pricing_policies` 14; a browser
+  check 3/3 (each check fails on the S11 sources) with the S11 checks 4/4; and `contract-admin`,
+  `critical-journey` and `editor-edits` unchanged.
+
+Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S12 (2026-09-25, ADR-061, branch `pricing-workspace`).** Special
+combinations are built on Pricing, under the occupancy ladder, without typing "2+2".
+- *Cards:* each special combination reads "2 Adults + 2 Children → Child 1 ×0.50 · Child 2 ×0.25",
+  over its age bands by label, rooms and periods. A card for some periods only is marked "◆ by
+  period". Edit opens the builder in place of the card, and Remove can be undone. A card the
+  builder cannot show (e.g. one with a note) links to the rule tables. The single-use rule stays
+  the ladder's first row. The ladder's ⓘ note now links to the cards that outrank a cell.
+- *Builder:* an inline panel, not a dialog. It has:
+  - Adults and Children, and quick chips of the combinations the rooms can host. A chip no room in
+    scope can host is greyed, and its tooltip names the rooms that can;
+  - Rooms and Periods (all, or chosen);
+  - one line per child ("Child 1 (oldest)", by the contract's child ordering), with an age band,
+    a rule and a value in the ladder's shorthand; a child can have lines for several bands;
+  - adult rules and a price for the whole party, and, under More, any children, any adults and
+    Always wins;
+  - a reading line, and Save combination.
+  Save writes ordinary occupancy rules as one undo entry, replacing the edited card's rows. Twins
+  of another card's rules are refused, as are other rules the server would refuse or ignore.
+
+Verification: `npm run test:unit` 244 (fail-first recorded) and `test:dom` 29; build and i18n (77
+keys); `test_pricing_workspace_api` 50. A browser check passed 5/5: the slice's three checks,
+including `get_version` after Save showing CHILD 1 CHB "2+2" ×0.5 and CHILD 2 CHA ×0.25, and a
+room with one child place greying 2A+2C. The S11 checks passed 4/4. `editor-edits`,
+`contract-admin`, `critical-journey`, `entry-branding` and `policy-revisions` are unchanged (15
+passed). Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, S12 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+- *A combination for All rooms and the same one for a room are two cards.* They used to merge into
+  one card that read "All rooms". Editing it and saving it unchanged deleted the room's rows,
+  which could change that room's price. All rooms / All periods and named rooms / periods are
+  now always separate cards, and each one saved unchanged keeps exactly its rows.
+- *The builder does not open a card it cannot save back as it is.* This covers a card that mixes
+  All with named rooms or periods, and a negative value outside Plus/minus % (ADD -5 would come
+  back as SUBTRACT 5). Such cards link to the rule tables.
+- *Wording:* the value hint says that a signed number stays Plus/minus % under Plus/minus %. The
+  twin refusal says "already has a rule for". A twin with an Inherit rule stays refused, for the
+  reasons in ADR-061.
+- *Tests:* `npm run test:unit` 249 (4 fail on the S12 head on assertions) and `test:dom` 29;
+  `test_pricing_workspace_api` 50; a browser check 2/2 (the verifier's scenario fails on the S12
+  sources), with the S12 checks 5/5.
+
+Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S13 (2026-09-25, ADR-061, branch `pricing-workspace`).** Boards are
+entered on Pricing, under Occupancy & child pricing.
+- *Collapsed,* the section reads as chips: "UAI BASE · AI −5 % · HB −20.00 per adult".
+- *Expanded,* it is a grid on the matrix's period columns. There is one row per board, and an
+  indented row for a room with rules of its own ("HB · Garden Villa only"). A cell takes `20`
+  (per room per night), `+20` / `-20` (per adult; children pay their share), `5%` / `-5%` (of the
+  night's occupancy price) or `BASE` (the board the room price includes; one board). The reading
+  line always names the unit, e.g. "Half board · All periods: −20.00 per adult per night;
+  children 50 %, infants free".
+- *Clearing:* a period or room cell removes that rule. Clearing a board's own All periods cell
+  removes the board after an inline confirmation.
+- *The row's terms popover* sets children's %, infants free, the label and the rooms, and adds a
+  rule for one room.
+- *Add board:* the first board added is the base board.
+- The column of the matrix's active period is highlighted, and `#boards` opens the section. Every
+  change is one undo entry.
+
+Verification: `npm run test:unit` 257 (fail-first recorded) and `test:dom` 29; build and i18n (91
+keys); `test_pricing_workspace_api` 50. A browser check passed 6/6, including the owner's example
+typed as BASE, -5%, -20: after Save, `get_version` has UAI base, AI ADJUST_PERCENT −5 and HB ADD
+−20, and the Price test with board HB shows "board HB supplement -40.00" per night for 2 adults.
+The S11 and S12 checks pass. S10's pass with one scratch locator scoped to the matrix. The committed
+`editor-edits`, `contract-admin`, `critical-journey`, `entry-branding` and `policy-revisions`
+specs are unchanged (15 passed). Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S14 (2026-09-25, ADR-061, branch `pricing-workspace`).** The Price test
+opens in a side drawer that is not modal, from the header (starting from the matrix cell that last
+had the focus) or from a matrix cell's context menu "Test this price". It starts with that room,
+3 nights from that period's start (within the stay window), the base board and 2 adults.
+- *Children* can be given exactly, in months or by date of birth, besides whole years.
+- *Live* re-prices each settled edit of the stay or of the draft, which is priced unsaved.
+- *The Explain ladder* shows the final price, then the stages in the order the engine applies
+  them (Base, Period without an amount, Room, Occupancy (adults), Children, Special combination,
+  Board, Period adjustment, Rate plan, Night cost, Cost offers, Markup, Currency conversion,
+  Promotion, then Tax and the final price for the stay), each with its server values before and
+  after and its explanation lines. Identical nights form one block ("Nights 1–3 · P2"). Nothing is
+  computed in the browser; a quote without the running subtotals leaves those stages blank.
+- *"Why this price"* shows band labels instead of band codes in every language, says the
+  sentences in the viewer's language where a template exists, and links each rule of the draft to
+  its matrix cell, ladder cell, combination card or board cell ("Show in grid").
+
+Verification: `npm run test:unit` 272 (15 new on four recorded quotes; fail-first recorded),
+`test:dom` 30; build and i18n (83 keys); `test_pricing_workspace_api` 50. A browser check passed
+5/5, including the owner's Deluxe example priced unsaved (Room 80.00 → 108.00, Occupancy 108.00 →
+216.00, Children 216.00 → 270.00 with the child line 54.00, Board 270.00 → 270.00, Night cost
+270.00, no `save_version`), a child of 143 months in Child 7–11.99 and one of 144 months priced
+as an adult, Show in grid, Live and German. `contract-admin` now expects the band labels in the
+price check's rule labels; with the other committed contract specs: 15 passed. The S10–S13 checks
+pass; S9's "Shift+F10 opens the popover" step now meets the cell menu first (ADR-061, S14
+deviation 2). Frontend only. R-04 stays PARTIAL.
+
+**Pricing Workspace, slice S15 (2026-09-25, ADR-061, branch `pricing-workspace`).** Validation
+issues are shown where they are.
+- *In the grids:* an issue marks the matrix cell, period header, occupancy ladder cell (in its
+  rooms scope), special combination card or board cell it is about, found from the rule it names
+  (the unsaved row's key, or a saved row's name) or from its room, period, band, party or board. A
+  marked cell has a glyph and an underline (an error in rose, a warning in amber), and the message in
+  its tooltip and its screen-reader description; an error also makes the cell invalid. Issues about
+  the header, the selling terms, rate plans or offers stay in the lists.
+- *The live check* lists the issues by section. A click shows the issue: the section opens, the
+  ladder switches to the right rooms scope, and the cell, card or header is focused. An issue
+  without a cell opens the child ages drawer, Occupancy, Boards, the matrix, its rule table or
+  Offers. A published version's stored report works the same way, with no check call.
+- *Band labels:* every issue list (the cells, the live check, Preview & audit, the Advanced rule
+  tables and the Publish dialog's check) shows band labels instead of band codes, including the
+  publish sweep's "STD 2A+2C [Child 7–11.99]: …".
+- *The i18n check* also fails when a `t("…")` key used in the code is missing from its area's
+  English catalogue.
+
+Verification: `npm run test:unit` 287 (15 new; fail-first recorded), `test:dom` 30; build and
+i18n (7 keys; 5,038 literal keys found); `test_pricing_workspace_api` 50. A browser check passed
+5/5 (each check fails on the S14 frontend): a saved duplicate P4 rule of a derived room marks its P4
+cell and the chip's count (the Advanced room prices table keeps one rule per cell, so it cannot make
+one), a duplicate board row made in the Advanced Boards table marks its board cell, and the list's
+clicks focus them; an overlapping band reads labels, not codes, in the live check, the
+Advanced table and Preview & audit; the sweep's parties mark the 2A+2C card and the Infant row in the
+room's ladder scope; overlapping periods mark both headers; a published version anchors its stored
+report. The S9–S14 checks and the committed contract specs (15 passed) are unchanged. Frontend only.
+
+**Pricing Workspace, slice S16 (2026-09-25, ADR-061, branch `pricing-workspace`).** The committed
+browser specs of the workspace, and the rebuilt bundles.
+- *`pricing-workspace.spec.ts`:* the owner's 13-step contract on a contract made with the ROOM basis:
+  PERSON chosen in the basis popover (the header saved at once, the draft still clean), three rooms,
+  four periods, `70⇥80⇥100⇥130↵`, the formulas and the P3:P4 bulk entry with their resolved rows,
+  the 3rd adult and its P4 override, the bands in the drawer with labels and no codes on the page,
+  the band rules, the 2A+2C card from the builder, the base board BB, then the Price test from
+  Deluxe's P2 cell (2 adults and a child of 8, 3 nights, no save) with its ladder compared with the
+  served `preview_price` answer (GAP-12 subtotals), then Save and the stored strings. The measured
+  budget is **41 clicks, 0 section switches, 0 modal dialogs** (limits 50 / 0 / 0; recorded in the
+  test's annotations). Edge checks (`abc`, `1.500`, Escape, Ctrl+Z after the bulk entry, a TSV
+  paste, `+10%` on the base room priced once by the server, `x1.20` over a fixed price) and a check
+  that the budget counts clicks, a native select, section switches and a modal dialog.
+- *`pricing-workspace-mobile.spec.ts`* (desktop and Pixel 7): a published version is read-only, fits
+  375 px without sideways scroll and is never sent to `validate_version`; an agent sees the catalogue
+  without amounts, page errors, cost calls or a 403.
+- *The contract flows* (`e2e/flows/contracts.ts`) drive the workspace by default, with `{advanced:
+  true}` for the Rule tables and the new `setBasis`; `contract-admin` and `critical-journey` run
+  through them unchanged. `editor-edits` uses the Boards section and a period column, and
+  `entry-branding` checks "Commercial rules" with its "Rate plans" table.
+- *The S9–S15 dev-server checks* are committed as seven `pricing-workspace-*.spec.ts` files (matrix,
+  bulk, occupancy, combinations, boards, price test, issues; 50 tests).
+
+Verification: unit 491 OK, ruff clean; `npm run build`, `npm run i18n:tex`, `npm run test:unit` 287,
+`npm run test:dom` 30; the ten integration modules of the slice (273 OK, migrated with the tree); the
+upstream suites 76/76, 13/13 and banquet 101. The whole Playwright suite on the tree's own servers
+(113 tests, desktop and Pixel 7): 105 passed and 1 skipped (two-factor, as before) against Vite, and
+the 7 others (custom-host, pay-link, manage-money, written for the bench) passed against the bench
+with an RQ worker (8 passed). Fail-first: against main's ten-tab editor the new specs and the two
+changed editor tests fail (9 of 9); S15's scenario 5 fails on the S14 frontend. Tests, docs and
+bundles only.
+
+**Pricing Workspace, S16 review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).** The
+review found 1 high, 7 medium and 15 low items. All are fixed except three low ones, which ADR-061
+lists as open.
+- *Server:*
+  - `price_matrix` shows an inherited pricing-policy formula (op, value, and a sample party total
+    priced with it) only to a viewer with `price.view_cost`, as the policies API does; an editor
+    with `contract.edit` alone gets the rule's source and scope (`hidden`).
+  - A blank night adjustment or rate plan value with an op set is refused on save and in the
+    overlay (GAP-8; it was stored and priced as 0).
+  - `build_terms` refuses another hotel's rate plan, cancellation policy or payment policy.
+  - `validate_version`, and `price_matrix` with unsaved data or sample parties, are bounded per
+    user: a budget a minute and at most 3 / 6 calls running at once (429).
+- *Workspace:*
+  - The three grids scroll sideways together.
+  - The header has the Base room select and, for the ROOM basis, the included-adults stepper.
+  - The dark theme uses only remapped shades (a unit test checks the contrast).
+  - A selected cell has an outline, not only a tint, and a read-only range is shown.
+  - Ctrl/Cmd+S in a cell editor saves the typed entry; the tab asks before closing with unsaved
+    input.
+  - Error drafts and an open combination builder survive a section switch.
+  - The focus stays in the matrix after Remove room and Delete period.
+  - The Price test panel follows its opener in the Tab order and is modal on phones.
+  - Settings and selling terms are in the undo history.
+  - Also: plural strings, room names in English Explain sentences, Duplicate's unnamed copy with
+    Rename…, the dotted weekday border, aria-colcount, and no card around Pricing.
+
+Verification: unit 491 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,060 literal
+keys), `npm run test:unit` 296, `npm run test:dom` 31. All 38 integration modules migrated with the
+tree: 838 OK (10 skipped, as before), `test_pricing_workspace_api` 55 of them. Upstream suites:
+eval 76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite
+:5186): the nine workspace specs, `editor-edits`, `contract-admin` and `critical-journey` (desktop
+and Pixel 7), 72 tests. 71 passed on the first run. The failing one was `-bulk` V1, which asserted
+the old rule that a read-only cell in a range is not aria-selected; it was updated, and `-bulk`
+passed again with 14 of 14. The new `pricing-workspace-review.spec.ts` passed 10 of 10. Fail-first:
+see ADR-061 (the backend tests, the i18n check, the unit tests, and the review spec, 10 of 10 on the
+S16 frontend).
+
+**Pricing Workspace, S16 re-review follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).** A
+second review found 9 medium and 12 low items. All are fixed except one low item, the shared
+inline-editing hook, which ADR-061 lists as open.
+- *Server:*
+  - A sample party that a hidden policy rule takes part in has no total and no error text for an
+    editor without `price.view_cost`. This covers a whole-party rule and a party that cannot be
+    priced (`matrix.party_rules`).
+  - That editor's live check leaves out the issues that depend on a hidden rule's value.
+  - The heavy-read budget is one atomic step, and a leaked slot ages out after 300 s.
+  - `preview_price` with unsaved data is bounded per user.
+- *Workspace:*
+  - The Price test's explanation is complete after a second result.
+  - The ladder popover adds child position rows and the "also when children travel" single use.
+  - Add room and Add board are menus.
+  - "Prices not updated" or "as saved" is shown instead of a spinner that never stops, and stale
+    values are italic, not faded.
+  - Ctrl/Cmd+S and closing the tab cover the child-age fields and new period dates.
+  - Alt+Enter in the boards grid keeps the typed entry.
+  - Each grid is one tab stop, with its header controls on the arrow keys.
+  - Shift+click selects header ranges.
+  - The Price test sits beside the matrix on a desktop.
+  - Also: every run-time state key is in the six languages, board names are used, and weekday
+    names are in the viewer's language.
+
+Verification: unit 496 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,065
+literal keys), `npm run test:unit` 303, `npm run test:dom` 32. All 38 integration modules migrated
+with the tree: 844 OK (10 skipped, as before), `test_pricing_workspace_api` 61 of them.
+`test_entry_branding` failed once because a commit moved HEAD during the run; it passed 34/34 when
+re-run. Upstream suites: eval 76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite
+:5186): the eleven workspace specs, `editor-edits`, `contract-admin` and `critical-journey`
+(desktop and Pixel 7), 83 tests. The final run passed all 83; the acceptance counted 41 clicks.
+Fail-first: see ADR-061 (the backend tests, the unit tests, the DOM test, and the new
+`pricing-workspace-rereview.spec.ts`, which fails 11 of 11 on the S16-review frontend).
+
+**Pricing Workspace, S16 re-review 2 follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+A third review found 1 high, 4 medium and 8 low items. All 13 are fixed.
+- *Server:*
+  - An editor without `price.view_cost` is again told when a child band has no rule, in the
+    live check and in the sample-party cells, also when a policy rule priced the adults. Only
+    what depends on a hidden rule's op or value stays hidden: a total or negative total it takes
+    part in, and a missing child rule where it defers (`occupancy.depends_on`).
+  - `get_version` gives that editor the report stored at publish filtered the same way
+    (`contracts.stored_report`).
+- *Workspace:*
+  - "Also when children travel" switches the whole single-use row, every period keeping its
+    value.
+  - A draft with both single-use forms shows a row for each.
+  - The header lane is in the keyboard shortcuts, the grid hints and each grid's description.
+  - A cleared child-age name no longer leaves the tab asking before it closes.
+  - Also: Add room focuses the new room; the Price test's status region is announced on the
+    first result; the terms popover's Add a rule for one room carries its help; a read-only copy
+    notice; board names in the history; three unused keys removed.
+
+Verification: unit 504 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,072 literal
+keys), `npm run test:unit` 306, `npm run test:dom` 32. All 38 integration modules migrated with the
+tree: 846 OK (10 skipped, as before), `test_pricing_workspace_api` 63 of them. Upstream suites: eval
+76/76, journey 13/13, banquet 101 OK. Playwright on the tree's own servers (bench :8016, Vite :5186):
+the twelve `pricing-workspace*` specs 88/88, and `editor-edits`, `contract-admin` and
+`critical-journey` 5/5. Fail-first: see ADR-061 (the backend tests, the unit tests, and the new
+`pricing-workspace-rereview2.spec.ts`, which fails 10 of 10 on the re-review frontend). Untracked
+test files of other work in the worktree are not counted (ADR-061).
+
+**Pricing Workspace, S16 re-review 3 follow-up (2026-09-25, ADR-061, branch `pricing-workspace`).**
+A fourth review found 4 medium and 14 low items. Sixteen are fixed. The other two are context: other
+work's untracked parity files in the worktree, and a reviewer's scratch clean-up.
+- *Server:*
+  - An editor without `price.view_cost` no longer learns whether a hidden policy rule is INHERIT.
+    OCC_INFANT_GENERIC names no hidden rule and is not said for an infant band a hidden rule names,
+    live and in the stored report.
+  - A hidden rule that defers where it would otherwise win a slot hides the party as one that
+    prices it (`occupancy.depends_on`).
+- *Workspace:*
+  - The single-use row leaves a special combination's rules alone: a builder's "1 adult + any
+    children" card keeps its Adult 1 through a form switch, and a write into its cell is refused.
+  - The switch is offered only for the scope's own rules, and never carries a relative rule into
+    the other form.
+  - Keyboard undo or redo that removes the focused row puts the focus back on the grid.
+  - A refused or partly typed new child-age band makes the tab ask before it closes.
+  - Also: each grid's header-lane note says its own controls, and only where it has them; the
+    single-use checkbox is described; a new period's dates hand the focus to its first cell; the
+    i18n check reads conditional keys; toasts stay long enough to read; side panels sit beside the
+    page only from 80rem, with a narrower row header; the Price test panel's nightly table fits it;
+    the re-review 2 notes counted twelve spec files, not thirteen.
+
+Verification: unit 506 OK, ruff clean; `tsc -b`, `npm run build`, `npm run i18n:tex` (5,100 keys),
+`npm run test:unit` 310, `npm run test:dom` 32. All 38 integration modules migrated with the tree: 846
+OK (10 skipped, as before). Upstream suites: eval 76/76, journey 13/13, banquet 101 OK. Playwright on
+the tree's own servers (bench :8016, Vite :5186): the thirteen `pricing-workspace*` spec files 97/97,
+and `editor-edits`, `contract-admin`, `critical-journey` and `policy-revisions` 6/6 (one bulk test
+failed once under load in an earlier full run and passed on every rerun). Fail-first: see ADR-061 (2
+Python tests, 3 frontend unit tests, and the new `pricing-workspace-rereview3.spec.ts`, which fails 9
+of 9 on the re-review 2 frontend). Untracked test files of other work in the worktree are not counted.
+
+**Pricing Workspace, existing semantics kept (2026-09-25, ADR-061, branch `pricing-workspace`).**
+The owner's rule: the workspace changes the UX only; no existing pricing semantics change silently.
+- *Existing callers get main's answers again.* Before, every internal quote (so every TEX Quote and
+  reservation snapshot) had three more night keys; the live check and publish reported and refused
+  board rows main published and gave each issue a `ref`; a save refused a blank value main stored
+  as 0; the price test refused children main priced; a saved draft's check was rate limited; the
+  matrix and the version had more keys. Now each of these is the workspace's opt-in (`workspace=1`,
+  or `data` / `parties`, which only the workspace sends), and the workspace sends the flag
+  (`WORKSPACE`; the version editor's publish dialog too, not the contract detail page's or the ARI
+  grid's).
+- *Kept for every caller (security and tenancy, reported):* a draft naming another hotel's rate
+  plan, cancellation policy or payment policy is refused wherever its terms are built; an editor
+  without `price.view_cost` is not told what a pricing policy's formula decides, live or in the
+  report stored at publish. GO_LIVE owner input 14.
+- *Tests:* unit `test_main_parity` (8: 2,906 quotes byte for byte, 25 payloads' issues, frozen
+  hashes and units, 97 broken drafts' issues, recorded against main `6b0102c`; the opt-in switches),
+  integration `test_existing_semantics` (13; against main's code 10 pass and the 3 security tests
+  fail as designed), e2e `pricing-workspace-optin` (the flag on every call).
+
+Verification: unit 516 OK, ruff clean; `tsc -b`, `npm run build` (bundles not committed), `npm run
+i18n:tex`, `npm run test:unit` 311. Integration with the tree migrated: `test_existing_semantics` 13,
+`test_pricing_workspace_api` 63, `test_commercial_flows` 63, `test_age_bands` 11, `test_money_fields`
+9, `test_critical_journey` 31, `test_security_regressions` 59, `test_pricing_policies` 14, all OK; then
+all 39 modules: 859 tests, 858 OK (10 skipped) and 1 error, `test_system_status`'s FX-age test run just
+after the site's midnight (it fails the same way against main's code at that time; not this change).
+Playwright on the tree's own servers (bench :8016, Vite :5186): the fourteen `pricing-workspace*`
+spec files 98/98 (with the new `pricing-workspace-optin`) and `editor-edits`, `contract-admin`,
+`critical-journey` and `policy-revisions` 6/6: 104 passed. Fail-first: `pricing-workspace-optin` fails
+on the frontend before it sent the flag (`2a13fd3`, Vite :5187): without `workspace=1`, `get_version`
+answers no `can_preview`, so the Price test is not offered.
+
+**Pricing Workspace, draft overlay performance (2026-09-25, ADR-061, branch `pricing-workspace`).**
+The new regression module `test_pricing_workspace_perf` (2 tests) measures the overlay's calls on a
+draft of 15 rooms × 26 periods (1,320 rows, 902 occupancy rules, 11 special combinations, 6 boards):
+20 runs each from a fresh request, p50 / p95 / max, response size and `frappe.db.sql` count, against
+the saved draft by name. Within budget on the development bench: whole-matrix overlay p95 253 ms
+(285 ms with the ladder's sample party; budget 800 ms), draft quote p95 264 ms for 3 nights and
+247 ms for 14 nights 2A+2C (budget 500 ms). Validation takes 2.7 s (not budgeted); `apply_op_values`
+takes 10 ms at 500 prices. Query counts do not grow with cells, and the module asserts it: the same
+for 13 and 26 periods, exactly one per room, the same for 3 and 14 nights. The overlay adds about
+160 ms and 12 queries (the draft is loaded twice). The table and the profile are in ADR-061. No app
+code changed.
+
+**Pricing Workspace, final verification (2026-09-25, ADR-061, branch `pricing-workspace` at `ebf6631`).**
+Main (`claude/inspiring-ptolemy-i6wdu2`, `1575c8b`) has no commit the branch lacks, so nothing was
+merged. Every run used this tree; the shared site was migrated with it before each run against it
+(migrate rc 0 each time).
+
+| Suite | How | Result |
+|---|---|---|
+| Unit | `python -m unittest discover -s kamra/tex/tests/unit -t .` | 516 OK |
+| Lint | `ruff check kamra/tex kamra/patches/tex` | clean |
+| Frontend unit | `npm run test:unit` (`node --test`) | 311/311 |
+| Frontend DOM harness | `npm run test:dom` (Playwright, no bench) | 32/32 |
+| Types, build, i18n | `npx tsc -b`, `npm run build`, `npm run i18n:tex` | clean; built (bundles not committed); 5,100 keys, the six languages complete |
+| Integration, all 40 modules | `migrate_test.sh` with no module | 861 tests: 860 OK (10 skipped, the whole-site and second-connection tests) and **1 error**, `test_system_status` (failure 1) |
+| Whole-site tests | `disposable_test.sh` (a site made, tested, dropped) | `test_patches` 33/33, none skipped; `test_crm_third_review`'s 7 second-connection tests OK. Its other 14 tests (they pass on the shared site) error on the new site for want of the shared site's config (`developer_mode`: an `http://` return URL is refused; `encryption_key`: `SigningKeyMissing`); with both set, 20 of 21 pass and `test_new_events_never_wait_for_a_purge` waits out its lock (1205) on the near-empty site |
+| Upstream | `run_baseline.sh` with the tree | eval harness 76/76, front-desk journey 13/13, banquet 101 OK |
+| Browser E2E, whole suite, run 1 | Playwright on the tree's own servers: bench :8016 with the tree (its `kamra/public` served at `/assets/kamra`), an RQ worker, Vite :5186; one test user with a second factor and a `tex_source_url`, so no test is skipped | through Vite, every spec but custom-host and pay-link, desktop and mobile: 148 passed, **1 failed** (failure 2); against :8016, custom-host, pay-link and manage-money: 8/8 |
+| Acceptance, `pricing-workspace.spec.ts` | twice in a row after run 1 | 3/3 and 3/3 |
+| Browser E2E, whole suite, run 2 | the same servers and settings, again | 139 passed, **4 failed** (failures 2, 3, 4), 6 not run (the rest of the matrix spec's serial group) |
+| Reruns | the same servers and settings | `entry-branding` ×3: 8 passed, 2 failed each (failure 2); `pricing-workspace-matrix` ×3: 1 failed (failure 3), then 8/8 twice; `pricing-workspace-rereview` ×3: 11/11 each; every `pricing-workspace*` spec together: 98/98 |
+
+*Acceptance counts, measured in the browser:* **41 clicks, 0 section switches, 0 modal dialogs** in
+each of its five runs (limits 50 / 0 / 0) for the owner's 13 steps in one draft, with no save before
+the price test.
+
+*Failures:*
+1. `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails` errors (not the workspace).
+   The FX check warns when the latest rate is more than two business days old
+   (`FX_WARN_BUSINESS_DAYS`, `ops/checks.py business_days`). The test writes a rate three calendar
+   days old and expects that warning, which exists only when those three days hold three weekdays:
+   a site date of Wednesday, Thursday or Friday. This run was on Saturday 26 September by the site's
+   clock (Europe/Istanbul), so no issue came back (`TypeError: 'NoneType' object is not
+   subscriptable`). Main's code (`1575c8b`, same schema, same hold of the lock) errors identically.
+   Correction to the existing-semantics entry above: it depends on the site's weekday (it errors
+   Saturday to Tuesday), not on the time of day; that run fell just after midnight into Saturday.
+2. E2E `entry-branding.spec.ts`, "navigation: every new sub-section opens its screen …" and, from
+   run 2 on, "navigation: a restricted user sees only what their capabilities open …" (not the
+   workspace). Run 1: the first test clicked a Rate plans row while the table still showed its
+   loading placeholders (`DataTable` renders five skeleton rows without a click handler; in the
+   trace the click came about 70 ms before `lists.version_rows` answered), so the page stayed on the
+   list. From run 2 on: `lists.version_rows` answers no row and `truncated: true` for every user,
+   because Aurora Beach Resort now has 2,114 versions in Draft or Published (1,739 and 375), over
+   the list's 2,000-version cap; the 2,000 most recently modified are E2E contracts' drafts
+   (browser runs archive their contracts, but the versions stay Draft) with no rate plan row, so
+   the demo contracts' rows fall outside the cut. `lists.py` is main's, unchanged by the branch; on
+   this shared site every tree fails these two tests now.
+3. E2E `pricing-workspace-matrix.spec.ts`, "Escape reverts; 'abc' and '1.500' are refused …" failed
+   in 2 of its 6 runs (the workspace). The test types `1.500` at once after Escape closes the
+   invalid `abc` editor. Once the editor held `.500` (the first key lost), once nothing (no editor
+   opened). Likely cause, from the code: `finish` closes the editor and returns the focus to the cell
+   only on the next animation frame (`focusAt`, `requestAnimationFrame`), so keys that arrive in
+   between reach `body`. Not fixed here.
+4. E2E `pricing-workspace-rereview.spec.ts`, "one tab stop per grid: … the headers' menus are on the
+   arrow keys" failed once in 6 runs (the workspace): ArrowDown on the first room's header menu did
+   not move the focus to the next room's menu. Passed in the other five runs; cause not found.
+
+Recorded as **PARTIAL** below: the lane's rule allows COMPLETE only when every suite is green.
+
+**Pricing Workspace, S16 re-review 4 follow-up, security and cost group (2026-09-26, ADR-061, branch `pricing-workspace`).**
+Two findings of the fifth review. The fixes:
+- An editor without `price.view_cost` learns nothing of a hidden pricing-policy rule's op, not even
+  whether it defers (INHERIT). `occupancy.depends_on` now decides from which rules exist, their
+  ranks and the viewer's own rules' ops only. The same holds in the matrix's sample parties, the live
+  check (a tie is named at a slot no hidden rule may decide, else without its slot; a tie with a
+  hidden rule and a hidden rule's missing value are left out) and the report stored at publish
+  (its sweep is given exactly as the live check's).
+- `publish_version` answers its caller the warnings `get_version` gives that caller, not the whole
+  stored report.
+
+Tests with fail-first output are in ADR-061:
+- unit `test_hidden_policy_ops`: the two reproductions, each with INHERIT and a pricing op, four
+  more cases, and 160 generated rule sets under every combination of hidden ops;
+- integration: a publisher with `contract.publish` without `price.view_cost`.
+
+Verification:
+- Unit 523 OK, ruff clean.
+- Integration, all 40 modules: 862 tests, 861 OK (10 skipped) and 1 error. The error is
+  `test_system_status`'s weekday-dependent FX test; the site date was a Saturday.
+- Upstream: 76/76, 13/13, banquet 101.
+
+Open: a refused publish still names every ERROR to a publisher without cost (ADR-061).
+
+Status unchanged (PARTIAL): the final verification's open failures are not this group's.
+
+**Pricing Workspace, S16 re-review 5 follow-up, security and cost group (2026-09-26, ADR-061, branch `pricing-workspace`).**
+One medium and three low findings of the sixth review. The fixes:
+- A refused publish names, to a publisher without `price.view_cost`, only the errors that
+  publisher's own live check shows (`validate.refusal_errors`). Those are the same whatever a
+  hidden policy rule's op. If there are none, the refusal names nothing. Who sees cost is told the
+  full check's errors, as before.
+- Publish answers the warnings `get_version` gives the caller, to the letter: None to a caller with
+  neither `price.view_cost` nor `contract.edit`.
+- For a viewer without cost, the stored report is worked out once per report and process. Running
+  a stored sweep at its limit again is bounded, as `validate_version` is.
+- The publish audit counts the warnings that a viewer without cost is shown. The audit trail is read
+  with `reservation.view`, and the full count said how many warnings a policy's formulas decide.
+
+Tests with fail-first output are in ADR-061:
+- integration: the reproduction (INHERIT and MULTIPLY 0, same message), the no-error message, the
+  bounded and cached report, a publish-only profile, and the audit count under two policy values;
+- unit `TestRefusals`: the reproduction and 160 generated rule sets, each refused under every op.
+
+Verification:
+- Unit 525 OK, ruff clean.
+- Integration, all 40 modules: 866 tests, 865 OK (10 skipped) and 1 error. The error is
+  `test_system_status`'s weekday-dependent FX test; the site date was a Saturday.
+- Upstream: 76/76, 13/13, banquet 101.
+- Details in ADR-061.
+
+Open:
+- `admin.audit_log` by reference needs only `reservation.view`. A republish's or a draft save's
+  audit entry shows changed contract rates old → new to a Reservations Agent. This is pre-existing
+  (ADR-053).
+- Refused publishes are neither audited nor limited.
+
+Status unchanged (PARTIAL).
+
+**Pricing Workspace, final follow-up, workspace UX and keyboard group (2026-09-26, ADR-061, branch `pricing-workspace`).**
+The workspace findings left after the final verification and the sixth review, and its two
+intermittent failures. Frontend only (and one pure unit test). The fixes:
+- The single-use switch ("Also when children travel") never changes what one adult pays. It is
+  refused (`outranked`, said in the popover in six languages) where, in the other form, another
+  rule would decide 1A+0C: an Always-wins Adult 1, a special combination's rule, a pricing policy's
+  rule, an All-rooms whole 1+0 under a room's switch. Paired with the engine: the rows of 20
+  scenarios are priced by `price_occupancy` in `test_single_use_switch` (allowed: the same price;
+  refused: the unchecked switch would have changed it, e.g. 56.00 → 70.00 in the review's case).
+- "+ Period" is a Tab stop while the matrix has no period column, and ArrowUp from All periods
+  reaches it: a draft with rooms and no period gets P1 by keyboard.
+- The single-use row names a special combination that prices one adult (the precedence note;
+  "special combination" instead of the engine default where the card holds the column).
+- The Keyboard shortcuts table wraps its keys (no overflow in any of the six languages).
+- A side panel starts under the shell's top bar, which keeps its width at 1280 and 1440 px.
+- A new period's dates hand the focus to its first cell only when a key closed them.
+- German says "Periode" throughout the workspace ("+ Periode", "Alle Perioden").
+- `pricing-workspace-matrix:107`: a closing cell editor focused its cell a frame later, so keys
+  typed at once after Escape reached the page; the three grids now focus at once.
+- `pricing-workspace-rereview:208`: Home's late frame took the focus back from the room's menu
+  that ArrowLeft had focused (the trace and screenshot show it); the grid now focuses the cell a key
+  moves to at once, and a late frame never takes the focus from a header control.
+
+Tests with fail-first output are in ADR-061: DOM harness `lanes.spec.ts` (10), node
+`workspace-occupancy` (3 new, 2 changed) and `single-use-switch` (2), Python
+`test_single_use_switch` (4), Playwright `pricing-workspace-final.spec.ts` (9; all 9 fail on the
+frontend before the follow-up), two committed expectations corrected (German "+ Periode",
+rereview3's single-use cell under a card).
+
+Verification (details in ADR-061):
+- `pricing-workspace-matrix` 10 of 10 runs green and `pricing-workspace-rereview` 10 of 10.
+- Every `pricing-workspace*` spec: 107/107 (acceptance 41 clicks, 0 section switches, 0 modal
+  dialogs).
+- Unit 529 OK, ruff clean, `npm run test:unit` 316/316, `npm run test:dom` 42/42, `tsc -b`,
+  `npm run build` (bundles not committed) and `npm run i18n:tex` clean.
+- Integration, all 40 modules: 866 tests, 865 OK (10 skipped) and 1 error, the weekday-dependent
+  FX test (a Saturday site date). Upstream: 76/76, 13/13, banquet 101.
+
+Status unchanged (PARTIAL): the workspace's own suites are green now, but not every suite is (the
+FX test's weekday and the `entry-branding` tests on the shared site's data are not this group's).
+
+**Pricing Workspace, final follow-up, main-side group (2026-09-26, ADR-061, branch `pricing-workspace`).**
+The final verification's failures outside the workspace, which blocked "every suite green" on this
+branch as on main. The fixes:
+- `test_system_status`'s FX test no longer depends on the weekday: it pins the site's "now" to each
+  day of a week, Monday to Sunday, and checks there what the check says (no rate, stale, old after
+  more than two business days with the calendar age, quiet at two, today). The product was right;
+  the test's rate three calendar days old warns only from Wednesday to Friday.
+- `lists.version_rows`: "current" leaves out archived contracts' versions (they sell nothing and are
+  drafted no more), and the 2,000-version cap counts only versions with a row in the table, the
+  most recent first; `truncated` stays honest. On the shared site, 1,979 of the cap's 2,000 were
+  archived E2E contracts' versions, so the Price periods / Occupancy rules / Rate plans lists came
+  back cut (Rate plans empty) for everyone. The lists' hint says archived contracts are under All
+  versions (six languages).
+- `entry-branding.spec.ts` "navigation: every new sub-section …" counts and opens the rows of the
+  lists' answers, not the loading placeholders (no product change).
+- The funnel purge deletes each old event alone by its primary key: one `DELETE … WHERE name IN`
+  for a batch that is most of a small funnel was read as a scan and locked every row and gap, so
+  `test_new_events_never_wait_for_a_purge` timed out on the near-empty disposable site.
+- `disposable_test.sh` (scratch, outside the repo) sets `developer_mode` and an `encryption_key` on
+  the new site, as the shared site has them.
+
+Tests with fail-first output are in ADR-061: the FX test rewritten over 7 pinned days and a unit
+twin (the old test errors on a Saturday site date; its 3-day rate reads `ok` from Saturday to
+Tuesday), `test_archived_contracts_never_crowd_the_current_versions_out` (2,020 archived drafts;
+fail first: the live version and a draft missing from all three tables),
+`test_each_old_event_is_deleted_alone_by_its_primary_key` (fail first: `1 != 3 : one DELETE per
+event`), and a scratch Playwright proof with the lists' answers held back 2.5 s (the old step
+clicks a placeholder row and fails; the new one passes).
+
+Verification (on `59ef45a`, the code of this group; docs after it):
+- Unit 530 OK, ruff clean, `npm run test:unit` 316/316, `npm run test:dom` 42/42, `tsc -b`,
+  `npm run build` (bundles not committed) and `npm run i18n:tex` clean.
+- Integration, all 40 modules (migrated with the tree): **868 tests, all OK** (11 skipped: the 3
+  whole-site patch tests, the 7 second-connection tests, and `test_entry_branding`'s git-checkout
+  test, which skips on the archived copy the run used; from the worktree that module is 35/35, none
+  skipped). `test_system_status` 12, `test_entry_branding` 35, `test_crm_third_review` 22 OK.
+- Disposable site (`disposable_test.sh`, made, tested, dropped): `test_crm_third_review` **22/22**,
+  none skipped (with the old purge: 21 of 22, `test_new_events_never_wait_for_a_purge` 1205);
+  `test_patches` 33/33; `test_crm_privacy_review` 28/28.
+- Upstream with the tree: eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- Playwright on this group's servers (bench :8021 with the tree, `serve_tree.py`, an RQ worker,
+  Vite :5191; a second factor for one test user and a `tex_source_url`, so nothing is skipped):
+  `entry-branding.spec.ts` 5 runs in a row, **10/10 each** (238 and 357 included).
+
+Status unchanged (PARTIAL): the four failures outside the workspace are fixed, and every suite
+this group ran is green, but a whole run of every suite (the whole Playwright suite included) on
+one commit is still to be recorded.
+
+**Pricing Workspace status (R-04): PARTIAL (built: S1–S16, the S16 review, three re-review follow-ups, the existing-semantics follow-up and the final follow-ups, branch `pricing-workspace`; the final verification above is not green in every suite: its two intermittent failures in the workspace's own specs are fixed by the final follow-up's workspace group (each spec 10 of 10 runs green), the ones outside it by the main-side group (`test_system_status`'s FX test pinned to every weekday; the version tables without archived contracts and `entry-branding` waiting for the lists' answers; the purge's lock on a small funnel); a whole green run of every suite on one commit is still to be recorded).** Backend S2–S5 (opt-in: `workspace=1`; existing callers get main's answers)
+(the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
+refs, exact child ages, `apply_op_values` and **GAP-12**: each night of the price test's internal quote
+reports its running subtotals after the adults, the children and the board, reported only, which the Explain
+ladder shows and the acceptance spec compares with the served answer); the workspace S1, S6–S15; the
+committed specs and bundles S16. The acceptance budget measured in the browser: **41 clicks, 0
+section switches, 0 modal dialogs** for the 13 steps (limit 50 / 0 / 0; §1.3 designed ≈41 / 0 / 0,
+against ≈112 clicks, 7 switches and 10 dialogs in the ten-tab editor); measured again in the final
+verification: 41 / 0 / 0 in five runs. Owner sign-off (GO_LIVE owner input 13, ADR-061 §0.1): O1–O5
+are implemented as proposed and stay provisional until the owner confirms each or chooses its
+alternative.
+
+*O1–O5 as implemented: PROVISIONAL owner decisions* (GO_LIVE owner input 13; `PRICING_WORKSPACE_UX.md`
+§0.1). Each is a mapping from typed text onto an op the DocTypes and the engine already had, in
+`shorthand.ts` and `model.ts`; `boards.py`, `ops.py`, `rooms.py` and the DocTypes are unchanged from
+main, and a probe prices the same board rows identically on the branch and on main `6b0102c`.
+- **O1 (provisional).** A bare `100` (or `=100`) in a board cell is stored as one board rule
+  `{op: ABSOLUTE, adult_amount: "100"}` for the cell's board, room and period. Before commit the
+  reading line says "Half board · All periods: 100.00 per room per night (fixed)"; the cell then
+  shows "100.00" over "per room". It is priced once per room and night whatever the party (1A, 2A,
+  3A and 2A+1C: 100 a night). Risk: the DocType's default board op is ADD (per adult), so the
+  reading line and the "per room" unit are the only guard against a per-adult reading. Alternative:
+  a bare number is ADD and `=100` is ABSOLUTE.
+- **O2 (provisional).** `-20` (or `−20`) in a board cell is stored as `{op: ADD, adult_amount: "-20"}`
+  (SUBTRACT is not a board op). It reads "−20.00 per adult per night; children 50 %, infants free"
+  and is priced −20 per adult plus each paying child's share (2A: −40; 2A+1C at 50 %: −50).
+- **O3 (provisional).** `50%` in a board cell is stored as `{op: ADJUST_PERCENT, adult_amount: "50"}`
+  (PERCENT_OF is not a board op; the engine prices both alike). It reads "+50% of the night's
+  occupancy price", is shown back as `+50%`, and adds half the night's occupancy total. In the room
+  matrix `50%` stays PERCENT_OF (half of the base room's price). Alternative: refuse `50%` on boards
+  and require `+50%`.
+- **O4 (provisional).** A relative entry (`x1.1`, `+10%`, `+5`, `-5`, `50%`) in a base-room cell
+  whose price is an entered price is sent to `apply_op_values` (read-only, `contract.edit`, drafts
+  only, at most 500 values), which applies it once as the ARI grid's rate change does (HALF_UP to the
+  currency); the answer is stored as an ABSOLUTE period rate (70.00 `+10%` → 77.00). The reading line
+  says "adjust 70.00 by +10% (calculated on commit)" first. Refused: no entered price, a formula on
+  the base cell, a negative result, a cell edited while the call was out. On the other rooms a
+  relative entry is a formula from the base (D11). Alternative: refuse relative entries on the base
+  room.
+- **O5 (provisional).** In a 0- or 2-decimal currency an amount with 1–3 integer digits and exactly
+  three decimals (`1.500`, `12.345`, `=1.500`, `-1.500`) is refused ("Is this 1500 or 1.5? Type 1500
+  for one thousand five hundred, or 1.5 for one and a half."), in cells, popovers, paste and bulk
+  Adjust…; nothing is stored. Accepted: `0.500`, `1.5`, `1500`, `1000.500`, factors, percentages, and
+  every amount in KWD, BHD, OMR, JOD and TND. The guard is the workspace's only: the server still
+  stores `1.500` from any other caller as before. Alternative: drop the guard and rely on the
+  reading line.
+
+*Draft overlay performance* (`test_pricing_workspace_perf`, a draft of 15 rooms × 26 periods,
+1,320 rows, 390 cells; 20 timed runs from a fresh request; server time without HTTP; the recorded
+run of ADR-061, and the p95 of this final run):
+
+| Call (`workspace=1`) | Overlay p50 / p95 / max, ms | Saved draft p50 / p95 / max, ms | Final run p95 overlay / saved, ms | Queries overlay / saved | Budget (p95) |
+|---|---|---|---|---|---|
+| `price_matrix`, whole matrix | 241.6 / 252.6 / 256.6 | 80.7 / 87.3 / 90.2 | 287.4 / 95.5 | 58 / 46 | 800 ms: met |
+| … + 1 sample party (the ladder) | 247.6 / 284.9 / 287.2 | 89.3 / 97.6 / 98.1 | 283.3 / 111.8 | 58 / 46 | 800 ms: met |
+| … + 12 sample parties (the cap) | 311.0 / 378.0 / 402.3 | 156.8 / 207.0 / 208.0 | 339.7 / 182.5 | 58 / 46 | — |
+| `preview_price`, 3 nights, 2A | 224.5 / 263.6 / 281.8 | 65.3 / 78.7 / 81.2 | 239.1 / 84.7 | 63 / 51 | 500 ms: met |
+| `preview_price`, 14 nights, 2A+2C | 231.1 / 247.2 / 280.6 | 75.1 / 98.6 / 108.3 | 261.0 / 102.0 | 63 / 51 | 500 ms: met |
+| `validate_version` (the publish sweep, 11,076 parties) | 2,664 / 2,808 / 2,984 | 2,536 / 2,652 / 2,658 | 2,871 / 2,658 | 48 / 48 | not budgeted |
+| `apply_op_values`, 26 / 500 prices | 5.3 / 6.0 / 6.4 and 9.3 / 9.8 / 10.0 | — | 5.4 and 10.7 | 7 and 7 | — |
+
+Query counts do not grow with cells (asserted: the same for 13 and 26 periods, one per room, the
+same for 3 and 14 nights, the same for 26 and 500 prices).
+
+Open after the review follow-up (ADR-061): the §3.18 one-screen fit of the owner example with the
+ladder is not met (the rows are taller than 28 px), and the three grids' inline editing is not
+one shared hook yet (only the key routing is shared).
+Open after the final verification: a green whole run (the FX test on a site date Wednesday to
+Friday or fixed; the version lists on a site without the accumulated E2E drafts, or a list that
+leaves archived contracts out). The two intermittent workspace failures it found (keys typed at
+once after Escape lost; one header-lane ArrowDown step) are fixed (final follow-up, workspace UX
+and keyboard group).
+
+R-04 itself stays PARTIAL: its classification is not otherwise changed by this lane (see its row).
+
 ## 2. Summary
 
 | Status | Count | Requirements |
@@ -511,7 +1362,7 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 | R-01 | Source & identity | **COMPLETE** | AGPL notices, `NOTICE.md`, baseline 418ed1a in history; TEX shell branding; entry screens say TEX Engine: sign-in page in the six TEX languages with the brand from TEX Settings, tab title, favicons, Desk logo and apps tile, `hooks.py` title and description (app name, package, modules and routes unchanged, ADR-001); every entry screen offers the source, "Based on Kamra PMS · AGPL-3.0 · Source code" (G-60 fixed, ADR-060); review follow-up: guests (every booking-engine page, the widget's modal, the legacy guest pages) and Desk (Help › About) are offered it too, always the running version's source (`/tree/<commit>` or `tex_source_url` with `{commit}`, never with credentials), carried by the served pages; the sign-in page asks a two-factor account for its code and takes no other answer for a session; release pipelines guarded to the upstream repository (G-61 fixed) · `test_entry_branding` (G-60: 8; review follow-up: `TestSourceOffer`, `TestEntryOverHttp`, `TestSignInContract`), e2e `entry-branding.spec`, `shell.spec` | The legacy PMS is closed to hotel users while switched off (G-16 fixed, ADR-030); the legacy booking engine refuses TEX hotels and the legacy night audit leaves TEX stays alone (G-03, G-04 fixed, ADR-028); a Desk, REST or data-import reservation at a TEX hotel is refused, migration imports keep their amount as "Imported" (G-92 fixed, ADR-052); a hotel joining TEX is onboarding, and its Desk sells until an administrator sets it live in TEX (audited; TEX-mode banners in the TEX shell, the legacy shell and the Desk form; ADR-052 review). Kept on purpose (legacy PMS, hidden while off): the housekeeping app's login, AI assistant / MCP texts. Owner items (not spec bullets, GO_LIVE_READINESS §3, input 12): the repository public with every deployed commit pushed, or `tex_source_url` (and `tex_source_commit` for an install without its git checkout). |
 | R-02 | Architecture principles | **COMPLETE** | `kamra/tex/pricing` has no frappe import (`TestPurity`); no import cycles; the frontend only formats decimal strings, and the TEX API returns decimal fields as exact strings, never floats; loyalty money is Decimal from a Currency field read exactly (G-72 fixed, ADR-055) · `TestPurity`, unit and integration `test_money_fields` | — (the legacy float pricing path remains only for hotels outside TEX, ADR-028: `Reservation.apply_pricing` never runs for a TEX hotel, G-92 fixed, ADR-052, `test_legacy_pricing`) |
 | R-03 | Pricing engine | **COMPLETE** | modular resolvers in `kamra/tex/pricing/*`; Decimal (`money.calc`); explanation trace; extras and taxes as of the sale time, every EXTRA/TAX step names its revision (G-20 fixed, ADR-031); decimal DB fields of 9 places that hold what was typed (refused otherwise) and are read as the exact Decimal (`money.db_dec`), FX rates to 10 significant digits, rule values explained as stored (G-72 fixed, ADR-055) · `test_engine.py`, `TestPayload`, `TestEffectiveDatedSources`, `TestEffectiveDatedExtrasAndTaxes`, unit `test_money_fields` (11), integration `test_money_fields` (9) | — |
-| R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `tex_contract.py`, `screens/rates/contracts/*`; the version editor's Discard returns to the last save, and a save's answer keeps what was edited while it was in flight (ADR-060 follow-up, branch `fix-editor`; also the policy, booking-site, content and loyalty editors) · `TestContractSelection`, `TestContractHeaderLock`, e2e `contract-admin`, `editor-edits` (3; all fail on main `b72b2a8`) | The e2e step for the header lock and status actions (G-50) passes in `contract-admin.spec.ts`. (Fixed: header lock G-50, ADR-045: a published contract's hotel, market, currency and basis are fixed, windows, channels, priority and sell currency are versioned, selection reads the frozen version, status moves through audited actions; review follow-up: versions frozen before G-50 keep their header narrowings (p25 snapshot and report), a suspend stops quotes and bookings in flight, the scheduler isolates each record, `TestContractHeaderLockReview`; contract selection G-17; cost visibility G-11.) |
+| R-04 | Contract management | PARTIAL | `api/contracts.py`, `commercial/contracts.py`, `tex_contract.py`, `screens/rates/contracts/*`; the version editor's Discard returns to the last save, and a save's answer keeps what was edited while it was in flight (ADR-060 follow-up, branch `fix-editor`; also the policy, booking-site, content and loyalty editors) · `TestContractSelection`, `TestContractHeaderLock`, e2e `contract-admin`, `editor-edits` (3; all fail on main `b72b2a8`); Pricing Workspace backend (every addition of S2–S5 below is the workspace's opt-in, `workspace=1`, since the existing-semantics follow-up: existing callers get main's answers, ADR-061), slice S2 (ADR-061, branch `pw-backend`): `price_matrix`, `validate_version` and `preview_price` price, validate and quote the editor's unsaved draft in memory (a read-only overlay: `contract.edit` and Draft only, the save's own checks except link validation and the window order, `~<_key>` rule ids, at most 5,000 rows, nothing saved or audited), a blank rule value is refused on save instead of being stored as 0, `get_version` says `can_preview` / `can_publish` / `can_edit_contract` / `basis_locked` and the currency's `minor_units`; slice S3: `price_matrix` names the rule behind each cell (scope, derivation chain, overridden rules; pure `pricing/matrix.py`), the effective room capacity, the age bands with their origin, the rules inherited from pricing policies and the engine's adult default, and prices sample parties per period (`parties`, `party_room`); slice S4: validation issues carry a `ref` to the rule(s), room, period, band(s), party and board they are about (messages unchanged), board rules for an unknown room or period and twin board rules are publish errors, the overlay refuses a row key used twice; slice S5: the price test takes a child's age in whole years, months or by date of birth (checked as a booking checks it) and refuses anything else, `apply_op_values` changes entered prices of a draft once by an op as the ARI grid does (read-only; the base room's relative entry, O4, and the bulk Adjust…), and each night of an internal quote reports its running subtotals after the adults, the children and the board (GAP-12, reported only: no price, explanation or engine version change; never in the guest view) ; frontend lane, merged with the backend lane on branch `pricing-workspace`: the currency-aware shorthand parser (S1), the design-system Popover, Menu, Tooltip and keyboard grid hooks (S7) and the pure workspace model that turns cell entries into ordinary rows (S6); slice S8: the version editor in four sections (Pricing, Commercial rules with the former editors as "Rule tables", Offers & promotions, Preview & audit) under a sticky context header with the pricing basis popover and the Price test, the server's live prices and checks of unsaved edits (one validation in flight; no cost call for agents), BOARD_* issues on Pricing; S8 review follow-up: a clean draft, the Check button and a draft above the overlay's row cap are priced and checked by name (no cap; `overlay_max_rows` and the typed `OverlayTooLarge` refusal, additive), and a refused check or matrix reads "could not run" with Try again; slice S9: the room price matrix on Pricing (inline shorthand cells with a reading line, the base room's relative entries adjusted once by the server and stored as prices (O4), formulas on the other rooms, Ctrl/Cmd+Enter over a selection, the rule popover, the room and period menus, the workspace undo history); S9 review follow-up: the night adjustment's amounts are currency-aware (O5), and a late server adjustment never overwrites a cell edited meanwhile; slice S10: the matrix's bulk tools (row and column header selection, Fill → / Fill ↓ with the fixed price confirmation, spreadsheet copy and paste, Adjust… with the server's preview, undo and redo with the "Applied to N cells · Undo" toast; the Rule tables' and Offers' edits are undo entries too); S10 review follow-up: Fill ↓ and copy take the rule a cell shows, a fill from an empty cell names what it cleared; S10 second review follow-up: a copied range over a resolved row pastes back onto the same rooms, copied text ends every row with a line break, Ctrl/Cmd+R and D never reach the browser from a cell editor, the undo toast returns the focus to the grid; slice S11: Occupancy & child pricing under the matrix (the ladder with engine defaults, band labels, period overrides, the rule popover and the server's resolved line for a sample party) and the non-modal child ages drawer (bands with saved labels, codes under Advanced, inherited bands, the child rules); S11 review follow-up: a room's ladder cells show the All-rooms and policy rules the engine uses instead of a false default or "not sellable", and the resolved line never shows another party's totals; slice S12: special combination cards under the ladder and the structured builder (steppers and quick chips of the rooms' valid combinations, rooms and periods, per-child band, rule and shorthand value, adult and whole-party rules, one undo entry replacing the edited card's rows; twins refused); S12 review follow-up: All-rooms / All-periods and named-scope rules are separate cards, so an unchanged Edit and Save keeps a room's rows, and the builder does not open a card it cannot save back as it is; slice S13: Boards on Pricing (chips when collapsed; a grid of the boards and their room rules on the matrix's period columns with board shorthand cells whose reading names the unit (O1–O3), BASE for one board, clearing a board's own cell removes it after a confirmation, the row's terms popover, Add board, the matrix's active period highlighted); slice S14: the Price test in a non-modal drawer (from the header or a matrix cell's "Test this price", prefilled from that cell; exact child ages in months or by date of birth; Live) with the Explain ladder (the engine's stages in its order, server values only, a chain check) and "Why this price" with band labels, localised sentences and Show in grid; slice S15: validation issues anchored in the workspace (the matrix cell, period header, ladder cell in its rooms scope, combination card or board cell an issue names; errors invalid, warnings described), the live check listed by section with each issue's click showing its cell, region or rule table, band labels in every issue list, and the i18n check's literal-key scan; slice S16: the committed acceptance (the owner's 13 steps in one draft, 41 clicks, 0 section switches, 0 modal dialogs, the Price test's ladder compared with the served answer), the read-only phone and agent checks, the contract E2E flows on the workspace and the S9–S15 checks as committed specs, the bundles rebuilt · `test_pricing_workspace_api` (50), `test_matrix` (22), `test_validate_refs` (37), `test_engine` `TestReportedSubtotals` (7), `npm run test:unit` (287), `npm run test:dom` (30), e2e `pricing-workspace` (3), `pricing-workspace-mobile` (2, desktop and Pixel 7), `pricing-workspace-matrix` (8), `-bulk` (14), `-occupancy` (4), `-combinations` (7), `-boards` (6), `-price-test` (6), `-issues` (5), `contract-admin` and `critical-journey` through the workspace, `editor-edits` (3) | The Pricing Workspace is built on branch `pricing-workspace` (ADR-061, slices S1–S16) and PARTIAL: its final verification was not green in every suite; the two intermittent failures in its own specs are fixed by the final follow-up's workspace group, and `test_system_status`'s weekday-dependent FX test and the two `entry-branding` navigation tests on the shared site's data by its main-side group; a whole green run of every suite on one commit is still to be recorded (its entries in §1); the owner's sign-off on the provisional shorthand decisions O1–O5 is owner input 13 (GO_LIVE_READINESS), and the committed bundles run on the dev bench only after the merge (ADR-061, open after S16). The e2e step for the header lock and status actions (G-50) passes in `contract-admin.spec.ts`. (Fixed: header lock G-50, ADR-045: a published contract's hotel, market, currency and basis are fixed, windows, channels, priority and sell currency are versioned, selection reads the frozen version, status moves through audited actions; review follow-up: versions frozen before G-50 keep their header narrowings (p25 snapshot and report), a suspend stops quotes and bookings in flight, the scheduler isolates each record, `TestContractHeaderLockReview`; contract selection G-17; cost visibility G-11.) |
 | R-05 | Versioning & snapshot | **COMPLETE** | immutable versions, frozen payload + hash verified on load (`tex_contract_version.py`, `revisions.py`); the price-locked snapshot keeps its periods and rules as a verified reference (version + payload hash): every reprice, the simulator and add-ons refuse, audited, a payload that is not the one the sale recorded, and the locked price never moves; the snapshot records when it was priced (`priced_at`, the quote's sale time) and accepted (G-73 fixed, ADR-058) · `TestContractImmutability`, `test_payload_integrity_is_checked`, `test_snapshot_integrity` (9), e2e | — (The REST lock bypass G-01 is fixed, `TestPriceLock`. At a TEX hotel every stay, TEX-priced or not, changes its stay or price only through the TEX services, and imported stays are price-locked: G-92 fixed, ADR-052.) |
 | R-06 | Base pricing modes | **COMPLETE** | `occupancy.py` PERSON/ROOM · `TestRoomBasis`, `TestPersonBasis`; basis select in `ContractDialogs.tsx` | — |
 | R-07 | Occupancy formula engine | **COMPLETE** | slot model, combinations not hardcoded (`occupancy.py`, `contracts.parse_combination`); every live pricing policy (global, hotel, market, hotel + market) cascades into a contract at publish, rule origin ranked before qualifiers, an infant priced by its band rule first, ambiguous rules refused at publish where the tie decides a price, a pricing policy checked on its own before it goes live, legacy payloads priced as sold (occupancy precedence v2, ADR-043, G-30/G-31 fixed and reviewed); policy and contract occupancy editors (`screens/rates`; a policy rule can name the bands of the policies it cascades with) · spec examples reproduced (270; 2A+1C 250 vs 1A+1C 200), `TestPrecedenceV2`, `test_policy_cascade`, `test_pricing_policies` (14) | — |
