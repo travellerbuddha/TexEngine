@@ -114,6 +114,15 @@ const SHORTCUTS = [
   "save",
 ] as const
 
+/** A shortcut's keys as the table shows them: one chip per key or gesture ("Ctrl+Home, Ctrl+End"
+ * is two), so a row wraps between them. */
+function keyChips(text: string): string[] {
+  return text
+    .split(/,\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+}
+
 export function KeyboardShortcuts() {
   const { t } = useTexT()
   const [open, setOpen] = useState(false)
@@ -125,7 +134,13 @@ export function KeyboardShortcuts() {
       </Button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={ref} label={t("rates.kbd.title")} width="lg" placement="bottom-end">
         <p className="mb-2 text-xs text-zinc-500">{t("rates.kbd.mac_note")}</p>
-        <table className="w-full text-left text-sm">
+        {/* a fixed layout: the keys wrap within their column (one chip per key, a long one wraps
+            inside its chip), so no language pushes the actions out of the popover (final follow-up) */}
+        <table className="w-full table-fixed text-left text-sm">
+          <colgroup>
+            <col className="w-[44%]" />
+            <col />
+          </colgroup>
           <thead className="sr-only">
             <tr>
               <th scope="col">{t("rates.kbd.keys")}</th>
@@ -135,10 +150,17 @@ export function KeyboardShortcuts() {
           <tbody className="divide-y divide-zinc-100">
             {SHORTCUTS.map((id) => (
               <tr key={id}>
-                <th scope="row" className="py-1 pr-3 align-top font-normal whitespace-nowrap">
-                  <kbd className="rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 font-sans text-xs text-zinc-800">{t(`rates.kbd.${id}.keys`)}</kbd>
+                <th scope="row" className="py-1 pr-3 align-top font-normal">
+                  <span className="flex flex-wrap gap-1">
+                    {keyChips(t(`rates.kbd.${id}.keys`)).map((k, i) => (
+                      <span key={i} className="inline-flex max-w-full">
+                        {i > 0 && <span className="sr-only">, </span>}
+                        <kbd className="max-w-full rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 font-sans text-xs break-words text-zinc-800">{k}</kbd>
+                      </span>
+                    ))}
+                  </span>
                 </th>
-                <td className="py-1 text-zinc-700">{t(`rates.kbd.${id}`)}</td>
+                <td className="py-1 align-top break-words text-zinc-700">{t(`rates.kbd.${id}`)}</td>
               </tr>
             ))}
           </tbody>
