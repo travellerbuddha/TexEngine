@@ -623,6 +623,52 @@ class TestPartialCancellation(HoldCase):
 		self.assertEqual(confirmations(b), 1)
 
 
+class TestNeverConfirmedLeftovers(HoldCase):
+	"""D2 (audit 1c): before B1, a booking waiting for its payment with a room cancelled became
+	"Partially Cancelled", and the old PMS job then released its other rooms: every room cancelled,
+	never confirmed, yet counted as confirmed and taking money. It takes no money as a confirmed booking
+	does, and p54 cancels it: its money off it into reconciliation, audited, no e-mail from migrate."""
+
+	def leftover(self, b: dict) -> None:
+		booking.cancel_reservation(self.rooms(b)[0], reason="one room less")
+		frappe.db.sql("""UPDATE `tabReservation` SET status='Cancelled', cancellation_note='Hold expired'
+		                 WHERE tex_booking=%s AND status IN ('Pending Payment', 'Held')""", b["booking"])
+		frappe.db.set_value("TEX Booking", b["booking"], "status", "Partially Cancelled")
+
+	def test_a_leftover_takes_no_money_as_a_confirmed_booking(self):
+		b = self.book(rooms=2)
+		payment = self.start_payment(b)
+		self.leftover(b)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(pay.allocated_of(payment["transaction"]), D(0))
+		self.assertEqual(paid(b), D(0))
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")
+
+	def test_p54_cancels_leftovers_and_parks_their_money_without_mail(self):
+		from kamra.tex.tests.integration.test_patches import migrate, never_ran
+
+		b = self.book(rooms=2)
+		cash = pay.record_manual(booking=b["booking"], amount="50", method="Cash", reference="desk",
+		                         idempotency_key=f"d2-cash-{b['booking']}")["transaction"]   # less than a room's deposit
+		self.leftover(b)
+		kept = self.book(rooms=2)                                  # confirmed, then one room cancelled
+		self.pays(self.start_payment(kept))
+		booking.cancel_reservation(self.rooms(kept)[0], reason="one room less")
+		never_ran("p54_never_confirmed_leftovers")
+		with mock.patch("kamra.tex.services.notify.reconciliation") as mailed:
+			migrate("p54_never_confirmed_leftovers")
+		mailed.assert_not_called()
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled", "Cancelled"]))
+		self.assertEqual((paid(b), pay.allocated_of(cash)), (D(0), D(0)))
+		self.assertEqual(txn_state(cash).reconciliation, "Action Required")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.leftover_cancelled",
+		                                                     "reference_name": b["booking"]}))
+		self.assertEqual(self.statuses(kept), ("Partially Cancelled", ["Cancelled", "Confirmed"]))
+		migrate("p54_never_confirmed_leftovers")                   # a second run changes nothing
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "booking.leftover_cancelled",
+		                                                     "reference_name": b["booking"]}), 1)
+
+
 class TestExpiryWithMoney(HoldCase):
 	"""B2 (audit 1b): a booking waiting for its payment that was partly paid (a first of two links,
 	a part paid at the desk) and then expires never keeps that money as a negative balance: the

@@ -104,6 +104,8 @@ BEHAVIOUR = {
 	"p52_partly_cancelled_awaiting_payment": "test_hold_payment_race.TestPartialCancellation."
 	                                         "test_p52_puts_stuck_bookings_back_to_waiting_for_their_payment",
 	"p53_payment_captured_at": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p54_never_confirmed_leftovers": "test_hold_payment_race.TestNeverConfirmedLeftovers."
+	                                 "test_p54_cancels_leftovers_and_parks_their_money_without_mail",
 }
 
 

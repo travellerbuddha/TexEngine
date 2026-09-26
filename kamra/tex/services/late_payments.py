@@ -41,6 +41,7 @@ BOOKING_CANCELLED = "BOOKING_CANCELLED"
 NOT_PAYABLE = "NOT_PAYABLE"
 EXPIRED_UNPAID = "EXPIRED_UNPAID"
 TAKES_MONEY = ("Confirmed", "Partially Cancelled")
+CONFIRMED = ("Confirmed", "Checked In", "Checked Out", "No Show")
 # what a payment made in time may undo: an expiry its news came after (B4)
 REVIVABLE = (ROOMS_RELEASED, BOOKING_CANCELLED)
 REVIVE_SAVEPOINT = "tex_revive_booking"
@@ -57,6 +58,11 @@ def problem(b, amount=None) -> str | None:
 	still owes (its cancellation charges), else ``BOOKING_CANCELLED``. A booking waiting for its
 	payment takes it while its rooms are held for it, however late (B3 a), else
 	``ROOMS_RELEASED``. Any other status: ``NOT_PAYABLE``."""
+	if b.status == "Partially Cancelled" and not confirmed_rooms(b.name):
+		# D2: never confirmed, left "Partially Cancelled" before B1 (its other rooms released by the old
+		# PMS job): it takes no money as a confirmed booking does, and owes no fee
+		states = frappe.get_all("Reservation", filters={"tex_booking": b.name}, pluck="status")
+		return BOOKING_CANCELLED if all(s == "Cancelled" for s in states) else NOT_PAYABLE
 	if b.status in TAKES_MONEY:
 		return None
 	if b.status == "Cancelled":
@@ -69,6 +75,11 @@ def problem(b, amount=None) -> str | None:
 	# its rooms still held for it: nothing is taken again, so its money confirms it as quoted,
 	# however late it comes (B3 a); rooms given back are never taken again by themselves (B3 b, c)
 	return ROOMS_RELEASED if booking_svc.rooms_not_held(b) else None
+
+
+def confirmed_rooms(booking: str) -> bool:
+	"""Whether a room of the booking was ever confirmed (confirmed, in house, departed, no-show)."""
+	return bool(frappe.db.exists("Reservation", {"tex_booking": booking, "status": ("in", CONFIRMED)}))
 
 
 def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> None:
@@ -152,10 +163,11 @@ def _held_when_expired(b) -> dict:
 	return out
 
 
-def money_off_expired(booking: str, *, now: datetime | None = None):
+def money_off_expired(booking: str, *, now: datetime | None = None, send_mail: bool = True):
 	"""B2: the money a booking held when it expired before it was paid in full (a first of two
 	links, a part paid at the desk) comes off the cancelled booking — never a negative balance —
-	and each charge it came from goes to reconciliation for staff. → the amount taken off."""
+	and each charge it came from goes to reconciliation for staff (``send_mail``: False from a
+	migration). → the amount taken off."""
 	from kamra.tex.payments import service as pay
 
 	now = get_datetime(now or now_datetime())
@@ -172,13 +184,14 @@ def money_off_expired(booking: str, *, now: datetime | None = None):
 		        f"{now:%Y-%m-%d %H:%M} before it was paid in full: the booking expired with its rooms and the money "
 		        "came off it. Book the stay again once the guest accepts it and allocate this payment to it, or "
 		        "refund it.")
-		_flag(txn, booking, EXPIRED_UNPAID, "Action Required", note, held)
+		_flag(txn, booking, EXPIRED_UNPAID, "Action Required", note, held, send_mail=send_mail)
 		taken += held
 	return taken
 
 
-def _flag(txn, booking: str, why: str, state: str, note: str, amount, **extra) -> None:
-	"""Put a charge's money in reconciliation (never twice), audited."""
+def _flag(txn, booking: str, why: str, state: str, note: str, amount, *, send_mail: bool = True, **extra) -> None:
+	"""Put a charge's money in reconciliation (never twice), audited; the team and the payer are told
+	(``send_mail``)."""
 	if frappe.db.get_value(TXN, txn.name, "reconciliation") in OPEN:
 		return
 	frappe.db.set_value(TXN, txn.name, {"reconciliation": state, "reconciliation_note": note[:1000]},
@@ -186,9 +199,10 @@ def _flag(txn, booking: str, why: str, state: str, note: str, amount, **extra) -
 	audit("payment.reconciliation_required", reference_doctype=TXN, reference_name=txn.name, property=txn.property,
 	      new={"booking": booking, "why": why, "state": state, "amount": to_str(amount), "currency": txn.currency,
 	           **extra})
-	from kamra.tex.services import notify
+	if send_mail:
+		from kamra.tex.services import notify
 
-	notify.reconciliation(txn, booking, state, note, amount)      # the team and the guest are told (B5)
+		notify.reconciliation(txn, booking, state, note, amount)      # the team and the guest are told (B5)
 
 
 def guest_notice(booking: str | None) -> str | None:
