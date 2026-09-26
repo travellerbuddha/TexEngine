@@ -1146,9 +1146,8 @@ Tests with fail-first output are in ADR-061:
 
 Verification:
 - Unit 525 OK, ruff clean.
-- Integration, all 40 modules: 865 tests, 864 OK (10 skipped) and 1 error. The error is
+- Integration, all 40 modules: 866 tests, 865 OK (10 skipped) and 1 error. The error is
   `test_system_status`'s weekday-dependent FX test; the site date was a Saturday.
-- After the audit count fix: 9 affected modules OK.
 - Upstream: 76/76, 13/13, banquet 101.
 - Details in ADR-061.
 

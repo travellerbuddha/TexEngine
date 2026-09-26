@@ -8772,17 +8772,14 @@ medium and three low findings for this group. Branch `pricing-workspace`.
 **Verification (S16 re-review 5 follow-up, security and cost group).** Main `1575c8b` is contained,
 so nothing was merged.
 - *Unit:* 525 OK. ruff is clean.
-- *Integration, all 40 modules, on `0283f86`* (before the audit count fix), migrated with the tree:
-  - 865 tests: 864 OK (10 skipped) and 1 error.
+- *Integration, all 40 modules, on the final code (`52fe929`),* migrated with the tree:
+  - 866 tests: 865 OK (10 skipped) and 1 error.
   - The error is `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails`. The site date
     was a Saturday, and this test depends on the weekday; it is not this group's.
-  - `test_pricing_workspace_api` passed 67, `test_existing_semantics` 13, the perf module 2.
-- *Integration after the audit count fix (`52fe929`):* 9 modules, all OK:
-  - `test_pricing_workspace_api` 68, `test_existing_semantics` 13, `test_pricing_policies` 14,
-    `test_cost_stage_privacy` 4, `test_security_regressions` 59;
-  - `test_commercial_flows` 63, `test_legacy_pricing_review` 23, `test_audit_trail` 15,
-    `test_security_hygiene` 14.
-- *Upstream with the tree (`0283f86`):* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+  - `test_pricing_workspace_api` passed 68, `test_existing_semantics` 13, the perf module 2.
+  - An earlier full run on `0283f86`, before the audit count fix, gave 865 tests: 864 OK and the
+    same error.
+- *Upstream with the tree (`52fe929`):* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
 - *Not run:* there is no frontend change, so no `tsc`, build, i18n or Playwright run. The frontend
   never reads publish's `warnings`.
 
