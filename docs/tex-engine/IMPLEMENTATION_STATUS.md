@@ -1465,3 +1465,4 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 - DOC-0 **COMPLETE**: the docs no longer say GitHub PR/CI is blocked (CI green on PR #2, PR #1; CI/CD PARTIAL: scanning, image, registry, staging, deploy open) · `git grep`.
 - NEW-1 **COMPLETE**: scheduled jobs never read a missing date as past (contract roll, loyalty expiry, grant expiry, payment links); every nullable date filter says what NULL means; p56 repairs the roll (ADR-064) · `test_null_dates`, `test_patches` p56, `unit/test_nullable_date_filters`, `test_scheduler_smoke`.
+- Y-1 **COMPLETE**: `admin.audit_log` by reference needs the record's own read capability (contract and rate tables: `price.view_cost` or `contract.edit`; payments `payment.view`; stays `reservation.view`; policies their read capability; else `settings.admin`) · `test_audit_trail.TestTrailByReference`.

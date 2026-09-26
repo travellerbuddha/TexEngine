@@ -424,6 +424,52 @@ def adapters():
 
 # ─── audit trail ─────────────────────────────────────────────────────────
 
+# A record's trail, read by reference, needs what reading the record itself needs (Y-1): a contract's
+# events carry its rates (a publish's collections, a draft's edits) and are cost (G-11); a payment's
+# carry amounts, the provider and the bank reference.
+TRAIL_COST = frozenset({"TEX Contract", "TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy",
+                        # a contract version's rate tables
+                        "TEX Price Period", "TEX Period Rate", "TEX Child Age Band", "TEX Occupancy Rule",
+                        "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan", "TEX Contract Offer",
+                        "TEX Contract Channel"})
+TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link": "payment.view",
+                    "TEX Payment Allocation": "payment.view", "Reservation": "reservation.view",
+                    "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view"}
+VERSION_TABLES = TRAIL_COST - {"TEX Contract", "TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy"}
+
+
+def _trail_property(doctype: str, name: str) -> str | None:
+	"""The hotel a record belongs to: as ``scope.property_of``, else its own ``property``, a
+	revision's stay, a rate table's version. None (a group or global record, one deleted since):
+	its trail is the platform administrators'."""
+	prop = scope.property_of(doctype, name)
+	if prop or not frappe.db.exists("DocType", doctype):
+		return prop
+	if doctype in VERSION_TABLES:
+		parent = frappe.db.get_value(doctype, name, "parent")
+		return scope.property_of("TEX Contract Version", parent) if parent else None
+	if doctype == "TEX Reservation Revision":
+		res = frappe.db.get_value(doctype, name, "reservation")
+		return scope.property_of("Reservation", res) if res else None
+	meta = frappe.get_meta(doctype)
+	return frappe.db.get_value(doctype, name, "property") if meta.has_field("property") and not meta.istable else None
+
+
+def _require_trail(doctype: str, prop: str) -> None:
+	"""Contract cost: ``price.view_cost`` or ``contract.edit`` (G-11); payments ``payment.view``; a
+	stay ``reservation.view``; a commercial policy what the policies API reads it with; anything
+	else ``settings.admin``."""
+	from kamra.tex.api import policies
+
+	if doctype in TRAIL_COST:
+		if not (scope.has_capability("price.view_cost", prop) or scope.has_capability("contract.edit", prop)):
+			frappe.throw(_("Not permitted."), frappe.PermissionError)
+		return
+	cap = TRAIL_CAPABILITY.get(doctype)
+	if not cap:
+		cap = policies.READ_CAP.get(doctype, "price.view") if doctype in policies.POLICY else "settings.admin"
+	scope.require(cap, prop)
+
 
 @frappe.whitelist()
 def audit_log(property: str | None = None, reference_doctype: str | None = None,
@@ -443,11 +489,11 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 		q = q.where((E.property == property)
 		            | E.name.isin(frappe.qb.from_(S).select(S.event).where(S.property == property)))
 	elif reference_doctype and reference_name:
-		prop = scope.property_of(reference_doctype, reference_name)
-		if prop:
-			scope.require("reservation.view", prop)
-		elif not scope.is_platform_admin():
-			frappe.throw(_("Not permitted."), frappe.PermissionError)
+		if not scope.is_platform_admin():
+			prop = _trail_property(reference_doctype, reference_name)
+			if not prop:
+				frappe.throw(_("Not permitted."), frappe.PermissionError)
+			_require_trail(reference_doctype, prop)
 	else:
 		_require_platform()
 	if reference_doctype:

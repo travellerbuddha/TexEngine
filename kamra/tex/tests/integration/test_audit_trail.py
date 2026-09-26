@@ -468,3 +468,73 @@ class TestPaymentSource(AuditCase):
 		self.assertEqual(frappe.db.get_value("TEX Payment Link", link, "status"), "Expired")
 		e = last_event("payment_link.expire", link)
 		self.assertEqual((e["source"], e["property"]), ("Scheduler", fx.PROPERTY))
+
+
+# ─── reading a record's trail (Y-1) ──────────────────────────────────────
+
+
+class TestTrailByReference(AuditCase):
+	"""Y-1 (audit Part 2A): a record's trail read by reference needs what reading the record itself
+	needs. It needed ``reservation.view`` whatever the record, so an agent read a contract version's
+	publish (its period rates, old → new) and a viewer a payment's amount, provider and bank
+	reference, which their own APIs refuse them (G-11)."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.tests.integration.test_crm_segments import agent
+
+		self.p = setup_site_and_payments(self.f)
+		self.version = frappe.db.get_value("TEX Contract", {"contract_code": "PAY", "property": fx.PROPERTY},
+		                                   "active_version")
+		self.contract = frappe.db.get_value("TEX Contract Version", self.version, "contract")
+		b = guest_books(session="y1-trail")
+		self.txn = b["payment"]["transaction"]
+		public.mock_pay(transaction=self.txn, outcome="success", sig=b["payment"]["fields"]["success_sig"])
+		self.res = b["rooms"][0]["reservation"]
+		self.agent = agent("y1-agent@example.com", fx.PROPERTY)                      # Reservations Agent
+		self.revenue = agent("y1-revenue@example.com", fx.PROPERTY, "Revenue Manager")
+		self.viewer = agent("y1-viewer@example.com", fx.PROPERTY, "Viewer")
+		self.desk = fx.ensure_user("y1-desk@example.com", ["Front Desk"])
+		fx.ensure("TEX Access Grant", {"user": self.desk, "property": fx.PROPERTY},
+		          {"user": self.desk, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		as_user("Administrator")
+
+	def trail(self, user: str, doctype: str, name: str) -> list[dict]:
+		as_user(user)
+		try:
+			return admin.audit_log(reference_doctype=doctype, reference_name=name, limit=500)
+		finally:
+			as_user("Administrator")
+
+	def test_contract_events_need_cost_or_contract_edit(self):
+		for doctype, name in (("TEX Contract Version", self.version), ("TEX Contract", self.contract)):
+			with self.assertRaises(frappe.PermissionError, msg=doctype):
+				self.trail(self.agent, doctype, name)
+		published = [r for r in self.trail(self.revenue, "TEX Contract Version", self.version)
+		             if r["action"] == "contract.publish"]
+		self.assertTrue(published and published[0]["new_value"]["collections"])
+
+	def test_payment_events_need_payment_view(self):
+		with self.assertRaises(frappe.PermissionError):
+			self.trail(self.viewer, "TEX Payment Transaction", self.txn)
+		self.assertIn("payment.succeeded", {r["action"] for r in self.trail(self.agent, "TEX Payment Transaction",
+		                                                                    self.txn)})
+
+	def test_a_stays_events_are_still_read_at_the_front_desk(self):
+		from kamra.tex.services import modification
+
+		p = modification.propose(self.res, {"check_out": str(fx.d(6, 14))})
+		modification.apply(p["proposal_token"], reason="one more night")
+		for user in (self.desk, self.viewer):
+			self.assertIn("reservation.modify", {r["action"] for r in self.trail(user, "Reservation", self.res)})
+
+	def test_any_other_record_needs_hotel_settings(self):
+		from kamra.tex.security.audit import audit
+
+		grant = frappe.db.get_value("TEX Access Grant", {"user": self.agent, "property": fx.PROPERTY})
+		audit("grant.update", reference_doctype="TEX Access Grant", reference_name=grant, property=fx.PROPERTY,
+		      new={"permission_profile": "Reservations Agent"})
+		with self.assertRaises(frappe.PermissionError):
+			self.trail(self.revenue, "TEX Access Grant", grant)
+		self.assertTrue(self.trail("Administrator", "TEX Access Grant", grant))
