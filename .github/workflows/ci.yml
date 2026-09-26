@@ -214,6 +214,13 @@ jobs:
           # new-site never ran the setup wizard, and Desk's sidebar is built only once it is done
           bench --site test.localhost execute \
             frappe.desk.page.setup_wizard.setup_wizard.enable_setup_wizard_complete --args "['frappe']"
+          # one test user signs in with a second factor (kamra.tex.devtools.e2e_two_factor)
+          bench --site test.localhost execute kamra.tex.devtools.e2e_two_factor.enable \
+            --kwargs "{'password': 'TexDemo#2026'}" | tail -n 1 > two_factor.json
+          TEX_E2E_2FA_USER=$(python3 -c "import json; print(json.load(open('two_factor.json'))['user'])")
+          TEX_E2E_2FA_SECRET=$(python3 -c "import json; print(json.load(open('two_factor.json'))['secret'])")
+          echo "::add-mask::$TEX_E2E_2FA_SECRET"
+          export TEX_E2E_2FA_USER TEX_E2E_2FA_SECRET
           echo "127.0.0.1 test.localhost" | sudo tee -a /etc/hosts
           # --skip-assets: link the app's committed bundles where the web server looks
           mkdir -p sites/assets
