@@ -903,7 +903,8 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 	total = from_db(b.total_amount, b.currency)
 	b.paid_amount = paid
 	b.balance_amount = total - paid
-	b.payment_status = "Paid" if paid >= total else ("Partially Paid" if paid > 0 else "Unpaid")
+	# nothing owed and nothing paid (an expired booking whose money came off it) is not "Paid" (C7)
+	b.payment_status = "Paid" if paid >= total and paid > 0 else ("Partially Paid" if paid > 0 else "Unpaid")
 	b.save(ignore_permissions=True)
 	if b.status in ("Pending Payment", "Held") and paid >= from_db(b.amount_due_now, b.currency):
 		confirm_booking(booking, reason=f"payment {reference or ''}".strip())

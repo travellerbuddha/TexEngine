@@ -1240,6 +1240,49 @@ class TestReconciliationStates(HoldCase):
 		self.assertEqual(txn_state(txn).reconciliation, "Action Required")
 
 
+class TestMoneyShownRight(HoldCase):
+	"""C7 (audit 1c): the payment report, a payment link and a booking's payment status show where the
+	money is: a late payment refunded nets to nothing, a link whose money was parked is not "Paid", and
+	a booking whose money came off it at its expiry is not "Paid"."""
+
+	def test_a_late_payment_refunded_nets_to_nothing_in_the_payment_report(self):
+		from kamra.tex.api import reports as rep_api
+		from kamra.tex.services import late_payments
+
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		a = self.book(room="DLX")
+		payment = self.start_payment(a)
+		frappe.db.sql("UPDATE `tabReservation` SET status='Cancelled' WHERE tex_booking=%s", a["booking"])
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")           # the last room, to B
+		passes(a["booking"], 60)
+		self.pays(payment)
+		late_payments.refund_queued()
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Refunded")
+		out = rep_api.report(view="payment", property=fx.PROPERTY, stay_from=str(fx.d(6, 1)), stay_to=str(fx.d(6, 30)))
+		t = out["totals"]["EUR"]
+		self.assertEqual((D(t["charged"]), D(t["refunded"])), (D(a["due_now"]), D(a["due_now"])))
+
+	def test_a_link_whose_money_was_parked_is_not_paid(self):
+		b = self.book()
+		link = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(txn_state(started["transaction"]).reconciliation, "Action Required")
+		self.assertNotEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Paid")
+
+	def test_a_booking_whose_money_came_off_at_its_expiry_is_not_paid(self):
+		b = self.book()
+		pay.record_manual(booking=b["booking"], amount="50", method="Cash", reference="desk",
+		                  idempotency_key=f"c7-{b['booking']}")
+		passes(b["booking"], 25)
+		run_expiry_jobs()
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], ["status", "payment_status"]),
+		                 ("Cancelled", "Unpaid"))
+
+
 class TestPaymentLinkHold(HoldCase):
 	"""B6 (audit 1b), the real flow: an agent books by card (a 20-minute hold), then sends the guest a
 	payment link. Sending it holds the rooms for the link hold (the hotel's, else TEX Settings, 24 hours

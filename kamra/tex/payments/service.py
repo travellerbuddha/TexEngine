@@ -584,7 +584,13 @@ def _after_charge(txn) -> None:
 			      property=link.property, new={"transaction": txn.name, "amount": to_str(amount),
 			                                   "status_before": closed, "currency": link.currency})
 		if link.booking and not txn.booking:
-			allocate(txn.name, booking=link.booking, amount=amount, reason="payment link", _system=True)
+			if allocate(txn.name, booking=link.booking, amount=amount, reason="payment link", _system=True) is None:
+				# its booking could not take the money (kept off it, in reconciliation): the link is closed,
+				# never shown "Paid" (C7)
+				frappe.db.set_value("TEX Payment Link", link.name, "status", closed or "Cancelled", update_modified=False)
+				audit("payment_link.closed", reference_doctype="TEX Payment Link", reference_name=link.name,
+				      property=link.property, new={"transaction": txn.name, "status": closed or "Cancelled",
+				                                   "why": "its booking could not take the payment"})
 			return
 	if txn.booking:
 		allocate(txn.name, booking=txn.booking, amount=amount, reason="booking payment", _system=True)
