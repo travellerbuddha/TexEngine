@@ -33,6 +33,8 @@ MIN_HOLD_MINUTES = 5
 # how long a gateway checkout started within the hold keeps the rooms (a hosted payment page's
 # life); finite, so a charge left Pending never holds inventory
 CHECKOUT_MINUTES = 30
+# how far a gateway attempt may run past the booking's hold: the guest may be inside 3-D Secure (C1)
+THREEDS_MARGIN_MINUTES = 5
 # how far a gateway's clock and TEX's may differ
 CLOCK_SKEW_MINUTES = 5
 TRANSFER = "Bank Transfer"
@@ -167,8 +169,12 @@ def paid_in_time(txn) -> bool:
 
 
 def open_attempt(booking: str, method: str | None, now: datetime | None = None) -> datetime | None:
-	"""A new payment attempt for a booking: under the booking lock, refused once the hold is over
-	(``HoldExpired``); otherwise → the attempt's deadline, and the booking keeps its rooms until
+	"""A new payment attempt for a booking, under the booking lock (C1: one rule). It may start while
+	the booking's rooms are held for it — its hold is not over, or an earlier attempt still keeps them
+	(a declined card tries again) — else ``HoldExpired``. A gateway attempt keeps the rooms for
+	``CHECKOUT_MINUTES`` but never more than ``THREEDS_MARGIN_MINUTES`` past the hold (the guest may be
+	inside 3-D Secure when it ends), nor past an earlier attempt's own deadline beyond that; a bank
+	transfer's lasts until the hold ends. → the attempt's deadline; the booking keeps its rooms until
 	then. A booking not waiting for its payment (a balance, a change of a confirmed stay) holds
 	nothing: → None."""
 	now = get_datetime(now or now_datetime())
@@ -176,10 +182,16 @@ def open_attempt(booking: str, method: str | None, now: datetime | None = None) 
 	if b.status not in HOLDING:
 		return None
 	deadline = hold_deadline(booking, lock=True)
-	if not deadline or deadline <= now:
+	if not deadline or (deadline <= now and not in_flight(b, now)):
 		raise HoldExpired(_("The time to pay for booking {0} is over; its rooms are no longer held. "
 		                    "Please book again.").format(booking))
-	until = deadline if method == TRANSFER else add_to_date(now, minutes=CHECKOUT_MINUTES)
+	if method == TRANSFER:
+		until = deadline
+	else:
+		cap = add_to_date(deadline, minutes=THREEDS_MARGIN_MINUTES)
+		if in_flight(b, now):
+			cap = max(cap, get_datetime(b.payment_attempt_until))
+		until = min(add_to_date(now, minutes=CHECKOUT_MINUTES), cap)
 	if not b.payment_attempt_until or get_datetime(b.payment_attempt_until) < until:
 		frappe.db.set_value("TEX Booking", booking, "payment_attempt_until", until, update_modified=False)
 	return until

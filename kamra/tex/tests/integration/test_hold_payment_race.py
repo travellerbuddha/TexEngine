@@ -115,7 +115,7 @@ class TestAtomicExpiry(HoldCase):
 	def test_a_payment_in_flight_keeps_the_rooms_until_it_is_paid(self):
 		b = self.book()
 		payment = self.start_payment(b)                            # started within the hold
-		passes(b["booking"], 25)                                   # hold over, the checkout still open
+		passes(b["booking"], 22)                                   # hold over, the checkout still open (3DS margin)
 		run_expiry_jobs()
 		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
 		self.assertEqual(self.pays(payment)["status"], "Succeeded")
@@ -136,6 +136,34 @@ class TestAtomicExpiry(HoldCase):
 		with self.assertRaises(frappe.ValidationError):
 			self.start_payment(b)
 		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"booking": b["booking"]}))
+
+	def test_a_card_attempt_never_outlives_the_hold_by_more_than_a_3ds_margin(self):
+		"""C1 (audit 1c): a web card booking opens its payment at once; its attempt keeps the rooms at
+		most a short 3-D Secure margin past the booking's 20-minute hold, never a fixed 30 minutes."""
+		from kamra.tex.services import holds
+
+		b = self.book()
+		payment = self.start_payment(b)
+		hold = held_until(b)[0]
+		until = frappe.db.get_value("TEX Payment Transaction", payment["transaction"], "expires_at")
+		self.assertEqual(until, add_to_date(hold, minutes=holds.THREEDS_MARGIN_MINUTES))
+
+	def test_a_declined_card_may_try_again_while_its_rooms_are_held(self):
+		"""C1 (audit 1c): 10:00 booked, 10:21 the card is declined: the rooms are still held by that
+		attempt, so the guest may try again (never "sold out" by their own booking); once nothing holds
+		them any more, no new attempt starts."""
+		b = self.book()
+		first = self.start_payment(b)
+		passes(b["booking"], 21)                                   # the hold ended, the attempt is open
+		public.mock_pay(transaction=first["transaction"], outcome="fail", sig=first["fields"]["fail_sig"])
+		again = self.start_payment(b)
+		self.assertEqual(self.pays(again)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		c = self.book()
+		self.start_payment(c)
+		passes(c["booking"], 30)                                   # hold and attempt both over
+		with self.assertRaises(frappe.ValidationError):
+			self.start_payment(c)
 
 	def test_a_payment_attempt_has_a_deadline(self):
 		b = self.book()

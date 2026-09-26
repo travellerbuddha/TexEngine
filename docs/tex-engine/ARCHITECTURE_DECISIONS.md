@@ -9094,8 +9094,8 @@ main `1575c8b` is contained, so nothing was merged.
 - The TEX Booking row decides a hold. Expiry locks the booking, then its rooms (name order), and
   cancels them together; the PMS job never touches TEX rooms. A never-confirmed booking with a
   room cancelled on purpose keeps waiting for its payment with the rest (B1).
-- An attempt started within the hold keeps the rooms until its own finite deadline (checkout 30
-  min, transfer = the hold); none starts after it; a stale Pending charge holds nothing. A payment
+- An attempt keeps the rooms until its own deadline: a card's at most 5 min (3DS) past the hold, a
+  transfer's the hold; another starts while the rooms are held (C1); a stale charge holds none. A payment
   link sent for the booking holds its rooms for the link hold (default 24 h) and expires with it (B6).
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
   at the locked price — its rooms, extra units and coupon uses are still held for it, so nothing is
