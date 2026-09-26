@@ -8806,3 +8806,135 @@ so nothing was merged.
   run, it answers 429 on a published version whose stored sweep reached its limit and that this
   process has not worked out yet.
 - *The report cache is per process.* Each worker works a report out once and keeps at most 256.
+
+**Final follow-up, workspace UX and keyboard group (2026-09-26).** The workspace findings still open
+after the final verification and the sixth review: the single-use switch that can change a price
+silently (low in the review; treated as must-fix, because a published price moves without a word),
+"+ Period" out of reach of the keyboard, the single-use row against special combinations and the
+Keyboard shortcuts table (medium), the side panel narrowing the shell's top bar, the focus after a
+new period's dates and the German "Zeitraum"/"Periode" (low), and the two intermittent failures of
+the final verification (`pricing-workspace-matrix:107`, `pricing-workspace-rereview:208`). A first
+agent on this group was stopped by a container restart; its uncommitted work (a DOM harness, the
+single-use checks, the side panel, part of the focus change) was reviewed, kept where right,
+finished and committed in pieces. Frontend only, plus one pure unit test; main `1575c8b` is
+contained, so nothing was merged.
+
+**Decision (final follow-up, workspace UX and keyboard group).**
+1. *The single-use switch never changes what one adult pays (must-fix).* "Also when children
+   travel" moves the row's rules between the whole 1+0 combination and Adult 1 of 1+*. The review's
+   case: Adult 1 ×1 "Always wins" and single use ×0.8. As the whole 1+0 the combination replaces the
+   total (1A+0C = 0.8 of the unit); as Adult 1 of 1+* the rule is a COMBINATION-level adult rule and
+   loses to the OVERRIDE-level Adult 1, so 1A+0C paid the full unit after a switch the popover
+   called value-keeping. `singleWriteRefusal` now also answers `"outranked"`: it writes the rule
+   both ways (in the row's form, and switched with the row's other rules moved) and compares, per
+   room and period, what prices one adult without children as `price_occupancy` resolves it (the
+   whole-stay winner if it replaces the total, else Adult 1's winner, then a relative whole-stay
+   rule; `engineRank` is `occupancy.specificity`, INHERIT defers, a tie of two values is the
+   engine's ambiguity). Only ops and values are compared, never amounts. Any difference refuses:
+   an Always-wins Adult 1 (of every room or one), a card's exact 1+0 Adult 1 in some period, a
+   `*+0` whole-stay rule the old form outranked, a pricing policy's rule (the ladder passes
+   `inherited_rules`; a rule served without its formula counts as one that prices, so the refusal
+   does not depend on a hidden op), a room's switch under an All-rooms whole 1+0, and Always wins
+   on both sides (the engine refuses the party). The check uses the op and "Always wins" chosen in
+   the popover. The popover says why in six languages (`rates.occ.pop.refused_outranked`) and
+   Apply waits, as for `card` and `relative`. Carrying `is_override` over instead was not taken: an
+   Always-wins single-use rule outranks special combinations too, which changes other parties'
+   prices; the refusal names the rule to change first.
+2. *"+ Period" by keyboard with rooms and no period (medium).* It stays a Tab stop while the matrix
+   has no period column (`cols` is only All periods), and `focusHeaderLane("top")` falls back from a
+   column without a header control (All periods) to the next column control after it, so ArrowUp
+   from All periods reaches "+ Period" (with periods, the first period's menu).
+3. *The single-use row names a special combination that prices one adult (medium).*
+   `combinationNotes` gives the single-use row's cells the precedence note where a card's whole-stay
+   or Adult 1 rule prices the row's party in that room and period (children = any includes none):
+   everywhere the row has no rule of its own, and where it has one, when the card's rule for the
+   same slot ranks at or above it, or the card's other rule still applies (an Adult 1 under a
+   relative whole 1+0, a whole-stay rule after "also when children travel"). An "Always wins" row
+   rule has no note. Where such a card holds the cell's whole column (`cardCovers`: every room of
+   the scope, that period), the cell reads "special combination" with the card's name, not "×1.00
+   default (no single-use rule)"; where it holds only some rooms, the default stays and its tooltip
+   says "except where a special combination prices one adult". The note names and links the card.
+4. *The Keyboard shortcuts table fits its popover (medium).* One chip per key or gesture (the
+   catalogue's ", "-separated keys), wrapping, in a fixed-layout table (keys 44 %). The chips are
+   hidden from screen readers; each row is named by the keys as the catalogue writes them
+   ("Ctrl+Shift+Z, Ctrl+Y Redo"), which `pricing-workspace-bulk` and `-rereview2` read.
+5. *The shell's top bar keeps its width beside a side panel (low).* In the TEX shell a side panel
+   starts under the bar (`html[data-tex-shell] [data-side-panel] { top: 3.5rem }` from 40 rem), and
+   the bar takes back the page's panel padding (`margin-right: -28rem` / `-42rem` / `-56rem`), so
+   the hotel selector, search and badges keep their places at 1280 and 1440 px.
+6. *A new period's dates hand the focus on only when a key closed them (low).* Enter, Ctrl/Cmd+S
+   or Escape focus the period's first cell at once; leaving the fields by a click or Tab leaves the
+   focus where it went, and the page does not scroll back to the matrix. Checked in the browser: a
+   click on a text inside the main region focuses the region itself (`main#tex-main` has
+   `tabIndex=-1`), so the old refocus did not fire there; a click on a text outside it (the side
+   navigation's group label, the top bar's background) left the focus on `body`, and the old code
+   then focused the new period's first cell and scrolled the page back to the matrix.
+7. *German says "Periode" throughout the workspace (low).* "+ Periode" named "Periode hinzufügen"
+   (`rates.ws.period.add_label`, so the name contains the text), "Alle Perioden" for the grids'
+   first column and the popovers' choice (`rates.ws.all_periods`), the lane help and the
+   single-use popover's texts. The rule tables keep "Zeitraum" with their own keys.
+8. *`pricing-workspace-matrix:107` (keys lost after Escape).* The cause was as the final
+   verification suspected: `finish` closed the invalid editor and focused the cell a frame later
+   (`focusAt` in `requestAnimationFrame`), so the keys typed before that frame reached `body`
+   ("1.500" became ".500", or no editor opened). `focusCellNow` (ui/grid.ts) focuses at once and
+   once more a frame later only if the focus was lost and no edit began; the matrix, the ladder and
+   the boards grid use it (their editors' blur is guarded by `closing`, so nothing is committed).
+9. *`pricing-workspace-rereview:208` (one header-lane ArrowDown step).* The trace
+   (`pw-final/e2e2/failures`) shows Home at +0 ms and ArrowLeft 6 ms later; the room's menu was
+   focused and the check passed; the failure screenshot has the focus in Family Suite · All periods.
+   Home had asked a frame to focus the active cell (`focusActive`); ArrowLeft, before that frame,
+   focused the room's menu; the late frame took the focus back to cell 0:0, and the next ArrowDown
+   moved within the cells. `useGridNavigation` now focuses the cell a key moves to at once, and its
+   frame refocuses the latest active cell only while the focus is in the cells or lost, never from a
+   header control.
+
+**Deviations (final follow-up, workspace UX and keyboard group).**
+- *The engine pairing is through a fixture.* The frontend cannot run the engine: the node test
+  writes each scenario's rows to `kamra/tex/tests/unit/parity_data/single_use_switch.json` and fails
+  when the switch writes other rows; the Python test prices them. After a change to the switch:
+  `UPDATE_SWITCH_PAIRS=1 npm run test:unit`, then the unit test.
+- *The refusal is conservative.* It compares the winning rules' ops and values, not amounts, so a
+  switch that would give the same amount through another op (×0.8 against 80 %) is refused too, as
+  is one where a hidden policy rule defers.
+- *"Zeitraum" stays in the Price test's stage names and the engine's explanation* (`rates.pt.*`,
+  `rates.explain.*`, shared with screens outside the workspace; a committed German Price test check
+  reads them).
+- *The first agent's work:* kept as written: the DOM harness, `focusCellNow`, the lane fallback,
+  the side-panel CSS, the `byKey` flag and the `"outranked"` model with its unit tests; added: the
+  popover's message and inputs (op, Always wins, inherited rules), the ladder's "special
+  combination" reading, the engine-paired test, the German wording and the Playwright checks.
+
+**Tests (final follow-up, workspace UX and keyboard group).** Fail-first output is from the code
+before each fix (the pre-follow-up frontend `830b79f` for Playwright).
+- DOM harness `tests/dom/lanes.spec.ts` (10): ArrowUp from All periods reaches "+ Period" and adds
+  P1, and the first period's menu with periods; Home then ArrowLeft before the frame keeps the room's
+  menu; arrows and Shift+arrows with frames held; the shortcuts popover in six languages. Fail
+  first: 10 of 10 fail (`"0:0"` instead of "Add period"; `"0:2"` instead of `"0:0"`; sideways
+  scroll 65 / 243 / 165 / 163 / 112 / 70 px in en / de / pl / ru / tr / ro).
+- Unit `workspace-occupancy.test.ts` (3 new, 2 changed) and `single-use-switch.test.ts` (2):
+  refusals for the reviewer's case and the other outranking rules, the note and `cardCovers`; the
+  20 scenarios' rows. Fail first: 5 tests fail (`null` instead of `"outranked"`, no note).
+- Unit (Python) `test_single_use_switch` (4): every allowed switch prices 1A+0C as the rule written
+  without it (and as before, for a switch of form only) in 3 rooms × 4 periods; every refused one
+  writes nothing and would have changed a price. Fail first (rows written by the code before):
+  12 failures, e.g. the reviewer's case 56.00 before, 70.00 after the switch.
+- Playwright `pricing-workspace-final.spec.ts` (9): keyboard only "+ Period" → P1 → a price;
+  the dates left by a click; typing after Escape with frames held in the matrix, ladder and boards;
+  the top bar at 1280 and 1440; the refused switch; the single-use row with a card of all rooms and
+  of one room. Fail first: 9 of 9 fail on `830b79f`. `rereview` German "+ Periode" and `rereview3`'s
+  single-use cell under a card updated (the expectation was the wrong reading).
+
+**Verification (final follow-up, workspace UX and keyboard group).** On `7e3b857` (docs after it);
+main `1575c8b` is contained, so nothing was merged.
+- *Unit:* 529 OK (the 4 new), ruff clean. `npm run test:unit` 316/316, `npm run test:dom` 42/42,
+  `tsc -b`, `npm run build` (bundles not committed) and `npm run i18n:tex` clean.
+- *Playwright* on this group's own servers (bench :8016 with the tree, `serve_tree.py`, an RQ
+  worker, Vite :5186; the site migrated with the tree in each lock hold; the pre-follow-up frontend
+  `830b79f` on Vite :5187 for the fail-first runs):
+  - `pricing-workspace-matrix` 10 runs in a row: 8/8 each; `pricing-workspace-rereview` 10 runs in
+    a row: 11/11 each (on `501721c`; the later commits change the shortcuts popover and tests only).
+  - `pricing-workspace-final` 9/9; `pricing-workspace-bulk` and `-rereview2` 24/24 after the
+    shortcuts rows got their names back (the first full run on `501721c` had failed those two
+    checks, 105 of 107).
+  - Every `pricing-workspace*` spec on `7e3b857`: 107/107, the acceptance at 41 clicks, 0 section
+    switches, 0 modal dialogs.

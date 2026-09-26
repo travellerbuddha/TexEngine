@@ -681,3 +681,16 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - Open, for the owner: a contract version's audit entries show changed contract rates to anyone
     with `reservation.view` (owner input 14; pre-existing).
   - No area status changes. Verdict unchanged: NOT READY.
+- 2026-09-26: Pricing Workspace final follow-up, workspace UX and keyboard group, on branch
+  `pricing-workspace` (ADR-061).
+  - The single-use switch no longer changes what one adult pays: it is refused where another rule
+    (an Always-wins Adult 1, a special combination's, a policy's) would decide single use in the
+    other form, checked against the engine's prices.
+  - "+ Period" is reachable by keyboard in a draft with rooms and no period; the single-use row
+    names a special combination that prices one adult; the shortcuts table, the shell's top bar
+    beside a side panel, the focus after a new period's dates and the German wording are fixed.
+  - The final verification's two intermittent workspace failures are fixed (each spec 10 of 10
+    runs green; every `pricing-workspace*` spec 107/107).
+  - The workspace stays PARTIAL (the FX weekday test and two `entry-branding` tests on the shared
+    site's data are not this group's). O1–O5 remain owner input 13. No area status changes.
+    Verdict unchanged: NOT READY.
