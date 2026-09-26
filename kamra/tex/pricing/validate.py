@@ -703,6 +703,18 @@ def visible_issues(t: ContractTerms, issues: list, hidden: frozenset[str]) -> li
 	return out + _visible_sweep(t, swept, hidden)
 
 
+def refusal_errors(t: ContractTerms, errors: list[Issue], hidden: frozenset[str], *,
+                   board_checks: bool = False) -> list[Issue]:
+	"""The errors a refused publish names to a viewer who may not read the ``hidden`` rules; ``errors``
+	are the full check's, which failed (S16 re-review 5). The errors of that viewer's own live check
+	(``validate_terms(t, hidden=hidden)``): none of them depends on a hidden op, so what the refusal
+	says is the same whatever those ops are (the full check's could name a slot, a party or a tie a
+	hidden rule decides). Empty when every error depends on a hidden rule. Nothing hidden: ``errors``."""
+	if not hidden:
+		return list(errors)
+	return [i for i in validate_terms(t, hidden=hidden, board_checks=board_checks) if i.level == "ERROR"]
+
+
 def reruns_sweep(issues: list) -> bool:
 	"""Whether ``visible_issues`` may run the sweep again for the stored report ``issues``: its sweep
 	rows reached ``SWEEP_LIMIT`` (``_visible_sweep``), seconds on a large contract, which the caller

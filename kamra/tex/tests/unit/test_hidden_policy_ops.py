@@ -304,5 +304,66 @@ class TestGeneratedRuleSets(unittest.TestCase):
 					self.assertEqual(report, stored[0][1])
 
 
+def refused_with(t, hidden) -> list[str] | None:
+	"""What a refused publish names to the viewer (``contracts._refusal``): None when the full check
+	passes (a real, audited publish)."""
+	errors = [i for i in validate.validate_terms(t) if i.level == "ERROR"]
+	if not errors:
+		return None
+	return [i.message for i in validate.refusal_errors(t, errors, hidden)[:8]]
+
+
+class TestRefusals(unittest.TestCase):
+	"""A refused publish named every error of the full check, before anything was written or audited
+	and as often as asked: with an error no op decides every publish fails, and the other errors named
+	a hidden rule's slot (S16 re-review 5, medium finding). A viewer without cost is now told what its
+	own live check shows: the same whatever the hidden ops, whenever it is refused."""
+
+	def test_the_reproduction(self):
+		"""V-X and V-Y tie on the child of 2A+1C under G-INF, which names the infant band; V-BAD names an
+		unknown band. The full check names the tie at the infant's slot with G-INF deferring and at the CHD
+		child's with it pricing; the viewer is told the CHD slot both times."""
+		def build(op, value):
+			own = (*OWN_ADULTS, rule("V-X", CHILD, Op.MULTIPLY, "0", adults=2),
+			       rule("V-Y", CHILD, Op.MULTIPLY, "0.1", children=1),
+			       rule("V-BAD", CHILD, Op.MULTIPLY, "0", age_band="NOPE"))
+			return cascaded((), own, layers=policy(rule("G-INF", CHILD, op, value, age_band="INF")))
+
+		told = {op: refused_with(build(op, v), frozenset({"G-INF"})) for op, v in ((Op.INHERIT, None),
+		                                                                        (Op.MULTIPLY, "0"))}
+		self.assertEqual(told[Op.INHERIT], told[Op.MULTIPLY])
+		self.assertEqual(told[Op.INHERIT][0], "rule V-BAD names unknown age band NOPE")
+		self.assertIn("child 1 (CHD) of DLX 2A+1C", told[Op.INHERIT][1])
+		full = {op: refused_with(build(op, v), frozenset()) for op, v in ((Op.INHERIT, None), (Op.MULTIPLY, "0"))}
+		self.assertIn("child 1 (INF)", full[Op.INHERIT][1])      # who sees cost is told the full check
+		self.assertIn("child 1 (CHD)", full[Op.MULTIPLY][1])
+
+	def test_generated_rule_sets_every_one_refused(self):
+		"""Rule sets generated from a fixed seed, as ``TestGeneratedRuleSets``, most with two tied version
+		rules and each with a rule naming an unknown band, so that every op is refused: the viewer is told
+		the same each time."""
+		rng = random.Random(62)
+		ties = ((dict(adults=2), dict(children=1)), (dict(adults=1), dict(children=2)), ({}, {}),
+		        (dict(position=1), dict(adults=2)), (dict(age_band="CHD"), dict(age_band="CHD")))
+		for n in range(GENERATED):
+			own = tuple(generated_rule(rng, f"V{i}", inherited=False) for i in range(rng.randint(0, 4)))
+			if rng.random() < 0.6:
+				one, two = rng.choice(ties)
+				own += (rule("V-X", CHILD, Op.MULTIPLY, "0", **one), rule("V-Y", CHILD, Op.MULTIPLY, "0.1", **two))
+			own += (rule("V-BAD", CHILD, Op.MULTIPLY, "0", age_band="NOPE"),)
+			shape = tuple(generated_rule(rng, f"G{i}", inherited=True) for i in range(rng.randint(1, 2)))
+			told = []
+			for ops in itertools.product(HIDDEN_OPS, repeat=len(shape)):
+				ruled = [replace(r, op=op, value=D(v) if v is not None else None)
+				         for r, (op, v) in zip(shape, ops, strict=True)]
+				t = cascaded((), own, layers=policy(ruled[0], hotel_rules=ruled[1:]))
+				told.append((ops, refused_with(t, hidden_of(t))))
+			(_, first), *others = told
+			for ops, message in others:
+				with self.subTest(n=n, own=own, hidden=shape, ops=ops):
+					self.assertIsNotNone(message)
+					self.assertEqual(message, first)
+
+
 if __name__ == "__main__":
 	unittest.main()

@@ -654,15 +654,13 @@ UNEXPLAINED_REFUSAL = ("the rules this draft inherits from a pricing policy make
 def _refusal(terms, errors: list, prop: str, workspace: bool) -> str:
 	"""What a refused publish names (S16 re-review 5). Who sees cost: the full check's ``errors``, as
 	before. A publisher without ``price.view_cost``: only the errors its own live check shows
-	(``validate_terms(hidden=policy_rules)``), which no hidden policy rule's op decides, so the message
-	reads the same whatever those ops are; when that check shows none, every error depends on a hidden
-	rule and none is named (``UNEXPLAINED_REFUSAL``). The refusal itself still says that the full check
-	failed. With the viewer's check showing an error no op decides it is refused whatever the ops;
-	otherwise not being refused is a real, audited publish (ADR-061)."""
-	hidden = policy_rules(terms)
-	if hidden and not scope.has_capability("price.view_cost", prop):
-		errors = [i for i in validate.validate_terms(terms, hidden=hidden, board_checks=workspace)
-		          if i.level == "ERROR"]
+	(``validate.refusal_errors``), which no hidden policy rule's op decides, so the message reads the
+	same whatever those ops are; when that check shows none, every error depends on a hidden rule and
+	none is named (``UNEXPLAINED_REFUSAL``). The refusal itself says only that the full check failed:
+	where the viewer's check shows an error that no op decides (an unknown band, say) it is refused
+	whatever the ops; otherwise not being refused is a real, audited publish (ADR-061)."""
+	if not scope.has_capability("price.view_cost", prop):
+		errors = validate.refusal_errors(terms, errors, policy_rules(terms), board_checks=workspace)
 		if not errors:
 			return _(UNEXPLAINED_REFUSAL)
 	return "; ".join(i.message for i in errors[:8])
