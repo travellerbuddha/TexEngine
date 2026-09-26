@@ -50,7 +50,7 @@ def ensure_agent_user():
 		"Discount Voucher": (1, 0, 0), "Guest": (1, 1, 1),
 		"Reservation": (1, 1, 1), "Housekeeping Task": (1, 1, 1),
 		"Group Booking": (1, 1, 1), "Company": (1, 0, 0),
-		"Agent Action Log": (1, 0, 1), "Folio": (1, 1, 1),
+		"Agent Action Log": (1, 0, 0), "Folio": (1, 1, 1),   # log: read only (Y-12)
 		"Night Audit Run": (1, 0, 1), "Service Ticket": (1, 1, 1),
 	}
 	for doctype, (r, w, c) in agent_grants.items():

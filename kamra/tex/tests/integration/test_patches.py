@@ -1191,6 +1191,98 @@ class TestSmallPatches(PatchCase):
 		self.assertIsNone(frappe.db.get_value("TEX Promotion Redemption", held, "released_at"))
 
 
+class TestP48Evidence(PatchCase):
+	"""Y-12 (audit Part 2A): p48 took every ``anonymize_guest`` row of the Agent Action Log as proof that
+	a profile had been erased, whatever its status, whoever wrote it, whatever the profile looks like;
+	a Hotel Admin could add such a row by REST for another tenant's guest, and p48 then erased that
+	guest for good. Proof is now a ``guest.erase`` event, or a row of an erasure that ran on a profile
+	that shows what the erasure left; and business roles only read the log."""
+
+	P48 = "p48_crm_privacy_third_review"
+
+	def guest(self, first: str) -> str:
+		return frappe.get_doc({"doctype": "Guest", "first_name": first, "last_name": "Kraus", "phone": "+49 30 1234",
+		                       "email": f"y12-{first.lower()}@example.com", "tex_consent_email": 1,
+		                       "date_of_birth": "1980-01-02"}).insert(ignore_permissions=True).name
+
+	def erased_by_the_old_endpoint(self, first: str) -> str:
+		"""What ``kamra.api.anonymize_guest`` left before the marker existed: its alias, no last name,
+		e-mail or phone, its note; the date of birth and consent it did not clear then are left."""
+		from kamra.patches.tex.p48_crm_privacy_third_review import ERASED_NOTE
+
+		g = self.guest(first)
+		alias = f"Guest {frappe.generate_hash(length=6).upper()}"
+		frappe.db.set_value("Guest", g, {"first_name": alias, "full_name": alias, "last_name": "", "email": "",
+		                                 "phone": "", "guest_notes": ERASED_NOTE})
+		return g
+
+	def log(self, guest: str, status: str, **values) -> str:
+		return put("Agent Action Log", action_type="anonymize_guest", reference_doctype="Guest", reference_name=guest,
+		           approval_status=status, **{"actor": "Administrator", **values})
+
+	def state(self, guest: str) -> dict:
+		return frappe.db.get_value("Guest", guest, ["tex_erased_at", "first_name", "last_name", "email", "phone",
+		                                            "tex_consent_email", "date_of_birth", "guest_notes"], as_dict=True)
+
+	def test_a_log_row_proves_an_erasure_only_with_what_the_erasure_left(self):
+		from kamra.patches.tex import p48_crm_privacy_third_review as p48
+		from kamra.tex.tests.integration.test_crm_segments import OTHER, other_tenant
+
+		_found, before = p48._erasures()
+		kept = {}
+		for status in ("Rejected", "Suggested", "Pending", "Executed"):       # no traces on the profile
+			g = self.guest(f"Kept{status}")
+			self.log(g, status, executed_at=now_datetime() if status in ("Executed", "Rejected") else None)
+			kept[g] = self.state(g)
+		# a Hotel Admin of another tenant added an Executed row for this tenant's guest (REST, before Y-12)
+		other_tenant()
+		intruder = fx.ensure_user("y12-intruder@example.com", ["Hotel Admin"])
+		victim = self.guest("Victim")
+		self.log(victim, "Executed", actor=intruder, owner=intruder, property=OTHER, executed_at=now_datetime())
+		kept[victim] = self.state(victim)
+		# real legacy erasures: an executed one, and one approved (the gate runs it right after)
+		real = self.erased_by_the_old_endpoint("Real")
+		self.log(real, "Executed", executed_at=now_datetime())
+		approved = self.erased_by_the_old_endpoint("Approved")
+		self.log(approved, "Approved", approver="Administrator", executed_at=now_datetime())
+
+		never_ran(self.P48)
+		seen = migrate(self.P48)
+		for g, was in kept.items():
+			self.assertEqual(self.state(g), was, g)
+			self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "guest.erase", "reference_name": g}), g)
+		for g in (real, approved):
+			now = self.state(g)
+			self.assertTrue(now.tex_erased_at, g)                              # marked
+			self.assertEqual((now.tex_consent_email, now.date_of_birth), (0, None), g)   # and finished
+			self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "guest.erase", "reference_name": g}), g)
+		printed = " ".join(str(c) for c in seen["print"].call_args_list)
+		self.assertIn(f"{before + 5} Agent Action Log erasure row(s) not taken as proof", printed)
+		self.assertEqual(rerun_changes(self.P48), {})
+
+	def test_business_roles_only_read_the_log_and_logging_goes_on(self):
+		from kamra.savings import log_action
+
+		guest = self.guest("Logged")
+		for role in ("Hotel Admin", "Kamra Agent"):
+			user = fx.ensure_user(f"y12-{role.lower().replace(' ', '-')}@example.com", [role])
+			frappe.set_user(user)  # nosemgrep: frappe-setuser -- the test acts as each role
+			try:
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.insert({"doctype": "Agent Action Log", "action_type": "anonymize_guest",
+					                      "reference_doctype": "Guest", "reference_name": guest,
+					                      "approval_status": "Executed"})
+				name = log_action("guest_note", "Guest", guest, rationale="Y-12")   # the normal path writes
+				self.assertTrue(name and frappe.db.exists("Agent Action Log", name), role)
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.set_value("Agent Action Log", name, "approval_status", "Approved")
+				with self.assertRaises(frappe.PermissionError, msg=role):
+					frappe.client.delete("Agent Action Log", name)
+				self.assertTrue(frappe.has_permission("Agent Action Log", "read"), role)
+			finally:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+
 class TestCommitGuard(PatchCase):
 	"""C1 (review of G-76): nothing a migration test holds can be committed until it rolled back."""
 
