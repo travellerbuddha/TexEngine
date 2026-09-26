@@ -1304,6 +1304,13 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		frappe.throw(_("The booking belongs to another hotel."))
 	if reservation and frappe.db.get_value("Reservation", reservation, "property") != property:
 		frappe.throw(_("The reservation belongs to another hotel."))
+	if reservation:
+		# a TEX room's link belongs to its booking: it holds the booking's rooms and its payment is
+		# allocated to it (D6)
+		of = frappe.db.get_value("Reservation", reservation, "tex_booking")
+		if booking and of and of != booking:
+			frappe.throw(_("The reservation belongs to another booking."))
+		booking = booking or of or None
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Amount must be positive."))
@@ -1322,8 +1329,7 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 	expires_at = add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60)))
 	# a link of a booking waiting for its payment holds its rooms for the link hold and expires with
 	# it (B6); a standalone link keeps its own validity (K-2d)
-	held = booking or (frappe.db.get_value("Reservation", reservation, "tex_booking") if reservation else None)
-	expires_at, rooms_held_until = holds.hold_for_link(held, expires_at)
+	expires_at, rooms_held_until = holds.hold_for_link(booking, expires_at)
 	doc = frappe.get_doc({
 		"doctype": "TEX Payment Link", "property": property, "status": "Active", "amount": amount,
 		"currency": currency, "description": (description or "")[:500],

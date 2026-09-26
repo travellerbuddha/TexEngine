@@ -1041,6 +1041,18 @@ class TestPaymentLinkHold(HoldCase):
 		                      expires_hours=72, booking=kept["booking"])
 		self.assertIsNone(out["rooms_held_until"])
 
+	def test_a_link_for_a_reservation_pays_its_booking(self):
+		"""D6 (audit 1c): a link made for a room (reservation only) belongs to that room's booking: it
+		holds its rooms, and its payment reaches the booking and confirms it."""
+		b = self.book(method="Card")
+		out = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Room",
+		                      expires_hours=72, reservation=self.rooms(b)[0])
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "booking"), b["booking"])
+		started = public.pay_link(token=out["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertEqual(pay.allocated_of(started["transaction"]), D(b["due_now"]))
+
 	def test_the_email_says_until_when(self):
 		from kamra.tex.tests.integration.test_migrations_notify import ensure_test_outbox
 
