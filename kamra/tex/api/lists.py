@@ -64,9 +64,13 @@ def _day(value) -> str | None:
 # ─── contract versions ───────────────────────────────────────────────────
 
 
-def _contracts(hotels: list[str]) -> dict:
+def _contracts(hotels: list[str], *, archived: bool = True) -> dict:
+	"""The hotels' contracts; without the archived ones when ``archived`` is false."""
+	filters: dict = {"property": ("in", hotels)}
+	if not archived:
+		filters["status"] = ("!=", "Archived")
 	return {c.name: c for c in frappe.get_all(
-		"TEX Contract", filters={"property": ("in", hotels)},
+		"TEX Contract", filters=filters,
 		fields=["name", "property", "contract_code", "contract_name", "market", "status", "active_version"])}
 
 
@@ -134,7 +138,8 @@ SECTIONS = {
 }
 COST_SECTIONS = ("periods", "occupancy")
 # a table lists the rows of at most MAX_VERSIONS versions, the most recently changed first, and at
-# most MAX_ROWS rows, in that order; "truncated" says when either cap left something out (L5)
+# most MAX_ROWS rows, in that order; "truncated" says when either cap left something out (L5). Only
+# versions with a row in the table count: an empty version shows nothing and takes no place.
 MAX_ROWS = 5000
 MAX_VERSIONS = 2000
 
@@ -142,21 +147,32 @@ MAX_VERSIONS = 2000
 @frappe.whitelist()
 @require_capability("price.view")
 def version_rows(section: str, property: str | None = None, status: str | None = None):
-	"""One table of every version (``status``: "current" = drafts and published, "all", or a
-	version status) of the hotels' contracts, each row with its contract and version."""
+	"""One table of every version (``status``: "current" = drafts and published versions of the
+	contracts that are not archived, "all", or a version status) of the hotels' contracts, each row
+	with its contract and version.
+
+	An archived contract sells nothing and is drafted no more, so its versions are not current (the
+	drafts of archived contracts, changed after every live version, once filled the version cap: the
+	current tables came back empty and cut). "all" and a version status still list them. Only the
+	versions with a row in the table count toward the cap."""
 	if section not in SECTIONS:
 		frappe.throw(_("Unknown section."), frappe.ValidationError)
 	hotels = _hotels("price.view", property, cost=section in COST_SECTIONS)
-	contracts = _contracts(hotels)
-	filters: dict = {"contract": ("in", list(contracts) or ["__none__"])}
 	wanted = _status_filter(status, default="current")
-	if wanted:
-		filters["status"] = wanted
-	found = frappe.get_all("TEX Contract Version", filters=filters,
-	                       fields=["name", "contract", "version_no", "status", "effective_from"],
-	                       order_by="modified desc, name desc", limit=MAX_VERSIONS + 1)
-	versions_ = {v.name: v for v in found[:MAX_VERSIONS]}
+	contracts = _contracts(hotels, archived=(status or "current") != "current")
 	doctype, parentfield, fields = SECTIONS[section]
+	conds = ["v.contract IN %(contracts)s",
+	         f"""EXISTS (SELECT 1 FROM `tab{doctype}` r WHERE r.parent = v.name
+	             AND r.parenttype = 'TEX Contract Version' AND r.parentfield = %(field)s)"""]
+	params: dict = {"contracts": tuple(contracts) or ("__none__",), "field": parentfield, "limit": MAX_VERSIONS + 1}
+	if wanted:
+		conds.append("v.status IN %(statuses)s")
+		params["statuses"] = tuple(wanted[1]) if isinstance(wanted, tuple) else (wanted,)
+	found = frappe.db.sql(  # nosemgrep -- a fixed table (SECTIONS) and conditions, values bound
+		f"""SELECT v.name, v.contract, v.version_no, v.status, v.effective_from FROM `tabTEX Contract Version` v
+		WHERE {" AND ".join(conds)} ORDER BY v.modified DESC, v.name DESC LIMIT %(limit)s""",
+		params, as_dict=True)
+	versions_ = {v.name: v for v in found[:MAX_VERSIONS]}
 	# the rows in the versions' order (then each version's own), so a cut keeps the recent ones
 	cols = ", ".join(f"r.`{f}`" for f in ("parent", "idx", *fields))
 	rows = frappe.db.sql(  # nosemgrep -- a fixed table and columns (SECTIONS), values bound
