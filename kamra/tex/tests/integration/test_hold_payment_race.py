@@ -4,14 +4,22 @@ A booking waiting for its payment holds its rooms until its hold deadline. A pay
 started before it keeps them until the attempt's own, finite deadline; a stale Pending charge
 keeps nothing. The booking and all its rooms expire together, in one transaction (K-2a).
 
+Money arriving once the hold truly ended never confirms the booking at its old price, and never
+takes rooms back: it is recorded, kept off the booking and put in reconciliation (``Action
+Required`` for staff, or ``Refund Queued`` when the rooms are gone and the gateway refunds by
+itself), audited, and no confirmation reaches the guest or the PMS (K-2b).
+
 Time passes in these tests by moving every stored deadline of a booking into the past
 (``passes``): the hold of its rooms, and the start and deadline of its payment attempts."""
+
+from unittest import mock
 
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
 from kamra.reservation_state import expire_holds
 from kamra.tex.api import public
+from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.services import booking, quoting
 from kamra.tex.tests.integration import fixtures as fx
@@ -45,14 +53,14 @@ class HoldCase(TexTestCase):
 		super().setUp()
 		self.account = setup_site_and_payments(self.f)["account"]
 
-	def book(self, rooms: int = 1, method: str = "Card", room: str = "STD") -> dict:
+	def book(self, rooms: int = 1, method: str = "Card", room: str = "STD", status: str = "Pending Payment") -> dict:
 		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
 		                     rooms=[{"adults": 2}] * rooms, market="DE", channel="DIRECT_WEB", currency="EUR")
 		offer = pick(res["properties"][0], room_code=room)
 		quotes = quoting.create_quotes([{"offer_key": r["offer_key"]} for r in offer["rooms"]])
 		b = booking.create_booking(quote_ids=[r["quote_id"] for r in quotes["rooms"]], guest=GUEST,
 		                           payment_method=method)
-		self.assertEqual(b["status"], "Pending Payment")
+		self.assertEqual(b["status"], status)
 		return b
 
 	def start_payment(self, b: dict) -> dict:
@@ -127,3 +135,78 @@ class TestAtomicExpiry(HoldCase):
 		self.assertIsNotNone(until)
 		self.assertLessEqual(until, add_to_date(now_datetime(), minutes=31))
 		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until"), until)
+
+
+def txn_state(name: str) -> dict:
+	return frappe.db.get_value("TEX Payment Transaction", name, ["status", "reconciliation", "reconciliation_note"],
+	                           as_dict=True)
+
+
+def confirmations(b: dict) -> int:
+	return frappe.db.count("TEX Audit Event", {"action": "booking.confirm", "reference_name": b["booking"]})
+
+
+class TestLatePayment(HoldCase):
+	"""K-2b: a late payment never confirms a booking whose rooms are not held for it."""
+
+	def test_a_payment_within_the_hold_confirms_the_booking(self):
+		b = self.book(rooms=2)
+		payment = self.start_payment(b)
+		passes(b["booking"], 10)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed", "Confirmed"]))
+		self.assertFalse(txn_state(payment["transaction"]).reconciliation)
+
+	def test_a_payment_after_the_hold_and_its_checkout_never_confirms_the_old_quote(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)                 # hold and checkout over; the expiry job has not run yet
+		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")      # the money is on record
+		mailed.assert_not_called()
+		self.assertEqual(confirmations(b), 0)
+		# the hold truly ended: the booking and its room expire now, never confirmed at the old price
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		t = txn_state(payment["transaction"])
+		self.assertEqual((t.status, t.reconciliation), ("Succeeded", "Action Required"))
+		self.assertIn("free now", t.reconciliation_note)          # availability and price evaluated again
+		self.assertIn("price now", t.reconciliation_note)
+		self.assertEqual(pay.allocated_of(payment["transaction"]), D(0))   # never written on the booking
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "paid_amount")), D(0))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                     "reference_name": payment["transaction"]}))
+		# the gateway calling again changes nothing
+		self.assertTrue(self.pays(payment).get("replay"))
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                     "reference_name": payment["transaction"]}), 1)
+		self.assertEqual(frappe.db.count("TEX Payment Allocation", {"transaction": payment["transaction"]}), 0)
+
+	def test_rooms_given_away_are_never_taken_back_by_a_late_payment(self):
+		"""The rooms of a booking still waiting were released before its payment arrived (as the PMS
+		job did before K-2a) and the last Deluxe room was sold to another guest meanwhile."""
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")        # one of the two is sold
+		a = self.book(room="DLX")
+		payment = self.start_payment(a)                                           # started within the hold
+		frappe.db.sql("UPDATE `tabReservation` SET status='Cancelled' WHERE tex_booking=%s", a["booking"])
+		b = self.book(room="DLX", method="Pay at Hotel", status="Confirmed")    # the last room, to B
+		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		mailed.assert_not_called()
+		self.assertEqual(confirmations(a), 0)
+		self.assertNotEqual(frappe.db.get_value("TEX Booking", a["booking"], "status"), "Confirmed")
+		self.assertEqual(self.statuses(a)[1], ["Cancelled"])
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))                # B untouched
+		dlx = self.f["room_types"]["DLX"]
+		live = frappe.db.count("Reservation", {"room_type": dlx, "status": ("in", ["Confirmed", "Pending Payment",
+		                                                                             "Held", "Checked In"])})
+		self.assertEqual(live, 2)                                                        # never oversold
+		# the rooms are gone and the gateway refunds by itself: the refund is queued, then made once
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Refund Queued")
+		from kamra.tex.services import late_payments
+
+		late_payments.refund_queued()
+		late_payments.refund_queued()
+		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Refunded")
+		refunds = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": payment["transaction"],
+		                                                             "txn_type": "Refund"}, pluck="status")
+		self.assertEqual(refunds, ["Succeeded"])

@@ -640,11 +640,19 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		return done
 	if txn.status != "Succeeded" or txn.txn_type != "Charge":
 		frappe.throw(_("Only successful charges can be allocated."))
-	b = frappe.get_doc("TEX Booking", booking)
+	# locked after the charge (the order a callback takes) and read as it is now (K-2b)
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.property != txn.property:
 		frappe.throw(_("A payment can only be allocated to a booking of the same hotel."))
 	if b.currency != txn.currency:
 		frappe.throw(_("Currency mismatch between payment and booking."))
+	from kamra.tex.services import late_payments
+
+	why = late_payments.problem(b)
+	if why and _system:
+		# money that cannot confirm its booking: recorded, kept off it, in reconciliation (K-2b)
+		late_payments.reconcile(txn, booking, why)
+		return None
 	amount = quantize(D(amount), txn.currency)
 	# a refund still waiting for its answer takes the unallocated money first: it is not free
 	free = (from_db(txn.amount, txn.currency) - allocated_of(transaction, lock=True) - refunded_of(transaction, lock=True)
@@ -663,6 +671,7 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		audit("payment.allocate", reference_doctype="TEX Payment Allocation", reference_name=doc.name,
 		      property=txn.property, new={"transaction": transaction, "booking": booking, "amount": to_str(amount)},
 		      reason=reason)
+		late_payments.settled(transaction)      # staff booked the stay again with this money
 	return doc.name
 
 
@@ -854,7 +863,8 @@ def _taken_off(txn, refund_name: str) -> tuple[str | None, D]:
 
 
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
-           _system: bool = False, durable: bool = False, on_record=None, relock=None, on_conflict=None) -> dict:
+           _system: bool = False, durable: bool = False, on_record=None, relock=None, on_conflict=None,
+           _late: bool = False) -> dict:
 	"""Refund a successful charge, or money a gateway captured that TEX refused to count
 	(an amount or currency mismatch, G-67): that refund is in the currency the gateway
 	stated, against the captured payment, and never touches a booking.
@@ -862,6 +872,8 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	``_system``: a refund TEX makes by itself for a guest's own change (G-45: an overpayment
 	under the hotel's refund policy, or a payment for a change that could not apply). Only
 	``services.guest_changes`` passes it, always naming the booking; staff need payment.refund.
+	``_late`` (with ``_system``): a late payment in reconciliation whose rooms are gone, never on
+	a booking (``services.late_payments.refund_queued``, K-2b).
 
 	``durable`` (the staff endpoint and the refund job): the refund is committed as Pending
 	before the gateway is asked. A gateway that answers "no" (``ProviderError`` or a Failed
@@ -888,7 +900,9 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	(``_share``), the idempotency key again too (re-review 4)."""
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
 	if _system:
-		if not booking:
+		if _late and txn.reconciliation != "Refund Queued":
+			frappe.throw(_("Only a late payment queued for its refund is refunded this way."))
+		if not booking and not _late:
 			frappe.throw(_("A refund TEX makes by itself names the booking it comes from."))
 	else:
 		scope.require("payment.refund", txn.property)
@@ -973,6 +987,10 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	if r.status == "Succeeded" and target and from_booking > 0:
 		# only what comes off the booking is taken from it; the rest was unallocated money
 		_take_off(txn, r, target, from_booking, reason)
+	if r.status == "Succeeded":
+		from kamra.tex.services import late_payments
+
+		late_payments.settled(txn.name)          # a late payment in reconciliation, given back
 	audit("payment.refund", reference_doctype="TEX Payment Transaction", reference_name=r.name,
 	      property=txn.property, new={"of": txn.name, "amount": to_str(amount), "currency": ccy, "status": r.status,
 	                                  "booking": target, "from_booking": to_str(from_booking),

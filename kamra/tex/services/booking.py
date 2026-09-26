@@ -807,17 +807,36 @@ def _check_redemption_limits(root: str, name: str, gkey: str | None, *, exclude_
 # ─── confirm / payments ──────────────────────────────────────────────────
 
 
+class RoomsNotHeld(frappe.ValidationError):
+	"""A booking whose rooms are not all held for it is never confirmed (K-2b)."""
+
+
+def rooms_not_held(b) -> list[str]:
+	"""The rooms of booking ``b`` that hold no inventory for it any more, read under their row
+	locks in name order (after the booking's lock: the order every TEX booking change takes)."""
+	names = sorted(r.reservation for r in b.rooms)
+	states = {n: frappe.db.get_value("Reservation", n, "status", for_update=True) for n in names}
+	return [n for n, st in states.items() if st not in (*holds.HOLDING, "Confirmed")]
+
+
 def confirm_booking(booking: str, *, reason: str | None = None) -> None:
-	b = frappe.get_doc("TEX Booking", booking)
+	"""Confirm a booking waiting for its payment, under its lock and its rooms' locks. A booking
+	whose rooms are not all held for it (released, or sold to someone else since) is never
+	confirmed and nothing is sent (``RoomsNotHeld``, K-2b)."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.status == "Confirmed":
 		return
 	if b.status not in ("Pending Payment", "Held"):
 		frappe.throw(_("Booking {0} cannot be confirmed from {1}.").format(booking, b.status))
+	gone = rooms_not_held(b)
+	if gone:
+		raise RoomsNotHeld(_("Booking {0} cannot be confirmed: its rooms {1} are no longer held for it.").format(
+			booking, ", ".join(gone)))
 	now = now_datetime()
 	frappe.flags.kamra_status_transition = True
 	try:
 		for row in b.rooms:
-			res = frappe.get_doc("Reservation", row.reservation)
+			res = frappe.get_doc("Reservation", row.reservation, for_update=True)
 			if res.status in ("Pending Payment", "Held"):
 				res.status = "Confirmed"
 				res.hold_expires_on = None
@@ -1063,29 +1082,30 @@ def booking_summary(booking: str, *, replay: bool = False) -> dict:
 	}
 
 
-def expire_booking(booking: str, *, now: datetime | None = None) -> bool:
+def expire_booking(booking: str, *, now: datetime | None = None, force: bool = False) -> bool:
 	"""A booking waiting for its payment whose hold is over, with no payment attempt open, gives
 	back all its rooms at once (K-2a): the booking is locked, then its rooms in name order (the
 	order every change of a TEX booking takes), and the rooms and the booking are cancelled in
 	this one transaction; their held extras and coupon uses are released with them. A payment
 	attempt started within the hold keeps the rooms until its own deadline (``holds``), never
-	longer. → whether it expired."""
+	longer; a booking none of whose rooms is held any more follows them at once. ``force``: its
+	money arrived and cannot confirm it (``late_payments``, K-2b). → whether it expired."""
 	now = get_datetime(now or now_datetime())
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
-	if b.status not in holds.HOLDING or holds.in_flight(b, now):
+	if b.status not in holds.HOLDING:
 		return False
 	names = sorted(r.reservation for r in b.rooms)
-	for name in names:
-		frappe.db.get_value("Reservation", name, "name", for_update=True)
-	holding = [n for n in names if frappe.db.get_value("Reservation", n, "status") in holds.HOLDING]
+	states = {n: frappe.db.get_value("Reservation", n, "status", for_update=True) for n in names}
+	holding = [n for n in names if states[n] in holds.HOLDING]
 	deadline = holds.hold_deadline(booking, lock=True)
-	if (deadline and deadline > now) or (holding and not deadline):
-		return False            # still on hold, or rooms held without a deadline (never guessed)
+	if holding and not force:
+		if holds.in_flight(b, now) or not deadline or deadline > now:
+			return False        # still on hold, or rooms held without a deadline (never guessed)
 	frappe.flags.kamra_status_transition = True
 	frappe.flags.kamra_cancelling = True
 	try:
 		for name in holding:
-			res = frappe.get_doc("Reservation", name)
+			res = frappe.get_doc("Reservation", name, for_update=True)
 			res.cancellation_reason = "Payment failed" if res.status == "Pending Payment" else "Other"
 			res.cancellation_note = "Hold / payment window expired"
 			res.status = "Cancelled"

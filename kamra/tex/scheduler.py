@@ -24,6 +24,8 @@ EVERY_MINUTE = ("kamra.tex.distribution.repository.process_inbound",
 # e-mail delivery status follows Frappe's e-mail queue (ADR-047)
 EVERY_5_MINUTES = ("kamra.tex.connect.outbox.deliver_pending",
                    "kamra.tex.services.booking.expire_pending_bookings",
+                   # late payments whose rooms are gone are refunded (K-2b)
+                   "kamra.tex.services.late_payments.refund_queued",
                    "kamra.tex.payments.service.expire_links",
                    "kamra.tex.services.mail_status.sync")
 # system-status alerts run last, so they see this run's outcome (ADR-047)

@@ -99,6 +99,7 @@ BEHAVIOUR = {
 	"p48_crm_privacy_third_review": "test_crm_third_review.TestP48."
 	                                "test_p48_marks_earlier_erasures_and_removes_what_they_left",
 	"p49_payment_attempt_deadline": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p50_payment_reconciliation": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
 
@@ -1059,7 +1060,9 @@ class TestSmallPatches(PatchCase):
 				 ("Property", "tex_lower_price_refund")),
 				("p49_payment_attempt_deadline", [("tex_payments", "doctype", "tex_payment_transaction"),
 				                                  ("tex_booking", "doctype", "tex_booking")],
-				 ("TEX Booking", "payment_attempt_until"))):
+				 ("TEX Booking", "payment_attempt_until")),
+				("p50_payment_reconciliation", [("tex_payments", "doctype", "tex_payment_transaction")],
+				 ("TEX Payment Transaction", "reconciliation"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
 			self.assertTrue(frappe.db.has_column(*field), patch)            # synced on this site
 

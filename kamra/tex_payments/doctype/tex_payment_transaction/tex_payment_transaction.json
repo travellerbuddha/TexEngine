@@ -32,7 +32,10 @@
   "error_code",
   "error_message",
   "reason",
-  "return_url"
+  "return_url",
+  "section_96",
+  "reconciliation",
+  "reconciliation_note"
  ],
  "fields": [
   {
@@ -196,10 +199,29 @@
    "fieldtype": "Small Text",
    "label": "Return URL",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_96",
+   "fieldtype": "Section Break",
+   "label": "Reconciliation"
+  },
+  {
+   "fieldname": "reconciliation",
+   "fieldtype": "Select",
+   "label": "Reconciliation",
+   "options": "\nAction Required\nRefund Queued\nRefunded\nResolved",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "reconciliation_note",
+   "fieldtype": "Small Text",
+   "label": "Why",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-09-30 00:00:00.000000",
+ "modified": "2026-09-30 00:00:01.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Transaction",

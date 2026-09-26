@@ -9088,3 +9088,17 @@ main `1575c8b` is contained, so nothing was merged.
   scan, as the purge's was. Not reproduced (`test_crm_privacy_review` 28/28 on the disposable site).
 - `lists.versions` lists archived contracts' versions by default (by design); on the shared site
   its 500 most recent are archived E2E drafts.
+
+## ADR-062 Payment holds and late payments (audit K-2)
+
+- The TEX Booking row is where a hold is decided. Expiry locks the booking, then its rooms in name
+  order, and cancels them together (`booking.expire_booking`); the PMS job no longer touches TEX rooms.
+- A payment attempt started within the hold keeps the rooms until its own finite deadline
+  (`TEX Payment Transaction.expires_at`, `TEX Booking.payment_attempt_until`: checkout 30 min, bank
+  transfer = the hold). No attempt starts after the hold. A stale Pending charge holds nothing.
+- Money that cannot confirm its booking (hold truly over, or a room released) never confirms it and
+  never re-takes rooms: the booking expires, and the charge stays Succeeded but unallocated with
+  `reconciliation` = `Refund Queued` (rooms gone and the gateway refunds via TEX) or `Action Required`.
+  The note records today's availability and price. The state closes as `Refunded` / `Resolved`.
+- Rooms released under an open attempt only exist from before this ADR. They are never revived
+  automatically (extras, coupons and allotments would need judging again); staff rebook.

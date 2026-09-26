@@ -1116,9 +1116,15 @@ PAYMENT_SPECS = [
 		F("error_message", "Small Text", "Error"),
 		F("reason", "Small Text", "Reason"),
 		F("return_url", "Small Text", "Return URL", read_only=1),
+		# K-2b: money the gateway captured that could not safely confirm its booking (its hold was
+		# over, or its rooms were gone): recorded, kept off the booking, until refunded or resolved
+		SB("Reconciliation"),
+		F("reconciliation", "Select", "Reconciliation", ["", "Action Required", "Refund Queued", "Refunded",
+		                                                 "Resolved"], read_only=1, in_standard_filter=1),
+		F("reconciliation_note", "Small Text", "Why", read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-09-30 00:00:00.000000"}),         # the indexes, then expires_at came later
+	   extra={"modified": "2026-09-30 00:00:01.000000"}),   # the indexes, expires_at, then reconciliation came later
 
 	dt("TEX Payment Allocation", PM, [
 		F("property", "Link", "Hotel", "Property"),
