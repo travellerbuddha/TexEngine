@@ -79,9 +79,11 @@ test.describe("pricing workspace, S16 re-review 3", () => {
     const calls = watchContracts(page)
     await open(page, withRules(...ANY_CHILDREN_CARD))
     await expand(page, "occupancy")
-    // the card's Adult 1 is the card's: the row is the whole 1+0 combination, at its default
+    // the card's Adult 1 is the card's: the row is the whole 1+0 combination, without a rule of its
+    // own; the card prices one adult (children = any includes none), which the row says with the
+    // card's note, not as the engine default (final follow-up)
     await expect(ladder(page).getByRole("rowheader").filter({ hasText: /^1 Adult \(also with children\)/ })).toHaveCount(0)
-    await expect(lcell(page, "1 Adult (single use)", "All periods")).toHaveAttribute("aria-label", /×1\.00/)
+    await expect(lcell(page, "1 Adult (single use)", "All periods")).toHaveAttribute("aria-label", /special combination · Special combinations win over period rules/)
     let pop = await popover(page, "1 Adult (single use)", "P2")
     const box = pop.getByRole("checkbox", { name: "Also when children travel" })
     await expect(box).toHaveAccessibleDescription(/^Prices the adult of a room with one adult/)
