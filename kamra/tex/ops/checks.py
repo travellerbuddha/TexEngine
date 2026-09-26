@@ -86,6 +86,7 @@ TITLES: dict[str, str] = {
 	"scheduler.errors": "TEX job errors",
 	"workers": "Background workers",
 	"encryption_key": "Encryption key",
+	"db.snapshot_isolation": "Database snapshot isolation",
 	"outbox.pms": "PMS delivery queue",
 	"outbox.channel": "Channel ARI queue",
 	"channel.inbound": "Channel bookings received",
@@ -115,6 +116,9 @@ REASONS: dict[str, str] = {
 	"no_workers": "No background worker is running.",
 	"backlog": "{count} background job(s) are waiting in the queues.",
 	"key_missing": "The site has no encryption_key: offers, payment callbacks and webhooks cannot be signed.",
+	"snapshot_isolation_on": "MariaDB innodb_snapshot_isolation is ON ({level}): a booking that waited for the last "
+	                         "room fails with an error instead of being told it sold out. Set "
+	                         "innodb_snapshot_isolation = 0 in the database server's configuration.",
 	"dead": "{count} message(s) are dead and will not be retried.",
 	"late": "{count} message(s) are late; the oldest has waited {minutes} minutes.",
 	"connection_errors": "{count} enabled connection(s) report an error.",
@@ -268,6 +272,15 @@ def workers_check(*, reachable: bool, workers: int, backlog: int, live: bool) ->
 
 def encryption_key_check(present: bool) -> dict:
 	return make("encryption_key", [] if present else [issue("key_missing", FAIL)], scope="platform")
+
+
+def snapshot_isolation_check(values: dict | None) -> dict:
+	"""``values``: {"global": 0|1, "session": 0|1} of the database connection, None when the server
+	has no ``innodb_snapshot_isolation`` (before MariaDB 10.6.18: nothing to check). ON fails, the
+	server default as well as this connection's (ADR-063)."""
+	issues = [issue("snapshot_isolation_on", FAIL, level=f"@@{level.upper()}")
+	          for level in ("global", "session") if values and int(values.get(level) or 0)]
+	return make("db.snapshot_isolation", issues, scope="platform", count=len(issues))
 
 
 # ─── hotel checks ────────────────────────────────────────────────────────

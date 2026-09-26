@@ -439,9 +439,10 @@ back-date it and so rewrite what `as_of` reports for the past.
 - Idempotency keys and the rolled-back naming series make the rerun write everything
   exactly once.
 **Consequences.** Other locking range reads (the reservation recount) can still meet
-another booking's insert under rare index layouts; the retry absorbs that. MariaDB ≥ 11.6
-(`innodb_snapshot_isolation`) reports changed-row conflicts as deadlocks too, and they are
-retried the same way. A new write endpoint that locks inventory must use the decorator.
+another booking's insert under rare index layouts; the retry absorbs that. Only the endpoints
+wrapped in `retry_on_deadlock` are run again. MariaDB snapshot isolation
+(`innodb_snapshot_isolation`, ON by default from 11.6.2) is kept OFF (corrected by ADR-063).
+A new write endpoint that locks inventory must use the decorator.
 
 ## ADR-033 Limited extras: a day counter keyed by code, an allocation ledger, locks by primary key
 **Context.** An extra could be marked *Limited daily inventory* with a daily capacity, but
@@ -9111,3 +9112,18 @@ main `1575c8b` is contained, so nothing was merged.
   another live booking for the stay → `Action Required`, team told, no auto refund. Locks: charges, then booking.
 - A booking never confirmed owes no cancellation fee; money on its way is never kept as a fee (C6, user).
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.
+
+## ADR-063 MariaDB snapshot isolation stays OFF
+**Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
+read or UPDATE of a row changed after the snapshot then fails with 1020 and rolls back, so a booking that waited for
+the last room's lock (ADR-032) got an error instead of "sold out": 5 of 8 `test_concurrency` tests red. No double sale.
+**Decision.** OFF everywhere. The double-selling guard is TEX's explicit locks and the locked recount, never snapshot
+isolation; the code and every race test assume OFF (10.11's default).
+- CI sets and checks it; the Docker package passes `--innodb-snapshot-isolation=0`; NATIVE.md's cnf carries
+  `loose-innodb_snapshot_isolation = 0`; `setup-local.sh` warns when it is ON.
+- Every request and job sets it OFF for its connection (`kamra.tex.ops.snapshot_isolation`, `before_request` /
+  `before_job`): a managed host may not allow the server setting. No variable (MariaDB < 10.6.18): nothing to do.
+- The status page's platform check `db.snapshot_isolation` fails while `@@GLOBAL` or `@@SESSION` is 1.
+**Consequences.** ADR-032's retries cover only the endpoints wrapped in `retry_on_deadlock`. Working with it ON would
+need retries around about 20 endpoints, callbacks, jobs and Frappe's naming-series inserts, and series locks held
+across a gateway call would still fail under load: not done.

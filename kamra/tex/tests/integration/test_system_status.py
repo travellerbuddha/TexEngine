@@ -2,8 +2,10 @@
 
 - ``kamra.tex.api.system.status`` (``system.monitor``): hotel-scoped checks show only the
   hotels where the user holds the capability; platform checks (scheduler, workers,
-  encryption key, the whole e-mail queue) only for platform administrators; no secret,
-  token, guest data or stack trace in the payload.
+  encryption key, database snapshot isolation, the whole e-mail queue) only for platform
+  administrators; no secret, token, guest data or stack trace in the payload.
+- ``kamra.tex.ops.snapshot_isolation`` (ADR-063): every web request and background job runs
+  with MariaDB ``innodb_snapshot_isolation`` OFF; the status page fails while it is ON.
 - ``kamra.tex.api.system.ping`` (guest): ``ok`` and reachability booleans, nothing else.
 - ``kamra.tex.ops.alerts.evaluate`` (every 15 minutes): one notice when a check gets worse
   and one when it recovers, never on every run.
@@ -12,10 +14,12 @@
 """
 
 import json
+import threading
 from datetime import datetime, time, timedelta
 from unittest import mock
 
 import frappe
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, getdate, now_datetime, nowdate
 
 from kamra.tex.security import scope
@@ -79,7 +83,8 @@ def check(result: dict, key: str) -> dict | None:
 	return next((c for c in result["checks"] if c["key"] == key), None)
 
 
-PLATFORM_KEYS = {"scheduler", "scheduler.jobs", "scheduler.errors", "workers", "encryption_key", "mail.queue"}
+PLATFORM_KEYS = {"scheduler", "scheduler.jobs", "scheduler.errors", "workers", "encryption_key",
+                 "db.snapshot_isolation", "mail.queue"}
 
 
 class TestSystemStatusAccess(TexTestCase):
@@ -338,3 +343,90 @@ class TestMailDeliveryStatus(TexTestCase):
 		last = frappe.get_all("TEX Communication", filters={"booking": b["booking"], "channel": "Email"},
 		                      fields=["status", "delivery_error"], order_by="creation desc", limit=1)[0]
 		self.assertEqual((last.status, last.delivery_error), ("Failed", "OutgoingEmailError"))
+
+
+def session_snapshot_isolation() -> int:
+	return int(frappe.db.sql("SELECT @@SESSION.innodb_snapshot_isolation")[0][0])
+
+
+class TestSnapshotIsolation(IntegrationTestCase):
+	"""ADR-063: MariaDB >= 11.6.2 hands every new connection innodb_snapshot_isolation ON. TEX turns
+	it off for each web request and background job, and the status page fails while it is on."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a platform administrator
+		self.before = session_snapshot_isolation()
+
+	def tearDown(self):
+		frappe.db.sql("SET SESSION innodb_snapshot_isolation = %s", self.before)
+		super().tearDown()
+
+	def test_a_web_request_runs_with_it_off(self):
+		from frappe.database.database import Database
+		from frappe.utils import get_test_client
+
+		real_connect, seen, responses = Database.connect, {}, []
+
+		def connect_as_a_new_server_does(db):
+			real_connect(db)
+			db.sql("SET SESSION innodb_snapshot_isolation = 1")
+			seen.setdefault("connected", int(db.sql("SELECT @@SESSION.innodb_snapshot_isolation")[0][0]))
+
+		def db_ok():                                   # runs inside the request, on its connection
+			seen["in_request"] = session_snapshot_isolation()
+			return True
+
+		def request():
+			responses.append(get_test_client().get("/api/method/kamra.tex.api.system.ping"))
+
+		with (mock.patch.object(Database, "connect", connect_as_a_new_server_does),
+		      mock.patch("kamra.tex.api.system._db_ok", side_effect=db_ok),
+		      mock.patch("frappe.app.get_site_name", return_value=frappe.local.site)):
+			t = threading.Thread(target=request)       # its own frappe.local and connection, as a worker's
+			t.start()
+			t.join(timeout=60)
+		self.assertEqual(responses[0].status_code, 200, responses[0].get_data(as_text=True))
+		self.assertEqual(seen, {"connected": 1, "in_request": 0})
+
+	def test_a_background_job_runs_with_it_off(self):
+		from frappe.database.database import Database
+		from frappe.utils.background_jobs import execute_job
+
+		frappe.db.sql("SET SESSION innodb_snapshot_isolation = 1")
+		seen, had_job = [], hasattr(frappe.local, "job")
+		try:
+			with mock.patch.object(Database, "commit"):  # the job's own commit: nothing of the test is kept
+				execute_job(frappe.local.site, method=lambda: seen.append(session_snapshot_isolation()), event=None,
+				            job_name="tex-snapshot-isolation-probe", kwargs={}, is_async=False)
+		finally:
+			if not had_job:
+				del frappe.local.job
+		self.assertEqual(seen, [0])
+
+	def test_the_status_page_fails_while_it_is_on(self):
+		from kamra.tex.ops import status as status_mod
+
+		frappe.db.sql("SET SESSION innodb_snapshot_isolation = 1")          # this connection has it on
+		on = check(system_api().status(), "db.snapshot_isolation")
+		self.assertEqual((on["status"], on["scope"]), ("fail", "platform"))
+		self.assertIn("@@SESSION", [i["params"]["level"] for i in on["issues"]])
+		frappe.db.sql("SET SESSION innodb_snapshot_isolation = 0")
+		for values, status, levels in (({"global": 1, "session": 0}, "fail", ["@@GLOBAL"]),
+		                               ({"global": 0, "session": 0}, "ok", []),
+		                               (None, "ok", [])):                   # before MariaDB 10.6.18: no variable
+			with mock.patch("kamra.tex.ops.snapshot_isolation.values", return_value=values):
+				c = check({"checks": status_mod.collect(platform=True)}, "db.snapshot_isolation")
+			self.assertEqual((c["status"], [i["params"]["level"] for i in c["issues"]]), (status, levels), values)
+
+	def test_a_server_without_the_variable_has_nothing_to_turn_off(self):
+		from kamra.tex.ops import snapshot_isolation
+
+		unknown = frappe.db.OperationalError(1193, "Unknown system variable 'innodb_snapshot_isolation'")
+		with mock.patch("frappe.database.database.Database.sql", side_effect=unknown):
+			snapshot_isolation.turn_off()
+			self.assertIsNone(snapshot_isolation.values())
+		lost = frappe.db.OperationalError(2013, "Lost connection to server during query")
+		with (mock.patch("frappe.database.database.Database.sql", side_effect=lost),
+		      self.assertRaises(frappe.db.OperationalError)):
+			snapshot_isolation.turn_off()

@@ -3,9 +3,9 @@ the site config (Frappe glue). ``kamra.tex.ops.checks`` judges them.
 
 - Hotel-scoped checks count only rows of ``properties`` (None = every hotel) and name the
   hotels that have a problem.
-- Platform checks (scheduler, TEX jobs, TEX job errors, workers, encryption key, the whole
-  e-mail queue) run only when ``platform`` is set: they describe the installation, not a
-  hotel.
+- Platform checks (scheduler, TEX jobs, TEX job errors, workers, encryption key, database
+  snapshot isolation, the whole e-mail queue) run only when ``platform`` is set: they describe
+  the installation, not a hotel.
 - A probe that raises becomes a failed check; the error goes to the Error Log without frame
   locals and never stops the other probes. Nothing read here is returned raw: only counts,
   ages, job names, currency pairs and hotel names reach the checks.
@@ -120,6 +120,12 @@ def _workers(now) -> dict:
 def _encryption_key(now) -> dict:
 	# presence only: the key itself never leaves site_config
 	return C.encryption_key_check(bool(frappe.local.conf.get("encryption_key")))
+
+
+def _snapshot_isolation(now) -> dict:
+	from kamra.tex.ops import snapshot_isolation
+
+	return C.snapshot_isolation_check(snapshot_isolation.values())
 
 
 def _mail_queue(now) -> dict:
@@ -358,7 +364,8 @@ def _mail_delivery(props, now) -> dict:
 
 PLATFORM_PROBES = (
 	("scheduler", _scheduler), ("scheduler.jobs", _jobs), ("scheduler.errors", _job_errors),
-	("workers", _workers), ("encryption_key", _encryption_key), ("mail.queue", _mail_queue),
+	("workers", _workers), ("encryption_key", _encryption_key), ("db.snapshot_isolation", _snapshot_isolation),
+	("mail.queue", _mail_queue),
 )
 HOTEL_PROBES = (
 	("outbox.pms", _outbox_pms), ("outbox.channel", _outbox_channel), ("channel.inbound", _channel_inbound),

@@ -143,8 +143,10 @@ security or distribution blocker remains (owner rule). Several remain (§2).
 ## 4. Platform notes
 
 - **Database**: MariaDB 10.11+ works (dev bench). CI uses 11.8.
-  - From 11.6, `innodb_snapshot_isolation` reports changed-row conflicts as deadlocks.
-    TEX's booking and modification endpoints retry them (ADR-032).
+  - `innodb_snapshot_isolation` must be OFF (ADR-063): from 11.6.2 it is ON by default. Set
+    `innodb_snapshot_isolation = 0` in the server config. TEX also turns it off for each request
+    and job, and the status page fails while it is ON. Only the endpoints wrapped in
+    `retry_on_deadlock` are retried on a deadlock (ADR-032).
   - No query needs `SKIP LOCKED`: queue claims are conditional `UPDATE … LIMIT` with a
     token and lease, and inbound messages are row-locked with a status re-check.
 - **Scheduler** must be enabled in production. TEX jobs run every minute (channel

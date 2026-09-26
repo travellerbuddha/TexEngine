@@ -4,7 +4,7 @@
 // issues by section and a click shows each one's place; band labels instead of codes in every issue
 // list; a published version's stored report anchored by saved row names, with no validate_version.
 import { expect, test, type Locator, type Page } from "@playwright/test"
-import { api, login, texPath, trackErrors, uniqueRunId } from "./helpers"
+import { login, pageApiOk, texPath, trackErrors, uniqueRunId } from "./helpers"
 import { archiveAll, DLX, HOTEL, STD, SUP, Y } from "./flows/workspace"
 
 test.use({ locale: "en-US", actionTimeout: 15_000, navigationTimeout: 30_000 })
@@ -61,17 +61,17 @@ const made: string[] = []
 async function open(page: Page, tweak: (d: Data) => void = () => {}, lang = "en") {
   await login(page, "revenue@demo.tex")
   const run = uniqueRunId()
-  const c = await api<{ contract: { name: string } }>(page.request, "kamra.tex.api.contracts.save_contract", {
+  const c = await pageApiOk<{ contract: { name: string } }>(page, "kamra.tex.api.contracts.save_contract", {
     data: { property: HOTEL, contract_code: `E2E-PWI-${run}`, contract_name: `E2E-PWI ${run}`, market: "DE", pricing_basis: "PERSON", contract_currency: "EUR", stay_from: `${Y}-04-01`, stay_to: `${Y}-07-31` },
   })
   const contract = c.contract.name
   made.push(contract)
-  const b = await api<{ versions: { name: string }[] }>(page.request, "kamra.tex.api.contracts.get_contract", { name: contract })
+  const b = await pageApiOk<{ versions: { name: string }[] }>(page, "kamra.tex.api.contracts.get_contract", { name: contract })
   const version = b.versions[0].name
   const data = base()
   tweak(data)
-  await api(page.request, "kamra.tex.api.contracts.save_version", { name: version, data })
-  const v = await api<{ room_types: { name: string; room_type_name: string }[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: version })
+  await pageApiOk(page, "kamra.tex.api.contracts.save_version", { name: version, data })
+  const v = await pageApiOk<{ room_types: { name: string; room_type_name: string }[] }>(page, "kamra.tex.api.contracts.get_version", { name: version })
   const names = Object.fromEntries(v.room_types.map((r) => [r.name, r.room_type_name || r.name]))
   await page.addInitScript((l) => {
     window.localStorage.setItem("tex-lang", l)
@@ -249,8 +249,8 @@ test.describe.serial("anchored issues", () => {
       data.occupancy_rules = [...(data.occupancy_rules as Record<string, unknown>[]).filter((r) => r.age_band !== "INF"), occ({ target: "CHILD", value: "0.4" })]
     })
     // published as the workspace publishes (ADR-061 opt-in): the stored report carries each issue's ref
-    await api(page.request, "kamra.tex.api.contracts.publish_version", { name: d.version, workspace: 1 })
-    const v = await api<{ validation_report?: unknown; occupancy_rules: { name: string; target: string; age_band: string | null }[] }>(page.request, "kamra.tex.api.contracts.get_version", { name: d.version })
+    await pageApiOk(page, "kamra.tex.api.contracts.publish_version", { name: d.version, workspace: 1 })
+    const v = await pageApiOk<{ validation_report?: unknown; occupancy_rules: { name: string; target: string; age_band: string | null }[] }>(page, "kamra.tex.api.contracts.get_version", { name: d.version })
     const generic = v.occupancy_rules.find((r) => r.target === "CHILD" && !r.age_band)
     expect(JSON.stringify(v.validation_report)).toContain(generic?.name ?? "missing")
     const calls: string[] = []

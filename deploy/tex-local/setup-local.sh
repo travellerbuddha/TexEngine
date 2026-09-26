@@ -554,6 +554,12 @@ if [ -n "$MYSQL_BIN" ] && [ -n "$PY" ] && [ -n "$DB_ROOT_PASSWORD" ]; then
 		if [ "$2" != utf8mb4 ] || [ "$3" != utf8mb4_unicode_ci ]; then
 			warn "MariaDB should use utf8mb4 / utf8mb4_unicode_ci (it uses $2 / $3). Add the config snippet from NATIVE.md and restart MariaDB."
 		fi
+		# ON by default from MariaDB 11.6.2 (ADR-063); a server without the variable prints nothing
+		snapshot=$("$MYSQL_BIN" --defaults-extra-file="$TMPD/root.cnf" --protocol=TCP -h "$DB_HOST" -P "$DB_PORT" -N -B \
+			-e "SELECT @@GLOBAL.innodb_snapshot_isolation" 2>/dev/null || true)
+		if [ "$snapshot" = 1 ]; then
+			warn "MariaDB has innodb_snapshot_isolation ON: a booking that waited for the last room would get an error instead of \"sold out\". Add loose-innodb_snapshot_isolation = 0 from the config snippet in NATIVE.md and restart MariaDB."
+		fi
 	else
 		problem "cannot log in to MariaDB as root at $DB_HOST:$DB_PORT: $(tr '\n' ' ' <"$TMPD/db.err")
       Is MariaDB running (brew services start mariadb@11.8 / sudo service mariadb start)?

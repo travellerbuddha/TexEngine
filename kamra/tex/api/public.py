@@ -50,7 +50,7 @@ def _charge_rooms(n: int) -> None:
 	if not ip:
 		return
 	key = frappe.cache.make_key(f"rl:tex.public.rooms_quoted:{ip}:{WRITE_LIMIT['seconds']}")
-	if not frappe.cache.get(key):
+	if not frappe.cache.get(key):  # nosemgrep: frappe-cache-breaks-multitenancy -- key is site-scoped by make_key above, as in frappe.rate_limiter
 		frappe.cache.setex(key, WRITE_LIMIT["seconds"], 0)
 	if frappe.cache.incrby(key, n) > WRITE_LIMIT["limit"]():
 		frappe.throw(_("You hit the rate limit because of too many requests. Please try after sometime."),

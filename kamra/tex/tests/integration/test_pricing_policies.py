@@ -14,6 +14,7 @@ Policies used (fx.PROPERTY, market DE; STD in LOW = 100 per person):
 """
 
 import json
+from unittest import mock
 
 import frappe
 from frappe.utils import add_to_date, now_datetime
@@ -144,6 +145,35 @@ class TestPolicyCascade(PolicyCase):
 		report = contracts.validate_version(c["version"])
 		self.assertFalse(report["ok"])
 		self.assertEqual([i["code"] for i in report["issues"]], ["BUILD"])
+
+	def test_a_pricing_error_reaches_the_translated_message_as_text(self):
+		"""Semgrep frappe-format-string-injection, a true finding: a translation is editable data, and
+		``{0.__class__…}`` in it could walk an exception object handed to ``.format()``. Only its text is."""
+		given = []
+
+		class Translated(str):
+			def format(self, *args, **kwargs):
+				given.extend([*args, *kwargs.values()])
+				return super().format(*args, **kwargs)
+
+		def translate(msg, *args, **kwargs):
+			return Translated(msg)
+
+		with (mock.patch("kamra.tex.commercial.contracts._", translate),
+		      mock.patch("kamra.tex_commercial.doctype.tex_pricing_policy.tex_pricing_policy._", translate)):
+			with self.assertRaisesRegex(frappe.ValidationError, "Age bands: age bands INF and CHA overlap"):
+				policy("PP bad bands", market="DE", live=False, bands=[
+					INF, {"band_code": "CHA", "from_age": 2, "to_age": 6.99}])
+			first = policy("PP Global", bands=[INF], rules=[child("INF", "MULTIPLY", 0)])
+			second = policy("PP Global twin", rules=[child("INF", "MULTIPLY", 0)], live=False)
+			frappe.db.set_value(POLICY, second, {"tex_status": "Active", "active_from": "2020-01-01 00:00:00"})
+			c = fx.create_contract(self.f, code="AMBF", publish=False)
+			with self.assertRaisesRegex(frappe.ValidationError, "Pricing policies cannot be combined") as cm:
+				contracts.publish(c["version"])
+		self.assertIn(first, str(cm.exception))
+		self.assertIn(second, str(cm.exception))
+		self.assertTrue(given)
+		self.assertEqual([a for a in given if isinstance(a, BaseException)], [])
 
 	def test_policy_rows_are_validated(self):
 		with self.assertRaisesRegex(frappe.ValidationError, "overlap"):

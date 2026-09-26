@@ -6,7 +6,7 @@
 // server: the spec compares the Explain ladder with the preview_price answer it observed.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e pricing-workspace
 import { expect, test, type Locator, type Page, type Response } from "@playwright/test"
-import { answerOf, api, login, trackErrors } from "./helpers"
+import { answerOf, login, pageApiOk, trackErrors } from "./helpers"
 import { Budget, choose, pickFrom } from "./flows/budget"
 import { addPeriod, addRooms, boardsGrid, ladderCell, occupancyLadder, priceCell, priceMatrix, saveDraft, setBasis } from "./flows/contracts"
 import { archiveAll, DLX, N, newContract, newDraft, openVersion, ownerDraft, readVersion, STD, SUP, twoDecimals, versionPath, watchContracts, Y } from "./flows/workspace"
@@ -51,7 +51,7 @@ test("the 13 steps of an ORS-style contract in one workspace: ≤ 50 clicks, no 
     await setBasis(page, "PERSON", budget)
     await expect(page.getByRole("button", { name: "Pricing basis: Per person", exact: true })).toBeVisible()
     await expect(page.getByText("Base person rate per night · EUR", { exact: true })).toBeVisible()
-    const c = await api<{ contract: { pricing_basis: string } }>(page.request, "kamra.tex.api.contracts.get_contract", { name: d.contract })
+    const c = await pageApiOk<{ contract: { pricing_basis: string } }>(page, "kamra.tex.api.contracts.get_contract", { name: d.contract })
     expect(c.contract.pricing_basis).toBe("PERSON")
     // the header was saved on its own: the draft is still clean, and nothing modal opened
     await expect(save).toBeDisabled()

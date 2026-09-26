@@ -5,7 +5,7 @@
 // and the cell menu, rooms and periods, Delete, and a read-only published version.
 // One draft (API-made, empty prices) is shared by the tests, in order.
 import { expect, test, type Locator, type Page } from "@playwright/test"
-import { api, login, trackErrors } from "./helpers"
+import { login, pageApiOk, trackErrors } from "./helpers"
 import { priceMatrix } from "./flows/contracts"
 import { pickFrom } from "./flows/budget"
 import { archiveAll, DLX, N, newContract, newDraft, ownerDraft, periods, publish, readVersion, STD, SUP, versionPath, watchContracts, Y, type NewContract } from "./flows/workspace"
@@ -36,7 +36,7 @@ test.describe.serial("room price matrix", () => {
     await login(page, "revenue@demo.tex")
     draft = await newContract(page, { prefix: "E2E-PWX" })
     made.push(draft.contract)
-    await api(page.request, "kamra.tex.api.contracts.save_version", {
+    await pageApiOk(page, "kamra.tex.api.contracts.save_version", {
       name: draft.version,
       data: {
         rooms: [
