@@ -376,6 +376,10 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	points = int(points)
 	if points < int(prog.min_redeem_points or 0) or points <= 0:
 		frappe.throw(_("At least {0} points must be redeemed.").format(prog.min_redeem_points or 1))
+	from kamra.tex.payments import service as pay
+
+	# a booking that cannot take the money is refused before a point is burned (C5)
+	pay.refuse_if_it_cannot_take(booking, quantize(db_dec(prog.point_value) * points, b.currency))
 	# the profile locked (whoever writes its ledger locks it too) and its balance read with a lock: what is
 	# committed now, not this request's snapshot, so two redemptions never spend the same points (third
 	# review of ADR-056, H-1); a profile merged into another meanwhile is gone
@@ -388,7 +392,6 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	cap = quantize(from_db(b.total_amount, b.currency) * pct / 100, b.currency)
 	if value > cap:
 		frappe.throw(_("Points can cover at most {0} {1} of this booking.").format(to_str(cap), b.currency))
-	from kamra.tex.payments import service as pay
 
 	txn = frappe.get_doc({"doctype": "TEX Payment Transaction", "property": b.property, "txn_type": "Charge",
 	                      "status": "Succeeded", "method": "Manual", "provider": "Loyalty", "amount": value,

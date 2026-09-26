@@ -1273,6 +1273,19 @@ def mark_transfer_received(transaction: str, *, reference: str, value_date=None)
 	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}
 
 
+def refuse_if_it_cannot_take(booking: str, amount) -> None:
+	"""C5: staff paying a booking that cannot take the money (cancelled, expired, its rooms given back)
+	are told why and nothing is recorded — never money parked at the desk, nor points burned. The
+	booking is locked (a new charge follows it, locked by no one else)."""
+	from kamra.tex.services import late_payments
+
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	amount = quantize(D(amount), b.currency)
+	why = late_payments.problem(b, amount=amount)
+	if why:
+		frappe.throw(late_payments.refusal(why, b, amount))
+
+
 def record_manual(*, booking: str, amount, method: str, reference: str, reason: str | None = None,
                   idempotency_key: str) -> dict:
 	"""A payment taken outside TEX (desk card terminal, cash, agency remittance): stored
@@ -1290,6 +1303,7 @@ def record_manual(*, booking: str, amount, method: str, reference: str, reason: 
 	amount = quantize(D(amount), b.currency)
 	if amount <= 0:
 		frappe.throw(_("Amount must be positive."))
+	refuse_if_it_cannot_take(booking, amount)
 	txn = _new_txn(property=b.property, txn_type="Charge", method="Manual", amount=amount, currency=b.currency,
 	               provider="Manual", provider_ref=reference.strip()[:140], idempotency_key=idempotency_key,
 	               booking=booking, reason=(f"{method}: {reason or ''}").strip()[:500])

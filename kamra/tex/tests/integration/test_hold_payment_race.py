@@ -328,15 +328,38 @@ class TestMoneyForBookingsThatCannotTakeIt(HoldCase):
 		with self.assertRaises(frappe.ValidationError):
 			pay.mark_transfer_received(transfer["transaction"], reference="EFT-2027-001")
 
-	def test_a_manual_payment_for_an_expired_booking_is_kept_off_it(self):
+	def test_a_manual_payment_for_an_expired_booking_is_refused(self):
+		"""C5 (audit 1c): staff are told why, and nothing is recorded — never money parked at the desk."""
 		b = self.book()
 		passes(b["booking"], 25)
 		run_expiry_jobs()
-		out = pay.record_manual(booking=b["booking"], amount=b["due_now"], method="Cash", reference="till 3",
-		                        idempotency_key=f"k2c-cash-{b['booking']}")
-		self.assertEqual(out["reconciliation"], "Action Required")
+		with self.assertRaisesRegex(frappe.ValidationError, "is cancelled"):
+			pay.record_manual(booking=b["booking"], amount=b["due_now"], method="Cash", reference="till 3",
+			                  idempotency_key=f"k2c-cash-{b['booking']}")
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"booking": b["booking"], "provider": "Manual"}))
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		self.assertEqual(paid(b), D(0))
+
+	def test_points_are_never_burned_on_a_booking_that_cannot_take_them(self):
+		"""C5 (audit 1c): a loyalty redemption on an expired booking is refused before a point is burned."""
+		from kamra.tex.crm import loyalty
+
+		prog = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "C5 Club", "property": fx.PROPERTY,
+		                       "enabled": 1, "currency": "EUR", "point_value": 0.1, "min_redeem_points": 50,
+		                       "max_redeem_percent": 100, "pending_days": 0,
+		                       "earn_rules": [{"basis": "MONEY", "rate": 1}]}).insert(ignore_permissions=True)
+		stayed = self.book()
+		self.pays(self.start_payment(stayed))
+		guest = frappe.db.get_value("TEX Booking", stayed["booking"], "booker_guest")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		before = loyalty.balances(guest, prog.name)["available"]
+		self.assertGreaterEqual(before, 50)
+		b = self.book()
+		passes(b["booking"], 25)
+		run_expiry_jobs()
+		with self.assertRaisesRegex(frappe.ValidationError, "is cancelled"):
+			loyalty.redeem(guest, b["booking"], 50, idempotency_key=f"c5-{b['booking']}")
+		self.assertEqual(loyalty.balances(guest, prog.name)["available"], before)
 
 	def test_staff_cannot_allocate_money_to_a_cancelled_booking(self):
 		source = self.book(method="Pay at Hotel", status="Confirmed")
