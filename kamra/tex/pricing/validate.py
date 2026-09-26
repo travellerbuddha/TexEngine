@@ -32,7 +32,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 
 from kamra.tex.money import ZERO, D
-from kamra.tex.pricing import ages, occupancy, rooms
+from kamra.tex.pricing import ages, occupancy, policy_money, rooms
 from kamra.tex.pricing.ages import ChildSlot, Party
 from kamra.tex.pricing.enums import Level, OccTarget, Op, PricingBasis, PromoValueType
 from kamra.tex.pricing.model import (
@@ -41,6 +41,7 @@ from kamra.tex.pricing.model import (
 	OccupancyRule,
 	Period,
 	PricingError,
+	RatePlanTerms,
 	RoomSpec,
 	Unsellable,
 )
@@ -245,6 +246,7 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 		for bd in sorted(rp.boards or ()):
 			if bd not in board_codes:
 				issues.append(_err("RATE_PLAN_BOARD", f"rate plan {rp.code} sells unknown board {bd}"))
+		issues.extend(_refundable_issues(rp))
 
 	for o in t.offers:
 		if o.value_type == PromoValueType.PERCENT and not (ZERO < D(o.value) <= D(100)):
@@ -256,6 +258,22 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	if sweep_combinations and not any(i.level == "ERROR" for i in issues):
 		issues.extend(_sweep(t, max_warnings, hidden))
 	return issues
+
+
+def _refundable_issues(rp: RatePlanTerms) -> list[Issue]:
+	"""A rate plan row and its cancellation policy that disagree about refunds (Y-4, ADR-067). A
+	price is refundable only when both say so, so a refundable row on a non-refundable policy would
+	be sold as non-refundable: an ERROR, for every caller. A non-refundable row on a refundable
+	policy with rules sells as the row says and the rules never apply: a WARNING."""
+	pol = rp.cancellation_policy or {}
+	name = pol.get("name") or pol.get("id")
+	if rp.refundable and not policy_money.refundable(rp.refundable, pol):
+		return [_err("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is refundable but its cancellation policy "
+		             f"{name} is not; mark the rate plan non-refundable or choose a refundable policy")]
+	if not rp.refundable and pol.get("rules") and pol.get("refundable", True) is not False:
+		return [_warn("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is non-refundable, so the rules of its "
+		              f"cancellation policy {name} never apply")]
+	return []
 
 
 def _board_issues(t: ContractTerms, codes: list[str]) -> list[Issue]:

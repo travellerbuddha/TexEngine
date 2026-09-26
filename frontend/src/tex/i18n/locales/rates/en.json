@@ -465,6 +465,7 @@
  "rates.h.property_global": "Leave empty to apply to every hotel you manage.",
  "rates.h.property_hotel": "The hotel this record belongs to.",
  "rates.h.refundable": "Non-refundable policies charge 100 % on any cancellation.",
+ "rates.h.row_refundable": "Refundable only if the rate plan and its cancellation policy both are. Choosing a rate plan or a policy sets it; a refundable row on a non-refundable policy cannot be published.",
  "rates.h.release_days": "Unsold rooms go back to general sale this many days before arrival.",
  "rates.h.requires_extras": "Extra codes that must be booked too, comma separated (package deals).",
  "rates.h.room_basis_children_fill_included": "E.g. 1 adult + 1 child in a room priced for 2: the child takes the free place.",

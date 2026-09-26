@@ -469,6 +469,7 @@
  "rates.h.property_global": "Pozostaw puste, aby obowiązywało we wszystkich Twoich hotelach.",
  "rates.h.property_hotel": "Hotel, do którego należy ten rekord.",
  "rates.h.refundable": "Warunki bezzwrotne pobierają 100 % przy każdej anulacji.",
+ "rates.h.row_refundable": "Zwrotny tylko wtedy, gdy plan cenowy i jego zasady anulowania są zwrotne. Wybór planu lub zasad ustawia to pole; zwrotnego wiersza z bezzwrotnymi zasadami nie można opublikować.",
  "rates.h.release_days": "Niesprzedane pokoje wracają do ogólnej sprzedaży tyle dni przed przyjazdem.",
  "rates.h.requires_extras": "Kody dodatków, które trzeba zarezerwować razem, oddzielone przecinkami (pakiety).",
  "rates.h.room_basis_children_fill_included": "Np. 1 dorosły + 1 dziecko w pokoju wycenionym dla 2: dziecko zajmuje wolne miejsce.",

@@ -13,12 +13,13 @@ from kamra.tex.api import crm as crm_api
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
-from kamra.tex.commercial import context
+from kamra.tex.commercial import context, contracts
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
 from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
+from kamra.tex.pricing import serialize
 from kamra.tex.pricing.model import Unsellable
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
@@ -1363,3 +1364,61 @@ class TestEffectiveDatedExtrasAndTaxes(TexTestCase):
 		with self.assertRaises(frappe.LinkExistsError):
 			policy_api.delete_record("TEX Payment Provider Account", acc)
 		self.assertTrue(frappe.db.exists("TEX Payment Provider Account", acc))
+
+
+class TestNonRefundablePolicy(TexTestCase):
+	"""Y-4 (ADR-067): a price is refundable only when its rate plan row and its cancellation policy
+	both say so. A refundable row on a non-refundable policy is not published; a payload frozen so
+	before is read so: search, the quote and the cancellation fee all say non-refundable."""
+
+	def test_a_refundable_row_on_a_non_refundable_policy_is_not_published(self):
+		nrf_cxl = frappe.db.get_value("TEX Cancellation Policy", {"property": fx.PROPERTY,
+		                                                         "policy_name": "Non-refundable"})
+		v = fx.create_contract(self.f, code="Y4-PUB", publish=False)["version"]
+		doc = frappe.get_doc("TEX Contract Version", v)
+		row = next(r for r in doc.rate_plans if r.rate_plan == self.f["rate_plans"]["FLEX"])
+		self.assertEqual(row.refundable, 1)
+		row.cancellation_policy = nrf_cxl
+		doc.save(ignore_permissions=True)
+		issues = contracts.validate_version(v)["issues"]
+		self.assertEqual([(i["level"], i["code"]) for i in issues if i["code"] == "RATE_PLAN_REFUNDABLE"],
+		                 [("ERROR", "RATE_PLAN_REFUNDABLE")])
+		with self.assertRaises(frappe.ValidationError) as cm:
+			contracts.publish(v)
+		self.assertIn("Non-refundable", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", v, "status"), "Draft")
+
+	def test_a_payload_frozen_so_before_sells_and_cancels_as_non_refundable(self):
+		setup_site_and_payments(self.f)
+		version = frappe.db.get_value("TEX Contract", {"contract_code": "PAY"}, "active_version")
+		nr = fx.ensure("TEX Cancellation Policy", {"property": fx.PROPERTY, "policy_name": "Y4 no refunds"},
+		               {"property": fx.PROPERTY, "policy_name": "Y4 no refunds", "refundable": 0})
+		# what a publish froze before Y-4: the refundable FLEX row with a non-refundable policy without rules
+		payload = json.loads(frappe.db.get_value("TEX Contract Version", version, "payload"))
+		flex = next(r for r in payload["rate_plans"] if r["code"] == self.f["rate_plans"]["FLEX"])
+		self.assertIs(flex["refundable"], True)
+		flex["cancellation_policy"] = {"id": nr, "name": "Y4 no refunds", "refundable": False, "rules": [],
+		                               "no_show": {"type": "NIGHTS", "value": "1"}, "description": ""}
+		frappe.db.set_value("TEX Contract Version", version,
+		                    {"payload": json.dumps(payload, sort_keys=True, ensure_ascii=False),
+		                     "payload_hash": serialize.payload_hash(payload)}, update_modified=False)
+		contracts.clear_terms_cache()
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2, "children": [8]}], market="DE", session_id="y4-search")
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		offer = next(o for o in res["properties"][0]["offers"]
+		             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+		self.assertIs(offer["refundable"], False)
+
+		b = guest_books(session="y4-book")
+		pmt = b["payment"]
+		public.mock_pay(transaction=pmt["transaction"], outcome="success", sig=pmt["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff reads the fee
+		room = frappe.get_doc("Reservation", {"tex_booking": b["booking"]})
+		self.assertIs(json.loads(room.tex_pricing_snapshot)["rate_plan"]["refundable"], False)
+		penalty, basis = booking.cancellation_penalty(room, today=fx.d(6, 9))
+		self.assertEqual(basis["rule"], "non-refundable")
+		self.assertEqual(penalty, D(room.tex_total_amount))
+		self.assertGreater(penalty, D(0))

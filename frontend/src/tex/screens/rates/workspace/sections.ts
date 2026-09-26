@@ -70,7 +70,7 @@ const namesParty = (ref: IssueRef | undefined) => ref?.adults !== undefined
  * The section a validation issue belongs to (§2): Pricing for rooms, periods, room prices, child
  * ages, occupancy and boards (ROOM_*, PERIOD_*, NO_PERIODS, NO_ROOMS, INCLUDED_ADULTS, AGE_BANDS*,
  * NO_AGE_BANDS, OCC_*, NO_BASE_BOARD, BOARD_*, and a party of the publish sweep); Offers for
- * OFFER_*; Commercial rules for the rest (RATE_PLAN_BOARD, SALE_WINDOW, STAY_WINDOW, CURRENCY,
+ * OFFER_*; Commercial rules for the rest (RATE_PLAN_*, SALE_WINDOW, STAY_WINDOW, CURRENCY,
  * BUILD, and any code not known here).
  */
 export function issueSection(code: string, ref?: IssueRef): SectionId {
@@ -98,7 +98,7 @@ export function issueTable(code: string, ref?: IssueRef): RuleTableId | "offers"
   if (code === "ROOM_CAPACITY" || code === "INCLUDED_ADULTS" || code === "NO_ROOMS") return "rooms"
   if (code.startsWith("AGE_BANDS") || code === "NO_AGE_BANDS") return "ages" // AGE_BANDS, AGE_BANDS_MIN_AGE (G-52)
   if (code === "NO_BASE_BOARD" || code.startsWith("BOARD_")) return "boards"
-  if (code === "RATE_PLAN_BOARD") return "plans"
+  if (code === "RATE_PLAN_BOARD" || code === "RATE_PLAN_REFUNDABLE") return "plans"
   if (namesParty(ref)) return "occupancy"
   return "settings"
 }

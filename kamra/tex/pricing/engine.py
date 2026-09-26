@@ -14,7 +14,18 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, calc, quantize, to_str, to_str6
-from kamra.tex.pricing import ages, boards, extras, fx, markup, occupancy, promotions, rooms, tax
+from kamra.tex.pricing import (
+	ages,
+	boards,
+	extras,
+	fx,
+	markup,
+	occupancy,
+	policy_money,
+	promotions,
+	rooms,
+	tax,
+)
 from kamra.tex.pricing.enums import (
 	ExtraPricingMode,
 	Level,
@@ -449,7 +460,9 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 	try:
 		rp = _check_contract(ctx, req, nights, ex)
 		if rp is not None:
-			q.rate_plan = {"code": rp.code, "name": rp.name, "refundable": rp.refundable,
+			# refundable only when the row and its cancellation policy both say so (Y-4, ADR-067)
+			q.rate_plan = {"code": rp.code, "name": rp.name,
+			               "refundable": policy_money.refundable(rp.refundable, rp.cancellation_policy),
 			               "cancellation_policy": rp.cancellation_policy,
 			               "payment_policy": rp.payment_policy, "inclusions": list(rp.inclusions)}
 		party = ages.classify_party(t, req.adults, req.children, req.check_in, sale_date)

@@ -466,6 +466,7 @@
  "rates.h.property_global": "Lăsați gol pentru a se aplica tuturor hotelurilor pe care le gestionați.",
  "rates.h.property_hotel": "Hotelul căruia îi aparține această înregistrare.",
  "rates.h.refundable": "Politicile nerambursabile rețin 100 % la orice anulare.",
+ "rates.h.row_refundable": "Rambursabil doar dacă planul tarifar și politica sa de anulare sunt ambele rambursabile. Alegerea unui plan sau a unei politici îl setează; un rând rambursabil cu o politică nerambursabilă nu poate fi publicat.",
  "rates.h.release_days": "Camerele nevândute revin la vânzarea generală cu atâtea zile înainte de sosire.",
  "rates.h.requires_extras": "Coduri de servicii extra care trebuie rezervate împreună, separate prin virgulă (pachete).",
  "rates.h.room_basis_children_fill_included": "De ex. 1 adult + 1 copil într-o cameră pentru 2: copilul ocupă locul liber.",

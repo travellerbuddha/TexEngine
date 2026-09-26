@@ -465,6 +465,7 @@
  "rates.h.property_global": "Yönettiğiniz tüm otellere uygulamak için boş bırakın.",
  "rates.h.property_hotel": "Bu kaydın ait olduğu otel.",
  "rates.h.refundable": "İadesiz politikalarda her iptalde %100 ücret alınır.",
+ "rates.h.row_refundable": "Yalnız fiyat planı ve iptal poliçesi ikisi de iadeli ise iadelidir. Fiyat planı veya poliçe seçilince bu kutu ayarlanır; iadesiz bir poliçeye bağlı iadeli bir satır yayınlanamaz.",
  "rates.h.release_days": "Satılmayan odalar girişten bu kadar gün önce genel satışa döner.",
  "rates.h.requires_extras": "Birlikte alınması gereken ekstra kodları, virgülle (paket fırsatları).",
  "rates.h.room_basis_children_fill_included": "Ör. 2 kişilik fiyatlı odada 1 yetişkin + 1 çocuk: çocuk boş yeri doldurur.",

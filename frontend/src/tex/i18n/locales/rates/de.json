@@ -465,6 +465,7 @@
  "rates.h.property_global": "Leer lassen, um für alle Ihre Hotels zu gelten.",
  "rates.h.property_hotel": "Das Hotel, zu dem dieser Datensatz gehört.",
  "rates.h.refundable": "Nicht erstattbare Regeln berechnen bei jeder Stornierung 100 %.",
+ "rates.h.row_refundable": "Nur erstattbar, wenn Ratenplan und Stornierungsbedingung beide erstattbar sind. Die Wahl eines Ratenplans oder einer Bedingung setzt das Feld; eine erstattbare Zeile mit nicht erstattbarer Bedingung kann nicht veröffentlicht werden.",
  "rates.h.release_days": "Nicht verkaufte Zimmer gehen so viele Tage vor Anreise in den allgemeinen Verkauf zurück.",
  "rates.h.requires_extras": "Extra-Codes, die mitgebucht werden müssen, durch Kommas getrennt (Pakete).",
  "rates.h.room_basis_children_fill_included": "Z. B. 1 Erwachsener + 1 Kind in einem Zimmer für 2: das Kind belegt den freien Platz.",

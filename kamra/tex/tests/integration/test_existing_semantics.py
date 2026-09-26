@@ -26,6 +26,12 @@ fixes that apply to every caller and are never opt-in. They fail against main by
 * an editor without ``price.view_cost`` is not told what an inherited pricing-policy rule's formula
   (cost) decides, by the live check nor in the report stored at publish.
 
+``TestPolicyMoneyChanges`` holds those of the audit's Part 2C-1 (ADR-067), money-safety fixes for
+every caller, never opt-in, that fail against main by design too:
+
+* a refundable rate plan row whose cancellation policy is non-refundable is refused
+  (``RATE_PLAN_REFUNDABLE``): main published it and sold it as free cancellation (Y-4).
+
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
 ``parties``) and tested in ``test_pricing_workspace_api``.
@@ -442,3 +448,29 @@ class TestSecurityChanges(ExistingCallerCase):
 		got, main = plain(api.get_version(self.v)), plain(mains_get_version(self.v))
 		self.assertEqual(got["validation_report"], [i for i in stored if i["code"] not in HIDEABLE])
 		self.assertEqual({**got, "validation_report": None}, {**main, "validation_report": None})
+
+
+class TestPolicyMoneyChanges(ExistingCallerCase):
+	"""The deliberate differences from main of the audit's Part 2C-1 (ADR-067): money-safety fixes,
+	enforced for every caller and never opt-in. These fail against main by design."""
+
+	def test_a_refundable_row_on_a_non_refundable_policy_is_refused(self):
+		"""Y-4: main validated and published a refundable rate plan row whose cancellation policy is
+		non-refundable, and sold it as free cancellation. Now it is an ERROR (``RATE_PLAN_REFUNDABLE``,
+		an issue in main's shape) and the publish is refused; the row marked non-refundable is main's."""
+		nrf_cxl = frappe.db.get_value("TEX Cancellation Policy", {"property": fx.PROPERTY,
+		                                                         "policy_name": "Non-refundable"})
+		data = tables(self.v)
+		find(data["rate_plans"], rate_plan=self.flex)["cancellation_policy"] = nrf_cxl
+		api.save_version(self.v, as_json(data))
+		report = api.validate_version(self.v)
+		self.assertFalse(report["ok"])
+		self.assertEqual([(i["level"], i["code"]) for i in report["issues"]], [("ERROR", "RATE_PLAN_REFUNDABLE")])
+		self.assertTrue(all(set(i) == MAIN_ISSUE_KEYS for i in report["issues"]))
+		with self.assertRaises(frappe.ValidationError):
+			contracts.publish(self.v)
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.v, "status"), "Draft")
+		find(data["rate_plans"], rate_plan=self.flex)["refundable"] = 0
+		api.save_version(self.v, as_json(data))
+		self.assertTrue(api.validate_version(self.v)["ok"])
+		self.assertEqual(contracts.publish(self.v)["version"], self.v)

@@ -81,3 +81,36 @@ export function int(v: unknown): number {
 export function isSet(v: unknown): boolean {
   return v === 1 || v === true || v === "1"
 }
+
+/** The refundable flag of a rate-plan row whose rate plan or cancellation policy was just chosen
+ * (Y-4, ADR-067): refundable only when the rate plan (`tex_refundable`, blank = refundable) and the
+ * row's own cancellation policy, when it names one, both are. The server sells the row so and
+ * refuses to publish a refundable row on a non-refundable policy (RATE_PLAN_REFUNDABLE). */
+export function planRowRefundable(
+  plan: { tex_refundable?: number | null } | undefined,
+  policy: { refundable?: number | null } | undefined,
+): 0 | 1 {
+  const planSays = plan?.tex_refundable === undefined || plan.tex_refundable === null || isSet(plan.tex_refundable)
+  const policySays = !policy || policy.refundable === undefined || policy.refundable === null || isSet(policy.refundable)
+  return planSays && policySays ? 1 : 0
+}
+
+/** The rate-plan table after an edit (`next`), each row whose rate plan or cancellation policy
+ * changed (or that is new with a rate plan) taking its refundable flag from them
+ * (`planRowRefundable`); the other rows, and a flag the user set by hand, are kept. */
+export function withPlanRefundable(
+  prev: Row[],
+  next: Row[],
+  plans: readonly { name: string; tex_refundable?: number | null }[],
+  policies: readonly { name: string; refundable?: number | null }[],
+): Row[] {
+  const before = new Map(prev.map((r) => [r._key, r]))
+  return next.map((r) => {
+    const old = before.get(r._key)
+    const chosen = old ? str(old.rate_plan) !== str(r.rate_plan) || str(old.cancellation_policy) !== str(r.cancellation_policy) : !!str(r.rate_plan)
+    if (!chosen || !str(r.rate_plan)) return r
+    const plan = plans.find((p) => p.name === str(r.rate_plan))
+    const policy = str(r.cancellation_policy) ? policies.find((p) => p.name === str(r.cancellation_policy)) : undefined
+    return { ...r, refundable: planRowRefundable(plan, policy) }
+  })
+}
