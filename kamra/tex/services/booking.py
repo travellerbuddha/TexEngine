@@ -921,11 +921,13 @@ def cancellation_penalty(reservation, today=None, *, basket: bool = True) -> tup
 	basis. A room that carried such a discount for the others passes it on, or has it credited when
 	it is no longer owed; the charge is then below the rate's penalty, and may be a credit.
 
-	A room of a booking never confirmed (still waiting for its payment) is cancelled free of charge
-	(C6, user decision): nothing was paid, nothing is owed."""
+	A room of a booking never confirmed (still waiting for its payment) owes no penalty (C6, user
+	decision); the discount the other rooms keep is no penalty and is still charged (E1). A booking
+	that ends never confirmed owes nothing at all (``_refresh_booking_after_change``)."""
 	if reservation.get("tex_booking") and reservation.status in holds.HOLDING:
-		return quantize(ZERO, reservation.tex_currency or "EUR"), {"rule": "never confirmed: no fee"}
-	pen, basis = _policy_penalty(reservation, today)
+		pen, basis = quantize(ZERO, reservation.tex_currency or "EUR"), {"rule": "never confirmed: no fee"}
+	else:
+		pen, basis = _policy_penalty(reservation, today)
 	snap = json.loads(reservation.tex_pricing_snapshot or "{}")
 	if basket and snap.get("contract") and reservation.get("tex_booking") and snap.get("source") != "channel":
 		ccy = reservation.tex_currency or snap.get("currency") or "EUR"
@@ -1055,6 +1057,10 @@ def _refresh_booking_after_change(booking: str) -> None:
 		row.status, row.amount = r.status, amount
 		row.check_in, row.check_out, row.adults, row.children, row.room_type = (
 			r.check_in_date, r.check_out_date, r.adults, r.children, r.room_type)
+	if all(s == "Cancelled" for s in statuses) and b.status in holds.HOLDING:
+		# never confirmed and over (all its rooms cancelled, or expired): it owes nothing, not even
+		# what a room carried for the others (C6, E1); a revival charges that again
+		total = _void_fees(b, ccy)
 	b.total_amount = total
 	b.balance_amount = total - from_db(b.paid_amount, ccy)
 	if all(s == "Cancelled" for s in statuses):
@@ -1076,6 +1082,22 @@ def _refresh_booking_after_change(booking: str) -> None:
 	paid = from_db(b.paid_amount, ccy)
 	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
 	b.save(ignore_permissions=True)
+
+
+def _void_fees(b, ccy: str) -> D:
+	"""The charges of the rooms of booking ``b``, which ends never confirmed, are void (the reports
+	read them), audited. → the booking's total: nothing."""
+	void = {}
+	for row in b.rooms:
+		fee = from_db(frappe.db.get_value("Reservation", row.reservation, "cancellation_fee"), ccy)
+		if fee:
+			frappe.db.set_value("Reservation", row.reservation, "cancellation_fee", 0, update_modified=False)
+			void[row.reservation] = to_str(fee)
+		row.amount = ZERO
+	if void:
+		audit("booking.fees_void", reference_doctype="TEX Booking", reference_name=b.name, property=b.property,
+		      old=void, reason="ended never confirmed: nothing is owed (C6)")
+	return quantize(ZERO, ccy)
 
 
 def resend_confirmation(booking: str) -> dict:
@@ -1244,6 +1266,11 @@ def revive_expired(booking: str, *, reason: str) -> list[str]:
 				xinv.allocate(b.property, booking, r.name, snaps[r.name], "Held", trk=extras)
 	finally:
 		frappe.flags.kamra_status_transition = False
+	for r in rooms:
+		claw = json.loads(r.tex_pricing_snapshot or "{}").get("basket_clawback")
+		if r.status == "Cancelled" and claw:
+			# cancelled on purpose: what it carried for the rooms taken back is owed again (E1)
+			frappe.db.set_value("Reservation", r.name, "cancellation_fee", D(claw["amount"]), update_modified=False)
 	b.status = "Pending Payment"
 	b.save(ignore_permissions=True)
 	_refresh_booking_after_change(booking)

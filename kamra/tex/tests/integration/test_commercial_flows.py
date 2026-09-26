@@ -671,6 +671,62 @@ class TestBookingBasket(TexTestCase):
 		self.assertEqual(booking.cancel_reservation(room1, reason="plans changed")["penalty"], "-80.25")
 		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D("0"))
 
+	def _pending(self, session: str) -> dict:
+		"""The two rooms booked by card, not paid yet: the booking waits for its payment."""
+		quotes, _offer = two_rooms_quoted_together(session, code="BIG")
+		b = public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST, payment_method="Card",
+		                session_id=session, idempotency_key=f"idem-{session}")
+		self.assertEqual((b["status"], D(b["total"])), ("Pending Payment", D("1011.15")))
+		return b
+
+	def _money(self, booking_name: str) -> tuple:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what the booking owes
+		row = frappe.db.get_value("TEX Booking", booking_name, ["status", "total_amount", "balance_amount"],
+		                          as_dict=True)
+		fees = [D(frappe.db.get_value("Reservation", r, "cancellation_fee") or 0)
+		        for r in sorted(frappe.get_all("TEX Booking Room", filters={"parent": booking_name}, pluck="reservation"))]
+		return row.status, D(row.total_amount), D(row.balance_amount), fees
+
+	def test_a_room_of_a_booking_not_paid_yet_still_carries_the_discount_the_others_keep(self):
+		# E1: C6 frees the rate's penalty of a booking never confirmed, not the discount room 1 keeps
+		self._big(minimum=1100)
+		b = self._pending("g84-pend")
+		room2 = b["rooms"][1]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest cancels room 2 on the manage page
+		self.assertEqual(public.manage_cancel(token=b["manage_token"], reservation=room2)["penalty"], "80.25")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what the booking owes
+		bk = frappe.get_doc("TEX Booking", b["booking"])
+		self.assertEqual((bk.status, D(bk.total_amount)), ("Pending Payment", D("802.50")))     # 722.25 + 80.25
+		self.assertEqual(D(bk.amount_due_now), booking.required_now(bk))                         # its deposit + 80.25
+		self.assertEqual(D(bk.amount_due_now), D("216.68") + D("80.25"))
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest pays what is due now
+		p = public.pay_booking(token=b["manage_token"])
+		self.assertEqual(D(frappe.db.get_value("TEX Payment Transaction", p["transaction"], "amount")), D("296.93"))
+		public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])
+		self.assertEqual(self._money(b["booking"])[:3], ("Partially Cancelled", D("802.50"), D("505.57")))
+
+	def test_a_booking_that_expires_unpaid_owes_nothing_not_even_the_discount(self):
+		self._big(minimum=1100)
+		b = self._pending("g84-pend-exp")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest cancels room 2, never pays
+		public.manage_cancel(token=b["manage_token"], reservation=b["rooms"][1]["reservation"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job runs past the hold
+		self.assertTrue(booking.expire_booking(b["booking"], now=add_to_date(now_datetime(), days=2)))
+		self.assertEqual(self._money(b["booking"]), ("Cancelled", D("0"), D("0"), [D("0"), D("0")]))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.fees_void",
+		                                                     "reference_name": b["booking"]}))
+		# its payment was made in time after all (B4): room 1 is taken back, and room 2 carries the discount again
+		booking.revive_expired(b["booking"], reason="paid in time")
+		self.assertEqual(self._money(b["booking"]), ("Pending Payment", D("802.50"), D("802.50"), [D("0"), D("80.25")]))
+
+	def test_a_booking_cancelled_before_it_was_paid_owes_nothing_not_even_the_discount(self):
+		self._big(minimum=1100)
+		b = self._pending("g84-pend-all")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest cancels both rooms, never pays
+		for row in reversed(b["rooms"]):
+			public.manage_cancel(token=b["manage_token"], reservation=row["reservation"])
+		self.assertEqual(self._money(b["booking"]), ("Cancelled", D("0"), D("0"), [D("0"), D("0")]))
+
 	def test_removing_an_extra_the_basket_counted_charges_the_other_rooms_discount(self):
 		self._big(minimum=1150)
 		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor adds a transfer to room 1
