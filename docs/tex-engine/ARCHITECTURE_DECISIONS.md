@@ -8608,3 +8608,31 @@ out of the same report: an outranked policy override, a negative total a hidden 
   - a Revenue Manager's warnings equal the stored report.
 
   Fail-first: 2 failures (both of the publisher's subtests) on the code before item 4.
+
+**Verification (S16 re-review 4 follow-up, security and cost group).** On `3b2196f`. Main `1575c8b`
+is contained, so nothing was merged.
+- *Unit:* 523 OK. ruff is clean.
+- *Integration:* all 40 modules, migrated with the tree (`migrate_test.sh`; migrate rc 0).
+  - 862 tests: 861 OK (10 skipped, as before) and 1 error.
+  - The error is `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails`. The site date
+    was a Saturday, and this test depends on the weekday (see "Final verification"). It is not this
+    group's.
+  - `test_pricing_workspace_api` passed 64 tests, `test_existing_semantics` 13.
+  - The perf module's p95s are within budget: whole-matrix overlay 273 ms, 12 parties 334 ms,
+    quotes 253 / 236 ms.
+- *Upstream with the tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+- *Not run:* no frontend change, so no `tsc`, build, i18n or Playwright run.
+
+**Open after the S16 re-review 4 follow-up, security and cost group.**
+- *A refused publish still names every ERROR to any publisher.* `publish` throws "Cannot publish: …"
+  with the full check's error messages before anything is written or audited. For a publisher
+  without cost, an ERROR whose presence depends on a hidden rule's op is therefore still an unaudited
+  probe of whether that rule defers. Examples: OCC_AMBIGUOUS at a slot a hidden rule decides; the
+  sweep's tie under a hidden rule. A probe that does not refuse publishes the draft, which is
+  audited.
+  - Filtering the messages alone would not close the channel: the refusal itself is the answer.
+    That needs an owner decision on publish semantics for such publishers.
+- *The publish audit* records `warnings: len(issues)`, the full count.
+- `test_existing_semantics.HIDEABLE` mirrors the old `HIDEABLE_CODES` and was left unchanged. The
+  three codes added here are ERRORs, which a published version's report never holds, so its
+  assertions are unaffected.

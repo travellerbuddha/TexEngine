@@ -1116,8 +1116,15 @@ Tests with fail-first output are in ADR-061:
   more cases, and 160 generated rule sets under every combination of hidden ops;
 - integration: a publisher with `contract.publish` without `price.view_cost`.
 
-Unit 523 OK, ruff clean. The integration regression is in ADR-061. Status unchanged (PARTIAL): the
-final verification's open failures are not this group's.
+Verification:
+- Unit 523 OK, ruff clean.
+- Integration, all 40 modules: 862 tests, 861 OK (10 skipped) and 1 error. The error is
+  `test_system_status`'s weekday-dependent FX test; the site date was a Saturday.
+- Upstream: 76/76, 13/13, banquet 101.
+
+Open: a refused publish still names every ERROR to a publisher without cost (ADR-061).
+
+Status unchanged (PARTIAL): the final verification's open failures are not this group's.
 
 **Pricing Workspace status (R-04): PARTIAL (built: S1–S16, the S16 review, three re-review follow-ups and the existing-semantics follow-up, branch `pricing-workspace`; the final verification above is not green in every suite: two intermittent failures in the workspace's own specs (a key typed at once after Escape lost; one header-lane arrow step), and two outside it (`test_system_status`'s weekday-dependent FX test; two `entry-branding` navigation tests on the shared site's accumulated E2E data)).** Backend S2–S5 (opt-in: `workspace=1`; existing callers get main's answers)
 (the draft overlay for `price_matrix`, `validate_version` and `preview_price`, cell sources, issue
