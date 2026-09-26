@@ -512,3 +512,31 @@ class TestPartialCancellation(HoldCase):
 		self.assertEqual(self.statuses(confirmed), ("Partially Cancelled", ["Cancelled", "Confirmed"]))
 		migrate("p52_partly_cancelled_awaiting_payment")                # a second run changes nothing
 		self.assertEqual(self.statuses(waiting), ("Pending Payment", ["Cancelled", "Pending Payment"]))
+
+
+class TestExpiryWithMoney(HoldCase):
+	"""B2 (audit 1b): a booking waiting for its payment that was partly paid (a first of two links,
+	a part paid at the desk) and then expires never keeps that money as a negative balance: the
+	money comes off the cancelled booking into reconciliation, audited with its amount."""
+
+	def test_money_paid_before_the_expiry_goes_to_reconciliation(self):
+		b = self.book()
+		part = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		txn = pay.record_manual(booking=b["booking"], amount=str(part), method="Cash", reference="first half",
+		                        idempotency_key=f"b2-half-{b['booking']}")["transaction"]
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))   # the rest is still due
+		self.assertEqual(paid(b), part)
+		passes(b["booking"], 25)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		self.assertEqual(paid(b), D(0))                                               # never a negative balance
+		self.assertEqual(pay.allocated_of(txn), D(0))
+		t = txn_state(txn)
+		self.assertEqual((t.status, t.reconciliation), ("Succeeded", "Action Required"))
+		import json
+
+		expired = frappe.get_all("TEX Audit Event", filters={"action": "booking.expire", "reference_name": b["booking"]},
+		                         pluck="new_value")
+		self.assertEqual(D(json.loads(expired[0])["paid"]), part)                      # the amount is on record
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                     "reference_name": txn}))

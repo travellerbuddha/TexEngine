@@ -36,11 +36,13 @@ HOLD_EXPIRED = "HOLD_EXPIRED"
 ROOMS_RELEASED = "ROOMS_RELEASED"
 BOOKING_CANCELLED = "BOOKING_CANCELLED"
 NOT_PAYABLE = "NOT_PAYABLE"
+EXPIRED_UNPAID = "EXPIRED_UNPAID"
 TAKES_MONEY = ("Confirmed", "Partially Cancelled")
 CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
           HOLD_EXPIRED: "its hold and payment window had ended",
           BOOKING_CANCELLED: "it had been cancelled",
-          NOT_PAYABLE: "it could not take payments"}
+          NOT_PAYABLE: "it could not take payments",
+          EXPIRED_UNPAID: "its hold ended before it was paid in full"}
 REFUND_REASON = "the booking could not be confirmed: the payment arrived after its rooms were given back"
 
 
@@ -87,11 +89,43 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	        f"{cause}. Not confirmed: {detail}. "
 	        + ("The rooms are gone: the payment is refunded." if state == "Refund Queued" else
 	           "Book the stay again once the guest accepts it and allocate this payment to it, or refund it."))
+	_flag(txn, booking, why, state, note, from_db(txn.amount, ccy), rooms_free_now=free)
+
+
+def money_off_expired(booking: str, *, now: datetime | None = None):
+	"""B2: the money a booking held when it expired before it was paid in full (a first of two
+	links, a part paid at the desk) comes off the cancelled booking — never a negative balance —
+	and each charge it came from goes to reconciliation for staff. → the amount taken off."""
+	from kamra.tex.payments import service as pay
+
+	now = get_datetime(now or now_datetime())
+	taken = ZERO
+	for name in sorted(set(frappe.get_all("TEX Payment Allocation", filters={"booking": booking},
+	                                      pluck="transaction"))):
+		held = pay.booking_nets(name, lock=True).get(booking, ZERO) - pay.in_flight_from(name, booking, lock=True)
+		if held <= ZERO:
+			continue
+		pay.release(name, booking=booking, amount=held, reason=CAUSES[EXPIRED_UNPAID],
+		            idempotency_key=f"expired:{booking}:{name}", _system=True)
+		txn = frappe.get_doc(TXN, name)
+		note = (f"{to_str(held)} {txn.currency} of this payment was on booking {booking}, whose hold ended at "
+		        f"{now:%Y-%m-%d %H:%M} before it was paid in full: the booking expired with its rooms and the money "
+		        "came off it. Book the stay again once the guest accepts it and allocate this payment to it, or "
+		        "refund it.")
+		_flag(txn, booking, EXPIRED_UNPAID, "Action Required", note, held)
+		taken += held
+	return taken
+
+
+def _flag(txn, booking: str, why: str, state: str, note: str, amount, **extra) -> None:
+	"""Put a charge's money in reconciliation (never twice), audited."""
+	if frappe.db.get_value(TXN, txn.name, "reconciliation") in OPEN:
+		return
 	frappe.db.set_value(TXN, txn.name, {"reconciliation": state, "reconciliation_note": note[:1000]},
 	                    update_modified=False)
 	audit("payment.reconciliation_required", reference_doctype=TXN, reference_name=txn.name, property=txn.property,
-	      new={"booking": booking, "why": why, "state": state, "amount": to_str(from_db(txn.amount, ccy)),
-	           "currency": ccy, "rooms_free_now": free})
+	      new={"booking": booking, "why": why, "state": state, "amount": to_str(amount), "currency": txn.currency,
+	           **extra})
 
 
 def refusal(why: str, b, amount) -> str:

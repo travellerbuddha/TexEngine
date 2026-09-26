@@ -682,11 +682,14 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	return doc.name
 
 
-def release(transaction: str, *, booking: str, amount, reason: str, idempotency_key: str | None = None) -> str:
-	"""Take (part of) an allocation back from a booking — e.g. to transfer it."""
+def release(transaction: str, *, booking: str, amount, reason: str, idempotency_key: str | None = None,
+            _system: bool = False) -> str:
+	"""Take (part of) an allocation back from a booking — e.g. to transfer it. ``_system``: TEX takes
+	it back itself (a booking that expired before it was paid in full, B2)."""
 	_lock("TEX Payment Transaction", transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction)
-	scope.require("payment.refund", txn.property)
+	if not _system:
+		scope.require("payment.refund", txn.property)
 	key, done = _replayed_allocation(txn.property, idempotency_key, "release", lock=True)
 	if done:
 		return done

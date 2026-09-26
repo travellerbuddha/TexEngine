@@ -1132,10 +1132,18 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 		frappe.flags.kamra_status_transition = False
 		frappe.flags.kamra_cancelling = False
 	_refresh_booking_after_change(booking)
+	paid = from_db(b.paid_amount, b.currency)
+	if paid > ZERO:
+		# paid in part before its hold ended: that money comes off the cancelled booking into
+		# reconciliation, never a negative balance (B2)
+		from kamra.tex.services import late_payments
+
+		late_payments.money_off_expired(booking, now=now)
 	audit("booking.expire", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
 	      old={"status": b.status}, new={"status": frappe.db.get_value("TEX Booking", booking, "status"),
 	                                     "reservations": holding, "hold_deadline": str(deadline) if deadline else None,
-	                                     "payment_attempt_until": str(b.payment_attempt_until or "") or None})
+	                                     "payment_attempt_until": str(b.payment_attempt_until or "") or None,
+	                                     "paid": to_str(paid), "currency": b.currency})
 	return True
 
 
