@@ -1194,7 +1194,8 @@ Verification (details in ADR-061):
   dialogs).
 - Unit 529 OK, ruff clean, `npm run test:unit` 316/316, `npm run test:dom` 42/42, `tsc -b`,
   `npm run build` (bundles not committed) and `npm run i18n:tex` clean.
-- Integration and upstream suites: see ADR-061 (this group changes no server code).
+- Integration, all 40 modules: 866 tests, 865 OK (10 skipped) and 1 error, the weekday-dependent
+  FX test (a Saturday site date). Upstream: 76/76, 13/13, banquet 101.
 
 Status unchanged (PARTIAL): the workspace's own suites are green now, but not every suite is (the
 FX test's weekday and the `entry-branding` tests on the shared site's data are not this group's).

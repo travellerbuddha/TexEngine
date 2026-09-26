@@ -8896,6 +8896,10 @@ contained, so nothing was merged.
 - *The refusal is conservative.* It compares the winning rules' ops and values, not amounts, so a
   switch that would give the same amount through another op (×0.8 against 80 %) is refused too, as
   is one where a hidden policy rule defers.
+- *The single-use row without a rule does not always read "×1.00 default (no single-use rule)"
+  (§3.6.2).* Where a special combination prices one adult in the whole column, the engine default
+  is not what one adult pays, so the cell reads "special combination" (with the card's name and
+  note); the design's line assumes no card prices single use.
 - *"Zeitraum" stays in the Price test's stage names and the engine's explanation* (`rates.pt.*`,
   `rates.explain.*`, shared with screens outside the workspace; a committed German Price test check
   reads them).
@@ -8938,3 +8942,15 @@ main `1575c8b` is contained, so nothing was merged.
     checks, 105 of 107).
   - Every `pricing-workspace*` spec on `7e3b857`: 107/107, the acceptance at 41 clicks, 0 section
     switches, 0 modal dialogs.
+- *Integration, all 40 modules, on `ee03be1`* (migrated with the tree): 866 tests, 865 OK (10
+  skipped) and 1 error, `test_system_status.test_an_old_fx_rate_warns_and_a_stale_one_fails` (the
+  site date was a Saturday; the weekday-dependent test of the final verification, not this group's).
+  `test_pricing_workspace_api` 68, `test_existing_semantics` 13, the perf module 2 all OK.
+- *Upstream with the tree:* eval harness 76/76, front-desk journey 13/13, banquet 101 OK.
+
+**Open after the final follow-up, workspace UX and keyboard group.**
+- A green whole run still needs the FX test on a Wednesday-to-Friday site date (or the test fixed)
+  and the `entry-branding` navigation tests on a site without the accumulated E2E drafts (or a
+  version list that leaves archived contracts out); neither is the workspace's.
+- As before: the §3.18 one-screen fit of the owner example with the ladder, one shared inline-edit
+  hook for the three grids, O1–O5 (owner input 13).
