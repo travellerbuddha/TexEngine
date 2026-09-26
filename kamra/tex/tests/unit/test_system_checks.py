@@ -113,6 +113,21 @@ class TestFx(unittest.TestCase):
 	def test_monday_morning_before_the_fetch_is_not_an_alarm(self):
 		self.assertEqual(c.fx_check(self.pair(date(2026, 9, 18)), date(2026, 9, 21))["status"], c.OK)
 
+	def test_every_weekday_warns_after_two_business_days(self):
+		"""The table the integration test pins its week with (test_system_status): for each weekday, the
+		oldest rate that is not yet old and the newest that is, in calendar days, worked out by hand."""
+		ages = {0: (4, 5), 1: (4, 5), 2: (2, 3), 3: (2, 3), 4: (2, 3), 5: (3, 4), 6: (4, 5)}
+		monday = date(2026, 9, 28)
+		for today in (monday + timedelta(days=i) for i in range(7)):
+			quiet, old = ages[today.weekday()]
+			with self.subTest(weekday=today.strftime("%A")):
+				seen = {d: c.fx_check(self.pair(today - timedelta(days=d), max_age=7), today) for d in (0, quiet, old, 7, 8)}
+				self.assertEqual({d: v["status"] for d, v in seen.items()},
+				                 {0: c.OK, quiet: c.OK, old: c.WARN, 7: c.WARN, 8: c.FAIL})
+				self.assertEqual([(i["reason"], i["params"]["days"]) for d in (old, 7, 8) for i in seen[d]["issues"]],
+				                 [("fx_old", old), ("fx_old", 7), ("fx_stale", 8)])
+				self.assertEqual(c.business_days(today - timedelta(days=quiet), today), c.FX_WARN_BUSINESS_DAYS)
+
 
 class TestTransitions(unittest.TestCase):
 	def test_only_worsening_and_recovery_are_sent(self):

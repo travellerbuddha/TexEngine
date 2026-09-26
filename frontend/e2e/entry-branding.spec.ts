@@ -247,22 +247,33 @@ test("navigation: every new sub-section opens its screen for a user who holds it
   const rows = page.locator("main table tbody tr")
 
   await test.step("Rates & Contracts: versions, periods, occupancy rules, rate plans", async () => {
-    for (const [entry, path] of [
-      ["Contract versions", "/tex/rates/versions"],
-      ["Price periods", "/tex/rates/periods"],
-      ["Occupancy rules", "/tex/rates/occupancy"],
-      ["Rate plans", "/tex/rates/rate-plans"],
+    // while a list loads, its table shows placeholder rows (no data, nothing to open): the rows
+    // counted and opened are those of the list's answer, each a link to its version
+    const loaded = page.locator("main table tbody tr[tabindex='0']")
+    for (const [entry, path, method, section] of [
+      ["Contract versions", "/tex/rates/versions", "versions", null],
+      ["Price periods", "/tex/rates/periods", "version_rows", "periods"],
+      ["Occupancy rules", "/tex/rates/occupancy", "version_rows", "occupancy"],
+      ["Rate plans", "/tex/rates/rate-plans", "version_rows", "rate_plans"],
     ] as const) {
+      const answer = page.waitForResponse((r) => {
+        const url = new URL(r.url())
+        return url.pathname.endsWith(`/api/method/kamra.tex.api.lists.${method}`) && url.searchParams.get("section") === section
+      })
       const nav = await openArea(page, "Rates & Contracts")
       await nav.getByRole("link", { name: entry, exact: true }).click()
       await expect(page).toHaveURL(new RegExp(`${path}$`))
       await expect(heading(entry)).toBeVisible()
       await expect(nav.getByRole("link", { name: entry, exact: true })).toHaveAttribute("aria-current", "page")
-      await expect(rows.first()).toBeVisible()
-      expect(await rows.count(), entry).toBeGreaterThan(0)
+      const res = await answer
+      expect(res.ok(), entry).toBeTruthy()
+      const list = ((await res.json()) as { message: { rows: unknown[] } }).message
+      expect(list.rows.length, `${entry}: rows in the list's answer`).toBeGreaterThan(0)
+      await expect(loaded.first()).toBeVisible()
+      await expect(rows).toHaveCount(await loaded.count()) // no placeholder row left
     }
     // a row opens its version on the matching table: Commercial rules, Rate plans
-    await rows.first().click()
+    await loaded.first().click()
     await expect(page).toHaveURL(/\/tex\/rates\/contracts\/[^/]+\/versions\/[^/#]+#plans$/)
     await expect(page.getByRole("tablist", { name: "Version sections", exact: true }).getByRole("tab", { name: /^Commercial rules/, selected: true })).toBeVisible()
     await expect(page.getByRole("tablist", { name: "Rule tables", exact: true }).getByRole("tab", { name: /^Rate plans/, selected: true })).toBeVisible()

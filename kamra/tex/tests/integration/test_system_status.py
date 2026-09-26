@@ -12,10 +12,11 @@
 """
 
 import json
+from datetime import datetime, time, timedelta
 from unittest import mock
 
 import frappe
-from frappe.utils import add_days, add_to_date, now_datetime, nowdate
+from frappe.utils import add_to_date, getdate, now_datetime, nowdate
 
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
@@ -136,27 +137,56 @@ class TestSystemStatusAccess(TexTestCase):
 		self.assertEqual(out["overall"], "fail")                         # the worst check decides
 
 	def test_an_old_fx_rate_warns_and_a_stale_one_fails(self):
+		"""The warning counts business days (more than ``FX_WARN_BUSINESS_DAYS``), the failure calendar
+		days (the policy's ``max_age_days``), so what a rate of a given age reads as depends on the
+		weekday: the site's "now" is pinned to each day of a week, Monday to Sunday, and every day says
+		the same four things (no rate, a stale rate, an old rate, a recent one)."""
 		fx.ensure_currency("XTS", "¤")
-		fx.ensure_live("TEX FX Policy", {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "XTS"},
-		               {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "XTS", "mode": "PROVIDER",
-		                "provider": "ECB", "rate_type": "REFERENCE", "max_age_days": 4})
+		policy = fx.ensure_live("TEX FX Policy", {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "XTS"},
+		                        {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "XTS",
+		                         "mode": "PROVIDER", "provider": "ECB", "rate_type": "REFERENCE", "max_age_days": 7})
+		self.assertEqual(frappe.db.get_value("TEX FX Policy", policy, "max_age_days"), 7)
+		# weekday → (the oldest rate that is not yet old, the newest that is), in calendar days: the business
+		# days after the rate's date up to and including today, 2 and 3 (worked out by hand, not with
+		# checks.business_days)
+		ages = {0: (4, 5), 1: (4, 5), 2: (2, 3), 3: (2, 3), 4: (2, 3), 5: (3, 4), 6: (4, 5)}
+		first = getdate(nowdate()) + timedelta(days=7 - getdate(nowdate()).weekday())    # next Monday
+		week = [first + timedelta(days=i) for i in range(7)]
+		self.assertEqual([d.weekday() for d in week], list(range(7)))
 
-		def rate(days_ago: int):
-			frappe.get_doc({"doctype": "TEX FX Rate", "provider": "ECB", "base_currency": "EUR", "quote_currency": "XTS",
-			                "rate_type": "REFERENCE", "rate": 1.25, "rate_date": add_days(nowdate(), -days_ago),
-			                "fetched_at": add_days(now_datetime(), -days_ago)}).insert(ignore_permissions=True)
+		for today in week:
+			pinned = datetime.combine(today, time(12, 0))
+			quiet, old = ages[today.weekday()]
+			with self.subTest(today=str(today), weekday=today.strftime("%A")), \
+					mock.patch("kamra.tex.api.system.now_datetime", return_value=pinned):
+				frappe.db.savepoint("fx_week")                                  # each day starts without a rate
 
-		def issue():
-			c = check(system_api().status(property=fx.PROPERTY), "fx.rates")
-			return next((i for i in c["issues"] if i["params"].get("pair") == "EUR/XTS"), None)
+				def rate(days_ago: int, pinned=pinned):
+					frappe.get_doc({"doctype": "TEX FX Rate", "provider": "ECB", "base_currency": "EUR",
+					                "quote_currency": "XTS", "rate_type": "REFERENCE", "rate": 1.25,
+					                "rate_date": (pinned - timedelta(days=days_ago)).date(),
+					                "fetched_at": pinned - timedelta(days=days_ago)}).insert(ignore_permissions=True)
 
-		self.assertEqual(issue()["status"], "fail")                      # no rate at all: pricing refuses
-		rate(6)
-		self.assertEqual((issue()["status"], issue()["reason"]), ("fail", "fx_stale"))    # older than the policy's 4 days
-		rate(3)
-		self.assertEqual((issue()["status"], issue()["reason"], issue()["params"]["days"]), ("warn", "fx_old", 3))
-		rate(0)
-		self.assertIsNone(issue())                                        # today's rate: nothing to say
+				def issue():
+					c = check(system_api().status(property=fx.PROPERTY), "fx.rates")
+					found = next((i for i in c["issues"] if i["params"].get("pair") == "EUR/XTS"), None)
+					return found and (found["status"], found["reason"], found["params"].get("days"),
+					                  found["params"].get("max_days"))
+
+				try:
+					self.assertEqual(issue(), ("fail", "fx_missing", None, None))    # no rate at all: pricing refuses
+					rate(8)
+					self.assertEqual(issue(), ("fail", "fx_stale", 8, 7))           # older than the policy's 7 days
+					rate(7)
+					self.assertEqual(issue(), ("warn", "fx_old", 7, 7))             # the policy's age itself: old only
+					rate(old)
+					self.assertEqual(issue(), ("warn", "fx_old", old, 7))           # 3 business days: old
+					rate(quiet)
+					self.assertIsNone(issue())                                     # 2 business days: not yet
+					rate(0)
+					self.assertIsNone(issue())                                     # today's rate: nothing to say
+				finally:
+					frappe.db.rollback(save_point="fx_week")
 
 	def test_no_secret_appears_in_the_status_payload(self):
 		conn = pms_connection(fx.PROPERTY, "PMS with a key", api_key="tex-ops-api-key-3c9d", secret="tex-ops-secret-77ab")

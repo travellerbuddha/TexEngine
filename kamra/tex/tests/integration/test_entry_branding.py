@@ -24,7 +24,7 @@ import threading
 from unittest import mock
 
 import frappe
-from frappe.utils import add_days, getdate, nowdate, set_request
+from frappe.utils import add_days, add_to_date, getdate, nowdate, set_request
 from frappe.website.serve import get_response
 
 from kamra.tex.security import scope
@@ -310,6 +310,68 @@ class TestContractLists(ListCase):
 			out = lists.version_rows(section="periods")
 		self.assertTrue(out["truncated"])
 		self.assertEqual([(r["version"], r["period_code"]) for r in out["rows"]], [(newer, "LOW"), (newer, "HIGH")])
+
+	def archived_drafts(self, n: int) -> list[str]:
+		"""``n`` archived contracts, each with a Draft version changed after every other version (one of
+		them Published, as an archived contract's live version stays Published), and a period, an
+		occupancy rule and a rate plan in it: what E2E runs leave behind (they archive what they made)."""
+		now = frappe.utils.now_datetime()
+		later = add_to_date(now, days=1)
+		tag = frappe.generate_hash(length=6)
+		contracts = [f"TEX-ARCH-{tag}-{i:05d}" for i in range(n)]
+		versions = [f"tex-arch-{tag}-{i:05d}" for i in range(n)]
+		frappe.db.bulk_insert("TEX Contract", ("name", "creation", "modified", "owner", "modified_by", "property",
+		                                       "contract_code", "contract_name", "market", "contract_currency",
+		                                       "pricing_basis", "status"),
+		                      [(c, now, now, "Administrator", "Administrator", fx.PROPERTY, c, c, "DE", "EUR", "PERSON",
+		                        "Archived") for c in contracts])
+		frappe.db.bulk_insert("TEX Contract Version", ("name", "creation", "modified", "owner", "modified_by",
+		                                               "contract", "status", "version_no"),
+		                      [(v, now, add_to_date(later, seconds=i), "Administrator", "Administrator", c,
+		                        "Published" if i == 0 else "Draft", 1)
+		                       for i, (c, v) in enumerate(zip(contracts, versions, strict=True))])
+		child = ("name", "creation", "modified", "owner", "modified_by", "parent", "parenttype", "parentfield", "idx")
+		for doctype, field, cols, values in (
+				("TEX Price Period", "periods", ("period_code", "start_date", "end_date"),
+				 ("ARCH", nowdate(), add_days(nowdate(), 30))),
+				("TEX Occupancy Rule", "occupancy_rules", ("target", "position", "op", "value"), ("ADULT", 1, "MULTIPLY", 1)),
+				("TEX Contract Rate Plan", "rate_plans", ("rate_plan", "op", "value", "refundable"),
+				 (self.f["rate_plans"]["NRF"], "ADJUST_PERCENT", -5, 0))):
+			frappe.db.bulk_insert(doctype, (*child, *cols),
+			                      [(frappe.generate_hash(length=14), now, now, "Administrator", "Administrator", v,
+			                        "TEX Contract Version", field, 1, *values) for v in versions])
+		return versions
+
+	def test_archived_contracts_never_crowd_the_current_versions_out(self):
+		"""The version cap counted the Draft versions of archived contracts as current: with more of them
+		than the cap (on the shared test site one hotel had 2,114, left by E2E runs), changed after every
+		live version, the current tables of every hotel came back empty and cut. The current tables list
+		the versions of contracts that are not archived; the cap counts only the versions with a row in
+		the table; "all" still lists the archived contracts' versions, the most recently changed first,
+		and says what it cut."""
+		from kamra.tex.api import lists
+
+		archived = self.archived_drafts(lists.MAX_VERSIONS + 20)
+		draft = fx.create_contract(self.f, code="ENTRY-G64-DRAFT", publish=False)["version"]
+		mine = {self.c["version"], draft}
+		self.as_user(self.rev)
+		for section in ("periods", "occupancy", "rate_plans"):
+			with self.subTest(section=section):
+				out = lists.version_rows(section=section, property=fx.PROPERTY)
+				versions = list(dict.fromkeys(r["version"] for r in out["rows"]))
+				self.assertEqual(mine - set(versions), set())                   # the live version and the draft
+				self.assertEqual(set(versions) & set(archived), set())          # no archived contract's version
+				self.assertFalse(out["truncated"])
+				modified = dict(frappe.get_all("TEX Contract Version", filters={"name": ("in", versions)},
+				                               fields=["name", "modified"], as_list=True))
+				self.assertEqual(versions, sorted(versions, key=lambda v: (modified[v], v), reverse=True))
+				self.assertEqual({r["state"] for r in out["rows"] if r["version"] in mine}, {"live", "draft"})
+
+				every = lists.version_rows(section=section, property=fx.PROPERTY, status="all")
+				self.assertTrue(every["truncated"])                             # more archived versions than the cap
+				shown = list(dict.fromkeys(r["version"] for r in every["rows"]))
+				self.assertEqual(len(shown), lists.MAX_VERSIONS)
+				self.assertEqual(shown, archived[::-1][:lists.MAX_VERSIONS])     # the most recently changed first
 
 
 class TestRestrictionList(ListCase):
