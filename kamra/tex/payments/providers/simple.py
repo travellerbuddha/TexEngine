@@ -6,9 +6,15 @@ import hashlib
 import hmac
 from decimal import Decimal
 
-from frappe.utils import now_datetime
-
 from kamra.tex.payments.providers.base import Checkout, Intent, Outcome, PaymentProvider, ProviderError
+
+
+def _now():
+	"""The server's clock (the site's time zone); frappe only when called, so the module loads without a
+	bench (K3)."""
+	from frappe.utils import now_datetime
+
+	return now_datetime()
 
 
 def mock_signature(secret: str, transaction: str, outcome: str) -> str:
@@ -48,7 +54,7 @@ class MockProvider(PaymentProvider):
 		# the sandbox gateway captures when it answers, by the server's clock: never a time the browser
 		# sent (D3)
 		return Outcome(status="Succeeded", provider_ref=f"MOCK-{transaction}", raw_status="APPROVED",
-		               card_brand="TESTCARD", card_last4="4242", captured_at=now_datetime())
+		               card_brand="TESTCARD", card_last4="4242", captured_at=_now())
 
 	def refund(self, provider_ref: str, amount: Decimal, currency: str, *, reference: str | None = None) -> Outcome:
 		return Outcome(status="Succeeded", provider_ref=f"{provider_ref}-R", amount=amount, currency=currency,

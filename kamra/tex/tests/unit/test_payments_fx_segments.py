@@ -96,7 +96,7 @@ class TestGatewaySignatures(unittest.TestCase):
 			simple.MockProvider(Acc(environment="Production"), "s")
 		p = simple.MockProvider(Acc(environment="Sandbox"), "secret")
 		good = simple.mock_signature("secret", "PTX-1", "success")
-		with mock.patch.object(simple, "now_datetime", return_value=datetime(2027, 1, 1, 12, 0)):
+		with mock.patch.object(simple, "_now", return_value=datetime(2027, 1, 1, 12, 0)):
 			self.assertEqual(p.handle_callback("PTX-1", {"outcome": "success", "sig": good}, {}, b"").status,
 			                 "Succeeded")
 		with self.assertRaises(turkey.ProviderError):
@@ -210,7 +210,7 @@ class TestProviderRegistry(unittest.TestCase):
 			self.assertIsNone(p.handle_callback("PTX-8", odd, {}, b"").captured_at)
 		m = simple.MockProvider(_Acc(environment="Sandbox"), "secret")
 		good = simple.mock_signature("secret", "PTX-1", "success")
-		with mock.patch.object(simple, "now_datetime", return_value=datetime(2027, 1, 1, 12, 0)):
+		with mock.patch.object(simple, "_now", return_value=datetime(2027, 1, 1, 12, 0)):
 			out = m.handle_callback("PTX-1", {"outcome": "success", "sig": good, "captured_at": "2020-01-01 00:00"},
 			                        {}, b"")
 		self.assertEqual(out.captured_at, datetime(2027, 1, 1, 12, 0))
@@ -297,3 +297,18 @@ class TestProviderRegistry(unittest.TestCase):
 			self.assertEqual(p.handle_callback("PTX-9", {}, {}, b"").status, "Failed")
 		with mock.patch.object(turkey.requests, "post", answer({"status_code": 1})):
 			self.assertEqual(p.handle_callback("PTX-9", {}, {}, b"").status, "Pending")   # never failed on doubt
+
+
+class TestProvidersWithoutBench(unittest.TestCase):
+	def test_the_gateway_providers_load_without_frappe(self):
+		"""K3 (audit 1c-son): the pure gateway modules load without a bench (no frappe), as the tests of
+		this directory run."""
+		import subprocess
+		import sys
+		from pathlib import Path
+
+		code = ("import sys; sys.modules['frappe'] = None\n"
+		        "import kamra.tex.payments.providers.simple, kamra.tex.payments.providers.turkey")
+		out = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[4],
+		                     capture_output=True, text=True, timeout=60)
+		self.assertEqual(out.returncode, 0, out.stderr[-800:])
