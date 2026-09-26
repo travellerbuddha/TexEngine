@@ -161,29 +161,61 @@ class TestLatePayment(HoldCase):
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed", "Confirmed"]))
 		self.assertFalse(txn_state(payment["transaction"]).reconciliation)
 
-	def test_a_payment_after_the_hold_and_its_checkout_never_confirms_the_old_quote(self):
+	def test_a_payment_while_its_rooms_are_still_held_confirms_it_at_its_price(self):
+		"""B3 a): hold and checkout are over but the expiry job has not run: the rooms are still
+		held for this booking, nothing is taken again, so its payment confirms it as quoted."""
 		b = self.book()
 		payment = self.start_payment(b)
-		passes(b["booking"], 60)                 # hold and checkout over; the expiry job has not run yet
+		passes(b["booking"], 60)
+		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		mailed.assert_called_once()
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertFalse(txn_state(payment["transaction"]).reconciliation)
+		self.assertEqual(pay.allocated_of(payment["transaction"]), D(b["due_now"]))
+
+	def test_a_payment_after_its_rooms_were_given_back_is_reconciled(self):
+		"""B3 b): the booking expired and its rooms were given back; they are still free. Nothing is
+		revived by itself: the money stays on record, off the booking, for staff."""
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)
+		run_expiry_jobs()
 		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			self.assertEqual(self.pays(payment)["status"], "Succeeded")      # the money is on record
 		mailed.assert_not_called()
 		self.assertEqual(confirmations(b), 0)
-		# the hold truly ended: the booking and its room expire now, never confirmed at the old price
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		t = txn_state(payment["transaction"])
 		self.assertEqual((t.status, t.reconciliation), ("Succeeded", "Action Required"))
-		self.assertIn("free now", t.reconciliation_note)          # availability and price evaluated again
+		self.assertIn("free now: yes", t.reconciliation_note)     # availability and price evaluated again
 		self.assertIn("price now", t.reconciliation_note)
 		self.assertEqual(pay.allocated_of(payment["transaction"]), D(0))   # never written on the booking
 		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "paid_amount")), D(0))
-		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
-		                                                     "reference_name": payment["transaction"]}))
 		# the gateway calling again changes nothing
 		self.assertTrue(self.pays(payment).get("replay"))
 		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.reconciliation_required",
 		                                                     "reference_name": payment["transaction"]}), 1)
 		self.assertEqual(frappe.db.count("TEX Payment Allocation", {"transaction": payment["transaction"]}), 0)
+
+	def test_while_a_rooms_are_held_b_cannot_have_them_and_a_late_payment_confirms_a(self):
+		"""B3: A holds the last Deluxe room past its hold (the job has not run yet). Guest B is told
+		it is sold out; A's payment then confirms A: the room is sold once, to A."""
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+		                     rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB", currency="EUR")
+		b_quote = quoting.create_quote(pick(res["properties"][0], room_code="DLX")["rooms"][0]["offer_key"])
+		a = self.book(room="DLX")                                   # A takes the last room first
+		payment = self.start_payment(a)
+		passes(a["booking"], 60)
+		with self.assertRaises(frappe.ValidationError) as refused:
+			booking.create_booking(quote_ids=[b_quote["quote_id"]], payment_method="Pay at Hotel",
+			                       guest={"first_name": "Ben", "last_name": "Late", "email": "ben.b3@example.com"})
+		self.assertIn("sold out", str(refused.exception))
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(a), ("Confirmed", ["Confirmed"]))
+		dlx = self.f["room_types"]["DLX"]
+		self.assertEqual(frappe.db.count("Reservation", {"room_type": dlx, "status": "Confirmed"}), 2)
 
 	def test_rooms_given_away_are_never_taken_back_by_a_late_payment(self):
 		"""The rooms of a booking still waiting were released before its payment arrived (as the PMS
@@ -490,6 +522,7 @@ class TestPartialCancellation(HoldCase):
 		payment = self.start_payment(b)
 		self.cancel_first(b)
 		passes(b["booking"], 60)
+		run_expiry_jobs()                                          # the room left was given back
 		self.assertEqual(self.pays(payment)["status"], "Succeeded")
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled", "Cancelled"]))
 		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Action Required")

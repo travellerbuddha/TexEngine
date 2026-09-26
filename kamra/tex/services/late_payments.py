@@ -1,21 +1,20 @@
-"""Late payments (K-2b; R-40, R-41, R-46): money for a booking whose rooms are not held for it.
+"""Late payments (K-2b, audit 1b B2/B3; R-40, R-41, R-46): money a booking cannot take as it is.
 
-A gateway (or a bank transfer, a payment link, staff) may bring money for a booking that cannot
-take it: a cancelled booking (beyond what it still owes), or one waiting for its payment after its
-hold truly ended — the hold deadline passed and no payment attempt started
-within it is still open (``holds``) — or after its rooms were released. That money never confirms
-the booking at the price it was quoted and never takes rooms back:
+A gateway (or a bank transfer, a payment link, staff) may bring money for a booking:
 
-- the booking expires at once with all its rooms (``booking.expire_booking``), if it had not yet;
-- the money stays on record on its charge, off the booking (never a negative balance), in
-  reconciliation: ``Refund Queued`` when the rooms are gone and the charge's gateway refunds
-  through TEX (``refund_queued`` makes it, once), else ``Action Required``: staff book the stay
-  again at today's price once the guest accepts it (then allocate the payment to it) or refund it;
-- the note says what is free now and what the stay costs now against its locked price;
-- ``payment.reconciliation_required`` is audited and the status page reports every open one.
+a) waiting for its payment with its rooms still held for it, even past its hold deadline (the
+   expiry job has not run): nothing is taken again, so the money confirms it at its locked price;
+b) whose rooms were given back (it expired, or a room was released) and are still free: nothing is
+   revived by itself — ``Action Required`` for staff;
+c) whose rooms were given back and sold to someone else: ``Refund Queued`` when the charge's
+   gateway refunds through TEX (``refund_queued`` makes it, once), else ``Action Required``;
+d) cancelled, beyond what it still owes (its cancellation charges): as b) or c).
 
-Nothing is confirmed or sent to the guest or the PMS. The caller holds the charge's lock (then the
-booking's): the order a payment callback takes."""
+In b)–d) the money stays on record on its charge, off the booking (never a negative balance); the
+note says what is free now and what the stay costs now against its locked price;
+``payment.reconciliation_required`` is audited. Nothing is confirmed or sent to the PMS. A booking
+that expires with money already on it hands that money over the same way (B2). The caller holds
+the charge's lock (then the booking's): the order a payment callback takes."""
 
 from __future__ import annotations
 
@@ -32,27 +31,24 @@ from kamra.tex.services import holds
 
 TXN = "TEX Payment Transaction"
 OPEN = ("Action Required", "Refund Queued")
-HOLD_EXPIRED = "HOLD_EXPIRED"
 ROOMS_RELEASED = "ROOMS_RELEASED"
 BOOKING_CANCELLED = "BOOKING_CANCELLED"
 NOT_PAYABLE = "NOT_PAYABLE"
 EXPIRED_UNPAID = "EXPIRED_UNPAID"
 TAKES_MONEY = ("Confirmed", "Partially Cancelled")
 CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
-          HOLD_EXPIRED: "its hold and payment window had ended",
           BOOKING_CANCELLED: "it had been cancelled",
           NOT_PAYABLE: "it could not take payments",
           EXPIRED_UNPAID: "its hold ended before it was paid in full"}
 REFUND_REASON = "the booking could not be confirmed: the payment arrived after its rooms were given back"
 
 
-def problem(b, now: datetime | None = None, amount=None) -> str | None:
+def problem(b, amount=None) -> str | None:
 	"""Why booking ``b`` (locked by the caller) may not take ``amount`` of money, or None when it
-	may (K-2b, K-2c). A confirmed (or partly cancelled) booking takes it. A cancelled one takes
-	at most what it still owes (its cancellation charges), else ``BOOKING_CANCELLED``. A booking
-	waiting for its payment takes it only while its rooms are held for it: ``ROOMS_RELEASED`` (a
-	room holds nothing any more), ``HOLD_EXPIRED`` (its hold deadline passed and no payment
-	attempt started within it is open). Any other status: ``NOT_PAYABLE``."""
+	may. A confirmed (or partly cancelled) booking takes it. A cancelled one takes at most what it
+	still owes (its cancellation charges), else ``BOOKING_CANCELLED``. A booking waiting for its
+	payment takes it while its rooms are held for it, however late (B3 a), else
+	``ROOMS_RELEASED``. Any other status: ``NOT_PAYABLE``."""
 	if b.status in TAKES_MONEY:
 		return None
 	if b.status == "Cancelled":
@@ -62,13 +58,9 @@ def problem(b, now: datetime | None = None, amount=None) -> str | None:
 		return NOT_PAYABLE
 	from kamra.tex.services import booking as booking_svc
 
-	if booking_svc.rooms_not_held(b):
-		return ROOMS_RELEASED
-	now = get_datetime(now or now_datetime())
-	if holds.in_flight(b, now):
-		return None
-	deadline = holds.hold_deadline(b.name, lock=True)
-	return HOLD_EXPIRED if deadline and deadline <= now else None
+	# its rooms still held for it: nothing is taken again, so its money confirms it as quoted,
+	# however late it comes (B3 a); rooms given back are never taken again by themselves (B3 b, c)
+	return ROOMS_RELEASED if booking_svc.rooms_not_held(b) else None
 
 
 def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> None:
@@ -135,7 +127,7 @@ def refusal(why: str, b, amount) -> str:
 		return _("Booking {0} is cancelled and owes {1} {2}: {3} {2} cannot be allocated to it. Book the stay "
 		         "again and allocate the payment there, or refund it.").format(
 			b.name, to_str(max(owed, ZERO)), b.currency, to_str(amount))
-	if why in (HOLD_EXPIRED, ROOMS_RELEASED):
+	if why == ROOMS_RELEASED:
 		return _("Booking {0} can no longer take this payment: {1}. Book the stay again and allocate the payment "
 		         "there, or refund it.").format(b.name, CAUSES[why])
 	return _("Booking {0} cannot take payments ({1}).").format(b.name, b.status)
