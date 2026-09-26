@@ -142,7 +142,7 @@ class TestFunnelPurge(PrivacyCase):
 		                                                           0, "{}"))
 		cutoff = add_days(now_datetime(), -180)
 		for sql, params, index in ((crm.PURGE_OLD, {"cutoff": cutoff, "n": crm.PURGE_BATCH}, "tex_funnel_time_session"),
-		                           (crm.PURGE_EVENTS, {"names": ("none",)}, "PRIMARY")):
+		                           (crm.PURGE_EVENT, {"name": "none"}, "PRIMARY")):
 			self.assertNotIn("IFNULL", sql.upper())
 			[plan] = frappe.db.sql(f"EXPLAIN {sql}", params, as_dict=True)
 			self.assertEqual((plan.key, plan.type != "ALL"), (index, True), (sql, plan))
