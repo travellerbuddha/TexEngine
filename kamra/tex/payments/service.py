@@ -648,12 +648,19 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 		frappe.throw(_("Currency mismatch between payment and booking."))
 	from kamra.tex.services import late_payments
 
-	why = late_payments.problem(b)
-	if why and _system:
-		# money that cannot confirm its booking: recorded, kept off it, in reconciliation (K-2b)
+	amount = quantize(D(amount), txn.currency)
+	why = late_payments.problem(b, amount=amount)
+	if why == late_payments.BOOKING_CANCELLED and _system:
+		from kamra.tex.services import guest_changes
+
+		if guest_changes.request_of_charge(txn):
+			why = None          # a guest change's payment: its request applies or refunds it (G-45)
+	if why:
+		if not _system:
+			frappe.throw(late_payments.refusal(why, b, amount))         # staff: told why, never silent (K-2c)
+		# money its booking cannot take: recorded, kept off it, in reconciliation (K-2b, K-2c)
 		late_payments.reconcile(txn, booking, why)
 		return None
-	amount = quantize(D(amount), txn.currency)
 	# a refund still waiting for its answer takes the unallocated money first: it is not free
 	free = (from_db(txn.amount, txn.currency) - allocated_of(transaction, lock=True) - refunded_of(transaction, lock=True)
 	        - in_flight_of(transaction, lock=True))
@@ -1222,7 +1229,9 @@ def mark_transfer_received(transaction: str, *, reference: str) -> dict:
 	_after_charge(txn)
 	audit("payment.transfer_received", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
 	      property=txn.property, new={"reference": reference})
-	return {"transaction": txn.name, "status": txn.status}
+	# money its booking could not take is in reconciliation: staff see it at once (K-2c)
+	return {"transaction": txn.name, "status": txn.status,
+	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}
 
 
 def record_manual(*, booking: str, amount, method: str, reference: str, reason: str | None = None,
@@ -1253,7 +1262,9 @@ def record_manual(*, booking: str, amount, method: str, reference: str, reason: 
 	audit("payment.manual", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
 	      property=b.property, new={"booking": booking, "amount": to_str(amount), "method": method,
 	                                "reference": reference}, reason=reason)
-	return {"transaction": txn.name, "status": txn.status}
+	# money taken for a booking that could not take it stays on record in reconciliation (K-2c)
+	return {"transaction": txn.name, "status": txn.status,
+	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}
 
 
 # ─── payment links ───────────────────────────────────────────────────────

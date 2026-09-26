@@ -1,7 +1,8 @@
 """Late payments (K-2b; R-40, R-41, R-46): money for a booking whose rooms are not held for it.
 
-A gateway (or a bank transfer, a payment link, staff) may bring money for a booking waiting for its
-payment after its hold truly ended — the hold deadline passed and no payment attempt started
+A gateway (or a bank transfer, a payment link, staff) may bring money for a booking that cannot
+take it: a cancelled booking (beyond what it still owes), or one waiting for its payment after its
+hold truly ended — the hold deadline passed and no payment attempt started
 within it is still open (``holds``) — or after its rooms were released. That money never confirms
 the booking at the price it was quoted and never takes rooms back:
 
@@ -22,6 +23,7 @@ from collections import Counter
 from datetime import datetime
 
 import frappe
+from frappe import _
 from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.money import ZERO, from_db, quantize, to_str
@@ -32,16 +34,30 @@ TXN = "TEX Payment Transaction"
 OPEN = ("Action Required", "Refund Queued")
 HOLD_EXPIRED = "HOLD_EXPIRED"
 ROOMS_RELEASED = "ROOMS_RELEASED"
+BOOKING_CANCELLED = "BOOKING_CANCELLED"
+NOT_PAYABLE = "NOT_PAYABLE"
+TAKES_MONEY = ("Confirmed", "Partially Cancelled")
+CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
+          HOLD_EXPIRED: "its hold and payment window had ended",
+          BOOKING_CANCELLED: "it had been cancelled",
+          NOT_PAYABLE: "it could not take payments"}
 REFUND_REASON = "the booking could not be confirmed: the payment arrived after its rooms were given back"
 
 
-def problem(b, now: datetime | None = None) -> str | None:
-	"""Why money for booking ``b`` (locked by the caller) may not confirm it, or None when it may:
-	``ROOMS_RELEASED`` (a room of it holds nothing any more) or ``HOLD_EXPIRED`` (its hold deadline
-	passed and no payment attempt started within it is open). Only a booking waiting for its
-	payment is judged here."""
-	if b.status not in holds.HOLDING:
+def problem(b, now: datetime | None = None, amount=None) -> str | None:
+	"""Why booking ``b`` (locked by the caller) may not take ``amount`` of money, or None when it
+	may (K-2b, K-2c). A confirmed (or partly cancelled) booking takes it. A cancelled one takes
+	at most what it still owes (its cancellation charges), else ``BOOKING_CANCELLED``. A booking
+	waiting for its payment takes it only while its rooms are held for it: ``ROOMS_RELEASED`` (a
+	room holds nothing any more), ``HOLD_EXPIRED`` (its hold deadline passed and no payment
+	attempt started within it is open). Any other status: ``NOT_PAYABLE``."""
+	if b.status in TAKES_MONEY:
 		return None
+	if b.status == "Cancelled":
+		owed = from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency)
+		return None if amount is not None and ZERO < amount <= owed else BOOKING_CANCELLED
+	if b.status not in holds.HOLDING:
+		return NOT_PAYABLE
 	from kamra.tex.services import booking as booking_svc
 
 	if booking_svc.rooms_not_held(b):
@@ -66,8 +82,7 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	free, detail = _today(booking, now)
 	state = "Refund Queued" if not free and pay.auto_refundable(txn) else "Action Required"
 	ccy = txn.currency
-	cause = ("its rooms had been given back" if why == ROOMS_RELEASED
-	         else "its hold and payment window had ended")
+	cause = CAUSES.get(why, why)
 	note = (f"{to_str(from_db(txn.amount, ccy))} {ccy} arrived at {now:%Y-%m-%d %H:%M} for booking {booking} after "
 	        f"{cause}. Not confirmed: {detail}. "
 	        + ("The rooms are gone: the payment is refunded." if state == "Refund Queued" else
@@ -77,6 +92,19 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	audit("payment.reconciliation_required", reference_doctype=TXN, reference_name=txn.name, property=txn.property,
 	      new={"booking": booking, "why": why, "state": state, "amount": to_str(from_db(txn.amount, ccy)),
 	           "currency": ccy, "rooms_free_now": free})
+
+
+def refusal(why: str, b, amount) -> str:
+	"""What staff are told when they allocate money a booking cannot take (never done silently)."""
+	if why == BOOKING_CANCELLED:
+		owed = from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency)
+		return _("Booking {0} is cancelled and owes {1} {2}: {3} {2} cannot be allocated to it. Book the stay "
+		         "again and allocate the payment there, or refund it.").format(
+			b.name, to_str(max(owed, ZERO)), b.currency, to_str(amount))
+	if why in (HOLD_EXPIRED, ROOMS_RELEASED):
+		return _("Booking {0} can no longer take this payment: {1}. Book the stay again and allocate the payment "
+		         "there, or refund it.").format(b.name, CAUSES[why])
+	return _("Booking {0} cannot take payments ({1}).").format(b.name, b.status)
 
 
 def _today(booking: str, now: datetime) -> tuple[bool, str]:
