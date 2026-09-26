@@ -460,11 +460,13 @@ def receive(connection: str, headers: dict, body: bytes) -> dict:
 
 def _claim_inbound(limit: int, connection: str | None = None) -> list[str]:
 	now = now_datetime()
-	filters = {"status": ("in", ["Received", "Failed"]), "next_attempt_at": ("<=", now)}
+	filters = {"status": ("in", ["Received", "Failed"])}
 	if connection:
 		filters["connection"] = connection
-	rows = frappe.get_all("TEX Channel Inbound", filters=filters, fields=["name", "connection", "provider_ref"],
-	                      order_by="creation asc", limit=limit)
+	# a message stored without a next attempt (every TEX path sets one) is due now
+	rows = frappe.get_all("TEX Channel Inbound", filters=filters,
+	                      or_filters=[["next_attempt_at", "is", "not set"], ["next_attempt_at", "<=", now]],
+	                      fields=["name", "connection", "provider_ref"], order_by="creation asc", limit=limit)
 	out, blocked = [], set()
 	for r in rows:
 		key = (r.connection, r.provider_ref)

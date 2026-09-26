@@ -225,12 +225,12 @@ def _payments_callbacks(props, now) -> dict:
 	errors = [owner.get(t.rsplit(" ", 1)[-1]) for t in titles if t]
 	errors = [p for p in errors if p and (props is None or p in props)]
 	since = now - timedelta(days=C.PAYMENT_AUDIT_WINDOW_DAYS)
-	audit_filters = {"event_time": (">=", since)}
+	audit_filters = [["event_time", "is", "set"], ["event_time", ">=", since]]
 	if props is not None:
-		audit_filters["property"] = ("in", sorted(props) or [""])
-	mismatches = frappe.get_all("TEX Audit Event", filters={**audit_filters, "action": "payment.capture_mismatch"},
+		audit_filters.append(["property", "in", sorted(props) or [""]])
+	mismatches = frappe.get_all("TEX Audit Event", filters=[*audit_filters, ["action", "=", "payment.capture_mismatch"]],
 	                            pluck="property")
-	overpaid = frappe.get_all("TEX Audit Event", filters={**audit_filters, "action": "payment_link.overpaid"},
+	overpaid = frappe.get_all("TEX Audit Event", filters=[*audit_filters, ["action", "=", "payment_link.overpaid"]],
 	                          pluck="property")
 	# refunds the gateway never answered (``payments.service.RefundUnknown``), at any age, and any
 	# refund still Pending after a few minutes (the run asking for it died): staff check them at

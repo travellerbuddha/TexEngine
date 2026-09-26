@@ -915,8 +915,9 @@ def dashboard(property: str, date_from=None, date_to=None) -> dict:
 	                       (property, str(a), f"{b} 23:59:59"), as_dict=True)
 	f = {r.event: r.n for r in funnel}
 	searches = f.get("search", 0)
-	abandoned = frappe.db.count("TEX Abandoned Booking", {"property": property, "status": "Open",
-	                                                      "last_event_at": (">=", str(a))})
+	abandoned = frappe.db.count("TEX Abandoned Booking", [["property", "=", property], ["status", "=", "Open"],
+	                                                      ["last_event_at", "is", "set"],
+	                                                      ["last_event_at", ">=", str(a)]])
 	return {
 		"property": property, "from": str(a), "to": str(b), "currency": default_ccy,
 		"stay": stay["totals"], "by_channel": stay["rows"], "pickup_by_day": booked["rows"],
