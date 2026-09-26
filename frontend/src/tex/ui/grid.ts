@@ -5,8 +5,9 @@
 //   const nav = useGridNavigation({ rows, cols, selection, onEdit, onKey })
 //   <table role="grid" aria-multiselectable ref={nav.gridRef}> … <td role="gridcell" {...nav.cellProps(r, c)}>
 //
-// Only the active cell has tabIndex 0, so the grid is one tab stop. Focus moves in
-// requestAnimationFrame to the active cell's element (data-cell="r:c") inside `gridRef`.
+// Only the active cell has tabIndex 0, so the grid is one tab stop. Focus moves at once to the
+// cell a key moves to (data-cell="r:c" inside `gridRef`), so the next key, however fast, starts
+// there; a frame later the latest active cell takes it back only if the focus was lost meanwhile.
 import {
   useCallback,
   useEffect,
@@ -163,9 +164,28 @@ function isPrintable(e: KeyboardEvent<HTMLElement>): boolean {
  * holds it. */
 export function refocusIfLost(focus: () => void) {
   requestAnimationFrame(() => {
-    const a = document.activeElement
-    if (a && a !== document.body && a.isConnected) return
+    if (!focusLost()) return
     focus()
+  })
+}
+
+/** Nothing holds the focus: it is on the page's body, or on an element that went away. */
+function focusLost(): boolean {
+  const a = document.activeElement
+  return !a || a === document.body || !a.isConnected
+}
+
+/** Focus a grid cell at once, and once more after the next frame if the focus was lost meanwhile
+ * (the cell re-rendered away) and `busy` does not say an edit has begun since (Pricing Workspace
+ * final follow-up). At once: a cell editor that is closing (Escape, Enter) had the focus, and a
+ * key typed straight after it must reach the cell, not the page; a frame later would lose it. The
+ * frame never takes the focus from an element that has it by then (a header control reached with
+ * the next key, the editor of an entry typed at once). */
+export function focusCellNow(find: () => HTMLElement | null | undefined, busy?: () => boolean) {
+  find()?.focus()
+  requestAnimationFrame(() => {
+    if (busy?.() || !focusLost()) return
+    find()?.focus()
   })
 }
 
@@ -181,11 +201,18 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
   const activeRef = useRef(active)
   activeRef.current = active
 
-  // Focus the active cell of the latest render, not the target of the key that asked for it:
-  // with fast key repeat a frame can come after the next key, and focusing that key's stale target
-  // would collapse the selection (the cell's onFocus).
-  const focusActive = useCallback(() => {
+  // The cell a key moves to takes the focus at once (Pricing Workspace final follow-up): a key
+  // pressed before the next frame (fast typing, key repeat, a busy page) starts from it, and a
+  // header control that key reaches (ArrowLeft after Home) keeps the focus. A frame later the active
+  // cell of the latest render takes it only while it is still in the cells or lost (a cell that
+  // re-rendered away), never from another element; focusing a cell whose key came earlier would
+  // collapse the selection (the cell's onFocus), so the frame reads the latest active cell.
+  const focusActive = useCallback((now?: GridCell) => {
+    if (now) root.current?.querySelector<HTMLElement>(`[data-cell="${now.r}:${now.c}"]`)?.focus()
     requestAnimationFrame(() => {
+      const a = document.activeElement
+      const inCells = a instanceof HTMLElement && a.hasAttribute("data-cell") && Boolean(root.current?.contains(a))
+      if (!inCells && a && a !== document.body && a.isConnected) return
       const { r, c } = activeRef.current
       root.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
     })
@@ -195,7 +222,7 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
     const t = { r: clampTo(target.r, rows), c: clampTo(target.c, cols) }
     if (selection) selection.dispatch({ type: "moveTo", r: t.r, c: t.c, extend })
     else setOwn(t)
-    focusActive()
+    focusActive(t)
   }
 
   const focusCell = (r: number, c: number) => moveTo({ r, c }, false)
@@ -218,9 +245,10 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
         // past the first row or column: the header's control, when there is one (§3.19)
         const edge = dr === -1 && r === 0 ? "top" : dc === -1 && c === 0 ? "left" : null
         if (edge && !e.shiftKey && !mod && onEdge?.(edge, active)) return
+        const to = { r: clampTo(r + dr, rows), c: clampTo(c + dc, cols) }
         if (selection) selection.dispatch({ type: "move", dr, dc, extend: e.shiftKey })
-        else setOwn({ r: clampTo(r + dr, rows), c: clampTo(c + dc, cols) })
-        focusActive()
+        else setOwn(to)
+        focusActive(to)
         return
       }
       case "Home":
@@ -310,9 +338,17 @@ export function useGridNavigation({ rows, cols, onEdit, onKey, selection, pageSi
  */
 
 /** Focus the control of the column header above `cell` (edge "top") or of the row header left of it
- * ("left"); false when that header has none. */
+ * ("left"); false when there is none. A column header without a control of its own ("All periods")
+ * hands ArrowUp to the next column's control after it (Pricing Workspace final follow-up: with
+ * rooms and no period yet, "+ Period" is the only one, and the keyboard must reach it). */
 export function focusHeaderLane(root: HTMLElement | null, edge: "top" | "left", cell: GridCell): boolean {
-  const el = root?.querySelector<HTMLElement>(edge === "top" ? `[data-lane-col="${cell.c}"]` : `[data-lane-rows~="${cell.r}"]`)
+  let el = root?.querySelector<HTMLElement>(edge === "top" ? `[data-lane-col="${cell.c}"]` : `[data-lane-rows~="${cell.r}"]`) ?? null
+  if (!el && edge === "top" && root)
+    el =
+      Array.from(root.querySelectorAll<HTMLElement>("[data-lane-col]"))
+        .map((x) => ({ x, c: Number(x.dataset.laneCol) }))
+        .filter((o) => o.c > cell.c)
+        .sort((a, b) => a.c - b.c)[0]?.x ?? null
   if (!el) return false
   el.focus()
   return true

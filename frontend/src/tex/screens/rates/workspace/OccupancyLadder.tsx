@@ -23,6 +23,7 @@ import {
   focusHeaderLane,
   headerLaneKeyDown,
   refocusIfLost,
+  focusCellNow,
   Money,
   revealElement,
   Select,
@@ -280,11 +281,14 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
       for (const c of cells) delete n[keyOf(c)]
       return n
     })
+  // at once (the closing editor had the focus: a key typed straight after Escape or Enter reaches the
+  // cell, not the page); a frame later only if the focus was lost, and never from an edit that a key
+  // typed at once began (taking it would commit that edit's first keys on blur)
   const focusAt = (r: number, c: number) =>
-    requestAnimationFrame(() => {
-      if (editingRef.current) return
-      gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
-    })
+    focusCellNow(
+      () => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`),
+      () => editingRef.current !== null,
+    )
   const refocus = (cell: LadderRef) =>
     requestAnimationFrame(() => {
       const now = document.activeElement

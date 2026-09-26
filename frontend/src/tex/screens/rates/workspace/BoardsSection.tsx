@@ -33,6 +33,7 @@ import {
   focusHeaderLane,
   headerLaneKeyDown,
   refocusIfLost,
+  focusCellNow,
   IconButton,
   Input,
   Notice,
@@ -310,11 +311,14 @@ export function BoardsSection(props: TabProps & { history: WorkspaceHistory; reg
       for (const c of cells) delete n[keyOf(c)]
       return n
     })
+  // at once (the closing editor had the focus: a key typed straight after Escape or Enter reaches the
+  // cell, not the page); a frame later only if the focus was lost, and never from an edit that a key
+  // typed at once began (taking it would commit that edit's first keys on blur)
   const focusAt = (r: number, c: number) =>
-    requestAnimationFrame(() => {
-      if (editingRef.current) return
-      gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
-    })
+    focusCellNow(
+      () => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`),
+      () => editingRef.current !== null,
+    )
   /** Rows written: the pending rows that got a rule are rows of the table now. */
   const settlePending = (boards: readonly Row[]) => setPending((p) => (p.some((id) => hasRows(boards, id)) ? p.filter((id) => !hasRows(boards, id)) : p))
   const toastDone = (message: string) => {

@@ -33,6 +33,7 @@ import {
   focusHeaderLane,
   headerLaneKeyDown,
   refocusIfLost,
+  focusCellNow,
   useGridNavigation,
   useGridSelection,
   useScrollSyncRef,
@@ -313,13 +314,14 @@ export function PriceMatrix({
       if (now && now !== document.body && now.isConnected) return
       gridEl.current?.querySelector<HTMLElement>(`[data-cellid="${CSS.escape(cellIdOf(cell))}"]`)?.focus()
     })
+  // at once (the closing editor had the focus: a key typed straight after Escape or Enter reaches the
+  // cell, not the page); a frame later only if the focus was lost, and never from an edit that a key
+  // typed at once began (taking it would commit that edit's first keys on blur)
   const focusAt = (r: number, c: number) =>
-    requestAnimationFrame(() => {
-      // an edit started before this frame (a key typed at once after Escape) keeps the focus: taking
-      // it would commit that edit's first keys on blur
-      if (editingRef.current) return
-      gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`)?.focus()
-    })
+    focusCellNow(
+      () => gridEl.current?.querySelector<HTMLElement>(`[data-cell="${r}:${c}"]`),
+      () => editingRef.current !== null,
+    )
 
   /** The base-room cells of an entry are adjusted once by the server (O4, §3.4.5): one
    * apply_op_values call per op and value (a typed entry or Ctrl/Cmd+Enter makes one; a paste may
@@ -763,8 +765,11 @@ export function PriceMatrix({
 
   // one tab stop (§3.19): the headers' controls are reached with the arrows from the first row or column
   const nav = useGridNavigation({ rows: rows.length, cols: cols.length, selection, onEdit: canEdit ? onEdit : undefined, onKey, onEdge: (edge, cell) => focusHeaderLane(gridEl.current, edge, cell) })
-  // with no cell (no room yet) the grid has no tab stop: its header controls stay Tab stops
+  // with no cell (no room yet) the grid has no tab stop: its header controls stay Tab stops. With
+  // rooms and no period yet, "+ Period" (the next step) stays one too; ArrowUp from "All periods"
+  // also reaches it (focusHeaderLane, final follow-up)
   const laneTab = rows.length > 0 && cols.length > 0 ? -1 : 0
+  const addPeriodTab = cols.length > 1 ? laneTab : 0
   const laneRowsOf = (roomIndex: number) => rows.flatMap((x, i) => (x.roomIndex === roomIndex ? [String(i)] : [])).join(" ")
   const setGrid = useCallback(
     (el: HTMLDivElement | null) => {
@@ -1214,7 +1219,7 @@ export function PriceMatrix({
                 laneTab={laneTab}
               />
             ))}
-            <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} col={cols.length} laneTab={laneTab} />
+            <AddPeriodHeader readOnly={readOnly} edit={edit} onAdded={setFreshPeriod} col={cols.length} laneTab={addPeriodTab} />
           </div>
 
           {rows.map((row, r) => {
