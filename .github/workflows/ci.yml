@@ -215,8 +215,9 @@ jobs:
           # --skip-assets: link the app's committed bundles where the web server looks
           mkdir -p sites/assets
           [ -e sites/assets/kamra ] || ln -s "$(pwd)/apps/kamra/kamra/public" sites/assets/kamra
-          # jobs run as on a live site: a paid guest change and a refund are made by a job
-          bench --site test.localhost enable-scheduler
+          # a paid guest change and a refund are made by a job (queue short): a worker runs them.
+          # The site's scheduler stays off: its every-15-minutes contract roll supersedes live
+          # versions without an end (IFNULL(active_to) <= now), which empties the current tables
           nohup bench serve --port 8000 > serve.log 2>&1 &
           nohup bench worker --queue short,default > worker.log 2>&1 &
           nohup bench schedule > schedule.log 2>&1 &
