@@ -9096,7 +9096,7 @@ main `1575c8b` is contained, so nothing was merged.
   cancels them together; the PMS job never touches TEX rooms. A never-confirmed booking with a
   room cancelled on purpose keeps waiting for its payment with the rest (B1).
 - An attempt keeps the rooms until its own deadline: a card's at most 5 min (3DS) past the hold, a
-  transfer's the hold; another starts while the rooms are held (C1); a stale charge holds none. A payment
+  transfer's the hold; a new one starts before the hold ends or while one is open (C1); stale ones hold none. A payment
   link sent for the booking holds its rooms for the link hold (default 24 h), never past the end of the
   arrival day, and expires with it (B6, D7); a cancelled link's extension goes back, never below the
   other links' expiry (open or paid) nor now + the booking's own hold (E3).
@@ -9106,13 +9106,17 @@ main `1575c8b` is contained, so nothing was merged.
   judged again; b) late money, rooms given back and still free: `Action Required`;
   c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
   the charge stays Succeeded, off the booking, with today's availability and price in its note; a
-  booking that expires with money on it hands that money over the same way (B2).
-- Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE`
-  (Istanbul time), the mock's server clock, a transfer's value date, ±5 min; iyzico and Sipay state
-  none, so their money is judged when its news arrives. Paid in time, news after the expiry (user
-  decision, D4): rooms free → revived with its B2 money and confirmed; rooms sold, or the guest has
-  another live booking for the stay → `Action Required`, team told, no auto refund. Locks: charges, then booking.
-- A booking never confirmed owes no cancellation fee; money on its way is never kept as a fee (C6, user).
+  booking that expires with money on it puts that money in `Action Required`, always (B2).
+- Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE` (Istanbul
+  time) and the mock's server clock, ±5 min; a transfer's value date by day (the hold's last day is in time);
+  iyzico and Sipay state none: judged when the news arrives. Paid in time, news after the expiry (D4, user):
+  revived and confirmed only when its rooms are free, this money plus what it held at the expiry covers
+  `amount_due_now` and its limited extras and coupons are still free; else, or when the guest has another
+  live booking for the stay, `Action Required`, team told, no auto refund.
+- Locks: money coming in (callback, link, transfer, manual, allocation, revival): link → charges → booking →
+  rooms; the expiry job and money going out (refund phase 2, outside TEX, finish/resolve): booking, then charges.
+- A booking never confirmed owes no cancellation penalty (a room still carries the basket discount the
+  others keep, E1) and nothing once it ends; money on its way is never kept as a fee (C6, user).
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
