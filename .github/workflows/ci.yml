@@ -205,6 +205,8 @@ jobs:
       - name: Browser E2E (Playwright, R-58 journey + booking/CRS/contract specs)
         run: |
           cd frappe-bench
+          # Desk's own bundles: bench init --skip-assets built none, and a spec opens Desk (/app)
+          bench build --app frappe
           bench --site test.localhost execute kamra.tex.devtools.demo_seed.execute \
             --kwargs "{'password': 'TexDemo#2026'}"
           bench --site test.localhost set-config -p tex_public_write_limit 1000
