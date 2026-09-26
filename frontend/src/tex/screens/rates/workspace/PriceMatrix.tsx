@@ -261,18 +261,19 @@ export function PriceMatrix({
   freshRef.current = freshPeriod
   // the new period's inline dates are gone once committed (Enter, Ctrl/Cmd+S) or kept (Escape): the
   // focus they held goes to the period's first cell (its header menu without rooms), not to the page
-  // (S16 re-review 3); leaving them for another element keeps that element's focus
-  const freshDone = useCallback(() => {
+  // (S16 re-review 3), at once (a key typed straight after reaches it). Leaving them for another
+  // element keeps that element's focus; a click on something that takes none (the page, a text)
+  // leaves it there too, and the page does not jump back to the matrix (final follow-up)
+  const freshDone = useCallback((byKey: boolean) => {
     const code = freshRef.current
     setFreshPeriod(null)
-    if (code === null) return
-    refocusIfLost(() => {
+    if (code === null || !byKey) return
+    // the cell itself (its onFocus makes it the active cell), else the period's menu
+    focusCellNow(() => {
       const c = shape.current.cols.indexOf(code)
-      if (c < 0) return
-      // the cell itself (its onFocus makes it the active cell; the grid's focusCell, called from a
-      // frame, would focus the active cell of a render that comes later), else the period's menu
+      if (c < 0) return null
       const grid = gridEl.current
-      ;(grid?.querySelector<HTMLElement>(`[data-cell="0:${c}"]`) ?? grid?.querySelector<HTMLElement>(`[data-lane-col="${c}"]`))?.focus()
+      return grid?.querySelector<HTMLElement>(`[data-cell="0:${c}"]`) ?? grid?.querySelector<HTMLElement>(`[data-lane-col="${c}"]`)
     })
   }, [])
   // the period Duplicate just made (unnamed): its header opens Rename… (S16 review)

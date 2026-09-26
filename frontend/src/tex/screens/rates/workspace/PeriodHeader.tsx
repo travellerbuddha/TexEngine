@@ -31,7 +31,9 @@ export interface PeriodHeaderProps {
   edit: Edit
   /** the column was just added with "+ Period": its end date is edited inline, focused */
   fresh: boolean
-  onFreshDone: () => void
+  /** the new period's inline dates are closed: `byKey` when Enter, Ctrl/Cmd+S or Escape closed
+   * them (the focus they held goes to the period's first cell), not when leaving them did */
+  onFreshDone: (byKey: boolean) => void
   decimalMark: "." | ","
   /** the contract currency's minor units: the night adjustment's +/- amounts are parsed with them
    * (O5: AMBIGUOUS only below 3 decimals) */
@@ -262,7 +264,8 @@ const dayName = (code: string) => {
 
 /** The inline dates of a column just added: the end date is focused; Enter or leaving the field
  * commits it, Escape keeps the proposed dates. A period without a dated one before it asks for
- * both dates. */
+ * both dates. Only a key that closes them hands the focus on (to the period's first cell); a click
+ * elsewhere leaves it where the click put it, and scrolls nothing (final follow-up). */
 function FreshDates(p: PeriodHeaderProps) {
   const { t } = useTexT()
   const { period } = p
@@ -274,7 +277,7 @@ function FreshDates(p: PeriodHeaderProps) {
     first.current?.focus()
   }, [])
   const needsStart = !period.start
-  const finish = (save: boolean) => {
+  const finish = (save: boolean, byKey: boolean) => {
     if (done.current) return
     done.current = true
     if (save) {
@@ -282,18 +285,18 @@ function FreshDates(p: PeriodHeaderProps) {
       const e = isoDay(end) === null ? period.end : end
       p.edit(t("rates.ws.h.period_dates", { period: period.code }), (tb) => setPeriodFields(tb, period.code, { start_date: s, end_date: e }))
     }
-    p.onFreshDone()
+    p.onFreshDone(byKey)
   }
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     // Ctrl/Cmd+S commits the dates first; the version editor's save then sends them (S16 re-review)
-    if (isSaveShortcut(e)) finish(true)
+    if (isSaveShortcut(e)) finish(true, true)
     else if (e.key === "Enter") {
       e.preventDefault()
-      finish(true)
+      finish(true, true)
     } else if (e.key === "Escape") {
       e.preventDefault()
       e.stopPropagation()
-      finish(false)
+      finish(false, true)
     }
   }
   // typed dates not in the version yet (keptState.UNCOMMITTED_INPUT): the tab asks before it closes
@@ -304,7 +307,7 @@ function FreshDates(p: PeriodHeaderProps) {
       data-uncommitted=""
       data-changed={changed ? "" : undefined}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) finish(true)
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) finish(true, false)
       }}
     >
       {needsStart && (
