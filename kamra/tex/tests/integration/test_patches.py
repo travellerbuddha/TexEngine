@@ -100,6 +100,7 @@ BEHAVIOUR = {
 	                                "test_p48_marks_earlier_erasures_and_removes_what_they_left",
 	"p49_payment_attempt_deadline": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p50_payment_reconciliation": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p51_hold_minutes_per_payment_method": "test_patches.TestSmallPatches.test_p51_gives_each_payment_method_its_hold",
 }
 
 
@@ -1098,6 +1099,20 @@ class TestSmallPatches(PatchCase):
 		self.assertEqual(frappe.db.get_value("TEX Audit Event", hotel, ["hotel_group", "property"]),
 		                 (None, fx.PROPERTY))
 		self.assertFalse(frappe.db.exists("TEX Audit Scope", {"event": hotel}))
+
+	def test_p51_gives_each_payment_method_its_hold(self):
+		frappe.db.sql("""DELETE FROM `tabSingles` WHERE doctype='TEX Settings'
+		                 AND field IN ('hold_minutes_link', 'hold_minutes_transfer')""")
+		frappe.db.set_single_value("TEX Settings", "hold_minutes", 25)
+		seen = self.first_run("p51_hold_minutes_per_payment_method")
+		self.assertEqual(seen["reload_doc"], [("tex_platform", "doctype", "tex_settings"),
+		                                      ("kamra", "doctype", "property")])
+		self.assertEqual([frappe.db.get_single_value("TEX Settings", f) for f in
+		                  ("hold_minutes", "hold_minutes_link", "hold_minutes_transfer")], [25, 1440, 2880])
+		frappe.db.set_single_value("TEX Settings", "hold_minutes_link", 600)     # an administrator's value
+		self.assertRerunChangesNothing("p51_hold_minutes_per_payment_method")
+		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_link"), 600)
+		self.assertTrue(frappe.db.has_column("Property", "tex_hold_minutes_transfer"))
 
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")

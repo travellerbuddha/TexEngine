@@ -18,6 +18,8 @@
   "quote_ttl_minutes",
   "column_4",
   "hold_minutes",
+  "hold_minutes_link",
+  "hold_minutes_transfer",
   "manage_link_days",
   "section_5",
   "fx_provider_default",
@@ -96,8 +98,20 @@
   {
    "fieldname": "hold_minutes",
    "fieldtype": "Int",
-   "label": "Hold duration (minutes)",
+   "label": "Hold duration, card payment (minutes)",
    "default": "20"
+  },
+  {
+   "fieldname": "hold_minutes_link",
+   "fieldtype": "Int",
+   "label": "Hold duration, payment link (minutes)",
+   "default": "1440"
+  },
+  {
+   "fieldname": "hold_minutes_transfer",
+   "fieldtype": "Int",
+   "label": "Hold duration, bank transfer (minutes)",
+   "default": "2880"
   },
   {
    "fieldname": "manage_link_days",
@@ -136,7 +150,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-30 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Platform",
  "name": "TEX Settings",

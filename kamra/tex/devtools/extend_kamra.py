@@ -69,6 +69,13 @@ EXT = {
 		              "refunds what was paid above the new total to the card(s) it came from; Keep as credit "
 		              "keeps it as credit on the same booking (used by later changes and extras, not by other "
 		              "bookings)"),
+		# K-2d: this hotel's hold per payment method (blank: TEX Settings)
+		F("tex_hold_minutes_card", "Int", "Hold, card payment (minutes)",
+		  description="How long a booking waiting for a card payment keeps its rooms. Blank: TEX Settings."),
+		F("tex_hold_minutes_link", "Int", "Hold, payment link (minutes)",
+		  description="How long a booking waiting for a payment link keeps its rooms. Blank: TEX Settings."),
+		F("tex_hold_minutes_transfer", "Int", "Hold, bank transfer (minutes)",
+		  description="How long a booking waiting for a bank transfer keeps its rooms. Blank: TEX Settings."),
 		F("tex_tax_profile", "Select", "Tax profile", ["Localization pack", "Custom"], default="Localization pack"),
 		SB("TEX tax rules", depends_on="eval:doc.tex_tax_profile=='Custom'"),
 		F("tex_tax_rules", "Table", "Tax rules", "TEX Tax Rule"),

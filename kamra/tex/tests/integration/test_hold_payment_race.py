@@ -249,7 +249,7 @@ class TestMoneyForBookingsThatCannotTakeIt(HoldCase):
 	def test_a_late_bank_transfer_is_kept_off_its_expired_booking(self):
 		b = self.book(method="Bank Transfer")
 		transfer = public.pay_booking(token=b["manage_token"], payment_method="Bank Transfer")
-		passes(b["booking"], 60)
+		passes(b["booking"], 2 * 24 * 60 + 5)                      # a transfer's 48-hour hold is over
 		run_expiry_jobs()
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		out = pay.mark_transfer_received(transfer["transaction"], reference="EFT-2027-001")
@@ -403,3 +403,52 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(again, {"a_pays_again": "Succeeded"})
 		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.reconciliation_required",
 		                                                     "reference_name": self.payment["transaction"]}), 1)
+
+
+class TestHoldPolicy(HoldCase):
+	"""K-2d: one resolver decides how long a booking's rooms wait for its payment, by payment
+	method (card 20 minutes, payment link 24 hours, bank transfer 48 hours by default), each
+	overridable per hotel; a payment link of a held booking never outlives its hold."""
+
+	def hold_minutes(self, b: dict) -> int:
+		sale_at = frappe.db.get_value("TEX Booking", b["booking"], "sale_at")
+		until = frappe.get_all("Reservation", filters={"tex_booking": b["booking"]}, pluck="hold_expires_on")[0]
+		return round((until - sale_at).total_seconds() / 60)
+
+	def test_each_payment_method_has_its_own_hold(self):
+		self.assertEqual(self.hold_minutes(self.book(method="Card")), 20)
+		self.assertEqual(self.hold_minutes(self.book(method="Payment Link")), 1440)
+		self.assertEqual(self.hold_minutes(self.book(method="Bank Transfer")), 2880)
+
+	def test_the_global_holds_are_tex_settings(self):
+		frappe.db.set_single_value("TEX Settings", {"hold_minutes": 15, "hold_minutes_link": 720,
+		                                           "hold_minutes_transfer": 1440})
+		self.assertEqual(self.hold_minutes(self.book(method="Card")), 15)
+		self.assertEqual(self.hold_minutes(self.book(method="Payment Link")), 720)
+		self.assertEqual(self.hold_minutes(self.book(method="Bank Transfer")), 1440)
+
+	def test_a_hotel_overrides_each_hold_and_a_blank_one_falls_back(self):
+		frappe.db.set_value("Property", fx.PROPERTY, {"tex_hold_minutes_card": 45, "tex_hold_minutes_link": 600,
+		                                              "tex_hold_minutes_transfer": 4320})
+		self.assertEqual(self.hold_minutes(self.book(method="Card")), 45)
+		self.assertEqual(self.hold_minutes(self.book(method="Payment Link")), 600)
+		self.assertEqual(self.hold_minutes(self.book(method="Bank Transfer")), 4320)
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_hold_minutes_link", 0)          # left blank
+		self.assertEqual(self.hold_minutes(self.book(method="Payment Link")), 1440)
+
+	def test_a_payment_link_never_outlives_its_bookings_hold(self):
+		b = self.book(method="Payment Link")
+		out = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                      expires_hours=72, booking=b["booking"])
+		hold = frappe.get_all("Reservation", filters={"tex_booking": b["booking"]}, pluck="hold_expires_on")[0]
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", out["link"], "expires_at"), hold)
+		passes(b["booking"], 1500)                                   # its 24-hour hold is over
+		with self.assertRaises(frappe.ValidationError):
+			pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+			                booking=b["booking"])
+
+	def test_a_standalone_payment_link_keeps_its_own_validity(self):
+		out = pay.create_link(property=fx.PROPERTY, amount="50", currency="EUR", description="Minibar",
+		                      expires_hours=72)
+		expires = frappe.db.get_value("TEX Payment Link", out["link"], "expires_at")
+		self.assertAlmostEqual((expires - now_datetime()).total_seconds() / 3600, 72, delta=0.1)

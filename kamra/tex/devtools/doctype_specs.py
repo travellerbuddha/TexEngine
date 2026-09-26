@@ -89,7 +89,11 @@ PLATFORM_SPECS = [
 		F("offer_ttl_minutes", "Int", "Offer validity (minutes)", default="20"),
 		F("quote_ttl_minutes", "Int", "Quote validity (minutes)", default="30"),
 		CB(),
-		F("hold_minutes", "Int", "Hold duration (minutes)", default="20"),
+		# K-2d: how long a booking's rooms wait for its payment, by payment method; a hotel may
+		# override each (Property.tex_hold_minutes_*); services.holds.resolve_hold_minutes decides
+		F("hold_minutes", "Int", "Hold duration, card payment (minutes)", default="20"),
+		F("hold_minutes_link", "Int", "Hold duration, payment link (minutes)", default="1440"),
+		F("hold_minutes_transfer", "Int", "Hold duration, bank transfer (minutes)", default="2880"),
 		F("manage_link_days", "Int", "Manage-booking link validity (days)", default="365"),
 		SB("Currency"),
 		F("fx_provider_default", "Select", "Default FX provider", ["TCMB", "ECB", "MANUAL"], default="TCMB"),
@@ -99,7 +103,8 @@ PLATFORM_SPECS = [
 		F("status_alert_recipients", "Small Text", "System-status alert recipients",
 		  description="E-mail addresses, one per line, told when a system-status check gets worse or "
 		              "recovers (ADR-047). Sent through the site's outgoing e-mail account."),
-	], perms=[SM, perm("Hotel Admin", "readonly")], issingle=True),
+	], perms=[SM, perm("Hotel Admin", "readonly")], issingle=True,
+	   extra={"modified": "2026-09-30 00:00:00.000000"}),         # the holds per payment method came later
 
 	dt("TEX Enterprise", P, [
 		F("enterprise_name", "Data", "Enterprise", reqd=1, unique=1, in_list_view=1),

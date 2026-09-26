@@ -597,8 +597,8 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		scope.require("reservation.confirm_unpaid", property)
 	confirm = due_now == 0 or (staff and confirm_without_payment)
 	status = "Confirmed" if confirm else "Pending Payment"
-	hold_until = None if confirm else add_to_date(now, minutes=int(
-		frappe.db.get_single_value("TEX Settings", "hold_minutes") or 20))
+	# how long the rooms wait for the payment: by payment method and hotel (K-2d)
+	hold_until = None if confirm else add_to_date(now, minutes=holds.resolve_hold_minutes(property, payment_method))
 	guest_name, consent_granted, consent_requested = resolve_guest(guest, property=property, market=market,
 	                                                               language=language, staff=staff)
 	booker = booker or {}

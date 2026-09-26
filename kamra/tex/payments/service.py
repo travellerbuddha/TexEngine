@@ -1298,10 +1298,15 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		# staff hear now why the account could not take the money, not the guest later (G-67)
 		provider_for(provider_account)
 	token = secrets.token_urlsafe(24)
+	expires_at = add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60)))
+	# a link of a booking waiting for its payment never outlives the booking's hold; a standalone
+	# link keeps its own validity (K-2d)
+	held = booking or (frappe.db.get_value("Reservation", reservation, "tex_booking") if reservation else None)
+	expires_at = holds.link_expiry(held, expires_at)
 	doc = frappe.get_doc({
 		"doctype": "TEX Payment Link", "property": property, "status": "Active", "amount": amount,
 		"currency": currency, "description": (description or "")[:500],
-		"expires_at": add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60))),
+		"expires_at": expires_at,
 		"provider_account": provider_account, "booking": booking, "reservation": reservation,
 		"guest_name": guest_name, "guest_email": guest_email, "token_hash": link_token_hash(token),
 		# the URL embeds the bearer token: returned once, never stored (only its hash is)
