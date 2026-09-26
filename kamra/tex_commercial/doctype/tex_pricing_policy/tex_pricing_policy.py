@@ -49,7 +49,7 @@ class TEXPricingPolicy(Document):
 		try:
 			ages.validate_bands(age_bands_of(self.age_bands))
 		except PricingError as e:
-			frappe.throw(_("Age bands: {0}.").format(e))
+			frappe.throw(_("Age bands: {0}.").format(str(e)))
 
 	def _check_rules(self):
 		from kamra.tex.commercial.contracts import parse_combination
