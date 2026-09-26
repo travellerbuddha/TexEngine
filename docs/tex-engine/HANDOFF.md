@@ -1,4 +1,4 @@
-Branch: `pricing-workspace` (integrated, parent b7f435a; LOCAL ONLY, not on origin). Copy on `claude/inspiring-ptolemy-i6wdu2` (parent 1575c8b).
+Branch: `claude/inspiring-ptolemy-i6wdu2` on origin (integrated: merge 93acf09 of `pricing-workspace` b80ef86 into 7f621de).
 
 # TEX Engine — Handoff (2026-09-26 06:1x UTC)
 
@@ -6,17 +6,17 @@ Facts only. Checked with the commands in §6 on 2026-09-26.
 
 ## 1. Branch map
 
-Remote (`git ls-remote origin`, 06:0x UTC): exactly one branch.
+Remote (`git ls-remote origin`): exactly one branch, `claude/inspiring-ptolemy-i6wdu2`. Every commit below is reachable from it except `worktree-wf_957bf605-4e5-1`.
 
 | Ref | SHA | Content | Merge? |
 |---|---|---|---|
-| origin `claude/inspiring-ptolemy-i6wdu2` | 1575c8b | Main line up to G-46/G-60/G-64/fix-* merges + `PRICING_WORKSPACE_UX.md` | Base |
-| local `pricing-workspace` (/home/user/tex-pricing-ws) | b7f435a | 1575c8b + Pricing Workspace S1–S16 (ADR-061) + review fixes + go-green groups (security-cost, workspace-ux, main-side). 180 commits not on origin | **Yes, first.** 1575c8b is its ancestor, so fast-forward. Condition: §3 finished |
+| origin `claude/inspiring-ptolemy-i6wdu2` | 93acf09 + this doc fix | 1575c8b (main line up to G-46/G-60/G-64/fix-*) + HANDOFF copy 7f621de + merge 93acf09 of `pricing-workspace` | Integrated; tree = `pricing-workspace` |
+| local `pricing-workspace` (/home/user/tex-pricing-ws) | b80ef86 | 1575c8b + Pricing Workspace S1–S16 (ADR-061) + review fixes + go-green groups (security-cost, workspace-ux, main-side) + HANDOFF | Merged (93acf09); on origin via `claude/inspiring-ptolemy-i6wdu2` history |
 | local `pw-backend` (/home/user/tex-pw-backend) | b9135e0 | Backend slices S2–S5 | No. 0 commits outside `pricing-workspace` |
-| local `worktree-wf_957bf605-4e5-1` | 23ec794 | G-69 UI (badc5fa, 23ec794) | No. Same change is already in main as 511784f, f03a0ef |
+| local `worktree-wf_957bf605-4e5-1` | 23ec794 | G-69 UI (badc5fa, 23ec794); not on origin | No. Same change is already in main as 511784f, f03a0ef |
 | ~40 other local branches (`fix-*`, `g*`, …) | — | Earlier gap waves | No. 0 commits outside 1575c8b |
 
-Source of truth: `pricing-workspace` @ b7f435a (the newest integrated code). It exists only in this container. The push was refused by the session's auto-mode permission classifier; it needs the owner's explicit permission in the session.
+Source of truth: origin `claude/inspiring-ptolemy-i6wdu2` (its tree equals `pricing-workspace` b80ef86 plus this doc fix). Pushed 2026-09-26 on the owner's direct instruction.
 
 ## 2. Current state
 
