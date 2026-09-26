@@ -2,10 +2,10 @@
 
 - ``kamra.tex.api.system.status`` (``system.monitor``): hotel-scoped checks show only the
   hotels where the user holds the capability; platform checks (scheduler, workers,
-  encryption key, the whole e-mail queue) only for platform administrators; no secret,
-  token, guest data or stack trace in the payload.
+  encryption key, database snapshot isolation, the whole e-mail queue) only for platform
+  administrators; no secret, token, guest data or stack trace in the payload.
 - ``kamra.tex.ops.snapshot_isolation`` (ADR-063): every web request and background job runs
-  with MariaDB ``innodb_snapshot_isolation`` OFF.
+  with MariaDB ``innodb_snapshot_isolation`` OFF; the status page fails while it is ON.
 - ``kamra.tex.api.system.ping`` (guest): ``ok`` and reachability booleans, nothing else.
 - ``kamra.tex.ops.alerts.evaluate`` (every 15 minutes): one notice when a check gets worse
   and one when it recovers, never on every run.
@@ -83,7 +83,8 @@ def check(result: dict, key: str) -> dict | None:
 	return next((c for c in result["checks"] if c["key"] == key), None)
 
 
-PLATFORM_KEYS = {"scheduler", "scheduler.jobs", "scheduler.errors", "workers", "encryption_key", "mail.queue"}
+PLATFORM_KEYS = {"scheduler", "scheduler.jobs", "scheduler.errors", "workers", "encryption_key",
+                 "db.snapshot_isolation", "mail.queue"}
 
 
 class TestSystemStatusAccess(TexTestCase):
@@ -350,7 +351,7 @@ def session_snapshot_isolation() -> int:
 
 class TestSnapshotIsolation(IntegrationTestCase):
 	"""ADR-063: MariaDB >= 11.6.2 hands every new connection innodb_snapshot_isolation ON. TEX turns
-	it off for each web request and background job."""
+	it off for each web request and background job, and the status page fails while it is on."""
 
 	def setUp(self):
 		super().setUp()
@@ -402,6 +403,21 @@ class TestSnapshotIsolation(IntegrationTestCase):
 			if not had_job:
 				del frappe.local.job
 		self.assertEqual(seen, [0])
+
+	def test_the_status_page_fails_while_it_is_on(self):
+		from kamra.tex.ops import status as status_mod
+
+		frappe.db.sql("SET SESSION innodb_snapshot_isolation = 1")          # this connection has it on
+		on = check(system_api().status(), "db.snapshot_isolation")
+		self.assertEqual((on["status"], on["scope"]), ("fail", "platform"))
+		self.assertIn("@@SESSION", [i["params"]["level"] for i in on["issues"]])
+		frappe.db.sql("SET SESSION innodb_snapshot_isolation = 0")
+		for values, status, levels in (({"global": 1, "session": 0}, "fail", ["@@GLOBAL"]),
+		                               ({"global": 0, "session": 0}, "ok", []),
+		                               (None, "ok", [])):                   # before MariaDB 10.6.18: no variable
+			with mock.patch("kamra.tex.ops.snapshot_isolation.values", return_value=values):
+				c = check({"checks": status_mod.collect(platform=True)}, "db.snapshot_isolation")
+			self.assertEqual((c["status"], [i["params"]["level"] for i in c["issues"]]), (status, levels), values)
 
 	def test_a_server_without_the_variable_has_nothing_to_turn_off(self):
 		from kamra.tex.ops import snapshot_isolation

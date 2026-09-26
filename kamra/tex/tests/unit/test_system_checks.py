@@ -58,6 +58,19 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.workers_check(reachable=True, workers=2, backlog=c.QUEUE_BACKLOG_FAIL, live=True)["status"],
 		                 c.FAIL)
 
+	def test_snapshot_isolation_on_fails_globally_or_for_the_connection(self):
+		"""ADR-063: ON turns a waiting booking's "sold out" into error 1020."""
+		for values in (None, {"global": 0, "session": 0}):
+			ok = c.snapshot_isolation_check(values)
+			self.assertEqual((ok["status"], ok["scope"], ok["count"]), (c.OK, "platform", 0))
+		server = c.snapshot_isolation_check({"global": 1, "session": 0})
+		self.assertEqual((server["status"], server["issues"][0]["params"]), (c.FAIL, {"level": "@@GLOBAL"}))
+		self.assertIn("innodb_snapshot_isolation = 0", server["detail"])
+		conn = c.snapshot_isolation_check({"global": 0, "session": 1})
+		self.assertEqual((conn["status"], conn["issues"][0]["params"]), (c.FAIL, {"level": "@@SESSION"}))
+		both = c.snapshot_isolation_check({"global": 1, "session": 1})
+		self.assertEqual((both["status"], both["count"], len(both["issues"])), (c.FAIL, 2, 2))
+
 	def test_mail_account_is_an_owner_input(self):
 		self.assertEqual(c.mail_account_check(has_account=False, suspended=False, production=False)["status"], c.WARN)
 		self.assertEqual(c.mail_account_check(has_account=False, suspended=False, production=True)["status"], c.FAIL)
