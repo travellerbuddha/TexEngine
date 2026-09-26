@@ -496,6 +496,32 @@ class TestSecurityHygieneG83Review(G83Setup):
 			with self.assertRaises(frappe.ValidationError, msg=name):          # the header alone is not an image
 				self.upload(name, whole[: len(whole) * 2 // 3], site=SLUG)
 
+	def test_r4_the_whole_image_check_leaves_pillows_process_setting_alone(self):
+		"""Semgrep frappe-monkey-patching-not-allowed, a true finding: the check turned Pillow's
+		LOAD_TRUNCATED_IMAGES off for the whole process while it decoded, racing other threads'
+		images (two overlapping checks could leave it off for good). It decodes elsewhere now."""
+		import importlib
+
+		from PIL import ImageFile
+
+		from kamra.tex.security import uploads
+
+		importlib.import_module("frappe.core.doctype.file.file")       # Frappe's setting: on
+		real, seen = ImageFile.ImageFile.load, []
+
+		def watched(img):
+			seen.append(ImageFile.LOAD_TRUNCATED_IMAGES)
+			return real(img)
+
+		whole = image_bytes("JPEG")
+		with mock.patch.object(ImageFile.ImageFile, "load", watched):
+			self.assertEqual(uploads.check_image(whole), "jpeg")
+			with self.assertRaises(uploads.UploadRefused):
+				uploads.check_image(whole[: len(whole) * 2 // 3])
+			self.assertEqual(uploads.check_image(image_bytes("MPO", frames=2)), "jpeg")        # an iPhone photo
+		self.assertNotIn(False, seen)
+		self.assertTrue(ImageFile.LOAD_TRUNCATED_IMAGES)
+
 	# ── R7. consent needs crm.edit; the consent history stays in my hotels ──
 
 	def test_r7_staff_consent_needs_crm_edit_and_the_history_stays_in_my_hotels(self):

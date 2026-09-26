@@ -28,6 +28,35 @@ class UploadRefused(frappe.ValidationError):
 	pass
 
 
+# Frappe turns Pillow's LOAD_TRUNCATED_IMAGES on for the whole process (frappe.core.doctype.file.file),
+# so a cut image decodes "whole" here, filled in grey. Turning that module global off for the check
+# would race every other thread's images, and two overlapping checks could leave it off for good.
+# The check decodes in a fresh interpreter instead, where Pillow keeps its own strict default.
+_DECODE_EVERY_FRAME = (
+	"import io, sys\n"
+	"from PIL import Image\n"
+	"with Image.open(io.BytesIO(sys.stdin.buffer.read())) as img:\n"
+	"    for frame in range(min(getattr(img, 'n_frames', 1), 500)):\n"
+	"        img.seek(frame)\n"
+	"        img.load()\n"
+)
+DECODE_TIMEOUT_SECONDS = 30
+
+
+def decodes_whole(content: bytes) -> bool:
+	"""Whether every frame of ``content`` (at most 500) decodes with Pillow's own default, which
+	refuses a cut or broken image. Anything else, a timeout included, is not whole."""
+	import subprocess
+	import sys
+
+	try:
+		done = subprocess.run([sys.executable, "-I", "-c", _DECODE_EVERY_FRAME], input=content,
+		                      capture_output=True, timeout=DECODE_TIMEOUT_SECONDS, check=False)
+	except (OSError, subprocess.SubprocessError):
+		return False
+	return done.returncode == 0
+
+
 def _private(doc, *, by_url: bool = True) -> bool:
 	if int(doc.get("is_private") or 0):
 		return True
@@ -79,7 +108,7 @@ def check_image(content: bytes) -> str:
 	kind = ft.sniff_image(content)
 	if not kind:
 		frappe.throw(_("Upload a PNG, JPEG, GIF or WebP image. SVG and other files are not accepted."), UploadRefused)
-	from PIL import Image, ImageFile
+	from PIL import Image
 
 	unreadable = _("The image could not be read whole. Save it again as PNG, JPEG or WebP.")
 	try:
@@ -97,17 +126,8 @@ def check_image(content: bytes) -> str:
 		frappe.throw(_("Images can be at most {0} pixels wide and high.").format(ft.MAX_IMAGE_SIDE), UploadRefused)
 	# decode every frame: Frappe lets Pillow fill a cut image in (LOAD_TRUNCATED_IMAGES), an upload
 	# must be whole. Pillow's verify() only checks PNG; JPEG, GIF and WebP need a real decode.
-	truncated = ImageFile.LOAD_TRUNCATED_IMAGES
-	ImageFile.LOAD_TRUNCATED_IMAGES = False
-	try:
-		with Image.open(io.BytesIO(content)) as img:
-			for frame in range(min(getattr(img, "n_frames", 1), 500)):
-				img.seek(frame)
-				img.load()
-	except Exception:
+	if not decodes_whole(content):
 		frappe.throw(unreadable, UploadRefused)
-	finally:
-		ImageFile.LOAD_TRUNCATED_IMAGES = truncated
 	return kind
 
 
