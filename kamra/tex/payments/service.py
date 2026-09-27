@@ -1288,22 +1288,30 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
 
 
-def mark_transfer_received(transaction: str, *, reference: str, value_date=None) -> dict:
+def mark_transfer_received(transaction: str, *, reference: str, value_date=None, amount=None) -> dict:
 	"""Staff saw a bank transfer arrive. ``value_date``: the day the money was on the account (its
 	valör), which decides whether it was paid in time (D3); not before the charge, never in the
-	future."""
+	future (the staff API requires it). ``amount``: what arrived, more than nothing and at most what
+	was asked (P1-11): a transfer that came short (a bank's fee) is recorded and allocated as it came;
+	a booking it no longer pays the deposit of keeps waiting for the rest, and expires with its hold."""
 	_lock_link_then_payment(transaction)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)   # as it is now
 	scope.require("payment.refund", txn.property)
 	if txn.provider != "Bank Transfer" or txn.status != "Pending":
 		frappe.throw(_("Only pending bank transfers can be confirmed."))
 	now = now_datetime()
+	asked = from_db(txn.amount, txn.currency)
+	came = asked if amount in (None, "") else quantize(D(amount), txn.currency)
+	if came <= ZERO or came > asked:
+		frappe.throw(_("The amount received must be more than zero and at most the {0} {1} asked.").format(
+			to_str(asked), txn.currency))
 	if value_date:
 		value_date = getdate(value_date)
 		if value_date > now.date() or value_date < get_datetime(txn.creation).date():
 			frappe.throw(_("The value date must be between the day the transfer was asked for and today."))
 		txn.captured_at = get_datetime(value_date)
 	txn.flags.tex_system_update = True
+	txn.amount = came
 	txn.status = "Succeeded"
 	txn.raw_status = "RECEIVED"
 	txn.provider_ref = reference[:140]
@@ -1311,7 +1319,8 @@ def mark_transfer_received(transaction: str, *, reference: str, value_date=None)
 	txn.save(ignore_permissions=True)
 	_after_charge(txn)
 	audit("payment.transfer_received", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
-	      property=txn.property, new={"reference": reference, "value_date": str(value_date) if value_date else None})
+	      property=txn.property, new={"reference": reference, "value_date": str(value_date) if value_date else None,
+	                                  "amount": to_str(came), "asked": to_str(asked)})
 	# money its booking could not take is in reconciliation: staff see it at once (K-2c)
 	return {"transaction": txn.name, "status": txn.status,
 	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}

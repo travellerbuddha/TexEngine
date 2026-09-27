@@ -1209,6 +1209,35 @@ class TestPaidInTime(HoldCase):
 		self.assertEqual(out["reconciliation"], "Action Required")
 		self.assertEqual(self.statuses(b)[0], "Cancelled")
 
+	def test_a_transfer_is_confirmed_with_the_amount_that_came(self):
+		"""P1-11 + NEW-3 (audit 2B, ADR-065): the API requires the value date, as the page does; staff record
+		the amount that arrived, at most the amount asked: a short transfer is allocated as it came and the
+		booking waits for the rest (or expires with its hold)."""
+		import json
+
+		from kamra.tex.api import payments as payments_api
+		from kamra.tex.money import from_db, to_str
+
+		self.transfer_account()
+		b = self.book(method="Bank Transfer")
+		txn = self.transfer(b)
+		asked = from_db(frappe.db.get_value("TEX Payment Transaction", txn, "amount"), "EUR")
+		with self.assertRaisesRegex(frappe.ValidationError, "value date"):
+			payments_api.mark_transfer_received(transaction=txn, reference="EFT-P111")
+		with self.assertRaisesRegex(frappe.ValidationError, "at most"):
+			payments_api.mark_transfer_received(transaction=txn, reference="EFT-P111", value_date=nowdate(),
+			                                    amount=str(asked + 1))
+		out = payments_api.mark_transfer_received(transaction=txn, reference="EFT-P111", value_date=nowdate(),
+		                                          amount=str(asked - 5))            # the bank's fee came off
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(D(frappe.db.get_value("TEX Payment Transaction", txn, "amount")), asked - 5)
+		self.assertEqual(paid(b), asked - 5)
+		row = frappe.db.get_value("TEX Booking", b["booking"], ["total_amount", "balance_amount", "status"], as_dict=True)
+		self.assertEqual((D(row.balance_amount), row.status), (D(row.total_amount) - (asked - 5), "Pending Payment"))
+		recorded = json.loads(frappe.db.get_value("TEX Audit Event", {"action": "payment.transfer_received",
+		                                                              "reference_name": txn}, "new_value"))
+		self.assertEqual((recorded["amount"], recorded["asked"]), (to_str(asked - 5), to_str(asked)))
+
 	def transfer_account(self):
 		bank = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Bank Transfer"},
 		                 {"label": "Bank transfer", "property": fx.PROPERTY, "provider": "Bank Transfer",
