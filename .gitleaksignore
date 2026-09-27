@@ -1,0 +1,7 @@
+# Reviewed gitleaks findings in the history (NEW-5; SECURITY.md "Supply-chain checks"). gitleaks reads this file
+# from the repository root; one fingerprint per line: commit:file:rule:line. A fingerprint matches only that
+# commit, file, rule and line: the same text anywhere else is still reported.
+#
+# 04c5a469, docs/tex-engine/wip/g30-g31-occupancy-precedence-commits.patch:1328 (generic-api-key): a test's
+# idempotency_key inside a work-in-progress patch snapshot (removed from the tree since); not a secret.
+04c5a469e0b5b2032ad44cb24e00acd403b4c078:docs/tex-engine/wip/g30-g31-occupancy-precedence-commits.patch:generic-api-key:1328

@@ -85,7 +85,8 @@ Every pull request, every push to `main` / `develop` and a weekly schedule run
   on push and schedule, the whole history, always with `--redact`. Each run first proves the scan
   works: a made-up token written at run time must be caught. The reviewed exceptions (test
   fixtures, built bundles, the demo password of disposable sites) are in `.gitleaks.toml`, each
-  with its reason. A real secret found is never copied anywhere: name the file and commit, rotate
+  with its reason; single reviewed findings of the history (by commit, file, rule and line) are in
+  `.gitleaksignore`. A real secret found is never copied anywhere: name the file and commit, rotate
   the secret, and tell the owner.
 - **npm** — `audit-ci` over `npm audit` on `frontend/package-lock.json`, production dependencies,
   high and critical advisories; exceptions in `.github/supply-chain/audit-ci.jsonc`.

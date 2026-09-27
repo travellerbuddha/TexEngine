@@ -65,15 +65,17 @@ jobs:
           fi
           echo "self-test passed: the planted secret was caught (github-pat, exit $code)"
 
-      - name: Scan (a pull request's own commits; the whole history on push and schedule)
+      - name: Scan (a pull request's own commits; the whole history on push, schedule and dispatch)
+        # --verbose names the file, line and commit of a finding (the value stays redacted); reviewed findings of
+        # the history are in .gitleaksignore (read from the repository root)
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            /tmp/gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="${BASE_SHA}..${HEAD_SHA}" .
+            /tmp/gitleaks git --no-banner --redact --verbose --config .gitleaks.toml --log-opts="${BASE_SHA}..${HEAD_SHA}" .
           else
-            /tmp/gitleaks git --no-banner --redact --config .gitleaks.toml .
+            /tmp/gitleaks git --no-banner --redact --verbose --config .gitleaks.toml .
           fi
 
   npm:
