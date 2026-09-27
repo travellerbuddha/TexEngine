@@ -1134,6 +1134,9 @@ PAYMENT_SPECS = [
 		# B4: when the gateway captured the money, by its own clock (when it states it): a payment is
 		# late by this, never by when its news reached TEX
 		F("captured_at", "Datetime", "Captured at (gateway)", read_only=1),
+		# NEW-6 (ADR-066): a start is asking the gateway for its checkout since then, with no lock held; a
+		# second start of the charge waits until it is cleared or older than the lease (p68)
+		F("checkout_started_at", "Datetime", "Checkout being started since", read_only=1),
 		SB("Outcome"),
 		F("raw_status", "Data", "Provider status"),
 		F("error_code", "Data", "Error code"),
@@ -1149,7 +1152,8 @@ PAYMENT_SPECS = [
 		F("reconciliation_note", "Small Text", "Why", read_only=1),
 	], perms=READONLY_AUDIT,
 	   autoname="PTX-.YYYY.-.######", naming_rule="Expression (old style)", sort_field="creation", in_create=True,
-	   extra={"modified": "2026-09-30 00:00:02.000000"}),   # the indexes, expires_at, reconciliation, captured_at came later
+	   extra={"modified": "2026-10-02 00:00:00.000000"}),   # the indexes, expires_at, reconciliation, captured_at,
+	                                                        # checkout_started_at came later
 
 	dt("TEX Payment Allocation", PM, [
 		F("property", "Link", "Hotel", "Property"),

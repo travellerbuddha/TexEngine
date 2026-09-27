@@ -26,7 +26,7 @@ from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.services import booking, quoting
 from kamra.tex.tests.integration import fixtures as fx
-from kamra.tex.tests.integration.test_commercial_flows import GUEST, setup_site_and_payments
+from kamra.tex.tests.integration.test_commercial_flows import GUEST, SLUG, setup_site_and_payments
 from kamra.tex.tests.integration.test_concurrency import _cleanup, _cleanup_payments
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase, pick
 
@@ -2045,3 +2045,171 @@ class TestPaymentLinkHold(HoldCase):
 		body = "".join(part.get_payload(decode=True).decode("utf-8", "replace") for part in msg.walk()
 		               if part.get_content_type() == "text/html")
 		self.assertIn(f"{held_until(b)[0]:%Y-%m-%d %H:%M}", body)
+
+
+class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
+	"""NEW-6 (ADR-066), under real concurrency: guest A books and pays by card, and the gateway takes
+	its time making A's checkout. Meanwhile another connection writes an audit event, books other nights
+	and starts another booking's payment: none of them may wait for A. Before, A held its booking's rows
+	and the site-wide naming-series rows (AUD-, TEX-, RES-, REV-, G-, PTX-) through the gateway call,
+	and each of them timed out. Fixtures committed, cleaned up."""
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup_payments()
+		_cleanup()
+		frappe.db.delete("TEX Booking Site", SLUG)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_payments()
+		self.f = fx.base_setup()
+		fx.create_contract(self.f, code="CONC")
+		acc = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"},
+		                {"label": "Sandbox gateway", "property": fx.PROPERTY, "provider": "Mock",
+		                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+		if not frappe.db.exists("TEX Booking Site", SLUG):
+			frappe.get_doc({"doctype": "TEX Booking Site", "site_name": "TEX Test Resort", "site_slug": SLUG,
+			                "enabled": 1, "property": fx.PROPERTY, "default_market": "DE", "default_currency": "EUR",
+			                "currencies": "EUR", "self_service_enabled": 1}).insert(ignore_permissions=True)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		res = public.search(site=SLUG, check_in=str(fx.d(8, 20)), check_out=str(fx.d(8, 22)), rooms=[{"adults": 2}],
+		                    market="DE", session_id="new6-a")
+		self.a_quote = public.quote(site=SLUG, offer_key=pick(res["properties"][0])["rooms"][0]["offer_key"],
+		                            session_id="new6-a")["quote_id"]
+		quote = lambda code, ci, co: quoting.create_quote(pick(quoting.search(  # noqa: E731
+			properties=[fx.PROPERTY], check_in=ci, check_out=co, rooms=[{"adults": 2}], market="DE",
+			channel="DIRECT_WEB", currency="EUR")["properties"][0], room_code=code)["rooms"][0]["offer_key"])["quote_id"]
+		self.c_quote = quote("DLX", fx.d(8, 24), fx.d(8, 26))
+		self.d = booking.create_booking(quote_ids=[quote("STD", fx.d(9, 1), fx.d(9, 3))], payment_method="Card",
+		                                guest={"first_name": "Dora", "last_name": "Waiting",
+		                                       "email": "dora.new6@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connections need committed fixtures
+
+	def test_other_writers_never_wait_for_a_gateway_call(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.security.audit import audit
+
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		in_gateway, release = threading.Event(), threading.Event()
+		calls: list[str] = []
+		results: dict = {}
+		real = MockProvider.create_checkout
+
+		def gateway(provider, intent):
+			calls.append(intent.transaction)
+			if len(calls) == 1:                         # A's checkout: the gateway takes its time
+				in_gateway.set()
+				release.wait(timeout=30)
+			return real(provider, intent)
+
+		def guest_a():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			# a new thread copies the test mode: this request's commits run, as in production
+			frappe.flags.in_test = False
+			try:
+				frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest books and pays
+				results["a"] = public.book(site=SLUG, quote_ids=[self.a_quote], payment_method="Card",
+				                           guest={"first_name": "Anna", "last_name": "Gateway",
+				                                  "email": "anna.new6@example.com"},
+				                           session_id="new6-a", idempotency_key="idem-new6-a")
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the request's own end
+			except Exception as e:
+				frappe.db.rollback()
+				results["a"] = f"{type(e).__name__}: {e}"
+			finally:
+				in_gateway.set()
+				frappe.destroy()
+
+		def others():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.db.sql("SET SESSION innodb_lock_wait_timeout = 2")
+				for step, user, fn in (
+					("audit", "Administrator", lambda: audit("tex.test.new6", property=fx.PROPERTY, new={"n": 1})),
+					("book", "Guest", lambda: booking.create_booking(
+						quote_ids=[self.c_quote], payment_method="Pay at Hotel",
+						guest={"first_name": "Carl", "last_name": "Other", "email": "carl.new6@example.com"})),
+					("pay", "Guest", lambda: public.pay_booking(token=self.d["manage_token"], payment_method="Card")),
+				):
+					frappe.set_user(user)  # nosemgrep: frappe-setuser -- staff, then guests, on their own requests
+					try:
+						fn()
+						results[step] = "ok"
+					except Exception as e:
+						results[step] = type(e).__name__
+					finally:
+						frappe.db.rollback()
+			finally:
+				frappe.destroy()
+
+		frappe.db.rollback()                            # this connection holds nothing while the others run
+		with mock.patch.object(MockProvider, "create_checkout", gateway):
+			a = threading.Thread(target=guest_a)
+			a.start()
+			self.assertTrue(in_gateway.wait(timeout=60))
+			b = threading.Thread(target=others)
+			b.start()
+			b.join(timeout=60)
+			release.set()
+			a.join(timeout=60)
+		self.assertEqual({k: results.get(k) for k in ("audit", "book", "pay")},
+		                 {"audit": "ok", "book": "ok", "pay": "ok"})
+		out = results.get("a")
+		self.assertIsInstance(out, dict, out if isinstance(out, str) else None)       # never its manage token
+		frappe.db.rollback()                            # read what A committed
+		txn = out["payment"]["transaction"]
+		self.assertTrue(out["payment"]["url"])
+		row = frappe.db.get_value("TEX Payment Transaction", txn, ["status", "provider_ref", "checkout_started_at"],
+		                          as_dict=True)
+		self.assertEqual((row.status, row.provider_ref, row.checkout_started_at), ("Pending", f"MOCK-{txn}", None))
+
+	def test_two_first_starts_of_one_charge_start_it_once(self):
+		"""The same new charge started twice at once (a double click, two tabs of one link): the unique key
+		lets one start insert it; the other, whose snapshot did not see it, undoes its own steps and is told
+		a payment is being started — one charge, one checkout."""
+		b = self.d["booking"]
+		acc = frappe.db.get_value("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"})
+		key = pay.ns_key(fx.PROPERTY, f"book:{b}:{self.d['due_now']}:1", "charge")    # pay_booking's first key
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		first: dict = {}
+
+		def other_tab():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the first start's insert
+				first["charge"] = pay._new_txn(property=fx.PROPERTY, txn_type="Charge", method="Card",
+				                               amount=D(self.d["due_now"]), currency="EUR", provider_account=acc,
+				                               provider="Mock", idempotency_key=key, booking=b).name
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its step (a)
+			except Exception as e:
+				frappe.db.rollback()
+				first["error"] = f"{type(e).__name__}: {e}"
+			finally:
+				frappe.destroy()
+
+		frappe.db.rollback()
+		# this request's snapshot is taken before the other start's charge exists: it does not see it
+		frappe.db.sql("SELECT name FROM `tabTEX Payment Transaction` LIMIT 1")
+		t = threading.Thread(target=other_tab)
+		t.start()
+		t.join(timeout=60)
+		self.assertIn("charge", first, first)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's second tab
+		with self.assertRaisesRegex(pay.PaymentBusy, "A payment is being started"):
+			public.pay_booking(token=self.d["manage_token"], payment_method="Card")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		frappe.db.rollback()
+		self.assertEqual(frappe.get_all("TEX Payment Transaction", filters={"booking": b}, pluck="name"),
+		                 [first["charge"]])
+

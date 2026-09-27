@@ -746,10 +746,10 @@ def _start_payment(req, b, return_url: str | None, *, new_attempt: bool = False)
 	After a failed or cancelled attempt a new charge is started, once the proposal was priced
 	again (it must still be sellable at the accepted price).
 
-	No booking, reservation or request lock is held through the gateway call: the first submit
-	committed the request first (``_release_locks``), and a retry holds only the charge
-	(``start_payment`` re-reads a reused one with a lock). The request is locked and read again
-	after the gateway answered."""
+	No lock is held through the gateway call: ``start_payment`` puts the charge on record and commits
+	before it asks the gateway (NEW-6, ADR-066), which ends whatever this request locked before (the
+	booking a new attempt relocks, the naming series of the charge), a retry's and ``pay_again``'s
+	included. The request is locked and read again after the gateway answered."""
 	from kamra.tex.payments import service as pay
 	from kamra.tex.services import sites
 

@@ -211,6 +211,96 @@ class TestGuestPayment(TexTestCase):
 			public.pay_link(token=link["token"])
 
 
+	# ── NEW-6 (ADR-066): no row, gap or series lock is held through a gateway call ──
+
+	def started(self, session: str, gateway) -> tuple[dict | Exception, list, str | None]:
+		"""``guest_books`` with the commits of a request outside tests (recorded, never made) and the
+		sandbox gateway replaced by ``gateway(real, intent)``. → (its answer or error, what happened: a
+		commit with the charge's status and whether its checkout lease was on, and each gateway call;
+		the charge)."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		events: list = []
+		charge: dict = {}
+		real, real_new = MockProvider.create_checkout, pay._new_txn
+
+		def new_txn(**kw):
+			doc = real_new(**kw)
+			charge.setdefault("name", doc.name)
+			return doc
+
+		def commit(*_a, **_kw):
+			row = frappe.db.get_value("TEX Payment Transaction", charge["name"],
+			                          ["status", "checkout_started_at"], as_dict=True) if charge else None
+			events.append(("commit", row and (row.status, bool(row.checkout_started_at))))
+
+		def checkout(provider, intent):
+			events.append("gateway")
+			return gateway(lambda: real(provider, intent), intent)
+
+		with mock.patch.dict(frappe.flags, {"in_test": False}), \
+				mock.patch.object(frappe.db, "commit", side_effect=commit), \
+				mock.patch.object(pay, "_new_txn", side_effect=new_txn), \
+				mock.patch.object(MockProvider, "create_checkout", checkout):
+			try:
+				out = guest_books(session=session)
+			except Exception as e:                   # the caller asserts on it
+				out = e
+		return out, events, charge.get("name")
+
+	def test_the_gateway_is_asked_between_two_commits(self):
+		out, events, _charge = self.started("new6-order", lambda real, _intent: real())
+		self.assertEqual(events, [("commit", ("Pending", True)), "gateway", ("commit", ("Pending", False))])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was recorded
+		pmt = out["payment"]
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", pmt["transaction"], "provider_ref"),
+		                 f"MOCK-{pmt['transaction']}")
+
+	def test_a_failed_start_is_on_record_before_the_guest_is_told(self):
+		def down(_real, _intent):
+			raise ProviderError("gateway down")
+
+		out, events, charge = self.started("new6-down", down)
+		self.assertIsInstance(out, frappe.ValidationError)
+		self.assertIn("could not be started", str(out))
+		# the booking and its charge were committed first; the failure is committed before the error
+		self.assertEqual(events, [("commit", ("Pending", True)), "gateway", ("commit", ("Failed", False))])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was recorded
+		b = frappe.db.get_value("TEX Payment Transaction", charge, "booking")
+		self.assertEqual(frappe.db.get_value("TEX Booking", b, "status"), "Pending Payment")
+
+	def test_a_second_start_while_the_gateway_works_is_told_to_wait(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's second tab
+		real_start, first, second = pay.start_payment, {}, []
+
+		def start(**kw):
+			first.setdefault("kw", kw)
+			return real_start(**kw)
+
+		def gateway(real, _intent):
+			if "again" not in first:          # the same charge, started again while this checkout is made
+				first["again"] = True
+				try:
+					second.append(("started", real_start(**first["kw"])["transaction"]))
+				except pay.PaymentBusy as e:
+					second.append(("busy", str(e)))
+			return real()
+
+		real_checkout = MockProvider.create_checkout
+		with mock.patch.object(pay, "start_payment", side_effect=start), \
+				mock.patch.object(MockProvider, "create_checkout",
+				                  lambda provider, intent: gateway(lambda: real_checkout(provider, intent), intent)):
+			try:
+				b = guest_books(session="new6-busy")
+			except Exception as e:                   # before NEW-6 the second checkout broke the first
+				b = e
+		self.assertEqual(second, [("busy", "A payment is being started. Please wait a moment and try again.")])
+		self.assertIsInstance(b, dict, b)
+		self.assertTrue(b["payment"]["url"])
+
+
 class TestSelfService(TexTestCase):
 	def setUp(self):
 		super().setUp()
