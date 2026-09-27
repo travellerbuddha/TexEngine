@@ -2,7 +2,7 @@
 // policy (Y-4, ADR-067). Run with `npm run test:unit` (node --test).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { planRowRefundable, withPlanRefundable } from "../../src/tex/screens/rates/workspace/rows.ts"
+import { planRowIssues, planRowRefundable, withPlanRefundable } from "../../src/tex/screens/rates/workspace/rows.ts"
 import type { Row } from "../../src/tex/screens/rates/lib/types.ts"
 
 const plans = [
@@ -50,4 +50,30 @@ test("choosing a rate plan or a policy sets the flag; other rows and a hand-set 
   // a new row added with a rate plan takes its flag; one without keeps the default
   const added = withPlanRefundable(hand, [...hand, row("c", { rate_plan: "NRF" }), row("d")], plans, policies)
   assert.deepEqual(added.map((r) => r.refundable), [1, 0, 0, 1])
+})
+
+test("a row without its own policy takes the rate plan's default policy (O-2b)", () => {
+  const withDefaults = [{ name: "FLEX", tex_refundable: 1, tex_cancellation_policy: "CXL-NRF" }, { name: "SAVE", tex_refundable: 1, tex_cancellation_policy: "CXL-FREE" }]
+  const prev = [row("a")]
+  // the plan is refundable, its default policy is not: the server would refuse the publish
+  let next = withPlanRefundable(prev, [{ ...prev[0], rate_plan: "FLEX" }], withDefaults, policies)
+  assert.equal(next[0].refundable, 0)
+  // the row's own refundable policy wins over the plan's default
+  next = withPlanRefundable(next, [{ ...next[0], cancellation_policy: "CXL-FREE" }], withDefaults, policies)
+  assert.equal(next[0].refundable, 1)
+  // a plan whose default policy is refundable
+  next = withPlanRefundable([row("b")], [{ ...row("b"), rate_plan: "SAVE" }], withDefaults, policies)
+  assert.equal(next[0].refundable, 1)
+})
+
+test("a rate plan's issues are listed under its row (O-2b)", () => {
+  const issues = [
+    { level: "WARNING" as const, code: "RATE_PLAN_REFUNDABLE", message: "w", ref: { rate_plan: "NRF" } },
+    { level: "ERROR" as const, code: "POLICY_CURRENCY", message: "e", ref: { rate_plan: "FLEX" } },
+    { level: "ERROR" as const, code: "SALE_WINDOW", message: "s" },
+  ]
+  assert.deepEqual(planRowIssues(issues, "FLEX"), { issues: [issues[1]], tone: "danger" })
+  assert.deepEqual(planRowIssues(issues, "NRF"), { issues: [issues[0]], tone: "warning" })
+  assert.deepEqual(planRowIssues(issues, ""), { issues: [], tone: undefined })
+  assert.deepEqual(planRowIssues(undefined, "FLEX"), { issues: [], tone: undefined })
 })

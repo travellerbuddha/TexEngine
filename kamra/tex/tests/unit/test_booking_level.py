@@ -45,6 +45,19 @@ class TestMinBasketCurrency(unittest.TestCase):
 		                                      "promo_fx": promo_fx})
 		self.assertEqual(applied(tr2, "MB").discount, D("1000.00"))
 
+	def test_the_owners_example_at_51(self):
+		"""O-7 (D-18): 1,000 EUR at 51 is 51,000 TRY. Three nights (600 EUR = 30,600 TRY) are refused,
+		five (51,000 TRY) reach it."""
+		rate = FxSnapshot("EUR", "TRY", FxMode.MANUAL, D("51"))
+		kw = {"sell_currency": "TRY", "ctx": {"promotions": (self.promo(),), "fx": rate, "promo_fx": {"EUR": rate}}}
+		three = price(check_out=fx.req().check_in.replace(day=5), **kw)
+		self.assertEqual(three.basket, D("30600.00"))
+		self.assertIsNone(applied(three, "MB"))
+		self.assertIn("below minimum 51000", next(p.reason for p in three.promotions if p.promo_id == "MB"))
+		five = price(check_out=fx.req().check_in.replace(day=7), **kw)
+		self.assertEqual(five.basket, D("51000.00"))
+		self.assertEqual(applied(five, "MB").discount, D("5100.00"))
+
 	def test_no_rate_for_the_threshold_currency_rejects_the_promotion(self):
 		try_fx = FxSnapshot("EUR", "TRY", FxMode.MANUAL, D("50"))
 		q = price(sell_currency="TRY", ctx={"promotions": (self.promo(minimum="10"),), "fx": try_fx})

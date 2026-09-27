@@ -110,6 +110,7 @@ BEHAVIOUR = {
 	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
+	"p60_promotion_code_key": "test_patches.TestReportingPatches.test_p60_stores_codes_by_their_key_and_reports_a_clash_once",
 	"p63_versioned_passwords": "test_patches.TestP63VersionedPasswords",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
@@ -1127,6 +1128,39 @@ class TestReportingPatches(PatchCase):
 		                      ("TEX Payment Policy", one)):
 			self.assertIsNone(frappe.db.get_value(doctype, name, "currency"))       # nothing filled in (D-1)
 			self.assertEqual(frappe.db.get_value(doctype, name, "modified"), policies_before[name])
+
+	def test_p60_stores_codes_by_their_key_and_reports_a_clash_once(self):
+		"""O-31: every code promotion (whatever its status) whose code is not its key gets it, ``modified``
+		kept; a changed one whose key another draft or live record of the hotel has is reported once.
+		Redemptions keep the code they recorded; a second run changes nothing."""
+		def promo(code: str, status: str = "Active", **kw) -> str:
+			return put("TEX Promotion", promotion_name=f"P60 {code}", property=fx.PROPERTY, trigger="Code",
+			           code=code, value_type="PERCENT", value=D(10), tex_status=status, revision_no=1, **kw)
+
+		dotted = promo("WİNTER")                                   # WINTER: the draft below has it
+		plain = promo("WINTER", status="Draft")
+		archived = promo("YAZİ", status="Archived")                # YAZI, never live again: no clash
+		dotless = promo("KIŞ", status="Draft")                     # KIŞ is its key already
+		revision = promo("WİNTER", status="Draft", revision_of=dotted)   # the same record: no clash
+		red = put("TEX Promotion Redemption", promotion=dotted, code="WİNTER", booking="P60-BOOKING")
+		before = {n: frappe.db.get_value("TEX Promotion", n, "modified") for n in (dotted, archived, revision)}
+
+		seen = self.first_run("p60_promotion_code_key")
+		self.assertIn("p60: 3 promotion code(s) set to their key", seen["print"].call_args.args[0])
+		self.assertIn("; 1 clash(es)", seen["print"].call_args.args[0])
+		self.assertRerunChangesNothing("p60_promotion_code_key")
+		codes = dict(frappe.get_all("TEX Promotion", filters={"name": ("in", [dotted, plain, archived, dotless,
+		                                                                        revision])},
+		                            fields=["name", "code"], as_list=True))
+		self.assertEqual(codes, {dotted: "WINTER", plain: "WINTER", archived: "YAZI", dotless: "KIŞ",
+		                         revision: "WINTER"})
+		for name, modified in before.items():
+			self.assertEqual(frappe.db.get_value("TEX Promotion", name, "modified"), modified)
+		self.assertEqual(frappe.db.get_value("TEX Promotion Redemption", red, "code"), "WİNTER")
+		events = frappe.get_all("TEX Audit Event", filters={"action": "promotion.code_clash"},
+		                        fields=["reference_name", "new_value"])
+		self.assertEqual([(e.reference_name, json.loads(e.new_value)) for e in events],
+		                 [(dotted, {"code": "WINTER", "clashes_with": [plain]})])
 
 
 class TestSmallPatches(PatchCase):

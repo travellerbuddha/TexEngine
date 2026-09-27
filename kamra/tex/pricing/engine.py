@@ -506,8 +506,8 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 		promo_ctx_base = dict(sale_date=sale_date, check_in=req.check_in, check_out=req.check_out, nights=nights,
 		                      market=req.market, channel=req.channel, room_type=req.room_type, board=req.board,
 		                      rate_plan=req.rate_plan, contract=t.contract_id, member=req.member,
-		                      codes=frozenset(c.strip().upper() for c in req.promo_codes if c and c.strip()),
-		                      extras=frozenset(e.code for e in req.extras))
+		                      codes=frozenset(k for c in req.promo_codes if (k := promotions.code_key(c))),
+		                      extras=frozenset(e.code for e in req.extras), room_index=req.room_index)
 
 		# ── 8: COST-stage contract offers ──
 		cost_promos = tuple(p for p in (*t.offers, *ctx.promotions) if p.stage == PromoStage.COST)
@@ -600,7 +600,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 		sell_ctx = promotions.PromoContext(basket=q.basket, sell_currency=sell_ccy, fx=ctx.promo_fx, fx_log=log,
 		                                   booking_basket=req.booking_basket, booking_rooms=req.booking_rooms,
 		                                   booking_baskets={p: (b, n) for p, b, n in req.booking_baskets} or None,
-		                                   **promo_ctx_base)
+		                                   extras_total=extras_total, **promo_ctx_base)
 		# the promotions with a minimum basket this room is eligible for on every other check (G-84)
 		minimums = promotions.basket_minimums(sell_promos, sell_ctx, ctx.coupon_usage)
 		by_id = {p.promo_id: p for p in sell_promos}
@@ -658,16 +658,10 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 			lines.append(QuoteLine(LineKind.EXTRA, e.code, e.name, amt, e.quantity, category=cat))
 
 		categories = {"ACCOMMODATION": accom_gross - accom_discount, **extra_cats}
+		# a fixed discount on the complete booking (or its extras) is granted once, on room 1; a
+		# percentage is the same share of every room (G-06, ADR-029): ``promotions.select`` refused
+		# the others, and any this room cannot use, before choosing (O-1)
 		for p in basket_chosen:
-			if not lead_room and p.value_type != PromoValueType.PERCENT:
-				# a fixed discount on the complete booking (or its extras) is granted once,
-				# on room 1; a percentage is the same share of every room (G-06, ADR-029)
-				reason = "fixed booking discount granted once per booking, on room 1"
-				ex.add("coupon", "COUPON_REJECTED", "{name}: {reason}", rule=promotions.promo_ref(p), name=p.name,
-				       reason=reason)
-				q.promotions.append(promotions.PromoOutcome(p.promo_id, p.name, p.kind, False, reason,
-				                                            source=p.source, code=p.code))
-				continue
 			outcome = _apply_basket_promo(p, categories, sell_ccy, ctx, lines, ex, log)
 			q.promotions.append(outcome)
 		sold = q.promotions[sell_from:]

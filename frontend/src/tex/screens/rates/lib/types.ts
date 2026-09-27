@@ -105,6 +105,8 @@ export interface RatePlanOpt {
   rate_plan_name: string
   code?: string
   tex_refundable?: number
+  /** The rate plan's default cancellation policy (lookups only): a row without its own uses it. */
+  tex_cancellation_policy?: string | null
 }
 
 /** One editable child-table row. `_key` is client-only (save_version drops `_*`). */
@@ -220,6 +222,8 @@ export interface IssueRef {
   adults?: number
   children?: number
   board?: string
+  /** the rate plan row (RATE_PLAN_REFUNDABLE, POLICY_CURRENCY; ADR-067) */
+  rate_plan?: string
 }
 
 export interface Issue {

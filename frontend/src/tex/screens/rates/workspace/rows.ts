@@ -2,7 +2,7 @@
 // Workspace modules share (PRICING_WORKSPACE_UX.md D1). No runtime imports except lib/keys.ts, so
 // everything here runs under `node --test`. lib/tables.ts re-exports ROW_DEFAULTS as NEW_ROW.
 import { newKey } from "../lib/keys.ts"
-import type { Row, VersionTable } from "../lib/types.ts"
+import type { Issue, Row, VersionTable } from "../lib/types.ts"
 
 /** New-row defaults (TEX Contract Room, TEX Price Period, TEX Period Rate, TEX Child Age Band,
  * TEX Occupancy Rule, TEX Board Rule, TEX Contract Rate Plan, TEX Contract Offer). */
@@ -97,11 +97,12 @@ export function planRowRefundable(
 
 /** The rate-plan table after an edit (`next`), each row whose rate plan or cancellation policy
  * changed (or that is new with a rate plan) taking its refundable flag from them
- * (`planRowRefundable`); the other rows, and a flag the user set by hand, are kept. */
+ * (`planRowRefundable`): the row's own policy, else the rate plan's default policy, as the server
+ * freezes it (O-2b). The other rows, and a flag the user set by hand, are kept. */
 export function withPlanRefundable(
   prev: Row[],
   next: Row[],
-  plans: readonly { name: string; tex_refundable?: number | null }[],
+  plans: readonly { name: string; tex_refundable?: number | null; tex_cancellation_policy?: string | null }[],
   policies: readonly { name: string; refundable?: number | null }[],
 ): Row[] {
   const before = new Map(prev.map((r) => [r._key, r]))
@@ -110,7 +111,16 @@ export function withPlanRefundable(
     const chosen = old ? str(old.rate_plan) !== str(r.rate_plan) || str(old.cancellation_policy) !== str(r.cancellation_policy) : !!str(r.rate_plan)
     if (!chosen || !str(r.rate_plan)) return r
     const plan = plans.find((p) => p.name === str(r.rate_plan))
-    const policy = str(r.cancellation_policy) ? policies.find((p) => p.name === str(r.cancellation_policy)) : undefined
+    const policyName = str(r.cancellation_policy) || str(plan?.tex_cancellation_policy)
+    const policy = policyName ? policies.find((p) => p.name === policyName) : undefined
     return { ...r, refundable: planRowRefundable(plan, policy) }
   })
+}
+
+/** The issues about one rate plan row (their `ref.rate_plan`, O-2b): listed under that row, the
+ * row marked by the worst of them. */
+export function planRowIssues(issues: readonly Issue[] | undefined, ratePlan: unknown): { issues: Issue[]; tone: "danger" | "warning" | undefined } {
+  const code = str(ratePlan)
+  const mine = code ? (issues ?? []).filter((i) => i.ref?.rate_plan === code) : []
+  return { issues: mine, tone: mine.some((i) => i.level === "ERROR") ? "danger" : mine.length ? "warning" : undefined }
 }

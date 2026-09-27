@@ -44,7 +44,7 @@ from kamra.tex.pricing.model import (
 	RoomSpec,
 	StayRequest,
 )
-from kamra.tex.pricing.promotions import offer_currency
+from kamra.tex.pricing.promotions import code_key, offer_currency
 
 PAYLOAD_SCHEMA = "tex.contract.v1"
 
@@ -132,7 +132,7 @@ def promotion_from_dict(d: dict) -> Promotion:
 		value_type=PromoValueType(d.get("value_type") or "PERCENT"), value=D(d.get("value")),
 		kind=d.get("kind") or "PROMOTION", stage=PromoStage(d.get("stage") or "SELL"),
 		applies_to=PromoAppliesTo(d.get("applies_to") or "ACCOMMODATION"),
-		currency=d.get("currency") or None, code=(d.get("code") or "").strip().upper() or None,
+		currency=d.get("currency") or None, code=code_key(d.get("code")),
 		sale_from=_d(d.get("sale_from")), sale_to=_d(d.get("sale_to")),
 		stay_from=_d(d.get("stay_from")), stay_to=_d(d.get("stay_to")),
 		stay_match=StayMatch(d.get("stay_match") or "ANY_NIGHT"),

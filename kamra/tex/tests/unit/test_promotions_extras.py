@@ -4,9 +4,17 @@ import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from kamra.tex.pricing import extras, promotions
-from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, PromoValueType, StackingMode, StayMatch
+from kamra.tex.pricing import engine, extras, promotions
+from kamra.tex.pricing.enums import (
+	ExtraPricingMode,
+	FxMode,
+	PromoAppliesTo,
+	PromoValueType,
+	StackingMode,
+	StayMatch,
+)
 from kamra.tex.pricing.model import ExtraDef, ExtraPriceRule, ExtraRequest, FxSnapshot, Promotion
+from kamra.tex.tests.unit import fixtures
 
 D = Decimal
 CI, CO = date(2027, 7, 10), date(2027, 7, 17)
@@ -137,6 +145,153 @@ class TestCombination(unittest.TestCase):
 			amounts("100"), pctx(), StackingMode.SEQUENTIAL, "EUR")
 		self.assertEqual(out[0].value_added, "Free spa")
 		self.assertEqual(res[NIGHTS[0]], D("85.00"))
+
+
+class TestUnusableNeverWins(unittest.TestCase):
+	"""O-1: a promotion the room cannot use is refused before the combination step, so it never
+	excludes or closes out one it can. 2 adults, STD, 3 nights: 600.00 EUR; EB10 alone 540.00."""
+
+	EB10 = P("EB10", priority=1)
+
+	def price(self, other, *, codes=("X",), extras_=(), ctx_kw=None, **req):
+		ctx = fixtures.ctx(**{"promotions": (self.EB10, other), **(ctx_kw or {})})
+		return engine.price_stay(ctx, fixtures.req(check_out=date(2027, 6, 5), promo_codes=codes, extras=extras_,
+		                                           **req))
+
+	def assertEb10Wins(self, q, reason, code, *, total="540.00", other="X"):
+		self.assertTrue(q.sellable, q.reasons)
+		self.assertEqual(q.totals["accommodation"], D(total))
+		out = {o.promo_id: o for o in q.promotions}
+		self.assertTrue(out["EB10"].applied, out["EB10"].reason)
+		self.assertFalse(out[other].applied)
+		self.assertEqual(out[other].reason, reason)
+		steps = [s for s in q.explanation.to_list() if (s["rule"] or {}).get("rule_id") == other]
+		self.assertEqual([s["code"] for s in steps], [code], q.explanation.summary_lines())
+
+	def test_an_exclusive_fixed_amount_without_a_rate(self):
+		q = self.price(P("X", PromoValueType.FIXED_STAY, "100", currency="USD", exclusive=True))
+		self.assertEb10Wins(q, "no FX to convert USD", "PROMO_NO_FX")
+
+	def test_a_non_combinable_fixed_night_amount_without_a_rate(self):
+		q = self.price(P("X", PromoValueType.FIXED_NIGHT, "10", currency="USD", stackable=False, priority=9))
+		self.assertEb10Wins(q, "no FX to convert USD", "PROMO_NO_FX")
+
+	def test_a_contract_offer_in_eur_sold_in_try_without_a_promotion_rate(self):
+		"""K-1: 30,600 TRY (600 EUR at 51); EB10 is 10 % of it."""
+		k1 = Promotion("X", "Early booking", PromoValueType.FIXED_STAY, D("50"), currency="EUR", exclusive=True,
+		               source="contract")
+		eur_try = FxSnapshot("EUR", "TRY", FxMode.MANUAL, D("51"))
+		q = self.price(k1, codes=(), sell_currency="TRY", ctx_kw={"fx": eur_try})
+		self.assertEqual(q.totals["accommodation_gross"], D("30600.00"))
+		self.assertEb10Wins(q, "no FX to convert EUR", "PROMO_NO_FX",
+		                    total=str(q.totals["accommodation_gross"] * D("0.9")))
+
+	def test_a_multiplier_on_the_total(self):
+		q = self.price(P("X", PromoValueType.MULTIPLIER, "0.5", code="X", exclusive=True,
+		                 applies_to=PromoAppliesTo.TOTAL))
+		self.assertEb10Wins(q, "MULTIPLIER is not supported on TOTAL", "COUPON_REJECTED")
+
+	def test_a_fixed_night_amount_on_the_total(self):
+		q = self.price(P("X", PromoValueType.FIXED_NIGHT, "10", code="X", exclusive=True,
+		                 applies_to=PromoAppliesTo.TOTAL))
+		self.assertEb10Wins(q, "FIXED_NIGHT is not supported on TOTAL", "COUPON_REJECTED")
+
+	def test_free_nights_on_the_extras(self):
+		q = self.price(P("X", PromoValueType.FREE_NIGHTS, "0", code="X", exclusive=True, free_nights_stay=3,
+		                 free_nights_pay=2, applies_to=PromoAppliesTo.EXTRAS))
+		self.assertEb10Wins(q, "FREE_NIGHTS is not supported on EXTRAS", "COUPON_REJECTED")
+
+	def test_an_extras_code_without_extras(self):
+		q = self.price(P("X", code="X", exclusive=True, applies_to=PromoAppliesTo.EXTRAS))
+		self.assertEb10Wins(q, "nothing to discount", "COUPON_REJECTED")
+
+	def test_a_non_combinable_fixed_total_code_on_the_second_room(self):
+		q = self.price(P("X", PromoValueType.FIXED_STAY, "50", code="X", currency="EUR", stackable=False,
+		                 priority=9, applies_to=PromoAppliesTo.TOTAL), room_index=1)
+		self.assertEb10Wins(q, "fixed booking discount granted once per booking, on room 1", "COUPON_REJECTED")
+
+	def test_usable_ones_are_unchanged(self):
+		"""On room 1, with the rate and extras there: the other promotion wins as before."""
+		first = self.price(P("X", PromoValueType.FIXED_STAY, "50", code="X", currency="EUR", stackable=False,
+		                     priority=9, applies_to=PromoAppliesTo.TOTAL))
+		self.assertEqual({o.promo_id: o.applied for o in first.promotions}, {"X": True, "EB10": False})
+		self.assertEqual(first.totals["subtotal"], D("550.00"))
+		usd = FxSnapshot("USD", "EUR", FxMode.MANUAL, D("0.9"))
+		fixed = self.price(P("X", PromoValueType.FIXED_STAY, "100", currency="USD", exclusive=True),
+		                   ctx_kw={"promo_fx": {"USD": usd}})
+		self.assertEqual(fixed.totals["accommodation"], D("510.00"))
+		cot = ExtraDef("COT", "Baby cot", ExtraPricingMode.ROOM, "EUR", D("15"))
+		extra = self.price(P("X", value="20", code="X", exclusive=True, applies_to=PromoAppliesTo.EXTRAS),
+		                   extras_=(ExtraRequest("COT"),), ctx_kw={"extras": {"COT": cot}})
+		self.assertEqual((extra.totals["accommodation"], extra.totals["discounts"]), (D("600.00"), D("3.00")))
+
+
+
+class TestGroupRule(unittest.TestCase):
+	"""O-4 (D-3): promotions of one group never combine. The highest priority is applied; on equal
+	priority the lowest id, the older promotion (not the better one). ``group_ties`` names the
+	promotions a new one would tie with."""
+
+	def price(self, *promos):
+		q = engine.price_stay(fixtures.ctx(promotions=promos), fixtures.req(check_out=date(2027, 6, 5)))
+		return q.totals["accommodation"], {o.promo_id: o.applied for o in q.promotions}
+
+	def test_on_equal_priority_the_older_one_is_applied(self):
+		eb10, eb25 = P("PRM-00001", value="10", group="EB"), P("PRM-00002", value="25", group="EB")
+		self.assertEqual(self.price(eb25, eb10), (D("540.00"), {"PRM-00001": True, "PRM-00002": False}))
+
+	def test_a_higher_priority_is_applied_first(self):
+		eb10, eb25 = P("PRM-00001", value="10", group="EB"), P("PRM-00002", value="25", group="EB", priority=1)
+		self.assertEqual(self.price(eb10, eb25), (D("450.00"), {"PRM-00001": False, "PRM-00002": True}))
+
+	def test_ties_are_the_same_group_and_priority_with_overlapping_windows(self):
+		new = P("NEW", group="EB", sale_from=date(2027, 1, 1), sale_to=date(2027, 3, 31))
+		others = (P("A", group="EB"), P("B", group="EB", priority=1), P("C", group="LS"), P("D"),
+		          P("E", group="EB", sale_from=date(2027, 4, 1)), P("F", group="EB", sale_to=date(2026, 12, 31)),
+		          P("G", group="EB", stay_from=date(2027, 7, 1), stay_to=date(2027, 7, 31)), P("NEW", group="EB"))
+		self.assertEqual([p.promo_id for p in promotions.group_ties(new, others)], ["A", "G"])
+		self.assertEqual(promotions.group_ties(P("X"), others), [])            # no group: no tie
+
+	def test_an_empty_date_is_an_open_end(self):
+		"""A window's empty start is "since always", its empty end "for ever": a promotion without
+		dates meets every other in its group."""
+		stay = P("S", group="EB", stay_from=date(2027, 6, 1), stay_to=date(2027, 6, 30))
+		self.assertEqual([p.promo_id for p in promotions.group_ties(P("N", group="EB"), (stay,))], ["S"])
+		later = P("L", group="EB", stay_from=date(2027, 7, 1))
+		self.assertEqual(promotions.group_ties(P("N", group="EB", stay_to=date(2027, 6, 30)), (later,)), [])
+		self.assertEqual(len(promotions.group_ties(P("N", group="EB", stay_to=date(2027, 7, 1)), (later,))), 1)
+
+
+
+class TestCodeKey(unittest.TestCase):
+	"""O-31: a promotion code is compared by its key: Turkish dotted and dotless i are I, other
+	letters (Ş, Ğ, Ü, Ö, Ç) are kept upper-cased."""
+
+	def test_cases(self):
+		for typed, key in (("winter", "WINTER"), ("wİnter", "WINTER"), ("WİNTER", "WINTER"), ("wınter", "WINTER"),
+		                   ("wi\u0307nter", "WINTER"), ("WI\u0307NTER", "WINTER"), ("  yaz-24 ", "YAZ-24"),
+		                   ("şeker", "ŞEKER"), ("ŞEKER", "ŞEKER"), ("dağ", "DAĞ"), ("üçgöz", "ÜÇGÖZ"),
+		                   ("s\u0327eker", "ŞEKER")):
+			with self.subTest(typed=typed):
+				self.assertEqual(promotions.code_key(typed), key)
+				self.assertEqual(promotions.code_key(key), promotions.code_key(typed))      # idempotent
+		for blank in (None, "", "   "):
+			self.assertIsNone(promotions.code_key(blank))
+
+	def price(self, typed: str, stored: str):
+		promo = P("WIN", code=stored)
+		q = engine.price_stay(fixtures.ctx(promotions=(promo,)),
+		                      fixtures.req(check_out=date(2027, 6, 5), promo_codes=(typed,)))
+		return q.totals["accommodation"]
+
+	def test_a_code_typed_with_a_turkish_i_matches(self):
+		self.assertEqual(self.price("wİnter", "WINTER"), D("540.00"))
+		self.assertEqual(self.price("WİNTER", "WINTER"), D("540.00"))
+
+	def test_a_code_stored_with_a_turkish_i_matches(self):
+		self.assertEqual(self.price("winter", "WİNTER"), D("540.00"))
+		self.assertEqual(self.price("şeker", "ŞEKER"), D("540.00"))
+		self.assertEqual(self.price("seker", "ŞEKER"), D("600.00"))            # Ş is not S
 
 
 def xctx(**kw):

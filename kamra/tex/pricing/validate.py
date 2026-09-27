@@ -54,7 +54,8 @@ class Issue:
 	message: str
 	# what the issue is about (ADR-061 D9): rule_id, rule_ids (every rule an issue about several
 	# names, rule_id the first), room_type, period, other_period, age_band, age_bands (every band
-	# code of the contract, for AGE_BANDS), adults, children (the party), board. Only the parts the
+	# code of the contract, for AGE_BANDS), adults, children (the party), board, rate_plan (the
+	# rate plan row of RATE_PLAN_REFUNDABLE and POLICY_CURRENCY, ADR-067). Only the parts the
 	# issue has; None when it is about the contract as a whole. Not part of the issue's identity.
 	ref: dict | None = field(default=None, compare=False)
 
@@ -270,10 +271,11 @@ def _refundable_issues(rp: RatePlanTerms) -> list[Issue]:
 	name = pol.get("name") or pol.get("id")
 	if rp.refundable and not policy_money.refundable(rp.refundable, pol):
 		return [_err("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is refundable but its cancellation policy "
-		             f"{name} is not; mark the rate plan non-refundable or choose a refundable policy")]
+		             f"{name} is not; mark the rate plan non-refundable or choose a refundable policy",
+		             rate_plan=rp.code)]
 	if not rp.refundable and pol.get("rules") and pol.get("refundable", True) is not False:
 		return [_warn("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is non-refundable, so the rules of its "
-		              f"cancellation policy {name} never apply")]
+		              f"cancellation policy {name} never apply", rate_plan=rp.code)]
 	return []
 
 
@@ -287,7 +289,8 @@ def _policy_currency_issues(rp: RatePlanTerms, contract_currency: str) -> list[I
 		if policy_money.has_fixed(pol) and ccy and ccy != contract_currency.upper():
 			out.append(_err("POLICY_CURRENCY", f"rate plan {rp.code}: the fixed amounts of {kind} policy "
 			                f"{pol.get('name') or pol.get('id')} are in {ccy}, the contract's currency is "
-			                f"{contract_currency}; give the policy the contract's currency (or none)"))
+			                f"{contract_currency}; give the policy the contract's currency (or none)",
+			                rate_plan=rp.code))
 	return out
 
 
@@ -370,6 +373,22 @@ def _positions(t: ContractTerms, spec: RoomSpec, r: OccupancyRule, adults: int, 
 	return list(range(first, last + 1))
 
 
+def _positions_infants_apart(t: ContractTerms, spec: RoomSpec, r: OccupancyRule, adults: int, children: int,
+                             band: AgeBand | None) -> list:
+	"""``_positions`` of a contract whose infants are not children (O-2, ADR-067): ``children`` counts
+	the other children, numbered first, as the combination rules and max_children count them; an
+	infant's slot follows them, as ``ages.order_children`` numbers it. The party fits the room as the
+	runtime checks it: the other children always, the infants up to the priced one when they count
+	as occupants (else up to the room's size)."""
+	if band is None or not band.is_infant:
+		return _positions(t, spec, r, adults, children) if adults + children <= spec.max_occupants else []
+	room = spec.max_occupants - adults - children if t.infants_count_as_occupants else spec.max_occupants
+	first, last = max(children, _fill(t, spec, adults)) + 1, children + room
+	if r.position is not None:
+		return [r.position] if first <= r.position <= last else []
+	return list(range(first, last + 1))
+
+
 def _fits(t: ContractTerms, spec: RoomSpec, adults: int, children: int, band: AgeBand | None) -> bool:
 	if adults + children <= spec.max_occupants:
 		return True
@@ -382,7 +401,8 @@ def _fits(t: ContractTerms, spec: RoomSpec, adults: int, children: int, band: Ag
 def _slots(t: ContractTerms, r: OccupancyRule, adults: int | None, children: int | None, periods: list):
 	"""(room, period code, adults, children, position, band) of every slot ``r`` prices in a
 	party of ``adults`` + ``children`` (None: any number). ``periods``: the codes to try when
-	the rule names none ([None] when no rule that matters names one)."""
+	the rule names none ([None] when no rule that matters names one). When infants are not
+	children (O-2) ``children`` is the count the combination rules see, without the infants."""
 	if r.room_type:
 		specs = [t.rooms[r.room_type]] if r.room_type in t.rooms else []
 	else:
@@ -402,9 +422,13 @@ def _slots(t: ContractTerms, r: OccupancyRule, adults: int | None, children: int
 				if children is not None and n_c != children:
 					continue
 				for band in bands:
-					if not _fits(t, spec, n_a, n_c, band):
+					if not t.infants_count_as_children:
+						positions = _positions_infants_apart(t, spec, r, n_a, n_c, band)
+					elif _fits(t, spec, n_a, n_c, band):
+						positions = _positions(t, spec, r, n_a, n_c)
+					else:
 						continue
-					for pos in _positions(t, spec, r, n_a, n_c):
+					for pos in positions:
 						for period in periods:
 							yield spec, period, n_a, n_c, pos, band
 
@@ -428,7 +452,15 @@ def _reached(t: ContractTerms, spec: RoomSpec, period, adults: int, children: in
 	pool = [x for x in t.occupancy_rules if x.op != Op.INHERIT] if reaching is None else reaching
 	rules = [x for x in pool if x.target == OccTarget.CHILD
 	         and occupancy.qualifiers_match(x, spec.room_type, period, adults, children)]
-	return all(any(occupancy.slot_matches(x, OccTarget.CHILD, q, b.code) for x in rules for b in t.age_bands)
+
+	def bands_at(q: int):
+		"""When infants are not children (O-2) the first ``children`` positions are the other
+		children and the ones after them infants."""
+		if t.infants_count_as_children:
+			return t.age_bands
+		return [b for b in t.age_bands if b.is_infant == (q > children)]
+
+	return all(any(occupancy.slot_matches(x, OccTarget.CHILD, q, b.code) for x in rules for b in bands_at(q))
 	           for q in range(_fill(t, spec, adults) + 1, last + 1))
 
 
