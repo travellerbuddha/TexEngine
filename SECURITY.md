@@ -76,6 +76,29 @@ without one is a bug:
 - Findings in third-party services (payment providers, channel managers, SMTP, hosting)
   should go to those vendors; tell us too if TEX handles their output unsafely.
 
+## Supply-chain checks
+
+Every pull request, every push to `main` / `develop` and a weekly schedule run
+`.github/workflows/supply-chain.yml` (pinned tool versions, read-only token):
+
+- **Secrets** — gitleaks (release archive, sha256 checked) scans a pull request's own commits and,
+  on push and schedule, the whole history, always with `--redact`. Each run first proves the scan
+  works: a made-up token written at run time must be caught. The reviewed exceptions (test
+  fixtures, built bundles, the demo password of disposable sites) are in `.gitleaks.toml`, each
+  with its reason. A real secret found is never copied anywhere: name the file and commit, rotate
+  the secret, and tell the owner.
+- **npm** — `audit-ci` over `npm audit` on `frontend/package-lock.json`, production dependencies,
+  high and critical advisories; exceptions in `.github/supply-chain/audit-ci.jsonc`.
+- **Python** — `pip-audit` over the bench environment (Frappe v16.25.0 + payments; kamra declares
+  no runtime dependency). Every finding fails the job unless it is listed in
+  `.github/supply-chain/pip-audit-ignore.txt` with its reason and a review date; the listed ones
+  are fixed only by upgrading Frappe or payments, whose pins exclude the fixed releases.
+
+A fix that upgrades a dependency within its pins is made instead of an exception. The repository
+owner reviews the exception lists (at each review date, and whenever Frappe or payments is
+upgraded) and should also switch on GitHub's Dependabot alerts and secret scanning in the
+repository settings.
+
 ## License
 
 TEX Engine is distributed under the GNU Affero General Public License v3.0, like the

@@ -1,0 +1,13 @@
+{
+  // npm dependency audit (NEW-5, .github/workflows/supply-chain.yml). audit-ci runs `npm audit` on
+  // frontend/package-lock.json, production dependencies only (the dev tools never ship), and fails on
+  // any high or critical advisory not allowlisted below. Retries a registry / network error.
+  // An allowlist entry is an advisory id (e.g. "GHSA-xxxx-xxxx-xxxx") with a reason and a review date
+  // in the comment above it; reviewed by the repository owner (SECURITY.md, "Supply-chain checks").
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "high": true,
+  "skip-dev": true,
+  "retry-count": 5,
+  "report-type": "important",
+  "allowlist": []
+}

@@ -1,0 +1,139 @@
+# Supply-chain checks (NEW-5, SECURITY.md "Supply-chain checks"): secrets in the history (gitleaks), the
+# frontend's production npm dependencies (audit-ci over npm audit) and the Python dependencies of the bench
+# environment (pip-audit). Separate from ci.yml. Each job fails on a finding that is not in its reviewed list:
+#   .gitleaks.toml                              (secrets; reasoned allowlists)
+#   .github/supply-chain/audit-ci.jsonc         (npm; high and critical)
+#   .github/supply-chain/pip-audit-ignore.txt   (Python; id, reason, review date)
+name: Supply chain
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: "17 3 * * 1"      # Mondays: new advisories appear without a push
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secrets (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # the CLI from its release archive, checksum checked (the gitleaks GitHub Action needs a licence
+      # on organisation repositories)
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks (pinned, sha256 checked)
+        run: |
+          curl -sSfL --retry 3 -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks version
+
+      - name: Self-test (a planted secret is caught)
+        # a GitHub token shape made up at run time in a scratch directory: never in the repository, never printed
+        run: |
+          dir=$(mktemp -d)
+          token="ghp_$(head -c 4096 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 36)"
+          printf 'GITHUB_TOKEN=%s\n' "$token" > "$dir/planted.env"
+          unset token
+          set +e
+          /tmp/gitleaks dir --no-banner --redact --verbose --config .gitleaks.toml \
+            --report-format json --report-path "$RUNNER_TEMP/self-test.json" "$dir/planted.env"
+          code=$?
+          set -e
+          caught=$(python3 -c "import json, sys; print(sum(f['RuleID'] == 'github-pat' for f in json.load(open(sys.argv[1]))))" \
+            "$RUNNER_TEMP/self-test.json")
+          rm -rf "$dir" "$RUNNER_TEMP/self-test.json"
+          if [ "$code" -eq 0 ] || [ "$caught" -lt 1 ]; then
+            echo "::error::gitleaks did not catch the planted secret (exit $code): the scan below cannot be trusted"
+            exit 1
+          fi
+          echo "self-test passed: the planted secret was caught (github-pat, exit $code)"
+
+      - name: Scan (a pull request's own commits; the whole history on push and schedule)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            /tmp/gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="${BASE_SHA}..${HEAD_SHA}" .
+          else
+            /tmp/gitleaks git --no-banner --redact --config .gitleaks.toml .
+          fi
+
+  npm:
+    name: npm dependencies (audit-ci)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: npm audit, production dependencies, high and critical
+        # frontend/package-lock.json is enough (no install); audit-ci retries a registry error and fails on
+        # an advisory not allowlisted in audit-ci.jsonc. docs-site does not ship with the product.
+        working-directory: frontend
+        run: npx --yes audit-ci@7.1.0 --config ../.github/supply-chain/audit-ci.jsonc
+
+  python:
+    name: Python dependencies (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PIP_AUDIT_VERSION: "2.10.1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kamra-src
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Bench environment (no database), as ci.yml builds it
+        # kamra declares no runtime dependency (pyproject.toml): the Python surface is Frappe v16.25.0 +
+        # payments, as installed by bench
+        run: |
+          npm install -g yarn
+          pip install frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --frappe-branch v16.25.0 frappe-bench
+          cd frappe-bench
+          bench get-app --skip-assets payments
+          bench get-app --skip-assets kamra "${GITHUB_WORKSPACE}/kamra-src"
+          env/bin/pip freeze --exclude-editable > "${GITHUB_WORKSPACE}/req.txt"
+          wc -l "${GITHUB_WORKSPACE}/req.txt"
+
+      - name: pip-audit (pinned, its own venv)
+        run: |
+          python -m venv /tmp/pip-audit
+          /tmp/pip-audit/bin/pip install --quiet "pip-audit==${PIP_AUDIT_VERSION}"
+          # exit 1 with a report = findings, judged by the gate below; no report = a tool / network error: retry
+          for attempt in 1 2 3; do
+            rm -f audit.json
+            /tmp/pip-audit/bin/pip-audit -r req.txt --no-deps --disable-pip --format json -o audit.json && break
+            python -c "import json; json.load(open('audit.json'))" 2>/dev/null && break
+            echo "pip-audit failed without a report (attempt ${attempt}); retrying"
+            sleep $((attempt * 20))
+          done
+          python -c "import json; json.load(open('audit.json'))"
+
+      - name: Findings not in the reviewed list fail the job
+        run: python kamra-src/.github/supply-chain/pip_audit_gate.py audit.json kamra-src/.github/supply-chain/pip-audit-ignore.txt
