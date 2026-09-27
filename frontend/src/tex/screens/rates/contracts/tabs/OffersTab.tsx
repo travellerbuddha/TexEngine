@@ -201,7 +201,7 @@ function OfferForm({
           <Field label={t("rates.f.priority")} hint={t("rates.h.promo_priority")}>
             <Input type="number" step={1} disabled={readOnly} value={n("priority")} onChange={(e) => onChange({ priority: intVal(e.target.value) })} />
           </Field>
-          <Field label={t("rates.f.offer_group")} hint={t("rates.h.promo_group")}>
+          <Field label={t("rates.f.offer_group")} hint={t("rates.h.offer_group")}>
             <Input disabled={readOnly} value={s("offer_group")} onChange={(e) => onChange({ offer_group: e.target.value })} />
           </Field>
         </FormGrid>

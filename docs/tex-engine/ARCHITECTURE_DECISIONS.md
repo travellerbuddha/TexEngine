@@ -9205,12 +9205,12 @@ the versions the roll superseded the state their contract's later publishes woul
   or FIXED_STAY, an extras discount without extras, a fixed booking discount on a later room (COUPON_REJECTED), with the
   reasons the apply step gave. Everything else is unchanged (parity corpus). The save refuses those type/scope pairs and a
   cost-stage offer that is not on the accommodation.
-- *Group rule (D-3).* Of one group the highest priority applies, on equal priority the lowest id (the older promotion), not
-  the better offer; texts say so in 6 languages; save and activation warn (`_warnings`, PROMO_GROUP_TIE) on a live tie.
+- *Group rule (D-3).* Highest priority first; on a tie the lowest id: of hotel promotions the older (PRM-), of contract offers
+  the code first alphabetically; never "the better offer". A member refused by stacking leaves the group open. Save/activation
+  warn on a live tie (PROMO_GROUP_TIE). A booking-level exclusive code excludes the others only on rooms that can use it (O-1).
 - *Minimum basket (D-18).* Accommodation before discounts plus extras, of the booking's rooms it covers, in the promotion's
-  currency; a minimum requires that currency.
+  currency; a minimum requires that currency. *Members only (G-57):* refused until a sale carries a membership signal.
 - *Codes (O-31).* Compared by `code_key` (İ and ı are I); p60 rewrites stored codes and reports clashes, never payloads.
-- *Members only (G-57).* Refused until a sale carries a membership signal.
 - *Markups (G-53).* A REPLACE markup tying a live one (scope, priority, stay dates) is refused on activation (serialised);
   publishing from the contract page runs the workspace's board checks. `level()` and server defaults are unchanged.
 - New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.
