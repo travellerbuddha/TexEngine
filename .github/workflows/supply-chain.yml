@@ -44,26 +44,31 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           /tmp/gitleaks version
 
-      - name: Self-test (a planted secret is caught)
-        # a GitHub token shape made up at run time in a scratch directory: never in the repository, never printed
+      - name: Self-test (a planted secret is caught, in a test folder too)
+        # a GitHub token shape made up at run time, never committed, never printed: once in a scratch directory,
+        # once in a temporary folder under kamra/tex/tests/ (the test-fixture allowlist covers generic-api-key only)
         run: |
-          dir=$(mktemp -d)
-          token="ghp_$(head -c 4096 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 36)"
-          printf 'GITHUB_TOKEN=%s\n' "$token" > "$dir/planted.env"
-          unset token
-          set +e
-          /tmp/gitleaks dir --no-banner --redact --verbose --config .gitleaks.toml \
-            --report-format json --report-path "$RUNNER_TEMP/self-test.json" "$dir/planted.env"
-          code=$?
-          set -e
-          caught=$(python3 -c "import json, sys; print(sum(f['RuleID'] == 'github-pat' for f in json.load(open(sys.argv[1]))))" \
-            "$RUNNER_TEMP/self-test.json")
-          rm -rf "$dir" "$RUNNER_TEMP/self-test.json"
-          if [ "$code" -eq 0 ] || [ "$caught" -lt 1 ]; then
-            echo "::error::gitleaks did not catch the planted secret (exit $code): the scan below cannot be trusted"
-            exit 1
-          fi
-          echo "self-test passed: the planted secret was caught (github-pat, exit $code)"
+          check() {
+            dir=$1
+            token="ghp_$(head -c 4096 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 36)"
+            printf 'GITHUB_TOKEN = "%s"\n' "$token" > "$dir/planted.py"
+            unset token
+            set +e
+            /tmp/gitleaks dir --no-banner --redact --verbose --config .gitleaks.toml \
+              --report-format json --report-path "$RUNNER_TEMP/self-test.json" "$dir/planted.py"
+            code=$?
+            set -e
+            caught=$(python3 -c "import json, sys; print(sum(f['RuleID'] == 'github-pat' for f in json.load(open(sys.argv[1]))))" \
+              "$RUNNER_TEMP/self-test.json")
+            rm -rf "$dir" "$RUNNER_TEMP/self-test.json"
+            if [ "$code" -eq 0 ] || [ "$caught" -lt 1 ]; then
+              echo "::error::gitleaks did not catch the secret planted in ${dir} (exit $code): the scan below cannot be trusted"
+              exit 1
+            fi
+            echo "self-test passed: the secret planted in ${dir} was caught (github-pat, exit $code)"
+          }
+          check "$(mktemp -d)"
+          check "$(mktemp -d kamra/tex/tests/gitleaks-self-test.XXXXXX)"
 
       - name: Scan (a pull request's own commits; the whole history on push, schedule and dispatch)
         # --verbose names the file, line and commit of a finding (the value stays redacted); reviewed findings of
