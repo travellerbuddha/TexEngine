@@ -9208,12 +9208,14 @@ the versions the roll superseded the state their contract's later publishes woul
   the contract's. It is frozen (upper-cased) only on a policy with a FIXED deposit, rule or no-show; a payload without it
   reads the contract's (the K-1 pattern). A fixed policy in another currency is refused (`POLICY_CURRENCY`).
 - *Conversion (done: Part 2E-1, Y-3 B, booking.py).* A fixed amount × the quote's recorded contract → sell rate,
-  half-up to the sale currency's minor unit (`fixed_in_sell`), never above the stored price; a snapshot whose policy has no
-  currency keeps the amount as sold; a fixed penalty's basis names the conversion (`fx`). A fixed deposit is taken once per
-  booking, on its first live room carrying the policy (`first_rooms_per_policy`, ADR-029). p59 syncs the policies and
-  reports what to review; no backfill.
-- *No backfill (Y-3 B).* Every computation after the release takes the deposit per booking; a pending booking's stored
-  `amount_due_now` is not rewritten: only multi-room bookings with a fixed deposit differ, and theirs drops at the first refresh.
+  half-up to the sale currency's minor unit (`fixed_in_sell`); a snapshot whose policy has no currency keeps the amount as
+  sold; a fixed penalty's basis names the conversion (`fx`). A fixed deposit is taken once per booking and payment policy
+  (rooms of different FIXED policies each take their own), at its first room's rate, room by room in room order (room
+  index, ADR-029), each room at most its own stored price: min(deposit, those rooms' total) (`deposit_shares`). p59 syncs
+  the policies and reports what to review; no backfill.
+- *No backfill (Y-3 B).* Every computation after the release takes the deposit per booking and policy; a pending booking's
+  stored `amount_due_now` is not rewritten: only multi-room bookings with a fixed deposit differ, and theirs drops at the
+  first refresh.
 - *Infants (O-2, D-2).* Version setting `infants_count_as_children`: off, combination rules and max_children count
   children without infants and infants are numbered last; max_occupants follows `infants_count_as_occupants`. DocType
   default 1 (every existing version prices as before); a brand-new contract's first draft 0. Frozen only when 0.
