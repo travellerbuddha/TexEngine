@@ -25,7 +25,7 @@ from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, quantize, to_str
-from kamra.tex.pricing import ages, engine, serialize
+from kamra.tex.pricing import ages, engine, promotions, serialize
 from kamra.tex.pricing.model import ChildSpec, ExtraRequest, PricingError, StayRequest, Unsellable
 from kamra.tex.security.keys import site_secret
 
@@ -177,7 +177,7 @@ def build_request(*, property, room_type, board, rate_plan, check_in, check_out,
 	return StayRequest(property=property, room_type=room_type, board=board, rate_plan=rate_plan, check_in=check_in,
 	                   check_out=check_out, adults=party.adults, children=tuple(party.children), sale_at=sale_at,
 	                   market=market, channel=channel, sell_currency=currency.upper(),
-	                   promo_codes=tuple(sorted({c.strip().upper() for c in promo_codes if c and c.strip()})),
+	                   promo_codes=tuple(sorted({k for c in promo_codes if (k := promotions.code_key(c))})),
 	                   member=member, extras=tuple(extras), room_index=room_index)
 
 

@@ -1574,6 +1574,14 @@ class TestPromotionSaveChecks(TexTestCase):
 		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
 		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
 
+	def test_a_code_with_a_turkish_i_is_stored_by_its_key(self):
+		"""O-31: "wİnter" is stored as WINTER (not WİNTER), and a code whose key another draft or live
+		promotion of the hotel already has is refused, however it was typed or stored."""
+		name = self.draft(trigger="Code", code="wİnter")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "code"), "WINTER")
+		frappe.db.set_value("TEX Promotion", name, "code", "WİNTER")          # stored before this change
+		self.assertRefused(self.draft, trigger="Code", code="winter")
+
 	def test_an_unusable_draft_is_not_activated_and_a_live_one_is_archived(self):
 		name = self.draft()
 		frappe.db.set_value("TEX Promotion", name, {"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"})

@@ -262,6 +262,38 @@ class TestGroupRule(unittest.TestCase):
 		self.assertEqual(len(promotions.group_ties(P("N", group="EB", stay_to=date(2027, 7, 1)), (later,))), 1)
 
 
+
+class TestCodeKey(unittest.TestCase):
+	"""O-31: a promotion code is compared by its key: Turkish dotted and dotless i are I, other
+	letters (Ş, Ğ, Ü, Ö, Ç) are kept upper-cased."""
+
+	def test_cases(self):
+		for typed, key in (("winter", "WINTER"), ("wİnter", "WINTER"), ("WİNTER", "WINTER"), ("wınter", "WINTER"),
+		                   ("wi\u0307nter", "WINTER"), ("WI\u0307NTER", "WINTER"), ("  yaz-24 ", "YAZ-24"),
+		                   ("şeker", "ŞEKER"), ("ŞEKER", "ŞEKER"), ("dağ", "DAĞ"), ("üçgöz", "ÜÇGÖZ"),
+		                   ("s\u0327eker", "ŞEKER")):
+			with self.subTest(typed=typed):
+				self.assertEqual(promotions.code_key(typed), key)
+				self.assertEqual(promotions.code_key(key), promotions.code_key(typed))      # idempotent
+		for blank in (None, "", "   "):
+			self.assertIsNone(promotions.code_key(blank))
+
+	def price(self, typed: str, stored: str):
+		promo = P("WIN", code=stored)
+		q = engine.price_stay(fixtures.ctx(promotions=(promo,)),
+		                      fixtures.req(check_out=date(2027, 6, 5), promo_codes=(typed,)))
+		return q.totals["accommodation"]
+
+	def test_a_code_typed_with_a_turkish_i_matches(self):
+		self.assertEqual(self.price("wİnter", "WINTER"), D("540.00"))
+		self.assertEqual(self.price("WİNTER", "WINTER"), D("540.00"))
+
+	def test_a_code_stored_with_a_turkish_i_matches(self):
+		self.assertEqual(self.price("winter", "WİNTER"), D("540.00"))
+		self.assertEqual(self.price("şeker", "ŞEKER"), D("540.00"))
+		self.assertEqual(self.price("seker", "ŞEKER"), D("600.00"))            # Ş is not S
+
+
 def xctx(**kw):
 	base = dict(sale_date=date(2027, 1, 15), check_in=CI, check_out=CO, nights=7, market="DE",
 	            channel="DIRECT_WEB", room_type="STD", adults=2, children=1, infants=1, sell_currency="EUR")

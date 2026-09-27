@@ -506,7 +506,7 @@ def _price_stay(ctx: PricingContext, req: StayRequest, log: fx.FxLog) -> RoomQuo
 		promo_ctx_base = dict(sale_date=sale_date, check_in=req.check_in, check_out=req.check_out, nights=nights,
 		                      market=req.market, channel=req.channel, room_type=req.room_type, board=req.board,
 		                      rate_plan=req.rate_plan, contract=t.contract_id, member=req.member,
-		                      codes=frozenset(c.strip().upper() for c in req.promo_codes if c and c.strip()),
+		                      codes=frozenset(k for c in req.promo_codes if (k := promotions.code_key(c))),
 		                      extras=frozenset(e.code for e in req.extras), room_index=req.room_index)
 
 		# ── 8: COST-stage contract offers ──

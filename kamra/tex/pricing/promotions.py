@@ -20,6 +20,7 @@ Eligibility is evaluated for every candidate and each one is reported as
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -110,6 +111,16 @@ PROMO_NO_FX = "PROMO_NO_FX"
 COUPON_REJECTED = "COUPON_REJECTED"
 
 
+def code_key(code: str | None) -> str | None:
+	"""What a promotion code is compared by (O-31): NFC, trimmed, the Turkish dotted İ and dotless ı
+	as I, upper-cased, and a combining dot above an I dropped (a lower-case i with a dot, upper-cased).
+	Ş, Ğ, Ü, Ö, Ç stay letters of their own. Idempotent; None when blank."""
+	if code is None:
+		return None
+	key = unicodedata.normalize("NFC", str(code).strip()).replace("İ", "I").replace("ı", "I").upper()
+	return unicodedata.normalize("NFC", key.replace("I\u0307", "I")) or None
+
+
 def promo_ref(p: Promotion) -> RuleRef:
 	return RuleRef("promotion", p.promo_id, None, p.source, p.name)
 
@@ -162,7 +173,7 @@ def _conditions(p: Promotion, ctx: PromoContext, usage: tuple[int, int] | None, 
                 ) -> tuple[str | None, Decimal | None]:
 	"""The minimum basket is the last check: a promotion refused for it is eligible on every
 	other one (G-84 review M2). ``basket=False`` leaves it out."""
-	if p.code and p.code.upper() not in ctx.codes:
+	if p.code and code_key(p.code) not in ctx.codes:
 		return "code not entered", None
 	if p.sale_from and ctx.sale_date < p.sale_from:
 		return f"sale date {ctx.sale_date} before {p.sale_from}", None

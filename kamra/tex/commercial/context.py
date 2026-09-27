@@ -41,6 +41,7 @@ from kamra.tex.pricing.model import (
 	TaxRule,
 	Unsellable,
 )
+from kamra.tex.pricing.promotions import code_key
 
 
 def _date(v):
@@ -96,7 +97,7 @@ def promotion_from_row(r) -> Promotion:
 		promo_id=root, name=r.promotion_name, kind=r.kind or "PROMOTION",
 		value_type=PromoValueType(r.value_type or "PERCENT"), value=db_dec(r.value),
 		stage=PromoStage(r.stage or "SELL"), applies_to=PromoAppliesTo(r.applies_to or "ACCOMMODATION"),
-		currency=r.currency or None, code=((r.code or "").upper() or None) if r.trigger == "Code" else None,
+		currency=r.currency or None, code=code_key(r.code) if r.trigger == "Code" else None,
 		sale_from=_date(r.sale_from), sale_to=_date(r.sale_to), stay_from=_date(r.stay_from),
 		stay_to=_date(r.stay_to), stay_match=StayMatch(r.stay_match or "ANY_NIGHT"),
 		min_nights=r.min_nights or None, max_nights=r.max_nights or None,

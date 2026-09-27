@@ -7,6 +7,7 @@ from frappe.model.document import Document
 
 from kamra.tex.commercial.revisions import block_delete, guard_revisioned
 from kamra.tex.money import D
+from kamra.tex.pricing.promotions import code_key
 
 # what a discount on the total or the extras can be (``promotions.BASKET_VALUES``)
 BASKET_VALUE_TYPES = ("PERCENT", "FIXED_STAY")
@@ -21,7 +22,7 @@ class TEXPromotion(Document):
 				# O-7 (D-18): the minimum is compared in the promotion's currency, converted to the sale's
 				frappe.throw(_("A minimum basket needs its currency."))
 		if self.trigger == "Code":
-			self.code = (self.code or "").strip().upper()
+			self.code = code_key(self.code) or ""          # "wİnter" is WINTER (O-31)
 			if not self.code:
 				frappe.throw("A code promotion needs a code.")
 		else:
@@ -40,12 +41,15 @@ class TEXPromotion(Document):
 		if self.value_type in ("FIXED_STAY", "FIXED_NIGHT") and not self.currency:
 			frappe.throw("A fixed discount needs a currency.")
 		if self.code and self.tex_status in ("Draft", "Active"):
-			clash = frappe.db.sql("""SELECT name FROM `tabTEX Promotion` WHERE code=%s AND name!=%s
-			   AND tex_status IN ('Draft','Active') AND IFNULL(property,'')=%s
-			   AND IFNULL(revision_of,name) != %s""",
-			                      (self.code, self.name or "", self.property or "", self.revision_of or self.name or ""))
+			# compared by key, so a code stored before O-31 ("WİNTER") clashes with WINTER
+			clash = [r.name for r in frappe.db.sql("""SELECT name, code FROM `tabTEX Promotion`
+			           WHERE `trigger`='Code' AND IFNULL(code,'')!='' AND name!=%s
+			           AND tex_status IN ('Draft','Active') AND IFNULL(property,'')=%s
+			           AND IFNULL(revision_of,name) != %s ORDER BY name""",
+			                                      (self.name or "", self.property or "", self.revision_of or self.name or ""),
+			                                      as_dict=True) if code_key(r.code) == self.code]
 			if clash:
-				frappe.throw(f"Code {self.code} is already used by promotion {clash[0][0]}.")
+				frappe.throw(f"Code {self.code} is already used by promotion {clash[0]}.")
 
 	def _new_terms(self) -> bool:
 		"""A draft being saved or activated, not ``revise``'s copy of a live revision (it is fixed as a
