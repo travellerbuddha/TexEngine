@@ -95,8 +95,13 @@ export interface NewContract {
 }
 
 /** A contract for the DE market in EUR (stay April–July of next year) with its empty draft V1,
- * made through the API. */
-export async function newContract(page: Page, o: { prefix: string; basis?: "PERSON" | "ROOM"; currency?: string }): Promise<NewContract> {
+ * made through the API. A brand-new contract's draft does not count infants as children (O-2,
+ * ADR-067); the specs' parties and sweep warnings were written for a draft that does, so it is set
+ * back on unless `infantsAsChildren` is 0. */
+export async function newContract(
+  page: Page,
+  o: { prefix: string; basis?: "PERSON" | "ROOM"; currency?: string; infantsAsChildren?: 0 | 1 },
+): Promise<NewContract> {
   const run = uniqueRunId()
   const c = await pageApiOk<{ contract: { name: string } }>(page, "kamra.tex.api.contracts.save_contract", {
     data: {
@@ -112,7 +117,11 @@ export async function newContract(page: Page, o: { prefix: string; basis?: "PERS
   })
   const contract = c.contract.name
   const b = await pageApiOk<{ versions: { name: string }[] }>(page, "kamra.tex.api.contracts.get_contract", { name: contract })
-  return { contract, version: b.versions[0].name }
+  const version = b.versions[0].name
+  if (o.infantsAsChildren !== 0) {
+    await pageApiOk(page, "kamra.tex.api.contracts.save_version", { name: version, data: { infants_count_as_children: 1 } })
+  }
+  return { contract, version }
 }
 
 /** A new contract whose draft holds `data` (saved through the API). */

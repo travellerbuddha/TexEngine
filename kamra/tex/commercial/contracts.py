@@ -167,8 +167,8 @@ SELLING_FIELDS = ("sale_from", "sale_to", "stay_from", "stay_to", "priority", "s
 FIXED_FIELDS = ("property", "market", "contract_currency", "pricing_basis")
 # what a draft edit changes besides its tables and selling terms (the editor's Settings tab)
 DRAFT_SETTINGS = ("child_ordering", "age_basis", "children_over_max_as_adults", "infants_count_as_occupants",
-                  "prices_include_tax", "stacking", "room_basis_extra_unit", "room_basis_children_fill_included",
-                  "change_note")
+                  "infants_count_as_children", "prices_include_tax", "stacking", "room_basis_extra_unit",
+                  "room_basis_children_fill_included", "change_note")
 
 
 def is_published(contract: str | None) -> bool:
@@ -454,6 +454,9 @@ def build_terms(version, *, at: datetime | None = None) -> ContractTerms:
 		age_basis=AgeBasis(version.age_basis or "ARRIVAL"),
 		children_over_max_as_adults=bool(version.children_over_max_as_adults),
 		infants_count_as_occupants=bool(version.infants_count_as_occupants),
+		# unset (a document made before the field) is the DocType's default: infants are children
+		infants_count_as_children=version.get("infants_count_as_children") is None
+		or bool(version.infants_count_as_children),
 		prices_include_tax=bool(version.prices_include_tax), stacking=StackingMode(version.stacking or "SEQUENTIAL"),
 		room_basis_extra_unit=RoomBasisExtraUnit(version.room_basis_extra_unit or "PER_PERSON_SHARE"),
 		room_basis_children_fill_included=bool(version.room_basis_children_fill_included),
@@ -560,6 +563,9 @@ def new_draft(contract: str, based_on: str | None = None) -> str:
 		doc = frappe.new_doc("TEX Contract Version")
 		doc.contract = contract
 		set_selling(doc, selling_values(frappe.get_doc("TEX Contract", contract)))
+		# a brand-new contract does not count infants as children (O-2, ADR-067, D-2); the DocType's
+		# default (1) keeps every other way a version is made pricing as before
+		doc.infants_count_as_children = 0
 	doc.status = "Draft"
 	doc.insert(ignore_permissions=True)
 	audit("contract.version.draft", reference_doctype="TEX Contract Version", reference_name=doc.name,

@@ -397,6 +397,10 @@ COMMERCIAL_SPECS = [
 		F("age_basis", "Select", "Age evaluated on", ["ARRIVAL", "BOOKING_DATE"], default="ARRIVAL"),
 		F("children_over_max_as_adults", "Check", "Children above top band count as adults", default="1"),
 		F("infants_count_as_occupants", "Check", "Infants count towards capacity", default="1"),
+		# O-2 (ADR-067, D-2): 1 keeps what every version so far priced; a new contract's first draft says 0
+		F("infants_count_as_children", "Check", "Infants count as children", default="1",
+		  description="For combination rules and the room's maximum children. Off: infants are numbered after the "
+		              "other children and never change their price."),
 		CB(),
 		F("prices_include_tax", "Check", "Prices include tax", default="1"),
 		F("stacking", "Select", "Promotion stacking", ["SEQUENTIAL", "ADDITIVE"], default="SEQUENTIAL"),
@@ -420,7 +424,8 @@ COMMERCIAL_SPECS = [
 		F("payload_hash", "Data", "Payload hash", read_only=1),
 		F("payload", "Code", "Frozen payload", "JSON", read_only=1),
 		F("validation_report", "Code", "Validation report", "JSON", read_only=1),
-	], perms=COMMERCIAL, autoname="hash", title_field="contract", sort_field="creation"),
+	], perms=COMMERCIAL, autoname="hash", title_field="contract", sort_field="creation",
+	   extra={"modified": "2026-10-01 00:00:01.000000"}),                # infants_count_as_children came later (O-2)
 
 	dt("TEX Pricing Policy", C, [
 		F("policy_name", "Data", "Policy", reqd=1, in_list_view=1),

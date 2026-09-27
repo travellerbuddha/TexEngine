@@ -20,7 +20,7 @@ from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.pricing import engine, policy_money, serialize
-from kamra.tex.pricing.model import StayRequest, Unsellable
+from kamra.tex.pricing.model import ChildSpec, StayRequest, Unsellable
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
@@ -1483,3 +1483,47 @@ class TestPolicyCurrency(TexTestCase):
 			                  channel="DIRECT_WEB", sell_currency=sell)
 			q = engine.price_stay(context.build_context(terms, req), req).to_dict(internal=True)
 			self.assertEqual(policy_money.fixed_in_sell("100", q["rate_plan"]["payment_policy"], q), due, sell)
+
+
+class TestInfantsNotChildren(TexTestCase):
+	"""O-2 (ADR-067, D-2): whether infants are children for combination rules and max_children is a
+	version setting. The DocType's default (1) keeps what every version so far priced; a brand-new
+	contract's first draft says 0; a draft made from a version keeps its value; a publish freezes
+	the key only when it is 0 (every payload frozen so far, and its hash, is as before)."""
+
+	def price(self, version: str, *kid_ages: int) -> D:
+		terms = contracts.load_terms(version)
+		req = StayRequest(property=fx.PROPERTY, room_type=self.f["room_types"]["STD"], board="AI",
+		                  rate_plan=self.f["rate_plans"]["FLEX"], check_in=fx.d(6, 10), check_out=fx.d(6, 11),
+		                  adults=1, sale_at=now_datetime().replace(microsecond=0), market="DE", channel="DIRECT_WEB",
+		                  sell_currency="EUR", children=tuple(ChildSpec(age=a) for a in kid_ages))
+		q = engine.price_stay(context.build_context(terms, req), req)
+		self.assertTrue(q.sellable, q.reasons)
+		return q.totals["accommodation"]
+
+	def test_a_new_contracts_first_draft_does_not_count_infants_as_children(self):
+		from kamra.tex.api import contracts as api
+
+		out = api.save_contract(data={"property": fx.PROPERTY, "contract_code": "O2-NEW", "contract_name": "O2 new",
+		                              "market": "DE", "contract_currency": "EUR", "pricing_basis": "PERSON"})
+		draft = frappe.db.get_value("TEX Contract Version", {"contract": out["contract"]["name"]},
+		                            "infants_count_as_children")
+		self.assertEqual(draft, 0)
+
+	def test_a_draft_made_from_a_version_keeps_its_setting(self):
+		c = fx.create_contract(self.f, code="O2-OLD")          # inserted without the field: the DocType's 1
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", c["version"], "infants_count_as_children"), 1)
+		draft = contracts.new_draft(c["contract"])
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", draft, "infants_count_as_children"), 1)
+
+	def test_a_publish_freezes_the_setting_only_when_off(self):
+		c = fx.create_contract(self.f, code="O2-PUB")
+		frozen = json.loads(frappe.db.get_value("TEX Contract Version", c["version"], "payload"))
+		self.assertNotIn("infants_count_as_children", frozen["settings"])
+		self.assertEqual((self.price(c["version"], 8), self.price(c["version"], 8, 1)), (D("200.00"), D("150.00")))
+		draft = contracts.new_draft(c["contract"])
+		frappe.db.set_value("TEX Contract Version", draft, "infants_count_as_children", 0)
+		contracts.publish(draft)
+		frozen = json.loads(frappe.db.get_value("TEX Contract Version", draft, "payload"))
+		self.assertIs(frozen["settings"]["infants_count_as_children"], False)
+		self.assertEqual((self.price(draft, 8), self.price(draft, 8, 1)), (D("200.00"), D("200.00")))

@@ -127,6 +127,7 @@ export const VERSION_SETTINGS = [
   "age_basis",
   "children_over_max_as_adults",
   "infants_count_as_occupants",
+  "infants_count_as_children",
   "prices_include_tax",
   "stacking",
   "room_basis_extra_unit",
@@ -151,6 +152,8 @@ export interface VersionDoc {
   age_basis: string
   children_over_max_as_adults: number
   infants_count_as_occupants: number
+  /** Infants are children for combination rules and max children (O-2); absent = 1. */
+  infants_count_as_children?: number
   prices_include_tax: number
   stacking: string
   room_basis_extra_unit: string

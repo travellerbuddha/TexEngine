@@ -34,6 +34,9 @@ every caller, never opt-in, that fail against main by design too:
 * a payment or cancellation policy whose fixed amounts are in another currency than the contract's
   is refused (``POLICY_CURRENCY``): main published it and read the amount in the sale's currency
   (Y-3 A).
+* a brand-new contract's first draft does not count infants as children for its combination rules
+  and ``max_children`` (``infants_count_as_children`` 0, O-2): main's did. Every other draft (from a
+  version, a duplicate, a version inserted directly) keeps counting them.
 
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
@@ -497,3 +500,21 @@ class TestPolicyMoneyChanges(ExistingCallerCase):
 		frappe.db.set_value("TEX Payment Policy", pay, "currency", None)
 		self.assertTrue(api.validate_version(self.v)["ok"])
 		self.assertEqual(contracts.publish(self.v)["version"], self.v)
+
+	def test_a_new_contracts_first_draft_does_not_count_infants_as_children(self):
+		"""O-2 (D-2): main's ``save_contract`` made a new contract's first draft in which an infant was a
+		child for the combination rules (1A + 8y + infant priced as 1A+2C). That draft now says infants
+		are not children, so the infant leaves the 8-year-old's price alone; switched back on, it prices as
+		main did."""
+		out = api.save_contract(data={"property": fx.PROPERTY, "contract_code": "PW-O2", "contract_name": "O2",
+		                              "market": "DE", "contract_currency": "EUR", "pricing_basis": "PERSON"})
+		draft = frappe.db.get_value("TEX Contract Version", {"contract": out["contract"]["name"]}, "name")
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", draft, "infants_count_as_children"), 0)
+		data = tables(self.v)
+		api.save_version(draft, as_json(data))                       # the fixture's rooms, rates and rules
+		kids = {"children": json.dumps([8, 1]), "check_out": str(fx.d(6, 11))}
+		new = api.preview_price(draft, **self.args(**kids, adults=1))
+		self.assertEqual(new["totals"]["accommodation"], api.preview_price(draft, **self.args(
+			children=json.dumps([8]), check_out=str(fx.d(6, 11)), adults=1))["totals"]["accommodation"])
+		api.save_version(draft, as_json({"infants_count_as_children": 1}))
+		self.assertEqual(plain(self.assert_mains(draft, **kids, adults=1))["totals"]["accommodation"], "150.00")

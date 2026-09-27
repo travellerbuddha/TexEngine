@@ -637,7 +637,8 @@ def _sweep_party(t: ContractTerms, adults: int, children: int, band: AgeBand | N
 	"""The party the sweep prices: ``children`` children, all at the lower edge of ``band``."""
 	slots = tuple(ChildSlot(i + 1, band.from_months, band, i) for i in range(children)) if band else ()
 	return Party(adults=adults, declared_adults=adults, children=slots, children_as_adults=(),
-	             infants=sum(1 for s in slots if s.band.is_infant), reference_date=p.start)
+	             infants=sum(1 for s in slots if s.band.is_infant), reference_date=p.start,
+	             infants_as_children=t.infants_count_as_children)
 
 
 # the sweep's issues whose presence can depend on a rule's op or value (``occupancy.depends_on``: every
