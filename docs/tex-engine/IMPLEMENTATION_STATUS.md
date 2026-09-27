@@ -1514,6 +1514,6 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 - 2G-1 leftovers **COMPLETE**: a new price found by checkout's re-quote stops the booking until the guest submits again (O-30); a stale CRS search no longer moves the cursor, a quote of the previous search is never current, a failed summary leaves no amount (O-29) · e2e `booking`, `crs-actions`.
 - NEW-8 **COMPLETE**: an Agent Action Log row without a hotel is platform level (Desk / REST, `activity_detail`, `activity_feed`); new rows take their record's hotel; p65 fills the old ones; minutes saved per own hotels · `TestLegacyTenancy` NEW-8, `TestP65AgentLogHotel`.
-- G-97 **COMPLETE**: TEX Contract Version, Markup Rule and Pricing Policy are System Manager's in Desk / REST (spec `COST`, p66); cost audit events hidden from non-platform users · `TestCostRecordsInDesk`, `TestP66CostDocTypesSystemOnly`.
+- G-97 **COMPLETE**: TEX Contract Version, Markup Rule and Pricing Policy are System Manager's in Desk / REST (spec `COST`, p66); cost audit events hidden from non-platform users in Desk / REST and, by capability, in the TEX audit log's hotel view · `TestCostRecordsInDesk`, `TestP66CostDocTypesSystemOnly`, `test_audit_trail`.
 - O-37 **COMPLETE**: p63 masks every Password field in the change history (changed, child row_changed) · `TestP63VersionedPasswords`.
 - NEW-5 **COMPLETE**: `supply-chain.yml` — gitleaks (self-tested), npm audit-ci, pip-audit with a reviewed ignore list · the workflow's three jobs.
