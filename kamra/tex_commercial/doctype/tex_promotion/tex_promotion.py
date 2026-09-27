@@ -17,6 +17,9 @@ class TEXPromotion(Document):
 		guard_revisioned(self)
 		if self._new_terms():
 			self._check_usable()
+			if D(self.min_basket or 0) > 0 and not self.currency:
+				# O-7 (D-18): the minimum is compared in the promotion's currency, converted to the sale's
+				frappe.throw(_("A minimum basket needs its currency."))
 		if self.trigger == "Code":
 			self.code = (self.code or "").strip().upper()
 			if not self.code:

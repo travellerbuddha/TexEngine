@@ -40,7 +40,7 @@ import { RowsEditor, type ColSpec } from "../components/RowsEditor"
 import { BOARDS, enumOptions, PERCENT_OPS } from "../lib/options"
 import type { Lookups, Row } from "../lib/types"
 import { decStr, fromRow, intVal, invalidateLookups, strVal, toRow, UI_RATES, useLookups, type FieldKind } from "../lib/util"
-import { fieldKinds, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
+import { fieldKinds, isRequired, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
 
 type T = (k: string, p?: Record<string, string | number>) => string
 
@@ -204,7 +204,7 @@ export default function PolicyEditor() {
     if (!kind || !doc) return []
     const out: string[] = []
     for (const f of Object.values(fieldKinds(kind))) {
-      if (!f.required || (f.showIf && !f.showIf(doc))) continue
+      if (!isRequired(f, doc) || (f.showIf && !f.showIf(doc))) continue
       const v = doc[f.key]
       if (v === "" || v === null || v === undefined) out.push(f.key)
     }
@@ -492,7 +492,7 @@ function FieldControl({
   const v = doc[f.key]
   const hint = f.helpByValue ? t(`${f.helpByValue}.${String(v || "")}`) : f.help ? t(f.help) : undefined
   const hintText = hint && !hint.startsWith("rates.") ? hint : undefined
-  const common = { label: t(f.label), hint: hintText, error, required: f.required && !readOnly, className: f.wide || f.kind === "textarea" ? "sm:col-span-2 lg:col-span-3" : undefined }
+  const common = { label: t(f.label), hint: hintText, error, required: isRequired(f, doc) && !readOnly, className: f.wide || f.kind === "textarea" ? "sm:col-span-2 lg:col-span-3" : undefined }
   switch (f.kind) {
     case "property": {
       const opts = boot.properties.filter((p) => can(kind.cap, p.name) || p.name === v).map((p) => ({ value: p.name, label: p.property_name }))
@@ -529,7 +529,7 @@ function FieldControl({
       const values = cur && !allowed.includes(cur) && (f.options ?? []).includes(cur) ? [...allowed, cur] : allowed
       return (
         <Field {...common}>
-          <Select disabled={readOnly} value={cur} onChange={(e) => onChange(e.target.value)} options={enumOptions(t, f.group ?? "", values)} placeholder={f.required ? undefined : t(f.blank ?? "rates.common.none")} />
+          <Select disabled={readOnly} value={cur} onChange={(e) => onChange(e.target.value)} options={enumOptions(t, f.group ?? "", values)} placeholder={isRequired(f, doc) ? undefined : t(f.blank ?? "rates.common.none")} />
         </Field>
       )
     }
@@ -543,7 +543,7 @@ function FieldControl({
             value={cur}
             onChange={(e) => onChange(e.target.value)}
             options={cur && !opts.some((o) => o.value === cur) ? [...opts, { value: cur, label: cur }] : opts}
-            placeholder={f.required ? t("rates.common.choose") : t(f.blank ?? "rates.common.any")}
+            placeholder={isRequired(f, doc) ? t("rates.common.choose") : t(f.blank ?? "rates.common.any")}
           />
         </Field>
       )

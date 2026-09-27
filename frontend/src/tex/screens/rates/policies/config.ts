@@ -31,6 +31,16 @@ import {
 export type Source = "market" | "channel" | "currency" | "room_type" | "contract" | "rate_plan" | "board"
 export type Doc = Record<string, unknown>
 
+/** A promotion with a minimum basket (0 or empty is none): it names the minimum's currency (O-7). */
+export function hasMinBasket(d: Doc): boolean {
+  return Number(d.min_basket || 0) > 0
+}
+
+/** A field the record must fill: always, or as its other fields ask (``requiredIf``). */
+export function isRequired(f: Pick<PolicyField, "required" | "requiredIf">, d: Doc): boolean {
+  return Boolean(f.required || f.requiredIf?.(d))
+}
+
 export interface PolicyField {
   key: string
   kind: FieldKind | "textarea" | "link" | "table" | "property"
@@ -39,6 +49,8 @@ export interface PolicyField {
   /** help key that depends on the current value, e.g. "rates.fx_mode_help.{value}" */
   helpByValue?: string
   required?: boolean
+  /** required when the record's other fields ask for it (``isRequired``) */
+  requiredIf?: (d: Doc) => boolean
   /** enum values; labels are rates.<group>.<value> */
   options?: readonly string[]
   /** the enum values the record's other fields allow (default ``options``); another value is
@@ -202,7 +214,8 @@ export const POLICY_KINDS: PolicyKind[] = [
             showIf: (d) => d.value_type !== "FREE_NIGHTS" && d.value_type !== "VALUE_ADDED",
             suffix: (d) => (d.value_type === "PERCENT" ? "%" : d.value_type === "MULTIPLIER" ? "×" : String(d.currency || "")),
           },
-          { key: "currency", kind: "link", source: "currency", label: "rates.f.currency_fixed", showIf: (d) => d.value_type === "FIXED_STAY" || d.value_type === "FIXED_NIGHT", blank: "rates.common.sell_currency" },
+          // the currency of a fixed amount and of the minimum basket (O-7, D-18: required with a minimum)
+          { key: "currency", kind: "link", source: "currency", label: "rates.f.promo_currency", showIf: (d) => d.value_type === "FIXED_STAY" || d.value_type === "FIXED_NIGHT" || hasMinBasket(d), requiredIf: hasMinBasket, blank: "rates.common.sell_currency" },
           { key: "free_nights_stay", kind: "int", label: "rates.f.free_nights_stay", help: "rates.h.free_nights", showIf: (d) => d.value_type === "FREE_NIGHTS" },
           { key: "free_nights_pay", kind: "int", label: "rates.f.free_nights_pay", showIf: (d) => d.value_type === "FREE_NIGHTS" },
           { key: "value_added", kind: "text", label: "rates.f.value_added", help: "rates.h.value_added", showIf: (d) => d.value_type === "VALUE_ADDED" },
@@ -237,7 +250,7 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "rate_plans", kind: "csv", source: "rate_plan", label: "rates.f.rate_plans", blank: "rates.common.all_rate_plans" },
           { key: "contracts", kind: "csv", source: "contract", label: "rates.f.contracts", blank: "rates.common.all_contracts" },
           { key: "requires_extras", kind: "text", label: "rates.f.requires_extras", help: "rates.h.requires_extras" },
-          { key: "min_basket", kind: "decimal", label: "rates.f.min_basket", help: "rates.h.min_basket" },
+          { key: "min_basket", kind: "decimal", label: "rates.f.min_basket", help: "rates.h.min_basket", suffix: (d) => String(d.currency || "") || null },
           { key: "member_only", kind: "check", label: "rates.f.member_only", help: "rates.h.member_only" },
         ],
       },

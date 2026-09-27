@@ -1565,6 +1565,15 @@ class TestPromotionSaveChecks(TexTestCase):
 			with self.subTest(**kw):
 				self.assertTrue(self.draft(**kw))
 
+	def test_a_minimum_basket_needs_its_currency(self):
+		"""O-7 (D-18): a minimum basket is compared in the promotion's currency, so it names one."""
+		self.assertRefused(self.draft, min_basket=1000)
+		self.assertEqual(frappe.db.get_value("TEX Promotion", self.draft(min_basket=1000, currency="EUR"), "currency"),
+		                 "EUR")
+		old = self.live(min_basket=1000, currency=None)
+		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
+
 	def test_an_unusable_draft_is_not_activated_and_a_live_one_is_archived(self):
 		name = self.draft()
 		frappe.db.set_value("TEX Promotion", name, {"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"})

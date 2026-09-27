@@ -44,6 +44,8 @@ against main by design:
 
 * a discount on the whole booking or its extras other than a percentage or a fixed amount for the
   stay, or a cost-stage offer on them (O-1): main saved it and the engine refused it on every quote.
+* a minimum basket without its currency (O-7, D-18): main saved it and compared the minimum in the
+  sale's currency, whatever it was sold in.
 
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
@@ -547,3 +549,10 @@ class TestSaleRuleChanges(TexTestCase):
 			with self.subTest(**kw), self.assertRaises(frappe.ValidationError):
 				self.promotion(**kw)
 		self.assertEqual(self.promotion(applies_to="TOTAL")["applies_to"], "TOTAL")
+
+	def test_a_minimum_basket_without_its_currency_is_refused(self):
+		"""O-7 (D-18): main saved a 1,000 minimum without a currency and read it in each sale's currency
+		(1,000 EUR or 1,000 TRY). Now the save asks for the currency; with it, it saves as on main."""
+		with self.assertRaises(frappe.ValidationError):
+			self.promotion(min_basket=1000)
+		self.assertEqual(self.promotion(min_basket=1000, currency="EUR")["currency"], "EUR")
