@@ -188,6 +188,42 @@ class TestFx(unittest.TestCase):
 				self.assertEqual(c.business_days(today - timedelta(days=quiet), today), c.FX_WARN_BUSINESS_DAYS)
 
 
+class TestContractsLive(unittest.TestCase):
+	"""Y-2 (2D-1): an Active contract whose sale window includes today and whose stays are not over
+	should have a version on sale. ``live_ends``: when the version on sale ends (None: open-ended);
+	``handover``: a version sells from that moment; ``next_start``: the earliest published version
+	starting later."""
+
+	def row(self, prop="H1", *, live=True, live_ends=None, handover=False, next_start=None):
+		return {"property": prop, "live": live, "live_ends": live_ends, "handover": handover, "next_start": next_start}
+
+	def test_no_version_on_sale_and_none_starting_soon_fails(self):
+		for nxt in (None, NOW + timedelta(days=8)):
+			with self.subTest(next_start=nxt):
+				out = c.contracts_live_check([self.row(live=False, next_start=nxt), self.row("H2")], NOW)
+				self.assertEqual((out["key"], out["status"], out["count"], out["properties"]),
+				                 ("contracts.live", c.FAIL, 1, ["H1"]))
+				self.assertEqual(out["issues"][0]["reason"], "contract_not_selling")
+		self.assertIn("contracts.live", c.TITLES)
+
+	def test_one_starting_within_seven_days_warns(self):
+		out = c.contracts_live_check([self.row(live=False, next_start=NOW + timedelta(days=6))], NOW)
+		self.assertEqual((out["status"], out["issues"][0]["reason"], out["count"]), (c.WARN, "contract_starts_soon", 1))
+
+	def test_the_version_on_sale_ending_soon_with_nothing_after_warns(self):
+		ends = self.row(live_ends=NOW + timedelta(days=3))
+		out = c.contracts_live_check([ends, self.row("H2", live_ends=NOW + timedelta(days=3), handover=True)], NOW)
+		self.assertEqual((out["status"], out["issues"][0]["reason"], out["properties"]),
+		                 (c.WARN, "contract_ends_soon", ["H1"]))
+
+	def test_selling_contracts_are_quiet(self):
+		rows = [self.row(), self.row(live_ends=NOW + timedelta(days=30)),
+		        self.row(live_ends=NOW + timedelta(days=2), handover=True)]
+		out = c.contracts_live_check(rows, NOW)
+		self.assertEqual((out["status"], out["count"], out["properties"], out["detail"]), (c.OK, 0, [], c.OK_DETAIL))
+		self.assertEqual(c.contracts_live_check([], NOW)["status"], c.OK)
+
+
 class TestTransitions(unittest.TestCase):
 	def test_only_worsening_and_recovery_are_sent(self):
 		t = c.transitions({}, {})

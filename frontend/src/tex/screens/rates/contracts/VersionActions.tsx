@@ -228,7 +228,7 @@ export function WithdrawDialog({
 }: {
   open: boolean
   onClose: () => void
-  version: { name: string; version_no: number }
+  version: { name: string; version_no: number; scheduled?: boolean }
   onDone: () => void
 }) {
   const { t } = useTexT()
@@ -240,7 +240,7 @@ export function WithdrawDialog({
       tone="danger"
       requireReason
       title={t("rates.version.withdraw_title", { v: versionLabel(version.name, version.version_no) })}
-      body={t("rates.version.withdraw_body")}
+      body={t(version.scheduled ? "rates.version.withdraw_body_scheduled" : "rates.version.withdraw_body")}
       confirmLabel={t("rates.version.withdraw")}
       onConfirm={async (reason) => {
         await tex("contracts", "withdraw_version", { name: version.name, reason }, { post: true })

@@ -3,11 +3,12 @@
 * Restrictions and inventory are operational: bulk edits upsert daily cells
   immediately (audited).
 * Rates are contract terms: a rate edit over a date range is applied to the
-  contract's DRAFT version as a *period split* — for each underlying period segment
-  a clone period (higher priority, optional weekday mask) is created with copies of
-  all its period-scoped rules, then the selected rooms get their new absolute unit.
-  Unselected derived rooms keep following their base room (R-10). Nothing is sold at
-  the new rate until the draft is published.
+  contract's DRAFT version as a plan of period edits (``pricing.ratesplit``, O-9,
+  G-47, ADR-069): a period pricing edited nights only is edited in place, any other
+  gets one clone per part of edited nights (above every period of its kind it
+  overlaps) with copies of its period-scoped rules; the selected rooms get their new
+  absolute unit. Unselected derived rooms keep following their base room (R-10).
+  Nothing is sold at the new rate until the draft is published.
 """
 
 from __future__ import annotations
@@ -23,11 +24,11 @@ from kamra.tex.availability import restrictions as rs
 from kamra.tex.availability.restrictions import FIELDS, RestrictionScope, effective
 from kamra.tex.commercial import contracts
 from kamra.tex.commercial.revisions import as_of
-from kamra.tex.money import D, quantize, to_str
+from kamra.tex.money import quantize, to_str
+from kamra.tex.pricing import ratesplit, validate
 from kamra.tex.pricing import rooms as room_math
 from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.model import Unsellable
-from kamra.tex.pricing.ops import apply_op
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 from kamra.tex.security.changes import SEP, cells_diff
@@ -301,8 +302,41 @@ def bulk_update(property: str, start, end, *, room_types: list[str], weekdays: l
 # ─── write: rates (draft period split) ───────────────────────────────────
 
 
+def _copy_rules(v, source: str, code: str, selected: set[str]) -> None:
+	"""The source period's rules, onto its clone ``code`` (as the grid always copied them): the
+	unselected rooms' own rules, the occupancy rules and the boards."""
+	def of(rows):
+		return [r for r in rows if (r.period_code or "").strip() == source]
+
+	for r in of(v.period_rates):
+		if r.room_type not in selected:
+			v.append("period_rates", {"room_type": r.room_type, "period_code": code, "op": r.op, "value": r.value,
+			                          "base_room_type": r.base_room_type})
+	for r in of(v.occupancy_rules):
+		v.append("occupancy_rules", {**{k: r.get(k) for k in ("target", "position", "age_band", "combination",
+		                                                     "room_type", "op", "value", "is_override", "note")},
+		                             "period_code": code})
+	for r in of(v.boards):
+		v.append("boards", {**{k: r.get(k) for k in ("board", "is_base", "op", "adult_amount", "child_percent",
+		                                            "infant_free", "room_type", "label")}, "period_code": code})
+
+
+def _set_unit(v, room_type: str, code: str, unit) -> None:
+	"""``room_type``'s rule in period ``code`` becomes the ABSOLUTE ``unit`` (its own row, else a new one)."""
+	rows = [r for r in v.period_rates if r.room_type == room_type and (r.period_code or "").strip() == code]
+	for r in rows[1:]:
+		v.remove(r)
+	if rows:
+		rows[0].update({"op": "ABSOLUTE", "value": unit, "base_room_type": None})
+	else:
+		v.append("period_rates", {"room_type": room_type, "period_code": code, "op": "ABSOLUTE", "value": unit})
+
+
 def apply_rate_change(contract: str, room_types: list[str], start: date, end: date, weekdays: list[int] | None,
                       op: str, value) -> dict:
+	"""The draft's rates changed as ``ratesplit.plan`` says (O-9, G-47, ADR-069): a period that
+	prices edited nights only is edited in place, any other gets one clone per part. The draft is
+	validated before and after: a change that adds an ERROR is refused and nothing is saved."""
 	prop = frappe.db.get_value("TEX Contract", contract, "property")
 	scope.require("contract.edit", prop)
 	if op not in ("ABSOLUTE", "ADJUST_PERCENT", "ADD", "SUBTRACT"):
@@ -312,63 +346,45 @@ def apply_rate_change(contract: str, room_types: list[str], start: date, end: da
 		draft = contracts.new_draft(contract)
 	v = frappe.get_doc("TEX Contract Version", draft)
 	terms = contracts.build_terms(v)
-	mask = frozenset(weekdays) if weekdays else None
+	try:
+		steps = ratesplit.plan(terms, getdate(start), getdate(end), weekdays, room_types, Op(op), value)
+	except ratesplit.RateSplitError as e:
+		if e.code == "NO_PERIOD":
+			frappe.throw(_("No stay period covers {0}; add one first.").format(e.ref["night"]))
+		if e.code == "NO_NIGHTS":
+			frappe.throw(_("No night of this range is on the chosen weekdays."))
+		frappe.throw(_("A rate cannot be negative."))
+	before = validate.validate_terms(terms)
 
-	# segment the range by underlying period
-	segments: list[tuple[object, date, date]] = []
-	d = start
-	while d <= end:
-		p = room_math.period_for(terms, d)
-		if p is None:
-			frappe.throw(_("No stay period covers {0}; add one first.").format(d))
-		seg_start = d
-		while d + timedelta(days=1) <= end and room_math.period_for(terms, d + timedelta(days=1)) == p:
-			d += timedelta(days=1)
-		segments.append((p, seg_start, d))
-		d += timedelta(days=1)
+	taken = {(p.period_code or "").strip() for p in v.periods}
+	edited, cells, alias = [], [], {}
+	for idx, s in enumerate(steps):
+		code = s.source.code
+		if s.clone:
+			code = ratesplit.clone_code(s, idx, taken)
+			taken.add(code)
+			alias[code] = s.source.code
+			v.append("periods", {"period_code": code, "period_name": ratesplit.clone_name(s),
+			                     "start_date": s.start, "end_date": s.end,
+			                     "weekdays": ",".join(WD[i] for i in sorted(s.weekdays)) if s.weekdays else None,
+			                     "adjustment_op": s.source.adjustment_op.value if s.source.adjustment_op else None,
+			                     "adjustment_value": s.source.adjustment_value, "priority": s.priority})
+			_copy_rules(v, s.source.code, code, {u.room_type for u in s.units})
+		for u in s.units:
+			_set_unit(v, u.room_type, code, u.new)
+			# the draft's unit before and after, per room and part (the audit's cells)
+			cells += [(f"{u.room_type}{SEP}{a}/{b}", {"unit": to_str(u.current)}, {"unit": to_str(u.new)})
+			          for a, b in s.parts]
+		edited.append(code)
 
-	created, cells = [], []
-	for idx, (p, s, e) in enumerate(segments):
-		code = f"G{s.strftime('%y%m%d')}{e.strftime('%m%d')}{'W' if mask else ''}{idx}"
-		n = 2
-		while any(x.period_code == code for x in v.periods):
-			code, n = f"{code[:-1]}{n}", n + 1
-		days_mask = (mask & p.weekdays) if (mask and p.weekdays) else (mask or p.weekdays)
-		v.append("periods", {"period_code": code, "period_name": f"{p.name} · edit {s:%d %b}–{e:%d %b}",
-		                     "start_date": s, "end_date": e,
-		                     "weekdays": ",".join(WD[i] for i in sorted(days_mask)) if days_mask else None,
-		                     "adjustment_op": p.adjustment_op.value if p.adjustment_op else None,
-		                     "adjustment_value": p.adjustment_value, "priority": int(p.priority) + 100})
-		# clone every rule scoped to the underlying period
-		for r in list(v.period_rates):
-			if (r.period_code or "") == p.code and r.room_type not in room_types:
-				v.append("period_rates", {"room_type": r.room_type, "period_code": code, "op": r.op, "value": r.value,
-				                          "base_room_type": r.base_room_type})
-		for r in list(v.occupancy_rules):
-			if (r.period_code or "") == p.code:
-				v.append("occupancy_rules", {**{k: r.get(k) for k in ("target", "position", "age_band", "combination",
-				                                                     "room_type", "op", "value", "is_override",
-				                                                     "note")}, "period_code": code})
-		for r in list(v.boards):
-			if (r.period_code or "") == p.code:
-				v.append("boards", {**{k: r.get(k) for k in ("board", "is_base", "op", "adult_amount", "child_percent",
-				                                            "infant_free", "room_type", "label")}, "period_code": code})
-		# selected rooms: explicit new unit
-		for rt in room_types:
-			if rt not in terms.rooms:
-				continue
-			current = room_math.room_unit(terms, rt, p)
-			new = D(value) if op == "ABSOLUTE" else apply_op(Op(op), D(value), reference=current, current=current)
-			if new < 0:
-				frappe.throw(_("A rate cannot be negative."))
-			v.append("period_rates", {"room_type": rt, "period_code": code, "op": "ABSOLUTE",
-			                          "value": quantize(new, terms.currency)})
-			# the draft's unit before and after, per room and date range (the audit's cells)
-			cells.append((f"{rt}{SEP}{s}/{e}", {"unit": to_str(quantize(current, terms.currency))},
-			              {"unit": to_str(quantize(new, terms.currency))}))
-		created.append(code)
+	frappe.db.savepoint("tex_grid_rate")
 	v.flags.tex_audit_reason = "ARI grid rate change"
 	v.save(ignore_permissions=True)
+	added = ratesplit.added_errors(before, validate.validate_terms(contracts.build_terms(v)), alias)
+	if added:
+		frappe.db.rollback(save_point="tex_grid_rate")
+		frappe.throw(_("This rate change would give the draft errors: {0}").format(
+			"; ".join(i.message for i in added[:5])), title=_("Rate change refused"))
 	# ``_cells`` is for the caller's audit only, never part of the response
-	return {"draft": draft, "periods": created, "note": _("Saved to the draft — publish to sell at the new rates."),
+	return {"draft": draft, "periods": edited, "note": _("Saved to the draft — publish to sell at the new rates."),
 	        "_cells": cells}

@@ -21,6 +21,7 @@ from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
+from kamra.tex.services.txn import retry_on_deadlock
 
 CONTRACT_FIELDS = ("contract_code", "contract_name", "market", "status", "pricing_basis", "contract_currency",
                    "sell_currency", "priority", "is_bar", "sale_from", "sale_to", "stay_from", "stay_to", "notes")
@@ -104,7 +105,11 @@ def get_contract(name: str):
 	                          order_by="version_no desc")
 	can_publish = scope.has_capability("contract.publish", c.property)
 	published = any(v.status != "Draft" for v in versions)
-	live = svc.active_version_header(name, now_datetime())
+	now = now_datetime()
+	for v in versions:
+		# published but not yet selling: withdrawing it cancels it and the one before keeps selling (Y-2)
+		v.scheduled = v.status == "Published" and bool(v.effective_from) and get_datetime(v.effective_from) > now
+	live = svc.active_version_header(name, now)
 	try:
 		live_selling = svc.version_selling(live.version_id).as_dict() if live else None
 	except frappe.ValidationError:          # a payload failing its integrity check sells nothing
@@ -271,17 +276,21 @@ def _set_selling(v, selling) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
-def save_version(name: str, data, workspace=None):
+def save_version(name: str, data, workspace=None, expected_modified=None):
 	"""Replace the draft's settings, selling terms and child tables in one call. The editor saves
 	on demand (Save, Ctrl+S), never per keystroke; each save that changes something is audited
 	old → new by the version's controller (G-74). ``workspace`` (ADR-061, opt-in): a blank rule
 	value is refused (GAP-8) instead of being stored as 0 as main stores it, and the answer is
-	``get_version``'s for the workspace."""
+	``get_version``'s for the workspace. ``expected_modified`` (O-10, opt-in): the draft's
+	``modified`` as the caller read it; a draft changed since is refused (``DraftChanged``) before
+	anything is applied. Without it a save replaces what it posts, as before."""
 	ws = _workspace(workspace)
 	data = parse(data, {})
-	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)
 	scope.require("contract.edit", prop)
+	if expected_modified:
+		svc.check_draft_token(name, expected_modified)
+	v = frappe.get_doc("TEX Contract Version", name)
 	if v.status != "Draft":
 		frappe.throw(_("Only draft versions can be edited — create a new draft."))
 	if "selling" in data:
@@ -495,7 +504,10 @@ def set_contract_status(name: str, action: str, reason: str):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def withdraw_version(name: str, reason: str):
+	# a booking locking its rooms' quotes in another order may meet the withdraw's quote locks: the
+	# victim is rolled back whole and run again (O-13; booking.create_booking is retried the same way)
 	svc.withdraw(name, text(reason, 500))
 	return {"ok": True}
 

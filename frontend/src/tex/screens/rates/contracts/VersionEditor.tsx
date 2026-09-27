@@ -9,6 +9,7 @@ import { Button, Card, CardBody, Drawer, ErrorState, isSaveShortcut, Notice, Pag
 import { IssueCount } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
 import { fingerprint, payloadOf, settleState, stateFromDoc, type EditorState, type SellingForm, type Settings } from "../lib/tables"
+import { isDraftChanged } from "../lib/draftToken.ts"
 import type { ContractBundle, Issue, Row, VersionDoc, VersionSetting, VersionTable } from "../lib/types"
 import { countIssues, editorHash, parseEditorHash, useLookups, versionLabel } from "../lib/util"
 import { effectiveBands } from "../workspace/bands.ts"
@@ -58,7 +59,12 @@ export default function VersionEditor() {
   const q = useTexQuery<VersionDoc>("contracts", "get_version", { name: version, ...WORKSPACE }, [version])
   const contract = useTexQuery<ContractBundle>("contracts", "get_contract", { name }, [name])
   const lookups = useLookups(q.data?.contract_doc.property)
-  const save = useTexMutation<{ name: string; data: Record<string, unknown>; workspace: 1 }, VersionDoc>("contracts", "save_version")
+  const save = useTexMutation<{ name: string; data: Record<string, unknown>; workspace: 1; expected_modified?: string }, VersionDoc>(
+    "contracts",
+    "save_version",
+  )
+  // the draft changed after it was read (O-10): the save was refused; reloading shows the change
+  const [stale, setStale] = useState<string | null>(null)
   const [doc, setDoc] = useState<VersionDoc>()
   const [state, setState] = useState<EditorState>()
   const [base, setBase] = useState("")
@@ -168,11 +174,14 @@ export default function VersionEditor() {
     if (fresh ? fingerprint(sent) === base : !dirty) return
     try {
       // opt-in (ADR-061): a blank value is refused (GAP-8) and the answer carries the workspace's flags
-      const d = await save.run({ name: doc.name, data: payloadOf(sent), ...WORKSPACE })
+      // the draft as it was read (O-10): a save from an older read is refused, never overwrites
+      const d = await save.run({ name: doc.name, data: payloadOf(sent), ...WORKSPACE, expected_modified: doc.modified })
       settle(d, sent)
+      setStale(null)
       toast.success(t("rates.version.saved"))
     } catch (e) {
-      toast.error((e as Error).message)
+      if (isDraftChanged(e)) setStale((e as Error).message)
+      else toast.error((e as Error).message)
     }
   }, [doc, state, editable, dirty, base, tablesNow, save, settle, toast, t])
 
@@ -372,7 +381,25 @@ export default function VersionEditor() {
           <Notice tone="info">{t("rates.version.no_edit_permission")}</Notice>
         </div>
       )}
-      {save.error && (
+      {stale && (
+        <div className="mb-4">
+          <Notice tone="warning" title={t("rates.version.draft_changed")}>
+            <span className="whitespace-pre-line">{stale}</span>{" "}
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setStale(null)
+                save.clearError()
+                q.reload()
+              }}
+            >
+              {t("rates.version.reload")}
+            </Button>
+          </Notice>
+        </div>
+      )}
+      {save.error && !stale && (
         <div className="mb-4">
           <Notice tone="danger" title={t("rates.version.save_failed")}>
             <span className="whitespace-pre-line">{save.error.message}</span>

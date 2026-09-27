@@ -378,10 +378,13 @@ def _positions_infants_apart(t: ContractTerms, spec: RoomSpec, r: OccupancyRule,
 	"""``_positions`` of a contract whose infants are not children (O-2, ADR-067): ``children`` counts
 	the other children, numbered first, as the combination rules and max_children count them; an
 	infant's slot follows them, as ``ages.order_children`` numbers it. The party fits the room as the
-	runtime checks it: the other children always, the infants up to the priced one when they count
-	as occupants (else up to the room's size)."""
+	runtime checks it: the adults and the other children always (a party they overfill never sells,
+	whatever its infants), the infants up to the priced one when they count as occupants (else up to
+	the room's size)."""
+	if adults + children > spec.max_occupants:
+		return []
 	if band is None or not band.is_infant:
-		return _positions(t, spec, r, adults, children) if adults + children <= spec.max_occupants else []
+		return _positions(t, spec, r, adults, children)
 	room = spec.max_occupants - adults - children if t.infants_count_as_occupants else spec.max_occupants
 	first, last = max(children, _fill(t, spec, adults)) + 1, children + room
 	if r.position is not None:

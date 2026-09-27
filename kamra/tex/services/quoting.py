@@ -214,8 +214,10 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	# the hotel's mandatory extras are priced in every offer, as the quote prices them (Y-5): the
 	# engine adds them to each room (a per-booking one to room 1 only); optional ones are the
 	# guest's choice at the quote. Loaded with the first context: an ambiguous catalog stops each
-	# room of this hotel as the quote does (``Unsellable``), never the search
+	# room of this hotel as the quote does (``Unsellable``), never the search. Read once per hotel
+	# per search: its refusal is remembered and raised again, not read (and logged) again (2D-1)
 	mandatory: dict | None = None
+	catalog_refused: Unsellable | None = None
 
 	for contract_row, version in cands:
 		terms = contracts.load_terms(version)
@@ -248,9 +250,15 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						                    promo_codes=promo_codes, member=member, room_index=idx)
 						try:
 							if key not in ctx_cache:
+								if catalog_refused is not None:
+									raise catalog_refused
 								if mandatory is None:
-									mandatory = {code: d for code, d in ctxmod.extras_catalog(property, at=sale_at).items()
-									             if d.mandatory}
+									try:
+										catalog = ctxmod.extras_catalog(property, at=sale_at)
+									except Unsellable as refused:
+										catalog_refused = refused
+										raise
+									mandatory = {code: d for code, d in catalog.items() if d.mandatory}
 								ctx_cache[key] = ctxmod.build_context(terms, req, extras=mandatory)
 							q = engine.price_stay(ctx_cache[key], req)
 						except Unsellable as u:
@@ -564,6 +572,13 @@ def _persist(offer_key: str, offer: dict, req: StayRequest, q, terms, live, now,
 		"result_json": json.dumps(result, sort_keys=True, ensure_ascii=False),
 	})
 	doc.insert(ignore_permissions=True)
+	# a withdraw committed while this was priced closes it (O-13): its range lock on the version's open
+	# quotes held this insert back, and this read under a shared lock sees it; a quote inserted before
+	# the withdraw scanned is found and expired by it. Superseded still books (as before)
+	row = frappe.db.sql("SELECT status FROM `tabTEX Contract Version` WHERE name=%s LOCK IN SHARE MODE",
+	                    live.version_id)
+	if row and row[0][0] == "Withdrawn":
+		frappe.throw(_("This rate is no longer on sale. Please search again."), contracts.ContractNotOnSale)
 	price_changed = to_str(q.total) != offer.get("total") and not changed_inputs
 	return {"ok": True, "quote_id": doc.name, "expires_at": str(doc.expires_at), "price_changed": price_changed,
 	        "previous_total": offer.get("total"), "quote": q.to_dict(internal=False),
@@ -646,6 +661,9 @@ def load_quote(quote_id: str, *, for_update: bool = False) -> tuple[dict, dict, 
 
 
 def quote_is_usable(row) -> str | None:
+	if row.status == "Expired":
+		# its version was withdrawn (``contracts.withdraw``, O-13): the rate is gone, not used
+		return _("This rate is no longer on sale. Please search again.")
 	if row.status != "Open":
 		return _("This quote was already used.")
 	if get_datetime(row.expires_at) < now_datetime():

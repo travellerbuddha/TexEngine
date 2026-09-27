@@ -116,6 +116,7 @@ BEHAVIOUR = {
 	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
 	"p66_cost_doctypes_system_only": "test_patches.TestP66CostDocTypesSystemOnly",
 	"p68_payment_checkout_lease": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
+	"p69_quote_version_index": "test_patches.TestP03Indexes.test_p69_creates_the_quote_version_index",
 }
 
 
@@ -861,6 +862,23 @@ class TestP03Indexes(PatchCase):
 		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
 		self.assertRerunChangesNothing("p46_report_indexes")
 
+
+	def test_p69_creates_the_quote_version_index(self):
+		"""O-13 (2D-1): a withdraw locks its version's open quotes (``FOR UPDATE``) through this index,
+		not the whole quote table. DDL only, stubbed in the sandbox (M3)."""
+		from kamra.tex import setup
+
+		new = {"tex_quote_version_open": ("TEX Quote", ("contract_version", "status", "expires_at"))}
+		have = {name: (dt, tuple(fields)) for dt, fields, name in setup.TEX_INDEXES}
+		self.assertEqual({k: have.get(k) for k in new}, new)
+		self.assertTrue(frappe.db.has_index("tabTEX Quote", "tex_quote_version_open"))      # the migration made it
+		self.assertEqual(self.first_run("p69_quote_version_index")["add_index"], [])       # nothing missing: no DDL
+		real = frappe.local.db.has_index
+		with mock.patch.object(frappe.local.db, "has_index",
+		                       side_effect=lambda table, index: index not in new and real(table, index)):
+			seen = migrate("p69_quote_version_index")
+		self.assertEqual(sorted(seen["add_index"]), sorted((dt, f, n) for n, (dt, f) in new.items()))
+		self.assertRerunChangesNothing("p69_quote_version_index")
 
 class TestP04LegacyPriceLock(PatchCase):
 	def test_standing_legacy_stays_are_locked_at_their_amount(self):

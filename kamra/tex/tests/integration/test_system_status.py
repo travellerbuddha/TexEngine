@@ -250,6 +250,25 @@ class TestOverpaidBookings(TexTestCase):
 		self.assertNotIn(OTHER, mine["properties"])
 
 
+class TestContractsLive(TexTestCase):
+	"""Y-2 (2D-1): an Active contract within its sale window with no version on sale (and none starting
+	within 7 days) sells nothing: ``contracts.live`` fails and names its hotel."""
+
+	def test_withdrawing_the_version_on_sale_fails_the_check(self):
+		from kamra.tex.commercial import contracts
+
+		c = fx.create_contract(self.f, code="Y2-LIVE")
+		before = check(system_api().status(property=fx.PROPERTY), "contracts.live")
+		contracts.withdraw(c["version"], reason="wrong prices")
+		after = check(system_api().status(property=fx.PROPERTY), "contracts.live")
+		self.assertEqual(after["status"], "fail")
+		failing = next(i for i in after["issues"] if i["reason"] == "contract_not_selling")
+		before_n = next((i["params"]["count"] for i in before["issues"] if i["reason"] == "contract_not_selling"), 0)
+		self.assertEqual(failing["params"]["count"] - before_n, 1)
+		self.assertIn(fx.PROPERTY, after["properties"])
+		self.assertNotIn(c["contract"], json.dumps(after))                   # counts and hotels only
+
+
 class TestStatusAlerts(TexTestCase):
 	def setUp(self):
 		super().setUp()

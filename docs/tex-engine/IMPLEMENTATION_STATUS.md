@@ -1510,6 +1510,13 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-29 **COMPLETE**: CRS search, quote and quote summary apply only the latest request's answer · e2e `crs-actions` O-29 (summary and search races).
 - O-30 **COMPLETE**: checkout books the quotes it just made again (older than 25 min), with a new idempotency key · e2e `booking` O-30.
 
+## 6D1. Audit Part 2D-1 (2026-09-27)
+
+- 2C-2 leftovers **COMPLETE**: group rule text (0a), the publish check skips an infant slot the room cannot hold (0b), an ambiguous extras catalog read once per hotel (0c), `code_key` idempotent (0d) and used for a change's codes (0e), markup tie message (0f) · unit `TestGroupRule`/`TestCodeKey`, `test_commercial_flows`, `test_modification_determinism`.
+- Y-2 + O-13 **COMPLETE**: withdrawing a scheduled version gives the previous one its window back, a live one ends now; the version's open quotes become Expired under lock order quote → contract → version; p69 index; ops check `contracts.live` (ADR-069) · `test_null_dates.TestVersionLifecycle`, `test_concurrency.TestConcurrentWithdraw`, `test_patches` p69, unit `TestContractsLive`.
+- O-10 **COMPLETE**: `save_version(expected_modified)` refuses a stale editor save (`DraftChanged`); the editor sends the token and offers Reload · `test_pricing_workspace_api.TestDraftToken`, frontend `draft-token`.
+- O-9 + G-47 **COMPLETE**: grid rate edits planned by pure `pricing/ratesplit.py` (in place, else one clone per part above every overlapping period of its kind); an edit adding an ERROR is refused · unit `test_ratesplit`, `test_inventory.TestGridRates`.
+
 ## 6E1. Audit Part 2E-1 (2026-09-27)
 
 - Y-3 B **COMPLETE**: a fixed deposit or penalty is converted from its policy's currency at the quote's recorded rate (a snapshot without one keeps the amount); a fixed deposit is taken once per booking and policy, room by room, each room at most its stored price; the fee's basis says `fx`; the guest's change preview settles the internal quote; offers write the policy's own currency (ADR-067) · `TestPolicyCurrency`, `test_existing_semantics.TestPolicyMoneyChanges`, unit `policy-currency`.

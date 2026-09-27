@@ -15,3 +15,11 @@ test("letters of any alphabet, digits, _ and - are kept; anything else goes", ()
   assert.equal(normalisePromoCode("yaz!%24"), "YAZ24")
   assert.equal(normalisePromoCode(normalisePromoCode("wİnter")), "WINTER") // idempotent
 })
+
+test("stacked dots above an I are all dropped, and it is idempotent (2D-1 0d)", () => {
+  for (const typed of ["İ\u0307\u0307i", "i\u0307\u0307\u0307", "ı\u0307", "wİ\u0307nter"]) {
+    const key = normalisePromoCode(typed)
+    assert.equal(normalisePromoCode(key), key)
+  }
+  assert.equal(normalisePromoCode("İ\u0307\u0307i"), "II")
+})

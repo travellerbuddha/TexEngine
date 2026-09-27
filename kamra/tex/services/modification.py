@@ -42,7 +42,7 @@ from frappe.utils import add_to_date, convert_utc_to_system_timezone, get_dateti
 from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import contracts
 from kamra.tex.money import D, db_dec, from_db, quantize, to_str
-from kamra.tex.pricing import addons, engine, serialize
+from kamra.tex.pricing import addons, engine, promotions, serialize
 from kamra.tex.pricing import fx as fx_math
 from kamra.tex.pricing.extras import guest_reason
 from kamra.tex.pricing.model import ChildSpec
@@ -117,7 +117,8 @@ def build_changed_request(res, changes: dict, sale_at: datetime):
 		elif k == "adults":
 			base[k] = int(v)
 		elif k == "promo_codes":
-			base[k] = [x.strip().upper() for x in (v or []) if x and x.strip()]
+			# keyed as a quote keys them (O-31), so the snapshot says WINTER, never WİNTER
+			base[k] = [key for x in (v or []) if (key := promotions.code_key(x))]
 		elif k == "extras":
 			base[k] = [{"code": e["code"].upper(), "quantity": int(e.get("quantity") or 1),
 			            "service_dates": list(e.get("service_dates") or [])} for e in (v or [])]

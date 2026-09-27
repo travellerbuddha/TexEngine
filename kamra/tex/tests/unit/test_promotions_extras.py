@@ -240,6 +240,26 @@ class TestGroupRule(unittest.TestCase):
 		eb10, eb25 = P("PRM-00001", value="10", group="EB"), P("PRM-00002", value="25", group="EB")
 		self.assertEqual(self.price(eb25, eb10), (D("540.00"), {"PRM-00001": True, "PRM-00002": False}))
 
+	def test_of_two_contract_offers_the_code_first_alphabetically_is_applied(self):
+		"""2D-1 0a: a contract offer's id is its code, so on equal priority the code that sorts first
+		wins, whichever was entered first: LS7 entered before EB15, EB15 applies."""
+		ls7 = P("LS7", value="7", group="SAVE", source="contract")
+		eb15 = P("EB15", value="15", group="SAVE", source="contract")
+		t = fixtures.terms(offers=(ls7, eb15))
+		q = engine.price_stay(fixtures.ctx(t), fixtures.req(check_out=date(2027, 6, 5)))
+		self.assertEqual({o.promo_id: o.applied for o in q.promotions}, {"EB15": True, "LS7": False})
+		self.assertEqual(q.totals["accommodation"], D("510.00"))
+
+	def test_a_top_member_refused_by_stacking_leaves_the_group_open(self):
+		"""The group closes only on a member that applies: its top member refused as not stackable (another
+		promotion already applies) lets the next member of the group apply."""
+		other = P("A-OTHER", value="10", priority=9)
+		top = P("G-TOP", value="20", group="EB", priority=5, stackable=False)
+		low = P("G-LOW", value="5", group="EB", priority=3)
+		chosen, rejected = promotions.select((other, top, low), pctx())
+		self.assertEqual([p.promo_id for p in chosen], ["A-OTHER", "G-LOW"])
+		self.assertIn("not stackable", {r.promo_id: r.reason for r in rejected}["G-TOP"])
+
 	def test_a_higher_priority_is_applied_first(self):
 		eb10, eb25 = P("PRM-00001", value="10", group="EB"), P("PRM-00002", value="25", group="EB", priority=1)
 		self.assertEqual(self.price(eb10, eb25), (D("450.00"), {"PRM-00001": False, "PRM-00002": True}))
@@ -277,6 +297,14 @@ class TestCodeKey(unittest.TestCase):
 				self.assertEqual(promotions.code_key(key), promotions.code_key(typed))      # idempotent
 		for blank in (None, "", "   "):
 			self.assertIsNone(promotions.code_key(blank))
+
+	def test_idempotent_on_stacked_combining_marks(self):
+		"""2D-1 0d: a fuzz found "İ̇̇i" → "İI" → "II"; stacked dots above an I (or an İ) are all dropped."""
+		for s in ("İ\u0307\u0307i", "i\u0307\u0307\u0307", "ı\u0307", "I\u0307\u0307", "wİ\u0307nter", "İ\u0307\u0323"):
+			with self.subTest(s=s):
+				key = promotions.code_key(s)
+				self.assertEqual(promotions.code_key(key), key)
+		self.assertEqual(promotions.code_key("İ\u0307\u0307i"), "II")
 
 	def price(self, typed: str, stored: str):
 		promo = P("WIN", code=stored)

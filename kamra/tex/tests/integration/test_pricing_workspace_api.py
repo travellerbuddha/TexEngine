@@ -1479,3 +1479,57 @@ class TestQuoteSubtotals(WorkspaceCase):
 		for staff in (False, True):
 			shown = quoting.strip_internal(json.loads(json.dumps(q)), staff=staff)
 			self.assertEqual([set(n) for n in shown["nights"]], [{"date", "amount"}])
+
+
+class TestDraftToken(WorkspaceCase):
+	"""O-10 (2D-1, ADR-069): a save carries the draft's ``modified`` as it read it
+	(``expected_modified``); when someone changed the draft since (an ARI grid rate change, another
+	editor), the save is refused (``DraftChanged``) and nothing is applied. Without a token a save
+	behaves as before (opt-in, as ADR-061's additions)."""
+
+	def save(self, data: dict, **kw) -> dict:
+		# as the browser calls it: frappe.call drops an argument the endpoint does not take
+		return frappe.call(api.save_version, name=self.v, data=as_json(data), workspace=1, **kw)
+
+	def grid_periods(self) -> set[str]:
+		return {p.period_code for p in frappe.get_doc("TEX Contract Version", self.v).periods
+		        if p.period_code.startswith("G")}
+
+	def test_a_stale_save_is_refused_and_the_grid_change_kept(self):
+		from kamra.tex.commercial import grid
+
+		t0 = wapi.get_version(self.v)["modified"]
+		data = self.payload()                                              # the editor's tables at T0
+		grid.apply_rate_change(self.c["contract"], [self.std], fx.d(6, 5), fx.d(6, 11), [5, 6], "ABSOLUTE", 160)
+		made = self.grid_periods()
+		self.assertTrue(made)
+		with self.assertRaises(contracts.DraftChanged) as refused:
+			self.save(data, expected_modified=t0)
+		self.assertIn("reload", str(refused.exception))
+		self.assertTrue(made <= self.grid_periods())                       # the grid's periods stay
+
+	def test_the_current_token_saves(self):
+		t0 = wapi.get_version(self.v)["modified"]
+		data = self.payload()
+		self.std_low(data)["value"] = "111"
+		out = self.save(data, expected_modified=t0)
+		self.assertGreater(frappe.utils.get_datetime(out["modified"]), frappe.utils.get_datetime(t0))
+		self.assertEqual(D(self.std_low(self.payload())["value"]), D("111"))
+
+	def test_two_saves_from_one_read_the_second_is_refused(self):
+		t0 = wapi.get_version(self.v)["modified"]
+		data = self.payload()
+		self.std_low(data)["value"] = "111"
+		self.save(data, expected_modified=t0)
+		self.std_low(data)["value"] = "222"
+		with self.assertRaises(contracts.DraftChanged):
+			self.save(data, expected_modified=t0)
+		self.assertEqual(D(self.std_low(self.payload())["value"]), D("111"))
+
+	def test_without_a_token_a_save_is_as_before(self):
+		from kamra.tex.commercial import grid
+
+		data = self.payload()
+		grid.apply_rate_change(self.c["contract"], [self.std], fx.d(6, 5), fx.d(6, 11), [5, 6], "ABSOLUTE", 160)
+		self.save(data)
+		self.assertEqual(self.grid_periods(), set())                        # last save wins, as before

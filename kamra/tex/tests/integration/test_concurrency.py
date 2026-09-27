@@ -285,6 +285,91 @@ def _cleanup_codes():
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
 
 
+class TestConcurrentWithdraw(IntegrationTestCase):
+	"""O-13 (2D-1, ADR-069): a quote priced while its version is withdrawn is not kept. One connection
+	prices a quote and is held after pricing; another withdraws the version and commits; the first
+	then writes the quote and must be refused (its insert re-reads the version under a shared lock)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		cls.f = fx.base_setup()
+		cls.version = fx.create_contract(cls.f, code="CONC")["version"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+		                      rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB", currency="EUR")["properties"][0]
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		cls.offer_key = next(o for o in prop["offers"] if o["room_type"] == rt and o["board"] == "AI")["rooms"][0][
+			"offer_key"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup()
+		super().tearDownClass()
+
+	def test_a_quote_priced_while_its_version_is_withdrawn_is_refused(self):
+		from unittest import mock
+
+		from kamra.tex.commercial import contracts
+
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		priced, withdrawn = threading.Event(), threading.Event()
+		results: dict[str, object] = {}
+		real = quoting.price_request
+
+		def held(*args, **kwargs):
+			out = real(*args, **kwargs)
+			priced.set()
+			withdrawn.wait(timeout=30)          # the withdraw commits while this quote is between pricing and insert
+			return out
+
+		def quote():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest quote path
+				results["quote"] = quoting.create_quote(self.offer_key)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each connection is its own request
+			except frappe.ValidationError as e:
+				frappe.db.rollback()
+				results["quote"] = f"refused: {e}"
+			except Exception:
+				results["quote"] = traceback.format_exc()
+			finally:
+				frappe.destroy()
+
+		def withdraw():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager withdraws
+				priced.wait(timeout=30)
+				contracts.withdraw(self.version, reason="race")
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each connection is its own request
+				results["withdraw"] = "done"
+			except Exception:
+				frappe.db.rollback()
+				results["withdraw"] = traceback.format_exc()
+			finally:
+				withdrawn.set()
+				frappe.destroy()
+
+		with mock.patch.object(quoting, "price_request", held):
+			threads = [threading.Thread(target=quote), threading.Thread(target=withdraw)]
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join(timeout=60)
+		self.assertEqual(results.get("withdraw"), "done", results)
+		self.assertIn("no longer on sale", str(results.get("quote")), results)
+		frappe.db.rollback()
+		self.assertEqual(frappe.db.count("TEX Quote", {"contract_version": self.version, "status": "Open"}), 0)
+
+
 class TestConcurrentCouponLimit(IntegrationTestCase):
 	"""G-07 under real concurrency: a code that may be used once, two guests book with it at
 	the same instant. Exactly one booking gets it; the other is told it is used up."""

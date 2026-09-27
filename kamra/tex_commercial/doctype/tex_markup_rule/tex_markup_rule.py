@@ -37,7 +37,8 @@ class TEXMarkupRule(Document):
 		if (self.combine or "REPLACE") != "REPLACE":
 			return
 		cols = ", ".join(f"`{f}`" for f in MARKUP_FIELDS)
-		others = frappe.db.sql(f"""SELECT {cols} FROM `tabTEX Markup Rule`
+		# active_to NULL: open-ended, live from active_from on
+		others = frappe.db.sql(f"""SELECT {cols}, `active_from` FROM `tabTEX Markup Rule`
 		                           WHERE tex_status IN ('Active','Superseded') AND IFNULL(combine,'REPLACE')='REPLACE'
 		                             AND IFNULL(property,'')=%(prop)s AND IFNULL(revision_of,name)!=%(root)s
 		                             AND (active_to IS NULL OR active_to > %(from)s)
@@ -45,12 +46,19 @@ class TEXMarkupRule(Document):
 		                       {"prop": self.property or "", "root": self.revision_of or self.name,
 		                        "from": self.active_from}, as_dict=True)
 		me = markup_from_row(self)
+		starts = {r.name: r.active_from for r in others}
+		now = frappe.utils.now_datetime()
 		for a, b in markup.same_scope_ties([me, *(markup_from_row(r) for r in others)]):
 			if a is me or b is me:
 				other = b if a is me else a
-				frappe.throw(_("Markup {0} has the same scope and priority as live markup {1}, and their stay dates "
-				               "meet: only one would apply. Give one a higher priority, or revise {1} instead.")
-				             .format(self.name, other.rule_id), title=_("Markup tie"))
+				# a tie is not revised away at the same priority: change a priority or archive one (2D-1)
+				scheduled = starts.get(other.rule_id) and frappe.utils.get_datetime(starts[other.rule_id]) > now
+				msg = (_("Markup {0} has the same scope and priority as live or scheduled markup {1}, and their stay "
+				         "dates meet: only one would apply. Change the priority of one, or archive one of them.")
+				       if scheduled else
+				       _("Markup {0} has the same scope and priority as live markup {1}, and their stay dates meet: "
+				         "only one would apply. Change the priority of one, or archive one of them."))
+				frappe.throw(msg.format(self.name, other.rule_id), title=_("Markup tie"))
 
 	def on_trash(self):
 		block_delete(self, lambda d: d.tex_status != "Draft")
