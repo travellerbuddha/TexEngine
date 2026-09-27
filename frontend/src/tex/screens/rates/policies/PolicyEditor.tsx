@@ -58,6 +58,16 @@ function tableKinds(cols: TableColumn[]): Record<string, FieldKind> {
   return Object.fromEntries(cols.map((c) => [c.key, c.kind]))
 }
 
+/** What the server saved but its owner may not expect (``_warnings``), e.g. a promotion that ties
+ * in its group (``PROMO_GROUP_TIE``, O-4): only the older one is applied. */
+interface SaveWarning {
+  code: string
+  message: string
+  other?: string
+  other_name?: string
+  older?: string
+}
+
 /** Loaded record → editor state (decimals as strings, tables as rows). */
 function normalise(kind: PolicyKind, src: Doc): Doc {
   const out: Doc = { ...src }
@@ -222,6 +232,13 @@ export default function PolicyEditor() {
   const listPath = `/tex/rates/policies/${kind.slug}`
   const title = doc ? (typeof kind.titleField === "function" ? kind.titleField(doc) : String(doc[kind.titleField] || "")) : ""
 
+  const warn = (rec: Doc) => {
+    for (const w of (rec._warnings as SaveWarning[] | undefined) ?? [])
+      toast.warning(
+        w.code === "PROMO_GROUP_TIE" ? t("rates.policy.promotions.group_tie", { name: w.other_name ?? "", id: w.other ?? "", older: w.older ?? "" }) : w.message,
+      )
+  }
+
   const onSave = async () => {
     // one save at a time (Enter in a field submits the form)
     if (!doc || save.pending) return
@@ -235,6 +252,7 @@ export default function PolicyEditor() {
       const saved = await save.run({ doctype: kind.doctype, data: payload(kind, sent) })
       invalidateLookups(String(saved.property || property || ""))
       toast.success(t("core.saved"))
+      warn(saved)
       if (isNew) {
         created.current = { name: String(saved.name), sent }
         navigate(`${listPath}/${encodeURIComponent(String(saved.name))}`, { replace: true })
@@ -408,6 +426,7 @@ export default function PolicyEditor() {
           onConfirm={async (at) => {
             await act(async () => {
               const d = await tex<Doc>("policies", "activate", { doctype: kind.doctype, name, at }, { post: true })
+              warn(d)
               const n = normalise(kind, d)
               setDoc(n)
               setBase(JSON.stringify(payload(kind, n)))

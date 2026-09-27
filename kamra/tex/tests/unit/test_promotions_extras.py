@@ -226,6 +226,42 @@ class TestUnusableNeverWins(unittest.TestCase):
 		self.assertEqual((extra.totals["accommodation"], extra.totals["discounts"]), (D("600.00"), D("3.00")))
 
 
+
+class TestGroupRule(unittest.TestCase):
+	"""O-4 (D-3): promotions of one group never combine. The highest priority is applied; on equal
+	priority the lowest id, the older promotion (not the better one). ``group_ties`` names the
+	promotions a new one would tie with."""
+
+	def price(self, *promos):
+		q = engine.price_stay(fixtures.ctx(promotions=promos), fixtures.req(check_out=date(2027, 6, 5)))
+		return q.totals["accommodation"], {o.promo_id: o.applied for o in q.promotions}
+
+	def test_on_equal_priority_the_older_one_is_applied(self):
+		eb10, eb25 = P("PRM-00001", value="10", group="EB"), P("PRM-00002", value="25", group="EB")
+		self.assertEqual(self.price(eb25, eb10), (D("540.00"), {"PRM-00001": True, "PRM-00002": False}))
+
+	def test_a_higher_priority_is_applied_first(self):
+		eb10, eb25 = P("PRM-00001", value="10", group="EB"), P("PRM-00002", value="25", group="EB", priority=1)
+		self.assertEqual(self.price(eb10, eb25), (D("450.00"), {"PRM-00001": False, "PRM-00002": True}))
+
+	def test_ties_are_the_same_group_and_priority_with_overlapping_windows(self):
+		new = P("NEW", group="EB", sale_from=date(2027, 1, 1), sale_to=date(2027, 3, 31))
+		others = (P("A", group="EB"), P("B", group="EB", priority=1), P("C", group="LS"), P("D"),
+		          P("E", group="EB", sale_from=date(2027, 4, 1)), P("F", group="EB", sale_to=date(2026, 12, 31)),
+		          P("G", group="EB", stay_from=date(2027, 7, 1), stay_to=date(2027, 7, 31)), P("NEW", group="EB"))
+		self.assertEqual([p.promo_id for p in promotions.group_ties(new, others)], ["A", "G"])
+		self.assertEqual(promotions.group_ties(P("X"), others), [])            # no group: no tie
+
+	def test_an_empty_date_is_an_open_end(self):
+		"""A window's empty start is "since always", its empty end "for ever": a promotion without
+		dates meets every other in its group."""
+		stay = P("S", group="EB", stay_from=date(2027, 6, 1), stay_to=date(2027, 6, 30))
+		self.assertEqual([p.promo_id for p in promotions.group_ties(P("N", group="EB"), (stay,))], ["S"])
+		later = P("L", group="EB", stay_from=date(2027, 7, 1))
+		self.assertEqual(promotions.group_ties(P("N", group="EB", stay_to=date(2027, 6, 30)), (later,)), [])
+		self.assertEqual(len(promotions.group_ties(P("N", group="EB", stay_to=date(2027, 7, 1)), (later,))), 1)
+
+
 def xctx(**kw):
 	base = dict(sale_date=date(2027, 1, 15), check_in=CI, check_out=CO, nights=7, market="DE",
 	            channel="DIRECT_WEB", room_type="STD", adults=2, children=1, infants=1, sell_currency="EUR")

@@ -1573,3 +1573,32 @@ class TestPromotionSaveChecks(TexTestCase):
 		old = self.live(stage="COST", applies_to="EXTRAS")
 		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
 		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
+
+
+class TestPromotionGroupTies(TexTestCase):
+	"""O-4 (D-3): of one group the highest priority is applied, on equal priority the older promotion.
+	Saving or activating one that ties with a live promotion of its group (same priority, dates that
+	meet) warns, naming it."""
+
+	def eb(self, value: int, **kw) -> dict:
+		return policy_api.save_record("TEX Promotion", {
+			"promotion_name": f"EB {value}", "property": fx.PROPERTY, "value_type": "PERCENT", "value": value,
+			"promo_group": "EB", **kw})
+
+	def activate(self, name: str) -> dict:
+		return policy_api.activate("TEX Promotion", name)
+
+	def test_the_second_early_booking_names_the_first(self):
+		first = self.eb(10)
+		self.assertNotIn("_warnings", self.activate(first["name"]))
+		second = self.eb(25)
+		for out in (second, self.activate(second["name"])):
+			self.assertEqual([(w["code"], w["other"], w["other_name"]) for w in out["_warnings"]],
+			                 [("PROMO_GROUP_TIE", first["name"], "EB 10")])
+			self.assertIn(first["name"], out["_warnings"][0]["message"])
+
+	def test_another_priority_or_group_is_no_tie(self):
+		self.activate(self.eb(10)["name"])
+		self.assertNotIn("_warnings", self.eb(25, priority=1))
+		self.assertNotIn("_warnings", self.eb(25, promo_group="LS"))
+		self.assertNotIn("_warnings", self.eb(25, promo_group=""))

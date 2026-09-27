@@ -157,7 +157,7 @@ def save_record(doctype: str, data):
 	if not _audited_by_record(doctype):
 		audit(f"{doctype.lower().replace(' ', '_')}.save", reference_doctype=doctype, reference_name=doc.name,
 		      old=before, new=doc_dict(doc), **_audit_scope(doctype, doc))
-	return doc_dict(doc)
+	return _with_warnings(doctype, doc_dict(doc))
 
 
 @frappe.whitelist(methods=["POST"])
@@ -189,7 +189,59 @@ def activate(doctype: str, name: str, at: str | None = None):
 	revisions.activate(doctype, name, at)   # never back-dated from here (G-20)
 	audit(f"{doctype.lower().replace(' ', '_')}.activate", reference_doctype=doctype, reference_name=name,
 	      new={"active_from": str(frappe.db.get_value(doctype, name, "active_from"))}, **_audit_scope(doctype, doc))
-	return get_record(doctype, name)
+	return _with_warnings(doctype, get_record(doctype, name))
+
+
+def _with_warnings(doctype: str, out: dict) -> dict:
+	"""``out`` with ``_warnings`` when the record, as saved, is legal but not what its owner may
+	expect: a TEX Promotion that ties in its group (``PROMO_GROUP_TIE``, O-4)."""
+	warnings = _group_ties(out) if doctype == "TEX Promotion" else []
+	if warnings:
+		out["_warnings"] = warnings
+	return out
+
+
+def _group_ties(rec: dict) -> list[dict]:
+	"""The live or scheduled promotions of ``rec``'s group that it ties with where both apply (same
+	priority, sale and stay windows that meet: ``promotions.group_ties``). Of such a pair the engine
+	applies the older (the lowest id), not the better offer (D-3), so the owner is told which."""
+	from kamra.tex.commercial.context import PROMO_FIELDS, promotion_from_row
+	from kamra.tex.pricing import promotions
+
+	if not rec.get("promo_group"):
+		return []
+	me = promotion_from_row(frappe._dict(rec))
+	rows = frappe.db.sql(f"""SELECT {', '.join(f'`{f}`' for f in PROMO_FIELDS)} FROM `tabTEX Promotion`
+	                        WHERE promo_group=%(g)s AND tex_status IN ('Active','Superseded')
+	                          AND (active_to IS NULL OR active_to > %(now)s)
+	                          AND IFNULL(revision_of, name) != %(root)s
+	                        ORDER BY revision_no""",
+	                     {"g": rec["promo_group"], "now": frappe.utils.now_datetime(), "root": me.promo_id},
+	                     as_dict=True)
+	latest = {promotion_from_row(r).promo_id: r for r in rows}          # a record's latest live revision
+	others = {pid: r for pid, r in latest.items() if _meet(rec, r)}
+	out = []
+	for o in promotions.group_ties(me, [promotion_from_row(r) for r in others.values()]):
+		older = min(o.promo_id, me.promo_id)
+		out.append({"code": "PROMO_GROUP_TIE", "other": o.promo_id, "other_name": o.name, "older": older,
+		            "message": _("{0} ({1}) is in group {2} with the same priority and dates that meet: only the "
+		                         "older promotion, {3}, is applied. Give one a higher priority to choose.").format(
+			            o.name, o.promo_id, rec["promo_group"], older)})
+	return out
+
+
+def _meet(a: dict, b: dict) -> bool:
+	"""Two promotions apply together somewhere: a hotel's, a hotel group's or every hotel's."""
+	def reach(r) -> tuple[str | None, str | None]:
+		prop = r.get("property") or None
+		return prop, (frappe.db.get_value("Property", prop, "tex_hotel_group") if prop else r.get("hotel_group") or None)
+
+	(pa, ga), (pb, gb) = reach(a), reach(b)
+	if pa and pb:
+		return pa == pb
+	if not (pa or ga) or not (pb or gb):
+		return True                                        # every hotel's
+	return ga == gb                                        # a hotel group's, and a hotel of it or the group
 
 
 @frappe.whitelist(methods=["POST"])

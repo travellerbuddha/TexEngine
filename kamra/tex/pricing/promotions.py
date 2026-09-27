@@ -9,7 +9,9 @@ Eligibility is evaluated for every candidate and each one is reported as
    booking's later room) is refused first, so it never excludes or closes out one it can (O-1);
 2. if any eligible promotion is ``exclusive``, the highest-priority exclusive one is the
    only promotion applied; all others are rejected "excluded by <id>";
-3. otherwise, in order: a promotion in an ``incompatible group`` already used is rejected;
+3. otherwise, in order: a promotion in an ``incompatible group`` already used is rejected (of
+   one group the highest priority applies, on equal priority the lowest id: the older one, not the
+   better one; ``group_ties`` finds such pairs, D-3);
    a non-stackable promotion is rejected once anything applied; after a non-stackable
    promotion is applied, nothing else applies;
 4. values apply per night on the running price (SEQUENTIAL) or all percentages on the
@@ -309,6 +311,23 @@ def select(promos: tuple[Promotion, ...], ctx: PromoContext,
 		if not p.stackable:
 			closed_by = p.promo_id
 	return apply, rejected
+
+
+def _overlap(lo1: date | None, hi1: date | None, lo2: date | None, hi2: date | None) -> bool:
+	"""Two inclusive date windows meet. An empty start is "since always", an empty end "for ever"
+	(a promotion's sale and stay windows are nullable)."""
+	return max(lo1 or date.min, lo2 or date.min) <= min(hi1 or date.max, hi2 or date.max)
+
+
+def group_ties(p: Promotion, others) -> list[Promotion]:
+	"""The promotions of ``others`` that ``p`` ties with in its group (O-4, D-3): the same group and
+	priority, sale and stay windows that meet. Of such a pair ``select`` applies the lowest id (the
+	older promotion), whichever is the better offer, so the owner is told."""
+	if not p.group:
+		return []
+	return [o for o in others if o.promo_id != p.promo_id and o.group == p.group and o.priority == p.priority
+	        and _overlap(p.sale_from, p.sale_to, o.sale_from, o.sale_to)
+	        and _overlap(p.stay_from, p.stay_to, o.stay_from, o.stay_to)]
 
 
 def in_currency(amount, from_ccy: str | None, to_ccy: str, fx: dict[str, FxSnapshot] | None, *,
