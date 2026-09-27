@@ -105,8 +105,14 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	booking_svc.expire_booking(booking, now=now, force=True)
 	free, detail = _today(booking, now)
 	in_time = holds.paid_in_time(txn)
+	# D-7 (P1-1): a gateway that states no payment time (iyzico, Sipay) may have been paid in time, its news
+	# late; money on a booking that ended by its expiry (a ``booking.expire`` audit, this one's included) is
+	# then never refunded by itself either. A booking cancelled on purpose keeps the rule below (C6)
+	untimed = not txn.get("captured_at") and txn.get("provider") != holds.TRANSFER and bool(
+		frappe.db.exists("TEX Audit Event", {"action": "booking.expire", "reference_name": booking}))
 	# paid in time, its news late: never refunded by itself — the hotel decides (B4, D4)
-	state = "Refund Queued" if not free and not in_time and pay.auto_refundable(txn) else "Action Required"
+	state = "Refund Queued" if not free and not in_time and not untimed and pay.auto_refundable(txn) \
+		else "Action Required"
 	again = booking_svc.live_duplicate(booking) if in_time else None
 	ccy = txn.currency
 	cause = CAUSES.get(why, why)
@@ -117,6 +123,8 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	           + (f": the guest has booking {again} for the same stay. " if again else ". ")
 	           if in_time else "")
 	        + f"Not confirmed: {detail}. "
+	        + ("The gateway states no payment time: it may have been paid in time; the hotel decides. "
+	           if untimed else "")
 	        + ("The rooms are gone: the payment is refunded." if state == "Refund Queued" else
 	           "Book the stay again once the guest accepts it and allocate this payment to it, or refund it."))
 	_flag(txn, booking, why, state, note, from_db(txn.amount, ccy), rooms_free_now=free)

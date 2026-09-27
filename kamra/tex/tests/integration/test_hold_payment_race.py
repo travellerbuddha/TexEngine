@@ -1477,6 +1477,32 @@ class TestReconciliationVisible(HoldCase):
 		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Refund Queued")
 		self.assertEqual(public.booking_status(token=a["manage_token"])["late_payment"], "refund")
 
+	def test_money_without_a_gateway_time_whose_rooms_were_sold_waits_for_staff(self):
+		"""P1-1 (D-7): a gateway that states no payment time (iyzico, Sipay) — the money may have been paid in
+		time, its news late. On a booking that ended by its expiry, with its rooms sold since, it is never
+		refunded by itself: it waits for staff, and the guest is told to contact the hotel."""
+		import dataclasses
+
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import late_payments
+
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		a, payment = self.late(room="DLX")
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")              # the last room, to B
+		real = MockProvider.handle_callback
+
+		def untimed(provider, *args, **kw):
+			return dataclasses.replace(real(provider, *args, **kw), captured_at=None)
+
+		with mock.patch.object(MockProvider, "handle_callback", untimed):
+			self.pays(payment)
+		txn = payment["transaction"]
+		self.assertEqual(txn_state(txn).reconciliation, "Action Required")
+		self.assertIn("states no payment time", txn_state(txn).reconciliation_note)
+		late_payments.refund_queued()
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"parent_transaction": txn, "txn_type": "Refund"}))
+		self.assertEqual(public.booking_status(token=a["manage_token"])["late_payment"], "contact")
+
 	def test_a_booking_that_took_its_money_announces_nothing(self):
 		b = self.book()
 		self.pays(self.start_payment(b))
