@@ -1238,6 +1238,19 @@ class TestPaidInTime(HoldCase):
 		                                                              "reference_name": txn}, "new_value"))
 		self.assertEqual((recorded["amount"], recorded["asked"]), (to_str(asked - 5), to_str(asked)))
 
+	def test_a_transfer_amount_that_is_not_a_number_is_refused(self):
+		"""P1-11 review: an amount that is not a finite number is told as such, never a server error."""
+		from kamra.tex.api import payments as payments_api
+
+		self.transfer_account()
+		b = self.book(method="Bank Transfer")
+		txn = self.transfer(b)
+		for amount in ("NaN", "abc", "Infinity"):
+			with self.subTest(amount=amount), self.assertRaisesRegex(frappe.ValidationError, "must be a number"):
+				payments_api.mark_transfer_received(transaction=txn, reference="EFT-NAN", value_date=nowdate(),
+				                                    amount=amount)
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "status"), "Pending")
+
 	def transfer_account(self):
 		bank = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Bank Transfer"},
 		                 {"label": "Bank transfer", "property": fx.PROPERTY, "provider": "Bank Transfer",

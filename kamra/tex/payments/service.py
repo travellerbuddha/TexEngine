@@ -1306,7 +1306,10 @@ def mark_transfer_received(transaction: str, *, reference: str, value_date=None,
 		frappe.throw(_("Only pending bank transfers can be confirmed."))
 	now = now_datetime()
 	asked = from_db(txn.amount, txn.currency)
-	came = asked if amount in (None, "") else quantize(D(amount), txn.currency)
+	came = asked if amount in (None, "") else _finite(amount)
+	if came is None:
+		frappe.throw(_("Amount must be a number."))
+	came = quantize(came, txn.currency)
 	if came <= ZERO or came > asked:
 		frappe.throw(_("The amount received must be more than zero and at most the {0} {1} asked.").format(
 			to_str(asked), txn.currency))
@@ -1329,6 +1332,15 @@ def mark_transfer_received(transaction: str, *, reference: str, value_date=None,
 	# money its booking could not take is in reconciliation: staff see it at once (K-2c)
 	return {"transaction": txn.name, "status": txn.status,
 	        "reconciliation": frappe.db.get_value("TEX Payment Transaction", txn.name, "reconciliation") or None}
+
+
+def _finite(value) -> D | None:
+	"""``value`` as a finite Decimal, or None when it is not a number (text, NaN, Infinity)."""
+	try:
+		d = D(value)
+	except (TypeError, ValueError):
+		return None
+	return d if d.is_finite() else None
 
 
 def refuse_if_it_cannot_take(booking: str, amount) -> None:
