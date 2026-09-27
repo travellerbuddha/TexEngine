@@ -3,12 +3,15 @@
 // Frappe asks every POST to echo; the booking engine sent none, so the site did not even load for
 // them. The page now carries the token for a signed-in user, and on such a page no third-party
 // tracker loads: the hotel's tag container would run with that session on the platform's origin.
+// O-27: the confirmation page linked to manage#token=…, so the manage token reached the address
+// bar and the link's href, where a tag container reads it. The link now carries no token; the
+// manage page reads it from the tab's storage.
 // The site gets GA4, GTM and Meta pixel ids for the run (put back after it); the tracker hosts are
 // answered by a stub that reports the page's address on load and on every history change, and
 // every request to them is recorded. Stays are cancelled at the end (fee waived).
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e guest-session
 import { expect, request as pwRequest, test, type APIRequestContext, type Page } from "@playwright/test"
-import { ADMIN_PASSWORD, api, login, PASSWORD, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
+import { ADMIN_PASSWORD, api, esc, login, PASSWORD, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
 import { bookPayAtHotel, fillGuest, guestSearch, pickRoom, readConfirmation } from "./flows/booking"
 
 const BASE = process.env.TEX_E2E_BASE || "http://test.localhost:8000"
@@ -189,6 +192,39 @@ test("O-28: a signed-in staff member books on the booking site, and no tracker l
         await ctx.dispose()
       }
       expect(seen, "no request reached a tracker host").toEqual([])
+      noErrors()
+    } finally {
+      if (manage.token) await cancelBooking(manage.token)
+    }
+  })
+})
+
+test("O-27: the manage token never reaches a URL, a link or a tracker", async ({ page }) => {
+  test.setTimeout(180_000)
+  const noErrors = trackErrors(page)
+  const seen = await stubTrackers(page)
+  await consentGiven(page)
+  const manage = manageTokenOf(page)
+  await withTrackers(async () => {
+    try {
+      const done = await bookAtHotel(page, 280, `Guest ${uniqueRunId()}`)
+      expect(done.status).toBe("Confirmed")
+      expect(manage.token, "the booking response carried a manage token").not.toBe("")
+      // the guest's trackers run on this page (consent given): the stub reported it
+      await expect.poll(() => seen.filter((s) => s.includes("/g/collect")).length).toBeGreaterThan(0)
+
+      const link = page.getByRole("link", { name: "Manage booking", exact: true })
+      await expect(link).toHaveAttribute("href", `/book/${SLUG}/manage`)
+      await link.click()
+      await expect(page.getByRole("heading", { level: 1, name: "Manage your booking" })).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByText(done.booking, { exact: true }).first()).toBeVisible()
+      // the tag container saw the manage page (history trigger), without any token
+      await expect.poll(() => seen.some((s) => new RegExp(`/book/${esc(SLUG)}/manage`).test(s))).toBe(true)
+      expect(page.url()).not.toContain(manage.token)
+      for (const s of seen) {
+        expect(s).not.toContain("token=")
+        expect(s).not.toContain(manage.token)
+      }
       noErrors()
     } finally {
       if (manage.token) await cancelBooking(manage.token)

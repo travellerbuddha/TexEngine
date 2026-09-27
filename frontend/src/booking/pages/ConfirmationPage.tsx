@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useI18n } from "../i18n"
 import { ApiError, pub } from "../lib/api"
 import { isPositive, isZero } from "../lib/format"
-import { instructionsFor, manageToken, rememberPayment, rememberReturn } from "../lib/storage"
+import { instructionsFor, manageToken, rememberPayment, rememberReturn, saveManageToken } from "../lib/storage"
 import { continuePayment } from "../flow/payment"
 import { sitePath, siteRoute, siteUrl, useSiteSlug } from "../lib/mount"
 import { Shell } from "../site/Layout"
@@ -180,7 +180,9 @@ function Confirmation({ booking }: { booking: string }) {
     body = t("confirm.payBody")
   }
   const note = siteText(site, lang, "confirmation_note")
-  const manageHref = siteRoute(site.slug, `manage#token=${encodeURIComponent(token)}`)
+  // no bearer token in the link: an address or href is read by the site's tag container. The manage
+  // page takes the tab's site token, set to this booking's on the click (O-27)
+  const manageHref = siteRoute(site.slug, "manage")
   const canPay = pending && !bank && !payAtHotel && isPositive(data.due_now)
 
   return (
@@ -246,7 +248,7 @@ function Confirmation({ booking }: { booking: string }) {
             <h2 className="text-lg">{t("confirm.manageTitle")}</h2>
             <p className="text-sm text-soft">{t("confirm.manageBody")}</p>
           </div>
-          <Link to={manageHref} className="bk-btn bk-btn-secondary">
+          <Link to={manageHref} onClick={() => saveManageToken(data.booking, token, site.slug)} className="bk-btn bk-btn-secondary">
             {t("confirm.manageCta")}
           </Link>
         </section>
