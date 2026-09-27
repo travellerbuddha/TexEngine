@@ -21,7 +21,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
-from kamra.tex.security.audit import audit
+from kamra.tex.security.audit import audit, log_exception
 
 HOLDING = ("Pending Payment", "Held")
 # K-2d: the hold of each payment method — (TEX Settings field, hotel override on Property, default)
@@ -66,9 +66,10 @@ def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = 
 		return wanted, None
 	now = get_datetime(now or now_datetime())
 	deadline = hold_deadline(booking, lock=True)
-	if not deadline or deadline <= now:
-		raise HoldExpired(_("The time to pay for booking {0} is over; its rooms are no longer held. "
-		                    "Please book again.").format(booking))
+	if not deadline or (deadline <= now and not in_flight(b, now)):
+		# the rooms are let go at once (P1-9); a card attempt still open (3-D Secure) keeps them for its
+		# recovery link, which extends them below
+		_expire_and_refuse(booking, deadline, now)
 	# never past the end of the arrival day (D7, E3): a link sent that day is paid by its night
 	arrival = datetime.combine(min(getdate(r.check_in) for r in b.rooms if r.status in HOLDING), time(23, 59, 59))
 	until = min(wanted, add_to_date(now, minutes=resolve_hold_minutes(b.property, LINK)), arrival)
@@ -179,6 +180,30 @@ class HoldExpired(frappe.ValidationError):
 	"""The booking's hold is over: no new payment attempt may keep its rooms."""
 
 
+EXPIRE_SAVEPOINT = "tex_hold_over"
+
+
+def _expire_and_refuse(booking: str, deadline: datetime | None, now: datetime):
+	"""P1-9: an attempt or a link refused because the booking's hold is over, with no attempt open, lets its
+	rooms go now rather than at the next 5-minute run: the booking expires (the caller holds its lock: the
+	order booking → rooms) and that is committed before the refusal, which Frappe rolls back. The commit
+	also puts what the request did before on record (a link it just found expired). Raises ``HoldExpired``."""
+	if deadline:
+		from kamra.tex.payments.service import _commit_step  # payments.service imports this module
+		from kamra.tex.services import booking as booking_svc
+		from kamra.tex.services.txn import undo_step
+
+		frappe.db.savepoint(EXPIRE_SAVEPOINT)
+		try:
+			booking_svc.expire_booking(booking, now=now)
+		except Exception as e:
+			undo_step(e, EXPIRE_SAVEPOINT)
+			log_exception(f"TEX booking expiry failed for {booking}")
+		_commit_step()
+	raise HoldExpired(_("The time to pay for booking {0} is over; its rooms are no longer held. "
+	                    "Please book again.").format(booking))
+
+
 def hold_deadline(booking: str, *, lock: bool = False) -> datetime | None:
 	"""The booking's hold deadline: the earliest ``hold_expires_on`` of its rooms still holding
 	inventory for it. ``lock``: a locking read (the rows as they are now, under the booking lock)."""
@@ -237,9 +262,13 @@ def open_attempt(booking: str, method: str | None, now: datetime | None = None) 
 		return None
 	deadline = hold_deadline(booking, lock=True)
 	if not deadline or (deadline <= now and not in_flight(b, now)):
-		raise HoldExpired(_("The time to pay for booking {0} is over; its rooms are no longer held. "
-		                    "Please book again.").format(booking))
+		_expire_and_refuse(booking, deadline, now)
 	if method == TRANSFER:
+		if deadline <= now:
+			# a transfer lasts until the hold ends, never past it: a card attempt still open keeps the rooms,
+			# no transfer is started beside it (P1-9)
+			raise HoldExpired(_("The time to pay for booking {0} by bank transfer is over. Please pay by card, "
+			                    "or book again.").format(booking))
 		until = deadline
 	else:
 		cap = add_to_date(deadline, minutes=THREEDS_MARGIN_MINUTES)

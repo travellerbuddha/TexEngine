@@ -1832,6 +1832,54 @@ class TestIyzicoFraudReview(HoldCase):
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 
 
+class TestRefusedAfterTheHold(HoldCase):
+	"""P1-9 (audit 2E-2): once a booking's hold is over with no attempt open, the refused retry lets its rooms
+	go at once (the expiry, committed before the refusal), not at the next 5-minute run; a recovery link is
+	still sent inside a card attempt's 3-D Secure margin; a transfer is never started past the hold."""
+
+	def test_a_retry_refused_after_the_hold_releases_the_rooms_at_once(self):
+		from kamra.tex.services import holds
+
+		b = self.book()
+		self.start_payment(b)
+		passes(b["booking"], 26)                                   # the hold and the card attempt are over
+		commits = []
+		with mock.patch.dict(frappe.flags, {"in_test": False}), \
+				mock.patch.object(frappe.db, "commit", side_effect=lambda *a, **kw: commits.append(self.statuses(b))):
+			with self.assertRaises(holds.HoldExpired):
+				self.start_payment(b)                              # no job ran in between
+		self.assertEqual(commits, [("Cancelled", ["Cancelled"])])  # on record before the refusal
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.expire", "reference_name": b["booking"]}))
+
+	def test_a_recovery_link_is_sent_inside_the_3ds_margin(self):
+		b = self.book()
+		self.start_payment(b)
+		passes(b["booking"], 22)                                   # the hold is over, the card attempt still open
+		out = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                      expires_hours=72, booking=b["booking"])
+		self.assertTrue(out["rooms_held_until"])
+		self.assertGreater(held_until(b)[0], add_to_date(now_datetime(), hours=23))
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+
+	def test_a_transfer_is_not_started_once_the_hold_is_over(self):
+		from kamra.tex.services import holds
+
+		bank = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Bank Transfer"},
+		                 {"label": "Bank transfer", "property": fx.PROPERTY, "provider": "Bank Transfer",
+		                  "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Bank Transfer"},
+		          {"property": fx.PROPERTY, "method": "Bank Transfer", "provider_account": bank, "priority": 5})
+		b = self.book()
+		self.start_payment(b)
+		passes(b["booking"], 22)                                   # the card attempt still holds the rooms
+		with self.assertRaises(holds.HoldExpired):
+			public.pay_booking(token=b["manage_token"], payment_method="Bank Transfer")
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"booking": b["booking"],
+		                                                              "provider": "Bank Transfer"}))
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+
+
 class TestReconciliationStates(HoldCase):
 	"""C4 (audit 1c): a charge in reconciliation leaves it only when its money is settled — refunded
 	(through the gateway, or outside it and recorded), or allocated by staff. A refund still waiting
