@@ -1513,6 +1513,32 @@ class TestReconciliationStates(HoldCase):
 				self.assertEqual(after[:1], expired)                           # the expiry's release as it was
 				self.assertEqual(after[1:], [(key(f"refund:{refund}:{b['booking']}:{c}"), D(40))])
 
+	def test_a_durable_refund_naming_no_booking_whose_booking_expires_meanwhile_leaves_no_money_on_it(self):
+		"""P1-3 review: staff refund 40 of a half link's charge without naming the booking (the dialog's
+		default); while the gateway works the booking expires (never confirmed), and the refund, decided again
+		once answered, comes out of the money the expiry released: the 40 still on the booking comes off it."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b = self.book(method="Card")
+		half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		link = pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description="First half",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		c = started["transaction"]
+		real = MockProvider.refund
+
+		def expires_meanwhile(provider, *args, **kw):
+			booking.expire_booking(b["booking"], force=True)
+			return real(provider, *args, **kw)
+
+		with mock.patch.object(MockProvider, "refund", expires_meanwhile):
+			out = pay.refund(c, amount="40", reason="the guest asked", idempotency_key=f"p13d-{c}", durable=True)
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		self.assertEqual(paid(b), D(0))
+		self.assertEqual(txn_state(c).reconciliation, "Action Required")
+
 	def test_a_refund_of_a_confirmed_booking_locks_none_of_its_payments_after_its_outcome(self):
 		"""P1-3 review: ``after_refund`` looks at the booking first and locks nothing unless it is cancelled:
 		a durable refund holds its booking already, and locking its payments after it would invert the order a

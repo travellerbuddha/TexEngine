@@ -1008,6 +1008,7 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 		frappe.throw(_("At most {0} {1} can be refunded.").format(to_str(refundable), ccy))
 	target, from_booking = (_refund_source(txn, amount, booking, lock=True) if txn.status == "Succeeded"
 	                        else (None, ZERO))
+	first = target              # the booking first decided for, before a durable refund decides again
 	provider = provider_for(txn.provider_account, purpose="settle", transaction=txn.name)
 	r = _new_txn(property=txn.property, txn_type="Refund", method=txn.method, amount=amount, currency=ccy,
 	             provider_account=txn.provider_account, provider=txn.provider, idempotency_key=idempotency_key,
@@ -1039,7 +1040,9 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 			# where the money is now, under the locks (as a verification decides it): never a
 			# booking it was moved off meanwhile (re-review 4)
 			target, from_booking = _refund_source(txn, amount, booking, lock=True, exclude=r.name)
-			r.booking = target
+			if target != r.booking:
+				r.flags.tex_system_update = True          # decided again by TEX, never by hand
+				r.booking = target
 	if outcome is None:
 		_refund_unknown(r, txn, error or "", durable)
 	r.status = outcome.status
@@ -1054,8 +1057,10 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 	from kamra.tex.services import late_payments
 
 	if txn.status == "Succeeded" and r.status in ("Succeeded", "Failed"):
-		# a booking that ended never confirmed while this refund was on its way holds no money (P1-3)
-		late_payments.after_refund(r.name, r.booking or booking)
+		# a booking that ended never confirmed while this refund was on its way holds no money (P1-3): the
+		# booking it comes off now, and the one first decided for when the money moved meanwhile (review)
+		for name in dict.fromkeys(b for b in (r.booking or booking, first) if b):
+			late_payments.after_refund(r.name, name)
 	if r.status == "Succeeded":
 		late_payments.settled(txn.name)          # a late payment in reconciliation, given back
 	audit("payment.refund", reference_doctype="TEX Payment Transaction", reference_name=r.name,
