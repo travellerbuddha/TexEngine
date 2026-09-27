@@ -9190,9 +9190,9 @@ the versions the roll superseded the state their contract's later publishes woul
   p68), the signed intent, commit; (b) `create_checkout`, nothing locking before or in it; (c) the charge locked by name,
   `provider_ref` written or merged, status never changed, its own lease cleared, commit; (c′) a gateway error: a new
   Pending charge Failed, a reused one superseded, committed before the caller hears.
-- A lease younger than 60 s (3 × the gateway timeout) makes another start of the charge `PaymentBusy`; a lapsed one is a
-  start that died (its checkout never reached the guest): the charge is reused. Two first starts of one key: the unique
-  key lets one insert, the other is `PaymentBusy`.
+- A lease younger than 100 s (5 × the gateway timeout: Sipay's 2 calls × (connect + read) + margin) makes another start
+  of the charge `PaymentBusy`; a lapsed one is a start that died (its checkout never reached the guest): the charge is
+  reused. Two first starts of one key: the unique key lets one insert, the other is `PaymentBusy`.
 - A failed start leaves the booking on record (Pending Payment, mails sent, charge Failed, rooms ≤ hold + 5 min); the
   engine's retry replays it by its key and offers `pay_booking`. Before, all of it was rolled back.
 - Commits (`_commit_step`) also end what the request did before (a booking just made); skipped in tests (one transaction).

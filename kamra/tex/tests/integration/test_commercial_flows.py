@@ -301,6 +301,63 @@ class TestGuestPayment(TexTestCase):
 		self.assertTrue(b["payment"]["url"])
 
 
+	def booked_with_its_start(self, session: str) -> tuple[dict, dict]:
+		"""``guest_books`` and the arguments its payment was started with (to start it again)."""
+		real_start, seen = pay.start_payment, {}
+
+		def start(**kw):
+			seen.setdefault("kw", kw)
+			return real_start(**kw)
+
+		with mock.patch.object(pay, "start_payment", side_effect=start):
+			b = guest_books(session=session)
+		return b, seen["kw"]
+
+	def test_a_lease_outlasts_the_slowest_gateway_then_a_dead_start_is_taken_over(self):
+		"""Sipay makes two calls, each up to 20 s to connect and 20 s to read: a start 70 s into its
+		gateway call is alive. Once the lease is over the start died (its checkout never reached the
+		guest): the charge it left is started again, and the guest pays it."""
+		b, again = self.booked_with_its_start("new6-lease")
+		txn = b["payment"]["transaction"]
+
+		def started(seconds_ago):
+			frappe.db.set_value("TEX Payment Transaction", txn, "checkout_started_at",
+			                    add_to_date(now_datetime(), seconds=-seconds_ago), update_modified=False)
+
+		started(70)
+		with self.assertRaises(pay.PaymentBusy):
+			pay.start_payment(**again)
+		started(pay.CHECKOUT_LEASE_SECONDS + 1)
+		out = pay.start_payment(**again)
+		self.assertEqual(out["transaction"], txn)                  # the same charge, never a second one
+		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", txn, "checkout_started_at"))
+		public.mock_pay(transaction=txn, outcome="success", sig=out["fields"]["success_sig"])
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "status"), "Confirmed")
+
+	def test_the_answer_of_a_gateway_never_changes_a_charge_settled_meanwhile(self):
+		"""A reused charge's earlier checkout is paid while the gateway makes its new one: step (c) records
+		the new reference and leaves the charge Succeeded, its booking confirmed once."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b, again = self.booked_with_its_start("new6-settled")
+		first = b["payment"]
+		real = MockProvider.create_checkout
+
+		def paid_meanwhile(provider, intent):
+			public.mock_pay(transaction=first["transaction"], outcome="success", sig=first["fields"]["success_sig"])
+			return real(provider, intent)
+
+		with mock.patch.object(MockProvider, "create_checkout", paid_meanwhile):
+			out = pay.start_payment(**again)
+		self.assertEqual(out["transaction"], first["transaction"])
+		row = frappe.db.get_value("TEX Payment Transaction", first["transaction"],
+		                          ["status", "provider_ref", "checkout_started_at"], as_dict=True)
+		self.assertEqual((row.status, row.checkout_started_at), ("Succeeded", None))
+		self.assertIn(f"MOCK-{first['transaction']}", row.provider_ref)
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "status"), "Confirmed")
+		self.assertEqual(frappe.db.count("TEX Payment Allocation", {"transaction": first["transaction"]}), 1)
+
+
 class TestSelfService(TexTestCase):
 	def setUp(self):
 		super().setUp()

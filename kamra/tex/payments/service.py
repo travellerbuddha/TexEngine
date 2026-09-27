@@ -290,9 +290,11 @@ def _new_txn(**kw) -> frappe.model.document.Document:
 
 START_SAVEPOINT = "tex_start_payment"
 # a start asks the gateway with no lock held; for this long its lease tells a second start of the same
-# charge that one is being started: 3 × a gateway call's timeout (Sipay makes two). An older lease is a
-# start that died between its steps: its checkout never reached the guest (NEW-6, ADR-066)
-CHECKOUT_LEASE_SECONDS = 3 * turkey.TIMEOUT
+# charge that one is being started. Longer than the slowest gateway path: Sipay makes two calls (token,
+# checkout), each up to TIMEOUT to connect and TIMEOUT to read (4 × TIMEOUT = 80 s), plus a margin: 5 ×
+# TIMEOUT = 100 s. An older lease is a start that died between its steps: its checkout never reached the
+# guest (NEW-6, ADR-066)
+CHECKOUT_LEASE_SECONDS = 5 * turkey.TIMEOUT
 
 
 def _busy() -> None:
