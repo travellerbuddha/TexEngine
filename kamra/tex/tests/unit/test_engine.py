@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 
-from kamra.tex.pricing import ages, engine, occupancy
+from kamra.tex.pricing import ages, engine, occupancy, serialize, validate
 from kamra.tex.pricing.enums import (
 	ExtraPricingMode,
 	FxMode,
@@ -28,6 +28,7 @@ from kamra.tex.pricing.model import (
 	Period,
 	PricingError,
 	Promotion,
+	RatePlanTerms,
 	RoomRule,
 	RoomSpec,
 	TaxRule,
@@ -426,3 +427,78 @@ class TestReportedSubtotals(unittest.TestCase):
 		for staff in (False, True):
 			shown = quoting.strip_internal(json.loads(json.dumps(internal)), staff=staff)
 			self.assertEqual([set(n) for n in shown["nights"]], [{"date", "amount"}])
+
+
+NRF_POLICY = {"id": "CXL-NRF", "name": "Non-refundable", "refundable": False, "rules": []}
+FLEX_POLICY = {"id": "CXL-FLEX", "name": "Free until 7 days", "refundable": True,
+               "rules": [{"days_before_arrival": 7, "penalty_type": "NIGHTS", "penalty_value": "1"}]}
+
+
+def with_plan(plan: RatePlanTerms):
+	return replace(fx.terms(), rate_plans={plan.code: plan})
+
+
+class TestRefundableByPolicy(unittest.TestCase):
+	"""A price is refundable only when its rate plan row and its cancellation policy both say so
+	(Y-4, ADR-067): the quote's ``rate_plan.refundable`` is the one answer search, the quote and the
+	cancellation fee read."""
+
+	def refundable(self, t) -> bool:
+		code = next(iter(t.rate_plans))
+		return engine.price_stay(fx.ctx(t), fx.req(rate_plan=code)).rate_plan["refundable"]
+
+	def test_a_refundable_row_on_a_non_refundable_policy_is_not_refundable(self):
+		t = with_plan(RatePlanTerms("FLEX", "Flexible", refundable=True, cancellation_policy=NRF_POLICY))
+		self.assertIs(self.refundable(t), False)
+
+	def test_a_payload_frozen_so_is_read_the_same_way(self):
+		"""No new payload key: the row's own flag is frozen as it is and the quote reads the policy."""
+		t = with_plan(RatePlanTerms("FLEX", "Flexible", refundable=True, cancellation_policy=NRF_POLICY))
+		payload = serialize.normalise_payload(serialize.terms_to_payload(t))
+		self.assertIs(payload["rate_plans"][0]["refundable"], True)
+		back = serialize.terms_from_payload(payload)
+		self.assertIs(back.rate_plans["FLEX"].refundable, True)
+		self.assertIs(self.refundable(back), False)
+
+	def test_pins(self):
+		cases = ((False, FLEX_POLICY, False),     # the row says non-refundable: the policy never widens it
+		         (True, None, True),              # no policy: the row decides
+		         (False, None, False),
+		         (True, FLEX_POLICY, True),
+		         (True, {"rules": []}, True))     # a policy that does not say: refundable, as the payload reads it
+		for row, policy, expected in cases:
+			with self.subTest(row=row, policy=policy):
+				t = with_plan(RatePlanTerms("X", "Plan", refundable=row, cancellation_policy=policy))
+				self.assertIs(self.refundable(t), expected)
+
+
+class TestRefundableIssues(unittest.TestCase):
+	"""``validate_terms`` refuses a refundable rate plan row whose cancellation policy is
+	non-refundable, and warns about a non-refundable row whose policy has rules and is refundable
+	(Y-4, ADR-067): for every caller, not only the workspace's board checks."""
+
+	def issues(self, plan, **kw):
+		return [(i.level, i.code) for i in validate.validate_terms(with_plan(plan), **kw)
+		        if i.code == "RATE_PLAN_REFUNDABLE"]
+
+	def test_a_refundable_row_on_a_non_refundable_policy_is_an_error(self):
+		plan = RatePlanTerms("FLEX", "Flexible", refundable=True, cancellation_policy=NRF_POLICY)
+		self.assertEqual(self.issues(plan), [("ERROR", "RATE_PLAN_REFUNDABLE")])
+		self.assertEqual(self.issues(plan, board_checks=True), [("ERROR", "RATE_PLAN_REFUNDABLE")])
+		msg = next(i.message for i in validate.validate_terms(with_plan(plan)) if i.code == "RATE_PLAN_REFUNDABLE")
+		self.assertIn("FLEX", msg)
+		self.assertIn("Non-refundable", msg)
+
+	def test_a_non_refundable_row_on_a_refundable_policy_with_rules_is_a_warning(self):
+		plan = RatePlanTerms("NRF", "Saver", refundable=False, cancellation_policy=FLEX_POLICY)
+		self.assertEqual(self.issues(plan), [("WARNING", "RATE_PLAN_REFUNDABLE")])
+
+	def test_consistent_rows_are_not_reported(self):
+		for plan in (RatePlanTerms("FLEX", "Flexible", refundable=True, cancellation_policy=FLEX_POLICY),
+		             RatePlanTerms("NRF", "Saver", refundable=False, cancellation_policy=NRF_POLICY),
+		             RatePlanTerms("NRF", "Saver", refundable=False, cancellation_policy={"refundable": True,
+		                                                                                  "rules": []}),
+		             RatePlanTerms("NRF", "Saver", refundable=False),
+		             RatePlanTerms("FLEX", "Flexible", refundable=True)):
+			with self.subTest(plan=plan):
+				self.assertEqual(self.issues(plan), [])

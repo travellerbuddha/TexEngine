@@ -330,6 +330,9 @@ export function OccupancySection(props: TabProps & { history: WorkspaceHistory; 
         ) : (
           <div className="space-y-2">
             {!bands.length && <Notice tone="info">{t("rates.occ.ladder.no_bands")}</Notice>}
+            {/* the ladder counts every child for its combinations; the server prices this version's
+                infants after the other children (O-2): the price test shows what it charges */}
+            {Number(settings.infants_count_as_children ?? 1) === 0 && <Notice tone="info">{t("rates.occ.ladder.infants_not_children")}</Notice>}
             {bandSource && <p className="text-xs text-zinc-500">{t("rates.occ.ladder.inherited_bands", { source: t(`rates.occ.ladder.source.${bandSource.scope.replace("+", "_")}`) })}</p>}
             <OccupancyLadder
               // a version loaded again (Discard) or another rooms scope starts the grid afresh:

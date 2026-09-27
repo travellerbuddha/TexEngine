@@ -397,6 +397,10 @@ COMMERCIAL_SPECS = [
 		F("age_basis", "Select", "Age evaluated on", ["ARRIVAL", "BOOKING_DATE"], default="ARRIVAL"),
 		F("children_over_max_as_adults", "Check", "Children above top band count as adults", default="1"),
 		F("infants_count_as_occupants", "Check", "Infants count towards capacity", default="1"),
+		# O-2 (ADR-067, D-2): 1 keeps what every version so far priced; a new contract's first draft says 0
+		F("infants_count_as_children", "Check", "Infants count as children", default="1",
+		  description="For combination rules and the room's maximum children. Off: infants are numbered after the "
+		              "other children and never change their price."),
 		CB(),
 		F("prices_include_tax", "Check", "Prices include tax", default="1"),
 		F("stacking", "Select", "Promotion stacking", ["SEQUENTIAL", "ADDITIVE"], default="SEQUENTIAL"),
@@ -420,7 +424,8 @@ COMMERCIAL_SPECS = [
 		F("payload_hash", "Data", "Payload hash", read_only=1),
 		F("payload", "Code", "Frozen payload", "JSON", read_only=1),
 		F("validation_report", "Code", "Validation report", "JSON", read_only=1),
-	], perms=COMMERCIAL, autoname="hash", title_field="contract", sort_field="creation"),
+	], perms=COMMERCIAL, autoname="hash", title_field="contract", sort_field="creation",
+	   extra={"modified": "2026-10-01 00:00:01.000000"}),                # infants_count_as_children came later (O-2)
 
 	dt("TEX Pricing Policy", C, [
 		F("policy_name", "Data", "Policy", reqd=1, in_list_view=1),
@@ -647,10 +652,14 @@ COMMERCIAL_SPECS = [
 		CB(),
 		F("no_show_type", "Select", "No-show penalty", ["PERCENT", "NIGHTS", "FIXED"], default="NIGHTS"),
 		F("no_show_value", "Float", "No-show value", default="1", **V),
+		# the fixed amounts' currency (ADR-067, D-1): frozen with a policy that has one
+		F("currency", "Link", "Currency (fixed amounts)", "Currency",
+		  description="Currency of the fixed penalties; empty: the contract's currency"),
 		SB("Rules"),
 		F("rules", "Table", "Rules", "TEX Cancellation Rule"),
 		F("description", "Small Text", "Guest-facing text"),
-	], perms=COMMERCIAL, autoname="CXP-.#####", naming_rule="Expression (old style)", title_field="policy_name"),
+	], perms=COMMERCIAL, autoname="CXP-.#####", naming_rule="Expression (old style)", title_field="policy_name",
+	   extra={"modified": "2026-10-01 00:00:00.000000"}),                # currency came later (ADR-067)
 
 	dt("TEX Payment Policy", C, [
 		F("policy_name", "Data", "Policy", reqd=1, in_list_view=1),
@@ -658,11 +667,15 @@ COMMERCIAL_SPECS = [
 		F("deposit_type", "Select", "Pay now", ["NONE", "PERCENT", "NIGHTS", "FULL", "FIXED"], default="FULL",
 		  in_list_view=1),
 		F("deposit_value", "Float", "Value", **V),
+		# the fixed deposit's currency (ADR-067, D-1): frozen with a policy that has one
+		F("currency", "Link", "Currency (fixed amounts)", "Currency",
+		  description="Currency of a fixed deposit; empty: the contract's currency"),
 		CB(),
 		F("balance_due_days", "Int", "Balance due (days before arrival)"),
 		F("allow_pay_at_hotel", "Check", "Balance payable at hotel"),
 		F("description", "Small Text", "Guest-facing text"),
-	], perms=COMMERCIAL, autoname="PAYP-.#####", naming_rule="Expression (old style)", title_field="policy_name"),
+	], perms=COMMERCIAL, autoname="PAYP-.#####", naming_rule="Expression (old style)", title_field="policy_name",
+	   extra={"modified": "2026-10-01 00:00:00.000000"}),                # currency came later (ADR-067)
 
 	dt("TEX Extra Price Rule", C, [
 		F("market", "Link", "Market", "TEX Market", in_list_view=1),

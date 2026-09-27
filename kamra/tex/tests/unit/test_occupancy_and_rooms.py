@@ -321,3 +321,57 @@ class TestPrecedenceV2(unittest.TestCase):
 	def test_legacy_payload_keeps_its_sold_price(self):
 		legacy = replace(self.t, occupancy_precedence=1)
 		self.assertEqual(occ(legacy, "STD", "P1", 2, 8, 1).total, D("275"))   # as sold before v2
+
+
+class TestInfantsNotChildren(unittest.TestCase):
+	"""O-2 (ADR-067, D-2): a contract version may say that infants are not children for its
+	combination rules and ``max_children`` (``infants_count_as_children`` False, a new contract's
+	default). Infants are then numbered after the other children, so a baby never takes a child's
+	position; room capacity (``max_occupants``) still follows ``infants_count_as_occupants``. True (every
+	payload frozen before, and the DocType's default) is today's behaviour."""
+
+	def quote(self, t, adults, *kid_ages):
+		from kamra.tex.pricing import engine
+
+		return engine.price_stay(fx.ctx(t), fx.req(adults=adults, children=kid_ages))
+
+	def test_a_baby_leaves_the_other_childrens_price_alone(self):
+		for ordering in (ages.ChildOrdering.OLDEST_FIRST, ages.ChildOrdering.YOUNGEST_FIRST):
+			with self.subTest(ordering=ordering):
+				t = replace(fx.terms(), infants_count_as_children=False, child_ordering=ordering)
+				self.assertEqual(self.quote(t, 1, 8).totals["total"], D("200.00"))
+				self.assertEqual(self.quote(t, 1, 8, 1).totals["total"], D("200.00"))
+				p = party(t, 1, 1, 8)
+				self.assertEqual([(s.position, s.band.code) for s in p.children], [(1, "CHB"), (2, "INF")])
+
+	def test_a_baby_does_not_fill_a_childs_place(self):
+		t = replace(fx.terms(), infants_count_as_children=False, infants_count_as_occupants=False)
+		q = self.quote(t, 2, 5, 8, 1)
+		self.assertTrue(q.sellable, q.reasons)
+		self.assertEqual(q.totals["total"], D("275.00"))          # 2A+2C: child 2 at 25 %, the infant ×0
+		# capacity still counts the baby as the version says (max_occupants 4)
+		t = replace(t, infants_count_as_occupants=True)
+		q = self.quote(t, 2, 5, 8, 1)
+		self.assertEqual([r["code"] for r in q.reasons], ["MAX_OCCUPANTS"])
+
+	def test_true_keeps_todays_prices(self):
+		for ordering in (ages.ChildOrdering.OLDEST_FIRST, ages.ChildOrdering.YOUNGEST_FIRST):
+			with self.subTest(ordering=ordering):
+				t = replace(fx.terms(), child_ordering=ordering)
+				self.assertIs(t.infants_count_as_children, True)
+				self.assertEqual(self.quote(t, 1, 8, 1).totals["total"], D("150.00"))
+		t = replace(fx.terms(), infants_count_as_occupants=False)
+		self.assertEqual([r["code"] for r in self.quote(t, 2, 5, 8, 1).reasons], ["MAX_CHILDREN"])
+
+	def test_the_payload_key_is_written_only_when_false(self):
+		from kamra.tex.pricing import serialize
+
+		t = fx.terms()
+		payload = serialize.normalise_payload(serialize.terms_to_payload(t))
+		self.assertNotIn("infants_count_as_children", payload["settings"])   # True: the hash as before
+		self.assertIs(serialize.terms_from_payload(payload).infants_count_as_children, True)
+		off = serialize.normalise_payload(serialize.terms_to_payload(replace(t, infants_count_as_children=False)))
+		self.assertIs(off["settings"]["infants_count_as_children"], False)
+		self.assertIs(serialize.terms_from_payload(off).infants_count_as_children, False)
+		self.assertEqual({k: v for k, v in off["settings"].items() if k != "infants_count_as_children"},
+		                 payload["settings"])

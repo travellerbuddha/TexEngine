@@ -102,6 +102,10 @@ export interface PolicyKind {
 
 const pct = (op: unknown) => op === "ADJUST_PERCENT" || op === "PERCENT_OF" || op === "PERCENT"
 
+/** A cancellation policy with a fixed amount (its no-show or a rule): it says their currency (ADR-067). */
+export const cancellationHasFixed = (d: Doc) =>
+  d.no_show_type === "FIXED" || (Array.isArray(d.rules) && d.rules.some((r) => (r as Doc | null)?.penalty_type === "FIXED"))
+
 export const POLICY_KINDS: PolicyKind[] = [
   // ─── Markup ────────────────────────────────────────────────────────────
   {
@@ -391,7 +395,9 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "property", kind: "property", label: "rates.f.hotel" },
           { key: "refundable", kind: "check", label: "rates.f.refundable", help: "rates.h.refundable" },
           { key: "no_show_type", kind: "select", label: "rates.f.no_show_type", options: PENALTY, group: "penalty" },
-          { key: "no_show_value", kind: "decimal", label: "rates.f.no_show_value", suffix: (d) => (d.no_show_type === "PERCENT" ? "%" : d.no_show_type === "NIGHTS" ? "N" : null) },
+          { key: "no_show_value", kind: "decimal", label: "rates.f.no_show_value", help: "rates.h.fixed_amount", suffix: (d) => (d.no_show_type === "PERCENT" ? "%" : d.no_show_type === "NIGHTS" ? "N" : null) },
+          // the fixed amounts' currency (ADR-067): shown once the no-show or a rule is a fixed amount
+          { key: "currency", kind: "link", source: "currency", label: "rates.f.currency_fixed", help: "rates.h.currency_fixed", showIf: cancellationHasFixed, blank: "rates.common.contract_currency" },
           { key: "description", kind: "textarea", label: "rates.f.guest_text", help: "rates.h.guest_text", wide: true },
         ],
       },
@@ -406,7 +412,7 @@ export const POLICY_KINDS: PolicyKind[] = [
             columns: [
               { key: "days_before_arrival", kind: "int", label: "rates.f.days_before_arrival", help: "rates.h.days_before_arrival" },
               { key: "penalty_type", kind: "select", label: "rates.f.penalty_type", options: PENALTY, group: "penalty", required: true, default: "PERCENT" },
-              { key: "penalty_value", kind: "decimal", label: "rates.f.value" },
+              { key: "penalty_value", kind: "decimal", label: "rates.f.value", help: "rates.h.fixed_amount" },
             ],
           },
         ],
@@ -445,6 +451,8 @@ export const POLICY_KINDS: PolicyKind[] = [
             showIf: (d) => d.deposit_type === "PERCENT" || d.deposit_type === "NIGHTS" || d.deposit_type === "FIXED",
             suffix: (d) => (d.deposit_type === "PERCENT" ? "%" : d.deposit_type === "NIGHTS" ? "N" : null),
           },
+          // a fixed deposit's currency (ADR-067)
+          { key: "currency", kind: "link", source: "currency", label: "rates.f.currency_fixed", help: "rates.h.currency_fixed", showIf: (d) => d.deposit_type === "FIXED", blank: "rates.common.contract_currency" },
           { key: "balance_due_days", kind: "int", label: "rates.f.balance_due_days", help: "rates.h.balance_due_days" },
           { key: "allow_pay_at_hotel", kind: "check", label: "rates.f.allow_pay_at_hotel", help: "rates.h.allow_pay_at_hotel" },
           { key: "description", kind: "textarea", label: "rates.f.guest_text", help: "rates.h.guest_text", wide: true },

@@ -181,7 +181,7 @@ def check_capacity(spec: RoomSpec, party: Party, infants_count: bool) -> None:
 		note = f" (children above the child age bands count as adults: {older})" if older else ""
 		raise Unsellable("MAX_ADULTS", f"{spec.name} sleeps at most {spec.max_adults} adults{note}",
 		                 max_adults=spec.max_adults, children_as_adults=older)
-	if party.child_count > spec.max_children:
+	if party.counted_children > spec.max_children:
 		raise Unsellable("MAX_CHILDREN", f"{spec.name} sleeps at most {spec.max_children} children",
 		                 max_children=spec.max_children)
 	if occupants > spec.max_occupants:
@@ -193,7 +193,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
                     *, night=None, explain: Explanation | None = None) -> OccupancyResult:
 	room_type = spec.room_type
 	rules = [r for r in terms.occupancy_rules
-	         if qualifiers_match(r, room_type, period.code, party.adults, party.child_count)]
+	         if qualifiers_match(r, room_type, period.code, party.adults, party.counted_children)]
 	slots: list[SlotPrice] = []
 	precedence = terms.occupancy_precedence
 
@@ -252,7 +252,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 		if winner is None:
 			raise Unsellable("NO_CHILD_RULE",
 			                 f"no occupancy rule for child {child.position} in band {child.band.code} "
-			                 f"({party.adults}A+{party.child_count}C)",
+			                 f"({party.adults}A+{party.counted_children}C)",
 			                 band=child.band.code, position=child.position)
 		amount = apply_op(winner.op, winner.value, reference=slot_unit)
 		ref = rule_ref(winner)
@@ -267,7 +267,7 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 
 	# ── whole-combination rules ──
 	combo_cands = [r for r in rules if slot_matches(r, OccTarget.COMBINATION, None, None)]
-	combo, overridden = _pick(combo_cands, f"combination {party.adults}A+{party.child_count}C", rank)
+	combo, overridden = _pick(combo_cands, f"combination {party.adults}A+{party.counted_children}C", rank)
 	combo_ref = None
 	if combo is not None:
 		combo_ref = rule_ref(combo)
@@ -280,11 +280,11 @@ def price_occupancy(terms: ContractTerms, spec: RoomSpec, period: Period, unit: 
 			explain.add("occupancy", "COMBINATION_RULE",
 			            "combination {adults}A+{children}C {op} → {total}",
 			            night=night, before=before, after=total, rule=combo_ref, overridden=overridden,
-			            adults=party.adults, children=party.child_count,
+			            adults=party.adults, children=party.counted_children,
 			            op=describe_op(combo.op, combo.value), total=total)
 	elif explain is not None:
 		explain.add("occupancy", "OCCUPANCY_TOTAL", "occupancy {adults}A+{children}C = {total}",
-		            night=night, after=total, adults=party.adults, children=party.child_count, total=total)
+		            night=night, after=total, adults=party.adults, children=party.counted_children, total=total)
 
 	if total < ZERO:
 		raise Unsellable("NEGATIVE_OCCUPANCY_PRICE", "occupancy rules produce a negative price")
@@ -361,7 +361,7 @@ def _hidden_rule_decides(terms: ContractTerms, spec: RoomSpec, period: Period, p
                          hidden: frozenset[str]) -> bool:
 	"""``depends_on``'s walk over the slots of ``party``, in ``price_occupancy``'s order."""
 	rules = [r for r in terms.occupancy_rules
-	         if qualifiers_match(r, spec.room_type, period.code, party.adults, party.child_count)]
+	         if qualifiers_match(r, spec.room_type, period.code, party.adults, party.counted_children)]
 	precedence = terms.occupancy_precedence
 
 	def rank(r: OccupancyRule) -> tuple:

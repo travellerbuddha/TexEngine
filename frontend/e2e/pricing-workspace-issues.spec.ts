@@ -70,7 +70,9 @@ async function open(page: Page, tweak: (d: Data) => void = () => {}, lang = "en"
   const version = b.versions[0].name
   const data = base()
   tweak(data)
-  await pageApiOk(page, "kamra.tex.api.contracts.save_version", { name: version, data })
+  // the sweep's parties below ("2A+1C [Infant]") are a draft's that counts infants as children, which a
+  // brand-new contract's draft no longer does (O-2, ADR-067)
+  await pageApiOk(page, "kamra.tex.api.contracts.save_version", { name: version, data: { ...data, infants_count_as_children: 1 } })
   const v = await pageApiOk<{ room_types: { name: string; room_type_name: string }[] }>(page, "kamra.tex.api.contracts.get_version", { name: version })
   const names = Object.fromEntries(v.room_types.map((r) => [r.name, r.room_type_name || r.name]))
   await page.addInitScript((l) => {

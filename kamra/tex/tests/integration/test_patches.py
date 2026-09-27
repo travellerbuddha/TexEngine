@@ -109,6 +109,7 @@ BEHAVIOUR = {
 	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
 	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
+	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 }
 
@@ -1061,6 +1062,68 @@ class TestReportingPatches(PatchCase):
 		for site in (slug_only, fine):
 			self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking_site.admin_slug",
 			                                                      "reference_name": site}), site)
+
+
+	def test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review(self):
+		"""Y-3 A (ADR-067, D-1): the policies' currency is synced, never filled in (empty is the
+		contract's currency). A fixed policy without one used by contracts in several currencies, and
+		a live or future stay with a fixed deposit or fee sold in another currency than its contract's,
+		are reported once each; nothing is changed."""
+		def plan_row(contract: dict, **values):
+			row = frappe.db.get_value("TEX Contract Rate Plan", {"parent": contract["version"],
+			                                                     "rate_plan": self.f["rate_plans"]["FLEX"]})
+			frappe.db.set_value("TEX Contract Rate Plan", row, values)
+
+		eur = fx.create_contract(self.f, code="P59-EUR", publish=False)
+		try_ = fx.create_contract(self.f, code="P59-TRY", publish=False)
+		frappe.db.set_value("TEX Contract", try_["contract"], "contract_currency", "TRY")
+		shared = put("TEX Payment Policy", policy_name="P59 100 now", property=fx.PROPERTY, deposit_type="FIXED",
+		             deposit_value=D(100))
+		fee = put("TEX Cancellation Policy", policy_name="P59 fee", property=fx.PROPERTY, refundable=1,
+		          no_show_type="FIXED", no_show_value=D(80))
+		named = put("TEX Payment Policy", policy_name="P59 in EUR", property=fx.PROPERTY, deposit_type="FIXED",
+		            deposit_value=D(100), currency="EUR")
+		one = put("TEX Payment Policy", policy_name="P59 one contract", property=fx.PROPERTY, deposit_type="FIXED",
+		          deposit_value=D(50))
+		plan_row(eur, payment_policy=shared, cancellation_policy=fee)
+		plan_row(try_, payment_policy=shared, cancellation_policy=fee)
+		for contract in (eur, try_):
+			frappe.db.set_value("TEX Contract Rate Plan", frappe.db.get_value(
+				"TEX Contract Rate Plan", {"parent": contract["version"], "rate_plan": self.f["rate_plans"]["NRF"]}),
+				"payment_policy", named)
+		plan_row(fx.create_contract(self.f, code="P59-ONE", publish=False), payment_policy=one)
+
+		def stay(status, sold, days=(10, 13)):
+			snap = {"currency": sold, "contract": {"currency": "EUR"},
+			        "rate_plan": {"payment_policy": {"id": shared, "deposit_type": "FIXED", "deposit_value": "100"}}}
+			return kamra_stay(fx.PROPERTY, status, 300, days=days, tex_pricing_snapshot=json.dumps(snap))
+
+		in_try = stay("Confirmed", "TRY")
+		quiet = (stay("Confirmed", "EUR"), stay("Cancelled", "TRY"), stay("Checked Out", "TRY", days=(-5, -2)))
+		policies_before = {n: frappe.db.get_value(dt, n, "modified") for dt, n in (
+			("TEX Payment Policy", shared), ("TEX Cancellation Policy", fee), ("TEX Payment Policy", one))}
+
+		seen = self.first_run("p59_policy_currency")
+		self.assertEqual(seen["reload_doc"], [("tex_commercial", "doctype", "tex_payment_policy"),
+		                                      ("tex_commercial", "doctype", "tex_cancellation_policy")])
+		self.assertIn("p59: 2 fixed polic(ies)", seen["print"].call_args.args[0])
+		self.assertIn("; 1 live or future stay(s)", seen["print"].call_args.args[0])
+		self.assertRerunChangesNothing("p59_policy_currency")
+		reported = {e.reference_name: json.loads(e.new_value) for e in frappe.get_all(
+			"TEX Audit Event", filters={"action": "policy.fixed_currency_ambiguous"},
+			fields=["reference_name", "new_value"])}
+		self.assertEqual(set(reported), {shared, fee})
+		self.assertEqual(reported[shared], {"currencies": ["EUR", "TRY"],
+		                                    "contracts": sorted([eur["contract"], try_["contract"]])})
+		stays = frappe.get_all("TEX Audit Event", filters={"action": "reservation.fixed_policy_currency"},
+		                       fields=["reference_name", "new_value"])
+		self.assertEqual([s.reference_name for s in stays], [in_try])
+		self.assertEqual(json.loads(stays[0].new_value)["sold_in"], "TRY")
+		self.assertFalse(set(quiet) & {s.reference_name for s in stays})
+		for doctype, name in (("TEX Payment Policy", shared), ("TEX Cancellation Policy", fee),
+		                      ("TEX Payment Policy", one)):
+			self.assertIsNone(frappe.db.get_value(doctype, name, "currency"))       # nothing filled in (D-1)
+			self.assertEqual(frappe.db.get_value(doctype, name, "modified"), policies_before[name])
 
 
 class TestSmallPatches(PatchCase):

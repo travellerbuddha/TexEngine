@@ -26,6 +26,18 @@ fixes that apply to every caller and are never opt-in. They fail against main by
 * an editor without ``price.view_cost`` is not told what an inherited pricing-policy rule's formula
   (cost) decides, by the live check nor in the report stored at publish.
 
+``TestPolicyMoneyChanges`` holds those of the audit's Part 2C-1 (ADR-067), money-safety fixes for
+every caller, never opt-in, that fail against main by design too:
+
+* a refundable rate plan row whose cancellation policy is non-refundable is refused
+  (``RATE_PLAN_REFUNDABLE``): main published it and sold it as free cancellation (Y-4).
+* a payment or cancellation policy whose fixed amounts are in another currency than the contract's
+  is refused (``POLICY_CURRENCY``): main published it and read the amount in the sale's currency
+  (Y-3 A).
+* a brand-new contract's first draft does not count infants as children for its combination rules
+  and ``max_children`` (``infants_count_as_children`` 0, O-2): main's did. Every other draft (from a
+  version, a duplicate, a version inserted directly) keeps counting them.
+
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
 ``parties``) and tested in ``test_pricing_workspace_api``.
@@ -442,3 +454,67 @@ class TestSecurityChanges(ExistingCallerCase):
 		got, main = plain(api.get_version(self.v)), plain(mains_get_version(self.v))
 		self.assertEqual(got["validation_report"], [i for i in stored if i["code"] not in HIDEABLE])
 		self.assertEqual({**got, "validation_report": None}, {**main, "validation_report": None})
+
+
+class TestPolicyMoneyChanges(ExistingCallerCase):
+	"""The deliberate differences from main of the audit's Part 2C-1 (ADR-067): money-safety fixes,
+	enforced for every caller and never opt-in. These fail against main by design."""
+
+	def test_a_refundable_row_on_a_non_refundable_policy_is_refused(self):
+		"""Y-4: main validated and published a refundable rate plan row whose cancellation policy is
+		non-refundable, and sold it as free cancellation. Now it is an ERROR (``RATE_PLAN_REFUNDABLE``,
+		an issue in main's shape) and the publish is refused; the row marked non-refundable is main's."""
+		nrf_cxl = frappe.db.get_value("TEX Cancellation Policy", {"property": fx.PROPERTY,
+		                                                         "policy_name": "Non-refundable"})
+		data = tables(self.v)
+		find(data["rate_plans"], rate_plan=self.flex)["cancellation_policy"] = nrf_cxl
+		api.save_version(self.v, as_json(data))
+		report = api.validate_version(self.v)
+		self.assertFalse(report["ok"])
+		self.assertEqual([(i["level"], i["code"]) for i in report["issues"]], [("ERROR", "RATE_PLAN_REFUNDABLE")])
+		self.assertTrue(all(set(i) == MAIN_ISSUE_KEYS for i in report["issues"]))
+		with self.assertRaises(frappe.ValidationError):
+			contracts.publish(self.v)
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", self.v, "status"), "Draft")
+		find(data["rate_plans"], rate_plan=self.flex)["refundable"] = 0
+		api.save_version(self.v, as_json(data))
+		self.assertTrue(api.validate_version(self.v)["ok"])
+		self.assertEqual(contracts.publish(self.v)["version"], self.v)
+
+	def test_a_fixed_policy_in_another_currency_is_refused(self):
+		"""Y-3 A: main published a policy's fixed deposit whatever its currency and took it in the sale's
+		currency. A fixed policy in another currency than the contract's is now an ERROR
+		(``POLICY_CURRENCY``, in main's shape) and not published; without a currency it is the contract's
+		and publishes as before."""
+		pay = fx.ensure("TEX Payment Policy", {"property": fx.PROPERTY, "policy_name": "PW 100 TRY"},
+		                {"property": fx.PROPERTY, "policy_name": "PW 100 TRY", "deposit_type": "FIXED",
+		                 "deposit_value": 100, "currency": "TRY"})
+		data = tables(self.v)
+		find(data["rate_plans"], rate_plan=self.flex)["payment_policy"] = pay
+		api.save_version(self.v, as_json(data))
+		report = api.validate_version(self.v)
+		self.assertEqual([(i["level"], i["code"]) for i in report["issues"]], [("ERROR", "POLICY_CURRENCY")])
+		self.assertTrue(all(set(i) == MAIN_ISSUE_KEYS for i in report["issues"]))
+		with self.assertRaises(frappe.ValidationError):
+			contracts.publish(self.v)
+		frappe.db.set_value("TEX Payment Policy", pay, "currency", None)
+		self.assertTrue(api.validate_version(self.v)["ok"])
+		self.assertEqual(contracts.publish(self.v)["version"], self.v)
+
+	def test_a_new_contracts_first_draft_does_not_count_infants_as_children(self):
+		"""O-2 (D-2): main's ``save_contract`` made a new contract's first draft in which an infant was a
+		child for the combination rules (1A + 8y + infant priced as 1A+2C). That draft now says infants
+		are not children, so the infant leaves the 8-year-old's price alone; switched back on, it prices as
+		main did."""
+		out = api.save_contract(data={"property": fx.PROPERTY, "contract_code": "PW-O2", "contract_name": "O2",
+		                              "market": "DE", "contract_currency": "EUR", "pricing_basis": "PERSON"})
+		draft = frappe.db.get_value("TEX Contract Version", {"contract": out["contract"]["name"]}, "name")
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", draft, "infants_count_as_children"), 0)
+		data = tables(self.v)
+		api.save_version(draft, as_json(data))                       # the fixture's rooms, rates and rules
+		kids = {"children": json.dumps([8, 1]), "check_out": str(fx.d(6, 11))}
+		new = api.preview_price(draft, **self.args(**kids, adults=1))
+		self.assertEqual(new["totals"]["accommodation"], api.preview_price(draft, **self.args(
+			children=json.dumps([8]), check_out=str(fx.d(6, 11)), adults=1))["totals"]["accommodation"])
+		api.save_version(draft, as_json({"infants_count_as_children": 1}))
+		self.assertEqual(plain(self.assert_mains(draft, **kids, adults=1))["totals"]["accommodation"], "150.00")

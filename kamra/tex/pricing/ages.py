@@ -19,7 +19,7 @@ age is its completed months at the reference date, and a child is under
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from itertools import pairwise
 
@@ -157,10 +157,18 @@ class Party:
 	children_as_adults: tuple[int, ...]  # input indexes of children priced as adults
 	infants: int
 	reference_date: date
+	# the contract counts infants as children for combination rules and max_children (O-2)
+	infants_as_children: bool = True
 
 	@property
 	def child_count(self) -> int:
 		return len(self.children)
+
+	@property
+	def counted_children(self) -> int:
+		"""The children a combination rule and ``max_children`` count: every child, or all but the
+		infants when the contract says infants are not children (O-2, ADR-067)."""
+		return self.child_count - (0 if self.infants_as_children else self.infants)
 
 	@property
 	def occupants(self) -> int:
@@ -177,6 +185,17 @@ def child_slots_in_order(children: list[tuple[int, int, AgeBand]], ordering: Chi
 		ordered.sort(key=lambda s: (s[1], s[0]))
 	return tuple(ChildSlot(position=i + 1, months=m, band=b, input_index=idx)
 	             for i, (idx, m, b) in enumerate(ordered))
+
+
+def order_children(terms: ContractTerms, children: list[tuple[int, int, AgeBand]]) -> tuple[ChildSlot, ...]:
+	"""Children given as (input index, months, band) numbered into the contract's child slots. When
+	infants are not children (O-2, ADR-067) they are numbered after the other children, so a baby
+	never takes a child's position; otherwise every child in the contract's order."""
+	if terms.infants_count_as_children:
+		return child_slots_in_order(children, terms.child_ordering)
+	older = child_slots_in_order([c for c in children if not c[2].is_infant], terms.child_ordering)
+	babies = child_slots_in_order([c for c in children if c[2].is_infant], terms.child_ordering)
+	return older + tuple(replace(b, position=len(older) + b.position) for b in babies)
 
 
 def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec, ...],
@@ -202,7 +221,7 @@ def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec,
 			                 child=idx + 1)
 		slots.append((idx, months, band))
 
-	child_slots = child_slots_in_order(slots, terms.child_ordering)
+	child_slots = order_children(terms, slots)
 	return Party(
 		adults=adults + len(as_adults),
 		declared_adults=adults,
@@ -210,4 +229,5 @@ def classify_party(terms: ContractTerms, adults: int, children: tuple[ChildSpec,
 		children_as_adults=tuple(as_adults),
 		infants=sum(1 for s in child_slots if s.band.is_infant),
 		reference_date=reference,
+		infants_as_children=terms.infants_count_as_children,
 	)

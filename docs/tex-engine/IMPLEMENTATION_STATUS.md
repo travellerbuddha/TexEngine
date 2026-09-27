@@ -1482,3 +1482,9 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - P1-10 **COMPLETE**: one `booking.payment_status` formula for payments and refreshes, "Refunded" included · `TestMoneyShownRight`.
 - O-19 **COMPLETE**: points pay at most min(share of the total − points on it, total − paid), read under the booking's lock; refund plans take an overpayment off the points first, never cash for points · `TestEarningsAndRedemption`, `TestLowerPrice`, unit `test_settlement`.
 - P1-11 + NEW-3 **COMPLETE**: a bank transfer is confirmed with the amount that came (≤ asked, audited); the API requires the value date; the dialog asks the amount · `TestPaidInTime`.
+
+## 6C1. Audit Part 2C-1 (2026-09-27)
+
+- Y-4 **COMPLETE**: a price is refundable only when its rate plan row and its cancellation policy both are (quote `rate_plan.refundable`, search, fee); publish refuses `RATE_PLAN_REFUNDABLE`; new rows take the plan's/policy's flag (ADR-067) · unit `TestRefundableByPolicy`/`TestRefundableIssues`, `test_commercial_flows.TestNonRefundablePolicy`.
+- Y-3 A **COMPLETE** (Y-3 B, booking.py, is the payments session's Part 2E): policies' fixed amounts have a currency, frozen only on fixed policies, contract's when empty; `POLICY_CURRENCY`; helpers `fixed_in_sell`/`first_rooms_per_policy`; p59 reports, no backfill · unit `test_policy_money`, `TestPolicyCurrency`, `test_patches` p59.
+- O-2 **COMPLETE**: version setting `infants_count_as_children` (default 1, a new contract's first draft 0): off, infants neither count for combinations/max_children nor take a child's position; frozen only when 0 · unit `TestInfantsNotChildren`, `test_commercial_flows.TestInfantsNotChildren`, e2e `pricing-infants`.
