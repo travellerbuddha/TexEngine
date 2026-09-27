@@ -140,7 +140,8 @@ export function penaltyText(
   return money(rule.penalty_value, currency)
 }
 
-/** Cancellation + payment terms of a rate plan, in the server's words plus rule lines. */
+/** Cancellation + payment terms of a rate plan, in the server's words plus rule lines. A fixed amount is
+ * written in its policy's own currency (Y-3 B); the amount due in the sale's comes from the server. */
 export function PolicySummary({ rp, currency, className }: { rp: RatePlanInfo | null | undefined; currency?: string; className?: string }) {
   const { t } = useTexT()
   const L = useLabels()
@@ -159,8 +160,8 @@ export function PolicySummary({ rp, currency, className }: { rp: RatePlanInfo | 
               {rules.map((r, i) => (
                 <li key={i}>
                   {r.days_before_arrival >= 9999
-                    ? t("crs.policy.rule_any", { penalty: penaltyText(t, r, currency) })
-                    : t("crs.policy.rule", { days: r.days_before_arrival, penalty: penaltyText(t, r, currency) })}
+                    ? t("crs.policy.rule_any", { penalty: penaltyText(t, r, cp?.currency || currency) })
+                    : t("crs.policy.rule", { days: r.days_before_arrival, penalty: penaltyText(t, r, cp?.currency || currency) })}
                 </li>
               ))}
             </ul>
@@ -178,7 +179,7 @@ export function PolicySummary({ rp, currency, className }: { rp: RatePlanInfo | 
                 {" "}
                 · {L.deposit(pp.deposit_type)}
                 {pp.deposit_type === "PERCENT" && pp.deposit_value ? ` ${pp.deposit_value.replace(/\.0+$/, "")}%` : ""}
-                {pp.deposit_type === "FIXED" && pp.deposit_value ? ` ${money(pp.deposit_value, currency)}` : ""}
+                {pp.deposit_type === "FIXED" && pp.deposit_value ? ` ${money(pp.deposit_value, pp.currency || currency)}` : ""}
                 {pp.deposit_type === "NIGHTS" && pp.deposit_value ? ` ${t("crs.policy.nights", { count: Number(pp.deposit_value) })}` : ""}
               </span>
             )}

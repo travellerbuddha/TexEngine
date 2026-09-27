@@ -2,7 +2,7 @@
 // percentages are described here; amounts always come from the server.
 import type { I18n, MessageKey } from "../i18n"
 import type { RatePlanInfo, Reason } from "../types"
-import { addDays, today } from "./dates"
+import { addDays, today } from "./dates.ts"
 
 const BOARDS: Record<string, MessageKey> = {
   RO: "board.RO",
@@ -38,6 +38,8 @@ export function cancellation(i18n: I18n, info: RatePlanInfo | null | undefined, 
   return { refundable: true, freeUntil: until, text: t("policy.freeUntil", { date: date(until, { day: "numeric", month: "long", year: "numeric" }) }) }
 }
 
+/** ``currency``: the quote's; a FIXED deposit is written in its policy's own currency when it names one
+ * (Y-3 B, ADR-067) — the converted amount due comes from the server (``due_now``). */
 export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, currency: string) {
   const { t, money } = i18n
   const p = info?.payment_policy
@@ -46,7 +48,7 @@ export function paymentTerms(i18n: I18n, info: RatePlanInfo | null | undefined, 
   let text: string
   if (kind === "NONE") text = t("policy.payNothingNow")
   else if (kind === "PERCENT") text = t("policy.depositPercent", { percent: v.replace(/\.0+$/, "") })
-  else if (kind === "FIXED") text = t("policy.depositFixed", { amount: money(v, currency) })
+  else if (kind === "FIXED") text = t("policy.depositFixed", { amount: money(v, p?.currency || currency) })
   else if (kind === "NIGHTS") text = t("policy.depositNights", { count: Number.parseInt(v || "1", 10) || 1 })
   else text = t("policy.payInFull")
   return { text, payAtHotel: !!p?.allow_pay_at_hotel || kind === "NONE" }

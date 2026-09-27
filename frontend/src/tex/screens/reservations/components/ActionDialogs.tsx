@@ -157,9 +157,11 @@ function ruleText(t: (k: string, p?: Record<string, string | number>) => string,
     if (r.startsWith("free cancellation")) return t("res.cancel.rule_free")
     return r
   }
+  // a fixed penalty is the policy's own amount, in its currency; the preview's penalty is it converted (Y-3 B)
+  const ccy = preview.basis.fx?.from ?? preview.currency
   return r.days_before_arrival >= 9999
-    ? t("crs.policy.rule_any", { penalty: penaltyText(t, r, preview.currency) })
-    : t("crs.policy.rule", { days: r.days_before_arrival, penalty: penaltyText(t, r, preview.currency) })
+    ? t("crs.policy.rule_any", { penalty: penaltyText(t, r, ccy) })
+    : t("crs.policy.rule", { days: r.days_before_arrival, penalty: penaltyText(t, r, ccy) })
 }
 
 /** Cancel with the server's penalty preview; waiving needs price.override (audited). */
