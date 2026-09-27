@@ -1688,3 +1688,131 @@ class TestInfantsNotChildren(TexTestCase):
 		frozen = json.loads(frappe.db.get_value("TEX Contract Version", draft, "payload"))
 		self.assertIs(frozen["settings"]["infants_count_as_children"], False)
 		self.assertEqual((self.price(draft, 8), self.price(draft, 8, 1)), (D("200.00"), D("200.00")))
+
+
+class TestPromotionSaveChecks(TexTestCase):
+	"""Part 2C-2 (ADR-068): a promotion no room could use as saved is refused when a draft is saved or
+	activated. A record already live is never refused for it: it stays archivable."""
+
+	def draft(self, **kw) -> str:
+		return policy_api.save_record("TEX Promotion", {
+			"promotion_name": "2C2 promo", "property": fx.PROPERTY, "value_type": "PERCENT", "value": 10, **kw})["name"]
+
+	def assertRefused(self, fn, *args, **kw):
+		with self.assertRaises(frappe.ValidationError):
+			fn(*args, **kw)
+
+	def live(self, **kw) -> str:
+		"""A promotion put live before the check, then given ``kw`` behind the controller's back."""
+		name = self.draft()
+		policy_api.activate("TEX Promotion", name, at=str(add_to_date(now_datetime(), minutes=-1)))
+		frappe.db.set_value("TEX Promotion", name, kw, update_modified=False)
+		return name
+
+	def test_a_discount_on_the_total_or_the_extras_no_room_could_use_is_refused(self):
+		"""O-1: on the total or the extras only a percentage or a fixed amount for the stay is applied,
+		and a cost-stage offer lowers the accommodation's cost only."""
+		for kw in ({"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"},
+		           {"value_type": "FIXED_NIGHT", "value": 10, "currency": "EUR", "applies_to": "TOTAL"},
+		           {"value_type": "FREE_NIGHTS", "free_nights_stay": 3, "free_nights_pay": 2, "applies_to": "EXTRAS"},
+		           {"value_type": "VALUE_ADDED", "value_added": "Spa", "applies_to": "TOTAL"},
+		           {"stage": "COST", "applies_to": "EXTRAS"},
+		           {"stage": "COST", "applies_to": "TOTAL"}):
+			with self.subTest(**kw):
+				self.assertRefused(self.draft, **kw)
+		for kw in ({"applies_to": "TOTAL"}, {"value_type": "FIXED_STAY", "value": 50, "currency": "EUR",
+		                                      "applies_to": "EXTRAS"},
+		           {"value_type": "MULTIPLIER", "value": "0.9"}, {"stage": "COST"}):
+			with self.subTest(**kw):
+				self.assertTrue(self.draft(**kw))
+
+	def test_a_minimum_basket_needs_its_currency(self):
+		"""O-7 (D-18): a minimum basket is compared in the promotion's currency, so it names one."""
+		self.assertRefused(self.draft, min_basket=1000)
+		self.assertEqual(frappe.db.get_value("TEX Promotion", self.draft(min_basket=1000, currency="EUR"), "currency"),
+		                 "EUR")
+		old = self.live(min_basket=1000, currency=None)
+		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
+
+	def test_a_code_with_a_turkish_i_is_stored_by_its_key(self):
+		"""O-31: "wİnter" is stored as WINTER (not WİNTER), and a code whose key another draft or live
+		promotion of the hotel already has is refused, however it was typed or stored."""
+		name = self.draft(trigger="Code", code="wİnter")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "code"), "WINTER")
+		frappe.db.set_value("TEX Promotion", name, "code", "WİNTER")          # stored before this change
+		self.assertRefused(self.draft, trigger="Code", code="winter")
+
+	def test_a_member_only_promotion_is_refused_until_a_sale_knows_members(self):
+		"""G-57: no search or quote tells the engine the guest is a member, so a members-only promotion
+		never applied. It is refused on a draft's save and activation; a live one stays archivable."""
+		self.assertRefused(self.draft, member_only=1)
+		name = self.draft()
+		frappe.db.set_value("TEX Promotion", name, "member_only", 1)
+		self.assertRefused(policy_api.activate, "TEX Promotion", name)
+		old = self.live(member_only=1)
+		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
+
+	def test_an_unusable_draft_is_not_activated_and_a_live_one_is_archived(self):
+		name = self.draft()
+		frappe.db.set_value("TEX Promotion", name, {"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"})
+		self.assertRefused(policy_api.activate, "TEX Promotion", name)
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "tex_status"), "Draft")
+		old = self.live(stage="COST", applies_to="EXTRAS")
+		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
+
+
+class TestPromotionGroupTies(TexTestCase):
+	"""O-4 (D-3): of one group the highest priority is applied, on equal priority the older promotion.
+	Saving or activating one that ties with a live promotion of its group (same priority, dates that
+	meet) warns, naming it."""
+
+	def eb(self, value: int, **kw) -> dict:
+		return policy_api.save_record("TEX Promotion", {
+			"promotion_name": f"EB {value}", "property": fx.PROPERTY, "value_type": "PERCENT", "value": value,
+			"promo_group": "EB", **kw})
+
+	def activate(self, name: str) -> dict:
+		return policy_api.activate("TEX Promotion", name)
+
+	def test_the_second_early_booking_names_the_first(self):
+		first = self.eb(10)
+		self.assertNotIn("_warnings", self.activate(first["name"]))
+		second = self.eb(25)
+		for out in (second, self.activate(second["name"])):
+			self.assertEqual([(w["code"], w["other"], w["other_name"]) for w in out["_warnings"]],
+			                 [("PROMO_GROUP_TIE", first["name"], "EB 10")])
+			self.assertIn(first["name"], out["_warnings"][0]["message"])
+
+	def test_another_priority_or_group_is_no_tie(self):
+		self.activate(self.eb(10)["name"])
+		self.assertNotIn("_warnings", self.eb(25, priority=1))
+		self.assertNotIn("_warnings", self.eb(25, promo_group="LS"))
+		self.assertNotIn("_warnings", self.eb(25, promo_group=""))
+
+
+class TestMarkupTies(TexTestCase):
+	"""G-53: two live REPLACE markups of one scope and priority whose stay dates meet tie, and the
+	engine took the newer silently. Activating the second is refused, naming the first."""
+
+	def markup(self, **kw) -> str:
+		return policy_api.save_record("TEX Markup Rule", {"label": "G53", "property": fx.PROPERTY, "market": "DE",
+		                                                  "op": "ADJUST_PERCENT", "value": 7, **kw})["name"]
+
+	def test_an_equal_markup_is_not_activated(self):
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		second = self.markup(value=9)
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.activate("TEX Markup Rule", second)
+		self.assertIn(first, str(refused.exception))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", second, "tex_status"), "Draft")
+		# another priority, another scope, stacked, or a revision of the same record: activated
+		for kw in ({"priority": 1}, {"room_type": self.f["room_types"]["STD"]}, {"combine": "STACK"}):
+			with self.subTest(**kw):
+				policy_api.activate("TEX Markup Rule", self.markup(**kw))
+		revision = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.activate("TEX Markup Rule", revision)
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")

@@ -9218,3 +9218,19 @@ the versions the roll superseded the state their contract's later publishes woul
   children without infants and infants are numbered last; max_occupants follows `infants_count_as_occupants`. DocType
   default 1 (every existing version prices as before); a brand-new contract's first draft 0. Frozen only when 0.
 - A sold stay keeps its snapshot's terms. Schema `tex.contract.v1`, no payload rewritten (G-73), parity corpus and ENGINE_VERSION unchanged.
+
+## ADR-068 Promotion selection, codes and markup ties (audit Part 2C-2)
+- *Usable first (O-1).* `promotions.select` refuses, after eligibility and before exclusive/group/stacking, what the room
+  cannot use: a fixed amount without an FX rate (PROMO_NO_FX), on the total or the extras a value type other than PERCENT
+  or FIXED_STAY, an extras discount without extras, a fixed booking discount on a later room (COUPON_REJECTED), with the
+  reasons the apply step gave. Everything else is unchanged (parity corpus). The save refuses those type/scope pairs and a
+  cost-stage offer that is not on the accommodation.
+- *Group rule (D-3).* Of one group the highest priority applies, on equal priority the lowest id (the older promotion), not
+  the better offer; texts say so in 6 languages; save and activation warn (`_warnings`, PROMO_GROUP_TIE) on a live tie.
+- *Minimum basket (D-18).* Accommodation before discounts plus extras, of the booking's rooms it covers, in the promotion's
+  currency; a minimum requires that currency.
+- *Codes (O-31).* Compared by `code_key` (İ and ı are I); p60 rewrites stored codes and reports clashes, never payloads.
+- *Members only (G-57).* Refused until a sale carries a membership signal.
+- *Markups (G-53).* A REPLACE markup tying a live one (scope, priority, stay dates) is refused on activation (serialised);
+  publishing from the contract page runs the workspace's board checks. `level()` and server defaults are unchanged.
+- New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.

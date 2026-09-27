@@ -30,6 +30,13 @@ export const PROMO_VALUE = ["PERCENT", "FIXED_STAY", "FIXED_NIGHT", "MULTIPLIER"
 export const STAY_MATCH = ["ANY_NIGHT", "ALL_NIGHTS", "ARRIVAL", "DEPARTURE"] as const
 export const PROMO_STAGE = ["SELL", "COST"] as const
 export const APPLIES_TO = ["ACCOMMODATION", "EXTRAS", "TOTAL"] as const
+/** What a promotion can apply to (O-1, ADR-068): the whole booking or its extras take a percentage
+ *  or a fixed amount for the stay, at the SELL stage; anything else lowers the accommodation only
+ *  (TEX Promotion's validate refuses the rest). */
+export function promoAppliesTo(d: { stage?: unknown; value_type?: unknown }): readonly string[] {
+  const basket = d.stage !== "COST" && (d.value_type === "PERCENT" || d.value_type === "FIXED_STAY")
+  return basket ? APPLIES_TO : ["ACCOMMODATION"]
+}
 export const TRIGGERS = ["Automatic", "Code"] as const
 export const COMBINE = ["REPLACE", "STACK"] as const
 export const FX_MODES = ["PROVIDER", "PROVIDER_PERCENT", "PROVIDER_FIXED", "MANUAL"] as const

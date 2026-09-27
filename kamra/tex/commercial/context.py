@@ -41,6 +41,7 @@ from kamra.tex.pricing.model import (
 	TaxRule,
 	Unsellable,
 )
+from kamra.tex.pricing.promotions import code_key
 
 
 def _date(v):
@@ -65,18 +66,22 @@ def guest_key(email: str | None = None, phone: str | None = None) -> str | None:
 # ─── markups ─────────────────────────────────────────────────────────────
 
 
+MARKUP_FIELDS = ("name", "revision_no", "revision_of", "property", "market", "contract", "room_type",
+                 "sales_channel", "stay_from", "stay_to", "op", "value", "currency", "combine", "priority", "label")
+
+
+def markup_from_row(r) -> MarkupRule:
+	return MarkupRule(rule_id=r.name, op=Op(r.op), value=db_dec(r.value), property=r.property or None,
+	                  market=r.market or None, contract=r.contract or None, room_type=r.room_type or None,
+	                  channel=r.sales_channel or None, stay_from=_date(r.stay_from), stay_to=_date(r.stay_to),
+	                  currency=r.currency or None, combine=MarkupCombine(r.combine or "REPLACE"),
+	                  priority=int(r.priority or 0), label=r.label or "",
+	                  revision=f"{r.revision_of or r.name}/r{r.revision_no or 1}")
+
+
 def markups(property: str, at: datetime) -> tuple[MarkupRule, ...]:
-	fields = ("name", "revision_no", "revision_of", "property", "market", "contract", "room_type", "sales_channel",
-	          "stay_from", "stay_to", "op", "value", "currency", "combine", "priority", "label")
-	rows = [r for r in as_of("TEX Markup Rule", at, fields=fields) if not r.property or r.property == property]
-	return tuple(
-		MarkupRule(rule_id=r.name, op=Op(r.op), value=db_dec(r.value), property=r.property or None,
-		           market=r.market or None, contract=r.contract or None, room_type=r.room_type or None,
-		           channel=r.sales_channel or None, stay_from=_date(r.stay_from), stay_to=_date(r.stay_to),
-		           currency=r.currency or None, combine=MarkupCombine(r.combine or "REPLACE"),
-		           priority=int(r.priority or 0), label=r.label or "",
-		           revision=f"{r.revision_of or r.name}/r{r.revision_no or 1}")
-		for r in rows)
+	rows = [r for r in as_of("TEX Markup Rule", at, fields=MARKUP_FIELDS) if not r.property or r.property == property]
+	return tuple(markup_from_row(r) for r in rows)
 
 
 # ─── promotions ──────────────────────────────────────────────────────────
@@ -96,7 +101,7 @@ def promotion_from_row(r) -> Promotion:
 		promo_id=root, name=r.promotion_name, kind=r.kind or "PROMOTION",
 		value_type=PromoValueType(r.value_type or "PERCENT"), value=db_dec(r.value),
 		stage=PromoStage(r.stage or "SELL"), applies_to=PromoAppliesTo(r.applies_to or "ACCOMMODATION"),
-		currency=r.currency or None, code=((r.code or "").upper() or None) if r.trigger == "Code" else None,
+		currency=r.currency or None, code=code_key(r.code) if r.trigger == "Code" else None,
 		sale_from=_date(r.sale_from), sale_to=_date(r.sale_to), stay_from=_date(r.stay_from),
 		stay_to=_date(r.stay_to), stay_match=StayMatch(r.stay_match or "ANY_NIGHT"),
 		min_nights=r.min_nights or None, max_nights=r.max_nights or None,

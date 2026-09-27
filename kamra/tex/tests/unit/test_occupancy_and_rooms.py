@@ -375,3 +375,32 @@ class TestInfantsNotChildren(unittest.TestCase):
 		self.assertIs(serialize.terms_from_payload(off).infants_count_as_children, False)
 		self.assertEqual({k: v for k, v in off["settings"].items() if k != "infants_count_as_children"},
 		                 payload["settings"])
+
+	def test_the_publish_check_counts_as_the_runtime_does(self):
+		"""O-2b: two rules for the 2nd child in the infant band of DLX, one for parties of 2 adults and
+		one for parties of 2 children, with different values. When infants are children they tie at
+		2A+2C (an infant 2nd child): OCC_AMBIGUOUS. When they are not, an infant is never the 2nd of 2
+		counted children (it is numbered after them), so the rules never meet: no error, and the party
+		2A + 8y + infant sells in DLX."""
+		from kamra.tex.pricing import validate
+
+		rules = (*fx.occ_rules(),
+		         OccupancyRule("O-DLX-INF-2A", OccTarget.CHILD, Op.PERCENT_OF, D("10"), position=2, age_band="INF",
+		                       room_type="DLX", adults=2),
+		         OccupancyRule("O-DLX-INF-2C", OccTarget.CHILD, Op.PERCENT_OF, D("20"), position=2, age_band="INF",
+		                       room_type="DLX", children=2))
+
+		def ambiguous(flag: bool):
+			t = replace(fx.terms(), occupancy_rules=rules, infants_count_as_children=flag)
+			return [i.level for i in validate.validate_terms(t) if i.code == "OCC_AMBIGUOUS"]
+
+		self.assertEqual(ambiguous(True), ["ERROR"])
+		self.assertEqual(ambiguous(False), [])
+		t = replace(fx.terms(), occupancy_rules=rules, infants_count_as_children=False)
+		q = self.quote_room(t, "DLX", 2, 8, 1)
+		self.assertTrue(q.sellable, q.reasons)
+
+	def quote_room(self, t, room, adults, *kid_ages):
+		from kamra.tex.pricing import engine
+
+		return engine.price_stay(fx.ctx(t), fx.req(room_type=room, adults=adults, children=kid_ages))

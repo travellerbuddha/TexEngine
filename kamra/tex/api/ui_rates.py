@@ -26,7 +26,9 @@ def lookups(property: str):
 			        "base_occupancy"], order_by="room_type_name asc"),
 		"rate_plans": frappe.get_all(
 			"Rate Plan", filters={"property": property, "disabled": 0},
-			fields=["name", "rate_plan_name", "code", "tex_refundable"], order_by="rate_plan_name asc"),
+			# the default cancellation policy: a contract's rate plan row without its own uses it (O-2b)
+			fields=["name", "rate_plan_name", "code", "tex_refundable", "tex_cancellation_policy"],
+			order_by="rate_plan_name asc"),
 		"contracts": frappe.get_all(
 			"TEX Contract", filters={"property": property},
 			fields=["name", "contract_code", "contract_name", "market", "status", "active_version",

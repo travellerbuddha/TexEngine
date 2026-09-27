@@ -41,6 +41,7 @@ import { useLabels } from "./lib/labels"
 import { copyText, offerId } from "./lib/party"
 import { callCenterShortcut, shortcutPlatform, type CallCenterAction } from "./lib/shortcuts"
 import { quoteText } from "./lib/quoteText"
+import { normalisePromoCode } from "./lib/promoCode"
 import { asApiError, focusFirstInvalid, useBookingFlow, type BookingFlow, type Selection } from "./lib/useBookingFlow"
 import { roomList, selectMessage } from "./lib/selectText"
 import { useServerClock } from "./lib/serverClock"
@@ -1040,7 +1041,7 @@ function PromoInline({ flow }: { flow: BookingFlow }) {
   const { t } = useTexT()
   const [draft, setDraft] = useState("")
   const add = () => {
-    const c = draft.trim().toUpperCase()
+    const c = normalisePromoCode(draft)
     if (c && !flow.quotePromo.includes(c)) flow.setQuotePromo([...flow.quotePromo, c])
     setDraft("")
   }
@@ -1066,7 +1067,7 @@ function PromoInline({ flow }: { flow: BookingFlow }) {
           id="cc-quote-promo"
           value={draft}
           autoComplete="off"
-          onChange={(e) => setDraft(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""))}
+          onChange={(e) => setDraft(normalisePromoCode(e.target.value))}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault()

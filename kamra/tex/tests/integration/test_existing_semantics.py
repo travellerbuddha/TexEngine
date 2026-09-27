@@ -40,6 +40,19 @@ every caller, never opt-in, that fail against main by design too:
   and ``max_children`` (``infants_count_as_children`` 0, O-2): main's did. Every other draft (from a
   version, a duplicate, a version inserted directly) keeps counting them.
 
+``TestSaleRuleChanges`` holds those of the audit's Part 2C-2 (ADR-068): a promotion no room could use as
+saved is refused when a draft of it is saved or activated, never when a live one is archived. They fail
+against main by design:
+
+* a discount on the whole booking or its extras other than a percentage or a fixed amount for the
+  stay, or a cost-stage offer on them (O-1): main saved it and the engine refused it on every quote.
+* a minimum basket without its currency (O-7, D-18): main saved it and compared the minimum in the
+  sale's currency, whatever it was sold in.
+* a members-only promotion (G-57): main saved it, but no search or quote says the guest is a member,
+  so it never applied.
+* a second live REPLACE markup of the same scope and priority whose stay dates meet the first's
+  (G-53): main activated it and priced with the newer one, silently. Its activation is now refused.
+
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
 ``parties``) and tested in ``test_pricing_workspace_api``.
@@ -543,3 +556,55 @@ class TestPolicyMoneyChanges(ExistingCallerCase):
 			children=json.dumps([8]), check_out=str(fx.d(6, 11)), adults=1))["totals"]["accommodation"])
 		api.save_version(draft, as_json({"infants_count_as_children": 1}))
 		self.assertEqual(plain(self.assert_mains(draft, **kids, adults=1))["totals"]["accommodation"], "150.00")
+
+
+class TestSaleRuleChanges(TexTestCase):
+	"""The deliberate differences from main of the audit's Part 2C-2 (ADR-068): a promotion no room
+	could use as saved is refused on a draft's save and activation. These fail against main by
+	design; a record already live is never refused for them and stays archivable."""
+
+	def promotion(self, **kw) -> dict:
+		from kamra.tex.api import policies
+
+		return policies.save_record("TEX Promotion", {"promotion_name": "2C-2", "property": fx.PROPERTY,
+		                                              "value_type": "PERCENT", "value": 10, **kw})
+
+	def test_a_discount_no_room_could_use_is_refused(self):
+		"""O-1: main saved a multiplier on the whole booking and a cost-stage offer on the extras; every
+		quote then refused it (``MULTIPLIER is not supported on TOTAL``, or a cost discount taken off the
+		accommodation). Now the save is refused; a percentage on them saves as on main."""
+		for kw in ({"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"},
+		           {"stage": "COST", "applies_to": "EXTRAS"}):
+			with self.subTest(**kw), self.assertRaises(frappe.ValidationError):
+				self.promotion(**kw)
+		self.assertEqual(self.promotion(applies_to="TOTAL")["applies_to"], "TOTAL")
+
+	def test_a_minimum_basket_without_its_currency_is_refused(self):
+		"""O-7 (D-18): main saved a 1,000 minimum without a currency and read it in each sale's currency
+		(1,000 EUR or 1,000 TRY). Now the save asks for the currency; with it, it saves as on main."""
+		with self.assertRaises(frappe.ValidationError):
+			self.promotion(min_basket=1000)
+		self.assertEqual(self.promotion(min_basket=1000, currency="EUR")["currency"], "EUR")
+
+	def test_a_members_only_promotion_is_refused(self):
+		"""G-57: main saved a members-only promotion that no sale could apply (no caller passes
+		``member``). Now the save is refused; without it, it saves as on main."""
+		with self.assertRaises(frappe.ValidationError):
+			self.promotion(member_only=1)
+		self.assertEqual(self.promotion(member_only=0)["member_only"], 0)
+
+	def test_an_equal_markup_is_not_activated(self):
+		"""G-53: main activated a second DE markup of the hotel at the same priority and priced with the
+		newer. Now its activation is refused, naming the first; at another priority it activates."""
+		from kamra.tex.api import policies
+
+		def markup(**kw) -> str:
+			return policies.save_record("TEX Markup Rule", {"label": "2C-2", "property": fx.PROPERTY, "market": "DE",
+			                                                "op": "ADJUST_PERCENT", "value": 7, **kw})["name"]
+
+		first = markup()
+		revisions.activate("TEX Markup Rule", first)
+		second = markup(value=9)
+		with self.assertRaises(frappe.ValidationError):
+			revisions.activate("TEX Markup Rule", second)
+		revisions.activate("TEX Markup Rule", markup(value=9, priority=1))

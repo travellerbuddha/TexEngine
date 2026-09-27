@@ -1489,6 +1489,17 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - Y-3 A **COMPLETE** (Y-3 B, booking.py, is the payments session's Part 2E): policies' fixed amounts have a currency, frozen only on fixed policies, contract's when empty; `POLICY_CURRENCY`; helpers `fixed_in_sell`/`first_rooms_per_policy`; p59 reports, no backfill · unit `test_policy_money`, `TestPolicyCurrency`, `test_patches` p59.
 - O-2 **COMPLETE**: version setting `infants_count_as_children` (default 1, a new contract's first draft 0): off, infants neither count for combinations/max_children nor take a child's position; frozen only when 0 · unit `TestInfantsNotChildren`, `test_commercial_flows.TestInfantsNotChildren`, e2e `pricing-infants`.
 
+## 6C2. Audit Part 2C-2 (2026-09-27)
+
+- O-2b **COMPLETE**: with infants not children the publish check numbers them as the runtime does; a new row's refundable flag reads the plan's default policy; ladder text; plan issues listed under their rate plan · unit `TestInfantsNotChildren`, `TestPlanIssueRefs`, frontend `plan-refundable`.
+- Y-5 **COMPLETE**: a search prices the hotel's mandatory extras as the quote does (an ambiguous catalog stops the hotel's rooms, not the search) · `test_public_booking.TestMandatoryExtrasInSearch`.
+- O-1 **COMPLETE**: a promotion the room cannot use is refused before the combination step; unsupported type/scope pairs and non-accommodation cost offers refused on save (ADR-068) · unit `TestUnusableNeverWins`, `TestPromotionSaveChecks`.
+- O-4 (+O-3) **COMPLETE**: group rule (highest priority, then the older) and cancellation-row texts in 6 languages; `group_ties` and a PROMO_GROUP_TIE warning on save/activation · unit `TestGroupRule`, `TestPromotionGroupTies`.
+- O-7 **COMPLETE**: a minimum basket requires its currency (drafts and activations; the editor shows it); help text · `test_a_minimum_basket_needs_its_currency`, unit pin at 51.
+- O-31 **COMPLETE**: codes compared by `code_key` (Turkish İ/ı), CRS inputs keep letters; p60 rewrites stored codes, reports clashes · unit `TestCodeKey`, `test_patches` p60, frontend `promo-code`.
+- G-57 **COMPLETE**: members-only promotions refused on save/activation until a sale knows members; box hidden · `test_a_member_only_promotion_is_refused_until_a_sale_knows_members`.
+- G-53 **COMPLETE**: a markup tying a live one is refused on activation (serialised); the contract page publishes with the workspace's board checks · unit `test_same_scope_markup_tie_is_flagged`, `TestMarkupTies`, e2e `contract-publish-boards`.
+
 ## 6G1. Audit Part 2G-1 (2026-09-27)
 
 - O-28 **COMPLETE**: a signed-in user's booking-engine page (/book and a pinned host) carries the session CSRF token, sent by `pub` (header) and `beacon` (form field); such a page loads no third-party tracker and shows no consent banner (ADR-046 note) · `test_security_hygiene` O-28, e2e `guest-session` O-28.
