@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 
 from kamra.tex.api._util import as_int, parse, text
-from kamra.tex.security import scope
+from kamra.tex.security import perm, scope
 from kamra.tex.security.audit import audit
 from kamra.tex.security.capabilities import CAPABILITIES
 
@@ -429,11 +429,7 @@ def adapters():
 # or edits contracts, ``contracts._sees_cost``); a payment's carry amounts, the provider and the bank
 # reference. Markups and pricing policies are read by their own API with price.view_cost alone
 # (``policies.READ_CAP``), so their trail takes that path.
-TRAIL_COST = frozenset({"TEX Contract", "TEX Contract Version",
-                        # a contract version's rate tables
-                        "TEX Price Period", "TEX Period Rate", "TEX Child Age Band", "TEX Occupancy Rule",
-                        "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan", "TEX Contract Offer",
-                        "TEX Contract Channel"})
+TRAIL_COST = perm.CONTRACT_COST_DOCTYPES     # one list with Desk / REST's cost (G-97)
 TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link": "payment.view",
                     "TEX Payment Allocation": "payment.view", "Reservation": "reservation.view",
                     "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view"}

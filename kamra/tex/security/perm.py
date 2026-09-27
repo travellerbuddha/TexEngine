@@ -66,6 +66,16 @@ LEGACY_PROPERTY_DOCTYPES = (
 	"Service Ticket", "Shift Handover", "Stock Ledger Entry", "Transaction Code", "Turnover Profile",
 	"Venue", "Venue Booking", "WhatsApp Message",
 )
+# cost (G-97): a contract, its versions and their rate tables (the audit trail's TRAIL_COST, which the
+# TEX API reads with price.view_cost or contract.edit), and markups and pricing policies (price.view_cost).
+# In Desk / REST their records are platform administrators' (DocType permissions), and so are the audit
+# events about them, whose compact diffs carry the prices
+CONTRACT_COST_DOCTYPES = frozenset({"TEX Contract", "TEX Contract Version",
+                                    # a contract version's rate tables
+                                    "TEX Price Period", "TEX Period Rate", "TEX Child Age Band", "TEX Occupancy Rule",
+                                    "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan",
+                                    "TEX Contract Offer", "TEX Contract Channel"})
+COST_DOCTYPES = CONTRACT_COST_DOCTYPES | {"TEX Markup Rule", "TEX Pricing Policy"}
 SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, LEDGER_DOCTYPE, "Guest",
                    *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES, *LEGACY_PROPERTY_DOCTYPES)
 
@@ -105,7 +115,8 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	t = f"`tab{doctype}`"
 	if doctype == "TEX Audit Event":
 		return (f"({t}.`property` in ({_sql_list(props)}) or {t}.`name` in (select s.`event` from "
-		        f"`tabTEX Audit Scope` s where s.`property` in ({_sql_list(props)})))")
+		        f"`tabTEX Audit Scope` s where s.`property` in ({_sql_list(props)})))"
+		        f" and ifnull({t}.`reference_doctype`, '') not in ({_sql_list(COST_DOCTYPES)})")
 	if doctype in STRICT_DOCTYPES:
 		return f"{t}.`property` in ({_sql_list(props)})"
 	if doctype in GROUP_DOCTYPES:
@@ -223,6 +234,8 @@ def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
 		                                        and doc.enterprise in _enterprises(scope.permitted_properties(user)))
 	if doc.doctype in TENANT_DOCTYPES:
 		return _tenant_doc_permitted(doc, user)
+	if doc.doctype == "TEX Audit Event" and doc.get("reference_doctype") in COST_DOCTYPES:
+		return False                              # cost: the TEX audit log serves it by price.view_cost (G-97)
 	props, platform_level = _doc_properties(doc)
 	if platform_level:
 		return False

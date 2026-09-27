@@ -525,6 +525,91 @@ class TestLegacyTenancy(TexTestCase):
 		self.assertEqual(missing, [], "record arguments without a hotel check")
 
 
+class TestCostRecordsInDesk(TexTestCase):
+	"""G-97 (audit Part 2I): a contract version (and its rate tables), a markup rule and a pricing policy are
+	cost. The TEX API serves them with ``price.view_cost``; Desk / REST let the Hotel Admin role read them,
+	and the audit events carrying their compact diffs. They are platform administrators' in Desk / REST now."""
+
+	COST = ("TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy")
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.security.audit import audit
+
+		setup_site_and_payments(self.f)
+		other_hotel_with_mock()
+		self.version = fx.create_contract(self.f, code="G97")["version"]
+		self.markup = fx.create_markup()
+		self.policy = frappe.get_doc({"doctype": "TEX Pricing Policy", "policy_name": "G97 policy",
+		                              "property": fx.PROPERTY}).insert(ignore_permissions=True).name
+		self.event = audit("contract.version.save", reference_doctype="TEX Contract Version",
+		                   reference_name=self.version, property=fx.PROPERTY, new={"collections": {}})
+		self.grant_event = audit("grant.create", reference_doctype="TEX Access Grant", reference_name="G97",
+		                         property=fx.PROPERTY)
+		self.booking = guest_books(session="g97")["booking"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		self.ha = self.user("g97-ha@example.com", "Hotel Admin", fx.PROPERTY, "Hotel Admin")
+		self.other = self.user("g97-other@example.com", "Hotel Admin", OTHER, "Hotel Admin")
+		self.rm = self.user("g97-rm@example.com", "Revenue Manager", fx.PROPERTY, "Revenue Manager")
+
+	def user(self, email, role, hotel, profile):
+		fx.ensure_user(email, [role])
+		fx.ensure("TEX Access Grant", {"user": email, "property": hotel},
+		          {"user": email, "scope_level": "Hotel", "property": hotel, "permission_profile": profile})
+		return email
+
+	def as_user(self, user):
+		frappe.set_user(user)  # nosemgrep: frappe-setuser -- each role probes
+		scope.clear_cache()
+
+	def test_g97_cost_records_are_platform_administrators_in_desk_and_rest(self):
+		from frappe.client import get as client_get
+		from frappe.client import get_list as client_get_list
+
+		self.as_user(self.ha)
+		for doctype, name in zip(self.COST, (self.version, self.markup, self.policy), strict=True):
+			with self.assertRaises(frappe.PermissionError, msg=doctype):
+				client_get(doctype, name)
+		for user in (self.ha, self.other):                               # the rate tables go with their version
+			self.as_user(user)
+			with self.assertRaises(frappe.PermissionError, msg=user):
+				client_get_list("TEX Period Rate", parent="TEX Contract Version", fields=["parent", "value"])
+		# the compact rate diffs of the audit trail are cost too; other events stay readable
+		self.as_user(self.ha)
+		self.assertEqual(frappe.get_list("TEX Audit Event", filters={"reference_doctype": "TEX Contract Version"},
+		                                 pluck="name"), [])
+		self.assertFalse(frappe.has_permission("TEX Audit Event", "read", doc=frappe.get_doc("TEX Audit Event", self.event),
+		                                       user=self.ha))
+		self.assertTrue(frappe.has_permission("TEX Audit Event", "read",
+		                                      doc=frappe.get_doc("TEX Audit Event", self.grant_event), user=self.ha))
+		self.assertIn(self.grant_event, frappe.get_list("TEX Audit Event", pluck="name", limit_page_length=0))
+		self.assertEqual(client_get("TEX Booking", self.booking)["name"], self.booking)   # booking reads unchanged
+		# the TEX API is the one reader: price.view_cost
+		self.as_user(self.rm)
+		self.assertIn(self.markup, [r["name"] for r in policy_api.list_records("TEX Markup Rule", property=fx.PROPERTY)])
+		self.assertIn(self.policy, [r["name"] for r in policy_api.list_records("TEX Pricing Policy",
+		                                                                       property=fx.PROPERTY)])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- platform administrators keep them
+		for doctype, name in zip(self.COST, (self.version, self.markup, self.policy), strict=True):
+			self.assertEqual(client_get(doctype, name)["name"], name)
+
+	def test_g97_the_cost_doctypes_json_permissions_are_the_specs(self):
+		import json
+		import os
+
+		from kamra.tex.devtools.doctype_gen import scrub
+		from kamra.tex.devtools.doctype_specs import SPECS
+
+		specs = {d["name"]: d for d in SPECS}
+		for doctype in self.COST:
+			spec = specs[doctype]
+			path = frappe.get_app_path("kamra", scrub(spec["module"]), "doctype", scrub(doctype), f"{scrub(doctype)}.json")
+			self.assertTrue(os.path.exists(path), path)
+			with open(path, encoding="utf-8") as f:
+				self.assertEqual(json.load(f)["permissions"], spec["permissions"], doctype)
+			self.assertEqual([p["role"] for p in spec["permissions"]], ["System Manager"], doctype)
+
+
 class TestLegacySelling(TexTestCase):
 	"""G-03: the legacy booking engine (`/kamra/book`) and the legacy staff booking dialog
 	price from Room Type.base_price; they must never price or sell a TEX hotel."""

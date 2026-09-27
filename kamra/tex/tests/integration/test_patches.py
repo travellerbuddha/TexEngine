@@ -112,6 +112,7 @@ BEHAVIOUR = {
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
+	"p66_cost_doctypes_system_only": "test_patches.TestP66CostDocTypesSystemOnly",
 }
 
 
@@ -1561,3 +1562,43 @@ class TestP65AgentLogHotel(PatchCase):
 		self.assertIn(f"p65: {3 + known} action log row(s) given their hotel", printed)
 		again = migrate(self.P65)
 		self.assertIn("p65: 0 action log row(s) given their hotel", " ".join(str(c) for c in again["print"].call_args_list))
+
+
+class TestP66CostDocTypesSystemOnly(PatchCase):
+	"""G-97 (audit Part 2I): contract versions, markup rules and pricing policies are System Manager's in
+	Desk / REST. Their JSON says so now; where Custom DocPerm rows decide instead (Frappe then ignores the
+	JSON), p66 takes every flag, read included, from every role's row but System Manager's."""
+
+	P66 = "p66_cost_doctypes_system_only"
+	COST = ("TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy")
+	FLAGS = ("read", "write", "create", "delete", "report", "export", "print", "email", "share")
+
+	def tearDown(self):
+		super().tearDown()                       # the rollback takes the rows this test wrote
+		for dt in self.COST:
+			frappe.clear_cache(doctype=dt)
+
+	def rows(self, doctype: str) -> dict[str, tuple]:
+		return {r.role: tuple(int(r.get(f) or 0) for f in self.FLAGS)
+		        for r in frappe.get_all("Custom DocPerm", filters={"parent": doctype, "permlevel": 0},
+		                                fields=["role", *self.FLAGS])}
+
+	def test_p66_takes_every_flag_from_the_roles_rows_but_system_managers(self):
+		from kamra.scripts.fix_perms_fields import _grant
+
+		for dt in self.COST[:2]:                                        # a site whose seeds wrote custom rows
+			_grant(dt, "System Manager", 1, 1, 1, delete=1)
+			_grant(dt, "Hotel Admin", 1, 0, 0)
+		system_manager = {dt: self.rows(dt)["System Manager"] for dt in self.COST[:2]}
+		self.assertEqual(self.rows(self.COST[2]), {})                   # the third has none
+		never_ran(self.P66)
+		seen = migrate(self.P66)
+		self.assertIn("p66: 2 Custom DocPerm row(s)", " ".join(str(c) for c in seen["print"].call_args_list))
+		for dt in self.COST[:2]:
+			rows = self.rows(dt)
+			self.assertEqual(rows["Hotel Admin"], (0,) * len(self.FLAGS), dt)
+			self.assertEqual(rows["System Manager"], system_manager[dt], dt)
+		self.assertEqual(self.rows(self.COST[2]), {})                   # no row added where there was none
+		again = migrate(self.P66)
+		self.assertIn("p66: 0 Custom DocPerm row(s)", " ".join(str(c) for c in again["print"].call_args_list))
+
