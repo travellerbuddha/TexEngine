@@ -907,6 +907,8 @@
  "rates.version.read_only": "Salt okunur",
  "rates.version.recheck": "Tekrar kontrol et",
  "rates.version.save_failed": "Taslak kaydedilemedi",
+ "rates.version.draft_changed": "Bu taslak siz açtıktan sonra değiştirildi. Kaydınız uygulanmadı: değişikliği görmek için taslağı yeniden yükleyin, sonra düzenlemenizi tekrar yapın.",
+ "rates.version.reload": "Taslağı yeniden yükle",
  "rates.version.save_first": "Önce değişikliklerinizi kaydedin",
  "rates.version.saved": "Taslak kaydedildi",
  "rates.version.schedule": "Planla",

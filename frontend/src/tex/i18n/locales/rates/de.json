@@ -907,6 +907,8 @@
  "rates.version.read_only": "Nur lesen",
  "rates.version.recheck": "Erneut prüfen",
  "rates.version.save_failed": "Der Entwurf konnte nicht gespeichert werden",
+ "rates.version.draft_changed": "Dieser Entwurf wurde geändert, nachdem Sie ihn geöffnet haben. Ihr Speichern wurde nicht übernommen: Laden Sie den Entwurf neu, um die Änderung zu sehen, und nehmen Sie Ihre Änderung dann erneut vor.",
+ "rates.version.reload": "Entwurf neu laden",
  "rates.version.save_first": "Speichern Sie zuerst Ihre Änderungen",
  "rates.version.saved": "Entwurf gespeichert",
  "rates.version.schedule": "Planen",

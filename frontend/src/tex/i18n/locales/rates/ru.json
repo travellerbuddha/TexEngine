@@ -921,6 +921,8 @@
  "rates.version.read_only": "Только чтение",
  "rates.version.recheck": "Проверить снова",
  "rates.version.save_failed": "Не удалось сохранить черновик",
+ "rates.version.draft_changed": "Этот черновик изменили после того, как вы его открыли. Ваше сохранение не применено: перезагрузите черновик, чтобы увидеть изменение, затем внесите свою правку снова.",
+ "rates.version.reload": "Перезагрузить черновик",
  "rates.version.save_first": "Сначала сохраните изменения",
  "rates.version.saved": "Черновик сохранён",
  "rates.version.schedule": "Запланировать",

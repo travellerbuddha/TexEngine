@@ -276,17 +276,21 @@ def _set_selling(v, selling) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
-def save_version(name: str, data, workspace=None):
+def save_version(name: str, data, workspace=None, expected_modified=None):
 	"""Replace the draft's settings, selling terms and child tables in one call. The editor saves
 	on demand (Save, Ctrl+S), never per keystroke; each save that changes something is audited
 	old → new by the version's controller (G-74). ``workspace`` (ADR-061, opt-in): a blank rule
 	value is refused (GAP-8) instead of being stored as 0 as main stores it, and the answer is
-	``get_version``'s for the workspace."""
+	``get_version``'s for the workspace. ``expected_modified`` (O-10, opt-in): the draft's
+	``modified`` as the caller read it; a draft changed since is refused (``DraftChanged``) before
+	anything is applied. Without it a save replaces what it posts, as before."""
 	ws = _workspace(workspace)
 	data = parse(data, {})
-	v = frappe.get_doc("TEX Contract Version", name)
 	prop = scope.property_of("TEX Contract Version", name)
 	scope.require("contract.edit", prop)
+	if expected_modified:
+		svc.check_draft_token(name, expected_modified)
+	v = frappe.get_doc("TEX Contract Version", name)
 	if v.status != "Draft":
 		frappe.throw(_("Only draft versions can be edited — create a new draft."))
 	if "selling" in data:

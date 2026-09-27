@@ -907,6 +907,8 @@
  "rates.version.read_only": "Read-only",
  "rates.version.recheck": "Check again",
  "rates.version.save_failed": "The draft could not be saved",
+ "rates.version.draft_changed": "This draft was changed after you opened it. Your save was not applied: reload the draft to see the change, then make your edit again.",
+ "rates.version.reload": "Reload draft",
  "rates.version.save_first": "Save your changes first",
  "rates.version.saved": "Draft saved",
  "rates.version.schedule": "Schedule",

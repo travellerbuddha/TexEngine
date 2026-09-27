@@ -985,6 +985,24 @@ def candidate_contracts(property: str, market: str, channel: str, at: datetime, 
 	return out
 
 
+class DraftChanged(frappe.TimestampMismatchError):
+	"""A draft save made from a read older than the draft (O-10, ADR-069): someone else saved it since."""
+
+
+def check_draft_token(name: str, expected) -> None:
+	"""O-10 (ADR-069): refuse a draft save made from a read older than the draft. The draft's
+	``modified`` (never NULL) and who changed it are read under a row lock, so two saves from one read
+	cannot both pass; a different time raises ``DraftChanged`` naming who changed it and when."""
+	row = frappe.db.get_value("TEX Contract Version", name, ["modified", "modified_by"], as_dict=True,
+	                          for_update=True)
+	if not row:
+		frappe.throw(_("Contract version {0} not found.").format(name), frappe.DoesNotExistError)
+	if get_datetime(row.modified) != get_datetime(expected):
+		who = frappe.utils.get_fullname(row.modified_by) if row.modified_by else _("someone")
+		frappe.throw(_("This draft was changed by {0} at {1}; reload it before saving.").format(
+			who, get_datetime(row.modified).replace(microsecond=0)), DraftChanged, title=_("Draft changed"))
+
+
 class ContractNotOnSale(frappe.ValidationError):
 	"""An offer or quote of a contract that stopped selling after it was made (ADR-045)."""
 	code = "CONTRACT_NOT_ON_SALE"

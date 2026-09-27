@@ -921,6 +921,8 @@
  "rates.version.read_only": "Tylko odczyt",
  "rates.version.recheck": "Sprawdź ponownie",
  "rates.version.save_failed": "Nie udało się zapisać szkicu",
+ "rates.version.draft_changed": "Ten szkic został zmieniony po jego otwarciu. Zapis nie został zastosowany: wczytaj szkic ponownie, aby zobaczyć zmianę, a następnie wprowadź swoją edycję jeszcze raz.",
+ "rates.version.reload": "Wczytaj szkic ponownie",
  "rates.version.save_first": "Najpierw zapisz zmiany",
  "rates.version.saved": "Zapisano szkic",
  "rates.version.schedule": "Zaplanuj",

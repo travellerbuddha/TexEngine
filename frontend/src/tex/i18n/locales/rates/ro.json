@@ -913,6 +913,8 @@
  "rates.version.read_only": "Doar citire",
  "rates.version.recheck": "Verifică din nou",
  "rates.version.save_failed": "Ciorna nu a putut fi salvată",
+ "rates.version.draft_changed": "Această ciornă a fost modificată după ce ați deschis-o. Salvarea dvs. nu a fost aplicată: reîncărcați ciorna pentru a vedea modificarea, apoi faceți din nou editarea.",
+ "rates.version.reload": "Reîncarcă ciorna",
  "rates.version.save_first": "Salvați mai întâi modificările",
  "rates.version.saved": "Ciorna a fost salvată",
  "rates.version.schedule": "Programează",
