@@ -79,6 +79,7 @@ class IyzicoProvider(PaymentProvider):
 	name = "iyzico"
 	reports_amount = True
 	supports_refund = True
+	status_query = True               # checkout-form DETAIL by the token TEX stored
 	sandbox_hosts = ("sandbox-api.iyzipay.com",)
 	INIT = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 	DETAIL = "/payment/iyzipos/checkoutform/auth/ecom/detail"
@@ -228,6 +229,7 @@ class SipayProvider(PaymentProvider):
 	# ``amount`` must match, but a success without one is not refused until then
 	reports_amount = False
 	sandbox_hosts = ("provisioning.sipay.com.tr",)
+	status_query = True               # checkstatus by TEX's own id of the charge
 
 	@property
 	def base(self) -> str:

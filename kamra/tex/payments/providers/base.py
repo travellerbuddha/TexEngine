@@ -85,6 +85,10 @@ class PaymentProvider(ABC):
 	# the only hosts a Sandbox account's gateway URL override may point at; empty for a
 	# provider that never reads the override (ADR-041)
 	sandbox_hosts: tuple[str, ...] = ()
+	# TEX can ask the gateway for a charge's outcome by itself (a status query), without the guest's
+	# browser or a notification: staff re-verify such a charge, and so does the 5-minute job (NEW-2).
+	# A gateway without one leaves a charge Pending until its news arrives (P1-8: the status page fails)
+	status_query: bool = False
 
 	def __init__(self, account):
 		self.account = account

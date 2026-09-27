@@ -416,6 +416,7 @@
  "settings.status.reason.late": "Opóźnione: {count}, najstarsza czeka {minutes} min.",
  "settings.status.reason.connection_errors": "Połączenia zgłaszające błąd: {count}.",
  "settings.status.reason.payment_pending": "Płatności kartą wciąż oczekujące: {count}, najstarsza rozpoczęta {minutes} min temu.",
+ "settings.status.reason.payment_pending_unverified": "Płatności kartą przez bramkę, której TEX nie może zapytać, wciąż oczekujące po terminie: {count}, najstarsza rozpoczęta {minutes} min temu. Sprawdź je w panelu banku; jeśli kwota została pobrana, zapisz ją jako płatność ręczną z numerem referencyjnym banku. Alert zniknie 48 godzin po płatności.",
  "settings.status.reason.reconciliation_action": "Płatności niezaliczone do rezerwacji, czekające na personel: {count}, najstarsza czeka {hours} godz. (Płatności → płatność).",
  "settings.status.reason.reconciliation_refund": "Płatności w kolejce do automatycznego zwrotu: {count}, najstarsza czeka {hours} godz.",
  "settings.status.reason.bookings_overpaid": "Rezerwacje z kwotą wyższą niż ich koszt: {count} (w tym anulowane: {cancelled}). Zwróć nadwyżkę lub przenieś ją na właściwą rezerwację (Płatności).",

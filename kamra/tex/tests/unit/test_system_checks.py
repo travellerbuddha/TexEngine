@@ -101,6 +101,25 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.pending_payments_check(2, NOW - timedelta(minutes=90), NOW)["issues"][0]["params"],
 		                 {"count": 2, "minutes": 90})
 
+	def test_a_payment_tex_cannot_ask_its_gateway_about_fails_after_its_deadline(self):
+		"""P1-8: a card payment of a gateway TEX cannot ask (the Virtual POS) still pending past its deadline
+		fails the check, with how to settle it; the pending warning stays as it was."""
+		self.assertEqual(c.PAYMENT_UNVERIFIED_FAIL_MINUTES, 10)
+		out = c.pending_payments_check(3, NOW - timedelta(minutes=90), NOW, ["H1"], unverified=1,
+		                               unverified_since=NOW - timedelta(minutes=45))
+		self.assertEqual(out["status"], c.FAIL)
+		self.assertEqual([(i["reason"], i["status"], i["params"]) for i in out["issues"]],
+		                 [("payment_pending_unverified", c.FAIL, {"count": 1, "minutes": 45}),
+		                  ("payment_pending", c.WARN, {"count": 3, "minutes": 90})])
+		text = c.describe(out["issues"][0])
+		for words in ("bank's panel", "Manual payment", "48 hours"):
+			self.assertIn(words, text)
+		# only the unverified one (its deadline passed; no pending one old enough to warn yet)
+		alone = c.pending_payments_check(0, None, NOW, unverified=2, unverified_since=NOW - timedelta(minutes=12))
+		self.assertEqual((alone["status"], [i["reason"] for i in alone["issues"]]),
+		                 (c.FAIL, ["payment_pending_unverified"]))
+		self.assertEqual(c.pending_payments_check(0, None, NOW)["status"], c.OK)
+
 	def test_holds_past_their_deadline_fail(self):
 		"""D9 (audit 1c): a booking still holding rooms well after its hold ended (its expiry keeps
 		failing) blocks inventory: the check fails, with the count and the age of the oldest."""

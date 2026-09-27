@@ -200,7 +200,18 @@ def gateway_providers() -> tuple[str, ...]:
 	return tuple(sorted(name for name, cls in REGISTRY.items() if cls.gateway))
 
 
+def unverifiable_providers() -> tuple[str, ...]:
+	"""Gateways TEX cannot ask for a charge's outcome (P1-8; today the Virtual POS). The sandbox mock is
+	not one: its page answers at once."""
+	from kamra.tex.payments.providers import REGISTRY
+
+	return tuple(sorted(name for name, cls in REGISTRY.items()
+	                    if cls.gateway and not cls.status_query and name != "Mock"))
+
+
 def _payments_pending(props, now) -> dict:
+	from kamra.tex.services import holds
+
 	params = {"gw": gateway_providers(), "cut": now - timedelta(minutes=C.PAYMENT_PENDING_WARN_MINUTES),
 	          "start": now - timedelta(hours=C.PAYMENT_PENDING_WINDOW_HOURS)}
 	cond = _scope("property", props, params)
@@ -209,7 +220,17 @@ def _payments_pending(props, now) -> dict:
 	                           AND creation < %(cut)s AND creation >= %(start)s{cond} GROUP BY property""",
 	                     params, as_dict=True)
 	n, oldest, hotels = _sum(rows)
-	return C.pending_payments_check(n, oldest, now, hotels)
+	# P1-8: charges of a gateway TEX cannot ask, still Pending 10 minutes past their deadline. A NULL
+	# expires_at is a charge that holds no rooms (a link's without a booking waiting for it, a guest
+	# change's, a confirmed booking's balance): its checkout's own time counts from its creation
+	params.update(blind=unverifiable_providers() or ("",), checkout=holds.CHECKOUT_MINUTES,
+	              late=now - timedelta(minutes=C.PAYMENT_UNVERIFIED_FAIL_MINUTES))
+	blind = frappe.db.sql(f"""SELECT property, COUNT(*) n, MIN(creation) since FROM `tabTEX Payment Transaction`
+	                          WHERE txn_type = 'Charge' AND status = 'Pending' AND provider IN %(blind)s
+	                            AND IFNULL(expires_at, creation + INTERVAL %(checkout)s MINUTE) < %(late)s
+	                            AND creation >= %(start)s{cond} GROUP BY property""", params, as_dict=True)
+	u, u_oldest, u_hotels = _sum(blind)
+	return C.pending_payments_check(n, oldest, now, hotels | u_hotels, unverified=u, unverified_since=u_oldest)
 
 
 def _payments_callbacks(props, now) -> dict:

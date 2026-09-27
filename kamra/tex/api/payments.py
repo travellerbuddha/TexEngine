@@ -185,12 +185,16 @@ def reverify(transaction: str):
 		attempts = [{}]
 	out, error = None, None
 	for params in attempts:
+		# a try that failed leaves no message in the answer: only the outcome (or the error) is its own
+		mark = len(frappe.local.message_log)
 		try:
 			res = pay.complete_retrying(transaction, params=params)
 		except ProviderError as e:
+			del frappe.local.message_log[mark:]
 			error = e                                  # this token is not verifiable: try the next
 			continue
 		except Exception as e:
+			del frappe.local.message_log[mark:]
 			# the gateway did not answer for this token: an older one may still hold the payment
 			log_exception(f"TEX payment re-verify error {transaction}")
 			error = e
@@ -329,6 +333,7 @@ def create_link(property: str, amount, currency: str, description: str, expires_
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.link", property_arg=None, doc_arg=("name", "TEX Payment Link"))
+@retry_on_deadlock
 def reissue_link(name: str, send_email=0, language: str | None = None):
 	return pay.reissue_link(name, send_email=bool(as_int(send_email, 0)), language=text(language, 5) or "en")
 

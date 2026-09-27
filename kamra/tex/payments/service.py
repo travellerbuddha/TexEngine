@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import random
 import secrets
+import time
 
 import frappe
 from frappe import _
@@ -24,7 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
-from kamra.tex.services.txn import transaction_lost
+from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost
 
 
 class AccountRefused(frappe.ValidationError):
@@ -72,7 +74,9 @@ def _durable_commit() -> None:
 def _commit_step() -> None:
 	"""End a step of a payment start (NEW-6, ADR-066): what it wrote is on record, and every row, gap
 	and naming-series lock the request took so far is released before the gateway is asked for a
-	checkout, and again once its answer is recorded. Tests keep one transaction."""
+	checkout, and again once its answer is recorded. Tests keep one transaction. The request is not
+	run again on a deadlock after this (``txn.retry_on_deadlock``, P1-8 e)."""
+	note_committed_step()
 	if not frappe.flags.in_test:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- no row, gap or series lock is held through a gateway call (NEW-6)
 
@@ -512,12 +516,23 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 
 
 def complete_retrying(transaction: str, **kw) -> dict:
-	"""C3: ``complete`` run again when the database chose it as a deadlock victim. It is idempotent —
-	a rerun asks the gateway again and applies its verified outcome once — so a charge the gateway
-	captured never stays Pending (nor its money unreconciled) because of a deadlock."""
-	from kamra.tex.services.txn import retry_on_deadlock
-
-	return retry_on_deadlock(complete)(transaction, **kw)
+	"""C3, P1-8: ``complete`` run again when the database chose it as a deadlock victim or a lock wait
+	timed out. It is idempotent — a rerun asks the gateway again and applies its verified outcome once —
+	so a charge the gateway captured never stays Pending (nor its money unreconciled) because of either.
+	Only here: the endpoints are run again on a deadlock only. After the last try the error itself is
+	raised (a caller's own deadlock wrapper may run it again: at most 3 × 3 tries). Its callers have no
+	uncommitted work before it, and nothing on its way commits."""
+	for attempt in range(1, DEADLOCK_ATTEMPTS + 1):
+		try:
+			return complete(transaction, **kw)
+		except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+			# the whole transaction back: a lock wait timeout undid only the statement that waited
+			# (innodb_rollback_on_timeout OFF), the rest of this try must not stay
+			frappe.db.rollback()
+			if attempt == DEADLOCK_ATTEMPTS:
+				raise
+			time.sleep(random.uniform(0.02, 0.1) * attempt)
+	return None
 
 
 def _checked_capture(provider, outcome: Outcome, txn) -> Outcome:

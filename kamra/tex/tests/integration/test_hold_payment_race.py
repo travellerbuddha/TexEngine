@@ -1531,7 +1531,81 @@ class TestDeadlockRetries(HoldCase):
 		self.assertEqual(len(calls), 2)
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 
+	def test_a_payment_callback_that_times_out_waiting_for_a_lock_is_applied_again(self):
+		"""P1-8: a lock wait timeout in ``complete`` (money captured) is run again like a deadlock, after a
+		full rollback: the statement that timed out was the only one undone."""
+		b = self.book()
+		payment = self.start_payment(b)
+		real_allocate, real_rollback, calls = pay.allocate, frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def allocate(*args, **kw):
+			calls.append(1)
+			if len(calls) == 1:
+				raise frappe.QueryTimeoutError("Lock wait timeout exceeded; try restarting transaction")
+			return real_allocate(*args, **kw)
+
+		def rollback(*args, **kw):                    # the test's own transaction stands for the request's
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		with mock.patch.object(pay, "allocate", side_effect=allocate), \
+				mock.patch.object(frappe.db, "rollback", side_effect=rollback):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(len(calls), 2)
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def test_a_request_that_put_a_step_on_record_is_not_run_again(self):
+		"""P1-8 e (NEW-6): a request that committed a step (``_commit_step``) and then meets a deadlock is not
+		run again from the start: its first steps are on record. One without a committed step is."""
+		from kamra.tex.services.txn import retry_on_deadlock
+
+		real_rollback, calls = frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def rollback(*args, **kw):
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		@retry_on_deadlock
+		def committed_then_deadlocked():
+			calls.append("committed")
+			pay._commit_step()
+			raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+
+		@retry_on_deadlock
+		def deadlocked():
+			calls.append("plain")
+			raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+
+		with mock.patch.object(frappe.db, "rollback", side_effect=rollback), mock.patch("time.sleep"):
+			with self.assertRaises(frappe.ValidationError):
+				committed_then_deadlocked()
+			with self.assertRaises(frappe.ValidationError):
+				deadlocked()
+		self.assertEqual(calls, ["committed", "plain", "plain", "plain"])
+
+	def test_a_reverify_keeps_no_message_of_a_token_that_failed(self):
+		"""P1-8: staff re-verify an iyzico charge with two checkout tokens; the first try fails with a
+		message, the next confirms it: the answer carries no message of the failed try."""
+		from kamra.tex.api import payments as payments_api
+
+		txn = pay._new_txn(property=fx.PROPERTY, txn_type="Charge", method="Card", amount=D("100"), currency="EUR",
+		                   provider="iyzico", provider_ref="tok-b tok-a", idempotency_key="p18-reverify").name
+		tries = []
+
+		def complete_retrying(transaction, **kw):
+			tries.append(kw["params"])
+			if len(tries) == 1:
+				frappe.throw("The hotel is very busy right now. Please try again in a moment.")
+			return {"status": "Succeeded", "transaction": transaction}
+
+		frappe.local.message_log = []
+		with mock.patch.object(pay, "complete_retrying", side_effect=complete_retrying):
+			self.assertEqual(payments_api.reverify(transaction=txn)["status"], "Succeeded")
+		self.assertEqual(len(tries), 2)
+		self.assertEqual(frappe.local.message_log, [])
+
 	def test_the_payment_endpoints_run_again_on_a_deadlock(self):
+		from kamra.tex.api import crm as crm_api
 		from kamra.tex.api import crs
 		from kamra.tex.api import payments as payments_api
 
@@ -1545,7 +1619,7 @@ class TestDeadlockRetries(HoldCase):
 		for fn in (public.pay_booking, public.pay_link, public.manage_cancel, public.mock_pay, crs.cancel,
 		           payments_api.allocate, payments_api.transfer, payments_api.mark_transfer_received,
 		           payments_api.record_manual, payments_api.create_link, payments_api.cancel_link,
-		           payments_api.reverify):
+		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests):
 			self.assertTrue(retried(fn), fn.__name__)
 
 
