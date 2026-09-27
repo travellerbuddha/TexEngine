@@ -1582,6 +1582,17 @@ class TestPromotionSaveChecks(TexTestCase):
 		frappe.db.set_value("TEX Promotion", name, "code", "WİNTER")          # stored before this change
 		self.assertRefused(self.draft, trigger="Code", code="winter")
 
+	def test_a_member_only_promotion_is_refused_until_a_sale_knows_members(self):
+		"""G-57: no search or quote tells the engine the guest is a member, so a members-only promotion
+		never applied. It is refused on a draft's save and activation; a live one stays archivable."""
+		self.assertRefused(self.draft, member_only=1)
+		name = self.draft()
+		frappe.db.set_value("TEX Promotion", name, "member_only", 1)
+		self.assertRefused(policy_api.activate, "TEX Promotion", name)
+		old = self.live(member_only=1)
+		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")
+
 	def test_an_unusable_draft_is_not_activated_and_a_live_one_is_archived(self):
 		name = self.draft()
 		frappe.db.set_value("TEX Promotion", name, {"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"})

@@ -453,7 +453,7 @@
  "rates.h.markup_priority": "Rozstrzyga tylko między regułami o dokładnie tym samym zakresie.",
  "rates.h.max_age_days": "Nie przeliczaj kursem dostawcy starszym niż ten.",
  "rates.h.max_lead_days": "Rezerwacja najwyżej tyle dni przed przyjazdem (0 = bez limitu).",
- "rates.h.member_only": "Tylko dla zalogowanych członków programu lojalnościowego.",
+ "rates.h.member_only": "Jeszcze niedostępne: żadna sprzedaż nie rozpoznaje członka, więc promocja tylko dla członków nigdy nie zostałaby zastosowana. Odznacz to pole i wyślij członkom kod promocyjny.",
  "rates.h.min_adults": "0 = co najmniej jeden dorosły.",
  "rates.h.min_basket": "Kwota, którą rezerwacja musi osiągnąć, aby promocja miała zastosowanie (w walucie promocji): zakwaterowanie przed rabatami plus dodatki, pokoi rezerwacji, których dotyczy, łącznie.",
  "rates.h.min_lead_days": "Rezerwacja co najmniej tyle dni przed przyjazdem (first minute).",

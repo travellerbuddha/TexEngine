@@ -251,7 +251,8 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "contracts", kind: "csv", source: "contract", label: "rates.f.contracts", blank: "rates.common.all_contracts" },
           { key: "requires_extras", kind: "text", label: "rates.f.requires_extras", help: "rates.h.requires_extras" },
           { key: "min_basket", kind: "decimal", label: "rates.f.min_basket", help: "rates.h.min_basket", suffix: (d) => String(d.currency || "") || null },
-          { key: "member_only", kind: "check", label: "rates.f.member_only", help: "rates.h.member_only" },
+          // G-57: no sale identifies a member yet (the save refuses it): shown only to clear an old one
+          { key: "member_only", kind: "check", label: "rates.f.member_only", help: "rates.h.member_only", showIf: (d) => Boolean(d.member_only) },
         ],
       },
       {

@@ -449,7 +449,7 @@
  "rates.h.markup_priority": "Only breaks ties between rules with exactly the same scope.",
  "rates.h.max_age_days": "Refuse to convert with a provider rate older than this.",
  "rates.h.max_lead_days": "Booked at most this many days before arrival (0 = no limit).",
- "rates.h.member_only": "Only for logged-in loyalty members.",
+ "rates.h.member_only": "Not available yet: no sale identifies a member, so a members-only promotion would never apply. Untick it and send your members a promotion code instead.",
  "rates.h.min_adults": "0 = at least one adult.",
  "rates.h.min_basket": "The amount the booking must reach, in the promotion's currency, before the promotion applies: accommodation before discounts plus extras, of the booking's rooms it applies to, together.",
  "rates.h.min_lead_days": "Booked at least this many days before arrival (early booking).",

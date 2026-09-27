@@ -449,7 +449,7 @@
  "rates.h.markup_priority": "Entscheidet nur zwischen Regeln mit exakt gleichem Geltungsbereich.",
  "rates.h.max_age_days": "Nicht mit einem Anbieterkurs umrechnen, der älter ist.",
  "rates.h.max_lead_days": "Höchstens so viele Tage vor Anreise gebucht (0 = unbegrenzt).",
- "rates.h.member_only": "Nur für angemeldete Loyalty-Mitglieder.",
+ "rates.h.member_only": "Noch nicht verfügbar: Kein Verkauf erkennt ein Mitglied, daher würde eine Aktion nur für Mitglieder nie angewendet. Entfernen Sie das Häkchen und senden Sie Ihren Mitgliedern stattdessen einen Aktionscode.",
  "rates.h.min_adults": "0 = mindestens ein Erwachsener.",
  "rates.h.min_basket": "Betrag, den die Buchung erreichen muss, damit die Aktion gilt (in der Währung der Aktion): Unterkunft vor Rabatten plus Extras, der Zimmer der Buchung, für die sie gilt, zusammen.",
  "rates.h.min_lead_days": "Mindestens so viele Tage vor Anreise gebucht (Frühbucher).",

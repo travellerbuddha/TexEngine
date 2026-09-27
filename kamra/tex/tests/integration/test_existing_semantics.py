@@ -46,6 +46,8 @@ against main by design:
   stay, or a cost-stage offer on them (O-1): main saved it and the engine refused it on every quote.
 * a minimum basket without its currency (O-7, D-18): main saved it and compared the minimum in the
   sale's currency, whatever it was sold in.
+* a members-only promotion (G-57): main saved it, but no search or quote says the guest is a member,
+  so it never applied.
 
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
@@ -556,3 +558,10 @@ class TestSaleRuleChanges(TexTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self.promotion(min_basket=1000)
 		self.assertEqual(self.promotion(min_basket=1000, currency="EUR")["currency"], "EUR")
+
+	def test_a_members_only_promotion_is_refused(self):
+		"""G-57: main saved a members-only promotion that no sale could apply (no caller passes
+		``member``). Now the save is refused; without it, it saves as on main."""
+		with self.assertRaises(frappe.ValidationError):
+			self.promotion(member_only=1)
+		self.assertEqual(self.promotion(member_only=0)["member_only"], 0)

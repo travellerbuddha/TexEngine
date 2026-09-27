@@ -449,7 +449,7 @@
  "rates.h.markup_priority": "Yalnızca tam olarak aynı kapsama sahip kurallar arasında eşitliği bozar.",
  "rates.h.max_age_days": "Bundan eski bir sağlayıcı kuruyla çevirme yapılmaz.",
  "rates.h.max_lead_days": "Girişten en fazla bu kadar gün önce yapılan rezervasyonlar (0 = sınırsız).",
- "rates.h.member_only": "Yalnızca giriş yapmış sadakat üyeleri için.",
+ "rates.h.member_only": "Henüz kullanılamaz: hiçbir satış üyeyi tanımıyor, bu yüzden yalnız üyelere özel bir promosyon hiç uygulanmaz. İşareti kaldırın ve üyelerinize bir promosyon kodu gönderin.",
  "rates.h.min_adults": "0 = en az bir yetişkin.",
  "rates.h.min_basket": "Promosyonun uygulanması için rezervasyonun ulaşması gereken tutar (promosyonun para biriminde): indirim öncesi konaklama ve ekstralar, rezervasyonda promosyonun geçerli olduğu odalar birlikte.",
  "rates.h.min_lead_days": "Girişten en az bu kadar gün önce yapılan rezervasyonlar (erken rezervasyon).",

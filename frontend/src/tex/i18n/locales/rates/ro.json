@@ -450,7 +450,7 @@
  "rates.h.markup_priority": "Departajează doar regulile cu exact același domeniu.",
  "rates.h.max_age_days": "Nu se convertește cu un curs de furnizor mai vechi de atât.",
  "rates.h.max_lead_days": "Rezervat cu cel mult atâtea zile înainte de sosire (0 = fără limită).",
- "rates.h.member_only": "Doar pentru membrii programului de loialitate autentificați.",
+ "rates.h.member_only": "Încă indisponibil: nicio vânzare nu identifică un membru, așa că o promoție doar pentru membri nu s-ar aplica niciodată. Debifați și trimiteți membrilor un cod promoțional.",
  "rates.h.min_adults": "0 = cel puțin un adult.",
  "rates.h.min_basket": "Suma pe care rezervarea trebuie să o atingă pentru ca promoția să se aplice (în moneda promoției): cazarea înainte de reduceri plus extrasele, pentru camerele rezervării cărora li se aplică, împreună.",
  "rates.h.min_lead_days": "Rezervat cu cel puțin atâtea zile înainte de sosire (early booking).",
