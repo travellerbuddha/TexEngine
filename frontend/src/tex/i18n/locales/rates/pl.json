@@ -1642,7 +1642,7 @@
  "rates.occ.ladder.single_sub": "cały pokój, od wartości „{unit}”",
  "rates.occ.ladder.unit_sub": "od wartości „{unit}”",
  "rates.occ.ladder.no_bands": "Brak przedziałów wiekowych dzieci: dzieci nie można jeszcze wycenić. Dodaj je przez Wiek dzieci…",
- "rates.occ.ladder.infants_not_children": "Ta wersja nie liczy niemowląt jako dzieci: grupa z niemowlęciem kosztuje tyle co ta sama grupa bez niego, niemowlę jest wyceniane na końcu. Drabinka poniżej nadal liczy każde dziecko; test ceny pokazuje, co zostanie naliczone.",
+ "rates.occ.ladder.infants_not_children": "Ta wersja nie liczy niemowląt jako dzieci: niemowlę nigdy nie zmienia kombinacji ani pozycji pozostałych dzieci i jest wyceniane po nich według reguły własnej grupy wiekowej. Drabinka poniżej nadal liczy każde dziecko; test ceny pokazuje, co zostanie naliczone.",
  "rates.occ.ladder.inherited_bands": "Przedziały wiekowe pochodzą z: {source}.",
  "rates.occ.ladder.party": "Przykładowa grupa",
  "rates.occ.ladder.party_unsaved": "Zapisz szkic, aby zobaczyć sumy dla tego pokoju: podgląd pokazuje zapisany szkic, który jeszcze go nie zawiera.",

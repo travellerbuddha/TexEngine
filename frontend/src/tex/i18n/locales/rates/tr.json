@@ -1542,7 +1542,7 @@
  "rates.occ.ladder.single_sub": "odanın tamamı, {unit} üzerinden",
  "rates.occ.ladder.unit_sub": "{unit} üzerinden",
  "rates.occ.ladder.no_bands": "Çocuk yaş grubu yok: çocuklar henüz fiyatlandırılamaz. Çocuk yaşları… ile ekleyin.",
- "rates.occ.ladder.infants_not_children": "Bu versiyon bebekleri çocuk saymaz: bebekli bir grup, bebeksiz aynı grup gibi fiyatlanır, bebek en son fiyatlanır. Aşağıdaki merdiven yine her çocuğu sayar; tahsil edilen fiyatı fiyat testi gösterir.",
+ "rates.occ.ladder.infants_not_children": "Bu versiyon bebekleri çocuk saymaz: bebek diğer çocukların kombinasyonunu ve sırasını değiştirmez, onlardan sonra kendi bant kuralıyla fiyatlanır. Aşağıdaki merdiven yine her çocuğu sayar; tahsil edilen fiyatı fiyat testi gösterir.",
  "rates.occ.ladder.inherited_bands": "Çocuk yaş grupları şuradan geliyor: {source}.",
  "rates.occ.ladder.party": "Örnek konaklayan grubu",
  "rates.occ.ladder.party_unsaved": "Bu odanın toplamlarını görmek için taslağı kaydedin: önizleme, bu odayı henüz içermeyen kayıtlı taslağı gösteriyor.",
