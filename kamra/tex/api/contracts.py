@@ -21,6 +21,7 @@ from kamra.tex.pricing.enums import Op
 from kamra.tex.pricing.model import ChildSpec, PricingError, StayRequest, Unsellable
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
+from kamra.tex.services.txn import retry_on_deadlock
 
 CONTRACT_FIELDS = ("contract_code", "contract_name", "market", "status", "pricing_basis", "contract_currency",
                    "sell_currency", "priority", "is_bar", "sale_from", "sale_to", "stay_from", "stay_to", "notes")
@@ -104,7 +105,11 @@ def get_contract(name: str):
 	                          order_by="version_no desc")
 	can_publish = scope.has_capability("contract.publish", c.property)
 	published = any(v.status != "Draft" for v in versions)
-	live = svc.active_version_header(name, now_datetime())
+	now = now_datetime()
+	for v in versions:
+		# published but not yet selling: withdrawing it cancels it and the one before keeps selling (Y-2)
+		v.scheduled = v.status == "Published" and bool(v.effective_from) and get_datetime(v.effective_from) > now
+	live = svc.active_version_header(name, now)
 	try:
 		live_selling = svc.version_selling(live.version_id).as_dict() if live else None
 	except frappe.ValidationError:          # a payload failing its integrity check sells nothing
@@ -495,7 +500,10 @@ def set_contract_status(name: str, action: str, reason: str):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def withdraw_version(name: str, reason: str):
+	# a booking locking its rooms' quotes in another order may meet the withdraw's quote locks: the
+	# victim is rolled back whole and run again (O-13; booking.create_booking is retried the same way)
 	svc.withdraw(name, text(reason, 500))
 	return {"ok": True}
 

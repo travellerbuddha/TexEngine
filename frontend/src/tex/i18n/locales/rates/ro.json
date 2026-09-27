@@ -928,6 +928,7 @@
  "rates.version.view_v": "Vezi {v}",
  "rates.version.withdraw": "Retrage",
  "rates.version.withdraw_body": "Rezervările noi nu mai folosesc imediat această versiune. Rezervările existente își păstrează prețurile. Dacă nu există altă versiune activă, contractul nu se mai vinde.",
+ "rates.version.withdraw_body_scheduled": "Această versiune nu a început încă să se vândă. Retragerea o anulează: versiunea care se vinde acum continuă până începe următoarea versiune publicată (sau fără sfârșit). Rezervările existente își păstrează prețurile.",
  "rates.version.withdraw_title": "Retrageți {v}?",
  "rates.version.withdraw_v": "Retrage {v}",
  "rates.version.withdrawn": "{v} a fost retrasă",

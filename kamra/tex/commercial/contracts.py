@@ -725,24 +725,68 @@ def audit_draft_save(before, after) -> None:
 
 
 def withdraw(name: str, reason: str) -> None:
-	version = frappe.get_doc("TEX Contract Version", name)
-	prop = frappe.db.get_value("TEX Contract", version.contract, "property")
-	scope.require("contract.publish", prop)
-	if version.status not in ("Published",):
+	"""Take a published version off sale (Y-2 + O-13, ADR-069).
+
+	Locks in ``create_booking``'s order: the version's open quotes, the contract, then the version
+	is read again under them. A version that has not started (scheduled) is cancelled: it ends at its
+	own start, and a version that was to end at that start gets the window back, to the next
+	published version's start (or open-ended); no other version is ever shortened. The version on
+	sale stops now, and no older version comes back. Its open quotes are expired (a booking of one
+	is refused), and the contract's live version is worked out again."""
+	contract = frappe.db.get_value("TEX Contract Version", name, "contract")
+	if not contract:
 		frappe.throw(_("Only published versions can be withdrawn."))
+	prop = frappe.db.get_value("TEX Contract", contract, "property")
+	scope.require("contract.publish", prop)
 	if not (reason or "").strip():
 		frappe.throw(_("A reason is required."))
+	now = now_datetime()
+	# the version's quotes that can still be booked, locked first as ``create_booking`` locks them.
+	# expires_at NULL: never written (``_persist`` always writes it); such a row counts as usable
+	# here and is expired with the others
+	quotes = frappe.db.sql_list("""SELECT name FROM `tabTEX Quote` WHERE contract_version=%(v)s AND status='Open'
+	                               AND (expires_at IS NULL OR expires_at > %(now)s) ORDER BY name FOR UPDATE""",
+	                            {"v": name, "now": now})
+	frappe.db.get_value("TEX Contract", contract, "name", for_update=True)
+	if frappe.db.get_value("TEX Contract Version", name, "status", for_update=True) != "Published":
+		frappe.throw(_("Only published versions can be withdrawn."))
+	version = frappe.get_doc("TEX Contract Version", name)
+	start = get_datetime(version.effective_from)
+	scheduled = start > now
+	restored = []
+	if scheduled:
+		# the other published versions, compared in Python (no date filter): a version that was to end
+		# at this one's start sells again until the next published version starts, or open-ended
+		others = frappe.get_all("TEX Contract Version",
+		                        filters={"contract": contract, "status": "Published", "name": ("!=", name)},
+		                        fields=["name", "effective_from", "active_to"])
+		later = [get_datetime(o.effective_from) for o in others
+		         if o.effective_from and get_datetime(o.effective_from) > start]
+		new_to = min(later) if later else None
+		for o in others:
+			if o.active_to and get_datetime(o.active_to) == start:
+				ov = frappe.get_doc("TEX Contract Version", o.name)
+				ov.flags.tex_lifecycle = True
+				ov.active_to = new_to
+				ov.save(ignore_permissions=True)
+				restored.append({"version": o.name, "active_to": [str(start), str(new_to) if new_to else None]})
 	version.flags.tex_lifecycle = True
 	version.status = "Withdrawn"
-	version.active_to = now_datetime()
+	# a cancelled schedule ends at its start (publish, p56); a started one now, never later than it
+	# already ended (what sold before stays as it was)
+	ended = get_datetime(version.active_to) if version.active_to else None
+	version.active_to = start if scheduled else min(ended, now) if ended else now
 	version.save(ignore_permissions=True)
-	contract = frappe.get_doc("TEX Contract", version.contract)
-	if contract.active_version == name:
-		contract.active_version = None
-		contract.flags.tex_lifecycle = True
-		contract.save(ignore_permissions=True)
+	for q in quotes:
+		doc = frappe.get_doc("TEX Quote", q)
+		doc.status = "Expired"
+		doc.save(ignore_permissions=True)
+	live = active_version_header(contract, now)
+	live_name = live.version_id if live else None
+	if frappe.db.get_value("TEX Contract", contract, "active_version") != live_name:
+		_go_live(contract, live_name)
 	audit("contract.withdraw", reference_doctype="TEX Contract Version", reference_name=name, property=prop,
-	      reason=reason)
+	      new={"scheduled": scheduled, "restored": restored, "quotes_expired": len(quotes)}, reason=reason)
 	clear_terms_cache()
 
 

@@ -936,6 +936,7 @@
  "rates.version.view_v": "Wyświetl {v}",
  "rates.version.withdraw": "Wycofaj",
  "rates.version.withdraw_body": "Nowe rezerwacje od razu przestają korzystać z tej wersji. Istniejące rezerwacje zachowują ceny. Jeśli nie obowiązuje inna wersja, umowa przestaje być sprzedawana.",
+ "rates.version.withdraw_body_scheduled": "Ta wersja jeszcze nie zaczęła się sprzedawać. Wycofanie ją anuluje: obecnie sprzedawana wersja sprzedaje się dalej do rozpoczęcia następnej opublikowanej wersji (lub bez końca). Istniejące rezerwacje zachowują ceny.",
  "rates.version.withdraw_title": "Wycofać {v}?",
  "rates.version.withdraw_v": "Wycofaj {v}",
  "rates.version.withdrawn": "Wycofano {v}",

@@ -922,6 +922,7 @@
  "rates.version.view_v": "{v} ansehen",
  "rates.version.withdraw": "Zurückziehen",
  "rates.version.withdraw_body": "Neue Buchungen nutzen diese Version ab sofort nicht mehr. Bestehende Buchungen behalten ihre Preise. Ist keine andere Version aktiv, wird der Vertrag nicht mehr verkauft.",
+ "rates.version.withdraw_body_scheduled": "Diese Version hat noch nicht begonnen. Zurückziehen storniert sie: Die jetzt verkaufte Version verkauft weiter, bis die nächste veröffentlichte Version beginnt (oder ohne Ende). Bestehende Buchungen behalten ihre Preise.",
  "rates.version.withdraw_title": "{v} zurückziehen?",
  "rates.version.withdraw_v": "{v} zurückziehen",
  "rates.version.withdrawn": "{v} zurückgezogen",

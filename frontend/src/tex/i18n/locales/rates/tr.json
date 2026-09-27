@@ -922,6 +922,7 @@
  "rates.version.view_v": "{v} görüntüle",
  "rates.version.withdraw": "Geri çek",
  "rates.version.withdraw_body": "Yeni rezervasyonlar bu versiyonu hemen kullanmayı bırakır. Mevcut rezervasyonlar fiyatlarını korur. Yürürlükte başka versiyon yoksa kontratın satışı durur.",
+ "rates.version.withdraw_body_scheduled": "Bu versiyon henüz satışa başlamadı. Geri çekmek onu iptal eder: şu an satan versiyon, yayınlanmış bir sonraki versiyon başlayana kadar (yoksa süresiz) satmaya devam eder. Mevcut rezervasyonlar fiyatlarını korur.",
  "rates.version.withdraw_title": "{v} geri çekilsin mi?",
  "rates.version.withdraw_v": "{v} geri çek",
  "rates.version.withdrawn": "{v} geri çekildi",

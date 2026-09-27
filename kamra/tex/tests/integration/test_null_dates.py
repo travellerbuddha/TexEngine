@@ -13,15 +13,16 @@ and ``<=``, so a row without the date looked "long past" to four jobs:
 """
 
 import frappe
-from frappe.utils import add_days, add_to_date, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, get_datetime, now_datetime, nowdate
 
 from kamra.tex.api import lists
 from kamra.tex.commercial import contracts
 from kamra.tex.crm import loyalty
 from kamra.tex.payments import service as pay
 from kamra.tex.security import grants, scope
+from kamra.tex.services import booking, quoting
 from kamra.tex.tests.integration import fixtures as fx
-from kamra.tex.tests.integration.test_critical_journey import TexTestCase
+from kamra.tex.tests.integration.test_critical_journey import TexTestCase, pick, search_std
 
 CLUB = {"doctype": "TEX Loyalty Program", "program_name": "NEW-1 Club", "property": fx.PROPERTY, "enabled": 1,
         "currency": "EUR", "point_value": 0.1, "min_redeem_points": 50, "max_redeem_percent": 50,
@@ -32,11 +33,22 @@ def status(version: str) -> str:
 	return frappe.db.get_value("TEX Contract Version", version, "status")
 
 
+def schedule(contract: str, at) -> str:
+	"""A new version of ``contract`` published to start at ``at``."""
+	version = contracts.new_draft(contract)
+	contracts.publish(version, effective_from=at)
+	return version
+
+
+def window(version: str) -> tuple:
+	row = frappe.db.get_value("TEX Contract Version", version, ["effective_from", "active_to"], as_dict=True)
+	return (get_datetime(row.effective_from) if row.effective_from else None,
+	        get_datetime(row.active_to) if row.active_to else None)
+
+
 class TestContractRoll(TexTestCase):
 	def schedule(self, contract: str, at) -> str:
-		version = contracts.new_draft(contract)
-		contracts.publish(version, effective_from=at)
-		return version
+		return schedule(contract, at)
 
 	def test_a_live_version_without_an_end_and_a_scheduled_one_stay_published(self):
 		c = fx.create_contract(self.f, code="NEW1-ROLL")
@@ -64,6 +76,71 @@ class TestContractRoll(TexTestCase):
 		v3 = self.schedule(c["contract"], add_to_date(now_datetime(), days=10))  # corrects V2 before its start
 		self.assertEqual(status(v2), "Withdrawn")
 		self.assertEqual(contracts.active_version_header(c["contract"], t2).version_id, v3)
+
+
+
+class TestVersionLifecycle(TexTestCase):
+	"""Y-2 + O-13 (2D-1, ADR-069): withdrawing a version that has not started gives the version before
+	it back the window it was to take over (it never shortens another); withdrawing the version on sale
+	still stops it now. A withdrawn version's open quotes are expired: none is booked."""
+
+	def test_a_withdrawn_scheduled_version_leaves_the_one_before_on_sale(self):
+		c = fx.create_contract(self.f, code="Y2-A")
+		v1, t2 = c["version"], add_to_date(now_datetime(), days=1)
+		v2 = schedule(c["contract"], t2)
+		self.assertEqual(window(v1)[1], window(v2)[0])                        # V1 was to end at V2's start
+		from kamra.tex.api import contracts as api
+
+		shown = {v.name: v.scheduled for v in api.get_contract(c["contract"])["versions"]}
+		self.assertEqual((shown[v1], shown[v2]), (False, True))              # the dialog says what withdraw does
+		contracts.withdraw(v2, reason="wrong prices")
+		self.assertEqual(status(v2), "Withdrawn")
+		self.assertEqual(window(v2), (window(v2)[0], window(v2)[0]))          # a cancelled schedule
+		self.assertIsNone(window(v1)[1])
+		later = add_to_date(now_datetime(), days=2)
+		self.assertEqual(contracts.active_version_header(c["contract"], later).version_id, v1)
+		with self.freeze_time(later):
+			contracts.roll_version_statuses()
+		self.assertEqual(status(v1), "Published")
+		self.assertEqual(frappe.db.get_value("TEX Contract", c["contract"], "active_version"), v1)
+
+	def test_the_version_before_takes_the_withdrawn_ones_window_to_the_next(self):
+		c = fx.create_contract(self.f, code="Y2-B")
+		v1 = c["version"]
+		v2 = schedule(c["contract"], add_to_date(now_datetime(), days=1))
+		v3 = schedule(c["contract"], add_to_date(now_datetime(), days=5))
+		contracts.withdraw(v2, reason="wrong prices")
+		self.assertEqual(window(v1)[1], window(v3)[0])                        # V1 hands over to V3 at T3
+		self.assertIsNone(window(v3)[1])
+		d = fx.create_contract(self.f, code="Y2-B2")
+		w2 = schedule(d["contract"], add_to_date(now_datetime(), days=1))
+		w3 = schedule(d["contract"], add_to_date(now_datetime(), days=5))
+		contracts.withdraw(w3, reason="not needed")
+		self.assertIsNone(window(w2)[1])                                      # V2 stays open-ended
+		self.assertEqual(window(d["version"])[1], window(w2)[0])              # V1 still ends at T2
+
+	def test_withdrawing_the_version_on_sale_still_stops_it_now(self):
+		c = fx.create_contract(self.f, code="Y2-C")
+		v1 = c["version"]
+		v2 = schedule(c["contract"], now_datetime())
+		self.assertEqual(status(v1), "Superseded")
+		contracts.withdraw(v2, reason="wrong prices")
+		self.assertEqual(status(v2), "Withdrawn")
+		self.assertEqual(status(v1), "Superseded")                            # an older version never comes back
+		self.assertIsNone(contracts.active_version_header(c["contract"], add_to_date(now_datetime(), seconds=1)))
+		self.assertIsNone(frappe.db.get_value("TEX Contract", c["contract"], "active_version"))
+
+	def test_a_withdrawn_versions_quote_is_not_booked(self):
+		c = fx.create_contract(self.f, code="Y2-D")
+		offer = pick(search_std(fx.d(6, 10), fx.d(6, 13), [{"adults": 2}]))
+		q = quoting.create_quote(offer["rooms"][0]["offer_key"])
+		self.assertTrue(q["ok"], q)
+		contracts.withdraw(c["version"], reason="wrong prices")
+		with self.assertRaisesRegex(frappe.ValidationError, "no longer on sale"):
+			booking.create_booking(quote_ids=[q["quote_id"]], guest={"first_name": "Ada", "last_name": "Y2",
+			                                                         "email": "ada.y2@example.com"},
+			                       payment_method="Pay at Hotel")
+		self.assertEqual(frappe.db.get_value("TEX Quote", q["quote_id"], "status"), "Expired")
 
 
 class TestOpenEndedRows(TexTestCase):

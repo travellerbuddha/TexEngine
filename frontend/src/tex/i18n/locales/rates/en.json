@@ -922,6 +922,7 @@
  "rates.version.view_v": "View {v}",
  "rates.version.withdraw": "Withdraw",
  "rates.version.withdraw_body": "New bookings stop using this version immediately. Existing reservations keep their prices. If no other version is live, the contract stops selling.",
+ "rates.version.withdraw_body_scheduled": "This version has not started selling. Withdrawing it cancels it: the version selling now keeps selling until the next published version starts (or with no end). Existing reservations keep their prices.",
  "rates.version.withdraw_title": "Withdraw {v}?",
  "rates.version.withdraw_v": "Withdraw {v}",
  "rates.version.withdrawn": "{v} withdrawn",

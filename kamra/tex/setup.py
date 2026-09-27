@@ -227,6 +227,8 @@ TEX_INDEXES = (
 	("Reservation", ["property", "check_in_date"], "tex_res_prop_ci"),
 	("TEX Funnel Event", ["property", "occurred_at"], "tex_funnel_prop_time"),
 	("TEX Funnel Event", ["site", "occurred_at"], "tex_funnel_site_time"),
+	# a withdraw locks its version's open quotes through this, never the whole quote table (O-13, p69)
+	("TEX Quote", ["contract_version", "status", "expires_at"], "tex_quote_version_open"),
 )
 
 
