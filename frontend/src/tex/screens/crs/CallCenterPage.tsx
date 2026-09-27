@@ -39,14 +39,17 @@ import { SearchForm } from "./components/SearchForm"
 import { guestProfile, logCall } from "./lib/api"
 import { useLabels } from "./lib/labels"
 import { copyText, offerId } from "./lib/party"
+import { callCenterShortcut, shortcutPlatform, type CallCenterAction } from "./lib/shortcuts"
 import { quoteText } from "./lib/quoteText"
 import { asApiError, focusFirstInvalid, useBookingFlow, type BookingFlow, type Selection } from "./lib/useBookingFlow"
 import { roomList, selectMessage } from "./lib/selectText"
 import { useServerClock } from "./lib/serverClock"
 import type { GuestProfile, GuestRow, Offer, PropertyResult } from "./lib/types"
 
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
-const ALT = IS_MAC ? "⌥" : "Alt+"
+const PLATFORM = shortcutPlatform(typeof navigator !== "undefined" ? navigator.platform : "")
+const IS_MAC = PLATFORM === "mac"
+// on a Mac ⌥ alone also types characters in fields (O-32): the labels show ⌃⌥, which works everywhere
+const ALT = IS_MAC ? "⌃⌥" : "Alt+"
 const MOD = IS_MAC ? "⌘" : "Ctrl+"
 
 /** Visible shortcut map (also the help dialog). */
@@ -259,37 +262,38 @@ export default function CallCenterPage() {
 
   // ── global shortcuts ──
   useEffect(() => {
+    const actions: Record<CallCenterAction, () => void> = {
+      book: () => void doBook(),
+      new_call: newCall,
+      caller: () => callerRef.current?.focus(),
+      search: () => void doSearch(),
+      results: () => listRef.current?.focus(),
+      requote: () => void flow.requestQuotes(),
+      copy: () => void copyQuote(),
+      guest: () => guestRef.current?.focus(),
+      payment: () => payRef.current?.querySelector<HTMLInputElement>("input[type=radio]:not(:disabled)")?.focus(),
+      notes: () => notesRef.current?.focus(),
+      help: () => setHelp(true),
+    }
     const onKey = (e: KeyboardEvent) => {
       // a dialog (payment link, shortcut help, command palette) owns the keyboard
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "Enter") {
-        e.preventDefault()
-        void doBook()
-        return
-      }
-      if (e.altKey && !e.ctrlKey && !e.metaKey) {
-        const actions: Record<string, () => void> = {
-          KeyN: newCall,
-          KeyC: () => callerRef.current?.focus(),
-          KeyS: () => void doSearch(),
-          KeyR: () => listRef.current?.focus(),
-          KeyU: () => void flow.requestQuotes(),
-          KeyQ: () => void copyQuote(),
-          KeyG: () => guestRef.current?.focus(),
-          KeyP: () => payRef.current?.querySelector<HTMLInputElement>("input[type=radio]:not(:disabled)")?.focus(),
-          KeyM: () => notesRef.current?.focus(),
-        }
-        const run = actions[e.code]
-        if (run) {
-          e.preventDefault()
-          run()
-        }
-        return
-      }
-      if (e.key === "?" && !isTyping(e.target)) {
-        e.preventDefault()
-        setHelp(true)
-      }
+      const action = callCenterShortcut(
+        {
+          key: e.key,
+          code: e.code,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altGraph: e.getModifierState?.("AltGraph") ?? false,
+          editable: isTyping(e.target),
+        },
+        PLATFORM,
+      )
+      // a key that is no shortcut (a character typed with Option on a Mac…) stays the field's
+      if (!action) return
+      e.preventDefault()
+      actions[action]()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
