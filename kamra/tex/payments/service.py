@@ -18,13 +18,13 @@ from frappe import _
 from frappe.utils import add_to_date, get_datetime, getdate, now_datetime
 
 from kamra.tex.money import ZERO, D, from_db, quantize, to_str
-from kamra.tex.payments.providers import REGISTRY, account_problem, simple
+from kamra.tex.payments.providers import REGISTRY, account_problem, simple, turkey
 from kamra.tex.payments.providers.base import Intent, Outcome, ProviderError
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
-from kamra.tex.services.txn import undo_step
+from kamra.tex.services.txn import transaction_lost
 
 
 class AccountRefused(frappe.ValidationError):
@@ -37,7 +37,7 @@ class ChargeSuperseded(frappe.ValidationError):
 
 
 class PaymentBusy(frappe.ValidationError):
-	"""Another request is starting a payment for the same link right now."""
+	"""Another request is starting the same payment (or one for the same link) right now."""
 
 
 class RefundUnknown(frappe.ValidationError):
@@ -67,6 +67,14 @@ def _durable_commit() -> None:
 	keep one transaction."""
 	if not frappe.flags.in_test:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- a refund attempt must be durable before the gateway call
+
+
+def _commit_step() -> None:
+	"""End a step of a payment start (NEW-6, ADR-066): what it wrote is on record, and every row, gap
+	and naming-series lock the request took so far is released before the gateway is asked for a
+	checkout, and again once its answer is recorded. Tests keep one transaction."""
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- no row, gap or series lock is held through a gateway call (NEW-6)
 
 
 # a charge in one of these states still records a payment the gateway verifies (another tab,
@@ -280,7 +288,25 @@ def _new_txn(**kw) -> frappe.model.document.Document:
 	return doc
 
 
-CHECKOUT_SAVEPOINT = "tex_checkout"
+START_SAVEPOINT = "tex_start_payment"
+# a start asks the gateway with no lock held; for this long its lease tells a second start of the same
+# charge that one is being started. Longer than the slowest gateway path: Sipay makes two calls (token,
+# checkout), each up to TIMEOUT to connect and TIMEOUT to read (4 × TIMEOUT = 80 s), plus a margin: 5 ×
+# TIMEOUT = 100 s. An older lease is a start that died between its steps: its checkout never reached the
+# guest (NEW-6, ADR-066)
+CHECKOUT_LEASE_SECONDS = 5 * turkey.TIMEOUT
+
+
+def _busy() -> None:
+	frappe.throw(_("A payment is being started. Please wait a moment and try again."), PaymentBusy)
+
+
+def _end_lease(txn, stamp) -> None:
+	"""Clear the checkout lease of ``txn`` (locked) if it is still this start's; a later start that took
+	over a lapsed one keeps its own."""
+	if txn.checkout_started_at and get_datetime(txn.checkout_started_at) == stamp:
+		frappe.db.set_value("TEX Payment Transaction", txn.name, "checkout_started_at", None, update_modified=False)
+		txn.checkout_started_at = None            # a save of ``txn`` after this never writes it back
 
 
 def start_payment(*, property: str, amount, currency: str, provider_account: str, booking: str | None = None,
@@ -290,7 +316,13 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	"""Start (or, with the same key, restart) a charge. A restart reuses the Pending charge;
 	when that charge cannot take another checkout, or its new checkout fails, it is superseded:
 	cancelled, with a late verified payment still recorded, and ``ChargeSuperseded`` raised so
-	the caller can start a new charge (G-68)."""
+	the caller can start a new charge (G-68).
+
+	Three steps, so that no row, gap or naming-series lock is held while the gateway works (NEW-6,
+	ADR-066): (a) the charge is put on record with a checkout lease and committed — with everything the
+	request did before (a booking made just now included); (b) the gateway is asked, no lock held; (c)
+	its answer is recorded under the charge's lock and committed. A start of the same charge while one's
+	lease is young is told so (``PaymentBusy``); a failed checkout is on record before the caller hears."""
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Nothing to pay."))
@@ -304,60 +336,99 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	if existing:
 		# a locking read by name: the charge as it is now (a callback may have settled it after
 		# this request's snapshot, G-68). Only an existing row is locked, never a gap of the key
-		# index, so no other payment's insert waits behind this one's gateway call.
+		# index, so no other payment's insert waits behind this one.
 		existing = frappe.db.get_value("TEX Payment Transaction", existing,
-		                               ["name", "status", "provider_account", "amount", "currency"], as_dict=True,
-		                               for_update=True)
+		                               ["name", "status", "provider_account", "amount", "currency",
+		                                "checkout_started_at"], as_dict=True, for_update=True)
 	if existing and existing.status != "Pending":
 		frappe.throw(_("This payment was already processed ({0}).").format(existing.status))
+	stamp = now_datetime()
+	if existing and existing.checkout_started_at and \
+			get_datetime(existing.checkout_started_at) > add_to_date(stamp, seconds=-CHECKOUT_LEASE_SECONDS):
+		# another request is asking the gateway for this charge's checkout right now (another tab, a
+		# double click, a retried request): one checkout at a time, never two for one charge
+		_busy()
 	if existing and (existing.provider_account != provider_account or existing.currency != currency
 	                 or from_db(existing.amount, existing.currency) != amount):
 		# a reused charge is exactly the charge that was started, never re-routed or re-priced
 		frappe.throw(_("This payment was started with another method or amount."))
 	provider = provider_for(provider_account)
+	# ── (a) the charge on record, with its lease ──
 	# a second start of the same charge (another tab, a double click, a restart) reuses the
 	# Pending transaction: one charge, never two (G-68)
 	if existing:
 		txn = frappe.get_doc("TEX Payment Transaction", existing.name, for_update=True)
 		if not provider.can_add_checkout(txn.provider_ref):
 			_supersede(txn, "another checkout was asked for")
+		frappe.db.set_value("TEX Payment Transaction", txn.name, "checkout_started_at", stamp, update_modified=False)
 	else:
+		# the key is unique: a start that lost the race to the same new key undoes its own steps back to
+		# here and is told a payment is being started (one start per charge, and per link: each tab of a
+		# link gets the same key while its charge is Pending)
+		frappe.db.savepoint(START_SAVEPOINT)
+		messages = frappe.local.message_log
+		mark = len(messages)
 		# a booking waiting for its payment: the attempt is refused once its hold is over, else it
 		# keeps the rooms until its own deadline, never longer (K-2a)
 		held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
 		expires_at = holds.open_attempt(held, holds.TRANSFER if provider.name == holds.TRANSFER else method) \
 			if held else None
-		txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
-		               provider_account=provider_account, provider=provider.name, idempotency_key=idempotency_key,
-		               booking=booking, payment_link=payment_link, return_url=return_url, reservation=reservation,
-		               expires_at=expires_at)
-	frappe.db.savepoint(CHECKOUT_SAVEPOINT)
+		try:
+			txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
+			               provider_account=provider_account, provider=provider.name,
+			               idempotency_key=idempotency_key, booking=booking, payment_link=payment_link,
+			               return_url=return_url, reservation=reservation, expires_at=expires_at,
+			               checkout_started_at=stamp)
+		except frappe.UniqueValidationError:
+			frappe.db.rollback(save_point=START_SAVEPOINT)
+			del messages[mark:]           # Frappe's "must be unique" message is not this request's answer
+			# a locking read: the charge the other request committed, not this transaction's older snapshot
+			if not frappe.db.sql("SELECT name FROM `tabTEX Payment Transaction` WHERE idempotency_key=%s "
+			                     "LOCK IN SHARE MODE", idempotency_key):
+				raise
+			_busy()
+	intent = Intent(transaction=txn.name, amount=amount, currency=currency, description=description,
+	                return_url=return_url, callback_url=callback_url(txn.name, "return"),
+	                notify_url=callback_url(txn.name, "notify"), customer=customer, locale=locale)
+	_commit_step()
+	# ── (b) the gateway, no lock held: nothing between the commit and the call takes one ──
 	try:
-		checkout = provider.create_checkout(Intent(transaction=txn.name, amount=amount, currency=currency,
-		                                           description=description, return_url=return_url,
-		                                           callback_url=callback_url(txn.name, "return"),
-		                                           notify_url=callback_url(txn.name, "notify"),
-		                                           customer=customer, locale=locale))
+		checkout = provider.create_checkout(intent)
 	except Exception as e:
-		# a deadlock: the request's transaction is gone, raised for the retry, never recorded as here; anything
-		# else (a lock wait timeout undoes only its statement) is a failed start, recorded below (ADR-056
-		# second and third reviews)
-		undo_step(e, CHECKOUT_SAVEPOINT)
+		if transaction_lost(e):
+			# a deadlock: the request's transaction is gone, raised for the retry (ADR-056 reviews)
+			raise
+		# ── (c′) a failed start, on record before the caller hears of it ──
 		log_exception(f"TEX payment start failed {txn.name}")
-		if existing:
+		txn = frappe.get_doc("TEX Payment Transaction", txn.name, for_update=True)      # as it is now
+		_end_lease(txn, stamp)
+		if txn.status == "Pending" and existing:
 			# the gateway may refuse a second checkout for the same order; a new charge gets a
 			# new order, and the checkout started earlier is still recorded if it is paid
-			_supersede(txn, "the gateway refused another checkout")
-		txn.status = "Failed"
-		txn.error_message = str(e)[:500]
-		txn.completed_at = now_datetime()
-		txn.save(ignore_permissions=True)
+			try:
+				_supersede(txn, "the gateway refused another checkout")
+			except ChargeSuperseded:
+				_commit_step()
+				raise
+		if txn.status == "Pending":
+			txn.status = "Failed"
+			txn.error_message = str(e)[:500]
+			txn.completed_at = now_datetime()
+			txn.save(ignore_permissions=True)
+		# a charge a callback settled meanwhile (an earlier checkout of a reused one) keeps its status
+		_commit_step()
 		frappe.throw(_("The payment could not be started. Please try another method."))
+	# ── (c) the answer, recorded under the charge's lock; its status is never changed here ──
+	txn = frappe.get_doc("TEX Payment Transaction", txn.name, for_update=True)          # as it is now
 	if checkout.provider_ref:
 		# a reused charge keeps what its earlier checkouts need to be recognised when paid
 		txn.provider_ref = provider.merge_ref(txn.provider_ref, checkout.provider_ref) if existing \
 			else checkout.provider_ref
+		# an earlier checkout of a reused charge may have been paid meanwhile: its reference is still kept
+		txn.flags.tex_system_update = txn.status != "Pending"
 		txn.save(ignore_permissions=True)
+	_end_lease(txn, stamp)
+	_commit_step()
 	return {"transaction": txn.name, "kind": checkout.kind, "url": checkout.url, "fields": checkout.fields,
 	        "instructions": checkout.instructions, "sandbox": provider.sandbox}
 
@@ -528,7 +599,7 @@ def _lock_link_then_payment(transaction: str, link: str | None = None) -> None:
 def lock_link(name: str, *, nowait: bool = False) -> frappe._dict:
 	"""Lock a payment link and read it as it is now (a locking read, not the snapshot).
 	``nowait``: a link another request is starting a payment for answers at once instead of
-	waiting behind that request's gateway call (G-68)."""
+	waiting for that request (G-68); the link is held only until its charge is on record (NEW-6)."""
 	query = "SELECT name, status, amount, paid_amount, currency, property FROM `tabTEX Payment Link` WHERE name=%s"
 	try:
 		rows = frappe.db.sql(query + (" FOR UPDATE NOWAIT" if nowait else " FOR UPDATE"), name, as_dict=True)

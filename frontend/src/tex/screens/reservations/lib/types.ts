@@ -264,7 +264,13 @@ export interface BasketClawback {
 export interface CancelPreview {
   penalty: string
   currency: string
-  basis: { rule: string | CancellationRule; days_before: number; basket_clawback?: BasketClawback }
+  basis: {
+    rule: string | CancellationRule
+    days_before: number
+    basket_clawback?: BasketClawback
+    /** a fixed penalty converted from its policy's currency at the rate the sale recorded (Y-3 B) */
+    fx?: { from: string; to: string; rate: string; amount: string }
+  }
 }
 
 export interface CancelResult {

@@ -72,3 +72,4 @@ kamra.patches.tex.p63_versioned_passwords
 kamra.patches.tex.p64_agent_log_read_only
 kamra.patches.tex.p65_agent_log_hotel
 kamra.patches.tex.p66_cost_doctypes_system_only
+kamra.patches.tex.p68_payment_checkout_lease

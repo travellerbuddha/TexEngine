@@ -92,6 +92,8 @@ export interface RatePlanInfo {
     refundable?: boolean
     rules?: CancellationRule[]
     no_show?: { type: string; value: string }
+    /** of its fixed amounts; frozen only on a policy with one (ADR-067) */
+    currency?: string
   } | null
   payment_policy?: {
     id?: string
@@ -101,6 +103,8 @@ export interface RatePlanInfo {
     deposit_value?: string
     allow_pay_at_hotel?: boolean
     balance_due_days?: number
+    /** of its fixed deposit; frozen only on a policy with one (ADR-067) */
+    currency?: string
   } | null
   inclusions: string[]
 }
