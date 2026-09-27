@@ -1544,6 +1544,23 @@ sends:
   `<meta name="referrer">` still wins, so the pages are safe; production nginx should not add
   its own policy on `/book/pay`, `/pay` (GO_LIVE_READINESS §4 has the snippet).
 
+**Note (audit Part 2G-1, 2026-09-27): session tokens, manage links and trackers.**
+- *O-28.* A signed-in user's booking-engine page (`/book/…` and a hotel's pinned host) carries the
+  session's CSRF token (`booking_host.with_session_token`); the engine sends it with every public
+  call (header; `csrf_token` form field for `sendBeacon`). A guest's page has none.
+- *Tracker rule.* A page that carries a session token loads no third-party tracker and shows no
+  consent banner: the hotel's tag container is arbitrary script, and on the platform's origin
+  (shared with `/kamra` and `/app`) it would run with the staff session and could call any
+  `/api/method` as that user; a staff booking is also no web conversion. ADR-050's staff flag
+  (`created_via` Desk, `booking.staff_on_site`) is unchanged.
+- *O-27.* The confirmation page links to `/<site>/manage` without the token; the click stores this
+  booking's token as the tab's site token, which the manage page reads (the fragment first, as for
+  the e-mailed magic link). No address, href or tracker request carries a manage token.
+- *Operations (remaining risk).* A tracker already loaded in another tab of the platform's origin
+  (a guest page before sign-in) keeps running and could act with a session opened later in that
+  browser. A site with trackers should be served on its own verified host (ADR-035), never on the
+  platform's origin; GO_LIVE_READINESS should say so.
+
 ## ADR-047 Operations: a scoped system status, a boolean guest ping, alerts on change; guest e-mail status follows Frappe's queue
 **Context.** GO_LIVE_READINESS listed two operations gaps.
 - *Monitoring.* TEX had no status endpoint. `kamra/health.py` is upstream Kamra diagnostics: it

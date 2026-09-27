@@ -1475,3 +1475,13 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - Y-4 **COMPLETE**: a price is refundable only when its rate plan row and its cancellation policy both are (quote `rate_plan.refundable`, search, fee); publish refuses `RATE_PLAN_REFUNDABLE`; new rows take the plan's/policy's flag (ADR-067) · unit `TestRefundableByPolicy`/`TestRefundableIssues`, `test_commercial_flows.TestNonRefundablePolicy`.
 - Y-3 A **COMPLETE** (Y-3 B, booking.py, is the payments session's Part 2E): policies' fixed amounts have a currency, frozen only on fixed policies, contract's when empty; `POLICY_CURRENCY`; helpers `fixed_in_sell`/`first_rooms_per_policy`; p59 reports, no backfill · unit `test_policy_money`, `TestPolicyCurrency`, `test_patches` p59.
 - O-2 **COMPLETE**: version setting `infants_count_as_children` (default 1, a new contract's first draft 0): off, infants neither count for combinations/max_children nor take a child's position; frozen only when 0 · unit `TestInfantsNotChildren`, `test_commercial_flows.TestInfantsNotChildren`, e2e `pricing-infants`.
+
+## 6G1. Audit Part 2G-1 (2026-09-27)
+
+- O-28 **COMPLETE**: a signed-in user's booking-engine page (/book and a pinned host) carries the session CSRF token, sent by `pub` (header) and `beacon` (form field); such a page loads no third-party tracker and shows no consent banner (ADR-046 note) · `test_security_hygiene` O-28, e2e `guest-session` O-28.
+- O-27 **COMPLETE**: the confirmation's manage link carries no token (`/<site>/manage`; the click stores this booking's token for the tab); no URL, href or tracker request carries it · e2e `guest-session` O-27, `custom-host`.
+- G-62 **COMPLETE**: GA4/GTM/pixel ids judged by one rule (`booking/lib/analyticsIds.ts`) on the server (new or changed values, trimmed), the admin form and the engine · `test_security_hygiene` G-62, unit `analytics-ids`, `branding`.
+- G-44 **COMPLETE**: the widget restores the host's scrolling on close, removal and re-render, and keeps the site's theme across re-renders · e2e `widget`.
+- O-32 **COMPLETE**: Call Center shortcuts (`crs/lib/shortcuts.ts`): on a Mac ⌃⌥ always, ⌥ alone not where it types a character in a field; elsewhere Alt without Ctrl/Meta/AltGr; labels ⌃⌥ on a Mac · unit `callcenter-shortcuts`, e2e `crs` O-32.
+- O-29 **COMPLETE**: CRS search, quote and quote summary apply only the latest request's answer · e2e `crs-actions` O-29 (summary and search races).
+- O-30 **COMPLETE**: checkout books the quotes it just made again (older than 25 min), with a new idempotency key · e2e `booking` O-30.

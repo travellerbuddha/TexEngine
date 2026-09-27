@@ -12,7 +12,7 @@ import { Summary } from "../flow/Summary"
 import { FlowErrorAlert, PriceChangeNotice, RejectedExtrasNotice, useBackToExtras, useContinue } from "../flow/useContinue"
 import { rememberReturn, sessionId } from "../lib/storage"
 import { useSite } from "../site/SiteContext"
-import type { PaymentMethod, PaymentStart, SiteExtra } from "../types"
+import type { PaymentMethod, PaymentStart, QuoteResponse, SiteExtra } from "../types"
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
@@ -579,16 +579,20 @@ function PaymentStep() {
     }
     setPending(true)
     setFlowError(null)
+    // quotes older than the page keeps them are made again, and those are booked: this render's
+    // flow still holds the old ones (O-30)
+    let fresh: QuoteResponse[] | undefined
     if (!quotesFresh) {
-      const { error, rejected } = await quoteAll()
+      const { error, rejected, quotes } = await quoteAll()
       if (error) {
         setPending(false)
         return setFlowError(error)
       }
       // an extra can no longer be added: the guest sees it (and the new total) before booking
       if (rejected.length) return setPending(false)
+      fresh = quotes
     }
-    const res = await book()
+    const res = await book({ quotes: fresh })
     if (res.error) {
       // a limited extra ran out, not the room: back to the extras, never to the room search
       if (res.error.kind === "extra_sold_out") return void backToExtras(res.error)

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { detectLang, useI18n } from "../i18n"
 import { hasTrackers, loadAnalytics, saveConsent, storedConsent, type Consent } from "../lib/analytics"
-import { ApiError, pub } from "../lib/api"
+import { ApiError, pub, sessionToken } from "../lib/api"
 import { applyTheme, themeFrom, type Theme } from "../lib/branding"
 import type { Hotel, Site } from "../types"
 
@@ -9,6 +9,8 @@ interface SiteCtx {
   site: Site
   theme: Theme
   hotel: (name: string | null | undefined) => Hotel | undefined
+  /** the site's trackers may run on this page (configured, and no signed-in user's page) */
+  tracking: boolean
   consent: Consent
   needsConsent: boolean
   setConsent: (c: Exclude<Consent, null>) => void
@@ -74,7 +76,10 @@ export function SiteProvider({ site, children }: { site: Site; children: ReactNo
     if (offered && !offered.includes(lang)) setLang(detectLang(offered, site.default_language))
   }, [site, lang, setLang])
 
-  const trackersConfigured = hasTrackers(site)
+  // A page served to a signed-in user (it carries the session's CSRF token) loads no third-party
+  // tracker and asks no consent: the hotel's tag container would run with that session on the
+  // platform's origin, and a staff booking is no web conversion (O-28, ADR-046 note)
+  const trackersConfigured = hasTrackers(site) && !sessionToken()
   const bannerOn = !!site.analytics?.consent_banner
 
   useEffect(() => {
@@ -96,6 +101,7 @@ export function SiteProvider({ site, children }: { site: Site; children: ReactNo
       site,
       theme,
       hotel: (name) => site.hotels.find((h) => h.name === name),
+      tracking: trackersConfigured,
       consent,
       needsConsent: trackersConfigured && bannerOn && (consent === null || reopened),
       setConsent,

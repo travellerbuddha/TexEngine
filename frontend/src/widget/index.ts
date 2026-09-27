@@ -104,6 +104,8 @@ export class TexBookingWidget extends HTMLElement {
   private adults = 2
   private ages: (number | null)[] = []
   private siteName = ""
+  /** the site's theme and texts once fetched: applied again after every render (G-44) */
+  private info: SiteInfo | null = null
   private rendered = false
   private onMessage = (e: MessageEvent) => {
     const frame = this.root.querySelector("iframe")
@@ -145,11 +147,15 @@ export class TexBookingWidget extends HTMLElement {
   }
   disconnectedCallback() {
     window.removeEventListener("message", this.onMessage)
+    // removed with the modal open: the host page must not stay locked (G-44)
+    this.unlock()
   }
   attributeChangedCallback(name: string, a: string | null, b: string | null) {
     if (!this.rendered || a === b) return
+    const other = name === "site" || name === "api"
+    if (other) this.info = null
     this.render()
-    if (name === "site" || name === "api") void this.loadTheme()
+    if (other) void this.loadTheme()
   }
 
   private async loadTheme() {
@@ -164,6 +170,15 @@ export class TexBookingWidget extends HTMLElement {
           .catch(() => null),
       )
     const s = await themeCache.get(key)
+    // another site asked for meanwhile: its own fetch applies it
+    if (!s || key !== `${this.api}|${this.site}`) return
+    this.info = s
+    this.applyTheme()
+  }
+
+  /** The site's theme, title and button label on the current render (render() rebuilds `.w`). */
+  private applyTheme() {
+    const s = this.info
     const w = this.root.querySelector<HTMLElement>(".w")
     if (!s || !w) return
     this.siteName = s.name || ""
@@ -208,12 +223,15 @@ export class TexBookingWidget extends HTMLElement {
 
   private render() {
     this.rendered = true
+    // the markup below replaces an open modal too: give the host page its scrolling back
+    this.unlock()
     const mode = this.getAttribute("mode") || "search"
     const today = iso(new Date())
     if (mode === "button") {
       this.root.innerHTML = `<style>${CSS}</style><div class="w" part="root"><button type="button" class="bk" part="button">${esc(this.getAttribute("label") || this.t("book"))}</button>${this.modalHtml()}</div>`
       this.root.querySelector(".bk")!.addEventListener("click", () => this.open(this.url({}, true)))
       this.wireModal()
+      this.applyTheme()
       return
     }
     this.root.innerHTML = `<style>${CSS}</style>
@@ -325,6 +343,7 @@ export class TexBookingWidget extends HTMLElement {
       else this.open(this.url(params, true))
     })
     this.wireModal()
+    this.applyTheme()
   }
 
   private renderGuests() {
@@ -382,20 +401,31 @@ export class TexBookingWidget extends HTMLElement {
     const frame = dlg.querySelector("iframe")!
     if (frame.getAttribute("src") !== src) frame.setAttribute("src", src)
     this.opener = (this.root.activeElement as HTMLElement) ?? null
-    // stop the host page scrolling behind the modal; restored exactly on close
-    this.hostOverflow = document.documentElement.style.overflow
-    document.documentElement.style.overflow = "hidden"
+    // stop the host page scrolling behind the modal; restored exactly on close, on removal and when
+    // a re-render replaces the modal (unlock)
+    if (!this.locked) {
+      this.hostOverflow = document.documentElement.style.overflow
+      document.documentElement.style.overflow = "hidden"
+      this.locked = true
+    }
     dlg.showModal()
     frame.focus()
   }
 
   private hostOverflow = ""
+  private locked = false
+
+  private unlock() {
+    if (!this.locked) return
+    this.locked = false
+    document.documentElement.style.overflow = this.hostOverflow
+  }
 
   close() {
     const dlg = this.root.querySelector("dialog")
     if (!dlg?.open) return
     dlg.close()
-    document.documentElement.style.overflow = this.hostOverflow
+    this.unlock()
     this.opener?.focus()
   }
 }

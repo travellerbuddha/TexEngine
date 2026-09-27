@@ -68,6 +68,8 @@ export interface QuoteOutcome {
   error: FlowError | null
   /** extras requested but not added by the quotes just made (empty on error) */
   rejected: RejectedExtra[]
+  /** the quotes just made (empty on error): book({ quotes }) books these, not the render's (O-30) */
+  quotes: QuoteResponse[]
 }
 
 interface FlowState {
@@ -157,7 +159,8 @@ interface Ctx {
   setGuest: (g: Partial<Guest>) => void
   setMethod: (m: PaymentMethod, providerAccount?: string | null) => void
   setTerms: (v: boolean) => void
-  book: () => Promise<{ error?: FlowError; payment?: PaymentStart | null; booking?: BookResponse }>
+  /** Book the flow's quotes, or `quotes` just made (quoteAll) with a new idempotency key. */
+  book: (opts?: { quotes?: QuoteResponse[] }) => Promise<{ error?: FlowError; payment?: PaymentStart | null; booking?: BookResponse }>
   hasExtras: boolean
   allSelected: boolean
   clearPriceChanges: () => void
@@ -411,7 +414,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const quoteAll = useCallback(async (override?: (Selection | null)[], baseline?: (Selection | null)[]): Promise<QuoteOutcome> => {
     const sels = override ?? flow.selections
     const base = baseline ?? sels
-    const failed = (error: FlowError): QuoteOutcome => ({ error, rejected: [] })
+    const failed = (error: FlowError): QuoteOutcome => ({ error, rejected: [], quotes: [] })
     if (!sels.length || sels.some((s) => !s)) return failed({ kind: "invalid", message: "" })
     // the rooms of a booking are quoted together: a coupon's minimum basket is the whole
     // booking's (G-84), so every room is priced knowing the others
@@ -442,7 +445,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     }
     setFlow((f) => ({ ...f, quotes, quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
-    return { error: null, rejected: findRejected(quotes, flow.extras) }
+    return { error: null, rejected: findRejected(quotes, flow.extras), quotes }
   }, [flow.selections, flow.extras, site.slug])
 
   const rejectedExtras = useMemo(() => findRejected(flow.quotes, flow.extras), [flow.quotes, flow.extras])
@@ -529,11 +532,14 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   }, [basketKey, site.slug, basketTick])
   const reloadBasket = useCallback(() => setBasketTick((n) => n + 1), [])
 
-  const book = useCallback(async () => {
-    const quoteIds = flow.quotes.map((q) => q?.quote_id).filter((x): x is string => !!x)
+  const book = useCallback(async (opts: { quotes?: QuoteResponse[] } = {}) => {
+    // quotes just made in the same step (refreshed before booking) are not in this render's flow yet:
+    // the caller passes them, and they are a new intent with a new key (O-30)
+    const fresh = opts.quotes
+    const quoteIds = (fresh ?? flow.quotes).map((q) => q?.quote_id).filter((x): x is string => !!x)
     if (!quoteIds.length || quoteIds.length !== flow.selections.length) return { error: { kind: "expired", message: "" } as FlowError }
-    const bookKey = flow.bookKey ?? newKey("book")
-    if (!flow.bookKey) setFlow((f) => ({ ...f, bookKey }))
+    const bookKey = (fresh ? null : flow.bookKey) ?? newKey("book")
+    if (bookKey !== flow.bookKey) setFlow((f) => ({ ...f, bookKey }))
     const g = flow.guest
     const method = flow.method ?? "Card"
     // name the gateway only when several accounts offer this method (e.g. two card gateways)

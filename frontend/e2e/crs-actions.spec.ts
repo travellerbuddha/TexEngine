@@ -7,9 +7,11 @@
 //   after booking, sends a payment link for the balance, re-sends the confirmation with a new
 //   manage link and cancels the reservation inside the free-cancellation window: every action
 //   through the reservation screen, every figure from the server.
+// - O-29: an answer that comes back late (an earlier search, the quote summary of a payment method
+//   left meanwhile) never replaces the current one on the Call Center page.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e crs-actions
 import { expect, test, type Page } from "@playwright/test"
-import { byLabel, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
+import { byLabel, holdNext, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
 import { openReservation, readLockedPrice, readRevisions } from "./flows/reservations"
 
 const AGENT = "agent@demo.tex"
@@ -247,4 +249,95 @@ test("Reservation actions from the CRS: add extras, payment link, re-send confir
       await pageApi(page, "kamra.tex.api.crs.cancel", { reservation: res, reason: `E2E clean-up (${run})`, waive_penalty: 0 })
     if (link) await pageApi(page, "kamra.tex.api.payments.cancel_link", { name: link, reason: `E2E clean-up (${run})` })
   }
+})
+
+// ─── O-29: late answers (Call Center) ───────────────────────────────────────
+
+const mdy = (iso: string) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(0, 4)}`
+const addDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+/** Two animation frames: whatever a delivered answer changes is on screen. */
+const frames = (page: Page) => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+
+/** The Call Center with the market (DE) and a check-in set; check-out follows (2 nights). */
+async function callCenterSearchForm(page: Page, offsetDays: number) {
+  await english(page)
+  await login(page, AGENT)
+  await page.goto(texPath("/tex/crs/call-center"))
+  await expect(page.getByRole("heading", { level: 1, name: "Call Center" })).toBeVisible()
+  await page.keyboard.press("Alt+KeyS")
+  const market = byLabel(page, "Market")
+  await expect(market).toBeFocused()
+  await page.keyboard.type("Germ")
+  await expect(market).toHaveValue("DE")
+  const { checkIn } = stayDates(offsetDays, 2)
+  await byLabel(page, "Check-in").focus()
+  await page.keyboard.type(mdy(checkIn))
+  await expect(byLabel(page, "Check-out")).toHaveValue(addDays(checkIn, 2))
+  return checkIn
+}
+
+const results = (page: Page) => page.getByText(/ · market DE$/)
+
+test("O-29: a search answered late never replaces the newer search's results", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  const checkIn = await callCenterSearchForm(page, 150)
+  // the first search (2 nights) is answered after the second (3 nights)
+  const first = await holdNext(page, "kamra.tex.api.ui_crs.search")
+  await page.keyboard.press("Alt+KeyS")
+  await first.held
+  await byLabel(page, "Check-out").fill(addDays(checkIn, 3))
+  await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search") && r.ok()), page.keyboard.press("Alt+KeyS")])
+  await expect(results(page)).toContainText("3 nights")
+  const late = page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search"))
+  first.release()
+  await late
+  await frames(page)
+  await expect(results(page)).toContainText("3 nights")
+  noErrors()
+})
+
+test("O-29: the quote summary of a payment method left meanwhile never shows", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  await callCenterSearchForm(page, 160)
+  await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search") && r.ok()), page.keyboard.press("Alt+KeyS")])
+  await expect(page.getByRole("listbox", { name: "Offers" })).toBeFocused()
+  await page.keyboard.press("ArrowDown")
+  await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary") && r.ok()), page.keyboard.press("Enter")])
+
+  // the card's summary is held, and marked: its amount due now reads 987.65
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  let arrived!: () => void
+  const held = new Promise<void>((r) => (arrived = r))
+  await page.route(
+    (url) => isMethod(url.href, "kamra.tex.api.ui_crs.quote_summary"),
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { message: { due_now: string | null } }
+      body.message.due_now = "987.65"
+      arrived()
+      await gate
+      await route.fulfill({ response, json: body })
+    },
+    { times: 1 },
+  )
+  await page.getByRole("radio", { name: /Card/ }).check()
+  await held
+  // the agent moves on to bank transfer, whose summary answers first
+  await Promise.all([
+    page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary") && r.ok()),
+    page.getByRole("radio", { name: /Bank transfer/ }).check(),
+  ])
+  await expect(page.getByText(/Due now/).first()).toBeVisible()
+  const late = page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary"))
+  release()
+  await late
+  await frames(page)
+  await expect(page.getByText(/987\.65/)).toHaveCount(0)
+  await expect(page.getByRole("radio", { name: /Bank transfer/ })).toBeChecked()
+  noErrors()
 })

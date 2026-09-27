@@ -89,12 +89,25 @@ export function endpoint(fn: string) {
   return `/api/method/kamra.tex.api.public.${fn}`
 }
 
+/** The session's CSRF token, when the page was served to a signed-in user (O-28): Frappe refuses
+ * a POST of such a session without it, `allow_guest` or not. A guest's page has none. */
+export function sessionToken(): string | null {
+  const t = (window as Window & { csrf_token?: unknown }).csrf_token
+  return typeof t === "string" && t ? t : null
+}
+
 export async function pub<T>(fn: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
   let res: Response
+  const csrf = sessionToken()
   try {
     res = await fetch(endpoint(fn), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": acceptLanguage },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "Accept-Language": acceptLanguage,
+        ...(csrf ? { "X-Frappe-CSRF-Token": csrf } : {}),
+      },
       body: JSON.stringify(args),
       credentials: "same-origin",
       signal,
@@ -116,6 +129,9 @@ export async function pub<T>(fn: string, args: Record<string, unknown> = {}, sig
 /** Fire-and-forget POST that survives page unload (funnel events). */
 export function beacon(fn: string, args: Record<string, string>) {
   const body = new URLSearchParams(args)
+  // sendBeacon cannot send headers: Frappe also takes the token as a form field
+  const csrf = sessionToken()
+  if (csrf) body.set("csrf_token", csrf)
   try {
     if (navigator.sendBeacon && navigator.sendBeacon(endpoint(fn), body)) return
   } catch {
