@@ -9183,6 +9183,22 @@ the versions the roll superseded the state their contract's later publishes woul
 - A transfer is confirmed with the amount that came (the staff API requires its value date); one that no longer covers the
   deposit leaves the booking Pending, and it expires with its hold. New reconciliation reasons tell the team only.
 
+## ADR-066 No lock is held through a gateway call (audit Part 2E-1, NEW-6)
+- Invariant: no row, gap or naming-series lock is held while a gateway is asked over HTTP. Frappe keeps `tabSeries` rows
+  (TEX-, RES-, REV-, AUD-, COM-, G-, PTX-) locked to the commit: across a 20–40 s checkout every write of the site waited.
+- `start_payment`: (a) checks, the reused charge locked, `open_attempt`, the insert, a checkout lease (`checkout_started_at`,
+  p68), the signed intent, commit; (b) `create_checkout`, nothing locking before or in it; (c) the charge locked by name,
+  `provider_ref` written or merged, status never changed, its own lease cleared, commit; (c′) a gateway error: a new
+  Pending charge Failed, a reused one superseded, committed before the caller hears.
+- A lease younger than 100 s (5 × the gateway timeout: Sipay's 2 calls × (connect + read) + margin) makes another start
+  of the charge `PaymentBusy`; a lapsed one is a start that died (its checkout never reached the guest): the charge is
+  reused. Two first starts of one key: the unique key lets one insert, the other is `PaymentBusy`.
+- A failed start leaves the booking on record (Pending Payment, mails sent, charge Failed, rooms ≤ hold + 5 min); the
+  engine's retry replays it by its key and offers `pay_booking`. Before, all of it was rolled back.
+- Commits (`_commit_step`) also end what the request did before (a booking just made); skipped in tests (one transaction).
+- Payment paths lock link → payment(s) → booking → rooms (→ nights → extras → promotions → Guest), series rows last, never
+  across a gateway call (ADR-062 "Locks"); Part 2F (P1-4) adds the full order and the reversed orders it fixes.
+
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
   (`pricing/policy_money.refundable`); the engine writes that into every quote's `rate_plan.refundable`. No payload key:
@@ -9191,9 +9207,15 @@ the versions the roll superseded the state their contract's later publishes woul
 - *Policy currency (Y-3 A, D-1).* A payment or cancellation policy may name the currency of its fixed amounts; empty is
   the contract's. It is frozen (upper-cased) only on a policy with a FIXED deposit, rule or no-show; a payload without it
   reads the contract's (the K-1 pattern). A fixed policy in another currency is refused (`POLICY_CURRENCY`).
-- *Conversion (for Part 2E, booking.py, the payments session).* A fixed amount × the quote's recorded contract → sell rate,
-  half-up to the sale currency's minor unit (`fixed_in_sell`); a fixed deposit is taken once per booking, on its first room
-  carrying the policy (`first_rooms_per_policy`, ADR-029). p59 syncs the policies and reports what to review; no backfill.
+- *Conversion (done: Part 2E-1, Y-3 B, booking.py).* A fixed amount × the quote's recorded contract → sell rate,
+  half-up to the sale currency's minor unit (`fixed_in_sell`); a snapshot whose policy has no currency keeps the amount as
+  sold; a fixed penalty's basis names the conversion (`fx`). A fixed deposit is taken once per booking and payment policy
+  (rooms of different FIXED policies each take their own), at its first room's rate, room by room in room order (room
+  index, ADR-029), each room at most its own stored price: min(deposit, those rooms' total) (`deposit_shares`). p59 syncs
+  the policies and reports what to review; no backfill.
+- *No backfill (Y-3 B).* Every computation after the release takes the deposit per booking and policy; a pending booking's
+  stored `amount_due_now` is not rewritten: only multi-room bookings with a fixed deposit differ, and theirs drops at the
+  first refresh.
 - *Infants (O-2, D-2).* Version setting `infants_count_as_children`: off, combination rules and max_children count
   children without infants and infants are numbered last; max_occupants follows `infants_count_as_occupants`. DocType
   default 1 (every existing version prices as before); a brand-new contract's first draft 0. Frozen only when 0.
