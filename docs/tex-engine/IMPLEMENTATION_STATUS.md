@@ -1514,3 +1514,11 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 
 - Y-3 B **COMPLETE**: a fixed deposit or penalty is converted from its policy's currency at the quote's recorded rate (a snapshot without one keeps the amount); a fixed deposit is taken once per booking and policy, room by room, each room at most its stored price; the fee's basis says `fx`; the guest's change preview settles the internal quote; offers write the policy's own currency (ADR-067) · `TestPolicyCurrency`, `test_existing_semantics.TestPolicyMoneyChanges`, unit `policy-currency`.
 - NEW-6 **COMPLETE**: `start_payment` commits the charge with a checkout lease (p68, 100 s) before the gateway call and records its answer after, so no row, gap or series lock is held through it; `PaymentBusy` for a second start (ADR-066) · `test_hold_payment_race.TestNoLockHeldThroughTheGateway`, `TestGuestPayment`, `test_patches` p68.
+
+## 6E2. Audit Part 2E-2 (2026-09-27)
+
+- P1-8 **COMPLETE**: `complete_retrying` retries lock wait timeouts too (full rollback); `reissue_link`, `loyalty_redeem`, `merge_guests` retried on deadlocks; re-verify keeps no message of a failed try; `payments.pending` FAILs for Virtual POS charges 10 min past their deadline; a request that committed a step is not run again (ADR-066) · `TestDeadlockRetries`, unit `test_system_checks`, `TestUnverifiedPayments`.
+- NEW-2 **COMPLETE**: job `payments.service.reverify_pending`, first of the 5-minute jobs, asks iyzico/Sipay about Pending charges (`status_query`, `status_params`), one per transaction · `TestPaymentsVerifiedByTheJob`, `test_scheduler_smoke`, unit `test_payments_fx_segments`.
+- O-18 **COMPLETE**: iyzico `fraudStatus` read (1 served; 0/absent/unknown review; -1 rejected); review holds the booking once for the link hold, rejection ends it and tells the team (ADR-062) · unit `test_payments_fx_segments`, `TestIyzicoFraudReview`.
+- P1-1 **COMPLETE** (D-7): late money without a gateway time on an expired booking goes to Action Required, never refunded by itself (ADR-062 c) · `TestReconciliationVisible`.
+- P1-9 **COMPLETE**: a refused retry or link after the hold expires the booking and commits first; links inside the 3-D Secure margin; no transfer past the hold (ADR-062) · `TestRefusedAfterTheHold`.
