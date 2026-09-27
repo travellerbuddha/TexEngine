@@ -67,6 +67,7 @@ kamra.patches.tex.p54_never_confirmed_leftovers
 kamra.patches.tex.p55_web_transfer_hold
 kamra.patches.tex.p56_open_ended_versions
 kamra.patches.tex.p59_policy_currency
+kamra.patches.tex.p63_versioned_passwords
 kamra.patches.tex.p64_agent_log_read_only
 kamra.patches.tex.p65_agent_log_hotel
 kamra.patches.tex.p66_cost_doctypes_system_only

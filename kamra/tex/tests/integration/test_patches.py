@@ -110,6 +110,7 @@ BEHAVIOUR = {
 	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
+	"p63_versioned_passwords": "test_patches.TestP63VersionedPasswords",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
 	"p66_cost_doctypes_system_only": "test_patches.TestP66CostDocTypesSystemOnly",
@@ -1602,3 +1603,47 @@ class TestP66CostDocTypesSystemOnly(PatchCase):
 		again = migrate(self.P66)
 		self.assertIn("p66: 0 Custom DocPerm row(s)", " ".join(str(c) for c in again["print"].call_args_list))
 
+
+class TestP63VersionedPasswords(PatchCase):
+	"""O-37 (audit Part 2I): TEX Integration Connection.api_key was a tracked Data field for a day (2026-09-22/23)
+	before it became a Password; its change history (Version) kept the plain keys, which the hotel's Hotel Admins
+	read in Desk. p24 masked only the payment provider accounts' history. p63 masks every Password field (DocType
+	and Custom Field) in every Version of its DocType: ``changed`` rows, and child tables' ``row_changed``."""
+
+	P63 = "p63_versioned_passwords"
+
+	def version(self, doctype: str, docname: str, data: dict) -> str:
+		return put("Version", ref_doctype=doctype, docname=docname, data=json.dumps(data))
+
+	def data(self, name: str) -> dict:
+		return json.loads(frappe.db.get_value("Version", name, "data"))
+
+	def test_p63_masks_plain_secrets_in_the_change_history(self):
+		import re
+
+		conn = put("TEX Integration Connection", label="p63 PMS", category="PMS", adapter="webhook",
+		           property=fx.PROPERTY)
+		plain = self.version("TEX Integration Connection", conn, {"changed": [["api_key", "old-plain", "new-plain"],
+		                                                                      ["label", "a", "b"]]})
+		acc = put("TEX Payment Provider Account", label="p63 account", property=fx.PROPERTY, provider="iyzico")
+		masked = {"changed": [["api_key", "*****", "*****"], ["secret_key", "********", "********"]]}
+		done = self.version("TEX Payment Provider Account", acc, masked)   # p24 masked it, or Frappe's own stars
+		seen = self.first_run(self.P63)                                   # (b): a second run changes nothing
+		self.assertEqual(self.data(plain)["changed"], [["api_key", "*****", "*****"], ["label", "a", "b"]])
+		self.assertEqual(self.data(done), masked)
+		printed = " ".join(str(c) for c in seen["print"].call_args_list)
+		self.assertGreaterEqual(int(re.search(r"p63: (\d+) change-history row", printed).group(1)), 1)
+		self.assertNotIn("plain", printed)                                # numbers only, never a value
+		again = migrate(self.P63)
+		self.assertIn("p63: 0 change-history row(s)", " ".join(str(c) for c in again["print"].call_args_list))
+
+	def test_p63_masks_a_child_tables_secret_in_row_changed(self):
+		"""No child table has a Password field today; the rule is there for one that will."""
+		from kamra.patches.tex import p63_versioned_passwords as p63
+
+		data = {"row_changed": [["keys", 0, "row1", [["token", "plain-token", "new-token"], ["note", "a", "b"]]]],
+		        "changed": [["api_key", "plain", "*****"]]}
+		self.assertTrue(p63.mask(data, {"api_key"}, {"keys": {"token"}}))
+		self.assertEqual(data, {"row_changed": [["keys", 0, "row1", [["token", "*****", "*****"], ["note", "a", "b"]]]],
+		                        "changed": [["api_key", "*****", "*****"]]})
+		self.assertFalse(p63.mask(data, {"api_key"}, {"keys": {"token"}}))     # masked already: no change
