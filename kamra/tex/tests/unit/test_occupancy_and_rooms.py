@@ -400,6 +400,24 @@ class TestInfantsNotChildren(unittest.TestCase):
 		q = self.quote_room(t, "DLX", 2, 8, 1)
 		self.assertTrue(q.sellable, q.reasons)
 
+	def test_an_infant_slot_of_a_party_the_room_cannot_hold_is_never_priced(self):
+		"""2D-1 0b: infants neither children nor occupants. STD holds 4: a party of 3 adults and 2 other
+		children never sells (MAX_OCCUPANTS), so two rules for its 3rd child in the infant band, one for
+		parties of 3 adults and one for parties of 2 children, never meet: no OCC_AMBIGUOUS."""
+		from kamra.tex.pricing import validate
+
+		rules = (*fx.occ_rules(),
+		         OccupancyRule("O-STD-INF-3A", OccTarget.CHILD, Op.PERCENT_OF, D("10"), position=3, age_band="INF",
+		                       room_type="STD", adults=3),
+		         OccupancyRule("O-STD-INF-2C", OccTarget.CHILD, Op.PERCENT_OF, D("20"), position=3, age_band="INF",
+		                       room_type="STD", children=2))
+		t = replace(fx.terms(), occupancy_rules=rules, infants_count_as_children=False,
+		            infants_count_as_occupants=False)
+		self.assertEqual([i.level for i in validate.validate_terms(t) if i.code == "OCC_AMBIGUOUS"], [])
+		q = self.quote_room(t, "STD", 3, 8, 8, 1)
+		self.assertFalse(q.sellable)
+		self.assertIn("MAX_OCCUPANTS", [r["code"] for r in q.reasons])
+
 	def quote_room(self, t, room, adults, *kid_ages):
 		from kamra.tex.pricing import engine
 
