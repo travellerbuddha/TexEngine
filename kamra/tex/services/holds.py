@@ -83,6 +83,48 @@ def hold_for_link(booking: str | None, wanted: datetime, now: datetime | None = 
 	return min(wanted, deadline), deadline
 
 
+def hold_for_review(booking: str, txn, now: datetime | None = None) -> tuple[datetime | None, datetime] | None:
+	"""O-18, D-8: the gateway holds a payment of ``booking`` in its fraud review. A booking waiting for its
+	payment keeps its rooms for it — the payment's attempt, and so the booking's, runs until the link hold
+	from now, never past the end of the arrival day (``hold_for_link``'s bounds) — once: never shortened,
+	never extended again (the caller records the review once). Under the booking's lock, after the
+	payment's (link → payment → booking, ADR-066). → (the booking's attempt deadline before, the new one);
+	None for a booking not waiting for its payment (a balance, a change): nothing is held."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # as it is now
+	if b.status not in HOLDING:
+		return None
+	now = get_datetime(now or now_datetime())
+	rooms = [r for r in b.rooms if r.status in HOLDING] or list(b.rooms)
+	arrival = datetime.combine(min(getdate(r.check_in) for r in rooms), time(23, 59, 59))
+	until = min(add_to_date(now, minutes=resolve_hold_minutes(b.property, LINK)), arrival)
+	before = get_datetime(b.payment_attempt_until) if b.payment_attempt_until else None
+	if before and before > until:
+		until = before                                                    # never shortened
+	frappe.db.set_value("TEX Booking", booking, "payment_attempt_until", until, update_modified=False)
+	frappe.db.set_value("TEX Payment Transaction", txn.name, "expires_at", until, update_modified=False)
+	return before, until
+
+
+def after_review_rejected(booking: str, txn: str, before: datetime | None) -> datetime | None:
+	"""O-18, D-8: the gateway rejected a payment it held in review; its hold is over. The booking's attempt
+	deadline goes back to the later of ``before`` (what it was when the review began) and the latest
+	deadline of its other Pending charges (its own and its links'); None when neither exists. Under the
+	booking's lock. → the deadline now (None: nothing keeps its rooms beyond its own hold)."""
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if b.status not in HOLDING:
+		return None
+	# a charge without expires_at holds no rooms: not counted
+	others = frappe.db.sql("""SELECT MAX(expires_at) FROM `tabTEX Payment Transaction`
+	                          WHERE txn_type = 'Charge' AND status = 'Pending' AND name != %(t)s
+	                            AND expires_at IS NOT NULL
+	                            AND (booking = %(b)s OR payment_link IN
+	                                 (SELECT name FROM `tabTEX Payment Link` WHERE booking = %(b)s))""",
+	                       {"t": txn, "b": booking})[0][0]
+	back = max((get_datetime(v) for v in (before, others) if v), default=None)
+	frappe.db.set_value("TEX Booking", booking, "payment_attempt_until", back, update_modified=False)
+	return back
+
+
 def after_link_closed(booking: str | None, now: datetime | None = None) -> datetime | None:
 	"""D7, E3: a cancelled link no longer holds its booking's rooms. The hold goes back to the latest of
 	what the booking's own payment method gave it (before any link extended it), the expiry of its

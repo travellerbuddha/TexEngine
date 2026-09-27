@@ -476,11 +476,14 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	provider = provider_for(row.provider_account, purpose="settle", transaction=row.name)
 	outcome = provider.handle_callback(row.name, params, headers or {}, body, provider_ref=row.provider_ref)
 	if outcome.status == "Pending":
+		if outcome.raw_status in FRAUD_REVIEW:
+			_under_review(row, outcome)
 		return {"transaction": row.name, "status": row.status, "pending": True}
 	_lock_link_then_payment(row.name, row.payment_link)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)
 	if txn.status not in SETTLEABLE:
 		return {"transaction": txn.name, "status": txn.status, "replay": True}
+	was_reviewed = txn.status == "Pending" and txn.raw_status in FRAUD_REVIEW
 	refused = False
 	if outcome.status == "Succeeded":
 		checked = _checked_capture(provider, outcome, txn)
@@ -507,12 +510,62 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	txn.save(ignore_permissions=True)
 	if txn.status == "Succeeded":
 		_after_charge(txn)
+	elif txn.status == "Failed" and was_reviewed:
+		_review_rejected(txn)
 	# the source is how the outcome arrived: the caller says (the gateway's return or notification,
 	# staff re-verifying, the sandbox page), else the request itself (G-74)
 	audit("payment." + txn.status.lower(), reference_doctype="TEX Payment Transaction", reference_name=txn.name,
 	      property=txn.property, new={"amount": to_str(from_db(txn.amount, txn.currency)), "currency": txn.currency,
 	                                  "provider": txn.provider, "booking": txn.booking, "link": txn.payment_link})
 	return {"transaction": txn.name, "status": txn.status}
+
+
+# the gateway holds the payment in its fraud review (O-18, D-8): iyzico's fraudStatus 0, or absent / unknown
+FRAUD_REVIEW = ("FRAUD_REVIEW", "FRAUD_UNKNOWN")
+
+
+def _paying_booking(txn) -> str | None:
+	"""The booking a charge pays: its own, or its payment link's (a link's charge names no booking)."""
+	if txn.get("booking"):
+		return txn.booking
+	return frappe.db.get_value("TEX Payment Link", txn.payment_link, "booking") if txn.get("payment_link") else None
+
+
+def _under_review(row, outcome: Outcome) -> None:
+	"""O-18, D-8: the gateway holds this Pending charge in its fraud review. Recorded once (``raw_status``,
+	audit ``payment.under_review`` with the booking's attempt deadline before it): a booking waiting for its
+	payment keeps its rooms for it for the link hold (``holds.hold_for_review``); any other (a balance, a
+	change, none) holds nothing. Locks: link → payment, then the booking (ADR-066)."""
+	_lock_link_then_payment(row.name, row.payment_link)
+	txn = frappe.get_doc("TEX Payment Transaction", row.name, for_update=True)      # as it is now
+	if txn.status != "Pending" or txn.raw_status in FRAUD_REVIEW:
+		return                        # settled meanwhile, or its review is on record already: held once
+	booking = _paying_booking(txn)
+	txn.raw_status = outcome.raw_status
+	txn.save(ignore_permissions=True)
+	held = holds.hold_for_review(booking, txn) if booking else None
+	audit("payment.under_review", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, old={"payment_attempt_until": str(held[0]) if held and held[0] else None},
+	      new={"raw_status": outcome.raw_status, "booking": booking,
+	           "payment_attempt_until": str(held[1]) if held else None})
+
+
+def _review_rejected(txn) -> None:
+	"""O-18, D-8: the gateway rejected a charge it held in review (now Failed). Its review hold ends: the
+	booking's attempt deadline goes back to what it was before the review, or its other Pending charges'
+	(``holds.after_review_rejected``); audited ``payment.fraud_rejected``, the team told. TEX recorded no
+	money for it (the gateway returns any itself): nothing goes to reconciliation."""
+	from kamra.tex.services import notify
+
+	booking = _paying_booking(txn)
+	review = frappe.get_all("TEX Audit Event", filters={"action": "payment.under_review", "reference_name": txn.name},
+	                        fields=["old_value"], order_by="creation asc", limit=1)
+	before = json.loads(review[0].old_value or "{}").get("payment_attempt_until") if review else None
+	back = holds.after_review_rejected(booking, txn.name, get_datetime(before) if before else None) \
+		if booking else None
+	audit("payment.fraud_rejected", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, new={"booking": booking, "payment_attempt_until": str(back) if back else None})
+	notify.payment_rejected(txn, booking)
 
 
 def complete_retrying(transaction: str, **kw) -> dict:

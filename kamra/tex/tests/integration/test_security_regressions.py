@@ -995,7 +995,7 @@ class FakeIyzico:
 		return {"status": "success", "paymentStatus": "SUCCESS", "conversationId": txn, "basketId": txn,
 		        "price": price, "paidPrice": paid_price or price, "currency": currency, "paymentId": payment,
 		        "itemTransactions": [{"paymentTransactionId": f"{payment}-I"}], "cardAssociation": "VISA",
-		        "lastFourDigits": "4242"}
+		        "lastFourDigits": "4242", "fraudStatus": 1}
 
 	@staticmethod
 	def failed(txn: str) -> dict:
