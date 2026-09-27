@@ -111,7 +111,10 @@ BEHAVIOUR = {
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p60_promotion_code_key": "test_patches.TestReportingPatches.test_p60_stores_codes_by_their_key_and_reports_a_clash_once",
+	"p63_versioned_passwords": "test_patches.TestP63VersionedPasswords",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
+	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
+	"p66_cost_doctypes_system_only": "test_patches.TestP66CostDocTypesSystemOnly",
 	"p68_payment_checkout_lease": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
@@ -1556,3 +1559,128 @@ if os.environ.get("TEX_C1_MARKER"):
 			sys.__stdout__.write(f"C1-MARKER-READY {marker}\n")
 			sys.__stdout__.flush()
 			time.sleep(120)
+
+
+class TestP65AgentLogHotel(PatchCase):
+	"""NEW-8 (audit Part 2I): a legacy action log row without a hotel is platform level now; p65 gives the
+	rows written before their hotel where the record they are about has one (savings.hotel_of)."""
+
+	P65 = "p65_agent_log_hotel"
+
+	def log(self, doctype: str | None, name: str | None) -> str:
+		return put("Agent Action Log", action_type="p65_probe", reference_doctype=doctype, reference_name=name,
+		           approval_status="Executed")
+
+	def test_p65_gives_rows_their_hotel_where_one_is_known(self):
+		from kamra import savings
+
+		other = kamra_hotel("P65 Other Hotel")
+		one = put("Guest", first_name="P65", last_name="One", full_name="P65 One")
+		two = put("Guest", first_name="P65", last_name="Two", full_name="P65 Two")
+		for guest, hotel in ((one, fx.PROPERTY), (two, fx.PROPERTY), (two, other)):
+			put("Reservation", guest=guest, property=hotel, status="Confirmed")
+		folio = put("Folio", property=fx.PROPERTY, guest=one)
+		user = fx.ensure_user("p65-desk@example.com", ["Front Desk"])
+		fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+		          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+		rows = {"folio": self.log("Folio", folio), "one hotel": self.log("Guest", one),
+		        "two hotels": self.log("Guest", two), "user": self.log("User", user), "nothing": self.log(None, None)}
+		# rows the site had already (the legacy PMS flows run before this test on CI write some)
+		earlier = [r for r in frappe.get_all("Agent Action Log", filters={"property": ("is", "not set")},
+		                                     fields=["name", "reference_doctype", "reference_name"])
+		           if r.name not in rows.values()]
+		known = sum(1 for r in earlier if savings.hotel_of(r.reference_doctype, r.reference_name))
+		seen = self.first_run(self.P65)                                  # (b): a second run changes nothing
+		hotel = {k: frappe.db.get_value("Agent Action Log", v, "property") for k, v in rows.items()}
+		self.assertEqual(hotel, {"folio": fx.PROPERTY, "one hotel": fx.PROPERTY, "two hotels": None,
+		                         "user": fx.PROPERTY, "nothing": None})
+		printed = " ".join(str(c) for c in seen["print"].call_args_list)
+		self.assertIn(f"p65: {3 + known} action log row(s) given their hotel", printed)
+		again = migrate(self.P65)
+		self.assertIn("p65: 0 action log row(s) given their hotel", " ".join(str(c) for c in again["print"].call_args_list))
+
+
+class TestP66CostDocTypesSystemOnly(PatchCase):
+	"""G-97 (audit Part 2I): contract versions, markup rules and pricing policies are System Manager's in
+	Desk / REST. Their JSON says so now; where Custom DocPerm rows decide instead (Frappe then ignores the
+	JSON), p66 takes every flag, read included, from every role's row but System Manager's."""
+
+	P66 = "p66_cost_doctypes_system_only"
+	COST = ("TEX Contract Version", "TEX Markup Rule", "TEX Pricing Policy")
+	FLAGS = ("read", "write", "create", "delete", "report", "export", "print", "email", "share")
+
+	def tearDown(self):
+		super().tearDown()                       # the rollback takes the rows this test wrote
+		for dt in self.COST:
+			frappe.clear_cache(doctype=dt)
+
+	def rows(self, doctype: str) -> dict[str, tuple]:
+		return {r.role: tuple(int(r.get(f) or 0) for f in self.FLAGS)
+		        for r in frappe.get_all("Custom DocPerm", filters={"parent": doctype, "permlevel": 0},
+		                                fields=["role", *self.FLAGS])}
+
+	def test_p66_takes_every_flag_from_the_roles_rows_but_system_managers(self):
+		from kamra.scripts.fix_perms_fields import _grant
+
+		for dt in self.COST[:2]:                                        # a site whose seeds wrote custom rows
+			_grant(dt, "System Manager", 1, 1, 1, delete=1)
+			_grant(dt, "Hotel Admin", 1, 0, 0)
+		system_manager = {dt: self.rows(dt)["System Manager"] for dt in self.COST[:2]}
+		self.assertEqual(self.rows(self.COST[2]), {})                   # the third has none
+		never_ran(self.P66)
+		seen = migrate(self.P66)
+		self.assertIn("p66: 2 Custom DocPerm row(s)", " ".join(str(c) for c in seen["print"].call_args_list))
+		for dt in self.COST[:2]:
+			rows = self.rows(dt)
+			self.assertEqual(rows["Hotel Admin"], (0,) * len(self.FLAGS), dt)
+			self.assertEqual(rows["System Manager"], system_manager[dt], dt)
+		self.assertEqual(self.rows(self.COST[2]), {})                   # no row added where there was none
+		again = migrate(self.P66)
+		self.assertIn("p66: 0 Custom DocPerm row(s)", " ".join(str(c) for c in again["print"].call_args_list))
+
+
+class TestP63VersionedPasswords(PatchCase):
+	"""O-37 (audit Part 2I): TEX Integration Connection.api_key was a tracked Data field for a day (2026-09-22/23)
+	before it became a Password; its change history (Version) kept the plain keys, which the hotel's Hotel Admins
+	read in Desk. p24 masked only the payment provider accounts' history. p63 masks every Password field (DocType
+	and Custom Field) in every Version of its DocType: ``changed`` rows, and child tables' ``row_changed``."""
+
+	P63 = "p63_versioned_passwords"
+
+	def version(self, doctype: str, docname: str, data: dict) -> str:
+		return put("Version", ref_doctype=doctype, docname=docname, data=json.dumps(data))
+
+	def data(self, name: str) -> dict:
+		return json.loads(frappe.db.get_value("Version", name, "data"))
+
+	def test_p63_masks_plain_secrets_in_the_change_history(self):
+		import re
+
+		conn = put("TEX Integration Connection", label="p63 PMS", category="PMS", adapter="webhook",
+		           property=fx.PROPERTY)
+		plain = self.version("TEX Integration Connection", conn, {"changed": [["api_key", "old-plain", "new-plain"],
+		                                                                      ["label", "a", "b"]]})
+		acc = put("TEX Payment Provider Account", label="p63 account", property=fx.PROPERTY, provider="iyzico")
+		masked = {"changed": [["api_key", "*****", "*****"], ["secret_key", "********", "********"]]}
+		done = self.version("TEX Payment Provider Account", acc, masked)   # p24 masked it, or Frappe's own stars
+		seen = self.first_run(self.P63)                                   # (b): a second run changes nothing
+		self.assertEqual(self.data(plain)["changed"], [["api_key", "*****", "*****"], ["label", "a", "b"]])
+		self.assertEqual(self.data(done), masked)
+		printed = " ".join(str(c) for c in seen["print"].call_args_list)
+		self.assertGreaterEqual(int(re.search(r"p63: (\d+) change-history row", printed).group(1)), 1)
+		self.assertNotIn("plain", printed)                                # numbers only, never a value
+		again = migrate(self.P63)
+		self.assertIn("p63: 0 change-history row(s)", " ".join(str(c) for c in again["print"].call_args_list))
+
+	def test_p63_masks_a_child_tables_secret_in_row_changed(self):
+		"""No child table has a Password field today; the rule is there for one that will."""
+		from kamra.patches.tex import p63_versioned_passwords as p63
+
+		data = {"row_changed": [["keys", 0, "row1", [["token", "plain-token", "new-token"], ["note", "a", "b"]]]],
+		        "changed": [["api_key", "plain", "*****"]]}
+		self.assertTrue(p63.mask(data, {"api_key"}, {"keys": {"token"}}))
+		self.assertEqual(data, {"row_changed": [["keys", 0, "row1", [["token", "*****", "*****"], ["note", "a", "b"]]]],
+		                        "changed": [["api_key", "*****", "*****"]]})
+		self.assertFalse(p63.mask(data, {"api_key"}, {"keys": {"token"}}))     # masked already: no change

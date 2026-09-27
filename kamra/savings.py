@@ -43,6 +43,12 @@ def log_action(
 	proposed.
 	"""
 	try:
+		if not property:
+			# a row without a hotel is platform level (NEW-8): take the hotel from the record it is about
+			try:
+				property = hotel_of(reference_doctype, reference_name)
+			except Exception:
+				property = None
 		if executed_at is None and approval_status in ("Executed", "Approved", "Rejected"):
 			executed_at = frappe.utils.now_datetime()
 		doc = frappe.get_doc(
@@ -70,6 +76,31 @@ def log_action(
 	except Exception:
 		frappe.log_error(title="Agent Action Log write failed")
 		return None
+
+
+def hotel_of(reference_doctype: str | None, reference_name: str | None) -> str | None:
+	"""The hotel an action on this record belongs to, or None (the row stays platform level, NEW-8):
+	a Property is its own hotel; a record with a ``property`` field has that hotel; a guest the one hotel
+	of their stays; a user (or their Cashier PIN) the one hotel in their scope. Several hotels or none:
+	None. Also used by patch p65 for the rows written before."""
+	if not reference_doctype or not reference_name:
+		return None
+	if reference_doctype == "Property":
+		return reference_name if frappe.db.exists("Property", reference_name) else None
+	if reference_doctype == "Guest":
+		hotels = {h for h in frappe.get_all("Reservation", filters={"guest": reference_name}, pluck="property",
+		                                    distinct=True) if h}
+		return hotels.pop() if len(hotels) == 1 else None
+	if reference_doctype in ("User", "Cashier PIN"):
+		from kamra.tex.security import scope
+
+		if not frappe.db.exists("User", reference_name):
+			return None
+		hotels = scope.permitted_properties(reference_name)
+		return next(iter(hotels)) if len(hotels) == 1 else None
+	if frappe.get_meta(reference_doctype).has_field("property"):
+		return frappe.db.get_value(reference_doctype, reference_name, "property") or None
+	return None
 
 
 def mark_approved(log_name: str, approver: str) -> None:

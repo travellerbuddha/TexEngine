@@ -149,6 +149,8 @@ export default function CallCenterPage() {
   // ── actions ──
   const doSearch = useCallback(async () => {
     const res = await flow.runSearch()
+    // a newer search took over: the cursor stays where the agent is (O-29)
+    if (res === undefined) return
     if (!res) {
       focusFirstInvalid()
       return
@@ -213,12 +215,14 @@ export default function CallCenterPage() {
       result: r,
       prop: selectedProp,
       quotes: flow.quotes,
-      summary: flow.summary,
+      // the amounts due come only from the current method's summary: none while it loads or failed
+      // (the previous method's would be read out under the new one's name, O-29)
+      summary: flow.summaryLoading || flow.summaryError ? undefined : flow.summary,
       paymentMethod: flow.method,
       partyText,
       time: clock.label,
     })
-  }, [r, flow.quotes, flow.quoteStale, flow.summary, flow.method, selectedProp, t, L, partyText, clock])
+  }, [r, flow.quotes, flow.quoteStale, flow.summary, flow.summaryLoading, flow.summaryError, flow.method, selectedProp, t, L, partyText, clock])
 
   const copyQuote = useCallback(async () => {
     if (!quoteCopy) return
