@@ -313,6 +313,12 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
 
   // ── reset helpers ──
   const clearDownstream = useCallback(() => {
+    // a quote or summary still on its way belongs to what is cleared here (O-29): it must not come
+    // back as current, e.g. a quote of the previous search's offer after a search that kept the pick
+    quoteSeq.current++
+    summarySeq.current++
+    setQuoting(false)
+    setSummaryLoading(false)
     setSelection(null)
     setExtras({})
     setQuotes([])
@@ -331,7 +337,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
 
   // ── search ──
   const runSearch = useCallback(
-    async (override?: Partial<SearchFormState>, keepSelection = false): Promise<SearchResult | null> => {
+    /** The result; null when the search was refused (the form, or the server: the caller may point at
+     * the field); undefined when a newer search took over (nothing to do, O-29). */
+    async (override?: Partial<SearchFormState>, keepSelection = false): Promise<SearchResult | null | undefined> => {
       const f = { ...form, ...override }
       const errs = validateSearch(f)
       setFormErrors(errs)
@@ -352,7 +360,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       setSearchError(undefined)
       try {
         const r = await searchOffers(args)
-        if (seq !== searchSeq.current) return null
+        if (seq !== searchSeq.current) return undefined
         setResult(r)
         setLastArgs(args)
         const keep =
@@ -375,7 +383,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         }
         return r
       } catch (e) {
-        if (seq !== searchSeq.current) return null
+        if (seq !== searchSeq.current) return undefined
         setSearchError(asApiError(e))
         setResult(undefined)
         clearDownstream()
@@ -499,7 +507,12 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       setSummary(s)
       setSummaryError(undefined)
     } catch (e) {
-      if (seq === summarySeq.current) setSummaryError(asApiError(e))
+      // a failed summary leaves none: the previous method's amount due and its permission to confirm
+      // unpaid are not this method's (O-29)
+      if (seq === summarySeq.current) {
+        setSummary(undefined)
+        setSummaryError(asApiError(e))
+      }
     } finally {
       if (seq === summarySeq.current) setSummaryLoading(false)
     }
@@ -633,6 +646,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       summary &&
       summary.usable &&
       !summaryLoading &&
+      !summaryError &&
       !payAtHotelBlocked &&
       !extrasTogether &&
       (!methods?.length || method),
@@ -697,6 +711,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     (keepSearch = false) => {
       clearDownstream()
       if (!keepSearch) {
+        // a search still on its way belongs to the call being reset
+        searchSeq.current++
+        setSearching(false)
         setForm(defaultSearchForm(clock.today(), sellable.map((p) => p.name), defaultChannel))
         setResult(undefined)
         setLastArgs(undefined)
