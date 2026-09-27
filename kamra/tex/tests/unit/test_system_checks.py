@@ -112,6 +112,20 @@ class TestVerdicts(unittest.TestCase):
 		self.assertIn("hold_overdue", c.REASONS)
 		self.assertIn("holds.overdue", c.TITLES)
 
+	def test_bookings_paid_more_than_they_cost_warn(self):
+		"""P1-7 (audit 2B): a booking holding more money than its total is shown to staff with the
+		count, the cancelled ones among them and the oldest; staff refund the excess or move it."""
+		ok = c.overpaid_bookings_check(0, 0, None)
+		self.assertEqual((ok["key"], ok["status"], ok["scope"]), ("payments.overpaid", c.OK, "hotel"))
+		out = c.overpaid_bookings_check(3, 1, NOW - timedelta(hours=5), properties=["H1"])
+		self.assertEqual((out["status"], out["count"], out["properties"]), (c.WARN, 3, ["H1"]))
+		self.assertEqual([(i["reason"], i["params"]) for i in out["issues"]],
+		                 [("bookings_overpaid", {"count": 3, "cancelled": 1})])
+		self.assertEqual(out["since"], str(NOW - timedelta(hours=5)))
+		self.assertIn("bookings_overpaid", c.REASONS)
+		self.assertIn("payments.overpaid", c.TITLES)
+		self.assertIn("3", c.describe(out["issues"][0]))
+
 	def test_money_in_reconciliation_is_shown_with_its_age(self):
 		"""B5: payments kept off every booking wait for staff (or a queued refund): each kind with its
 		count and the age of its oldest item; staff have a day, a queued refund an hour."""

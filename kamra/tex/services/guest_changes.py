@@ -220,8 +220,10 @@ def change_applying(booking: str) -> bool:
 
 
 def room_changeable(res) -> bool:
-	"""Guests change a room only before they arrive: confirmed, arriving today or later."""
-	return res.status == "Confirmed" and getdate(res.check_in_date) >= getdate(now_datetime())
+	"""Guests change a room only before they arrive: confirmed, arriving today or later, and not
+	priced by hand: a price staff set is changed only by staff (D-9, ADR-065)."""
+	return res.status == "Confirmed" and getdate(res.check_in_date) >= getdate(now_datetime()) \
+		and booking_svc.manual_price(res) is None
 
 
 def guard_room(res) -> None:
@@ -375,8 +377,10 @@ def refundable_now(booking: str, amount, *, except_request: str | None = None,
 	from kamra.tex.payments import service as pay
 
 	reserved = _reserved(booking, except_request)
+	# points are never paid back as cash: an overpayment comes off them first (O-19)
 	charges = [st.Charge(c["transaction"], c["available"], c["supported"] and c["transaction"] not in failed,
-	                     c["at"]) for c in pay.booking_charges(booking) if c["transaction"] not in reserved]
+	                     c["at"], points=c["provider"] == "Loyalty")
+	           for c in pay.booking_charges(booking) if c["transaction"] not in reserved]
 	return st.plan_refunds(max(ZERO, D(amount)), charges)
 
 

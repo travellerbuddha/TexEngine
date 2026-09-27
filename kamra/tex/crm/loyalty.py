@@ -18,7 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_months, getdate, now_datetime, nowdate
 
-from kamra.tex.money import D, db_dec, from_db, quantize, to_str
+from kamra.tex.money import ZERO, D, db_dec, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
 
@@ -363,6 +363,37 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 	return doc.name
 
 
+# the points already on a booking, read with locks that each go by an index — the booking, or the charges'
+# names — so they hold this booking's rows only, never every payment of every hotel (O-19 review)
+LOYALTY_ON_BOOKING = """SELECT name FROM `tabTEX Payment Transaction` WHERE booking=%(b)s AND provider='Loyalty'
+                        AND status='Succeeded' AND txn_type='Charge' LOCK IN SHARE MODE"""
+ALLOCATED_TO_BOOKING = """SELECT DISTINCT `transaction` FROM `tabTEX Payment Allocation` WHERE booking=%(b)s
+                          LOCK IN SHARE MODE"""
+LOYALTY_NAMED = """SELECT name FROM `tabTEX Payment Transaction` WHERE name IN %(names)s AND provider='Loyalty'
+                   AND status='Succeeded' AND txn_type='Charge' LOCK IN SHARE MODE"""
+
+
+def loyalty_charges_on(booking: str) -> list[str]:
+	"""The succeeded Loyalty charges of ``booking``: redeemed for it, or allocated to it (name order)."""
+	own = set(frappe.db.sql_list(LOYALTY_ON_BOOKING, {"b": booking}))
+	allocated = frappe.db.sql_list(ALLOCATED_TO_BOOKING, {"b": booking})
+	moved = set(frappe.db.sql_list(LOYALTY_NAMED, {"names": tuple(allocated)})) if allocated else set()
+	return sorted(own | moved)
+
+
+def redeemable(b, pct) -> D:
+	"""O-19 (audit 2B, ADR-065): the most points may still pay of booking ``b`` (locked by the caller):
+	its program's share of its total (``pct``) less the points already on it, and never more than it
+	still owes — so points are never paid back as cash. "On it": what the booking holds of its
+	succeeded Loyalty payments (``booking_nets``), read with locking reads."""
+	from kamra.tex.payments import service as pay
+
+	ccy = b.currency
+	total, paid = from_db(b.total_amount, ccy), from_db(b.paid_amount, ccy)
+	on_it = sum((pay.booking_nets(t, lock=True).get(b.name, ZERO) for t in loyalty_charges_on(b.name)), ZERO)
+	return quantize(max(ZERO, min(quantize(total * pct / 100, ccy) - on_it, total - paid)), ccy)
+
+
 def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> dict:
 	"""Burn points as a payment on a booking (min points, max % of the booking, currency)."""
 	b = frappe.get_doc("TEX Booking", booking)
@@ -402,6 +433,8 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 
 	# a booking that cannot take the money is refused before a point is burned (C5)
 	pay.refuse_if_it_cannot_take(booking, quantize(db_dec(prog.point_value) * points, b.currency))
+	# its total and what it holds read under its lock (taken just now), as they are now (O-19)
+	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	# the profile locked (whoever writes its ledger locks it too) and its balance read with a lock: what is
 	# committed now, not this request's snapshot, so two redemptions never spend the same points (third
 	# review of ADR-056, H-1); a profile merged into another meanwhile is gone
@@ -411,9 +444,11 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	if balances(guest, program, lock=True)["available"] < points:
 		frappe.throw(_("Not enough points."))
 	value = quantize(db_dec(prog.point_value) * points, b.currency)
-	cap = quantize(from_db(b.total_amount, b.currency) * pct / 100, b.currency)
+	cap = redeemable(b, pct)
 	if value > cap:
-		frappe.throw(_("Points can cover at most {0} {1} of this booking.").format(to_str(cap), b.currency))
+		most = int(cap / db_dec(prog.point_value)) if db_dec(prog.point_value) > 0 else 0
+		frappe.throw(_("Points can cover at most {0} {1} of this booking now ({2} points).").format(
+			to_str(cap), b.currency, most))
 
 	txn = frappe.get_doc({"doctype": "TEX Payment Transaction", "property": b.property, "txn_type": "Charge",
 	                      "status": "Succeeded", "method": "Manual", "provider": "Loyalty", "amount": value,

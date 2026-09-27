@@ -123,6 +123,15 @@ class TestPlanRefunds(unittest.TestCase):
 		t2 = st.Charge("T2", D("589.75"), supported=False, at=self.T2.at)
 		self.assertEqual(st.plan_refunds(D("267.50"), [self.T1, t2]), ([("T1", D("252.75"))], D("14.75")))
 
+	def test_an_overpayment_comes_off_the_points_first(self):
+		"""O-19 (audit 2B): points are never paid back as cash: a card gets only what the refund is over
+		the points holding the booking's money; the points' part is the hotel's to settle."""
+		card = st.Charge("CARD", D("1000"), at="2027-01-01 10:00:00")
+		points = st.Charge("PTS", D("500"), supported=False, at="2027-01-02 10:00:00", points=True)
+		self.assertEqual(st.plan_refunds(D("600"), [card, points]), ([("CARD", D("100"))], D("500")))
+		self.assertEqual(st.plan_refunds(D("400"), [card, points]), ([], D("400")))
+		self.assertEqual(st.plan_refunds(D("600"), [card]), ([("CARD", D("600"))], D("0")))
+
 	def test_nothing_to_refund_from(self):
 		self.assertEqual(st.plan_refunds(D("10"), []), ([], D("10")))
 		self.assertEqual(st.plan_refunds(D("0"), [self.T1]), ([], D("0")))

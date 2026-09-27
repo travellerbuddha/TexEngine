@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { tex } from "../../../lib/api"
+import { money } from "../../../lib/format"
 import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Button, DecimalInput, Dialog, Field, InlineError, Input, Money, Notice, Segmented, Select, Textarea, useToast } from "../../../ui"
 import { BookingPicker } from "../components/BookingPicker"
-import { isPositiveAmount, isZero, useEvent, useIntentKey } from "../lib"
+import { isPositiveAmount, isZero, minusAmount, useEvent, useIntentKey } from "../lib"
 import type { TxnDetail } from "../types"
 
 function useAction(open: boolean) {
@@ -276,6 +277,8 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
   const today = useSiteToday()
   const [reference, setReference] = useState("")
   const [valueDate, setValueDate] = useState(today)
+  // what arrived: a bank may take its fee off the transfer (P1-11); never more than was asked
+  const [received, setReceived] = useState(txn.amount)
   const close = useEvent(() => {
     if (!a.pending) onClose()
   })
@@ -283,14 +286,22 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
     if (open) {
       setReference("")
       setValueDate(today)
+      setReceived(txn.amount)
     }
-  }, [open, today])
+  }, [open, today, txn.amount])
   const created = txn.created.slice(0, 10)
-  const valid = reference.trim().length > 0 && Boolean(valueDate) && valueDate <= today && valueDate >= created
+  const short = isPositiveAmount(received) ? minusAmount(txn.amount, received) : null
+  const receivedOk = short !== null && !short.startsWith("-")
+  const valid = reference.trim().length > 0 && Boolean(valueDate) && valueDate <= today && valueDate >= created && receivedOk
   const submit = async () => {
     if (!valid) return
     const r = await a.run(() =>
-      tex<{ reconciliation?: string | null }>("payments", "mark_transfer_received", { transaction: txn.name, reference: reference.trim(), value_date: valueDate }, { post: true }),
+      tex<{ reconciliation?: string | null }>(
+        "payments",
+        "mark_transfer_received",
+        { transaction: txn.name, reference: reference.trim(), value_date: valueDate, amount: received.trim() },
+        { post: true },
+      ),
     )
     if (r === undefined) return
     // money its booking could no longer take is recorded, but kept off it: said as such (B5)
@@ -319,6 +330,16 @@ export function ConfirmTransferDialog({ open, onClose, txn, onDone }: { open: bo
         <Field label={t("payments.bank.value_date")} required hint={t("payments.bank.value_date_hint")}>
           <Input type="date" value={valueDate} min={created} max={today} onChange={(e) => setValueDate(e.target.value)} />
         </Field>
+        <Field
+          label={t("payments.bank.received")}
+          required
+          hint={t("payments.bank.received_hint")}
+          error={received.trim() && !receivedOk ? t("payments.bank.received_invalid") : undefined}
+        >
+          <DecimalInput value={received} onValueChange={setReceived} suffix={txn.currency} />
+        </Field>
+        {/* a short transfer is allocated as it came: the booking still owes the rest (P1-11) */}
+        {receivedOk && short && !isZero(short) && <Notice tone="info">{t("payments.bank.short", { amount: money(short, txn.currency) })}</Notice>}
         <Notice tone="warning">{t("payments.bank.check_amount")}</Notice>
         <InlineError error={a.error} />
       </div>

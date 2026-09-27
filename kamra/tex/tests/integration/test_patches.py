@@ -108,16 +108,24 @@ BEHAVIOUR = {
 	                                 "test_p54_cancels_leftovers_and_parks_their_money_without_mail",
 	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
 	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
+	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 }
 
 
-def listed_patches() -> list[str]:
-	"""The TEX patches in migration order, as ``patches.txt`` lists them."""
+def listed_patches(section: str | None = None) -> list[str]:
+	"""The TEX patches in migration order, as ``patches.txt`` lists them (``[pre_model_sync]`` first);
+	``section``: only those of ``pre_model_sync`` or ``post_model_sync``."""
+	out, current = [], None
 	with open(os.path.join(os.path.dirname(kamra.__file__), "patches.txt")) as fh:
-		lines = [ln.split("#", 1)[0].strip() for ln in fh]
-	return [ln[len(PREFIX):] for ln in lines if ln.startswith(PREFIX)]
+		for raw in fh:
+			ln = raw.split("#", 1)[0].strip()
+			if ln.startswith("[") and ln.endswith("]"):
+				current = ln[1:-1]
+			elif ln.startswith(PREFIX) and section in (None, current):
+				out.append(ln[len(PREFIX):])
+	return out
 
 
 # ─── running a patch inside the test's transaction ──────────────────────
@@ -437,7 +445,10 @@ class TestEveryPatch(PatchCase):
 		files = sorted(f[:-3] for f in os.listdir(os.path.dirname(import_module("kamra.patches.tex").__file__))
 		               if f.startswith("p") and f.endswith(".py"))
 		self.assertEqual(sorted(listed), files)                        # no patch file left out, none listed twice
-		self.assertEqual(listed, sorted(listed))                        # migration order is patch order
+		for section in ("pre_model_sync", "post_model_sync"):
+			part = listed_patches(section)
+			self.assertEqual(part, sorted(part), section)             # within a section, migration order is patch order
+		self.assertEqual(listed, listed_patches("pre_model_sync") + listed_patches("post_model_sync"))
 		self.assertEqual(set(BEHAVIOUR), set(listed))
 		for patch, where in BEHAVIOUR.items():
 			module, cls, *test = where.split(".")
@@ -1197,6 +1208,33 @@ class TestSmallPatches(PatchCase):
 		self.assertRerunChangesNothing("p55_web_transfer_hold")
 		self.assertEqual(frappe.db.get_single_value("TEX Settings", "hold_minutes_transfer_web"), 720)
 		self.assertTrue(frappe.db.has_column("Property", "tex_hold_minutes_transfer_web"))
+
+	def test_p57_keeps_one_payment_link_per_key(self):
+		"""O-38 (audit 2B): before the model sync makes the key unique, the later links of a key are renamed
+		(their status untouched, audited, naming the link that kept it) and an empty key becomes NULL; a
+		second run finds nothing. The unique index lets no duplicate be seeded: the rows it reads are the
+		links as an older release left them (``rows`` stubbed); its plan is unit tested (test_p57_plan)."""
+		from kamra.patches.tex import p57_payment_link_unique_key as p57
+
+		link = {"property": fx.PROPERTY, "status": "Active", "amount": D("80"), "currency": "EUR",
+		        "token_hash": "x" * 64}
+		first = put("TEX Payment Link", idempotency_key="o38-first", creation=add_to_date(now_datetime(), minutes=-5),
+		            **link)
+		later = put("TEX Payment Link", idempotency_key="o38-later", **{**link, "status": "Paid"})
+		blank = put("TEX Payment Link", idempotency_key="", **link)
+		at = {n: frappe.db.get_value("TEX Payment Link", n, "creation") for n in (first, later, blank)}
+		as_left = [(first, "o38-first", at[first]), (later, "o38-first", at[later]), (blank, "", at[blank])]
+		never_ran("p57_payment_link_unique_key")
+		with mock.patch.object(p57, "rows", return_value=as_left):
+			seen = migrate("p57_payment_link_unique_key")
+		self.assertEqual(seen["reload_doc"], [])                                  # DML only, before the sync
+		key = lambda n: frappe.db.get_value("TEX Payment Link", n, ["idempotency_key", "status"])  # noqa: E731
+		self.assertEqual((key(first), key(later), key(blank)),
+		                 (("o38-first", "Active"), (f"o38-first:dup:{later}", "Paid"), (None, "Active")))
+		audits = frappe.get_all("TEX Audit Event", filters={"action": "payment_link.key_deduplicated"},
+		                        fields=["reference_name", "new_value"])
+		self.assertEqual([(a.reference_name, json.loads(a.new_value)["kept_by"]) for a in audits], [(later, first)])
+		self.assertRerunChangesNothing("p57_payment_link_unique_key")
 
 	def test_p56_gives_versions_the_roll_superseded_their_state(self):
 		# NEW-1: the roll set every published version without an end Superseded and left active_to empty

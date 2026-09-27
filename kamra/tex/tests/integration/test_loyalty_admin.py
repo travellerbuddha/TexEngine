@@ -152,6 +152,37 @@ class TestEarningsAndRedemption(LoyaltyCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "cannot be redeemed in this program"):
 			loyalty.redeem(guest, b["booking"], 50, idempotency_key="g24-3")
 
+	def test_points_pay_at_most_the_programs_share_and_what_the_booking_owes(self):
+		"""O-19 (audit 2B, ADR-065): points pay at most the program's share of a booking, the points already
+		on it counted, and never more than it still owes: a second 50 % is refused, and so is any on a booking
+		paid in full. The refusal says the most it may still take, in money and points."""
+		name = self.create(pending_days=0)                                # 50 %, a point is 0.10
+		at_hotel = guest_books(session="o19-hotel", method="Pay at Hotel")      # 842.50, nothing paid yet
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", at_hotel["booking"], "booker_guest")
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": name, "guest": guest, "entry_type": "Adjust",
+		                "points": 20000, "status": "Available", "reason": "welcome"}).insert(ignore_permissions=True)
+		self.assertEqual(loyalty.redeem(guest, at_hotel["booking"], 4212, idempotency_key="o19-1")["value"], "421.20")
+		with self.assertRaisesRegex(frappe.ValidationError, r"at most 0\.05 EUR .*\(0 points\)"):
+			loyalty.redeem(guest, at_hotel["booking"], 50, idempotency_key="o19-2")
+		full, _guest = self.paid_stay("o19-full")                          # the deposit, then the rest
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest pays the rest online
+		rest = public.pay_booking(token=full["manage_token"])
+		public.mock_pay(transaction=rest["transaction"], outcome="success", sig=rest["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		with self.assertRaisesRegex(frappe.ValidationError, r"at most 0\.00 EUR"):
+			loyalty.redeem(guest, full["booking"], 50, idempotency_key="o19-3")
+
+	def test_the_points_on_a_booking_are_read_by_its_indexes(self):
+		"""O-19 review: the locking reads of the points already on a booking go by an index (its booking, or
+		the charges' names), so their shared locks hold this booking's rows only, never every payment of every
+		hotel until the redemption commits."""
+		for sql, values in ((loyalty.LOYALTY_ON_BOOKING, {"b": "BK-O19"}), (loyalty.ALLOCATED_TO_BOOKING, {"b": "BK-O19"}),
+		                    (loyalty.LOYALTY_NAMED, {"names": ("TXN-O19-1", "TXN-O19-2")})):
+			for row in frappe.db.sql("EXPLAIN " + sql, values, as_dict=True):
+				self.assertNotIn(row.type, ("ALL", "index"), (sql, row))
+				self.assertTrue(row.key, (sql, row))
+
 	def test_a_guests_summary_shows_the_viewers_programs_only(self):
 		name = self.create()
 		_b, guest = self.paid_stay("g24-sum")

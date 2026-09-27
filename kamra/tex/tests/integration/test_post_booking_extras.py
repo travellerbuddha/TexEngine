@@ -82,6 +82,32 @@ class TestPostBookingExtras(AddonCase):
 		self.assertEqual([(r.change_type, r.source, D(r.difference)) for r in rev], [("Extras", "Guest", D("100"))])
 		self.assertEqual(frappe.db.get_value("Reservation", res, "tex_guest_change_pending"), 1)
 
+	def test_an_extra_added_to_a_price_staff_set_adds_to_that_price(self):
+		"""Y-7 (audit 2B, ADR-065): the new stored price is the old stored price plus the extras; a price
+		staff set stays theirs, never the engine's total the snapshot explains."""
+		b = self.book("y7-manual")                                      # FLEX, paid at the hotel
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff set the price
+		p = modification.propose(res, {})
+		modification.apply(p["proposal_token"], reason="the price agreed by phone", override_amount="600")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest adds a massage
+		p = public.manage_extras_propose(token=b["manage_token"], reservation=res, extras=[{"code": "MASSAGE"}])
+		self.assertEqual((p["old_total"], p["new_total"]), ("600.00", "650.00"))
+		public.manage_extras_apply(token=b["manage_token"], proposal_token=p["proposal_token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what was stored
+		self.assertEqual(D(frappe.db.get_value("Reservation", res, "tex_total_amount")), D("650"))
+		self.assertEqual(self.snapshot(res)["override_amount"], "650.00")
+		rev = frappe.get_all("TEX Reservation Revision", filters={"reservation": res, "pricing_basis": "ADD_ON"},
+		                     fields=["change_type", "old_amount", "new_amount", "difference", "override_amount",
+		                             "changes_json"])
+		self.assertEqual([(r.change_type, D(r.old_amount), D(r.new_amount), D(r.difference), D(r.override_amount))
+		                  for r in rev], [("Extras", D(600), D(650), D(50), D(650))])
+		self.assertEqual(frappe.parse_json(rev[0].changes_json)["manual_price"], {"before": "600.00", "after": "650.00"})
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount")), D("650"))
+		audit = frappe.parse_json(frappe.db.get_value("TEX Audit Event", {"action": "reservation.addon",
+		                                                                   "reference_name": res}, "new_value"))
+		self.assertEqual((audit["total_before"], audit["total_after"]), ("600.00", "650.00"))
+
 	def test_only_extras_sold_online_after_booking_can_be_added(self):
 		extra("BACKSTAGE", bookable_online=0)
 		extra("WELCOME", bookable_after_booking=0)

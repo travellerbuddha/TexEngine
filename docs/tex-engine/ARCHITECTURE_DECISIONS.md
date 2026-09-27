@@ -9167,6 +9167,22 @@ the versions the roll superseded the state their contract's later publishes woul
   covers them deterministically.
 - O-16 (user): a guest cancels online only before the arrival day, but may still start a change on it (`room_changeable`).
 
+## ADR-065 The stored price and a booking's money (audit Part 2B)
+- A room's stored price is `Reservation.tex_total_amount` (= `amount_after_tax`, `tex_currency`; set by hand: also
+  `snapshot.override_amount`; `totals.total` is the engine's, to explain); a booking's, `TEX Booking(.Room)` amounts after
+  `_refresh_booking_after_change`. Money reads the stored price; the snapshot gives only the terms, never the price.
+- `required_now` = each live room's `amount_due_now` (its frozen policy, its stored price) + the cancelled rooms' fees.
+- Extras add to the stored price; a price set by hand stays one. A later stay change needs staff's choice (keep it, or the
+  change's price, audited); a guest cannot change such a stay online (D-9).
+- A booking cancelled never confirmed holds no money: on its cancellation and on every refund outcome it goes to
+  reconciliation (keys `cancelled:`, `refund:`, `refund-fix:`; `expired:` stays B2/D4's). Gateway, link and transfer money is
+  allocated up to what the booking owes, the rest stays on the charge (`OVERPAID`); status check `payments.overpaid`.
+- A link is in its booking's currency (D-10); money that came in another is recorded, kept off, `Action Required`, never undone.
+- One link per idempotency key (unique; p57). One `payment_status` formula ("Refunded" included).
+- Points ≤ min(total × max % − points on it, total − paid); a refund plan never pays points back as cash.
+- A transfer is confirmed with the amount that came (the staff API requires its value date); one that no longer covers the
+  deposit leaves the booking Pending, and it expires with its hold. New reconciliation reasons tell the team only.
+
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
   (`pricing/policy_money.refundable`); the engine writes that into every quote's `rate_plan.refundable`. No payload key:

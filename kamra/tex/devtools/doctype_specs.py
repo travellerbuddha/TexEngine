@@ -1099,7 +1099,8 @@ PAYMENT_SPECS = [
 		F("public_url", "Data", "Payment URL", read_only=1),
 		CB(),
 		F("token_hash", "Data", "Token (hash)", read_only=1, hidden=1),
-		F("idempotency_key", "Data", "Idempotency key", read_only=1),
+		# one link per key, in the database (O-38, p57)
+		F("idempotency_key", "Data", "Idempotency key", read_only=1, unique=1),
 	], perms=[SM, HA_RO],
 	   autoname="PL-.YYYY.-.#####", naming_rule="Expression (old style)", title_field="guest_name"),
 

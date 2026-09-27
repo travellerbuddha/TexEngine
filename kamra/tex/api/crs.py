@@ -251,11 +251,12 @@ def propose_modification(reservation: str, changes, basis: str = "CURRENT", basi
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def apply_modification(proposal_token: str, reason: str, override_amount: str | None = None,
-                       override_restrictions: int = 0):
+                       override_restrictions: int = 0, reprice: int = 0):
 	"""``override_restrictions``: sell a change the restrictions refuse (``restriction.edit``,
-	audited; G-48)."""
+	audited; G-48). ``reprice``: a stay priced by hand takes the change's price (D-9, audited)."""
 	return modification.apply(proposal_token, reason=text(reason, 500), override_amount=override_amount or None,
-	                          override_restrictions=bool(as_int(override_restrictions, 0)))
+	                          override_restrictions=bool(as_int(override_restrictions, 0)),
+	                          reprice=bool(as_int(reprice, 0)))
 
 
 @frappe.whitelist()

@@ -289,6 +289,18 @@ def _payments_reconciliation(props, now) -> dict:
 	                              now=now, properties=hotels | refund_hotels)
 
 
+def _bookings_overpaid(props, now) -> dict:
+	"""P1-7: bookings (not drafts) holding more money than they cost, per hotel; the cancelled ones
+	counted apart; aged from the oldest one's last change."""
+	params: dict = {}
+	cond = _scope("property", props, params)
+	rows = frappe.db.sql(f"""SELECT property, COUNT(*) n, SUM(status = 'Cancelled') cancelled, MIN(modified) since
+	                         FROM `tabTEX Booking` WHERE paid_amount > total_amount AND status != 'Draft'{cond}
+	                         GROUP BY property""", params, as_dict=True)
+	n, oldest, hotels = _sum(rows)
+	return C.overpaid_bookings_check(n, sum(int(r.cancelled or 0) for r in rows), oldest, hotels)
+
+
 def fx_pairs(props, now) -> list[dict]:
 	"""The provider currency pairs the active FX policies of these hotels (and the global
 	ones) use, each with the date of its latest rate as pricing would find it."""
@@ -371,6 +383,7 @@ HOTEL_PROBES = (
 	("outbox.pms", _outbox_pms), ("outbox.channel", _outbox_channel), ("channel.inbound", _channel_inbound),
 	("connections", _connections), ("payments.pending", _payments_pending),
 	("payments.callbacks", _payments_callbacks), ("payments.reconciliation", _payments_reconciliation),
+	("payments.overpaid", _bookings_overpaid),
 	("holds.overdue", _overdue_holds),
 	("fx.rates", _fx), ("mail.account", _mail_account),
 	("mail.delivery", _mail_delivery),
