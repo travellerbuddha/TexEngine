@@ -599,3 +599,21 @@ class TestGuestProposals(TexTestCase):
 			crs_api.resolve_guest_change(request=request, action="approve", reason="ok")
 		self.assertEqual(crs_api.resolve_guest_change(request=request, action="reject", reason="no longer sold")[
 			"status"], "Rejected")
+
+
+class TestChangedPromotionCodes(TexTestCase):
+	"""2D-1 0e: a change's promotion codes are keyed as a quote keys them (`code_key`, O-31), so the
+	re-priced request and its snapshot say WINTER, never WİNTER."""
+
+	def test_a_changed_code_is_stored_by_its_key(self):
+		from kamra.tex.pricing import serialize
+		from kamra.tex.pricing.model import StayRequest
+
+		sold = StayRequest(property=fx.PROPERTY, room_type=self.f["room_types"]["STD"], board="AI",
+		                   check_in=fx.d(6, 10), check_out=fx.d(6, 13), adults=2, sale_at=now_datetime(),
+		                   market="DE", channel="DIRECT_WEB", sell_currency="EUR")
+		res = frappe._dict(name="2D1-0E", tex_pricing_snapshot=json.dumps(
+			{"request": serialize.request_to_dict(sold)}, default=str))
+		req, _snap = modification.build_changed_request(res, {"promo_codes": [" wİnter ", "yaz", "  "]},
+		                                                now_datetime())
+		self.assertEqual(req.promo_codes, ("WINTER", "YAZ"))
