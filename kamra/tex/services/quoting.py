@@ -213,8 +213,9 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	ctx_cache: dict[tuple, object] = {}
 	# the hotel's mandatory extras are priced in every offer, as the quote prices them (Y-5): the
 	# engine adds them to each room (a per-booking one to room 1 only); optional ones are the
-	# guest's choice at the quote
-	mandatory = {code: d for code, d in ctxmod.extras_catalog(property, at=sale_at).items() if d.mandatory}
+	# guest's choice at the quote. Loaded with the first context: an ambiguous catalog stops each
+	# room of this hotel as the quote does (``Unsellable``), never the search
+	mandatory: dict | None = None
 
 	for contract_row, version in cands:
 		terms = contracts.load_terms(version)
@@ -247,6 +248,9 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 						                    promo_codes=promo_codes, member=member, room_index=idx)
 						try:
 							if key not in ctx_cache:
+								if mandatory is None:
+									mandatory = {code: d for code, d in ctxmod.extras_catalog(property, at=sale_at).items()
+									             if d.mandatory}
 								ctx_cache[key] = ctxmod.build_context(terms, req, extras=mandatory)
 							q = engine.price_stay(ctx_cache[key], req)
 						except Unsellable as u:
