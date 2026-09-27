@@ -122,7 +122,8 @@ class TestVersionLifecycle(TexTestCase):
 	def test_withdrawing_the_version_on_sale_still_stops_it_now(self):
 		c = fx.create_contract(self.f, code="Y2-C")
 		v1 = c["version"]
-		v2 = schedule(c["contract"], now_datetime())
+		# None: "now" as publish reads it, never a time taken before new_draft ran (a second may pass)
+		v2 = schedule(c["contract"], None)
 		self.assertEqual(status(v1), "Superseded")
 		contracts.withdraw(v2, reason="wrong prices")
 		self.assertEqual(status(v2), "Withdrawn")
