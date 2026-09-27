@@ -25,7 +25,7 @@ from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
 from kamra.tex.tests.integration import fixtures as fx
-from kamra.tex.tests.integration.test_critical_journey import TexTestCase
+from kamra.tex.tests.integration.test_critical_journey import TexTestCase, pick
 
 SLUG = "tex-test-resort"
 GUEST = {"first_name": "Lena", "last_name": "Kraus", "email": "lena@example.com", "country": "Germany"}
@@ -250,6 +250,153 @@ class TestGuestPayment(TexTestCase):
 		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "paid_amount")), D("100"))
 		with self.assertRaises(frappe.ValidationError):
 			public.pay_link(token=link["token"])
+
+
+	# ── NEW-6 (ADR-066): no row, gap or series lock is held through a gateway call ──
+
+	def started(self, session: str, gateway) -> tuple[dict | Exception, list, str | None]:
+		"""``guest_books`` with the commits of a request outside tests (recorded, never made) and the
+		sandbox gateway replaced by ``gateway(real, intent)``. → (its answer or error, what happened: a
+		commit with the charge's status and whether its checkout lease was on, and each gateway call;
+		the charge)."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		events: list = []
+		charge: dict = {}
+		real, real_new = MockProvider.create_checkout, pay._new_txn
+
+		def new_txn(**kw):
+			doc = real_new(**kw)
+			charge.setdefault("name", doc.name)
+			return doc
+
+		def commit(*_a, **_kw):
+			row = frappe.db.get_value("TEX Payment Transaction", charge["name"],
+			                          ["status", "checkout_started_at"], as_dict=True) if charge else None
+			events.append(("commit", row and (row.status, bool(row.checkout_started_at))))
+
+		def checkout(provider, intent):
+			events.append("gateway")
+			return gateway(lambda: real(provider, intent), intent)
+
+		with mock.patch.dict(frappe.flags, {"in_test": False}), \
+				mock.patch.object(frappe.db, "commit", side_effect=commit), \
+				mock.patch.object(pay, "_new_txn", side_effect=new_txn), \
+				mock.patch.object(MockProvider, "create_checkout", checkout):
+			try:
+				out = guest_books(session=session)
+			except Exception as e:                   # the caller asserts on it
+				out = e
+		return out, events, charge.get("name")
+
+	def test_the_gateway_is_asked_between_two_commits(self):
+		out, events, _charge = self.started("new6-order", lambda real, _intent: real())
+		self.assertEqual(events, [("commit", ("Pending", True)), "gateway", ("commit", ("Pending", False))])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was recorded
+		pmt = out["payment"]
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", pmt["transaction"], "provider_ref"),
+		                 f"MOCK-{pmt['transaction']}")
+
+	def test_a_failed_start_is_on_record_before_the_guest_is_told(self):
+		def down(_real, _intent):
+			raise ProviderError("gateway down")
+
+		out, events, charge = self.started("new6-down", down)
+		self.assertIsInstance(out, frappe.ValidationError)
+		self.assertIn("could not be started", str(out))
+		# the booking and its charge were committed first; the failure is committed before the error
+		self.assertEqual(events, [("commit", ("Pending", True)), "gateway", ("commit", ("Failed", False))])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was recorded
+		b = frappe.db.get_value("TEX Payment Transaction", charge, "booking")
+		self.assertEqual(frappe.db.get_value("TEX Booking", b, "status"), "Pending Payment")
+
+	def test_a_second_start_while_the_gateway_works_is_told_to_wait(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest's second tab
+		real_start, first, second = pay.start_payment, {}, []
+
+		def start(**kw):
+			first.setdefault("kw", kw)
+			return real_start(**kw)
+
+		def gateway(real, _intent):
+			if "again" not in first:          # the same charge, started again while this checkout is made
+				first["again"] = True
+				try:
+					second.append(("started", real_start(**first["kw"])["transaction"]))
+				except pay.PaymentBusy as e:
+					second.append(("busy", str(e)))
+			return real()
+
+		real_checkout = MockProvider.create_checkout
+		with mock.patch.object(pay, "start_payment", side_effect=start), \
+				mock.patch.object(MockProvider, "create_checkout",
+				                  lambda provider, intent: gateway(lambda: real_checkout(provider, intent), intent)):
+			try:
+				b = guest_books(session="new6-busy")
+			except Exception as e:                   # before NEW-6 the second checkout broke the first
+				b = e
+		self.assertEqual(second, [("busy", "A payment is being started. Please wait a moment and try again.")])
+		self.assertIsInstance(b, dict, b)
+		self.assertTrue(b["payment"]["url"])
+
+
+	def booked_with_its_start(self, session: str) -> tuple[dict, dict]:
+		"""``guest_books`` and the arguments its payment was started with (to start it again)."""
+		real_start, seen = pay.start_payment, {}
+
+		def start(**kw):
+			seen.setdefault("kw", kw)
+			return real_start(**kw)
+
+		with mock.patch.object(pay, "start_payment", side_effect=start):
+			b = guest_books(session=session)
+		return b, seen["kw"]
+
+	def test_a_lease_outlasts_the_slowest_gateway_then_a_dead_start_is_taken_over(self):
+		"""Sipay makes two calls, each up to 20 s to connect and 20 s to read: a start 70 s into its
+		gateway call is alive. Once the lease is over the start died (its checkout never reached the
+		guest): the charge it left is started again, and the guest pays it."""
+		b, again = self.booked_with_its_start("new6-lease")
+		txn = b["payment"]["transaction"]
+
+		def started(seconds_ago):
+			frappe.db.set_value("TEX Payment Transaction", txn, "checkout_started_at",
+			                    add_to_date(now_datetime(), seconds=-seconds_ago), update_modified=False)
+
+		started(70)
+		with self.assertRaises(pay.PaymentBusy):
+			pay.start_payment(**again)
+		started(pay.CHECKOUT_LEASE_SECONDS + 1)
+		out = pay.start_payment(**again)
+		self.assertEqual(out["transaction"], txn)                  # the same charge, never a second one
+		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", txn, "checkout_started_at"))
+		public.mock_pay(transaction=txn, outcome="success", sig=out["fields"]["success_sig"])
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "status"), "Confirmed")
+
+	def test_the_answer_of_a_gateway_never_changes_a_charge_settled_meanwhile(self):
+		"""A reused charge's earlier checkout is paid while the gateway makes its new one: step (c) records
+		the new reference and leaves the charge Succeeded, its booking confirmed once."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b, again = self.booked_with_its_start("new6-settled")
+		first = b["payment"]
+		real = MockProvider.create_checkout
+
+		def paid_meanwhile(provider, intent):
+			public.mock_pay(transaction=first["transaction"], outcome="success", sig=first["fields"]["success_sig"])
+			return real(provider, intent)
+
+		with mock.patch.object(MockProvider, "create_checkout", paid_meanwhile):
+			out = pay.start_payment(**again)
+		self.assertEqual(out["transaction"], first["transaction"])
+		row = frappe.db.get_value("TEX Payment Transaction", first["transaction"],
+		                          ["status", "provider_ref", "checkout_started_at"], as_dict=True)
+		self.assertEqual((row.status, row.checkout_started_at), ("Succeeded", None))
+		self.assertIn(f"MOCK-{first['transaction']}", row.provider_ref)
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "status"), "Confirmed")
+		self.assertEqual(frappe.db.count("TEX Payment Allocation", {"transaction": first["transaction"]}), 1)
 
 
 class TestSelfService(TexTestCase):
@@ -1545,6 +1692,135 @@ class TestPolicyCurrency(TexTestCase):
 			                  channel="DIRECT_WEB", sell_currency=sell)
 			q = engine.price_stay(context.build_context(terms, req), req).to_dict(internal=True)
 			self.assertEqual(policy_money.fixed_in_sell("100", q["rate_plan"]["payment_policy"], q), due, sell)
+
+
+	# ── Y-3 B (ADR-067): the booking takes a fixed amount in the sale's currency, once per booking ──
+
+	def quotes(self, sell: str, rooms: int = 1) -> list[str]:
+		"""The fixed policies without a currency (frozen in the contract's, EUR) on a published EUR
+		contract, sold in ``sell`` at 51 TRY per EUR: the quotes of one search of ``rooms`` rooms."""
+		from kamra.tex.tests.integration.test_contract_offer_currency import _policy
+
+		pay, cxl = self.fixed_policies()
+		contracts.publish(self.draft("Y3B", pay, cxl))
+		_policy("EUR", "TRY", 51)
+		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+		                     rooms=[{"adults": 2}] * rooms, market="DE", channel="DIRECT_WEB", currency=sell)
+		offer = pick(res["properties"][0])
+		out = quoting.create_quotes([{"offer_key": r["offer_key"], "extras": []}
+		                             for r in sorted(offer["rooms"], key=lambda r: r["room_index"])])
+		self.assertTrue(out["ok"], out)
+		return [r["quote_id"] for r in out["rooms"]]
+
+	def book(self, ids: list[str], key: str, *, confirm: bool = False) -> dict:
+		return booking.create_booking(quote_ids=ids, guest=GUEST, payment_method="Card", idempotency_key=key,
+		                              confirm_without_payment=confirm)
+
+	def test_a_fixed_deposit_is_converted_to_the_sales_currency(self):
+		ids = self.quotes("TRY")
+		summary = booking.quotes_summary([quoting.load_quote(q) for q in ids], "Card")
+		self.assertEqual((summary["currency"], summary["due_now"]), ("TRY", "5100.00"))   # 100 EUR × 51
+		b = self.book(ids, "y3b-try")
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now"), D("5100.00"))
+		self.assertEqual(b["due_now"], "5100.00")
+		self.assertEqual(booking.required_now(b["booking"]), D("5100.00"))
+
+	def test_a_fixed_deposit_is_taken_once_per_booking(self):
+		ids = self.quotes("EUR", rooms=3)
+		summary = booking.quotes_summary([quoting.load_quote(q) for q in ids], "Card")
+		self.assertEqual(summary["due_now"], "100.00")
+		self.assertEqual([r["due_now"] for r in summary["rooms"]], ["100.00", "0.00", "0.00"])
+		b = self.book(ids, "y3b-three")
+		self.assertEqual(b["due_now"], "100.00")
+		self.assertEqual(booking.required_now(b["booking"]), D("100.00"))
+		# room 1 cancelled: the next live room carrying the policy takes the deposit
+		first = next(r["reservation"] for r in b["rooms"]
+		             if frappe.db.get_value("Reservation", r["reservation"], "tex_room_index") == 1)
+		booking.cancel_reservation(first, reason="Y-3 B: room 1 leaves")
+		self.assertEqual(frappe.db.get_value("Reservation", first, "status"), "Cancelled")
+		self.assertEqual(booking.required_now(b["booking"]), D("100.00"))
+
+	def test_a_fixed_penalty_is_converted_and_explained(self):
+		b = self.book(self.quotes("TRY"), "y3b-fee", confirm=True)
+		room = frappe.get_doc("Reservation", b["rooms"][0]["reservation"])
+		penalty, basis = booking.cancellation_penalty(room, today=fx.d(6, 7))        # 3 days before arrival
+		self.assertEqual(penalty, D("7650.00"))                                        # 150 EUR × 51
+		self.assertEqual(basis["fx"], {"from": "EUR", "to": "TRY", "rate": "51.000000", "amount": "150.00"})
+
+	def test_a_fixed_deposit_never_exceeds_the_stored_price(self):
+		b = self.book(self.quotes("TRY"), "y3b-staff")
+		frappe.db.set_value("Reservation", b["rooms"][0]["reservation"], "tex_total_amount", 3000)
+		self.assertEqual(booking.required_now(b["booking"]), D("3000.00"))            # min(5,100.00, 3,000.00)
+
+	def test_a_fixed_deposit_falls_to_the_next_room_when_the_first_cannot_take_it(self):
+		"""One fixed deposit per booking and payment policy, taken room by room in room order, each room at
+		most its own price: a first room priced below the deposit (a price staff set, a booking discount it
+		carries) leaves the rest to the next room carrying the policy, never nothing."""
+		b = self.book(self.quotes("TRY", rooms=2), "y3b-fall")
+		rooms = sorted(b["rooms"], key=lambda r: frappe.db.get_value("Reservation", r["reservation"], "tex_room_index"))
+		self.assertGreaterEqual(D(rooms[1]["amount"]), D("5100"))
+		for first, due in ((0, D("5100.00")), (3000, D("5100.00")), (6000, D("5100.00"))):
+			frappe.db.set_value("Reservation", rooms[0]["reservation"], "tex_total_amount", first)
+			self.assertEqual(booking.required_now(b["booking"]), due, first)     # 0 + 5,100; 3,000 + 2,100; 5,100 + 0
+
+	def test_a_stay_sold_before_its_policy_had_a_currency_keeps_the_amount_as_sold(self):
+		b = self.book(self.quotes("TRY"), "y3b-old", confirm=True)
+		name = b["rooms"][0]["reservation"]
+		snap = json.loads(frappe.db.get_value("Reservation", name, "tex_pricing_snapshot"))
+		for key in ("payment_policy", "cancellation_policy"):
+			self.assertEqual(snap["rate_plan"][key].pop("currency"), "EUR")
+		frappe.db.set_value("Reservation", name, "tex_pricing_snapshot", json.dumps(snap, sort_keys=True))
+		self.assertEqual(booking.required_now(b["booking"]), D("100.00"))
+		penalty, basis = booking.cancellation_penalty(frappe.get_doc("Reservation", name), today=fx.d(6, 7))
+		self.assertEqual(penalty, D("150.00"))
+		self.assertNotIn("fx", basis)
+
+
+	def guest_changes(self, room: int) -> tuple[dict, str, dict]:
+		"""A confirmed two-room TRY booking of the fixed policies; the guest prices a longer stay of its
+		room ``room`` (1: the room that takes the fixed deposit) on the manage page."""
+		b = self.book(self.quotes("TRY", rooms=2), f"y3b-change-{room}", confirm=True)
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_self_service", 1)
+		res = next(r["reservation"] for r in b["rooms"]
+		           if frappe.db.get_value("Reservation", r["reservation"], "tex_room_index") == room)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		return b, res, public.manage_propose(token=b["manage_token"], reservation=res,
+		                                     changes={"check_out": str(fx.d(6, 14))})
+
+	def assert_guest_priced(self, b: dict, res: str, up: dict) -> None:
+		self.assertTrue(up["sellable"], up)
+		self.assertTrue(up["proposal_token"])
+		self.assertIsNotNone(up["settlement"])
+		seen: set[str] = set()
+
+		def keys(v):
+			if isinstance(v, dict):
+				seen.update(v)
+				for x in v.values():
+					keys(x)
+			elif isinstance(v, list):
+				for x in v:
+					keys(x)
+
+		keys(up)
+		# what a guest is never told: rates, providers, the rule explanation, cost and margin
+		self.assertFalse(seen & {"fx", "fx_rates", "original_fx_rates", "explanation", *quoting.INTERNAL_TOTALS},
+		                 seen)
+		# the guest accepts it at the price shown
+		done = public.manage_apply(token=b["manage_token"], proposal_token=up["proposal_token"])
+		self.assertIn(done["status"], ("payment_required", "requested", "applied"), done)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was recorded
+		req = frappe.get_all("TEX Guest Change Request", filters={"reservation": res}, fields=["new_total", "old_total"])
+		self.assertEqual(len(req), 1)
+		self.assertEqual(D(req[0].new_total) - D(req[0].old_total), D(up["difference"]))
+
+	def test_the_guest_prices_a_change_of_the_room_taking_the_deposit(self):
+		b, res, up = self.guest_changes(1)
+		self.assert_guest_priced(b, res, up)
+
+	def test_the_guest_prices_a_change_of_another_room(self):
+		b, res, up = self.guest_changes(2)
+		self.assert_guest_priced(b, res, up)
 
 
 class TestInfantsNotChildren(TexTestCase):

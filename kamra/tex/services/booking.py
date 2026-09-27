@@ -24,10 +24,10 @@ from kamra.tex.commercial import context as ctxmod
 from kamra.tex.commercial import contracts
 from kamra.tex.money import ZERO, D, db_dec, from_db, quantize, to_str
 from kamra.tex.pricing import basket as basket_math
-from kamra.tex.pricing import engine
+from kamra.tex.pricing import engine, policy_money
 from kamra.tex.pricing.enums import LineKind
 from kamra.tex.pricing.explain import Explanation
-from kamra.tex.pricing.model import RuleRef
+from kamra.tex.pricing.model import PricingError, RuleRef
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
@@ -199,8 +199,57 @@ def _record_consent(guest: str, booking: str, property: str, granted: list[str],
 		      new={**dict.fromkeys(requested, True), "booking": booking}, reason="booking")
 
 
-def amount_due_now(result: dict, method: str | None) -> tuple[D, str]:
-	"""Deposit due at booking from the frozen payment policy of the rate plan."""
+def _fixed(amount, policy: dict | None, result: dict) -> D:
+	"""A fixed amount of a frozen payment or cancellation policy in the currency ``result`` (a room's
+	internal quote or snapshot) was sold in (Y-3 B, ADR-067): converted at the contract → sell rate the
+	quote recorded; a policy sold before it had a currency keeps the amount as sold."""
+	try:
+		return quantize(policy_money.fixed_in_sell(amount, policy, result), result["currency"])
+	except PricingError as e:
+		# a fixed amount in a third currency: ``POLICY_CURRENCY`` keeps it from being published; fail closed
+		frappe.throw(_("This rate's fixed amount cannot be converted: {0}").format(str(e)))
+
+
+def _fixed_fx(amount, policy: dict | None, result: dict) -> dict | None:
+	"""How ``_fixed`` converted ``amount``, for a basis: None when it is in the sale's currency."""
+	frm = ((policy or {}).get("currency") or "").upper()
+	to = str(result["currency"]).upper()
+	if not frm or frm == to:
+		return None
+	return {"from": frm, "to": to, "rate": str((result.get("fx") or {}).get("sell_rate")),
+	        "amount": to_str(quantize(D(amount), frm))}
+
+
+def deposit_shares(results: list[dict]) -> dict[int, D]:
+	"""Each room's share of its booking's fixed deposits (Y-3 B, ADR-067), by position in ``results``
+	(the internal quotes of one booking's live rooms, at their stored prices). A FIXED payment policy's
+	deposit is taken once per booking and policy, in the sale's currency at the rate its first room
+	recorded, room by room in room order (room index, as ``policy_money.first_rooms_per_policy``), each
+	room at most its own total: min(deposit, those rooms' total) in all. Rooms of another policy are
+	not in it."""
+	rooms: dict[str, list[tuple[int, int]]] = defaultdict(list)
+	for pos, r in enumerate(results):
+		policy = (r.get("rate_plan") or {}).get("payment_policy") or {}
+		if policy.get("deposit_type") == "FIXED":
+			rooms[str(policy.get("id") or policy.get("name") or "")].append(
+				(int((r.get("request") or {}).get("room_index") or 0), pos))
+	shares: dict[int, D] = {}
+	for group in rooms.values():
+		group.sort()
+		first = results[group[0][1]]
+		policy = first["rate_plan"]["payment_policy"]
+		left = _fixed(D(policy.get("deposit_value")), policy, first)
+		for _index, pos in group:
+			share = max(ZERO, min(left, D(results[pos]["totals"]["total"])))
+			shares[pos] = quantize(share, first["currency"])
+			left -= share
+	return shares
+
+
+def amount_due_now(result: dict, method: str | None, *, fixed_share: D | None = None) -> tuple[D, str]:
+	"""Deposit due at booking from the frozen payment policy of the rate plan. A FIXED deposit is the
+	room's share of its booking's (``deposit_shares``: once per booking and policy, in the sale's
+	currency, room by room); a room priced alone takes it whole, at most its total."""
 	total = D(result["totals"]["total"])
 	ccy = result["currency"]
 	policy = (result.get("rate_plan") or {}).get("payment_policy") or {"deposit_type": "FULL"}
@@ -215,7 +264,9 @@ def amount_due_now(result: dict, method: str | None) -> tuple[D, str]:
 	if kind == "PERCENT":
 		return quantize(total * v / 100, ccy), kind
 	if kind == "FIXED":
-		return min(quantize(v, ccy), total), kind
+		if fixed_share is not None:
+			return quantize(fixed_share, ccy), kind
+		return min(_fixed(v, policy, result), total), kind
 	if kind == "NIGHTS":
 		# N nights' share of the stay total (extras and taxes included proportionally)
 		count = max(1, len(result.get("nights") or []))
@@ -258,6 +309,7 @@ def required_now(booking, override: dict | None = None) -> D:
 	ccy = b.currency or "EUR"
 	method = b.payment_method
 	total = ZERO
+	priced = []                                             # the live rooms TEX priced, at their stored price
 	for row in b.rooms:
 		r = frappe.db.get_value("Reservation", row.reservation, ["status", "tex_pricing_snapshot", "cancellation_fee",
 		                                                         "tex_total_amount"], as_dict=True)
@@ -271,8 +323,13 @@ def required_now(booking, override: dict | None = None) -> D:
 		if not (result.get("totals") or {}).get("total"):
 			total += from_db(r.tex_total_amount, ccy)       # not priced by TEX: all of it
 			continue
+		priced.append(result)
+	# a fixed deposit once per booking, room by room: a cancelled first room, or one priced below it,
+	# leaves it to the next live rooms carrying the policy
+	shares = deposit_shares(priced)
+	for pos, result in enumerate(priced):
 		m = method if method != "Pay at Hotel" or pay_at_hotel_allowed(result) else "Card"
-		due, _kind = amount_due_now(result, m)
+		due, _kind = amount_due_now(result, m, fixed_share=shares.get(pos))
 		total += due
 	return quantize(total, ccy)
 
@@ -293,7 +350,8 @@ def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
 	due = ZERO
 	due_known = True
 	pay_at_hotel = True
-	for row, req, result in loaded:
+	shares = deposit_shares([result for _row, _req, result in loaded])
+	for pos, (row, req, result) in enumerate(loaded):
 		room_total = D(result["totals"]["total"])
 		total += room_total
 		allowed = pay_at_hotel_allowed(result)
@@ -302,7 +360,7 @@ def quotes_summary(loaded: list[tuple], method: str | None) -> dict:
 		if method == "Pay at Hotel":
 			room_due, kind = (ZERO, "Pay at Hotel") if allowed else (None, policy.get("deposit_type") or "FULL")
 		else:
-			room_due, kind = amount_due_now(result, method)
+			room_due, kind = amount_due_now(result, method, fixed_share=shares.get(pos))
 		if room_due is None:
 			due_known = False
 		else:
@@ -609,8 +667,9 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	# ── money ──
 	total = sum((D(r[2]["totals"]["total"]) for r in rows), ZERO)
 	due_now = ZERO
-	for _row, _req, result in rows:
-		d, _kind = amount_due_now(result, payment_method)
+	shares = deposit_shares([r[2] for r in rows])
+	for pos, (_row, _req, result) in enumerate(rows):
+		d, _kind = amount_due_now(result, payment_method, fixed_share=shares.get(pos))
 		due_now += d
 	if not staff and payment_method == holds.TRANSFER and due_now > 0 and len(rows) > holds.WEB_TRANSFER_MAX_ROOMS:
 		# one visitor must not lock many rooms for a day by choosing a transfer (C2, user decision)
@@ -998,13 +1057,18 @@ def _policy_penalty(reservation, today=None) -> tuple[D, dict]:
 		return quantize(ZERO, ccy), {"rule": "free cancellation window", "days_before": days}
 	rule = min(applicable, key=lambda r: int(r["days_before_arrival"]))
 	v = D(rule["penalty_value"])
+	basis = {"rule": rule, "days_before": days}
 	if rule["penalty_type"] == "PERCENT":
 		pen = total * v / 100
 	elif rule["penalty_type"] == "NIGHTS":
 		pen = total / max(1, len(snap.get("nights") or [1])) * v
 	else:
-		pen = v
-	return quantize(min(pen, total), ccy), {"rule": rule, "days_before": days}
+		# in the policy's currency, converted at the rate the sale recorded (Y-3 B), and said so
+		pen = _fixed(v, policy, snap)
+		conversion = _fixed_fx(v, policy, snap)
+		if conversion:
+			basis["fx"] = conversion
+	return quantize(min(pen, total), ccy), basis
 
 
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,

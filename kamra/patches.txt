@@ -69,4 +69,5 @@ kamra.patches.tex.p56_open_ended_versions
 kamra.patches.tex.p59_policy_currency
 kamra.patches.tex.p60_promotion_code_key
 kamra.patches.tex.p64_agent_log_read_only
+kamra.patches.tex.p68_payment_checkout_lease
 kamra.patches.tex.p69_quote_version_index

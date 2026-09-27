@@ -112,6 +112,7 @@ BEHAVIOUR = {
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p60_promotion_code_key": "test_patches.TestReportingPatches.test_p60_stores_codes_by_their_key_and_reports_a_clash_once",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
+	"p68_payment_checkout_lease": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p69_quote_version_index": "test_patches.TestP03Indexes.test_p69_creates_the_quote_version_index",
 }
 
@@ -1199,7 +1200,9 @@ class TestSmallPatches(PatchCase):
 				("p50_payment_reconciliation", [("tex_payments", "doctype", "tex_payment_transaction")],
 				 ("TEX Payment Transaction", "reconciliation")),
 				("p53_payment_captured_at", [("tex_payments", "doctype", "tex_payment_transaction")],
-				 ("TEX Payment Transaction", "captured_at"))):
+				 ("TEX Payment Transaction", "captured_at")),
+				("p68_payment_checkout_lease", [("tex_payments", "doctype", "tex_payment_transaction")],
+				 ("TEX Payment Transaction", "checkout_started_at"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
 			self.assertTrue(frappe.db.has_column(*field), patch)            # synced on this site
 

@@ -28,6 +28,7 @@
   "completed_at",
   "expires_at",
   "captured_at",
+  "checkout_started_at",
   "section_95",
   "raw_status",
   "error_code",
@@ -177,6 +178,12 @@
    "read_only": 1
   },
   {
+   "fieldname": "checkout_started_at",
+   "fieldtype": "Datetime",
+   "label": "Checkout being started since",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_95",
    "fieldtype": "Section Break",
    "label": "Outcome"
@@ -228,7 +235,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-30 00:00:02.000000",
+ "modified": "2026-10-02 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Payments",
  "name": "TEX Payment Transaction",

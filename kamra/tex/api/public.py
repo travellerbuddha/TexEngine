@@ -468,6 +468,8 @@ def _start_booking_payment(s, result: dict, *, due, method: str, provider_accoun
 		# the open attempt could not take another checkout and was cancelled (G-68): the
 		# confirmation page offers pay_booking, which starts a new charge
 		return None
+	# ``PaymentBusy`` (the first request is asking the gateway for this charge's checkout right now) is
+	# raised to the retry, never answered with no payment: that would open a second checkout (NEW-6)
 
 
 RESUME_TTL_HOURS = 24
@@ -571,16 +573,13 @@ def payment_link(token: str):
 	        "late_payment": late_payments.guest_notice(link.booking)}
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(**WRITE_LIMIT)
-@retry_on_deadlock
-def pay_link(token: str, provider_account: str | None = None):
+def _link_due(link):
+	"""What the link asks now, under its lock. One start at a time per link (G-68): a second,
+	simultaneous start is told at once that a payment is being started, rather than waiting behind the
+	first one; a later start sees the link as it is now (paid, or with a charge to reuse). The lock is
+	held until the start puts its charge on record, never through the gateway call (NEW-6)."""
 	from kamra.tex.payments import service as pay
 
-	link = pay.link_by_token(token)
-	# one start at a time per link (G-68): a second, simultaneous start is told at once that a
-	# payment is being started, rather than waiting behind the first one's gateway call; a
-	# later start sees the link as it is now (paid, or with a charge to reuse)
 	now = pay.lock_link(link.name, nowait=True)
 	if now.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("This payment link is {0}.").format(now.status.lower()))
@@ -589,6 +588,17 @@ def pay_link(token: str, provider_account: str | None = None):
 	if why:
 		# its booking takes no more money, or less than it asks: never 200 paid for 100 (E4)
 		frappe.throw(why)
+	return due
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
+def pay_link(token: str, provider_account: str | None = None):
+	from kamra.tex.payments import service as pay
+
+	link = pay.link_by_token(token)
+	due = _link_due(link)
 	methods = {m["provider_account"] for m in pay.payment_methods(link.property, market=None, currency=link.currency,
 	                                                               channel="DIRECT_WEB") if m["method"] == "Card"}
 	if link.provider_account:
@@ -601,6 +611,10 @@ def pay_link(token: str, provider_account: str | None = None):
 		if not account or account not in methods:
 			frappe.throw(_("No card payment is configured for this link."))
 	for attempt in (1, 2):
+		if attempt == 2:
+			# the first attempt's failed checkout was put on record, which ended the transaction and its
+			# lock of the link (NEW-6): locked and read again
+			due = _link_due(link)
 		try:
 			return pay.start_payment(
 				property=link.property, amount=due, currency=link.currency, provider_account=account,
@@ -864,10 +878,15 @@ def manage_propose(token: str, reservation: str, changes):
 	# extras are added through manage_extras_* (priced on their own; the stay stays price-locked)
 	allowed = {"check_in", "check_out", "adults", "children"}
 	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}
-	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False)
+	# the internal quote: settling it converts a fixed deposit at the rate it recorded (Y-3 B); the
+	# guest's answer is stripped below, as ``propose`` strips it for a guest (the token holds no quote)
+	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False, internal=True)
 	res = frappe.get_doc("Reservation", reservation)
 	warnings, sellable, proposal_token = p["warnings"], p["sellable"], p["proposal_token"]
 	settlement = guest_changes.preview(b, res, p) if sellable else None
+	quoting.strip_internal(p["proposed"])
+	for k in quoting.INTERNAL_TOTALS:
+		p["old"]["totals"].pop(k, None)
 	if p["currency_changed"] or (sellable and settlement is None):
 		# never compared across currencies: the guest is sent to the hotel
 		warnings = [*warnings, {"code": "CURRENCY_CHANGED",
