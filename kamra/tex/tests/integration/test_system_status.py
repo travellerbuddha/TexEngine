@@ -335,6 +335,15 @@ class TestStatusAlerts(TexTestCase):
 		self.assertIn("kamra.tex.ops.alerts.evaluate", scheduler.EVERY_15_MINUTES)
 		self.assertIn("kamra.tex.services.mail_status.sync", scheduler.EVERY_5_MINUTES)
 
+	def test_payments_are_verified_first_in_the_5_minute_jobs(self):
+		"""NEW-2: the re-verification job runs first in its group — before the PMS outbox (which may use most
+		of the tick) and before the expiry, so money it finds confirms its booking in that tick."""
+		from kamra.tex import scheduler
+
+		self.assertEqual(scheduler.EVERY_5_MINUTES[0], "kamra.tex.payments.service.reverify_pending")
+		self.assertLess(scheduler.EVERY_5_MINUTES.index("kamra.tex.payments.service.reverify_pending"),
+		                scheduler.EVERY_5_MINUTES.index("kamra.tex.services.booking.expire_pending_bookings"))
+
 
 class TestMailDeliveryStatus(TexTestCase):
 	def setUp(self):

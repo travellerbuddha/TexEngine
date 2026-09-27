@@ -535,6 +535,105 @@ def complete_retrying(transaction: str, **kw) -> dict:
 	return None
 
 
+def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool = True,
+             step_commit: bool = False) -> tuple[dict | None, Exception | None]:
+	"""Ask the gateway again for a charge by itself (its provider's ``status_query``): each of its questions
+	(``attempts``, default ``status_params`` of its reference, newest first) until one confirms it. A try
+	that failed leaves no message behind (P1-8); ``log``: a try the gateway did not answer is logged.
+	``step_commit`` (the job): a try that changed the charge is on record before the next question, so no
+	lock is held through it (ADR-066). → (the last answer, the last error)."""
+	if attempts is None:
+		row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref"], as_dict=True)
+		cls = REGISTRY.get(row.provider) if row else None
+		attempts = cls.status_params(row.provider_ref) if cls and cls.status_query else []
+	out, error, state = None, None, None
+	for n, params in enumerate(attempts):
+		if step_commit:
+			now_state = frappe.db.get_value("TEX Payment Transaction", transaction, ["status", "modified"])
+			if n and now_state != state:
+				_commit_step()             # the last question changed the charge: on record before the next
+			state = now_state
+		mark = len(frappe.local.message_log)
+		try:
+			res = complete_retrying(transaction, params=params)
+		except ProviderError as e:
+			del frappe.local.message_log[mark:]
+			error = e                                  # this question is not verifiable: ask the next
+			continue
+		except Exception as e:
+			del frappe.local.message_log[mark:]
+			if transaction_lost(e):
+				raise
+			# the gateway did not answer this question: an older checkout may still hold the payment
+			if log:
+				log_exception(f"TEX payment re-verify error {transaction}")
+			error = e
+			continue
+		out = res
+		if res.get("status") == "Succeeded":
+			break
+	return out, error
+
+
+REVERIFY_AFTER_MINUTES = 3        # a checkout this young is still in the guest's hands
+REVERIFY_WINDOW_HOURS = 2         # asked until then past its deadline (a fraud review's included, O-18)
+REVERIFY_BATCH = 20
+REVERIFY_BUDGET_SECONDS = 60      # one tick is a single RQ job with 300 s for the whole 5-minute group
+REVERIFY_SAVEPOINT = "tex_reverify"
+
+
+def reverify_pending(now=None) -> dict:
+	"""Scheduler, first of the 5-minute jobs (NEW-2): card charges still Pending whose gateway TEX can ask
+	(``status_query``) are asked, as the guest's browser would have told TEX had it come back — before this
+	tick's expiry, so money taken in time confirms its booking. The same path as a callback (``complete``).
+
+	Candidates (a plain read, no lock): Pending charges of an enabled account (a disabled one settles
+	nothing), at least 3 minutes old, with no start asking the gateway for a checkout right now (a lapsed
+	lease is a dead start), their deadline — or, without one, their creation — within the last 2 hours;
+	oldest first, 20 per tick, none started after 60 s. Each is asked under a savepoint; an error is logged
+	("TEX payment re-verify <charge>") and undone; each is on record before the next question (ADR-066)."""
+	now = get_datetime(now or now_datetime())
+	askable = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query)) or ("",)
+	# NULL checkout_started_at: no start is asking the gateway; NULL expires_at: a charge that holds no rooms
+	# (a link's without a waiting booking, a change's, a balance's), judged by when it started
+	names = frappe.db.sql("""SELECT t.name FROM `tabTEX Payment Transaction` t
+	                         JOIN `tabTEX Payment Provider Account` a ON a.name = t.provider_account
+	                         WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND t.provider IN %(askable)s
+	                           AND a.enabled = 1 AND t.creation <= %(settled)s
+	                           AND (t.checkout_started_at IS NULL OR t.checkout_started_at < %(lease)s)
+	                           AND IFNULL(t.expires_at, t.creation) >= %(window)s
+	                         ORDER BY IFNULL(t.expires_at, t.creation), t.name LIMIT %(limit)s""",
+	                      {"askable": askable, "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
+	                       "lease": add_to_date(now, seconds=-CHECKOUT_LEASE_SECONDS),
+	                       "window": add_to_date(now, hours=-REVERIFY_WINDOW_HOURS), "limit": REVERIFY_BATCH},
+	                      pluck=True)
+	started = time.monotonic()
+	done = {"asked": 0, "errors": 0}
+	for name in names:
+		if time.monotonic() - started > REVERIFY_BUDGET_SECONDS:
+			break
+		frappe.db.savepoint(REVERIFY_SAVEPOINT)
+		mark = len(frappe.local.message_log)
+		done["asked"] += 1
+		try:
+			out, error = reverify(name, log=False, step_commit=True)
+			if out is None and error is not None:
+				raise error
+		except Exception as e:
+			if transaction_lost(e):
+				frappe.db.rollback()         # a deadlock victim's transaction is gone with its savepoint
+			else:
+				frappe.db.rollback(save_point=REVERIFY_SAVEPOINT)
+			del frappe.local.message_log[mark:]
+			log_exception(f"TEX payment re-verify {name}")
+			done["errors"] += 1
+		if not frappe.flags.in_test:
+			# on record (its Error Log and audit included) before the next gateway question: no lock is held
+			# through it (ADR-066); tests keep one transaction
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- one charge per transaction, none held across a gateway call
+	return done
+
+
 def _checked_capture(provider, outcome: Outcome, txn) -> Outcome:
 	"""A gateway's success counts only for exactly this charge (G-67): a gateway that reports
 	amounts must state the amount it captured (missing or 0 is not trusted), any stated amount

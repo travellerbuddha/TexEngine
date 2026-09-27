@@ -14,6 +14,7 @@ Time passes in these tests by moving every stored deadline of a booking into the
 (``passes``): the hold of its rooms, and the start and deadline of its payment attempts."""
 
 import threading
+from contextlib import contextmanager
 from unittest import mock
 
 import frappe
@@ -1621,6 +1622,105 @@ class TestDeadlockRetries(HoldCase):
 		           payments_api.record_manual, payments_api.create_link, payments_api.cancel_link,
 		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests):
 			self.assertTrue(retried(fn), fn.__name__)
+
+
+class TestPaymentsVerifiedByTheJob(HoldCase):
+	"""NEW-2 (audit 2E-2): a card payment whose guest never came back from the gateway is asked for by the
+	5-minute job, before that tick's expiry: its booking is confirmed, never expired. Only charges that
+	may still be paid are asked, one at a time, each on record before the next question."""
+
+	@contextmanager
+	def askable(self):
+		"""The sandbox gateway answers a status query: its page's success for each charge. → the charges asked."""
+		from kamra.tex.payments.providers.simple import MockProvider, mock_signature
+
+		asked: list[str] = []
+
+		def status_params(provider_ref):
+			txn = str(provider_ref or "").split("MOCK-", 1)[-1]
+			asked.append(txn)
+			return [{"outcome": "success", "sig": mock_signature(pay._mock_secret(), txn, "success")}]
+
+		with mock.patch.object(MockProvider, "status_query", True), \
+				mock.patch.object(MockProvider, "status_params", staticmethod(status_params)):
+			yield asked
+
+	def tick(self) -> None:
+		"""The payment jobs of one 5-minute tick, in their order there (``_run``'s rollback would take the test's
+		data with it on an error)."""
+		from kamra.tex import scheduler
+
+		for job in scheduler.EVERY_5_MINUTES:
+			if job in ("kamra.tex.payments.service.reverify_pending", "kamra.tex.services.booking.expire_pending_bookings"):
+				frappe.get_attr(job)()
+
+	def test_a_payment_whose_guest_never_came_back_confirms_its_booking(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 26)                                   # hold and checkout over, no job ran yet
+		with self.askable() as asked:
+			self.tick()
+		self.assertEqual(asked, [payment["transaction"]])
+		self.assertEqual(txn_state(payment["transaction"]).status, "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking.expire", "reference_name": b["booking"]}))
+
+	def test_only_payments_that_may_still_be_paid_are_asked(self):
+		guests = [dict(GUEST, email=f"new2-{n}@example.com") for n in range(3)]
+		old, live, due = (self.book(guest=g) for g in guests)
+		payments = {k: self.start_payment(b)["transaction"] for k, b in (("old", old), ("live", live), ("due", due))}
+		passes(old["booking"], 26 + 180)                           # its deadline 3 hours ago
+		passes(live["booking"], 26)
+		passes(due["booking"], 26)
+		frappe.db.set_value("TEX Payment Transaction", payments["live"], "checkout_started_at", now_datetime(),
+		                    update_modified=False)                  # a start is asking the gateway right now
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [payments["due"]])
+
+	def test_a_disabled_account_is_not_asked(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 26)
+		frappe.db.set_value("TEX Payment Provider Account", self.account, "enabled", 0)
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [])
+		self.assertEqual(txn_state(payment["transaction"]).status, "Pending")
+
+	def test_a_gateway_error_is_logged_and_the_next_payment_is_still_asked(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		first, second = (self.book(guest=dict(GUEST, email=f"new2-err-{n}@example.com")) for n in range(2))
+		broken, fine = self.start_payment(first)["transaction"], self.start_payment(second)["transaction"]
+		passes(first["booking"], 27)
+		passes(second["booking"], 26)
+		real = MockProvider.handle_callback
+
+		def handle_callback(provider, transaction, *args, **kw):
+			if transaction == broken:
+				raise RuntimeError("gateway unreachable")
+			return real(provider, transaction, *args, **kw)
+
+		with self.askable() as asked, mock.patch.object(MockProvider, "handle_callback", handle_callback):
+			pay.reverify_pending()
+		self.assertEqual(asked, [broken, fine])
+		self.assertEqual((txn_state(broken).status, txn_state(fine).status), ("Pending", "Succeeded"))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX payment re-verify {broken}"}))
+		self.assertEqual(frappe.db.get_value("TEX Booking", second["booking"], "status"), "Confirmed")
+
+	def test_money_the_job_finds_after_the_expiry_is_a_late_payment(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [payment["transaction"]])
+		t = txn_state(payment["transaction"])
+		self.assertEqual((t.status, t.reconciliation), ("Succeeded", "Action Required"))    # ADR-062 b), rooms free
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
 
 
 class TestReconciliationStates(HoldCase):

@@ -170,38 +170,17 @@ def transaction(name: str):
 @require_capability("payment.view", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 @retry_on_deadlock
 def reverify(transaction: str):
-	"""Ask the gateway again for a Pending or Failed charge (iyzico / Sipay support a
-	status query): a charge the gateway did capture is recovered, never lost."""
-	from kamra.tex.payments.providers.turkey import iyzico_tokens
+	"""Ask the gateway again for a Pending or Failed charge (a gateway with a status query:
+	iyzico, Sipay): a charge the gateway did capture is recovered, never lost."""
+	from kamra.tex.payments.providers import REGISTRY
 
 	row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref", "status"],
 	                          as_dict=True)
-	if row.status not in pay.SETTLEABLE or row.provider not in ("iyzico", "Sipay"):
+	cls = REGISTRY.get(row.provider)
+	if row.status not in pay.SETTLEABLE or not (cls and cls.status_query):
 		frappe.throw(_("Only pending, failed or cancelled iyzico / Sipay payments can be re-verified."))
-	# iyzico: each checkout-form token stored for this charge, newest first
-	if row.provider == "iyzico":
-		attempts = [{"token": t} for t in iyzico_tokens(row.provider_ref)] or [{"token": ""}]
-	else:
-		attempts = [{}]
-	out, error = None, None
-	for params in attempts:
-		# a try that failed leaves no message in the answer: only the outcome (or the error) is its own
-		mark = len(frappe.local.message_log)
-		try:
-			res = pay.complete_retrying(transaction, params=params)
-		except ProviderError as e:
-			del frappe.local.message_log[mark:]
-			error = e                                  # this token is not verifiable: try the next
-			continue
-		except Exception as e:
-			del frappe.local.message_log[mark:]
-			# the gateway did not answer for this token: an older one may still hold the payment
-			log_exception(f"TEX payment re-verify error {transaction}")
-			error = e
-			continue
-		out = res
-		if res.get("status") == "Succeeded":
-			break
+	# iyzico: each checkout-form token stored for this charge, newest first; none: the gateway's own "no"
+	out, error = pay.reverify(transaction, attempts=cls.status_params(row.provider_ref) or [{"token": ""}])
 	if out is None:
 		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(error)[:200]))
 	return out

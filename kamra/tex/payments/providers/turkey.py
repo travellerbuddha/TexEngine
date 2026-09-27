@@ -80,6 +80,11 @@ class IyzicoProvider(PaymentProvider):
 	reports_amount = True
 	supports_refund = True
 	status_query = True               # checkout-form DETAIL by the token TEX stored
+
+	@staticmethod
+	def status_params(provider_ref: str | None) -> list[dict]:
+		# each checkout-form token stored for the charge; one without a token has nothing to ask
+		return [{"token": t} for t in iyzico_tokens(provider_ref)]
 	sandbox_hosts = ("sandbox-api.iyzipay.com",)
 	INIT = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 	DETAIL = "/payment/iyzipos/checkoutform/auth/ecom/detail"
@@ -230,6 +235,10 @@ class SipayProvider(PaymentProvider):
 	reports_amount = False
 	sandbox_hosts = ("provisioning.sipay.com.tr",)
 	status_query = True               # checkstatus by TEX's own id of the charge
+
+	@staticmethod
+	def status_params(provider_ref: str | None) -> list[dict]:
+		return [{}]                   # asked by the charge's own id: no parameter
 
 	@property
 	def base(self) -> str:

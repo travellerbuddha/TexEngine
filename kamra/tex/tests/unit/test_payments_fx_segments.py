@@ -225,6 +225,21 @@ class TestProviderRegistry(unittest.TestCase):
 		odd["HASH"] = turkey.nestpay_hash_v3({k: v for k, v in odd.items() if k != "HASH"}, "SK")
 		self.assertEqual(p.handle_callback("PTX-7", odd, {}, b"").currency, "999")   # never mistaken for ours
 
+	def test_what_tex_asks_a_gateway_about_a_charge_by_itself(self):
+		"""NEW-2: iyzico is asked by each checkout-form token stored for the charge (newest first; a captured
+		payment's id is not a token), Sipay by TEX's own id (no parameter); the Virtual POS and the sandbox
+		mock cannot be asked."""
+		self.assertTrue(turkey.IyzicoProvider.status_query)
+		self.assertTrue(turkey.SipayProvider.status_query)
+		self.assertFalse(turkey.NestPayProvider.status_query)
+		self.assertFalse(simple.MockProvider.status_query)
+		self.assertEqual(turkey.IyzicoProvider.status_params("tok-b tok-a"), [{"token": "tok-b"}, {"token": "tok-a"}])
+		self.assertEqual(turkey.IyzicoProvider.status_params("P1|I1 tok-a"), [{"token": "tok-a"}])
+		self.assertEqual(turkey.IyzicoProvider.status_params(None), [])        # no token: nothing to ask
+		self.assertEqual(turkey.SipayProvider.status_params(None), [{}])
+		self.assertEqual(turkey.NestPayProvider.status_params("T1"), [])
+		self.assertEqual(simple.MockProvider.status_params("MOCK-1"), [])
+
 	def test_iyzico_takes_one_checkout_per_charge(self):
 		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk", "api_key": "ak"}, environment="Sandbox"))
 		self.assertTrue(p.can_add_checkout(None))

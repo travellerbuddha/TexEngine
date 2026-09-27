@@ -115,6 +115,12 @@ class PaymentProvider(ABC):
 		unknown (the gateway may have refunded)."""
 		raise ProviderError(f"{self.name} does not support refunds through TEX")
 
+	@staticmethod
+	def status_params(provider_ref: str | None) -> list[dict]:
+		"""The callback parameters that ask the gateway for a charge's outcome by itself (``status_query``),
+		one set per question, newest first; [] when there is nothing to ask (NEW-2)."""
+		return []
+
 	def can_add_checkout(self, provider_ref: str | None) -> bool:
 		"""Whether a Pending charge that already has checkouts may get another one (a second
 		tab, a restart, G-68). By default yes: the gateway knows the charge by TEX's own id."""

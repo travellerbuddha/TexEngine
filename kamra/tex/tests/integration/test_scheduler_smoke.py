@@ -10,11 +10,13 @@ before the fixtures' season) and no outside world:
   (``distribution.repository.adapter_for``: deliver_ari, process_inbound, daily_resync) are stubs
   that record and accept;
 * payment providers (``payments.service.provider_for``, called as it is: ``(account_name, *,
-  purpose, transaction)``) are a stub that records a refund and refuses anything else. The seed holds
-  no queued refund and no guest change awaiting payment, so ``late_payments.refund_queued`` and
-  ``guest_changes.expire_awaiting`` run with nothing to do and never reach it: their refund paths are
-  not exercised here (``test_hold_payment_race`` and ``test_self_service_money`` cover them); the stub
-  only guarantees no real provider is called;
+  purpose, transaction)``) are a stub that records a refund or a status query (``handle_callback``,
+  answered "still pending") and refuses anything else. The seed holds one iyzico charge still Pending
+  ten minutes after it started (NEW-2): the re-verification job asks the stub about it once, by its
+  token, and leaves it as it was. It holds no queued refund and no guest change awaiting payment, so
+  ``late_payments.refund_queued`` and ``guest_changes.expire_awaiting`` run with nothing to do: their
+  refund paths are not exercised here (``test_hold_payment_race`` and ``test_self_service_money``
+  cover them); the stub only guarantees no real provider is called;
 * the domain check's DNS-over-HTTPS lookup (``services.sites.txt_records``) answers the token;
 * e-mail is only queued: ``EmailQueue.send`` records and delivers nothing;
 * any other connection to a host that is not this machine is refused and recorded (``socket``).
@@ -125,6 +127,10 @@ def outside_world(day: date):
 			calls["provider"].append(("refund", provider_ref, str(amount), currency))
 			return Outcome(status="Succeeded", provider_ref=f"smoke-{provider_ref}", amount=Decimal(amount),
 			               currency=currency)
+
+		def handle_callback(self, transaction, params, headers, body, *, provider_ref=None):
+			calls["provider"].append(("handle_callback", transaction, dict(params), provider_ref))
+			return Outcome(status="Pending")
 
 		def __getattr__(self, name):
 			calls["provider"].append((name,))
@@ -268,6 +274,16 @@ class TestSchedulerTick(TexTestCase):
 		frappe.db.set_value("TEX Payment Link", s["open_link"], "expires_at", None)
 		frappe.db.set_value("TEX Payment Link", s["stale_link"], "expires_at", add_days(now_datetime(), -1))
 
+		# an iyzico charge still Pending ten minutes after it started: the re-verification job asks (NEW-2)
+		iyzico = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "iyzico"},
+		                   {"label": "Smoke iyzico", "property": fx.PROPERTY, "provider": "iyzico",
+		                    "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		s["iyzico_charge"] = pay._new_txn(property=fx.PROPERTY, txn_type="Charge", method="Card", amount=Decimal("50"),
+		                                  currency="EUR", provider_account=iyzico, provider="iyzico",
+		                                  provider_ref="tok-smoke", idempotency_key="smoke-iyzico").name
+		frappe.db.sql("UPDATE `tabTEX Payment Transaction` SET creation = %s WHERE name = %s",
+		              (add_to_date(now_datetime(), minutes=-10), s["iyzico_charge"]))
+
 		# a verified booking-site domain the daily check looks up
 		s["domain"] = frappe.get_doc({"doctype": "TEX Booking Domain", "parent": SLUG, "parenttype": "TEX Booking Site",
 		                              "parentfield": "domains", "domain": "smoke.example.com", "verified": 1,
@@ -317,6 +333,11 @@ class TestSchedulerTick(TexTestCase):
 		# the booking is still confirmed and paid
 		self.assertEqual(frappe.db.get_value("Reservation", s["reservation"], "status"), "Confirmed")
 
+		# the iyzico charge was asked about once, by its token, and is as it was (the gateway: still pending)
+		self.assertEqual(calls["provider"], [("handle_callback", s["iyzico_charge"], {"token": "tok-smoke"}, "tok-smoke")])
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", s["iyzico_charge"], ["status", "provider_ref"]),
+		                 ("Pending", "tok-smoke"))
+
 		# the stubs were reached and what they answered was stored
 		self.assertEqual(sorted(calls["fx"]), ["ECB", "TCMB"])
 		for provider, base, quote in (("TCMB", "EUR", "TRY"), ("ECB", "EUR", "USD")):
@@ -331,4 +352,5 @@ class TestSchedulerTick(TexTestCase):
 		self.assertEqual(calls["dns"], ["_tex-verify.smoke.example.com"])
 		self.assertEqual(frappe.db.get_value("TEX Booking Domain", s["domain"].name, ["verified", "check_failures"]),
 		                 (1, 0))
-		self.assertEqual((calls["provider"], calls["mail"]), ([], []))
+		# nothing else reached a provider (the one status query is checked above), no e-mail was sent
+		self.assertEqual(([c for c in calls["provider"] if c[0] != "handle_callback"], calls["mail"]), ([], []))
