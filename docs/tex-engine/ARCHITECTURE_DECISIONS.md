@@ -9214,3 +9214,18 @@ the versions the roll superseded the state their contract's later publishes woul
 - *Markups (G-53).* A REPLACE markup tying a live one (scope, priority, stay dates) is refused on activation (serialised);
   publishing from the contract page runs the workspace's board checks. `level()` and server defaults are unchanged.
 - New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.
+
+## ADR-069 Contract lifecycle, FX fallback and draft editing (audit Part 2D-1)
+- *Withdraw (Y-2).* A live version ends now (never later than it already ended); a scheduled one gives the versions it cut
+  short their window back (up to the next later start, else open). The live version is recomputed; no payload or hash moves.
+- *Quotes (O-13).* Lock order quote → contract → version. Withdraw locks the version's open, unexpired quotes (`FOR UPDATE`,
+  by name) and marks them Expired ("no longer on sale"); a quote saved meanwhile re-reads its version `LOCK IN SHARE MODE`
+  and is refused when Withdrawn. p69 indexes `(contract_version, status, expires_at)`. Ops check `contracts.live` per hotel.
+- *Draft token (O-10).* `save_version(expected_modified=…)` locks the draft row and compares `modified`; a mismatch raises
+  `DraftChanged` (a `TimestampMismatchError`) naming who and when, nothing applied. No token: as before. The editor sends it.
+- *Grid rate edits (O-9, G-47).* Pure `pricing/ratesplit.py` plans, `commercial/grid.py` writes the draft. Edited nights =
+  range ∩ weekdays; parts = longest runs of consecutive edited nights one period prices; a night without one is refused. A
+  period pricing edited nights only is edited in place (selected rooms → ABSOLUTE); else one clone per part over first..last,
+  weekdays = mask ∩ the period's, priority = max(period + 100, each same-kind period it overlaps + 1): never a tie. Rules and
+  units as before. Validated before and after; an edit adding an ERROR is refused (savepoint). Response keys unchanged.
+- *FX fallback.* Part 2D-2 adds it here. ENGINE_VERSION, schema and the parity corpus are unchanged.
