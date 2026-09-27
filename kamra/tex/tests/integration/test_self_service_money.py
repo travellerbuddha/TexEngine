@@ -263,6 +263,27 @@ class TestLowerPrice(GuestMoneyCase):
 		self.assertEqual(len(refunds(b["booking"])), 1)
 		self.assertNotEqual(deposit, balance)
 
+	def test_points_are_never_paid_back_to_the_card(self):
+		"""O-19 (audit 2B, ADR-065): points pay up to the program's limit, then the stay is shortened under
+		"refund automatically": the overpayment comes off the points first, so the card gets back at most
+		what it paid over the new price (here nothing), never the points' value as cash."""
+		from kamra.tex.crm import loyalty
+
+		lower_price_policy("Refund automatically")
+		b = self.deposit_paid("gcm-points")                                # 252.75 by card
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel's club, staff redeem
+		guest = frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+		club = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "O19 Club", "property": fx.PROPERTY,
+		                       "enabled": 1, "currency": "EUR", "point_value": 0.1, "min_redeem_points": 50,
+		                       "max_redeem_percent": 50, "pending_days": 0}).insert(ignore_permissions=True)
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": club.name, "guest": guest, "entry_type": "Adjust",
+		                "points": 10000, "status": "Available", "reason": "welcome"}).insert(ignore_permissions=True)
+		loyalty.redeem(guest, b["booking"], 4212, idempotency_key="gcm-points-1")    # 421.20: the 50 % limit
+		self.assertEqual(money(b["booking"])[1], D("673.95"))
+		self.accept(b, self.propose(b, (6, 12)))                           # 575.00: 98.95 over
+		card = sum((amount for _charge, amount, status in refunds(b["booking"]) if status == "Succeeded"), D(0))
+		self.assertLessEqual(card, max(D(0), D("252.75") - D("575.00")))
+
 	def test_a_refund_job_that_did_not_run_is_retried(self):
 		lower_price_policy("Refund automatically")
 		b = self.fully_paid("gcm-retry")

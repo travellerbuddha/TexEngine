@@ -377,8 +377,10 @@ def refundable_now(booking: str, amount, *, except_request: str | None = None,
 	from kamra.tex.payments import service as pay
 
 	reserved = _reserved(booking, except_request)
+	# points are never paid back as cash: an overpayment comes off them first (O-19)
 	charges = [st.Charge(c["transaction"], c["available"], c["supported"] and c["transaction"] not in failed,
-	                     c["at"]) for c in pay.booking_charges(booking) if c["transaction"] not in reserved]
+	                     c["at"], points=c["provider"] == "Loyalty")
+	           for c in pay.booking_charges(booking) if c["transaction"] not in reserved]
 	return st.plan_refunds(max(ZERO, D(amount)), charges)
 
 

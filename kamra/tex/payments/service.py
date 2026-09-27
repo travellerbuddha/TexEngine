@@ -872,15 +872,16 @@ def auto_refundable(txn) -> bool:
 
 def booking_charges(booking: str) -> list[dict]:
 	"""The succeeded charges holding this booking's money now (G-45): what each holds for it
-	(its net allocation, at most what is still refundable), whether TEX may refund it by itself
-	and when it was taken. A charge that also holds unallocated money is left to staff: a
-	refund of it takes that money first (ADR-042), not this booking's."""
+	(its net allocation, at most what is still refundable), whether TEX may refund it by itself,
+	when it was taken, its provider and whether it is loyalty points (never paid back as cash,
+	O-19). A charge that also holds unallocated money is left to staff: a refund of it takes that
+	money first (ADR-042), not this booking's."""
 	out = []
 	for name in sorted(set(frappe.get_all("TEX Payment Allocation", filters={"booking": booking},
 	                                      pluck="transaction"))):
 		t = frappe.db.get_value("TEX Payment Transaction", name, ["name", "txn_type", "status", "amount", "currency",
-		                                                           "provider_account", "completed_at", "creation"],
-		                        as_dict=True)
+		                                                           "provider_account", "provider", "completed_at",
+		                                                           "creation"], as_dict=True)
 		if not t or t.txn_type != "Charge" or t.status != "Succeeded":
 			continue
 		held = booking_nets(name).get(booking, ZERO)
@@ -893,7 +894,8 @@ def booking_charges(booking: str) -> list[dict]:
 		out.append({"transaction": name, "available": max(ZERO, min(held, amount - refunded - in_flight)),
 		            # a refund of it the gateway never confirmed: staff check it first
 		            "supported": auto_refundable(t) and unallocated <= 0 and in_flight <= 0,
-		            "at": str(get_datetime(t.completed_at or t.creation))})
+		            "at": str(get_datetime(t.completed_at or t.creation)), "provider": t.provider,
+		            "points": t.provider == "Loyalty"})
 	return sorted(out, key=lambda c: (c["at"], c["transaction"]), reverse=True)
 
 
