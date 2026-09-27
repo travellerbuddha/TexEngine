@@ -614,3 +614,36 @@ class TestSecurityHygieneG83Review(G83Setup):
 		self.as_user(self.editor)
 		with self.assertRaises(frappe.PermissionError):
 			self.upload("group.png", png_bytes(), hotel_group=empty)
+
+
+class TestAnalyticsIdsG62(G83Setup):
+	"""G-62 (audit Part 2G-1): the analytics ids a booking site loads are judged on the server with the
+	booking engine's patterns (booking/lib/analyticsIds.ts), after trimming. Each refused id saved before."""
+
+	def test_g62_the_server_judges_analytics_ids_with_the_engines_patterns(self):
+		self.as_user("Administrator")
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		for field, bad in (("gtm_container_id", "GTM-ABC'><script>"), ("ga4_measurement_id", "G-abc"),
+		                   ("ga4_measurement_id", "UA-1234"), ("gtm_container_id", "GTM-ABCDEFGHIJKLM"),  # 13 after GTM-
+		                   ("meta_pixel_id", "12345")):
+			site.reload()
+			site.set(field, bad)
+			with self.assertRaises(frappe.ValidationError, msg=f"{field} {bad}"):
+				site.save(ignore_permissions=True)
+		# valid ids are saved, trimmed; the longest the engine takes too
+		site.reload()
+		site.update({"ga4_measurement_id": " G-ABCD1234EF ", "gtm_container_id": "GTM-" + "B" * 12,
+		             "meta_pixel_id": "123456789012345"})
+		site.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("TEX Booking Site", SLUG, ["ga4_measurement_id", "gtm_container_id",
+		                                                                "meta_pixel_id"]),
+		                 ("G-ABCD1234EF", "GTM-" + "B" * 12, "123456789012345"))
+		# an older id the engine ignores does not make the site unsavable: only a new or changed id is judged
+		frappe.db.set_value("TEX Booking Site", SLUG, "gtm_container_id", "GTM-old'bad")
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		site.site_name = "TEX Test Resort (renamed)"
+		site.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("TEX Booking Site", SLUG, "gtm_container_id"), "GTM-old'bad")
+		site.gtm_container_id = "GTM-new'bad"
+		with self.assertRaises(frappe.ValidationError):
+			site.save(ignore_permissions=True)

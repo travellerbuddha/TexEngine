@@ -1,22 +1,20 @@
 // Third-party analytics (GA4 / GTM / Meta pixel) configured per booking site. When the
 // site enables the consent banner, nothing is loaded until the guest agrees; the
 // choice is remembered per site in this browser only. IDs are validated so a
-// misconfigured value can never become script injection.
+// misconfigured value can never become script injection (lib/analyticsIds.ts: the same rule as
+// the admin form and the server, G-62).
 import type { Site } from "../types"
-import { getItem, setItem } from "./storage"
+import { analyticsId } from "./analyticsIds.ts"
+import { getItem, setItem } from "./storage.ts"
 
 export type Consent = "granted" | "denied" | null
-
-const GA4 = /^G-[A-Z0-9]{4,20}$/
-const GTM = /^GTM-[A-Z0-9]{4,12}$/
-const PIXEL = /^\d{6,20}$/
 
 export function trackers(site: Site) {
   const a = site.analytics || ({} as Site["analytics"])
   return {
-    ga4: a.ga4 && GA4.test(a.ga4.trim()) ? a.ga4.trim() : null,
-    gtm: a.gtm && GTM.test(a.gtm.trim()) ? a.gtm.trim() : null,
-    pixel: a.meta_pixel && PIXEL.test(a.meta_pixel.trim()) ? a.meta_pixel.trim() : null,
+    ga4: analyticsId("ga4", a.ga4),
+    gtm: analyticsId("gtm", a.gtm),
+    pixel: analyticsId("pixel", a.meta_pixel),
   }
 }
 

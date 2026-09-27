@@ -19,6 +19,13 @@ RESERVED_SLUGS = ("pay", "api", "assets", "manage", "widget")
 # slug) or a site moved to another slug may not take one; sites named so before keep their name and
 # slug, and patch p47 reports them
 ADMIN_SLUGS = ("new", "sites", "content", "rooms", "analytics")
+# the analytics ids the booking engine loads, with the engine's own patterns (booking/lib/analyticsIds.ts,
+# G-62): a value is trimmed, then must match. ASCII only, as in the browser
+ANALYTICS_IDS = {
+	"ga4_measurement_id": (re.compile(r"G-[A-Z0-9]{4,20}", re.ASCII), "G-XXXXXXXXXX"),
+	"gtm_container_id": (re.compile(r"GTM-[A-Z0-9]{4,12}", re.ASCII), "GTM-XXXXXXX"),
+	"meta_pixel_id": (re.compile(r"[0-9]{6,20}", re.ASCII), "123456789012345"),
+}
 
 
 class TEXBookingSite(Document):
@@ -49,6 +56,15 @@ class TEXBookingSite(Document):
 					self.get(f), sites.own_hosts()):
 				frappe.throw(_("{0} must be an uploaded PNG, JPEG, GIF or WebP image or an https:// address on "
 				               "another site.").format(self.meta.get_label(f)))
+		for f, (pattern, example) in ANALYTICS_IDS.items():
+			# only a new or changed id is judged: the engine ignores an older invalid one, and it must
+			# not make the site unsavable (a domain check saves the site as it is)
+			if not (self.is_new() or self.has_value_changed(f)):
+				continue
+			value = (self.get(f) or "").strip()
+			self.set(f, value)
+			if value and not pattern.fullmatch(value):
+				frappe.throw(_("{0} is not valid: it looks like {1}.").format(self.meta.get_label(f), example))
 		origins = [o.strip().lower().rstrip("/") for o in (self.allowed_embed_origins or "").splitlines() if o.strip()]
 		bad = [o for o in origins if not ORIGIN.match(o)]
 		if bad:
