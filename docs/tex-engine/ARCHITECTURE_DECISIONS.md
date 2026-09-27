@@ -9149,3 +9149,19 @@ the versions the roll superseded the state their contract's later publishes woul
 - The Playwright run keeps the site scheduler off: wall-clock jobs (hold expiry, alerts) would act mid-spec; the smoke test
   covers them deterministically.
 - O-16 (user): a guest cancels online only before the arrival day, but may still start a change on it (`room_changeable`).
+
+## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
+- *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
+  (`pricing/policy_money.refundable`); the engine writes that into every quote's `rate_plan.refundable`. No payload key:
+  a payload frozen before is read so. A refundable row on a non-refundable policy is refused (`RATE_PLAN_REFUNDABLE`
+  ERROR, every caller); a non-refundable row on a refundable policy with rules is a WARNING.
+- *Policy currency (Y-3 A, D-1).* A payment or cancellation policy may name the currency of its fixed amounts; empty is
+  the contract's. It is frozen (upper-cased) only on a policy with a FIXED deposit, rule or no-show; a payload without it
+  reads the contract's (the K-1 pattern). A fixed policy in another currency is refused (`POLICY_CURRENCY`).
+- *Conversion (for Part 2E, booking.py, the payments session).* A fixed amount × the quote's recorded contract → sell rate,
+  half-up to the sale currency's minor unit (`fixed_in_sell`); a fixed deposit is taken once per booking, on its first room
+  carrying the policy (`first_rooms_per_policy`, ADR-029). p59 syncs the policies and reports what to review; no backfill.
+- *Infants (O-2, D-2).* Version setting `infants_count_as_children`: off, combination rules and max_children count
+  children without infants and infants are numbered last; max_occupants follows `infants_count_as_occupants`. DocType
+  default 1 (every existing version prices as before); a brand-new contract's first draft 0. Frozen only when 0.
+- A sold stay keeps its snapshot's terms. Schema `tex.contract.v1`, no payload rewritten (G-73), parity corpus and ENGINE_VERSION unchanged.
