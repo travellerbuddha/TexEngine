@@ -64,4 +64,5 @@ kamra.patches.tex.p53_payment_captured_at
 kamra.patches.tex.p54_never_confirmed_leftovers
 kamra.patches.tex.p55_web_transfer_hold
 kamra.patches.tex.p56_open_ended_versions
+kamra.patches.tex.p59_policy_currency
 kamra.patches.tex.p64_agent_log_read_only

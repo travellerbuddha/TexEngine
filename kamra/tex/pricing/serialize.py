@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from kamra.tex.money import D, D_or_none, to_str, to_str6
+from kamra.tex.pricing import policy_money
 from kamra.tex.pricing.enums import (
 	AgeBasis,
 	ChildOrdering,
@@ -169,6 +170,9 @@ def terms_to_payload(t: ContractTerms) -> dict:
 			"room_basis_extra_unit": t.room_basis_extra_unit.value,
 			"room_basis_children_fill_included": t.room_basis_children_fill_included,
 			"occupancy_precedence": t.occupancy_precedence,
+			# only when infants are not children (O-2, ADR-067): every payload frozen so far, and its
+			# hash, stays as it was
+			**({} if t.infants_count_as_children else {"infants_count_as_children": False}),
 		},
 		"rooms": [
 			{"room_type": r.room_type, "name": r.name, "max_adults": r.max_adults, "max_children": r.max_children,
@@ -276,12 +280,16 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		          period=b.get("period") or None, label=b.get("label") or "")
 		for b in payload.get("boards") or []
 	)
+	# a policy's fixed amounts frozen without a currency (before ADR-067) are in the contract's
+	# currency, as K-1 reads a fixed offer; the payload itself is never rewritten
 	rate_plans = {
 		r["code"]: RatePlanTerms(
 			code=r["code"], name=r.get("name") or r["code"], op=Op(r["op"]) if r.get("op") else None,
 			value=D_or_none(r.get("value")), refundable=bool(r.get("refundable", True)),
-			boards=_set(r.get("boards")), cancellation_policy=r.get("cancellation_policy"),
-			payment_policy=r.get("payment_policy"), inclusions=tuple(r.get("inclusions") or ()))
+			boards=_set(r.get("boards")),
+			cancellation_policy=policy_money.with_currency(r.get("cancellation_policy"), c["currency"]),
+			payment_policy=policy_money.with_currency(r.get("payment_policy"), c["currency"]),
+			inclusions=tuple(r.get("inclusions") or ()))
 		for r in payload.get("rate_plans") or []
 	}
 	return ContractTerms(
@@ -300,6 +308,7 @@ def terms_from_payload(payload: dict, payload_hash_value: str | None = None) -> 
 		age_basis=AgeBasis(s.get("age_basis") or "ARRIVAL"),
 		children_over_max_as_adults=bool(s.get("children_over_max_as_adults", True)),
 		infants_count_as_occupants=bool(s.get("infants_count_as_occupants", True)),
+		infants_count_as_children=bool(s.get("infants_count_as_children", True)),
 		prices_include_tax=bool(s.get("prices_include_tax", True)),
 		stacking=StackingMode(s.get("stacking") or "SEQUENTIAL"),
 		room_basis_extra_unit=RoomBasisExtraUnit(s.get("room_basis_extra_unit") or "PER_PERSON_SHARE"),

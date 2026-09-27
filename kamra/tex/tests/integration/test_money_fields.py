@@ -166,9 +166,9 @@ class TestTypedValuesAreKept(TexTestCase):
 		self.assertEqual((pol.adjustment, pol.manual_rate), (D("1.123456789"), D("0.029411765")))
 		rules = context._table_rules(frappe.get_doc("TEX Tax Policy", tax["name"]).rules, "tax_policy:G72", "EUR")
 		self.assertEqual({r.code: r.rate for r in rules}, {"VAT": D("7.123456789")})
-		cp = contracts._cancellation_policy(cxl["name"])
+		cp = contracts._cancellation_policy(cxl["name"], "EUR")
 		self.assertEqual((cp["no_show"]["value"], cp["rules"][0]["penalty_value"]), ("33.333333333", "66.666666667"))
-		self.assertEqual(contracts._payment_policy(pay["name"])["deposit_value"], "12.345678901")
+		self.assertEqual(contracts._payment_policy(pay["name"], "EUR")["deposit_value"], "12.345678901")
 
 	def test_fx_rates(self):
 		out = policies_api.add_manual_rate("EUR", "TRY", "34.123456789", str(getdate()))

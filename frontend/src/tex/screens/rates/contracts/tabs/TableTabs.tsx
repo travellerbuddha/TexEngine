@@ -6,6 +6,7 @@ import { BOARDS, enumLabel, enumOptions, OCC_TARGETS, OPS_ADJ, OPS_BOARD, OPS_OC
 import { NEW_ROW } from "../../lib/tables"
 import type { Row } from "../../lib/types"
 import { intVal, splitCsv, WEEKDAY_CODES, weekdayName, yearsToMonths } from "../../lib/util"
+import { withPlanRefundable } from "../../workspace/rows.ts"
 import { bandOptions, contractRoomOptions, periodOptions, roomOptions, TabIntro, TabIssues, type TabProps } from "./shared"
 
 // ─── Rooms ────────────────────────────────────────────────────────────────
@@ -348,7 +349,8 @@ export function RatePlansTab({ doc, state, readOnly, issues, setTable, lookups }
         caption={t("rates.tab.plans")}
         readOnly={readOnly}
         rows={rows}
-        onChange={(r) => setTable("rate_plans", r)}
+        // a row's refundable flag follows the rate plan and cancellation policy chosen for it (Y-4)
+        onChange={(r) => setTable("rate_plans", withPlanRefundable(rows, r, doc.rate_plan_options, lookups?.cancellation_policies ?? []))}
         newRow={NEW_ROW.rate_plans}
         addLabel={t("rates.plans.add")}
         emptyText={t("rates.plans.empty")}
@@ -363,7 +365,7 @@ export function RatePlansTab({ doc, state, readOnly, issues, setTable, lookups }
           },
           { key: "op", label: t("rates.f.adjustment"), kind: "select", options: enumOptions(t, "op", OPS_ADJ), placeholder: t("rates.common.no_adjustment"), help: t("rates.h.plan_op"), className: "md:min-w-36" },
           { key: "value", label: t("rates.f.value"), kind: "decimal", allowNegative: true, disabled: (r) => !r.op, suffix: (r) => (PERCENT_OPS.has(String(r.op)) ? "%" : null) },
-          { key: "refundable", label: t("rates.f.refundable"), kind: "check" },
+          { key: "refundable", label: t("rates.f.refundable"), kind: "check", help: t("rates.h.row_refundable") },
           { key: "boards", label: t("rates.f.boards"), kind: "csv", options: enumOptions(t, "board", BOARDS), allLabel: t("rates.common.all_boards") },
           {
             key: "cancellation_policy",

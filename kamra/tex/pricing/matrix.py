@@ -68,9 +68,10 @@ def sample_party(terms: ContractTerms, adults: int, band_codes, reference) -> ag
 		if band is None:
 			raise PricingError(f"age band {code} is not a band of this contract")
 		children.append((i, band.from_months, band))
-	slots = ages.child_slots_in_order(children, terms.child_ordering)
+	slots = ages.order_children(terms, children)
 	return ages.Party(adults=adults, declared_adults=adults, children=slots, children_as_adults=(),
-	                  infants=sum(1 for s in slots if s.band.is_infant), reference_date=reference)
+	                  infants=sum(1 for s in slots if s.band.is_infant), reference_date=reference,
+	                  infants_as_children=terms.infants_count_as_children)
 
 
 def party_total(terms: ContractTerms, room_type: str, period: Period, adults: int,

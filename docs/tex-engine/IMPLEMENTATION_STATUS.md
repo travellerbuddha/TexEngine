@@ -1470,6 +1470,12 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-16 **COMPLETE**: a guest cancels a room online only before the arrival day (site's day; `public.manage_cancel` refuses with ChangeRefused, `can_cancel` hides the manage page's button); a change may still start on the arrival day (unchanged, ADR-064) · `test_commercial_flows.TestSelfService.test_no_online_cancellation_from_the_arrival_day`, `frontend/tests/unit/manage-actions.test.ts`.
 - Y-12 **COMPLETE**: p48 marks a profile erased only on a `guest.erase` event, or an Executed/Approved `anonymize_guest` log row on a profile showing the legacy erasure's traces (alias, no last name/e-mail/phone, its note); other rows are only counted; business roles read the Agent Action Log only: its JSON, and p64 on sites whose seeds wrote Custom DocPerm rows (`seed_rbac_v2.ensure_hotel_admin` now grants it read-only) · `test_patches.TestP48Evidence`, `TestP64AgentLogReadOnly`, `test_crm_third_review.TestP48`.
 
+## 6C1. Audit Part 2C-1 (2026-09-27)
+
+- Y-4 **COMPLETE**: a price is refundable only when its rate plan row and its cancellation policy both are (quote `rate_plan.refundable`, search, fee); publish refuses `RATE_PLAN_REFUNDABLE`; new rows take the plan's/policy's flag (ADR-067) · unit `TestRefundableByPolicy`/`TestRefundableIssues`, `test_commercial_flows.TestNonRefundablePolicy`.
+- Y-3 A **COMPLETE** (Y-3 B, booking.py, is the payments session's Part 2E): policies' fixed amounts have a currency, frozen only on fixed policies, contract's when empty; `POLICY_CURRENCY`; helpers `fixed_in_sell`/`first_rooms_per_policy`; p59 reports, no backfill · unit `test_policy_money`, `TestPolicyCurrency`, `test_patches` p59.
+- O-2 **COMPLETE**: version setting `infants_count_as_children` (default 1, a new contract's first draft 0): off, infants neither count for combinations/max_children nor take a child's position; frozen only when 0 · unit `TestInfantsNotChildren`, `test_commercial_flows.TestInfantsNotChildren`, e2e `pricing-infants`.
+
 ## 6G1. Audit Part 2G-1 (2026-09-27)
 
 - O-28 **COMPLETE**: a signed-in user's booking-engine page (/book and a pinned host) carries the session CSRF token, sent by `pub` (header) and `beacon` (form field); such a page loads no third-party tracker and shows no consent banner (ADR-046 note) · `test_security_hygiene` O-28, e2e `guest-session` O-28.

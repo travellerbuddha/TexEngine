@@ -32,7 +32,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 
 from kamra.tex.money import ZERO, D
-from kamra.tex.pricing import ages, occupancy, rooms
+from kamra.tex.pricing import ages, occupancy, policy_money, rooms
 from kamra.tex.pricing.ages import ChildSlot, Party
 from kamra.tex.pricing.enums import Level, OccTarget, Op, PricingBasis, PromoValueType
 from kamra.tex.pricing.model import (
@@ -41,6 +41,7 @@ from kamra.tex.pricing.model import (
 	OccupancyRule,
 	Period,
 	PricingError,
+	RatePlanTerms,
 	RoomSpec,
 	Unsellable,
 )
@@ -245,6 +246,8 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 		for bd in sorted(rp.boards or ()):
 			if bd not in board_codes:
 				issues.append(_err("RATE_PLAN_BOARD", f"rate plan {rp.code} sells unknown board {bd}"))
+		issues.extend(_refundable_issues(rp))
+		issues.extend(_policy_currency_issues(rp, t.currency))
 
 	for o in t.offers:
 		if o.value_type == PromoValueType.PERCENT and not (ZERO < D(o.value) <= D(100)):
@@ -256,6 +259,36 @@ def validate_terms(t: ContractTerms, *, sweep_combinations: bool = True, max_war
 	if sweep_combinations and not any(i.level == "ERROR" for i in issues):
 		issues.extend(_sweep(t, max_warnings, hidden))
 	return issues
+
+
+def _refundable_issues(rp: RatePlanTerms) -> list[Issue]:
+	"""A rate plan row and its cancellation policy that disagree about refunds (Y-4, ADR-067). A
+	price is refundable only when both say so, so a refundable row on a non-refundable policy would
+	be sold as non-refundable: an ERROR, for every caller. A non-refundable row on a refundable
+	policy with rules sells as the row says and the rules never apply: a WARNING."""
+	pol = rp.cancellation_policy or {}
+	name = pol.get("name") or pol.get("id")
+	if rp.refundable and not policy_money.refundable(rp.refundable, pol):
+		return [_err("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is refundable but its cancellation policy "
+		             f"{name} is not; mark the rate plan non-refundable or choose a refundable policy")]
+	if not rp.refundable and pol.get("rules") and pol.get("refundable", True) is not False:
+		return [_warn("RATE_PLAN_REFUNDABLE", f"rate plan {rp.code} is non-refundable, so the rules of its "
+		              f"cancellation policy {name} never apply")]
+	return []
+
+
+def _policy_currency_issues(rp: RatePlanTerms, contract_currency: str) -> list[Issue]:
+	"""A payment or cancellation policy whose fixed amounts are in another currency than the
+	contract's (Y-3 A, ADR-067): an ERROR, so a fixed amount always converts to the sale's currency
+	at the one contract → sell rate a quote records. A policy without a currency is in the contract's."""
+	out = []
+	for kind, pol in (("cancellation", rp.cancellation_policy), ("payment", rp.payment_policy)):
+		ccy = ((pol or {}).get("currency") or "").upper()
+		if policy_money.has_fixed(pol) and ccy and ccy != contract_currency.upper():
+			out.append(_err("POLICY_CURRENCY", f"rate plan {rp.code}: the fixed amounts of {kind} policy "
+			                f"{pol.get('name') or pol.get('id')} are in {ccy}, the contract's currency is "
+			                f"{contract_currency}; give the policy the contract's currency (or none)"))
+	return out
 
 
 def _board_issues(t: ContractTerms, codes: list[str]) -> list[Issue]:
@@ -604,7 +637,8 @@ def _sweep_party(t: ContractTerms, adults: int, children: int, band: AgeBand | N
 	"""The party the sweep prices: ``children`` children, all at the lower edge of ``band``."""
 	slots = tuple(ChildSlot(i + 1, band.from_months, band, i) for i in range(children)) if band else ()
 	return Party(adults=adults, declared_adults=adults, children=slots, children_as_adults=(),
-	             infants=sum(1 for s in slots if s.band.is_infant), reference_date=p.start)
+	             infants=sum(1 for s in slots if s.band.is_infant), reference_date=p.start,
+	             infants_as_children=t.infants_count_as_children)
 
 
 # the sweep's issues whose presence can depend on a rule's op or value (``occupancy.depends_on``: every

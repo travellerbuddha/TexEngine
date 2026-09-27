@@ -403,6 +403,13 @@ export function ChildAgesDrawer(p: ChildAgesDrawerProps) {
             label={t("rates.f.infants_count_as_occupants")}
             description={t("rates.h.infants_count_as_occupants")}
           />
+          <Switch
+            disabled={readOnly}
+            checked={Boolean(s.infants_count_as_children)}
+            onChange={(v) => p.setSetting("infants_count_as_children", v ? 1 : 0)}
+            label={t("rates.f.infants_count_as_children")}
+            description={t("rates.h.infants_count_as_children")}
+          />
           <p className="text-xs text-zinc-500">{t("rates.bands.settings_note")}</p>
         </section>
       </div>

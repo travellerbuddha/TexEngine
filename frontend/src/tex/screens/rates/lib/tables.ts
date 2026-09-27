@@ -121,6 +121,7 @@ export function stateFromDoc(doc: VersionDoc): EditorState {
       age_basis: doc.age_basis || "ARRIVAL",
       children_over_max_as_adults: doc.children_over_max_as_adults ? 1 : 0,
       infants_count_as_occupants: doc.infants_count_as_occupants ? 1 : 0,
+      infants_count_as_children: doc.infants_count_as_children === 0 ? 0 : 1,
       prices_include_tax: doc.prices_include_tax ? 1 : 0,
       stacking: doc.stacking || "SEQUENTIAL",
       room_basis_extra_unit: doc.room_basis_extra_unit || "PER_PERSON_SHARE",
