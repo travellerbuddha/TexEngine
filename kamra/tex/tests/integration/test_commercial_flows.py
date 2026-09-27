@@ -1702,13 +1702,23 @@ class TestMarkupTies(TexTestCase):
 		return policy_api.save_record("TEX Markup Rule", {"label": "G53", "property": fx.PROPERTY, "market": "DE",
 		                                                  "op": "ADJUST_PERCENT", "value": 7, **kw})["name"]
 
+	def test_a_tie_with_a_scheduled_markup_says_so(self):
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first, at=str(add_to_date(now_datetime(), days=1)))
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.activate("TEX Markup Rule", self.markup(value=9))
+		self.assertIn(f"live or scheduled markup {first}", str(refused.exception))
+
 	def test_an_equal_markup_is_not_activated(self):
 		first = self.markup()
 		policy_api.activate("TEX Markup Rule", first)
 		second = self.markup(value=9)
 		with self.assertRaises(frappe.ValidationError) as refused:
 			policy_api.activate("TEX Markup Rule", second)
-		self.assertIn(first, str(refused.exception))
+		self.assertIn(f"live markup {first}", str(refused.exception))
+		# 2D-1 0f: a tie cannot be revised away at the same priority; the way out is said
+		self.assertIn("archive", str(refused.exception))
+		self.assertNotIn("revise", str(refused.exception))
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", second, "tex_status"), "Draft")
 		# another priority, another scope, stacked, or a revision of the same record: activated
 		for kw in ({"priority": 1}, {"room_type": self.f["room_types"]["STD"]}, {"combine": "STACK"}):
