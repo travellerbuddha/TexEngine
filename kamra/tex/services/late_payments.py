@@ -43,6 +43,7 @@ NOT_PAYABLE = "NOT_PAYABLE"
 EXPIRED_UNPAID = "EXPIRED_UNPAID"
 CANCELLED_UNPAID = "CANCELLED_UNPAID"
 OVERPAID = "OVERPAID"
+CURRENCY_MISMATCH = "CURRENCY_MISMATCH"
 TAKES_MONEY = ("Confirmed", "Partially Cancelled")
 CONFIRMED = ("Confirmed", "Checked In", "Checked Out", "No Show")
 # what a payment made in time may undo: an expiry its news came after (B4)
@@ -53,7 +54,8 @@ CAUSES = {ROOMS_RELEASED: "its rooms had been given back",
           NOT_PAYABLE: "it could not take payments",
           EXPIRED_UNPAID: "its hold ended before it was paid in full",
           CANCELLED_UNPAID: "it was cancelled before it was ever confirmed",
-          OVERPAID: "it owed less than this payment"}
+          OVERPAID: "it owed less than this payment",
+          CURRENCY_MISMATCH: "it is paid in another currency"}
 REFUND_REASON = "the booking could not be confirmed: the payment arrived after its rooms were given back"
 
 
@@ -251,8 +253,8 @@ def money_off_expired(booking: str, *, now: datetime | None = None, send_mail: b
 
 
 def keep_off(txn, booking: str, why: str, amount, note: str) -> None:
-	"""Money its booking cannot take (``why``: OVERPAID) stays on its charge, off the booking, in
-	reconciliation for staff (``Action Required``); the team is told, not the payer (ADR-065)."""
+	"""Money its booking cannot take (``why``: OVERPAID, CURRENCY_MISMATCH) stays on its charge, off the
+	booking, in reconciliation for staff (``Action Required``); the team is told, not the payer (ADR-065)."""
 	from kamra.tex.services import notify
 
 	_flag(txn, booking, why, "Action Required", note, amount, send_mail=False)

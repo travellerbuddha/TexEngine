@@ -667,7 +667,16 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	if b.property != txn.property:
 		frappe.throw(_("A payment can only be allocated to a booking of the same hotel."))
 	if b.currency != txn.currency:
-		frappe.throw(_("Currency mismatch between payment and booking."))
+		if not _system:
+			frappe.throw(_("Currency mismatch between payment and booking."))
+		# money that came in another currency (a link made before D-10) is recorded, never undone: it stays
+		# on its charge, off the booking, for staff (P1-5, ADR-065); the link is closed (``_after_charge``)
+		came = quantize(D(amount), txn.currency)
+		late_payments.keep_off(txn, booking, late_payments.CURRENCY_MISMATCH, came, (
+			f"{to_str(came)} {txn.currency} of this payment came for booking {booking}, which is in {b.currency}: "
+			f"a booking is paid in its own currency. It stays on the payment, off the booking. Refund it, and send "
+			f"the guest a new link in {b.currency}."))
+		return None
 	amount = quantize(D(amount), txn.currency)
 	# money staff took themselves (the desk, points) may pay a fee; money on its way never does (C6)
 	why = late_payments.problem(b, amount=amount, in_flight=_system and txn.provider not in ("Manual", "Loyalty"))
@@ -1376,6 +1385,12 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		if booking and of and of != booking:
 			frappe.throw(_("The reservation belongs to another booking."))
 		booking = booking or of or None
+	if booking:
+		ccy = frappe.db.get_value("TEX Booking", booking, "currency")
+		if currency != ccy:
+			# a booking is paid in its own currency: TEX never converts a payment (D-10, P1-5)
+			frappe.throw(_("Booking {0} is in {1}: send its payment link in {1}, not {2}.").format(
+				booking, ccy, currency))
 	amount = quantize(D(amount), currency)
 	if amount <= 0:
 		frappe.throw(_("Amount must be positive."))
@@ -1448,21 +1463,26 @@ def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -
 
 
 def link_refusal(booking: str, amount, currency: str, *, guest: bool) -> str | None:
-	"""E4: why a link of ``booking`` asking ``amount`` may not be paid, nor sent again: its booking cannot
-	take the money (cancelled, expired, its rooms given back: ``late_payments.problem``; a link's money
-	is on its way, never kept as a fee, C6), or owes less than the link asks (a link in another currency
-	is judged when its money comes). None when it may. Locks the booking (after the link: the order of
-	a link's payment). ``guest``: told to the guest, else to staff."""
+	"""E4: why a link of ``booking`` asking ``amount`` may not be paid, nor sent again: it asks another
+	currency than the booking's (a booking is paid in its own currency, D-10: a link made before that
+	rule); its booking cannot take the money (cancelled, expired, its rooms given back:
+	``late_payments.problem``; a link's money is on its way, never kept as a fee, C6); or it owes less
+	than the link asks. None when it may. Locks the booking (after the link: the order of a link's
+	payment). ``guest``: told to the guest, else to staff."""
 	from kamra.tex.services import late_payments
 
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
+	if currency != b.currency:
+		return (_("This payment link cannot be paid online. Please contact the hotel.") if guest else
+		        _("Booking {0} is in {1}; this link asks {2}: cancel it and send a new link in {1}.").format(
+			        b.name, b.currency, currency))
 	amount = quantize(D(amount), currency)
 	if late_payments.problem(b, amount=amount, in_flight=True):
 		return (_("This payment link can no longer be paid: its booking cannot take payments any more. Please "
 		          "contact the hotel.") if guest else
 		        _("Booking {0} ({1}) cannot take this link's payment: cancel the link.").format(b.name, _(b.status)))
 	owed = quantize(from_db(b.total_amount, b.currency) - from_db(b.paid_amount, b.currency), b.currency)
-	if currency != b.currency or amount <= owed:
+	if amount <= owed:
 		return None
 	if guest:
 		return (_("This payment link can no longer be paid: its booking is paid in full.") if owed <= ZERO else

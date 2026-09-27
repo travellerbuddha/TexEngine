@@ -1746,6 +1746,47 @@ class TestPaymentLinkHold(HoldCase):
 		                                                 "reference_name": t2["transaction"]}, pluck="new_value")
 		self.assertEqual([json.loads(v)["why"] for v in why], ["OVERPAID"])
 
+	def test_a_link_in_another_currency_than_its_booking_is_refused(self):
+		"""P1-5 (D-10, ADR-065): a booking is paid in its own currency; a link asking another one is never
+		made, sent again or paid."""
+		b = self.book(method="Card")
+		with self.assertRaisesRegex(frappe.ValidationError, "is in EUR"):
+			pay.create_link(property=fx.PROPERTY, amount="100", currency="TRY", description="Deposit",
+			                booking=b["booking"])
+		with self.assertRaisesRegex(frappe.ValidationError, "is in EUR"):
+			pay.create_link(property=fx.PROPERTY, amount="100", currency="TRY", description="Deposit",
+			                reservation=self.rooms(b)[0])
+		link = self.send_link(b)
+		frappe.db.set_value("TEX Payment Link", link["link"], "currency", "TRY")       # made before D-10
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot be paid online"):
+			public.pay_link(token=link["token"])
+		with self.assertRaisesRegex(frappe.ValidationError, "this link asks TRY"):
+			pay.reissue_link(link["link"])
+
+	def test_money_that_came_in_another_currency_is_recorded_and_kept_off_the_booking(self):
+		"""P1-5 (D-10): a checkout opened in another currency (a link made before D-10) is paid: the charge
+		is recorded, never undone, kept off the booking for staff, and the link is closed."""
+		import json
+
+		from kamra.tex.services import sites
+
+		b = self.book(method="Card")
+		link = self.send_link(b)
+		frappe.db.set_value("TEX Payment Link", link["link"], "currency", "TRY")
+		started = pay.start_payment(property=fx.PROPERTY, amount="3000", currency="TRY", provider_account=self.account,
+		                            payment_link=link["link"], description="Deposit", customer={},
+		                            return_url=sites.guest_url(sites.site_for(fx.PROPERTY), "pay/return",
+		                                                       site_scoped=False),
+		                            idempotency_key=f"p15-{link['link']}")
+		out = public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(txn_state(started["transaction"]).reconciliation, "Action Required")
+		why = frappe.get_all("TEX Audit Event", filters={"action": "payment.reconciliation_required",
+		                                                 "reference_name": started["transaction"]}, pluck="new_value")
+		self.assertEqual([json.loads(v)["why"] for v in why], ["CURRENCY_MISMATCH"])
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Cancelled")
+		self.assertEqual((paid(b), self.statuses(b)[0]), (D(0), "Pending Payment"))
+
 	def test_a_link_asking_more_than_the_booking_owes_is_refused(self):
 		"""E4: a link left open (being paid when its booking was settled) never takes more than the
 		booking still owes; a balance link sent after the deposit stays open and is paid."""
