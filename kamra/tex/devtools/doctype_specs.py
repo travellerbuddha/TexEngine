@@ -12,6 +12,11 @@ SM = perm("System Manager", "full")
 HA = perm("Hotel Admin", "full")
 HA_RO = perm("Hotel Admin", "readonly")
 COMMERCIAL = [SM, HA_RO]
+# contract cost, markups and pricing policies: platform administrators only in Desk / REST; the TEX API
+# serves them by price.view_cost (G-97). Their rate tables are child tables and go with the parent
+COST = [SM]
+# the G-97 change of COST's DocTypes (their JSON permissions): later than every earlier stamp of theirs
+COST_STAMP = "2026-10-02 00:00:00.000000"
 MASTER = [SM, HA_RO, perm("Revenue Manager", "readonly"), perm("Front Desk", "readonly"),
           perm("Call Center Agent", "readonly"), perm("Finance", "readonly")]
 BOOKING = [SM, HA_RO]
@@ -424,8 +429,8 @@ COMMERCIAL_SPECS = [
 		F("payload_hash", "Data", "Payload hash", read_only=1),
 		F("payload", "Code", "Frozen payload", "JSON", read_only=1),
 		F("validation_report", "Code", "Validation report", "JSON", read_only=1),
-	], perms=COMMERCIAL, autoname="hash", title_field="contract", sort_field="creation",
-	   extra={"modified": "2026-10-01 00:00:01.000000"}),                # infants_count_as_children came later (O-2)
+	], perms=COST, autoname="hash", title_field="contract", sort_field="creation",
+	   extra={"modified": COST_STAMP}),                # infants_count_as_children (O-2), then Desk/REST cost (G-97)
 
 	dt("TEX Pricing Policy", C, [
 		F("policy_name", "Data", "Policy", reqd=1, in_list_view=1),
@@ -435,7 +440,8 @@ COMMERCIAL_SPECS = [
 		SB("Default occupancy rules"),
 		F("occupancy_rules", "Table", "Occupancy rules", "TEX Occupancy Rule"),
 		*revision("TEX Pricing Policy"),
-	], perms=COMMERCIAL, autoname="POL-.#####", naming_rule="Expression (old style)", title_field="policy_name"),
+	], perms=COST, autoname="POL-.#####", naming_rule="Expression (old style)", title_field="policy_name",
+	   extra={"modified": COST_STAMP}),
 
 	dt("TEX Markup Rule", C, [
 		F("label", "Data", "Label", in_list_view=1),
@@ -449,7 +455,8 @@ COMMERCIAL_SPECS = [
 		F("combine", "Select", "Combination", ["REPLACE", "STACK"], default="REPLACE"),
 		F("priority", "Int", "Priority"),
 		*revision("TEX Markup Rule"),
-	], perms=COMMERCIAL, autoname="MKP-.#####", naming_rule="Expression (old style)", title_field="label"),
+	], perms=COST, autoname="MKP-.#####", naming_rule="Expression (old style)", title_field="label",
+	   extra={"modified": COST_STAMP}),
 
 	dt("TEX Promotion", C, [
 		F("promotion_name", "Data", "Promotion", reqd=1, in_list_view=1),

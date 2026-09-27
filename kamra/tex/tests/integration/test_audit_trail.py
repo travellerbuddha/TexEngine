@@ -538,6 +538,58 @@ class TestTrailByReference(AuditCase):
 			self.assertTrue(self.trail(self.revenue, doctype, name), doctype)
 		self.assertTrue(self.trail(editor, "TEX Contract Version", self.version))
 
+	def test_a_hotels_trail_leaves_out_the_cost_its_viewer_may_not_read(self):
+		# audit Part 2I, fix round 1 (G-97): the hotel view needed settings.admin alone, so a custom profile
+		# with settings.admin but neither price.view_cost nor contract.edit read there the cost events (a
+		# version's rate diff, markups, pricing policies) that each record's own trail refuses it; the group
+		# events that reached the hotel (TEX Audit Scope) too
+		from kamra.tex.security.audit import audit
+		from kamra.tex.tests.integration.test_channel_binding import grant as bind
+		from kamra.tex.tests.integration.test_channel_binding import profile
+		from kamra.tex.tests.integration.test_patches import put
+
+		viewers = {}
+		for key, caps in (("settings", ["settings.admin"]),
+		                  ("cost", ["settings.admin", "price.view_cost"]),
+		                  ("contract", ["settings.admin", "contract.edit"])):
+			viewers[key] = fx.ensure_user(f"y1-{key}-admin@example.com", ["Call Center Agent"])
+			bind(viewers[key], fx.PROPERTY, profile(f"2I hotel trail, {key}", caps))
+		as_user("Administrator")
+		markup = put("TEX Markup Rule", property=fx.PROPERTY, tex_status="Active")
+		policy = put("TEX Pricing Policy", property=fx.PROPERTY, tex_status="Active")
+		grant = frappe.db.get_value("TEX Access Grant", {"user": self.agent, "property": fx.PROPERTY})
+		group = {"hotel_group": self.f["group"], "hotels": [fx.PROPERTY]}
+		made = {"grant": audit("grant.update", reference_doctype="TEX Access Grant", reference_name=grant,
+		                       property=fx.PROPERTY, new={"permission_profile": "Reservations Agent"})}
+		made |= {
+			"version": audit("contract.version.save", reference_doctype="TEX Contract Version",
+			                 reference_name=self.version, property=fx.PROPERTY, new={"rates": {"DBL": "100.00"}}),
+			"markup": audit("tex_markup_rule.save", reference_doctype="TEX Markup Rule", reference_name=markup,
+			                property=fx.PROPERTY, new={"formula": "COST * 1.25"}),
+			"policy": audit("tex_pricing_policy.save", reference_doctype="TEX Pricing Policy", reference_name=policy,
+			                property=fx.PROPERTY, new={"formula": "COST * 1.30"}),
+			"group version": audit("contract.version.save", reference_doctype="TEX Contract Version",
+			                       reference_name=self.version, new={"rates": {"DBL": "90.00"}}, **group),
+			"group markup": audit("tex_markup_rule.save", reference_doctype="TEX Markup Rule", reference_name=markup,
+			                      new={"formula": "COST * 1.20"}, **group),
+		}
+
+		def seen(user: str, limit: int = 500) -> set[str]:
+			as_user(user)
+			try:
+				names = {r["name"] for r in admin.audit_log(property=fx.PROPERTY, limit=limit)}
+			finally:
+				as_user("Administrator")
+			return {k for k, name in made.items() if name in names}
+
+		contract = {"version", "group version"}
+		self.assertEqual(seen(viewers["settings"]), {"grant"})
+		self.assertEqual(seen(viewers["cost"]), set(made))
+		self.assertEqual(seen(viewers["contract"]), {"grant"} | contract)
+		self.assertEqual(seen("Administrator"), set(made))
+		# the filter is in the query: the newest page of a viewer without cost is not emptied by it
+		self.assertEqual(seen(viewers["settings"], limit=1), {"grant"})
+
 	def test_payment_events_need_payment_view(self):
 		with self.assertRaises(frappe.PermissionError):
 			self.trail(self.viewer, "TEX Payment Transaction", self.txn)

@@ -70,6 +70,8 @@ export interface QuoteOutcome {
   rejected: RejectedExtra[]
   /** the quotes just made (empty on error): book({ quotes }) books these, not the render's (O-30) */
   quotes: QuoteResponse[]
+  /** prices that changed with the quotes just made (also in flow.priceChanges; empty on error) */
+  changes: PriceChange[]
 }
 
 interface FlowState {
@@ -414,7 +416,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const quoteAll = useCallback(async (override?: (Selection | null)[], baseline?: (Selection | null)[]): Promise<QuoteOutcome> => {
     const sels = override ?? flow.selections
     const base = baseline ?? sels
-    const failed = (error: FlowError): QuoteOutcome => ({ error, rejected: [], quotes: [] })
+    const failed = (error: FlowError): QuoteOutcome => ({ error, rejected: [], quotes: [], changes: [] })
     if (!sels.length || sels.some((s) => !s)) return failed({ kind: "invalid", message: "" })
     // the rooms of a booking are quoted together: a coupon's minimum basket is the whole
     // booking's (G-84), so every room is priced knowing the others
@@ -445,7 +447,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     }
     setFlow((f) => ({ ...f, quotes, quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
-    return { error: null, rejected: findRejected(quotes, flow.extras), quotes }
+    return { error: null, rejected: findRejected(quotes, flow.extras), quotes, changes }
   }, [flow.selections, flow.extras, site.slug])
 
   const rejectedExtras = useMemo(() => findRejected(flow.quotes, flow.extras), [flow.quotes, flow.extras])

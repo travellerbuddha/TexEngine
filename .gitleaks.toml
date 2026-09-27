@@ -1,0 +1,38 @@
+# Secret scanning (NEW-5, .github/workflows/supply-chain.yml): gitleaks' default rules, plus the reviewed
+# exceptions below. Every exception says why it is safe; add one only for a value that is not a secret, never
+# to hide a real one (rotate it instead and say so in the PR). A single line may also carry `gitleaks:allow`.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """Test fixtures: the integration, unit and E2E tests pass made-up keys, secrets and idempotency keys
+(e.g. idempotency_key="idem-…", api_key="…" for a sandbox connection). None is a credential of any service. Only the
+generic rule is silenced here: a token of a known shape (GitHub, AWS, Stripe, …) in a test is still reported."""
+targetRules = ["generic-api-key"]
+paths = [
+  '''^kamra/tex/tests/''',
+  '''^kamra/tests/''',
+  '''^frontend/tests/''',
+  '''^frontend/e2e/''',
+]
+
+[[allowlists]]
+description = """kamra/public/: the built bundles of frontend/ (minified, with the libraries bundled into them;
+regenerated in Part 2Z), the logos, and one hand-written Desk script (js/tex_source.js). Minified code trips the
+generic rule; the bundles' sources are scanned. Only the generic rule is silenced here: a token of a known shape
+is still reported, in the hand-written script too."""
+targetRules = ["generic-api-key"]
+paths = ['''^kamra/public/''']
+
+[[allowlists]]
+description = """Demo credentials of disposable test sites (CI, local benches, deploy/tex-local): the well-known
+demo password of the demo users, never set on a production site (tex_production refuses the demo seed)."""
+regexes = ['''TexDemo#2026''']
+
+[[allowlists]]
+description = """Keyboard-help labels in the TEX i18n catalogs: a key named `….keys` holds the keys to press
+("Shift+Click …"), which the generic rule takes for an API key."""
+condition = "AND"
+paths = ['''^frontend/src/tex/i18n/locales/''']
+regexTarget = "line"
+regexes = ['''^\s*"[A-Za-z0-9_.-]+\.keys":''']

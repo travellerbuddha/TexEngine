@@ -29,8 +29,9 @@ PROPERTY_DOCTYPES = (
 GROUP_DOCTYPES = ("TEX Promotion", "TEX Loyalty Program", "TEX Booking Site")
 # blank hotel means platform level: only platform administrators see those rows. An audit event
 # of a hotel group or an enterprise is seen at each hotel it reached (its TEX Audit Scope rows,
-# ADR-053); a scope row only at its own hotel, so no hotel reads another's name
-STRICT_DOCTYPES = ("TEX Audit Event", "TEX Audit Scope")
+# ADR-053); a scope row only at its own hotel, so no hotel reads another's name. A legacy action log
+# row without a hotel is platform level too (NEW-8): its before/after snapshots name guests and folios
+STRICT_DOCTYPES = ("TEX Audit Event", "TEX Audit Scope", "Agent Action Log")
 # hotel known through a parent document
 VIA_PARENT = {
 	"TEX Reservation Revision": ("reservation", "Reservation"),
@@ -53,7 +54,7 @@ TENANT_DOCTYPES = ("TEX Access Grant", "TEX Enterprise", "TEX Hotel Group")
 # follow the TEX scope (live grants and the user's own User Permissions), not only Frappe's User
 # Permission filter, which a user left without mirrored rows (a grant deleted or ended) escapes
 LEGACY_PROPERTY_DOCTYPES = (
-	"AI Assistant Settings", "Agent Action Log", "Banquet Checklist Template", "Banquet Dish",
+	"AI Assistant Settings", "Banquet Checklist Template", "Banquet Dish",
 	"Banquet Function Task", "Banquet Menu", "Banquet Service Item", "Cancelled Invoice", "Cashier",
 	"Cashier Session", "Cashier Transaction", "Channel Manager Connection", "Channel Provider Connection",
 	"City Ledger Account", "City Ledger Entry", "Copilot Conversation", "Credit Note", "Discount Voucher",
@@ -65,6 +66,16 @@ LEGACY_PROPERTY_DOCTYPES = (
 	"Service Ticket", "Shift Handover", "Stock Ledger Entry", "Transaction Code", "Turnover Profile",
 	"Venue", "Venue Booking", "WhatsApp Message",
 )
+# cost (G-97): a contract, its versions and their rate tables (the audit trail's TRAIL_COST, which the
+# TEX API reads with price.view_cost or contract.edit), and markups and pricing policies (price.view_cost).
+# In Desk / REST their records are platform administrators' (DocType permissions), and so are the audit
+# events about them, whose compact diffs carry the prices
+CONTRACT_COST_DOCTYPES = frozenset({"TEX Contract", "TEX Contract Version",
+                                    # a contract version's rate tables
+                                    "TEX Price Period", "TEX Period Rate", "TEX Child Age Band", "TEX Occupancy Rule",
+                                    "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan",
+                                    "TEX Contract Offer", "TEX Contract Channel"})
+COST_DOCTYPES = CONTRACT_COST_DOCTYPES | {"TEX Markup Rule", "TEX Pricing Policy"}
 SCOPED_DOCTYPES = (*PROPERTY_DOCTYPES, *GROUP_DOCTYPES, *STRICT_DOCTYPES, *VIA_PARENT, LEDGER_DOCTYPE, "Guest",
                    *ENTERPRISE_DOCTYPES, *TENANT_DOCTYPES, *LEGACY_PROPERTY_DOCTYPES)
 
@@ -104,7 +115,8 @@ def query_conditions(user: str | None = None, doctype: str | None = None) -> str
 	t = f"`tab{doctype}`"
 	if doctype == "TEX Audit Event":
 		return (f"({t}.`property` in ({_sql_list(props)}) or {t}.`name` in (select s.`event` from "
-		        f"`tabTEX Audit Scope` s where s.`property` in ({_sql_list(props)})))")
+		        f"`tabTEX Audit Scope` s where s.`property` in ({_sql_list(props)})))"
+		        f" and ifnull({t}.`reference_doctype`, '') not in ({_sql_list(COST_DOCTYPES)})")
 	if doctype in STRICT_DOCTYPES:
 		return f"{t}.`property` in ({_sql_list(props)})"
 	if doctype in GROUP_DOCTYPES:
@@ -222,6 +234,8 @@ def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
 		                                        and doc.enterprise in _enterprises(scope.permitted_properties(user)))
 	if doc.doctype in TENANT_DOCTYPES:
 		return _tenant_doc_permitted(doc, user)
+	if doc.doctype == "TEX Audit Event" and doc.get("reference_doctype") in COST_DOCTYPES:
+		return False                              # cost: the TEX audit log serves it by price.view_cost (G-97)
 	props, platform_level = _doc_properties(doc)
 	if platform_level:
 		return False

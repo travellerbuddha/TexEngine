@@ -98,6 +98,66 @@ test("quotes older than 25 minutes are made again before booking, and the new on
   noErrors()
 })
 
+test("a new price found when the quotes are made again stops the booking; the next submit books the new quotes (O-30)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  await page.clock.install()
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  const quoted: string[][] = []
+  page.on("response", async (r) => {
+    if (!isQuoteRooms(r.url()) || !r.ok()) return
+    const b = (await r.json().catch(() => null)) as { message?: { rooms?: { quote_id?: string }[] } } | null
+    quoted.push((b?.message?.rooms ?? []).map((q) => q.quote_id ?? ""))
+  })
+  const booked: string[][] = []
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book") booked.push((r.postDataJSON() as { quote_ids: string[] }).quote_ids)
+  })
+  const { checkIn, checkOut } = stay(200, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted.length, { message: "the stay was quoted" }).toBeGreaterThan(0)
+  const before = quoted.length
+
+  // the refresh made at submit (the quotes are 26 minutes old) finds another price: the server's quotes,
+  // their total raised by 10.00 and marked as changed
+  await page.route(
+    (url) => isQuoteRooms(url.href),
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { message: { rooms: { price_changed?: boolean; previous_total?: string; quote?: { totals: { total: string } } }[] } }
+      for (const q of body.message.rooms) {
+        if (!q.quote) continue
+        q.previous_total = q.quote.totals.total
+        const c = cents(q.quote.totals.total) + 1000n
+        q.quote.totals.total = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+        q.price_changed = true
+      }
+      await route.fulfill({ response, json: body })
+    },
+    { times: 1 },
+  )
+  await page.clock.fastForward("26:00")
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  const bookButton = page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first()
+  await bookButton.click()
+  // the guest sees the new price before anything is booked
+  await expect(page.getByText("The price has changed").first()).toBeVisible()
+  await expect.poll(() => quoted.length, { message: "the stay was quoted again" }).toBeGreaterThan(before)
+  expect(booked, "no booking before the guest has seen the new price").toEqual([])
+
+  // the next submit books the quotes just made (fresh, so not made again)
+  const [book] = await Promise.all([page.waitForRequest((r) => new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book"), bookButton.click()])
+  expect((book.postDataJSON() as { quote_ids: string[] }).quote_ids).toEqual(quoted[quoted.length - 1])
+  expect(booked).toHaveLength(1)
+  await completeSandbox(page, "success")
+  expect((await readConfirmation(page)).status).toBe("Confirmed")
+  noErrors()
+})
+
 test("a declined card keeps the booking awaiting payment until the retry succeeds", async ({ page }, testInfo) => {
   const noErrors = trackErrors(page)
   const { checkIn, checkOut } = stay(160, 2, testInfo.project.name)
