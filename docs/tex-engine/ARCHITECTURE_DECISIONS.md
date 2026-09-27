@@ -9163,5 +9163,5 @@ the versions the roll superseded the state their contract's later publishes woul
 - A link is in its booking's currency (D-10); money that came in another is recorded, kept off, `Action Required`, never undone.
 - One link per idempotency key (unique; p57). One `payment_status` formula ("Refunded" included).
 - Points ≤ min(total × max % − points on it, total − paid); a refund plan never pays points back as cash.
-- A transfer is confirmed with the amount that came; the staff API requires its value date. New reconciliation reasons
-  tell the team only (the guest's late-payment e-mail fits an expiry alone).
+- A transfer is confirmed with the amount that came (the staff API requires its value date); one that no longer covers the
+  deposit leaves the booking Pending, and it expires with its hold. New reconciliation reasons tell the team only.
