@@ -48,6 +48,8 @@ against main by design:
   sale's currency, whatever it was sold in.
 * a members-only promotion (G-57): main saved it, but no search or quote says the guest is a member,
   so it never applied.
+* a second live REPLACE markup of the same scope and priority whose stay dates meet the first's
+  (G-53): main activated it and priced with the newer one, silently. Its activation is now refused.
 
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
@@ -565,3 +567,19 @@ class TestSaleRuleChanges(TexTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self.promotion(member_only=1)
 		self.assertEqual(self.promotion(member_only=0)["member_only"], 0)
+
+	def test_an_equal_markup_is_not_activated(self):
+		"""G-53: main activated a second DE markup of the hotel at the same priority and priced with the
+		newer. Now its activation is refused, naming the first; at another priority it activates."""
+		from kamra.tex.api import policies
+
+		def markup(**kw) -> str:
+			return policies.save_record("TEX Markup Rule", {"label": "2C-2", "property": fx.PROPERTY, "market": "DE",
+			                                                "op": "ADJUST_PERCENT", "value": 7, **kw})["name"]
+
+		first = markup()
+		revisions.activate("TEX Markup Rule", first)
+		second = markup(value=9)
+		with self.assertRaises(frappe.ValidationError):
+			revisions.activate("TEX Markup Rule", second)
+		revisions.activate("TEX Markup Rule", markup(value=9, priority=1))

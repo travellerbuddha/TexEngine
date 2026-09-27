@@ -66,18 +66,22 @@ def guest_key(email: str | None = None, phone: str | None = None) -> str | None:
 # ─── markups ─────────────────────────────────────────────────────────────
 
 
+MARKUP_FIELDS = ("name", "revision_no", "revision_of", "property", "market", "contract", "room_type",
+                 "sales_channel", "stay_from", "stay_to", "op", "value", "currency", "combine", "priority", "label")
+
+
+def markup_from_row(r) -> MarkupRule:
+	return MarkupRule(rule_id=r.name, op=Op(r.op), value=db_dec(r.value), property=r.property or None,
+	                  market=r.market or None, contract=r.contract or None, room_type=r.room_type or None,
+	                  channel=r.sales_channel or None, stay_from=_date(r.stay_from), stay_to=_date(r.stay_to),
+	                  currency=r.currency or None, combine=MarkupCombine(r.combine or "REPLACE"),
+	                  priority=int(r.priority or 0), label=r.label or "",
+	                  revision=f"{r.revision_of or r.name}/r{r.revision_no or 1}")
+
+
 def markups(property: str, at: datetime) -> tuple[MarkupRule, ...]:
-	fields = ("name", "revision_no", "revision_of", "property", "market", "contract", "room_type", "sales_channel",
-	          "stay_from", "stay_to", "op", "value", "currency", "combine", "priority", "label")
-	rows = [r for r in as_of("TEX Markup Rule", at, fields=fields) if not r.property or r.property == property]
-	return tuple(
-		MarkupRule(rule_id=r.name, op=Op(r.op), value=db_dec(r.value), property=r.property or None,
-		           market=r.market or None, contract=r.contract or None, room_type=r.room_type or None,
-		           channel=r.sales_channel or None, stay_from=_date(r.stay_from), stay_to=_date(r.stay_to),
-		           currency=r.currency or None, combine=MarkupCombine(r.combine or "REPLACE"),
-		           priority=int(r.priority or 0), label=r.label or "",
-		           revision=f"{r.revision_of or r.name}/r{r.revision_no or 1}")
-		for r in rows)
+	rows = [r for r in as_of("TEX Markup Rule", at, fields=MARKUP_FIELDS) if not r.property or r.property == property]
+	return tuple(markup_from_row(r) for r in rows)
 
 
 # ─── promotions ──────────────────────────────────────────────────────────

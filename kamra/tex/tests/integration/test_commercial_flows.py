@@ -1630,3 +1630,28 @@ class TestPromotionGroupTies(TexTestCase):
 		self.assertNotIn("_warnings", self.eb(25, priority=1))
 		self.assertNotIn("_warnings", self.eb(25, promo_group="LS"))
 		self.assertNotIn("_warnings", self.eb(25, promo_group=""))
+
+
+class TestMarkupTies(TexTestCase):
+	"""G-53: two live REPLACE markups of one scope and priority whose stay dates meet tie, and the
+	engine took the newer silently. Activating the second is refused, naming the first."""
+
+	def markup(self, **kw) -> str:
+		return policy_api.save_record("TEX Markup Rule", {"label": "G53", "property": fx.PROPERTY, "market": "DE",
+		                                                  "op": "ADJUST_PERCENT", "value": 7, **kw})["name"]
+
+	def test_an_equal_markup_is_not_activated(self):
+		first = self.markup()
+		policy_api.activate("TEX Markup Rule", first)
+		second = self.markup(value=9)
+		with self.assertRaises(frappe.ValidationError) as refused:
+			policy_api.activate("TEX Markup Rule", second)
+		self.assertIn(first, str(refused.exception))
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", second, "tex_status"), "Draft")
+		# another priority, another scope, stacked, or a revision of the same record: activated
+		for kw in ({"priority": 1}, {"room_type": self.f["room_types"]["STD"]}, {"combine": "STACK"}):
+			with self.subTest(**kw):
+				policy_api.activate("TEX Markup Rule", self.markup(**kw))
+		revision = policy_api.revise("TEX Markup Rule", first)["name"]
+		policy_api.activate("TEX Markup Rule", revision)
+		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")

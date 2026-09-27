@@ -163,9 +163,19 @@ def create_contract(f: dict, *, code="DE-TEST", market="DE", base=100, publish=T
 
 
 def create_markup(market="DE", value=7):
+	"""The hotel's live markup for ``market`` is ``value``: a new record, or a revision of the live one
+	(a second live markup of one scope and priority is refused, G-53; the newer one used to win)."""
 	from kamra.tex.commercial import revisions
 
-	doc = frappe.get_doc({"doctype": "TEX Markup Rule", "label": f"{market} markup", "property": PROPERTY,
-	                      "market": market, "op": "ADJUST_PERCENT", "value": value}).insert(ignore_permissions=True)
+	live = revisions.live_or_scheduled_roots("TEX Markup Rule", {
+		"property": PROPERTY, "market": market, "contract": None, "room_type": None, "sales_channel": None,
+		"stay_from": None, "stay_to": None, "priority": 0})
+	if live:
+		doc = frappe.get_doc("TEX Markup Rule", revisions.revise("TEX Markup Rule", live[0]))
+		doc.update({"op": "ADJUST_PERCENT", "value": value, "combine": "REPLACE"})
+		doc.save(ignore_permissions=True)
+	else:
+		doc = frappe.get_doc({"doctype": "TEX Markup Rule", "label": f"{market} markup", "property": PROPERTY,
+		                      "market": market, "op": "ADJUST_PERCENT", "value": value}).insert(ignore_permissions=True)
 	revisions.activate("TEX Markup Rule", doc.name)
 	return doc.name

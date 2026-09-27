@@ -63,6 +63,19 @@ class TestMarkup(unittest.TestCase):
 		self.assertEqual(markup.apply_markup(tuple(rules), SCOPE, NIGHT, D("100"), explain=ex), D("112"))
 		self.assertEqual([s.code for s in ex.steps], ["MARKUP", "MARKUP_STACK"])
 
+	def test_same_scope_markup_tie_is_flagged(self):
+		"""G-53: two REPLACE rules of one scope and priority whose stay dates meet tie; ``resolve`` takes
+		the higher rule id (the newer one) silently, so the activation refuses such a pair."""
+		def m(rid, **kw):
+			return MarkupRule(rid, Op.ADJUST_PERCENT, D("10"), property="HOTEL-A", market="DE", **kw)
+
+		july = {"stay_from": date(2027, 7, 1), "stay_to": date(2027, 7, 31)}
+		rules = (m("a"), m("b"), m("c", priority=1), m("d", channel="WEB"), m("e", combine=MarkupCombine.STACK),
+		         m("f", **july), m("g", stay_from=date(2027, 7, 31)), m("h", stay_to=date(2027, 6, 30)),
+		         MarkupRule("i", Op.ADJUST_PERCENT, D("10"), property="HOTEL-A"))
+		self.assertEqual([(x.rule_id, y.rule_id) for x, y in markup.same_scope_ties(rules)], [("a", "b"), ("f", "g")])
+		self.assertEqual(markup.resolve((m("a"), m("b")), SCOPE, NIGHT)[0].rule_id, "b")     # the newer, silently
+
 	def test_add_in_other_currency_refused(self):
 		with self.assertRaises(Unsellable):
 			self.apply([MarkupRule("m", Op.ADD, D("5"), property="HOTEL-A", currency="TRY")])
