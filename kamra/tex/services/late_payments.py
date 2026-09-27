@@ -277,11 +277,15 @@ def after_refund(refund: str, booking: str | None, *, key: str | None = None) ->
 	"""P1-3: the outcome of refund ``refund`` off ``booking`` is recorded (made, not made, corrected).
 	A booking cancelled before it was ever confirmed holds no money (``ended_unconfirmed``): what it
 	still holds — a refund on its way when it ended (the expiry left that money on it) — comes off it
-	into reconciliation (``refund:{refund}``, or ``key``), the team told, never the guest. A booking that
-	is not cancelled is only looked at (nothing locked: a durable refund holds its booking already, and its
-	payments locked after it would invert a payment callback's order); a cancelled one has its charges
-	locked (name order), then itself: the order money coming in takes. → the amount taken off."""
-	if not booking or frappe.db.get_value("TEX Booking", booking, "status") != "Cancelled":
+	into reconciliation (``refund:{refund}``, or ``key``), the team told, never the guest.
+
+	The booking's status is a locking read: its state as it is now, never this request's read view (a
+	durable refund's gateway call may read before the expiry job commits). On the durable path the booking
+	is locked already (``relock``, ``_refund_source(lock=True)``): no new lock, the latest state; on
+	``finish_unknown_refund`` and ``correct_refund`` it takes the booking's lock. A booking that is not
+	cancelled locks none of its payments; a cancelled one has its charges locked after it (name order), as
+	on the durable path. → the amount taken off."""
+	if not booking or frappe.db.get_value("TEX Booking", booking, "status", for_update=True) != "Cancelled":
 		return ZERO
 	for name in charges_of(booking):
 		frappe.db.get_value(TXN, name, "name", for_update=True)

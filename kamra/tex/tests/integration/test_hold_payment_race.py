@@ -653,6 +653,98 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("TEX Booking", self.a["booking"], "status"), a)
 
 
+class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
+	"""P1-3 review 2, under real concurrency: a durable refund is committed before the gateway is asked;
+	the gateway's own plain read (its secret) fixes the request's read view; while it works, the expiry job
+	(another connection) cancels the never-confirmed booking and commits. The refund's outcome must judge the
+	booking as it is now (a locking read), never as that read view saw it. Fixtures committed, cleaned up."""
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup_payments()
+		_cleanup()
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_payments()
+		self.f = fx.base_setup()
+		fx.create_contract(self.f, code="CONC")
+		acc = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"},
+		                {"label": "Sandbox gateway", "property": fx.PROPERTY, "provider": "Mock",
+		                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+		                      rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB",
+		                      currency="EUR")["properties"][0]
+		offer = pick(prop, room_code="STD", rate_plan_code="FLEX")
+		quote = quoting.create_quote(offer["rooms"][0]["offer_key"])["quote_id"]
+		b = booking.create_booking(quote_ids=[quote], payment_method="Card", guest={
+			"first_name": "Rita", "last_name": "Refund", "email": "rita.p13@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent sends a link for most of it
+		# just under the deposit: never confirmed, and at least 80 on it, so that once the expiry released all
+		# but the 40 on their way, the refund comes wholly out of that released money and this request never
+		# writes the booking before it judges it (a transaction always sees its own writes)
+		part = D(b["due_now"]) - 1
+		self.assertGreaterEqual(part - 40, D(40))
+		link = pay.create_link(property=fx.PROPERTY, amount=str(part), currency="EUR", description="Most of it",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.b, self.c = b["booking"], started["transaction"]
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection needs committed fixtures
+
+	def test_a_refunds_outcome_judges_the_booking_as_it_is_now(self):
+		import traceback
+
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		self.assertEqual(frappe.db.get_value("TEX Booking", self.b, "status"), "Pending Payment")
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		real = MockProvider.refund
+		errors: list[str] = []
+
+		def expiry_elsewhere():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
+				booking.expire_booking(self.b, force=True, send_mail=False)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the job's own transaction
+			except Exception:
+				frappe.db.rollback()
+				errors.append(traceback.format_exc())
+			finally:
+				frappe.destroy()
+
+		def gateway(provider, *args, **kw):
+			# the gateway reads its secret first: a plain read, which fixes this request's read view
+			frappe.db.sql("SELECT status FROM `tabTEX Booking` WHERE name=%s", self.b)
+			job = threading.Thread(target=expiry_elsewhere)
+			job.start()
+			job.join(timeout=60)
+			return real(provider, *args, **kw)
+
+		frappe.flags.in_test = False                    # the durable commit runs, as in production
+		try:
+			with mock.patch.object(MockProvider, "refund", gateway):
+				out = pay.refund(self.c, amount="40", reason="the guest asked", idempotency_key=f"p13r2-{self.c}",
+				                 durable=True)
+		finally:
+			frappe.flags.in_test = True
+		self.assertEqual(errors, [])
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", out["refund"], "booking"))  # off no booking
+		now = frappe.db.get_value("TEX Booking", self.b, ["status", "paid_amount"], as_dict=True, for_update=True)
+		self.assertEqual((now.status, D(now.paid_amount)), ("Cancelled", D(0)))
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", self.c, "reconciliation", for_update=True),
+		                 "Action Required")
+
+
 class TestHoldPolicy(HoldCase):
 	"""K-2d: one resolver decides how long a booking's rooms wait for its payment, by payment
 	method (card 20 minutes, payment link 24 hours, bank transfer 48 hours by default), each
@@ -1553,9 +1645,9 @@ class TestReconciliationStates(HoldCase):
 		self.assertEqual(txn_state(c).reconciliation, "Action Required")
 
 	def test_a_refund_of_a_confirmed_booking_locks_none_of_its_payments_after_its_outcome(self):
-		"""P1-3 review: ``after_refund`` looks at the booking first and locks nothing unless it is cancelled:
-		a durable refund holds its booking already, and locking its payments after it would invert the order a
-		payment callback takes (payment, then booking)."""
+		"""P1-3 review: ``after_refund`` reads the booking first (a locking read: its state now) and locks none
+		of its payments unless it is cancelled: locking them after the booking would invert the order a payment
+		callback takes (payment, then booking)."""
 		import re
 
 		from kamra.tex.services import late_payments
@@ -1569,7 +1661,8 @@ class TestReconciliationStates(HoldCase):
 
 		def spied(*args, **kw):
 			def recording(query, *a, **k):
-				if re.search(r"FOR UPDATE|LOCK IN SHARE MODE", str(query), re.I):
+				# the booking's own row may be locked (review 2: its status is read as it is now); its payments never
+				if re.search(r"FOR UPDATE|LOCK IN SHARE MODE", str(query), re.I) and "tabTEX Payment" in str(query):
 					locks.append(" ".join(str(query).split()))
 				return sql(query, *a, **k)
 
