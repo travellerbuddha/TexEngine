@@ -1513,6 +1513,37 @@ class TestReconciliationStates(HoldCase):
 				self.assertEqual(after[:1], expired)                           # the expiry's release as it was
 				self.assertEqual(after[1:], [(key(f"refund:{refund}:{b['booking']}:{c}"), D(40))])
 
+	def test_a_refund_of_a_confirmed_booking_locks_none_of_its_payments_after_its_outcome(self):
+		"""P1-3 review: ``after_refund`` looks at the booking first and locks nothing unless it is cancelled:
+		a durable refund holds its booking already, and locking its payments after it would invert the order a
+		payment callback takes (payment, then booking)."""
+		import re
+
+		from kamra.tex.services import late_payments
+
+		b = self.book()
+		payment = self.start_payment(b)
+		self.pays(payment)
+		self.assertEqual(self.statuses(b)[0], "Confirmed")
+		real, sql = late_payments.after_refund, frappe.db.sql
+		locks: list[str] = []
+
+		def spied(*args, **kw):
+			def recording(query, *a, **k):
+				if re.search(r"FOR UPDATE|LOCK IN SHARE MODE", str(query), re.I):
+					locks.append(" ".join(str(query).split()))
+				return sql(query, *a, **k)
+
+			with mock.patch.object(frappe.db, "sql", side_effect=recording):
+				return real(*args, **kw)
+
+		with mock.patch.object(late_payments, "after_refund", side_effect=spied) as after:
+			out = pay.refund(payment["transaction"], amount="10", reason="goodwill",
+			                 idempotency_key=f"p13r-{b['booking']}", booking=b["booking"])
+		self.assertEqual(out["status"], "Succeeded")
+		after.assert_called_once()
+		self.assertEqual(locks, [])
+
 	def test_money_given_back_outside_tex_settles_it(self):
 		_b, txn = self.parked()
 		amount = frappe.db.get_value("TEX Payment Transaction", txn, "amount")
