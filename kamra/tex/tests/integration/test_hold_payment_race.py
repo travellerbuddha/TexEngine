@@ -1570,6 +1570,23 @@ class TestMoneyShownRight(HoldCase):
 		self.assertEqual(txn_state(started["transaction"]).reconciliation, "Action Required")
 		self.assertNotEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Paid")
 
+	def test_a_booking_cancelled_for_free_and_refunded_in_full_reads_refunded(self):
+		"""P1-10 (audit 2B, ADR-065): one payment status formula wherever it is written: a cancelled booking
+		owing nothing reads "Paid" while its money is on it, and "Refunded" once all of it went back."""
+		b = self.book()                                                     # FLEX by card
+		payment = self.start_payment(b)
+		self.pays(payment)
+		self.assertEqual(self.statuses(b)[0], "Confirmed")
+		booking.cancel_reservation(self.rooms(b)[0], reason="free cancellation")
+		state = lambda: frappe.db.get_value("TEX Booking", b["booking"], ["status", "total_amount",  # noqa: E731
+		                                                                  "payment_status"])
+		self.assertEqual(state(), ("Cancelled", 0, "Paid"))                # nothing owed, the money on it
+		pay.refund(payment["transaction"], amount=b["due_now"], reason="free cancellation",
+		           idempotency_key=f"p110-{b['booking']}", booking=b["booking"])
+		self.assertEqual(state(), ("Cancelled", 0, "Refunded"))            # apply_payment's reading
+		booking._refresh_booking_after_change(b["booking"])
+		self.assertEqual(state(), ("Cancelled", 0, "Refunded"))            # the refresh reads the same
+
 	def test_a_booking_whose_money_came_off_at_its_expiry_is_not_paid(self):
 		b = self.book()
 		pay.record_manual(booking=b["booking"], amount="50", method="Cash", reference="desk",

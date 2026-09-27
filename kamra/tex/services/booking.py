@@ -899,6 +899,20 @@ def confirm_booking(booking: str, *, reason: str | None = None, send_mail: bool 
 		notify.booking_confirmed(booking)
 
 
+def payment_status(b, paid, total) -> str:
+	"""The booking's payment status from what it holds and costs (P1-10, ADR-065), wherever it is
+	written: money on it → "Paid" once it covers the total, else "Partially Paid"; none → "Refunded" for
+	a cancelled booking owing nothing whose money was refunded, "Pay at Hotel" when it is paid there
+	(or through its channel), else "Unpaid". ``create_booking`` writes its own first status."""
+	paid, total = D(paid), D(total)
+	if paid > ZERO:
+		return "Paid" if paid >= total else "Partially Paid"
+	if b.status == "Cancelled" and total <= ZERO and frappe.db.exists(
+			"TEX Payment Allocation", {"booking": b.name, "allocation_type": "Refund"}):
+		return "Refunded"
+	return "Pay at Hotel" if b.payment_method in ("Pay at Hotel", "Channel") else "Unpaid"
+
+
 def confirm_if_paid(booking: str, *, reason: str, send_mail: bool = True) -> bool:
 	"""D1: a booking waiting for its payment that now has what it owes now — a room was cancelled
 	after part of the money came, or a stuck booking took its payment — is confirmed while its rooms
@@ -924,7 +938,7 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 	b.paid_amount = paid
 	b.balance_amount = total - paid
 	# nothing owed and nothing paid (an expired booking whose money came off it) is not "Paid" (C7)
-	b.payment_status = "Paid" if paid >= total and paid > 0 else ("Partially Paid" if paid > 0 else "Unpaid")
+	b.payment_status = payment_status(b, paid, total)
 	b.save(ignore_permissions=True)
 	if amount > ZERO:
 		_close_links_if_settled(b)
@@ -1111,8 +1125,7 @@ def _refresh_booking_after_change(booking: str) -> None:
 		b.amount_due_now = min(required_now(b), total)
 	elif any(s == "Cancelled" for s in statuses):
 		b.status = "Partially Cancelled"
-	paid = from_db(b.paid_amount, ccy)
-	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
+	b.payment_status = payment_status(b, from_db(b.paid_amount, ccy), total)
 	b.save(ignore_permissions=True)
 	_close_links_if_settled(b)
 
