@@ -583,13 +583,14 @@ function PaymentStep() {
     // flow still holds the old ones (O-30)
     let fresh: QuoteResponse[] | undefined
     if (!quotesFresh) {
-      const { error, rejected, quotes } = await quoteAll()
+      const { error, rejected, quotes, changes } = await quoteAll()
       if (error) {
         setPending(false)
         return setFlowError(error)
       }
-      // an extra can no longer be added: the guest sees it (and the new total) before booking
-      if (rejected.length) return setPending(false)
+      // an extra can no longer be added, or a price changed: the guest sees it (and the new total)
+      // before booking; their next submit books the quotes just made (fresh, in the flow)
+      if (rejected.length || changes.length) return setPending(false)
       fresh = quotes
     }
     const res = await book({ quotes: fresh })
