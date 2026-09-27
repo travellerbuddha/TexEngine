@@ -9,7 +9,13 @@ The page may be framed only by the booking site's allowed embed origins
 
 import frappe
 
-from kamra.tex.booking_host import booking_html, frame_ancestors, referrer_policy, with_referrer_policy
+from kamra.tex.booking_host import (
+	booking_html,
+	frame_ancestors,
+	referrer_policy,
+	with_referrer_policy,
+	with_session_token,
+)
 from kamra.tex.services import sites
 
 no_cache = 1
@@ -33,6 +39,7 @@ def get_context(context):
 	# payment pages send no Referer (an old /book/pay/<token> link must not leak its token, G-83)
 	policy = referrer_policy(path)
 	frappe.local.response_headers["Referrer-Policy"] = policy
-	context.spa_html = with_referrer_policy(html, policy)
+	# a signed-in staff member's POSTs must echo the session's CSRF token (O-28)
+	context.spa_html = with_referrer_policy(with_session_token(html), policy)
 	context.no_cache = 1
 	return context

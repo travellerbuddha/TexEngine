@@ -147,13 +147,12 @@ export function Header({ home }: { home?: string }) {
 }
 
 export function Footer() {
-  const { site, needsConsent, reopenConsent } = useSite()
+  const { site, tracking, needsConsent, reopenConsent } = useSite()
   const { t, lang } = useI18n()
   const [policies, setPolicies] = useState(false)
   const c = site.contact || {}
   const wa = c.whatsapp?.replace(/[^\d]/g, "")
   const note = siteText(site, lang, "footer_note")
-  const hasTrackers = !!(site.analytics?.ga4 || site.analytics?.gtm || site.analytics?.meta_pixel)
   return (
     <footer className="mt-16 border-t border-line bg-surface">
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 text-sm text-soft sm:grid-cols-[1.4fr_1fr] sm:px-6">
@@ -195,7 +194,7 @@ export function Footer() {
               {t("footer.policies")}
             </button>
           )}
-          {hasTrackers && site.analytics?.consent_banner && !needsConsent && (
+          {tracking && site.analytics?.consent_banner && !needsConsent && (
             <button type="button" className="min-h-6 underline underline-offset-2 hover:text-ink" onClick={reopenConsent}>
               {t("footer.cookies")}
             </button>

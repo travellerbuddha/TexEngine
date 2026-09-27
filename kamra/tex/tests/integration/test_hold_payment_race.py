@@ -374,6 +374,37 @@ class TestMoneyForBookingsThatCannotTakeIt(HoldCase):
 			loyalty.redeem(guest, b["booking"], 50, idempotency_key=f"c5-{b['booking']}")
 		self.assertEqual(loyalty.balances(guest, prog.name)["available"], before)
 
+	def test_money_on_a_booking_cancelled_before_it_was_confirmed_comes_off_it(self):
+		"""P1-7 a (audit 2B, ADR-065): a booking waiting for its payment, part paid, is cancelled (by staff,
+		or by the guest online): its money comes off it into reconciliation for staff — never left on a
+		cancelled booking owing nothing — and the guest gets no late-payment e-mail."""
+		import json
+
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_self_service", 1)
+		for how in ("staff", "online"):
+			with self.subTest(how=how):
+				b = self.book(method="Card")
+				half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+				link = pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR",
+				                       description="First half", booking=b["booking"])
+				started = public.pay_link(token=link["token"])
+				public.mock_pay(transaction=started["transaction"], outcome="success",
+				                sig=started["fields"]["success_sig"])
+				t = started["transaction"]
+				self.assertEqual((self.statuses(b)[0], paid(b)), ("Pending Payment", half))
+				with mock.patch("kamra.tex.services.notify.payment_after_expiry") as guest_mail:
+					if how == "staff":
+						booking.cancel_reservation(self.rooms(b)[0], reason="the guest called to cancel")
+					else:
+						public.manage_cancel(token=b["manage_token"], reservation=self.rooms(b)[0], reason="plans")
+				guest_mail.assert_not_called()
+				self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+				self.assertEqual((paid(b), pay.allocated_of(t)), (D(0), D(0)))
+				self.assertEqual(txn_state(t).reconciliation, "Action Required")
+				why = frappe.get_all("TEX Audit Event", filters={"action": "payment.reconciliation_required",
+				                                                 "reference_name": t}, pluck="new_value")
+				self.assertEqual([json.loads(v)["why"] for v in why], ["CANCELLED_UNPAID"])
+
 	def test_staff_cannot_allocate_money_to_a_cancelled_booking(self):
 		source = self.book(method="Pay at Hotel", status="Confirmed")
 		txn = pay.record_manual(booking=source["booking"], amount="100", method="Cash", reference="till 4",
@@ -620,6 +651,98 @@ class TestLastRoomRace(IntegrationTestCase):
 		again = self._race(("a_pays_again", self.late_payment, "Guest"))
 		self.assertEqual(again, {"a_pays_again": "Succeeded"})
 		self.assertEqual(frappe.db.get_value("TEX Booking", self.a["booking"], "status"), a)
+
+
+class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
+	"""P1-3 review 2, under real concurrency: a durable refund is committed before the gateway is asked;
+	the gateway's own plain read (its secret) fixes the request's read view; while it works, the expiry job
+	(another connection) cancels the never-confirmed booking and commits. The refund's outcome must judge the
+	booking as it is now (a locking read), never as that read view saw it. Fixtures committed, cleaned up."""
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup_payments()
+		_cleanup()
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_payments()
+		self.f = fx.base_setup()
+		fx.create_contract(self.f, code="CONC")
+		acc = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"},
+		                {"label": "Sandbox gateway", "property": fx.PROPERTY, "provider": "Mock",
+		                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+		                      rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB",
+		                      currency="EUR")["properties"][0]
+		offer = pick(prop, room_code="STD", rate_plan_code="FLEX")
+		quote = quoting.create_quote(offer["rooms"][0]["offer_key"])["quote_id"]
+		b = booking.create_booking(quote_ids=[quote], payment_method="Card", guest={
+			"first_name": "Rita", "last_name": "Refund", "email": "rita.p13@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent sends a link for most of it
+		# just under the deposit: never confirmed, and at least 80 on it, so that once the expiry released all
+		# but the 40 on their way, the refund comes wholly out of that released money and this request never
+		# writes the booking before it judges it (a transaction always sees its own writes)
+		part = D(b["due_now"]) - 1
+		self.assertGreaterEqual(part - 40, D(40))
+		link = pay.create_link(property=fx.PROPERTY, amount=str(part), currency="EUR", description="Most of it",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.b, self.c = b["booking"], started["transaction"]
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection needs committed fixtures
+
+	def test_a_refunds_outcome_judges_the_booking_as_it_is_now(self):
+		import traceback
+
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		self.assertEqual(frappe.db.get_value("TEX Booking", self.b, "status"), "Pending Payment")
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		real = MockProvider.refund
+		errors: list[str] = []
+
+		def expiry_elsewhere():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
+				booking.expire_booking(self.b, force=True, send_mail=False)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the job's own transaction
+			except Exception:
+				frappe.db.rollback()
+				errors.append(traceback.format_exc())
+			finally:
+				frappe.destroy()
+
+		def gateway(provider, *args, **kw):
+			# the gateway reads its secret first: a plain read, which fixes this request's read view
+			frappe.db.sql("SELECT status FROM `tabTEX Booking` WHERE name=%s", self.b)
+			job = threading.Thread(target=expiry_elsewhere)
+			job.start()
+			job.join(timeout=60)
+			return real(provider, *args, **kw)
+
+		frappe.flags.in_test = False                    # the durable commit runs, as in production
+		try:
+			with mock.patch.object(MockProvider, "refund", gateway):
+				out = pay.refund(self.c, amount="40", reason="the guest asked", idempotency_key=f"p13r2-{self.c}",
+				                 durable=True)
+		finally:
+			frappe.flags.in_test = True
+		self.assertEqual(errors, [])
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", out["refund"], "booking"))  # off no booking
+		now = frappe.db.get_value("TEX Booking", self.b, ["status", "paid_amount"], as_dict=True, for_update=True)
+		self.assertEqual((now.status, D(now.paid_amount)), ("Cancelled", D(0)))
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", self.c, "reconciliation", for_update=True),
+		                 "Action Required")
 
 
 class TestHoldPolicy(HoldCase):
@@ -888,6 +1011,37 @@ class TestChangesOfABookingWaitingForItsPayment(HoldCase):
 		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
 		self.assertEqual(paid(b), D(b["due_now"]))
 
+	def test_a_price_staff_raised_is_owed_in_full_and_the_old_amount_confirms_nothing(self):
+		"""P1-6 (audit 2B, ADR-065): what a room owes now is read from its stored price, never from the
+		engine's total its snapshot explains."""
+		from kamra.tex.services import modification
+
+		b = self.book(rate_plan="NRF")                                  # all of it paid now
+		total = D(b["total"])
+		payment = self.start_payment(b)                                 # the old amount
+		p = modification.propose(self.rooms(b)[0], {})
+		modification.apply(p["proposal_token"], reason="the price agreed by phone", override_amount=str(total + 100))
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now")), total + 100)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		self.assertEqual(paid(b), total)
+
+	def test_a_price_staff_lowered_lowers_the_deposit_and_its_payment_confirms(self):
+		from kamra.tex.money import quantize
+		from kamra.tex.services import modification
+
+		b = self.book()                                                 # FLEX: 30% now
+		lower = D(b["total"]) - 100
+		p = modification.propose(self.rooms(b)[0], {})
+		modification.apply(p["proposal_token"], reason="the price agreed by phone", override_amount=str(lower))
+		due = quantize(lower * D("0.3"), "EUR")
+		self.assertEqual(D(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now")), due)
+		payment = self.start_payment(b)
+		self.assertEqual(D(frappe.db.get_value("TEX Payment Transaction", payment["transaction"], "amount")), due)
+		self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertEqual(paid(b), due)
+
 
 class TestNeverConfirmedLeftovers(HoldCase):
 	"""D2 (audit 1c): before B1, a booking waiting for its payment with a room cancelled became
@@ -1147,6 +1301,48 @@ class TestPaidInTime(HoldCase):
 		self.assertEqual(out["reconciliation"], "Action Required")
 		self.assertEqual(self.statuses(b)[0], "Cancelled")
 
+	def test_a_transfer_is_confirmed_with_the_amount_that_came(self):
+		"""P1-11 + NEW-3 (audit 2B, ADR-065): the API requires the value date, as the page does; staff record
+		the amount that arrived, at most the amount asked: a short transfer is allocated as it came and the
+		booking waits for the rest (or expires with its hold)."""
+		import json
+
+		from kamra.tex.api import payments as payments_api
+		from kamra.tex.money import from_db, to_str
+
+		self.transfer_account()
+		b = self.book(method="Bank Transfer")
+		txn = self.transfer(b)
+		asked = from_db(frappe.db.get_value("TEX Payment Transaction", txn, "amount"), "EUR")
+		with self.assertRaisesRegex(frappe.ValidationError, "value date"):
+			payments_api.mark_transfer_received(transaction=txn, reference="EFT-P111")
+		with self.assertRaisesRegex(frappe.ValidationError, "at most"):
+			payments_api.mark_transfer_received(transaction=txn, reference="EFT-P111", value_date=nowdate(),
+			                                    amount=str(asked + 1))
+		out = payments_api.mark_transfer_received(transaction=txn, reference="EFT-P111", value_date=nowdate(),
+		                                          amount=str(asked - 5))            # the bank's fee came off
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(D(frappe.db.get_value("TEX Payment Transaction", txn, "amount")), asked - 5)
+		self.assertEqual(paid(b), asked - 5)
+		row = frappe.db.get_value("TEX Booking", b["booking"], ["total_amount", "balance_amount", "status"], as_dict=True)
+		self.assertEqual((D(row.balance_amount), row.status), (D(row.total_amount) - (asked - 5), "Pending Payment"))
+		recorded = json.loads(frappe.db.get_value("TEX Audit Event", {"action": "payment.transfer_received",
+		                                                              "reference_name": txn}, "new_value"))
+		self.assertEqual((recorded["amount"], recorded["asked"]), (to_str(asked - 5), to_str(asked)))
+
+	def test_a_transfer_amount_that_is_not_a_number_is_refused(self):
+		"""P1-11 review: an amount that is not a finite number is told as such, never a server error."""
+		from kamra.tex.api import payments as payments_api
+
+		self.transfer_account()
+		b = self.book(method="Bank Transfer")
+		txn = self.transfer(b)
+		for amount in ("NaN", "abc", "Infinity"):
+			with self.subTest(amount=amount), self.assertRaisesRegex(frappe.ValidationError, "must be a number"):
+				payments_api.mark_transfer_received(transaction=txn, reference="EFT-NAN", value_date=nowdate(),
+				                                    amount=amount)
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "status"), "Pending")
+
 	def transfer_account(self):
 		bank = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Bank Transfer"},
 		                 {"label": "Bank transfer", "property": fx.PROPERTY, "provider": "Bank Transfer",
@@ -1376,6 +1572,110 @@ class TestReconciliationStates(HoldCase):
 				pay.refund(txn, amount=str(amount), reason="the guest asked", idempotency_key=f"c4-{txn}")
 		return frappe.db.get_value("TEX Payment Transaction", {"parent_transaction": txn, "txn_type": "Refund"}, "name")
 
+	def expired_with_a_refund_unanswered(self) -> tuple[dict, str, str]:
+		"""P1-3: a FLEX booking by card, never confirmed, holds a half link's charge C; 40 of C is refunded
+		off it and the gateway does not answer; the booking expires with it on its way. → (b, C, refund)."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b = self.book(method="Card")
+		half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		link = pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description="First half",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		c = started["transaction"]
+		with mock.patch.object(MockProvider, "refund", side_effect=RuntimeError("gateway timeout")):
+			with self.assertRaises(pay.RefundUnknown):
+				pay.refund(c, amount="40", reason="the guest asked", idempotency_key=f"p13-{c}", booking=b["booking"])
+		refund = frappe.db.get_value("TEX Payment Transaction", {"parent_transaction": c, "txn_type": "Refund"}, "name")
+		passes(b["booking"], 24 * 60 + 5)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		self.assertEqual(paid(b), D(40))                                  # the refund on its way stays on it
+		return b, c, refund
+
+	@staticmethod
+	def releases(c: str) -> list[tuple[str, D]]:
+		rows = frappe.get_all("TEX Payment Allocation", filters={"transaction": c, "allocation_type": "Release"},
+		                      fields=["idempotency_key", "amount"], order_by="creation asc, name asc")
+		return [(r.idempotency_key, D(r.amount)) for r in rows]
+
+	def test_a_refund_on_its_way_when_an_unconfirmed_booking_ended_leaves_no_money_on_it(self):
+		"""P1-3 (audit 2B, ADR-065): once the refund's outcome is known, a booking cancelled before it was
+		ever confirmed holds none of the money: whatever the outcome, it comes off into reconciliation."""
+		for outcome in ("Failed", "Succeeded"):
+			with self.subTest(outcome=outcome):
+				b, c, refund = self.expired_with_a_refund_unanswered()
+				expired = self.releases(c)
+				key = lambda raw: pay.ns_key(fx.PROPERTY, raw, "release")  # noqa: E731
+				self.assertEqual([k for k, _a in expired], [key(f"expired:{b['booking']}:{c}")])
+				with mock.patch("kamra.tex.services.notify.payment_after_expiry") as guest_mail:
+					pay.finish_unknown_refund(refund, outcome=outcome, reference="GW-P13", reason="seen at the gateway")
+				guest_mail.assert_not_called()
+				self.assertEqual((paid(b), pay.allocated_of(c)), (D(0), D(0)))
+				self.assertEqual(txn_state(c).reconciliation, "Action Required")
+				after = self.releases(c)
+				self.assertEqual(after[:1], expired)                           # the expiry's release as it was
+				self.assertEqual(after[1:], [(key(f"refund:{refund}:{b['booking']}:{c}"), D(40))])
+
+	def test_a_durable_refund_naming_no_booking_whose_booking_expires_meanwhile_leaves_no_money_on_it(self):
+		"""P1-3 review: staff refund 40 of a half link's charge without naming the booking (the dialog's
+		default); while the gateway works the booking expires (never confirmed), and the refund, decided again
+		once answered, comes out of the money the expiry released: the 40 still on the booking comes off it."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		b = self.book(method="Card")
+		half = (D(b["due_now"]) / 2).quantize(D("0.01"))
+		link = pay.create_link(property=fx.PROPERTY, amount=str(half), currency="EUR", description="First half",
+		                       booking=b["booking"])
+		started = public.pay_link(token=link["token"])
+		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		c = started["transaction"]
+		real = MockProvider.refund
+
+		def expires_meanwhile(provider, *args, **kw):
+			booking.expire_booking(b["booking"], force=True)
+			return real(provider, *args, **kw)
+
+		with mock.patch.object(MockProvider, "refund", expires_meanwhile):
+			out = pay.refund(c, amount="40", reason="the guest asked", idempotency_key=f"p13d-{c}", durable=True)
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		self.assertEqual(paid(b), D(0))
+		self.assertEqual(txn_state(c).reconciliation, "Action Required")
+
+	def test_a_refund_of_a_confirmed_booking_locks_none_of_its_payments_after_its_outcome(self):
+		"""P1-3 review: ``after_refund`` reads the booking first (a locking read: its state now) and locks none
+		of its payments unless it is cancelled: locking them after the booking would invert the order a payment
+		callback takes (payment, then booking)."""
+		import re
+
+		from kamra.tex.services import late_payments
+
+		b = self.book()
+		payment = self.start_payment(b)
+		self.pays(payment)
+		self.assertEqual(self.statuses(b)[0], "Confirmed")
+		real, sql = late_payments.after_refund, frappe.db.sql
+		locks: list[str] = []
+
+		def spied(*args, **kw):
+			def recording(query, *a, **k):
+				# the booking's own row may be locked (review 2: its status is read as it is now); its payments never
+				if re.search(r"FOR UPDATE|LOCK IN SHARE MODE", str(query), re.I) and "tabTEX Payment" in str(query):
+					locks.append(" ".join(str(query).split()))
+				return sql(query, *a, **k)
+
+			with mock.patch.object(frappe.db, "sql", side_effect=recording):
+				return real(*args, **kw)
+
+		with mock.patch.object(late_payments, "after_refund", side_effect=spied) as after:
+			out = pay.refund(payment["transaction"], amount="10", reason="goodwill",
+			                 idempotency_key=f"p13r-{b['booking']}", booking=b["booking"])
+		self.assertEqual(out["status"], "Succeeded")
+		after.assert_called_once()
+		self.assertEqual(locks, [])
+
 	def test_money_given_back_outside_tex_settles_it(self):
 		_b, txn = self.parked()
 		amount = frappe.db.get_value("TEX Payment Transaction", txn, "amount")
@@ -1461,6 +1761,23 @@ class TestMoneyShownRight(HoldCase):
 		public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
 		self.assertEqual(txn_state(started["transaction"]).reconciliation, "Action Required")
 		self.assertNotEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Paid")
+
+	def test_a_booking_cancelled_for_free_and_refunded_in_full_reads_refunded(self):
+		"""P1-10 (audit 2B, ADR-065): one payment status formula wherever it is written: a cancelled booking
+		owing nothing reads "Paid" while its money is on it, and "Refunded" once all of it went back."""
+		b = self.book()                                                     # FLEX by card
+		payment = self.start_payment(b)
+		self.pays(payment)
+		self.assertEqual(self.statuses(b)[0], "Confirmed")
+		booking.cancel_reservation(self.rooms(b)[0], reason="free cancellation")
+		state = lambda: frappe.db.get_value("TEX Booking", b["booking"], ["status", "total_amount",  # noqa: E731
+		                                                                  "payment_status"])
+		self.assertEqual(state(), ("Cancelled", 0, "Paid"))                # nothing owed, the money on it
+		pay.refund(payment["transaction"], amount=b["due_now"], reason="free cancellation",
+		           idempotency_key=f"p110-{b['booking']}", booking=b["booking"])
+		self.assertEqual(state(), ("Cancelled", 0, "Refunded"))            # apply_payment's reading
+		booking._refresh_booking_after_change(b["booking"])
+		self.assertEqual(state(), ("Cancelled", 0, "Refunded"))            # the refresh reads the same
 
 	def test_a_booking_whose_money_came_off_at_its_expiry_is_not_paid(self):
 		b = self.book()
@@ -1618,6 +1935,66 @@ class TestPaymentLinkHold(HoldCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "cancelled"):
 			public.pay_link(token=second["token"])
 		self.assertEqual(paid(b), half)
+
+	def test_a_second_links_money_for_a_booking_already_paid_is_kept_off_it(self):
+		"""P1-7 b (audit 2B, ADR-065): two links for what the booking owes, both opened; the first pays it
+		(and closes the second); the second's open checkout is paid too: the booking takes at most what it
+		owes, the rest stays on the charge for staff (OVERPAID), never twice on the booking."""
+		import json
+
+		b = self.book(rate_plan="NRF")
+		first, second = self.send_link(b), self.send_link(b)
+		t1, t2 = public.pay_link(token=first["token"]), public.pay_link(token=second["token"])
+		for t in (t1, t2):
+			public.mock_pay(transaction=t["transaction"], outcome="success", sig=t["fields"]["success_sig"])
+		total = D(frappe.db.get_value("TEX Booking", b["booking"], "total_amount"))
+		self.assertEqual((self.statuses(b)[0], paid(b)), ("Confirmed", total))
+		self.assertEqual(pay.allocated_of(t2["transaction"]), D(0))
+		self.assertEqual(txn_state(t2["transaction"]).reconciliation, "Action Required")
+		why = frappe.get_all("TEX Audit Event", filters={"action": "payment.reconciliation_required",
+		                                                 "reference_name": t2["transaction"]}, pluck="new_value")
+		self.assertEqual([json.loads(v)["why"] for v in why], ["OVERPAID"])
+
+	def test_a_link_in_another_currency_than_its_booking_is_refused(self):
+		"""P1-5 (D-10, ADR-065): a booking is paid in its own currency; a link asking another one is never
+		made, sent again or paid."""
+		b = self.book(method="Card")
+		with self.assertRaisesRegex(frappe.ValidationError, "is in EUR"):
+			pay.create_link(property=fx.PROPERTY, amount="100", currency="TRY", description="Deposit",
+			                booking=b["booking"])
+		with self.assertRaisesRegex(frappe.ValidationError, "is in EUR"):
+			pay.create_link(property=fx.PROPERTY, amount="100", currency="TRY", description="Deposit",
+			                reservation=self.rooms(b)[0])
+		link = self.send_link(b)
+		frappe.db.set_value("TEX Payment Link", link["link"], "currency", "TRY")       # made before D-10
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot be paid online"):
+			public.pay_link(token=link["token"])
+		with self.assertRaisesRegex(frappe.ValidationError, "this link asks TRY"):
+			pay.reissue_link(link["link"])
+
+	def test_money_that_came_in_another_currency_is_recorded_and_kept_off_the_booking(self):
+		"""P1-5 (D-10): a checkout opened in another currency (a link made before D-10) is paid: the charge
+		is recorded, never undone, kept off the booking for staff, and the link is closed."""
+		import json
+
+		from kamra.tex.services import sites
+
+		b = self.book(method="Card")
+		link = self.send_link(b)
+		frappe.db.set_value("TEX Payment Link", link["link"], "currency", "TRY")
+		started = pay.start_payment(property=fx.PROPERTY, amount="3000", currency="TRY", provider_account=self.account,
+		                            payment_link=link["link"], description="Deposit", customer={},
+		                            return_url=sites.guest_url(sites.site_for(fx.PROPERTY), "pay/return",
+		                                                       site_scoped=False),
+		                            idempotency_key=f"p15-{link['link']}")
+		out = public.mock_pay(transaction=started["transaction"], outcome="success", sig=started["fields"]["success_sig"])
+		self.assertEqual(out["status"], "Succeeded")
+		self.assertEqual(txn_state(started["transaction"]).reconciliation, "Action Required")
+		why = frappe.get_all("TEX Audit Event", filters={"action": "payment.reconciliation_required",
+		                                                 "reference_name": started["transaction"]}, pluck="new_value")
+		self.assertEqual([json.loads(v)["why"] for v in why], ["CURRENCY_MISMATCH"])
+		self.assertEqual(frappe.db.get_value("TEX Payment Link", link["link"], "status"), "Cancelled")
+		self.assertEqual((paid(b), self.statuses(b)[0]), (D(0), "Pending Payment"))
 
 	def test_a_link_asking_more_than_the_booking_owes_is_refused(self):
 		"""E4: a link left open (being paid when its booking was settled) never takes more than the

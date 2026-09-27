@@ -216,6 +216,40 @@ class TestSystemStatusAccess(TexTestCase):
 			self.assertNotIn(leak, text)
 
 
+class TestOverpaidBookings(TexTestCase):
+	"""P1-7 (audit 2B, ADR-065): a booking holding more money than it costs is shown to staff, counted at
+	its hotel only, the cancelled ones among them apart."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		other_tenant()
+		self.watcher = monitor("ops-overpaid@example.com", fx.PROPERTY)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+
+	def overpaid(self, session: str, **row) -> str:
+		b = guest_books(session=session, method="Pay at Hotel")["booking"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the money came twice
+		total = frappe.db.get_value("TEX Booking", b, "total_amount")
+		frappe.db.set_value("TEX Booking", b, {"paid_amount": total + 50, **row}, update_modified=False)
+		return b
+
+	def test_a_booking_paid_more_than_it_costs_is_counted_at_its_hotel(self):
+		before = check(system_api().status(property=fx.PROPERTY), "payments.overpaid")
+		self.overpaid("p17-over-1")
+		self.overpaid("p17-over-2", status="Cancelled")
+		self.overpaid("p17-over-3", property=OTHER)
+		here = check(system_api().status(property=fx.PROPERTY), "payments.overpaid")
+		self.assertEqual((here["status"], here["count"] - before["count"]), ("warn", 2))
+		self.assertEqual(here["issues"][0]["params"]["cancelled"] - (before["issues"][0]["params"]["cancelled"]
+		                                                             if before["issues"] else 0), 1)
+		self.assertIn(fx.PROPERTY, here["properties"])
+		frappe.set_user(self.watcher)  # nosemgrep: frappe-setuser -- a monitor of this hotel only
+		mine = check(system_api().status(), "payments.overpaid")
+		self.assertEqual(mine["count"], here["count"])
+		self.assertNotIn(OTHER, mine["properties"])
+
+
 class TestStatusAlerts(TexTestCase):
 	def setUp(self):
 		super().setUp()

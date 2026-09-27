@@ -18,7 +18,7 @@ from frappe.utils import add_to_date, getdate, now_datetime
 
 from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.commercial import context
-from kamra.tex.money import D, from_db, to_str
+from kamra.tex.money import D, from_db, quantize, to_str
 from kamra.tex.pricing import addons, extras, serialize
 from kamra.tex.pricing.model import ExtraRequest
 from kamra.tex.security.audit import audit
@@ -137,8 +137,9 @@ def options(reservation: str, *, guest: bool) -> dict:
 def propose(reservation: str, raw_requests, *, guest: bool) -> dict:
 	res = frappe.get_doc("Reservation", reservation)
 	_open(res)
-	q, snap, requests = price(res, raw_requests, guest=guest)
-	old_total = D(snap["totals"]["total"])
+	q, _snap, requests = price(res, raw_requests, guest=guest)
+	# the stored price, a price staff set included (ADR-065): the extras are added to it
+	old_total = from_db(res.tex_total_amount, res.tex_currency or q.currency)
 	now = now_datetime()
 	token = quoting.sign({
 		"kind": "addon", "reservation": res.name, "modified": str(res.modified), "guest": guest,
@@ -190,10 +191,23 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 	merged = addons.merge_addons(snap, block, addon_id=addon_id, at=str(now))
 	merged["addons"][-1]["requests"] = p["requests"]
 	merged["addons"][-1]["source"] = source
-	old_total, new_total = D(snap["totals"]["total"]), D(merged["totals"]["total"])
+	ccy = res.tex_currency or q.currency
+	# the new stored price is the old stored price plus the extras (ADR-065); a price staff set
+	# stays theirs: the engine's total in the snapshot only explains it (Y-7)
+	old_total = from_db(res.tex_total_amount, ccy)
+	amounts = booking_svc.reservation_amounts(merged)
+	manual = snap.get("override_amount") not in (None, "")
+	if manual:
+		new_total = quantize(old_total + D(q.totals["total"]), ccy)
+		tax = from_db(res.tax_amount, ccy) + D(q.totals["tax"])
+		amounts.update({"amount_after_tax": new_total, "tex_total_amount": new_total, "tax_amount": tax,
+		                "amount_before_tax": new_total - tax,
+		                "tex_margin_amount": from_db(res.tex_margin_amount, ccy),
+		                "tex_cost_amount": from_db(res.tex_cost_amount, ccy)})
+		merged["override_amount"] = to_str(new_total)
+	new_total = D(amounts["tex_total_amount"])
 	res.flags.tex_modification = True
-	res.update({"tex_pricing_snapshot": json.dumps(merged, sort_keys=True, ensure_ascii=False),
-	            **booking_svc.reservation_amounts(merged)})
+	res.update({"tex_pricing_snapshot": json.dumps(merged, sort_keys=True, ensure_ascii=False), **amounts})
 	if guest:
 		added = ", ".join(f"{o.name} ×{o.quantity.normalize()}" for o in q.outcomes)
 		res.tex_guest_change_pending = 1
@@ -202,7 +216,9 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 	booking_svc._record_revision(
 		res.name, res.tex_booking, change_type="Extras", old_amount=old_total, new_amount=new_total,
 		currency=q.currency, basis="ADD_ON", basis_sale_at=now, reason=reason or "Extras added",
-		changes={"added": p["requests"], "addon": addon_id}, before=snap, after=merged, source=source)
+		changes={"added": p["requests"], "addon": addon_id}
+		| ({"manual_price": {"before": to_str(old_total), "after": to_str(new_total)}} if manual else {}),
+		before=snap, after=merged, source=source, override=new_total if manual else None)
 	if res.tex_booking:
 		booking_svc._refresh_booking_after_change(res.tex_booking)
 		# never confirmed: what it owes now may be paid already (E2)
@@ -211,7 +227,8 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 			frappe.db.set_value("TEX Booking", res.tex_booking, "guest_change_pending", 1)
 	audit("reservation.addon", reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	      new={"addon": addon_id, "extras": p["requests"], "total": to_str(q.totals["total"]),
-	           "currency": q.currency}, source=source)
+	           "currency": q.currency, "total_before": to_str(old_total), "total_after": to_str(new_total)},
+	      source=source)
 	return _result(res, addon_id)
 
 

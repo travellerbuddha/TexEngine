@@ -223,6 +223,9 @@ export interface Proposal {
   /** The caller may sell it anyway (restriction.edit), with the reason, audited. */
   restriction_override: boolean
   difference: string | null
+  /** The stay's price was set by hand (D-9): kept unless staff use the change's price
+   *  (`engine_total`, null when the change cannot be sold); null when the engine priced it. */
+  manual_price?: { amount: string; engine_total: string | null } | null
   currency_changed: boolean
   warnings: Reason[]
   proposal_token: string

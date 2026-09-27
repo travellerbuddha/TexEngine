@@ -1544,6 +1544,23 @@ sends:
   `<meta name="referrer">` still wins, so the pages are safe; production nginx should not add
   its own policy on `/book/pay`, `/pay` (GO_LIVE_READINESS §4 has the snippet).
 
+**Note (audit Part 2G-1, 2026-09-27): session tokens, manage links and trackers.**
+- *O-28.* A signed-in user's booking-engine page (`/book/…` and a hotel's pinned host) carries the
+  session's CSRF token (`booking_host.with_session_token`); the engine sends it with every public
+  call (header; `csrf_token` form field for `sendBeacon`). A guest's page has none.
+- *Tracker rule.* A page that carries a session token loads no third-party tracker and shows no
+  consent banner: the hotel's tag container is arbitrary script, and on the platform's origin
+  (shared with `/kamra` and `/app`) it would run with the staff session and could call any
+  `/api/method` as that user; a staff booking is also no web conversion. ADR-050's staff flag
+  (`created_via` Desk, `booking.staff_on_site`) is unchanged.
+- *O-27.* The confirmation page links to `/<site>/manage` without the token; the click stores this
+  booking's token as the tab's site token, which the manage page reads (the fragment first, as for
+  the e-mailed magic link). No address, href or tracker request carries a manage token.
+- *Operations (remaining risk).* A tracker already loaded in another tab of the platform's origin
+  (a guest page before sign-in) keeps running and could act with a session opened later in that
+  browser. A site with trackers should be served on its own verified host (ADR-035), never on the
+  platform's origin; GO_LIVE_READINESS should say so.
+
 ## ADR-047 Operations: a scoped system status, a boolean guest ping, alerts on change; guest e-mail status follows Frappe's queue
 **Context.** GO_LIVE_READINESS listed two operations gaps.
 - *Monitoring.* TEX had no status endpoint. `kamra/health.py` is upstream Kamra diagnostics: it
@@ -9149,6 +9166,22 @@ the versions the roll superseded the state their contract's later publishes woul
 - The Playwright run keeps the site scheduler off: wall-clock jobs (hold expiry, alerts) would act mid-spec; the smoke test
   covers them deterministically.
 - O-16 (user): a guest cancels online only before the arrival day, but may still start a change on it (`room_changeable`).
+
+## ADR-065 The stored price and a booking's money (audit Part 2B)
+- A room's stored price is `Reservation.tex_total_amount` (= `amount_after_tax`, `tex_currency`; set by hand: also
+  `snapshot.override_amount`; `totals.total` is the engine's, to explain); a booking's, `TEX Booking(.Room)` amounts after
+  `_refresh_booking_after_change`. Money reads the stored price; the snapshot gives only the terms, never the price.
+- `required_now` = each live room's `amount_due_now` (its frozen policy, its stored price) + the cancelled rooms' fees.
+- Extras add to the stored price; a price set by hand stays one. A later stay change needs staff's choice (keep it, or the
+  change's price, audited); a guest cannot change such a stay online (D-9).
+- A booking cancelled never confirmed holds no money: on its cancellation and on every refund outcome it goes to
+  reconciliation (keys `cancelled:`, `refund:`, `refund-fix:`; `expired:` stays B2/D4's). Gateway, link and transfer money is
+  allocated up to what the booking owes, the rest stays on the charge (`OVERPAID`); status check `payments.overpaid`.
+- A link is in its booking's currency (D-10); money that came in another is recorded, kept off, `Action Required`, never undone.
+- One link per idempotency key (unique; p57). One `payment_status` formula ("Refunded" included).
+- Points ≤ min(total × max % − points on it, total − paid); a refund plan never pays points back as cash.
+- A transfer is confirmed with the amount that came (the staff API requires its value date); one that no longer covers the
+  deposit leaves the booking Pending, and it expires with its hold. New reconciliation reasons tell the team only.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so

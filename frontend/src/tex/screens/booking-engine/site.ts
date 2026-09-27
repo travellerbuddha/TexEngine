@@ -1,6 +1,7 @@
 // TEX Booking Site model, defaults and client-side validation. The server
 // (tex_booking_site.py) re-validates everything; these rules mirror it so users
 // see problems before saving.
+import { analyticsId } from "../../../booking/lib/analyticsIds.ts"
 
 /** A custom booking host (ADR-035). `verified`, `verified_at`, `last_checked_at` and
  * `check_failures` are written only by the server's DNS check: read-only here, and the
@@ -214,9 +215,13 @@ export function validateSite(s: Site, saved?: Site | null): Errors {
   if (s.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.contact_email)) e.contact_email = "be.err.email"
   if (s.whatsapp && !/^\+?[0-9 ()-]{6,20}$/.test(s.whatsapp)) e.whatsapp = "be.err.phone"
   if (s.contact_phone && !/^\+?[0-9 ()./-]{6,24}$/.test(s.contact_phone)) e.contact_phone = "be.err.phone"
-  if (s.ga4_measurement_id && !/^G-[A-Z0-9]{4,12}$/.test(s.ga4_measurement_id)) e.ga4_measurement_id = "be.err.ga4"
-  if (s.gtm_container_id && !/^GTM-[A-Z0-9]{4,10}$/.test(s.gtm_container_id)) e.gtm_container_id = "be.err.gtm"
-  if (s.meta_pixel_id && !/^\d{6,20}$/.test(s.meta_pixel_id)) e.meta_pixel_id = "be.err.pixel"
+  // the engine's rule (G-62); like the images, an id the site already had is not judged again
+  for (const [f, kind, err] of [
+    ["ga4_measurement_id", "ga4", "be.err.ga4"],
+    ["gtm_container_id", "gtm", "be.err.gtm"],
+    ["meta_pixel_id", "pixel", "be.err.pixel"],
+  ] as const)
+    if (s[f]?.trim() && s[f] !== saved?.[f] && !analyticsId(kind, s[f])) e[f] = err
   if (lines(s.allowed_embed_origins).some((o) => !ORIGIN.test(normaliseOrigin(o)))) e.allowed_embed_origins = "be.err.origin"
   const badDomain = s.domains.map((d) => domainError(d.domain)).find(Boolean)
   if (badDomain) e.domains = badDomain

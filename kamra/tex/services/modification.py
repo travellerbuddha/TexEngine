@@ -427,6 +427,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		for k in quoting.INTERNAL_TOTALS:
 			old_totals.pop(k, None)
 	diff = (new_total - old_total) if quote.sellable and quote.currency == old_ccy else None
+	# a price staff set is kept unless staff choose the change's price: both are shown (D-9, Y-7b)
+	manual = booking_svc.manual_price(res)
 	# sellable but for the restrictions: what staff who may edit restrictions can override (G-48)
 	sellable_otherwise = quote.sellable and not any(w.get("code") == "SOLD_OUT" for w in warnings) \
 		and not (not _check_permission and any(w.get("code") == "ADDON_OUTSIDE_STAY" for w in warnings))
@@ -455,6 +457,8 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		"restriction_override": bool(violations) and sellable_otherwise and _check_permission
 		and scope.has_capability("restriction.edit", res.property),
 		"difference": to_str(diff) if diff is not None else None,
+		"manual_price": {"amount": to_str(manual), "engine_total": to_str(new_total) if quote.sellable else None}
+		if manual is not None else None,
 		# what this room carries for the other rooms of its booking (G-84 review H1), shown before
 		# the change is confirmed: the amount is in ``proposed`` (a line, its totals)
 		"basket_clawback": new.get("basket_clawback"),
@@ -493,8 +497,8 @@ def require_proposer(p: dict, *, guest: bool) -> None:
 
 
 def apply(proposal_token: str | None, *, reason: str, override_amount=None, source: str = "Desk",
-          override_restrictions: bool = False, _guest_authorized: bool = False, _proposal: dict | None = None,
-          _from_payment: bool = False, _paid_at=None) -> dict:
+          override_restrictions: bool = False, reprice: bool = False, _guest_authorized: bool = False,
+          _proposal: dict | None = None, _from_payment: bool = False, _paid_at=None) -> dict:
 	"""``_guest_authorized``: set only by the self-service API after verifying the
 	guest's manage token owns the proposal's reservation. Guests can never override.
 
@@ -514,6 +518,12 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	applying their own proposal who hold ``restriction.edit`` sell it anyway; the reason is
 	required, the revision records the restrictions overridden and an audit event
 	(``reservation.restriction_override``) names them. Never on a guest's path.
+
+	A stay whose price staff set by hand (``booking.manual_price``) keeps it on a change only by an
+	explicit choice (D-9, ADR-065): ``override_amount`` (``price.override``; the drawer fills in the
+	price set by hand) or ``reprice`` (``reservation.modify``: the change's price, the revision's
+	``manual_price_dropped`` and an audit event say so); with neither the change is refused, naming
+	both amounts. Never repriced silently.
 
 	Locks: the booking, then the reservation, then the inventory days: the order every path that
 	changes a TEX booking takes (review of ADR-044)."""
@@ -540,7 +550,7 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		frappe.throw(_("This proposal was made for another reservation: propose the change again."),
 		             frappe.PermissionError)
 	if _guest_authorized:
-		if override_amount not in (None, ""):
+		if override_amount not in (None, "") or reprice:
 			frappe.throw(_("Guests cannot override prices."), frappe.PermissionError)
 		if p["basis"] != "CURRENT":
 			# a guest changes the stay at today's prices, the only basis the manage page proposes
@@ -565,6 +575,9 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		frappe.throw(_("A reason is required for every modification."))
 	if override_amount not in (None, ""):
 		scope.require("price.override", res.property)
+		if reprice:
+			frappe.throw(_("Choose one: keep a price set by hand, or use the price of the change."))
+	manual = booking_svc.manual_price(res)
 
 	# lock the new nights first, then recompute deterministically under the lock
 	changes = p["changes"]
@@ -594,6 +607,12 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 			frappe.throw(str(stopped), type(stopped))
 	if new["totals"]["total"] != p["new_total"]:
 		frappe.throw(_("The price moved since this proposal was made — review it again."))
+	dropped = manual is not None and override_amount in (None, "")
+	if dropped and not reprice:
+		# a price staff set is never replaced silently (D-9): keep it or take the change's price
+		frappe.throw(_("The price of this stay was set by hand: {0} {2}. The change is priced {1} {2}. Keep the "
+		               "price set by hand, or use the price of the change.").format(
+			to_str(manual), new["totals"]["total"], new["currency"]))
 	# limited extras: give back the old units and take the new ones under the day locks (G-19)
 	from kamra.tex.availability import extras_repository as xinv
 
@@ -666,12 +685,17 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 		basis_sale_at=result["pricing_sale_at"], reason=reason,
 		changes=changed_fields | {"requested": changes} | priced
 		| ({"restrictions_overridden": overridden_restrictions} if overridden_restrictions else {})
+		| ({"manual_price_dropped": {"amount": to_str(manual), "engine_total": to_str(new_total)}} if dropped else {})
 		| ({"basket_clawback": new["basket_clawback"]} if new.get("basket_clawback") else {}),
 		before=snap, after=json.loads(res.tex_pricing_snapshot), source=source,
 		override=final_total if overridden else None)
 	if new.get("basket_clawback"):
 		audit("reservation.basket_clawback", reference_doctype="Reservation", reference_name=res.name,
 		      property=res.property, new={**new["basket_clawback"], "revision": rev}, reason=reason)
+	if dropped:
+		audit("reservation.manual_price_dropped", reference_doctype="Reservation", reference_name=res.name,
+		      property=res.property, old={"total": to_str(manual)},
+		      new={"amount": to_str(manual), "engine_total": to_str(new_total), "revision": rev}, reason=reason)
 	if overridden_restrictions:
 		audit("reservation.restriction_override", reference_doctype="Reservation", reference_name=res.name,
 		      property=res.property, new={"restrictions": overridden_restrictions, "revision": rev}, reason=reason)

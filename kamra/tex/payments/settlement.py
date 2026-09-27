@@ -133,19 +133,24 @@ class Charge:
 	available: Decimal            # what it holds for this booking and can still refund
 	supported: bool = True        # its provider refunds through TEX (a card gateway, not a transfer)
 	at: str = ""                  # when it was taken (sortable): newest is refunded first
+	points: bool = False          # loyalty points: never paid back as cash (O-19)
 
 
 def plan_refunds(amount, charges) -> tuple[list[tuple[str, Decimal]], Decimal]:
 	"""→ ([(transaction, amount)], remainder). Newest charge first, each capped by what it
-	holds; charges the provider cannot refund are skipped; the remainder is what is left."""
-	left = Decimal(amount)
+	holds; charges the provider cannot refund are skipped; the remainder is what is left (the hotel
+	settles it). An overpayment comes off the points first (O-19): cash is planned for at most
+	``amount`` less what the point charges hold, so points never go back to a card as cash."""
+	amount = Decimal(amount)
+	points = sum((Decimal(c.available) for c in charges if c.points and c.available > 0), ZERO)
+	left = max(ZERO, amount - points)
 	plan: list[tuple[str, Decimal]] = []
 	for c in sorted(charges, key=lambda c: (c.at, c.transaction), reverse=True):
 		if left <= 0:
 			break
-		if not c.supported or c.available <= 0:
+		if c.points or not c.supported or c.available <= 0:
 			continue
 		take = min(left, Decimal(c.available))
 		plan.append((c.transaction, take))
 		left -= take
-	return plan, max(ZERO, left)
+	return plan, max(ZERO, amount - sum((take for _t, take in plan), ZERO))

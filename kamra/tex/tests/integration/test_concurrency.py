@@ -274,7 +274,7 @@ class TestConcurrentAllocation(IntegrationTestCase):
 
 def _cleanup_payments():
 	frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test cleanup
-	for dt in ("TEX Payment Allocation", "TEX Payment Transaction"):
+	for dt in ("TEX Payment Allocation", "TEX Payment Transaction", "TEX Payment Link"):
 		frappe.db.sql(f"DELETE FROM `tab{dt}` WHERE property=%s", fx.PROPERTY)  # constant table list
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
 
@@ -542,3 +542,94 @@ class TestConcurrentLastExtra(IntegrationTestCase):
 	def test_different_days_book_side_by_side(self):
 		d1, d2 = add_days(self.ci, 1), add_days(self.ci, 2)
 		self.assertEqual(sorted(self._race([d1, d2]).values()), ["booked", "booked"])
+
+
+class TestConcurrentPaymentLink(IntegrationTestCase):
+	"""O-38 (audit 2B, ADR-065): two ``create_link`` calls with the same idempotency key at the same
+	instant (a double click, a retried request) make one link and send one e-mail; the other call is
+	answered with that link (``replay``). The database holds one link per key (unique, p57)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_payments()
+		cls.f = fx.base_setup()
+		fx.create_contract(cls.f, code="CONC")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+		                      rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB", currency="EUR")["properties"][0]
+		flex = frappe.db.get_value("Rate Plan", {"property": fx.PROPERTY, "code": "FLEX"})
+		offer = next(o for o in prop["offers"] if o["board"] == "AI" and o["rate_plan"] == flex)
+		q = quoting.create_quote(offer["rooms"][0]["offer_key"])["quote_id"]
+		cls.booking = booking.create_booking(quote_ids=[q], guest={"first_name": "Link", "last_name": "Twice",
+		                                                           "email": "link.twice@example.com"},
+		                                     payment_method="Pay at Hotel")["booking"]
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup_payments()
+		_cleanup()
+		super().tearDownClass()
+
+	def race(self, key: str, **link) -> tuple[list[dict], list[str], int]:
+		"""Two staff requests create a link with ``key`` at the same instant; each passes the check for
+		an existing link before either inserts. → (their answers, errors, e-mails sent)."""
+		from unittest import mock
+
+		from kamra.tex.services import holds
+
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		start, checked = threading.Barrier(2), threading.Barrier(2)
+		real = holds.hold_for_link
+		answers: list[dict] = []
+		errors: list[str] = []
+
+		def after_the_check(*args, **kw):
+			checked.wait(timeout=10)                   # both found no link with the key
+			return real(*args, **kw)
+
+		def run():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				from kamra.tex.payments import service as pay
+
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a finance user
+				start.wait(timeout=10)
+				answers.append(pay.create_link(property=fx.PROPERTY, amount="80", currency="EUR", description="Deposit",
+				                               idempotency_key=key, send_email=True, guest_email="o38@example.com",
+				                               **link))
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each request is its own transaction
+			except Exception:
+				frappe.db.rollback()
+				errors.append(traceback.format_exc())
+			finally:
+				frappe.destroy()
+
+		with mock.patch("kamra.tex.services.holds.hold_for_link", side_effect=after_the_check), \
+				mock.patch("kamra.tex.services.notify.payment_link", return_value=True) as mailed:
+			threads = [threading.Thread(target=run) for _ in range(2)]
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join(timeout=60)
+		frappe.db.rollback()
+		return answers, errors, mailed.call_count
+
+	def assert_one_link(self, key: str, answers: list[dict], errors: list[str], mails: int) -> None:
+		from kamra.tex.payments import service as pay
+
+		self.assertEqual(errors, [])
+		self.assertEqual(frappe.db.count("TEX Payment Link", {"idempotency_key": pay.ns_key(fx.PROPERTY, key, "link")}), 1)
+		self.assertEqual(sorted(bool(a.get("replay")) for a in answers), [False, True])
+		self.assertEqual(len({a["link"] for a in answers}), 1)
+		self.assertEqual(mails, 1)
+
+	def test_one_standalone_link_per_key(self):
+		self.assert_one_link("o38-standalone", *self.race("o38-standalone"))
+
+	def test_one_booking_link_per_key(self):
+		self.assert_one_link("o38-booking", *self.race("o38-booking", booking=self.booking))

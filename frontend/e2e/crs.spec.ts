@@ -92,6 +92,52 @@ test("Call Center: keyboard-only booking by an agent", async ({ page }) => {
   noErrors()
 })
 
+test("Call Center on a Mac: Option types characters in fields; ⌃⌥ runs the shortcut (O-32)", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  // the page reads the platform once, when its module loads
+  await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "platform", { get: () => "MacIntel", configurable: true }))
+  await english(page)
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+  await login(page, "agent@demo.tex")
+  await page.goto(texPath("/tex/crs/call-center"))
+  await expect(page.getByRole("heading", { level: 1, name: "Call Center" })).toBeVisible()
+  // a Mac shows the shortcuts that work everywhere, fields included
+  await expect(page.getByText("⌃⌥S").first()).toBeVisible()
+  const kb = page.keyboard
+
+  // a quote to copy: market, dates, search and the first offer, with ⌃⌥ shortcuts
+  await kb.press("Control+Alt+KeyS")
+  const market = byLabel(page, "Market")
+  await expect(market).toBeFocused()
+  await kb.type("Germ")
+  await expect(market).toHaveValue("DE")
+  const { checkIn } = stayDates(80, 2)
+  await byLabel(page, "Check-in").focus()
+  await kb.type(mdy(checkIn))
+  await expect(byLabel(page, "Check-out")).toHaveValue(addDays(checkIn, 2))
+  await Promise.all([page.waitForResponse((r) => r.url().includes("ui_crs.search") && r.ok()), kb.press("Control+Alt+KeyS")])
+  await expect(page.getByRole("listbox", { name: "Offers" })).toBeFocused()
+  await kb.press("ArrowDown")
+  await Promise.all([page.waitForResponse((r) => r.url().includes("ui_crs.quote_summary") && r.ok()), kb.press("Enter")])
+  await expect(page.getByText(/Valid until /).first()).toBeVisible()
+
+  // Turkish-Q: ⌥Q types "@" in the guest's e-mail; the page leaves it to the field
+  const email = byLabel(page, "Email").first()
+  await email.focus()
+  const typed = await email.evaluate((el) =>
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "@", code: "KeyQ", altKey: true, bubbles: true, cancelable: true })),
+  )
+  expect(typed, "⌥Q in a field is not taken by the page").toBe(true)
+  await expect(page.getByText("Quote text copied")).toHaveCount(0)
+  // ⌃⌥Q is the shortcut, in the field too: the page takes it and copies the quote
+  const taken = await email.evaluate((el) =>
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "@", code: "KeyQ", altKey: true, ctrlKey: true, bubbles: true, cancelable: true })),
+  )
+  expect(taken, "⌃⌥Q is taken by the page").toBe(false)
+  await expect(page.getByText("Quote text copied").first()).toBeVisible()
+  noErrors()
+})
+
 test("Reservation change: OLD vs NEW price before applying, then a new revision", async ({ page }) => {
   const noErrors = trackErrors(page)
   await english(page)

@@ -201,12 +201,11 @@ test("a guest books with pay at the hotel; confirmation and manage pages stay on
     expect(where(page)).toEqual({ host: HOST_PORT, path: `/confirmation/${encodeURIComponent(done.booking)}` })
     await expect(page.getByRole("link", { name: /— home$/ })).toHaveAttribute("href", "/")
 
-    // manage link: /manage#token=… on the same host
+    // manage link: /manage on the same host, without the token (O-27): the manage page takes it
+    // from the tab's storage, so no address or href a tag container reads carries it
     const manage = page.getByRole("link", { name: "Manage booking", exact: true })
-    const href = (await manage.getAttribute("href")) ?? ""
-    expect(href).toMatch(/^\/manage#token=[^&]+$/)
+    await expect(manage).toHaveAttribute("href", "/manage")
     expect(token, "the booking response carried a manage token").not.toBe("")
-    expect(decodeURIComponent(href.split("#token=")[1] ?? "")).toBe(token)
     await manage.click()
     await expect(page.getByRole("heading", { level: 1, name: "Manage your booking" })).toBeVisible({ timeout: 30_000 })
     expect(where(page)).toEqual({ host: HOST_PORT, path: "/manage" })

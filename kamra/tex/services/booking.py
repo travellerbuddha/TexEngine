@@ -229,12 +229,31 @@ def pay_at_hotel_allowed(result: dict) -> bool:
 	return bool(policy.get("allow_pay_at_hotel")) or policy.get("deposit_type") == "NONE"
 
 
+def at_stored_price(snap: dict, stored) -> dict:
+	"""A room's frozen terms at its stored price (``tex_total_amount``, ADR-065): the snapshot's
+	``totals.total`` is the engine's figure, which a price staff set replaced. → ``snap`` itself
+	when they agree or it has no total, else a shallow copy with the stored price as its total."""
+	totals = snap.get("totals") or {}
+	if not totals.get("total") or stored is None or D(totals["total"]) == D(stored):
+		return snap
+	return {**snap, "totals": {**totals, "total": to_str(D(stored))}}
+
+
+def manual_price(res) -> D | None:
+	"""The price staff set on a room by hand (D-9, ADR-065): its stored price while its snapshot
+	records an ``override_amount``; None when the engine's price is the stored one."""
+	snap = json.loads(res.get("tex_pricing_snapshot") or "{}")
+	if snap.get("override_amount") in (None, ""):
+		return None
+	return from_db(res.get("tex_total_amount"), res.get("tex_currency") or snap.get("currency") or "EUR")
+
+
 def required_now(booking, override: dict | None = None) -> D:
 	"""What the booking's payment terms require to be paid by now: each live room's
-	``amount_due_now`` (its frozen payment policy, the booking's payment method), with
-	``override`` ({reservation: priced result}) standing in for a room being changed, plus the
-	cancellation fee of each cancelled room. A room whose rate cannot be paid at the hotel
-	counts as paid by card (G-45)."""
+	``amount_due_now`` (its frozen payment policy on its stored price, the booking's payment
+	method), with ``override`` ({reservation: priced result}) standing in for a room being
+	changed, plus the cancellation fee of each cancelled room. A room whose rate cannot be paid
+	at the hotel counts as paid by card (G-45)."""
 	b = frappe.get_doc("TEX Booking", booking) if isinstance(booking, str) else booking
 	ccy = b.currency or "EUR"
 	method = b.payment_method
@@ -247,7 +266,8 @@ def required_now(booking, override: dict | None = None) -> D:
 		if r.status in ("Cancelled", "No Show"):
 			total += from_db(r.cancellation_fee, ccy)
 			continue
-		result = (override or {}).get(row.reservation) or json.loads(r.tex_pricing_snapshot or "{}")
+		result = (override or {}).get(row.reservation) or at_stored_price(
+			json.loads(r.tex_pricing_snapshot or "{}"), from_db(r.tex_total_amount, ccy))
 		if not (result.get("totals") or {}).get("total"):
 			total += from_db(r.tex_total_amount, ccy)       # not priced by TEX: all of it
 			continue
@@ -879,6 +899,20 @@ def confirm_booking(booking: str, *, reason: str | None = None, send_mail: bool 
 		notify.booking_confirmed(booking)
 
 
+def payment_status(b, paid, total) -> str:
+	"""The booking's payment status from what it holds and costs (P1-10, ADR-065), wherever it is
+	written: money on it → "Paid" once it covers the total, else "Partially Paid"; none → "Refunded" for
+	a cancelled booking owing nothing whose money was refunded, "Pay at Hotel" when it is paid there
+	(or through its channel), else "Unpaid". ``create_booking`` writes its own first status."""
+	paid, total = D(paid), D(total)
+	if paid > ZERO:
+		return "Paid" if paid >= total else "Partially Paid"
+	if b.status == "Cancelled" and total <= ZERO and frappe.db.exists(
+			"TEX Payment Allocation", {"booking": b.name, "allocation_type": "Refund"}):
+		return "Refunded"
+	return "Pay at Hotel" if b.payment_method in ("Pay at Hotel", "Channel") else "Unpaid"
+
+
 def confirm_if_paid(booking: str, *, reason: str, send_mail: bool = True) -> bool:
 	"""D1: a booking waiting for its payment that now has what it owes now — a room was cancelled
 	after part of the money came, or a stuck booking took its payment — is confirmed while its rooms
@@ -904,7 +938,7 @@ def apply_payment(booking: str, amount, *, reference: str | None = None) -> dict
 	b.paid_amount = paid
 	b.balance_amount = total - paid
 	# nothing owed and nothing paid (an expired booking whose money came off it) is not "Paid" (C7)
-	b.payment_status = "Paid" if paid >= total and paid > 0 else ("Partially Paid" if paid > 0 else "Unpaid")
+	b.payment_status = payment_status(b, paid, total)
 	b.save(ignore_permissions=True)
 	if amount > ZERO:
 		_close_links_if_settled(b)
@@ -981,8 +1015,9 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	Locks the booking, then the reservation (then the guest's change requests): the order every
 	change to a TEX booking takes (review of ADR-044)."""
 	res = frappe.get_doc("Reservation", reservation)
+	was = None
 	if res.tex_booking:
-		frappe.db.get_value("TEX Booking", res.tex_booking, "name", for_update=True)
+		was = frappe.db.get_value("TEX Booking", res.tex_booking, "status", for_update=True)
 		res = frappe.get_doc("Reservation", reservation, for_update=True)
 	if not _guest_authorized:
 		scope.require("reservation.cancel", res.property)
@@ -1032,6 +1067,14 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
 		_refresh_booking_after_change(res.tex_booking)
+		b = frappe.db.get_value("TEX Booking", res.tex_booking, ["status", "paid_amount", "currency"], as_dict=True)
+		if was in holds.HOLDING and b.status == "Cancelled" and from_db(b.paid_amount, b.currency) > ZERO:
+			# over before it was ever confirmed: it owes nothing and holds no money; what it held comes
+			# off it for staff, the team told (P1-7, ADR-065). Never in the refresh: an expiry keys its own
+			from kamra.tex.services import late_payments
+
+			late_payments.money_off(res.tex_booking, why=late_payments.CANCELLED_UNPAID, key="cancelled",
+			                        guest_mail=False)
 		# never confirmed: what it owes now may be paid already (a first half came before this room left)
 		confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was cancelled")
 	# a guest's change still waiting for this room is void; a payment of it arriving later is
@@ -1082,8 +1125,7 @@ def _refresh_booking_after_change(booking: str) -> None:
 		b.amount_due_now = min(required_now(b), total)
 	elif any(s == "Cancelled" for s in statuses):
 		b.status = "Partially Cancelled"
-	paid = from_db(b.paid_amount, ccy)
-	b.payment_status = "Paid" if paid >= total and total > 0 else ("Partially Paid" if paid > 0 else b.payment_status)
+	b.payment_status = payment_status(b, from_db(b.paid_amount, ccy), total)
 	b.save(ignore_permissions=True)
 	_close_links_if_settled(b)
 

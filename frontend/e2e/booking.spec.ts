@@ -60,6 +60,44 @@ test("guest books a room with an extra and pays by sandbox card", async ({ page 
   noErrors()
 })
 
+test("quotes older than 25 minutes are made again before booking, and the new ones are booked (O-30)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  await page.clock.install()
+  const quoted: string[][] = []
+  page.on("response", async (r) => {
+    if (new URL(r.url()).pathname !== "/api/method/kamra.tex.api.public.quote_rooms" || !r.ok()) return
+    const b = (await r.json().catch(() => null)) as { message?: { rooms?: { quote_id?: string }[] } } | null
+    quoted.push((b?.message?.rooms ?? []).map((q) => q.quote_id ?? ""))
+  })
+  const { checkIn, checkOut } = stay(190, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted.length, { message: "the stay was quoted" }).toBeGreaterThan(0)
+  const before = quoted.length
+
+  // the guest lingers on the payment step: the quotes are 26 minutes old when they book (the page
+  // quotes again after 25; the server keeps a quote for 30)
+  await page.clock.fastForward("26:00")
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  const [book] = await Promise.all([
+    page.waitForRequest((r) => new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book"),
+    page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first().click(),
+  ])
+  await expect.poll(() => quoted.length, { message: "the stay was quoted again" }).toBeGreaterThan(before)
+  // what is booked is what the guest was just quoted, not the old quotes
+  expect((book.postDataJSON() as { quote_ids: string[] }).quote_ids).toEqual(quoted[quoted.length - 1])
+  expect(quoted[quoted.length - 1]).not.toEqual(quoted[before - 1])
+
+  await completeSandbox(page, "success")
+  const done = await readConfirmation(page)
+  expect(done.status).toBe("Confirmed")
+  noErrors()
+})
+
 test("a declined card keeps the booking awaiting payment until the retry succeeds", async ({ page }, testInfo) => {
   const noErrors = trackErrors(page)
   const { checkIn, checkOut } = stay(160, 2, testInfo.project.name)

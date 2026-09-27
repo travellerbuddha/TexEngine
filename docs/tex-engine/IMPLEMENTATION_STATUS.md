@@ -1470,6 +1470,19 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-16 **COMPLETE**: a guest cancels a room online only before the arrival day (site's day; `public.manage_cancel` refuses with ChangeRefused, `can_cancel` hides the manage page's button); a change may still start on the arrival day (unchanged, ADR-064) · `test_commercial_flows.TestSelfService.test_no_online_cancellation_from_the_arrival_day`, `frontend/tests/unit/manage-actions.test.ts`.
 - Y-12 **COMPLETE**: p48 marks a profile erased only on a `guest.erase` event, or an Executed/Approved `anonymize_guest` log row on a profile showing the legacy erasure's traces (alias, no last name/e-mail/phone, its note); other rows are only counted; business roles read the Agent Action Log only: its JSON, and p64 on sites whose seeds wrote Custom DocPerm rows (`seed_rbac_v2.ensure_hotel_admin` now grants it read-only) · `test_patches.TestP48Evidence`, `TestP64AgentLogReadOnly`, `test_crm_third_review.TestP48`.
 
+## 6B. Audit Part 2B (2026-09-27)
+
+- P1-6 **COMPLETE**: `required_now` prices every room's deposit on its stored price (`booking.at_stored_price`), so a price staff set is what the booking owes now (ADR-065) · `TestChangesOfABookingWaitingForItsPayment`.
+- Y-7 **COMPLETE**: extras add to the stored price; a price set by hand stays one (snapshot `override_amount`, revision `manual_price`, audit `total_before/after`) · `test_post_booking_extras.TestPostBookingExtras`.
+- Y-7b **COMPLETE** (D-9): a later change of a stay priced by hand needs a choice (keep it: `override_amount`; or `reprice=1`: audited `manual_price_dropped`), else refused; guests cannot change it online; ModifyDrawer shows both amounts · `TestManualOverride`, `TestGuards`.
+- P1-3 **COMPLETE**: a refund's outcome on a booking that ended never confirmed takes what it still holds into reconciliation (`late_payments.after_refund`, keys `refund:`/`refund-fix:`), team told · `TestReconciliationStates`.
+- P1-7 **COMPLETE**: a never-confirmed booking cancelled with money parks it (`cancelled:`); system money is allocated up to what a booking owes, the rest `OVERPAID`; status check `payments.overpaid` · `TestMoneyForBookingsThatCannotTakeIt`, `TestPaymentLinkHold`, `TestOverpaidBookings`, unit `test_system_checks`.
+- P1-5 **COMPLETE** (D-10): a link is in its booking's currency (create, pay, reissue refused otherwise); money that came in another currency is recorded and kept off the booking (`CURRENCY_MISMATCH`), the link closed · `TestPaymentLinkHold`.
+- O-38 **COMPLETE**: `TEX Payment Link.idempotency_key` unique (p57 `[pre_model_sync]` renames duplicates, empty keys → NULL); a racing `create_link` replays the other's link, one e-mail · `TestConcurrentPaymentLink`, `test_patches` p57, unit `test_p57_plan`.
+- P1-10 **COMPLETE**: one `booking.payment_status` formula for payments and refreshes, "Refunded" included · `TestMoneyShownRight`.
+- O-19 **COMPLETE**: points pay at most min(share of the total − points on it, total − paid), read under the booking's lock; refund plans take an overpayment off the points first, never cash for points · `TestEarningsAndRedemption`, `TestLowerPrice`, unit `test_settlement`.
+- P1-11 + NEW-3 **COMPLETE**: a bank transfer is confirmed with the amount that came (≤ asked, audited); the API requires the value date; the dialog asks the amount · `TestPaidInTime`.
+
 ## 6C1. Audit Part 2C-1 (2026-09-27)
 
 - Y-4 **COMPLETE**: a price is refundable only when its rate plan row and its cancellation policy both are (quote `rate_plan.refundable`, search, fee); publish refuses `RATE_PLAN_REFUNDABLE`; new rows take the plan's/policy's flag (ADR-067) · unit `TestRefundableByPolicy`/`TestRefundableIssues`, `test_commercial_flows.TestNonRefundablePolicy`.
@@ -1486,3 +1499,13 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-31 **COMPLETE**: codes compared by `code_key` (Turkish İ/ı), CRS inputs keep letters; p60 rewrites stored codes, reports clashes · unit `TestCodeKey`, `test_patches` p60, frontend `promo-code`.
 - G-57 **COMPLETE**: members-only promotions refused on save/activation until a sale knows members; box hidden · `test_a_member_only_promotion_is_refused_until_a_sale_knows_members`.
 - G-53 **COMPLETE**: a markup tying a live one is refused on activation (serialised); the contract page publishes with the workspace's board checks · unit `test_same_scope_markup_tie_is_flagged`, `TestMarkupTies`, e2e `contract-publish-boards`.
+
+## 6G1. Audit Part 2G-1 (2026-09-27)
+
+- O-28 **COMPLETE**: a signed-in user's booking-engine page (/book and a pinned host) carries the session CSRF token, sent by `pub` (header) and `beacon` (form field); such a page loads no third-party tracker and shows no consent banner (ADR-046 note) · `test_security_hygiene` O-28, e2e `guest-session` O-28.
+- O-27 **COMPLETE**: the confirmation's manage link carries no token (`/<site>/manage`; the click stores this booking's token for the tab); no URL, href or tracker request carries it · e2e `guest-session` O-27, `custom-host`.
+- G-62 **COMPLETE**: GA4/GTM/pixel ids judged by one rule (`booking/lib/analyticsIds.ts`) on the server (new or changed values, trimmed), the admin form and the engine · `test_security_hygiene` G-62, unit `analytics-ids`, `branding`.
+- G-44 **COMPLETE**: the widget restores the host's scrolling on close, removal and re-render, and keeps the site's theme across re-renders · e2e `widget`.
+- O-32 **COMPLETE**: Call Center shortcuts (`crs/lib/shortcuts.ts`): on a Mac ⌃⌥ always, ⌥ alone not where it types a character in a field; elsewhere Alt without Ctrl/Meta/AltGr; labels ⌃⌥ on a Mac · unit `callcenter-shortcuts`, e2e `crs` O-32.
+- O-29 **COMPLETE**: CRS search, quote and quote summary apply only the latest request's answer · e2e `crs-actions` O-29 (summary and search races).
+- O-30 **COMPLETE**: checkout books the quotes it just made again (older than 25 min), with a new idempotency key · e2e `booking` O-30.

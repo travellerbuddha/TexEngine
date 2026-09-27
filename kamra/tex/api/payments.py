@@ -280,10 +280,14 @@ def transfer(transaction: str, from_booking: str, to_booking: str, amount, reaso
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 @retry_on_deadlock
-def mark_transfer_received(transaction: str, reference: str, value_date: str | None = None):
+def mark_transfer_received(transaction: str, reference: str, value_date: str | None = None, amount: str | None = None):
+	"""``value_date`` is required, as the page requires it (NEW-3); ``amount``: what arrived (P1-11)."""
 	if not text(reference, 140):
 		frappe.throw(_("The bank reference is required."))
-	return pay.mark_transfer_received(transaction, reference=text(reference, 140), value_date=text(value_date, 10) or None)
+	if not text(value_date, 10):
+		frappe.throw(_("The value date is required: the day the money was on the hotel's account."))
+	return pay.mark_transfer_received(transaction, reference=text(reference, 140), value_date=text(value_date, 10),
+	                                  amount=text(amount, 30) or None)
 
 
 @frappe.whitelist(methods=["POST"])
