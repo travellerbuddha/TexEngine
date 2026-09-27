@@ -2047,6 +2047,32 @@ class TestPaymentLinkHold(HoldCase):
 		self.assertIn(f"{held_until(b)[0]:%Y-%m-%d %H:%M}", body)
 
 
+NEW6_EMAILS = ("anna.new6@example.com", "carl.new6@example.com", "dora.new6@example.com")
+
+
+def _cleanup_new6():
+	"""What the gateway race commits beyond ``_cleanup``/``_cleanup_payments``, run before them: the
+	booking site's funnel events, the bookings' e-mails (queue, records, errors), the stays' deposits and
+	versions, and the race's guests."""
+	frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test cleanup
+	bookings = frappe.get_all("TEX Booking", filters={"property": fx.PROPERTY}, pluck="name")
+	rooms = frappe.get_all("Reservation", filters={"property": fx.PROPERTY}, pluck="name")
+	frappe.db.delete("TEX Funnel Event", {"site": SLUG})
+	if bookings:
+		frappe.db.delete("TEX Communication", {"booking": ("in", bookings)})
+		queue = frappe.get_all("Email Queue", filters={"reference_doctype": "TEX Booking",
+		                                               "reference_name": ("in", bookings)}, pluck="name")
+		if queue:
+			frappe.db.delete("Email Queue Recipient", {"parent": ("in", queue)})
+			frappe.db.delete("Email Queue", {"name": ("in", queue)})
+		frappe.db.delete("Error Log", {"method": ("in", [f"TEX booking e-mail {b}" for b in bookings])})
+	if rooms:
+		frappe.db.delete("Security Deposit", {"reservation": ("in", rooms)})
+		frappe.db.delete("Version", {"ref_doctype": "Reservation", "docname": ("in", rooms)})
+	frappe.db.delete("Guest", {"email": ("in", NEW6_EMAILS)})
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+
+
 class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
 	"""NEW-6 (ADR-066), under real concurrency: guest A books and pays by card, and the gateway takes
 	its time making A's checkout. Meanwhile another connection writes an audit event, books other nights
@@ -2056,6 +2082,7 @@ class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
 
 	@classmethod
 	def tearDownClass(cls):
+		_cleanup_new6()
 		_cleanup_payments()
 		_cleanup()
 		frappe.db.delete("TEX Booking Site", SLUG)
@@ -2065,6 +2092,7 @@ class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
 	def setUp(self):
 		super().setUp()
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup_new6()
 		_cleanup()
 		_cleanup_payments()
 		self.f = fx.base_setup()
@@ -2153,15 +2181,19 @@ class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
 				frappe.destroy()
 
 		frappe.db.rollback()                            # this connection holds nothing while the others run
+		a, b = threading.Thread(target=guest_a), threading.Thread(target=others)
 		with mock.patch.object(MockProvider, "create_checkout", gateway):
-			a = threading.Thread(target=guest_a)
-			a.start()
-			self.assertTrue(in_gateway.wait(timeout=60))
-			b = threading.Thread(target=others)
-			b.start()
-			b.join(timeout=60)
-			release.set()
-			a.join(timeout=60)
+			try:
+				a.start()
+				self.assertTrue(in_gateway.wait(timeout=60))
+				b.start()
+			finally:
+				# whatever failed: the other side ends, then A is let go and ends before anything is cleaned up
+				if b.ident is not None:
+					b.join(timeout=60)
+				release.set()
+				if a.ident is not None:
+					a.join(timeout=60)
 		self.assertEqual({k: results.get(k) for k in ("audit", "book", "pay")},
 		                 {"audit": "ok", "book": "ok", "pay": "ok"})
 		out = results.get("a")
