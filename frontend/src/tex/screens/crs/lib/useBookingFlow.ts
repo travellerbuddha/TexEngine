@@ -304,6 +304,13 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     [t, clock],
   )
 
+  // an answer that comes back after a newer request of its kind is dropped (O-29): each of search,
+  // quote and quote summary counts its requests, and only the latest one's answer, error and
+  // loading state apply (as the extras stock, below)
+  const searchSeq = useRef(0)
+  const quoteSeq = useRef(0)
+  const summarySeq = useRef(0)
+
   // ── reset helpers ──
   const clearDownstream = useCallback(() => {
     setSelection(null)
@@ -340,10 +347,12 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         properties: f.properties,
       }
       const prevSelection = selection
+      const seq = ++searchSeq.current
       setSearching(true)
       setSearchError(undefined)
       try {
         const r = await searchOffers(args)
+        if (seq !== searchSeq.current) return null
         setResult(r)
         setLastArgs(args)
         const keep =
@@ -366,12 +375,13 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         }
         return r
       } catch (e) {
+        if (seq !== searchSeq.current) return null
         setSearchError(asApiError(e))
         setResult(undefined)
         clearDownstream()
         return null
       } finally {
-        setSearching(false)
+        if (seq === searchSeq.current) setSearching(false)
       }
     },
     [form, validateSearch, selection, extras, clearDownstream],
@@ -479,21 +489,29 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
   // ── quotes ──
   const loadSummary = useCallback(async (ids: string[], m: string) => {
     if (!ids.length) return
+    // e.g. the card's summary answering after the agent moved on to bank transfer: its amount due
+    // now and payment_required (confirm_without_payment) are not this method's
+    const seq = ++summarySeq.current
     setSummaryLoading(true)
     try {
       const s = await quoteSummary(ids, m || undefined)
+      if (seq !== summarySeq.current) return
       setSummary(s)
       setSummaryError(undefined)
     } catch (e) {
-      setSummaryError(asApiError(e))
+      if (seq === summarySeq.current) setSummaryError(asApiError(e))
     } finally {
-      setSummaryLoading(false)
+      if (seq === summarySeq.current) setSummaryLoading(false)
     }
   }, [])
 
   const requestQuotes = useCallback(
     async (sel: Selection | null = selection): Promise<QuoteResult[] | null> => {
       if (!sel || !sel.picks.every(Boolean)) return null
+      const seq = ++quoteSeq.current
+      // the summary of the quotes being replaced is not theirs either
+      summarySeq.current++
+      setSummaryLoading(false)
       setQuoting(true)
       setQuoteError(undefined)
       setSummary(undefined)
@@ -518,6 +536,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
           return { offer_key: room.offer_key, extras: ex }
         })
         const res = await quoteRooms(rooms, promoChanged ? quotePromo : undefined)
+        if (seq !== quoteSeq.current) return null
         // the summary (total, due now) follows from the effect on the quote ids
         setQuotes(res)
         setQuotedSig(sig)
@@ -526,11 +545,12 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         void loadExtrasStock()
         return res
       } catch (e) {
+        if (seq !== quoteSeq.current) return null
         setQuoteError(asApiError(e))
         setQuotes([])
         return null
       } finally {
-        setQuoting(false)
+        if (seq === quoteSeq.current) setQuoting(false)
       }
     },
     [selection, quotePromo, lastArgs, extras, findOffer, t, loadExtrasStock],
