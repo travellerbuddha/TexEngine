@@ -2152,13 +2152,20 @@ def front_desk_snapshot(property: str | None = None, date: str | None = None):
 		order_by="room_number asc",
 	)
 
+	# the minutes saved at the same hotels as the rest of the snapshot (NEW-8: not every tenant's)
+	hotel = room_filters.get("property")
+	where, params = "", {"since": add_days(date, -30)}
+	if isinstance(hotel, tuple):
+		where, params["hotels"] = "AND property IN %(hotels)s", tuple(hotel[1])
+	elif hotel:
+		where, params["hotel"] = "AND property = %(hotel)s", hotel
 	minutes = frappe.db.sql(
-		"""
+		f"""  # nosemgrep: frappe-sql-format-injection -- values are parameterized; `where` is a constant
 		SELECT COALESCE(SUM(minutes_saved), 0)
 		FROM `tabAgent Action Log`
-		WHERE DATE(creation) >= %(since)s
+		WHERE DATE(creation) >= %(since)s {where}
 		""",
-		{"since": add_days(date, -30)},
+		params,
 	)[0][0]
 
 	return {
@@ -4184,7 +4191,7 @@ def my_connector_credentials(property: str):
 	u.save(ignore_permissions=True)
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persists the completed operation before returning to an external/public caller; reviewed as intentional
 	from kamra.savings import log_action
-	log_action("connector_key_issued", "User", user,
+	log_action("connector_key_issued", "User", user, property,
 	           rationale="Personal MCP connector credentials (re)generated")
 	return {"api_key": api_key, "api_secret": api_secret,
 	        "base_url": frappe.utils.get_url(), "property": property,

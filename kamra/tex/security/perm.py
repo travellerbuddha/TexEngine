@@ -29,8 +29,9 @@ PROPERTY_DOCTYPES = (
 GROUP_DOCTYPES = ("TEX Promotion", "TEX Loyalty Program", "TEX Booking Site")
 # blank hotel means platform level: only platform administrators see those rows. An audit event
 # of a hotel group or an enterprise is seen at each hotel it reached (its TEX Audit Scope rows,
-# ADR-053); a scope row only at its own hotel, so no hotel reads another's name
-STRICT_DOCTYPES = ("TEX Audit Event", "TEX Audit Scope")
+# ADR-053); a scope row only at its own hotel, so no hotel reads another's name. A legacy action log
+# row without a hotel is platform level too (NEW-8): its before/after snapshots name guests and folios
+STRICT_DOCTYPES = ("TEX Audit Event", "TEX Audit Scope", "Agent Action Log")
 # hotel known through a parent document
 VIA_PARENT = {
 	"TEX Reservation Revision": ("reservation", "Reservation"),
@@ -53,7 +54,7 @@ TENANT_DOCTYPES = ("TEX Access Grant", "TEX Enterprise", "TEX Hotel Group")
 # follow the TEX scope (live grants and the user's own User Permissions), not only Frappe's User
 # Permission filter, which a user left without mirrored rows (a grant deleted or ended) escapes
 LEGACY_PROPERTY_DOCTYPES = (
-	"AI Assistant Settings", "Agent Action Log", "Banquet Checklist Template", "Banquet Dish",
+	"AI Assistant Settings", "Banquet Checklist Template", "Banquet Dish",
 	"Banquet Function Task", "Banquet Menu", "Banquet Service Item", "Cancelled Invoice", "Cashier",
 	"Cashier Session", "Cashier Transaction", "Channel Manager Connection", "Channel Provider Connection",
 	"City Ledger Account", "City Ledger Entry", "Copilot Conversation", "Credit Note", "Discount Voucher",

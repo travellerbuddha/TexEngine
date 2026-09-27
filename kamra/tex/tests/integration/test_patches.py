@@ -111,6 +111,7 @@ BEHAVIOUR = {
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
+	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
 }
 
 
@@ -1519,3 +1520,44 @@ if os.environ.get("TEX_C1_MARKER"):
 			sys.__stdout__.write(f"C1-MARKER-READY {marker}\n")
 			sys.__stdout__.flush()
 			time.sleep(120)
+
+
+class TestP65AgentLogHotel(PatchCase):
+	"""NEW-8 (audit Part 2I): a legacy action log row without a hotel is platform level now; p65 gives the
+	rows written before their hotel where the record they are about has one (savings.hotel_of)."""
+
+	P65 = "p65_agent_log_hotel"
+
+	def log(self, doctype: str | None, name: str | None) -> str:
+		return put("Agent Action Log", action_type="p65_probe", reference_doctype=doctype, reference_name=name,
+		           approval_status="Executed")
+
+	def test_p65_gives_rows_their_hotel_where_one_is_known(self):
+		from kamra import savings
+
+		other = kamra_hotel("P65 Other Hotel")
+		one = put("Guest", first_name="P65", last_name="One", full_name="P65 One")
+		two = put("Guest", first_name="P65", last_name="Two", full_name="P65 Two")
+		for guest, hotel in ((one, fx.PROPERTY), (two, fx.PROPERTY), (two, other)):
+			put("Reservation", guest=guest, property=hotel, status="Confirmed")
+		folio = put("Folio", property=fx.PROPERTY, guest=one)
+		user = fx.ensure_user("p65-desk@example.com", ["Front Desk"])
+		fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+		          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+		rows = {"folio": self.log("Folio", folio), "one hotel": self.log("Guest", one),
+		        "two hotels": self.log("Guest", two), "user": self.log("User", user), "nothing": self.log(None, None)}
+		# rows the site had already (the legacy PMS flows run before this test on CI write some)
+		earlier = [r for r in frappe.get_all("Agent Action Log", filters={"property": ("is", "not set")},
+		                                     fields=["name", "reference_doctype", "reference_name"])
+		           if r.name not in rows.values()]
+		known = sum(1 for r in earlier if savings.hotel_of(r.reference_doctype, r.reference_name))
+		seen = self.first_run(self.P65)                                  # (b): a second run changes nothing
+		hotel = {k: frappe.db.get_value("Agent Action Log", v, "property") for k, v in rows.items()}
+		self.assertEqual(hotel, {"folio": fx.PROPERTY, "one hotel": fx.PROPERTY, "two hotels": None,
+		                         "user": fx.PROPERTY, "nothing": None})
+		printed = " ".join(str(c) for c in seen["print"].call_args_list)
+		self.assertIn(f"p65: {3 + known} action log row(s) given their hotel", printed)
+		again = migrate(self.P65)
+		self.assertIn("p65: 0 action log row(s) given their hotel", " ".join(str(c) for c in again["print"].call_args_list))

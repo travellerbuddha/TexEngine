@@ -12,6 +12,7 @@ import hmac
 from unittest import mock
 
 import frappe
+from frappe.utils import add_days, nowdate
 
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
@@ -414,6 +415,73 @@ class TestLegacyTenancy(TexTestCase):
 		self.assertIn(self.own_log, feed)
 		self.assertNotIn(self.log, feed)
 		self.assertIn("enabled", assistant.assistant_status(property=OTHER))
+
+	def test_new8_an_action_log_row_without_a_hotel_is_platform_level(self):
+		"""NEW-8 (audit Part 2I): a legacy action log row without a hotel was taken for a platform-wide
+		record: every tenant's roles read it in Desk / REST, and ``activity_detail`` returned it. New rows
+		take their hotel from the record they are about; the feed and the front desk's minutes saved stay
+		inside the caller's hotels."""
+		from frappe.client import get as client_get
+
+		from kamra import agents_api, api
+		from kamra.savings import log_action
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- fixtures
+		# a row as the legacy writers left it (folio moves, allowances, PIN resets...): no hotel
+		bare = frappe.get_doc({"doctype": "Agent Action Log", "action_type": "sec_new8_bare",
+		                       "minutes_saved": 7}).insert(ignore_permissions=True).name
+		folio = frappe.get_doc({"doctype": "Folio", "property": fx.PROPERTY, "reservation": self.reservation,
+		                        "guest": self.guest}).insert(ignore_permissions=True).name
+		frappe.get_doc({"doctype": "Agent Action Log", "action_type": "sec_new8_mine", "property": OTHER,
+		                "minutes_saved": 5}).insert(ignore_permissions=True)
+		frappe.get_doc({"doctype": "Agent Action Log", "action_type": "sec_new8_theirs", "property": fx.PROPERTY,
+		                "minutes_saved": 11}).insert(ignore_permissions=True)
+		desk = fx.ensure_user("sec-new8-fd@example.com", ["Front Desk"])
+		fx.ensure("TEX Access Grant", {"user": desk, "property": fx.PROPERTY},
+		          {"user": desk, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		self.assertEqual(client_get("Agent Action Log", bare)["name"], bare)       # platform administrators read it
+
+		def as_user(user):
+			frappe.set_user(user)  # nosemgrep: frappe-setuser -- each tenant's user probes
+			scope.clear_cache()
+
+		for pms in (1, 0):
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the platform's PMS switch
+			frappe.db.set_single_value("TEX Settings", "show_legacy_pms", pms)
+			for user in (self.gm, desk):                                  # another tenant's GM, the hotel's desk
+				as_user(user)
+				with self.assertRaises(frappe.PermissionError, msg=f"{user} pms={pms}"):
+					client_get("Agent Action Log", bare)
+				self.assertEqual(frappe.get_list("Agent Action Log", filters={"name": bare}, pluck="name"), [],
+				                 f"{user} pms={pms}")
+				if pms:
+					with self.assertRaises(frappe.PermissionError, msg=user):
+						agents_api.activity_detail(name=bare)
+					feed = agents_api.activity_feed(limit=200)
+					self.assertFalse([r.name for r in feed if not frappe.db.get_value("Agent Action Log", r.name,
+					                                                                  "property")], user)
+
+		# new rows about a hotel's records carry that hotel: its staff read them, another tenant does not
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the legacy writers' own calls
+		frappe.db.set_single_value("TEX Settings", "show_legacy_pms", 1)
+		logged = [log_action("allowance", "Folio", folio), log_action("anonymize_guest", "Guest", self.guest)]
+		for row in logged:
+			self.assertEqual(frappe.db.get_value("Agent Action Log", row, "property"), fx.PROPERTY, row)
+			as_user(desk)
+			self.assertEqual(client_get("Agent Action Log", row)["name"], row)
+			as_user(self.gm)
+			with self.assertRaises(frappe.PermissionError):
+				client_get("Agent Action Log", row)
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
+		# the front desk's "minutes saved" counts only the caller's hotels
+		as_user(self.gm)
+		since = add_days(nowdate(), -30)
+		mine = frappe.db.sql("""select coalesce(sum(minutes_saved), 0) from `tabAgent Action Log`
+		                        where property = %s and date(creation) >= %s""", (OTHER, since))[0][0]
+		for snap in (api.front_desk_snapshot(), api.front_desk_snapshot(property=OTHER)):
+			self.assertEqual(snap["minutes_saved_30d"], float(mine))
 
 	def test_g16_switched_off_pms_is_closed_in_the_backend(self):
 		from kamra import agents_api, api
