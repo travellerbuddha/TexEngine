@@ -13,13 +13,14 @@ from kamra.tex.api import crm as crm_api
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
 from kamra.tex.api import public
-from kamra.tex.commercial import context
+from kamra.tex.commercial import context, contracts
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
 from kamra.tex.money import D
 from kamra.tex.payments import service as pay
 from kamra.tex.payments.providers.base import ProviderError
-from kamra.tex.pricing.model import Unsellable
+from kamra.tex.pricing import engine, policy_money, serialize
+from kamra.tex.pricing.model import ChildSpec, StayRequest, Unsellable
 from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
@@ -1363,3 +1364,166 @@ class TestEffectiveDatedExtrasAndTaxes(TexTestCase):
 		with self.assertRaises(frappe.LinkExistsError):
 			policy_api.delete_record("TEX Payment Provider Account", acc)
 		self.assertTrue(frappe.db.exists("TEX Payment Provider Account", acc))
+
+
+class TestNonRefundablePolicy(TexTestCase):
+	"""Y-4 (ADR-067): a price is refundable only when its rate plan row and its cancellation policy
+	both say so. A refundable row on a non-refundable policy is not published; a payload frozen so
+	before is read so: search, the quote and the cancellation fee all say non-refundable."""
+
+	def test_a_refundable_row_on_a_non_refundable_policy_is_not_published(self):
+		nrf_cxl = frappe.db.get_value("TEX Cancellation Policy", {"property": fx.PROPERTY,
+		                                                         "policy_name": "Non-refundable"})
+		v = fx.create_contract(self.f, code="Y4-PUB", publish=False)["version"]
+		doc = frappe.get_doc("TEX Contract Version", v)
+		row = next(r for r in doc.rate_plans if r.rate_plan == self.f["rate_plans"]["FLEX"])
+		self.assertEqual(row.refundable, 1)
+		row.cancellation_policy = nrf_cxl
+		doc.save(ignore_permissions=True)
+		issues = contracts.validate_version(v)["issues"]
+		self.assertEqual([(i["level"], i["code"]) for i in issues if i["code"] == "RATE_PLAN_REFUNDABLE"],
+		                 [("ERROR", "RATE_PLAN_REFUNDABLE")])
+		with self.assertRaises(frappe.ValidationError) as cm:
+			contracts.publish(v)
+		self.assertIn("Non-refundable", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", v, "status"), "Draft")
+
+	def test_a_payload_frozen_so_before_sells_and_cancels_as_non_refundable(self):
+		setup_site_and_payments(self.f)
+		version = frappe.db.get_value("TEX Contract", {"contract_code": "PAY"}, "active_version")
+		nr = fx.ensure("TEX Cancellation Policy", {"property": fx.PROPERTY, "policy_name": "Y4 no refunds"},
+		               {"property": fx.PROPERTY, "policy_name": "Y4 no refunds", "refundable": 0})
+		# what a publish froze before Y-4: the refundable FLEX row with a non-refundable policy without rules
+		payload = json.loads(frappe.db.get_value("TEX Contract Version", version, "payload"))
+		flex = next(r for r in payload["rate_plans"] if r["code"] == self.f["rate_plans"]["FLEX"])
+		self.assertIs(flex["refundable"], True)
+		flex["cancellation_policy"] = {"id": nr, "name": "Y4 no refunds", "refundable": False, "rules": [],
+		                               "no_show": {"type": "NIGHTS", "value": "1"}, "description": ""}
+		frappe.db.set_value("TEX Contract Version", version,
+		                    {"payload": json.dumps(payload, sort_keys=True, ensure_ascii=False),
+		                     "payload_hash": serialize.payload_hash(payload)}, update_modified=False)
+		contracts.clear_terms_cache()
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
+		                    rooms=[{"adults": 2, "children": [8]}], market="DE", session_id="y4-search")
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		offer = next(o for o in res["properties"][0]["offers"]
+		             if o["room_type"] == rt and o["board"] == "AI" and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+		self.assertIs(offer["refundable"], False)
+
+		b = guest_books(session="y4-book")
+		pmt = b["payment"]
+		public.mock_pay(transaction=pmt["transaction"], outcome="success", sig=pmt["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff reads the fee
+		room = frappe.get_doc("Reservation", {"tex_booking": b["booking"]})
+		self.assertIs(json.loads(room.tex_pricing_snapshot)["rate_plan"]["refundable"], False)
+		penalty, basis = booking.cancellation_penalty(room, today=fx.d(6, 9))
+		self.assertEqual(basis["rule"], "non-refundable")
+		self.assertEqual(penalty, D(room.tex_total_amount))
+		self.assertGreater(penalty, D(0))
+
+
+class TestPolicyCurrency(TexTestCase):
+	"""Y-3 A (ADR-067, D-1): a payment or cancellation policy's fixed amounts are in the policy's
+	currency, or the contract's when it names none; the currency is frozen with a policy that has a
+	fixed amount. A fixed policy in another currency than the contract's is not published, so a
+	fixed amount converts to the sale's currency at the one contract → sell rate the quote recorded."""
+
+	def fixed_policies(self, currency: str | None = None) -> tuple[str, str]:
+		pay = frappe.get_doc({"doctype": "TEX Payment Policy", "property": fx.PROPERTY, "policy_name": "Y3 100 now",
+		                      "deposit_type": "FIXED", "deposit_value": 100, "currency": currency}).insert(
+			ignore_permissions=True)
+		cxl = frappe.get_doc({"doctype": "TEX Cancellation Policy", "property": fx.PROPERTY,
+		                      "policy_name": "Y3 150 fee", "refundable": 1, "no_show_type": "NIGHTS",
+		                      "no_show_value": 1, "currency": currency,
+		                      "rules": [{"days_before_arrival": 7, "penalty_type": "FIXED", "penalty_value": 150}]}
+		                     ).insert(ignore_permissions=True)
+		return pay.name, cxl.name
+
+	def draft(self, code: str, pay: str, cxl: str) -> str:
+		v = fx.create_contract(self.f, code=code, publish=False)["version"]
+		doc = frappe.get_doc("TEX Contract Version", v)
+		row = next(r for r in doc.rate_plans if r.rate_plan == self.f["rate_plans"]["FLEX"])
+		row.payment_policy, row.cancellation_policy = pay, cxl
+		doc.save(ignore_permissions=True)
+		return v
+
+	def test_a_fixed_policy_in_another_currency_is_not_published(self):
+		pay, cxl = self.fixed_policies("TRY")
+		v = self.draft("Y3-TRY", pay, cxl)
+		issues = contracts.validate_version(v)["issues"]
+		self.assertEqual([(i["level"], i["code"]) for i in issues if i["code"] == "POLICY_CURRENCY"],
+		                 [("ERROR", "POLICY_CURRENCY")] * 2)
+		with self.assertRaises(frappe.ValidationError) as cm:
+			contracts.publish(v)
+		self.assertIn("are in TRY, the contract's currency is EUR", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", v, "status"), "Draft")
+
+	def test_a_fixed_policy_without_a_currency_is_frozen_in_the_contracts(self):
+		from kamra.tex.tests.integration.test_contract_offer_currency import _policy
+
+		pay, cxl = self.fixed_policies()
+		v = self.draft("Y3-EUR", pay, cxl)
+		contracts.publish(v)
+		payload = json.loads(frappe.db.get_value("TEX Contract Version", v, "payload"))
+		plans = {r["code"]: r for r in payload["rate_plans"]}
+		flex, nrf = plans[self.f["rate_plans"]["FLEX"]], plans[self.f["rate_plans"]["NRF"]]
+		self.assertEqual((flex["payment_policy"]["currency"], flex["cancellation_policy"]["currency"]), ("EUR", "EUR"))
+		self.assertNotIn("currency", nrf["payment_policy"])                  # FULL: no fixed amount, as before
+		self.assertNotIn("currency", nrf["cancellation_policy"])             # PERCENT rules: as before
+
+		# the helper Y-3 B uses: 100 EUR is 5,100.00 in a TRY sale at 51, and 100 in a EUR one
+		_policy("EUR", "TRY", 51)
+		terms = contracts.load_terms(v)
+		for sell, due in (("TRY", D("5100.00")), ("EUR", D("100"))):
+			req = StayRequest(property=fx.PROPERTY, room_type=self.f["room_types"]["STD"], board="AI",
+			                  rate_plan=self.f["rate_plans"]["FLEX"], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+			                  adults=2, sale_at=now_datetime().replace(microsecond=0), market="DE",
+			                  channel="DIRECT_WEB", sell_currency=sell)
+			q = engine.price_stay(context.build_context(terms, req), req).to_dict(internal=True)
+			self.assertEqual(policy_money.fixed_in_sell("100", q["rate_plan"]["payment_policy"], q), due, sell)
+
+
+class TestInfantsNotChildren(TexTestCase):
+	"""O-2 (ADR-067, D-2): whether infants are children for combination rules and max_children is a
+	version setting. The DocType's default (1) keeps what every version so far priced; a brand-new
+	contract's first draft says 0; a draft made from a version keeps its value; a publish freezes
+	the key only when it is 0 (every payload frozen so far, and its hash, is as before)."""
+
+	def price(self, version: str, *kid_ages: int) -> D:
+		terms = contracts.load_terms(version)
+		req = StayRequest(property=fx.PROPERTY, room_type=self.f["room_types"]["STD"], board="AI",
+		                  rate_plan=self.f["rate_plans"]["FLEX"], check_in=fx.d(6, 10), check_out=fx.d(6, 11),
+		                  adults=1, sale_at=now_datetime().replace(microsecond=0), market="DE", channel="DIRECT_WEB",
+		                  sell_currency="EUR", children=tuple(ChildSpec(age=a) for a in kid_ages))
+		q = engine.price_stay(context.build_context(terms, req), req)
+		self.assertTrue(q.sellable, q.reasons)
+		return q.totals["accommodation"]
+
+	def test_a_new_contracts_first_draft_does_not_count_infants_as_children(self):
+		from kamra.tex.api import contracts as api
+
+		out = api.save_contract(data={"property": fx.PROPERTY, "contract_code": "O2-NEW", "contract_name": "O2 new",
+		                              "market": "DE", "contract_currency": "EUR", "pricing_basis": "PERSON"})
+		draft = frappe.db.get_value("TEX Contract Version", {"contract": out["contract"]["name"]},
+		                            "infants_count_as_children")
+		self.assertEqual(draft, 0)
+
+	def test_a_draft_made_from_a_version_keeps_its_setting(self):
+		c = fx.create_contract(self.f, code="O2-OLD")          # inserted without the field: the DocType's 1
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", c["version"], "infants_count_as_children"), 1)
+		draft = contracts.new_draft(c["contract"])
+		self.assertEqual(frappe.db.get_value("TEX Contract Version", draft, "infants_count_as_children"), 1)
+
+	def test_a_publish_freezes_the_setting_only_when_off(self):
+		c = fx.create_contract(self.f, code="O2-PUB")
+		frozen = json.loads(frappe.db.get_value("TEX Contract Version", c["version"], "payload"))
+		self.assertNotIn("infants_count_as_children", frozen["settings"])
+		self.assertEqual((self.price(c["version"], 8), self.price(c["version"], 8, 1)), (D("200.00"), D("150.00")))
+		draft = contracts.new_draft(c["contract"])
+		frappe.db.set_value("TEX Contract Version", draft, "infants_count_as_children", 0)
+		contracts.publish(draft)
+		frozen = json.loads(frappe.db.get_value("TEX Contract Version", draft, "payload"))
+		self.assertIs(frozen["settings"]["infants_count_as_children"], False)
+		self.assertEqual((self.price(draft, 8), self.price(draft, 8, 1)), (D("200.00"), D("200.00")))

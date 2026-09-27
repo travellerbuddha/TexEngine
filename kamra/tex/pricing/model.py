@@ -255,6 +255,9 @@ class ContractTerms:
 	age_basis: AgeBasis = AgeBasis.ARRIVAL
 	children_over_max_as_adults: bool = True
 	infants_count_as_occupants: bool = True
+	# infants are children for combination rules and max_children (O-2, ADR-067); a payload frozen
+	# without the key was priced so
+	infants_count_as_children: bool = True
 	prices_include_tax: bool = True
 	stacking: StackingMode = StackingMode.SEQUENTIAL
 	room_basis_extra_unit: RoomBasisExtraUnit = RoomBasisExtraUnit.PER_PERSON_SHARE

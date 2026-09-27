@@ -61,6 +61,13 @@ export function SettingsTab(props: TabProps) {
         />
         <Switch
           disabled={readOnly}
+          checked={Boolean(s.infants_count_as_children)}
+          onChange={(v) => setSetting("infants_count_as_children", v ? 1 : 0)}
+          label={t("rates.f.infants_count_as_children")}
+          description={t("rates.h.infants_count_as_children")}
+        />
+        <Switch
+          disabled={readOnly}
           checked={Boolean(s.prices_include_tax)}
           onChange={(v) => setSetting("prices_include_tax", v ? 1 : 0)}
           label={t("rates.f.prices_include_tax")}
