@@ -1469,3 +1469,13 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - Y-10 **COMPLETE**: an EXTRA-based loyalty rule reads the snapshot quantity ("2.000000") as Decimal (`loyalty.extra_units`); a quantity that is not whole earns nothing and says so, never breaking the confirmation · `test_loyalty_admin.TestExtraEarning`.
 - O-16 **COMPLETE**: a guest cancels a room online only before the arrival day (site's day; `public.manage_cancel` refuses with ChangeRefused, `can_cancel` hides the manage page's button); a change may still start on the arrival day (unchanged, ADR-064) · `test_commercial_flows.TestSelfService.test_no_online_cancellation_from_the_arrival_day`, `frontend/tests/unit/manage-actions.test.ts`.
 - Y-12 **COMPLETE**: p48 marks a profile erased only on a `guest.erase` event, or an Executed/Approved `anonymize_guest` log row on a profile showing the legacy erasure's traces (alias, no last name/e-mail/phone, its note); other rows are only counted; business roles read the Agent Action Log only: its JSON, and p64 on sites whose seeds wrote Custom DocPerm rows (`seed_rbac_v2.ensure_hotel_admin` now grants it read-only) · `test_patches.TestP48Evidence`, `TestP64AgentLogReadOnly`, `test_crm_third_review.TestP48`.
+
+## 6G1. Audit Part 2G-1 (2026-09-27)
+
+- O-28 **COMPLETE**: a signed-in user's booking-engine page (/book and a pinned host) carries the session CSRF token, sent by `pub` (header) and `beacon` (form field); such a page loads no third-party tracker and shows no consent banner (ADR-046 note) · `test_security_hygiene` O-28, e2e `guest-session` O-28.
+- O-27 **COMPLETE**: the confirmation's manage link carries no token (`/<site>/manage`; the click stores this booking's token for the tab); no URL, href or tracker request carries it · e2e `guest-session` O-27, `custom-host`.
+- G-62 **COMPLETE**: GA4/GTM/pixel ids judged by one rule (`booking/lib/analyticsIds.ts`) on the server (new or changed values, trimmed), the admin form and the engine · `test_security_hygiene` G-62, unit `analytics-ids`, `branding`.
+- G-44 **COMPLETE**: the widget restores the host's scrolling on close, removal and re-render, and keeps the site's theme across re-renders · e2e `widget`.
+- O-32 **COMPLETE**: Call Center shortcuts (`crs/lib/shortcuts.ts`): on a Mac ⌃⌥ always, ⌥ alone not where it types a character in a field; elsewhere Alt without Ctrl/Meta/AltGr; labels ⌃⌥ on a Mac · unit `callcenter-shortcuts`, e2e `crs` O-32.
+- O-29 **COMPLETE**: CRS search, quote and quote summary apply only the latest request's answer · e2e `crs-actions` O-29 (summary and search races).
+- O-30 **COMPLETE**: checkout books the quotes it just made again (older than 25 min), with a new idempotency key · e2e `booking` O-30.
