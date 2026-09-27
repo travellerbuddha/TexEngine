@@ -1646,6 +1646,53 @@ class TestPolicyCurrency(TexTestCase):
 		self.assertNotIn("fx", basis)
 
 
+	def guest_changes(self, room: int) -> tuple[dict, str, dict]:
+		"""A confirmed two-room TRY booking of the fixed policies; the guest prices a longer stay of its
+		room ``room`` (1: the room that takes the fixed deposit) on the manage page."""
+		b = self.book(self.quotes("TRY", rooms=2), f"y3b-change-{room}", confirm=True)
+		frappe.db.set_value("Property", fx.PROPERTY, "tex_self_service", 1)
+		res = next(r["reservation"] for r in b["rooms"]
+		           if frappe.db.get_value("Reservation", r["reservation"], "tex_room_index") == room)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		return b, res, public.manage_propose(token=b["manage_token"], reservation=res,
+		                                     changes={"check_out": str(fx.d(6, 14))})
+
+	def assert_guest_priced(self, b: dict, res: str, up: dict) -> None:
+		self.assertTrue(up["sellable"], up)
+		self.assertTrue(up["proposal_token"])
+		self.assertIsNotNone(up["settlement"])
+		seen: set[str] = set()
+
+		def keys(v):
+			if isinstance(v, dict):
+				seen.update(v)
+				for x in v.values():
+					keys(x)
+			elif isinstance(v, list):
+				for x in v:
+					keys(x)
+
+		keys(up)
+		# what a guest is never told: rates, providers, the rule explanation, cost and margin
+		self.assertFalse(seen & {"fx", "fx_rates", "original_fx_rates", "explanation", *quoting.INTERNAL_TOTALS},
+		                 seen)
+		# the guest accepts it at the price shown
+		done = public.manage_apply(token=b["manage_token"], proposal_token=up["proposal_token"])
+		self.assertIn(done["status"], ("payment_required", "requested", "applied"), done)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was recorded
+		req = frappe.get_all("TEX Guest Change Request", filters={"reservation": res}, fields=["new_total", "old_total"])
+		self.assertEqual(len(req), 1)
+		self.assertEqual(D(req[0].new_total) - D(req[0].old_total), D(up["difference"]))
+
+	def test_the_guest_prices_a_change_of_the_room_taking_the_deposit(self):
+		b, res, up = self.guest_changes(1)
+		self.assert_guest_priced(b, res, up)
+
+	def test_the_guest_prices_a_change_of_another_room(self):
+		b, res, up = self.guest_changes(2)
+		self.assert_guest_priced(b, res, up)
+
+
 class TestInfantsNotChildren(TexTestCase):
 	"""O-2 (ADR-067, D-2): whether infants are children for combination rules and max_children is a
 	version setting. The DocType's default (1) keeps what every version so far priced; a brand-new

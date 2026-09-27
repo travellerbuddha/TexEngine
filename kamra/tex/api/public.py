@@ -878,10 +878,15 @@ def manage_propose(token: str, reservation: str, changes):
 	# extras are added through manage_extras_* (priced on their own; the stay stays price-locked)
 	allowed = {"check_in", "check_out", "adults", "children"}
 	ch = {k: v for k, v in (parse(changes, {}) or {}).items() if k in allowed}
-	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False)
+	# the internal quote: settling it converts a fixed deposit at the rate it recorded (Y-3 B); the
+	# guest's answer is stripped below, as ``propose`` strips it for a guest (the token holds no quote)
+	p = modification.propose(reservation, ch, basis="CURRENT", _check_permission=False, internal=True)
 	res = frappe.get_doc("Reservation", reservation)
 	warnings, sellable, proposal_token = p["warnings"], p["sellable"], p["proposal_token"]
 	settlement = guest_changes.preview(b, res, p) if sellable else None
+	quoting.strip_internal(p["proposed"])
+	for k in quoting.INTERNAL_TOTALS:
+		p["old"]["totals"].pop(k, None)
 	if p["currency_changed"] or (sellable and settlement is None):
 		# never compared across currencies: the guest is sent to the hotel
 		warnings = [*warnings, {"code": "CURRENCY_CHANGED",
