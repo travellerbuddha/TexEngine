@@ -17,9 +17,10 @@ from datetime import timedelta
 import frappe
 from frappe.utils import add_days, getdate
 
+from kamra.tex.api import crs as crs_api
 from kamra.tex.api import policies as policy_api
 from kamra.tex.availability import repository as avail
-from kamra.tex.commercial import grid
+from kamra.tex.commercial import contracts, grid
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
 from kamra.tex.tests.integration import fixtures as fx
@@ -605,3 +606,84 @@ class TestChannelLockOrder(_channel_case()):
 		self.assertLess(0, first_name)
 		self.assertEqual(events[0][1], [(str(fx.d(6, 10)), str(fx.d(6, 12))), (str(fx.d(6, 11)), str(fx.d(6, 13)))],
 		                 events)
+
+
+class TestGridRates(InventoryCase):
+	"""O-9 + G-47 (2D-1, ADR-069): a rate edit on the ARI grid is a plan of period edits
+	(``pricing.ratesplit``) written into the contract's draft. A second weekend edit used to add a
+	clone at the first one's priority on the same days: the draft could no longer be published
+	(PERIOD_OVERLAP). Now it edits the first edit's clones in place and the draft publishes."""
+
+	def setUp(self):
+		super().setUp()
+		self.contract = self.c["contract"]
+		self.sat = next(fx.d(6, 1) + timedelta(days=i) for i in range(7) if (fx.d(6, 1) + timedelta(days=i)).weekday() == 5)
+		self.mon = self.sat + timedelta(days=2)
+
+	def edit(self, op: str, value: str, start=None, end=None, weekdays=(5, 6), room_types=None) -> dict:
+		return grid.bulk_update(fx.PROPERTY, start or fx.d(6, 1), end or fx.d(8, 31), room_types=room_types or [self.std],
+		                        weekdays=list(weekdays) if weekdays else None, contract=self.contract,
+		                        rate={"op": op, "value": value})["rate"]
+
+	def draft(self) -> str:
+		return frappe.db.get_value("TEX Contract Version", {"contract": self.contract, "status": "Draft"}, "name")
+
+	def periods(self) -> int:
+		return len(frappe.get_doc("TEX Contract Version", self.draft()).periods)
+
+	def cells(self, room_type=None, days: int = 3) -> dict:
+		out = crs_api.ari_grid(property=fx.PROPERTY, start=str(self.sat), days=days, contract=self.contract)
+		row = next(r for r in out["rows"] if r["room_type"] == (room_type or self.std))
+		return {c["date"]: c for c in row["cells"]}
+
+	def test_two_weekend_edits_publish(self):
+		first = self.edit("ABSOLUTE", "150")
+		made = self.periods()
+		second = self.edit("ABSOLUTE", "160")
+		self.assertEqual(self.periods(), made)                         # the first edit's clones, edited in place
+		self.assertEqual(set(second["periods"]), set(first["periods"]))
+		self.assertEqual(set(second), {"draft", "periods", "note"})
+		contracts.publish(self.draft())                                  # was refused: PERIOD_OVERLAP
+		cells = self.cells()
+		self.assertEqual((cells[str(self.sat)]["rate"], cells[str(self.mon)]["rate"]), ("160.00", "100.00"))
+
+	def test_the_grid_shows_live_and_draft_rates_to_cost_viewers_only(self):
+		self.edit("ABSOLUTE", "150")
+		cells = self.cells()
+		self.assertEqual([(cells[str(d)]["rate"], cells[str(d)]["draft_rate"]) for d in (self.sat, self.mon)],
+		                 [("100.00", "150.00"), ("100.00", "100.00")])
+		self.assertEqual(self.cells(self.dlx)[str(self.sat)]["draft_rate"], "202.50")   # ×1.35, follows STD
+		viewer = fx.ensure_user("g47-viewer@example.com", ["Hotel Admin"])
+		fx.ensure("TEX Access Grant", {"user": viewer, "property": fx.PROPERTY},
+		          {"user": viewer, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": "Viewer"})
+		frappe.set_user(viewer)  # nosemgrep: frappe-setuser -- a viewer without price.view_cost
+		scope.clear_cache()
+		out = crs_api.ari_grid(property=fx.PROPERTY, start=str(self.sat), days=3, contract=self.contract)
+		self.assertTrue(out["rates_hidden"])
+		self.assertFalse([c for r in out["rows"] for c in r["cells"] if "rate" in c or "draft_rate" in c])
+		# and it may not change a rate: contract.edit
+		with self.assertRaises(frappe.PermissionError):
+			self.edit("ABSOLUTE", "1")
+		with self.assertRaises(frappe.PermissionError):
+			grid.apply_rate_change(self.contract, [self.std], self.sat, self.sat, None, "ABSOLUTE", "1")
+
+	def test_adjust_percent(self):
+		self.edit("ADJUST_PERCENT", "10", end=fx.d(6, 30))
+		self.edit("ADJUST_PERCENT", "10", end=fx.d(6, 30))               # the clone's unit, again
+		cells = self.cells()
+		self.assertEqual([cells[str(d)]["draft_rate"] for d in (self.sat, self.mon)], ["121.00", "100.00"])
+		self.assertEqual(self.cells(self.dlx)[str(self.sat)]["draft_rate"], "163.35")
+		contracts.publish(self.draft())
+
+	def test_an_edit_that_adds_an_error_is_refused_and_nothing_is_saved(self):
+		draft = contracts.new_draft(self.contract)
+		v = frappe.get_doc("TEX Contract Version", draft)
+		for r in v.period_rates:
+			if r.room_type == self.dlx:
+				r.update({"op": "SUBTRACT", "value": 50})               # DLX = STD − 50
+		v.save(ignore_permissions=True)
+		before = self.periods()
+		with self.assertRaisesRegex(frappe.ValidationError, "errors"):
+			self.edit("ABSOLUTE", "30", start=self.sat, end=self.sat, weekdays=None)
+		self.assertEqual(self.periods(), before)
+		self.assertEqual(self.cells()[str(self.sat)]["draft_rate"], "100.00")
