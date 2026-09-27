@@ -1365,6 +1365,9 @@ def record_manual(*, booking: str, amount, method: str, reference: str, reason: 
 # ─── payment links ───────────────────────────────────────────────────────
 
 
+LINK_SAVEPOINT = "tex_create_link"
+
+
 def link_token_hash(token: str) -> str:
 	return hashlib.sha256(("tex-paylink:" + token).encode()).hexdigest()
 
@@ -1407,6 +1410,11 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		provider_for(provider_account)
 	token = secrets.token_urlsafe(24)
 	expires_at = add_to_date(now_datetime(), hours=max(1, min(int(expires_hours or 72), 24 * 60)))
+	# the key is unique in the database (O-38): a request that lost the race to the same key undoes its
+	# own steps back to here and answers with the link the other one made (one link, one e-mail)
+	frappe.db.savepoint(LINK_SAVEPOINT)
+	messages = frappe.local.message_log
+	mark = len(messages)
 	# a link of a booking waiting for its payment holds its rooms for the link hold and expires with
 	# it (B6); a standalone link keeps its own validity (K-2d)
 	expires_at, rooms_held_until = holds.hold_for_link(booking, expires_at)
@@ -1419,7 +1427,19 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 		# the URL embeds the bearer token: returned once, never stored (only its hash is)
 		"idempotency_key": idempotency_key, "public_url": None,
 	})
-	doc.insert(ignore_permissions=True)
+	try:
+		doc.insert(ignore_permissions=True)
+	except frappe.UniqueValidationError:
+		if not idempotency_key:
+			raise
+		frappe.db.rollback(save_point=LINK_SAVEPOINT)
+		del messages[mark:]           # Frappe's "must be unique" message is not this request's answer
+		# a locking read: the link the other request committed, not this transaction's older snapshot
+		made = frappe.db.sql("SELECT name FROM `tabTEX Payment Link` WHERE idempotency_key=%s LOCK IN SHARE MODE",
+		                     idempotency_key)
+		if not made:
+			raise
+		return {"link": made[0][0], "replay": True}
 	url = _link_url(property, booking, token)
 	emailed = False
 	if send_email:
