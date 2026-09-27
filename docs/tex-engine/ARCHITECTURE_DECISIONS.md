@@ -1963,6 +1963,13 @@ user to a channel.
   records to that user's roles. They are now under the TEX permission hooks
   (`perm.LEGACY_PROPERTY_DOCTYPES`, hooks `_TEX_SCOPED`): their lists and documents follow the
   TEX scope like TEX's own DocTypes (a blank `property` stays readable, as for TEX policies).
+- *Note (audit Part 2I, 2026-09-27; NEW-8).* The Agent Action Log is no longer among them: a row
+  without a hotel was read by every tenant's roles in Desk / REST and returned by `activity_detail`.
+  It is in `perm.STRICT_DOCTYPES` (a blank hotel = platform only; `hooks._TEX_SCOPED` unchanged);
+  `activity_detail` refuses such a row and `activity_feed` leaves it out for non-platform users;
+  `front_desk_snapshot` sums minutes saved over its own hotels. New rows take the hotel of the
+  record they are about (`savings.hotel_of`: a Property; a record with `property`; a guest's or a
+  user's one hotel); p65 does the same for the rows written before, the rest stay platform level.
 - Tests: `test_channel_binding` (26: + web-only sites, staff on a site, p31, per-capability
   channels, product changes), `test_grant_expiry` (9), unit `test_channel_entitlement` (7).
 
@@ -2348,7 +2355,14 @@ was given access to a hotel; every payment outcome was recorded as coming from a
   The rows are a separate DocType, not a child table, so Desk / REST scope them per hotel: a
   hotel's staff read their own hotel's row and never another hotel's name. Visibility: a
   non-platform user sees an event when its hotel or one of its scope rows is theirs
-  (`perm.query_conditions`, `has_permission`); an event with neither stays platform-level. The
+  (`perm.query_conditions`, `has_permission`); an event with neither stays platform-level.
+  Cost events (G-97, 2026-09-27; `reference_doctype` in `perm.COST_DOCTYPES`: a contract, its
+  versions and rate tables, markup rules, pricing policies) are read in Desk / REST by platform
+  administrators only. In the TEX audit log they are read with `price.view_cost`; contract events
+  (`perm.CONTRACT_COST_DOCTYPES`), as in the record's own trail, also with `contract.edit` — the
+  hotel view (`settings.admin`) leaves the others out in its query, the group / enterprise events
+  that reached the hotel too (fix round 1 of Part 2I). The other events (grants, payments,
+  bookings) keep the rule above. The
   audit viewer's hotel filter includes the events that reached the hotel and returns `hotels`
   (the reached hotels the viewer may see) and `other_hotels` (a count), like the users screen
   shows a grant's foreign hotels only as a count.
@@ -2873,6 +2887,17 @@ three Low, fixed as follows.
   removed, row_changed) that `mask_diff` does not cover; `contract.version.save` audit events hold
   compact rate diffs at the hotel, read by its Hotel Admins in Desk and by `settings.admin` in the
   TEX audit log; markup rules are in the same position. Recorded in FINAL_GAP_AUDIT (#70a).
+  - *Closed (audit Part 2I, 2026-09-27).* Instead of withholding fields, the records are closed as a
+    whole: TEX Contract Version, TEX Markup Rule and TEX Pricing Policy give System Manager alone
+    Desk / REST access (`doctype_specs.COST`; the version's rate tables, child tables, follow it), p66
+    takes every flag from other roles' Custom DocPerm rows, and the audit events about cost
+    (`perm.COST_DOCTYPES`, one list with the audit trail's `TRAIL_COST`) are hidden from non-platform
+    users in Desk / REST. The TEX API is the one reader: with `price.view_cost`, a contract and its
+    events also with `contract.edit` (G-11, the record's own trail). The TEX audit log's hotel view
+    (`settings.admin`) leaves out, in its query, the cost events its viewer could not read by the
+    record's trail, the group / enterprise events that reached the hotel too (fix round 1). The
+    Version rows of a contract version stay as Frappe keeps them (read with the version, now System
+    Manager's).
 - Tests: `test_crm_privacy` 29 (11 new; 2 extended: the listing drops the profile link, p37 keeps
   the values) and the p40 registry entry in `test_patches`; on the merged base (main `665b6b9`) and
   its schema the 12 review tests fail or error, one for each finding; the identity test fails on the

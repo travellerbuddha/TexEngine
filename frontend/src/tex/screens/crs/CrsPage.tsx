@@ -43,6 +43,7 @@ export default function CrsPage() {
 
   const onSearch = async () => {
     const r = await flow.runSearch()
+    if (r === undefined) return // a newer search took over (O-29)
     if (r) setAnnounce(t("crs.results.announce", { count: r.properties.reduce((n, p) => n + p.offers.length, 0) }))
     else focusFirstInvalid()
   }

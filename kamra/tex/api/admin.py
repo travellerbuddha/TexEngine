@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 
 from kamra.tex.api._util import as_int, parse, text
-from kamra.tex.security import scope
+from kamra.tex.security import perm, scope
 from kamra.tex.security.audit import audit
 from kamra.tex.security.capabilities import CAPABILITIES
 
@@ -429,11 +429,7 @@ def adapters():
 # or edits contracts, ``contracts._sees_cost``); a payment's carry amounts, the provider and the bank
 # reference. Markups and pricing policies are read by their own API with price.view_cost alone
 # (``policies.READ_CAP``), so their trail takes that path.
-TRAIL_COST = frozenset({"TEX Contract", "TEX Contract Version",
-                        # a contract version's rate tables
-                        "TEX Price Period", "TEX Period Rate", "TEX Child Age Band", "TEX Occupancy Rule",
-                        "TEX Board Rule", "TEX Contract Room", "TEX Contract Rate Plan", "TEX Contract Offer",
-                        "TEX Contract Channel"})
+TRAIL_COST = perm.CONTRACT_COST_DOCTYPES     # one list with Desk / REST's cost (G-97)
 TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link": "payment.view",
                     "TEX Payment Allocation": "payment.view", "Reservation": "reservation.view",
                     "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view"}
@@ -473,14 +469,30 @@ def _require_trail(doctype: str, prop: str) -> None:
 	scope.require(cap, prop)
 
 
+def _cost_hidden(prop: str) -> list[str]:
+	"""The cost records whose events a hotel's trail leaves out for this viewer, by each record's own trail
+	rule (``_require_trail``): markups and pricing policies without ``price.view_cost``; contracts and their
+	rate tables without ``price.view_cost`` or ``contract.edit``. None for platform administrators."""
+	from kamra.tex.api import policies
+
+	if scope.is_platform_admin() or scope.has_capability("price.view_cost", prop):
+		return []
+	hidden = {d for d, cap in policies.READ_CAP.items() if cap == "price.view_cost"}
+	if not scope.has_capability("contract.edit", prop):
+		hidden |= TRAIL_COST
+	return sorted(hidden)
+
+
 @frappe.whitelist()
 def audit_log(property: str | None = None, reference_doctype: str | None = None,
               reference_name: str | None = None, action: str | None = None, actor: str | None = None,
               date_from: str | None = None, date_to: str | None = None, start=0, limit=100):
 	"""The audit trail, newest first. A hotel's trail holds its own events and the events of its
 	hotel group or enterprise that reached it (a group grant, ADR-053); such an event names only
-	the hotels the viewer may see, the others as a count."""
+	the hotels the viewer may see, the others as a count. Cost events are left out of it as their
+	record's own trail would refuse them (``_cost_hidden``)."""
 	from frappe.query_builder import Order
+	from frappe.query_builder.functions import IfNull
 
 	E, S = frappe.qb.DocType("TEX Audit Event"), frappe.qb.DocType("TEX Audit Scope")
 	q = frappe.qb.from_(E).select(E.name, E.event_time, E.action, E.actor, E.actor_roles, E.source, E.property,
@@ -490,6 +502,9 @@ def audit_log(property: str | None = None, reference_doctype: str | None = None,
 		scope.require("settings.admin", property)
 		q = q.where((E.property == property)
 		            | E.name.isin(frappe.qb.from_(S).select(S.event).where(S.property == property)))
+		if hidden := _cost_hidden(property):
+			# in the query, so a page is filled with what the viewer may read (G-97, audit Part 2I)
+			q = q.where(IfNull(E.reference_doctype, "").notin(hidden))
 	elif reference_doctype and reference_name:
 		if not scope.is_platform_admin():
 			prop = _trail_property(reference_doctype, reference_name)

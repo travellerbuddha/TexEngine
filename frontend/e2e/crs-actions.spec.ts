@@ -10,7 +10,7 @@
 // - O-29: an answer that comes back late (an earlier search, the quote summary of a payment method
 //   left meanwhile) never replaces the current one on the Call Center page.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e crs-actions
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page, type Route } from "@playwright/test"
 import { byLabel, holdNext, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
 import { openReservation, readLockedPrice, readRevisions } from "./flows/reservations"
 
@@ -292,11 +292,107 @@ test("O-29: a search answered late never replaces the newer search's results", a
   await byLabel(page, "Check-out").fill(addDays(checkIn, 3))
   await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search") && r.ok()), page.keyboard.press("Alt+KeyS")])
   await expect(results(page)).toContainText("3 nights")
+  const offers = page.getByRole("listbox", { name: "Offers" })
+  await expect(offers).toBeFocused()
+  // a field marked invalid meanwhile (as a refused booking leaves one): a late answer is no refused
+  // search, so the cursor stays where the agent is
+  await byLabel(page, "Check-in").evaluate((el) => el.setAttribute("aria-invalid", "true"))
   const late = page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search"))
   first.release()
   await late
   await frames(page)
   await expect(results(page)).toContainText("3 nights")
+  await expect(offers).toBeFocused()
+  noErrors()
+})
+
+test("O-29: a quote made from the previous search's offer is not taken for the new search's", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  const checkIn = await callCenterSearchForm(page, 170)
+  await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search") && r.ok()), page.keyboard.press("Alt+KeyS")])
+  await expect(page.getByRole("listbox", { name: "Offers" })).toBeFocused()
+  // the first quote fails: its notice offers "Search again", which keeps the selection
+  const quoteRooms = (url: URL) => isMethod(url.href, "kamra.tex.api.crs.quote_rooms")
+  const failQuote = (route: Route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ exc_type: "Exception", exception: "Exception: E2E quote failure" }) })
+  await page.route(quoteRooms, failQuote)
+  await page.keyboard.press("ArrowDown")
+  await page.keyboard.press("Enter")
+  const again = page.getByRole("button", { name: "Search again" })
+  await expect(again).toBeVisible()
+  await page.unroute(quoteRooms, failQuote)
+
+  // other dates; the new search is held, and meanwhile the agent updates the quote (Alt+U) from the
+  // offer of the previous search; that quote answers after the new search
+  // two answers are held at once: a standing route keeps request interception on while either waits
+  // (once the last route is used up, Playwright stops intercepting and lets a held request go)
+  await page.route("**/api/method/**", (route) => route.fallback())
+  const search = await holdNext(page, "kamra.tex.api.ui_crs.search")
+  const quote = await holdNext(page, "kamra.tex.api.crs.quote_rooms")
+  await byLabel(page, "Check-out").fill(addDays(checkIn, 3))
+  await again.click()
+  await search.held
+  await page.keyboard.press("Alt+KeyU")
+  await quote.held
+  const searched = page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search"))
+  search.release()
+  await searched
+  await expect(results(page)).toContainText("3 nights")
+  const quoted = page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.crs.quote_rooms"))
+  quote.release()
+  await quoted
+  await frames(page)
+  // the late quote is not this search's: nothing is quoted, nothing can be booked
+  await expect(page.getByText("Quote a room first.")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Book now/ })).toBeDisabled()
+  noErrors()
+})
+
+test("O-29: a quote summary that fails leaves no amount of the previous method", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+  await callCenterSearchForm(page, 180)
+  await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.search") && r.ok()), page.keyboard.press("Alt+KeyS")])
+  await expect(page.getByRole("listbox", { name: "Offers" })).toBeFocused()
+  await page.keyboard.press("ArrowDown")
+  await Promise.all([page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary") && r.ok()), page.keyboard.press("Enter")])
+
+  // the card's summary, marked: its amount due now reads 987.65
+  await page.route(
+    (url) => isMethod(url.href, "kamra.tex.api.ui_crs.quote_summary"),
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { message: { due_now: string | null } }
+      body.message.due_now = "987.65"
+      await route.fulfill({ response, json: body })
+    },
+    { times: 1 },
+  )
+  await Promise.all([
+    page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary")),
+    page.getByRole("radio", { name: /Card/ }).check(),
+  ])
+  await expect(page.getByText(/987\.65/).first()).toBeVisible()
+
+  // bank transfer: its summary fails
+  await page.route(
+    (url) => isMethod(url.href, "kamra.tex.api.ui_crs.quote_summary"),
+    (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ exc_type: "Exception", exception: "Exception: E2E summary failure" }) }),
+    { times: 1 },
+  )
+  await Promise.all([
+    page.waitForResponse((r) => isMethod(r.url(), "kamra.tex.api.ui_crs.quote_summary")),
+    page.getByRole("radio", { name: /Bank transfer/ }).check(),
+  ])
+  await frames(page)
+  // no amount of the card stays on screen, nothing can be booked, the quote text has no amount due
+  await expect(page.getByText(/987\.65/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Book now/ })).toBeDisabled()
+  await page.keyboard.press("Alt+KeyQ")
+  await expect(page.getByText("Quote text copied").first()).toBeVisible()
+  const text = await page.evaluate(() => navigator.clipboard.readText())
+  expect(text).not.toContain("987.65")
+  expect(text).not.toMatch(/Due now/i)
   noErrors()
 })
 
