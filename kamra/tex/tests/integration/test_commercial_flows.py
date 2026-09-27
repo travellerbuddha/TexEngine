@@ -25,7 +25,7 @@ from kamra.tex.reports import service as reports
 from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
 from kamra.tex.tests.integration import fixtures as fx
-from kamra.tex.tests.integration.test_critical_journey import TexTestCase
+from kamra.tex.tests.integration.test_critical_journey import TexTestCase, pick
 
 SLUG = "tex-test-resort"
 GUEST = {"first_name": "Lena", "last_name": "Kraus", "email": "lena@example.com", "country": "Germany"}
@@ -1483,6 +1483,77 @@ class TestPolicyCurrency(TexTestCase):
 			                  channel="DIRECT_WEB", sell_currency=sell)
 			q = engine.price_stay(context.build_context(terms, req), req).to_dict(internal=True)
 			self.assertEqual(policy_money.fixed_in_sell("100", q["rate_plan"]["payment_policy"], q), due, sell)
+
+
+	# ── Y-3 B (ADR-067): the booking takes a fixed amount in the sale's currency, once per booking ──
+
+	def quotes(self, sell: str, rooms: int = 1) -> list[str]:
+		"""The fixed policies without a currency (frozen in the contract's, EUR) on a published EUR
+		contract, sold in ``sell`` at 51 TRY per EUR: the quotes of one search of ``rooms`` rooms."""
+		from kamra.tex.tests.integration.test_contract_offer_currency import _policy
+
+		pay, cxl = self.fixed_policies()
+		contracts.publish(self.draft("Y3B", pay, cxl))
+		_policy("EUR", "TRY", 51)
+		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+		                     rooms=[{"adults": 2}] * rooms, market="DE", channel="DIRECT_WEB", currency=sell)
+		offer = pick(res["properties"][0])
+		out = quoting.create_quotes([{"offer_key": r["offer_key"], "extras": []}
+		                             for r in sorted(offer["rooms"], key=lambda r: r["room_index"])])
+		self.assertTrue(out["ok"], out)
+		return [r["quote_id"] for r in out["rooms"]]
+
+	def book(self, ids: list[str], key: str, *, confirm: bool = False) -> dict:
+		return booking.create_booking(quote_ids=ids, guest=GUEST, payment_method="Card", idempotency_key=key,
+		                              confirm_without_payment=confirm)
+
+	def test_a_fixed_deposit_is_converted_to_the_sales_currency(self):
+		ids = self.quotes("TRY")
+		summary = booking.quotes_summary([quoting.load_quote(q) for q in ids], "Card")
+		self.assertEqual((summary["currency"], summary["due_now"]), ("TRY", "5100.00"))   # 100 EUR × 51
+		b = self.book(ids, "y3b-try")
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "amount_due_now"), D("5100.00"))
+		self.assertEqual(b["due_now"], "5100.00")
+		self.assertEqual(booking.required_now(b["booking"]), D("5100.00"))
+
+	def test_a_fixed_deposit_is_taken_once_per_booking(self):
+		ids = self.quotes("EUR", rooms=3)
+		summary = booking.quotes_summary([quoting.load_quote(q) for q in ids], "Card")
+		self.assertEqual(summary["due_now"], "100.00")
+		self.assertEqual([r["due_now"] for r in summary["rooms"]], ["100.00", "0.00", "0.00"])
+		b = self.book(ids, "y3b-three")
+		self.assertEqual(b["due_now"], "100.00")
+		self.assertEqual(booking.required_now(b["booking"]), D("100.00"))
+		# room 1 cancelled: the next live room carrying the policy takes the deposit
+		first = next(r["reservation"] for r in b["rooms"]
+		             if frappe.db.get_value("Reservation", r["reservation"], "tex_room_index") == 1)
+		booking.cancel_reservation(first, reason="Y-3 B: room 1 leaves")
+		self.assertEqual(frappe.db.get_value("Reservation", first, "status"), "Cancelled")
+		self.assertEqual(booking.required_now(b["booking"]), D("100.00"))
+
+	def test_a_fixed_penalty_is_converted_and_explained(self):
+		b = self.book(self.quotes("TRY"), "y3b-fee", confirm=True)
+		room = frappe.get_doc("Reservation", b["rooms"][0]["reservation"])
+		penalty, basis = booking.cancellation_penalty(room, today=fx.d(6, 7))        # 3 days before arrival
+		self.assertEqual(penalty, D("7650.00"))                                        # 150 EUR × 51
+		self.assertEqual(basis["fx"], {"from": "EUR", "to": "TRY", "rate": "51.000000", "amount": "150.00"})
+
+	def test_a_fixed_deposit_never_exceeds_the_stored_price(self):
+		b = self.book(self.quotes("TRY"), "y3b-staff")
+		frappe.db.set_value("Reservation", b["rooms"][0]["reservation"], "tex_total_amount", 3000)
+		self.assertEqual(booking.required_now(b["booking"]), D("3000.00"))            # min(5,100.00, 3,000.00)
+
+	def test_a_stay_sold_before_its_policy_had_a_currency_keeps_the_amount_as_sold(self):
+		b = self.book(self.quotes("TRY"), "y3b-old", confirm=True)
+		name = b["rooms"][0]["reservation"]
+		snap = json.loads(frappe.db.get_value("Reservation", name, "tex_pricing_snapshot"))
+		for key in ("payment_policy", "cancellation_policy"):
+			self.assertEqual(snap["rate_plan"][key].pop("currency"), "EUR")
+		frappe.db.set_value("Reservation", name, "tex_pricing_snapshot", json.dumps(snap, sort_keys=True))
+		self.assertEqual(booking.required_now(b["booking"]), D("100.00"))
+		penalty, basis = booking.cancellation_penalty(frappe.get_doc("Reservation", name), today=fx.d(6, 7))
+		self.assertEqual(penalty, D("150.00"))
+		self.assertNotIn("fx", basis)
 
 
 class TestInfantsNotChildren(TexTestCase):

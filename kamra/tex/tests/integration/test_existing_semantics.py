@@ -34,6 +34,8 @@ every caller, never opt-in, that fail against main by design too:
 * a payment or cancellation policy whose fixed amounts are in another currency than the contract's
   is refused (``POLICY_CURRENCY``): main published it and read the amount in the sale's currency
   (Y-3 A).
+* a booking takes a fixed deposit once, on its first room, converted from the policy's currency to the
+  sale's at the quote's recorded rate (Y-3 B): main took it on every room, read in the sale's currency.
 * a brand-new contract's first draft does not count infants as children for its combination rules
   and ``max_children`` (``infants_count_as_children`` 0, O-2): main's did. Every other draft (from a
   version, a duplicate, a version inserted directly) keeps counting them.
@@ -500,6 +502,29 @@ class TestPolicyMoneyChanges(ExistingCallerCase):
 		frappe.db.set_value("TEX Payment Policy", pay, "currency", None)
 		self.assertTrue(api.validate_version(self.v)["ok"])
 		self.assertEqual(contracts.publish(self.v)["version"], self.v)
+
+	def test_a_fixed_deposit_is_taken_once_per_booking_in_the_sales_currency(self):
+		"""Y-3 B: main took a fixed deposit on every room of a booking and read its amount in the sale's
+		currency (100 EUR sold in TRY: 100 TRY a room). It is taken once per booking and converted at the
+		contract → sell rate the quotes recorded: two rooms sold in TRY at 51 owe 5,100.00 now, not 200.00."""
+		from kamra.tex.tests.integration.test_contract_offer_currency import _policy
+
+		pay = fx.ensure("TEX Payment Policy", {"property": fx.PROPERTY, "policy_name": "PW 100 fixed"},
+		                {"property": fx.PROPERTY, "policy_name": "PW 100 fixed", "deposit_type": "FIXED",
+		                 "deposit_value": 100})
+		data = tables(self.v)
+		find(data["rate_plans"], rate_plan=self.flex)["payment_policy"] = pay
+		api.save_version(self.v, as_json(data))
+		contracts.publish(self.v)
+		_policy("EUR", "TRY", 51)
+		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+		                     rooms=[{"adults": 2}, {"adults": 2}], market="DE", channel="DIRECT_WEB", currency="TRY")
+		offer = pick(res["properties"][0])
+		out = quoting.create_quotes([{"offer_key": r["offer_key"], "extras": []}
+		                             for r in sorted(offer["rooms"], key=lambda r: r["room_index"])])
+		summary = booking.quotes_summary([quoting.load_quote(r["quote_id"]) for r in out["rooms"]], "Card")
+		self.assertEqual([r["due_now"] for r in summary["rooms"]], ["5100.00", "0.00"])     # main: 100.00 each
+		self.assertEqual(summary["due_now"], "5100.00")                                      # main: 200.00
 
 	def test_a_new_contracts_first_draft_does_not_count_infants_as_children(self):
 		"""O-2 (D-2): main's ``save_contract`` made a new contract's first draft in which an infant was a
