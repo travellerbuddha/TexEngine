@@ -1633,6 +1633,17 @@ class TestPolicyCurrency(TexTestCase):
 		frappe.db.set_value("Reservation", b["rooms"][0]["reservation"], "tex_total_amount", 3000)
 		self.assertEqual(booking.required_now(b["booking"]), D("3000.00"))            # min(5,100.00, 3,000.00)
 
+	def test_a_fixed_deposit_falls_to_the_next_room_when_the_first_cannot_take_it(self):
+		"""One fixed deposit per booking and payment policy, taken room by room in room order, each room at
+		most its own price: a first room priced below the deposit (a price staff set, a booking discount it
+		carries) leaves the rest to the next room carrying the policy, never nothing."""
+		b = self.book(self.quotes("TRY", rooms=2), "y3b-fall")
+		rooms = sorted(b["rooms"], key=lambda r: frappe.db.get_value("Reservation", r["reservation"], "tex_room_index"))
+		self.assertGreaterEqual(D(rooms[1]["amount"]), D("5100"))
+		for first, due in ((0, D("5100.00")), (3000, D("5100.00")), (6000, D("5100.00"))):
+			frappe.db.set_value("Reservation", rooms[0]["reservation"], "tex_total_amount", first)
+			self.assertEqual(booking.required_now(b["booking"]), due, first)     # 0 + 5,100; 3,000 + 2,100; 5,100 + 0
+
 	def test_a_stay_sold_before_its_policy_had_a_currency_keeps_the_amount_as_sold(self):
 		b = self.book(self.quotes("TRY"), "y3b-old", confirm=True)
 		name = b["rooms"][0]["reservation"]
