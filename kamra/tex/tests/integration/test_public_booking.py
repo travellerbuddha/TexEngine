@@ -366,3 +366,41 @@ class TestMarketLinks(TexTestCase):
 			frappe.conf.pop("tex_public_write_limit", None)
 			if saved is not None:
 				frappe.conf["tex_public_write_limit"] = saved
+
+
+class TestMandatoryExtrasInSearch(TexTestCase):
+	"""Y-5: a search prices the hotel's mandatory extras as the quote does, so the price a guest or an
+	agent sees in the results is the one the quote confirms (``price_changed`` False) — not the stay
+	without its mandatory gala dinner (2 adults × 150)."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		fx.ensure_live("TEX Extra", {"property": fx.PROPERTY, "extra_code": "GALA"},
+		               {"property": fx.PROPERTY, "extra_code": "GALA", "extra_name": "Gala dinner",
+		                "category": "Dining", "pricing_mode": "ADULT", "currency": "EUR", "amount": 150,
+		                "tax_category": "SERVICE", "is_mandatory": 1})
+
+	def pick(self, offers) -> dict:
+		rt = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "STD"})
+		return next(o for o in offers if o["room_type"] == rt and o["board"] == "AI"
+		            and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+
+	def test_the_guest_search_shows_what_the_quote_confirms(self):
+		offer = self.pick(_search([{"adults": 2, "children": []}], session="y5-web")["offers"])
+		room = offer["rooms"][0]
+		self.assertIn("GALA", {e["code"] for e in room["quote"]["extras"] if e.get("ok")})
+		q = public.quote(site=SLUG, offer_key=room["offer_key"], session_id="y5-web")
+		self.assertTrue(q["ok"], q)
+		self.assertEqual(D(q["quote"]["totals"]["total"]), D(room["quote"]["totals"]["total"]))
+		self.assertEqual(D(offer["total"]), D(q["quote"]["totals"]["total"]))
+		self.assertFalse(q["price_changed"])
+
+	def test_the_call_centre_search_shows_what_the_quote_confirms(self):
+		res = crs.search(check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)), rooms=[{"adults": 2, "children": []}],
+		                 market="DE", channel="CALL_CENTER", properties=[fx.PROPERTY])
+		room = self.pick(res["properties"][0]["offers"])["rooms"][0]
+		q = crs.quote(offer_key=room["offer_key"])
+		self.assertTrue(q["ok"], q)
+		self.assertEqual(D(q["quote"]["totals"]["total"]), D(room["quote"]["totals"]["total"]))
+		self.assertFalse(q["price_changed"])
