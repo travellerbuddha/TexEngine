@@ -363,6 +363,24 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 	return doc.name
 
 
+# the points already on a booking, read with locks that each go by an index — the booking, or the charges'
+# names — so they hold this booking's rows only, never every payment of every hotel (O-19 review)
+LOYALTY_ON_BOOKING = """SELECT name FROM `tabTEX Payment Transaction` WHERE booking=%(b)s AND provider='Loyalty'
+                        AND status='Succeeded' AND txn_type='Charge' LOCK IN SHARE MODE"""
+ALLOCATED_TO_BOOKING = """SELECT DISTINCT `transaction` FROM `tabTEX Payment Allocation` WHERE booking=%(b)s
+                          LOCK IN SHARE MODE"""
+LOYALTY_NAMED = """SELECT name FROM `tabTEX Payment Transaction` WHERE name IN %(names)s AND provider='Loyalty'
+                   AND status='Succeeded' AND txn_type='Charge' LOCK IN SHARE MODE"""
+
+
+def loyalty_charges_on(booking: str) -> list[str]:
+	"""The succeeded Loyalty charges of ``booking``: redeemed for it, or allocated to it (name order)."""
+	own = set(frappe.db.sql_list(LOYALTY_ON_BOOKING, {"b": booking}))
+	allocated = frappe.db.sql_list(ALLOCATED_TO_BOOKING, {"b": booking})
+	moved = set(frappe.db.sql_list(LOYALTY_NAMED, {"names": tuple(allocated)})) if allocated else set()
+	return sorted(own | moved)
+
+
 def redeemable(b, pct) -> D:
 	"""O-19 (audit 2B, ADR-065): the most points may still pay of booking ``b`` (locked by the caller):
 	its program's share of its total (``pct``) less the points already on it, and never more than it
@@ -372,12 +390,7 @@ def redeemable(b, pct) -> D:
 
 	ccy = b.currency
 	total, paid = from_db(b.total_amount, ccy), from_db(b.paid_amount, ccy)
-	charges = frappe.db.sql_list("""SELECT name FROM `tabTEX Payment Transaction`
-	                                WHERE provider='Loyalty' AND status='Succeeded' AND txn_type='Charge'
-	                                  AND (booking=%(b)s OR name IN (SELECT `transaction` FROM `tabTEX Payment Allocation`
-	                                                                 WHERE booking=%(b)s))
-	                                ORDER BY name LOCK IN SHARE MODE""", {"b": b.name})
-	on_it = sum((pay.booking_nets(t, lock=True).get(b.name, ZERO) for t in charges), ZERO)
+	on_it = sum((pay.booking_nets(t, lock=True).get(b.name, ZERO) for t in loyalty_charges_on(b.name)), ZERO)
 	return quantize(max(ZERO, min(quantize(total * pct / 100, ccy) - on_it, total - paid)), ccy)
 
 

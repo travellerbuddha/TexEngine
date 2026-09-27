@@ -173,6 +173,16 @@ class TestEarningsAndRedemption(LoyaltyCase):
 		with self.assertRaisesRegex(frappe.ValidationError, r"at most 0\.00 EUR"):
 			loyalty.redeem(guest, full["booking"], 50, idempotency_key="o19-3")
 
+	def test_the_points_on_a_booking_are_read_by_its_indexes(self):
+		"""O-19 review: the locking reads of the points already on a booking go by an index (its booking, or
+		the charges' names), so their shared locks hold this booking's rows only, never every payment of every
+		hotel until the redemption commits."""
+		for sql, values in ((loyalty.LOYALTY_ON_BOOKING, {"b": "BK-O19"}), (loyalty.ALLOCATED_TO_BOOKING, {"b": "BK-O19"}),
+		                    (loyalty.LOYALTY_NAMED, {"names": ("TXN-O19-1", "TXN-O19-2")})):
+			for row in frappe.db.sql("EXPLAIN " + sql, values, as_dict=True):
+				self.assertNotIn(row.type, ("ALL", "index"), (sql, row))
+				self.assertTrue(row.key, (sql, row))
+
 	def test_a_guests_summary_shows_the_viewers_programs_only(self):
 		name = self.create()
 		_b, guest = self.paid_stay("g24-sum")
