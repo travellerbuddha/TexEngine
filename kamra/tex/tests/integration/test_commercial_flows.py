@@ -31,6 +31,47 @@ SLUG = "tex-test-resort"
 GUEST = {"first_name": "Lena", "last_name": "Kraus", "email": "lena@example.com", "country": "Germany"}
 
 
+OTHER_SELLING = "TEX Search Other Hotel"
+
+
+def sellable_other_hotel(f: dict) -> str:
+	"""A second hotel of the test hotel's group, live in TEX, with one room type, one rate plan and a
+	published DE contract: what a search over several hotels prices next to the test hotel."""
+	from kamra.tex.commercial import contracts
+
+	if not frappe.db.exists("Property", OTHER_SELLING):
+		frappe.get_doc({"doctype": "Property", "property_name": OTHER_SELLING, "city": "Side", "country": "Turkey",
+		                "currency": "EUR", "tex_hotel_group": f["group"], "tex_tax_profile": "Custom",
+		                "minimum_nights": 1}).insert(ignore_permissions=True)
+		# sold through TEX, as the test hotel (base_setup)
+		frappe.db.set_value("Property", OTHER_SELLING, "tex_live_from", "2020-01-01 00:00:00")
+	std = fx.ensure("Room Type", {"property": OTHER_SELLING, "room_type_code": "STD"},
+	                {"property": OTHER_SELLING, "room_type_code": "STD", "room_type_name": "Standard Room",
+	                 "base_price": 90, "adults_capacity": 3, "children_capacity": 2, "max_total_occupants": 5,
+	                 "base_occupancy": 2})
+	for i in range(4):
+		fx.ensure("Room", {"property": OTHER_SELLING, "room_number": f"O-STD{i + 1}"},
+		          {"property": OTHER_SELLING, "room_number": f"O-STD{i + 1}", "room_type": std})
+	flex = fx.ensure("Rate Plan", {"property": OTHER_SELLING, "code": "FLEX"},
+	                 {"property": OTHER_SELLING, "code": "FLEX", "rate_plan_name": "Flexible",
+	                  "modifier_type": "Percent", "modifier_value": 0, "tex_refundable": 1})
+	contract = frappe.get_doc({
+		"doctype": "TEX Contract", "property": OTHER_SELLING, "contract_code": "OTHER-DE", "contract_name": "Other DE",
+		"market": "DE", "contract_currency": "EUR", "pricing_basis": "PERSON", "status": "Draft",
+		"sale_from": add_to_date(now_datetime(), days=-30), "sale_to": fx.STAY_TO, "stay_from": fx.STAY_FROM,
+		"stay_to": fx.STAY_TO}).insert(ignore_permissions=True)
+	version = frappe.get_doc({
+		"doctype": "TEX Contract Version", "contract": contract.name, "prices_include_tax": 0,
+		"rooms": [{"room_type": std, "is_base": 1}],
+		"periods": [{"period_code": "ALL", "period_name": "All", "start_date": fx.STAY_FROM, "end_date": fx.STAY_TO}],
+		"period_rates": [{"room_type": std, "period_code": "ALL", "op": "ABSOLUTE", "value": 90}],
+		"age_bands": fx.default_age_bands(), "occupancy_rules": fx.default_occupancy_rules(),
+		"boards": [{"board": "AI", "is_base": 1}], "rate_plans": [{"rate_plan": flex, "refundable": 1}],
+	}).insert(ignore_permissions=True)
+	contracts.publish(version.name)
+	return OTHER_SELLING
+
+
 def setup_site_and_payments(f: dict, **contract) -> dict:
 	fx.create_contract(f, code="PAY", **contract)
 	fx.create_markup("DE", 7)
@@ -1345,6 +1386,27 @@ class TestEffectiveDatedExtrasAndTaxes(TexTestCase):
 		res = public.search(site=SLUG, check_in=str(fx.d(6, 10)), check_out=str(fx.d(6, 13)),
 		                    rooms=[{"adults": 2}], market="DE", session_id="g20-ambiguous")
 		self.assertFalse([o for p in res["properties"] for o in p["offers"]])
+
+	def test_an_ambiguous_catalog_is_read_once_per_hotel_in_a_search(self):
+		"""2D-1 0c: after Y-5 a search read the hotel's ambiguous extras catalog again for every context
+		it priced (contract × room × rate plan × board × party), each time logging an error. It is read
+		once per hotel per search: one log, that hotel's offers stay empty, another hotel still sells."""
+		other = sellable_other_hotel(self.f)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a corrupted catalog
+		clone = frappe.copy_doc(frappe.get_doc("TEX Extra", self.trf))
+		clone.extra_code = "TRF-COPY"
+		clone.insert(ignore_permissions=True)
+		frappe.db.set_value("TEX Extra", clone.name, {"extra_code": "TRF", "tex_status": "Active",
+		                                              "active_from": "2020-01-01"})
+		with mock.patch("frappe.log_error") as log:
+			res = quoting.search(properties=[fx.PROPERTY, other], check_in=str(fx.d(6, 10)),
+			                     check_out=str(fx.d(6, 13)), rooms=[{"adults": 2}, {"adults": 2}], market="DE",
+			                     channel="DIRECT_WEB", currency="EUR")
+		ambiguous = [c for c in log.call_args_list if "ambiguous extras" in str(c.kwargs.get("title", ""))]
+		self.assertEqual(len(ambiguous), 1, log.call_args_list)
+		offers = {p["property"]: p["offers"] for p in res["properties"]}
+		self.assertEqual(offers[fx.PROPERTY], [])
+		self.assertTrue(offers[other])
 
 	def test_a_draft_with_an_audit_trail_can_be_deleted(self):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager drafts, then drops it
