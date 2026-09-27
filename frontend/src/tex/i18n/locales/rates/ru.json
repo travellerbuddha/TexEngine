@@ -860,6 +860,7 @@
  "rates.trigger_help.Code": "Применяется только при вводе кода купона.",
  "rates.v.checkout_after": "Выезд должен быть позже заезда.",
  "rates.v.fix_required": "Сначала заполните обязательные поля.",
+ "rates.v.not_allowed": "Недоступно при других значениях этой формы.",
  "rates.v.range": "Дата окончания раньше даты начала.",
  "rates.v.required": "Обязательно",
  "rates.validation.errors": {

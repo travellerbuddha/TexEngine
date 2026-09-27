@@ -860,6 +860,7 @@
  "rates.trigger_help.Code": "Obowiązuje tylko po wpisaniu kodu kuponu.",
  "rates.v.checkout_after": "Wyjazd musi być po przyjeździe.",
  "rates.v.fix_required": "Najpierw uzupełnij wymagane pola.",
+ "rates.v.not_allowed": "Niedostępne przy pozostałych wyborach w tym formularzu.",
  "rates.v.range": "Data końcowa jest wcześniejsza niż początkowa.",
  "rates.v.required": "Wymagane",
  "rates.validation.errors": {

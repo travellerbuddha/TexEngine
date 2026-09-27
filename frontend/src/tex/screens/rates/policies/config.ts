@@ -21,6 +21,7 @@ import {
   PROMO_KINDS,
   PROMO_STAGE,
   PROMO_VALUE,
+  promoAppliesTo,
   RATE_TYPES,
   STAY_MATCH,
   TAX_CATEGORIES,
@@ -40,6 +41,9 @@ export interface PolicyField {
   required?: boolean
   /** enum values; labels are rates.<group>.<value> */
   options?: readonly string[]
+  /** the enum values the record's other fields allow (default ``options``); another value is
+   *  marked and blocks the save, as the server refuses it */
+  optionsFor?: (d: Doc) => readonly string[]
   group?: string
   source?: Source
   /** i18n key of the "blank" choice for optional selects / links */
@@ -203,7 +207,7 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "free_nights_pay", kind: "int", label: "rates.f.free_nights_pay", showIf: (d) => d.value_type === "FREE_NIGHTS" },
           { key: "value_added", kind: "text", label: "rates.f.value_added", help: "rates.h.value_added", showIf: (d) => d.value_type === "VALUE_ADDED" },
           { key: "stage", kind: "select", label: "rates.f.stage", options: PROMO_STAGE, group: "stage", helpByValue: "rates.stage_help" },
-          { key: "applies_to", kind: "select", label: "rates.f.applies_to", options: APPLIES_TO, group: "applies_to" },
+          { key: "applies_to", kind: "select", label: "rates.f.applies_to", options: APPLIES_TO, optionsFor: promoAppliesTo, group: "applies_to" },
           { key: "property", kind: "property", label: "rates.f.hotel" },
         ],
       },

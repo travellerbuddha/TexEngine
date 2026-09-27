@@ -3,7 +3,10 @@
 Eligibility is evaluated for every candidate and each one is reported as
 ``applied`` or ``rejected`` with a reason. Combination is deterministic:
 
-1. candidates sorted by (priority desc, promo_id);
+1. candidates sorted by (priority desc, promo_id); an eligible promotion the room cannot use
+   (a fixed amount without a rate to the sell currency; on the total or the extras, a value type
+   other than a percentage or a fixed amount, extras that are not there, or a fixed amount on a
+   booking's later room) is refused first, so it never excludes or closes out one it can (O-1);
 2. if any eligible promotion is ``exclusive``, the highest-priority exclusive one is the
    only promotion applied; all others are rejected "excluded by <id>";
 3. otherwise, in order: a promotion in an ``incompatible group`` already used is rejected;
@@ -21,7 +24,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from kamra.tex.money import HUNDRED, ONE, ZERO, D, quantize
-from kamra.tex.pricing.enums import PromoValueType, StackingMode, StayMatch
+from kamra.tex.pricing.enums import PromoAppliesTo, PromoValueType, StackingMode, StayMatch
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import FxSnapshot, Promotion, RuleRef
 
@@ -56,6 +59,11 @@ class PromoContext:
 	# A promotion absent here is compared with ``booking_basket`` (a request recorded before), or
 	# with this room's own basket when the room is priced alone
 	booking_baskets: dict[str, tuple[Decimal, int]] | None = None
+	# the booking's room this is (0: its first) and, at the SELL stage, the room's extras in the sell
+	# currency: what a discount on the total or the extras can use (O-1). None at the COST stage,
+	# which lowers the accommodation's cost only
+	room_index: int = 0
+	extras_total: Decimal | None = None
 	# records the rates a threshold was converted with (G-56); not part of the context's identity
 	fx_log: FxLog | None = field(default=None, compare=False, hash=False)
 
@@ -79,6 +87,10 @@ class PromoOutcome:
 	# COST: a cost-stage offer (it lowers the contract cost: its discount, and a basket it was
 	# compared with, are cost figures, shown only with price.view_cost); SELL otherwise
 	stage: str = "SELL"
+	# how a refusal is explained when it is not PROMO_REJECTED (O-1): PROMO_NO_FX with the pair it
+	# had no rate for, or COUPON_REJECTED; neither is part of the outcome's identity or its dict
+	explain_code: str = field(default="", compare=False)
+	fx_pair: tuple[str, str] | None = field(default=None, compare=False)
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str6
@@ -92,6 +104,8 @@ class PromoOutcome:
 
 
 MIN_BASKET = "MIN_BASKET"
+PROMO_NO_FX = "PROMO_NO_FX"
+COUPON_REJECTED = "COUPON_REJECTED"
 
 
 def promo_ref(p: Promotion) -> RuleRef:
@@ -256,6 +270,8 @@ def select(promos: tuple[Promotion, ...], ctx: PromoContext,
 		if reason:
 			rejected.append(PromoOutcome(p.promo_id, p.name, p.kind, False, reason, source=p.source, code=p.code,
 			                             rule=MIN_BASKET if minimum is not None else "", minimum=minimum))
+		elif refused := unusable(p, ctx):
+			rejected.append(refused)
 		else:
 			eligible.append(p)
 
@@ -328,13 +344,44 @@ def _fixed_in(p: Promotion, currency: str, fx: dict[str, FxSnapshot] | None,
 	return in_currency(p.value, p.currency, currency, fx, log=log, use=f"promotion:{p.promo_id}")
 
 
+BASKET_VALUES = frozenset({PromoValueType.PERCENT, PromoValueType.FIXED_STAY})
+
+
+def unusable(p: Promotion, ctx: PromoContext) -> PromoOutcome | None:
+	"""An eligible promotion this room cannot use (O-1), refused before the combination step with
+	the reason and explanation it was refused with once chosen, in the same order: on the total or the
+	extras (SELL stage), a fixed amount on a booking's later room (G-06, ADR-029) or a value type other
+	than a percentage or a fixed amount for the stay; a fixed amount without a rate to the sell
+	currency (K-1); an extras discount on a room without extras. None when it can be used."""
+	def refused(reason: str, explain_code: str, fx_pair: tuple[str, str] | None = None) -> PromoOutcome:
+		return PromoOutcome(p.promo_id, p.name, p.kind, False, reason, source=p.source, code=p.code,
+		                    explain_code=explain_code, fx_pair=fx_pair)
+
+	basket = ctx.extras_total is not None and p.applies_to != PromoAppliesTo.ACCOMMODATION
+	if basket and ctx.room_index >= 1 and p.value_type != PromoValueType.PERCENT:
+		# a fixed discount on the complete booking (or its extras) is granted once, on room 1; a
+		# percentage is the same share of every room
+		return refused("fixed booking discount granted once per booking, on room 1", COUPON_REJECTED)
+	if basket and p.value_type not in BASKET_VALUES:
+		return refused(f"{p.value_type.value} is not supported on {p.applies_to.value}", COUPON_REJECTED)
+	if p.value_type in FIXED_VALUES and _fixed_in(p, ctx.sell_currency, ctx.fx) is None:
+		return refused(f"no FX to convert {p.currency}", PROMO_NO_FX, (p.currency, ctx.sell_currency))
+	if basket and p.applies_to == PromoAppliesTo.EXTRAS and ctx.extras_total <= ZERO:
+		return refused("nothing to discount", COUPON_REJECTED)
+	return None
+
+
+def _explain_no_fx(explain: Explanation, stage: str, rule: RuleRef, name: str, pair: tuple[str, str]) -> None:
+	explain.add(stage, PROMO_NO_FX,
+	            "{name} not applied: no FX rate {from_currency}→{to_currency} to convert its fixed amount",
+	            rule=rule, name=name, from_currency=pair[0], to_currency=pair[1])
+
+
 def _no_fx(p: Promotion, currency: str, explain: Explanation | None, stage: str) -> PromoOutcome:
 	"""A fixed amount without a rate to the sell currency is not applied: never the raw figure,
-	never zero; the explanation names the missing pair (K-1)."""
+	never zero; the explanation names the missing pair (K-1). ``select`` refuses it first (O-1)."""
 	if explain is not None:
-		explain.add(stage, "PROMO_NO_FX",
-		            "{name} not applied: no FX rate {from_currency}→{to_currency} to convert its fixed amount",
-		            rule=promo_ref(p), name=p.name, from_currency=p.currency, to_currency=currency)
+		_explain_no_fx(explain, stage, promo_ref(p), p.name, (p.currency, currency))
 	return PromoOutcome(p.promo_id, p.name, p.kind, False, f"no FX to convert {p.currency}", source=p.source,
 	                    code=p.code)
 
@@ -408,8 +455,14 @@ def explain_rejections(rejected: list[PromoOutcome], explain: Explanation | None
 	if explain is None:
 		return
 	for r in rejected:
-		explain.add(stage, "PROMO_REJECTED", "{name} not applied: {reason}",
-		            rule=RuleRef("promotion", r.promo_id, None, r.source, r.name), name=r.name, reason=r.reason)
+		rule = RuleRef("promotion", r.promo_id, None, r.source, r.name)
+		if r.explain_code == PROMO_NO_FX:
+			_explain_no_fx(explain, stage, rule, r.name, r.fx_pair)
+		elif r.explain_code == COUPON_REJECTED:
+			explain.add("coupon", COUPON_REJECTED, "{name}: {reason}", rule=rule, name=r.name, reason=r.reason)
+		else:
+			explain.add(stage, "PROMO_REJECTED", "{name} not applied: {reason}", rule=rule, name=r.name,
+			            reason=r.reason)
 
 
 @dataclass

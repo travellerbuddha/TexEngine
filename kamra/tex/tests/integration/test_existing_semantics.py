@@ -38,6 +38,13 @@ every caller, never opt-in, that fail against main by design too:
   and ``max_children`` (``infants_count_as_children`` 0, O-2): main's did. Every other draft (from a
   version, a duplicate, a version inserted directly) keeps counting them.
 
+``TestSaleRuleChanges`` holds those of the audit's Part 2C-2 (ADR-068): a promotion no room could use as
+saved is refused when a draft of it is saved or activated, never when a live one is archived. They fail
+against main by design:
+
+* a discount on the whole booking or its extras other than a percentage or a fixed amount for the
+  stay, or a cost-stage offer on them (O-1): main saved it and the engine refused it on every quote.
+
 Every other test passes against main's code and against this branch's (both were run; the report of
 the change has the output). What the workspace adds is opt-in (``workspace=1``, ``data``,
 ``parties``) and tested in ``test_pricing_workspace_api``.
@@ -518,3 +525,25 @@ class TestPolicyMoneyChanges(ExistingCallerCase):
 			children=json.dumps([8]), check_out=str(fx.d(6, 11)), adults=1))["totals"]["accommodation"])
 		api.save_version(draft, as_json({"infants_count_as_children": 1}))
 		self.assertEqual(plain(self.assert_mains(draft, **kids, adults=1))["totals"]["accommodation"], "150.00")
+
+
+class TestSaleRuleChanges(TexTestCase):
+	"""The deliberate differences from main of the audit's Part 2C-2 (ADR-068): a promotion no room
+	could use as saved is refused on a draft's save and activation. These fail against main by
+	design; a record already live is never refused for them and stays archivable."""
+
+	def promotion(self, **kw) -> dict:
+		from kamra.tex.api import policies
+
+		return policies.save_record("TEX Promotion", {"promotion_name": "2C-2", "property": fx.PROPERTY,
+		                                              "value_type": "PERCENT", "value": 10, **kw})
+
+	def test_a_discount_no_room_could_use_is_refused(self):
+		"""O-1: main saved a multiplier on the whole booking and a cost-stage offer on the extras; every
+		quote then refused it (``MULTIPLIER is not supported on TOTAL``, or a cost discount taken off the
+		accommodation). Now the save is refused; a percentage on them saves as on main."""
+		for kw in ({"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"},
+		           {"stage": "COST", "applies_to": "EXTRAS"}):
+			with self.subTest(**kw), self.assertRaises(frappe.ValidationError):
+				self.promotion(**kw)
+		self.assertEqual(self.promotion(applies_to="TOTAL")["applies_to"], "TOTAL")

@@ -852,6 +852,7 @@
  "rates.trigger_help.Code": "Gilt nur, wenn der Gutscheincode eingegeben wird.",
  "rates.v.checkout_after": "Die Abreise muss nach der Anreise liegen.",
  "rates.v.fix_required": "Bitte zuerst die Pflichtfelder ausfüllen.",
+ "rates.v.not_allowed": "Mit den übrigen Angaben in diesem Formular nicht verfügbar.",
  "rates.v.range": "Das Enddatum liegt vor dem Startdatum.",
  "rates.v.required": "Pflichtfeld",
  "rates.validation.errors": {

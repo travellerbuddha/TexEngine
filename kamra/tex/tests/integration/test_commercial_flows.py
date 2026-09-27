@@ -1527,3 +1527,49 @@ class TestInfantsNotChildren(TexTestCase):
 		frozen = json.loads(frappe.db.get_value("TEX Contract Version", draft, "payload"))
 		self.assertIs(frozen["settings"]["infants_count_as_children"], False)
 		self.assertEqual((self.price(draft, 8), self.price(draft, 8, 1)), (D("200.00"), D("200.00")))
+
+
+class TestPromotionSaveChecks(TexTestCase):
+	"""Part 2C-2 (ADR-068): a promotion no room could use as saved is refused when a draft is saved or
+	activated. A record already live is never refused for it: it stays archivable."""
+
+	def draft(self, **kw) -> str:
+		return policy_api.save_record("TEX Promotion", {
+			"promotion_name": "2C2 promo", "property": fx.PROPERTY, "value_type": "PERCENT", "value": 10, **kw})["name"]
+
+	def assertRefused(self, fn, *args, **kw):
+		with self.assertRaises(frappe.ValidationError):
+			fn(*args, **kw)
+
+	def live(self, **kw) -> str:
+		"""A promotion put live before the check, then given ``kw`` behind the controller's back."""
+		name = self.draft()
+		policy_api.activate("TEX Promotion", name, at=str(add_to_date(now_datetime(), minutes=-1)))
+		frappe.db.set_value("TEX Promotion", name, kw, update_modified=False)
+		return name
+
+	def test_a_discount_on_the_total_or_the_extras_no_room_could_use_is_refused(self):
+		"""O-1: on the total or the extras only a percentage or a fixed amount for the stay is applied,
+		and a cost-stage offer lowers the accommodation's cost only."""
+		for kw in ({"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"},
+		           {"value_type": "FIXED_NIGHT", "value": 10, "currency": "EUR", "applies_to": "TOTAL"},
+		           {"value_type": "FREE_NIGHTS", "free_nights_stay": 3, "free_nights_pay": 2, "applies_to": "EXTRAS"},
+		           {"value_type": "VALUE_ADDED", "value_added": "Spa", "applies_to": "TOTAL"},
+		           {"stage": "COST", "applies_to": "EXTRAS"},
+		           {"stage": "COST", "applies_to": "TOTAL"}):
+			with self.subTest(**kw):
+				self.assertRefused(self.draft, **kw)
+		for kw in ({"applies_to": "TOTAL"}, {"value_type": "FIXED_STAY", "value": 50, "currency": "EUR",
+		                                      "applies_to": "EXTRAS"},
+		           {"value_type": "MULTIPLIER", "value": "0.9"}, {"stage": "COST"}):
+			with self.subTest(**kw):
+				self.assertTrue(self.draft(**kw))
+
+	def test_an_unusable_draft_is_not_activated_and_a_live_one_is_archived(self):
+		name = self.draft()
+		frappe.db.set_value("TEX Promotion", name, {"value_type": "MULTIPLIER", "value": "0.9", "applies_to": "TOTAL"})
+		self.assertRefused(policy_api.activate, "TEX Promotion", name)
+		self.assertEqual(frappe.db.get_value("TEX Promotion", name, "tex_status"), "Draft")
+		old = self.live(stage="COST", applies_to="EXTRAS")
+		policy_api.archive("TEX Promotion", old, reason="2C-2 clean-up")
+		self.assertEqual(frappe.db.get_value("TEX Promotion", old, "tex_status"), "Archived")

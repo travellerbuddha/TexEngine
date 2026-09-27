@@ -852,6 +852,7 @@
  "rates.trigger_help.Code": "Applies only when the coupon code is entered.",
  "rates.v.checkout_after": "Check-out must be after check-in.",
  "rates.v.fix_required": "Fill in the required fields first.",
+ "rates.v.not_allowed": "Not available with the other choices on this form.",
  "rates.v.range": "The end date is before the start date.",
  "rates.v.required": "Required",
  "rates.validation.errors": {

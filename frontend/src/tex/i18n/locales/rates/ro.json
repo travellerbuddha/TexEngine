@@ -855,6 +855,7 @@
  "rates.trigger_help.Code": "Se aplică doar când se introduce codul de cupon.",
  "rates.v.checkout_after": "Plecarea trebuie să fie după sosire.",
  "rates.v.fix_required": "Completați mai întâi câmpurile obligatorii.",
+ "rates.v.not_allowed": "Nu este disponibil cu celelalte opțiuni din acest formular.",
  "rates.v.range": "Data de sfârșit este înaintea datei de început.",
  "rates.v.required": "Obligatoriu",
  "rates.validation.errors": {

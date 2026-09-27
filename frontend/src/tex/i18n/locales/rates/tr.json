@@ -852,6 +852,7 @@
  "rates.trigger_help.Code": "Yalnızca kupon kodu girildiğinde uygulanır.",
  "rates.v.checkout_after": "Çıkış tarihi giriş tarihinden sonra olmalı.",
  "rates.v.fix_required": "Önce zorunlu alanları doldurun.",
+ "rates.v.not_allowed": "Bu formdaki diğer seçimlerle kullanılamaz.",
  "rates.v.range": "Bitiş tarihi başlangıç tarihinden önce.",
  "rates.v.required": "Zorunlu",
  "rates.validation.errors": {

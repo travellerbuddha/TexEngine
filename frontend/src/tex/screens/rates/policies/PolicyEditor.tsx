@@ -201,6 +201,13 @@ export default function PolicyEditor() {
     if (kind.propertyRequired && !doc.property) out.push("property")
     return out
   }, [kind, doc])
+  // a choice the record's other fields no longer allow (``optionsFor``): the server refuses it
+  const invalid = useMemo(() => {
+    if (!kind || !doc) return []
+    return Object.values(fieldKinds(kind))
+      .filter((f) => f.optionsFor && (!f.showIf || f.showIf(doc)) && doc[f.key] && !f.optionsFor(doc).includes(String(doc[f.key])))
+      .map((f) => f.key)
+  }, [kind, doc])
 
   if (!kind)
     return (
@@ -219,7 +226,7 @@ export default function PolicyEditor() {
     // one save at a time (Enter in a field submits the form)
     if (!doc || save.pending) return
     setTouched(true)
-    if (missing.length) {
+    if (missing.length || invalid.length) {
       toast.error(t("rates.v.fix_required"))
       return
     }
@@ -382,7 +389,7 @@ export default function PolicyEditor() {
                   ) : (
                     <FormGrid cols={3}>
                       {visible.map((f) => (
-                        <FieldControl key={f.key} f={f} kind={kind} doc={doc} readOnly={!editable || Boolean(f.readOnly)} lookups={lookups.data} error={touched && missing.includes(f.key) ? t("rates.v.required") : undefined} onChange={(v) => set(f.key, v)} />
+                        <FieldControl key={f.key} f={f} kind={kind} doc={doc} readOnly={!editable || Boolean(f.readOnly)} lookups={lookups.data} error={touched && missing.includes(f.key) ? t("rates.v.required") : invalid.includes(f.key) ? t("rates.v.not_allowed") : undefined} onChange={(v) => set(f.key, v)} />
                       ))}
                     </FormGrid>
                   )}
@@ -496,12 +503,17 @@ function FieldControl({
           <DecimalInput disabled={readOnly} value={String(v ?? "")} onValueChange={onChange} decimals={f.decimals ?? DECIMAL_PLACES} allowNegative={f.allowNegative} suffix={f.suffix?.(doc) || undefined} />
         </Field>
       )
-    case "select":
+    case "select": {
+      const allowed = f.optionsFor?.(doc) ?? f.options ?? []
+      const cur = String(v || "")
+      // a value the other fields no longer allow stays visible, marked, until it is changed
+      const values = cur && !allowed.includes(cur) && (f.options ?? []).includes(cur) ? [...allowed, cur] : allowed
       return (
         <Field {...common}>
-          <Select disabled={readOnly} value={String(v || "")} onChange={(e) => onChange(e.target.value)} options={enumOptions(t, f.group ?? "", f.options ?? [])} placeholder={f.required ? undefined : t(f.blank ?? "rates.common.none")} />
+          <Select disabled={readOnly} value={cur} onChange={(e) => onChange(e.target.value)} options={enumOptions(t, f.group ?? "", values)} placeholder={f.required ? undefined : t(f.blank ?? "rates.common.none")} />
         </Field>
       )
+    }
     case "link": {
       const opts = sourceOptions(t, f.source, boot, lookups, doc)
       const cur = String(v || "")

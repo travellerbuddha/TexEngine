@@ -4,9 +4,17 @@ import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from kamra.tex.pricing import extras, promotions
-from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, PromoValueType, StackingMode, StayMatch
+from kamra.tex.pricing import engine, extras, promotions
+from kamra.tex.pricing.enums import (
+	ExtraPricingMode,
+	FxMode,
+	PromoAppliesTo,
+	PromoValueType,
+	StackingMode,
+	StayMatch,
+)
 from kamra.tex.pricing.model import ExtraDef, ExtraPriceRule, ExtraRequest, FxSnapshot, Promotion
+from kamra.tex.tests.unit import fixtures
 
 D = Decimal
 CI, CO = date(2027, 7, 10), date(2027, 7, 17)
@@ -137,6 +145,85 @@ class TestCombination(unittest.TestCase):
 			amounts("100"), pctx(), StackingMode.SEQUENTIAL, "EUR")
 		self.assertEqual(out[0].value_added, "Free spa")
 		self.assertEqual(res[NIGHTS[0]], D("85.00"))
+
+
+class TestUnusableNeverWins(unittest.TestCase):
+	"""O-1: a promotion the room cannot use is refused before the combination step, so it never
+	excludes or closes out one it can. 2 adults, STD, 3 nights: 600.00 EUR; EB10 alone 540.00."""
+
+	EB10 = P("EB10", priority=1)
+
+	def price(self, other, *, codes=("X",), extras_=(), ctx_kw=None, **req):
+		ctx = fixtures.ctx(**{"promotions": (self.EB10, other), **(ctx_kw or {})})
+		return engine.price_stay(ctx, fixtures.req(check_out=date(2027, 6, 5), promo_codes=codes, extras=extras_,
+		                                           **req))
+
+	def assertEb10Wins(self, q, reason, code, *, total="540.00", other="X"):
+		self.assertTrue(q.sellable, q.reasons)
+		self.assertEqual(q.totals["accommodation"], D(total))
+		out = {o.promo_id: o for o in q.promotions}
+		self.assertTrue(out["EB10"].applied, out["EB10"].reason)
+		self.assertFalse(out[other].applied)
+		self.assertEqual(out[other].reason, reason)
+		steps = [s for s in q.explanation.to_list() if (s["rule"] or {}).get("rule_id") == other]
+		self.assertEqual([s["code"] for s in steps], [code], q.explanation.summary_lines())
+
+	def test_an_exclusive_fixed_amount_without_a_rate(self):
+		q = self.price(P("X", PromoValueType.FIXED_STAY, "100", currency="USD", exclusive=True))
+		self.assertEb10Wins(q, "no FX to convert USD", "PROMO_NO_FX")
+
+	def test_a_non_combinable_fixed_night_amount_without_a_rate(self):
+		q = self.price(P("X", PromoValueType.FIXED_NIGHT, "10", currency="USD", stackable=False, priority=9))
+		self.assertEb10Wins(q, "no FX to convert USD", "PROMO_NO_FX")
+
+	def test_a_contract_offer_in_eur_sold_in_try_without_a_promotion_rate(self):
+		"""K-1: 30,600 TRY (600 EUR at 51); EB10 is 10 % of it."""
+		k1 = Promotion("X", "Early booking", PromoValueType.FIXED_STAY, D("50"), currency="EUR", exclusive=True,
+		               source="contract")
+		eur_try = FxSnapshot("EUR", "TRY", FxMode.MANUAL, D("51"))
+		q = self.price(k1, codes=(), sell_currency="TRY", ctx_kw={"fx": eur_try})
+		self.assertEqual(q.totals["accommodation_gross"], D("30600.00"))
+		self.assertEb10Wins(q, "no FX to convert EUR", "PROMO_NO_FX",
+		                    total=str(q.totals["accommodation_gross"] * D("0.9")))
+
+	def test_a_multiplier_on_the_total(self):
+		q = self.price(P("X", PromoValueType.MULTIPLIER, "0.5", code="X", exclusive=True,
+		                 applies_to=PromoAppliesTo.TOTAL))
+		self.assertEb10Wins(q, "MULTIPLIER is not supported on TOTAL", "COUPON_REJECTED")
+
+	def test_a_fixed_night_amount_on_the_total(self):
+		q = self.price(P("X", PromoValueType.FIXED_NIGHT, "10", code="X", exclusive=True,
+		                 applies_to=PromoAppliesTo.TOTAL))
+		self.assertEb10Wins(q, "FIXED_NIGHT is not supported on TOTAL", "COUPON_REJECTED")
+
+	def test_free_nights_on_the_extras(self):
+		q = self.price(P("X", PromoValueType.FREE_NIGHTS, "0", code="X", exclusive=True, free_nights_stay=3,
+		                 free_nights_pay=2, applies_to=PromoAppliesTo.EXTRAS))
+		self.assertEb10Wins(q, "FREE_NIGHTS is not supported on EXTRAS", "COUPON_REJECTED")
+
+	def test_an_extras_code_without_extras(self):
+		q = self.price(P("X", code="X", exclusive=True, applies_to=PromoAppliesTo.EXTRAS))
+		self.assertEb10Wins(q, "nothing to discount", "COUPON_REJECTED")
+
+	def test_a_non_combinable_fixed_total_code_on_the_second_room(self):
+		q = self.price(P("X", PromoValueType.FIXED_STAY, "50", code="X", currency="EUR", stackable=False,
+		                 priority=9, applies_to=PromoAppliesTo.TOTAL), room_index=1)
+		self.assertEb10Wins(q, "fixed booking discount granted once per booking, on room 1", "COUPON_REJECTED")
+
+	def test_usable_ones_are_unchanged(self):
+		"""On room 1, with the rate and extras there: the other promotion wins as before."""
+		first = self.price(P("X", PromoValueType.FIXED_STAY, "50", code="X", currency="EUR", stackable=False,
+		                     priority=9, applies_to=PromoAppliesTo.TOTAL))
+		self.assertEqual({o.promo_id: o.applied for o in first.promotions}, {"X": True, "EB10": False})
+		self.assertEqual(first.totals["subtotal"], D("550.00"))
+		usd = FxSnapshot("USD", "EUR", FxMode.MANUAL, D("0.9"))
+		fixed = self.price(P("X", PromoValueType.FIXED_STAY, "100", currency="USD", exclusive=True),
+		                   ctx_kw={"promo_fx": {"USD": usd}})
+		self.assertEqual(fixed.totals["accommodation"], D("510.00"))
+		cot = ExtraDef("COT", "Baby cot", ExtraPricingMode.ROOM, "EUR", D("15"))
+		extra = self.price(P("X", value="20", code="X", exclusive=True, applies_to=PromoAppliesTo.EXTRAS),
+		                   extras_=(ExtraRequest("COT"),), ctx_kw={"extras": {"COT": cot}})
+		self.assertEqual((extra.totals["accommodation"], extra.totals["discounts"]), (D("600.00"), D("3.00")))
 
 
 def xctx(**kw):
