@@ -55,6 +55,8 @@ export interface VersionRow {
   change_note: string | null
   payload_hash: string | null
   based_on: string | null
+  /** published, not yet selling (withdrawing it cancels it; the version before keeps selling) */
+  scheduled?: boolean
 }
 
 export interface ContractBundle {

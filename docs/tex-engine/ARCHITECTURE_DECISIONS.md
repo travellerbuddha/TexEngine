@@ -9270,12 +9270,29 @@ the versions the roll superseded the state their contract's later publishes woul
   or FIXED_STAY, an extras discount without extras, a fixed booking discount on a later room (COUPON_REJECTED), with the
   reasons the apply step gave. Everything else is unchanged (parity corpus). The save refuses those type/scope pairs and a
   cost-stage offer that is not on the accommodation.
-- *Group rule (D-3).* Of one group the highest priority applies, on equal priority the lowest id (the older promotion), not
-  the better offer; texts say so in 6 languages; save and activation warn (`_warnings`, PROMO_GROUP_TIE) on a live tie.
+- *Group rule (D-3).* Highest priority first; on a tie the lowest id: of hotel promotions the older (PRM-), of contract offers
+  the code first alphabetically; never "the better offer". A member refused by stacking leaves the group open. Save/activation
+  warn on a live tie (PROMO_GROUP_TIE). A booking-level exclusive code excludes the others only on rooms that can use it (O-1).
 - *Minimum basket (D-18).* Accommodation before discounts plus extras, of the booking's rooms it covers, in the promotion's
-  currency; a minimum requires that currency.
+  currency; a minimum requires that currency. *Members only (G-57):* refused until a sale carries a membership signal.
 - *Codes (O-31).* Compared by `code_key` (İ and ı are I); p60 rewrites stored codes and reports clashes, never payloads.
-- *Members only (G-57).* Refused until a sale carries a membership signal.
 - *Markups (G-53).* A REPLACE markup tying a live one (scope, priority, stay dates) is refused on activation (serialised);
   publishing from the contract page runs the workspace's board checks. `level()` and server defaults are unchanged.
 - New save refusals apply to drafts and activations only; a live record stays archivable. ENGINE_VERSION, schema unchanged.
+
+## ADR-069 Contract lifecycle, FX fallback and draft editing (audit Part 2D-1)
+- *Withdraw (Y-2).* A live version ends now (never later than it already ended); a scheduled one gives the versions it cut
+  short their window back (up to the next later start, else open). The live version is recomputed; no payload or hash moves.
+- *Quotes (O-13).* Lock order quote → contract → version. Withdraw locks the version's open, unexpired quotes (`FOR UPDATE`;
+  the locks follow p69's index scan, `ORDER BY name` only sorts the result) and marks them Expired ("no longer on sale"); a
+  quote saved meanwhile re-reads its version `LOCK IN SHARE MODE` and is refused when Withdrawn. That share lock makes a
+  publish, a withdraw or the roll wait for the quote requests in flight (short; accepted). Ops check `contracts.live`.
+- *Draft token (O-10).* `save_version(expected_modified=…)` locks the draft row and compares `modified`; a mismatch raises
+  `DraftChanged` (a `TimestampMismatchError`) naming who and when, nothing applied. No token: as before. The editor sends it.
+  The ARI grid takes no token: it applies its change to the current draft, and grid against grid Frappe already refuses.
+- *Grid rate edits (O-9, G-47).* Pure `pricing/ratesplit.py` plans, `commercial/grid.py` writes the draft. Edited nights =
+  range ∩ weekdays; parts = longest runs of consecutive edited nights one period prices; a night without one is refused. A
+  period pricing edited nights only is edited in place (selected rooms → ABSOLUTE); else one clone per part over first..last,
+  weekdays = mask ∩ the period's, priority = max(period + 100, each same-kind period it overlaps + 1): never a tie. Rules and
+  units as before. Validated before and after; an edit adding an ERROR is refused (savepoint). Response keys unchanged.
+- *FX fallback.* Part 2D-2 adds it here. ENGINE_VERSION, schema and the parity corpus are unchanged.

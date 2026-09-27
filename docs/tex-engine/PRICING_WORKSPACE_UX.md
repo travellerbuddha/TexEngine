@@ -977,7 +977,7 @@ Test files:
 
 **Out of scope (deliberately)**
 - Any change to pricing semantics, ops, precedence or the payload; autosave of versions; a server-side "base room" (GAP-11); per-band board child % (GAP-9).
-- Optimistic concurrency between users on `save_version` (last writer wins remains; a future `expected_modified`).
+- ~~Optimistic concurrency between users on `save_version`~~ — done in audit Part 2D-1 (O-10, ADR-069): the editor saves with `expected_modified` (the draft's `modified` as it read it); a draft changed since (another editor, an ARI grid rate change) is refused with `DraftChanged` and the editor offers a reload. Callers without the token still save as before.
 - Reordering the engine's pipeline to match the owner's stage list (the ladder shows the real order instead).
 - Refactoring AriGrid/ExtrasGrid onto the new grid hook (later cleanup).
 - CSV import/export of the matrix; full localisation of every explanation code (templates are added where cheap; band codes are always mapped).

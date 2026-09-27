@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import frappe
-from frappe.utils import cint, get_datetime, now_datetime
+from frappe.utils import cint, get_datetime, getdate, now_datetime
 
 from kamra.tex.ops import checks as C
 from kamra.tex.security.audit import log_exception
@@ -366,6 +366,41 @@ def _fx(props, now) -> dict:
 	return out
 
 
+def _contracts_live(props, now) -> dict:
+	"""Y-2 (2D-1): the Active contracts that should sell now and what their versions say
+	(``checks.contracts_live_check``). A contract should sell when its sale window includes today and its
+	stays are not over. Its dates are compared in Python, never by a date filter: an empty ``sale_from``
+	is "since always", an empty ``sale_to`` or ``stay_to`` "for ever" (NEW-1, ADR-064)."""
+	from kamra.tex.pricing import versions
+
+	filters: dict = {"status": "Active"}
+	if props is not None:
+		filters["property"] = ("in", sorted(props) or [""])
+	today = now.date()
+	due = [c for c in frappe.get_all("TEX Contract", filters=filters,
+	                                 fields=["name", "property", "sale_from", "sale_to", "stay_to"])
+	       if (not c.sale_from or getdate(c.sale_from) <= today) and (not c.sale_to or getdate(c.sale_to) >= today)
+	       and (not c.stay_to or getdate(c.stay_to) >= today)]
+	headers: dict[str, list] = {}
+	if due:
+		for v in frappe.get_all("TEX Contract Version",
+		                        filters={"contract": ("in", [c.name for c in due]),
+		                                 "status": ("in", list(versions.SELLABLE_HISTORY))},
+		                        fields=["contract", "name", "version_no", "status", "effective_from", "active_to"]):
+			headers.setdefault(v.contract, []).append(versions.VersionHeader(
+				v.name, int(v.version_no or 0), v.status, get_datetime(v.effective_from) if v.effective_from else None,
+				get_datetime(v.active_to) if v.active_to else None))
+	rows = []
+	for c in due:
+		hs = headers.get(c.name, [])
+		live = versions.active_version(hs, now)
+		ends = live.active_to if live else None
+		later = [h.effective_from for h in hs if h.status == "Published" and h.effective_from and h.effective_from > now]
+		rows.append({"property": c.property, "live": live is not None, "live_ends": ends,
+		             "handover": bool(ends and versions.active_version(hs, ends)), "next_start": min(later, default=None)})
+	return C.contracts_live_check(rows, now)
+
+
 def outgoing_account() -> bool:
 	return bool(frappe.db.exists("Email Account", {"enable_outgoing": 1, "default_outgoing": 1}))
 
@@ -408,6 +443,7 @@ HOTEL_PROBES = (
 	("holds.overdue", _overdue_holds),
 	("fx.rates", _fx), ("mail.account", _mail_account),
 	("mail.delivery", _mail_delivery),
+	("contracts.live", _contracts_live),
 )
 
 

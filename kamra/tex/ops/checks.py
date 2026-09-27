@@ -81,6 +81,10 @@ MAIL_UNSENT_FAIL_MINUTES = 240
 # rows older than this are not looked at (Frappe clears its e-mail queue after ~31 days)
 MAIL_WINDOW_DAYS = 7
 
+# a contract that should sell and has no version on sale is a failure unless one starts within this;
+# the version on sale ending within it with nothing after is a warning (Y-2, 2D-1)
+CONTRACT_START_WARN_DAYS = 7
+
 # ─── texts ───────────────────────────────────────────────────────────────
 
 TITLES: dict[str, str] = {
@@ -103,6 +107,7 @@ TITLES: dict[str, str] = {
 	"mail.account": "Outgoing e-mail account",
 	"mail.delivery": "Guest e-mail delivery",
 	"mail.queue": "E-mail queue",
+	"contracts.live": "Contracts on sale",
 }
 
 OK_DETAIL = "No problems found."
@@ -154,6 +159,12 @@ REASONS: dict[str, str] = {
 	"mail_suspended": "Sending e-mail is suspended on this site.",
 	"mail_failed": "{count} e-mail(s) failed in the last {hours} hours.",
 	"mail_unsent": "{count} e-mail(s) are still unsent; the oldest has waited {minutes} minutes.",
+	"contract_not_selling": "{count} active contract(s) within their sale window have no version on sale and none "
+	                        "starting within {days} days: they sell nothing.",
+	"contract_starts_soon": "{count} active contract(s) within their sale window have no version on sale; one starts "
+	                        "within {days} days.",
+	"contract_ends_soon": "{count} contract(s) stop selling within {days} days: their version on sale ends and no "
+	                      "version starts then.",
 	"check_error": "This check could not run (see the Error Log).",
 }
 
@@ -395,6 +406,27 @@ def fx_check(pairs: list[dict], today: date, properties: Iterable[str] = ()) -> 
 		elif business_days(p["rate_date"], today) > FX_WARN_BUSINESS_DAYS:
 			issues.append(issue("fx_old", WARN, days=days, max_days=max_days, **base))
 	return make("fx.rates", issues, scope="hotel", properties=properties, count=len(issues))
+
+
+def contracts_live_check(rows: list[dict], now: datetime) -> dict:
+	"""Y-2 (2D-1): the Active contracts whose sale window includes today and whose stays are not over,
+	one row each: {"property", "live": a version on sale now, "live_ends": when it ends (None:
+	open-ended), "handover": a version sells from that moment, "next_start": the earliest published
+	version starting later}. FAIL: none on sale and none starting within ``CONTRACT_START_WARN_DAYS``;
+	WARN: none on sale but one starts within it, or the one on sale ends within it and nothing sells
+	from then (data a withdraw broke before 2D-1). Counts and hotels only."""
+	soon = now + timedelta(days=CONTRACT_START_WARN_DAYS)
+	kinds: dict[str, list[str]] = {"contract_not_selling": [], "contract_starts_soon": [], "contract_ends_soon": []}
+	for r in rows:
+		if not r["live"]:
+			starts = r.get("next_start")
+			kinds["contract_starts_soon" if starts is not None and starts <= soon else "contract_not_selling"].append(
+				r["property"])
+		elif r.get("live_ends") is not None and r["live_ends"] <= soon and not r.get("handover"):
+			kinds["contract_ends_soon"].append(r["property"])
+	level = {"contract_not_selling": FAIL, "contract_starts_soon": WARN, "contract_ends_soon": WARN}
+	issues = [issue(k, level[k], count=len(v), days=CONTRACT_START_WARN_DAYS) for k, v in kinds.items() if v]
+	return make("contracts.live", issues, scope="hotel", properties={p for v in kinds.values() for p in v})
 
 
 def mail_account_check(*, has_account: bool, suspended: bool, production: bool) -> dict:
