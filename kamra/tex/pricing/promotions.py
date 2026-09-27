@@ -113,12 +113,19 @@ COUPON_REJECTED = "COUPON_REJECTED"
 
 def code_key(code: str | None) -> str | None:
 	"""What a promotion code is compared by (O-31): NFC, trimmed, the Turkish dotted İ and dotless ı
-	as I, upper-cased, and a combining dot above an I dropped (a lower-case i with a dot, upper-cased).
-	Ş, Ğ, Ü, Ö, Ç stay letters of their own. Idempotent; None when blank."""
+	as I, upper-cased, and a combining dot above an I dropped (a lower-case i with a dot, upper-cased),
+	repeated until nothing changes. Ş, Ğ, Ü, Ö, Ç stay letters of their own. Idempotent; None when blank."""
 	if code is None:
 		return None
-	key = unicodedata.normalize("NFC", str(code).strip()).replace("İ", "I").replace("ı", "I").upper()
-	return unicodedata.normalize("NFC", key.replace("I\u0307", "I")) or None
+	key = unicodedata.normalize("NFC", str(code).strip())
+	# to a fixed point: stacked dots above (İ + U+0307 …) turn back into İ under NFC, one per pass (2D-1)
+	for _pass in range(len(key) + 2):             # a changing pass drops a mark (or upper-cases once)
+		step = unicodedata.normalize(
+			"NFC", key.replace("İ", "I").replace("ı", "I").upper().replace("I\u0307", "I"))
+		if step == key:
+			break
+		key = step
+	return key or None
 
 
 def promo_ref(p: Promotion) -> RuleRef:

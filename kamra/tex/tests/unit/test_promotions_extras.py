@@ -298,6 +298,14 @@ class TestCodeKey(unittest.TestCase):
 		for blank in (None, "", "   "):
 			self.assertIsNone(promotions.code_key(blank))
 
+	def test_idempotent_on_stacked_combining_marks(self):
+		"""2D-1 0d: a fuzz found "İ̇̇i" → "İI" → "II"; stacked dots above an I (or an İ) are all dropped."""
+		for s in ("İ\u0307\u0307i", "i\u0307\u0307\u0307", "ı\u0307", "I\u0307\u0307", "wİ\u0307nter", "İ\u0307\u0323"):
+			with self.subTest(s=s):
+				key = promotions.code_key(s)
+				self.assertEqual(promotions.code_key(key), key)
+		self.assertEqual(promotions.code_key("İ\u0307\u0307i"), "II")
+
 	def price(self, typed: str, stored: str):
 		promo = P("WIN", code=stored)
 		q = engine.price_stay(fixtures.ctx(promotions=(promo,)),
