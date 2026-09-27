@@ -1498,3 +1498,8 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-32 **COMPLETE**: Call Center shortcuts (`crs/lib/shortcuts.ts`): on a Mac ⌃⌥ always, ⌥ alone not where it types a character in a field; elsewhere Alt without Ctrl/Meta/AltGr; labels ⌃⌥ on a Mac · unit `callcenter-shortcuts`, e2e `crs` O-32.
 - O-29 **COMPLETE**: CRS search, quote and quote summary apply only the latest request's answer · e2e `crs-actions` O-29 (summary and search races).
 - O-30 **COMPLETE**: checkout books the quotes it just made again (older than 25 min), with a new idempotency key · e2e `booking` O-30.
+
+## 6E1. Audit Part 2E-1 (2026-09-27)
+
+- Y-3 B **COMPLETE**: a fixed deposit or penalty is converted from its policy's currency at the quote's recorded rate (a snapshot without one keeps the amount), taken once per booking, never above the stored price; the fee's basis says `fx`; offers write the policy's own currency (ADR-067) · `TestPolicyCurrency`, `test_existing_semantics.TestPolicyMoneyChanges`, unit `policy-currency`.
+- NEW-6 **COMPLETE**: `start_payment` commits the charge with a checkout lease (p68) before the gateway call and records its answer after, so no row, gap or series lock is held through it; `PaymentBusy` for a second start (ADR-066) · `test_hold_payment_race.TestNoLockHeldThroughTheGateway`, `TestGuestPayment`, `test_patches` p68.
