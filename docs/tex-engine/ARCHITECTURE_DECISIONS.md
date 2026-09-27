@@ -9240,11 +9240,13 @@ the versions the roll superseded the state their contract's later publishes woul
 ## ADR-069 Contract lifecycle, FX fallback and draft editing (audit Part 2D-1)
 - *Withdraw (Y-2).* A live version ends now (never later than it already ended); a scheduled one gives the versions it cut
   short their window back (up to the next later start, else open). The live version is recomputed; no payload or hash moves.
-- *Quotes (O-13).* Lock order quote → contract → version. Withdraw locks the version's open, unexpired quotes (`FOR UPDATE`,
-  by name) and marks them Expired ("no longer on sale"); a quote saved meanwhile re-reads its version `LOCK IN SHARE MODE`
-  and is refused when Withdrawn. p69 indexes `(contract_version, status, expires_at)`. Ops check `contracts.live` per hotel.
+- *Quotes (O-13).* Lock order quote → contract → version. Withdraw locks the version's open, unexpired quotes (`FOR UPDATE`;
+  the locks follow p69's index scan, `ORDER BY name` only sorts the result) and marks them Expired ("no longer on sale"); a
+  quote saved meanwhile re-reads its version `LOCK IN SHARE MODE` and is refused when Withdrawn. That share lock makes a
+  publish, a withdraw or the roll wait for the quote requests in flight (short; accepted). Ops check `contracts.live`.
 - *Draft token (O-10).* `save_version(expected_modified=…)` locks the draft row and compares `modified`; a mismatch raises
   `DraftChanged` (a `TimestampMismatchError`) naming who and when, nothing applied. No token: as before. The editor sends it.
+  The ARI grid takes no token: it applies its change to the current draft, and grid against grid Frappe already refuses.
 - *Grid rate edits (O-9, G-47).* Pure `pricing/ratesplit.py` plans, `commercial/grid.py` writes the draft. Edited nights =
   range ∩ weekdays; parts = longest runs of consecutive edited nights one period prices; a night without one is refused. A
   period pricing edited nights only is edited in place (selected rooms → ABSOLUTE); else one clone per part over first..last,
