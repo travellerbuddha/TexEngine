@@ -502,3 +502,18 @@ class TestRefundableIssues(unittest.TestCase):
 		             RatePlanTerms("FLEX", "Flexible", refundable=True)):
 			with self.subTest(plan=plan):
 				self.assertEqual(self.issues(plan), [])
+
+
+class TestPlanIssueRefs(unittest.TestCase):
+	"""O-2b: RATE_PLAN_REFUNDABLE and POLICY_CURRENCY name their rate plan in the workspace's ``ref``
+	(D9), so the editor lists them under that rate plan's row; the message and main's keys are as before."""
+
+	def test_the_issue_names_its_rate_plan(self):
+		plan = RatePlanTerms("FLEX", "Flexible", refundable=True, cancellation_policy=NRF_POLICY,
+		                     payment_policy={"id": "P", "name": "100 now", "deposit_type": "FIXED",
+		                                     "deposit_value": "100", "currency": "TRY"})
+		issues = {i.code: i for i in validate.validate_terms(with_plan(plan))}
+		for code in ("RATE_PLAN_REFUNDABLE", "POLICY_CURRENCY"):
+			with self.subTest(code=code):
+				self.assertEqual(issues[code].ref, {"rate_plan": "FLEX"})
+				self.assertEqual(set(issues[code].to_dict()), {"level", "code", "message"})

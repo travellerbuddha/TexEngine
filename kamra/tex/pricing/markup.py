@@ -6,8 +6,8 @@ Resolution per night:
 * REPLACE rules: the most specific matching rule wins. Specificity weights are
   unique powers of two - property 1, market 2, contract 4, room 8, stay dates 16,
   channel 32 - so two different scopes can never tie; ``priority`` then rule id
-  break ties between rules of the *same* scope (a configuration smell the admin UI
-  flags).
+  break ties between rules of the *same* scope (a configuration smell: equal priorities
+  are refused on activation, ``same_scope_ties``, G-53).
 * STACK rules: every matching STACK rule is applied on top of the REPLACE result, in
   ascending specificity - never hidden, always listed in the explanation.
 * No matching rule → selling price = contract price (explicitly explained).
@@ -95,6 +95,27 @@ def resolve(rules: tuple[MarkupRule, ...], scope: MarkupScope, night: date
 	               key=lambda r: (weight(r), r.priority, r.rule_id))
 	winner = replace[0] if replace else None
 	return winner, stack, replace[1:]
+
+
+def _scope_key(rule: MarkupRule) -> tuple:
+	return (rule.property or None, rule.market or None, rule.contract or None, rule.room_type or None,
+	        rule.channel or None, bool(rule.stay_from or rule.stay_to))
+
+
+def same_scope_ties(rules) -> list[tuple[MarkupRule, MarkupRule]]:
+	"""The pairs of REPLACE rules that tie (G-53), by rule id: the same hotel, market, contract, room
+	and channel, the same priority, both with stay dates or both without, and stay dates that meet (an
+	empty date is an open end). ``resolve`` takes the higher rule id of such a pair (the newer one)
+	silently: the activation refuses it instead."""
+	reps = sorted((r for r in rules if r.combine == MarkupCombine.REPLACE), key=lambda r: r.rule_id)
+	out = []
+	for i, a in enumerate(reps):
+		for b in reps[i + 1:]:
+			if (_scope_key(a) == _scope_key(b) and a.priority == b.priority
+			        and max(a.stay_from or date.min, b.stay_from or date.min)
+			        <= min(a.stay_to or date.max, b.stay_to or date.max)):
+				out.append((a, b))
+	return out
 
 
 def _apply(rule: MarkupRule, amount: Decimal, scope: MarkupScope) -> Decimal:

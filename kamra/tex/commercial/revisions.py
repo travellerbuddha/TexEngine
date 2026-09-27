@@ -18,8 +18,8 @@ REVISION_META = ("tex_status", "active_from", "active_to", "revision_no", "revis
 REVISIONED = frozenset({"TEX Markup Rule", "TEX Promotion", "TEX FX Policy", "TEX Pricing Policy", "TEX Extra",
                         "TEX Tax Policy"})
 # activations checked against every live record of the DocType (one live pricing policy per
-# scope): they run one at a time (``_serialise_activations``)
-SERIAL_ACTIVATION = frozenset({"TEX Pricing Policy"})
+# scope, no two markups that tie: G-53): they run one at a time (``_serialise_activations``)
+SERIAL_ACTIVATION = frozenset({"TEX Pricing Policy", "TEX Markup Rule"})
 
 
 def _check_doctype(doctype: str) -> None:

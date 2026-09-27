@@ -264,7 +264,7 @@ export default function ContractDetail() {
             onDone={(v) => navigate(editorLink(v))}
           />
           {publishing && (
-            <PublishDialog open onClose={() => setPublishing(null)} version={publishing} contractCode={c.contract_code} onDone={q.reload} />
+            <PublishDialog open onClose={() => setPublishing(null)} version={publishing} contractCode={c.contract_code} workspace onDone={q.reload} />
           )}
           {withdrawing && <WithdrawDialog open onClose={() => setWithdrawing(null)} version={withdrawing} onDone={q.reload} />}
         </>

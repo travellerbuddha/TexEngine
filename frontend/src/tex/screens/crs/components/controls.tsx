@@ -4,6 +4,7 @@ import { useState, type InputHTMLAttributes, type ReactNode } from "react"
 import { ChevronRight, Minus, Plus, X } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
+import { normalisePromoCode } from "../lib/promoCode"
 
 const BOX =
   "rounded-lg border border-zinc-300 bg-white text-sm text-zinc-900 shadow-sm transition-colors hover:border-zinc-400 " +
@@ -82,7 +83,7 @@ export function CodeChips({
   const { t } = useTexT()
   const [draft, setDraft] = useState("")
   const add = () => {
-    const c = draft.trim().toUpperCase()
+    const c = normalisePromoCode(draft)
     if (c && !value.includes(c)) onChange([...value, c])
     setDraft("")
   }
@@ -105,7 +106,7 @@ export function CodeChips({
         value={draft}
         autoComplete="off"
         spellCheck={false}
-        onChange={(e) => setDraft(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""))}
+        onChange={(e) => setDraft(normalisePromoCode(e.target.value))}
         onKeyDown={(e) => {
           if ((e.key === "Enter" || e.key === "," || e.key === " ") && draft.trim()) {
             e.preventDefault()

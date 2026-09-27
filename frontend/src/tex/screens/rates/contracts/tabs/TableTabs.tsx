@@ -6,7 +6,7 @@ import { BOARDS, enumLabel, enumOptions, OCC_TARGETS, OPS_ADJ, OPS_BOARD, OPS_OC
 import { NEW_ROW } from "../../lib/tables"
 import type { Row } from "../../lib/types"
 import { intVal, splitCsv, WEEKDAY_CODES, weekdayName, yearsToMonths } from "../../lib/util"
-import { withPlanRefundable } from "../../workspace/rows.ts"
+import { planRowIssues, withPlanRefundable } from "../../workspace/rows.ts"
 import { bandOptions, contractRoomOptions, periodOptions, roomOptions, TabIntro, TabIssues, type TabProps } from "./shared"
 
 // ─── Rooms ────────────────────────────────────────────────────────────────
@@ -350,7 +350,7 @@ export function RatePlansTab({ doc, state, readOnly, issues, setTable, lookups }
         readOnly={readOnly}
         rows={rows}
         // a row's refundable flag follows the rate plan and cancellation policy chosen for it (Y-4)
-        onChange={(r) => setTable("rate_plans", withPlanRefundable(rows, r, doc.rate_plan_options, lookups?.cancellation_policies ?? []))}
+        onChange={(r) => setTable("rate_plans", withPlanRefundable(rows, r, lookups?.rate_plans ?? doc.rate_plan_options, lookups?.cancellation_policies ?? []))}
         newRow={NEW_ROW.rate_plans}
         addLabel={t("rates.plans.add")}
         emptyText={t("rates.plans.empty")}
@@ -384,10 +384,24 @@ export function RatePlansTab({ doc, state, readOnly, issues, setTable, lookups }
             className: "min-w-40",
           },
         ]}
+        // a rate plan's own issues (refundable flag, policy currency) are marked and listed on its row
+        rowTone={(r) => planRowIssues(issues, r.rate_plan).tone}
         describe={(r) => {
           if (!r.rate_plan) return null
           const adj = r.op ? t("rates.plans.desc_adj", { op: opText(String(r.op), String(r.value || "0")) }) : t("rates.plans.desc_same")
-          return `${planName(String(r.rate_plan))}: ${adj} · ${r.refundable ? t("rates.f.refundable") : t("rates.plans.non_refundable")}`
+          const text = `${planName(String(r.rate_plan))}: ${adj} · ${r.refundable ? t("rates.f.refundable") : t("rates.plans.non_refundable")}`
+          const own = planRowIssues(issues, r.rate_plan).issues
+          if (!own.length) return text
+          return (
+            <>
+              {text}
+              {own.map((i) => (
+                <span key={`${i.code}:${i.message}`} className={i.level === "ERROR" ? "block text-rose-700" : "block text-amber-700"}>
+                  {i.message}
+                </span>
+              ))}
+            </>
+          )
         }}
       />
     </div>

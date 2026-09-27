@@ -2,17 +2,31 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 from kamra.tex.commercial.revisions import block_delete, guard_revisioned
 from kamra.tex.money import D
+from kamra.tex.pricing.promotions import code_key
+
+# what a discount on the total or the extras can be (``promotions.BASKET_VALUES``)
+BASKET_VALUE_TYPES = ("PERCENT", "FIXED_STAY")
 
 
 class TEXPromotion(Document):
 	def validate(self):
 		guard_revisioned(self)
+		if self._new_terms():
+			self._check_usable()
+			if D(self.min_basket or 0) > 0 and not self.currency:
+				# O-7 (D-18): the minimum is compared in the promotion's currency, converted to the sale's
+				frappe.throw(_("A minimum basket needs its currency."))
+			if self.member_only:
+				# G-57: no search or quote says the guest is a member, so it would never apply
+				frappe.throw(_("A members-only promotion cannot apply yet: no sale identifies a member. Use a "
+				               "promotion code sent to your members instead."))
 		if self.trigger == "Code":
-			self.code = (self.code or "").strip().upper()
+			self.code = code_key(self.code) or ""          # "wİnter" is WINTER (O-31)
 			if not self.code:
 				frappe.throw("A code promotion needs a code.")
 		else:
@@ -31,12 +45,34 @@ class TEXPromotion(Document):
 		if self.value_type in ("FIXED_STAY", "FIXED_NIGHT") and not self.currency:
 			frappe.throw("A fixed discount needs a currency.")
 		if self.code and self.tex_status in ("Draft", "Active"):
-			clash = frappe.db.sql("""SELECT name FROM `tabTEX Promotion` WHERE code=%s AND name!=%s
-			   AND tex_status IN ('Draft','Active') AND IFNULL(property,'')=%s
-			   AND IFNULL(revision_of,name) != %s""",
-			                      (self.code, self.name or "", self.property or "", self.revision_of or self.name or ""))
+			# compared by key, so a code stored before O-31 ("WİNTER") clashes with WINTER
+			clash = [r.name for r in frappe.db.sql("""SELECT name, code FROM `tabTEX Promotion`
+			           WHERE `trigger`='Code' AND IFNULL(code,'')!='' AND name!=%s
+			           AND tex_status IN ('Draft','Active') AND IFNULL(property,'')=%s
+			           AND IFNULL(revision_of,name) != %s ORDER BY name""",
+			                                      (self.name or "", self.property or "", self.revision_of or self.name or ""),
+			                                      as_dict=True) if code_key(r.code) == self.code]
 			if clash:
-				frappe.throw(f"Code {self.code} is already used by promotion {clash[0][0]}.")
+				frappe.throw(f"Code {self.code} is already used by promotion {clash[0]}.")
+
+	def _new_terms(self) -> bool:
+		"""A draft being saved or activated, not ``revise``'s copy of a live revision (it is fixed as a
+		draft): the checks a record already live was saved without, so it stays archivable (ADR-068)."""
+		before = self.get_doc_before_save()
+		copied = self.is_new() and self.flags.tex_revision_transition
+		return self.tex_status in ("Draft", "Active") and (not before or before.tex_status == "Draft") and not copied
+
+	def _check_usable(self):
+		"""O-1: what no room could use as saved (the engine refuses it on every quote)."""
+		scope = self.applies_to or "ACCOMMODATION"
+		if scope == "ACCOMMODATION":
+			return
+		if self.stage == "COST":
+			frappe.throw(_("A cost-stage offer lowers the contract cost of the accommodation: it applies to the "
+			               "accommodation only."))
+		if self.value_type not in BASKET_VALUE_TYPES:
+			frappe.throw(_("A discount on {0} is a percentage or a fixed amount for the stay.").format(
+				_("the whole booking") if scope == "TOTAL" else _("the extras")))
 
 	def on_trash(self):
 		block_delete(self, lambda d: d.tex_status != "Draft")

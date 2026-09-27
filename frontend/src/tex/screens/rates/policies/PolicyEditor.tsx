@@ -40,7 +40,7 @@ import { RowsEditor, type ColSpec } from "../components/RowsEditor"
 import { BOARDS, enumOptions, PERCENT_OPS } from "../lib/options"
 import type { Lookups, Row } from "../lib/types"
 import { decStr, fromRow, intVal, invalidateLookups, strVal, toRow, UI_RATES, useLookups, type FieldKind } from "../lib/util"
-import { fieldKinds, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
+import { fieldKinds, isRequired, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
 
 type T = (k: string, p?: Record<string, string | number>) => string
 
@@ -56,6 +56,16 @@ interface HistoryRow {
 
 function tableKinds(cols: TableColumn[]): Record<string, FieldKind> {
   return Object.fromEntries(cols.map((c) => [c.key, c.kind]))
+}
+
+/** What the server saved but its owner may not expect (``_warnings``), e.g. a promotion that ties
+ * in its group (``PROMO_GROUP_TIE``, O-4): only the older one is applied. */
+interface SaveWarning {
+  code: string
+  message: string
+  other?: string
+  other_name?: string
+  older?: string
 }
 
 /** Loaded record → editor state (decimals as strings, tables as rows). */
@@ -194,12 +204,19 @@ export default function PolicyEditor() {
     if (!kind || !doc) return []
     const out: string[] = []
     for (const f of Object.values(fieldKinds(kind))) {
-      if (!f.required || (f.showIf && !f.showIf(doc))) continue
+      if (!isRequired(f, doc) || (f.showIf && !f.showIf(doc))) continue
       const v = doc[f.key]
       if (v === "" || v === null || v === undefined) out.push(f.key)
     }
     if (kind.propertyRequired && !doc.property) out.push("property")
     return out
+  }, [kind, doc])
+  // a choice the record's other fields no longer allow (``optionsFor``): the server refuses it
+  const invalid = useMemo(() => {
+    if (!kind || !doc) return []
+    return Object.values(fieldKinds(kind))
+      .filter((f) => f.optionsFor && (!f.showIf || f.showIf(doc)) && doc[f.key] && !f.optionsFor(doc).includes(String(doc[f.key])))
+      .map((f) => f.key)
   }, [kind, doc])
 
   if (!kind)
@@ -215,11 +232,18 @@ export default function PolicyEditor() {
   const listPath = `/tex/rates/policies/${kind.slug}`
   const title = doc ? (typeof kind.titleField === "function" ? kind.titleField(doc) : String(doc[kind.titleField] || "")) : ""
 
+  const warn = (rec: Doc) => {
+    for (const w of (rec._warnings as SaveWarning[] | undefined) ?? [])
+      toast.warning(
+        w.code === "PROMO_GROUP_TIE" ? t("rates.policy.promotions.group_tie", { name: w.other_name ?? "", id: w.other ?? "", older: w.older ?? "" }) : w.message,
+      )
+  }
+
   const onSave = async () => {
     // one save at a time (Enter in a field submits the form)
     if (!doc || save.pending) return
     setTouched(true)
-    if (missing.length) {
+    if (missing.length || invalid.length) {
       toast.error(t("rates.v.fix_required"))
       return
     }
@@ -228,6 +252,7 @@ export default function PolicyEditor() {
       const saved = await save.run({ doctype: kind.doctype, data: payload(kind, sent) })
       invalidateLookups(String(saved.property || property || ""))
       toast.success(t("core.saved"))
+      warn(saved)
       if (isNew) {
         created.current = { name: String(saved.name), sent }
         navigate(`${listPath}/${encodeURIComponent(String(saved.name))}`, { replace: true })
@@ -382,7 +407,7 @@ export default function PolicyEditor() {
                   ) : (
                     <FormGrid cols={3}>
                       {visible.map((f) => (
-                        <FieldControl key={f.key} f={f} kind={kind} doc={doc} readOnly={!editable || Boolean(f.readOnly)} lookups={lookups.data} error={touched && missing.includes(f.key) ? t("rates.v.required") : undefined} onChange={(v) => set(f.key, v)} />
+                        <FieldControl key={f.key} f={f} kind={kind} doc={doc} readOnly={!editable || Boolean(f.readOnly)} lookups={lookups.data} error={touched && missing.includes(f.key) ? t("rates.v.required") : invalid.includes(f.key) ? t("rates.v.not_allowed") : undefined} onChange={(v) => set(f.key, v)} />
                       ))}
                     </FormGrid>
                   )}
@@ -401,6 +426,7 @@ export default function PolicyEditor() {
           onConfirm={async (at) => {
             await act(async () => {
               const d = await tex<Doc>("policies", "activate", { doctype: kind.doctype, name, at }, { post: true })
+              warn(d)
               const n = normalise(kind, d)
               setDoc(n)
               setBase(JSON.stringify(payload(kind, n)))
@@ -466,7 +492,7 @@ function FieldControl({
   const v = doc[f.key]
   const hint = f.helpByValue ? t(`${f.helpByValue}.${String(v || "")}`) : f.help ? t(f.help) : undefined
   const hintText = hint && !hint.startsWith("rates.") ? hint : undefined
-  const common = { label: t(f.label), hint: hintText, error, required: f.required && !readOnly, className: f.wide || f.kind === "textarea" ? "sm:col-span-2 lg:col-span-3" : undefined }
+  const common = { label: t(f.label), hint: hintText, error, required: isRequired(f, doc) && !readOnly, className: f.wide || f.kind === "textarea" ? "sm:col-span-2 lg:col-span-3" : undefined }
   switch (f.kind) {
     case "property": {
       const opts = boot.properties.filter((p) => can(kind.cap, p.name) || p.name === v).map((p) => ({ value: p.name, label: p.property_name }))
@@ -496,12 +522,17 @@ function FieldControl({
           <DecimalInput disabled={readOnly} value={String(v ?? "")} onValueChange={onChange} decimals={f.decimals ?? DECIMAL_PLACES} allowNegative={f.allowNegative} suffix={f.suffix?.(doc) || undefined} />
         </Field>
       )
-    case "select":
+    case "select": {
+      const allowed = f.optionsFor?.(doc) ?? f.options ?? []
+      const cur = String(v || "")
+      // a value the other fields no longer allow stays visible, marked, until it is changed
+      const values = cur && !allowed.includes(cur) && (f.options ?? []).includes(cur) ? [...allowed, cur] : allowed
       return (
         <Field {...common}>
-          <Select disabled={readOnly} value={String(v || "")} onChange={(e) => onChange(e.target.value)} options={enumOptions(t, f.group ?? "", f.options ?? [])} placeholder={f.required ? undefined : t(f.blank ?? "rates.common.none")} />
+          <Select disabled={readOnly} value={cur} onChange={(e) => onChange(e.target.value)} options={enumOptions(t, f.group ?? "", values)} placeholder={isRequired(f, doc) ? undefined : t(f.blank ?? "rates.common.none")} />
         </Field>
       )
+    }
     case "link": {
       const opts = sourceOptions(t, f.source, boot, lookups, doc)
       const cur = String(v || "")
@@ -512,7 +543,7 @@ function FieldControl({
             value={cur}
             onChange={(e) => onChange(e.target.value)}
             options={cur && !opts.some((o) => o.value === cur) ? [...opts, { value: cur, label: cur }] : opts}
-            placeholder={f.required ? t("rates.common.choose") : t(f.blank ?? "rates.common.any")}
+            placeholder={isRequired(f, doc) ? t("rates.common.choose") : t(f.blank ?? "rates.common.any")}
           />
         </Field>
       )
