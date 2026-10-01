@@ -9251,9 +9251,12 @@ main `1575c8b` is contained, so nothing was merged.
   links') or of the link is in review, `start_payment` starts no other payment of it — a new key, a link, a transfer —
   and never supersedes the reviewed one: it answers `PaymentBusy` with `PAYMENT_UNDER_REVIEW` ("your bank is reviewing
   your payment"). Checked before step (a): the candidates are read plainly, then each by name under a share lock, so a
-  review recorded after the request's snapshot counts (lock order link → charges → booking). A review recorded after
-  that check, while a new charge is being started, is not caught: an approved review then pays twice and is flagged
-  OVERPAID as before.
+  review recorded after the request's snapshot counts (lock order link → charges → booking); only the booking and link
+  that are set are compared. A replayed `book` answers with no payment instead. A review recorded after that check,
+  while a new charge is being started, is not caught: an approved review then pays twice and is flagged OVERPAID as
+  before. A review that never resolves keeps refusing until the gateway answers (the job asks for 2 hours past the
+  deadline, staff re-verify after that). Two starts reusing different charges of one booking can deadlock on these
+  share locks: nothing is committed yet, so `retry_on_deadlock` runs the loser again.
 - *Refused after the hold (P1-9, Part 2E-2).* A retry or a link refused because the hold is over, with no attempt open,
   expires the booking and commits before the refusal (its rooms go at once); a link inside a card's 3-D Secure margin
   is still sent; a transfer is never started past the hold.
@@ -9273,7 +9276,10 @@ main `1575c8b` is contained, so nothing was merged.
   re-verified instead. The real fix stays NestPay's order query (certification, §5a).
 - *Job slots (Part 2K-1).* A gateway whose status query asks by a reference TEX stored (`status_by_ref`: iyzico's
   token) gives a charge with none no place in the re-verify tick (LO-21). Queued late refunds run last in the
-  5-minute group, at most 20 a run, oldest first, none started after 90 s (LO-07).
+  5-minute group, oldest first, at most 20 refunds asked a run (a charge with nothing to refund now takes no place),
+  none started after 90 s (LO-07). Re-verify with `step_commit` (the job, and staff since LO-19) commits before every
+  next question, whatever the last one changed: `complete` locks the link and the charge even for an answer that
+  changes nothing.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
@@ -9372,8 +9378,8 @@ the versions the roll superseded the state their contract's later publishes woul
 - *A charge settled during its checkout (Part 2K-1, LO-04).* Step (c) reads the charge under its lock after the gateway
   answered; when a callback settled it meanwhile (an earlier checkout of a reused charge was paid), the new checkout's
   reference is recorded and the lease ended as before, but the checkout is never handed out: the start answers "already
-  processed" (`PAYMENT_ALREADY_PROCESSED`). Paid, it would be a second capture that `complete` answers as a replay of
-  the settled charge.
+  processed" (`PAYMENT_ALREADY_PROCESSED`); a replayed `book` answers with no payment instead. Paid, it would be a
+  second capture that `complete` answers as a replay of the settled charge.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
