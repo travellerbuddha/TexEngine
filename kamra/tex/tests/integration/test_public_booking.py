@@ -372,6 +372,13 @@ class TestMarketLinks(TexTestCase):
 		             payload={"reason": "<script>", "market": "NOPE", "country": "Deutschland", "phone": "+49 1"})
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was stored
 		self.assertEqual(stored("mk-2"), [{}])
+		# a value of another type is dropped too, never a server error (review round 1)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a browser sending anything
+		public.track(site=SLUG, session_id="mk-3", event="market_refused",
+		             payload={"reason": ["MARKET_UNKNOWN"], "market": {"x": 1}, "country": ["DE"]})
+		public.track(site=SLUG, session_id="mk-3", event="room_view", payload={"board": ["AI"], "hotel": ["x"]})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was stored
+		self.assertEqual(stored("mk-3"), [{}])
 
 	def test_public_limits_can_only_be_raised(self):
 		# independent of the bench's own site_config (E2E benches raise the limit)
@@ -463,6 +470,26 @@ class TestRefusalCodes(TexTestCase):
 			refused()
 		self.assertNotIn("tex_code", frappe.local.response)
 		self.assertNotIn("tex_params", frappe.local.response)
+
+	def test_the_error_body_carries_only_guest_safe_params(self):
+		"""Review round 1: an exception with a registered code and params of its own (not a Refusal) gets the same
+		cleaning as a Refusal's: JSON-safe values only."""
+		from kamra.tex.services import refusals
+
+		class Odd(frappe.ValidationError):
+			code = "SOLD_OUT"
+
+		@refusals.coded
+		def endpoint():
+			e = Odd("Sold out.")
+			e.params = {"room": object(), "dates": {"2026-12-02", "2026-12-01"}}
+			raise e
+
+		with self.assertRaises(Odd):
+			endpoint()
+		params = frappe.local.response["tex_params"]
+		self.assertEqual(params["dates"], ["2026-12-01", "2026-12-02"])
+		self.assertIsInstance(params["room"], str)
 
 	def test_a_guest_booking_refused_by_a_suspended_contract_says_CONTRACT_SUSPENDED(self):
 		"""A real guest endpoint: the class code of ``ContractSuspended`` (raised through ``frappe.throw``) reaches the
@@ -575,6 +602,8 @@ class TestMarketIntegrity(TexTestCase):
 		                                           "nationality": "Türkiye"})["status"], "Confirmed")
 
 	def test_staff_override_in_the_crs_is_audited(self):
+		from kamra.tex.services import refusals
+
 		agent = fx.ensure_user("o8-agent@example.com", ["Call Center Agent"])
 		fx.ensure("TEX Access Grant", {"user": agent, "property": fx.PROPERTY},
 		          {"user": agent, "scope_level": "Hotel", "property": fx.PROPERTY,
@@ -587,8 +616,10 @@ class TestMarketIntegrity(TexTestCase):
 		e = self.assertRefused("MARKET_RESIDENCY", crs.book, quote_ids=[quote_id], guest=guest,
 		                       payment_method="Pay at Hotel")
 		self.assertIn("anyway", str(e))                                    # the agent is told the way out
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaises(frappe.ValidationError) as no_reason:
 			crs.book(quote_ids=[quote_id], guest=guest, payment_method="Pay at Hotel", market_override=1)
+		self.assertNotIsInstance(no_reason.exception, refusals.MarketRefused)     # the override was heard: a reason
+		self.assertIn("reason", str(no_reason.exception))
 		out = crs.book(quote_ids=[quote_id], guest=guest, payment_method="Pay at Hotel", market_override=1,
 		               market_override_reason="Guest works in Antalya, residence permit shown")
 		self.assertEqual(out["status"], "Confirmed")
@@ -600,6 +631,53 @@ class TestMarketIntegrity(TexTestCase):
 		                 {"market": "TR", "countries": ["TR"], "country": "DE", "nationality": None})
 		self.assertEqual((event[0].reason, event[0].actor),
 		                 ("Guest works in Antalya, residence permit shown", agent))
+
+	def agent(self) -> str:
+		agent = fx.ensure_user("o8-agent@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": agent, "property": fx.PROPERTY},
+		          {"user": agent, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+		return agent
+
+	def test_the_call_centres_country_codes_reach_the_guest_profile(self):
+		"""Review round 1: the Call Center sends ISO codes; the profile keeps Frappe's Country (a Link). An existing
+		profile without a country of residence gets it, and a booking for it never fails on the code."""
+		guest = frappe.get_doc({"doctype": "Guest", "first_name": "Ayşe", "last_name": "Kaya",
+		                        "email": "o8-known@example.com"}).insert(ignore_permissions=True)
+		frappe.db.set_value("Guest", guest.name, {"tex_country": None, "nationality": None})
+		frappe.set_user(self.agent())  # nosemgrep: frappe-setuser -- a call-centre agent
+		offer = self.flex(crs.search(**market_stay(), market="TR", channel="CALL_CENTER", properties=[fx.PROPERTY]))
+		quote_id = crs.quote(offer_key=offer["rooms"][0]["offer_key"])["quote_id"]
+		out = crs.book(quote_ids=[quote_id], guest={"first_name": "Ayşe", "last_name": "Kaya", "email": "o8-known@example.com",
+		                                            "country": "tr"}, payment_method="Pay at Hotel")
+		self.assertEqual(out["status"], "Confirmed")
+		self.assertEqual(frappe.db.get_value("Guest", guest.name, "tex_country"), "Türkiye")
+
+	def test_a_quote_of_a_market_the_site_no_longer_sells_is_refused_at_booking(self):
+		"""Review round 1: a quote made while the site sold TR (or on another site of the hotel) is refused when the
+		site's list no longer has it; nothing is booked and the quote stays open."""
+		_res, quote_id = self.quote("o8-gone", market="TR")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel narrows the site
+		self.sell_only("DE, GLOBAL")
+		frappe.clear_document_cache("TEX Booking Site", SLUG)
+		e = self.assertRefused("MARKET_NOT_ALLOWED", self.book, "o8-gone", quote_id, {**GUEST, "country": "TR"})
+		self.assertEqual(e.params, {"market": "TR"})
+		self.assertEqual(frappe.db.get_value("TEX Quote", quote_id, "status"), "Open")
+
+	def test_a_residents_only_default_is_priced_for_a_country_no_market_takes(self):
+		"""Review round 1: on a site whose default market is residents-only, a link country that no market of the site
+		takes (JP) falls to that default: priced with its residency (refusing it would only send the search back to
+		the same market), and the site's save warns that non-residents get no price they can book there."""
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		site.default_market = "TR"
+		site.allowed_markets = "TR, DE"
+		frappe.clear_messages()
+		site.save(ignore_permissions=True)
+		self.assertIn("residents", " ".join(str(m) for m in frappe.get_message_log()))
+		res = self.search("o8-jp", country="JP")
+		self.assertEqual(res["residency"], {"countries": ["TR"]})
+		self.assertRefused("MARKET_RESIDENCY", self.search, "o8-de-tr", market="TR", country="DE")   # the link's own
 
 	def test_staff_on_a_booking_site_follow_the_site(self):
 		_res, quote_id = self.quote("o8-5", market="TR")

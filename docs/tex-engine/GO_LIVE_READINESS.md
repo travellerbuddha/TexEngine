@@ -173,7 +173,9 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   General; blank sells every enabled market) and confirm which markets are "Residents only (web)" (Settings → Markets; TR by
   default). A residents-only market's web prices go only to guests whose country of residence or nationality is among its
   countries; Call Center agents may book anyway with a reason (audit trail: `booking.market_override`; refused web
-  bookings: `booking.market_refused`).
+  bookings: `booking.market_refused`). A site whose default market is residents-only shows guests from elsewhere prices
+  they cannot book (p71 reports such sites as `booking_site.residents_only_default`): give it a default market for
+  everyone (such as GLOBAL) and let TR come from a link or the guest's country.
 - **`encryption_key`** in `site_config.json` signs offers, payment callbacks and webhooks,
   and decrypts every Password field. Back it up separately from the database and never
   rotate it without a re-encryption plan.

@@ -6,7 +6,10 @@
   country of residence or a nationality among its countries. A forced re-run never sets it again after an
   administrator switched it off. Fresh sites get it from the seed (``setup.MARKETS``).
 
-No site's market list is set: every site keeps selling what it sold. No price, snapshot or payload moves."""
+A booking site whose default market is TR is reported once (audit ``booking_site.residents_only_default``): there a
+guest whose country no other market of the site takes is priced on TR and can no longer book it; its owner may give it
+a default market for everyone. No site's market list or default is set: every site keeps selling what it sold. No
+price, snapshot or payload moves."""
 
 import frappe
 
@@ -23,3 +26,12 @@ def execute():
 		frappe.db.set_value("TEX Market", "TR", "residency_required", 1, update_modified=False)
 		audit("market.save", reference_doctype="TEX Market", reference_name="TR", old={"residency_required": 0},
 		      new={"residency_required": 1}, reason="p71 (O-8, D-5): the domestic market is residents-only on the web")
+	for site, prop in frappe.db.sql("""SELECT name, property FROM `tabTEX Booking Site` WHERE default_market = 'TR'
+	                                   ORDER BY name"""):
+		if frappe.db.exists("TEX Audit Event", {"action": "booking_site.residents_only_default",
+		                                        "reference_doctype": "TEX Booking Site", "reference_name": site}):
+			continue                                   # reported once
+		audit("booking_site.residents_only_default", reference_doctype="TEX Booking Site", reference_name=site,
+		      property=prop, new={"default_market": "TR"},
+		      reason="p71 (O-8): the default market is residents-only; guests from elsewhere cannot book its prices")
+		print(f"p71: booking site {site} sells TR by default; TR is now residents-only (review its default market)")

@@ -1411,6 +1411,11 @@ class TestSmallPatches(PatchCase):
 		(audited); an administrator who switches it off afterwards is not overruled by a forced re-run; no site's
 		market list is set."""
 		frappe.db.set_value("TEX Market", "TR", "residency_required", 0, update_modified=False)
+		put("TEX Booking Site", "p71-domestic", site_slug="p71-domestic", site_name="Domestic", property=fx.PROPERTY,
+		    enabled=1, default_market="TR")
+		put("TEX Booking Site", "p71-abroad", site_slug="p71-abroad", site_name="Abroad", property=fx.PROPERTY,
+		    enabled=1, default_market="DE")
+		domestic = frappe.get_all("TEX Booking Site", filters={"default_market": "TR"}, pluck="name")
 		sites = dict(frappe.db.sql("SELECT name, IFNULL(allowed_markets, '') FROM `tabTEX Booking Site`"))
 		audited = lambda: frappe.db.count("TEX Audit Event", {"action": "market.save",  # noqa: E731
 		                                                      "reference_name": "TR", "reason": ("like", "p71%")})
@@ -1425,6 +1430,10 @@ class TestSmallPatches(PatchCase):
 		self.assertEqual(dict(frappe.db.sql("SELECT name, IFNULL(allowed_markets, '') FROM `tabTEX Booking Site`")),
 		                 sites)
 		self.assertEqual(frappe.db.count("TEX Market", {"residency_required": 1}), 1)   # TR only
+		# a site whose default market is TR now offers non-residents no price they can book: reported once
+		reported = frappe.get_all("TEX Audit Event", filters={"action": "booking_site.residents_only_default"},
+		                          pluck="reference_name")
+		self.assertEqual(sorted(reported), sorted(domestic))
 		# an administrator switches it off after the upgrade: a forced re-run keeps it off
 		frappe.db.set_value("TEX Market", "TR", "residency_required", 0)
 		self.assertRerunChangesNothing("p71_market_integrity")

@@ -116,8 +116,10 @@ def coded(fn):
 			code = guest_code(e)
 			if code and resp is not None:
 				resp["tex_code"] = code
-				if getattr(e, "params", None):
-					resp["tex_params"] = e.params
+				params = _safe(getattr(e, "params", None)) if code_of(e) and isinstance(getattr(e, "params", None), dict) \
+					else None
+				if params:
+					resp["tex_params"] = params
 			raise
 
 	return wrapper

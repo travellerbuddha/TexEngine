@@ -86,8 +86,15 @@ class TEXBookingSite(Document):
 		codes = list(dict.fromkeys(c.strip().upper() for c in (self.allowed_markets or "").replace("\n", ",").split(",")
 		                           if c.strip()))
 		self.allowed_markets = ", ".join(codes) or None
-		if not codes or not (self.is_new() or self.has_value_changed("allowed_markets")
-		                     or self.has_value_changed("default_market")):
+		changed = self.is_new() or self.has_value_changed("allowed_markets") or self.has_value_changed("default_market")
+		if changed and self.default_market and frappe.db.get_value("TEX Market", self.default_market, "residency_required"):
+			# allowed (a domestic site), but said: a guest whose country no other market of the site takes is priced
+			# on it, and only its residents can book those prices
+			frappe.msgprint(_("The default market {0} is for residents only: guests from elsewhere see its prices but "
+			                  "cannot book them unless a link or their country picks another market of this site. A "
+			                  "market for everyone (such as GLOBAL) is the usual default.").format(self.default_market),
+			                indicator="orange", alert=True)
+		if not codes or not changed:
 			return
 		enabled = set(frappe.get_all("TEX Market", filters={"name": ("in", codes), "disabled": 0}, pluck="name"))
 		bad = [c for c in codes if c not in enabled]

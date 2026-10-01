@@ -210,7 +210,9 @@ def _market(site, market: str | None, country: str | None) -> versions.MarketDef
 		params = {"market": market.strip().upper()} if e.code == "MARKET_NOT_ALLOWED" and market else {}
 		frappe.throw(str(e), MarketRefused(code=e.code, params=params), title=_("Market"))
 	m = next(m for m in markets if m.code == code)
-	if country and versions.residency_refusal(m, country=country, nationality=None):
+	# the link's own market (named, or its country's) for a country outside it; a site's residents-only default is
+	# priced (searching again without the link would only come back to it) and the booking decides
+	if country and _how != "default" and versions.residency_refusal(m, country=country, nationality=None):
 		frappe.throw(_("These prices are for residents of {0}.").format(", ".join(sorted(m.countries))),
 		             MarketRefused(code="MARKET_RESIDENCY", params={"market": m.code, "countries": sorted(m.countries)}),
 		             title=_("Market"))
@@ -725,13 +727,13 @@ def _browser_payload(site, session_id: str | None, event: str, payload) -> dict:
 		rt = _text(payload.get("room_type"))
 		if rt and frappe.db.exists("Room Type", {"name": rt, "property": out["hotel"]}):
 			out["room_type"] = rt
-	if "board" in fields and payload.get("board") in BOARD_CODES:
+	if "board" in fields and isinstance(payload.get("board"), str) and payload["board"] in BOARD_CODES:
 		out["board"] = payload["board"]
 	if "rate_plan" in fields and out.get("hotel"):
 		rp = _text(payload.get("rate_plan"))
 		if rp and frappe.db.exists("Rate Plan", {"name": rp, "property": out["hotel"]}):
 			out["rate_plan"] = rp
-	if "reason" in fields and payload.get("reason") in MARKET_REFUSALS:
+	if "reason" in fields and isinstance(payload.get("reason"), str) and payload["reason"] in MARKET_REFUSALS:
 		out["reason"] = payload["reason"]
 	if "market" in fields:
 		# a market's code, never an unknown string (a link can carry anything)

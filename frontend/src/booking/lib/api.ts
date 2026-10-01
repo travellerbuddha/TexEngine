@@ -50,20 +50,20 @@ const EXPIRED = /expired|search again|no longer on sale|already used|invalid off
 /** A refusal code as the server sends it (kamra/tex/refusal_codes.py): UPPER_SNAKE. */
 const CODE = /^[A-Z][A-Z0-9_]{1,63}$/
 
-/** The kind a code means, whatever the language of its message (G-70a). A code missing here is classified as
- * before; a market code is a plain refusal the search recovers from (G-55b), never sold out or expired. */
+/** The kind a code means, whatever the language of its message (G-70a). A code missing here (the server's
+ * fallback codes NOT_FOUND / NOT_PERMITTED / RATE_LIMITED included) is classified as before, by its wording and
+ * status; a market code is a refusal the search or checkout recovers from (G-55b, O-8), never sold out: a quote of a
+ * market the site no longer sells is searched again (expired), a residents-only market's goes back to the guest's
+ * country of residence. */
 const KIND_BY_CODE: Record<string, ErrorKind> = {
   SOLD_OUT: "sold_out",
   EXTRA_SOLD_OUT: "extra_sold_out",
   CONTRACT_NOT_ON_SALE: "expired",
   CONTRACT_SUSPENDED: "expired",
-  NOT_FOUND: "not_found",
-  NOT_PERMITTED: "permission",
-  RATE_LIMITED: "rate_limit",
   MARKET_UNKNOWN: "invalid",
   MARKET_AMBIGUOUS: "invalid",
   MARKET_REQUIRED: "invalid",
-  MARKET_NOT_ALLOWED: "invalid",
+  MARKET_NOT_ALLOWED: "expired",
   MARKET_RESIDENCY: "invalid",
 }
 

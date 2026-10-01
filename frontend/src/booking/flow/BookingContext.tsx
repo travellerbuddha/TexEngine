@@ -621,7 +621,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const hasExtras = !!(hotel && (site.extras?.[hotel]?.length ?? 0) > 0)
   const allSelected = flow.selections.length === criteria.rooms.length && flow.selections.every(Boolean)
   const hotelName = hotel ? site.hotels.find((h) => h.name === hotel)?.property_name ?? hotel : null
-  const residency = (basket.key === basketKey ? basket.data?.residency : undefined) ?? search.data?.residency ?? null
+  // the booked quotes' market once the basket of these quotes is read (null there means "ask nothing"), else the search's
+  const residency = basket.key === basketKey && basket.data ? basket.data.residency ?? null : search.data?.residency ?? null
   const linked = !!(criteria.market || criteria.country)
   const standardPrices = useCallback(() => setCriteria({ ...criteria, market: null, country: null }), [criteria, setCriteria])
 

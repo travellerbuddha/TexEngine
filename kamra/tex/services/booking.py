@@ -81,7 +81,26 @@ def _clean_guest(g: dict) -> dict:
 	for f in ("first_name", "last_name"):
 		if len(g[f]) > 80:
 			frappe.throw(_("Name is too long."))
+	# a country of residence or nationality given as an ISO code (the Call Center, the booking engine) or a Country
+	# name: the profile keeps Frappe's Country name (``tex_country`` is a Link). An unknown country is not kept; a
+	# nationality that names no country stays as typed (the profile's field is free text)
+	if g.get("country"):
+		g["country"] = country_name(g["country"])
+	if g.get("nationality"):
+		g["nationality"] = country_name(g["nationality"]) or g["nationality"]
 	return g
+
+
+def country_name(value) -> str | None:
+	"""Frappe's Country name for an ISO 3166-1 alpha-2 code or a Country name; None for anything else."""
+	v = value.strip() if isinstance(value, str) else ""
+	if not v:
+		return None
+	if frappe.db.exists("Country", v):
+		return frappe.db.get_value("Country", v, "name")
+	if len(v) == 2 and v.isalpha():
+		return frappe.db.get_value("Country", {"code": v.lower()}, "name")
+	return None
 
 
 CONSENT_FIELDS = ("tex_consent_email", "tex_consent_sms", "tex_consent_whatsapp")

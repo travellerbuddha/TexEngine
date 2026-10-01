@@ -82,7 +82,6 @@ export const GuestForm = forwardRef<
         <Field
           label={t("crs.guest.country")}
           error={e.country}
-          required={!!residency}
           hint={!e.country && residency ? t("crs.guest.residency_hint", { market: residency.market, countries: residency.countries.join(", ") }) : undefined}
         >
           <Select

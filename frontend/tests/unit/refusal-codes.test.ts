@@ -46,6 +46,14 @@ test("a market code is a refusal the guest can act on, never read as sold out or
   assert.equal(e.code, "MARKET_UNKNOWN")
 })
 
+test("the server's fallback codes never change how a refusal was classified (review round 1)", () => {
+  // an expired manage link is a 403 the wording calls expired, as before G-70a
+  assert.equal(parseError(body({ exc_type: "PermissionError", tex_code: "NOT_PERMITTED" }, "This link has expired."), 403).kind, "expired")
+  assert.equal(parseError(body({ exc_type: "PermissionError", tex_code: "NOT_PERMITTED" }, "Invalid link."), 403).kind, "permission")
+  // a quote of a market the site no longer sells: search again
+  assert.equal(parseError(body({ tex_code: "MARKET_NOT_ALLOWED" }, "These prices are not sold on this site."), 417).kind, "expired")
+})
+
 test("without a code the existing classification still applies (until every refusal is coded, G-70b)", () => {
   assert.equal(parseError(body({}, "Sorry — Deluxe has just sold out for 2026-12-01."), 417).kind, "sold_out")
   assert.equal(parseError(body({}, "This quote has expired — please search again."), 417).kind, "expired")
