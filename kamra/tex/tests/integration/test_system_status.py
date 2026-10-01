@@ -303,7 +303,11 @@ class TestOverpaidBookings(TexTestCase):
 		twice = self.overpaid("p17-credit-3")
 		self.credit(twice, 30)
 		self.credit(twice, 40)
-		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 2)
+		# the latest one, not the largest: 60 was kept, then a change used 20 of it and 40 is kept now
+		down = self.overpaid("p17-credit-4")
+		self.credit(down, 60)
+		self.credit(down, 40)
+		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 3)
 
 
 class TestUnverifiedPayments(TexTestCase):
