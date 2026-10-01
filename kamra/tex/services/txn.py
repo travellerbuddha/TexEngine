@@ -47,6 +47,17 @@ def undo_step(e: BaseException, savepoint: str) -> None:
 	frappe.db.rollback(save_point=savepoint)
 
 
+def committed_steps() -> int:
+	"""How many steps this request (or job) has put on record mid-way (``note_committed_step``)."""
+	return getattr(frappe.local, "tex_committed_steps", 0)
+
+
+def note_committed_step() -> None:
+	"""A step of this request is on record (a payment start's commit, NEW-6): the request can no longer
+	be run again from its start (``retry_on_deadlock``). Counted also where tests skip the commit."""
+	frappe.local.tex_committed_steps = committed_steps() + 1
+
+
 def retry_on_deadlock(fn):
 	"""Run a whole write request again when the database chose it as a deadlock victim.
 
@@ -54,18 +65,22 @@ def retry_on_deadlock(fn):
 	run the transaction again. The locks TEX takes (inventory days, then promotions, in a
 	fixed order) keep deadlocks rare, but a locking range read can still meet another
 	booking's insert, and MariaDB ≥ 11.6 reports a changed-row conflict the same way.
-	Only for endpoints whose every write belongs to that one request transaction: the
-	retry starts from a clean rollback and repeats all of it, so nothing is written
-	twice (the booking and payment idempotency keys guard the rest)."""
+	The retry starts from a clean rollback and repeats all of it, so nothing is written
+	twice (the booking and payment idempotency keys guard the rest) — as long as all of it
+	was one transaction. A request that put a step on record mid-way (``note_committed_step``:
+	a payment start commits its charge before the gateway call, ADR-066) is never run again:
+	its rollback keeps what it committed and it answers "very busy" (P1-8 e). A commit that
+	a key replays (a durable refund, a guest change's submit) does not count."""
 
 	@functools.wraps(fn)
 	def wrapper(*args, **kwargs):
 		for attempt in range(1, DEADLOCK_ATTEMPTS + 1):
+			steps = committed_steps()
 			try:
 				return fn(*args, **kwargs)
 			except frappe.QueryDeadlockError:
 				frappe.db.rollback()
-				if attempt == DEADLOCK_ATTEMPTS:
+				if attempt == DEADLOCK_ATTEMPTS or committed_steps() != steps:
 					frappe.throw(_("The hotel is very busy right now. Please try again in a moment."),
 					             title=_("Please try again"))
 				time.sleep(random.uniform(0.02, 0.1) * attempt)

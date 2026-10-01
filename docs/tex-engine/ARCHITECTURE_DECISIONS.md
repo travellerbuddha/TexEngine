@@ -9146,7 +9146,9 @@ main `1575c8b` is contained, so nothing was merged.
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
   at the locked price — its rooms, extra units and coupon uses are still held for it, so nothing is
   judged again; b) late money, rooms given back and still free: `Action Required`;
-  c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
+  c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required` — and
+  `Action Required` whenever the gateway states no capture time on a booking that ended by its expiry (D-7, P1-1: it
+  may have been paid in time; the hotel decides, never an automatic refund). In b)/c)
   the charge stays Succeeded, off the booking, with today's availability and price in its note; a
   booking that expires with money on it puts that money in `Action Required`, always (B2).
 - Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE` (Istanbul
@@ -9160,6 +9162,14 @@ main `1575c8b` is contained, so nothing was merged.
 - A booking never confirmed owes no cancellation penalty (a room still carries the basket discount the
   others keep, E1) and nothing once it ends; money on its way is never kept as a fee (C6, user).
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.
+- *Fraud review (D-8, O-18, Part 2E-2).* A payment the gateway holds in its fraud review (iyzico fraudStatus 0; absent or
+  unknown is read so, never approved on doubt) keeps its booking waiting: its rooms are held once for the link hold (never
+  past the arrival day, never shortened, not extended again), audited `payment.under_review`; a 1 then confirms it. A
+  rejection (-1) fails it, ends that hold (back to the deadline before it, or the booking's other open charges'), is
+  audited `payment.fraud_rejected` and tells the team; TEX holds none of its money, so nothing goes to reconciliation.
+- *Refused after the hold (P1-9, Part 2E-2).* A retry or a link refused because the hold is over, with no attempt open,
+  expires the booking and commits before the refusal (its rooms go at once); a link inside a card's 3-D Secure margin
+  is still sent; a transfer is never started past the hold.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
@@ -9223,6 +9233,21 @@ the versions the roll superseded the state their contract's later publishes woul
 - Commits (`_commit_step`) also end what the request did before (a booking just made); skipped in tests (one transaction).
 - Payment paths lock link → payment(s) → booking → rooms (→ nights → extras → promotions → Guest), series rows last, never
   across a gateway call (ADR-062 "Locks"); Part 2F (P1-4) adds the full order and the reversed orders it fixes.
+- *Addendum (Part 2E-2).* `complete_retrying` runs `complete` again on a deadlock or a lock wait timeout, after a full
+  rollback (a timeout undoes only its statement), 3 tries, then raises the error (`mock_pay`'s own wrapper: ≤ 3 × 3);
+  3 × `innodb_lock_wait_timeout` may outlast a web worker: the safety net is the re-verify job (P1-8).
+- The re-verify job (NEW-2) is first in the 5-minute group: a plain SELECT of askable Pending charges (enabled account,
+  no live lease), 20 per tick by urgency — still holding rooms first (nearest deadline first), then holding none
+  (`expires_at` NULL: oldest first), then past their deadline (latest first); an abandoned iyzico checkout stays Pending
+  for 2 hours and must not starve those that can still be saved — one charge per transaction, committed before the
+  next gateway question (and between two questions of one charge when the first changed it). A request that committed a step (`_commit_step` counts it) is never run
+  again on a deadlock: it rolls back and answers "very busy" (P1-8 e); a durable refund's or a guest change's commit,
+  replayed by its key, does not count.
+- Each question of a re-verify (`reverify`: the job and the staff endpoint) is asked under a savepoint: one that failed
+  half way (money recorded, its allocation refused) is undone before the next token is asked, so no step commit and no
+  request commit puts a half state on record. A deadlock or timeout in `complete_retrying` rolls the whole transaction
+  back and a step commit ends it: the savepoint is then gone, and the undo (`_undo_to`) rolls back whole instead — safe
+  there: every charge of the job is a transaction of its own and staff's request has no uncommitted work before it.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so

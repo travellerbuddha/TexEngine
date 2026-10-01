@@ -225,6 +225,40 @@ class TestProviderRegistry(unittest.TestCase):
 		odd["HASH"] = turkey.nestpay_hash_v3({k: v for k, v in odd.items() if k != "HASH"}, "SK")
 		self.assertEqual(p.handle_callback("PTX-7", odd, {}, b"").currency, "999")   # never mistaken for ours
 
+	def test_what_tex_asks_a_gateway_about_a_charge_by_itself(self):
+		"""NEW-2: iyzico is asked by each checkout-form token stored for the charge (newest first; a captured
+		payment's id is not a token), Sipay by TEX's own id (no parameter); the Virtual POS and the sandbox
+		mock cannot be asked."""
+		self.assertTrue(turkey.IyzicoProvider.status_query)
+		self.assertTrue(turkey.SipayProvider.status_query)
+		self.assertFalse(turkey.NestPayProvider.status_query)
+		self.assertFalse(simple.MockProvider.status_query)
+		self.assertEqual(turkey.IyzicoProvider.status_params("tok-b tok-a"), [{"token": "tok-b"}, {"token": "tok-a"}])
+		self.assertEqual(turkey.IyzicoProvider.status_params("P1|I1 tok-a"), [{"token": "tok-a"}])
+		self.assertEqual(turkey.IyzicoProvider.status_params(None), [])        # no token: nothing to ask
+		self.assertEqual(turkey.SipayProvider.status_params(None), [{}])
+		self.assertEqual(turkey.NestPayProvider.status_params("T1"), [])
+		self.assertEqual(simple.MockProvider.status_params("MOCK-1"), [])
+
+	def test_iyzico_confirms_only_a_payment_its_fraud_check_passed(self):
+		"""O-18 (D-8): iyzico's rule is that only a payment with fraudStatus 1 is served. 0 is a fraud review
+		(pending), -1 a rejection (failed); absent or anything else is treated as a review, never approved on
+		doubt."""
+		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk", "api_key": "ak"}, environment="Sandbox"))
+		paid = {"status": "success", "paymentStatus": "SUCCESS", "conversationId": "PTX-9", "basketId": "PTX-9",
+		        "price": "80.00", "paidPrice": "80.00", "currency": "EUR", "paymentId": "P9",
+		        "itemTransactions": [{"paymentTransactionId": "I9"}]}
+		cases = ((1, ("Succeeded", "SUCCESS", None)), ("1", ("Succeeded", "SUCCESS", None)),
+		         (" 1 ", ("Succeeded", "SUCCESS", None)), (0, ("Pending", "FRAUD_REVIEW", None)),
+		         (-1, ("Failed", "FRAUD_REJECTED", "FRAUD_REJECTED")), ("-1", ("Failed", "FRAUD_REJECTED", "FRAUD_REJECTED")),
+		         (None, ("Pending", "FRAUD_UNKNOWN", None)), (2, ("Pending", "FRAUD_UNKNOWN", None)),
+		         ("yes", ("Pending", "FRAUD_UNKNOWN", None)), ("absent", ("Pending", "FRAUD_UNKNOWN", None)))
+		for fraud, expected in cases:
+			answer = dict(paid) if fraud == "absent" else {**paid, "fraudStatus": fraud}
+			with mock.patch.object(p, "_post", return_value=answer):
+				out = p.handle_callback("PTX-9", {"token": "tok-a"}, {}, b"", provider_ref="tok-a")
+			self.assertEqual((out.status, out.raw_status, out.error_code), expected, fraud)
+
 	def test_iyzico_takes_one_checkout_per_charge(self):
 		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk", "api_key": "ak"}, environment="Sandbox"))
 		self.assertTrue(p.can_add_checkout(None))
@@ -234,7 +268,7 @@ class TestProviderRegistry(unittest.TestCase):
 		self.assertEqual(turkey.iyzico_payment("P1|I1 tok-b"), "P1|I1")
 		detail = {"status": "success", "paymentStatus": "SUCCESS", "conversationId": "PTX-1", "basketId": "PTX-1",
 		          "price": "80.00", "paidPrice": "80.00", "currency": "EUR", "paymentId": "P1",
-		          "itemTransactions": [{"paymentTransactionId": "I1"}]}
+		          "itemTransactions": [{"paymentTransactionId": "I1"}], "fraudStatus": 1}
 		with mock.patch.object(p, "_post", return_value=detail):
 			out = p.handle_callback("PTX-1", {"token": "tok-a"}, {}, b"", provider_ref="tok-a")
 			self.assertEqual((out.status, out.amount, out.currency, out.provider_ref),
@@ -251,7 +285,8 @@ class TestProviderRegistry(unittest.TestCase):
 	def test_iyzico_counts_the_basket_price_not_the_instalment_interest(self):
 		p = turkey.IyzicoProvider(_Acc(secrets={"secret_key": "sk", "api_key": "ak"}, environment="Sandbox"))
 		base = {"status": "success", "paymentStatus": "SUCCESS", "conversationId": "PTX-2", "basketId": "PTX-2",
-		        "currency": "EUR", "paymentId": "P2", "itemTransactions": [{"paymentTransactionId": "I2"}]}
+		        "currency": "EUR", "paymentId": "P2", "itemTransactions": [{"paymentTransactionId": "I2"}],
+		        "fraudStatus": 1}
 		for answer, amount in (({"price": "80.00", "paidPrice": "83.20"}, Decimal("80.00")),   # interest on top
 		                       ({"price": "80.00", "paidPrice": "79.00"}, Decimal("79.00")),   # less paid
 		                       ({"paidPrice": "80.00"}, Decimal("80.00")),
