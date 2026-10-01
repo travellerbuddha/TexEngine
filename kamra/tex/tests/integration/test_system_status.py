@@ -298,7 +298,12 @@ class TestOverpaidBookings(TexTestCase):
 		self.credit(kept, 50)
 		more = self.overpaid("p17-credit-2")                # 50 over, 20 of it kept as credit
 		self.credit(more, 20)
-		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 1)
+		# review round 1: each credit request stores the whole excess kept at its time (30, then 40 after a second
+		# lower price), never added up: 40 is kept, the other 10 is money above it
+		twice = self.overpaid("p17-credit-3")
+		self.credit(twice, 30)
+		self.credit(twice, 40)
+		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 2)
 
 
 class TestUnverifiedPayments(TexTestCase):
