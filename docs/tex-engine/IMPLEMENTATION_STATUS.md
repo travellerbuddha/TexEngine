@@ -1529,3 +1529,12 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - G-97 **COMPLETE**: TEX Contract Version, Markup Rule and Pricing Policy are System Manager's in Desk / REST (spec `COST`, p66); cost audit events hidden from non-platform users in Desk / REST and, by capability, in the TEX audit log's hotel view · `TestCostRecordsInDesk`, `TestP66CostDocTypesSystemOnly`, `test_audit_trail`.
 - O-37 **COMPLETE**: p63 masks every Password field in the change history (changed, child row_changed) · `TestP63VersionedPasswords`.
 - NEW-5 **COMPLETE**: `supply-chain.yml` — gitleaks (self-tested), npm audit-ci, pip-audit with a reviewed ignore list · the workflow's three jobs.
+
+## 6H1. Audit Part 2H-1 (2026-10-01)
+
+- Y-11 + O-22 **COMPLETE**: points are used first-to-expire first and an expiry takes only what is left of its lot (`crm/lots.py`, `settle`, ADR-071; p61 closes lots that expired before) · unit `test_loyalty_lots`, `TestExpiry`, `test_patches` p61.
+- O-21 **COMPLETE**: changing a spent stay is exact (no re-minted points, the new lot keeps the old one's state, a reversal takes the lot's expiry rows) and the stay does not raise its own tier · `TestModification`.
+- G-66 **COMPLETE** (tests only): the earn matrix (every basis, with and without a tier multiplier) and the earn / pending / expiry / redemption flows are pinned · `TestEarnMatrix`.
+- O-23 **COMPLETE**: the CRM counts visits (the rooms of one booking are one stay and not a repeat guest) · unit `test_segments`, `test_crm_segments`.
+- O-26 **COMPLETE**: the abandoned list keeps and shows a phone only with SMS or WhatsApp consent (`phone_channels`), never as a `tel:` call link · `TestAbandonedPrivacy`.
+- O-33 **COMPLETE**: the CRM phone export keeps international numbers as they are (`lib/csv.ts`) · unit `csv-cell`.
