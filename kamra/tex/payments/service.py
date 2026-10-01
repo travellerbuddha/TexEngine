@@ -335,14 +335,16 @@ def _refuse_in_review(booking: str | None, payment_link: str | None) -> None:
 	second capture would take the money twice. The candidates are read plainly, then each is read as it is now (a
 	locking read in name order: a review recorded after this request's snapshot counts); the link, when there is one,
 	is already held (lock order: link → charges → booking, ADR-066)."""
-	if not (booking or payment_link):
+	# only what is set is compared: a blank booking or link never matches another payment's blank one
+	of = ([] if not booking else ["t.booking = %(booking)s", "l.booking = %(booking)s"]) + \
+		([] if not payment_link else ["t.payment_link = %(link)s"])
+	if not of:
 		return
 	names = frappe.db.sql(
-		"""SELECT t.name FROM `tabTEX Payment Transaction` t
+		f"""SELECT t.name FROM `tabTEX Payment Transaction` t
 		LEFT JOIN `tabTEX Payment Link` l ON l.name = t.payment_link
-		WHERE t.txn_type='Charge' AND t.status='Pending'
-		AND (t.booking=%(booking)s OR l.booking=%(booking)s OR t.payment_link=%(link)s)""",
-		{"booking": booking or "", "link": payment_link or ""}, pluck=True)
+		WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND ({" OR ".join(of)})""",
+		{"booking": booking, "link": payment_link}, pluck=True)  # nosemgrep -- constant SQL, values bound
 	for name in sorted(names):
 		now = frappe.db.sql("SELECT status, raw_status FROM `tabTEX Payment Transaction` WHERE name=%s LOCK IN SHARE MODE",
 		                    name, as_dict=True)

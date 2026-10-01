@@ -2271,6 +2271,18 @@ class TestIyzicoFraudReview(HoldCase):
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, ["status", "raw_status"]),
 		                 ("Pending", "FRAUD_REVIEW"))
 
+	def test_a_review_never_refuses_an_unrelated_payment(self):
+		"""LO-05, review round 1: only the booking's own charges and its links' (or the link's) count. A charge whose
+		booking is blank never matches a payment whose booking is blank too (a link sold without a booking)."""
+		_b, txn, _attempt = self.reviewed()
+		frappe.db.sql("UPDATE `tabTEX Payment Transaction` SET booking = '' WHERE name = %s", txn)
+		link = pay.create_link(property=fx.PROPERTY, amount="50", currency="EUR", description="Deposit", expires_hours=72)
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens a link sold without a booking
+		started = public.pay_link(token=link["token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", started["transaction"], "payment_link"),
+		                 link["link"])
+
 	def test_a_payment_iyzico_rejects_after_its_review_lets_the_rooms_go_and_tells_the_team(self):
 		from kamra.tex.services import notify
 
