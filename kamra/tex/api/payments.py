@@ -184,7 +184,7 @@ def reverify(transaction: str):
 	if row.status not in pay.SETTLEABLE or not (cls and cls.status_query):
 		frappe.throw(_("Only pending, failed or cancelled iyzico / Sipay payments can be re-verified."))
 	# iyzico: each checkout-form token stored for this charge, newest first; none: the gateway's own "no".
-	# A try that changed the charge is on record before the next token is asked, as in the job: no lock is held
+	# Each try is on record, its locks released, before the next token is asked, as in the job: no lock is held
 	# through a gateway call (LO-19, ADR-066); nothing uncommitted comes before it, and ``retry_on_deadlock``
 	# never runs a request again once it committed a step
 	out, error = pay.reverify(transaction, attempts=cls.status_params(row.provider_ref) or [{"token": ""}],

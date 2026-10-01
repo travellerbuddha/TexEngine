@@ -2130,13 +2130,11 @@ class TestAFailedTryLeavesNothing(HoldCase):
 		self.assertEqual(txn_state(txn).status, "Pending")
 		self.assertEqual(pay.allocated_of(txn), 0)
 
-	def test_staff_reverify_holds_no_lock_through_the_next_tokens_question(self):
-		"""LO-19 (audit 2K-1): a token's answer failed the charge; before staff re-verify asks the gateway about its
-		next token, what that try wrote is on record and every row lock it took released (``step_commit``, as the
-		job does; ADR-066). Sniffed: no ``FOR UPDATE`` since the last step commit when the next token is asked."""
+	def sniffed_reverify(self, txn: str) -> list[str]:
+		"""Staff re-verify ``txn`` (tok-1 answers it failed, tok-2 paid), recording each gateway question, each
+		``FOR UPDATE`` and each step commit, in order."""
 		from kamra.tex.api import payments as payments_api
 
-		_b, txn = self.two_tokens()
 		price = f"{D(frappe.db.get_value('TEX Payment Transaction', txn, 'amount')):.2f}"
 		events: list[str] = []
 
@@ -2159,10 +2157,29 @@ class TestAFailedTryLeavesNothing(HoldCase):
 		with mock.patch.object(frappe.db, "sql", side_effect=sql), mock.patch.object(pay, "_commit_step", side_effect=step):
 			payments_api.reverify(transaction=txn)
 		self.assertEqual([e for e in events if e.startswith("ask")], ["ask tok-1", "ask tok-2"])
+		return events
+
+	def assert_no_lock_through_the_second_question(self, events: list[str]) -> None:
 		before = events[:events.index("ask tok-2")]
-		self.assertIn("lock", before[events.index("ask tok-1"):])                 # the first answer was recorded
+		self.assertIn("lock", before[events.index("ask tok-1"):])                 # the first answer was handled
 		since_commit = before[len(before) - before[::-1].index("commit"):] if "commit" in before else before
 		self.assertNotIn("lock", since_commit)
+
+	def test_staff_reverify_holds_no_lock_through_the_next_tokens_question(self):
+		"""LO-19 (audit 2K-1): a token's answer failed the charge; before staff re-verify asks the gateway about its
+		next token, what that try wrote is on record and every row lock it took released (``step_commit``, as the
+		job does; ADR-066). Sniffed: no ``FOR UPDATE`` since the last step commit when the next token is asked."""
+		_b, txn = self.two_tokens()
+		self.assert_no_lock_through_the_second_question(self.sniffed_reverify(txn))
+		self.assertEqual(txn_state(txn).status, "Succeeded")
+
+	def test_staff_reverify_of_a_failed_charge_holds_no_lock_through_the_next_tokens_question(self):
+		"""LO-19, review round 1: staff re-verify a Failed charge (a lost callback of an old checkout): a token's
+		failed answer changes nothing, but ``complete`` locked the link and the charge for it; they are released
+		before the next token is asked all the same."""
+		_b, txn = self.two_tokens()
+		frappe.db.set_value("TEX Payment Transaction", txn, "status", "Failed", update_modified=False)
+		self.assert_no_lock_through_the_second_question(self.sniffed_reverify(txn))
 		self.assertEqual(txn_state(txn).status, "Succeeded")
 
 

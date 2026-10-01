@@ -662,20 +662,18 @@ def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool 
 	"""Ask the gateway again for a charge by itself (its provider's ``status_query``): each of its questions
 	(``attempts``, default ``status_params`` of its reference, newest first) until one confirms it. A try
 	that failed leaves no message behind (P1-8); ``log``: a try the gateway did not answer is logged.
-	``step_commit`` (the job): a try that changed the charge is on record before the next question, so no
-	lock is held through it (ADR-066). A try that failed leaves nothing it wrote half way (money recorded, its
-	allocation refused): it is undone before the next question. → (the last answer, the last error)."""
+	``step_commit`` (the job, staff): each try is on record before the next question, its locks released — one
+	that changed nothing took the link's and the charge's locks all the same — so no lock is held through it
+	(ADR-066, LO-19). A try that failed leaves nothing it wrote half way (money recorded, its allocation
+	refused): it is undone before the next question. → (the last answer, the last error)."""
 	if attempts is None:
 		row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref"], as_dict=True)
 		cls = REGISTRY.get(row.provider) if row else None
 		attempts = cls.status_params(row.provider_ref) if cls and cls.status_query else []
-	out, error, state = None, None, None
+	out, error = None, None
 	for n, params in enumerate(attempts):
-		if step_commit:
-			now_state = frappe.db.get_value("TEX Payment Transaction", transaction, ["status", "modified"])
-			if n and now_state != state:
-				_commit_step()             # the last question changed the charge: on record before the next
-			state = now_state
+		if step_commit and n:
+			_commit_step()                 # the last question's answer on record, its locks released, before the next
 		mark = len(frappe.local.message_log)
 		frappe.db.savepoint(REVERIFY_TRY_SAVEPOINT)
 		try:
