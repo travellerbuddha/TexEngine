@@ -44,6 +44,7 @@ class TEXBookingSite(Document):
 		if self.sales_channel and self.sales_channel not in WEB_CHANNELS:
 			frappe.throw(_("A booking site sells on a web channel ({0}), not on {1}.").format(
 				", ".join(sorted(WEB_CHANNELS)), self.sales_channel))
+		self._validate_markets()
 		for f in ("primary_color", "accent_color", "background_color"):
 			if self.get(f) and not HEX.match(self.get(f)):
 				frappe.throw(_("{0} must be a #RRGGBB colour.").format(self.meta.get_label(f)))
@@ -77,6 +78,24 @@ class TEXBookingSite(Document):
 				assert isinstance(data, dict)
 			except Exception:
 				frappe.throw(_("Custom texts must be a JSON object keyed by language."))
+
+	def _validate_markets(self):
+		"""The markets a link may choose on this site (O-8, ADR-070); blank: every enabled market. Judged only when
+		the list or the default market changes: a market disabled later must not make the site unsavable (a domain
+		check saves the site as it is), and a disabled market is not sold anyway (``versions.resolve_market``)."""
+		codes = list(dict.fromkeys(c.strip().upper() for c in (self.allowed_markets or "").replace("\n", ",").split(",")
+		                           if c.strip()))
+		self.allowed_markets = ", ".join(codes) or None
+		if not codes or not (self.is_new() or self.has_value_changed("allowed_markets")
+		                     or self.has_value_changed("default_market")):
+			return
+		enabled = set(frappe.get_all("TEX Market", filters={"name": ("in", codes), "disabled": 0}, pluck="name"))
+		bad = [c for c in codes if c not in enabled]
+		if bad:
+			frappe.throw(_("Markets this site sells: {0} is not an enabled market.").format(", ".join(bad)))
+		if self.default_market and self.default_market not in codes:
+			frappe.throw(_("The default market {0} must be one of the markets this site sells.").format(
+				self.default_market))
 
 	def _validate_domains(self):
 		"""Custom domains are hostnames (ADR-035). Whether one is verified, when, and how its

@@ -86,7 +86,9 @@ def quote_rooms(rooms, promo_codes=None):
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def book(quote_ids, guest, payment_method: str | None = None, confirm_without_payment: int = 0,
-         notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
+         notes: str | None = None, idempotency_key: str | None = None, language: str | None = None,
+         market_override: int = 0, market_override_reason: str | None = None):
+	"""``market_override`` with a reason books a residents-only market for a guest outside it, audited (O-8)."""
 	ids = parse(quote_ids, [])
 	if not ids:
 		frappe.throw(_("Select at least one room."))
@@ -94,7 +96,9 @@ def book(quote_ids, guest, payment_method: str | None = None, confirm_without_pa
 	out = booking_svc.create_booking(quote_ids=ids, guest=parse(guest, {}), payment_method=payment_method,
 	                                 confirm_without_payment=bool(int(confirm_without_payment or 0)),
 	                                 notes=text(notes, 2000), idempotency_key=text(idempotency_key, 140),
-	                                 language=text(language, 10))
+	                                 language=text(language, 10),
+	                                 market_override=bool(int(market_override or 0)),
+	                                 market_override_reason=text(market_override_reason, 300))
 	# the guest's self-service link goes to the guest (email), never to the agent's screen
 	out.pop("manage_token", None)
 	return out

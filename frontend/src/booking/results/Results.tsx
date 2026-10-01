@@ -11,6 +11,7 @@ import { useContinue } from "../flow/useContinue"
 import { partyText } from "../search/GuestsPicker"
 import { useSite } from "../site/SiteContext"
 import type { Offer, PropertyResult, Reason, RoomContent } from "../types"
+import { countryNames, regionDisplay, type Residency } from "../../lib/residency"
 import { Badge, Button } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Skeleton } from "../ui/feedback"
@@ -541,6 +542,17 @@ function ContinueAction() {
   )
 }
 
+/** A residents-only market's prices (O-8): the guest confirms the country of residence at checkout. */
+function ResidencyBanner({ residency }: { residency: Residency }) {
+  const { t, locale } = useI18n()
+  const countries = countryNames(residency.countries, regionDisplay(locale))
+  return (
+    <Alert tone="info" live={false}>
+      {t("results.residencyBanner", { countries })}
+    </Alert>
+  )
+}
+
 export default function Results() {
   const { t, money } = useI18n()
   const { site } = useSite()
@@ -592,6 +604,7 @@ export default function Results() {
           {statusText}
         </p>
         {error && errorView}
+        {data?.residency && <ResidencyBanner residency={data.residency} />}
         {loading && data && <p className="text-sm text-muted">{t("results.searching")}</p>}
         {body}
       </div>

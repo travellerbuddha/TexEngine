@@ -1,6 +1,8 @@
 // Shapes returned by kamra/tex/api/public.py (guest-safe). Every amount is a
 // decimal string computed by the server; the browser only formats it.
 
+import type { Residency } from "../lib/residency"
+
 export type Money = string
 
 export interface Branding {
@@ -231,6 +233,8 @@ export interface SearchResult {
   check_out: string
   nights: number
   market: string
+  /** these prices are for residents of these countries (a residents-only market, O-8): checkout asks the guest */
+  residency?: Residency | null
   rooms: { adults: number; children: { age: number | null }[] }[]
   properties: PropertyResult[]
 }
@@ -423,6 +427,8 @@ export interface Basket {
     problem: string | null
   }[]
   methods: BasketMethod[]
+  /** the booked quotes' market is for residents of these countries (O-8) */
+  residency?: Residency | null
 }
 
 export interface PaymentLinkInfo {

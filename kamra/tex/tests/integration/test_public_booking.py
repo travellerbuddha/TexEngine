@@ -461,6 +461,149 @@ class TestRefusalCodes(TexTestCase):
 		self.assertNotIn("tex_params", frappe.local.response)
 
 
+def market_stay() -> dict:
+	return {"check_in": str(fx.d(6, 10)), "check_out": str(fx.d(6, 13)), "rooms": [{"adults": 2, "children": []}]}
+
+
+class TestMarketIntegrity(TexTestCase):
+	"""O-8 (audit Part 2G-2, ADR-070, D-5): a link chooses only a market its booking site sells, and the domestic
+	market (residents only) is sold on the web only to a guest whose country of residence or nationality is
+	among its countries. Staff may book anyway in the Call Center with a reason, audited."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		fx.create_contract(self.f, code="TR-DOM", market="TR")
+		frappe.db.set_value("TEX Market", "TR", "residency_required", 1)
+
+	def sell_only(self, markets: str) -> None:
+		site = frappe.get_doc("TEX Booking Site", SLUG)
+		site.allowed_markets = markets
+		site.save(ignore_permissions=True)
+
+	@staticmethod
+	def search(session: str, **link) -> dict:
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- anonymous booking-engine visitor
+		return public.search(site=SLUG, session_id=session, **market_stay(), **link)
+
+	def flex(self, res: dict) -> dict:
+		"""The standard room's flexible all-inclusive offer (its 30 % deposit rule takes payment at the hotel)."""
+		return next(o for o in res["properties"][0]["offers"] if o["room_type"] == self.f["room_types"]["STD"]
+		            and o["board"] == "AI" and o["rate_plan"] == self.f["rate_plans"]["FLEX"])
+
+	def quote(self, session: str, **link) -> tuple[dict, str]:
+		res = self.search(session, **link)
+		offer = self.flex(res)
+		q = public.quote(site=SLUG, offer_key=offer["rooms"][0]["offer_key"], session_id=session)
+		self.assertTrue(q["ok"], q)
+		return res, q["quote_id"]
+
+	def book(self, session: str, quote_id: str, guest: dict, key: str | None = None) -> dict:
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor books
+		return public.book(site=SLUG, quote_ids=[quote_id], guest=guest, payment_method="Pay at Hotel",
+		                   session_id=session, idempotency_key=key or f"idem-{session}")
+
+	def market_of(self, result: dict) -> str:
+		return frappe.db.get_value("TEX Quote", frappe.db.get_value("TEX Quote", {"booking": result["booking"]}),
+		                           "market")
+
+	def assertRefused(self, code: str, fn, *args, **kwargs):
+		from kamra.tex.services import refusals
+
+		with self.assertRaises(refusals.MarketRefused) as cm:
+			fn(*args, **kwargs)
+		self.assertEqual(cm.exception.code, code)
+		return cm.exception
+
+	def test_a_market_the_site_does_not_sell_is_refused_in_search(self):
+		self.sell_only("DE, GLOBAL")
+		self.assertRefused("MARKET_NOT_ALLOWED", self.search, "o8-1", market="TR")
+		self.assertEqual(frappe.local.response.get("tex_code"), "MARKET_NOT_ALLOWED")
+		# the guest's country picks among the site's markets: TR is not one, so the site's default (DE) prices
+		res = self.search("o8-1b", country="TR")
+		self.assertIsNone(res["residency"])
+		totals = lambda r: sorted(o["total"] for o in r["properties"][0]["offers"])  # noqa: E731
+		self.assertTrue(totals(res))
+		self.assertEqual(totals(res), totals(self.search("o8-1c", market="DE")))
+
+	def test_a_residents_only_market_is_refused_for_another_link_country(self):
+		e = self.assertRefused("MARKET_RESIDENCY", self.search, "o8-2", market="TR", country="DE")
+		self.assertEqual(e.params, {"market": "TR", "countries": ["TR"]})
+		self.assertEqual(self.search("o8-2b", market="TR", country="tr")["residency"], {"countries": ["TR"]})
+
+	def test_the_guest_declares_residence_at_booking(self):
+		res, quote_id = self.quote("o8-3", market="TR")
+		self.assertEqual(res["residency"], {"countries": ["TR"]})          # priced; checkout asks for the residence
+		self.assertEqual(public.basket(site=SLUG, quote_ids=[quote_id], session_id="o8-3")["residency"],
+		                 {"countries": ["TR"]})
+		bookings = frappe.db.count("TEX Booking")
+		e = self.assertRefused("MARKET_RESIDENCY", self.book, "o8-3", quote_id, GUEST)        # resident of Germany
+		self.assertEqual(e.params, {"market": "TR", "countries": ["TR"]})
+		self.assertNotIn("TR-DOM", str(e))
+		self.assertEqual(frappe.db.count("TEX Booking"), bookings)
+		event = frappe.get_all("TEX Audit Event", filters={"action": "booking.market_refused", "reference_name": quote_id},
+		                       fields=["new_value", "property"])
+		self.assertEqual(len(event), 1)
+		self.assertEqual(frappe.parse_json(event[0].new_value),
+		                 {"market": "TR", "countries": ["TR"], "country": "DE", "nationality": None, "site": SLUG})
+		# the guest corrects the country: the same quote and the same retry key book (the refusal kept neither)
+		ok = self.book("o8-3", quote_id, {**GUEST, "country": "TR"})
+		self.assertEqual((ok["status"], self.market_of(ok)), ("Confirmed", "TR"))
+		# a guest living abroad with Turkish nationality books too
+		_res, other = self.quote("o8-3b", market="TR")
+		self.assertEqual(self.book("o8-3b", other, {**GUEST, "email": "o8-nat@example.com",
+		                                           "nationality": "Türkiye"})["status"], "Confirmed")
+
+	def test_staff_override_in_the_crs_is_audited(self):
+		agent = fx.ensure_user("o8-agent@example.com", ["Call Center Agent"])
+		fx.ensure("TEX Access Grant", {"user": agent, "property": fx.PROPERTY},
+		          {"user": agent, "scope_level": "Hotel", "property": fx.PROPERTY,
+		           "permission_profile": "Reservations Agent"})
+		scope.clear_cache()
+		frappe.set_user(agent)  # nosemgrep: frappe-setuser -- a call-centre agent
+		offer = self.flex(crs.search(**market_stay(), market="TR", channel="CALL_CENTER", properties=[fx.PROPERTY]))
+		quote_id = crs.quote(offer_key=offer["rooms"][0]["offer_key"])["quote_id"]
+		guest = {"first_name": "Jonas", "last_name": "Weber", "email": "o8-crs@example.com", "country": "DE"}
+		e = self.assertRefused("MARKET_RESIDENCY", crs.book, quote_ids=[quote_id], guest=guest,
+		                       payment_method="Pay at Hotel")
+		self.assertIn("anyway", str(e))                                    # the agent is told the way out
+		with self.assertRaises(frappe.ValidationError):
+			crs.book(quote_ids=[quote_id], guest=guest, payment_method="Pay at Hotel", market_override=1)
+		out = crs.book(quote_ids=[quote_id], guest=guest, payment_method="Pay at Hotel", market_override=1,
+		               market_override_reason="Guest works in Antalya, residence permit shown")
+		self.assertEqual(out["status"], "Confirmed")
+		event = frappe.get_all("TEX Audit Event", filters={"action": "booking.market_override",
+		                                                    "reference_name": out["booking"]},
+		                       fields=["new_value", "reason", "actor"])
+		self.assertEqual(len(event), 1)
+		self.assertEqual(frappe.parse_json(event[0].new_value),
+		                 {"market": "TR", "countries": ["TR"], "country": "DE", "nationality": None})
+		self.assertEqual((event[0].reason, event[0].actor),
+		                 ("Guest works in Antalya, residence permit shown", agent))
+
+	def test_staff_on_a_booking_site_follow_the_site(self):
+		_res, quote_id = self.quote("o8-5", market="TR")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- signed-in staff on the public site
+		with self.assertRaises(frappe.ValidationError) as cm:
+			public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Pay at Hotel",
+			            session_id="o8-5", idempotency_key="idem-o8-5")
+		self.assertEqual(getattr(cm.exception, "code", None), "MARKET_RESIDENCY")
+		self.assertFalse(frappe.db.exists("TEX Quote", {"name": quote_id, "status": "Used"}))
+
+	def test_markets_and_sites_are_validated(self):
+		frappe.db.set_value("TEX Market", "PL", "disabled", 1)
+		for markets in ("DE, NOPE", "DE, PL", "GLOBAL, TR"):                  # unknown, disabled, default not listed
+			with self.assertRaises(frappe.ValidationError, msg=markets):
+				self.sell_only(markets)
+		self.sell_only(" de , global,de")
+		self.assertEqual(frappe.db.get_value("TEX Booking Site", SLUG, "allowed_markets"), "DE, GLOBAL")
+		for name, values in (("GLOBAL", {"residency_required": 1}), ("DE", {"residency_required": 1, "countries": ""})):
+			doc = frappe.get_doc("TEX Market", name)
+			doc.update(values)
+			with self.assertRaises(frappe.ValidationError, msg=name):
+				doc.save(ignore_permissions=True)
+
+
 class TestMandatoryExtrasInSearch(TexTestCase):
 	"""Y-5: a search prices the hotel's mandatory extras as the quote does, so the price a guest or an
 	agent sees in the results is the one the quote confirms (``price_changed`` False) — not the stay

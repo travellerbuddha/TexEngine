@@ -185,16 +185,42 @@ def _strip_names(rows: dict) -> dict:
 	return rows
 
 
-def _market(site, market: str | None, country: str | None) -> str:
-	markets = [versions.MarketDef(m.name, frozenset(_csv(m.countries)), bool(m.is_global), bool(m.disabled))
-	           for m in frappe.get_all("TEX Market", fields=["name", "countries", "is_global", "disabled"])]
+def market_defs() -> list[versions.MarketDef]:
+	return [versions.MarketDef(m.name, frozenset(_csv(m.countries)), bool(m.is_global), bool(m.disabled),
+	                           bool(m.residency_required))
+	        for m in frappe.get_all("TEX Market", fields=["name", "countries", "is_global", "disabled",
+	                                                      "residency_required"])]
+
+
+def _market(site, market: str | None, country: str | None) -> versions.MarketDef:
+	"""The market a search prices, from the link's market or country among the site's markets (O-8, ADR-070). Refused
+	(``MarketRefused``, a clean 417 the booking app acts on: it searches again without the link and says why): a
+	market the site does not sell, an unknown or ambiguous one, and a residents-only market asked for together with
+	a link country outside it. A residents-only market without a country is priced: the guest declares residence
+	at checkout and ``create_booking`` decides."""
+	from kamra.tex.services.refusals import MarketRefused
+
+	markets = market_defs()
 	try:
 		code, _how = versions.resolve_market(explicit=market, country=country, markets=markets,
+		                                     allowed=set(_csv(site.allowed_markets)) or None,
 		                                     default=site.default_market)
 	except versions.MarketResolutionError as e:
-		# a clean 417 the booking app can act on (it retries without the deep link)
-		frappe.throw(str(e), frappe.ValidationError, title=_("Market"))
-	return code
+		params = {"market": market.strip().upper()} if e.code == "MARKET_NOT_ALLOWED" and market else {}
+		frappe.throw(str(e), MarketRefused(code=e.code, params=params), title=_("Market"))
+	m = next(m for m in markets if m.code == code)
+	if country and versions.residency_refusal(m, country=country, nationality=None):
+		frappe.throw(_("These prices are for residents of {0}.").format(", ".join(sorted(m.countries))),
+		             MarketRefused(code="MARKET_RESIDENCY", params={"market": m.code, "countries": sorted(m.countries)}),
+		             title=_("Market"))
+	return m
+
+
+def residency(market: versions.MarketDef | str | None) -> dict | None:
+	"""What the guest is told of a residents-only market (O-8): its countries; None for any other market."""
+	if isinstance(market, str):
+		market = next((m for m in market_defs() if m.code == market), None)
+	return {"countries": sorted(market.countries)} if market and market.residency_required else None
 
 
 # ─── search / quote / book ───────────────────────────────────────────────
@@ -215,7 +241,8 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	allowed_ccy = _csv(s.currencies)
 	if currency and allowed_ccy and currency not in allowed_ccy:
 		frappe.throw(_("Currency not offered."))
-	mkt = _market(s, market, country)
+	m = _market(s, market, country)
+	mkt = m.code
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
 	                     channel=_channel(s), currency=currency or s.default_currency or None,
 	                     promo_codes=[promo_code] if promo_code else (), internal=False)
@@ -228,6 +255,8 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 			o.pop("contract", None)
 			o.pop("version", None)
 	res["market"] = mkt
+	# a residents-only market's prices: checkout asks the guest's country of residence (O-8)
+	res["residency"] = residency(m)
 	content.Localizer(content.guest_language()).search(res)
 	# the party as ages on arrival: a child's date of birth never reaches analytics (G-52 review)
 	parties = quoting.parse_rooms(rooms, arrival=getdate(check_in))
@@ -386,7 +415,9 @@ def basket(site: str, quote_ids, session_id: str | None = None):
 		r.pop("payment_policy", None)
 	return {"currency": out["currency"], "total": out["total"], "usable": out["usable"],
 	        "expires_at": out["expires_at"], "pay_at_hotel_allowed": out["pay_at_hotel_allowed"],
-	        "rooms": out["rooms"], "methods": methods}
+	        "rooms": out["rooms"], "methods": methods,
+	        # the market of the quotes booked, not of the search: checkout asks for the residence it needs (O-8)
+	        "residency": residency(out["market"])}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])

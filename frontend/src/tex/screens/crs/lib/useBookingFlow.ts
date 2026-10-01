@@ -7,6 +7,8 @@ import { addDays, nightsBetween } from "../../../lib/format"
 import { useSession } from "../../../lib/session"
 import { useSiteClock } from "../../../lib/siteDay"
 import { TEX_LANGS, useTexT } from "../../../i18n"
+import { isoCountry, marketCountries } from "../../../../lib/residency"
+import COUNTRIES from "../../../../booking/checkout/countries.json"
 import {
   bookQuotes,
   extrasAvailability as fetchExtrasAvailability,
@@ -51,6 +53,9 @@ export interface GuestFormState {
   phone: string
   special_requests: string
   language: string
+  /** ISO codes: a residents-only market's web prices are for guests of its countries (O-8) */
+  country: string
+  nationality: string
   consent_email: boolean
   consent_sms: boolean
   consent_whatsapp: boolean
@@ -152,6 +157,8 @@ export function emptyGuest(lang: string): GuestFormState {
     phone: "",
     special_requests: "",
     language: TEX_LANGS.some((l) => l.code === lang) ? lang : "en",
+    country: "",
+    nationality: "",
     consent_email: false,
     consent_sms: false,
     consent_whatsapp: false,
@@ -166,6 +173,9 @@ function sameCodes(a: string[], b: string[]) {
   const y = [...new Set(b.map((c) => c.toUpperCase()))].sort().join(",")
   return x === y
 }
+
+/** ISO code → country name (Frappe's English names: "Türkiye", "Germany"). */
+export const COUNTRY_NAMES = COUNTRIES as Record<string, string>
 
 function emailOk(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
@@ -599,6 +609,12 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     bookKey.current = null
   }, [quotedSig, guest, booker, method, confirmUnpaid, notes])
 
+  // the market of the prices found: a residents-only one asks for the guest's residence or nationality (O-8)
+  const residency = useMemo(() => {
+    const m = result?.market ? boot.markets.find((x) => x.name === result.market) : undefined
+    return m?.residency_required ? { market: m.name, countries: marketCountries(m.countries) } : null
+  }, [result?.market, boot.markets])
+
   // ── guest / book ──
   const validateGuest = useCallback((): FieldErrors => {
     const e: FieldErrors = {}
@@ -606,13 +622,15 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     if (!guest.last_name.trim()) e.last_name = t("crs.err.last_name")
     if (!guest.email.trim() && !guest.phone.trim()) e.contact = t("crs.err.contact")
     if (guest.email.trim() && !emailOk(guest.email)) e.email = t("crs.err.email")
+    if (residency && !guest.country && !guest.nationality)
+      e.country = t("crs.err.residence", { market: residency.market, countries: residency.countries.join(", ") })
     if (!booker.same) {
       if (!booker.name.trim()) e.booker_name = t("crs.err.booker_name")
       if (!booker.email.trim() && !booker.phone.trim()) e.booker_contact = t("crs.err.contact")
       if (booker.email.trim() && !emailOk(booker.email)) e.booker_email = t("crs.err.email")
     }
     return e
-  }, [guest, booker, t])
+  }, [guest, booker, t, residency])
 
   const applyGuest = useCallback(
     (row: GuestRow | null) => {
@@ -628,6 +646,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         email: row.email || "",
         phone: row.phone || "",
         language: row.tex_language && TEX_LANGS.some((l) => l.code === row.tex_language) ? row.tex_language : g.language,
+        // the profile's country of residence; its nationality only when it names a country (the default is "Indian")
+        country: isoCountry(row.tex_country, COUNTRY_NAMES) ?? "",
+        nationality: isoCountry(row.nationality, COUNTRY_NAMES) ?? "",
         crm_guest: row,
         // consent is only ever granted explicitly on this screen, never carried over
         consent_email: false,
@@ -652,7 +673,9 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
       (!methods?.length || method),
   )
 
-  const book = useCallback(async (): Promise<BookingSummary | null> => {
+  /** Book the quotes; `marketOverrideReason`: book a residents-only market for a guest outside it (MarketRefused),
+   * with the agent's reason (audited, O-8). */
+  const book = useCallback(async (opts: { marketOverrideReason?: string } = {}): Promise<BookingSummary | null> => {
     const errs = validateGuest()
     setGuestErrors(errs)
     if (Object.keys(errs).length) return null
@@ -673,6 +696,8 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
           email: guest.email.trim() || undefined,
           phone: guest.phone.trim() || undefined,
           special_requests: guest.special_requests.trim() || undefined,
+          country: guest.country || undefined,
+          nationality: guest.nationality || undefined,
           consent_email: guest.consent_email || undefined,
           consent_sms: guest.consent_sms || undefined,
           consent_whatsapp: guest.consent_whatsapp || undefined,
@@ -685,6 +710,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
         notes: notes.trim() || undefined,
         idempotency_key: bookKey.current,
         language: guest.language,
+        ...(opts.marketOverrideReason ? { market_override: 1 as const, market_override_reason: opts.marketOverrideReason } : {}),
       })
       setBooking(out)
       return out
@@ -778,6 +804,7 @@ export function useBookingFlow(opts: { channel?: string } = {}) {
     // guest
     guest,
     setGuest,
+    residency,
     booker,
     setBooker,
     guestErrors,

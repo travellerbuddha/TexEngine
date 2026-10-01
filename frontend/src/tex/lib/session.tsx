@@ -29,7 +29,15 @@ export interface Bootstrap {
   properties: TexProperty[]
   capabilities: Record<string, string>
   settings: { brand_name: string; show_legacy_pms: boolean; default_market?: string; default_sales_channel?: string; source_url?: string }
-  markets: { name: string; market_name: string; is_global: number; default_currency?: string; countries?: string }[]
+  markets: {
+    name: string
+    market_name: string
+    is_global: number
+    default_currency?: string
+    countries?: string
+    /** sold on the web only to residents of its countries; the Call Center asks and may book anyway (O-8) */
+    residency_required?: number
+  }[]
   channels: { name: string; channel_name: string; channel_group?: string }[]
   currencies: string[]
   /** Server wall clock: datetimes from the API are naive times in `time_zone`; `today` is the

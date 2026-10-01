@@ -9411,6 +9411,38 @@ the versions the roll superseded the state their contract's later publishes woul
   page says WARN `fx_bridged` (pairs, ages, hotels). VND (Cam Ranh) uses a MANUAL-mode policy, outside this part.
 - ENGINE_VERSION, schema and the parity corpus are unchanged.
 
+## ADR-070 Market integrity: markets per site, residents-only markets (audit Part 2G-2: O-8, G-55b; D-5)
+
+Written 2026-10-01 (owner decision D-5; the Call Center override is `reservation.create` with a reason). Before, a link's
+`?market=TR` (or the widget's `market` attribute) priced the domestic market for anyone: `public._market` never passed the
+site's markets to `resolve_market`, the link's country was ignored when a market was named, and `create_booking` never
+compared the guest's residence or nationality with the market.
+- *Markets per site.* `TEX Booking Site.allowed_markets` lists the markets a link may choose there (blank: every enabled
+  market, as before; the default market is always among them, checked when the list or the default changes, so a market
+  disabled later never makes the site unsavable). A link's market outside the list is refused as `MARKET_NOT_ALLOWED`
+  (never "unknown"); a link's country picks among the site's markets, else the default. A booking of a quote made for
+  another site's market is refused the same way.
+- *Residents-only markets.* `TEX Market.residency_required` ("Residents only (web)"; TR by the seed and by p71, once; only a
+  market with countries, never the global one). A web booking on such a market needs the guest's declared country of
+  residence or nationality among the market's countries (the request's values, ISO or a Country name; never a stored
+  profile's, whose nationality defaults to "Indian"), else it is refused (`MARKET_RESIDENCY`) after the quotes are locked and
+  before any contract, night or guest lock, and the refusal is audited outside the request (`booking.market_refused`: market,
+  its countries, the guest's country and nationality, the site; once per quote and answer). Search refuses only a mismatch
+  it already knows (a link's own country outside the market); otherwise it prices and answers `residency: {countries}`
+  (and so does `basket`, for the market of the quotes booked), and the booking engine asks the country of residence (and,
+  optionally, the nationality) at checkout. Eligibility is read from the market when booking, never from the frozen
+  payload, and never changes a price.
+- *Staff.* In the Call Center a mismatch is refused (`MarketRefused`, which names the way out) unless the agent books anyway
+  with a reason (`market_override`, `market_override_reason`; the capability is the booking's own `reservation.create`),
+  audited `booking.market_override` (market, its countries, the guest's country and nationality, the reason). The Call
+  Center form has the guest's country of residence and nationality (ISO), pre-filled from the CRM profile, and asks for one
+  of them on a residents-only market. Staff booking on a booking site follow the site's rules (ADR-050) and cannot override.
+  Channel bookings are the channel's; a staff modification into a residents-only market is not checked (its revision is the
+  record).
+- Refusals carry the market codes of ADR-013's addendum (`MARKET_UNKNOWN`, `MARKET_AMBIGUOUS`, `MARKET_REQUIRED`,
+  `MARKET_NOT_ALLOWED`, `MARKET_RESIDENCY`; params: the market, its countries). p71 syncs TEX Market and TEX Booking Site and
+  makes TR residents-only once (`ran_before`: an administrator who switches it off is never overruled).
+
 ## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
 
 Written 2026-10-01 (Y-11, O-22, O-21; §4 and the job's lock order in §7: Part 2H-2, O-20). Before, the daily job took `min(lot, balance)` from every Available earning past its

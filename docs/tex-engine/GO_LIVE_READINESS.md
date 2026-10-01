@@ -169,6 +169,11 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - Alerts go to TEX settings → Monitoring → recipients, every 15 minutes and only on a change.
     They need SMTP. Without it, each change is in the Error Log (`TEX status alert: …`) and in
     the audit trail (`system.status_changed`).
+- **Markets per booking site** (O-8, ADR-070, D-5). Set each booking site's "Markets this site sells" (Booking Engine →
+  General; blank sells every enabled market) and confirm which markets are "Residents only (web)" (Settings → Markets; TR by
+  default). A residents-only market's web prices go only to guests whose country of residence or nationality is among its
+  countries; Call Center agents may book anyway with a reason (audit trail: `booking.market_override`; refused web
+  bookings: `booking.market_refused`).
 - **`encryption_key`** in `site_config.json` signs offers, payment callbacks and webhooks,
   and decrypts every Password field. Back it up separately from the database and never
   rotate it without a re-encryption plan.

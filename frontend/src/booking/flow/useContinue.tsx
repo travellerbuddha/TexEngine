@@ -7,6 +7,7 @@ import { useI18n } from "../i18n"
 import { extraAnchor, refusalText } from "../lib/extras"
 import { Button } from "../ui/controls"
 import { Alert } from "../ui/feedback"
+import { countryNames, regionDisplay } from "../../lib/residency"
 import { useBooking, type FlowError, type Step } from "./BookingContext"
 
 export function useContinue() {
@@ -56,7 +57,7 @@ export function useBackToExtras() {
 }
 
 export function FlowErrorAlert() {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const b = useBooking()
   const ref = useRef<HTMLDivElement>(null)
   const e = b.flowError
@@ -134,6 +135,18 @@ export function FlowErrorAlert() {
         {t("errors.refreshPrices")}
       </Button>
     )
+  } else if (e.code === "MARKET_RESIDENCY") {
+    // these prices are for residents of the market's countries (O-8): the guest's residence or nationality, or the
+    // standard prices
+    const codes = Array.isArray(e.params?.countries) ? (e.params.countries as unknown[]).filter((c): c is string => typeof c === "string") : b.residency?.countries ?? []
+    title = t("errors.residencyTitle")
+    body = t("details.errResidenceNotEligible", { countries: countryNames(codes, regionDisplay(locale)) })
+    if (b.standardPrices)
+      action = (
+        <Button size="sm" onClick={b.standardPrices}>
+          {t("details.standardPrices")}
+        </Button>
+      )
   } else if (e.kind === "rate_limit") {
     title = t("errors.rateLimitTitle")
     body = t("errors.rateLimitBody")

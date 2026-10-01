@@ -30,7 +30,7 @@ from kamra.tex.pricing.enums import LineKind
 from kamra.tex.pricing.explain import Explanation
 from kamra.tex.pricing.model import PricingError, RuleRef
 from kamra.tex.security import scope
-from kamra.tex.security.audit import audit, log_exception
+from kamra.tex.security.audit import audit, audit_refusal, log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import holds, quoting
 
@@ -571,10 +571,73 @@ def reservation_amounts(result: dict) -> dict:
 METHODS = (holds.CARD, holds.TRANSFER, "Pay at Hotel")
 
 
+def iso_country(value) -> str | None:
+	"""An ISO 3166-1 alpha-2 code, upper case, from a code or a Frappe Country name ("Türkiye", "Germany"); None
+	for anything else. Frappe keeps ``Country.code`` in lower case."""
+	v = value.strip() if isinstance(value, str) else ""
+	if not v:
+		return None
+	if len(v) == 2 and v.isalpha():
+		return v.upper()
+	code = frappe.db.get_value("Country", v, "code")
+	return code.upper() if code else None
+
+
+def _country_name(code: str) -> str:
+	return frappe.db.get_value("Country", {"code": code.lower()}, "name") or code
+
+
+def check_market(market: str, *, web: bool, booking_site: str | None, property: str, first_quote: str, guest: dict,
+                 override: bool = False, reason: str | None = None) -> dict | None:
+	"""Whether this booking may be made on ``market`` (O-8, ADR-070, D-5); before any contract, night or guest lock.
+
+	- On the web (a guest, or staff on a booking site): a market the site does not sell is refused
+	  (``MARKET_NOT_ALLOWED``: a quote of another site of the hotel).
+	- A residents-only market needs the guest's declared country of residence or nationality among its countries
+	  (the request's values only, never a stored profile's: its nationality defaults to "Indian"). On the web a
+	  mismatch is refused (``MARKET_RESIDENCY``) and audited outside the request, never overridden. In the Call
+	  Center it is refused unless the agent books anyway with a reason (``override``): → what the override audits.
+
+	Eligibility is read from the market now, not from the frozen payload: it is not a price."""
+	from kamra.tex.pricing import versions
+	from kamra.tex.services.refusals import MarketRefused
+
+	split = lambda v: [c.strip().upper() for c in (v or "").replace("\n", ",").split(",") if c.strip()]  # noqa: E731
+	if web and booking_site:
+		allowed = split(frappe.db.get_value("TEX Booking Site", booking_site, "allowed_markets"))
+		if allowed and market not in allowed:
+			frappe.throw(_("These prices are not sold on this site. Please search again."),
+			             MarketRefused(code="MARKET_NOT_ALLOWED", params={"market": market}), title=_("Market"))
+	row = frappe.db.get_value("TEX Market", market, ["countries", "residency_required"], as_dict=True)
+	if not row or not row.residency_required:
+		return None
+	m = versions.MarketDef(market, frozenset(split(row.countries)), residency_required=True)
+	country, nationality = iso_country(guest.get("country")), iso_country(guest.get("nationality"))
+	if not versions.residency_refusal(m, country=country, nationality=nationality):
+		return None
+	seen = {"market": market, "countries": sorted(m.countries), "country": country, "nationality": nationality}
+	refused = MarketRefused(code="MARKET_RESIDENCY", params={"market": market, "countries": sorted(m.countries)})
+	residents = ", ".join(_country_name(c) for c in sorted(m.countries))
+	if web:
+		audit_refusal("booking.market_refused", reference_doctype="TEX Quote", reference_name=first_quote,
+		              property=property, new={**seen, "site": booking_site}, once_per=("market", "country", "nationality"))
+		frappe.throw(_("These prices are for residents of {0}. Please choose your country of residence, or search "
+		               "again for our standard prices.").format(residents), refused, title=_("Market"))
+	if not override:
+		frappe.throw(_("Market {0} is for residents of {1}; the guest's country of residence is {2} and nationality {3}. "
+		               "Book on this market anyway with a reason, or quote another market.").format(
+			market, residents, _country_name(country) if country else "—",
+			_country_name(nationality) if nationality else "—"), refused, title=_("Market"))
+	if not (reason or "").strip():
+		frappe.throw(_("A reason is required to book on market {0} anyway.").format(market))
+	return seen
+
+
 def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = None, payment_method: str | None = None,
                    idempotency_key: str | None = None, notes: str | None = None, language: str | None = None,
                    booking_site: str | None = None, confirm_without_payment: bool = False,
-                   session_id: str | None = None, source_tag: str | None = None) -> dict:
+                   session_id: str | None = None, source_tag: str | None = None, market_override: bool = False,
+                   market_override_reason: str | None = None) -> dict:
 	staff = frappe.session.user != "Guest"
 	key = scoped_idempotency_key(idempotency_key, staff=staff, booking_site=booking_site, session_id=session_id)
 	if key:
@@ -633,6 +696,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		if not booking_site:
 			# staff book on the channels their profiles may book on (ADR-050)
 			scope.require_channel(channel, property, to="book")
+	# the site's markets and a residents-only market's guests (O-8): the quotes are locked, nothing else yet
+	overridden = check_market(market, web=bool(booking_site or not staff), booking_site=booking_site, property=property,
+	                          first_quote=rows[0][0].name, guest=guest, override=bool(market_override),
+	                          reason=market_override_reason)
 	# the hotel's payment method rules bind the booking where one matches its market, currency and channel
 	# (O-15): the method must be one it offers, whoever books. The quotes are locked (a refusal gives the request
 	# back and they stay Open); no contract, night or guest lock is taken yet
@@ -733,6 +800,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		audit("booking.staff_on_site", reference_doctype="TEX Booking", reference_name=booking.name,
 		      property=property, new={"booking_site": booking_site, "channel": channel, "total": to_str(total),
 		                              "currency": currency})
+	if overridden:
+		# booked on a residents-only market for a guest outside it, in the Call Center, with a reason (O-8, ADR-070)
+		audit("booking.market_override", reference_doctype="TEX Booking", reference_name=booking.name,
+		      property=property, new=overridden, reason=market_override_reason)
 	_record_consent(guest_name, booking.name, property, consent_granted, consent_requested, staff)
 
 	reservations = []

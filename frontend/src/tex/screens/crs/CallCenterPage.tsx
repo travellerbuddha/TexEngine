@@ -26,7 +26,7 @@ import {
 } from "../../ui"
 import { cn } from "../../../lib/utils"
 import type { TexApiError } from "../../lib/api"
-import { GuestForm, PaymentPicker } from "./components/CheckoutParts"
+import { GuestForm, MarketRefusedNotice, PaymentPicker } from "./components/CheckoutParts"
 import { Confirmation } from "./components/Confirmation"
 import { Disclosure, LiveRegion } from "./components/controls"
 import { GuestLookup } from "./components/GuestLookup"
@@ -232,9 +232,9 @@ export default function CallCenterPage() {
     }
   }, [quoteCopy, toast, t, log])
 
-  const doBook = useCallback(async () => {
+  const doBook = useCallback(async (opts: { marketOverrideReason?: string } = {}) => {
     if (!flow.canBook || flow.bookingPending) return
-    const b = await flow.book()
+    const b = await flow.book(opts)
     if (b) {
       setAnnounce(t("crs.done.announce", { ref: b.booking }))
       log(t("crs.cc.ev.booked", { ref: b.booking, status: L.status(b.status) }))
@@ -508,7 +508,7 @@ export default function CallCenterPage() {
                     showNotes={false}
                   />
                 </div>
-                <BookBlock flow={flow} onBook={() => void doBook()} />
+                <BookBlock flow={flow} onBook={() => void doBook()} onBookAnyway={(reason) => void doBook({ marketOverrideReason: reason })} />
               </CardBody>
             </Card>
           )}
@@ -1089,13 +1089,15 @@ function PromoInline({ flow }: { flow: BookingFlow }) {
   )
 }
 
-function BookBlock({ flow, onBook }: { flow: BookingFlow; onBook: () => void }) {
+function BookBlock({ flow, onBook, onBookAnyway }: { flow: BookingFlow; onBook: () => void; onBookAnyway: (reason: string) => void }) {
   const { t } = useTexT()
   return (
     <div className="space-y-2 border-t border-zinc-100 pt-4">
       {/* a limited extra sold out since the quote (not the room): re-quoted, the extra shows as not added */}
       {flow.extraSoldOut && <ExtraSoldOutNotice flow={flow} />}
-      {flow.bookError && !flow.extraSoldOut && (
+      {/* a residents-only market refused the guest: the agent may book anyway with a reason (O-8) */}
+      {flow.bookError?.type === "MarketRefused" && <MarketRefusedNotice flow={flow} onBookAnyway={onBookAnyway} />}
+      {flow.bookError && !flow.extraSoldOut && flow.bookError.type !== "MarketRefused" && (
         <Notice tone="danger" title={flow.bookError.isPermission ? t("core.error.permission") : t("crs.book.failed")}>
           <p>{flow.bookError.message}</p>
           {!flow.bookError.isPermission && (

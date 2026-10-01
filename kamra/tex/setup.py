@@ -9,18 +9,18 @@ import frappe
 from kamra.tex.security.capabilities import DEFAULT_PROFILES
 
 MARKETS = [
-	# code, name, countries, currency, language, global
-	("GLOBAL", "Global", "", "EUR", "en", 1),
-	("TR", "Türkiye", "TR", "TRY", "tr", 0),
-	("DE", "Germany", "DE", "EUR", "de", 0),
-	("UK", "United Kingdom", "GB", "GBP", "en", 0),
-	("RO", "Romania", "RO", "EUR", "ro", 0),
-	("PL", "Poland", "PL", "EUR", "pl", 0),
-	("RU", "Russia", "RU", "USD", "ru", 0),
-	("CIS", "CIS", "AM, AZ, BY, KG, KZ, MD, TJ, UZ", "USD", "ru", 0),
-	("DACH", "DACH", "AT, CH, DE", "EUR", "de", 0),
+	# code, name, countries, currency, language, global, residents only on the web (O-8, D-5: the domestic market)
+	("GLOBAL", "Global", "", "EUR", "en", 1, 0),
+	("TR", "Türkiye", "TR", "TRY", "tr", 0, 1),
+	("DE", "Germany", "DE", "EUR", "de", 0, 0),
+	("UK", "United Kingdom", "GB", "GBP", "en", 0, 0),
+	("RO", "Romania", "RO", "EUR", "ro", 0, 0),
+	("PL", "Poland", "PL", "EUR", "pl", 0, 0),
+	("RU", "Russia", "RU", "USD", "ru", 0, 0),
+	("CIS", "CIS", "AM, AZ, BY, KG, KZ, MD, TJ, UZ", "USD", "ru", 0, 0),
+	("DACH", "DACH", "AT, CH, DE", "EUR", "de", 0, 0),
 	("EU", "European Union", "AT, BE, BG, CY, CZ, DE, DK, EE, ES, FI, FR, GR, HR, HU, IE, IT, LT, LU, LV, MT, NL, "
-	                         "PL, PT, RO, SE, SI, SK", "EUR", "en", 0),
+	                         "PL, PT, RO, SE, SI, SK", "EUR", "en", 0, 0),
 ]
 
 CHANNELS = [
@@ -57,11 +57,13 @@ def ensure_profiles() -> None:
 
 
 def ensure_masters() -> None:
-	for code, name, countries, ccy, lang, is_global in MARKETS:
+	for code, name, countries, ccy, lang, is_global, residents_only in MARKETS:
 		if not frappe.db.exists("TEX Market", code):
+			# on create only: an administrator's choice is never undone (an upgraded site gets TR's rule from p71)
 			frappe.get_doc({"doctype": "TEX Market", "market_code": code, "market_name": name, "countries": countries,
 			                "default_currency": ccy if frappe.db.exists("Currency", ccy) else None,
-			                "default_language": lang, "is_global": is_global}).insert(ignore_permissions=True)
+			                "default_language": lang, "is_global": is_global,
+			                "residency_required": residents_only}).insert(ignore_permissions=True)
 	for code, name, group in CHANNELS:
 		if not frappe.db.exists("TEX Sales Channel", code):
 			frappe.get_doc({"doctype": "TEX Sales Channel", "channel_code": code, "channel_name": name,

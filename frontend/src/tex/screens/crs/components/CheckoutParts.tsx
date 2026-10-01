@@ -1,10 +1,10 @@
-import { forwardRef, useEffect } from "react"
+import { forwardRef, useEffect, useMemo, useState } from "react"
 import { Link2Off, Star } from "lucide-react"
 import { TEX_LANGS, useTexT } from "../../../i18n"
 import { Badge, Button, Checkbox, Field, FormGrid, Input, Money, Notice, Select, Skeleton, Textarea } from "../../../ui"
 import { cn } from "../../../../lib/utils"
 import { useLabels } from "../lib/labels"
-import type { BookingFlow } from "../lib/useBookingFlow"
+import { COUNTRY_NAMES, type BookingFlow } from "../lib/useBookingFlow"
 import { Row } from "./controls"
 import { GuestLookup } from "./GuestLookup"
 
@@ -13,9 +13,10 @@ export const GuestForm = forwardRef<
   HTMLInputElement,
   { flow: BookingFlow; lookup?: boolean; idPrefix?: string; canLookup?: boolean }
 >(function GuestForm({ flow, lookup = true, idPrefix = "g", canLookup = true }, firstRef) {
-  const { t } = useTexT()
-  const { guest, setGuest, booker, setBooker, guestErrors: e } = flow
+  const { t, lang } = useTexT()
+  const { guest, setGuest, booker, setBooker, guestErrors: e, residency } = flow
   const g = guest.crm_guest
+  const countries = useCountryOptions(lang)
   const already = g
     ? [g.tex_consent_email ? t("crs.consent.email") : null, g.tex_consent_sms ? t("crs.consent.sms") : null, g.tex_consent_whatsapp ? t("crs.consent.whatsapp") : null].filter(Boolean)
     : []
@@ -78,6 +79,29 @@ export const GuestForm = forwardRef<
         <Field label={t("crs.guest.requests")}>
           <Textarea id={`${idPrefix}-req`} rows={1} value={guest.special_requests} onChange={(ev) => setGuest({ ...guest, special_requests: ev.target.value })} />
         </Field>
+        <Field
+          label={t("crs.guest.country")}
+          error={e.country}
+          required={!!residency}
+          hint={!e.country && residency ? t("crs.guest.residency_hint", { market: residency.market, countries: residency.countries.join(", ") }) : undefined}
+        >
+          <Select
+            id={`${idPrefix}-country`}
+            value={guest.country}
+            placeholder={t("crs.guest.select_country")}
+            options={countries}
+            onChange={(ev) => setGuest({ ...guest, country: ev.target.value })}
+          />
+        </Field>
+        <Field label={t("crs.guest.nationality")}>
+          <Select
+            id={`${idPrefix}-nationality`}
+            value={guest.nationality}
+            placeholder={t("crs.guest.select_country")}
+            options={countries}
+            onChange={(ev) => setGuest({ ...guest, nationality: ev.target.value })}
+          />
+        </Field>
       </FormGrid>
 
       <fieldset className="space-y-1.5">
@@ -114,6 +138,52 @@ export const GuestForm = forwardRef<
     </div>
   )
 })
+
+/** Every country by its ISO code, named in the staff language. */
+function useCountryOptions(lang: string) {
+  return useMemo(() => {
+    let names: Intl.DisplayNames | null = null
+    try {
+      names = new Intl.DisplayNames([lang], { type: "region" })
+    } catch {
+      /* old engines */
+    }
+    return Object.entries(COUNTRY_NAMES)
+      .map(([value, name]) => ({ value, label: names?.of(value) ?? name }))
+      .sort((a, b) => a.label.localeCompare(b.label, lang))
+  }, [lang])
+}
+
+/** A residents-only market refused the guest (MarketRefused, O-8): the agent may book on it anyway with a reason,
+ * which the audit log keeps (ADR-070). */
+export function MarketRefusedNotice({ flow, onBookAnyway }: { flow: BookingFlow; onBookAnyway: (reason: string) => void }) {
+  const { t } = useTexT()
+  const [reason, setReason] = useState("")
+  const [tried, setTried] = useState(false)
+  const missing = tried && !reason.trim()
+  return (
+    <Notice tone="warning" title={t("crs.market.refused_title")}>
+      <p>{flow.bookError?.message}</p>
+      <p className="mt-1 text-xs">{t("crs.market.override_hint")}</p>
+      <div className="mt-2 space-y-2">
+        <Field label={t("crs.market.override_reason")} error={missing ? t("crs.market.reason_required") : undefined} required>
+          <Textarea id="crs-market-reason" rows={2} maxLength={300} value={reason} onChange={(ev) => setReason(ev.target.value)} />
+        </Field>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={flow.bookingPending}
+          onClick={() => {
+            setTried(true)
+            if (reason.trim()) onBookAnyway(reason.trim())
+          }}
+        >
+          {t("crs.market.override")}
+        </Button>
+      </div>
+    </Notice>
+  )
+}
 
 /** Payment method (from crs.payment_methods) with the server's amount due now. */
 export function PaymentPicker({

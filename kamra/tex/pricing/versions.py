@@ -66,6 +66,8 @@ class MarketDef:
 	countries: frozenset[str]
 	is_global: bool = False
 	disabled: bool = False
+	# sold on the web only to a guest whose country of residence or nationality is one of ``countries`` (O-8, D-5)
+	residency_required: bool = False
 
 
 class MarketResolutionError(Unsellable):
@@ -76,7 +78,9 @@ def resolve_market(*, explicit: str | None, country: str | None, markets: list[M
                    allowed: set[str] | None = None, default: str | None = None) -> tuple[str, str]:
 	"""→ (market code, how it was decided). Never guesses when ambiguous (R-13).
 
-	1. an explicit market (user, campaign, call-centre, API) must exist and be enabled;
+	1. an explicit market (user, campaign, call-centre, API) must exist and be enabled, and be one the
+	   caller sells (``allowed``: a booking site's markets, O-8) — else ``MARKET_NOT_ALLOWED``, never
+	   "unknown";
 	2. else the guest's country maps to the market with the smallest country list
 	   containing it (DE → "DE" before "DACH" before "EU"); two equally specific
 	   candidates are ambiguous → error, the caller must ask;
@@ -87,6 +91,8 @@ def resolve_market(*, explicit: str | None, country: str | None, markets: list[M
 	if explicit:
 		code = explicit.strip().upper()
 		if code not in live:
+			if any(m.code == code and not m.disabled for m in markets):
+				raise MarketResolutionError("MARKET_NOT_ALLOWED", f"market {code} is not sold here")
 			raise MarketResolutionError("MARKET_UNKNOWN", f"market {code} is not available")
 		return code, "explicit"
 	if country:
@@ -105,3 +111,13 @@ def resolve_market(*, explicit: str | None, country: str | None, markets: list[M
 		if code in live:
 			return code, "default"
 	raise MarketResolutionError("MARKET_REQUIRED", "the market could not be determined; choose one explicitly")
+
+
+def residency_refusal(market: MarketDef, *, country: str | None, nationality: str | None) -> str | None:
+	"""Why a guest may not book ``market`` (``"MARKET_RESIDENCY"``), or None (O-8, D-5, ADR-070). A residents-only
+	market sells to a guest whose country of residence or nationality (ISO 3166-1 alpha-2) is one of its
+	countries; any other market asks nothing. Eligibility, never a price: the frozen payload is not read."""
+	if not market.residency_required:
+		return None
+	declared = {(c or "").strip().upper() for c in (country, nationality)} - {""}
+	return None if declared & market.countries else "MARKET_RESIDENCY"

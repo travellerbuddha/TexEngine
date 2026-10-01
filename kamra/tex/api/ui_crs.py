@@ -97,9 +97,11 @@ def _booker(raw) -> dict | None:
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
 def book(quote_ids, guest, booker=None, payment_method: str | None = None, confirm_without_payment: int = 0,
-         notes: str | None = None, idempotency_key: str | None = None, language: str | None = None):
+         notes: str | None = None, idempotency_key: str | None = None, language: str | None = None,
+         market_override: int = 0, market_override_reason: str | None = None):
 	"""``crs.book`` with an optional ``booker`` ({name, email, phone}) — the person on the
-	phone when they are not the staying guest (an assistant, a travel agent)."""
+	phone when they are not the staying guest (an assistant, a travel agent). ``market_override`` with a reason
+	books a residents-only market for a guest outside it, audited (O-8)."""
 	scope.require("reservation.create", None)
 	ids = parse(quote_ids, [])
 	if not ids:
@@ -109,7 +111,9 @@ def book(quote_ids, guest, booker=None, payment_method: str | None = None, confi
 	                                 payment_method=text(payment_method, 40),
 	                                 confirm_without_payment=bool(int(confirm_without_payment or 0)),
 	                                 notes=text(notes, 2000), idempotency_key=text(idempotency_key, 140),
-	                                 language=text(language, 10))
+	                                 language=text(language, 10),
+	                                 market_override=bool(int(market_override or 0)),
+	                                 market_override_reason=text(market_override_reason, 300))
 	# the guest's self-service token travels only to the guest, never to a staff screen
 	out.pop("manage_token", None)
 	return out

@@ -16,6 +16,7 @@
   "default_currency",
   "currencies",
   "default_market",
+  "allowed_markets",
   "sales_channel",
   "self_service_enabled",
   "tab_78",
@@ -118,6 +119,12 @@
    "fieldtype": "Link",
    "label": "Default market",
    "options": "TEX Market"
+  },
+  {
+   "fieldname": "allowed_markets",
+   "fieldtype": "Small Text",
+   "label": "Markets this site sells",
+   "description": "Market codes, comma-separated. Blank: every enabled market. A link's market outside them is refused; the default market must be one of them."
   },
   {
    "fieldname": "sales_channel",
@@ -303,7 +310,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-10-04 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Booking",
  "name": "TEX Booking Site",
