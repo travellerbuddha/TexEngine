@@ -224,10 +224,28 @@ def property_validate(doc, method=None):
 	_guard_superseded_tax_rules(doc)
 
 
+def _announce_disabled_room_type(doc) -> None:
+	"""Y-9 (ADR-048): disabling a room type of a TEX hotel stops its sale, not its count. Its rooms and its live stays
+	still count in its inventory pool; say so, with how many stays, once, when it is disabled."""
+	from kamra.reservation_state import LIVE_STATUSES
+	from kamra.tex.legacy import is_tex_hotel
+
+	before = doc.get_doc_before_save()
+	if doc.is_new() or not doc.get("disabled") or not before or before.get("disabled") \
+			or not is_tex_hotel(doc.get("property")):
+		return
+	live = frappe.db.count("Reservation", {"property": doc.property, "room_type": doc.name,
+	                                       "status": ("in", list(LIVE_STATUSES))})
+	if live:
+		frappe.msgprint(_("{0} live stay(s) keep counting in the room type's inventory pool; the room type is no "
+		                  "longer sold.").format(live), title=_("Room type no longer sold"), indicator="orange")
+
+
 def room_type_validate(doc, method=None):
 	"""Some localization packs take a room type's tax % (G-20): once the hotel's tax policy
 	has begun, TEX prices ignore it, so a change is announced rather than silently diverging
 	from the legacy folio."""
+	_announce_disabled_room_type(doc)
 	if not doc.get("property") or not doc.meta.has_field("tax_percent"):
 		return
 	from kamra.tex.commercial.context import policy_started

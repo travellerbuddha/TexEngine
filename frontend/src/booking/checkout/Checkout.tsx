@@ -16,6 +16,7 @@ import type { PaymentMethod, PaymentStart, QuoteResponse, SiteExtra } from "../t
 import { Badge, Button, Checkbox, Counter, Field, Input, Select, Textarea } from "../ui/controls"
 import { Alert, ErrorSummary, Spinner, type FieldError } from "../ui/feedback"
 import { isZero } from "../lib/format"
+import { fallbackChoices, type PayChoice } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
 
@@ -490,16 +491,6 @@ const METHOD_TEXT: Record<PaymentMethod, { label: MessageKey; body: MessageKey }
 }
 const KNOWN = new Set<string>(["Card", "Bank Transfer", "Pay at Hotel"])
 
-interface PayChoice {
-  method: PaymentMethod
-  account: string | null
-  /** gateway label when several accounts offer the same method */
-  via: string | null
-  dueNow: string | null
-  later: string | null
-  sandbox: boolean
-}
-
 function PaymentStep() {
   const i18n = useI18n()
   const { t, money } = i18n
@@ -517,7 +508,7 @@ function PaymentStep() {
   const methodErrRef = useRef<HTMLDivElement>(null)
 
   // Methods and amounts come from the server basket (same deposit rules as booking);
-  // if it cannot be read, fall back to the generic list and let book() decide.
+  // if it cannot be read, fall back to the card alone (the hotel's rules decide the rest) and let book() decide.
   const basket = b.basket.status === "done" ? b.basket.data : null
   const basketLoading = b.basket.status === "loading" || (b.basket.status === "idle" && b.quotesFresh)
   const choices: PayChoice[] = useMemo(() => {
@@ -532,16 +523,8 @@ function PaymentStep() {
         sandbox: m.sandbox,
       }))
     }
-    const payAtHotel = flow.selections.every((s) => s && paymentTerms(i18n, s.rateInfo, s.currency).payAtHotel)
-    return (["Card", "Bank Transfer", ...(payAtHotel ? ["Pay at Hotel"] : [])] as PaymentMethod[]).map((m) => ({
-      method: m,
-      account: null,
-      via: null,
-      dueNow: null,
-      later: null,
-      sandbox: false,
-    }))
-  }, [basket, flow.selections, i18n])
+    return fallbackChoices()
+  }, [basket])
   const current =
     choices.find((c) => c.method === flow.method && (!c.account || !flow.providerAccount || c.account === flow.providerAccount)) ?? choices[0] ?? null
   const method: PaymentMethod = current?.method ?? "Card"

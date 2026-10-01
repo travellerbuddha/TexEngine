@@ -229,7 +229,7 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 	for row in b.rooms:
 		snap = json.loads(frappe.db.get_value("Reservation", row.reservation, "tex_pricing_snapshot") or "{}")
 		lines[snap.get("line_ref")] = row.reservation
-	warnings, seen = [], set()
+	warnings, seen, reactivated = [], set(), []
 	now = now_datetime()
 	for room, m in mapped:
 		name = lines.get(room["line_ref"])
@@ -271,29 +271,49 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			if restricted:
 				warnings.append(restricted)
 			old = D(str(res.tex_total_amount or 0))
+			was = res.status
 			res.update(values)
-			if res.status not in LIVE:
-				res.status = "Confirmed"
+			changes = {k: [before.get(k), str(values[k])] for k in before if before[k] != str(values[k] or "")}
 			res.flags.tex_modification = True
 			res.flags.tex_channel_accept = True
 			res.flags.allow_past_check_in = True
-			res.save(ignore_permissions=True)
+			if was == "Cancelled":
+				# the channel brings back a room it had taken off (D-11, Y-8): a live stay again, as the nights above
+				# were counted for it (accepted as sold, an overbooking warned). The one status move out of Cancelled
+				# is allowed here, as a revival's (``revive_expired``); its cancellation is cleared
+				res.status = "Confirmed"
+				res.cancellation_reason = res.cancellation_note = res.cancelled_on = None
+				res.cancellation_fee = 0
+				res.tex_hold_expired = 0
+				changes["status"] = ["Cancelled", "Confirmed"]
+				reactivated.append(res.name)
+				frappe.flags.kamra_status_transition = True
+				try:
+					res.save(ignore_permissions=True)
+				finally:
+					frappe.flags.kamra_status_transition = False
+			else:
+				if was not in LIVE:
+					# a no-show or a stay already checked out keeps its status: the channel does not undo it
+					warnings.append(_("Room {0} of {1} is {2}: the channel's change was applied, its status kept.").format(
+						room["line_ref"], ref, was))
+				res.save(ignore_permissions=True)
 			booking_svc._record_revision(res.name, b.name, change_type="Multiple", old_amount=old,
 			                             new_amount=res.tex_total_amount, currency=ccy, basis="EXTERNAL",
-			                             reason=f"modified by the channel ({ref})", source="Channel",
-			                             changes={k: [before.get(k), str(values[k])] for k in before
-			                                      if before[k] != str(values[k] or "")})
+			                             reason=f"modified by the channel ({ref})", source="Channel", changes=changes)
 			guest_changes.close_open(res.name, f"the channel changed the room ({ref})")
 		if w:
 			warnings.append(w)
 	for line, name in lines.items():
 		if line not in seen and frappe.db.get_value("Reservation", name, "status") in LIVE:
 			_cancel_one(name, b.name, f"room removed by the channel ({ref})")
+	if reactivated and b.status in ("Cancelled", "Partially Cancelled"):
+		b.status = "Confirmed"          # a room is live again; the refresh below says "Partially Cancelled" if one is not
 	b.save(ignore_permissions=True)
 	booking_svc._refresh_booking_after_change(b.name)
 	_warn(prop, b.name, ref, warnings)
 	audit("channel.booking_modified", reference_doctype="TEX Booking", reference_name=b.name, property=prop,
-	      new={"ref": ref, "rooms": len(mapped), "inbound": inbound}, source="Webhook")
+	      new={"ref": ref, "rooms": len(mapped), "inbound": inbound, "reactivated": reactivated}, source="Webhook")
 	return {"status": "Applied", "booking": b.name, "warning": "; ".join(warnings) or None}
 
 

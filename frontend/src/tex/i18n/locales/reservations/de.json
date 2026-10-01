@@ -94,6 +94,7 @@
  "res.cancel.basket_credit": "Enthält eine Gutschrift von {amount}: zuvor auf einem anderen Zimmer für {promotion} berechnet.",
  "res.cancel.body": "{guest}, {from} – {to}. Die Reservierung wird freigegeben und die unten stehende Gebühr erfasst.",
  "res.cancel.button": "Reservierung stornieren",
+ "res.cancel.channel": "Verkauft über {connection} (Buchung {ref}). Die Stornierung hier storniert nicht im Kanal, der das Zimmer weiter verkaufen kann: stornieren Sie dort ebenfalls. Wird mit Ihrer Begründung im Audit-Protokoll festgehalten.",
  "res.cancel.confirm": "Reservierung stornieren",
  "res.cancel.days_before": {
   "one": "{count} Tag vor Anreise",

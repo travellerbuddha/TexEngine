@@ -11,6 +11,7 @@ import frappe
 from frappe.utils import add_to_date, getdate, now_datetime
 
 from kamra.tex.api import distribution as dist_api
+from kamra.tex.availability import repository as avail
 from kamra.tex.distribution import repository as dist
 from kamra.tex.distribution import signing
 from kamra.tex.money import D
@@ -336,6 +337,118 @@ class TestInbound(DistributionCase):
 		                                                             "kind": "Reservation"}))  # a channel gets ARI
 
 
+class TestChannelBookings(DistributionCase):
+	"""Y-8 (audit 2F-2, D-11, ADR-039): a room the channel brings back is applied; an OTA booking is the channel's, so
+	it is cancelled at the desk only by someone who manages the channel, with a reason, on record."""
+
+	def line(self, ref: str, check_out=None, total="450.00") -> dict:
+		return {"room_code": "DBL", "rate_code": "BAR", "check_in": str(fx.d(6, 10)),
+		        "check_out": str(check_out or fx.d(6, 13)), "adults": 2, "total": total, "currency": "EUR",
+		        "line_ref": ref}
+
+	def process(self) -> dict:
+		"""The queue as the scheduler runs it: a failed message is counted, never raised."""
+		return dist.process_inbound(connection=self.conn.name)
+
+	def free(self, night) -> int:
+		count, _per = avail.stay_availability(fx.PROPERTY, self.std, None, night, night + timedelta(days=1), getdate())
+		return count
+
+	def booked(self, *refs: str):
+		"""The channel's booking OTA-100 with the lines ``refs``, applied: → (booking, {line: reservation})."""
+		self.send(message(rooms=[self.line(r) for r in refs]))
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		b = frappe.get_doc("TEX Booking", {"external_ref": "OTA-100"})
+		return b.name, {r: frappe.db.get_value("Reservation", {"ota_ref": f"OTA-100-{r}"}) for r in refs}
+
+	def staff(self, email: str, role: str, profile: str | None = None) -> str:
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- grants are made by an administrator
+		user = fx.ensure_user(email, [role])
+		if profile:
+			fx.ensure("TEX Access Grant", {"user": user, "property": fx.PROPERTY},
+			          {"user": user, "scope_level": "Hotel", "property": fx.PROPERTY, "permission_profile": profile})
+		scope.clear_cache()
+		return user
+
+	def test_a_room_the_channel_brings_back_is_applied(self):
+		"""The channel takes a room off and puts it back (and moves the other): the cancelled room is a live
+		stay again, its cancellation cleared, the booking Confirmed, a night less free — and nothing fails."""
+		booking_name, rooms = self.booked("L1", "L2")
+		l1, l2 = rooms["L1"], rooms["L2"]
+		self.send(message(status="modified", rooms=[self.line("L1")]))                  # the channel removes L2
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		self.assertEqual(frappe.db.get_value("Reservation", l2, "status"), "Cancelled")
+		free_without = self.free(fx.d(6, 10))
+		self.send(message(status="modified", rooms=[self.line("L1", check_out=fx.d(6, 14), total="600.00"),
+		                                            self.line("L2")]))                  # ... and brings it back
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		back = frappe.db.get_value("Reservation", l2, ["status", "cancellation_reason", "cancellation_note",
+		                                               "cancelled_on", "cancellation_fee", "tex_hold_expired"],
+		                           as_dict=True)
+		self.assertEqual((back.status, back.cancellation_reason, back.cancellation_note, back.cancelled_on,
+		                  back.cancellation_fee, back.tex_hold_expired), ("Confirmed", None, None, None, 0, 0))
+		self.assertEqual(str(frappe.db.get_value("Reservation", l1, "check_out_date")), str(fx.d(6, 14)))
+		self.assertEqual(frappe.db.get_value("TEX Booking", booking_name, "status"), "Confirmed")
+		self.assertEqual(self.free(fx.d(6, 10)), free_without - 1)
+		audit = frappe.get_all("TEX Audit Event", filters={"action": "channel.booking_modified",
+		                                                   "reference_name": booking_name}, pluck="new_value",
+		                       order_by="creation desc")
+		self.assertEqual(json.loads(audit[0])["reactivated"], [l2])
+		revision = frappe.get_all("TEX Reservation Revision", filters={"reservation": l2}, pluck="changes_json",
+		                          order_by="creation desc")
+		self.assertEqual(json.loads(revision[0])["status"], ["Cancelled", "Confirmed"])
+
+	def test_an_ota_booking_is_cancelled_at_the_desk_only_by_someone_who_manages_the_channel(self):
+		from kamra.tex.api import crs as crs_api
+
+		_booking, rooms = self.booked("L1")
+		res = rooms["L1"]
+		with self.assertRaisesRegex(frappe.ValidationError, "cancel it on the channel"):
+			crs_api.cancel(reservation=res, reason="the guest phoned")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		desk = self.staff("y8-desk@example.com", "Call Center Agent", "Reservations Agent")  # may cancel, not the channel
+		frappe.set_user(desk)  # nosemgrep: frappe-setuser -- a call-centre agent
+		with self.assertRaises(frappe.PermissionError):
+			crs_api.cancel(reservation=res, reason="the guest phoned", channel_override=1)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		admin = self.staff("y8-admin@example.com", "Hotel Admin", "Hotel Admin")
+		frappe.set_user(admin)  # nosemgrep: frappe-setuser -- the hotel's administrator
+		preview = crs_api.cancellation_preview(reservation=res)
+		self.assertEqual(preview["channel"], {"connection": self.conn.name, "ref": "OTA-100"})
+		crs_api.cancel(reservation=res, reason="the guest phoned the hotel", channel_override=1)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
+		warned = frappe.get_all("TEX Audit Event", filters={"action": "reservation.channel_cancel_override",
+		                                                    "reference_name": res}, pluck="new_value")
+		self.assertEqual(len(warned), 1)
+		self.assertIn("OTA-100", warned[0])
+
+	def test_a_guest_booking_has_no_channel(self):
+		"""Only an OTA booking is the channel's: the preview of a TEX booking names none."""
+		from kamra.tex.api import crs as crs_api
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		res = guest_books(session="y8-own")["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		self.assertIsNone(crs_api.cancellation_preview(reservation=res)["channel"])
+		self.assertIsNone(crs_api.reservation(res)["channel_booking"])
+
+	def test_staff_retry_only_the_latest_message_of_a_booking(self):
+		"""A dead old message retried after a newer one was applied would put the booking back as it was."""
+		self.send(message())
+		self.process()
+		self.send(message(status="modified", co=fx.d(6, 14), total="600.00"))
+		self.process()
+		old, newer = frappe.get_all("TEX Channel Inbound", filters={"connection": self.conn.name,
+		                                                          "provider_ref": "OTA-100"},
+		                            pluck="name", order_by="creation asc")
+		frappe.db.set_value("TEX Channel Inbound", old, "status", "Dead", update_modified=False)
+		with self.assertRaisesRegex(frappe.ValidationError, "newer message"):
+			dist_api.retry_inbound(old)
+		self.assertEqual(frappe.db.get_value("TEX Channel Inbound", old, "status"), "Dead")
+		frappe.db.set_value("TEX Channel Inbound", newer, "status", "Failed", update_modified=False)
+		self.assertEqual(dist_api.retry_inbound(newer), {"ok": True})            # the latest one may be retried
+
+
 class TestReconcileAndTenancy(DistributionCase):
 	def test_reconciliation_finds_drift_and_differences(self):
 		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
@@ -351,7 +464,7 @@ class TestReconcileAndTenancy(DistributionCase):
 		res = frappe.db.get_value("Reservation", {"ota_ref": "OTA-500-L1"})
 		from kamra.tex.services import booking
 
-		booking.cancel_reservation(res, reason="cancelled at the desk", waive_penalty=True)
+		booking.cancel_reservation(res, reason="cancelled at the desk", waive_penalty=True, channel_override=True)
 		kinds = {m.kind for m in dist.reconcile(self.conn.name)}
 		self.assertIn("status_differs", kinds)                                      # the channel still has it
 		self.assertIn("ari_drift", kinds)                                           # a room came free, not pushed yet

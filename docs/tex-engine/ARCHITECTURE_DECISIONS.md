@@ -772,6 +772,24 @@ enterprise or group view (G-25).
 - The sandbox proves the full flow end to end without pretending to reach a channel.
 - Reconciliation against a provider's own booking list waits for an adapter that
   implements `fetch_reservations`.
+- *Addendum (Part 2F-2, Y-8, D-11): a room the channel brings back, and who cancels a channel's booking.*
+  - A "modified" message that carries a room the channel had taken off (`_cancel_one`, then back) used to fail: the
+    update moved a Cancelled stay to Confirmed without the status-transition flag, the whole message was undone and
+    retried 2 … 128 minutes later (Dead after 8 tries, ~4 h 15 min), holding the booking's later messages. The
+    update now reactivates a `Cancelled` row as a revival does (`kamra_status_transition` for that save): Confirmed,
+    cancellation reason, note, date and fee cleared, `tex_hold_expired` 0, the revision's changes carry
+    `status: [Cancelled, Confirmed]`, the `channel.booking_modified` audit lists `reactivated`. Its nights were counted
+    as a sale of the channel is (accepted, an overbooking warned). A booking Cancelled or Partially Cancelled becomes
+    Confirmed before the refresh, which says Partially Cancelled again if a room is still cancelled. A No Show or
+    Checked Out row keeps its status and gets a warning.
+  - A channel's booking is the channel's: `cancel_reservation` refuses it (`channel_connection` is written at creation
+    and never changes) — "Sold by …: cancel it on the channel." — for staff, for the guest's manage page and for any
+    source but the channel's own. Staff with `channel.manage` at the hotel may override (`channel_override`, a reason,
+    audit `reservation.channel_cancel_override` warning that the channel may still sell the room); `crs.cancel` passes
+    it, `crs.cancellation_preview` and `crs.reservation` say which channel (`channel` / `channel_booking`); the
+    reservation screen hides Cancel without `channel.manage` and the dialog warns and sends the override.
+  - Same class as the PMS outbox's retry (ADR-015): `retry_inbound` rejects a Failed or Dead message when a newer one
+    of the same booking was Applied.
 
 ## ADR-040 The tenant structure is itself tenant data; guest identity is shared inside an enterprise
 **Context.** G-26: Desk/REST exposed the tenant structure across tenants.
@@ -858,6 +876,21 @@ sandbox host, a live site runs no sandbox gateway, and iyzico keeps one checkout
 - A second start that waited on the link lock can still meet the first start's charge after its
   own read snapshot. It then gets a unique-key error instead of a second charge.
 - Bookings paid in Sandbox are not flagged yet: that needs a schema field.
+- *Addendum (Part 2F-2, O-15): the method rules bind the booking.* `payment_methods` was read only where money was due
+  (`_start_booking_payment`); `public.book`, `crs.book` and `ui_crs.book` passed any method on, and
+  `ui_crs.book(payment_method="X")` stored "X". `create_booking` now refuses in two steps:
+  - an unknown method, before any quote is locked: `None`, or one of `METHODS` (Card, Bank Transfer, Pay at Hotel);
+    staff may also name "Payment Link" (K-2d, a 24-hour hold), a guest never;
+  - a method the hotel does not offer, once the sale's market, currency and channel are known and staff's rights are
+    checked, before any contract, night or guest lock: where at least one open rule matches the sale (whatever the state
+    of its account), the method must be among `payment_methods` (`pay.method_offered`; it hides what cannot run). A hotel
+    with no rule matching the sale behaves as before. "Payment Link" is offered where a link can be paid: a card among
+    the methods of the web (any market, `DIRECT_WEB`, as `public.pay_link`). `None` (the staff API only; the screen
+    always names one) is not checked: a deposit is due and the rooms are held as a card's; confirming without payment
+    stays `confirm_without_payment`'s.
+  - One message for guest and staff ("This payment method is not available."); the request is given back, the locked
+    quotes stay Open. `TEX Booking.payment_method` stays free text (a channel booking writes "Channel" and does not use
+    `create_booking`). The checkout's fallback, when its basket cannot be read, offers the card only.
 
 ## ADR-042 Payments: new money and settled money are gated apart; one iyzico checkout per charge
 **Context.** The review of ADR-041 found that the go-live gates still had holes, and that some
@@ -1812,6 +1845,20 @@ the inventory lock are migration imports and status moves into a live status.*
 - Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
   bypass this guard, as they bypass every other rule.
 - An allotment's cutoff is per contract. Allotments still have no channel dimension (G-41).
+- *Addendum (Part 2F-2, Y-9): a disabled room type stays in its pool.* `pool_of` read only the open members of a
+  pool and keyed it by the first of them: disabling a member dropped its rooms, its configured inventory and its
+  live stays from the count (an oversale), and disabling the key's member slid the key, so the nights closed under it
+  opened again; a pool of disabled types raised `IndexError` in the search. The members are now all of them
+  (`disabled` is not a filter), and the key is the first by name, disabled ones included: it never moves when a member
+  is disabled. A disabled type is not sold (`search_property` skips it) and keeps counting; disabling one of a TEX
+  hotel says how many live stays keep counting (`room_type_validate`). The key is not stored: `tex_inventory_pool` is
+  the pool's name, and `TEX Inventory Day.room_type` is a required Link.
+- *Patch p58* moves what the old rule left under the wrong key. Per hotel and pool whose first member is disabled and
+  another is open: the old key is the first open member, the new one the first of all. Where the old key has rows (the
+  ones in force today) the rows under the new key (the disabled first member's, which nobody reads today) are dropped
+  and the old key's rows move to it (`room_type` and the date-derived `name`); where it has none the disabled first
+  member's rows come back into force as they are (the hotel's last settings before it disabled the type; counted, not
+  touched). A pool of disabled members is left alone. Counts only; a second run moves nothing.
 
 ## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
 **Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day

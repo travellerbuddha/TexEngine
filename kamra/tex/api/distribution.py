@@ -227,6 +227,15 @@ def retry_inbound(name: str):
 	_conn(row.connection, "channel.manage")
 	if row.status not in ("Failed", "Dead"):
 		frappe.throw(_("Only failed messages can be retried."))
+	if frappe.db.sql(
+			"""SELECT name FROM `tabTEX Channel Inbound`
+			   WHERE connection=%(c)s AND provider_ref=%(r)s AND status='Applied'
+			     AND (creation > %(t)s OR (creation = %(t)s AND name > %(n)s)) LIMIT 1""",
+			{"c": row.connection, "r": row.provider_ref, "t": row.creation, "n": row.name}):
+		# a booking's messages apply in the order received: an old one applied now would put the booking back as it
+		# was (as ``outbox.retry`` takes only the latest message); the newer one carries the full state
+		frappe.throw(_("A newer message of this booking was already applied: retry the latest one, it carries the "
+		               "full state."))
 	frappe.db.set_value("TEX Channel Inbound", name, {"status": "Received", "attempts": 0,
 	                                                  "next_attempt_at": now_datetime()}, update_modified=False)
 	audit("channel.inbound_retry", reference_doctype="TEX Channel Inbound", reference_name=name, property=row.property)

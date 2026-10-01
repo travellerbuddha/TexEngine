@@ -13,9 +13,11 @@
 // "E2E channel …" card on the Channels list.
 //   TEX_E2E_BASE=http://test.localhost:8000 TEX_E2E_PASSWORD=… npx playwright test -c e2e channels
 import { expect, test, type Locator, type Page } from "@playwright/test"
-import { byLabel, esc, login, pageApi, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
+import { byLabel, esc, login, pageApi, pageApiOk, stayDates, texPath, trackErrors, uniqueRunId } from "./helpers"
 
 const HOTEL_ADMIN = "beach.gm@demo.tex"
+/** A call-centre agent at the same hotel: may cancel stays (reservation.cancel), does not manage channels. */
+const AGENT = "agent@demo.tex"
 /** Demo data at Aurora Beach Resort: the DE contract sells the base room with breakfast
  * and the Flexible rate plan; OTA is the channel-manager sales channel. */
 const SOLD_AS = { roomType: "Standard Sea View", board: "BB", ratePlan: "Flexible", market: "DE", channel: "OTA", currency: "EUR" }
@@ -56,7 +58,7 @@ async function fillMapping(dialog: Locator, codes: { room: string; rate: string 
   await byLabel(dialog, "Days ahead").fill("30")
 }
 
-test("channel distribution: sandbox connection, mapping, ARI push, a channel booking applied, reconciliation", async ({ page }) => {
+test("channel distribution: sandbox connection, mapping, ARI push, a channel booking applied, reconciliation", async ({ page, browser }) => {
   test.setTimeout(240_000)
   const noErrors = trackErrors(page)
   const run = uniqueRunId()
@@ -207,6 +209,37 @@ test("channel distribution: sandbox connection, mapping, ARI push, a channel boo
       await expect(panel(page).getByText(/^(No differences found|\d+ differences? found)/)).toBeVisible()
       await expect(panel(page).getByRole("region", { name: "Missing in TEX" }).getByText(ref)).toHaveCount(0)
       await expect(panel(page).getByRole("button", { name: "Run again" })).toBeVisible()
+    })
+
+    await test.step("the booking is the channel's: an agent has no Cancel; the hotel admin is warned before cancelling (Y-8)", async () => {
+      await openTab(page, "Bookings from the channel")
+      const href = await panel(page).getByRole("row").filter({ hasText: ref }).getByRole("link").first().getAttribute("href")
+      const bookingName = decodeURIComponent((href ?? "").split("/").pop() ?? "")
+      expect(bookingName).not.toBe("")
+      const summary = await pageApiOk<{ rooms: { reservation: string }[] }>(page, "kamra.tex.api.crs.booking", { name: bookingName })
+      const reservation = summary.rooms[0].reservation
+      const detail = texPath(`/tex/reservations/${encodeURIComponent(reservation)}`)
+      // the agent may cancel stays but does not manage the channel: a channel's booking is cancelled on the channel (D-11)
+      const context = await browser.newContext({ locale: "en-US" })
+      try {
+        const desk = await context.newPage()
+        await english(desk)
+        await login(desk, AGENT)
+        await desk.goto(detail)
+        await expect(desk.getByRole("heading", { level: 1, name: new RegExp(esc(reservation)) })).toBeVisible()
+        await expect(desk.getByRole("button", { name: "Re-send confirmation" })).toBeVisible() // the page has loaded
+        await expect(desk.getByRole("button", { name: "Cancel reservation", exact: true })).toHaveCount(0)
+      } finally {
+        await context.close()
+      }
+      // the hotel admin manages the channel: the dialog says who sold it and that the channel may still sell the room
+      await page.goto(detail)
+      await page.getByRole("button", { name: "Cancel reservation", exact: true }).click()
+      const dialog = page.getByRole("dialog", { name: new RegExp(`^Cancel ${esc(reservation)}`) })
+      await expect(dialog.getByText(/Sold by .*Cancelling it here does not cancel it on the channel/)).toBeVisible()
+      await dialog.getByRole("button", { name: "Keep reservation" }).click()
+      await expect(dialog).toBeHidden()
+      await page.goto(texPath(`/tex/connect/channels/${encodeURIComponent(connection)}`))
     })
 
     await test.step("the channel cancels the booking; the mapping is switched off", async () => {

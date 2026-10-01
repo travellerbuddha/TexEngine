@@ -59,8 +59,13 @@ export function cancellationPreview(reservation: string) {
   return tex<CancelPreview>("crs", "cancellation_preview", { reservation })
 }
 
-export function cancelReservation(reservation: string, reason: string, waive_penalty: boolean) {
-  return tex<CancelResult>("crs", "cancel", { reservation, reason, waive_penalty: waive_penalty ? 1 : 0 }, { post: true })
+export function cancelReservation(reservation: string, reason: string, waive_penalty: boolean, channel_override = false) {
+  return tex<CancelResult>(
+    "crs",
+    "cancel",
+    { reservation, reason, waive_penalty: waive_penalty ? 1 : 0, channel_override: channel_override ? 1 : 0 },
+    { post: true },
+  )
 }
 
 /** Correct the amount (and currency) an imported stay was locked at: price.override, a reason,

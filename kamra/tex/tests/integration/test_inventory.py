@@ -687,3 +687,60 @@ class TestGridRates(InventoryCase):
 			self.edit("ABSOLUTE", "30", start=self.sat, end=self.sat, weekdays=None)
 		self.assertEqual(self.periods(), before)
 		self.assertEqual(self.cells()[str(self.sat)]["draft_rate"], "100.00")
+
+
+class TestPoolKeyWithDisabledMembers(InventoryCase):
+	"""Y-9 (audit 2F-2, ADR-048): a disabled room type stays in its inventory pool. Its rooms, its configured
+	inventory and its live stays count; the pool's key — the first member by name, disabled ones included — never
+	moves, so the rows kept under it (closed nights, adjustments, oversell limits) stay found; a pool of disabled
+	types sells nothing and breaks nothing."""
+
+	def setUp(self):
+		super().setUp()
+		for code in ("STD", "DLX"):
+			frappe.db.set_value("Room Type", self.rt(code), "tex_inventory_pool", "G49-POOL")      # 6 + 2 rooms
+
+	def test_a_disabled_member_still_counts_in_its_pool(self):
+		for who in ("a", "b", "c", "d"):
+			self.tex_book("DLX", who)
+		for who in ("e", "f", "g"):
+			self.tex_book("STD", who)
+		q = self.quote("STD")                              # taken before the pool is full
+		self.tex_book("STD", "h")                          # 8 of 8
+		frappe.db.set_value("Room Type", self.dlx, "disabled", 1)
+		self.assertEqual(self.available("STD"), 0)         # the four Deluxe stays and its two rooms still count
+		with self.assertRaisesRegex(frappe.ValidationError, "sold out"):
+			self.tex_book("STD", "late", quote_id=q)       # the recount under the lock sees them too
+		self.assertEqual(self.live("STD") + self.live("DLX"), 8)
+
+	def test_a_pool_of_disabled_types_sells_nothing_and_breaks_nothing(self):
+		for code in ("STD", "DLX"):
+			frappe.db.set_value("Room Type", self.rt(code), "disabled", 1)
+		self.assertIsNone(self.entry("STD"))               # no offer, no unavailable line: the type is not sold
+		self.assertIsNone(self.entry("DLX"))
+		members = sorted([self.std, self.dlx])
+		self.assertEqual(avail.pool_of(self.std), (members[0], members))
+		self.assertEqual(avail.pool_of(self.dlx), (members[0], members))
+
+	def test_the_rows_under_the_key_stay_found_when_its_member_is_disabled(self):
+		key = sorted([self.std, self.dlx])[0]
+		self.assertEqual(key, self.dlx)                    # names are {hotel}-{code}
+		self.set_inventory("STD", self.nights[0], self.nights[0], closed=1)        # stored under the pool's key
+		self.assertEqual(self.available("STD"), 0)
+		frappe.db.set_value("Room Type", key, "disabled", 1)
+		self.assertEqual(self.available("STD"), 0)         # still closed that night (before: the key slid, 6)
+
+	def test_disabling_a_room_type_says_its_stays_keep_counting(self):
+		self.tex_book("DLX", "x")
+		frappe.local.message_log = []
+		doc = frappe.get_doc("Room Type", self.dlx)
+		doc.disabled = 1
+		doc.save(ignore_permissions=True)
+		told = [str(m) for m in frappe.local.message_log]
+		self.assertTrue(any("1 live stay" in m and "no longer sold" in m for m in told), told)
+		frappe.local.message_log = []
+		doc.reload()
+		doc.room_type_name = "Deluxe, renamed"                  # a later save of the disabled type says nothing
+		doc.save(ignore_permissions=True)
+		self.assertEqual([m for m in frappe.local.message_log if "no longer sold" in str(m)], [])
+

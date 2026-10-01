@@ -195,6 +195,8 @@ export interface ReservationDetail {
     tex_tags: string | null
   } | null
   pricing: Snapshot
+  /** sold by a channel manager (D-11): cancelled on the channel; null for any other booking */
+  channel_booking: { connection: string; ref: string } | null
   revisions: Revision[]
   capabilities: string[]
   /** ui_crs: guest-facing nightly prices of the locked snapshot. */
@@ -264,6 +266,8 @@ export interface BasketClawback {
 export interface CancelPreview {
   penalty: string
   currency: string
+  /** the channel that sold the booking (D-11): staff with channel.manage cancel it here only by saying so */
+  channel: { connection: string; ref: string } | null
   basis: {
     rule: string | CancellationRule
     days_before: number

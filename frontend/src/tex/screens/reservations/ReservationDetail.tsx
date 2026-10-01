@@ -118,7 +118,8 @@ function DetailView({
   const canModify = caps.has("reservation.modify") && !terminal && texPriced
   // extras added after booking (G-22): priced on their own, the stay stays price-locked
   const canAddExtras = caps.has("reservation.modify") && ADDON_STATUSES.includes(d.status) && texPriced
-  const canCancel = caps.has("reservation.cancel") && !terminal
+  // a channel manager's booking is the channel's: cancelled on the channel, here only with channel.manage (D-11, Y-8)
+  const canCancel = caps.has("reservation.cancel") && !terminal && (!d.channel_booking || caps.has("channel.manage"))
   const canSimulate = caps.has("price.view") && texPriced
   const canCost = caps.has("price.view_cost")
   // new manage link by e-mail: booking-level, not once everything is cancelled

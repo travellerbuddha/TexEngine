@@ -566,6 +566,10 @@ def reservation_amounts(result: dict) -> dict:
 
 # ─── create ──────────────────────────────────────────────────────────────
 
+# the payment methods a booking is made with (O-15): what a guest may choose; staff may also name "Payment Link"
+# (K-2d: a link sent to the guest, 24 hours). TEX Booking.payment_method stays free text for the channels' "Channel"
+METHODS = (holds.CARD, holds.TRANSFER, "Pay at Hotel")
+
 
 def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = None, payment_method: str | None = None,
                    idempotency_key: str | None = None, notes: str | None = None, language: str | None = None,
@@ -583,6 +587,11 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		frappe.throw(_("Select at least one room."))
 	if len(quote_ids) > quoting.MAX_ROOMS:
 		frappe.throw(_("Too many rooms."))
+	# an unknown method is refused before any quote is locked, never stored as it came (O-15); none (staff API
+	# only: the screen always names one) keeps today's way: a deposit is due, held as a card is
+	payment_method = payment_method or None
+	if payment_method and payment_method not in (*METHODS, *((holds.LINK,) if staff else ())):
+		frappe.throw(_("This payment method is not available."))
 	guest = _clean_guest(guest)
 	now = now_datetime()
 
@@ -624,6 +633,14 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		if not booking_site:
 			# staff book on the channels their profiles may book on (ADR-050)
 			scope.require_channel(channel, property, to="book")
+	# the hotel's payment method rules bind the booking where one matches its market, currency and channel
+	# (O-15): the method must be one it offers, whoever books. The quotes are locked (a refusal gives the request
+	# back and they stay Open); no contract, night or guest lock is taken yet
+	if payment_method:
+		from kamra.tex.payments import service as pay
+
+		if not pay.method_offered(property, payment_method, market=market, currency=currency, channel=channel):
+			frappe.throw(_("This payment method is not available."))
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
 	# row lock makes a suspend wait for bookings in flight, and every booking after it see it
 	for contract in sorted({r[2]["contract"]["contract"] for r in rows}):
@@ -1075,10 +1092,23 @@ def _policy_penalty(reservation, today=None) -> tuple[D, dict]:
 	return quantize(min(pen, total), ccy), basis
 
 
+def channel_of(booking: str | None) -> dict | None:
+	"""A booking a channel manager sold (``channel_connection`` and ``external_ref`` are written when it is
+	created and never change): → {"connection", "ref"}; None for any other. A plain read."""
+	row = frappe.db.get_value("TEX Booking", booking, ["channel_connection", "external_ref"], as_dict=True) \
+		if booking else None
+	return {"connection": row.channel_connection, "ref": row.external_ref} if row and row.channel_connection else None
+
+
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
-                       source: str = "Desk", _guest_authorized: bool = False) -> dict:
+                       source: str = "Desk", _guest_authorized: bool = False, channel_override: bool = False) -> dict:
 	"""``_guest_authorized`` is set only by the self-service API after it verified the
 	guest's manage token for this exact reservation; staff calls always check scope.
+
+	A channel manager's booking is the channel's (D-11, Y-8): its stay is cancelled on the channel, which tells TEX;
+	here only by staff with ``channel.manage`` at the hotel who say so (``channel_override``) with a reason, audited
+	(``reservation.channel_cancel_override``: the channel may still sell the room). A guest's own cancellation is
+	refused too.
 
 	Locks the booking, then the reservation (then the guest's change requests): the order every
 	change to a TEX booking takes (review of ADR-044)."""
@@ -1091,10 +1121,18 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		scope.require("reservation.cancel", res.property)
 	elif waive_penalty:
 		frappe.throw(_("Guests cannot waive cancellation fees."), frappe.PermissionError)
+	sold_by = channel_of(res.tex_booking) if source != "Channel" else None
+	if sold_by:
+		if not channel_override:
+			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["connection"]))
+		scope.require("channel.manage", res.property)
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status))
 	if not (reason or "").strip():
 		frappe.throw(_("A cancellation reason is required."))
+	if sold_by:
+		audit("reservation.channel_cancel_override", reference_doctype="Reservation", reference_name=res.name,
+		      property=res.property, new={**sold_by, "warning": "the channel may still sell the room"}, reason=reason)
 	penalty, basis = cancellation_penalty(res)
 	claw = basis.get("basket_clawback")
 	if waive_penalty:

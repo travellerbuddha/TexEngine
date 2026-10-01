@@ -518,6 +518,9 @@ class TestLastRoomRace(IntegrationTestCase):
 		                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
 		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
 		          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+		# guests book pay at the hotel in the races (O-15: a hotel with rules is bound by them)
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Pay at Hotel"},
+		          {"property": fx.PROPERTY, "method": "Pay at Hotel", "priority": 5})
 		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
 		prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
 		                      rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB",
@@ -905,6 +908,13 @@ class TestHoldPolicy(HoldCase):
 	"""K-2d: one resolver decides how long a booking's rooms wait for its payment, by payment
 	method (card 20 minutes, payment link 24 hours, bank transfer 48 hours by default), each
 	overridable per hotel; a payment link of a held booking never outlives its hold."""
+
+	def setUp(self):
+		super().setUp()
+		# the transfer bookings below are sold by a hotel that has a rule for them (O-15); no account: nothing is
+		# charged here
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Bank Transfer"},
+		          {"property": fx.PROPERTY, "method": "Bank Transfer", "priority": 5})
 
 	def hold_minutes(self, b: dict) -> int:
 		sale_at = frappe.db.get_value("TEX Booking", b["booking"], "sale_at")
@@ -2818,6 +2828,9 @@ class TestNoLockHeldThroughTheGateway(IntegrationTestCase):
 		                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
 		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
 		          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+		# guests book pay at the hotel in the races (O-15: a hotel with rules is bound by them)
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Pay at Hotel"},
+		          {"property": fx.PROPERTY, "method": "Pay at Hotel", "priority": 5})
 		if not frappe.db.exists("TEX Booking Site", SLUG):
 			frappe.get_doc({"doctype": "TEX Booking Site", "site_name": "TEX Test Resort", "site_slug": SLUG,
 			                "enabled": 1, "property": fx.PROPERTY, "default_market": "DE", "default_currency": "EUR",

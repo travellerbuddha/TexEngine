@@ -205,6 +205,8 @@ def reservation(name: str):
 		"revision_no": res.tex_revision_no, "guest_change_pending": bool(res.tex_guest_change_pending),
 		"guest_change_note": res.tex_guest_change_note, "special_requests": res.special_requests,
 		"guest": guest, "pricing": snap,
+		# sold by a channel manager: {connection, ref}; None otherwise (cancelled on the channel, D-11)
+		"channel_booking": booking_svc.channel_of(res.tex_booking),
 		"revisions": modification.revisions(res.name),
 		"capabilities": sorted(scope.capabilities(res.property)),
 	}
@@ -272,14 +274,17 @@ def cancellation_preview(reservation: str):
 	res = frappe.get_doc("Reservation", reservation)
 	scope.require("reservation.cancel", res.property)
 	penalty, basis = booking_svc.cancellation_penalty(res)
-	return {"penalty": to_str(penalty), "currency": res.tex_currency, "basis": basis}
+	# a channel manager's booking is cancelled on the channel (D-11): the dialog says so and asks the override
+	return {"penalty": to_str(penalty), "currency": res.tex_currency, "basis": basis,
+	        "channel": booking_svc.channel_of(res.tex_booking)}
 
 
 @frappe.whitelist(methods=["POST"])
 @retry_on_deadlock
-def cancel(reservation: str, reason: str, waive_penalty: int = 0):
+def cancel(reservation: str, reason: str, waive_penalty: int = 0, channel_override: int = 0):
 	return booking_svc.cancel_reservation(reservation, reason=text(reason, 500),
-	                                      waive_penalty=bool(int(waive_penalty or 0)))
+	                                      waive_penalty=bool(int(waive_penalty or 0)),
+	                                      channel_override=bool(int(channel_override or 0)))
 
 
 @frappe.whitelist(methods=["POST"])
