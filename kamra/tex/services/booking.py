@@ -586,7 +586,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	now = now_datetime()
 
 	rows = []
-	for qid in quote_ids:
+	# the quotes are locked in name order, whatever the caller's: two bookings of the same quotes named in
+	# opposite orders would each hold one and wait for the other (ADR-066 Locks, P1-4). A list, not a set: a
+	# duplicated id is still refused below (``room_index``)
+	for qid in sorted(quote_ids):
 		row, req, result = quoting.load_quote(qid, for_update=True)
 		problem = quoting.quote_is_usable(row)
 		if problem:

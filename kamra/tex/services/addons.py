@@ -162,8 +162,12 @@ def apply(proposal_token: str, *, source: str, reason: str | None = None, guest:
 	if bool(p.get("guest")) != guest:
 		frappe.throw(_("Invalid proposal."))
 	addon_id = "ADD-" + hashlib.sha256(proposal_token.encode()).hexdigest()[:12]
-	frappe.db.sql("SELECT name FROM `tabReservation` WHERE name=%s FOR UPDATE", p["reservation"])
-	res = frappe.get_doc("Reservation", p["reservation"])
+	# the booking first, then its room (the order of a payment and of the expiry, ADR-066 Locks, P1-4); the room is
+	# read under its lock, as it is now, never as the snapshot taken before the lock saw it
+	bk = frappe.db.get_value("Reservation", p["reservation"], "tex_booking")
+	if bk:
+		frappe.db.get_value("TEX Booking", bk, "name", for_update=True)
+	res = frappe.get_doc("Reservation", p["reservation"], for_update=True)
 	snap = _snapshot(res)
 	if any(a.get("id") == addon_id for a in snap.get("addons") or []):
 		return _result(res, addon_id, replay=True)                 # the first response was lost

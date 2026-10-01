@@ -1752,8 +1752,10 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 
 def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -> dict:
 	"""New token for an open link (the old URL stops working) — staff lost or resend. Never for a link
-	its booking cannot take the money of, or asking more than it owes (E4)."""
-	link = frappe.get_doc("TEX Payment Link", name)
+	its booking cannot take the money of, or asking more than it owes (E4). The link is locked first and read
+	as it is now (P1-4): a guest starting its payment holds the link and asks for the booking next, so the
+	booking (``link_refusal``) is never taken before the link."""
+	link = frappe.get_doc("TEX Payment Link", name, for_update=True)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("Only open links can be reissued."))
@@ -1865,9 +1867,9 @@ def expire_links() -> int:
 
 
 def cancel_link(name: str, reason: str):
-	"""→ until when its booking's rooms are still held (None: not held, or no booking; E3)."""
-	_lock("TEX Payment Link", name)
-	link = frappe.get_doc("TEX Payment Link", name)
+	"""→ until when its booking's rooms are still held (None: not held, or no booking; E3). The link is locked
+	and read as it is now, before its booking (P1-4)."""
+	link = frappe.get_doc("TEX Payment Link", name, for_update=True)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Draft"):
 		frappe.throw(_("Only active links can be cancelled."))

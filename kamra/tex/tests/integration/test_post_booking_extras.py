@@ -108,6 +108,27 @@ class TestPostBookingExtras(AddonCase):
 		                                                                   "reference_name": res}, "new_value"))
 		self.assertEqual((audit["total_before"], audit["total_after"]), ("600.00", "650.00"))
 
+	def test_extras_lock_the_booking_before_their_room_and_read_the_room_under_the_lock(self):
+		"""2F-1 (P1-4): the order is booking, then room (as a payment and the expiry take it), and the room is read
+		with a locking read, the state after the lock, not the snapshot taken before it."""
+		from kamra.tex.services import addons
+		from kamra.tex.tests.integration.test_security_regressions import SqlSpy
+
+		b = self.book("p14-order")
+		res = b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest adds a massage
+		p = public.manage_extras_propose(token=b["manage_token"], reservation=res, extras=[{"code": "MASSAGE"}])
+		with SqlSpy() as spy:
+			addons.apply(p["proposal_token"], source="Guest", guest=True)
+
+		def first_lock(table: str):
+			return next((i for i, q in enumerate(spy.seen) if f"`tab{table}`" in q and "FOR UPDATE" in q), None)
+
+		loads = spy.loads("Reservation")
+		self.assertTrue(loads and loads[0].endswith("FOR UPDATE"), loads)
+		self.assertIsNotNone(first_lock("TEX Booking"))
+		self.assertLess(first_lock("TEX Booking"), first_lock("Reservation"))
+
 	def test_only_extras_sold_online_after_booking_can_be_added(self):
 		extra("BACKSTAGE", bookable_online=0)
 		extra("WELCOME", bookable_after_booking=0)

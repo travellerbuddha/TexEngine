@@ -633,6 +633,40 @@ class TestLastRoomRace(IntegrationTestCase):
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- read what was decided
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "reconciliation"), "Refund Queued")
 
+	def test_a_revival_finds_the_money_an_expiry_took_off_the_booking_as_it_is_now(self):
+		"""2F-1 (P1-4): the Release rows of an expiry are read with a locking read. A late payment whose request
+		fixed its read view before the expiry job committed still finds the money the expiry took off the booking
+		(a plain read saw none: the revival then locked no charge and took none back)."""
+		from kamra.tex.services import late_payments
+
+		a = self.a["booking"]
+		half = (D(self.a["due_now"]) / 2).quantize(D("0.01"))
+		cash = pay.record_manual(booking=a, amount=str(half), method="Cash", reference="p14 half",
+		                         idempotency_key=f"p14-half-{a}")["transaction"]
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the expiry job is its own connection
+		self.assertEqual(frappe.db.get_value("TEX Booking", a, "status"), "Pending Payment")   # the read view opens
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		ran = []
+
+		def expiry_job():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a job
+				booking.expire_pending_bookings()
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its own request
+				ran.append(1)
+			finally:
+				frappe.destroy()
+
+		job = threading.Thread(target=expiry_job)
+		job.start()
+		job.join(timeout=60)
+		self.assertEqual(ran, [1])
+		self.assertEqual(frappe.db.get_value("TEX Booking", a, "status"), "Pending Payment")   # still the old view
+		self.assertEqual(late_payments.lock_expiry_money(a, but="no-such-charge"), [cash])
+		frappe.db.rollback()
+
 	def test_the_expiry_job_a_late_payment_and_a_new_guest_race_for_the_last_room(self):
 		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			results = self._race(("expiry", self.expiry, "Administrator"), ("a_pays", self.late_payment, "Guest"),
@@ -653,6 +687,91 @@ class TestLastRoomRace(IntegrationTestCase):
 		again = self._race(("a_pays_again", self.late_payment, "Guest"))
 		self.assertEqual(again, {"a_pays_again": "Succeeded"})
 		self.assertEqual(frappe.db.get_value("TEX Booking", self.a["booking"], "status"), a)
+
+
+class TestPaymentLinkLockOrder(IntegrationTestCase):
+	"""2F-1 (P1-4): a payment link is locked before its booking everywhere. A guest starting the link's payment
+	holds the link and then asks for the booking (``_link_due``); staff reissuing the same link must queue behind
+	it on the link, not take the booking first and wait for the link (a deadlock with a victim)."""
+
+	@classmethod
+	def tearDownClass(cls):
+		_cleanup_payments()
+		_cleanup()
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		_cleanup()
+		_cleanup_payments()
+		self.f = fx.base_setup()
+		fx.create_contract(self.f, code="CONC")
+		acc = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Mock"},
+		                {"label": "Sandbox gateway", "property": fx.PROPERTY, "provider": "Mock",
+		                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest booking path
+		prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+		                      rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB", currency="EUR")["properties"][0]
+		quote = quoting.create_quote(pick(prop, room_code="DLX")["rooms"][0]["offer_key"])["quote_id"]
+		self.a = booking.create_booking(quote_ids=[quote], payment_method="Card", guest={
+			"first_name": "Anna", "last_name": "Linked", "email": "anna.p14@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the agent sends the link
+		self.link = pay.create_link(property=fx.PROPERTY, amount=self.a["due_now"], currency="EUR",
+		                            description="Deposit", expires_hours=72, booking=self.a["booking"])["link"]
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	def test_a_link_being_started_and_the_same_link_reissued_do_not_deadlock(self):
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		guest_has_link, staff_has_booking, go = threading.Event(), threading.Event(), threading.Event()
+		real, results = pay.link_refusal, {}
+
+		def link_refusal(*args, **kw):
+			if threading.current_thread().name == "guest":
+				guest_has_link.set()                          # the start holds the link and asks for the booking next
+				go.wait(timeout=30)
+				return real(*args, **kw)
+			out = real(*args, **kw)
+			staff_has_booking.set()                           # a reissue that took the booking first would hold it now
+			return out
+
+		def guest_starts():
+			from kamra.tex.api.public import _link_due
+
+			_link_due(frappe.get_doc("TEX Payment Link", self.link))
+			return "ok"
+
+		def staff_reissues():
+			guest_has_link.wait(timeout=30)
+			return "ok" if pay.reissue_link(self.link)["token"] else "no token"
+
+		def run(who, user, fn):
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user(user)  # nosemgrep: frappe-setuser -- a guest's click, an agent's click
+				frappe.db.sql("SET SESSION innodb_lock_wait_timeout = 5")
+				results[who] = fn()
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each side is its own request
+			except Exception as e:
+				frappe.db.rollback()
+				results[who] = f"refused: {type(e).__name__}: {e}"
+			finally:
+				frappe.destroy()
+
+		with mock.patch.object(pay, "link_refusal", link_refusal):
+			threads = [threading.Thread(target=run, args=("guest", "Guest", guest_starts), name="guest"),
+			           threading.Thread(target=run, args=("staff", "Administrator", staff_reissues), name="staff")]
+			for t in threads:
+				t.start()
+			staff_has_booking.wait(timeout=2)                 # today it does: the booking is free; fixed: it queues
+			go.set()
+			for t in threads:
+				t.join(timeout=60)
+		frappe.db.rollback()
+		self.assertEqual(results, {"guest": "ok", "staff": "ok"})
 
 
 class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
@@ -1647,7 +1766,9 @@ class TestDeadlockRetries(HoldCase):
 		for fn in (public.pay_booking, public.pay_link, public.manage_cancel, public.mock_pay, crs.cancel,
 		           payments_api.allocate, payments_api.transfer, payments_api.mark_transfer_received,
 		           payments_api.record_manual, payments_api.create_link, payments_api.cancel_link,
-		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests):
+		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests,
+		           # 2F-1 (P1-4): the endpoints that lock a booking and then its rooms or its guest
+		           crs.resend_confirmation, crs.acknowledge_guest_change, crm_api.loyalty_adjust):
 			self.assertTrue(retried(fn), fn.__name__)
 
 	def test_the_quote_endpoints_run_again_on_a_deadlock(self):
@@ -2365,6 +2486,28 @@ class TestPaymentLinkHold(HoldCase):
 		self.assertAlmostEqual((back - base).total_seconds(), 0, delta=60)     # its card hold, from now
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.hold_restored",
 		                                                     "reference_name": b["booking"]}))
+
+	def test_a_link_is_locked_before_its_booking_when_it_is_reissued_or_cancelled(self):
+		"""2F-1 (P1-4): the order of a link's payment is link, then booking, reservations. ``reissue_link`` and
+		``cancel_link`` read the link with a locking read first (a plain read let ``link_refusal`` take the
+		booking before the link was locked)."""
+		from kamra.tex.tests.integration.test_security_regressions import SqlSpy
+
+		b = self.book(method="Card")
+		for what, call in (("reissue_link", lambda name: pay.reissue_link(name)),
+		                   ("cancel_link", lambda name: pay.cancel_link(name, reason="p14"))):
+			out = self.send_link(b)
+			with SqlSpy() as spy:
+				call(out["link"])
+			first = {}
+			for table in ("TEX Payment Link", "TEX Booking", "Reservation"):
+				first[table] = next((i for i, q in enumerate(spy.seen) if f"`tab{table}`" in q and "FOR UPDATE" in q), None)
+			self.assertIsNotNone(first["TEX Payment Link"], f"{what}: the link is never locked")
+			loads = spy.loads("TEX Payment Link")
+			self.assertTrue(loads and loads[0].endswith("FOR UPDATE"), f"{what}: the link is read as a snapshot: {loads}")
+			for later in ("TEX Booking", "Reservation"):
+				if first[later] is not None:
+					self.assertLess(first["TEX Payment Link"], first[later], f"{what}: {later} locked before the link")
 
 	def test_a_paid_link_keeps_holding_when_the_other_is_cancelled(self):
 		"""E3 (audit 1c-son): two links for half each; the guest pays the first, staff cancel the second.

@@ -137,8 +137,10 @@ def lock_expiry_money(booking: str, *, but: str) -> list[str]:
 	from kamra.tex.payments import service as pay
 
 	prop = frappe.db.get_value("TEX Booking", booking, "property")
+	# a locking read: the releases as they are now, an expiry committed after this request began included (P1-4;
+	# ``_held_when_expired`` reads them the same way)
 	rows = frappe.db.sql("""SELECT `transaction`, idempotency_key FROM `tabTEX Payment Allocation`
-	                        WHERE booking=%s AND allocation_type='Release'""", booking, as_dict=True)
+	                        WHERE booking=%s AND allocation_type='Release' LOCK IN SHARE MODE""", booking, as_dict=True)
 	names = sorted({r.transaction for r in rows if r.transaction != but
 	                and r.idempotency_key == pay.ns_key(prop, f"expired:{booking}:{r.transaction}", "release")})
 	for name in names:

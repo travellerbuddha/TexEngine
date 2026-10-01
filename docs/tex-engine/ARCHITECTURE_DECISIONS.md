@@ -9248,6 +9248,20 @@ the versions the roll superseded the state their contract's later publishes woul
   request commit puts a half state on record. A deadlock or timeout in `complete_retrying` rolls the whole transaction
   back and a step commit ends it: the savepoint is then gone, and the undo (`_undo_to`) rolls back whole instead — safe
   there: every charge of the job is a transaction of its own and staff's request has no uncommitted work before it.
+- *Locks (Part 2F-1, P1-4).* One order, each kind in name order: quote(s) → contract → contract version → payment
+  link → charge(s) → booking(s) → reservations → nights ((pool, date)) → extra days → Guest → promotions →
+  allocation, ledger and redemption rows (locking reads). It replaces the order in the 2E-1 bullet above: the code
+  locks the Guest before the promotions (`resolve_guest`, then `_record_redemptions`), and series rows are taken as
+  documents are inserted and held to the commit — never across a gateway call.
+- Fixed: `reissue_link` locks its link first; `addons.apply` and `crs.acknowledge_guest_change` lock the booking, then
+  read the room under its lock; `create_booking` locks its quotes in name order; a revival reads the expired booking's
+  releases with a locking read.
+- Accepted, each a clean rollback run again by `retry_on_deadlock`, `complete_retrying` or the job's next run: every
+  expiry (the job, `reconcile`, a refused attempt or link, P1-9) and money going out lock booking → charges (ADR-062
+  "Locks") against money coming in (charge → booking); a revival's share lock on the booking's allocations against an
+  allocation insert; a CRM merge (both profiles, then their records); the recount (ADR-048); withdraw's quote scan
+  (index order, ADR-069): name order ends caller-against-caller cycles, not create-against-withdraw.
+- Every write endpoint taking these locks is wrapped; a request that committed a step is not run again (P1-8 e).
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
