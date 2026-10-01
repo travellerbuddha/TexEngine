@@ -31,6 +31,7 @@ HOLDING = ("Confirmed", "Checked In", "Held", "Pending Payment", "Checked Out")
 
 class ExtraSoldOut(frappe.ValidationError):
 	"""A limited extra has no units left on a day the booking needs."""
+	code = "EXTRA_SOLD_OUT"                      # the guest's refusal code (G-70a)
 
 
 def _day_name(property: str, code: str, day) -> str:

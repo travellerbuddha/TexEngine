@@ -122,6 +122,9 @@ export interface FlowError {
   kind: ErrorKind | "unavailable"
   message: string
   room?: number
+  /** the refusal's stable code and params (G-70a), when the server sent one */
+  code?: string | null
+  params?: Record<string, unknown>
 }
 
 export interface Refreshed {
@@ -193,7 +196,7 @@ export function useBooking() {
 }
 
 function toFlowError(e: unknown): FlowError {
-  if (e instanceof ApiError) return { kind: e.kind, message: e.message }
+  if (e instanceof ApiError) return { kind: e.kind, message: e.message, code: e.code, params: e.params }
   return { kind: "server", message: "" }
 }
 

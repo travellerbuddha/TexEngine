@@ -368,6 +368,99 @@ class TestMarketLinks(TexTestCase):
 				frappe.conf["tex_public_write_limit"] = saved
 
 
+class TestRefusalCodes(TexTestCase):
+	"""G-70a (audit Part 2G-2, ADR-013 amendment): a guest refusal's stable code and its guest-safe params reach
+	the JSON error body (``tex_code``, ``tex_params``) next to Frappe's message, so the booking app can tell
+	refusals apart by code, never by their English wording."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		self.saved_response = frappe.local.response
+		frappe.local.response = frappe._dict({"docs": []})      # as a request starts (frappe.init)
+
+	def tearDown(self):
+		frappe.local.response = self.saved_response
+		frappe.clear_messages()
+		super().tearDown()
+
+	@staticmethod
+	def error_body() -> dict:
+		"""The JSON body Frappe answers a guest API request's error with (``handle_exception`` → ``report_error``),
+		built inside the ``except`` that caught it."""
+		import json
+		from unittest import mock
+
+		from frappe.utils.response import report_error
+		from werkzeug.test import EnvironBuilder
+		from werkzeug.wrappers import Request
+
+		env = EnvironBuilder(method="POST", path="/api/method/kamra.tex.api.public.book").get_environ()
+		with mock.patch.object(frappe.local, "request", Request(env), create=True):
+			return json.loads(report_error(417).get_data())
+
+	def test_a_coded_refusal_carries_its_code_and_params_into_the_error_body(self):
+		from kamra.tex.services import refusals
+
+		@refusals.coded
+		def endpoint():
+			frappe.throw("Sorry — Deluxe has just sold out for 2026-12-01.",
+			             refusals.refusal("SOLD_OUT", room="Deluxe", date="2026-12-01"))
+
+		with self.assertRaises(frappe.ValidationError) as cm:
+			try:
+				endpoint()
+			except frappe.ValidationError:
+				body = self.error_body()
+				raise
+		self.assertEqual((cm.exception.code, cm.exception.params), ("SOLD_OUT", {"room": "Deluxe", "date": "2026-12-01"}))
+		self.assertEqual(str(cm.exception), "Sorry — Deluxe has just sold out for 2026-12-01.")   # staff keep the text
+		self.assertEqual((body["tex_code"], body["tex_params"]), ("SOLD_OUT", {"room": "Deluxe", "date": "2026-12-01"}))
+		self.assertEqual(body["exc_type"], "Refusal")
+		self.assertIn("sold out", body["_server_messages"])
+
+	def test_an_uncoded_error_keeps_frappes_body_and_a_later_answer_has_no_code(self):
+		from kamra.tex.services import refusals
+
+		@refusals.coded
+		def refused():
+			frappe.throw("Check-out must be after check-in.")          # not coded yet (G-70b)
+
+		@refusals.coded
+		def gone():
+			frappe.throw("Booking site not found.", frappe.DoesNotExistError)
+
+		@refusals.coded
+		def ok():
+			return {"ok": True}
+
+		with self.assertRaises(frappe.DoesNotExistError):
+			gone()
+		self.assertEqual(frappe.local.response["tex_code"], "NOT_FOUND")    # an uncoded 404 says what it is
+		self.assertTrue(ok()["ok"])
+		self.assertNotIn("tex_code", frappe.local.response)                # one request's code, never the next's
+		with self.assertRaises(frappe.ValidationError):
+			refused()
+		self.assertNotIn("tex_code", frappe.local.response)
+		self.assertNotIn("tex_params", frappe.local.response)
+
+	def test_a_guest_booking_refused_by_a_suspended_contract_says_CONTRACT_SUSPENDED(self):
+		"""A real guest endpoint: the class code of ``ContractSuspended`` (raised through ``frappe.throw``) reaches the
+		error body of ``public.book``."""
+		from kamra.tex.api import contracts as contracts_api
+		from kamra.tex.commercial import contracts
+
+		def suspend():
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel suspends the contract
+			contracts_api.set_contract_status(name=frappe.db.get_value("TEX Contract", {"contract_code": "PAY"}),
+			                                  action="suspend", reason="Overbooked")
+
+		with self.assertRaises(contracts.ContractSuspended):
+			guest_books(session="g70a-suspended", before_book=suspend)
+		self.assertEqual(frappe.local.response["tex_code"], "CONTRACT_SUSPENDED")
+		self.assertNotIn("tex_params", frappe.local.response)
+
+
 class TestMandatoryExtrasInSearch(TexTestCase):
 	"""Y-5: a search prices the hotel's mandatory extras as the quote does, so the price a guest or an
 	agent sees in the results is the one the quote confirms (``price_changed`` False) — not the stay

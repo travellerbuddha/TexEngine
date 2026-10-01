@@ -134,6 +134,19 @@ iframe (payment isolation, CSP) or redirects. Branding is limited to safe tokens
 **Decision.** TEX screens use `frontend/src/tex/i18n` with JSON catalogs for `en, tr, de, ru, ro,
 pl`, `t(key, params)` with plural support and `Intl` number/date/currency formatting. Server-side
 guest-facing strings use Frappe `_()`. Legacy Kamra screens keep the existing en/ar mechanism.
+- *Addendum (Part 2G-2, G-70a): guest refusals carry a stable code.* A refusal of the guest API carries a code
+  from the pure registry `kamra/tex/refusal_codes.py` (`CODES`, UPPER_SNAKE, never re-used for another meaning)
+  and guest-safe `params` (ISO dates, decimal strings, ISO codes, localised hotel content; never a token, an
+  e-mail or an internal id): `services.refusals.Refusal` (`refusal(code, base, **params)` keeps a 403/404 or an
+  existing class), or a class `code` on an existing exception (`ContractSuspended`, `HoldExpired`, `PaymentBusy`,
+  `ExtraSoldOut` …). `@refusals.coded` on every guest endpoint (inside `rate_limit`, outside
+  `retry_on_deadlock`; `functools.wraps`) copies them into the JSON error body as `tex_code` / `tex_params`, next
+  to Frappe's `exc_type` and message (Frappe answers with the whole `frappe.local.response`); an uncoded 404 / 403
+  / 429 says `NOT_FOUND` / `NOT_PERMITTED` / `RATE_LIMITED`. The English message stays for staff, API clients and
+  logs. The booking app reads them into `ApiError.code` / `params`; a code decides the kind before any wording,
+  and a refusal without a code is classified as before until G-70b codes every guest refusal (HANDOFF_STAGE3 §5f),
+  adds `refusal.<CODE>` texts in the six catalogs and drops the wording. `unit/test_guest_refusal_codes` fails on a
+  guest endpoint without the decorator.
 
 ## ADR-014 Hide, don't delete, PMS modules
 **Decision.** TEX navigation omits housekeeping, laundry, POS, banquet, night audit, maintenance

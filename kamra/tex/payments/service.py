@@ -31,15 +31,18 @@ from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, trans
 
 class AccountRefused(frappe.ValidationError):
 	"""A provider account that may not run for what was asked of it (G-67, ADR-041)."""
+	code = "PAYMENT_METHOD_UNAVAILABLE"          # the guest's refusal code (G-70a)
 
 
 class ChargeSuperseded(frappe.ValidationError):
 	"""A reused Pending charge could not take another checkout, so it was cancelled; the
 	caller may start a new charge (G-68). A late verified payment of it is still recorded."""
+	code = "CHARGE_SUPERSEDED"
 
 
 class PaymentBusy(frappe.ValidationError):
 	"""Another request is starting the same payment (or one for the same link) right now."""
+	code = "PAYMENT_BUSY"
 
 
 class RefundUnknown(frappe.ValidationError):

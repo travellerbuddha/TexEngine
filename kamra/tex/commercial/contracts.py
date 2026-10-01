@@ -859,6 +859,8 @@ class PayloadMismatch(frappe.ValidationError):
 	the version that failed and the hash on its row (review of G-73, L3): selection loads every
 	contract on sale, so the one that failed may not be the stay's."""
 
+	code = "RATE_UNAVAILABLE"                    # the guest's refusal code (G-70a)
+
 	def __init__(self, message: str = "", *, version: str | None = None, found_hash: str | None = None):
 		super().__init__(message)
 		self.version = version

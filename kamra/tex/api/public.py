@@ -23,7 +23,7 @@ from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, sites
+from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, refusals, sites
 from kamra.tex.services.txn import retry_on_deadlock, undo_step
 
 
@@ -120,6 +120,7 @@ def _safe_return_url(site, url: str | None, booking: str | None = None) -> str |
 
 @frappe.whitelist(allow_guest=True)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def site(slug: str | None = None, domain: str | None = None):
 	s = _site(slug, domain)
 	# the widget on a hotel's own website reads its theme from here: allow exactly the
@@ -201,6 +202,7 @@ def _market(site, market: str | None, country: str | None) -> str:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])   # a party may carry a child's date of birth
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def search(site: str, check_in: str, check_out: str, rooms, currency: str | None = None,
            promo_code: str | None = None, market: str | None = None, country: str | None = None,
            hotel: str | None = None, session_id: str | None = None):
@@ -241,6 +243,7 @@ LOW_STOCK = 3
 
 @frappe.whitelist(allow_guest=True)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def extras_availability(site: str, hotel: str, check_in: str, check_out: str, session_id: str | None = None):
 	s = _site(site)
 	if hotel not in _site_properties(s):
@@ -260,6 +263,7 @@ def extras_availability(site: str, hotel: str, check_in: str, check_out: str, se
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None, session_id: str | None = None):
 	s = _site(site)
@@ -285,6 +289,7 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str | None = None):
 	"""The rooms of one booking quoted together (G-84, ADR-057): a coupon's minimum basket is the
@@ -354,6 +359,7 @@ def _country(value) -> str | None:
 
 @frappe.whitelist(allow_guest=True)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def basket(site: str, quote_ids, session_id: str | None = None):
 	"""Server total of the selected rooms and, for every payment method the guest may
 	choose, the amount due now (each rate plan's deposit rule) — before booking."""
@@ -385,6 +391,7 @@ def basket(site: str, quote_ids, session_id: str | None = None):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def book(site: str, quote_ids, guest, payment_method: str | None = None, provider_account: str | None = None,
          idempotency_key: str | None = None, language: str | None = None, session_id: str | None = None,
@@ -488,6 +495,7 @@ def resume_token(booking: str) -> str:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def booking_status(token: str):
 	"""Confirmation page / manage link: guest view of a booking by its manage token."""
 	b = _booking_by_token(token)
@@ -496,6 +504,7 @@ def booking_status(token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def pay_booking(token: str, payment_method: str = "Card", provider_account: str | None = None,
                 return_url: str | None = None):
@@ -534,6 +543,7 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60)
+@refusals.coded
 @retry_on_deadlock
 def mock_pay(transaction: str, outcome: str, sig: str):
 	"""Sandbox payment page action (only Mock provider accounts reach this)."""
@@ -561,6 +571,7 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def payment_link(token: str):
 	from kamra.tex.payments import service as pay
 
@@ -595,6 +606,7 @@ def _link_due(link):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def pay_link(token: str, provider_account: str | None = None):
 	from kamra.tex.payments import service as pay
@@ -734,6 +746,7 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=120, seconds=60)
+@refusals.coded
 def track(site: str, session_id: str, event: str, payload=None):
 	if event not in BROWSER_EVENT_FIELDS:
 		frappe.throw(_("Unknown event."))
@@ -846,6 +859,7 @@ def _own_reservation(b, reservation: str) -> None:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	b = _booking_by_token(token)
@@ -868,6 +882,7 @@ def manage_cancel(token: str, reservation: str, reason: str | None = None):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 def manage_propose(token: str, reservation: str, changes):
 	"""The price of a change and how it would be settled (``settlement``: pay now, at the
 	hotel, balance, refund, credit, hotel approval), before the guest accepts it (G-45)."""
@@ -905,6 +920,7 @@ def manage_propose(token: str, reservation: str, changes):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def manage_extras(token: str, reservation: str):
 	"""Extras the guest can still add to a room of their booking (G-22)."""
 	b = _booking_by_token(token)
@@ -927,6 +943,7 @@ def manage_extras(token: str, reservation: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 def manage_extras_propose(token: str, reservation: str, extras):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
@@ -941,6 +958,7 @@ def manage_extras_propose(token: str, reservation: str, extras):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_extras_apply(token: str, proposal_token: str):
 	b = _booking_by_token(token)
@@ -956,6 +974,7 @@ def manage_extras_apply(token: str, proposal_token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_apply(token: str, proposal_token: str, note: str | None = None, return_url: str | None = None):
 	"""Guest accepts a proposal (G-45, ADR-044). → ``status``:
@@ -981,6 +1000,7 @@ def manage_apply(token: str, proposal_token: str, note: str | None = None, retur
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_change_pay(token: str, request: str, return_url: str | None = None):
 	"""Pay for the guest's change still waiting for its payment (``rooms[].pending_change``
