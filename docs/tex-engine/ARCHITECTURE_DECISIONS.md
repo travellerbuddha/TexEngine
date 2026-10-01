@@ -9237,8 +9237,10 @@ the versions the roll superseded the state their contract's later publishes woul
   rollback (a timeout undoes only its statement), 3 tries, then raises the error (`mock_pay`'s own wrapper: ≤ 3 × 3);
   3 × `innodb_lock_wait_timeout` may outlast a web worker: the safety net is the re-verify job (P1-8).
 - The re-verify job (NEW-2) is first in the 5-minute group: a plain SELECT of askable Pending charges (enabled account,
-  no live lease), one charge per transaction, committed before the next gateway question (and between two questions
-  of one charge when the first changed it). A request that committed a step (`_commit_step` counts it) is never run
+  no live lease), 20 per tick by urgency — still holding rooms first (nearest deadline first), then holding none
+  (`expires_at` NULL: oldest first), then past their deadline (latest first); an abandoned iyzico checkout stays Pending
+  for 2 hours and must not starve those that can still be saved — one charge per transaction, committed before the
+  next gateway question (and between two questions of one charge when the first changed it). A request that committed a step (`_commit_step` counts it) is never run
   again on a deadlock: it rolls back and answers "very busy" (P1-8 e); a durable refund's or a guest change's commit,
   replayed by its key, does not count.
 

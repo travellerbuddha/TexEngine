@@ -1720,8 +1720,8 @@ class TestPaymentsVerifiedByTheJob(HoldCase):
 
 		first, second = (self.book(guest=dict(GUEST, email=f"new2-err-{n}@example.com")) for n in range(2))
 		broken, fine = self.start_payment(first)["transaction"], self.start_payment(second)["transaction"]
-		passes(first["booking"], 27)
-		passes(second["booking"], 26)
+		passes(first["booking"], 26)                               # both are past their deadline: the later one
+		passes(second["booking"], 27)                              # is asked first (2E-2 fix 1), so the broken one
 		real = MockProvider.handle_callback
 
 		def handle_callback(provider, transaction, *args, **kw):
@@ -1748,6 +1748,46 @@ class TestPaymentsVerifiedByTheJob(HoldCase):
 		t = txn_state(payment["transaction"])
 		self.assertEqual((t.status, t.reconciliation), ("Succeeded", "Action Required"))    # ADR-062 b), rooms free
 		self.assertEqual(self.statuses(b)[0], "Cancelled")
+
+	def aged(self, txn: str, *, created_ago: int, expires_in: int | None) -> None:
+		"""A stored charge as it would be ``created_ago`` minutes after its start, its deadline ``expires_in``
+		minutes from now (negative: gone by; None: it holds no rooms)."""
+		expires = add_to_date(now_datetime(), minutes=expires_in) if expires_in is not None else None
+		frappe.db.sql("UPDATE `tabTEX Payment Transaction` SET creation = %s, expires_at = %s WHERE name = %s",
+		              (add_to_date(now_datetime(), minutes=-created_ago), expires, txn))
+
+	def test_a_payment_still_holding_rooms_is_asked_before_the_abandoned_ones(self):
+		"""NEW-2 (2E-2 fix 1): a tick asks 20 at most. Abandoned checkouts stay Pending (iyzico never says they
+		failed) for 2 hours past their deadline; asked first they would starve the payments that still hold
+		rooms and may yet be saved."""
+		guests = [dict(GUEST, email=f"new2-order-{n}@example.com") for n in range(3)]
+		gone_a, gone_b, holding = (self.book(guest=g) for g in guests)
+		txns = [self.start_payment(b)["transaction"] for b in (gone_a, gone_b, holding)]
+		self.aged(txns[0], created_ago=50, expires_in=-30)
+		self.aged(txns[1], created_ago=45, expires_in=-30)
+		self.aged(txns[2], created_ago=5, expires_in=10)
+		with self.askable() as asked, mock.patch.object(pay, "REVERIFY_BATCH", 2):
+			pay.reverify_pending()
+		self.assertEqual(asked[0], txns[2])
+		self.assertEqual(txn_state(txns[2]).status, "Succeeded")
+		self.assertEqual(self.statuses(holding), ("Confirmed", ["Confirmed"]))
+
+	def test_the_candidates_are_asked_by_urgency(self):
+		"""Still holding (the nearest deadline first), then holding none (the oldest first), then gone by (the
+		latest deadline first)."""
+		names = ("late_hold", "soon_hold", "new_free", "old_free", "gone_long", "gone_short")
+		made = {n: self.book(guest=dict(GUEST, email=f"new2-urgency-{n}@example.com")) for n in names}
+		txns = {n: self.start_payment(b)["transaction"] for n, b in made.items()}
+		self.aged(txns["late_hold"], created_ago=5, expires_in=10)
+		self.aged(txns["soon_hold"], created_ago=6, expires_in=2)
+		self.aged(txns["new_free"], created_ago=10, expires_in=None)
+		self.aged(txns["old_free"], created_ago=20, expires_in=None)
+		self.aged(txns["gone_long"], created_ago=70, expires_in=-50)
+		self.aged(txns["gone_short"], created_ago=45, expires_in=-30)
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [txns[n] for n in ("soon_hold", "late_hold", "old_free", "new_free",
+		                                          "gone_short", "gone_long")])
 
 
 class TestIyzicoFraudReview(HoldCase):

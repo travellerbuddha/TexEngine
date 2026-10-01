@@ -643,20 +643,29 @@ def reverify_pending(now=None) -> dict:
 	Candidates (a plain read, no lock): Pending charges of an enabled account (a disabled one settles
 	nothing), at least 3 minutes old, with no start asking the gateway for a checkout right now (a lapsed
 	lease is a dead start), their deadline — or, without one, their creation — within the last 2 hours;
-	oldest first, 20 per tick, none started after 60 s. Each is asked under a savepoint; an error is logged
+	20 per tick, none started after 60 s, by urgency: those still holding rooms first (the nearest deadline
+	first: money found in time confirms the booking), then those holding none, oldest first, then those whose
+	deadline has gone by, the latest first — an abandoned iyzico checkout stays Pending for 2 hours and must
+	not starve the payments that can still be saved. Each is asked under a savepoint; an error is logged
 	("TEX payment re-verify <charge>") and undone; each is on record before the next question (ADR-066)."""
 	now = get_datetime(now or now_datetime())
 	askable = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query)) or ("",)
 	# NULL checkout_started_at: no start is asking the gateway; NULL expires_at: a charge that holds no rooms
-	# (a link's without a waiting booking, a change's, a balance's), judged by when it started
+	# (a link's without a waiting booking, a change's, a balance's), judged by when it started (ADR-064).
+	# Urgency: 0 = its deadline is ahead (holds rooms), nearest first; 1 = no deadline, oldest first; 2 = its
+	# deadline has gone by, latest first. A CASE without ELSE is NULL outside its group: constant inside it
 	names = frappe.db.sql("""SELECT t.name FROM `tabTEX Payment Transaction` t
 	                         JOIN `tabTEX Payment Provider Account` a ON a.name = t.provider_account
 	                         WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND t.provider IN %(askable)s
 	                           AND a.enabled = 1 AND t.creation <= %(settled)s
 	                           AND (t.checkout_started_at IS NULL OR t.checkout_started_at < %(lease)s)
 	                           AND IFNULL(t.expires_at, t.creation) >= %(window)s
-	                         ORDER BY IFNULL(t.expires_at, t.creation), t.name LIMIT %(limit)s""",
-	                      {"askable": askable, "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
+	                         ORDER BY CASE WHEN t.expires_at > %(now)s THEN 0 WHEN t.expires_at IS NULL THEN 1 ELSE 2 END,
+	                                  CASE WHEN t.expires_at > %(now)s THEN t.expires_at END,
+	                                  CASE WHEN t.expires_at IS NULL THEN t.creation END,
+	                                  CASE WHEN t.expires_at <= %(now)s THEN t.expires_at END DESC,
+	                                  t.name LIMIT %(limit)s""",
+	                      {"askable": askable, "now": now, "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
 	                       "lease": add_to_date(now, seconds=-CHECKOUT_LEASE_SECONDS),
 	                       "window": add_to_date(now, hours=-REVERIFY_WINDOW_HOURS), "limit": REVERIFY_BATCH},
 	                      pluck=True)
