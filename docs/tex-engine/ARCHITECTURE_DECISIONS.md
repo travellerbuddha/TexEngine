@@ -9170,6 +9170,9 @@ main `1575c8b` is contained, so nothing was merged.
 - *Refused after the hold (P1-9, Part 2E-2).* A retry or a link refused because the hold is over, with no attempt open,
   expires the booking and commits before the refusal (its rooms go at once); a link inside a card's 3-D Secure margin
   is still sent; a transfer is never started past the hold.
+- *A restarted charge (Part 2F-1).* A Pending charge started again with its key (another tab, a replayed booking, a
+  link's guest back) is a new attempt: `open_attempt` decides it as for a new charge (refused after the hold, P1-9);
+  the charge's deadline moves to the new attempt's, never back.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking

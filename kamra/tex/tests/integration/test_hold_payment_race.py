@@ -2120,6 +2120,21 @@ class TestRefusedAfterTheHold(HoldCase):
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.expire", "reference_name": b["booking"]}))
 
+	def test_a_booking_replayed_after_the_hold_is_refused_like_a_new_payment(self):
+		"""2F-1 (1b): the engine repeats ``book`` (same session, same key) after the hold: the Pending charge it
+		restarts is a new attempt, refused like a new one — the rooms go at once, no checkout is opened for a
+		booking the 5-minute job is about to cancel."""
+		from kamra.tex.services import holds
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		first = guest_books(session="p19-reuse")                    # booked by card; the guest's response was lost
+		quote_id = frappe.db.get_value("TEX Quote", {"booking": first["booking"]}, "name")
+		passes(first["booking"], 26)                                # the hold and the card attempt are over
+		with self.assertRaises(holds.HoldExpired):
+			public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Card", session_id="p19-reuse",
+			            idempotency_key="idem-p19-reuse")
+		self.assertEqual(self.statuses(first), ("Cancelled", ["Cancelled"]))
+
 	def test_a_recovery_link_is_sent_inside_the_3ds_margin(self):
 		b = self.book()
 		self.start_payment(b)
@@ -2486,6 +2501,23 @@ class TestPaymentLinkHold(HoldCase):
 		self.assertAlmostEqual((back - base).total_seconds(), 0, delta=60)     # its card hold, from now
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.hold_restored",
 		                                                     "reference_name": b["booking"]}))
+
+	def test_a_link_the_guest_comes_back_to_holds_the_rooms_for_the_new_attempt(self):
+		"""2F-1 (1b): a Pending charge started again with its key is a new attempt: ``open_attempt`` extends the
+		booking's attempt, and the charge's deadline moves with it. The guest left the link's checkout the day
+		before and comes back 4 minutes before the link hold ends: the job that runs while the guest is in 3-D
+		Secure must not give the rooms away, and the payment then confirms."""
+		b = self.book(method="Card")
+		out = self.send_link(b)
+		first = public.pay_link(token=out["token"])
+		passes(b["booking"], 24 * 60 - 4)                          # the link hold ends in 4 minutes; C1's attempt is long over
+		again = public.pay_link(token=out["token"])
+		self.assertEqual(again["transaction"], first["transaction"])            # C1 is reused
+		passes(b["booking"], 6)                                     # the hold is over; the new attempt is open
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		public.mock_pay(transaction=again["transaction"], outcome="success", sig=again["fields"]["success_sig"])
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 
 	def test_a_link_is_locked_before_its_booking_when_it_is_reissued_or_cancelled(self):
 		"""2F-1 (P1-4): the order of a link's payment is link, then booking, reservations. ``reissue_link`` and

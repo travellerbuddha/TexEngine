@@ -357,6 +357,10 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		# a reused charge is exactly the charge that was started, never re-routed or re-priced
 		frappe.throw(_("This payment was started with another method or amount."))
 	provider = provider_for(provider_account)
+	# a booking waiting for its payment: the attempt is refused once its hold is over, else it
+	# keeps the rooms until its own deadline, never longer (K-2a)
+	held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
+	hold_method = holds.TRANSFER if provider.name == holds.TRANSFER else method
 	# ── (a) the charge on record, with its lease ──
 	# a second start of the same charge (another tab, a double click, a restart) reuses the
 	# Pending transaction: one charge, never two (G-68)
@@ -364,6 +368,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn = frappe.get_doc("TEX Payment Transaction", existing.name, for_update=True)
 		if not provider.can_add_checkout(txn.provider_ref):
 			_supersede(txn, "another checkout was asked for")
+		# a restart is a new attempt (2F-1): the hold decides it as it does a new charge (refused once it is
+		# over, P1-9; the booking is locked after the charge, the order of money coming in), and the charge's
+		# deadline moves to the new attempt's, never back — ``paid_in_time`` reads it
+		until = holds.open_attempt(held, hold_method) if held else None
+		if until and (not txn.expires_at or get_datetime(txn.expires_at) < get_datetime(until)):
+			frappe.db.set_value("TEX Payment Transaction", txn.name, "expires_at", until, update_modified=False)
 		frappe.db.set_value("TEX Payment Transaction", txn.name, "checkout_started_at", stamp, update_modified=False)
 	else:
 		# the key is unique: a start that lost the race to the same new key undoes its own steps back to
@@ -372,11 +382,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		frappe.db.savepoint(START_SAVEPOINT)
 		messages = frappe.local.message_log
 		mark = len(messages)
-		# a booking waiting for its payment: the attempt is refused once its hold is over, else it
-		# keeps the rooms until its own deadline, never longer (K-2a)
-		held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
-		expires_at = holds.open_attempt(held, holds.TRANSFER if provider.name == holds.TRANSFER else method) \
-			if held else None
+		expires_at = holds.open_attempt(held, hold_method) if held else None
 		try:
 			txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 			               provider_account=provider_account, provider=provider.name,
