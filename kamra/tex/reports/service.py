@@ -311,8 +311,14 @@ def selection(view: str, *, property=None, level=None, name=None, group_by=None,
 	                 include_cancelled=bool(include_cancelled), cost_visible=cost_visible)
 
 
-def _stay_where(sel: Selection, *, statuses: tuple[str, ...] | None, currency: bool = True) -> str:
+def _stay_where(sel: Selection, *, statuses: tuple[str, ...] | None, currency: bool = True,
+                holds: bool = False) -> str:
+	"""The stays of a selection. A hold that ran out of time (``tex_hold_expired``, a Check: never NULL) is no
+	sale and no cancellation (O-24, ADR-059): left out, unless the view asks for them (``holds``: the
+	cancellation view counts them apart, the payment view reads every booking whatever became of it)."""
 	w = ["r.property IN %(hotels)s"]
+	if not holds:
+		w.append("r.tex_hold_expired = 0")
 	if statuses:
 		w.append("r.status IN %(statuses)s")
 	if sel.stay:
@@ -643,21 +649,29 @@ def _extras(sel: Selection) -> dict:
 # ─── cancellations (whole stays) ─────────────────────────────────────────────────────────────
 
 
+# a stay the system did not cancel: the figures of the cancellation view are theirs, a hold that ran out of time
+# is counted apart (``x_expired``, O-24)
+_STAYED = "r.tex_hold_expired = 0"
+
+
 def _cancellation(sel: Selection) -> dict:
 	key, joins = _stay_key(sel)
 	found = frappe.db.sql(f"""
-		SELECT {key} AS x_key, {_CCY} AS x_ccy, COUNT(*) AS x_n,
-		       SUM(r.status = 'Cancelled') AS x_cancelled, SUM(r.status = 'No Show') AS x_no_shows,
-		       SUM(CASE WHEN {_CLOSED} THEN {_NIGHTS} ELSE 0 END) AS x_nights,
-		       CAST(SUM(CASE WHEN {_CLOSED} THEN {_VALUE} ELSE 0 END) AS CHAR) AS x_value,
-		       CAST(SUM(CASE WHEN {_CLOSED} THEN IFNULL(r.cancellation_fee, 0) ELSE 0 END) AS CHAR) AS x_fees,
-		       SUM(CASE WHEN r.status = 'Cancelled' AND r.cancelled_on IS NOT NULL
+		SELECT {key} AS x_key, {_CCY} AS x_ccy, SUM({_STAYED}) AS x_n,
+		       SUM({_STAYED} AND r.status = 'Cancelled') AS x_cancelled,
+		       SUM({_STAYED} AND r.status = 'No Show') AS x_no_shows,
+		       SUM(CASE WHEN {_STAYED} AND {_CLOSED} THEN {_NIGHTS} ELSE 0 END) AS x_nights,
+		       CAST(SUM(CASE WHEN {_STAYED} AND {_CLOSED} THEN {_VALUE} ELSE 0 END) AS CHAR) AS x_value,
+		       CAST(SUM(CASE WHEN {_STAYED} AND {_CLOSED} THEN IFNULL(r.cancellation_fee, 0) ELSE 0 END) AS CHAR)
+		           AS x_fees,
+		       SUM(CASE WHEN {_STAYED} AND r.status = 'Cancelled' AND r.cancelled_on IS NOT NULL
 		                THEN GREATEST(DATEDIFF(r.check_in_date, r.cancelled_on), 0) ELSE 0 END) AS x_lead,
-		       SUM(r.status = 'Cancelled' AND r.cancelled_on IS NOT NULL) AS x_lead_n
+		       SUM({_STAYED} AND r.status = 'Cancelled' AND r.cancelled_on IS NOT NULL) AS x_lead_n,
+		       SUM(r.tex_hold_expired = 1) AS x_expired
 		FROM `tabReservation` r JOIN `tabProperty` p ON p.name = r.property {joins}
-		WHERE {_stay_where(sel, statuses=BOOKED)}
+		WHERE {_stay_where(sel, statuses=BOOKED, holds=True)}
 		GROUP BY x_key, x_ccy""", {**sel.params, "statuses": BOOKED}, as_dict=True)
-	counts = ("n", "cancelled", "no_shows", "nights", "lead", "lead_n")
+	counts = ("n", "cancelled", "no_shows", "nights", "lead", "lead_n", "expired")
 	buckets = {(r.x_key or NOT_SET, r.x_ccy): {**{k: int(r[f"x_{k}"] or 0) for k in counts},
 	                                           "value": _dec(r.x_value), "fees": _dec(r.x_fees)} for r in found}
 	time = sel.group_by in TIME_KEYS
@@ -673,8 +687,10 @@ def _cancellation(sel: Selection) -> dict:
 
 
 def _cancel_figures(b: dict) -> dict:
-	"""Cancelled figures count cancellations and no-shows; fees are what they kept."""
+	"""Cancelled figures count cancellations and no-shows; fees are what they kept. A hold that ran out of time
+	is neither: ``expired_holds`` counts them apart (O-24)."""
 	return {"stays": b["n"], "cancelled": b["cancelled"], "no_shows": b["no_shows"],
+	        "expired_holds": b["expired"],
 	        "cancelled_pct": _pct(b["cancelled"] + b["no_shows"], b["n"]), "cancelled_nights": b["nights"],
 	        "cancelled_value": to_str(b["value"]), "fees": to_str(b["fees"]), "net_lost": to_str(b["value"] - b["fees"]),
 	        "avg_days_before_arrival": _avg(b["lead"], b["lead_n"])}
@@ -700,7 +716,7 @@ def _payment(sel: Selection) -> dict:
 	# every booking with a stay in the selection, whatever that stay's status: a cancelled stay
 	# keeps its fee, payments and refunds
 	stays = (f"SELECT r.tex_booking FROM `tabReservation` r JOIN `tabProperty` p ON p.name = r.property "
-	         f"WHERE {_stay_where(sel, statuses=None, currency=False)} AND r.tex_booking IS NOT NULL")
+	         f"WHERE {_stay_where(sel, statuses=None, currency=False, holds=True)} AND r.tex_booking IS NOT NULL")
 	bccy = "COALESCE(NULLIF(b.currency, ''), NULLIF(bp.currency, ''), 'EUR')"
 	tccy = f"COALESCE(NULLIF(t.currency, ''), {bccy})"
 	where = f"b.property IN %(hotels)s AND b.status != 'Draft' AND b.name IN ({stays})"
@@ -894,10 +910,13 @@ def dashboard(property: str, date_from=None, date_to=None) -> dict:
 	default_ccy = frappe.db.get_value("Property", property, "currency") or "EUR"
 	stay = production(property, a, b, group_by="channel", basis="stay")
 	booked = production(property, a, b, group_by="day", basis="booking")
-	cancelled = frappe.db.count("Reservation", {"property": property, "status": "Cancelled",
+	# a hold that ran out of time is neither a cancellation nor a sale (O-24): counted apart
+	cancelled = frappe.db.count("Reservation", {"property": property, "status": "Cancelled", "tex_hold_expired": 0,
 	                                            "cancelled_on": ("between", [str(a), f"{b} 23:59:59"])})
-	created = frappe.db.count("Reservation", {"property": property, "creation": ("between", [str(a),
-	                                                                                           f"{b} 23:59:59"])})
+	expired = frappe.db.count("Reservation", {"property": property, "tex_hold_expired": 1,
+	                                          "cancelled_on": ("between", [str(a), f"{b} 23:59:59"])})
+	created = frappe.db.count("Reservation", {"property": property, "tex_hold_expired": 0,
+	                                          "creation": ("between", [str(a), f"{b} 23:59:59"])})
 	arrivals = frappe.db.count("Reservation", {"property": property, "check_in_date": today,
 	                                           "status": ("in", ["Confirmed", "Pending Payment"])})
 	departures = frappe.db.count("Reservation", {"property": property, "check_out_date": today,
@@ -921,7 +940,7 @@ def dashboard(property: str, date_from=None, date_to=None) -> dict:
 	return {
 		"property": property, "from": str(a), "to": str(b), "currency": default_ccy,
 		"stay": stay["totals"], "by_channel": stay["rows"], "pickup_by_day": booked["rows"],
-		"reservations_created": created, "cancellations": cancelled,
+		"reservations_created": created, "cancellations": cancelled, "expired_holds": expired,
 		"cancellation_rate": to_str(quantize(D(cancelled) / D(created) * 100, "EUR")) if created else None,
 		"today": {"arrivals": arrivals, "departures": departures}, "guest_changes_pending": pending_changes,
 		"open_balance": {c: to_str(v) for c, v in balance.items()},

@@ -18,6 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
 
+from kamra.reservation_state import EXPIRY_NOTE
 from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import context as ctxmod
@@ -1314,7 +1315,8 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 		for name in holding:
 			res = frappe.get_doc("Reservation", name, for_update=True)
 			res.cancellation_reason = "Payment failed" if res.status == "Pending Payment" else "Other"
-			res.cancellation_note = "Hold / payment window expired"
+			res.cancellation_note = EXPIRY_NOTE
+			res.tex_hold_expired = 1             # the system cancelled it: no sale, no cancellation (O-24)
 			res.status = "Cancelled"
 			res.cancelled_on = now
 			res.hold_expires_on = None
@@ -1400,6 +1402,7 @@ def revive_expired(booking: str, *, reason: str) -> list[str]:
 			r.status = "Pending Payment"
 			r.hold_expires_on = now              # its payment confirms it now; nothing else keeps it
 			r.cancellation_reason = r.cancellation_note = r.cancelled_on = None
+			r.tex_hold_expired = 0               # it is a sale again, waiting for its payment (O-24)
 			r.flags.tex_modification = True
 			r.flags.tex_inventory_checked = True     # its nights were locked and recounted above
 			r.save(ignore_permissions=True)

@@ -49,6 +49,7 @@
  "reports.col.currency": "Валюта",
  "reports.col.details": "Данные гостя",
  "reports.col.discount": "Предоставленная скидка",
+ "reports.col.expired_holds": "Истёкшие блокировки",
  "reports.col.extra": "Доп. услуга",
  "reports.col.extras": "Доп. услуги",
  "reports.col.fees": "Удержанные сборы",

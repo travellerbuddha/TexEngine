@@ -104,6 +104,20 @@ class TestNamedSegments(SegmentCase):
 		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_stays"), 2)
 		self.assertTrue(third)
 
+	def test_an_expired_hold_is_not_a_cancellation_of_the_guest(self):
+		"""O-24 (audit Part 2H-2): a hold that ran out of time was the guest's cancellation (the CANCELLED
+		segment, the profile's count) and their last sale (the lead time)."""
+		_res, guest = self.stay("g23-held-a")
+		hold = guest_books(session="g23-held-b", guest={**GUEST, "email": "g23@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
+		self.assertTrue(booking.expire_booking(hold["booking"], force=True))
+		self.assertNotIn(guest, self.members("CANCELLED", self.here))
+		frappe.set_user(self.here)  # nosemgrep: frappe-setuser -- tenant A
+		self.assertEqual(crm_api.guest(guest)["cancellations"]["count"], 0)
+		row = next(r for r in crm_api.guests(q="g23@example.com")["rows"] if r["name"] == guest)
+		self.assertEqual(row["tex_stays"], 1)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+
 	def test_families_last_minute_cancelled_abandoned_birthday(self):
 		res, guest = self.stay("g23-fam")                                   # guest_books has a child of 8
 		self.assertIn(guest, self.members("FAMILY", self.here))

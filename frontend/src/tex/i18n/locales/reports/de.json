@@ -47,6 +47,7 @@
  "reports.col.currency": "Währung",
  "reports.col.details": "Gästedaten",
  "reports.col.discount": "Gewährter Rabatt",
+ "reports.col.expired_holds": "Abgelaufene Optionen",
  "reports.col.extra": "Zusatzleistung",
  "reports.col.extras": "Zusatzleistungen",
  "reports.col.fees": "Einbehaltene Gebühren",

@@ -800,3 +800,70 @@ class TestReviewConversion(ReportCase):
 		scope.clear_cache()
 		narrowed = self.report("conversion", **kw)
 		self.assertNotIn("g46-group-site", {r["key"] for r in narrowed["rows"]})
+
+
+class TestExpiredHolds(ReportCase):
+	"""O-24 (audit Part 2H-2, ADR-059): a booking whose hold ran out is cancelled by the system, not by anyone,
+	and was never a sale. Every report, the dashboard and the CRM counted it as a cancellation and as a stay:
+	the cancellation rate rose with every unpaid hold, and the production counted nights nobody bought. It is
+	marked (``tex_hold_expired``) and counted apart (``expired_holds``)."""
+
+	def expired_hold(self, session: str) -> dict:
+		b = sell(session)
+		self.assertTrue(booking.expire_booking(b["booking"], force=True))
+		return b
+
+	def test_an_expired_hold_is_neither_a_cancellation_nor_a_sale(self):
+		before = rep.dashboard(fx.PROPERTY)
+		sell("o24-live")
+		gone = self.expired_hold("o24-gone")
+		t = self.report("cancellation", **self.june())["totals"]["EUR"]
+		self.assertEqual((t["stays"], t["cancelled"], t.get("expired_holds")), (1, 0, 1))
+		self.assertEqual((t["cancelled_nights"], D(t["cancelled_value"]), D(t["fees"])), (0, D(0), D(0)))
+		self.assertEqual(self.report("cancellation", **self.june(group_by="channel"))["rows"][0].get("expired_holds"), 1)
+		prod = self.report("production", **self.june(include_cancelled=1))["totals"]["EUR"]
+		self.assertEqual((prod["bookings"], prod["room_nights"]), (1, 3))
+		after = rep.dashboard(fx.PROPERTY)
+		self.assertEqual(after["cancellations"] - before["cancellations"], 0)
+		self.assertEqual(after["reservations_created"] - before["reservations_created"], 1)
+		self.assertEqual(after.get("expired_holds", 0) - before.get("expired_holds", 0), 1)
+		self.assertEqual(frappe.db.get_value("Reservation", gone["reservation"], "tex_hold_expired"), 1)
+
+	def test_a_hold_cancelled_on_purpose_is_still_a_cancellation(self):
+		sell("o24-kept")
+		cut = sell("o24-cut")
+		booking.cancel_reservation(cut["reservation"], reason="plans changed", waive_penalty=True)
+		t = self.report("cancellation", **self.june())["totals"]["EUR"]
+		self.assertEqual((t["stays"], t["cancelled"], t.get("expired_holds")), (2, 1, 0))
+		self.assertEqual(frappe.db.get_value("Reservation", cut["reservation"], "tex_hold_expired"), 0)
+
+	def test_the_payments_report_still_sees_an_expired_hold_with_its_money(self):
+		"""Money is money whatever happened to the booking: the payment report reads every booking."""
+		b = sell("o24-pay")
+		pay(b)
+		frappe.db.set_value("Reservation", b["reservation"], "tex_hold_expired", 1)    # as if it had expired
+		out = self.report("payment", self.admin, **self.june())["totals"]["EUR"]
+		self.assertEqual(out["bookings"], 1)
+
+	def test_the_pms_job_that_expires_a_desk_hold_marks_it_too(self):
+		"""``expire_holds`` (a Desk hold, no TEX booking) gives the same note and the same mark."""
+		from kamra.reservation_state import EXPIRY_NOTE, expire_holds
+
+		saved = []
+
+		class Held(frappe._dict):
+			def save(self, **kw):
+				saved.append(dict(self))
+
+		with patch.object(frappe, "get_all", return_value=["R-O24"]), \
+				patch.object(frappe, "get_doc", return_value=Held(name="R-O24", status="Held")):
+			self.assertEqual(expire_holds(), {"expired": 1})
+		[doc] = saved
+		self.assertEqual((doc["status"], doc["cancellation_note"], doc["tex_hold_expired"]), ("Cancelled", EXPIRY_NOTE, 1))
+
+	def test_a_hold_taken_back_by_its_late_payment_counts_again(self):
+		gone = self.expired_hold("o24-back")
+		self.assertTrue(booking.revive_expired(gone["booking"], reason="paid in time"))
+		self.assertEqual(frappe.db.get_value("Reservation", gone["reservation"], "tex_hold_expired"), 0)
+		t = self.report("cancellation", **self.june())["totals"]["EUR"]
+		self.assertEqual((t["stays"], t["cancelled"], t.get("expired_holds")), (1, 0, 0))

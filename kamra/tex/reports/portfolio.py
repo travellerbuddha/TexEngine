@@ -141,7 +141,7 @@ def portfolio(level: str = "All", name: str | None = None, date_from=None, date_
 
 	for r in frappe.db.sql(
 		"""SELECT property, tex_currency ccy, COUNT(*) n, CAST(SUM(IFNULL(tex_total_amount, amount_after_tax)) AS CHAR) v
-		   FROM `tabReservation` WHERE property IN %(h)s AND status = 'Cancelled'
+		   FROM `tabReservation` WHERE property IN %(h)s AND status = 'Cancelled' AND tex_hold_expired = 0
 		     AND DATE(cancelled_on) BETWEEN %(a)s AND %(b)s GROUP BY property, tex_currency""",
 			{"h": tuple(hotels), "a": a, "b": b}, as_dict=True):
 		per[r.property]["cancellations"] += int(r.n)

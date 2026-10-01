@@ -47,6 +47,7 @@
  "reports.col.currency": "Para birimi",
  "reports.col.details": "Misafir bilgileri",
  "reports.col.discount": "Verilen indirim",
+ "reports.col.expired_holds": "Süresi dolan tutmalar",
  "reports.col.extra": "Ekstra",
  "reports.col.extras": "Ekstralar",
  "reports.col.fees": "Alınan ücretler",

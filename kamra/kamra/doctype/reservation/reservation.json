@@ -141,7 +141,9 @@
   "tex_guest_change_pending",
   "tex_guest_change_note",
   "tex_section_30",
-  "tex_pricing_snapshot"
+  "tex_pricing_snapshot",
+  "tex_section_32",
+  "tex_hold_expired"
  ],
  "fields": [
   {
@@ -956,12 +958,25 @@
    "label": "Pricing snapshot (JSON)",
    "read_only": 1,
    "permlevel": 1
+  },
+  {
+   "fieldname": "tex_section_32",
+   "fieldtype": "Section Break",
+   "label": "Hold"
+  },
+  {
+   "fieldname": "tex_hold_expired",
+   "fieldtype": "Check",
+   "label": "Hold expired",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Cancelled by the system because its hold or payment window ran out: not a cancellation, not a sale."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-24 14:00:00.000000",
+ "modified": "2026-10-01 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Kamra",
  "name": "Reservation",

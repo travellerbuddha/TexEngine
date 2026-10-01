@@ -48,6 +48,7 @@
  "reports.col.currency": "Monedă",
  "reports.col.details": "Datele oaspetelui",
  "reports.col.discount": "Reducere acordată",
+ "reports.col.expired_holds": "Blocări expirate",
  "reports.col.extra": "Extra",
  "reports.col.extras": "Extra",
  "reports.col.fees": "Taxe reținute",
