@@ -10,15 +10,16 @@ from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, add_months, nowdate
+from frappe.utils import add_days, add_months, add_to_date, now_datetime, nowdate
 
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import loyalty as loyalty_api
 from kamra.tex.api import public
 from kamra.tex.crm import loyalty
-from kamra.tex.money import D
+from kamra.tex.money import D, from_db
 from kamra.tex.payments import service as pay
 from kamra.tex.security import scope
+from kamra.tex.services import booking as booking_svc
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import guest_books, setup_site_and_payments
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
@@ -724,7 +725,8 @@ class TestPointsBack(LoyaltyCase):
 		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": booking["booking"], "entry_type": "Earn"})
 		if own:                                                  # the booking's own earning is not part of this scenario
 			frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
-		self.give(guest, gift)
+		if gift:
+			self.give(guest, gift)
 		red = loyalty.redeem(guest, booking["booking"], points, idempotency_key=f"{session}-pts")
 		return booking, guest, red
 
@@ -739,3 +741,102 @@ class TestPointsBack(LoyaltyCase):
 			with self.assertRaisesRegex(frappe.ValidationError, "never as money"):
 				call()
 		self.assertEqual(frappe.db.count("TEX Payment Transaction", {"parent_transaction": red["transaction"]}), 0)
+
+	def refunds_of(self, charge: str) -> list[tuple]:
+		return [(from_db(r.amount, "EUR"), r.status, r.raw_status, r.provider) for r in frappe.get_all(
+			"TEX Payment Transaction", filters={"parent_transaction": charge, "txn_type": "Refund"},
+			fields=["amount", "status", "raw_status", "provider"], order_by="creation asc, name asc")]
+
+	def reverse_rows(self, guest: str) -> list[tuple]:
+		return [(r.points, r.status, r.booking) for r in frappe.get_all(
+			"TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Reverse"},
+			fields=["points", "status", "booking"], order_by="creation asc, name asc")]
+
+	def test_cancelling_gives_back_the_points_it_was_paid_with(self):
+		"""867 earned, 300 spent on another booking, that booking cancelled: 867 (it was 567)."""
+		_stay, guest = self.paid_stay("o20-a")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest), 867)
+		hotel, who, red = self.spend("o20-a-hotel", 300, gift=0)
+		self.assertEqual((who, self.available(guest)), (guest, 567))
+		booking_svc.cancel_reservation(hotel["rooms"][0]["reservation"], reason="o20", waive_penalty=True)
+		self.assertEqual(self.available(guest), 867)
+		paid, status = frappe.db.get_value("TEX Booking", hotel["booking"], ["paid_amount", "payment_status"])
+		self.assertEqual((from_db(paid, "EUR"), status), (D("0.00"), "Refunded"))
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", hotel["booking"])])
+		self.assertEqual(pay.booking_charges(hotel["booking"]), [])
+		self.assertEqual(loyalty.return_points(hotel["booking"], reason="again"), 0)           # by state: nothing more
+		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_loyalty_points"), 867)
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "loyalty.return", "reference_name": hotel["booking"]}))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.points_returned"}))
+
+	def test_points_spent_on_the_stays_own_booking_are_given_back_before_its_earning_is(self):
+		"""The stay earned 867 and 300 of them paid for it: the points go back first, so reversing the earning
+		takes 867 of 867 and never tops up (an Adjust of +300 made them out of nothing)."""
+		stay, guest = self.paid_stay("o20-b")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		red = loyalty.redeem(guest, stay["booking"], 300, idempotency_key="o20-b-pts")
+		self.assertEqual(self.available(guest), 567)
+		booking_svc.cancel_reservation(stay["rooms"][0]["reservation"], reason="o20", waive_penalty=True)
+		self.assertEqual(self.available(guest), 0)
+		self.assertEqual(frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Adjust"}), [])
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", stay["booking"])])
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		paid = frappe.db.get_value("TEX Booking", stay["booking"], "paid_amount")
+		self.assertEqual(from_db(paid, "EUR"), D("252.75"))             # the card deposit stays: staff refund it
+
+	def test_a_hold_that_ends_gives_the_points_back_and_asks_staff_for_nothing(self):
+		held = guest_books(session="o20-d")                              # a card hold waiting for its payment
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", held["booking"], "booker_guest")
+		self.give(guest, 1000)
+		red = loyalty.redeem(guest, held["booking"], 500, idempotency_key="o20-d-pts")
+		self.assertEqual(self.available(guest), 500)
+		self.assertTrue(booking_svc.expire_booking(held["booking"], now=add_to_date(now_datetime(), hours=2)))
+		self.assertEqual(self.available(guest), 1000)
+		self.assertFalse(frappe.db.get_value("TEX Payment Transaction", red["transaction"], "reconciliation"))
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                      "reference_name": red["transaction"]}))
+		self.assertEqual(from_db(frappe.db.get_value("TEX Booking", held["booking"], "paid_amount"), "EUR"), D("0.00"))
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("50.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+
+	def test_points_that_come_back_after_their_lot_expired_expire_at_once(self):
+		"""D-16a: the lot the spent points came from has expired meanwhile: nothing reopens it."""
+		hotel = guest_books(session="o20-e", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", hotel["booking"], "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": hotel["booking"], "entry_type": "Earn"})
+		frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")        # not part of this scenario
+		lot = self.give(guest, 500, entry_type="Earn", expires_on=add_days(nowdate(), 5),
+		                available_on=add_days(nowdate(), -30))
+		loyalty.redeem(guest, hotel["booking"], 300, idempotency_key="o20-e-pts")      # 200 of the lot are left
+		frappe.db.set_value("TEX Loyalty Ledger", lot, "expires_on", add_days(nowdate(), -1))
+		loyalty.mature_and_expire()                                                    # 200 expire, the lot closes
+		self.assertEqual(self.available(guest), 0)
+		booking_svc.cancel_reservation(hotel["rooms"][0]["reservation"], reason="o20", waive_penalty=True)
+		rows = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": ("in", ["Reverse", "Expire"])},
+		                      fields=["entry_type", "points"], order_by="creation asc, name asc")
+		self.assertEqual([(r.entry_type, r.points) for r in rows], [("Expire", -200), ("Reverse", 300), ("Expire", -300)])
+		self.assertEqual(self.available(guest), 0)
+
+	def test_a_return_is_shared_pro_rata_by_the_newest_payment_first(self):
+		"""Two redemptions of one booking, the booking now costs less than it holds: the newest payment gives
+		back first, and only what the booking holds beyond its new cost."""
+		hotel, guest, first = self.spend("o20-f", 300)                                 # 30.00
+		second = loyalty.redeem(guest, hotel["booking"], 200, idempotency_key="o20-f-2")   # 20.00
+		self.assertEqual(self.available(guest), 500)
+		frappe.db.set_value("TEX Booking", hotel["booking"], "total_amount", D("50.00"))      # it costs what it holds
+		self.assertEqual(loyalty.return_points(hotel["booking"], reason="a fee kept"), 0)      # a fee keeps its points
+		frappe.db.set_value("TEX Booking", hotel["booking"], "total_amount", D("45.00"))      # 5.00 over
+		self.assertEqual(loyalty.return_points(hotel["booking"], reason="the price came down"), 50)
+		self.assertEqual(self.refunds_of(second["transaction"]), [(D("5.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		self.assertEqual(self.refunds_of(first["transaction"]), [])
+		self.assertEqual(self.available(guest), 550)
+
+	def test_the_points_of_a_return_are_read_by_their_indexes(self):
+		params = {"guests": ("G-O20-1", "G-O20-2"), "b": "BK-O20", "reasons": ("redeemed as TXN-O20-1",)}
+		for sql in (loyalty.BURNS_OF, loyalty.PENDING_REFUNDS_OF):
+			for row in frappe.db.sql("EXPLAIN " + sql, params, as_dict=True):
+				self.assertNotIn(row.type, ("ALL", "index"), (sql, row))
+				self.assertTrue(row.key, (sql, row))

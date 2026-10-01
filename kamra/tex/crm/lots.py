@@ -16,11 +16,17 @@ remainders; a lot's remainder is derived from the rows by this one function and 
   ``excess``, which expires too.
 
 ``plan`` says what to write; ``loyalty.settle`` writes it under the guest's lock.
+
+A cancellation or an expiry gives back as points what the booking's Loyalty charges hold beyond what it now
+costs (``points_of`` says how many points a share of the money is worth): a positive Reverse row, which is no
+lot and only lowers the debits. A lot that closed meanwhile is never reopened: the points that came back for
+it are its ``excess`` and expire at once (ADR-071 §4).
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 FINAL = ("Available", "Used", "Expired")
 LOT_TYPES = ("Earn", "Adjust")
@@ -95,3 +101,19 @@ def plan(rows: list[dict], today) -> dict:
 				expire.append((lot["name"], points - spent))
 			close.append(lot["name"])
 	return {"expire": expire, "close": close, "excess": max(0, -open_t)}
+
+
+def points_of(points: int, value, back, take) -> int:
+	"""The points that come back with ``take`` of the money of a payment of ``value`` that ``points`` paid, ``back``
+	of that money having come back already: pro rata and cumulative, half-up (the points due for ``back + take``
+	less those due for ``back``), so the shares of one payment, however they come, add up to its points exactly:
+	300 points of 30.00 given back as 12.40, 0.01 and 17.59 are 124, 0 and 176."""
+	value = Decimal(value)
+	if value <= 0 or points <= 0:
+		return 0
+
+	def upto(money: Decimal) -> int:
+		money = min(max(money, Decimal(0)), value)
+		return int((Decimal(points) * money / value).to_integral_value(rounding=ROUND_HALF_UP))
+
+	return upto(Decimal(back) + Decimal(take)) - upto(Decimal(back))

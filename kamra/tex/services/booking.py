@@ -1117,6 +1117,9 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		res.cancellation_fee = penalty
 		res.cancelled_on = now_datetime()
 		res.flags.tex_modification = True
+		# the stay's own earning is reversed after the money below, once the points spent on its booking are
+		# given back: reversed first, a spent stay's reversal topped the balance up with points made out of nothing
+		res.flags.tex_loyalty_after_money = bool(res.tex_booking)
 		res.save(ignore_permissions=True)
 	finally:
 		frappe.flags.kamra_cancelling = False
@@ -1130,7 +1133,11 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		audit("reservation.basket_clawback", reference_doctype="Reservation", reference_name=res.name,
 		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
+		from kamra.tex.crm import loyalty
+
 		_refresh_booking_after_change(res.tex_booking)
+		# what its Loyalty charges hold beyond what it now costs goes back as points, never as money (O-20)
+		loyalty.return_points(res.tex_booking, reason=f"reservation {res.name} cancelled")
 		b = frappe.db.get_value("TEX Booking", res.tex_booking, ["status", "paid_amount", "currency"], as_dict=True)
 		if was in holds.HOLDING and b.status == "Cancelled" and from_db(b.paid_amount, b.currency) > ZERO:
 			# over before it was ever confirmed: it owes nothing and holds no money; what it held comes
@@ -1141,6 +1148,8 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 			                        guest_mail=False)
 		# never confirmed: what it owes now may be paid already (a first half came before this room left)
 		confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was cancelled")
+		res.flags.tex_loyalty_after_money = False
+		loyalty.on_reservation_change(res)              # the stay's own earning, after the points came back
 	# a guest's change still waiting for this room is void; a payment of it arriving later is
 	# refunded (G-45)
 	from kamra.tex.services import guest_changes

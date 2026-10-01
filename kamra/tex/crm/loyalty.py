@@ -165,6 +165,8 @@ def on_reservation_change(doc) -> None:
 	rules, tiers or points never rewrites earnings already made (G-24)."""
 	if not doc.get("tex_booking") or not doc.guest:
 		return
+	if doc.flags.get("tex_loyalty_after_money"):
+		return          # a cancellation gives the points spent on its booking back first, then calls this (ADR-071 §4)
 	program = program_for(doc.property)
 	if not program:
 		return
@@ -546,3 +548,85 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	audit("loyalty.redeem", reference_doctype="TEX Loyalty Ledger", reference_name=led.name, property=b.property,
 	      new={"booking": booking, "points": points, "value": to_str(value), "transaction": txn.name})
 	return {"transaction": txn.name, "ledger": led.name, "value": to_str(value), "currency": b.currency}
+
+
+# a booking's refunds the gateway has not answered (Pending): their money may be gone already. By ``booking``
+# (indexed); read with a lock, as it is now
+PENDING_REFUNDS_OF = """SELECT amount, currency FROM `tabTEX Payment Transaction` WHERE booking=%(b)s
+                        AND txn_type='Refund' AND status='Pending' LOCK IN SHARE MODE"""
+# the burn rows of a booking's Loyalty charges: its guests' rows by ``tex_ledger_guest_program`` (guest), narrowed by
+# the booking and by the charge each was redeemed as. A NULL booking or reason matches nothing: a burn that names no
+# booking or charge is not one of these. Locked, after the guests and the charges (ADR-071 §4)
+BURNS_OF = """SELECT name, guest, program, points, property, reason FROM `tabTEX Loyalty Ledger`
+              WHERE guest IN %(guests)s AND entry_type='Burn' AND booking=%(b)s AND reason IN %(reasons)s
+              FOR UPDATE"""
+
+
+def return_points(booking: str, *, reason: str) -> int:
+	"""A booking that is cancelled or expires gives back as points, never as money, what its Loyalty charges
+	hold beyond what it now costs (O-20, D-16, ADR-071 §4), the newest charge first: the share comes off the
+	booking as a Loyalty refund (``payments.points_back``) and its points come back, pro rata, as a positive
+	Reverse row of the guest who spent them; a lot that closed meanwhile is never reopened (``settle``: D-16a).
+	What a cancellation keeps (a penalty not refunded) keeps its points as it keeps its cash. By state: what the
+	booking holds beyond its cost is what is left to give, so a second call gives back nothing.
+
+	The caller holds the booking's lock (and its rooms'). Locks taken here: the guests who may have spent
+	points on it, the Loyalty charges (name order), then their burn rows. → the points given back."""
+	from kamra.tex.crm.service import lock_guest
+	from kamra.tex.payments import service as pay
+
+	b = frappe.db.get_value("TEX Booking", booking, ["property", "currency", "booker_guest", "paid_amount",
+	                                                  "total_amount"], as_dict=True, for_update=True)
+	if not b:
+		return 0
+	ccy = b.currency
+	waiting = sum((from_db(r.amount, r.currency) for r in frappe.db.sql(PENDING_REFUNDS_OF, {"b": booking}, as_dict=True)),
+	              ZERO)
+	over = from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy) - waiting
+	charges = loyalty_charges_on(booking) if over > 0 else []
+	if not charges:
+		return 0
+	guests = sorted({b.booker_guest, *frappe.get_all("Reservation", filters={"tex_booking": booking},
+	                                                  pluck="guest")} - {None})
+	for g in guests:
+		lock_guest(g)                                  # a profile merged away holds no points here
+	rows = []
+	for name in charges:                               # name order: the order every writer of them takes
+		t = frappe.db.get_value("TEX Payment Transaction", name, ["name", "amount", "currency", "creation"],
+		                        as_dict=True, for_update=True)
+		held = pay.booking_nets(name, lock=True).get(booking, ZERO) - pay.in_flight_from(name, booking, lock=True)
+		if held > ZERO:
+			rows.append((t, held))
+	burns = {}
+	if rows and guests:
+		for r in frappe.db.sql(BURNS_OF, {"guests": tuple(guests), "b": booking,
+		                                  "reasons": tuple(f"redeemed as {t.name}" for t, _h in rows)}, as_dict=True):
+			burns[r.reason] = r
+	left, points, shares, settle_for = over, 0, [], {}
+	for t, held in sorted(rows, key=lambda r: (r[0].creation, r[0].name), reverse=True):
+		if left <= ZERO:
+			break
+		burn = burns.get(f"redeemed as {t.name}")
+		if not burn:
+			frappe.log_error(title=f"Loyalty points not returned: {t.name}",
+			                 message=f"No burn row of {booking} for the Loyalty charge {t.name}: its money was left for staff.")
+			continue
+		take = min(held, left)
+		pts = lots.points_of(-int(burn.points), from_db(t.amount, t.currency), pay.refunded_of(t.name, lock=True), take)
+		pay.points_back(t.name, booking=booking, amount=take, points=pts, reason=reason)
+		if pts:
+			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": burn.program, "guest": burn.guest,
+			                "entry_type": "Reverse", "points": pts, "status": "Available", "booking": booking,
+			                "property": burn.property or b.property, "reason": f"points returned: {reason} ({t.name})"[:500],
+			                "actor": frappe.session.user}).insert(ignore_permissions=True)
+		settle_for[(burn.guest, burn.program)] = None
+		left -= take
+		points += pts
+		shares.append({"transaction": t.name, "amount": to_str(take), "points": pts})
+	for guest, program in settle_for:
+		settle(guest, program)                         # a lot closed meanwhile: the points that came back expire at once
+		_sync_guest(guest)
+	if shares:
+		audit("loyalty.return", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
+		      new={"points": points, "value": to_str(over - left), "currency": ccy, "charges": shares}, reason=reason)
+	return points

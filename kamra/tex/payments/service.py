@@ -1500,6 +1500,43 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	return {"refund": r.name, "status": r.status, "booking": target, "from_booking": to_str(from_booking)}
 
 
+def points_back(charge: str, *, booking: str, amount, points: int, reason: str) -> str:
+	"""Of the Loyalty charge ``charge``, ``amount`` comes off ``booking`` because its ``points`` go back to their
+	owner (O-20, D-16, ADR-071 §4): recorded as a succeeded refund of the charge (Manual, provider Loyalty,
+	"POINTS RETURNED"), taken off the booking and audited ``payment.points_returned``. It asks for no permission:
+	a cancellation or an expiry gives points back (``loyalty.return_points``), whoever causes it, and holds the
+	booking's lock and the charge's. At most what the booking holds of the charge, less refunds waiting for their
+	answer. Never a release: loose money could be allocated again and the points would be spent twice.
+	→ the refund's name."""
+	from kamra.tex.services import late_payments
+
+	txn = frappe.get_doc("TEX Payment Transaction", charge, for_update=True)
+	if txn.provider != "Loyalty" or txn.txn_type != "Charge" or txn.status != "Succeeded":
+		frappe.throw(_("Only a succeeded charge paid with points can be given back as points."))
+	ccy = txn.currency
+	amount = quantize(D(amount), ccy)
+	free = booking_nets(charge, lock=True).get(booking, ZERO) - in_flight_from(charge, booking, lock=True)
+	if amount <= 0 or amount > free:
+		frappe.throw(_("Booking {0} holds {1} {2} of these points.").format(booking, to_str(max(ZERO, free)), ccy))
+	# the next number of this charge's refunds, read with a lock (the charge's lock is held): the key is unique
+	[[n]] = frappe.db.sql("""SELECT COUNT(*) FROM `tabTEX Payment Transaction` WHERE parent_transaction=%s
+	                         AND txn_type='Refund' LOCK IN SHARE MODE""", charge)
+	key = ns_key(txn.property, f"points-back:{booking}:{charge}:{int(n) + 1}", "points-back")
+	r = _new_txn(property=txn.property, txn_type="Refund", method="Manual", amount=amount, currency=ccy,
+	             provider="Loyalty", provider_ref=f"{int(points)} pts", idempotency_key=key,
+	             parent_transaction=charge, booking=booking, reason=(reason or "").strip()[:500])
+	r.status = "Succeeded"
+	r.raw_status = "POINTS RETURNED"
+	r.completed_at = now_datetime()
+	r.save(ignore_permissions=True)
+	_take_off(txn, r, booking, amount, reason)
+	late_payments.settled(charge)               # money in reconciliation given back as points leaves it
+	audit("payment.points_returned", reference_doctype="TEX Payment Transaction", reference_name=r.name,
+	      property=txn.property, new={"of": charge, "amount": to_str(amount), "currency": ccy, "booking": booking,
+	                                  "points": int(points)}, reason=reason)
+	return r.name
+
+
 def conflict_open(refund: str) -> dict | None:
 	"""The gateway's answer that contradicted the outcome recorded for this refund, while staff
 	have not recorded what it actually did: {"recorded", "gateway", ...}; None otherwise."""

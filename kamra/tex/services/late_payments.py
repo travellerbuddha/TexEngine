@@ -214,11 +214,15 @@ def money_off(booking: str, *, why: str, key: str, note: str | None = None, now:
 	(``why``; ``note`` adds a sentence to the note). ``guest_mail``: the payer is told too
 	(``payment_after_expiry``, whose words fit an expiry only); else only the team. ``send_mail``
 	False (a migration): nobody. → the amount taken off."""
+	from kamra.tex.crm import loyalty
 	from kamra.tex.payments import service as pay
 	from kamra.tex.services import notify
 
 	now = get_datetime(now or now_datetime())
 	taken = ZERO
+	# what points paid goes back as points, never to staff to refund as money (O-20): the loop below finds the
+	# booking holding none of it, and a charge that cannot be given back (no burn row) is left to staff as before
+	loyalty.return_points(booking, reason=CAUSES.get(why, why))
 	for name in charges_of(booking):
 		held = pay.booking_nets(name, lock=True).get(booking, ZERO) - pay.in_flight_from(name, booking, lock=True)
 		if held <= ZERO:
