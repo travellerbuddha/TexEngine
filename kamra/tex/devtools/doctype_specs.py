@@ -538,8 +538,12 @@ COMMERCIAL_SPECS = [
 		F("rate_date", "Date", "Rate date", reqd=1, in_list_view=1),
 		F("fetched_at", "Datetime", "Fetched at"),
 		F("source_ref", "Data", "Source"),
+		# a manual rate entered for one hotel (O-12, ADR-069); blank = every hotel (and every provider row)
+		F("property", "Link", "Hotel", "Property", in_standard_filter=1,
+		  description="Manual rates only. Blank = every hotel."),
 	], perms=[SM, perm("Hotel Admin", "readonly"), perm("Revenue Manager", "readonly"), perm("Finance", "readonly")],
-	   autoname="hash", track_changes=False, sort_field="creation"),
+	   autoname="hash", track_changes=False, sort_field="creation",
+	   extra={"modified": "2026-10-03 00:00:00.000000"}),                # property came later (O-12)
 
 	dt("TEX FX Policy", C, [
 		F("property", "Link", "Hotel", "Property", description="Blank = global default."),

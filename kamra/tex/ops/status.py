@@ -303,7 +303,9 @@ def _bookings_overpaid(props, now) -> dict:
 
 def fx_pairs(props, now) -> list[dict]:
 	"""The provider currency pairs the active FX policies of these hotels (and the global
-	ones) use, each with the date of its latest rate as pricing would find it."""
+	ones) use, each with the date of its latest rate as pricing would find it, the hotels it concerns
+	(``affected``) and the dated manual rates that would bridge it today (``manual``: hotel, or None for
+	every hotel → the newest date; O-12). Dates and hotels only: never a rate value or a user."""
 	from kamra.tex.commercial.context import provider_rates
 	from kamra.tex.commercial.revisions import as_of
 	from kamra.tex.pricing import fx as fx_math
@@ -320,6 +322,7 @@ def fx_pairs(props, now) -> list[dict]:
 		if r.property:
 			w["hotels"].add(r.property)
 	rates: dict[str, tuple] = {}
+	everyone: set[str] | None = None
 	pairs = []
 	for (provider, rate_type, frm, to), w in sorted(wanted.items()):
 		if provider not in rates:
@@ -328,9 +331,27 @@ def fx_pairs(props, now) -> list[dict]:
 			_rate, _id, rate_date = fx_math.provider_rate(rates[provider], provider, rate_type, frm, to, now.date())
 		except Unsellable:
 			rate_date = None
+		if w["hotels"]:
+			affected = set(w["hotels"])
+		else:                       # a global policy: every hotel of the caller's (all of them for the platform)
+			if everyone is None:
+				everyone = set(props) if props is not None else set(frappe.get_all("Property", pluck="name"))
+			affected = everyone
 		pairs.append({"pair": f"{frm}/{to}", "provider": provider, "rate_date": rate_date,
-		              "max_age_days": w["max_age_days"], "hotels": w["hotels"]})
+		              "max_age_days": w["max_age_days"], "hotels": w["hotels"], "affected": affected,
+		              "manual": _manual_dates(frm, to, now, w["max_age_days"])})
 	return pairs
+
+
+def _manual_dates(frm: str, to: str, now, max_age: int) -> dict:
+	"""{hotel or None (every hotel): the date of the newest manual rate pricing would use now} (O-12): as
+	``context.manual_rates`` reads them (dated within the policy's age, entered by now)."""
+	from kamra.tex.commercial.context import manual_rates
+
+	out: dict = {}
+	for r in manual_rates(frm, to, None, now, max_age):      # None: every hotel's rows
+		out[r.property] = max(r.rate_date, out.get(r.property, r.rate_date))
+	return out
 
 
 def _fx(props, now) -> dict:

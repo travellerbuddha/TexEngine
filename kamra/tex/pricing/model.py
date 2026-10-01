@@ -305,6 +305,9 @@ class FxSnapshot:
 	# where a rate recorded earlier came from when it is reused (G-56, ADR-051), e.g.
 	# "reservation:RES-0001" for a price-locked reservation's sold rate; None = resolved now
 	origin: str | None = None
+	# the provider whose rate was stale or missing, when a dated manual rate stood in for it (O-12,
+	# ADR-069); ``provider`` is then "MANUAL". None: the provider's own rate
+	bridged_from: str | None = None
 
 	def to_dict(self) -> dict:
 		from kamra.tex.money import to_str_rate
@@ -320,6 +323,8 @@ class FxSnapshot:
 		}
 		if self.origin:
 			out["origin"] = self.origin
+		if self.bridged_from:
+			out["bridged_from"] = self.bridged_from      # only when there is one: a record without it reads as before
 		return out
 
 

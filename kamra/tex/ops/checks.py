@@ -148,6 +148,8 @@ REASONS: dict[str, str] = {
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
 	"fx_old": "The latest {provider} rate for {pair} is {days} days old.",
+	"fx_bridged": "The {provider} rate for {pair} is stale or missing: prices use a manual rate dated {manual_days} "
+	              "days ago, with each policy's margin on it.",
 	"no_outgoing_account": "No default outgoing e-mail account is set up: guest e-mails cannot be sent.",
 	"mail_suspended": "Sending e-mail is suspended on this site.",
 	"mail_failed": "{count} e-mail(s) failed in the last {hours} hours.",
@@ -374,19 +376,40 @@ def overpaid_bookings_check(count: int, cancelled: int, oldest: datetime | None,
 	return make("payments.overpaid", issues, scope="hotel", since=oldest, properties=properties)
 
 
+def _bridge(p: dict, today: date) -> int | None:
+	"""The age in days of the oldest manual rate that bridges a stale or missing provider rate for every
+	hotel the pair concerns (a hotel's own rate or a global one, the newer of the two), or None when a
+	hotel has none. ``p["manual"]``: {hotel or None (every hotel): the rate's date}."""
+	manual = p.get("manual") or {}
+	if not manual:
+		return None
+	hotels = p.get("affected") or set()
+	best = [max((d for d in (manual.get(h), manual.get(None)) if d), default=None) for h in sorted(hotels)] \
+		if hotels else [manual.get(None)]
+	if any(d is None for d in best):
+		return None
+	return (today - min(best)).days
+
+
 def fx_check(pairs: list[dict], today: date, properties: Iterable[str] = ()) -> dict:
-	"""``pairs``: [{"pair": "EUR/TRY", "provider", "rate_date": date|None, "max_age_days": int}],
-	one per provider currency pair an active FX policy of these hotels uses."""
+	"""``pairs``: [{"pair": "EUR/TRY", "provider", "rate_date": date|None, "max_age_days": int,
+	"affected": the hotels it concerns, "manual": {hotel or None: date of a valid manual rate}}], one per
+	provider currency pair an active FX policy of these hotels uses. A stale or missing provider rate
+	that every affected hotel has a manual rate for (O-12, ADR-069) is a WARN ``fx_bridged``: prices are
+	still computed, on the manual rate; one hotel without it keeps the FAIL."""
 	issues = []
 	for p in sorted(pairs, key=lambda p: (p["pair"], p["provider"])):
 		base = {"pair": p["pair"], "provider": p["provider"]}
 		max_days = int(p.get("max_age_days") or 4)
-		if p.get("rate_date") is None:
-			issues.append(issue("fx_missing", FAIL, **base))
-			continue
-		days = (today - p["rate_date"]).days
-		if days > max_days:
-			issues.append(issue("fx_stale", FAIL, days=days, max_days=max_days, **base))
+		days = (today - p["rate_date"]).days if p.get("rate_date") is not None else None
+		if days is None or days > max_days:
+			manual_days = _bridge(p, today)
+			if manual_days is not None:
+				issues.append(issue("fx_bridged", WARN, days=days, manual_days=manual_days, **base))
+			elif days is None:
+				issues.append(issue("fx_missing", FAIL, **base))
+			else:
+				issues.append(issue("fx_stale", FAIL, days=days, max_days=max_days, **base))
 		elif business_days(p["rate_date"], today) > FX_WARN_BUSINESS_DAYS:
 			issues.append(issue("fx_old", WARN, days=days, max_days=max_days, **base))
 	return make("fx.rates", issues, scope="hotel", properties=properties, count=len(issues))

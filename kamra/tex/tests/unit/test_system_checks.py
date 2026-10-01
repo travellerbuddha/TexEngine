@@ -188,6 +188,47 @@ class TestFx(unittest.TestCase):
 				self.assertEqual(c.business_days(today - timedelta(days=quiet), today), c.FX_WARN_BUSINESS_DAYS)
 
 
+class TestFxBridged(unittest.TestCase):
+	"""O-12 (2D-2): a pair whose provider rate is stale or missing but which every affected hotel has a
+	valid dated manual rate for is WARN ``fx_bridged``; one hotel without it keeps the FAIL. Pairs, ages
+	and hotels only: never a rate value, never a user."""
+
+	WED = date(2026, 9, 23)
+
+	def pair(self, rate_date, manual, affected=("A", "B"), max_age=4):
+		return [{"pair": "EUR/TRY", "provider": "TCMB", "rate_date": rate_date, "max_age_days": max_age,
+		         "affected": set(affected), "manual": manual}]
+
+	def test_every_affected_hotel_bridged_by_a_global_or_its_own_manual_rate_warns(self):
+		stale = date(2026, 9, 14)
+		for manual in ({None: date(2026, 9, 21)}, {"A": date(2026, 9, 21), "B": date(2026, 9, 22)},
+		               {"A": date(2026, 9, 21), None: date(2026, 9, 20)}):
+			with self.subTest(manual=manual):
+				out = c.fx_check(self.pair(stale, manual), self.WED)
+				self.assertEqual(out["status"], c.WARN)
+				(i,) = out["issues"]
+				self.assertEqual((i["reason"], i["status"]), ("fx_bridged", c.WARN))
+				self.assertEqual(set(i["params"]), {"pair", "provider", "days", "manual_days"})
+				self.assertEqual((i["params"]["pair"], i["params"]["provider"], i["params"]["days"]),
+				                 ("EUR/TRY", "TCMB", 9))
+		# the oldest manual rate in use is the one it says
+		self.assertEqual(c.fx_check(self.pair(stale, {"A": date(2026, 9, 21), "B": date(2026, 9, 22)}),
+		                            self.WED)["issues"][0]["params"]["manual_days"], 2)
+
+	def test_a_missing_provider_rate_is_bridged_too(self):
+		(i,) = c.fx_check(self.pair(None, {None: date(2026, 9, 22)}), self.WED)["issues"]
+		self.assertEqual((i["reason"], i["params"]["days"], i["params"]["manual_days"]), ("fx_bridged", None, 1))
+
+	def test_one_hotel_without_a_manual_rate_keeps_the_fail(self):
+		for rate_date, reason in ((date(2026, 9, 14), "fx_stale"), (None, "fx_missing")):
+			out = c.fx_check(self.pair(rate_date, {"A": date(2026, 9, 21)}), self.WED)
+			self.assertEqual((out["status"], out["issues"][0]["reason"]), (c.FAIL, reason))
+		self.assertEqual(c.fx_check(self.pair(date(2026, 9, 14), {}), self.WED)["status"], c.FAIL)
+
+	def test_a_fresh_provider_rate_never_says_bridged(self):
+		self.assertEqual(c.fx_check(self.pair(self.WED, {None: self.WED}), self.WED)["status"], c.OK)
+
+
 class TestContractsLive(unittest.TestCase):
 	"""Y-2 (2D-1): an Active contract whose sale window includes today and whose stays are not over
 	should have a version on sale. ``live_ends``: when the version on sale ends (None: open-ended);

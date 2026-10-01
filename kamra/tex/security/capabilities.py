@@ -14,7 +14,8 @@ CAPABILITIES: dict[str, str] = {
 	"contract.publish": "Publish, schedule and withdraw contract versions",
 	"promotion.edit": "Manage promotions and coupons",
 	"markup.edit": "Manage markup rules",
-	"fx.edit": "Manage FX policies and manual rates",
+	"fx.edit": "Manage FX policies",
+	"fx.manual_rate": "Enter a dated manual FX rate that bridges a provider gap (a bank holiday)",
 	"tax.edit": "Manage the hotel's tax policy (VAT, accommodation tax, levies)",
 	"inventory.edit": "Edit inventory, allotments and closures",
 	"restriction.edit": "Edit restrictions (stop sell, LOS, CTA/CTD…)",
@@ -49,14 +50,16 @@ ROLE_DEFAULTS: dict[str, frozenset[str]] = {
 	"Hotel Admin": ALL,
 	"Revenue Manager": frozenset({
 		"price.view", "price.view_cost", "price.override", "price.any_channel", "contract.edit", "contract.publish",
-		"promotion.edit", "markup.edit", "fx.edit", "inventory.edit", "restriction.edit", "reservation.view",
+		"promotion.edit", "markup.edit", "fx.edit", "fx.manual_rate", "inventory.edit", "restriction.edit",
+		"reservation.view",
 		"reservation.create", "reservation.modify", "reservation.confirm_unpaid", "report.view", "booking_site.edit", "crm.view",
 		"loyalty.edit", "channel.view", "channel.manage"}),
 	"Front Desk": frozenset(_SALES),
 	"Call Center Agent": frozenset(_SALES),
 	# tax rules are a legal/finance setting: Finance and Hotel Admin, not revenue management
 	"Finance": frozenset({"price.view", "price.view_cost", "reservation.view", "reservation.confirm_unpaid",
-	                      "payment.view", "payment.link", "payment.refund", "report.view", "crm.view", "tax.edit"}),
+	                      "payment.view", "payment.link", "payment.refund", "report.view", "crm.view", "tax.edit",
+	                      "fx.manual_rate"}),
 	"Kamra Agent": frozenset({"price.view", "reservation.view", "reservation.create", "reservation.modify"}),
 }
 

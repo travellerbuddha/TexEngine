@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from kamra.tex.pricing import addons, engine, fx
 from kamra.tex.pricing.enums import ExtraPricingMode, FxMode, PromoAppliesTo, PromoValueType, TaxKind
-from kamra.tex.pricing.model import ExtraDef, ExtraRequest, FxSnapshot, Promotion, TaxRule
+from kamra.tex.pricing.model import ExtraDef, ExtraRequest, FxSnapshot, Promotion, TaxRule, Unsellable
 from kamra.tex.tests.unit import fixtures
 
 D = Decimal
@@ -195,3 +195,95 @@ class TestLegacySnapshotLinePins(unittest.TestCase):
 		legacy["extras"] = [{**e, "addon": "ADD-1"} for e in legacy["extras"]]
 		self.assertEqual({(r["from"], r["to"]) for r in fx.recorded(legacy, extra_currency={"EXT-00011": "USD"})},
 		                 {("EUR", "TRY")})
+
+
+class TestManualBridge(unittest.TestCase):
+	"""O-12 (2D-2, ADR-069): when the provider's rate is stale or missing (a bank holiday), a dated manual
+	rate stands in for the provider's REFERENCE rate; the policy's own mode and margin apply on top
+	(manual 50.5, +2 % → 51.51). It is recorded in the snapshot as a bridge."""
+
+	POLICY = fx.FxPolicy("FXP-EUR", "EUR", "TRY", FxMode.PROVIDER_PERCENT, provider="TCMB",
+	                     adjustment=D("2"), max_age_days=4)
+	TCMB = (fx.ProviderRate("T-0614", "TCMB", "EUR", "TRY", D("50"), date(2027, 6, 14)),)
+	HOLIDAY = datetime(2027, 6, 20, 12, 0)                  # the provider's last rate is 6 days old
+
+	def manual(self, rid="FXR-M1", r="50.5", day=date(2027, 6, 19), base="EUR", quote="TRY", property=None,
+	           entered=datetime(2027, 6, 19, 9, 0)):
+		return fx.ProviderRate(rid, "MANUAL", base, quote, D(r), day, "REFERENCE", property=property,
+		                       entered_at=entered)
+
+	def resolve(self, manual, rates=TCMB, policy=POLICY, at=HOLIDAY):
+		return fx.resolve_fx("EUR", "TRY", policy, rates, at, manual=tuple(manual))
+
+	def test_a_stale_provider_is_bridged_by_the_manual_rate_and_the_margin_still_applies(self):
+		s = self.resolve([self.manual()])
+		self.assertEqual(s.sell_rate, D("51.510000"))
+		self.assertEqual((s.mode, s.provider, s.provider_rate, s.provider_rate_id, s.rate_date, s.adjustment,
+		                  s.policy_id, s.bridged_from),
+		                 (FxMode.PROVIDER_PERCENT, "MANUAL", D("50.500000"), "FXR-M1", date(2027, 6, 19), D("2"),
+		                  "FXP-EUR", "TCMB"))
+		self.assertEqual(s.as_of, self.HOLIDAY)
+		self.assertEqual(fx.describe(s), "MANUAL 50.500000 of 2027-06-19 +2% (bridging TCMB), policy FXP-EUR")
+
+	def test_a_missing_provider_rate_is_bridged_too(self):
+		s = self.resolve([self.manual()], rates=())
+		self.assertEqual((s.sell_rate, s.bridged_from), (D("51.510000"), "TCMB"))
+
+	def test_a_fresh_provider_wins_and_the_record_keeps_its_eleven_keys(self):
+		s = self.resolve([self.manual()], at=datetime(2027, 6, 16, 12, 0))
+		self.assertEqual((s.provider, s.provider_rate, s.bridged_from), ("TCMB", D("50.000000"), None))
+		self.assertEqual(len(s.to_dict()), 11)
+		self.assertNotIn("bridged_from", s.to_dict())
+
+	def test_the_original_error_stays_without_a_usable_manual_rate(self):
+		for rows in ([], [self.manual(day=date(2027, 6, 15))],                  # older than max_age (5 days)
+		             [self.manual(day=date(2027, 6, 21))],                       # dated after the sale
+		             [self.manual(base="USD")]):                                 # another pair
+			with self.subTest(rows=rows), self.assertRaises(Unsellable) as cm:
+				self.resolve(rows)
+			self.assertEqual(cm.exception.code, "FX_RATE_STALE")
+		with self.assertRaises(Unsellable) as cm:
+			self.resolve([], rates=())
+		self.assertEqual(cm.exception.code, "FX_RATE_MISSING")
+
+	def test_an_inverse_manual_row_is_inverted(self):
+		s = self.resolve([self.manual(rid="FXR-INV", r="0.02", base="TRY", quote="EUR")])
+		self.assertEqual((s.provider_rate, s.provider_rate_id), (D("50.000000"), "1/FXR-INV"))
+		self.assertEqual(s.sell_rate, D("51.000000"))
+
+	def test_the_newest_date_then_the_hotels_row_then_the_latest_entry_wins(self):
+		newer = self.manual(rid="FXR-NEW", r="51", day=date(2027, 6, 19))
+		older = self.manual(rid="FXR-OLD", r="49", day=date(2027, 6, 18))
+		self.assertEqual(self.resolve([older, newer]).provider_rate_id, "FXR-NEW")
+		glob = self.manual(rid="FXR-G", r="52", property=None)
+		own = self.manual(rid="FXR-H", r="53", property="HOTEL-A", entered=datetime(2027, 6, 19, 8, 0))
+		self.assertEqual(self.resolve([glob, own]).provider_rate_id, "FXR-H")          # the hotel's, though entered earlier
+		fix = self.manual(rid="FXR-FIX", r="50.6", entered=datetime(2027, 6, 19, 10, 0))
+		self.assertEqual(self.resolve([self.manual(), fix]).provider_rate_id, "FXR-FIX")   # the correction
+		tie = self.manual(rid="FXR-Z")
+		self.assertEqual(self.resolve([self.manual(rid="FXR-A"), tie]).provider_rate_id, "FXR-Z")
+
+	def test_a_manual_mode_policy_is_unchanged(self):
+		pol = fx.FxPolicy("FXP-M", "EUR", "TRY", FxMode.MANUAL, manual_rate=D("49.5"))
+		s = self.resolve([self.manual()], policy=pol)
+		self.assertEqual((s.sell_rate, s.provider, s.bridged_from), (D("49.500000"), None, None))
+
+	def test_the_record_and_the_pins_keep_the_bridge(self):
+		s = self.resolve([self.manual()])
+		self.assertEqual(s.to_dict()["bridged_from"], "TCMB")
+		back = fx.from_dict(s.to_dict(), origin="reservation:R1")
+		self.assertEqual((back.bridged_from, back.provider, back.sell_rate), ("TCMB", "MANUAL", D("51.510000")))
+		pinned = fx.pins([s.to_dict()], origin="reservation:R1")[("EUR", "TRY")]
+		self.assertEqual(pinned.bridged_from, "TCMB")
+		self.assertIsNone(fx.from_dict(EUR_TRY.to_dict()).bridged_from)           # an older record
+
+	def test_the_explanation_names_the_bridge_only_when_there_is_one(self):
+		from kamra.tex.pricing.explain import Explanation
+
+		for snap, expected in ((self.resolve([self.manual()]), "TCMB"), (EUR_TRY, None)):
+			log, explain = fx.FxLog(), Explanation()
+			log.note(snap, "accommodation")
+			fx.explain_new(log, explain)
+			params = explain.to_list()[0]["params"]
+			self.assertEqual(params.get("bridged_from"), expected)
+			self.assertEqual("bridged_from" in params, expected is not None)
