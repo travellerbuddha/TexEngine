@@ -674,11 +674,14 @@ def detect_abandoned(now=None) -> dict:
 		if booking and consent:
 			guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
 			if guest:
-				email, phone, agreed = frappe.db.get_value("Guest", guest, ["email", "phone", "tex_consent_email"])
+				email, phone, agreed, sms, whatsapp = frappe.db.get_value(
+					"Guest", guest, ["email", "phone", "tex_consent_email", "tex_consent_sms", "tex_consent_whatsapp"])
 				if not agreed:
 					# the profile's own consent decides: a tick in an anonymous booking that matched
 					# an existing profile is only a request (ADR-046)
 					consent, guest, email, phone = False, None, None, None
+				elif not (sms or whatsapp):
+					phone = None                    # a phone is for SMS or WhatsApp, not for e-mail consent (O-26)
 		prop = next((e.property for e in events if e.property), None)
 		if not prop and qp.get("quote"):
 			prop = frappe.db.get_value("TEX Quote", qp["quote"], "property")
@@ -726,7 +729,9 @@ def _paid_later(events) -> str | None:
 
 def abandoned(property: str, *, status: str | None = None, days: int = 30) -> list[dict]:
 	"""The hotel's abandoned bookings. Contact data is shown only while the guest profile's own
-	e-mail consent holds (withdrawn later: the case stays, anonymous; ADR-046, ADR-056)."""
+	e-mail consent holds (withdrawn later: the case stays, anonymous; ADR-046, ADR-056); the phone only
+	while the guest agrees to SMS or WhatsApp (``phone_channels`` says which; TEX records no consent to be
+	called, so it is never offered as a call, O-26)."""
 	scope.require("crm.view", property)
 	filters = [["property", "=", property], ["last_event_at", "is", "set"],
 	           ["last_event_at", ">=", add_to_date(now_datetime(), days=-days)]]
@@ -737,14 +742,21 @@ def abandoned(property: str, *, status: str | None = None, days: int = 30) -> li
 	                              "consent_marketing", "value", "currency", "check_in", "check_out",
 	                              "last_event_at", "recovered_booking"], order_by="last_event_at desc", limit=500)
 	guests = {r.guest for r in rows if r.guest}
-	agreed = set(frappe.get_all("Guest", filters={"name": ("in", list(guests)), "tex_consent_email": 1},
-	                            pluck="name")) if guests else set()
+	agreed = {g.name: g for g in frappe.get_all(
+		"Guest", filters={"name": ("in", list(guests)), "tex_consent_email": 1},
+		fields=["name", "tex_consent_sms", "tex_consent_whatsapp"])} if guests else {}
 	for r in rows:
 		if not (r.consent_marketing and r.guest in agreed):
 			# anonymous, the profile link and the booking that recovered it included: each leads to the
 			# person (ADR-056 and its second review)
 			r["email"] = r["phone"] = r["guest"] = r["recovered_booking"] = None
 			r["consent_marketing"] = 0
+			r["phone_channels"] = []
+		else:
+			g = agreed[r.guest]
+			r["phone_channels"] = [c for c, on in (("SMS", g.tex_consent_sms), ("WhatsApp", g.tex_consent_whatsapp)) if on]
+			if not r["phone_channels"]:
+				r["phone"] = None
 		r["value"] = to_str(from_db(r["value"], r["currency"] or "EUR"))
 		for k in ("check_in", "check_out", "last_event_at"):
 			r[k] = str(r[k]) if r[k] else None
@@ -767,6 +779,7 @@ FUNNEL_BY_SESSION = "SELECT name, email_hash FROM `tabTEX Funnel Event` WHERE se
 FORGET_CASES = """UPDATE `tabTEX Abandoned Booking` SET guest = NULL, email = NULL, phone = NULL, quote = NULL,
 	consent_marketing = 0 WHERE name IN %(names)s"""
 FORGET_EVENTS = "UPDATE `tabTEX Funnel Event` SET email_hash = NULL WHERE name IN %(names)s"
+FORGET_PHONE = "UPDATE `tabTEX Abandoned Booking` SET phone = NULL WHERE name IN %(names)s AND phone IS NOT NULL"
 BATCH = 500
 
 
@@ -793,6 +806,16 @@ def forget_contact(guest: str, emails=()) -> int:
 	for chunk in _chunks(events):
 		frappe.db.sql(FORGET_EVENTS, {"names": chunk})
 	return len(cases) + len(events)
+
+
+def forget_phone(guest: str) -> int:
+	"""The guest no longer agrees to SMS or WhatsApp: their abandoned cases lose the phone (the e-mail and the
+	rest stay while the e-mail consent holds). The cases are read with a lock, as ``forget_contact`` does, so
+	one written while this runs is seen. → the cases changed."""
+	cases = [c.name for c in frappe.db.sql(CASES_OF_GUEST, {"guest": guest}, as_dict=True)]
+	for chunk in _chunks(cases):
+		frappe.db.sql(FORGET_PHONE, {"names": chunk})
+	return len(cases)
 
 
 def lock_guest(guest: str | None, *, share: bool = False) -> bool:
@@ -835,7 +858,8 @@ def guest_validate(doc, method=None) -> None:
 def guest_on_update(doc, method=None) -> None:
 	"""``Guest.on_update``, whoever saves (the CRM, the Desk form, REST): a consent change made outside
 	the CRM is audited; a withdrawal of marketing e-mail consent, or an e-mail or phone cleared, makes
-	the guest's abandoned cases and funnel data anonymous (ADR-056 and its second review)."""
+	the guest's abandoned cases and funnel data anonymous (ADR-056 and its second review); the last SMS or
+	WhatsApp consent withdrawn takes the phone off the cases."""
 	pending = doc.flags.pop("tex_consent_audit", None)
 	if pending:
 		audit("guest.consent", reference_doctype="Guest", reference_name=doc.name, new=pending[0], reason=pending[1])
@@ -846,6 +870,9 @@ def guest_on_update(doc, method=None) -> None:
 	cleared = any(before.get(f) and not doc.get(f) for f in ("email", "phone"))
 	if withdrawn or cleared:
 		forget_contact(doc.name, emails={before.get("email"), doc.get("email")})
+	elif (before.get("tex_consent_sms") or before.get("tex_consent_whatsapp")) and not (
+			doc.get("tex_consent_sms") or doc.get("tex_consent_whatsapp")):
+		forget_phone(doc.name)                      # no SMS or WhatsApp consent left: no phone on the cases (O-26)
 
 
 def erase_traces(guest: str, alias: str, *, emails=(), audit_event: bool = True) -> dict:

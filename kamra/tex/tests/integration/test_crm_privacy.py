@@ -420,7 +420,8 @@ class TestAbandonedPrivacy(PrivacyCase):
 		self.assertEqual(frappe.db.get_value("TEX Funnel Event", rows["g81-old-b"], "email_hash"), "ab" * 32)
 
 	def test_consented_contact_then_recovery_by_a_later_payment(self):
-		b, guest = self.booked_guest("g81-rec", "g81-rec@example.com", consent_email=1, phone="+49 30 1234")
+		b, guest = self.booked_guest("g81-rec", "g81-rec@example.com", consent_email=1, consent_sms=1,
+		                             phone="+49 30 1234")
 		self.assertTrue(b["payment"])                               # left at the gateway, unpaid
 		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
 		row = frappe.db.get_value("TEX Abandoned Booking", {"session_id": "g81-rec"},
@@ -443,6 +444,40 @@ class TestAbandonedPrivacy(PrivacyCase):
 		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=120))
 		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", row.name, ["status", "recovered_booking"]),
 		                 ("Recovered", b["booking"]))
+
+	def test_a_cases_phone_needs_sms_or_whatsapp_consent_not_email_consent(self):
+		"""O-26 (audit Part 2H-1; D-17, D-17a): the list kept and showed the phone of every guest who agreed
+		to marketing e-mail, as a tel: link. A phone is for SMS or WhatsApp: it is kept and shown only while
+		the guest agrees to one of them (TEX records no consent to be called), and goes when they withdraw."""
+		sessions = {"mail": dict(consent_email=1), "sms": dict(consent_email=1, consent_sms=1),
+		            "wa": dict(consent_email=1, consent_whatsapp=1), "both": dict(consent_email=1, consent_sms=1,
+		                                                                          consent_whatsapp=1)}
+		guests, phones = {}, {key: f"+49 30 260{i}" for i, key in enumerate(sessions)}
+		for key, consent in sessions.items():
+			_b, guests[key] = self.booked_guest(f"o26-{key}", f"o26-{key}@example.com", phone=phones[key], **consent)
+		crm.detect_abandoned(now=add_to_date(now_datetime(), minutes=60))
+		stored = {k: frappe.db.get_value("TEX Abandoned Booking", {"session_id": f"o26-{k}"},
+		                                 ["name", "email", "phone"], as_dict=True) for k in sessions}
+		self.assertEqual({k: bool(c.phone) for k, c in stored.items()},
+		                 {"mail": False, "sms": True, "wa": True, "both": True})
+		self.assertTrue(all(c.email for c in stored.values()))             # the e-mail consent keeps the e-mail
+		as_user(self.here)                                          # what the hotel sees
+		listed = {k: next(r for r in crm_api.abandoned(fx.PROPERTY) if r["name"] == c.name) for k, c in stored.items()}
+		self.assertEqual({k: (bool(r["phone"]), r["phone_channels"]) for k, r in listed.items()},
+		                 {"mail": (False, []), "sms": (True, ["SMS"]), "wa": (True, ["WhatsApp"]),
+		                  "both": (True, ["SMS", "WhatsApp"])})
+		self.assertTrue(all(r["email"] for r in listed.values()))
+		# a consent withdrawn where the hook cannot see it (a direct write) is honoured by the list at once
+		frappe.db.set_value("Guest", guests["sms"], "tex_consent_sms", 0, update_modified=False)
+		listed = next(r for r in crm_api.abandoned(fx.PROPERTY) if r["name"] == stored["sms"].name)
+		self.assertEqual((listed["phone"], listed["phone_channels"], bool(listed["email"])), (None, [], True))
+		# and a withdrawal the CRM records makes the cases lose the phone: one channel left keeps it
+		crm_api.update_guest(guests["both"], {"tex_consent_sms": 0}, consent_source="guest asked")
+		self.assertEqual(frappe.db.get_value("TEX Abandoned Booking", stored["both"].name, "phone"), phones["both"])
+		crm_api.update_guest(guests["both"], {"tex_consent_whatsapp": 0}, consent_source="guest asked")
+		as_user("Administrator")
+		case = frappe.db.get_value("TEX Abandoned Booking", stored["both"].name, ["guest", "email", "phone"])
+		self.assertEqual(case, (guests["both"], "o26-both@example.com", None))        # the e-mail case stays
 
 	def test_contact_data_is_shown_only_while_the_consent_holds(self):
 		b, guest = self.booked_guest("g81-wd", "g81-wd@example.com", consent_email=1, phone="+49 30 99")
