@@ -159,6 +159,8 @@ def transaction(name: str):
 		          "conflict": {"recorded": conflict.get("recorded"), "gateway": conflict.get("gateway"),
 		                       "gateway_ref": conflict.get("gateway_ref")} if conflict is not None else None}
 	return {**_txn_row(r), **finish, "allocations": allocations, "refunds": [_txn_row(x) for x in refunds],
+	        # a Pending charge of a gateway TEX cannot ask: staff may mark it not paid once the bank says so (LO-18)
+	        "can_close_unpaid": pay.closable_unpaid(r),
 	        "unallocated": to_str(from_db(r.amount, r.currency) - pay.allocated_of(name) - pay.refunded_of(name))
 	        if succeeded else "0",
 	        "refundable": to_str(refundable) if refundable is not None else "0",
@@ -190,6 +192,16 @@ def reverify(transaction: str):
 	if out is None:
 		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(error)[:200]))
 	return out
+
+
+@frappe.whitelist(methods=["POST"])
+@require_capability("payment.refund", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
+@retry_on_deadlock
+def close_unpaid(transaction: str, reason: str):
+	"""Not paid (checked with the bank): a Pending charge of a gateway TEX cannot ask (the Virtual POS) that staff
+	found uncharged in the bank's panel is closed Failed with their reason, audited (LO-18). Paid after all:
+	record a Manual payment, or the bank's own news of it is still recorded."""
+	return pay.close_unpaid(transaction, reason=text(reason, 500) or "")
 
 
 @frappe.whitelist(methods=["POST"])

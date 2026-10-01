@@ -332,6 +332,41 @@ class TestUnverifiedPayments(TexTestCase):
 		self.assertEqual(found["status"], "fail")
 		self.assertIn(fx.PROPERTY, found["properties"])
 
+	def test_staff_mark_a_payment_the_bank_never_took_as_not_paid(self):
+		"""LO-18 (audit 2K-1): staff checked a Virtual POS payment in the bank's panel and it was never charged:
+		"Not paid" closes it Failed with their reason, audited, and the check no longer counts it. Finance only
+		(``payment.refund``), a reason required; a gateway TEX can ask is re-verified instead."""
+		from kamra.tex.api import payments as payments_api
+
+		before = self.unverified()
+		txn = self.pending("Virtual POS", expires=add_to_date(now_datetime(), minutes=-15), created_ago=50)
+		asked = self.pending("iyzico", expires=add_to_date(now_datetime(), minutes=-15), created_ago=50)
+		self.assertEqual(self.unverified() - before, 1)
+		self.assertTrue(payments_api.transaction(name=txn)["can_close_unpaid"])
+		self.assertFalse(payments_api.transaction(name=asked)["can_close_unpaid"])
+		frappe.set_user(agent("lo18-agent@example.com", fx.PROPERTY))  # nosemgrep: frappe-setuser -- payment.view only
+		with self.assertRaises(frappe.PermissionError):
+			payments_api.close_unpaid(transaction=txn, reason="Not in the bank's panel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance
+		with self.assertRaisesRegex(frappe.ValidationError, "reason"):
+			payments_api.close_unpaid(transaction=txn, reason="  ")
+		with self.assertRaisesRegex(frappe.ValidationError, "re-verify"):
+			payments_api.close_unpaid(transaction=asked, reason="Not in the bank's panel")
+		self.assertEqual(payments_api.close_unpaid(transaction=txn, reason="Not in the bank's panel")["status"], "Failed")
+		row = frappe.db.get_value("TEX Payment Transaction", txn, ["status", "error_code", "error_message", "completed_at"],
+		                          as_dict=True)
+		self.assertEqual((row.status, row.error_code, row.error_message), ("Failed", "CLOSED_UNPAID",
+		                                                                  "Not in the bank's panel"))
+		self.assertIsNotNone(row.completed_at)
+		event = frappe.get_all("TEX Audit Event", filters={"action": "payment.closed_unpaid", "reference_name": txn},
+		                       fields=["reason", "property"])
+		self.assertEqual([(e.reason, e.property) for e in event], [("Not in the bank's panel", fx.PROPERTY)])
+		self.assertEqual(self.unverified(), before)
+		self.assertFalse(payments_api.transaction(name=txn)["can_close_unpaid"])
+		with self.assertRaisesRegex(frappe.ValidationError, "already processed"):
+			payments_api.close_unpaid(transaction=txn, reason="again")
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", asked, "status"), "Pending")
+
 
 class TestContractsLive(TexTestCase):
 	"""Y-2 (2D-1): an Active contract within its sale window with no version on sale (and none starting

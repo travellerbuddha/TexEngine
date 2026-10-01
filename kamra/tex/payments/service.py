@@ -1665,6 +1665,49 @@ def correct_refund(refund_txn: str, *, outcome: str, reason: str, reference: str
 	return {"refund": r.name, "status": r.status, "amount": to_str(amount), "currency": r.currency}
 
 
+CLOSED_UNPAID = "CLOSED_UNPAID"
+
+
+def closable_unpaid(txn) -> bool:
+	"""LO-18: a Pending charge of a gateway TEX cannot ask for its outcome (``ops.status.unverifiable_providers``,
+	today the Virtual POS), which staff may close as not paid once they checked it with the bank."""
+	from kamra.tex.ops.status import unverifiable_providers
+
+	return txn.txn_type == "Charge" and txn.status == "Pending" and txn.provider in unverifiable_providers()
+
+
+def close_unpaid(transaction: str, *, reason: str) -> dict:
+	"""LO-18: staff checked a Pending charge of a gateway TEX cannot ask in the bank's panel, and it was never
+	charged: it is closed Failed (``CLOSED_UNPAID``, their reason), audited ``payment.closed_unpaid``, and the
+	pending-payments check stops counting it. Its booking is judged as for any failed payment (its hold runs
+	out, the expiry job ends it). Paid after all, the bank's own news of it is still recorded (a Failed charge
+	settles a verified success, G-68); paid at the desk, staff record a Manual payment. Locks: link → payment."""
+	reason = (reason or "").strip()
+	if not reason:
+		frappe.throw(_("A reason is required: say how the payment was checked with the bank."))
+	_lock_link_then_payment(transaction)
+	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)          # as it is now
+	if txn.txn_type == "Charge" and txn.status != "Pending":
+		frappe.throw(_("This payment was already processed ({0}).").format(txn.status))
+	if not closable_unpaid(txn):
+		frappe.throw(_("Only a pending payment of a bank TEX cannot ask can be marked not paid: re-verify the "
+		               "others."))
+	if txn.checkout_started_at and \
+			get_datetime(txn.checkout_started_at) > add_to_date(now_datetime(), seconds=-CHECKOUT_LEASE_SECONDS):
+		_busy()                                     # its checkout is being made right now
+	txn.flags.tex_system_update = True
+	txn.status = "Failed"
+	txn.error_code = CLOSED_UNPAID
+	txn.error_message = reason[:500]
+	txn.completed_at = now_datetime()
+	txn.save(ignore_permissions=True)
+	audit("payment.closed_unpaid", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, old={"status": "Pending"},
+	      new={"status": "Failed", "amount": to_str(from_db(txn.amount, txn.currency)), "currency": txn.currency,
+	           "provider": txn.provider, "booking": txn.booking, "link": txn.payment_link}, reason=reason[:500])
+	return {"transaction": txn.name, "status": txn.status}
+
+
 def mark_transfer_received(transaction: str, *, reference: str, value_date=None, amount=None) -> dict:
 	"""Staff saw a bank transfer arrive. ``value_date``: the day the money was on the account (its
 	valör), which decides whether it was paid in time (D3); not before the charge, never in the

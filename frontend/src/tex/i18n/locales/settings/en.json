@@ -350,7 +350,7 @@
  "settings.status.reason.no_workers": "No background worker is running.",
  "settings.status.reason.overpaid": "Payment links paid twice in the last {days} days: {count}.",
  "settings.status.reason.payment_pending": "Card payments still pending: {count}, oldest started {minutes} min ago.",
- "settings.status.reason.payment_pending_unverified": "Card payments of a gateway TEX cannot ask, still pending after their deadline: {count}, oldest started {minutes} min ago. Check them in the bank's panel; if one was charged, record it as a Manual payment with the bank's reference. The alert clears 48 hours after the payment.",
+ "settings.status.reason.payment_pending_unverified": "Card payments of a gateway TEX cannot ask, still pending after their deadline: {count}, oldest started {minutes} min ago. Check them in the bank's panel; if one was charged, record it as a Manual payment with the bank's reference. The alert clears 48 hours after the payment. A payment the bank did not charge can be marked not paid on its page (Payments).",
  "settings.status.reason.reconciliation_action": "Payments kept off their booking, waiting for staff: {count}, oldest waiting {hours} h (Payments → the payment).",
  "settings.status.reason.reconciliation_refund": "Payments queued for an automatic refund: {count}, oldest waiting {hours} h.",
  "settings.status.reason.bookings_overpaid": "Bookings holding more money than they cost: {count} ({cancelled} of them cancelled). Refund the excess or move it to the booking it was meant for (Payments). A refund still on its way counts as paid until the gateway answers it.",

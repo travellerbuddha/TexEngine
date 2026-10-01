@@ -9264,6 +9264,13 @@ main `1575c8b` is contained, so nothing was merged.
   same hotel has a live room (not Cancelled or No Show) for nights of the stay whose guest is one of the expired
   booking's guest profiles, or a profile with one of their e-mails (case-insensitive) or phones (trimmed) — the CRM's
   possible-duplicate rule. The booker's (an agency's) e-mail never counts, nor a name alone.
+- *A charge TEX cannot ask about (Part 2K-1, LO-18).* A Pending charge of a gateway with no status query (the Virtual
+  POS, `ops.status.unverifiable_providers`) is closed by staff once the bank's panel shows it was never charged:
+  "Not paid (checked with the bank)", `payment.refund`, a reason required. It becomes Failed (`CLOSED_UNPAID`, the
+  reason as its message), audited `payment.closed_unpaid`, and the pending-payments check stops counting it; its
+  booking is then judged as after any failed payment. Paid after all, the bank's own news still records it (a Failed
+  charge settles a verified success, G-68); paid at the desk, staff record a Manual payment. A gateway TEX can ask is
+  re-verified instead. The real fix stays NestPay's order query (certification, §5a).
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking

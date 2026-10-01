@@ -136,7 +136,8 @@ REASONS: dict[str, str] = {
 	"payment_pending_unverified": "{count} card payment(s) of a gateway TEX cannot ask are still pending after their "
 	                              "deadline; the oldest started {minutes} minutes ago. Check them in the bank's panel; "
 	                              "if one was charged, record it as a Manual payment with the bank's reference. The "
-	                              "alert clears 48 hours after the payment.",
+	                              "alert clears 48 hours after the payment. A payment the bank did not charge can be "
+	                              "marked not paid on its page (Payments).",
 	"callback_errors": "{count} payment callback(s) failed or were rejected in the last {hours} hours.",
 	"overpaid": "{count} payment link(s) were paid more than once in the last {days} days.",
 	"capture_mismatch": "{count} gateway capture(s) did not match their charge in the last {days} days.",

@@ -350,7 +350,7 @@
  "settings.status.reason.no_workers": "Çalışan arka plan işçisi yok.",
  "settings.status.reason.overpaid": "Son {days} günde iki kez ödenen ödeme linkleri: {count}.",
  "settings.status.reason.payment_pending": "Hâlâ bekleyen kart ödemeleri: {count}, en eskisi {minutes} dk önce başladı.",
- "settings.status.reason.payment_pending_unverified": "TEX'in sorgulayamadığı bir gateway'de, son tarihinden sonra hâlâ bekleyen kart ödemeleri: {count}, en eskisi {minutes} dk önce başladı. Bankanın panelinden kontrol edin; çekildiyse banka referansıyla Manuel ödeme olarak kaydedin. Uyarı ödemeden 48 saat sonra kalkar.",
+ "settings.status.reason.payment_pending_unverified": "TEX'in sorgulayamadığı bir gateway'de, son tarihinden sonra hâlâ bekleyen kart ödemeleri: {count}, en eskisi {minutes} dk önce başladı. Bankanın panelinden kontrol edin; çekildiyse banka referansıyla Manuel ödeme olarak kaydedin. Uyarı ödemeden 48 saat sonra kalkar. Bankanın çekmediği bir ödeme, kendi sayfasında ödenmedi olarak işaretlenebilir (Ödemeler).",
  "settings.status.reason.reconciliation_action": "Rezervasyona işlenmeyen, personel bekleyen ödemeler: {count}, en eskisi {hours} saattir bekliyor (Ödemeler → ilgili ödeme).",
  "settings.status.reason.reconciliation_refund": "Otomatik iade kuyruğundaki ödemeler: {count}, en eskisi {hours} saattir bekliyor.",
  "settings.status.reason.bookings_overpaid": "Tutarından fazla para tutan rezervasyonlar: {count} ({cancelled} tanesi iptal). Fazlayı iade edin ya da ait olduğu rezervasyona aktarın (Ödemeler). Yolda olan bir iade, gateway yanıt verene kadar ödenmiş sayılır.",
