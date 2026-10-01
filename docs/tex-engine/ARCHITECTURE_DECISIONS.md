@@ -9271,6 +9271,9 @@ main `1575c8b` is contained, so nothing was merged.
   booking is then judged as after any failed payment. Paid after all, the bank's own news still records it (a Failed
   charge settles a verified success, G-68); paid at the desk, staff record a Manual payment. A gateway TEX can ask is
   re-verified instead. The real fix stays NestPay's order query (certification, §5a).
+- *Job slots (Part 2K-1).* A gateway whose status query asks by a reference TEX stored (`status_by_ref`: iyzico's
+  token) gives a charge with none no place in the re-verify tick (LO-21). Queued late refunds run last in the
+  5-minute group, at most 20 a run, oldest first, none started after 90 s (LO-07).
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
