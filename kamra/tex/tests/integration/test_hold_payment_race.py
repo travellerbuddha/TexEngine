@@ -1519,6 +1519,34 @@ class TestPaidInTime(HoldCase):
 		self.assertEqual(t.reconciliation, "Action Required")                # never refunded by itself
 		self.assertIn(again["booking"], t.reconciliation_note)
 
+	def test_an_agencys_other_guests_do_not_stop_a_revival(self):
+		"""P1-2 (2F-1): the duplicate of D4 c) is the guest's, never the booker's. An agency booked another guest
+		for the same nights with the same desk e-mail: the first booking is still revived."""
+		desk = {"email": "desk.d4@agency.example"}
+		b = self.book(booker=desk)
+		payment, at = self.paid_in_time(b)
+		otto = {"first_name": "Otto", "last_name": "Other", "email": "otto.d4@example.com"}
+		self.book(method="Pay at Hotel", status="Confirmed", guest=otto, booker=desk)        # same agency, another guest
+		with captured(at):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertFalse(txn_state(payment["transaction"]).reconciliation)
+
+	def test_the_same_guest_booked_again_under_another_e_mail_stops_a_revival(self):
+		"""P1-2 (2F-1): the CRM's possible-duplicate rule: one of the guest's phones is enough. The same name and
+		phone under another e-mail is the same guest: staff decide, nothing is revived by itself."""
+		phone = "+49 30 5550100"
+		b = self.book(guest=dict(GUEST, email="lena.p12@example.com", phone=phone))
+		payment, at = self.paid_in_time(b)
+		again = self.book(method="Pay at Hotel", status="Confirmed",
+		                  guest=dict(GUEST, email="lena.k@other.example", phone=phone))
+		with captured(at):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		t = txn_state(payment["transaction"])
+		self.assertEqual(t.reconciliation, "Action Required")
+		self.assertIn(again["booking"], t.reconciliation_note)
+
 	def test_a_revival_locks_the_charges_before_the_booking(self):
 		"""D4: every payment path locks a charge, then its booking. A revival takes back the money the
 		booking held when it expired (another charge): that charge is locked before the booking, never

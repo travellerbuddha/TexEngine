@@ -1337,20 +1337,42 @@ LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
 
 
 def live_duplicate(booking: str) -> str | None:
-	"""D4 c): another live booking of the same guest (profile or e-mail) at the same hotel for nights
-	of this booking's stay — staff booked the guest again after it expired. → its name, or None."""
+	"""D4 c): another live booking at the same hotel with a live room for nights of this booking's stay whose guest
+	is the same person — staff booked the guest again after it expired. The guest, never the booker (P1-2): one of
+	this booking's guest profiles (the profiles of its rooms and its booker's profile), or another profile with the
+	e-mail (case-insensitive) or phone (trimmed) of one of them: the CRM's possible-duplicate rule. The booker's own
+	e-mail (an agency's desk) never counts, nor a name alone. → its name, or None.
+
+	NULL meaning (ADR-064): an empty e-mail or phone is dropped, never matched (a NULL equals nothing, and ``("",)``
+	would match every profile without one); a room's dates are required, so never NULL."""
 	b = frappe.get_doc("TEX Booking", booking)
-	who = [(f, v) for f, v in (("booker_guest", b.booker_guest), ("booker_email", b.booker_email)) if v]
-	if not who or not b.rooms:
+	if not b.rooms:
 		return None
 	ci, co = min(getdate(r.check_in) for r in b.rooms), max(getdate(r.check_out) for r in b.rooms)
+	mine = {g for g in frappe.get_all("Reservation", filters={"tex_booking": b.name}, pluck="guest") if g}
+	if b.booker_guest:
+		mine.add(b.booker_guest)
+	if not mine:
+		return None
+	profiles = frappe.get_all("Guest", filters={"name": ("in", sorted(mine))}, fields=["email", "phone"])
+	emails = sorted({p.email.strip().lower() for p in profiles if p.email and p.email.strip()})
+	phones = sorted({p.phone.strip() for p in profiles if p.phone and p.phone.strip()})
+	params = {"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, "mine": sorted(mine)}
+	same = ["g.name IN %(mine)s"]               # a condition only for a set that is not empty
+	if emails:
+		same.append("g.email IN %(emails)s")
+		params["emails"] = emails
+	if phones:
+		same.append("g.phone IN %(phones)s")
+		params["phones"] = phones
 	rows = frappe.db.sql(
-		f"""SELECT DISTINCT o.name FROM `tabTEX Booking` o JOIN `tabTEX Booking Room` r ON r.parent = o.name
-		    WHERE o.property=%(p)s AND o.name != %(b)s AND o.status IN %(live)s AND r.status != 'Cancelled'
-		      AND r.check_in < %(co)s AND r.check_out > %(ci)s
-		      AND ({" OR ".join(f"o.{f} = %({f})s" for f, _v in who)})
-		    ORDER BY o.name LIMIT 1""",  # nosemgrep -- the column names are constants
-		{"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, **dict(who)})
+		f"""SELECT r.tex_booking FROM `tabGuest` g
+		    JOIN `tabReservation` r ON r.guest = g.name AND r.property = %(p)s
+		    JOIN `tabTEX Booking` o ON o.name = r.tex_booking
+		    WHERE ({" OR ".join(same)}) AND r.tex_booking != %(b)s AND r.status NOT IN ('Cancelled', 'No Show')
+		      AND r.check_in_date < %(co)s AND r.check_out_date > %(ci)s AND o.status IN %(live)s
+		    ORDER BY r.tex_booking LIMIT 1""",  # nosemgrep -- the conditions are constants
+		params)
 	return rows[0][0] if rows else None
 
 

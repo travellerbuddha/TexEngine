@@ -9178,6 +9178,10 @@ main `1575c8b` is contained, so nothing was merged.
 - *A restarted charge (Part 2F-1).* A Pending charge started again with its key (another tab, a replayed booking, a
   link's guest back) is a new attempt: `open_attempt` decides it as for a new charge (refused after the hold, P1-9);
   the charge's deadline moves to the new attempt's, never back.
+- *D4 c) identity (Part 2F-1, P1-2).* The guest has another live booking for the stay when another live booking at the
+  same hotel has a live room (not Cancelled or No Show) for nights of the stay whose guest is one of the expired
+  booking's guest profiles, or a profile with one of their e-mails (case-insensitive) or phones (trimmed) — the CRM's
+  possible-duplicate rule. The booker's (an agency's) e-mail never counts, nor a name alone.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
