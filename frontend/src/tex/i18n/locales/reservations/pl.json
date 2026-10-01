@@ -106,6 +106,7 @@
  "res.cancel.basket_credit": "Obejmuje zwrot {amount}: naliczony wcześniej na innym pokoju za {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. Rezerwacja zostanie zwolniona, a poniższa opłata zapisana.",
  "res.cancel.button": "Anuluj rezerwację",
+ "res.cancel.channel": "Sprzedane przez {connection} (rezerwacja {ref}). Anulowanie tutaj nie anuluje jej w kanale, który może nadal sprzedawać pokój: anuluj ją także tam. Zapisane w dzienniku audytu wraz z Twoim powodem.",
  "res.cancel.confirm": "Anuluj rezerwację",
  "res.cancel.days_before": {
   "one": "{count} dzień przed przyjazdem",

@@ -100,6 +100,7 @@
  "res.cancel.basket_credit": "Include un credit de {amount}: perceput anterior pe altă cameră pentru {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. Rezervarea este eliberată și penalizarea de mai jos este înregistrată.",
  "res.cancel.button": "Anulează rezervarea",
+ "res.cancel.channel": "Vândută prin {connection} (rezervarea {ref}). Anularea aici nu o anulează în canal, care poate continua să vândă camera: anulați-o și acolo. Se înregistrează în jurnalul de audit cu motivul dumneavoastră.",
  "res.cancel.confirm": "Anulează rezervarea",
  "res.cancel.days_before": {
   "one": "cu {count} zi înainte de sosire",

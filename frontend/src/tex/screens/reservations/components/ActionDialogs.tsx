@@ -206,7 +206,7 @@ export function CancelDialog({
     setBusy(true)
     setError(undefined)
     try {
-      const r = await cancelReservation(res.name, reason.trim(), waive)
+      const r = await cancelReservation(res.name, reason.trim(), waive, Boolean(preview?.channel))
       toast.success(t("res.cancel.done", { name: res.name }))
       onCancelled(r)
     } catch (e) {
@@ -267,6 +267,9 @@ export function CancelDialog({
             </>
           )}
         </div>
+        {preview?.channel && (
+          <Notice tone="warning">{t("res.cancel.channel", { connection: preview.channel.connection, ref: preview.channel.ref })}</Notice>
+        )}
         {canWaive && preview && !isZero(preview.penalty) && (
           <Checkbox
             className="items-start"

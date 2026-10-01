@@ -94,6 +94,7 @@
  "res.cancel.basket_credit": "Includes a credit of {amount}: charged earlier on another room for {promotion}.",
  "res.cancel.body": "{guest}, {from} – {to}. The reservation is released and the penalty below is recorded.",
  "res.cancel.button": "Cancel reservation",
+ "res.cancel.channel": "Sold by {connection} (booking {ref}). Cancelling it here does not cancel it on the channel, which may still sell the room: cancel it there as well. Recorded in the audit trail with your reason.",
  "res.cancel.confirm": "Cancel reservation",
  "res.cancel.days_before": {
   "one": "{count} day before arrival",

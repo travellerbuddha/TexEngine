@@ -1092,10 +1092,23 @@ def _policy_penalty(reservation, today=None) -> tuple[D, dict]:
 	return quantize(min(pen, total), ccy), basis
 
 
+def channel_of(booking: str | None) -> dict | None:
+	"""A booking a channel manager sold (``channel_connection`` and ``external_ref`` are written when it is
+	created and never change): → {"connection", "ref"}; None for any other. A plain read."""
+	row = frappe.db.get_value("TEX Booking", booking, ["channel_connection", "external_ref"], as_dict=True) \
+		if booking else None
+	return {"connection": row.channel_connection, "ref": row.external_ref} if row and row.channel_connection else None
+
+
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
-                       source: str = "Desk", _guest_authorized: bool = False) -> dict:
+                       source: str = "Desk", _guest_authorized: bool = False, channel_override: bool = False) -> dict:
 	"""``_guest_authorized`` is set only by the self-service API after it verified the
 	guest's manage token for this exact reservation; staff calls always check scope.
+
+	A channel manager's booking is the channel's (D-11, Y-8): its stay is cancelled on the channel, which tells TEX;
+	here only by staff with ``channel.manage`` at the hotel who say so (``channel_override``) with a reason, audited
+	(``reservation.channel_cancel_override``: the channel may still sell the room). A guest's own cancellation is
+	refused too.
 
 	Locks the booking, then the reservation (then the guest's change requests): the order every
 	change to a TEX booking takes (review of ADR-044)."""
@@ -1108,10 +1121,18 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		scope.require("reservation.cancel", res.property)
 	elif waive_penalty:
 		frappe.throw(_("Guests cannot waive cancellation fees."), frappe.PermissionError)
+	sold_by = channel_of(res.tex_booking) if source != "Channel" else None
+	if sold_by:
+		if not channel_override:
+			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["connection"]))
+		scope.require("channel.manage", res.property)
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status))
 	if not (reason or "").strip():
 		frappe.throw(_("A cancellation reason is required."))
+	if sold_by:
+		audit("reservation.channel_cancel_override", reference_doctype="Reservation", reference_name=res.name,
+		      property=res.property, new={**sold_by, "warning": "the channel may still sell the room"}, reason=reason)
 	penalty, basis = cancellation_penalty(res)
 	claw = basis.get("basket_clawback")
 	if waive_penalty:

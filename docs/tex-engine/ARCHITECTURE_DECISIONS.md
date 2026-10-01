@@ -772,6 +772,24 @@ enterprise or group view (G-25).
 - The sandbox proves the full flow end to end without pretending to reach a channel.
 - Reconciliation against a provider's own booking list waits for an adapter that
   implements `fetch_reservations`.
+- *Addendum (Part 2F-2, Y-8, D-11): a room the channel brings back, and who cancels a channel's booking.*
+  - A "modified" message that carries a room the channel had taken off (`_cancel_one`, then back) used to fail: the
+    update moved a Cancelled stay to Confirmed without the status-transition flag, the whole message was undone and
+    retried 2 … 128 minutes later (Dead after 8 tries, ~4 h 15 min), holding the booking's later messages. The
+    update now reactivates a `Cancelled` row as a revival does (`kamra_status_transition` for that save): Confirmed,
+    cancellation reason, note, date and fee cleared, `tex_hold_expired` 0, the revision's changes carry
+    `status: [Cancelled, Confirmed]`, the `channel.booking_modified` audit lists `reactivated`. Its nights were counted
+    as a sale of the channel is (accepted, an overbooking warned). A booking Cancelled or Partially Cancelled becomes
+    Confirmed before the refresh, which says Partially Cancelled again if a room is still cancelled. A No Show or
+    Checked Out row keeps its status and gets a warning.
+  - A channel's booking is the channel's: `cancel_reservation` refuses it (`channel_connection` is written at creation
+    and never changes) — "Sold by …: cancel it on the channel." — for staff, for the guest's manage page and for any
+    source but the channel's own. Staff with `channel.manage` at the hotel may override (`channel_override`, a reason,
+    audit `reservation.channel_cancel_override` warning that the channel may still sell the room); `crs.cancel` passes
+    it, `crs.cancellation_preview` and `crs.reservation` say which channel (`channel` / `channel_booking`); the
+    reservation screen hides Cancel without `channel.manage` and the dialog warns and sends the override.
+  - Same class as the PMS outbox's retry (ADR-015): `retry_inbound` rejects a Failed or Dead message when a newer one
+    of the same booking was Applied.
 
 ## ADR-040 The tenant structure is itself tenant data; guest identity is shared inside an enterprise
 **Context.** G-26: Desk/REST exposed the tenant structure across tenants.
