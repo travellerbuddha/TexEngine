@@ -320,8 +320,15 @@ def fx_rates(provider: str = "TCMB", days: int = 14, base: str | None = None):
 		filters["base_currency"] = base
 	rows = frappe.get_all("TEX FX Rate", filters=filters,
 	                      fields=["name", "provider", "base_currency", "quote_currency", "rate_type", "rate",
-	                              "rate_date", "fetched_at"], order_by="rate_date desc, base_currency asc", limit=500)
-	return [r | {"rate": api_value(r.rate)} for r in rows]      # the exact rate, never a float (G-72)
+	                              "rate_date", "fetched_at", "property", "source_ref"],
+	                      order_by="rate_date desc, base_currency asc", limit=500)
+	if not scope.is_platform_admin():
+		# a manual rate is its hotel's: the caller's hotels' and the global ones (O-12); the provider's are shared
+		mine = scope.permitted_properties()
+		rows = [r for r in rows if not r.property or r.property in mine]
+	# the exact rate, never a float (G-72); who entered a manual rate is shown (the audit trail has it too)
+	return [r | {"rate": api_value(r.rate), "source_ref": r.source_ref if r.provider == "MANUAL" else None}
+	        for r in rows]
 
 
 @frappe.whitelist(methods=["POST"])
@@ -335,16 +342,27 @@ def fetch_fx(provider: str = "TCMB"):
 
 
 @frappe.whitelist(methods=["POST"])
-def add_manual_rate(base_currency: str, quote_currency: str, rate: str, rate_date: str):
-	if not scope.is_platform_admin():
-		frappe.throw(_("Only platform administrators manage shared FX rates."), frappe.PermissionError)
+def add_manual_rate(base_currency: str, quote_currency: str, rate: str, rate_date: str,
+                    property: str | None = None, reason: str | None = None):
+	"""A dated manual rate (provider MANUAL) that stands in for a provider's REFERENCE rate while the
+	provider is stale or silent, e.g. over a bank holiday (D-4, O-12, ADR-069): each FX policy puts its own
+	margin on it. For one hotel: ``fx.manual_rate`` there. For every hotel (``property`` blank): platform
+	administrators. A date entered again is a correction: the latest entry wins, the rows stay."""
+	property = property or None
+	if property:
+		scope.require("fx.manual_rate", property)
+	elif not scope.is_platform_admin():
+		frappe.throw(_("Only platform administrators enter a manual rate for every hotel."), frappe.PermissionError)
 	value = typed(str(rate if rate is not None else ""), _("Rate"))     # as typed, up to 9 places (G-72)
 	if value is None or value <= 0:
 		frappe.throw(_("The rate must be a positive number."))
-	doc = frappe.get_doc({"doctype": "TEX FX Rate", "provider": "MANUAL", "base_currency": text(base_currency, 3),
-	                      "quote_currency": text(quote_currency, 3), "rate": str(value), "rate_date": rate_date,
+	reason = text(reason, 500)
+	doc = frappe.get_doc({"doctype": "TEX FX Rate", "provider": "MANUAL", "rate_type": "REFERENCE",
+	                      "base_currency": text(base_currency, 3), "quote_currency": text(quote_currency, 3),
+	                      "rate": str(value), "rate_date": rate_date, "property": property,
 	                      "fetched_at": frappe.utils.now_datetime(), "source_ref": frappe.session.user})
 	doc.insert(ignore_permissions=True)
-	audit("fx.manual_rate", reference_doctype="TEX FX Rate", reference_name=doc.name,
-	      new={"pair": f"{doc.base_currency}{doc.quote_currency}", "rate": str(rate), "date": rate_date})
+	audit("fx.manual_rate", reference_doctype="TEX FX Rate", reference_name=doc.name, property=property,
+	      new={"pair": f"{doc.base_currency}{doc.quote_currency}", "rate": str(rate), "date": rate_date,
+	           "property": property}, reason=reason or None)
 	return {"name": doc.name}

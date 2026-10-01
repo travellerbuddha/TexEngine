@@ -12,6 +12,9 @@ and ``<=``, so a row without the date looked "long past" to four jobs:
 * the payment-link job (every 5 min) expired a link without an expiry time.
 """
 
+import json
+from datetime import timedelta
+
 import frappe
 from frappe.utils import add_days, add_to_date, get_datetime, now_datetime, nowdate
 
@@ -130,6 +133,21 @@ class TestVersionLifecycle(TexTestCase):
 		self.assertEqual(status(v1), "Superseded")                            # an older version never comes back
 		self.assertIsNone(contracts.active_version_header(c["contract"], add_to_date(now_datetime(), seconds=1)))
 		self.assertIsNone(frappe.db.get_value("TEX Contract", c["contract"], "active_version"))
+
+	def test_a_version_without_a_start_is_on_sale_and_ends_now(self):
+		"""2D-2 0b: ``effective_from`` NULL (published before p56) is read as "now" by ``get_datetime``;
+		the version is on sale, not scheduled: the audit says so and it ends now."""
+		c = fx.create_contract(self.f, code="Y2-NULL")
+		v1 = c["version"]
+		frappe.db.sql("UPDATE `tabTEX Contract Version` SET effective_from = NULL WHERE name = %s", v1)
+		before = now_datetime()
+		contracts.withdraw(v1, reason="no start")
+		event = frappe.get_all("TEX Audit Event", filters={"action": "contract.withdraw", "reference_name": v1},
+		                       fields=["new_value"], order_by="creation desc", limit=1)[0]
+		self.assertFalse(json.loads(event.new_value)["scheduled"])
+		self.assertEqual(status(v1), "Withdrawn")
+		ended = window(v1)[1]
+		self.assertTrue(before - timedelta(seconds=2) <= ended <= now_datetime() + timedelta(seconds=2), ended)
 
 	def test_a_withdrawn_versions_quote_is_not_booked(self):
 		c = fx.create_contract(self.f, code="Y2-D")

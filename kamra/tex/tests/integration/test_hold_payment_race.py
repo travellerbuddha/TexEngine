@@ -1650,6 +1650,21 @@ class TestDeadlockRetries(HoldCase):
 		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests):
 			self.assertTrue(retried(fn), fn.__name__)
 
+	def test_the_quote_endpoints_run_again_on_a_deadlock(self):
+		"""2D-2 0c: ``_persist``'s share lock on the version can deadlock a quote with a withdraw (the
+		quote is not always the victim): the four quote endpoints, one transaction each, run again."""
+		from kamra.tex.api import crs
+
+		def retried(fn) -> bool:
+			while fn is not None:
+				if fn.__code__.co_qualname == "retry_on_deadlock.<locals>.wrapper":
+					return True
+				fn = getattr(fn, "__wrapped__", None)
+			return False
+
+		for fn in (public.quote, public.quote_rooms, crs.quote, crs.quote_rooms):
+			self.assertTrue(retried(fn), f"{fn.__module__}.{fn.__name__}")
+
 
 class TestPaymentsVerifiedByTheJob(HoldCase):
 	"""NEW-2 (audit 2E-2): a card payment whose guest never came back from the gateway is asked for by the

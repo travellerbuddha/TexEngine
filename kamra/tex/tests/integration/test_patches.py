@@ -118,6 +118,7 @@ BEHAVIOUR = {
 	"p66_cost_doctypes_system_only": "test_patches.TestP66CostDocTypesSystemOnly",
 	"p68_payment_checkout_lease": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p69_quote_version_index": "test_patches.TestP03Indexes.test_p69_creates_the_quote_version_index",
+	"p70_manual_fx_rate": "test_patches.TestCapabilityPatches",
 }
 
 
@@ -908,11 +909,12 @@ CAPABILITY_PATCHES = {"p08_confirm_unpaid_capability": ("reservation.confirm_unp
                       "p17_loyalty_admin": ("loyalty.edit",),
                       "p18_channel_distribution": ("channel.view", "channel.manage"),
                       "p23_system_status_alerts": ("system.monitor",),
-                      "p29_channel_binding": ("price.any_channel",)}
+                      "p29_channel_binding": ("price.any_channel",),
+                      "p70_manual_fx_rate": ("fx.manual_rate",)}
 
 
 class TestCapabilityPatches(PatchCase):
-	"""p08, p12, p17, p18, p23, p29 give a new capability to the seeded profiles that carry it
+	"""p08, p12, p17, p18, p23, p29, p70 give a new capability to the seeded profiles that carry it
 	(p29: also to custom profiles that publish contracts), once, at the upgrade that brings it. A
 	capability an administrator removed since is not given back by a forced re-run."""
 

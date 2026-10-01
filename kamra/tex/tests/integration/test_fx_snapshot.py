@@ -13,6 +13,7 @@ from frappe.utils import add_days, add_to_date, getdate, now_datetime
 
 from kamra.tex.commercial import revisions
 from kamra.tex.money import D
+from kamra.tex.security import scope
 from kamra.tex.services import booking, modification, quoting
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase, pick
@@ -177,3 +178,188 @@ class TestCrossCurrencySnapshot(TexTestCase):
 		self.assertEqual((rates[("EUR", "TRY")]["sell_rate"], rates[("USD", "TRY")]["sell_rate"]),
 		                 ("51.000000", "40.000000"))
 		self.assertEqual(rates[("USD", "TRY")]["mode"], "RECORDED")
+
+
+class TestOnePolicyPerPair(TexTestCase):
+	"""O-11 (2D-2, ADR-069): one live or scheduled FX policy per scope (a hotel, or every hotel) and pair.
+	A second one used to activate and be ignored: the older name won, silently."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("TEX FX Policy", {"from_currency": "EUR", "to_currency": "TRY"})
+		self.first = _live("TEX FX Policy", self.payload())
+
+	def payload(self, **kw) -> dict:
+		return {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "TRY", "mode": "PROVIDER_PERCENT",
+		        "provider": "TCMB", "rate_type": "FOREX_SELLING", "adjustment": 0, "max_age_days": 4, **kw}
+
+	def draft(self, **kw) -> str:
+		return frappe.get_doc({"doctype": "TEX FX Policy", **self.payload(**kw)}).insert(ignore_permissions=True).name
+
+	def test_a_second_policy_for_the_pair_is_refused(self):
+		second = self.draft(adjustment=3)
+		with self.assertRaisesRegex(frappe.ValidationError, f"already has a live FX policy for EUR→TRY \\({self.first}\\)"):
+			revisions.activate("TEX FX Policy", second, at="2020-01-01 00:00:00", backdate=True)
+		self.assertEqual(frappe.db.get_value("TEX FX Policy", second, "tex_status"), "Draft")
+
+	def test_a_scheduled_policy_counts_both_ways(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "already has a live FX policy"):
+			revisions.activate("TEX FX Policy", self.draft(adjustment=3), at=add_to_date(now_datetime(), days=10))
+		frappe.db.delete("TEX FX Policy", {"from_currency": "EUR", "to_currency": "TRY"})
+		later = self.draft()
+		revisions.activate("TEX FX Policy", later, at=add_to_date(now_datetime(), days=10))      # scheduled
+		with self.assertRaisesRegex(frappe.ValidationError, "already has a live FX policy"):
+			revisions.activate("TEX FX Policy", self.draft(adjustment=3), at="2020-01-01 00:00:00", backdate=True)
+
+	def test_a_revision_of_the_live_policy_activates(self):
+		draft = revisions.revise("TEX FX Policy", self.first)
+		frappe.db.set_value("TEX FX Policy", draft, "adjustment", 2)
+		revisions.activate("TEX FX Policy", draft)
+		self.assertEqual(frappe.db.get_value("TEX FX Policy", draft, "tex_status"), "Active")
+
+	def test_a_global_policy_lives_next_to_a_hotels_own_and_the_hotels_wins(self):
+		glob = _live("TEX FX Policy", self.payload(property=None, adjustment=5))
+		from kamra.tex.commercial import context
+
+		self.assertEqual(context.fx_policy("EUR", "TRY", fx.PROPERTY, now_datetime()).policy_id, self.first)
+		self.assertEqual(context.fx_policy("EUR", "TRY", "Another Hotel", now_datetime()).policy_id, glob)
+
+	def test_two_live_rows_are_never_ranked_by_name(self):
+		"""Forced in past the check (Desk, an import, an older site): the pair is unsellable."""
+		from kamra.tex.commercial import context
+		from kamra.tex.pricing.model import Unsellable
+
+		second = self.draft(adjustment=3)
+		frappe.db.set_value("TEX FX Policy", second, {"tex_status": "Active", "active_from": "2020-01-01 00:00:00"})
+		with self.assertRaises(Unsellable) as cm:
+			context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		self.assertEqual(cm.exception.code, "FX_POLICY_AMBIGUOUS")
+		self.assertIn(self.first, str(cm.exception))
+
+
+class TestManualBridge(TexTestCase):
+	"""O-12 (2D-2, ADR-069, D-4): over a bank holiday the provider's last rate is stale and pricing
+	stopped. A dated manual rate entered by a Revenue Manager or Finance user stands in for the provider's
+	reference rate, with the policy's margin on it, per hotel, audited, and recorded in the snapshot."""
+
+	def setUp(self):
+		super().setUp()
+		now = now_datetime()
+		self.today = getdate(now)
+		frappe.db.delete("TEX FX Rate", {"base_currency": "EUR", "quote_currency": "TRY"})
+		frappe.db.delete("TEX FX Policy", {"from_currency": "EUR", "to_currency": "TRY"})
+		fx.create_contract(self.f, code="FXB")
+		self.policy = _live("TEX FX Policy", {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "TRY",
+		                                      "mode": "PROVIDER_PERCENT", "provider": "TCMB",
+		                                      "rate_type": "FOREX_SELLING", "adjustment": 2, "max_age_days": 4})
+		self.tcmb = _rate("TCMB", "EUR", "TRY", 50, add_days(self.today, -6), add_to_date(now, days=-6))
+		self.yesterday = add_days(self.today, -1)
+		self.rm = self.hotel_user("fxb-rm@example.com", fx.PROPERTY, "Revenue Manager")
+
+	def hotel_user(self, email: str, property: str, profile: str) -> str:
+		fx.ensure_user(email, ["Revenue Manager"])            # the Desk role; the TEX profile decides
+		fx.ensure("TEX Access Grant", {"user": email, "property": property},
+		          {"user": email, "scope_level": "Hotel", "property": property, "permission_profile": profile})
+		scope.clear_cache()
+		return email
+
+	def as_user(self, user: str) -> None:
+		frappe.set_user(user)  # nosemgrep: frappe-setuser -- the test acts as each user in turn
+		scope.clear_cache()
+
+	def enter(self, rate="50.5", property=fx.PROPERTY, day=None) -> str:
+		from kamra.tex.api import policies
+
+		return policies.add_manual_rate("EUR", "TRY", rate, str(day or self.yesterday), property=property,
+		                                reason="bank holiday")["name"]
+
+	def sell(self) -> dict:
+		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+		                     rooms=[{"adults": 2}], market="DE", channel="DIRECT_WEB", currency="TRY")
+		offer = pick(res["properties"][0])
+		q = quoting.create_quote(offer["rooms"][0]["offer_key"])
+		self.assertTrue(q["ok"], q)
+		b = booking.create_booking(quote_ids=[q["quote_id"]], guest={
+			"first_name": "Deniz", "last_name": "Kaya", "email": "deniz.fxb@example.com"}, payment_method="Card",
+			confirm_without_payment=True, idempotency_key="o12-fx")
+		return json.loads(frappe.db.get_value("Reservation", b["rooms"][0]["reservation"], "tex_pricing_snapshot")) \
+			| {"_reservation": b["rooms"][0]["reservation"]}
+
+	def test_without_a_manual_rate_the_stale_provider_rate_stops_the_pair(self):
+		from kamra.tex.commercial import context
+		from kamra.tex.pricing.model import Unsellable
+
+		with self.assertRaises(Unsellable) as cm:
+			context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		self.assertEqual(cm.exception.code, "FX_RATE_STALE")
+
+	def test_a_revenue_manager_bridges_the_hotel_and_the_stay_is_sold_on_the_manual_rate(self):
+		self.as_user(self.rm)
+		name = self.enter()
+		event = frappe.get_all("TEX Audit Event", filters={"action": "fx.manual_rate", "reference_name": name},
+		                       fields=["property", "reason", "new_value"])[0]
+		self.assertEqual((event.property, event.reason), (fx.PROPERTY, "bank holiday"))
+		self.as_user("Administrator")
+		sold = self.sell()
+		rate = _rates(sold)[("EUR", "TRY")]
+		self.assertEqual((rate["sell_rate"], rate["mode"], rate["provider"], rate["provider_rate"],
+		                  rate["provider_rate_id"], rate["rate_date"], rate["adjustment"], rate["policy_id"],
+		                  rate["bridged_from"]),
+		                 ("51.510000", "PROVIDER_PERCENT", "MANUAL", "50.500000", name, str(self.yesterday),
+		                  "2.000000", self.policy, "TCMB"))
+		fx_step = next(s for s in sold["explanation"] if s["code"] == "FX")
+		self.assertEqual(fx_step["params"]["bridged_from"], "TCMB")
+		self.assertIn("(bridging TCMB)", fx_step["text"])
+
+	def test_the_sale_keeps_its_recorded_rate_when_a_correction_is_entered_later(self):
+		self.enter()
+		sold = self.sell()
+		self.enter(rate="60")                              # the same date entered again: the latest entry wins
+		p = modification.propose(sold["_reservation"], {}, basis="ORIGINAL_SALE_DATE")["proposed"]
+		self.assertEqual([_fixed(r) for r in p["fx_rates"]], sold["fx_rates"])
+		self.assertEqual(_rates(p)[("EUR", "TRY")]["sell_rate"], "51.510000")
+		self.assertEqual(_rates(p)[("EUR", "TRY")]["origin"], f"reservation:{sold['_reservation']}")
+		from kamra.tex.commercial import context
+
+		today = context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		self.assertEqual(today.sell_rate, D("61.200000"))                   # 60 × 1.02: today is the correction
+
+	def test_another_hotels_rate_does_not_bridge_this_hotel_and_its_user_cannot_enter_one_here(self):
+		from kamra.tex.commercial import context
+		from kamra.tex.pricing.model import Unsellable
+		from kamra.tex.tests.integration.test_security_regressions import OTHER, other_hotel_with_mock
+
+		other_hotel_with_mock()
+		self.enter(property=OTHER)                                           # platform administrator
+		with self.assertRaises(Unsellable) as cm:
+			context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		self.assertEqual(cm.exception.code, "FX_RATE_STALE")
+		theirs = self.hotel_user("fxb-other@example.com", OTHER, "Revenue Manager")
+		self.as_user(theirs)
+		with self.assertRaises(frappe.PermissionError):
+			self.enter(property=fx.PROPERTY)
+		with self.assertRaises(frappe.PermissionError):
+			self.enter(property=None)                                       # every hotel: platform administrators
+		self.as_user(self.rm)
+		from kamra.tex.api import policies
+
+		self.assertNotIn(OTHER, {r.property for r in policies.fx_rates("MANUAL")})   # a hotel never sees another's rates
+
+	def test_a_platform_administrator_enters_a_rate_for_every_hotel(self):
+		from kamra.tex.commercial import context
+
+		self.enter(property=None)
+		snap = context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		self.assertEqual((snap.sell_rate, snap.bridged_from), (D("51.510000"), "TCMB"))
+
+	def test_a_rate_older_than_the_policys_age_or_a_viewer_does_not_bridge_or_enter(self):
+		from kamra.tex.commercial import context
+		from kamra.tex.pricing.model import Unsellable
+
+		self.enter(day=add_days(self.today, -5))                             # older than max_age 4
+		with self.assertRaises(Unsellable):
+			context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		viewer = self.hotel_user("fxb-viewer@example.com", fx.PROPERTY, "Viewer")
+		self.as_user(viewer)
+		with self.assertRaises(frappe.PermissionError):
+			self.enter()

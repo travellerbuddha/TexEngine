@@ -11,6 +11,16 @@ from __future__ import annotations
 import frappe
 
 from kamra.tex.commercial import context, revisions
+from kamra.tex.pricing.model import Unsellable
+
+
+def _fx_policy_or_none(frm: str, to: str, property: str):
+	"""The pair's FX policy, for the seed's note. A pair with two live policies (O-11) has a policy: it
+	is not "missing", and the seed never stops for it."""
+	try:
+		return context.fx_policy(frm, to, property, frappe.utils.now_datetime())
+	except Unsellable:
+		return True
 
 
 def _key(r) -> tuple:
@@ -87,7 +97,7 @@ def seed(property: str, *, at=None, backdate: bool = False) -> str | None:
 		note = " ".join(x for x in (note, f"Fixed levies are now in {currency}.") if x)
 		others = sorted(c for c in sell_currencies(property) if c != currency)
 		if others:
-			missing = [c for c in others if not context.fx_policy(currency, c, property, frappe.utils.now_datetime())]
+			missing = [c for c in others if not _fx_policy_or_none(currency, c, property)]
 			frappe.log_error(title=f"TEX tax policy of {property}: fixed levies in {currency}",
 			                 message=f"Contracts also sell in {', '.join(others)}; levies are converted from "
 			                         f"{currency}. Missing FX policies: {', '.join(missing) or 'none'}.")

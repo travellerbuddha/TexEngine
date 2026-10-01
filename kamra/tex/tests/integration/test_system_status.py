@@ -194,6 +194,38 @@ class TestSystemStatusAccess(TexTestCase):
 				finally:
 					frappe.db.rollback(save_point="fx_week")
 
+	def test_a_manual_rate_turns_a_stale_provider_into_a_warning_and_never_shows_its_value(self):
+		"""O-12 (2D-2): a pair no provider rate serves, bridged for every hotel by a dated manual rate, is
+		WARN ``fx_bridged`` (pair, provider and ages only); a rate entered for another hotel does not
+		bridge this one."""
+		fx.ensure_currency("XTS", "¤")
+		fx.ensure_live("TEX FX Policy", {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "XTS"},
+		               {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "XTS",
+		                "mode": "PROVIDER", "provider": "ECB", "rate_type": "REFERENCE", "max_age_days": 4})
+		today = getdate(nowdate())
+
+		def issue():
+			c = check(system_api().status(property=fx.PROPERTY), "fx.rates")
+			return next((i for i in c["issues"] if i["params"].get("pair") == "EUR/XTS"), None)
+
+		def manual(property, rate="1.337"):
+			frappe.get_doc({"doctype": "TEX FX Rate", "provider": "MANUAL", "base_currency": "EUR",
+			                "quote_currency": "XTS", "rate_type": "REFERENCE", "rate": rate,
+			                "rate_date": today - timedelta(days=1), "fetched_at": now_datetime(),
+			                "property": property}).insert(ignore_permissions=True)
+
+		self.assertEqual(issue()["reason"], "fx_missing")
+		other = fx.ensure("Property", {"property_name": "FX Status Other"},
+		                  {"doctype": "Property", "property_name": "FX Status Other", "city": "Side",
+		                   "country": "Turkey", "currency": "EUR"})
+		manual(other)
+		self.assertEqual(issue()["reason"], "fx_missing")                    # another hotel's rate does not bridge this one
+		manual(None)
+		found = issue()
+		self.assertEqual((found["status"], found["reason"], found["params"]["days"], found["params"]["manual_days"]),
+		                 ("warn", "fx_bridged", None, 1))
+		self.assertNotIn("1.337", json.dumps(system_api().status(property=fx.PROPERTY), default=str))
+
 	def test_no_secret_appears_in_the_status_payload(self):
 		conn = pms_connection(fx.PROPERTY, "PMS with a key", api_key="tex-ops-api-key-3c9d", secret="tex-ops-secret-77ab")
 		frappe.db.set_value("TEX Integration Connection", conn, {"last_status": "Failed",

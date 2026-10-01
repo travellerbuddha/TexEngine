@@ -39,6 +39,22 @@ class FxPolicy:
 	rate_type: str = "FOREX_SELLING"
 	adjustment: Decimal | None = None
 	max_age_days: int = 4
+	property: str | None = None       # the hotel it is for; None: every hotel
+
+
+def choose_policy(policies: list[FxPolicy]) -> FxPolicy | None:
+	"""The policy that converts a pair (O-11, 2D-2): the hotel's own, else a global one. Two live in
+	the one scope that decides are never ranked by name (the older used to win silently): the pair
+	is unsellable (``FX_POLICY_AMBIGUOUS``) until one is archived."""
+	own = [p for p in policies if p.property]
+	pool = own or [p for p in policies if not p.property]
+	if len(pool) > 1:
+		ids = ", ".join(sorted(p.policy_id for p in pool))
+		pair = pool[0]
+		raise Unsellable("FX_POLICY_AMBIGUOUS", f"more than one FX policy is live for {pair.from_currency}→"
+		                 f"{pair.to_currency} in one scope ({ids})", from_currency=pair.from_currency,
+		                 to_currency=pair.to_currency)
+	return pool[0] if pool else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +66,8 @@ class ProviderRate:
 	rate: Decimal
 	rate_date: date
 	rate_type: str = "FOREX_SELLING"
+	property: str | None = None         # a manual rate: the hotel it was entered for; None: every hotel
+	entered_at: datetime | None = None  # a manual rate: when it was entered (the latest correction wins)
 
 
 def _latest(rates: list[ProviderRate], base: str, quote: str, on: date) -> ProviderRate | None:
@@ -84,8 +102,31 @@ def identity(currency: str, as_of: datetime | None = None) -> FxSnapshot:
 	return FxSnapshot(currency, currency, FxMode.IDENTITY, ONE, as_of=as_of)
 
 
+def manual_bridge(manual: tuple[ProviderRate, ...], frm: str, to: str, on: date,
+                  max_age_days: int) -> tuple[Decimal, str, date] | None:
+	"""A dated manual rate for the pair, direct or inverse, as of ``on`` and at most ``max_age_days``
+	old (O-12). Of several: the newest date, then the hotel's row before a global one, then the
+	latest entry (a correction), then the id: never a guess."""
+	cands = []
+	for r in manual:
+		if r.rate <= 0 or not (r.rate_date <= on and (on - r.rate_date).days <= max_age_days):
+			continue
+		if (r.base, r.quote) == (frm, to):
+			value, rid = D(r.rate), r.rate_id
+		elif (r.base, r.quote) == (to, frm):
+			value, rid = ONE / D(r.rate), f"1/{r.rate_id}"
+		else:
+			continue
+		cands.append(((r.rate_date, r.property is not None, r.entered_at or datetime.min, r.rate_id),
+		              (value, rid, r.rate_date)))
+	return max(cands, key=lambda c: c[0])[1] if cands else None
+
+
 def resolve_fx(frm: str, to: str, policy: FxPolicy | None, rates: tuple[ProviderRate, ...],
-               as_of: datetime) -> FxSnapshot:
+               as_of: datetime, *, manual: tuple[ProviderRate, ...] = ()) -> FxSnapshot:
+	"""``manual``: dated manual rates, used only when a provider mode finds the provider's rate stale or
+	missing. The manual rate stands in for the provider's REFERENCE rate: the policy's own mode and
+	margin apply on top (manual 50.5, +2 % → 51.51), and the snapshot says it was bridged."""
 	frm, to = frm.upper(), to.upper()
 	if frm == to:
 		return identity(frm, as_of)
@@ -100,10 +141,20 @@ def resolve_fx(frm: str, to: str, policy: FxPolicy | None, rates: tuple[Provider
 	if not policy.provider:
 		raise Unsellable("FX_PROVIDER_MISSING", f"FX policy {policy.policy_id} names no provider")
 	on = as_of.date()
-	raw, rate_id, rate_date = provider_rate(rates, policy.provider, policy.rate_type, frm, to, on)
-	if (on - rate_date).days > policy.max_age_days:
-		raise Unsellable("FX_RATE_STALE", f"latest {policy.provider} {frm}→{to} rate is from "
-		                 f"{rate_date.isoformat()}, older than {policy.max_age_days} days")
+	bridged_from = None
+	try:
+		raw, rate_id, rate_date = provider_rate(rates, policy.provider, policy.rate_type, frm, to, on)
+		if (on - rate_date).days > policy.max_age_days:
+			raise Unsellable("FX_RATE_STALE", f"latest {policy.provider} {frm}→{to} rate is from "
+			                 f"{rate_date.isoformat()}, older than {policy.max_age_days} days")
+	except Unsellable as e:
+		if e.code not in ("FX_RATE_STALE", "FX_RATE_MISSING"):
+			raise
+		found = manual_bridge(manual, frm, to, on, policy.max_age_days)
+		if found is None:
+			raise
+		raw, rate_id, rate_date = found
+		bridged_from = policy.provider
 	adj = D(policy.adjustment)
 	if policy.mode == FxMode.PROVIDER:
 		sell = raw
@@ -115,10 +166,10 @@ def resolve_fx(frm: str, to: str, policy: FxPolicy | None, rates: tuple[Provider
 		raise Unsellable("FX_MODE_UNSUPPORTED", f"unsupported FX mode {policy.mode}")
 	if sell <= 0:
 		raise Unsellable("FX_RATE_INVALID", "FX policy produces a non-positive rate")
-	return FxSnapshot(frm, to, policy.mode, quantize_rate(sell), provider=policy.provider,
+	return FxSnapshot(frm, to, policy.mode, quantize_rate(sell), provider="MANUAL" if bridged_from else policy.provider,
 	                  provider_rate=quantize_rate(raw), provider_rate_id=rate_id, rate_date=rate_date,
 	                  adjustment=adj if policy.mode != FxMode.PROVIDER else None,
-	                  policy_id=policy.policy_id, as_of=as_of)
+	                  policy_id=policy.policy_id, as_of=as_of, bridged_from=bridged_from)
 
 
 def convert(amount: Decimal, fx: FxSnapshot) -> Decimal:
@@ -147,6 +198,8 @@ def describe(snap: FxSnapshot) -> str:
 			text += f" {'+' if adj >= 0 else '−'}{display_pct(abs(adj), DB_PLACES)}%"
 		elif snap.mode == FxMode.PROVIDER_FIXED and adj is not None:
 			text += f" {'+' if adj >= 0 else '−'} {to_str_rate(abs(adj))}"
+		if snap.bridged_from:
+			text += f" (bridging {snap.bridged_from})"
 	if snap.policy_id:
 		text += f", policy {snap.policy_id}"
 	if snap.origin:
@@ -191,6 +244,7 @@ def explain_new(log: FxLog | None, explain) -> None:
 	for snap, use in log.take_unexplained():
 		rule = RuleRef("fx_policy", snap.policy_id, None, f"fx_policy:{snap.policy_id}",
 		               f"{snap.from_currency}→{snap.to_currency}") if snap.policy_id else None
+		extra = {"bridged_from": snap.bridged_from} if snap.bridged_from else {}
 		explain.add("fx", "FX", "{use}: 1 {from} = {rate} {to} ({source})", rule=rule, use=use,
 		            **{"from": snap.from_currency}, to=snap.to_currency, rate=to_str_rate(snap.sell_rate),
 		            mode=snap.mode.value, provider=snap.provider, provider_rate=to_str_rate(snap.provider_rate),
@@ -198,7 +252,7 @@ def explain_new(log: FxLog | None, explain) -> None:
 		            rate_date=snap.rate_date.isoformat() if snap.rate_date else None,
 		            adjustment=to_str_rate(snap.adjustment), policy=snap.policy_id,
 		            as_of=snap.as_of.isoformat() if snap.as_of else None, origin=snap.origin,
-		            source=describe(snap))
+		            source=describe(snap), **extra)
 
 
 def from_dict(d: dict, *, origin: str | None = None) -> FxSnapshot:
@@ -215,7 +269,7 @@ def from_dict(d: dict, *, origin: str | None = None) -> FxSnapshot:
 		provider_rate_id=d.get("provider_rate_id"), rate_date=day(d.get("rate_date")),
 		adjustment=dec(d.get("adjustment")), policy_id=d.get("policy_id"),
 		as_of=datetime.fromisoformat(d["as_of"]) if d.get("as_of") else None,
-		origin=origin if origin is not None else d.get("origin"))
+		origin=origin if origin is not None else d.get("origin"), bridged_from=d.get("bridged_from") or None)
 
 
 def recorded(snapshot: dict, *, extra_currency: dict[str, str] | None = None,

@@ -145,6 +145,32 @@ class TestFx(unittest.TestCase):
 		self.assertEqual(fx.convert(D("1080"), s), D("55080"))
 
 
+class TestChoosePolicy(unittest.TestCase):
+	"""O-11 (2D-2): of the policies live for one pair the hotel's own is taken before a global one;
+	two in one scope are never ranked by name (the older used to win silently)."""
+
+	def pol(self, pid, property=None):
+		return fx.FxPolicy(pid, "EUR", "TRY", FxMode.PROVIDER, provider="TCMB", property=property)
+
+	def test_none_one_and_the_hotels_before_a_global(self):
+		self.assertIsNone(fx.choose_policy([]))
+		self.assertEqual(fx.choose_policy([self.pol("G1")]).policy_id, "G1")
+		self.assertEqual(fx.choose_policy([self.pol("G1"), self.pol("H1", "HOTEL-A")]).policy_id, "H1")
+		self.assertEqual(fx.choose_policy([self.pol("H1", "HOTEL-A"), self.pol("G1")]).policy_id, "H1")
+
+	def test_two_in_one_scope_are_ambiguous_whatever_their_names(self):
+		for rows in ([self.pol("FXP-1", "HOTEL-A"), self.pol("FXP-2", "HOTEL-A")],
+		             [self.pol("FXP-2", "HOTEL-A"), self.pol("FXP-1", "HOTEL-A")],
+		             [self.pol("G1"), self.pol("G2")]):
+			with self.subTest(rows=[r.policy_id for r in rows]), self.assertRaises(Unsellable) as cm:
+				fx.choose_policy(rows)
+			self.assertEqual(cm.exception.code, "FX_POLICY_AMBIGUOUS")
+
+	def test_a_tie_among_globals_does_not_matter_when_the_hotel_has_its_own(self):
+		rows = [self.pol("G1"), self.pol("G2"), self.pol("H1", "HOTEL-A")]
+		self.assertEqual(fx.choose_policy(rows).policy_id, "H1")
+
+
 class TestTax(unittest.TestCase):
 	TR = (TaxRule("KDV", "KDV", rate=D("10"), applies_to=frozenset({"ACCOMMODATION"}), order=2),
 	      TaxRule("KV", "Konaklama Vergisi", rate=D("2"), applies_to=frozenset({"ACCOMMODATION"}), order=1),

@@ -9302,7 +9302,17 @@ the versions the roll superseded the state their contract's later publishes woul
   period pricing edited nights only is edited in place (selected rooms → ABSOLUTE); else one clone per part over first..last,
   weekdays = mask ∩ the period's, priority = max(period + 100, each same-kind period it overlaps + 1): never a tie. Rules and
   units as before. Validated before and after; an edit adding an ERROR is refused (savepoint). Response keys unchanged.
-- *FX fallback.* Part 2D-2 adds it here. ENGINE_VERSION, schema and the parity corpus are unchanged.
+- *One FX policy per pair (O-11).* A live or scheduled FX policy per scope (a hotel, or every hotel) and currency pair, checked
+  on Draft → Active under a locking read (`SERIAL_ACTIVATION`); a global policy lives next to a hotel's own. `fx.choose_policy`
+  takes the hotel's, else the global; two in one scope are `FX_POLICY_AMBIGUOUS`, never ranked by name.
+- *Manual rate bridge (O-12, D-4).* When a provider mode finds the provider's rate STALE or MISSING (a bank holiday), the newest
+  dated manual rate for the pair (direct or inverse, within `max_age_days`, entered by the sale time; ties: the hotel's row, the
+  latest entry, the id) stands in for the provider's REFERENCE rate; the policy's own mode and margin apply on top (manual 50.5,
+  +2 % → 51.51: never the final sell rate). A manual rate is entered per hotel (`fx.manual_rate` there; every hotel: platform
+  administrators), audited with a reason, and never used while the provider is fresh or by a MANUAL-mode policy. The snapshot
+  records provider "MANUAL", the row, its date and `bridged_from` (only when bridged: older records read as before); the status
+  page says WARN `fx_bridged` (pairs, ages, hotels). VND (Cam Ranh) uses a MANUAL-mode policy, outside this part.
+- ENGINE_VERSION, schema and the parity corpus are unchanged.
 
 ## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
 

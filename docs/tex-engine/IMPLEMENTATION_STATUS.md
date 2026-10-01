@@ -1547,3 +1547,9 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-23 **COMPLETE**: the CRM counts visits (the rooms of one booking are one stay and not a repeat guest) · unit `test_segments`, `test_crm_segments`.
 - O-26 **COMPLETE**: the abandoned list keeps and shows a phone only with SMS or WhatsApp consent (`phone_channels`), never as a `tel:` call link · `TestAbandonedPrivacy`.
 - O-33 **COMPLETE**: the CRM phone export keeps international numbers as they are (`lib/csv.ts`) · unit `csv-cell`.
+
+## 6D2. Audit Part 2D-2 (2026-10-01)
+
+- 2D-1 leftovers **COMPLETE**: withdraw reads only under its locks, a version without a start is on sale not scheduled, the quote endpoints retry a deadlock; the `channels.spec.ts:127` flake is a server-load network error, reproduced under CPU stress, not fixed (Kalanlar in PR) · `test_concurrency.TestConcurrentWithdrawLocks`, `test_null_dates`, `test_hold_payment_race.TestDeadlockRetries`.
+- O-11 **COMPLETE**: one live or scheduled FX policy per scope and pair (activation refused, `SERIAL_ACTIVATION`); `fx.choose_policy` raises `FX_POLICY_AMBIGUOUS` for two in one scope · `test_fx_snapshot.TestOnePolicyPerPair`, unit `TestChoosePolicy`.
+- O-12 **COMPLETE**: a dated manual rate bridges a stale or missing provider rate (policy margin on top), entered per hotel with `fx.manual_rate` (p70), audited, recorded as `bridged_from`, WARN `fx_bridged` · unit `TestManualBridge`/`TestFxBridged`, `test_fx_snapshot.TestManualBridge`, `test_system_status`, e2e `fx-manual-rate`.

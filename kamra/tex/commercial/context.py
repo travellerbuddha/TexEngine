@@ -172,11 +172,12 @@ def fx_policy(frm: str, to: str, property: str, at: datetime) -> fx_math.FxPolic
 	        if r.from_currency == frm and r.to_currency == to and (not r.property or r.property == property)]
 	if not rows:
 		return None
-	r = sorted(rows, key=lambda r: (0 if r.property else 1, r.name))[0]
-	return fx_math.FxPolicy(policy_id=r.name, from_currency=frm, to_currency=to, mode=FxMode(r.mode),
-	                        manual_rate=db_dec_or_none(r.manual_rate) if r.manual_rate else None,
-	                        provider=r.provider, rate_type=r.rate_type or "FOREX_SELLING",
-	                        adjustment=db_dec_or_none(r.adjustment), max_age_days=int(r.max_age_days or 4))
+	return fx_math.choose_policy([
+		fx_math.FxPolicy(policy_id=r.name, from_currency=frm, to_currency=to, mode=FxMode(r.mode),
+		                 manual_rate=db_dec_or_none(r.manual_rate) if r.manual_rate else None,
+		                 provider=r.provider, rate_type=r.rate_type or "FOREX_SELLING",
+		                 adjustment=db_dec_or_none(r.adjustment), max_age_days=int(r.max_age_days or 4),
+		                 property=r.property or None) for r in rows])
 
 
 def provider_rates(provider: str, at: datetime, days: int = 10) -> tuple[fx_math.ProviderRate, ...]:
@@ -192,15 +193,47 @@ def provider_rates(provider: str, at: datetime, days: int = 10) -> tuple[fx_math
 	                                  get_datetime(r.rate_date).date(), r.rate_type) for r in rows)
 
 
+def manual_rates(frm: str, to: str, property: str | None, at: datetime,
+                 max_age: int) -> tuple[fx_math.ProviderRate, ...]:
+	"""The dated manual rates (provider MANUAL) of the pair that bridge a stale or missing provider rate at
+	``at`` (O-12, ADR-069): this hotel's and the global ones (every hotel's with ``property`` None, for the
+	status page), dated in [at - max_age, at], and entered by
+	``at``. ``rate_date`` is required, so it has no NULL case; ``fetched_at`` NULL = entered before the
+	entry time was kept: always known (as for ``provider_rates``)."""
+	on = get_datetime(at)
+	rows = frappe.get_all("TEX FX Rate",
+	                      filters={"provider": "MANUAL", "base_currency": ("in", [frm, to]),
+	                               "quote_currency": ("in", [frm, to]),
+	                               "rate_date": ("between", [(on - timedelta(days=max_age)).date(), on.date()])},
+	                      or_filters=[["fetched_at", "is", "not set"], ["fetched_at", "<=", on]],
+	                      fields=["name", "base_currency", "quote_currency", "rate", "rate_date", "fetched_at",
+	                              "property"])
+	# the hotel in Python: a blank hotel is every hotel's (no NULL date filter)
+	return tuple(fx_math.ProviderRate(r.name, "MANUAL", r.base_currency, r.quote_currency, db_dec(r.rate),
+	                                  get_datetime(r.rate_date).date(), "REFERENCE", property=r.property or None,
+	                                  entered_at=get_datetime(r.fetched_at) if r.fetched_at else None)
+	             for r in rows if (property is None or not r.property or r.property == property)
+	             and {r.base_currency, r.quote_currency} == {frm, to})
+
+
 def fx_snapshot(frm: str, to: str, property: str, at: datetime) -> FxSnapshot:
-	"""Raises Unsellable when no policy/rate exists — conversion is never guessed."""
+	"""Raises Unsellable when no policy/rate exists — conversion is never guessed. A provider policy whose
+	rate is stale or missing (a bank holiday) is bridged by a dated manual rate, when one is entered."""
 	frm, to = frm.upper(), to.upper()
 	if frm == to:
 		return fx_math.identity(frm, get_datetime(at))
 	policy = fx_policy(frm, to, property, at)
 	rates = provider_rates(policy.provider, at, max(policy.max_age_days, 1) + 3) \
 		if policy and policy.mode != FxMode.MANUAL else ()
-	return fx_math.resolve_fx(frm, to, policy, rates, get_datetime(at))
+	try:
+		return fx_math.resolve_fx(frm, to, policy, rates, get_datetime(at))
+	except Unsellable as e:
+		if e.code not in ("FX_RATE_STALE", "FX_RATE_MISSING") or policy is None or policy.mode == FxMode.MANUAL:
+			raise
+		manual = manual_rates(frm, to, property, at, policy.max_age_days)
+		if not manual:
+			raise
+		return fx_math.resolve_fx(frm, to, policy, rates, get_datetime(at), manual=manual)
 
 
 # ─── taxes ───────────────────────────────────────────────────────────────

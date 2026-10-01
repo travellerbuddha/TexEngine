@@ -2,7 +2,7 @@
 // from the server (admin.profiles → capabilities); unknown codes land in "other".
 
 export const CAP_GROUPS: { id: string; caps: string[] }[] = [
-  { id: "pricing", caps: ["price.view", "price.view_cost", "price.override", "price.any_channel", "contract.edit", "contract.publish", "promotion.edit", "markup.edit", "fx.edit", "tax.edit"] },
+  { id: "pricing", caps: ["price.view", "price.view_cost", "price.override", "price.any_channel", "contract.edit", "contract.publish", "promotion.edit", "markup.edit", "fx.edit", "fx.manual_rate", "tax.edit"] },
   { id: "inventory", caps: ["inventory.edit", "restriction.edit"] },
   { id: "reservations", caps: ["reservation.view", "reservation.create", "reservation.modify", "reservation.cancel"] },
   { id: "payments", caps: ["payment.view", "payment.link", "payment.refund"] },

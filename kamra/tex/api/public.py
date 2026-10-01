@@ -260,6 +260,7 @@ def extras_availability(site: str, hotel: str, check_in: str, check_out: str, se
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None, session_id: str | None = None):
 	s = _site(site)
 	channel = _channel(s)
@@ -284,6 +285,7 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@retry_on_deadlock
 def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str | None = None):
 	"""The rooms of one booking quoted together (G-84, ADR-057): a coupon's minimum basket is the
 	whole booking's. ``rooms``: [{"offer_key", "extras"}] of one search, in room order. → {"ok",

@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Download, Plus } from "lucide-react"
 import { tex, TexApiError, useTexQuery, useTexMutation } from "../../../lib/api"
-import { useSession } from "../../../lib/session"
+import { useSession, type TexProperty } from "../../../lib/session"
 import { date as fmtDate, dateTime } from "../../../lib/format"
 import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
@@ -19,6 +19,9 @@ interface FxRate {
   rate: number | string
   rate_date: string
   fetched_at: string | null
+  /** A manual rate's hotel (blank = every hotel) and who entered it; provider rows have neither. */
+  property?: string | null
+  source_ref?: string | null
 }
 
 type Provider = "TCMB" | "ECB" | "MANUAL"
@@ -32,8 +35,13 @@ export default function FxRates() {
   const [days, setDays] = useState("14")
   const [base, setBase] = useState("")
   const q = useTexQuery<FxRate[]>("policies", "fx_rates", { provider, days: Number(days), base: base || undefined }, [provider, days, base])
-  // provider/manual rates are shared by every hotel: platform administrators only
-  const canEdit = boot.user.platform_admin
+  const { can } = useSession()
+  // provider rates are shared by every hotel: platform administrators fetch them. A manual rate is for one hotel
+  // (fx.manual_rate there) or for every hotel (platform administrators): D-4, O-12
+  const canFetch = boot.user.platform_admin
+  const manualHotels = boot.properties.filter((p) => can("fx.manual_rate", p.name))
+  const canManual = canFetch || manualHotels.length > 0
+  const hotelName = (name?: string | null) => (name ? (boot.properties.find((p) => p.name === name)?.property_name ?? name) : t("rates.fx.hotel_all"))
   const [fetching, setFetching] = useState<string | null>(null)
   const [fetchErr, setFetchErr] = useState<TexApiError>()
   const [fetchResult, setFetchResult] = useState<string>()
@@ -62,7 +70,7 @@ export default function FxRates() {
         title={t("rates.fx.title")}
         subtitle={t("rates.fx.subtitle")}
         actions={
-          canEdit && (
+          canFetch && (
             <>
               <Button variant="secondary" icon={<Download className="size-4" aria-hidden />} loading={fetching === "TCMB"} disabled={Boolean(fetching)} onClick={() => void fetchNow("TCMB")}>
                 {t("rates.fx.fetch", { provider: "TCMB" })}
@@ -115,20 +123,30 @@ export default function FxRates() {
                 rowKey={(r) => r.name}
                 dense
                 initialSort={{ key: "rate_date", dir: "desc" }}
-                empty={<EmptyState title={t("rates.fx.none")} description={canEdit && provider !== "MANUAL" ? t("rates.fx.none_hint") : undefined} />}
+                empty={<EmptyState title={t("rates.fx.none")} description={canFetch && provider !== "MANUAL" ? t("rates.fx.none_hint") : undefined} />}
                 columns={[
                   { key: "rate_date", header: t("rates.fx.date"), sortValue: (r) => r.rate_date, cell: (r) => <span className="whitespace-nowrap">{fmtDate(r.rate_date)}</span> },
                   { key: "pair", header: t("rates.f.pair"), sortValue: (r) => r.base_currency + r.quote_currency, cell: (r) => <span className="font-medium">{r.base_currency}/{r.quote_currency}</span> },
                   { key: "rate", header: t("rates.fx.rate"), align: "right", cell: (r) => <span className="font-medium tabular-nums">{decText(r.rate, 0)}</span> },
                   { key: "rate_type", header: t("rates.f.rate_type"), hideBelow: "md", cell: (r) => enumLabel(t, "rate_type", r.rate_type) },
                   { key: "fetched_at", header: t("rates.fx.fetched_at"), hideBelow: "lg", cell: (r) => (r.fetched_at ? dateTime(r.fetched_at) : "—") },
+                  ...(provider === "MANUAL"
+                    ? [
+                        { key: "property", header: t("rates.fx.hotel"), hideBelow: "md" as const, cell: (r: FxRate) => hotelName(r.property) },
+                        { key: "source_ref", header: t("rates.fx.entered_by"), hideBelow: "lg" as const, cell: (r: FxRate) => r.source_ref ?? "—" },
+                      ]
+                    : []),
                 ]}
               />
             )}
           </Card>
         </div>
         <div className="self-start">
-          {canEdit ? <ManualRate onSaved={() => (provider === "MANUAL" ? q.reload() : setProvider("MANUAL"))} /> : <Notice tone="info">{t("rates.fx.read_only")}</Notice>}
+          {canManual ? (
+            <ManualRate hotels={manualHotels} everyHotel={canFetch} onSaved={() => (provider === "MANUAL" ? q.reload() : setProvider("MANUAL"))} />
+          ) : (
+            <Notice tone="info">{t("rates.fx.read_only")}</Notice>
+          )}
         </div>
       </div>
     </>
@@ -148,11 +166,15 @@ function summarise(r: unknown, t: (k: string, p?: Record<string, string | number
   return String(r ?? "")
 }
 
-function ManualRate({ onSaved }: { onSaved: () => void }) {
+function ManualRate({ hotels, everyHotel, onSaved }: { hotels: TexProperty[]; everyHotel: boolean; onSaved: () => void }) {
   const { t } = useTexT()
   const toast = useToast()
   const { boot } = useSession()
-  const add = useTexMutation<{ base_currency: string; quote_currency: string; rate: string; rate_date: string }>("policies", "add_manual_rate")
+  const add = useTexMutation<{ base_currency: string; quote_currency: string; rate: string; rate_date: string; property?: string; reason?: string }>("policies", "add_manual_rate")
+  const { property: selected } = useSession()
+  // the hotel the rate is for: the selected one when the caller may enter rates there; "" = every hotel (platform administrators)
+  const [hotel, setHotel] = useState<string>(() => (hotels.some((h) => h.name === selected?.name) ? (selected?.name ?? "") : (hotels[0]?.name ?? "")))
+  const [reason, setReason] = useState("")
   // rate date null = the site's today (G-91), which follows the site's midnight until one is picked
   const today = useSiteToday()
   const [f, setF] = useState<{ base_currency: string; quote_currency: string; rate: string; rate_date: string | null }>({ base_currency: "EUR", quote_currency: "TRY", rate: "", rate_date: null })
@@ -169,9 +191,10 @@ function ManualRate({ onSaved }: { onSaved: () => void }) {
             e.preventDefault()
             if (!ok) return
             try {
-              await add.run({ ...f, rate_date: rateDate })
+              await add.run({ ...f, rate_date: rateDate, property: hotel || undefined, reason: reason.trim() || undefined })
               toast.success(t("rates.fx.manual_saved", { pair: `${f.base_currency}/${f.quote_currency}` }))
               setF((x) => ({ ...x, rate: "" }))
+              setReason("")
               onSaved()
             } catch {
               /* inline */
@@ -191,6 +214,16 @@ function ManualRate({ onSaved }: { onSaved: () => void }) {
           </Field>
           <Field label={t("rates.fx.date")} required>
             <Input type="date" value={rateDate} onChange={(e) => setF({ ...f, rate_date: e.target.value })} />
+          </Field>
+          <Field label={t("rates.fx.hotel")} required>
+            <Select
+              value={hotel}
+              onChange={(e) => setHotel(e.target.value)}
+              options={[...(everyHotel ? [{ value: "", label: t("rates.fx.hotel_all") }] : []), ...hotels.map((h) => ({ value: h.name, label: h.property_name }))]}
+            />
+          </Field>
+          <Field label={t("rates.fx.reason")}>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
           </Field>
           <InlineError error={add.error} />
           <Button type="submit" loading={add.pending} disabled={!ok} icon={<Plus className="size-4" aria-hidden />}>

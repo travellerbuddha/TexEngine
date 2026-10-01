@@ -60,6 +60,7 @@ def search(check_in: str, check_out: str, rooms, market: str, channel: str = "CA
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def quote(offer_key: str, extras=None, promo_codes=None):
 	offer = quoting.verify(offer_key)
 	scope.require("reservation.create", offer["property"])
@@ -69,6 +70,7 @@ def quote(offer_key: str, extras=None, promo_codes=None):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def quote_rooms(rooms, promo_codes=None):
 	"""The rooms of one booking quoted together: a minimum basket is the whole booking's (G-84,
 	ADR-057). ``rooms``: [{"offer_key", "extras"}] of one search, in room order."""
