@@ -9303,3 +9303,32 @@ the versions the roll superseded the state their contract's later publishes woul
   weekdays = mask ∩ the period's, priority = max(period + 100, each same-kind period it overlaps + 1): never a tie. Rules and
   units as before. Validated before and after; an edit adding an ERROR is refused (savepoint). Response keys unchanged.
 - *FX fallback.* Part 2D-2 adds it here. ENGINE_VERSION, schema and the parity corpus are unchanged.
+
+## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
+
+Written 2026-10-01 (Y-11, O-22, O-21). Before, the daily job took `min(lot, balance)` from every Available earning past its
+`expires_on`, whenever it ran: spent points were tied to no lot, so a spent lot's expiry took a later lot's points (Y-11:
+A = 100 spent, B = 80 matures later: B lost 80), or the points of a lot that expires years later (O-22), and a change to a
+spent stay topped the balance up and earned the whole new amount again (O-21).
+
+1. *Lot.* A lot is a matured earning (an Earn row that is Available, Used or Expired) or a positive Adjust. A use never
+   names a lot: each lot's remainder is derived from the ledger by one pure function (`kamra/tex/crm/lots.py`, no frappe,
+   like `pricing`) and is never stored. Pending, Reversed and any other non-final row is ignored.
+2. *Order.* Burns, negative Adjusts and Expire rows (the debits) are spent by the open lots, the one that expires first
+   first, then by availability date (none first), creation and name. A lot without an expiry is used last and never
+   expires (NULL: ADR-064); an Adjust lot never expires. With a fixed expiry period this is FIFO.
+3. *Closing.* On its date a lot closes once: an Expire row ("expiry of <lot>") takes what is left of it (no row when
+   nothing is), and the lot's status becomes Expired. A closed lot has absorbed exactly its own points, so later debits are
+   spent by the open lots only; a lot the old job marked ("expiry of <lot>" and still Available) is closed the same way.
+   Points that come back after their lot closed (`excess`) expire too, so they are not a free balance.
+4. *(Part 2H-2, D-16: the use of points that a cancellation gives back.)*
+5. *Reversal.* A reversed earning takes its lot and that lot's Expire rows with it. A stay that did not happen (cancelled,
+   no-show) never takes the balance below zero: the shortfall is topped up by an Adjust, as before.
+6. *Changed stays.* The new lot takes the old one's place in its state (a stay that had matured stays mature) with the dates
+   computed as for any earning. The change is exact (no floor): what was spent is the balance's, which may be below zero
+   until later earnings close the debt (`lots.plan` spends a debt first); a redemption and a negative adjustment still
+   refuse what the balance cannot cover. The tier is read from the lifetime points without the stay's own earnings.
+7. *Settling.* The daily job settles each guest and program under the guest's lock (Guest, then its ledger rows) in one
+   savepointed step, committed outside tests; a redemption and a negative adjustment settle first, so points past their
+   expiry are never spent before the job has run. p61 closes the lots that expired before this model (those the old job
+   marked, and those spent in full) and never takes a point; points the old job already took are not given back.

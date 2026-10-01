@@ -232,12 +232,26 @@ export default function Abandoned() {
                               </a>
                             </p>
                           )}
-                          {r.phone && (
-                            <p className="flex items-center gap-1">
+                          {r.phone && r.phone_channels.length > 0 && (
+                            // a phone for the channels the guest agreed to, never a call: TEX records no consent to be called (O-26)
+                            <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                               <Phone className="size-3 text-zinc-400" aria-hidden />
-                              <a className="text-tex-700 hover:underline" href={`tel:${r.phone}`}>
-                                {r.phone}
-                              </a>
+                              <span>{r.phone}</span>
+                              {r.phone_channels.includes("SMS") && (
+                                <a className="text-tex-700 hover:underline" href={`sms:${r.phone}`}>
+                                  {t("crm.channel.sms")}
+                                </a>
+                              )}
+                              {r.phone_channels.includes("WhatsApp") && /^\+\d[\d ().-]*$/.test(r.phone) && (
+                                <a
+                                  className="text-tex-700 hover:underline"
+                                  href={`https://wa.me/${r.phone.replace(/\D/g, "")}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {t("crm.channel.whatsapp")}
+                                </a>
+                              )}
                             </p>
                           )}
                           {r.guest && (

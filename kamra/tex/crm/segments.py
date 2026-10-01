@@ -181,6 +181,7 @@ class StayFact:
 	cancelled_on: date | None = None
 	amount: Decimal = Decimal(0)
 	currency: str | None = None
+	visit: str | None = None              # the booking it belongs to: the rooms of one booking are one visit (O-23)
 
 
 def _day(v) -> date | None:
@@ -215,20 +216,24 @@ def derive_facts(guest: dict, stays: list[StayFact], abandoned: list, today: dat
 	"""Segment facts of one guest, from that tenant's reservations and abandoned bookings."""
 	done = [s for s in stays if s.status not in NOT_STAYED | NOT_SOLD and s.check_out <= today]
 	ltv: dict[str, Decimal] = {}
-	count: dict[str, int] = {}
-	for s in done:
+	visits: dict[str, set] = {}
+	every: set = set()
+	for i, s in enumerate(done):
+		# a stay is a visit: the reservations (rooms) of one booking are one; one without a booking counts alone
+		visit = s.visit if s.visit is not None else ("_", i)
+		every.add(visit)
 		ccy = (s.currency or "").upper()
 		if ccy:
 			ltv[ccy] = ltv.get(ccy, Decimal(0)) + Decimal(s.amount or 0)
-			count[ccy] = count.get(ccy, 0) + 1
-	main = min(count, key=lambda c: (-count[c], c)) if count else None
+			visits.setdefault(ccy, set()).add(visit)
+	main = min(visits, key=lambda c: (-len(visits[c]), c)) if visits else None
 	sold = [s for s in stays if s.status not in NOT_SOLD and s.sold_on]
 	latest = max(sold, key=lambda s: (s.sold_on, s.check_in)) if sold else None
 	cancelled = [s for s in stays if s.status == "Cancelled"]
 	cancel_days = [s.cancelled_on for s in cancelled if s.cancelled_on]
 	gave_up = [d for d in (_day(a) for a in abandoned) if d]
 	return {
-		"stays": len(done), "lifetime_value": ltv, "lifetime_currency": main,
+		"stays": len(every), "lifetime_value": ltv, "lifetime_currency": main,
 		"last_stay_days_ago": (today - max(s.check_out for s in done)).days if done else None,
 		"has_upcoming_stay": any(s.status in UPCOMING and s.check_in >= today for s in stays),
 		"has_children": any(s.children > 0 for s in stays if s.status not in NOT_STAYED | NOT_SOLD),

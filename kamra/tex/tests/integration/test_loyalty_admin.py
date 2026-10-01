@@ -3,10 +3,11 @@ validated, by the hotels they belong to only; earnings are never rewritten by a 
 change; redemption honours its cap and blackouts; a guest's summary shows the viewer's
 programs only."""
 
+from types import MappingProxyType
 from unittest import mock
 
 import frappe
-from frappe.utils import add_days
+from frappe.utils import add_days, add_months, nowdate
 
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import loyalty as loyalty_api
@@ -258,3 +259,283 @@ class TestExtraEarning(LoyaltyCase):
 		points, lines = loyalty.points_for(prog, res, 1)
 		self.assertEqual(points, 0)
 		self.assertIn("not a whole number", lines[0]["note"])
+
+
+class TestExpiry(LoyaltyCase):
+	"""Y-11 and O-22 (audit Part 2H-1, ADR-071): points are used first-to-expire first, and an expiry takes
+	only what is left of its lot. The job used to take ``min(lot, balance)`` whenever it ran: a spent lot
+	took a later lot's points, or the points of a lot that expires years later."""
+
+	def setUp(self):
+		super().setUp()
+		self.club = self.create()
+		self.guest = frappe.get_doc({"doctype": "Guest", "first_name": "Lots", "last_name": "Test",
+		                             "email": "h1-lots@example.com"}).insert(ignore_permissions=True).name
+
+	def row(self, entry_type, points, status="Available", expires_on=None, available_on=None, reason="h1") -> str:
+		return frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": self.club, "guest": self.guest,
+		                       "entry_type": entry_type, "points": points, "status": status, "property": fx.PROPERTY,
+		                       "expires_on": expires_on, "available_on": available_on, "reason": reason}
+		                      ).insert(ignore_permissions=True).name
+
+	def available(self) -> int:
+		return loyalty.balances(self.guest, self.club)["available"]
+
+	def expire_rows(self) -> list[int]:
+		return frappe.get_all("TEX Loyalty Ledger", filters={"guest": self.guest, "entry_type": "Expire"},
+		                      pluck="points", order_by="creation asc, name asc")
+
+	def test_y11_a_lot_spent_in_full_takes_nothing_from_a_later_lot(self):
+		past, later = add_days(nowdate(), -30), add_days(nowdate(), 400)
+		a = self.row("Earn", 100, expires_on=past, available_on=add_days(nowdate(), -60))
+		self.row("Burn", -100, "Used")
+		loyalty.mature_and_expire()                                       # A is spent: nothing to take
+		self.row("Earn", 80, "Pending", expires_on=later, available_on=add_days(nowdate(), -1))
+		loyalty.mature_and_expire()                                       # B matures
+		self.assertEqual(self.available(), 80)
+		self.assertEqual(self.expire_rows(), [])
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", a, "status"), "Expired")
+
+	def test_o22_spent_points_come_from_the_lot_that_expires_first(self):
+		self.row("Earn", 100, expires_on=add_days(nowdate(), -30), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 100, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		self.row("Burn", -100, "Used")
+		loyalty.mature_and_expire()
+		self.assertEqual(self.available(), 100)
+		self.assertEqual(self.expire_rows(), [])
+
+	def test_a_partly_spent_lot_expires_what_is_left_and_only_once(self):
+		a = self.row("Earn", 100, expires_on=add_days(nowdate(), -30), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 100, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		self.row("Burn", -60, "Used")
+		out = loyalty.mature_and_expire()
+		self.assertEqual((self.available(), self.expire_rows(), out["expired_points"]), (100, [-40], 40))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", a, "status"), "Expired")
+		self.assertEqual(frappe.db.get_value("Guest", self.guest, "tex_loyalty_points"), 100)
+		again = loyalty.mature_and_expire()                               # a closed lot is not looked at again
+		self.assertEqual((self.available(), self.expire_rows(), again["expired_points"]), (100, [-40], 0))
+
+	def test_points_past_their_expiry_cannot_be_spent_before_the_daily_job_runs(self):
+		at_hotel = guest_books(session="h1-expired", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		self.guest = frappe.db.get_value("TEX Booking", at_hotel["booking"], "booker_guest")
+		self.row("Earn", 100, expires_on=add_days(nowdate(), -1), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 20, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):
+			loyalty.redeem(self.guest, at_hotel["booking"], 50, idempotency_key="h1-exp-1")
+		self.assertEqual((self.available(), self.expire_rows()), (20, [-100]))
+
+	def test_a_negative_adjustment_cannot_take_points_that_expired(self):
+		self.row("Earn", 100, expires_on=add_days(nowdate(), -1), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 20, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- an agent with crm.edit
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot go negative"):
+			loyalty.adjust(self.guest, self.club, -50, "correction", property=fx.PROPERTY)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertEqual((self.available(), self.expire_rows()), (20, [-100]))
+
+
+class TestModification(LoyaltyCase):
+	"""O-21 (audit Part 2H-1, ADR-071): changing a stay whose points were spent minted them again. The change
+	reversed the earning and topped the balance up to zero with an Adjust (the points that were spent were
+	"not clawed back"), then earned the whole new amount: 842 spent, a +1 change: 843 points. The stay's own
+	points also counted for its tier. Now the change is exact: the old earning goes, the new one comes, the
+	difference is the balance's; and the tier is read without the stay's own points."""
+
+	CLUB_1 = MappingProxyType({"earn_rules": [{"basis": "MONEY", "rate": "1"}]})      # 842.50 earns 842
+
+	def available(self, guest: str, club: str) -> int:
+		return loyalty.balances(guest, club)["available"]
+
+	def set_total(self, res: str, amount) -> None:
+		"""The stay's total changes (its fingerprint), then the daily job runs, as it does the next night."""
+		frappe.db.set_value("Reservation", res, "tex_total_amount", D(amount))
+		doc = frappe.get_doc("Reservation", res)
+		doc.save(ignore_permissions=True)
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+
+	def spent_stay(self, club: str, session: str) -> tuple[dict, str, str, dict]:
+		"""A stay that earned 842 (matured), all of it spent on another booking of the guest (84.20 of 842.50)."""
+		b, guest = self.paid_stay(session)
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest, club), 842)
+		at_hotel = guest_books(session=f"{session}-hotel", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		# the booking the points are spent on earns points of its own: not part of this scenario
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": at_hotel["booking"], "entry_type": "Earn"})
+		frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		self.assertEqual(loyalty.redeem(guest, at_hotel["booking"], 842, idempotency_key=f"{session}-1")["value"], "84.20")
+		self.assertEqual(self.available(guest, club), 0)
+		return b, guest, res, at_hotel
+
+	def test_changing_a_spent_stay_does_not_mint_its_points_again(self):
+		club = self.create(**self.CLUB_1)
+		_b, guest, res, _hotel = self.spent_stay(club, "o21-a")
+		self.set_total(res, "843.50")                                             # +1
+		self.assertEqual(self.available(guest, club), 1)                          # 843 earned now, 842 were spent
+		self.assertFalse(frappe.db.exists("TEX Loyalty Ledger", {"guest": guest, "entry_type": "Adjust"}))
+		lot = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn",
+		                                                    "status": ("!=", "Reversed")}, fields=["points", "status"])
+		self.assertEqual([(r.points, r.status) for r in lot], [(843, "Available")])    # a matured stay's new lot is mature
+
+	def test_repeated_changes_never_add_up_to_more_than_the_stay_is_worth(self):
+		club = self.create(**self.CLUB_1)
+		_b, guest, res, hotel = self.spent_stay(club, "o21-b")
+		for total, left in (("843.50", 1), ("844.50", 2), ("845.50", 3), ("846.50", 4)):
+			self.set_total(res, total)
+			self.assertEqual(self.available(guest, club), left, total)
+		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):
+			loyalty.redeem(guest, hotel["booking"], 50, idempotency_key="o21-b-2")
+
+	def test_a_stay_changed_down_and_up_again_is_worth_what_it_is_now(self):
+		club = self.create(**self.CLUB_1)
+		_b, guest, res, _hotel = self.spent_stay(club, "o21-c")
+		self.set_total(res, "843.50")
+		self.assertEqual(self.available(guest, club), 1)
+		self.set_total(res, "800.00")                                             # 800 earned, 842 spent: a debt
+		self.assertEqual(self.available(guest, club), -42)
+		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_loyalty_points"), -42)
+		self.set_total(res, "843.50")
+		self.assertEqual(self.available(guest, club), 1)
+
+	def test_a_stay_does_not_raise_its_own_tier(self):
+		club = self.create(earn_rules=[{"basis": "MONEY", "rate": "1"}],
+		                   tiers=[{"tier_name": "Silver", "min_points": 0, "earn_multiplier": "1"},
+		                          {"tier_name": "Gold", "min_points": 800, "earn_multiplier": "2"}])
+		b, guest = self.paid_stay("o21-d")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest, club), 842)                        # earned as Silver (0 before it)
+		self.set_total(res, "843.50")                                             # its own 842 made the guest Gold
+		self.assertEqual(self.available(guest, club), 843)                        # still Silver: 1687 as Gold
+
+	def test_changing_a_stay_whose_points_expired_takes_the_expiry_with_the_earning(self):
+		club = self.create(**self.CLUB_1)
+		b, guest = self.paid_stay("o21-e")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		earn = frappe.db.get_value("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn"})
+		frappe.db.set_value("TEX Loyalty Ledger", earn, "expires_on", add_days(nowdate(), -1))
+		loyalty.mature_and_expire()
+		self.assertEqual((self.available(guest, club), frappe.db.get_value("TEX Loyalty Ledger", earn, "status")),
+		                 (0, "Expired"))
+		self.set_total(res, "843.50")
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", earn, "status"), "Reversed")
+		expiry = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Expire"},
+		                        fields=["points", "status"])
+		self.assertEqual([(r.points, r.status) for r in expiry], [(-842, "Reversed")])    # taken away with its lot
+		self.assertEqual(self.available(guest, club), 843)
+
+
+class TestEarnMatrix(LoyaltyCase):
+	"""G-66 (audit Part 2H-1): every earn basis, with and without a tier multiplier, on one stay (842.50 EUR,
+	3 nights, DBL, SPA x2), and the flows around it: tier progression, the pending period, expiry, the
+	minimum, the currency, a lack of points. They fix today's behaviour; none is a fix."""
+
+	def setUp(self):
+		super().setUp()
+		self.spa = fx.ensure_live("TEX Extra", {"property": fx.PROPERTY, "extra_code": "SPA"},
+		                          {"property": fx.PROPERTY, "extra_code": "SPA", "extra_name": "Spa treatment",
+		                           "category": "Spa", "pricing_mode": "UNIT", "currency": "EUR", "amount": 50,
+		                           "tax_category": "SERVICE"})
+
+	def stay(self) -> frappe._dict:
+		return frappe._dict(check_in_date=fx.d(6, 10), check_out_date=fx.d(6, 13), tex_currency="EUR", room_type="DBL",
+		                    tex_total_amount=D("842.50"), tex_pricing_snapshot=frappe.as_json(
+			                    {"extras": [{"code": "SPA", "quantity": "2.000000", "ok": True}]}))
+
+	def program(self, *rules, currency="EUR", blackouts=()) -> frappe._dict:
+		bare = {"date_from": None, "date_to": None, "room_type": None, "extra": None}
+		return frappe._dict(currency=currency, blackouts=list(blackouts),
+		                    earn_rules=[frappe._dict({**bare, **r}) for r in rules])
+
+	def test_each_basis_with_and_without_a_multiplier(self):
+		for rules, plain, boosted in (
+			([{"basis": "MONEY", "rate": "1"}], 842, 1263),
+			([{"basis": "NIGHTS", "rate": "10"}], 30, 45),
+			([{"basis": "STAY", "rate": "25"}], 25, 37),
+			([{"basis": "ROOM", "rate": "5", "room_type": "DBL"}], 15, 22),
+			([{"basis": "ROOM", "rate": "5", "room_type": "SGL"}], 0, 0),
+			([{"basis": "EXTRA", "rate": "5", "extra": self.spa}], 10, 15),
+			([{"basis": "MONEY", "rate": "0.5"}], 421, None),
+			([{"basis": "MONEY", "rate": "1"}, {"basis": "STAY", "rate": "25"}], 867, 1301),
+		):
+			for multiplier, expected in (("1", plain), ("1.5", boosted)):
+				if expected is None:
+					continue
+				with self.subTest(rules=[(r["basis"], r["rate"]) for r in rules], multiplier=multiplier):
+					self.assertEqual(loyalty.points_for(self.program(*rules), self.stay(), multiplier)[0], expected)
+
+	def test_a_stay_in_another_currency_than_the_program_earns_nothing_on_its_amount(self):
+		points, lines = loyalty.points_for(self.program({"basis": "MONEY", "rate": "1"}, currency="TRY"), self.stay(), 1)
+		self.assertEqual(points, 0)
+		self.assertIn("currency EUR ≠ program TRY", lines[0]["note"])
+
+	def test_a_rule_that_starts_after_check_in_earns_nothing(self):
+		prog = self.program({"basis": "MONEY", "rate": "1"})
+		prog.earn_rules[0].date_from = fx.d(6, 11)
+		self.assertEqual(loyalty.points_for(prog, self.stay(), 1)[0], 0)
+		prog.earn_rules[0].date_from, prog.earn_rules[0].date_to = fx.d(6, 1), fx.d(6, 10)       # up to check-in: counts
+		self.assertEqual(loyalty.points_for(prog, self.stay(), 1)[0], 842)
+
+	def test_an_earning_blackout_on_the_check_in_day_earns_nothing_and_a_redemption_one_does_not_matter(self):
+		day = frappe._dict(date_from=fx.d(6, 10), date_to=fx.d(6, 10))
+		stay_rule = {"basis": "STAY", "rate": "25"}
+		points, lines = loyalty.points_for(self.program(stay_rule, blackouts=[frappe._dict(**day, applies_to="Earning")]),
+		                                   self.stay(), 1)
+		self.assertEqual((points, lines), (0, [{"rule": "BLACKOUT", "points": 0}]))
+		self.assertEqual(loyalty.points_for(self.program(stay_rule, blackouts=[frappe._dict(**day, applies_to="Redemption")]),
+		                                    self.stay(), 1)[0], 25)
+
+	def test_the_tier_is_the_highest_one_reached(self):
+		prog = frappe._dict(tiers=[frappe._dict(tier_name="Gold", min_points=1000),
+		                           frappe._dict(tier_name="Silver", min_points=0)])
+		self.assertEqual((loyalty.tier_of(prog, 999).tier_name, loyalty.tier_of(prog, 1000).tier_name), ("Silver", "Gold"))
+
+	def test_the_second_stay_earns_at_the_tier_the_first_made(self):
+		club = self.create(tiers=[{"tier_name": "Silver", "min_points": 0, "earn_multiplier": "1"},
+		                          {"tier_name": "Gold", "min_points": 800, "earn_multiplier": "1.5"}])
+		first, guest = self.paid_stay("g66-tier-1")
+		loyalty.mature_and_expire(today=fx.d(6, 13))                       # 867 earned: Gold from here
+		second, _same = self.paid_stay("g66-tier-2")                        # the same guest books and pays again
+		earned = {r: frappe.db.get_value("TEX Loyalty Ledger", {"reservation": r, "entry_type": "Earn"}, "points")
+		          for r in (first["rooms"][0]["reservation"], second["rooms"][0]["reservation"])}
+		self.assertEqual(list(earned.values()), [867, 1301])
+		self.assertEqual(loyalty.balances(guest, club)["lifetime_earned"], 867)
+
+	def test_points_wait_for_the_pending_period_and_expire_after_their_months(self):
+		club = self.create(pending_days=2, expiry_months=24)
+		b, guest = self.paid_stay("g66-wait")
+		earn = frappe.db.get_value("TEX Loyalty Ledger", {"guest": guest, "entry_type": "Earn"}, "name")
+		loyalty.mature_and_expire(today=add_days(fx.d(6, 13), 1))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", earn, "status"), "Pending")      # check-out + 1
+		loyalty.mature_and_expire(today=add_days(fx.d(6, 13), 2))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", earn, "status"), "Available")    # check-out + 2
+		available_on, expires_on = frappe.db.get_value("TEX Loyalty Ledger", earn, ["available_on", "expires_on"])
+		self.assertEqual(available_on, add_days(fx.d(6, 13), 2))
+		self.assertEqual(expires_on, add_months(available_on, 24))
+		self.assertEqual(loyalty.balances(guest, club)["available"], 867)
+		self.assertTrue(b["booking"])
+
+	def test_a_program_without_expiry_months_gives_points_no_expiry_date(self):
+		self.create(expiry_months=0)
+		_b, guest = self.paid_stay("g66-never")
+		earn = frappe.db.get_value("TEX Loyalty Ledger", {"guest": guest, "entry_type": "Earn"}, "name")
+		self.assertIsNone(frappe.db.get_value("TEX Loyalty Ledger", earn, "expires_on"))
+
+	def test_redemption_asks_for_the_minimum_the_currency_and_the_points(self):
+		club = self.create()
+		b, guest = self.paid_stay("g66-redeem")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		with self.assertRaisesRegex(frappe.ValidationError, "At least 50 points"):
+			loyalty.redeem(guest, b["booking"], 49, idempotency_key="g66-1")
+		self.assertEqual(loyalty.balances(guest, club)["available"], 867)
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": club, "guest": guest, "entry_type": "Burn",
+		                "points": -850, "status": "Used", "reason": "spent"}).insert(ignore_permissions=True)
+		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):    # 17 left
+			loyalty.redeem(guest, b["booking"], 50, idempotency_key="g66-2")
+		frappe.db.set_value("TEX Loyalty Program", club, "enabled", 0)
+		self.create(program_name="TRY club", currency="TRY")
+		with self.assertRaisesRegex(frappe.ValidationError, "can only be redeemed on TRY bookings"):
+			loyalty.redeem(guest, b["booking"], 50, idempotency_key="g66-3")

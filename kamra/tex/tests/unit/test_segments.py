@@ -82,6 +82,26 @@ class TestFacts(unittest.TestCase):
 		self.assertEqual((f["stays"], f["last_stay_days_ago"], f["has_upcoming_stay"], f["cancellations"]),
 		                 (1, (TODAY - date(2025, 8, 5)).days, True, 1))
 
+	def test_the_rooms_of_one_booking_are_one_stay(self):
+		"""O-23 (audit Part 2H-1): a reservation is a room. A booking of two rooms is one visit of the guest:
+		one stay, not a repeat guest; the value is the rooms' together."""
+		two_rooms = [stay(visit="B1"), stay(visit="B1", amount=D("200"))]
+		f = facts(two_rooms)
+		self.assertEqual((f["stays"], f["lifetime_value"]), (1, {"EUR": D("1000")}))
+		self.assertFalse(seg.matches(f, seg.validate(seg.SYSTEM_SEGMENTS["REPEAT"][1], strict=True)))
+		again = facts([*two_rooms, stay(visit="B2", ci=date(2026, 3, 1), co=date(2026, 3, 4))])
+		self.assertEqual(again["stays"], 2)
+		self.assertTrue(seg.matches(again, seg.validate(seg.SYSTEM_SEGMENTS["REPEAT"][1], strict=True)))
+		# a stay without a visit (a legacy reservation) counts on its own
+		self.assertEqual(facts([stay(), stay(ci=date(2026, 3, 1), co=date(2026, 3, 4))])["stays"], 2)
+
+	def test_the_main_currency_is_the_one_of_most_visits_not_most_rooms(self):
+		rooms = [stay(visit="B1", currency="EUR"), stay(visit="B1", currency="EUR"), stay(visit="B1", currency="EUR"),
+		         stay(visit="B2", currency="GBP"), stay(visit="B3", currency="GBP", ci=date(2026, 3, 1),
+		                                              co=date(2026, 3, 4))]
+		f = facts(rooms)
+		self.assertEqual((f["lifetime_currency"], f["stays"]), ("GBP", 3))
+
 	def test_an_inquiry_is_not_an_upcoming_stay(self):
 		self.assertFalse(facts([stay(status="Inquiry", ci=date(2026, 10, 1), co=date(2026, 10, 2))])["has_upcoming_stay"])
 
