@@ -2336,6 +2336,63 @@ class TestAChargeSettledDuringItsCheckout(HoldCase):
 		                                     ["status", "checkout_started_at"]), ("Succeeded", None))
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 
+	def replayed(self, session: str, meanwhile) -> dict:
+		"""The engine repeats ``book`` (same session, same key: the guest's answer was lost) and restarts the open
+		payment; ``meanwhile(first)`` runs during that restart's checkout call. → the replay's answer."""
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		first = guest_books(session=session)
+		quote_id = frappe.db.get_value("TEX Quote", {"booking": first["booking"]}, "name")
+		real = MockProvider.create_checkout
+
+		def gateway(provider, intent):
+			out = real(provider, intent)
+			meanwhile(first["payment"])
+			return out
+
+		mark = len(frappe.local.message_log)
+		with mock.patch.object(MockProvider, "create_checkout", gateway):
+			again = public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Card", session_id=session,
+			                    idempotency_key=f"idem-{session}")
+		self.assertEqual(frappe.local.message_log[mark:], [])          # no refusal reaches the guest's answer
+		self.assertTrue(again["idempotent_replay"])
+		self.assertEqual(again["booking"], first["booking"])
+		return again
+
+	def test_a_booking_replayed_while_its_payment_is_paid_answers_without_a_checkout(self):
+		"""LO-04, review round 1: the replay answers the booking (its manage token included) with no payment, as it
+		does for an attempt that ended before it: the guest's page shows it paid."""
+		again = self.replayed("lo04-replay", self.pays)
+		self.assertIsNone(again["payment"])
+		self.assertTrue(again["manage_token"])
+		self.assertEqual(frappe.db.get_value("TEX Booking", again["booking"], "status"), "Confirmed")
+
+	def test_a_booking_replayed_while_its_payment_is_in_review_answers_without_a_checkout(self):
+		"""LO-05, review round 1: a charge the gateway is reviewing is neither restarted nor superseded by a replay."""
+		def reviewed(payment):
+			frappe.db.set_value("TEX Payment Transaction", payment["transaction"], "raw_status", "FRAUD_REVIEW",
+			                    update_modified=False)
+
+		def no_checkout(provider, intent):
+			raise AssertionError("no checkout is asked for a charge in review")
+
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		first = guest_books(session="lo05-replay")
+		reviewed(first["payment"])
+		quote_id = frappe.db.get_value("TEX Quote", {"booking": first["booking"]}, "name")
+		mark = len(frappe.local.message_log)
+		with mock.patch.object(MockProvider, "create_checkout", no_checkout):
+			again = public.book(site=SLUG, quote_ids=[quote_id], guest=GUEST, payment_method="Card",
+			                    session_id="lo05-replay", idempotency_key="idem-lo05-replay")
+		self.assertEqual(frappe.local.message_log[mark:], [])
+		self.assertTrue(again["idempotent_replay"])
+		self.assertIsNone(again["payment"])
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", first["payment"]["transaction"],
+		                                     ["status", "raw_status"]), ("Pending", "FRAUD_REVIEW"))
+
 
 class TestRefusedAfterTheHold(HoldCase):
 	"""P1-9 (audit 2E-2): once a booking's hold is over with no attempt open, the refused retry lets its rooms
