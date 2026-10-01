@@ -353,7 +353,7 @@
  "settings.status.reason.payment_pending_unverified": "Kartenzahlungen eines Gateways, das TEX nicht abfragen kann, nach ihrer Frist noch ausstehend: {count}, die älteste begann vor {minutes} Min. Prüfen Sie sie im Bankportal; wurde eine belastet, erfassen Sie sie als manuelle Zahlung mit der Bankreferenz. Die Warnung endet 48 Stunden nach der Zahlung.",
  "settings.status.reason.reconciliation_action": "Zahlungen, die keiner Buchung zugeordnet sind und auf das Team warten: {count}, die älteste wartet seit {hours} Std. (Zahlungen → die Zahlung).",
  "settings.status.reason.reconciliation_refund": "Zahlungen in der Warteschlange für eine automatische Erstattung: {count}, die älteste wartet seit {hours} Std.",
- "settings.status.reason.bookings_overpaid": "Buchungen, die mehr Geld halten, als sie kosten: {count} (davon {cancelled} storniert). Erstatten Sie den Überschuss oder buchen Sie ihn auf die richtige Buchung um (Zahlungen).",
+ "settings.status.reason.bookings_overpaid": "Buchungen, die mehr Geld halten, als sie kosten: {count} (davon {cancelled} storniert). Erstatten Sie den Überschuss oder buchen Sie ihn auf die richtige Buchung um (Zahlungen). Eine Erstattung, die noch unterwegs ist, zählt als bezahlt, bis das Zahlungsgateway sie beantwortet.",
  "settings.status.reason.hold_overdue": "Buchungen, die nach Ablauf ihrer Reservierung noch Zimmer halten: {count}, die älteste lief vor {minutes} Min. ab. Ihr Ablauf schlägt wiederholt fehl (siehe Fehlerprotokoll).",
  "settings.status.reason.redis_unreachable": "Die Hintergrund-Warteschlange (Redis) ist nicht erreichbar.",
  "settings.status.reason.refund_unknown": "Vom Zahlungsanbieter nie bestätigte Erstattungen: {count}. Prüfen Sie sie dort, bevor Sie erneut erstatten.",

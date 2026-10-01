@@ -282,6 +282,24 @@ class TestOverpaidBookings(TexTestCase):
 		self.assertEqual(mine["count"], here["count"])
 		self.assertNotIn(OTHER, mine["properties"])
 
+	def credit(self, booking: str, amount) -> None:
+		"""A lower price of ``booking`` whose excess was kept as credit on it (a guest's change, or staff approving
+		one)."""
+		frappe.get_doc({"doctype": "TEX Guest Change Request", "property": fx.PROPERTY, "booking": booking,
+		                "reservation": frappe.db.get_value("Reservation", {"tex_booking": booking}, "name"),
+		                "status": "Applied", "currency": frappe.db.get_value("TEX Booking", booking, "currency"),
+		                "settlement": "Credit on booking", "settlement_amount": amount}).insert(ignore_permissions=True)
+
+	def test_a_credit_kept_on_purpose_is_not_an_overpayment(self):
+		"""LO-17 (audit 2K-1): money above a booking's total that the guest kept as credit on it is not counted;
+		money above that credit still is."""
+		before = check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"]
+		kept = self.overpaid("p17-credit-1")                # 50 over, all of it kept as credit
+		self.credit(kept, 50)
+		more = self.overpaid("p17-credit-2")                # 50 over, 20 of it kept as credit
+		self.credit(more, 20)
+		self.assertEqual(check(system_api().status(property=fx.PROPERTY), "payments.overpaid")["count"] - before, 1)
+
 
 class TestUnverifiedPayments(TexTestCase):
 	"""P1-8 (audit 2E-2): a card payment of a gateway TEX cannot ask for its outcome (the Virtual POS) still

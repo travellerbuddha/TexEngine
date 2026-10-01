@@ -151,7 +151,8 @@ REASONS: dict[str, str] = {
 	"reconciliation_refund": "{count} payment(s) are queued for an automatic refund; the oldest has waited {hours} "
 	                         "hours.",
 	"bookings_overpaid": "{count} booking(s) hold more money than they cost ({cancelled} of them cancelled): refund "
-	                     "the excess, or move it to the booking it was meant for (Payments).",
+	                     "the excess, or move it to the booking it was meant for (Payments). A refund still on its "
+	                     "way counts as paid until the gateway answers it.",
 	"fx_missing": "No {provider} rate for {pair}: prices that need it cannot be computed.",
 	"fx_stale": "The latest {provider} rate for {pair} is {days} days old, older than its policy allows "
 	            "({max_days}): prices that need it cannot be computed.",
