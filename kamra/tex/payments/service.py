@@ -26,7 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
-from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost
+from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost, undo_to
 
 
 class AccountRefused(frappe.ValidationError):
@@ -357,6 +357,10 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		# a reused charge is exactly the charge that was started, never re-routed or re-priced
 		frappe.throw(_("This payment was started with another method or amount."))
 	provider = provider_for(provider_account)
+	# a booking waiting for its payment: the attempt is refused once its hold is over, else it
+	# keeps the rooms until its own deadline, never longer (K-2a)
+	held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
+	hold_method = holds.TRANSFER if provider.name == holds.TRANSFER else method
 	# ── (a) the charge on record, with its lease ──
 	# a second start of the same charge (another tab, a double click, a restart) reuses the
 	# Pending transaction: one charge, never two (G-68)
@@ -364,6 +368,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn = frappe.get_doc("TEX Payment Transaction", existing.name, for_update=True)
 		if not provider.can_add_checkout(txn.provider_ref):
 			_supersede(txn, "another checkout was asked for")
+		# a restart is a new attempt (2F-1): the hold decides it as it does a new charge (refused once it is
+		# over, P1-9; the booking is locked after the charge, the order of money coming in), and the charge's
+		# deadline moves to the new attempt's, never back — ``paid_in_time`` reads it
+		until = holds.open_attempt(held, hold_method) if held else None
+		if until and (not txn.expires_at or get_datetime(txn.expires_at) < get_datetime(until)):
+			frappe.db.set_value("TEX Payment Transaction", txn.name, "expires_at", until, update_modified=False)
 		frappe.db.set_value("TEX Payment Transaction", txn.name, "checkout_started_at", stamp, update_modified=False)
 	else:
 		# the key is unique: a start that lost the race to the same new key undoes its own steps back to
@@ -372,11 +382,7 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		frappe.db.savepoint(START_SAVEPOINT)
 		messages = frappe.local.message_log
 		mark = len(messages)
-		# a booking waiting for its payment: the attempt is refused once its hold is over, else it
-		# keeps the rooms until its own deadline, never longer (K-2a)
-		held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
-		expires_at = holds.open_attempt(held, holds.TRANSFER if provider.name == holds.TRANSFER else method) \
-			if held else None
+		expires_at = holds.open_attempt(held, hold_method) if held else None
 		try:
 			txn = _new_txn(property=property, txn_type="Charge", method=method, amount=amount, currency=currency,
 			               provider_account=provider_account, provider=provider.name,
@@ -589,20 +595,12 @@ def complete_retrying(transaction: str, **kw) -> dict:
 
 
 REVERIFY_TRY_SAVEPOINT = "tex_reverify_try"
-_NO_SUCH_SAVEPOINT = 1305          # MariaDB: SAVEPOINT x does not exist
-
-
 def _undo_to(save_point: str) -> None:
 	"""Undo what was written since ``save_point``. A deadlock or a lock wait timeout in ``complete_retrying`` rolls
-	the whole transaction back and a step commit ends it: either way the savepoint is gone and the rollback to it
-	fails with "SAVEPOINT does not exist". Then the transaction is rolled back whole: safe where this runs — the
-	job's every charge is a transaction of its own and staff's request has no uncommitted work before it."""
-	try:
-		frappe.db.rollback(save_point=save_point)
-	except Exception as e:
-		if not e.args or e.args[0] != _NO_SUCH_SAVEPOINT:
-			raise
-		frappe.db.rollback()
+	the whole transaction back and a step commit ends it: either way the savepoint is gone and ``undo_to`` rolls
+	back whole instead — safe where this runs: the job's every charge is a transaction of its own and staff's
+	request has no uncommitted work before it."""
+	undo_to(save_point)
 
 
 def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool = True,
@@ -1798,8 +1796,10 @@ def create_link(*, property: str, amount, currency: str, description: str, expir
 
 def reissue_link(name: str, *, send_email: bool = False, language: str = "en") -> dict:
 	"""New token for an open link (the old URL stops working) — staff lost or resend. Never for a link
-	its booking cannot take the money of, or asking more than it owes (E4)."""
-	link = frappe.get_doc("TEX Payment Link", name)
+	its booking cannot take the money of, or asking more than it owes (E4). The link is locked first and read
+	as it is now (P1-4): a guest starting its payment holds the link and asks for the booking next, so the
+	booking (``link_refusal``) is never taken before the link."""
+	link = frappe.get_doc("TEX Payment Link", name, for_update=True)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Partially Paid"):
 		frappe.throw(_("Only open links can be reissued."))
@@ -1911,9 +1911,9 @@ def expire_links() -> int:
 
 
 def cancel_link(name: str, reason: str):
-	"""→ until when its booking's rooms are still held (None: not held, or no booking; E3)."""
-	_lock("TEX Payment Link", name)
-	link = frappe.get_doc("TEX Payment Link", name)
+	"""→ until when its booking's rooms are still held (None: not held, or no booking; E3). The link is locked
+	and read as it is now, before its booking (P1-4)."""
+	link = frappe.get_doc("TEX Payment Link", name, for_update=True)
 	scope.require("payment.link", link.property)
 	if link.status not in ("Active", "Draft"):
 		frappe.throw(_("Only active links can be cancelled."))

@@ -47,6 +47,23 @@ def undo_step(e: BaseException, savepoint: str) -> None:
 	frappe.db.rollback(save_point=savepoint)
 
 
+NO_SUCH_SAVEPOINT = 1305          # MariaDB: SAVEPOINT x does not exist
+
+
+def undo_to(save_point: str) -> None:
+	"""Undo what was written since ``save_point``. A deadlock or a lock wait timeout that rolled the whole
+	transaction back, or a step commit, ends the savepoint with it: the rollback to it then fails with "SAVEPOINT
+	does not exist" (1305), and the transaction is rolled back whole instead. Anything else is raised. Safe only
+	where nothing uncommitted precedes the savepoint: a job whose every item is a transaction of its own, a
+	request with no step before it."""
+	try:
+		frappe.db.rollback(save_point=save_point)
+	except Exception as e:
+		if not e.args or e.args[0] != NO_SUCH_SAVEPOINT:
+			raise
+		frappe.db.rollback()
+
+
 def committed_steps() -> int:
 	"""How many steps this request (or job) has put on record mid-way (``note_committed_step``)."""
 	return getattr(frappe.local, "tex_committed_steps", 0)

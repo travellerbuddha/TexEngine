@@ -108,6 +108,7 @@ def loyalty_summary(guest: str):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def loyalty_adjust(guest: str, program: str, points, reason: str, property: str | None = None):
 	crm.require_guest(guest, "crm.edit")
 	return {"name": loyalty.adjust(guest, program, as_int(points, 0), text(reason, 500) or "",

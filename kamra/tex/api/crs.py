@@ -233,6 +233,7 @@ def booking(name: str):
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def resend_confirmation(booking: str):
 	"""Send the guest the booking e-mail again (with a fresh manage link)."""
 	b = frappe.db.get_value("TEX Booking", text(booking, 140), "property")
@@ -291,17 +292,25 @@ def correct_imported_amount(reservation: str, amount: str, reason: str, currency
 
 
 @frappe.whitelist(methods=["POST"])
+@retry_on_deadlock
 def acknowledge_guest_change(reservation: str, note: str | None = None):
 	res = frappe.get_doc("Reservation", reservation)
 	scope.require("reservation.modify", res.property)
+	# the booking first, then its room (ADR-066 Locks, P1-4); the note it appends to is read under the lock
+	if res.tex_booking:
+		frappe.db.get_value("TEX Booking", res.tex_booking, "name", for_update=True)
+	was = frappe.db.get_value("Reservation", reservation, "tex_guest_change_note", for_update=True)
 	# only the flag and its note: the reservation's modified stays, so a guest's change waiting
 	# for its payment or for approval still applies (G-45)
 	frappe.db.set_value("Reservation", reservation, {
 		"tex_guest_change_pending": 0,
-		"tex_guest_change_note": ((res.tex_guest_change_note or "") + f"\n[ack {frappe.session.user}] {note or ''}")[
-			-1000:]}, update_modified=False)
-	if res.tex_booking and not frappe.db.exists("Reservation", {"tex_booking": res.tex_booking,
-	                                                             "tex_guest_change_pending": 1}):
+		"tex_guest_change_note": ((was or "") + f"\n[ack {frappe.session.user}] {note or ''}")[-1000:]},
+		update_modified=False)
+	# the other rooms' flags as they are now (a share lock: their writers hold the booking's lock, and this
+	# runs under it)
+	if res.tex_booking and not frappe.db.sql(
+			"""SELECT name FROM `tabReservation` WHERE tex_booking=%s AND tex_guest_change_pending=1 LIMIT 1
+			LOCK IN SHARE MODE""", res.tex_booking):
 		frappe.db.set_value("TEX Booking", res.tex_booking, "guest_change_pending", 0)
 	from kamra.tex.security.audit import audit
 

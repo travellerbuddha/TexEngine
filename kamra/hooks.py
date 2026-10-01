@@ -52,10 +52,11 @@ scheduler_events = {
 		# 04:15 - wipe the public demo so it cannot be used as a live PMS
 		# (no-op unless kamra_demo_mode is on and the site is a playground)
 		"15 4 * * *": ["kamra.scripts.reset_demo.scheduled"],
-		# TEX Engine: integration outbox, expired payment holds and links, e-mail
-		# delivery status (5 min);
+		# TEX Engine, every 5 minutes, two jobs (each its own RQ job and time limit): payments asked again,
+		# expired payment holds and links, e-mail delivery status (every_5_minutes); the PMS outbox
+		# (outbox_every_5_minutes: a stalled PMS never delays the first);
 		# FX after TCMB's 15:30 publication; loyalty maturation/expiry (02:30)
-		"*/5 * * * *": ["kamra.tex.scheduler.every_5_minutes"],
+		"*/5 * * * *": ["kamra.tex.scheduler.every_5_minutes", "kamra.tex.scheduler.outbox_every_5_minutes"],
 		"* * * * *": ["kamra.tex.scheduler.every_minute"],
 		"45 15,17 * * *": ["kamra.tex.scheduler.fx_daily"],
 		"30 2 * * *": ["kamra.tex.scheduler.daily"],

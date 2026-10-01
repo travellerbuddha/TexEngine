@@ -152,7 +152,8 @@ security or distribution blocker remains (owner rule). Several remain (§2).
   - No query needs `SKIP LOCKED`: queue claims are conditional `UPDATE … LIMIT` with a
     token and lease, and inbound messages are row-locked with a status re-check.
 - **Scheduler** must be enabled in production. TEX jobs run every minute (channel
-  distribution), every 5 minutes (outbox, holds, links, e-mail delivery status), every 15
+  distribution), every 5 minutes in two jobs (payments asked again, holds, links, e-mail delivery
+  status; and, on its own so a stalled PMS delays nothing else, the PMS outbox), every 15
   minutes (contract status, abandonment, system-status alerts), and daily (FX, DNS recheck,
   channel resync, loyalty maturation).
 - **Monitoring** (ADR-047).

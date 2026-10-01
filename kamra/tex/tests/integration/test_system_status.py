@@ -386,6 +386,22 @@ class TestStatusAlerts(TexTestCase):
 		self.assertIn("kamra.tex.ops.alerts.evaluate", scheduler.EVERY_15_MINUTES)
 		self.assertIn("kamra.tex.services.mail_status.sync", scheduler.EVERY_5_MINUTES)
 
+	def test_the_pms_outbox_is_its_own_watched_5_minute_job(self):
+		"""NEW-7 (2F-1): holds, payments and links never wait behind a PMS: the outbox is not in the group of the
+		expiry, runs from its own cron entry (its own RQ job and time limit) and the status page watches it."""
+		from kamra import hooks
+		from kamra.tex import scheduler
+		from kamra.tex.ops import checks
+		from kamra.tex.ops import status as ops_status
+
+		self.assertEqual(hooks.scheduler_events["cron"]["*/5 * * * *"],
+		                 ["kamra.tex.scheduler.every_5_minutes", "kamra.tex.scheduler.outbox_every_5_minutes"])
+		self.assertEqual(scheduler.OUTBOX_EVERY_5_MINUTES, ("kamra.tex.connect.outbox.deliver_pending",))
+		self.assertNotIn("kamra.tex.connect.outbox.deliver_pending", scheduler.EVERY_5_MINUTES)
+		for job in ("every_5_minutes", "outbox_every_5_minutes"):
+			self.assertIn(f"kamra.tex.scheduler.{job}", checks.JOB_MAX_AGE_MINUTES)
+			self.assertIn(f"kamra.tex.scheduler.{job}", ops_status.TEX_JOBS)
+
 	def test_payments_are_verified_first_in_the_5_minute_jobs(self):
 		"""NEW-2: the re-verification job runs first in its group — before the PMS outbox (which may use most
 		of the tick) and before the expiry, so money it finds confirms its booking in that tick."""

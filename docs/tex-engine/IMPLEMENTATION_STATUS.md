@@ -1554,6 +1554,13 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-11 **COMPLETE**: one live or scheduled FX policy per scope and pair (activation refused, `SERIAL_ACTIVATION`); `fx.choose_policy` raises `FX_POLICY_AMBIGUOUS` for two in one scope · `test_fx_snapshot.TestOnePolicyPerPair`, unit `TestChoosePolicy`.
 - O-12 **COMPLETE**: a dated manual rate bridges a stale or missing provider rate (policy margin on top), entered per hotel with `fx.manual_rate` (p70), audited, recorded as `bridged_from`, WARN `fx_bridged` · unit `TestManualBridge`/`TestFxBridged`, `test_fx_snapshot.TestManualBridge`, `test_system_status`, e2e `fx-manual-rate`.
 
+## 6F1. Audit Part 2F-1 (2026-10-01)
+
+- P1-4 **COMPLETE**: one lock order (ADR-066 "Locks"): `reissue_link` / `cancel_link` lock the link first, `addons.apply` and `acknowledge_guest_change` the booking, then the room under its lock, `create_booking` its quotes by name, `lock_expiry_money` reads the releases with a locking read; `resend_confirmation`, `acknowledge_guest_change`, `loyalty_adjust` retry a deadlock · `TestPaymentLinkLockOrder`, `TestLastRoomRace`, `TestDeadlockRetries`, sniffs in `test_post_booking_extras`, `test_commercial_flows`, `test_self_service_money`.
+- 1b restarted Pending payment **COMPLETE**: `start_payment`'s reuse branch asks `open_attempt` (refused after the hold, deadline moved to the new attempt's, never back; ADR-062) · `TestPaymentLinkHold`, `TestRefusedAfterTheHold`.
+- NEW-7 **COMPLETE**: the expiry job reads the due bookings lock-free; the PMS outbox is its own 5-minute job (`outbox_every_5_minutes`, `JOB_MAX_AGE` 20) with a 120 s budget and per-reservation order, `_each` survives a lost savepoint, `retry_outbox` takes only the latest message (ADR-015) · `TestAtomicExpiry`, `TestPmsDelivery`, `test_system_status`, `test_scheduler_smoke`, unit `test_system_checks`.
+- P1-2 **COMPLETE**: a revival's duplicate is the guest's (profile, e-mail, phone), never the booker's (ADR-062 D4 c) · `TestPaidInTime`.
+
 ## 6H2. Audit Part 2H-2 (2026-10-01)
 
 - 2H-1 leftover **COMPLETE**: the daily loyalty job commits the rows it matured before it asks for a guest (no deadlock with an adjustment or a redemption), and a lost savepoint (1305) rolls back whole, is logged, the job goes on · `TestExpiryLockOrder`, `TestExpiry`.
