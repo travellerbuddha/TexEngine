@@ -1,259 +1,193 @@
 <p align="center">
-  <img src="branding/png/kamra-mark-512.png" width="96" alt="Kamra — open-source hotel PMS" />
+  <img src="frontend/public/tex-mark.svg" width="96" alt="TEX Engine" />
 </p>
 
-<h1 align="center">Kamra PMS</h1>
+<h1 align="center">TEX Engine</h1>
 
 <p align="center">
-  <b>Open-source hotel &amp; short-term rental PMS</b> — front desk, booking engine,<br/>
-  folios &amp; tax billing, housekeeping, POS, and an <b>MCP tool layer</b> so AI agents can run the property.
-</p>
-
-<p align="center">
-  <a href="https://demo.kamrapms.com"><img src="https://img.shields.io/badge/demo-live-0f766e?style=flat-square" alt="Live demo" /></a>
-  <a href="https://github.com/Kamra-PMS/kamra-pms/releases/latest"><img src="https://img.shields.io/github/v/release/Kamra-PMS/kamra-pms?style=flat-square&label=release" alt="Latest release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0" /></a>
-  <a href="https://cloud.frappe.io/marketplace/apps/kamra"><img src="https://img.shields.io/badge/Frappe%20Cloud-Marketplace-ed8936?style=flat-square" alt="Frappe Cloud Marketplace" /></a>
-  <a href="https://kamrapms.com/docs/"><img src="https://img.shields.io/badge/docs-kamrapms.com-111827?style=flat-square" alt="Documentation" /></a>
-  <img src="https://img.shields.io/github/stars/Kamra-PMS/kamra-pms?style=flat-square" alt="GitHub stars" />
+  <b>Oteller ve otel grupları için ticari yönetim ve merkezi rezervasyon platformu.</b><br />
+  Sözleşmeler, fiyatlandırma, envanter, rezervasyon, çağrı merkezi, CRM ve ödemeler.
 </p>
 
 <p align="center">
-  <a href="https://demo.kamrapms.com"><b>▶ Live demo</b></a> ·
-  <a href="https://kamrapms.com/docs/"><b>Docs</b></a> ·
-  <a href="#install"><b>Install</b></a> ·
-  <a href="https://kamrapms.com/docs/ai-and-mcp"><b>AI / MCP</b></a> ·
-  <a href="mailto:hello@kamrapms.com"><b>Contact</b></a>
+  <a href="#yerelde-çalıştırma">Yerel kurulum</a> ·
+  <a href="docs/tex-engine/IMPLEMENTATION_STATUS.md">Geliştirme durumu</a> ·
+  <a href="docs/tex-engine/PRODUCT_SPEC.md">Ürün kapsamı</a> ·
+  <a href="https://github.com/travellerbuddha/TexEngine/issues">Hata ve öneriler</a> ·
+  <a href="license.txt">AGPL-3.0</a>
 </p>
 
-> **Try it in 30 seconds → [demo.kamrapms.com](https://demo.kamrapms.com)**  
-> Tap any role to sign in (credentials are on the page). Guest booking: [/book](https://demo.kamrapms.com/book) · Housekeeping app: [/kamra/hk](https://demo.kamrapms.com/kamra/hk)
+**TEX Engine**, otelin sözleşmeden satışa uzanan ticari akışını tek platformda yönetmek için geliştiriliyor. Otel ve otel grubu bazında fiyat kurallarını tanımlar; misafir rezervasyon motoru, merkezi rezervasyon sistemi (CRS) ve çağrı merkezi aynı fiyatlandırma ve rezervasyon servislerini kullanır.
 
-**Kamra** is a full **property management system (PMS)** for hotels, resorts, and **short-term rentals / villas**. It runs on **Frappe** (the framework behind ERPNext), is **AGPL-3.0**, and is built so humans *and* AI agents share the same governed APIs — booking, check-in, folios, night audit, pricing — with deterministic money (never from an LLM).
+Projenin kaynak deposu: **[travellerbuddha/TexEngine](https://github.com/travellerbuddha/TexEngine)**.
 
----
+## Neler yapar?
 
-## Contents
+| Alan | İşlevler |
+| --- | --- |
+| **Sözleşmeler** | Otel ve pazar bazında sözleşmeler, fiyat dönemleri, taslak düzenleme, doğrulama, yayınlama ve sürüm geçmişi. |
+| **Fiyatlandırma** | Oda ve kişi bazlı fiyatlar, yetişkin/çocuk kuralları, yaş bantları, döviz politikaları, satış marjları, promosyonlar ve ek hizmetler. |
+| **Envanter ve kısıtlamalar** | Kontenjanlar, müsaitlik, satışa kapatma, konaklama kısıtlamaları ve toplu fiyat/envanter düzenleme. |
+| **CRS ve çağrı merkezi** | Tek veya çok odalı teklif ve rezervasyon, klavye odaklı satış akışı, ödeme bağlantıları ve rezervasyon değişiklikleri. |
+| **Misafir rezervasyon motoru** | Tarih ve kişi seçimi, oda/fiyat sonuçları, ek hizmetler, misafir bilgileri, ödeme ve onay akışı. |
+| **Misafir işlemleri** | Rezervasyonu görüntüleme, değişiklik ve iptal talepleri, ödeme ve rezervasyon sonrası ek hizmetler. |
+| **CRM ve sadakat** | Misafir profilleri, iletişim izinleri, segmentler, terk edilen rezervasyonlar ve sadakat puanları. |
+| **Ödemeler** | Test ödeme akışları, sağlayıcı entegrasyonları, ödeme bağlantıları, iade ve ödeme mutabakatı. |
+| **Raporlama** | Rezervasyon üretimi, sözleşme maliyeti/satış fiyatı, marj, ödeme, iptal, promosyon ve dönüşüm raporları. |
+| **TEX Connect** | PMS ve kanal bağlantıları için adaptörler, gönderim kuyrukları, tekrar deneme ve sistem durumu takibi. |
 
-- [What's new](#whats-new)
-- [Why Kamra](#why-kamra)
-- [What makes it different](#what-makes-it-different)
-- [Screenshots](#screenshots)
-- [Short-term rentals](#short-term-rentals)
-- [Features](#features)
-- [Documentation & API](#documentation--api)
-- [Install](#install)
-- [Quickstart (development)](#quickstart-development)
-- [Who it's for](#who-its-for)
-- [License & contributors](#license--contributors)
+Bu tablo ürün alanlarını özetler. Her alt özelliğin tamamlanma durumu [geliştirme durum belgesinde](docs/tex-engine/IMPLEMENTATION_STATUS.md) takip edilir.
 
----
+## Temel yaklaşım
 
-## What's new
+- **Tek fiyatlandırma kaynağı:** Web rezervasyon motoru, CRS ve çağrı merkezi aynı ticari kuralları kullanır.
+- **Deterministik hesaplama:** Para ve fiyat kuralları `Decimal` ile hesaplanır; fiyat kararlarını bir yapay zekâ modeli vermez.
+- **Yayınlanmış sözleşme sürümleri:** Satışın dayandığı kurallar ve sürüm bilgisi kaydedilir.
+- **Rezervasyon fiyat kilidi:** Sonradan yapılan sözleşme düzenlemeleri satılmış rezervasyonun fiyatını değiştirmez. Değişiklikler ayrı fiyatlama ve revizyon akışından geçer.
+- **Otel bazında yetki:** Kullanıcıların erişimi işletme, otel grubu ve otel kapsamındaki yetkilerle sınırlandırılır.
+- **İşlem geçmişi:** Ticari değişiklikler, ödeme sonuçları ve yetkili işlemler denetim kaydına yazılır.
 
-On **`develop`** (nightly) the product is the **2.6.2** train plus Unreleased
-work. The `v2.6.2` GitHub tag is still pending — latest published release is
-[v2.6.0](https://github.com/Kamra-PMS/kamra-pms/releases/tag/v2.6.0).
+## Geliştirme durumu
 
-- **Unreleased** — System Health, property time zone, **85 MCP tools** (role +
-  module gated), AI provider presets, WordPress-easy `deploy/install.sh`,
-  banquet Phase 1 (send quote, guest response, Sales/Finance/HK/F&B checklists)
-- **2.6.2** (in the changelog; not tagged yet) — Opera-style cashier till,
-  folio ledger, cashier PIN, POS full-screen till
+TEX Engine **aktif geliştirme aşamasındadır**. Yerel demo ortamında sözleşme, fiyatlandırma, rezervasyon, test ödemesi ve rezervasyon değişikliği akışları kullanılabilir.
 
-Notes live in [`CHANGELOG.md`](CHANGELOG.md) — this list is a pointer, not a
-second release note. How we cut stables: [`RELEASING.md`](RELEASING.md).
+Gerçek ödeme ve kanal sağlayıcılarının doğrulanması ile canlı ortam hazırlıkları ayrıca takip edilir. Güncel kapsam ve açık işler için:
 
----
+- [Uygulama durumu](docs/tex-engine/IMPLEMENTATION_STATUS.md)
+- [Ürün gereksinimleri](docs/tex-engine/PRODUCT_SPEC.md)
+- [Canlıya geçiş hazırlıkları](docs/tex-engine/GO_LIVE_READINESS.md)
 
-## Why Kamra
+## Yerelde çalıştırma
 
-Most hotel PMS software was built twenty years ago: per-room SaaS rent, locked-in data, bolt-on chatbots, and screens that need a week of training.
-
-Kamra is the alternative we wanted:
-
-| Pain with legacy PMS | With Kamra |
-|---|---|
-| Per-room / per-module pricing | **Free forever** (AGPL) — cost doesn't scale with rooms |
-| Data lock-in | **You host it** — on-prem, VPS, or Frappe Cloud |
-| AI as a marketing slide | **MCP tools** — Claude (or any agent) books and audits with RBAC |
-| Opaque pricing & tax | **Deterministic engine** — GST / SST / VAT packs in code + CI evals |
-| New-hire training hell | Front desk UI a clerk can learn the same day |
-
----
-
-## What makes it different
-
-- **Agent-ready, not agent-locked.** [MCP server](https://kamrapms.com/docs/ai-and-mcp) with **85** governed tools — role-scoped, module-gated, permission-checked, fully logged. Connect Claude; no bundled agent to trust.
-- **Bring your own key.** No AI markup or model lock-in. Optional [HeyKoala](https://heykoala.ai) for voice / WhatsApp concierge.
-- **Deterministic money.** Rates, tax slabs, availability, and no-overbooking guards come from code — never from a language model.
-- **Full audit trail.** Every human or AI action: who, what, why.
-- **Built on Frappe.** RBAC, multi-tenancy, Desk escape hatch, [frappe/payments](https://github.com/frappe/payments) gateways, ERPNext-adjacent ecosystem.
-
----
-
-## Screenshots
-
-*From the [live demo](https://demo.kamrapms.com) — open it and click around.*
-
-| | |
-|---|---|
-| ![Today — front desk morning view](docs/screenshots/today.png) | ![Reservation 360](docs/screenshots/reservation-360.png) |
-| **Today** — arrivals, departures, in-house, paid/due chips, room board | **Reservation 360** — billing, amend dates, check-in / out / cancel |
-| ![Tape chart](docs/screenshots/tape-chart.png) | ![Reports](docs/screenshots/reports.png) |
-| **Tape chart** — rooms × dates, moves & stay amendments | **Reports** — occupancy, ADR, RevPAR, flash |
-| ![New booking](docs/screenshots/booking-dialog.png) | ![Guest profile](docs/screenshots/guest-profile.png) |
-| **New booking** — live quote, multi-room, add-ons, cancellation policy | **Guest profile** — stay strip, merge & anonymize (DPDP) |
-| ![GST invoice](docs/screenshots/invoice.png) | ![Booking Engine](docs/screenshots/booking-engine.png) |
-| **Folio & tax invoice** — per-line GST, splits, payment links | **Booking engine console** — gallery, policies, FAQ, SEO |
-| ![Restaurant POS](docs/screenshots/pos.png) | ![Dashboard](docs/screenshots/dashboard.png) |
-| **Restaurant POS** — table map, KOT / bill print, F-keys | **Dashboard** — occupancy, revenue, chain roll-up |
-| ![Laundry](docs/screenshots/laundry.png) | ![Self check-in](docs/screenshots/checkin-id.png) |
-| **Laundry** — pickup → return → folio; guest self-service | **Self check-in** — ID capture, e-sign, retention policy |
-
-**Guest-facing booking page** — date range, **Check availability**, rates, gallery, policies, pay-at-hotel:
-
-[![Public booking page](docs/screenshots/public-booking.png)](https://demo.kamrapms.com/book)
-
----
-
-## Short-term rentals
-
-Same PMS for **villas and multi-site STR portfolios**: sellable units (room / whole-place / package), competition groups, cleaning fees & deposits, Instant or Request-to-book, and a catalog that feels like a listing site.
-
-| | |
-|---|---|
-| ![STR catalog](docs/screenshots/str-catalog.png) | ![STR villas](docs/screenshots/str-villas.png) |
-| **Catalog** — check-in / out + Check availability | **Places to stay** — per-villa cards & from-rates |
-
-[![Villa listing](docs/screenshots/str-listing.png)](https://demo.kamrapms.com/book)
-
-Live example: [demo.kamrapms.com/book](https://demo.kamrapms.com/book).
-
----
-
-## Features
-
-| Area | What you get |
-|---|---|
-| **Front desk** | Today board, check-in flow (GRC readiness + room suggestion), tape chart, ETA/ETD, guest profiles, blacklist |
-| **Booking engine** | Direct booking + SEO console; hotels = room grid; STRs = villa catalog |
-| **Short-term rentals** | Hotel vs STR property kind, sellable units, per-villa locations, Instant / Request-to-book |
-| **Booking** | Multi-room / group / corporate, returning guests, add-ons, vouchers, travel agents, day-use |
-| **Revenue** | Seasons, rate plans, guardrails, hurdle rates, overbooking allowance, cancellation & no-show policy in code |
-| **Billing** | Folios, corporate routing, group masters, charge splits, night audit, tax invoices, GSTR-1, payment links, cashier till (FO+POS cash, PIN pad), folio ledger |
-| **F&B** | POS table map, full-screen till and kitchen pass, split bills, thermal KOT, kitchen display, inventory & recipes, QR ordering, room posting |
-| **Operations** | Tickets + SLA, housekeeping `/hk`, guest laundry end-to-end, lost & found, banquet / events (send quote, guest response, dept checklists) |
-| **Guests** | Online pre-check-in, GRC + occupant register, **editable nationality**, ID retention modes |
-| **Messaging** | WhatsApp (Meta Cloud API) — confirmations, check-in links, inbox, desk tickets |
-| **Localization** | India GST, Indonesia PB1, Thailand VAT, Malaysia SST, UAE VAT — currency & locales follow the pack |
-| **Platform** | Multi-property RBAC, dark mode, property time zone, System Health, AI provider presets, CSV migration (eZee / Cloudbeds presets), eval harness in CI |
-
----
-
-## Documentation & API
-
-Full manual: **[kamrapms.com/docs](https://kamrapms.com/docs/)** — quickstart, self-hosting, features, user guide, AI/MCP, FAQ.
-
-Going live? Use the **[go-live checklist](https://kamrapms.com/docs/go-live)**.
-
-### REST & agents
-
-Kamra exposes **170+ REST endpoints** — the same governed layer the UI and AI use:
-
-- [REST API reference](https://kamrapms.com/docs/api-reference)
-- [Postman collection](https://kamrapms.com/docs/kamra.postman_collection.json)
-- [MCP tool reference](https://kamrapms.com/docs/mcp-tools)
+En kolay başlangıç, depo içindeki **Docker demo kurulumudur**. Windows ve macOS'ta Docker Desktop; Linux'ta Docker Engine ve Compose eklentisi gerekir.
 
 ```bash
-curl -X POST https://<your-kamra>/api/method/kamra.api.get_quote \
-  -H "Authorization: token <api_key>:<api_secret>" \
-  -H "Content-Type: application/json" \
-  -d '{"property":"Your Property","room_type":"Your Property-DLX",
-       "check_in_date":"2026-08-01","check_out_date":"2026-08-03"}'
+git clone https://github.com/travellerbuddha/TexEngine.git
+cd TexEngine/deploy/tex-local
+docker compose up -d --build
 ```
 
-In-repo: [`docs/`](docs/) · [user guide](docs/user-guide.md) · [AI & API](docs/ai-and-api.md) · [self-hosting](docs/self-hosting.md) · [dev notes](docs-dev.md) · [branding](branding/README.md)
-
----
-
-## Install
-
-**Hotels (WordPress-easy):**
+İlk çalıştırmada uygulama imajı derlenir, veritabanı oluşturulur ve demo verileri yüklenir. İlerlemeyi ve servis durumunu görmek için:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kamra-PMS/kamra-pms/main/deploy/install.sh | bash
+docker compose logs -f tex
+docker compose ps
 ```
 
-Three prompts: site domain, admin email, admin password. Pulls
-`ghcr.io/kamra-pms/kamra:latest`. Then open `/kamra/setup`. Details:
-[deploy/](deploy/) · [docs quickstart](https://kamrapms.com/docs/quickstart).
+`tex` servisi **healthy** olduğunda tarayıcıda açılabilecek adresler:
 
-**Bench / Frappe Cloud:**
+| Ekran | Yerel adres |
+| --- | --- |
+| TEX personel uygulaması | `http://localhost:8000/kamra/tex` |
+| Misafir rezervasyon motoru | `http://localhost:8000/book/aurora` |
+| Yönetim ekranı | `http://localhost:8000/desk` |
+
+### Demo kullanıcıları
+
+Demo personel hesaplarının ortak şifresi: **`TexDemo#2026`**.
+
+| Kullanıcı | Rol |
+| --- | --- |
+| `revenue@demo.tex` | Otel grubu gelir yönetimi |
+| `agent@demo.tex` | Çağrı merkezi ve rezervasyon |
+| `finance@demo.tex` | Finans |
+| `beach.gm@demo.tex` | Aurora Beach Resort otel yöneticisi |
+
+Yönetici hesabı: `Administrator` / `admin`.
+
+Bu kurulum demo verileri ve test ödeme sayfası kullanır; gerçek kart veya misafir verisi gerektirmez. Varsayılan şifreler herkese açık olduğu için ortamı kendi bilgisayarında test amacıyla kullan.
+
+Durdurmak ve tekrar açmak için, aynı klasörde:
 
 ```bash
-bench get-app payments
-bench get-app kamra https://github.com/Kamra-PMS/kamra-pms --branch main
-bench --site your-site install-app kamra
+docker compose stop
+docker compose up -d
 ```
 
-After install: product UI at **`/kamra`**, booking at **`/book`**, housekeeping at **`/hk`**. Desk remains at `/app`. Sign in as **Administrator**, open `/kamra/setup`, create your property, add staff.
+Ayarlar, sorun giderme ve güncelleme adımları: [Docker kurulum rehberi](deploy/tex-local/README.md). Docker kullanmadan kurulum: [native kurulum rehberi](deploy/tex-local/NATIVE.md).
 
-| Channel | Branch / tag | Use for |
-|---|---|---|
-| **Stable** | `main` / `vX.Y.Z` | Production, [Frappe Cloud Marketplace](https://cloud.frappe.io/marketplace/apps/kamra), [demo](https://demo.kamrapms.com), `ghcr.io/kamra-pms/kamra:latest` |
-| **Nightly** | `develop` | Previews, `ghcr.io/kamra-pms/kamra:nightly` |
+### Güncel arayüzle geliştirme
 
-Production installs should use `--branch main` (`develop` is the default GitHub branch for contributors). Releases are SemVer with a **patch-first** cadence — see [`RELEASING.md`](RELEASING.md) and [`CHANGELOG.md`](CHANGELOG.md).
-
----
-
-## Quickstart (development)
+Frappe sunucusu `8000` portunda çalışırken, **Node.js 24** ile ikinci bir terminalde:
 
 ```bash
-bench init --frappe-branch v16.25.0 frappe-bench && cd frappe-bench
-bench get-app payments
-bench get-app kamra https://github.com/Kamra-PMS/kamra-pms
-bench new-site kamra.localhost --admin-password admin
-bench --site kamra.localhost install-app kamra
-bench serve --port 8000
-cd apps/kamra/frontend && npm install && npm run dev   # hot-reload UI on :5173
+cd TexEngine/frontend
+npm ci
 ```
 
-Rebuild the SPA with `npm run build` at the app root (emits `kamra/public/frontend`). Seed demo data: `bench --site … execute kamra.scripts.seed_demo.execute`. Details: [docs-dev.md](docs-dev.md).
-
-Connect Claude (hosted MCP — no local Python):
+macOS / Linux:
 
 ```bash
-# Kamra Agent → Connect your AI → Connect Claude, or:
-claude mcp add --transport http kamra https://pms.yourhotel.com/mcp
+KAMRA_API_HOST=tex.localhost KAMRA_API_TARGET=http://127.0.0.1:8000 npm run dev -- --host 127.0.0.1 --strictPort
 ```
 
----
+Windows PowerShell:
 
-## Who it's for
+```powershell
+$env:KAMRA_API_HOST = 'tex.localhost'
+$env:KAMRA_API_TARGET = 'http://127.0.0.1:8000'
+npm run dev -- --host 127.0.0.1 --strictPort
+```
 
-- **Hotel / villa operators** — own the software and the data; costs don't grow with room count; AI is optional, not a ransom.
-- **IT & integrators** — Python (Frappe) + React, documented REST + MCP, RBAC, audit trails, CI eval suite. Fork and extend.
-- **Builders of hospitality AI** — a real PMS tool surface, not a demo chatbot API.
+Vite üzerinden personel ekranı `http://localhost:5173/tex`, misafir ekranı `http://localhost:5173/book/aurora` adresindedir. Bu akış arayüz kaynak kodundaki değişiklikleri doğrudan gösterir; `8000` portundaki sunucu depoya kaydedilmiş hazır arayüz paketlerini kullanır.
 
----
+## Geliştiriciler için
 
-## License & contributors
+| Katman | Teknoloji |
+| --- | --- |
+| Backend | Python 3.14, Frappe v16.25.0 |
+| Arayüz | React 19, TypeScript, Vite, Tailwind CSS |
+| JavaScript çalışma ortamı | Node.js 24, Yarn 1 |
+| Veritabanı | MariaDB; yerel Docker kurulumu 11.8 kullanır |
+| Önbellek ve iş kuyruğu | Redis, Frappe arka plan işleri |
+| Testler | Python birim/entegrasyon testleri, Node.js birim testleri, Playwright |
 
-**AGPL-3.0** — free forever. Anyone offering Kamra as a hosted service must share modifications back.
+### Testler
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Thanks to [@Mohammed-Muneef](https://github.com/Mohammed-Muneef) (laundry, kitchen display v2, inventory & recipes, menu import, ID-document hardening).
+Frontend klasöründe:
 
-### Links
+```bash
+cd frontend
+npm run test:unit
+npm run i18n:tex
+```
 
-- **Demo:** [demo.kamrapms.com](https://demo.kamrapms.com)
-- **Docs:** [kamrapms.com/docs](https://kamrapms.com/docs/)
-- **Issues:** [github.com/Kamra-PMS/kamra-pms](https://github.com/Kamra-PMS/kamra-pms)
-- **Email:** [hello@kamrapms.com](mailto:hello@kamrapms.com)
+Arayüzün tip kontrolü ve derlemesi; çıktılar depo dışına yazılır:
 
-Built by [HeyKoala](https://heykoala.ai).
+```bash
+npx tsc -b
+npx vite build --outDir ../../tex-build/frontend
+npx vite build -c vite.widget.config.ts --outDir ../../tex-build/widget
+```
 
----
+Backend testleri kurulu bir Frappe bench'in Python ortamında çalıştırılır. Bench klasöründen:
 
-*Kamra means "room". The door in our logo is open on purpose.*
+```bash
+./env/bin/python -m pytest apps/kamra/kamra/tex/tests/unit -q
+bench --site tex.localhost run-tests --module kamra.tex.tests.integration.test_critical_journey
+```
+
+Test sitesinde `allow_tests` açık olmalıdır. Tarayıcı testleri, demo verisi ve diğer entegrasyon testleri için [geliştirme ortamı rehberine](docs/tex-engine/DEV_ENVIRONMENT.md) bak.
+
+## Proje dokümantasyonu
+
+| Belge | İçerik |
+| --- | --- |
+| [Ürün kapsamı](docs/tex-engine/PRODUCT_SPEC.md) | İşlevler ve kabul kriterleri |
+| [Geliştirme durumu](docs/tex-engine/IMPLEMENTATION_STATUS.md) | Tamamlanan, kısmi ve açık maddeler |
+| [Hedef mimari](docs/tex-engine/TARGET_ARCHITECTURE.md) | Servisler ve sistem sınırları |
+| [Mimari kararlar](docs/tex-engine/ARCHITECTURE_DECISIONS.md) | Tasarım kararları ve gerekçeleri |
+| [Fiyatlandırma çalışma alanı](docs/tex-engine/PRICING_WORKSPACE_UX.md) | Sözleşme ve fiyat yönetimi arayüzü |
+| [Geliştirme ortamı](docs/tex-engine/DEV_ENVIRONMENT.md) | Araçlar, testler ve demo verisi |
+| [Migration planı](docs/tex-engine/MIGRATION_PLAN.md) | Şema ve veri geçişleri |
+| [Güvenlik](SECURITY.md) | Güvenlik politikası |
+
+Hata ve önerileri [bu deponun Issues bölümünde](https://github.com/travellerbuddha/TexEngine/issues) takip edebilirsin.
+
+## Lisans ve kaynak atfı
+
+TEX Engine, **[GNU Affero General Public License v3.0](license.txt)** kapsamında dağıtılır.
+
+Projenin başlangıç kodu [Kamra PMS](https://github.com/Kamra-PMS/kamra-pms) kaynaklarına dayanır. Orijinal telif hakları ve kaynak atıfları korunur; ayrıntılar [NOTICE.md](NOTICE.md) ve [upstream başlangıç kaydında](docs/tex-engine/UPSTREAM_BASELINE.md) yer alır. Değiştirilmiş yazılımı ağ üzerinden sunarken kullanıcılarına ilgili kaynak kodu da sunman gerekir.
+
+Frappe uygulama/paket adı ve bazı teknik yollar uyumluluk için `kamra` olarak korunmuştur; ürünün adı **TEX Engine**'dir.
