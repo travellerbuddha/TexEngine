@@ -6,7 +6,7 @@ import { useSession } from "../../lib/session"
 import { useTexT } from "../../i18n"
 import { Button, Card, CardBody, CardHeader, ErrorState, Money, Notice, PageHeader, useToast } from "../../ui"
 import { cn } from "../../../lib/utils"
-import { GuestForm, PaymentPicker } from "./components/CheckoutParts"
+import { GuestForm, MarketRefusedNotice, PaymentPicker } from "./components/CheckoutParts"
 import { Confirmation } from "./components/Confirmation"
 import { LiveRegion, Row } from "./components/controls"
 import { OfferTitle } from "./components/OfferParts"
@@ -66,8 +66,8 @@ export default function CrsPage() {
     }
   }
 
-  const onBook = async () => {
-    const b = await flow.book()
+  const onBook = async (opts: { marketOverrideReason?: string } = {}) => {
+    const b = await flow.book(opts)
     if (b) {
       go("done")
       setAnnounce(t("crs.done.announce", { ref: b.booking }))
@@ -180,6 +180,7 @@ export default function CrsPage() {
                   go("search")
                 }}
                 onReviewQuote={() => go("quote")}
+                onBookAnyway={(reason) => void onBook({ marketOverrideReason: reason })}
               />
             </>
           )}
@@ -293,16 +294,20 @@ export function BookErrors({
   onRequote,
   onSearchAgain,
   onReviewQuote,
+  onBookAnyway,
 }: {
   flow: BookingFlow
   onRequote: () => void
   onSearchAgain: () => void
   /** Back to the quote step (an extra sold out: the rooms were quoted again without it). */
   onReviewQuote?: () => void
+  /** Book a residents-only market for this guest anyway, with the agent's reason (O-8). */
+  onBookAnyway?: (reason: string) => void
 }) {
   const { t } = useTexT()
   if (!flow.bookError) return null
   if (flow.bookError.isPermission) return <Notice tone="danger" title={t("core.error.permission")}>{flow.bookError.message}</Notice>
+  if (flow.bookError.type === "MarketRefused" && onBookAnyway) return <MarketRefusedNotice flow={flow} onBookAnyway={onBookAnyway} />
   if (flow.extraSoldOut) return <ExtraSoldOutNotice flow={flow} onReviewQuote={onReviewQuote} />
   return (
     <Notice tone="danger" title={t("crs.book.failed")}>

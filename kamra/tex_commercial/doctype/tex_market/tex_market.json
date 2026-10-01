@@ -11,6 +11,7 @@
   "disabled",
   "column_12",
   "countries",
+  "residency_required",
   "default_currency",
   "default_language",
   "parent_market"
@@ -53,6 +54,12 @@
    "description": "Comma-separated ISO 3166-1 alpha-2 codes, e.g. DE, AT, CH"
   },
   {
+   "fieldname": "residency_required",
+   "fieldtype": "Check",
+   "label": "Residents only (web)",
+   "description": "Web bookings need a country of residence or a nationality among this market's countries. Staff may override in the Call Center, audited (ADR-070)."
+  },
+  {
    "fieldname": "default_currency",
    "fieldtype": "Link",
    "label": "Default currency",
@@ -71,7 +78,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-10-04 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "TEX Commercial",
  "name": "TEX Market",

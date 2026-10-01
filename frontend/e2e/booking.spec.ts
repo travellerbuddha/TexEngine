@@ -181,7 +181,7 @@ test("a declined card keeps the booking awaiting payment until the retry succeed
   noErrors()
 })
 
-test("a campaign link's market prices the stay; an unknown market falls back quietly", async ({ page }, testInfo) => {
+test("a campaign link's market prices the stay; an unknown market falls back with a notice", async ({ page }, testInfo) => {
   const noErrors = trackErrors(page)
   const warnings: string[] = []
   page.on("console", (m) => {
@@ -199,10 +199,18 @@ test("a campaign link's market prices the stay; an unknown market falls back qui
   const byCountry = await guestSearch(page, { ...search, country: "DE" })
   expect(byCountry.rates).toEqual(de.rates)
 
+  // the link's market is not sold: the standard prices, a notice saying so, and a funnel event (G-55b)
+  const notice = page.getByRole("status").filter({ hasText: "The offer in your link is not available here" })
+  await expect(notice).toHaveCount(0)
+  const counted = page.waitForRequest((r) => r.url().includes("kamra.tex.api.public.track") && (r.postData() ?? "").includes("market_refused"))
   const unknown = await guestSearch(page, { ...search, market: "E2E_NO_SUCH_MARKET" })
   expect(unknown.view).toBe("rooms")
   expect(unknown.rates).toEqual(standard.rates)
   expect(warnings.join("\n")).toContain("market link ignored")
+  await expect(notice).toBeVisible()
+  const body = new URLSearchParams((await counted).postData() ?? "")
+  // the server keeps the refusal and an existing market only (ADR-056): this one it drops
+  expect(JSON.parse(body.get("payload") ?? "{}")).toEqual({ reason: "MARKET_UNKNOWN", market: "E2E_NO_SUCH_MARKET" })
   noErrors()
 })
 

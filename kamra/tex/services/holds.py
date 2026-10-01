@@ -178,6 +178,7 @@ def resolve_hold_minutes(property: str, payment_method: str | None, *, web: bool
 
 class HoldExpired(frappe.ValidationError):
 	"""The booking's hold is over: no new payment attempt may keep its rooms."""
+	code = "HOLD_EXPIRED"                        # the guest's refusal code (G-70a)
 
 
 EXPIRE_SAVEPOINT = "tex_hold_over"

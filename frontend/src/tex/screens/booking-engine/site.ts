@@ -29,6 +29,8 @@ export interface Site {
   default_currency: string | null
   currencies: string | null
   default_market: string | null
+  /** the markets a link may choose here, comma-separated; blank: every enabled market (O-8, ADR-070) */
+  allowed_markets: string | null
   sales_channel: string | null
   self_service_enabled: number
   logo: string | null
@@ -96,6 +98,7 @@ export function newSite(property?: string): Site {
     default_currency: null,
     currencies: null,
     default_market: null,
+    allowed_markets: null,
     sales_channel: null,
     self_service_enabled: 1,
     logo: null,
@@ -210,6 +213,8 @@ export function validateSite(s: Site, saved?: Site | null): Errors {
   else if (!langs.includes(s.default_language)) e.default_language = "be.err.default_language"
   const ccys = csv(s.currencies)
   if (s.default_currency && ccys.length && !ccys.includes(s.default_currency)) e.default_currency = "be.err.default_currency"
+  const markets = csv(s.allowed_markets)
+  if (s.default_market && markets.length && !markets.includes(s.default_market)) e.default_market = "be.err.default_market"
   for (const f of ["primary_color", "accent_color", "background_color"] as const) if (s[f] && !HEX.test(s[f])) e[f] = "be.err.hex"
   for (const f of ["logo", "hero_image"] as const) if (s[f] && s[f] !== saved?.[f] && !newImageUrlOk(s[f])) e[f] = "be.err.image_url"
   if (s.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.contact_email)) e.contact_email = "be.err.email"
@@ -245,6 +250,7 @@ export const FIELD_TAB: Record<string, TabId> = {
   languages: "general",
   default_language: "general",
   default_currency: "general",
+  default_market: "general",
   primary_color: "branding",
   accent_color: "branding",
   background_color: "branding",

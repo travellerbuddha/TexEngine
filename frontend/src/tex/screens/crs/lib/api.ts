@@ -60,6 +60,9 @@ export interface BookArgs {
   notes?: string
   idempotency_key: string
   language?: string
+  /** book a residents-only market for a guest outside it, with a reason (audited, O-8) */
+  market_override?: 0 | 1
+  market_override_reason?: string
 }
 
 export function bookQuotes(args: BookArgs) {

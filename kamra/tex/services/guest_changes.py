@@ -84,24 +84,29 @@ TRANSIENT_CODES = (1205, 1213, 1969, 2003, 2006, 2013)
 
 class PaymentPending(frappe.ValidationError):
 	"""The booking's own payment is not complete: it cannot be changed yet."""
+	code = "PAYMENT_PENDING"                     # the guest's refusal codes (G-70a): those of ``changes_blocked``
 
 
 class RefundPending(frappe.ValidationError):
 	"""A refund of an earlier change of the booking is still being made: no new change until it
 	is (review of ADR-044: it must not be counted as money the booking still holds)."""
+	code = "REFUND_PENDING"
 
 
 class ChangeApplying(frappe.ValidationError):
 	"""A change of the booking was paid and is being applied: no new change until it is (the
 	payment is not money the booking may use for another change, re-review F4)."""
+	code = "CHANGE_APPLYING"
 
 
 class ChangeRefused(frappe.ValidationError):
 	"""The room can no longer be changed by the guest (arrived, or not confirmed)."""
+	code = "CHANGE_REFUSED"
 
 
 class CurrencyChanged(frappe.ValidationError):
 	"""The change would be priced in another currency than the booking's."""
+	code = "CURRENCY_CHANGED"
 
 
 def _commit() -> None:

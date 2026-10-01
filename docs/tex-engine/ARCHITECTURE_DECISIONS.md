@@ -134,6 +134,22 @@ iframe (payment isolation, CSP) or redirects. Branding is limited to safe tokens
 **Decision.** TEX screens use `frontend/src/tex/i18n` with JSON catalogs for `en, tr, de, ru, ro,
 pl`, `t(key, params)` with plural support and `Intl` number/date/currency formatting. Server-side
 guest-facing strings use Frappe `_()`. Legacy Kamra screens keep the existing en/ar mechanism.
+- *Addendum (Part 2G-2, G-70a): guest refusals carry a stable code.* A refusal of the guest API carries a code
+  from the pure registry `kamra/tex/refusal_codes.py` (`CODES`, UPPER_SNAKE, never re-used for another meaning)
+  and guest-safe `params` (ISO dates, decimal strings, ISO codes, localised hotel content; never a token, an
+  e-mail or an internal id): `services.refusals.Refusal` (`refusal(code, base, **params)` keeps a 403/404 or an
+  existing class), or a class `code` on an existing exception (`ContractSuspended`, `HoldExpired`, `PaymentBusy`,
+  `ExtraSoldOut` …). `@refusals.coded` on every guest endpoint (inside `rate_limit`, outside
+  `retry_on_deadlock`; `functools.wraps`) copies them into the JSON error body as `tex_code` / `tex_params`, next
+  to Frappe's `exc_type` and message (Frappe answers with the whole `frappe.local.response`); params are cleaned to
+  JSON-safe values whatever raised them; an uncoded 404 / 403 says `NOT_FOUND` / `NOT_PERMITTED`, a 429 raised inside
+  the endpoint (the per-room quote budget) `RATE_LIMITED` (the request limit itself answers before the decorator).
+  The English message stays for staff, API clients and logs. The booking app reads them into `ApiError.code` /
+  `params`; a refusal's own code decides the kind before any wording (a market the site no longer sells: search
+  again), while the fallback codes and a refusal without a code are classified as before until G-70b codes every
+  guest refusal (HANDOFF_STAGE3 §5f),
+  adds `refusal.<CODE>` texts in the six catalogs and drops the wording. `unit/test_guest_refusal_codes` fails on a
+  guest endpoint without the decorator.
 
 ## ADR-014 Hide, don't delete, PMS modules
 **Decision.** TEX navigation omits housekeeping, laundry, POS, banquet, night audit, maintenance
@@ -3213,6 +3229,10 @@ Medium, 3 Low; patch p48).**
   the tracking and mailing tests (a timeout raised) and p45 (the look-alike loses its consent) fail. E2E:
   `crm-profile`, `crm-merge`, `crm-admin` and `booking` pass twice in a row on a server running this
   tree.
+- *Addendum (Part 2G-2, G-55b): a refused market link is a browser event.* `public.track` also takes `market_refused`:
+  `reason` one of the five market refusal codes (`refusal_codes.MARKET_REFUSALS`), `market` only an existing market's
+  code, `country` two letters (upper-cased); nothing else is kept (p72 adds the Select option: an event without it
+  would fail validation and `_track` would drop it silently).
 
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
@@ -9397,6 +9417,46 @@ the versions the roll superseded the state their contract's later publishes woul
   records provider "MANUAL", the row, its date and `bridged_from` (only when bridged: older records read as before); the status
   page says WARN `fx_bridged` (pairs, ages, hotels). VND (Cam Ranh) uses a MANUAL-mode policy, outside this part.
 - ENGINE_VERSION, schema and the parity corpus are unchanged.
+
+## ADR-070 Market integrity: markets per site, residents-only markets (audit Part 2G-2: O-8, G-55b; D-5)
+
+Written 2026-10-01 (owner decision D-5; the Call Center override is `reservation.create` with a reason). Before, a link's
+`?market=TR` (or the widget's `market` attribute) priced the domestic market for anyone: `public._market` never passed the
+site's markets to `resolve_market`, the link's country was ignored when a market was named, and `create_booking` never
+compared the guest's residence or nationality with the market.
+- *Markets per site.* `TEX Booking Site.allowed_markets` lists the markets a link may choose there (blank: every enabled
+  market, as before; the default market is always among them, checked when the list or the default changes, so a market
+  disabled later never makes the site unsavable). A link's market outside the list is refused as `MARKET_NOT_ALLOWED`
+  (never "unknown"); a link's country picks among the site's markets, else the default. A booking of a quote made for
+  another site's market is refused the same way.
+- *Residents-only markets.* `TEX Market.residency_required` ("Residents only (web)"; TR by the seed and by p71, once; only a
+  market with countries, never the global one). A web booking on such a market needs the guest's declared country of
+  residence or nationality among the market's countries (the request's values, ISO or a Country name; never a stored
+  profile's, whose nationality defaults to "Indian"), else it is refused (`MARKET_RESIDENCY`) after the quotes are locked and
+  before any contract, night or guest lock, and the refusal is audited outside the request (`booking.market_refused`: market,
+  its countries, the guest's country and nationality, the site; once per quote and answer). Search refuses only a mismatch
+  it already knows (a link's own country outside the market the link chose; a site's residents-only default is priced,
+  as searching again without the link would only come back to it); otherwise it prices and answers `residency: {countries}`
+  (and so does `basket`, for the market of the quotes booked), and the booking engine asks the country of residence (and,
+  optionally, the nationality) at checkout. Eligibility is read from the market when booking, never from the frozen
+  payload, and never changes a price.
+- *Staff.* In the Call Center a mismatch is refused (`MarketRefused`, which names the way out) unless the agent books anyway
+  with a reason (`market_override`, `market_override_reason`; the capability is the booking's own `reservation.create`),
+  audited `booking.market_override` (market, its countries, the guest's country and nationality, the reason). The Call
+  Center form has the guest's country of residence and nationality (ISO; every booking path stores Frappe's Country name
+  on the profile), pre-filled from the CRM profile, and asks for one of them on a residents-only market. Staff booking on a booking site follow the site's rules (ADR-050) and cannot override.
+  Channel bookings are the channel's; a staff modification into a residents-only market is not checked (its revision is the
+  record).
+- *Refused links (G-55b).* Only a market refusal (by its code) sends the booking engine's search on without the link:
+  the results say why (the site does not sell that market, it is for residents of {countries}, or it could not be
+  applied), the browser sends the funnel event `market_refused` (refusal code, the link's market and country; ADR-056
+  allow-list) and the analytics event `market_link_refused`. Any other refusal of a linked search (bad dates, an unknown
+  hotel, the network) is the search's own error, never hidden by a fallback.
+- Refusals carry the market codes of ADR-013's addendum (`MARKET_UNKNOWN`, `MARKET_AMBIGUOUS`, `MARKET_REQUIRED`,
+  `MARKET_NOT_ALLOWED`, `MARKET_RESIDENCY`; params: the market, its countries). p71 syncs TEX Market and TEX Booking Site and
+  makes TR residents-only once (`ran_before`: an administrator who switches it off is never overruled), reporting each
+  booking site whose default market is TR (`booking_site.residents_only_default`: guests from elsewhere get prices there
+  they cannot book; saving such a site warns the same); p72 adds the funnel event option.
 
 ## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
 

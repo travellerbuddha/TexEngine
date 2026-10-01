@@ -36,6 +36,8 @@ export interface MarketRow {
   is_global: number
   disabled: number
   countries: string | null
+  /** sold on the web only to residents of its countries (O-8, ADR-070) */
+  residency_required: number
   default_currency: string | null
   default_language: string | null
   parent_market: string | null
@@ -50,6 +52,7 @@ type Draft = {
   is_global: boolean
   disabled: boolean
   countries: string
+  residency_required: boolean
   default_currency: string
   default_language: string
   parent_market: string
@@ -61,6 +64,7 @@ const EMPTY: Draft = {
   is_global: false,
   disabled: false,
   countries: "",
+  residency_required: false,
   default_currency: "",
   default_language: "",
   parent_market: "",
@@ -74,6 +78,7 @@ function toDraft(m: MarketRow): Draft {
     is_global: !!m.is_global,
     disabled: !!m.disabled,
     countries: m.countries ?? "",
+    residency_required: !!m.residency_required,
     default_currency: m.default_currency ?? "",
     default_language: m.default_language ?? "",
     parent_market: m.parent_market ?? "",
@@ -150,6 +155,7 @@ export default function Markets() {
         cell: (m) => (
           <span className="inline-flex flex-wrap items-center gap-1.5">
             <Badge tone={m.disabled ? "neutral" : "success"}>{t(m.disabled ? "settings.markets.disabled" : "settings.markets.active")}</Badge>
+            {m.residency_required ? <Badge tone="info">{t("settings.markets.residents_badge")}</Badge> : null}
             {m.overlaps.length > 0 && (
               <Badge tone="warning" title={m.overlaps.map((o) => `${o.market}: ${o.countries.join(", ")}`).join("; ")}>
                 <AlertTriangle className="size-3" aria-hidden />
@@ -320,7 +326,7 @@ function MarketEditor({
         </FormGrid>
         <Switch
           checked={d.is_global}
-          onChange={(v) => set({ is_global: v, countries: v ? "" : d.countries })}
+          onChange={(v) => set({ is_global: v, countries: v ? "" : d.countries, residency_required: v ? false : d.residency_required })}
           label={t("settings.markets.is_global")}
           description={t("settings.markets.is_global_hint")}
         />
@@ -328,6 +334,14 @@ function MarketEditor({
           <Field label={t("settings.markets.countries")} hint={t("settings.markets.countries_hint")}>
             <Textarea value={d.countries} onChange={(e) => set({ countries: e.target.value.toUpperCase() })} rows={3} className="font-mono" />
           </Field>
+        )}
+        {!d.is_global && (
+          <Switch
+            checked={d.residency_required}
+            onChange={(v) => set({ residency_required: v })}
+            label={t("settings.markets.residents_only")}
+            description={t("settings.markets.residents_only_hint")}
+          />
         )}
         <FormGrid>
           <Field label={t("settings.markets.currency")}>

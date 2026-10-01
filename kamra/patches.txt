@@ -78,3 +78,5 @@ kamra.patches.tex.p66_cost_doctypes_system_only
 kamra.patches.tex.p68_payment_checkout_lease
 kamra.patches.tex.p69_quote_version_index
 kamra.patches.tex.p70_manual_fx_rate
+kamra.patches.tex.p71_market_integrity
+kamra.patches.tex.p72_market_refused_funnel_event

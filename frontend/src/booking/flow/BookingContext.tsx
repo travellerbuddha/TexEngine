@@ -10,7 +10,9 @@ import { ApiError, pub, type ErrorKind } from "../lib/api"
 import { apiRooms, applyCriteria, isComplete, parseCriteria, searchKey, type Criteria } from "../lib/criteria"
 import { siteUrl } from "../lib/mount"
 import { getJSON, manageToken, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
-import { armAbandon, disarmAbandon } from "../lib/track"
+import { armAbandon, disarmAbandon, trackMarketRefused } from "../lib/track"
+import { marketRefusal, refusedLinkPayload, type MarketRefusal } from "../lib/marketLink"
+import type { Residency } from "../../lib/residency"
 import { useSite } from "../site/SiteContext"
 import type { Basket, BookResponse, Offer, PaymentMethod, PaymentStart, QuoteResponse, RatePlanInfo, RoomQuote, SearchResult } from "../types"
 
@@ -41,6 +43,8 @@ export interface Guest {
   email: string
   phone: string
   country: string
+  /** ISO code; asked for a residents-only market's prices, where it counts as much as the residence (O-8) */
+  nationality: string
   special_requests: string
   consent_email: boolean
   consent_sms: boolean
@@ -98,6 +102,7 @@ const EMPTY_GUEST: Guest = {
   email: "",
   phone: "",
   country: "",
+  nationality: "",
   special_requests: "",
   consent_email: false,
   consent_sms: false,
@@ -122,6 +127,9 @@ export interface FlowError {
   kind: ErrorKind | "unavailable"
   message: string
   room?: number
+  /** the refusal's stable code and params (G-70a), when the server sent one */
+  code?: string | null
+  params?: Record<string, unknown>
 }
 
 export interface Refreshed {
@@ -175,6 +183,12 @@ interface Ctx {
   /** server total and amount due now per payment method of the quoted rooms */
   basket: BasketState
   reloadBasket: () => void
+  /** the prices chosen are for residents of these countries (O-8): the booked quotes' market, else the search's */
+  residency: Residency | null
+  /** search again without the campaign link's market and country (the standard prices); null without a link */
+  standardPrices: (() => void) | null
+  /** the campaign link's market the server refused: the results are the standard ones, and say why (G-55b) */
+  marketNotice: MarketRefusal | null
 }
 
 export interface BasketState {
@@ -193,7 +207,7 @@ export function useBooking() {
 }
 
 function toFlowError(e: unknown): FlowError {
-  if (e instanceof ApiError) return { kind: e.kind, message: e.message }
+  if (e instanceof ApiError) return { kind: e.kind, message: e.message, code: e.code, params: e.params }
   return { kind: "server", message: "" }
 }
 
@@ -248,6 +262,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const searchSeq = useRef(0)
   // a market / country from a link the server refused: search without it from then on
   const refusedMarket = useRef<string | null>(null)
+  const [marketNotice, setMarketNotice] = useState<MarketRefusal | null>(null)
 
   useEffect(() => {
     setJSON(storeKey, flow)
@@ -291,14 +306,24 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         if (linked && refusedMarket.current !== linked) {
           try {
             data = await pub<SearchResult>("search", { ...args, market: criteria.market || undefined, country: criteria.country || undefined })
+            if (seq === searchSeq.current) setMarketNotice(null)
           } catch (e) {
-            // an unknown or ambiguous market must never break the page: search without it
-            if (!(e instanceof ApiError) || e.kind === "network" || e.kind === "rate_limit") throw e
-            console.warn(`[tex-booking] market link ignored (market=${criteria.market ?? "-"}, country=${criteria.country ?? "-"}): ${e.type || e.kind}${e.message ? ` ${e.message}` : ""}`)
+            // a market the site does not sell, an unknown or ambiguous one, or a residents-only one for another country
+            // must never break the page: search without it, say so and count it (G-55b). Any other refusal (bad dates,
+            // an unknown hotel, the network) is the search's own error
+            const refusal = marketRefusal(e)
+            if (!refusal) throw e
+            console.warn(`[tex-booking] market link ignored (market=${criteria.market ?? "-"}, country=${criteria.country ?? "-"}): ${refusal.reason}`)
             refusedMarket.current = linked
+            if (seq === searchSeq.current) setMarketNotice(refusal)
+            trackMarketRefused(site.slug, refusedLinkPayload(refusal.reason, criteria.market, criteria.country))
+            analyticsEvent("market_link_refused", { reason: refusal.reason })
             data = await pub<SearchResult>("search", args)
           }
-        } else data = await pub<SearchResult>("search", args)
+        } else {
+          if (!linked && seq === searchSeq.current) setMarketNotice(null)
+          data = await pub<SearchResult>("search", args)
+        }
         if (seq === searchSeq.current) setSearch({ key, lang, hotelScope: scope, status: "done", data, error: null })
         analyticsEvent("search", { check_in: criteria.checkIn, check_out: criteria.checkOut })
         return data
@@ -557,6 +582,8 @@ export function BookingProvider({ children }: { children: ReactNode }) {
           email: g.email.trim(),
           phone: g.phone.trim(),
           country: g.country || undefined,
+          // a flow saved before the field existed has none
+          nationality: g.nationality || undefined,
           special_requests: g.special_requests.trim(),
           consent_email: g.consent_email,
           consent_sms: g.consent_sms,
@@ -594,6 +621,10 @@ export function BookingProvider({ children }: { children: ReactNode }) {
   const hasExtras = !!(hotel && (site.extras?.[hotel]?.length ?? 0) > 0)
   const allSelected = flow.selections.length === criteria.rooms.length && flow.selections.every(Boolean)
   const hotelName = hotel ? site.hotels.find((h) => h.name === hotel)?.property_name ?? hotel : null
+  // the booked quotes' market once the basket of these quotes is read (null there means "ask nothing"), else the search's
+  const residency = basket.key === basketKey && basket.data ? basket.data.residency ?? null : search.data?.residency ?? null
+  const linked = !!(criteria.market || criteria.country)
+  const standardPrices = useCallback(() => setCriteria({ ...criteria, market: null, country: null }), [criteria, setCriteria])
 
   const value: Ctx = {
     criteria,
@@ -629,6 +660,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     justBooked,
     basket,
     reloadBasket,
+    residency,
+    standardPrices: linked ? standardPrices : null,
+    marketNotice: linked ? marketNotice : null,
   }
   return <BookingCtx.Provider value={value}>{children}</BookingCtx.Provider>
 }

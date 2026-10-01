@@ -160,8 +160,8 @@ def save_profile(data):
 
 # ─── markets (platform master data, R-13) ────────────────────────────────
 
-MARKET_FIELDS = ("market_code", "market_name", "is_global", "disabled", "countries", "default_currency",
-                 "default_language", "parent_market")
+MARKET_FIELDS = ("market_code", "market_name", "is_global", "disabled", "countries", "residency_required",
+                 "default_currency", "default_language", "parent_market")
 
 
 def _countries(value) -> set[str]:
@@ -224,6 +224,9 @@ def save_market(data):
 	doc.is_global = 1 if d.get("is_global") else 0
 	doc.disabled = 1 if d.get("disabled") else 0
 	doc.countries = text(d.get("countries"), 2000) or ""
+	if "residency_required" in d:
+		# residents only on the web (O-8, ADR-070); a client that does not send it keeps the market's rule
+		doc.residency_required = 1 if d.get("residency_required") else 0
 	ccy = text(d.get("default_currency"), 3)
 	if ccy and not frappe.db.exists("Currency", ccy):
 		frappe.throw(_("Unknown currency {0}.").format(ccy))

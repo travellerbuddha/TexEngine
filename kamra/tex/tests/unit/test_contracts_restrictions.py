@@ -192,6 +192,34 @@ class TestMarket(unittest.TestCase):
 		self.assertEqual(cm.exception.code, "MARKET_REQUIRED")
 		self.assertEqual(self.r(country="JP", default="GLOBAL"), ("GLOBAL", "default"))
 
+	def test_an_explicit_market_the_site_does_not_sell_is_not_allowed(self):
+		"""O-8 (audit 2G-2, ADR-070): a link's market outside the site's list is refused as not sold there, never as
+		unknown; a disabled or missing one stays unknown; the country still picks among the site's markets."""
+		with self.assertRaises(Unsellable) as cm:
+			self.r(explicit="DACH", allowed={"DE", "GLOBAL"})
+		self.assertEqual(cm.exception.code, "MARKET_NOT_ALLOWED")
+		for code in ("OLD", "NOPE"):
+			with self.assertRaises(Unsellable) as cm:
+				self.r(explicit=code, allowed={"DE", "GLOBAL"})
+			self.assertEqual(cm.exception.code, "MARKET_UNKNOWN", code)
+		self.assertEqual(self.r(explicit="de", allowed={"DE", "GLOBAL"}), ("DE", "explicit"))
+		self.assertEqual(self.r(country="AT", allowed={"DE", "GLOBAL"}, default="DE"), ("DE", "default"))
+
+	def test_residency(self):
+		"""A residents-only market: the guest's country of residence or nationality must be one of its countries
+		(D-5); a market without the rule asks nothing."""
+		tr = versions.MarketDef("TR", frozenset({"TR"}), residency_required=True)
+		self.assertIsNone(versions.residency_refusal(tr, country="tr", nationality=None))       # residence
+		self.assertIsNone(versions.residency_refusal(tr, country="DE", nationality="TR"))       # nationality
+		self.assertIsNone(versions.residency_refusal(tr, country=None, nationality=" tr "))
+		self.assertEqual(versions.residency_refusal(tr, country="DE", nationality="GB"), "MARKET_RESIDENCY")
+		self.assertEqual(versions.residency_refusal(tr, country=None, nationality=None), "MARKET_RESIDENCY")
+		self.assertEqual(versions.residency_refusal(tr, country="", nationality=""), "MARKET_RESIDENCY")
+		de = versions.MarketDef("DE", frozenset({"DE"}))
+		self.assertFalse(de.residency_required)
+		self.assertIsNone(versions.residency_refusal(de, country="TR", nationality=None))
+		self.assertIsNone(versions.residency_refusal(de, country=None, nationality=None))
+
 
 class TestValidation(unittest.TestCase):
 	def codes(self, t, level="ERROR"):

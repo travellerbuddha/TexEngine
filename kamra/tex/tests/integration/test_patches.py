@@ -122,6 +122,8 @@ BEHAVIOUR = {
 	"p68_payment_checkout_lease": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 	"p69_quote_version_index": "test_patches.TestP03Indexes.test_p69_creates_the_quote_version_index",
 	"p70_manual_fx_rate": "test_patches.TestCapabilityPatches",
+	"p71_market_integrity": "test_patches.TestSmallPatches.test_p71_makes_the_domestic_market_residents_only_once",
+	"p72_market_refused_funnel_event": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
 
@@ -1211,9 +1213,13 @@ class TestSmallPatches(PatchCase):
 				("p53_payment_captured_at", [("tex_payments", "doctype", "tex_payment_transaction")],
 				 ("TEX Payment Transaction", "captured_at")),
 				("p68_payment_checkout_lease", [("tex_payments", "doctype", "tex_payment_transaction")],
-				 ("TEX Payment Transaction", "checkout_started_at"))):
+				 ("TEX Payment Transaction", "checkout_started_at")),
+				("p72_market_refused_funnel_event", [("tex_booking", "doctype", "tex_funnel_event")],
+				 ("TEX Funnel Event", "event"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
 			self.assertTrue(frappe.db.has_column(*field), patch)            # synced on this site
+		# a Select option, not a column (G-55b): an event the meta does not list is refused and lost by _track
+		self.assertIn("market_refused", frappe.get_meta("TEX Funnel Event").get_field("event").options.split("\n"))
 
 	def test_p14_gives_extras_an_order_cutoff(self):
 		# the synced column is NOT NULL with 0 (existing extras: until the day they are used), so the
@@ -1399,6 +1405,39 @@ class TestSmallPatches(PatchCase):
 		again = " ".join(str(x) for x in migrate("p61_loyalty_lots")["print"].call_args_list)
 		self.assertIn(f"p61: 0 lot(s) closed by the old expiry marked, 0 lot(s) that expired with nothing left closed; "
 		              f"{c} past-due lot(s) left to the daily expiry", again)
+
+	def test_p71_makes_the_domestic_market_residents_only_once(self):
+		"""O-8 (audit Part 2G-2, ADR-070, D-5): the two fields are synced; TR becomes residents-only on the web, once
+		(audited); an administrator who switches it off afterwards is not overruled by a forced re-run; no site's
+		market list is set."""
+		frappe.db.set_value("TEX Market", "TR", "residency_required", 0, update_modified=False)
+		put("TEX Booking Site", "p71-domestic", site_slug="p71-domestic", site_name="Domestic", property=fx.PROPERTY,
+		    enabled=1, default_market="TR")
+		put("TEX Booking Site", "p71-abroad", site_slug="p71-abroad", site_name="Abroad", property=fx.PROPERTY,
+		    enabled=1, default_market="DE")
+		domestic = frappe.get_all("TEX Booking Site", filters={"default_market": "TR"}, pluck="name")
+		sites = dict(frappe.db.sql("SELECT name, IFNULL(allowed_markets, '') FROM `tabTEX Booking Site`"))
+		audited = lambda: frappe.db.count("TEX Audit Event", {"action": "market.save",  # noqa: E731
+		                                                      "reference_name": "TR", "reason": ("like", "p71%")})
+		before = audited()
+		seen = self.first_run("p71_market_integrity")                      # (b): a second run changes nothing
+		self.assertEqual(seen["reload_doc"], [("tex_commercial", "doctype", "tex_market"),
+		                                      ("tex_booking", "doctype", "tex_booking_site")])
+		self.assertTrue(frappe.db.has_column("TEX Market", "residency_required"))
+		self.assertTrue(frappe.db.has_column("TEX Booking Site", "allowed_markets"))
+		self.assertEqual(frappe.db.get_value("TEX Market", "TR", "residency_required"), 1)
+		self.assertEqual(audited(), before + 1)
+		self.assertEqual(dict(frappe.db.sql("SELECT name, IFNULL(allowed_markets, '') FROM `tabTEX Booking Site`")),
+		                 sites)
+		self.assertEqual(frappe.db.count("TEX Market", {"residency_required": 1}), 1)   # TR only
+		# a site whose default market is TR now offers non-residents no price they can book: reported once
+		reported = frappe.get_all("TEX Audit Event", filters={"action": "booking_site.residents_only_default"},
+		                          pluck="reference_name")
+		self.assertEqual(sorted(reported), sorted(domestic))
+		# an administrator switches it off after the upgrade: a forced re-run keeps it off
+		frappe.db.set_value("TEX Market", "TR", "residency_required", 0)
+		self.assertRerunChangesNothing("p71_market_integrity")
+		self.assertEqual(frappe.db.get_value("TEX Market", "TR", "residency_required"), 0)
 
 	def test_p62_flags_holds_that_expired_before_the_flag(self):
 		"""O-24 (audit Part 2H-2, ADR-059): a cancelled reservation with the expiry note that nobody cancelled

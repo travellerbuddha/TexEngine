@@ -212,10 +212,14 @@ COMMERCIAL_SPECS = [
 		CB(),
 		F("countries", "Small Text", "Countries (ISO codes)",
 		  description="Comma-separated ISO 3166-1 alpha-2 codes, e.g. DE, AT, CH"),
+		F("residency_required", "Check", "Residents only (web)",
+		  description="Web bookings need a country of residence or a nationality among this market's countries. "
+		              "Staff may override in the Call Center, audited (ADR-070)."),
 		F("default_currency", "Link", "Default currency", "Currency"),
 		F("default_language", "Data", "Default language"),
 		F("parent_market", "Link", "Parent market", "TEX Market"),
-	], perms=MASTER, autoname="field:market_code", naming_rule="By fieldname", title_field="market_name"),
+	], perms=MASTER, autoname="field:market_code", naming_rule="By fieldname", title_field="market_name",
+	   extra={"modified": "2026-10-04 00:00:00.000000"}),                # residency_required came later (O-8)
 
 	dt("TEX Sales Channel", C, [
 		F("channel_code", "Data", "Code", reqd=1, unique=1, in_list_view=1),
@@ -978,6 +982,9 @@ BOOKING_SPECS = [
 		F("default_currency", "Link", "Default currency", "Currency"),
 		F("currencies", "Small Text", "Currencies"),
 		F("default_market", "Link", "Default market", "TEX Market"),
+		F("allowed_markets", "Small Text", "Markets this site sells",
+		  description="Market codes, comma-separated. Blank: every enabled market. A link's market outside them is "
+		              "refused; the default market must be one of them."),
 		F("sales_channel", "Link", "Sales channel", "TEX Sales Channel"),
 		F("self_service_enabled", "Check", "Guest self-service", default="1"),
 		TAB("Branding"),
@@ -1013,7 +1020,8 @@ BOOKING_SPECS = [
 		F("meta_pixel_id", "Data", "Meta pixel id"),
 		F("consent_banner", "Check", "Show consent banner", default="1"),
 	], perms=[SM, HA_RO],
-	   autoname="field:site_slug", naming_rule="By fieldname", title_field="site_name"),
+	   autoname="field:site_slug", naming_rule="By fieldname", title_field="site_name",
+	   extra={"modified": "2026-10-04 00:00:00.000000"}),                # allowed_markets came later (O-8)
 
 	dt("TEX Content Translation", B, [
 		F("property", "Link", "Hotel", "Property", reqd=1, in_list_view=1, in_standard_filter=1),
@@ -1030,7 +1038,8 @@ BOOKING_SPECS = [
 
 	dt("TEX Funnel Event", B, [
 		F("event", "Select", "Event", ["search", "room_view", "quote", "guest_details", "payment_started",
-		                               "abandoned", "booked"], reqd=1, in_list_view=1, in_standard_filter=1),
+		                               "abandoned", "booked", "market_refused"], reqd=1, in_list_view=1,
+		  in_standard_filter=1),
 		F("occurred_at", "Datetime", "At", in_list_view=1),
 		F("site", "Link", "Site", "TEX Booking Site"),
 		F("property", "Link", "Property", "Property", in_standard_filter=1),
@@ -1044,7 +1053,8 @@ BOOKING_SPECS = [
 		F("currency", "Link", "Currency", "Currency"),
 		F("payload", "Code", "Payload", "JSON", permlevel=1),
 	], perms=[*READONLY_AUDIT, INTERNALS], autoname="hash", track_changes=False,
-	   sort_field="creation", in_create=True),
+	   sort_field="creation", in_create=True,
+	   extra={"modified": "2026-10-04 00:00:01.000000"}),                # market_refused came later (G-55b)
 ]
 
 # ═══ TEX Payments ═════════════════════════════════════════════════════════

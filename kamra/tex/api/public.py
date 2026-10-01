@@ -20,10 +20,11 @@ from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import versions
 from kamra.tex.pricing.extras import guest_safe
+from kamra.tex.refusal_codes import MARKET_REFUSALS
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
-from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, sites
+from kamra.tex.services import content, guest_changes, late_payments, modification, quoting, refusals, sites
 from kamra.tex.services.txn import retry_on_deadlock, undo_step
 
 
@@ -120,6 +121,7 @@ def _safe_return_url(site, url: str | None, booking: str | None = None) -> str |
 
 @frappe.whitelist(allow_guest=True)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def site(slug: str | None = None, domain: str | None = None):
 	s = _site(slug, domain)
 	# the widget on a hotel's own website reads its theme from here: allow exactly the
@@ -184,16 +186,44 @@ def _strip_names(rows: dict) -> dict:
 	return rows
 
 
-def _market(site, market: str | None, country: str | None) -> str:
-	markets = [versions.MarketDef(m.name, frozenset(_csv(m.countries)), bool(m.is_global), bool(m.disabled))
-	           for m in frappe.get_all("TEX Market", fields=["name", "countries", "is_global", "disabled"])]
+def market_defs() -> list[versions.MarketDef]:
+	return [versions.MarketDef(m.name, frozenset(_csv(m.countries)), bool(m.is_global), bool(m.disabled),
+	                           bool(m.residency_required))
+	        for m in frappe.get_all("TEX Market", fields=["name", "countries", "is_global", "disabled",
+	                                                      "residency_required"])]
+
+
+def _market(site, market: str | None, country: str | None) -> versions.MarketDef:
+	"""The market a search prices, from the link's market or country among the site's markets (O-8, ADR-070). Refused
+	(``MarketRefused``, a clean 417 the booking app acts on: it searches again without the link and says why): a
+	market the site does not sell, an unknown or ambiguous one, and a residents-only market asked for together with
+	a link country outside it. A residents-only market without a country is priced: the guest declares residence
+	at checkout and ``create_booking`` decides."""
+	from kamra.tex.services.refusals import MarketRefused
+
+	markets = market_defs()
 	try:
 		code, _how = versions.resolve_market(explicit=market, country=country, markets=markets,
+		                                     allowed=set(_csv(site.allowed_markets)) or None,
 		                                     default=site.default_market)
 	except versions.MarketResolutionError as e:
-		# a clean 417 the booking app can act on (it retries without the deep link)
-		frappe.throw(str(e), frappe.ValidationError, title=_("Market"))
-	return code
+		params = {"market": market.strip().upper()} if e.code == "MARKET_NOT_ALLOWED" and market else {}
+		frappe.throw(str(e), MarketRefused(code=e.code, params=params), title=_("Market"))
+	m = next(m for m in markets if m.code == code)
+	# the link's own market (named, or its country's) for a country outside it; a site's residents-only default is
+	# priced (searching again without the link would only come back to it) and the booking decides
+	if country and _how != "default" and versions.residency_refusal(m, country=country, nationality=None):
+		frappe.throw(_("These prices are for residents of {0}.").format(", ".join(sorted(m.countries))),
+		             MarketRefused(code="MARKET_RESIDENCY", params={"market": m.code, "countries": sorted(m.countries)}),
+		             title=_("Market"))
+	return m
+
+
+def residency(market: versions.MarketDef | str | None) -> dict | None:
+	"""What the guest is told of a residents-only market (O-8): its countries; None for any other market."""
+	if isinstance(market, str):
+		market = next((m for m in market_defs() if m.code == market), None)
+	return {"countries": sorted(market.countries)} if market and market.residency_required else None
 
 
 # ─── search / quote / book ───────────────────────────────────────────────
@@ -201,6 +231,7 @@ def _market(site, market: str | None, country: str | None) -> str:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])   # a party may carry a child's date of birth
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def search(site: str, check_in: str, check_out: str, rooms, currency: str | None = None,
            promo_code: str | None = None, market: str | None = None, country: str | None = None,
            hotel: str | None = None, session_id: str | None = None):
@@ -213,7 +244,8 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 	allowed_ccy = _csv(s.currencies)
 	if currency and allowed_ccy and currency not in allowed_ccy:
 		frappe.throw(_("Currency not offered."))
-	mkt = _market(s, market, country)
+	m = _market(s, market, country)
+	mkt = m.code
 	res = quoting.search(properties=props, check_in=check_in, check_out=check_out, rooms=rooms, market=mkt,
 	                     channel=_channel(s), currency=currency or s.default_currency or None,
 	                     promo_codes=[promo_code] if promo_code else (), internal=False)
@@ -226,6 +258,8 @@ def search(site: str, check_in: str, check_out: str, rooms, currency: str | None
 			o.pop("contract", None)
 			o.pop("version", None)
 	res["market"] = mkt
+	# a residents-only market's prices: checkout asks the guest's country of residence (O-8)
+	res["residency"] = residency(m)
 	content.Localizer(content.guest_language()).search(res)
 	# the party as ages on arrival: a child's date of birth never reaches analytics (G-52 review)
 	parties = quoting.parse_rooms(rooms, arrival=getdate(check_in))
@@ -241,6 +275,7 @@ LOW_STOCK = 3
 
 @frappe.whitelist(allow_guest=True)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def extras_availability(site: str, hotel: str, check_in: str, check_out: str, session_id: str | None = None):
 	s = _site(site)
 	if hotel not in _site_properties(s):
@@ -260,6 +295,7 @@ def extras_availability(site: str, hotel: str, check_in: str, check_out: str, se
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None, session_id: str | None = None):
 	s = _site(site)
@@ -285,6 +321,7 @@ def quote(site: str, offer_key: str, extras=None, promo_code: str | None = None,
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def quote_rooms(site: str, rooms, promo_code: str | None = None, session_id: str | None = None):
 	"""The rooms of one booking quoted together (G-84, ADR-057): a coupon's minimum basket is the
@@ -354,6 +391,7 @@ def _country(value) -> str | None:
 
 @frappe.whitelist(allow_guest=True)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def basket(site: str, quote_ids, session_id: str | None = None):
 	"""Server total of the selected rooms and, for every payment method the guest may
 	choose, the amount due now (each rate plan's deposit rule) — before booking."""
@@ -380,11 +418,14 @@ def basket(site: str, quote_ids, session_id: str | None = None):
 		r.pop("payment_policy", None)
 	return {"currency": out["currency"], "total": out["total"], "usable": out["usable"],
 	        "expires_at": out["expires_at"], "pay_at_hotel_allowed": out["pay_at_hotel_allowed"],
-	        "rooms": out["rooms"], "methods": methods}
+	        "rooms": out["rooms"], "methods": methods,
+	        # the market of the quotes booked, not of the search: checkout asks for the residence it needs (O-8)
+	        "residency": residency(out["market"])}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def book(site: str, quote_ids, guest, payment_method: str | None = None, provider_account: str | None = None,
          idempotency_key: str | None = None, language: str | None = None, session_id: str | None = None,
@@ -488,6 +529,7 @@ def resume_token(booking: str) -> str:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def booking_status(token: str):
 	"""Confirmation page / manage link: guest view of a booking by its manage token."""
 	b = _booking_by_token(token)
@@ -496,6 +538,7 @@ def booking_status(token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def pay_booking(token: str, payment_method: str = "Card", provider_account: str | None = None,
                 return_url: str | None = None):
@@ -534,6 +577,7 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60)
+@refusals.coded
 @retry_on_deadlock
 def mock_pay(transaction: str, outcome: str, sig: str):
 	"""Sandbox payment page action (only Mock provider accounts reach this)."""
@@ -561,6 +605,7 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def payment_link(token: str):
 	from kamra.tex.payments import service as pay
 
@@ -595,6 +640,7 @@ def _link_due(link):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def pay_link(token: str, provider_account: str | None = None):
 	from kamra.tex.payments import service as pay
@@ -653,7 +699,9 @@ FUNNEL_CONTACT_KEYS = frozenset({"email", "phone", "mobile", "first_name", "last
 # itself sells (second review): one of its hotels, a room type and a rate plan of that hotel, a board
 # code, the quotes of the visitor's own session. Anything else is dropped, never stored: a name, a
 # phone number or an address typed into a field is not a room type
-BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel")}
+BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel"),
+                        # a campaign link's market the search refused (G-55b): the refusal, the market, the country
+                        "market_refused": ("reason", "market", "country")}
 BROWSER_TEXT_MAX = 140
 BROWSER_QUOTES_MAX = 10
 BROWSER_QUOTE_ID_MAX = 64
@@ -679,12 +727,23 @@ def _browser_payload(site, session_id: str | None, event: str, payload) -> dict:
 		rt = _text(payload.get("room_type"))
 		if rt and frappe.db.exists("Room Type", {"name": rt, "property": out["hotel"]}):
 			out["room_type"] = rt
-	if "board" in fields and payload.get("board") in BOARD_CODES:
+	if "board" in fields and isinstance(payload.get("board"), str) and payload["board"] in BOARD_CODES:
 		out["board"] = payload["board"]
 	if "rate_plan" in fields and out.get("hotel"):
 		rp = _text(payload.get("rate_plan"))
 		if rp and frappe.db.exists("Rate Plan", {"name": rp, "property": out["hotel"]}):
 			out["rate_plan"] = rp
+	if "reason" in fields and isinstance(payload.get("reason"), str) and payload["reason"] in MARKET_REFUSALS:
+		out["reason"] = payload["reason"]
+	if "market" in fields:
+		# a market's code, never an unknown string (a link can carry anything)
+		code = _text(payload.get("market"))
+		if code and frappe.db.exists("TEX Market", code.strip().upper()):
+			out["market"] = code.strip().upper()
+	if "country" in fields:
+		cc = payload.get("country")
+		if isinstance(cc, str) and len(cc) == 2 and cc.isascii() and cc.isalpha():
+			out["country"] = cc.upper()
 	if "quotes" in fields and isinstance(payload.get("quotes"), list):
 		ids = [q for q in payload["quotes"] if isinstance(q, str) and 0 < len(q) <= BROWSER_QUOTE_ID_MAX]
 		ids = _own_quotes(site, ids[:BROWSER_QUOTES_MAX], session_id)
@@ -734,6 +793,7 @@ def _track(site, session_id: str | None, event: str, payload: dict, *, consent: 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=120, seconds=60)
+@refusals.coded
 def track(site: str, session_id: str, event: str, payload=None):
 	if event not in BROWSER_EVENT_FIELDS:
 		frappe.throw(_("Unknown event."))
@@ -846,6 +906,7 @@ def _own_reservation(b, reservation: str) -> None:
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_cancel(token: str, reservation: str, reason: str | None = None):
 	b = _booking_by_token(token)
@@ -868,6 +929,7 @@ def manage_cancel(token: str, reservation: str, reason: str | None = None):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 def manage_propose(token: str, reservation: str, changes):
 	"""The price of a change and how it would be settled (``settlement``: pay now, at the
 	hotel, balance, refund, credit, hotel approval), before the guest accepts it (G-45)."""
@@ -905,6 +967,7 @@ def manage_propose(token: str, reservation: str, changes):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])  # the token in the body, never a query string (G-83)
 @rate_limit(**SEARCH_LIMIT)
+@refusals.coded
 def manage_extras(token: str, reservation: str):
 	"""Extras the guest can still add to a room of their booking (G-22)."""
 	b = _booking_by_token(token)
@@ -927,6 +990,7 @@ def manage_extras(token: str, reservation: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 def manage_extras_propose(token: str, reservation: str, extras):
 	b = _booking_by_token(token)
 	_own_reservation(b, reservation)
@@ -941,6 +1005,7 @@ def manage_extras_propose(token: str, reservation: str, extras):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_extras_apply(token: str, proposal_token: str):
 	b = _booking_by_token(token)
@@ -956,6 +1021,7 @@ def manage_extras_apply(token: str, proposal_token: str):
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_apply(token: str, proposal_token: str, note: str | None = None, return_url: str | None = None):
 	"""Guest accepts a proposal (G-45, ADR-044). → ``status``:
@@ -981,6 +1047,7 @@ def manage_apply(token: str, proposal_token: str, note: str | None = None, retur
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(**WRITE_LIMIT)
+@refusals.coded
 @retry_on_deadlock
 def manage_change_pay(token: str, request: str, return_url: str | None = None):
 	"""Pay for the guest's change still waiting for its payment (``rooms[].pending_change``

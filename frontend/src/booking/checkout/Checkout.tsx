@@ -19,6 +19,7 @@ import { isZero } from "../lib/format"
 import { fallbackChoices, type PayChoice } from "../lib/methods"
 import { Photo } from "../ui/Photo"
 import COUNTRIES from "./countries.json"
+import { countryNames, isoCountry, regionDisplay, residencyProblem } from "../../lib/residency"
 
 /** special_requests limit the server accepts */
 const REQUESTS_MAX = 1000
@@ -347,7 +348,7 @@ const PHONE = /^\+?[\d\s().-]{6,20}$/
 
 function DetailsStep() {
   const { t, locale } = useI18n()
-  const { flow, setGuest, goStep } = useBooking()
+  const { flow, setGuest, goStep, residency, standardPrices, criteria } = useBooking()
   const g = flow.guest
   const [submitted, setSubmitted] = useState(false)
   const summaryRef = useRef<HTMLDivElement>(null)
@@ -358,6 +359,7 @@ function DetailsStep() {
     email: `${base}-email`,
     phone: `${base}-phone`,
     country: `${base}-country`,
+    nationality: `${base}-nationality`,
     requests: `${base}-requests`,
   }
   const countries = useMemo(() => {
@@ -373,6 +375,13 @@ function DetailsStep() {
   }, [locale])
   // the server takes ISO 3166-1 alpha-2 codes; older saved forms may hold a country name
   const countryCode = g.country && !(g.country in COUNTRIES) ? countries.find((c) => c.name === g.country)?.code ?? "" : g.country
+  const nationalityCode = isoCountry(g.nationality, COUNTRIES as Record<string, string>) ?? ""
+  // a residents-only market's prices (O-8): the country of residence is asked, a link's country fills it in
+  useEffect(() => {
+    if (residency && !g.country && criteria.country && criteria.country in COUNTRIES) setGuest({ country: criteria.country })
+  }, [residency, g.country, criteria.country, setGuest])
+  const residents = residency ? countryNames(residency.countries, regionDisplay(locale)) : ""
+  const residence = residencyProblem(residency, countryCode, nationalityCode)
 
   const errors: FieldError[] = []
   if (!g.first_name.trim()) errors.push({ id: ids.first, message: t("details.errFirst") })
@@ -380,6 +389,8 @@ function DetailsStep() {
   if (!EMAIL.test(g.email.trim())) errors.push({ id: ids.email, message: g.email.trim() ? t("details.errEmailFormat") : t("details.errEmail") })
   if (!g.phone.trim()) errors.push({ id: ids.phone, message: t("details.errPhone") })
   else if (!PHONE.test(g.phone.trim())) errors.push({ id: ids.phone, message: t("details.errPhoneFormat") })
+  if (residence === "required") errors.push({ id: ids.country, message: t("details.errResidence") })
+  else if (residence === "not_eligible") errors.push({ id: ids.country, message: t("details.errResidenceNotEligible", { countries: residents }) })
   const errFor = (id: string) => (submitted ? errors.find((e) => e.id === id)?.message ?? null : null)
 
   const submit = (e: FormEvent) => {
@@ -430,8 +441,15 @@ function DetailsStep() {
             <Field label={t("details.phone")} hint={t("details.phoneHint")} error={errFor(ids.phone)} id={ids.phone}>
               <Input type="tel" inputMode="tel" value={g.phone} onChange={(e) => setGuest({ phone: e.target.value.slice(0, 40) })} autoComplete="tel" required />
             </Field>
-            <Field label={t("details.country")} optional={t("common.optional")} id={ids.country} className="sm:col-span-2">
-              <Select value={countryCode} onChange={(e) => setGuest({ country: e.target.value })} autoComplete="country">
+            <Field
+              label={t("details.country")}
+              optional={residency ? undefined : t("common.optional")}
+              hint={residency ? t("details.residenceNote", { countries: residents }) : undefined}
+              error={errFor(ids.country)}
+              id={ids.country}
+              className="sm:col-span-2"
+            >
+              <Select value={countryCode} onChange={(e) => setGuest({ country: e.target.value })} autoComplete="country" required={!!residency}>
                 <option value="">{t("details.selectCountry")}</option>
                 {countries.map((c) => (
                   <option key={c.code} value={c.code}>
@@ -440,6 +458,25 @@ function DetailsStep() {
                 ))}
               </Select>
             </Field>
+            {residency && (
+              <Field label={t("details.nationality")} optional={t("common.optional")} id={ids.nationality} className="sm:col-span-2">
+                <Select value={nationalityCode} onChange={(e) => setGuest({ nationality: e.target.value })}>
+                  <option value="">{t("details.selectCountry")}</option>
+                  {countries.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {submitted && residence === "not_eligible" && standardPrices && (
+              <div className="sm:col-span-2">
+                <Button variant="secondary" onClick={standardPrices}>
+                  {t("details.standardPrices")}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
         <div className="bk-card space-y-3 p-4 sm:p-6">
@@ -581,6 +618,11 @@ function PaymentStep() {
       // a limited extra ran out, not the room: back to the extras, never to the room search
       if (res.error.kind === "extra_sold_out") return void backToExtras(res.error)
       setPending(false)
+      if (res.error.code === "MARKET_RESIDENCY") {
+        // these prices are for residents (O-8): back to the guest's country of residence
+        b.goStep("details", { keepError: true })
+        return setFlowError(res.error)
+      }
       if (res.error.kind === "invalid" && /payment|pay|hotel/i.test(res.error.message)) {
         setMethodError(res.error.message)
         requestAnimationFrame(() => methodErrRef.current?.focus())

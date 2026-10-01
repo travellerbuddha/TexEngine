@@ -44,6 +44,7 @@ class TEXBookingSite(Document):
 		if self.sales_channel and self.sales_channel not in WEB_CHANNELS:
 			frappe.throw(_("A booking site sells on a web channel ({0}), not on {1}.").format(
 				", ".join(sorted(WEB_CHANNELS)), self.sales_channel))
+		self._validate_markets()
 		for f in ("primary_color", "accent_color", "background_color"):
 			if self.get(f) and not HEX.match(self.get(f)):
 				frappe.throw(_("{0} must be a #RRGGBB colour.").format(self.meta.get_label(f)))
@@ -77,6 +78,31 @@ class TEXBookingSite(Document):
 				assert isinstance(data, dict)
 			except Exception:
 				frappe.throw(_("Custom texts must be a JSON object keyed by language."))
+
+	def _validate_markets(self):
+		"""The markets a link may choose on this site (O-8, ADR-070); blank: every enabled market. Judged only when
+		the list or the default market changes: a market disabled later must not make the site unsavable (a domain
+		check saves the site as it is), and a disabled market is not sold anyway (``versions.resolve_market``)."""
+		codes = list(dict.fromkeys(c.strip().upper() for c in (self.allowed_markets or "").replace("\n", ",").split(",")
+		                           if c.strip()))
+		self.allowed_markets = ", ".join(codes) or None
+		changed = self.is_new() or self.has_value_changed("allowed_markets") or self.has_value_changed("default_market")
+		if changed and self.default_market and frappe.db.get_value("TEX Market", self.default_market, "residency_required"):
+			# allowed (a domestic site), but said: a guest whose country no other market of the site takes is priced
+			# on it, and only its residents can book those prices
+			frappe.msgprint(_("The default market {0} is for residents only: guests from elsewhere see its prices but "
+			                  "cannot book them unless a link or their country picks another market of this site. A "
+			                  "market for everyone (such as GLOBAL) is the usual default.").format(self.default_market),
+			                indicator="orange", alert=True)
+		if not codes or not changed:
+			return
+		enabled = set(frappe.get_all("TEX Market", filters={"name": ("in", codes), "disabled": 0}, pluck="name"))
+		bad = [c for c in codes if c not in enabled]
+		if bad:
+			frappe.throw(_("Markets this site sells: {0} is not an enabled market.").format(", ".join(bad)))
+		if self.default_market and self.default_market not in codes:
+			frappe.throw(_("The default market {0} must be one of the markets this site sells.").format(
+				self.default_market))
 
 	def _validate_domains(self):
 		"""Custom domains are hostnames (ADR-035). Whether one is verified, when, and how its

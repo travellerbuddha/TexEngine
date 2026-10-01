@@ -36,3 +36,13 @@ export function armAbandon(site: string, payload: Record<string, unknown>) {
 export function disarmAbandon() {
   armed = null
 }
+
+const refusedLinks = new Set<string>()
+
+/** A campaign link's market the search refused (G-55b): once per link and page life. */
+export function trackMarketRefused(site: string, payload: Record<string, string>) {
+  const key = JSON.stringify(payload)
+  if (refusedLinks.has(key)) return
+  refusedLinks.add(key)
+  beacon("track", { site, session_id: sessionId(), event: "market_refused", payload: JSON.stringify(payload) })
+}

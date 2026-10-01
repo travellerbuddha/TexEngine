@@ -18,11 +18,18 @@ export class ApiError extends Error {
   status: number
   type: string
   kind: ErrorKind
-  constructor(message: string, status: number, type: string, kind: ErrorKind) {
+  /** the refusal's stable code (`tex_code`, G-70a), e.g. "SOLD_OUT" or "MARKET_RESIDENCY"; null when the server sent none */
+  code: string | null
+  /** the refusal's guest-safe params (`tex_params`): ISO dates, decimal strings, ISO codes, hotel names */
+  params: Record<string, unknown>
+  constructor(message: string, status: number, type: string, kind: ErrorKind, code: string | null = null,
+              params: Record<string, unknown> = {}) {
     super(message)
     this.status = status
     this.type = type
     this.kind = kind
+    this.code = code
+    this.params = params
   }
 }
 
@@ -35,12 +42,35 @@ function clean(s: string) {
     .trim()
 }
 
-// The server's wording for the states the guest must recover from by searching again.
+// The server's wording for the states the guest must recover from by searching again: only for a refusal
+// that carries no code yet (G-70b codes them all and drops the wording).
 const SOLD_OUT = /sold out|no longer available|not enough rooms/i
 const EXPIRED = /expired|search again|no longer on sale|already used|invalid offer|invalid quote/i
 
-function classify(message: string, status: number, type: string): ErrorKind {
+/** A refusal code as the server sends it (kamra/tex/refusal_codes.py): UPPER_SNAKE. */
+const CODE = /^[A-Z][A-Z0-9_]{1,63}$/
+
+/** The kind a code means, whatever the language of its message (G-70a). A code missing here (the server's
+ * fallback codes NOT_FOUND / NOT_PERMITTED / RATE_LIMITED included) is classified as before, by its wording and
+ * status; a market code is a refusal the search or checkout recovers from (G-55b, O-8), never sold out: a quote of a
+ * market the site no longer sells is searched again (expired), a residents-only market's goes back to the guest's
+ * country of residence. */
+const KIND_BY_CODE: Record<string, ErrorKind> = {
+  SOLD_OUT: "sold_out",
+  EXTRA_SOLD_OUT: "extra_sold_out",
+  CONTRACT_NOT_ON_SALE: "expired",
+  CONTRACT_SUSPENDED: "expired",
+  MARKET_UNKNOWN: "invalid",
+  MARKET_AMBIGUOUS: "invalid",
+  MARKET_REQUIRED: "invalid",
+  MARKET_NOT_ALLOWED: "expired",
+  MARKET_RESIDENCY: "invalid",
+}
+
+function classify(message: string, status: number, type: string, code: string | null): ErrorKind {
   if (status === 429 || type === "RateLimitExceededError") return "rate_limit"
+  const byCode = code ? KIND_BY_CODE[code] : undefined
+  if (byCode) return byCode
   // before the wording test: "Spa has just sold out…" is an extra, not the room (G-19)
   if (type === "ExtraSoldOut" || type.endsWith(".ExtraSoldOut")) return "extra_sold_out"
   if (SOLD_OUT.test(message)) return "sold_out"
@@ -54,9 +84,23 @@ function classify(message: string, status: number, type: string): ErrorKind {
 export function parseError(body: string, status: number): ApiError {
   let message = ""
   let type = ""
+  let code: string | null = null
+  let params: Record<string, unknown> = {}
   try {
-    const j = JSON.parse(body) as { _server_messages?: string; exception?: string; exc_type?: string; message?: unknown }
+    const j = JSON.parse(body) as {
+      _server_messages?: string
+      exception?: string
+      exc_type?: string
+      message?: unknown
+      tex_code?: unknown
+      tex_params?: unknown
+    }
     type = j.exc_type ?? ""
+    if (typeof j.tex_code === "string" && CODE.test(j.tex_code)) {
+      code = j.tex_code
+      if (j.tex_params && typeof j.tex_params === "object" && !Array.isArray(j.tex_params))
+        params = j.tex_params as Record<string, unknown>
+    }
     if (j._server_messages) {
       const msgs = JSON.parse(j._server_messages) as string[]
       message = msgs
@@ -75,7 +119,7 @@ export function parseError(body: string, status: number): ApiError {
   } catch {
     /* not JSON */
   }
-  return new ApiError(message, status, type, classify(message, status, type))
+  return new ApiError(message, status, type, classify(message, status, type, code), code, params)
 }
 
 let acceptLanguage = "en"

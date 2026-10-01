@@ -16,6 +16,8 @@ export function GeneralTab({ site, set, err, isNew }: TabProps) {
   const scope: "hotel" | "group" = site.hotel_group && !site.property ? "group" : "hotel"
   const langs = csv(site.languages)
   const ccys = csv(site.currencies)
+  const markets = csv(site.allowed_markets)
+  const liveMarkets = boot.markets.map((m) => m.name)
   const allCcys = [...new Set([...boot.currencies, ...ccys])].sort()
   const withCurrent = (opts: { value: string; label: string }[], cur: string | null) =>
     cur && !opts.some((o) => o.value === cur) ? [...opts, { value: cur, label: cur }] : opts
@@ -156,7 +158,7 @@ export function GeneralTab({ site, set, err, isNew }: TabProps) {
 
           <FormSection title={t("be.general.selling")} description={t("be.general.selling_hint")}>
             <FormGrid>
-              <Field label={t("be.field.default_market")} hint={t("be.field.default_market_hint")}>
+              <Field label={t("be.field.default_market")} hint={t("be.field.default_market_hint")} error={err("default_market")}>
                 <Select
                   value={site.default_market ?? ""}
                   placeholder={t("be.platform_default")}
@@ -180,6 +182,23 @@ export function GeneralTab({ site, set, err, isNew }: TabProps) {
                 />
               </Field>
             </FormGrid>
+            <CheckboxGroup
+              legend={t("be.field.allowed_markets")}
+              hint={t("be.field.allowed_markets_hint")}
+              options={[...new Set([...liveMarkets, ...markets])].map((code) => {
+                const m = boot.markets.find((x) => x.name === code)
+                return { value: code, label: m ? `${m.market_name} (${code})${m.residency_required ? ` · ${t("be.field.residents_only")}` : ""}` : code }
+              })}
+              value={markets}
+              onChange={(v) => {
+                const next = [...new Set([...liveMarkets, ...markets])].filter((c) => v.includes(c))
+                set({
+                  allowed_markets: next.join(", ") || null,
+                  // the default market is always one the site sells (validated on the server too)
+                  default_market: site.default_market && next.length && !next.includes(site.default_market) ? next[0] : site.default_market,
+                })
+              }}
+            />
             <Switch
               checked={!!site.self_service_enabled}
               onChange={(v) => set({ self_service_enabled: v ? 1 : 0 })}
