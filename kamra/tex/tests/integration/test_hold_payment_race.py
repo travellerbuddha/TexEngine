@@ -175,6 +175,41 @@ class TestAtomicExpiry(HoldCase):
 		self.assertLessEqual(until, add_to_date(now_datetime(), minutes=31))
 		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until"), until)
 
+	def test_the_expiry_job_locks_only_the_bookings_that_are_due(self):
+		"""NEW-7 (2F-1): a lock-free read picks the bookings whose hold is over with no attempt open; the others
+		are never locked (1 + its rooms' row locks and a commit for every waiting booking, every 5 minutes)."""
+		due, holding, in_flight = self.book(), self.book(), self.book()
+		passes(due["booking"], 25)                                 # the 20-minute hold is over, no attempt
+		passes(holding["booking"], 5)                              # still held for 15 minutes
+		self.start_payment(in_flight)
+		passes(in_flight["booking"], 22)                           # hold over, the checkout still open (3DS margin)
+		mine = {b["booking"] for b in (due, holding, in_flight)}
+		with mock.patch.object(booking, "expire_booking", wraps=booking.expire_booking) as asked:
+			booking.expire_pending_bookings()
+		self.assertEqual({c.args[0] for c in asked.call_args_list} & mine, {due["booking"]})
+		self.assertEqual([self.statuses(b)[0] for b in (due, holding, in_flight)],
+		                 ["Cancelled", "Pending Payment", "Pending Payment"])
+
+	def test_a_stalled_pms_outbox_never_stops_the_expiry(self):
+		"""NEW-7 (2F-1): the PMS outbox is its own 5-minute job. It used to run before the expiry in the same
+		job: a webhook that hangs (15 s to connect, 15 s to read) ended that job at RQ's limit and the expiry,
+		the refunds, the links and the mail status never ran."""
+		from kamra.tex import scheduler
+
+		b = self.book()
+		passes(b["booking"], 25)
+		before = set(frappe.get_all("Error Log", pluck="name"))
+		with mock.patch("kamra.tex.connect.outbox.deliver_pending", side_effect=SystemExit) as outbox, \
+				mock.patch.object(frappe.db, "commit"):
+			try:
+				scheduler.every_5_minutes()
+			except SystemExit:
+				self.fail("the PMS outbox took the whole 5-minute group down before the expiry ran")
+		outbox.assert_not_called()
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		new = set(frappe.get_all("Error Log", filters=[["method", "like", "TEX job%"]], pluck="name")) - before
+		self.assertEqual(new, set())
+
 
 def txn_state(name: str) -> dict:
 	return frappe.db.get_value("TEX Payment Transaction", name, ["status", "reconciliation", "reconciliation_note"],

@@ -1,8 +1,8 @@
 """NEW-1 (audit Part 2A, ADR-064): one tick of every TEX scheduler entry point over seeded data.
 
-``kamra.tex.scheduler`` every_minute, every_5_minutes, every_15_minutes, site_midnight, daily and
-fx_daily run once each, in that order, with the clock frozen (``freeze_time``: a Wednesday in June,
-before the fixtures' season) and no outside world:
+``kamra.tex.scheduler`` every_minute, every_5_minutes, outbox_every_5_minutes (the PMS outbox, its own job
+since NEW-7), every_15_minutes, site_midnight, daily and fx_daily run once each, in that order, with the
+clock frozen (``freeze_time``: a Wednesday in June, before the fixtures' season) and no outside world:
 
 * FX provider HTTP (the ``requests.get`` of ``connect.fx_providers.fetch``) answers a canned TCMB
   and ECB file;
@@ -49,7 +49,8 @@ from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import SLUG, guest_books, setup_site_and_payments
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
 
-ENTRY_POINTS = ("every_minute", "every_5_minutes", "every_15_minutes", "site_midnight", "daily", "fx_daily")
+ENTRY_POINTS = ("every_minute", "every_5_minutes", "outbox_every_5_minutes", "every_15_minutes", "site_midnight",
+                "daily", "fx_daily")
 LOCAL_HOSTS = ("localhost", "test.localhost", "::1")
 TOKEN = "tex-smoke-token"
 # the alerts job records a worsened status check as an Error Log by design (ADR-047): not a failure

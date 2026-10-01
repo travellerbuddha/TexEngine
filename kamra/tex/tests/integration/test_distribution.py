@@ -8,7 +8,7 @@ from datetime import timedelta
 from unittest import mock
 
 import frappe
-from frappe.utils import getdate, now_datetime
+from frappe.utils import add_to_date, getdate, now_datetime
 
 from kamra.tex.api import distribution as dist_api
 from kamra.tex.distribution import repository as dist
@@ -462,3 +462,153 @@ class TestPmsDelivery(TexTestCase):
 		reservations = {r for _e, r in adapters.LogOnlyPMS.delivered}
 		self.assertFalse(reservations & {x["reservation"] for x in booked["rooms"]})  # nothing was delivered
 		self.assertEqual(frappe.db.get_value("TEX Integration Connection", pms.name, "last_status"), "Dead")
+
+	# ─── NEW-7 (2F-1): a time budget, and order per reservation ──────────────
+
+	def pms(self):
+		setup_site_and_payments(self.f)
+		return frappe.get_doc({"doctype": "TEX Integration Connection", "label": "PMS order", "property": fx.PROPERTY,
+		                       "category": "PMS", "adapter": "log", "environment": "Sandbox", "enabled": 1}
+		                      ).insert(ignore_permissions=True)
+
+	def rows(self, conn, reservation: str | None = None) -> list:
+		"""The connection's reservation messages, oldest first."""
+		filters = {"connection": conn.name, "kind": "Reservation"}
+		if reservation:
+			filters["reference_name"] = reservation
+		return frappe.get_all("TEX Integration Outbox", filters=filters, order_by="creation asc, name asc",
+		                      fields=["name", "event", "status", "attempts", "claim_token", "claimed_until",
+		                              "next_attempt_at", "reference_name"])
+
+	def booked_and_cancelled(self, session: str):
+		"""→ (connection, reservation, its messages oldest first: created … cancelled)."""
+		from kamra.tex.api import crs as crs_api
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		conn = self.pms()
+		res = guest_books(session=session)["rooms"][0]["reservation"]
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff cancel it, the scheduler delivers
+		crs_api.cancel(reservation=res, reason="the guest phoned")
+		rows = self.rows(conn, res)
+		self.assertEqual((rows[0].event, rows[-1].event), ("reservation.created", "reservation.cancelled"))
+		return conn, res, rows
+
+	def test_a_run_stops_starting_messages_when_its_time_budget_is_used(self):
+		"""A PMS that answers slowly cannot hold a run past its budget: the messages it did not start are given
+		back (no claim, still Pending, no attempt counted) for the next run."""
+		from kamra.tex.connect import adapters, outbox
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		conn = self.pms()
+		for n in range(3):
+			guest_books(session=f"p20-budget-{n}")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
+		self.assertEqual([r.event for r in self.rows(conn)], ["reservation.created"] * 3)
+
+		class Clock:                                            # every delivery takes 50 seconds
+			now = 1000.0
+
+			def monotonic(self):
+				return self.now
+
+		clock, real = Clock(), outbox._deliver
+
+		def slow_deliver(name, token=None):
+			real(name, token)
+			clock.now += 50
+
+		adapters.LogOnlyPMS.delivered.clear()
+		with mock.patch.object(outbox, "time", clock), mock.patch.object(dist, "time", clock), \
+				mock.patch.object(outbox, "_deliver", slow_deliver):
+			out = outbox.deliver_pending(limit=50, budget_seconds=60)
+		self.assertEqual((out["sent"], out["failed"]), (2, 0))
+		first, second, third = self.rows(conn)
+		self.assertEqual((first.status, second.status), ("Sent", "Sent"))
+		self.assertEqual((third.status, third.attempts, third.claim_token, third.claimed_until),
+		                 ("Pending", 0, None, None))
+		with mock.patch.object(outbox, "time", clock), mock.patch.object(dist, "time", clock):   # a new run, a new budget
+			self.assertEqual(outbox.deliver_pending(limit=50, budget_seconds=60)["sent"], 1)
+		self.assertEqual(self.rows(conn)[2].status, "Sent")
+
+	def test_a_failed_message_holds_back_the_later_ones_of_its_reservation(self):
+		"""A "modified" waiting in back-off must never be sent after a "cancelled" that came later (a phantom
+		arrival at the PMS): the cancellation waits for it, and both go in order once it may be sent."""
+		from kamra.tex.connect import adapters, outbox
+
+		conn, res, rows = self.booked_and_cancelled("p20-order")
+		frappe.db.set_value("TEX Integration Outbox", rows[0].name, {
+			"status": "Failed", "attempts": 1, "next_attempt_at": add_to_date(now_datetime(), minutes=10)},
+			update_modified=False)
+		adapters.LogOnlyPMS.delivered.clear()
+		self.assertEqual(outbox.deliver_pending()["sent"], 0)
+		self.assertEqual(adapters.LogOnlyPMS.delivered, [])      # nothing: the later messages wait for the first
+		frappe.db.set_value("TEX Integration Outbox", rows[0].name, "next_attempt_at",
+		                    add_to_date(now_datetime(), minutes=-1), update_modified=False)
+		self.assertEqual(outbox.deliver_pending()["sent"], len(rows))
+		self.assertEqual(adapters.LogOnlyPMS.delivered, [(r.event.split(".")[1], res) for r in rows])
+		self.assertEqual({r.status for r in self.rows(conn, res)}, {"Sent"})
+
+	def test_a_dead_message_never_blocks_the_next_ones(self):
+		from kamra.tex.connect import adapters, outbox
+
+		conn, res, rows = self.booked_and_cancelled("p20-dead")
+		frappe.db.set_value("TEX Integration Outbox", rows[0].name, {"status": "Dead", "attempts": outbox.MAX_ATTEMPTS},
+		                    update_modified=False)
+		adapters.LogOnlyPMS.delivered.clear()
+		self.assertEqual(outbox.deliver_pending()["sent"], len(rows) - 1)
+		self.assertEqual(adapters.LogOnlyPMS.delivered, [(r.event.split(".")[1], res) for r in rows[1:]])
+		self.assertEqual(self.rows(conn, res)[0].status, "Dead")
+
+	def test_a_message_another_worker_reclaimed_is_not_sent(self):
+		"""Each message is read again just before it is sent: one that is no longer this run's (its claim lapsed
+		and another worker took it) or that is already sent is skipped."""
+		from kamra.tex.connect import adapters, outbox
+		from kamra.tex.tests.integration.test_commercial_flows import guest_books
+
+		conn = self.pms()
+		guest_books(session="p20-claim")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
+		row = self.rows(conn)[0]
+		frappe.db.set_value("TEX Integration Outbox", row.name, {
+			"claim_token": "worker-b", "claimed_until": add_to_date(now_datetime(), minutes=10)}, update_modified=False)
+		adapters.LogOnlyPMS.delivered.clear()
+		outbox._deliver(row.name, token="worker-a")
+		self.assertEqual(adapters.LogOnlyPMS.delivered, [])
+		self.assertEqual(frappe.db.get_value("TEX Integration Outbox", row.name, ["status", "claim_token"]),
+		                 ("Pending", "worker-b"))
+		outbox._deliver(row.name, token="worker-b")             # the one that holds it sends it
+		self.assertEqual(len(adapters.LogOnlyPMS.delivered), 1)
+		outbox._deliver(row.name)                                # already sent: never again, whoever asks
+		self.assertEqual(len(adapters.LogOnlyPMS.delivered), 1)
+
+	def test_staff_retry_only_the_latest_message_of_a_reservation(self):
+		"""A dead "created" retried after a newer message was sent would put the stay back as it was: staff retry
+		the latest, which carries the full state."""
+		from kamra.tex.api import admin
+
+		_conn, _res, rows = self.booked_and_cancelled("p20-retry")
+		old, latest = rows[0], rows[-1]
+		for r in rows:
+			frappe.db.set_value("TEX Integration Outbox", r.name, {"status": "Dead", "attempts": 8}, update_modified=False)
+		frappe.db.set_value("TEX Integration Outbox", latest.name, "status", "Sent", update_modified=False)
+		with self.assertRaisesRegex(frappe.ValidationError, "newer message"):
+			admin.retry_outbox(old.name)
+		self.assertEqual(frappe.db.get_value("TEX Integration Outbox", old.name, "status"), "Dead")
+		frappe.db.set_value("TEX Integration Outbox", latest.name, "status", "Dead", update_modified=False)
+		self.assertEqual(admin.retry_outbox(latest.name), {"ok": True})
+		self.assertEqual(frappe.db.get_value("TEX Integration Outbox", latest.name, ["status", "attempts"]), ("Pending", 0))
+
+	def test_a_run_goes_on_after_a_deadlock_ended_its_savepoint(self):
+		"""A deadlock rolls the transaction back whole, and the item's savepoint with it: the rollback to it fails
+		(MariaDB 1305) and used to end the loop, leaving the claimed rows to wait out their lease. The loop now
+		rolls back whole, records the failure and goes on (this also holds for ``apply_now`` and the ARI push)."""
+		seen, failed = [], []
+
+		def work(name):
+			if name == "first":
+				frappe.db.rollback()                              # a deadlock victim's transaction is gone
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+			seen.append(name)
+
+		done = dist._each(["first", "second"], work, lambda name, e: failed.append((name, type(e).__name__)))
+		self.assertEqual((done, seen, failed), ((1, 1), ["second"], [("first", "QueryDeadlockError")]))

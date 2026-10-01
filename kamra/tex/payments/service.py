@@ -26,7 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
-from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost
+from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost, undo_to
 
 
 class AccountRefused(frappe.ValidationError):
@@ -595,20 +595,12 @@ def complete_retrying(transaction: str, **kw) -> dict:
 
 
 REVERIFY_TRY_SAVEPOINT = "tex_reverify_try"
-_NO_SUCH_SAVEPOINT = 1305          # MariaDB: SAVEPOINT x does not exist
-
-
 def _undo_to(save_point: str) -> None:
 	"""Undo what was written since ``save_point``. A deadlock or a lock wait timeout in ``complete_retrying`` rolls
-	the whole transaction back and a step commit ends it: either way the savepoint is gone and the rollback to it
-	fails with "SAVEPOINT does not exist". Then the transaction is rolled back whole: safe where this runs — the
-	job's every charge is a transaction of its own and staff's request has no uncommitted work before it."""
-	try:
-		frappe.db.rollback(save_point=save_point)
-	except Exception as e:
-		if not e.args or e.args[0] != _NO_SUCH_SAVEPOINT:
-			raise
-		frappe.db.rollback()
+	the whole transaction back and a step commit ends it: either way the savepoint is gone and ``undo_to`` rolls
+	back whole instead — safe where this runs: the job's every charge is a transaction of its own and staff's
+	request has no uncommitted work before it."""
+	undo_to(save_point)
 
 
 def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool = True,

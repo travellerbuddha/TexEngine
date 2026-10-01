@@ -144,6 +144,11 @@ Schedulers that are PMS-only keep running only when their module is enabled.
 **Decision.** Reservation create/modify/cancel writes `TEX Integration Outbox` rows in the same DB
 transaction; a scheduled worker delivers them through adapters with exponential backoff and
 dead-lettering. Core reservation code never calls vendors directly.
+- *Order and isolation (Part 2F-1, NEW-7).* At least once, in order per reservation and connection: a run sends a
+  reservation's due messages oldest first, one after another, within a 120 s budget; a failed one holds back its later
+  ones until it is sent or Dead (8 tries, ~4 h 15 min); a Dead one never blocks; staff retry only the latest. Each
+  carries its `Idempotency-Key` and the full state; the receiver upserts. The outbox is its own 5-minute job
+  (`scheduler.outbox_every_5_minutes`): holds, payments and links never wait behind a PMS.
 
 ## ADR-016 Payments: provider interface, no card data at rest
 **Decision.** `PaymentProvider` interface (`create_checkout`, `handle_callback`, `refund`,

@@ -4,15 +4,21 @@ Reservation changes write ``TEX Integration Outbox`` rows in the same database
 transaction as the change; ``deliver_pending`` (scheduler) sends them through the
 adapter registered for each enabled connection, with exponential back-off and a
 dead-letter state. Core reservation code never talks to a vendor directly.
+
+Order and isolation (NEW-7, ADR-015): the messages of one reservation to one connection go in
+the order they were written — a failed one holds the later ones back until it is sent or Dead
+(a Dead one never blocks) — and a run stops starting messages when its time budget is used.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import time
+from functools import partial
 
 import frappe
-from frappe.utils import add_to_date, now_datetime
+from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from kamra.tex.connect import adapters
 
@@ -66,7 +72,13 @@ def on_reservation_change(doc) -> None:
 		                "payload": json.dumps(payload, default=str, sort_keys=True)}).insert(ignore_permissions=True)
 
 
-def _deliver(name: str) -> None:
+def _deliver(name: str, token: str | None = None) -> bool | None:
+	"""Send one claimed message. It is read again first (every item starts after a commit, so the read is
+	current): one that is no longer Pending or Failed (sent, dead, retried meanwhile) or, when ``token`` is given,
+	no longer this run's (its claim lapsed and another worker took it) is not sent. → False when skipped."""
+	state = frappe.db.get_value("TEX Integration Outbox", name, ["status", "claim_token"], as_dict=True)
+	if not state or state.status not in ("Pending", "Failed") or (token is not None and state.claim_token != token):
+		return False
 	item = frappe.get_doc("TEX Integration Outbox", name)
 	conn = frappe.get_doc("TEX Integration Connection", item.connection)
 	if not conn.enabled:
@@ -101,10 +113,81 @@ def _failed(name: str, e: Exception) -> None:
 		      new={"connection": item.connection, "status": status}, reason=err, source="System")
 
 
-def deliver_pending(limit: int = 50) -> dict:
-	"""Scheduler: claim due reservation events (no two workers send the same row) and send
-	each as its own unit of work; errors are stored redacted."""
+def _claim(limit: int, token: str, connection: str | None = None) -> list[str]:
+	"""Claim for one run (``token``) the first undelivered message of each reservation and connection, when it is
+	due and no worker holds it (NEW-7); at most ``limit``. Kind Reservation only: ARI jobs coalesce and need no
+	order (``distribution.claim``). Undelivered = Pending or Failed, read oldest first (``creation``, ``name``):
+
+	* a reservation's later messages are never claimed while an earlier one is undelivered — one waiting in
+	  back-off, one claimed by another worker — so a "cancelled" never overtakes a "modified". Dead and Sent
+	  messages are not read: a Dead one never blocks;
+	* due = ``next_attempt_at <= now``; a NULL ``next_attempt_at`` is NOT due (as in ``distribution.claim``);
+	* free = ``claim_token`` NULL, or ``claimed_until`` before now (a NULL ``claimed_until`` of a claimed row is
+	  not free: its worker's lease is unknown).
+
+	The claim is one conditional UPDATE by name (the same conditions: a row another worker took or sent since
+	the read is left alone), committed so it is visible at once, read back by this run's token."""
+	from kamra.tex.distribution.repository import CLAIM_MINUTES, _commit
+
+	now = now_datetime()
+	rows = frappe.db.sql(
+		"""SELECT name, connection, reference_name, next_attempt_at, claim_token, claimed_until
+		   FROM `tabTEX Integration Outbox`
+		   WHERE kind='Reservation' AND status IN ('Pending', 'Failed') AND (%(c)s IS NULL OR connection=%(c)s)
+		   ORDER BY creation ASC, name ASC""", {"c": connection}, as_dict=True)
+	first, take = set(), []
+	for r in rows:
+		key = (r.connection, r.reference_name)
+		if key in first:
+			continue                                   # an earlier message of this reservation is not delivered yet
+		first.add(key)
+		due = r.next_attempt_at is not None and get_datetime(r.next_attempt_at) <= now
+		free = r.claim_token is None or (r.claimed_until is not None and get_datetime(r.claimed_until) < now)
+		if due and free:
+			take.append(r.name)
+			if len(take) >= limit:
+				break
+	if not take:
+		return []
+	frappe.db.sql(
+		"""UPDATE `tabTEX Integration Outbox` SET claim_token=%(t)s, claimed_until=%(u)s
+		   WHERE name IN %(names)s AND kind='Reservation' AND status IN ('Pending', 'Failed')
+		     AND next_attempt_at <= %(n)s AND (claim_token IS NULL OR claimed_until < %(n)s)""",
+		{"t": token, "u": add_to_date(now, minutes=CLAIM_MINUTES), "n": now, "names": tuple(take)})
+	_commit()                                          # the claim must be visible to other workers at once
+	got = {r[0] for r in frappe.db.sql("SELECT name FROM `tabTEX Integration Outbox` WHERE name IN %(names)s "
+	                                    "AND claim_token=%(t)s", {"names": tuple(take), "t": token})}
+	return [n for n in take if n in got]
+
+
+def _release(names: list[str], token: str) -> None:
+	"""Give back the claims of the messages this run did not start (its budget was used): still Pending or
+	Failed, no attempt counted, due again at the next run."""
+	if names:
+		frappe.db.sql("""UPDATE `tabTEX Integration Outbox` SET claim_token=NULL, claimed_until=NULL
+		                 WHERE name IN %(names)s AND claim_token=%(t)s AND status IN ('Pending', 'Failed')""",
+		              {"names": tuple(names), "t": token})
+
+
+def deliver_pending(limit: int = 50, budget_seconds: int = 120) -> dict:
+	"""Scheduler: claim due reservation messages (no two workers send the same row, a reservation's messages in
+	order) and send each as its own unit of work; errors are stored redacted.
+
+	One round claims at most one message per reservation and connection; rounds repeat, each with a new claim,
+	while the budget (``budget_seconds``, ``time.monotonic``) and ``limit`` (messages claimed) allow, so a
+	reservation's due messages go one after another, oldest first. A run never starts a message once the budget
+	is used: a PMS that answers slowly (a webhook waits 15 s to connect and 15 s to read) cannot hold the job past
+	its time limit; the messages not started are given back."""
 	from kamra.tex.distribution import repository as dist
 
-	sent, failed = dist._each(dist.claim("Reservation", limit), _deliver, _failed)
+	deadline = time.monotonic() + budget_seconds
+	sent = failed = claimed = 0
+	while claimed < limit and time.monotonic() < deadline:
+		token = frappe.generate_hash(length=16)
+		names = _claim(limit - claimed, token)
+		if not names:
+			break
+		ok, bad = dist._each(names, partial(_deliver, token=token), _failed, deadline=deadline,
+		                     release=partial(_release, token=token))
+		sent, failed, claimed = sent + ok, failed + bad, claimed + len(names)
 	return {"sent": sent, "failed": failed}

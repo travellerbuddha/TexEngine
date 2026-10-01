@@ -1416,13 +1416,33 @@ def revive_expired(booking: str, *, reason: str) -> list[str]:
 	return names
 
 
+def _due_for_expiry(now) -> list[str]:
+	"""The bookings ``expire_booking`` would expire at ``now``, by a plain read that locks nothing (NEW-7): waiting
+	for its payment, and either none of its rooms still holds, or its hold is over and no payment attempt is open.
+	Whatever this lets through is locked and judged again by ``expire_booking``; one a payment is saving this
+	moment is simply seen by the next run. The rule of ``expire_booking`` and of the status page's overdue holds:
+
+	* NULL ``payment_attempt_until`` = no attempt open (it counts as over, not as "unknown");
+	* the booking's hold deadline is the earliest ``hold_expires_on`` of its holding rooms; ``MIN`` ignores NULL
+	  deadlines, so a room held without a deadline never expires (never guessed), and a booking whose holding
+	  rooms all have none is not due."""
+	return [r[0] for r in frappe.db.sql(
+		"""SELECT b.name FROM `tabTEX Booking` b
+		   WHERE b.status IN %(holding)s
+		     AND (NOT EXISTS (SELECT 1 FROM `tabReservation` r WHERE r.tex_booking = b.name AND r.status IN %(holding)s)
+		          OR ((b.payment_attempt_until IS NULL OR b.payment_attempt_until <= %(now)s)
+		              AND (SELECT MIN(r.hold_expires_on) FROM `tabReservation` r
+		                   WHERE r.tex_booking = b.name AND r.status IN %(holding)s) <= %(now)s))
+		   ORDER BY b.name""", {"holding": tuple(holds.HOLDING), "now": now})]
+
+
 def expire_pending_bookings() -> dict:
 	"""Scheduler: bookings whose hold is over, with no payment attempt open, expire with all their
 	rooms (``expire_booking``), each in its own transaction so a payment callback waits for at
 	most one booking's expiry (tests keep one transaction)."""
 	now = now_datetime()
 	n = 0
-	for name in frappe.get_all("TEX Booking", filters={"status": ("in", list(holds.HOLDING))}, pluck="name"):
+	for name in _due_for_expiry(now):
 		frappe.db.savepoint("tex_expire_booking")
 		try:
 			n += expire_booking(name, now=now)
