@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import random
 import secrets
+import time
 
 import frappe
 from frappe import _
@@ -24,7 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
-from kamra.tex.services.txn import transaction_lost
+from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost
 
 
 class AccountRefused(frappe.ValidationError):
@@ -72,7 +74,9 @@ def _durable_commit() -> None:
 def _commit_step() -> None:
 	"""End a step of a payment start (NEW-6, ADR-066): what it wrote is on record, and every row, gap
 	and naming-series lock the request took so far is released before the gateway is asked for a
-	checkout, and again once its answer is recorded. Tests keep one transaction."""
+	checkout, and again once its answer is recorded. Tests keep one transaction. The request is not
+	run again on a deadlock after this (``txn.retry_on_deadlock``, P1-8 e)."""
+	note_committed_step()
 	if not frappe.flags.in_test:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- no row, gap or series lock is held through a gateway call (NEW-6)
 
@@ -472,11 +476,14 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	provider = provider_for(row.provider_account, purpose="settle", transaction=row.name)
 	outcome = provider.handle_callback(row.name, params, headers or {}, body, provider_ref=row.provider_ref)
 	if outcome.status == "Pending":
+		if outcome.raw_status in FRAUD_REVIEW:
+			_under_review(row, outcome)
 		return {"transaction": row.name, "status": row.status, "pending": True}
 	_lock_link_then_payment(row.name, row.payment_link)
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)
 	if txn.status not in SETTLEABLE:
 		return {"transaction": txn.name, "status": txn.status, "replay": True}
+	was_reviewed = txn.status == "Pending" and txn.raw_status in FRAUD_REVIEW
 	refused = False
 	if outcome.status == "Succeeded":
 		checked = _checked_capture(provider, outcome, txn)
@@ -503,6 +510,8 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	txn.save(ignore_permissions=True)
 	if txn.status == "Succeeded":
 		_after_charge(txn)
+	elif txn.status == "Failed" and was_reviewed:
+		_review_rejected(txn)
 	# the source is how the outcome arrived: the caller says (the gateway's return or notification,
 	# staff re-verifying, the sandbox page), else the request itself (G-74)
 	audit("payment." + txn.status.lower(), reference_doctype="TEX Payment Transaction", reference_name=txn.name,
@@ -511,13 +520,201 @@ def complete(transaction: str, *, params: dict, headers: dict | None = None, bod
 	return {"transaction": txn.name, "status": txn.status}
 
 
-def complete_retrying(transaction: str, **kw) -> dict:
-	"""C3: ``complete`` run again when the database chose it as a deadlock victim. It is idempotent —
-	a rerun asks the gateway again and applies its verified outcome once — so a charge the gateway
-	captured never stays Pending (nor its money unreconciled) because of a deadlock."""
-	from kamra.tex.services.txn import retry_on_deadlock
+# the gateway holds the payment in its fraud review (O-18, D-8): iyzico's fraudStatus 0, or absent / unknown
+FRAUD_REVIEW = ("FRAUD_REVIEW", "FRAUD_UNKNOWN")
 
-	return retry_on_deadlock(complete)(transaction, **kw)
+
+def _paying_booking(txn) -> str | None:
+	"""The booking a charge pays: its own, or its payment link's (a link's charge names no booking)."""
+	if txn.get("booking"):
+		return txn.booking
+	return frappe.db.get_value("TEX Payment Link", txn.payment_link, "booking") if txn.get("payment_link") else None
+
+
+def _under_review(row, outcome: Outcome) -> None:
+	"""O-18, D-8: the gateway holds this Pending charge in its fraud review. Recorded once (``raw_status``,
+	audit ``payment.under_review`` with the booking's attempt deadline before it): a booking waiting for its
+	payment keeps its rooms for it for the link hold (``holds.hold_for_review``); any other (a balance, a
+	change, none) holds nothing. Locks: link → payment, then the booking (ADR-066)."""
+	_lock_link_then_payment(row.name, row.payment_link)
+	txn = frappe.get_doc("TEX Payment Transaction", row.name, for_update=True)      # as it is now
+	if txn.status != "Pending" or txn.raw_status in FRAUD_REVIEW:
+		return                        # settled meanwhile, or its review is on record already: held once
+	booking = _paying_booking(txn)
+	txn.raw_status = outcome.raw_status
+	txn.save(ignore_permissions=True)
+	held = holds.hold_for_review(booking, txn) if booking else None
+	audit("payment.under_review", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, old={"payment_attempt_until": str(held[0]) if held and held[0] else None},
+	      new={"raw_status": outcome.raw_status, "booking": booking,
+	           "payment_attempt_until": str(held[1]) if held else None})
+
+
+def _review_rejected(txn) -> None:
+	"""O-18, D-8: the gateway rejected a charge it held in review (now Failed). Its review hold ends: the
+	booking's attempt deadline goes back to what it was before the review, or its other Pending charges'
+	(``holds.after_review_rejected``); audited ``payment.fraud_rejected``, the team told. TEX recorded no
+	money for it (the gateway returns any itself): nothing goes to reconciliation."""
+	from kamra.tex.services import notify
+
+	booking = _paying_booking(txn)
+	review = frappe.get_all("TEX Audit Event", filters={"action": "payment.under_review", "reference_name": txn.name},
+	                        fields=["old_value"], order_by="creation asc", limit=1)
+	before = json.loads(review[0].old_value or "{}").get("payment_attempt_until") if review else None
+	back = holds.after_review_rejected(booking, txn.name, get_datetime(before) if before else None) \
+		if booking else None
+	audit("payment.fraud_rejected", reference_doctype="TEX Payment Transaction", reference_name=txn.name,
+	      property=txn.property, new={"booking": booking, "payment_attempt_until": str(back) if back else None})
+	notify.payment_rejected(txn, booking)
+
+
+def complete_retrying(transaction: str, **kw) -> dict:
+	"""C3, P1-8: ``complete`` run again when the database chose it as a deadlock victim or a lock wait
+	timed out. It is idempotent — a rerun asks the gateway again and applies its verified outcome once —
+	so a charge the gateway captured never stays Pending (nor its money unreconciled) because of either.
+	Only here: the endpoints are run again on a deadlock only. After the last try the error itself is
+	raised (a caller's own deadlock wrapper may run it again: at most 3 × 3 tries). Its callers have no
+	uncommitted work before it, and nothing on its way commits."""
+	for attempt in range(1, DEADLOCK_ATTEMPTS + 1):
+		try:
+			return complete(transaction, **kw)
+		except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+			# the whole transaction back: a lock wait timeout undid only the statement that waited
+			# (innodb_rollback_on_timeout OFF), the rest of this try must not stay
+			frappe.db.rollback()
+			if attempt == DEADLOCK_ATTEMPTS:
+				raise
+			time.sleep(random.uniform(0.02, 0.1) * attempt)
+	return None
+
+
+REVERIFY_TRY_SAVEPOINT = "tex_reverify_try"
+_NO_SUCH_SAVEPOINT = 1305          # MariaDB: SAVEPOINT x does not exist
+
+
+def _undo_to(save_point: str) -> None:
+	"""Undo what was written since ``save_point``. A deadlock or a lock wait timeout in ``complete_retrying`` rolls
+	the whole transaction back and a step commit ends it: either way the savepoint is gone and the rollback to it
+	fails with "SAVEPOINT does not exist". Then the transaction is rolled back whole: safe where this runs — the
+	job's every charge is a transaction of its own and staff's request has no uncommitted work before it."""
+	try:
+		frappe.db.rollback(save_point=save_point)
+	except Exception as e:
+		if not e.args or e.args[0] != _NO_SUCH_SAVEPOINT:
+			raise
+		frappe.db.rollback()
+
+
+def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool = True,
+             step_commit: bool = False) -> tuple[dict | None, Exception | None]:
+	"""Ask the gateway again for a charge by itself (its provider's ``status_query``): each of its questions
+	(``attempts``, default ``status_params`` of its reference, newest first) until one confirms it. A try
+	that failed leaves no message behind (P1-8); ``log``: a try the gateway did not answer is logged.
+	``step_commit`` (the job): a try that changed the charge is on record before the next question, so no
+	lock is held through it (ADR-066). A try that failed leaves nothing it wrote half way (money recorded, its
+	allocation refused): it is undone before the next question. → (the last answer, the last error)."""
+	if attempts is None:
+		row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref"], as_dict=True)
+		cls = REGISTRY.get(row.provider) if row else None
+		attempts = cls.status_params(row.provider_ref) if cls and cls.status_query else []
+	out, error, state = None, None, None
+	for n, params in enumerate(attempts):
+		if step_commit:
+			now_state = frappe.db.get_value("TEX Payment Transaction", transaction, ["status", "modified"])
+			if n and now_state != state:
+				_commit_step()             # the last question changed the charge: on record before the next
+			state = now_state
+		mark = len(frappe.local.message_log)
+		frappe.db.savepoint(REVERIFY_TRY_SAVEPOINT)
+		try:
+			res = complete_retrying(transaction, params=params)
+		except ProviderError as e:
+			del frappe.local.message_log[mark:]
+			_undo_to(REVERIFY_TRY_SAVEPOINT)
+			error = e                                  # this question is not verifiable: ask the next
+			continue
+		except Exception as e:
+			del frappe.local.message_log[mark:]
+			if transaction_lost(e):
+				raise
+			_undo_to(REVERIFY_TRY_SAVEPOINT)
+			# the gateway did not answer this question: an older checkout may still hold the payment
+			if log:
+				log_exception(f"TEX payment re-verify error {transaction}")
+			error = e
+			continue
+		out = res
+		if res.get("status") == "Succeeded":
+			break
+	return out, error
+
+
+REVERIFY_AFTER_MINUTES = 3        # a checkout this young is still in the guest's hands
+REVERIFY_WINDOW_HOURS = 2         # asked until then past its deadline (a fraud review's included, O-18)
+REVERIFY_BATCH = 20
+REVERIFY_BUDGET_SECONDS = 60      # one tick is a single RQ job with 300 s for the whole 5-minute group
+REVERIFY_SAVEPOINT = "tex_reverify"
+
+
+def reverify_pending(now=None) -> dict:
+	"""Scheduler, first of the 5-minute jobs (NEW-2): card charges still Pending whose gateway TEX can ask
+	(``status_query``) are asked, as the guest's browser would have told TEX had it come back — before this
+	tick's expiry, so money taken in time confirms its booking. The same path as a callback (``complete``).
+
+	Candidates (a plain read, no lock): Pending charges of an enabled account (a disabled one settles
+	nothing), at least 3 minutes old, with no start asking the gateway for a checkout right now (a lapsed
+	lease is a dead start), their deadline — or, without one, their creation — within the last 2 hours;
+	20 per tick, none started after 60 s, by urgency: those still holding rooms first (the nearest deadline
+	first: money found in time confirms the booking), then those holding none, oldest first, then those whose
+	deadline has gone by, the latest first — an abandoned iyzico checkout stays Pending for 2 hours and must
+	not starve the payments that can still be saved. Each is asked under a savepoint; an error is logged
+	("TEX payment re-verify <charge>") and undone; each is on record before the next question (ADR-066)."""
+	now = get_datetime(now or now_datetime())
+	askable = tuple(sorted(name for name, cls in REGISTRY.items() if cls.status_query)) or ("",)
+	# NULL checkout_started_at: no start is asking the gateway; NULL expires_at: a charge that holds no rooms
+	# (a link's without a waiting booking, a change's, a balance's), judged by when it started (ADR-064).
+	# Urgency: 0 = its deadline is ahead (holds rooms), nearest first; 1 = no deadline, oldest first; 2 = its
+	# deadline has gone by, latest first. A CASE without ELSE is NULL outside its group: constant inside it
+	names = frappe.db.sql("""SELECT t.name FROM `tabTEX Payment Transaction` t
+	                         JOIN `tabTEX Payment Provider Account` a ON a.name = t.provider_account
+	                         WHERE t.txn_type = 'Charge' AND t.status = 'Pending' AND t.provider IN %(askable)s
+	                           AND a.enabled = 1 AND t.creation <= %(settled)s
+	                           AND (t.checkout_started_at IS NULL OR t.checkout_started_at < %(lease)s)
+	                           AND IFNULL(t.expires_at, t.creation) >= %(window)s
+	                         ORDER BY CASE WHEN t.expires_at > %(now)s THEN 0 WHEN t.expires_at IS NULL THEN 1 ELSE 2 END,
+	                                  CASE WHEN t.expires_at > %(now)s THEN t.expires_at END,
+	                                  CASE WHEN t.expires_at IS NULL THEN t.creation END,
+	                                  CASE WHEN t.expires_at <= %(now)s THEN t.expires_at END DESC,
+	                                  t.name LIMIT %(limit)s""",
+	                      {"askable": askable, "now": now, "settled": add_to_date(now, minutes=-REVERIFY_AFTER_MINUTES),
+	                       "lease": add_to_date(now, seconds=-CHECKOUT_LEASE_SECONDS),
+	                       "window": add_to_date(now, hours=-REVERIFY_WINDOW_HOURS), "limit": REVERIFY_BATCH},
+	                      pluck=True)
+	started = time.monotonic()
+	done = {"asked": 0, "errors": 0}
+	for name in names:
+		if time.monotonic() - started > REVERIFY_BUDGET_SECONDS:
+			break
+		frappe.db.savepoint(REVERIFY_SAVEPOINT)
+		mark = len(frappe.local.message_log)
+		done["asked"] += 1
+		try:
+			out, error = reverify(name, log=False, step_commit=True)
+			if out is None and error is not None:
+				raise error
+		except Exception as e:
+			if transaction_lost(e):
+				frappe.db.rollback()         # a deadlock victim's transaction is gone with its savepoint
+			else:
+				_undo_to(REVERIFY_SAVEPOINT)       # gone after a step commit or a retried deadlock: whole
+			del frappe.local.message_log[mark:]
+			log_exception(f"TEX payment re-verify {name}")
+			done["errors"] += 1
+		if not frappe.flags.in_test:
+			# on record (its Error Log and audit included) before the next gateway question: no lock is held
+			# through it (ADR-066); tests keep one transaction
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- one charge per transaction, none held across a gateway call
+	return done
 
 
 def _checked_capture(provider, outcome: Outcome, txn) -> Outcome:

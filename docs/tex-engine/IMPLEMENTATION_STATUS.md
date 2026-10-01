@@ -1530,6 +1530,15 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - O-37 **COMPLETE**: p63 masks every Password field in the change history (changed, child row_changed) · `TestP63VersionedPasswords`.
 - NEW-5 **COMPLETE**: `supply-chain.yml` — gitleaks (self-tested), npm audit-ci, pip-audit with a reviewed ignore list · the workflow's three jobs.
 
+## 6E2. Audit Part 2E-2 (2026-09-27)
+
+- P1-8 **COMPLETE**: `complete_retrying` retries lock wait timeouts too (full rollback); `reissue_link`, `loyalty_redeem`, `merge_guests` retried on deadlocks; re-verify keeps no message of a failed try; `payments.pending` FAILs for Virtual POS charges 10 min past their deadline; a request that committed a step is not run again (ADR-066) · `TestDeadlockRetries`, unit `test_system_checks`, `TestUnverifiedPayments`.
+- NEW-2 **COMPLETE**: job `payments.service.reverify_pending`, first of the 5-minute jobs, asks iyzico/Sipay about Pending charges (`status_query`, `status_params`), one per transaction · `TestPaymentsVerifiedByTheJob`, `test_scheduler_smoke`, unit `test_payments_fx_segments`.
+- O-18 **COMPLETE**: iyzico `fraudStatus` read (1 served; 0/absent/unknown review; -1 rejected); review holds the booking once for the link hold, rejection ends it and tells the team (ADR-062) · unit `test_payments_fx_segments`, `TestIyzicoFraudReview`.
+- P1-1 **COMPLETE** (D-7): late money without a gateway time on an expired booking goes to Action Required, never refunded by itself (ADR-062 c) · `TestReconciliationVisible`.
+- P1-9 **COMPLETE**: a refused retry or link after the hold expires the booking and commits first; links inside the 3-D Secure margin; no transfer past the hold (ADR-062) · `TestRefusedAfterTheHold`.
+- Fix round 1 **COMPLETE**: NEW-2's job asks by urgency (still holding rooms, nearest deadline first; holding none, oldest first; deadline gone by, latest first) so abandoned iyzico checkouts cannot fill the 20 of a tick; a failed token's half-written try is undone before the next token, and a lost savepoint rolls back whole (ADR-066) · `TestPaymentsVerifiedByTheJob`, `TestAFailedTryLeavesNothing`. Open: Pending candidates without a question (an iyzico charge with no token) still take a place; a `last_reverified_at` field (schema + patch) for a fair order → later.
+
 ## 6H1. Audit Part 2H-1 (2026-10-01)
 
 - Y-11 + O-22 **COMPLETE**: points are used first-to-expire first and an expiry takes only what is left of its lot (`crm/lots.py`, `settle`, ADR-071; p61 closes lots that expired before) · unit `test_loyalty_lots`, `TestExpiry`, `test_patches` p61.

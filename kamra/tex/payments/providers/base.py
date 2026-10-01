@@ -85,6 +85,10 @@ class PaymentProvider(ABC):
 	# the only hosts a Sandbox account's gateway URL override may point at; empty for a
 	# provider that never reads the override (ADR-041)
 	sandbox_hosts: tuple[str, ...] = ()
+	# TEX can ask the gateway for a charge's outcome by itself (a status query), without the guest's
+	# browser or a notification: staff re-verify such a charge, and so does the 5-minute job (NEW-2).
+	# A gateway without one leaves a charge Pending until its news arrives (P1-8: the status page fails)
+	status_query: bool = False
 
 	def __init__(self, account):
 		self.account = account
@@ -110,6 +114,12 @@ class PaymentProvider(ABC):
 		Raise ProviderError only for a definite "no"; any other exception means the outcome is
 		unknown (the gateway may have refunded)."""
 		raise ProviderError(f"{self.name} does not support refunds through TEX")
+
+	@staticmethod
+	def status_params(provider_ref: str | None) -> list[dict]:
+		"""The callback parameters that ask the gateway for a charge's outcome by itself (``status_query``),
+		one set per question, newest first; [] when there is nothing to ask (NEW-2)."""
+		return []
 
 	def can_add_checkout(self, provider_ref: str | None) -> bool:
 		"""Whether a Pending charge that already has checkouts may get another one (a second

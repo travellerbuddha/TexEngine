@@ -79,6 +79,12 @@ class IyzicoProvider(PaymentProvider):
 	name = "iyzico"
 	reports_amount = True
 	supports_refund = True
+	status_query = True               # checkout-form DETAIL by the token TEX stored
+
+	@staticmethod
+	def status_params(provider_ref: str | None) -> list[dict]:
+		# each checkout-form token stored for the charge; one without a token has nothing to ask
+		return [{"token": t} for t in iyzico_tokens(provider_ref)]
 	sandbox_hosts = ("sandbox-api.iyzipay.com",)
 	INIT = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 	DETAIL = "/payment/iyzipos/checkoutform/auth/ecom/detail"
@@ -152,6 +158,16 @@ class IyzicoProvider(PaymentProvider):
 			return Outcome(status="Pending", raw_status=res.get("paymentStatus") or res.get("status"))
 		if res.get("basketId") not in (None, transaction):
 			raise ProviderError("iyzico result belongs to another order")
+		# iyzico's fraud check (O-18, D-8): only a payment with fraudStatus 1 may be served; 0 is under
+		# review, -1 rejected (iyzico returns the money itself). Absent or anything else is read as a
+		# review: never approved on doubt
+		fraud = res.get("fraudStatus")
+		fraud = "" if fraud is None else str(fraud).strip()
+		if fraud == "-1":
+			return Outcome(status="Failed", raw_status="FRAUD_REJECTED", error_code="FRAUD_REJECTED",
+			               error_message="iyzico's fraud check rejected the payment")
+		if fraud != "1":
+			return Outcome(status="Pending", raw_status="FRAUD_REVIEW" if fraud == "0" else "FRAUD_UNKNOWN")
 		items = res.get("itemTransactions") or [{}]
 		ref = f"{res.get('paymentId')}|{items[0].get('paymentTransactionId') or ''}"
 		# ``paidPrice`` includes the instalment interest a merchant may pass on to the guest;
@@ -228,6 +244,11 @@ class SipayProvider(PaymentProvider):
 	# ``amount`` must match, but a success without one is not refused until then
 	reports_amount = False
 	sandbox_hosts = ("provisioning.sipay.com.tr",)
+	status_query = True               # checkstatus by TEX's own id of the charge
+
+	@staticmethod
+	def status_params(provider_ref: str | None) -> list[dict]:
+		return [{}]                   # asked by the charge's own id: no parameter
 
 	@property
 	def base(self) -> str:
