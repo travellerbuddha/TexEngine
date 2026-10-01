@@ -111,6 +111,7 @@ BEHAVIOUR = {
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p60_promotion_code_key": "test_patches.TestReportingPatches.test_p60_stores_codes_by_their_key_and_reports_a_clash_once",
+	"p61_loyalty_lots": "test_patches.TestSmallPatches.test_p61_closes_lots_that_expired_before_the_lot_model",
 	"p63_versioned_passwords": "test_patches.TestP63VersionedPasswords",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
@@ -1343,6 +1344,58 @@ class TestSmallPatches(PatchCase):
 		self.assertEqual(sorted(e.reference_name for e in restored), sorted([live["version"], v2, replaced["version"]]))
 		self.assertEqual(json.loads(next(e.new_value for e in restored if e.reference_name == v2))["status"],
 		                 "Withdrawn")
+
+	def test_p61_closes_lots_that_expired_before_the_lot_model(self):
+		"""Y-11 and O-22 (audit Part 2H-1, ADR-071): a past-due earning the old job marked, or one spent in
+		full, is closed now (Expired); one with points left is the daily job's. The patch never takes points."""
+		import re
+
+		today = getdate(nowdate())
+		past = add_days(nowdate(), -30)
+		club = put("TEX Loyalty Program", program_name="P61 Club", property=fx.PROPERTY, enabled=1, currency="EUR",
+		           point_value=0.1)
+		due = ("SELECT COUNT(*) FROM `tabTEX Loyalty Ledger` WHERE entry_type='Earn' AND status='Available' "
+		       "AND expires_on IS NOT NULL AND expires_on < %s")
+		earlier = frappe.db.sql(due, today)[0][0]                          # lots the site had already (shared site)
+
+		def lot(guest, points, **values):
+			return put("TEX Loyalty Ledger", program=club, guest=guest, entry_type="Earn", points=points,
+			           status="Available", available_on=add_days(past, -30), expires_on=past, property=fx.PROPERTY,
+			           reason="p61", **values)
+
+		def debit(guest, entry_type, points, status, reason="p61"):
+			return put("TEX Loyalty Ledger", program=club, guest=guest, entry_type=entry_type, points=points,
+			           status=status, property=fx.PROPERTY, reason=reason)
+
+		def guest(n):
+			return put("Guest", first_name="P61", last_name=n, full_name=f"P61 {n}")
+
+		marked_g, spent_g, left_g = guest("Marked"), guest("Spent"), guest("Left")
+		marked = lot(marked_g, 100)                                         # the old job took the 70 that were left
+		debit(marked_g, "Burn", -30, "Used")
+		debit(marked_g, "Expire", -70, "Expired", reason=f"expiry of {marked}")
+		spent = lot(spent_g, 100)                                           # spent in full: the old job found nothing
+		debit(spent_g, "Burn", -100, "Used")
+		left = lot(left_g, 100)                                             # 40 left of it: the daily job's
+		debit(left_g, "Burn", -60, "Used")
+		mine = [marked_g, spent_g, left_g]
+		rows = lambda: frappe.db.sql("SELECT COUNT(*), COALESCE(SUM(points), 0) FROM `tabTEX Loyalty Ledger` "  # noqa: E731
+		                             "WHERE guest IN %s", (tuple(mine),))[0]
+		before = rows()
+
+		seen = self.first_run("p61_loyalty_lots")                           # (b): a second run changes nothing
+		status = lambda name: frappe.db.get_value("TEX Loyalty Ledger", name, "status")  # noqa: E731
+		self.assertEqual((status(marked), status(spent), status(left)), ("Expired", "Expired", "Available"))
+		self.assertEqual(rows(), before)                                    # no row written, no point taken
+		line = " ".join(str(c) for c in seen["print"].call_args_list)
+		a, b, c = (int(n) for n in re.search(r"p61: (\d+) lot\(s\) closed by the old expiry marked, (\d+) lot\(s\) "
+		                                    r"that expired with nothing left closed; (\d+) past-due lot\(s\) left to "
+		                                    r"the daily expiry", line).groups())
+		self.assertGreaterEqual((a, b, c), (1, 1, 1))
+		self.assertEqual(a + b + c, earlier + 3)                            # every past-due lot is one of the three
+		again = " ".join(str(x) for x in migrate("p61_loyalty_lots")["print"].call_args_list)
+		self.assertIn(f"p61: 0 lot(s) closed by the old expiry marked, 0 lot(s) that expired with nothing left closed; "
+		              f"{c} past-due lot(s) left to the daily expiry", again)
 
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")

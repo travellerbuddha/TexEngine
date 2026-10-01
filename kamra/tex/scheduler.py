@@ -21,8 +21,11 @@ def _run(path: str) -> None:
 # Channel distribution (G-69): inbound bookings first, then ARI pushes.
 EVERY_MINUTE = ("kamra.tex.distribution.repository.process_inbound",
                 "kamra.tex.distribution.repository.deliver_ari")
-# e-mail delivery status follows Frappe's e-mail queue (ADR-047)
-EVERY_5_MINUTES = ("kamra.tex.connect.outbox.deliver_pending",
+# e-mail delivery status follows Frappe's e-mail queue (ADR-047). Card payments whose browser never came
+# back are asked first (NEW-2): before the PMS outbox, which may use most of the tick, and before the
+# expiry, so money taken in time confirms its booking in this tick
+EVERY_5_MINUTES = ("kamra.tex.payments.service.reverify_pending",
+                   "kamra.tex.connect.outbox.deliver_pending",
                    "kamra.tex.services.booking.expire_pending_bookings",
                    # late payments whose rooms are gone are refunded (K-2b)
                    "kamra.tex.services.late_payments.refund_queued",

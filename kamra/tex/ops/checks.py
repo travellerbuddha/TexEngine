@@ -53,6 +53,9 @@ QUEUE_LATE_FAIL_MINUTES = 240
 # the gateway may hold money whose callback never arrived (or the guest left the checkout)
 PAYMENT_PENDING_WARN_MINUTES = 60
 PAYMENT_PENDING_WINDOW_HOURS = 48
+# a card charge of a gateway TEX cannot ask for its outcome (the Virtual POS) still Pending this long
+# after its deadline: FAIL (P1-8); the money may have been taken and nothing will tell TEX
+PAYMENT_UNVERIFIED_FAIL_MINUTES = 10
 # rejected or failed gateway callbacks (Error Log) counted over this window
 CALLBACK_ERROR_WINDOW_HOURS = 24
 # captures TEX refused to count / links paid twice (audit trail) counted over this window
@@ -129,6 +132,10 @@ REASONS: dict[str, str] = {
 	"late": "{count} message(s) are late; the oldest has waited {minutes} minutes.",
 	"connection_errors": "{count} enabled connection(s) report an error.",
 	"payment_pending": "{count} card payment(s) are still pending; the oldest started {minutes} minutes ago.",
+	"payment_pending_unverified": "{count} card payment(s) of a gateway TEX cannot ask are still pending after their "
+	                              "deadline; the oldest started {minutes} minutes ago. Check them in the bank's panel; "
+	                              "if one was charged, record it as a Manual payment with the bank's reference. The "
+	                              "alert clears 48 hours after the payment.",
 	"callback_errors": "{count} payment callback(s) failed or were rejected in the last {hours} hours.",
 	"overpaid": "{count} payment link(s) were paid more than once in the last {days} days.",
 	"capture_mismatch": "{count} gateway capture(s) did not match their charge in the last {days} days.",
@@ -322,9 +329,18 @@ def connections_check(errors: int, properties: Iterable[str] = ()) -> dict:
 
 
 def pending_payments_check(count: int, oldest: datetime | None, now: datetime,
-                           properties: Iterable[str] = ()) -> dict:
-	issues = [issue("payment_pending", WARN, count=count, minutes=minutes_since(oldest, now))] if count else []
-	return make("payments.pending", issues, scope="hotel", since=oldest, properties=properties)
+                           properties: Iterable[str] = (), *, unverified: int = 0,
+                           unverified_since: datetime | None = None) -> dict:
+	"""Card charges still Pending: a WARN (the guest may have left the checkout, or its news is late),
+	and a FAIL for ``unverified`` ones TEX cannot ask its gateway about, past their deadline (P1-8)."""
+	issues = []
+	if unverified:
+		issues.append(issue("payment_pending_unverified", FAIL, count=unverified,
+		                    minutes=minutes_since(unverified_since, now)))
+	if count:
+		issues.append(issue("payment_pending", WARN, count=count, minutes=minutes_since(oldest, now)))
+	since = min((t for t in (oldest, unverified_since) if t), default=None)
+	return make("payments.pending", issues, scope="hotel", since=since, properties=properties)
 
 
 def callbacks_check(*, errors: int, overpaid: int, mismatches: int, refunds_unknown: int = 0,

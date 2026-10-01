@@ -22,6 +22,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, getdate, now_datetime, nowdate
 
+from kamra.tex.payments import service as pay
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import SLUG, guest_books, setup_site_and_payments
@@ -282,6 +283,38 @@ class TestOverpaidBookings(TexTestCase):
 		self.assertNotIn(OTHER, mine["properties"])
 
 
+class TestUnverifiedPayments(TexTestCase):
+	"""P1-8 (audit 2E-2): a card payment of a gateway TEX cannot ask for its outcome (the Virtual POS) still
+	pending 10 minutes after its deadline fails the hotel's pending-payments check; one without a deadline
+	(a link's, a change's, a balance's) is judged by its checkout's 30 minutes. A gateway TEX asks
+	(iyzico) is not in it: TEX re-verifies those."""
+
+	def pending(self, provider: str, *, expires=None, created_ago: int = 0) -> str:
+		name = pay._new_txn(property=fx.PROPERTY, txn_type="Charge", method="Card", amount=100, currency="EUR",
+		                    provider=provider, idempotency_key=f"p18-{frappe.generate_hash(length=8)}",
+		                    expires_at=expires).name
+		frappe.db.sql("UPDATE `tabTEX Payment Transaction` SET creation = %s WHERE name = %s",
+		              (add_to_date(now_datetime(), minutes=-created_ago), name))
+		return name
+
+	def unverified(self) -> int:
+		found = check(system_api().status(property=fx.PROPERTY), "payments.pending")
+		return next((i["params"]["count"] for i in found["issues"] if i["reason"] == "payment_pending_unverified"), 0)
+
+	def test_a_payment_tex_cannot_verify_fails_after_its_deadline(self):
+		before = self.unverified()
+		self.pending("Virtual POS", expires=add_to_date(now_datetime(), minutes=-15), created_ago=50)
+		self.pending("Virtual POS", created_ago=45)            # no deadline: 45 − 30 = 15 minutes past
+		self.pending("Virtual POS", created_ago=35)            # no deadline: 5 minutes past, not yet
+		self.pending("Virtual POS", expires=add_to_date(now_datetime(), minutes=-5), created_ago=50)
+		self.pending("iyzico", expires=add_to_date(now_datetime(), minutes=-60), created_ago=90)
+		self.pending("Mock", expires=add_to_date(now_datetime(), minutes=-60), created_ago=90)
+		self.assertEqual(self.unverified() - before, 2)
+		found = check(system_api().status(property=fx.PROPERTY), "payments.pending")
+		self.assertEqual(found["status"], "fail")
+		self.assertIn(fx.PROPERTY, found["properties"])
+
+
 class TestContractsLive(TexTestCase):
 	"""Y-2 (2D-1): an Active contract within its sale window with no version on sale (and none starting
 	within 7 days) sells nothing: ``contracts.live`` fails and names its hotel."""
@@ -352,6 +385,15 @@ class TestStatusAlerts(TexTestCase):
 
 		self.assertIn("kamra.tex.ops.alerts.evaluate", scheduler.EVERY_15_MINUTES)
 		self.assertIn("kamra.tex.services.mail_status.sync", scheduler.EVERY_5_MINUTES)
+
+	def test_payments_are_verified_first_in_the_5_minute_jobs(self):
+		"""NEW-2: the re-verification job runs first in its group — before the PMS outbox (which may use most
+		of the tick) and before the expiry, so money it finds confirms its booking in that tick."""
+		from kamra.tex import scheduler
+
+		self.assertEqual(scheduler.EVERY_5_MINUTES[0], "kamra.tex.payments.service.reverify_pending")
+		self.assertLess(scheduler.EVERY_5_MINUTES.index("kamra.tex.payments.service.reverify_pending"),
+		                scheduler.EVERY_5_MINUTES.index("kamra.tex.services.booking.expire_pending_bookings"))
 
 
 class TestMailDeliveryStatus(TexTestCase):

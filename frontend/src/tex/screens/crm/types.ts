@@ -287,10 +287,13 @@ export interface AbandonedRow {
   site: string | null
   stage_reached: FunnelStage
   status: AbandonedStatus
-  /** profile, e-mail and phone: only while the profile's own e-mail consent holds (ADR-056) */
+  /** profile and e-mail: only while the profile's own e-mail consent holds (ADR-056) */
   guest: string | null
   email: string | null
+  /** the phone: only while the guest agrees to SMS or WhatsApp (O-26); TEX records no consent to be called */
   phone: string | null
+  /** the channels the guest agrees to now: [] with no phone */
+  phone_channels: ("SMS" | "WhatsApp")[]
   consent_marketing: Flag
   value: string
   currency: string | null

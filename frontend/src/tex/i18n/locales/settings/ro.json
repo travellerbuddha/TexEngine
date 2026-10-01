@@ -409,6 +409,7 @@
  "settings.status.reason.contract_starts_soon": "Contracte active în perioada de vânzare fără versiune în vânzare; una începe în {days} zile: {count}.",
  "settings.status.reason.contract_ends_soon": "Contracte care nu se mai vând în {days} zile (versiunea în vânzare se încheie și atunci nu începe alta): {count}.",
  "settings.status.reason.payment_pending": "Plăți cu cardul încă în așteptare: {count}, cea mai veche a început acum {minutes} min.",
+ "settings.status.reason.payment_pending_unverified": "Plăți cu cardul printr-un gateway pe care TEX nu îl poate interoga, încă în așteptare după termen: {count}, cea mai veche a început acum {minutes} min. Verificați-le în panoul băncii; dacă una a fost încasată, înregistrați-o ca plată manuală cu referința băncii. Alerta dispare la 48 de ore după plată.",
  "settings.status.reason.reconciliation_action": "Plăți nealocate rezervării, care așteaptă personalul: {count}, cea mai veche așteaptă de {hours} h (Plăți → plata).",
  "settings.status.reason.reconciliation_refund": "Plăți în coada de rambursare automată: {count}, cea mai veche așteaptă de {hours} h.",
  "settings.status.reason.bookings_overpaid": "Rezervări care dețin mai mulți bani decât costă: {count} (dintre care {cancelled} anulate). Rambursați surplusul sau mutați-l la rezervarea potrivită (Plăți).",

@@ -13,12 +13,14 @@ and the gateway refunds by itself), audited, and no confirmation reaches the gue
 Time passes in these tests by moving every stored deadline of a booking into the past
 (``passes``): the hold of its rooms, and the start and deadline of its payment attempts."""
 
+import json
 import threading
+from contextlib import contextmanager
 from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, add_to_date, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, get_datetime, now_datetime, nowdate
 
 from kamra.reservation_state import expire_holds
 from kamra.tex.api import public
@@ -1475,6 +1477,32 @@ class TestReconciliationVisible(HoldCase):
 		self.assertEqual(txn_state(payment["transaction"]).reconciliation, "Refund Queued")
 		self.assertEqual(public.booking_status(token=a["manage_token"])["late_payment"], "refund")
 
+	def test_money_without_a_gateway_time_whose_rooms_were_sold_waits_for_staff(self):
+		"""P1-1 (D-7): a gateway that states no payment time (iyzico, Sipay) — the money may have been paid in
+		time, its news late. On a booking that ended by its expiry, with its rooms sold since, it is never
+		refunded by itself: it waits for staff, and the guest is told to contact the hotel."""
+		import dataclasses
+
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import late_payments
+
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")
+		a, payment = self.late(room="DLX")
+		self.book(room="DLX", method="Pay at Hotel", status="Confirmed")              # the last room, to B
+		real = MockProvider.handle_callback
+
+		def untimed(provider, *args, **kw):
+			return dataclasses.replace(real(provider, *args, **kw), captured_at=None)
+
+		with mock.patch.object(MockProvider, "handle_callback", untimed):
+			self.pays(payment)
+		txn = payment["transaction"]
+		self.assertEqual(txn_state(txn).reconciliation, "Action Required")
+		self.assertIn("states no payment time", txn_state(txn).reconciliation_note)
+		late_payments.refund_queued()
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"parent_transaction": txn, "txn_type": "Refund"}))
+		self.assertEqual(public.booking_status(token=a["manage_token"])["late_payment"], "contact")
+
 	def test_a_booking_that_took_its_money_announces_nothing(self):
 		b = self.book()
 		self.pays(self.start_payment(b))
@@ -1531,7 +1559,81 @@ class TestDeadlockRetries(HoldCase):
 		self.assertEqual(len(calls), 2)
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 
+	def test_a_payment_callback_that_times_out_waiting_for_a_lock_is_applied_again(self):
+		"""P1-8: a lock wait timeout in ``complete`` (money captured) is run again like a deadlock, after a
+		full rollback: the statement that timed out was the only one undone."""
+		b = self.book()
+		payment = self.start_payment(b)
+		real_allocate, real_rollback, calls = pay.allocate, frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def allocate(*args, **kw):
+			calls.append(1)
+			if len(calls) == 1:
+				raise frappe.QueryTimeoutError("Lock wait timeout exceeded; try restarting transaction")
+			return real_allocate(*args, **kw)
+
+		def rollback(*args, **kw):                    # the test's own transaction stands for the request's
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		with mock.patch.object(pay, "allocate", side_effect=allocate), \
+				mock.patch.object(frappe.db, "rollback", side_effect=rollback):
+			self.assertEqual(self.pays(payment)["status"], "Succeeded")
+		self.assertEqual(len(calls), 2)
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def test_a_request_that_put_a_step_on_record_is_not_run_again(self):
+		"""P1-8 e (NEW-6): a request that committed a step (``_commit_step``) and then meets a deadlock is not
+		run again from the start: its first steps are on record. One without a committed step is."""
+		from kamra.tex.services.txn import retry_on_deadlock
+
+		real_rollback, calls = frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def rollback(*args, **kw):
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		@retry_on_deadlock
+		def committed_then_deadlocked():
+			calls.append("committed")
+			pay._commit_step()
+			raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+
+		@retry_on_deadlock
+		def deadlocked():
+			calls.append("plain")
+			raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+
+		with mock.patch.object(frappe.db, "rollback", side_effect=rollback), mock.patch("time.sleep"):
+			with self.assertRaises(frappe.ValidationError):
+				committed_then_deadlocked()
+			with self.assertRaises(frappe.ValidationError):
+				deadlocked()
+		self.assertEqual(calls, ["committed", "plain", "plain", "plain"])
+
+	def test_a_reverify_keeps_no_message_of_a_token_that_failed(self):
+		"""P1-8: staff re-verify an iyzico charge with two checkout tokens; the first try fails with a
+		message, the next confirms it: the answer carries no message of the failed try."""
+		from kamra.tex.api import payments as payments_api
+
+		txn = pay._new_txn(property=fx.PROPERTY, txn_type="Charge", method="Card", amount=D("100"), currency="EUR",
+		                   provider="iyzico", provider_ref="tok-b tok-a", idempotency_key="p18-reverify").name
+		tries = []
+
+		def complete_retrying(transaction, **kw):
+			tries.append(kw["params"])
+			if len(tries) == 1:
+				frappe.throw("The hotel is very busy right now. Please try again in a moment.")
+			return {"status": "Succeeded", "transaction": transaction}
+
+		frappe.local.message_log = []
+		with mock.patch.object(pay, "complete_retrying", side_effect=complete_retrying):
+			self.assertEqual(payments_api.reverify(transaction=txn)["status"], "Succeeded")
+		self.assertEqual(len(tries), 2)
+		self.assertEqual(frappe.local.message_log, [])
+
 	def test_the_payment_endpoints_run_again_on_a_deadlock(self):
+		from kamra.tex.api import crm as crm_api
 		from kamra.tex.api import crs
 		from kamra.tex.api import payments as payments_api
 
@@ -1545,9 +1647,8 @@ class TestDeadlockRetries(HoldCase):
 		for fn in (public.pay_booking, public.pay_link, public.manage_cancel, public.mock_pay, crs.cancel,
 		           payments_api.allocate, payments_api.transfer, payments_api.mark_transfer_received,
 		           payments_api.record_manual, payments_api.create_link, payments_api.cancel_link,
-		           payments_api.reverify):
+		           payments_api.reverify, payments_api.reissue_link, crm_api.loyalty_redeem, crm_api.merge_guests):
 			self.assertTrue(retried(fn), fn.__name__)
-
 
 	def test_the_quote_endpoints_run_again_on_a_deadlock(self):
 		"""2D-2 0c: ``_persist``'s share lock on the version can deadlock a quote with a withdraw (the
@@ -1563,6 +1664,367 @@ class TestDeadlockRetries(HoldCase):
 
 		for fn in (public.quote, public.quote_rooms, crs.quote, crs.quote_rooms):
 			self.assertTrue(retried(fn), f"{fn.__module__}.{fn.__name__}")
+
+
+class TestPaymentsVerifiedByTheJob(HoldCase):
+	"""NEW-2 (audit 2E-2): a card payment whose guest never came back from the gateway is asked for by the
+	5-minute job, before that tick's expiry: its booking is confirmed, never expired. Only charges that
+	may still be paid are asked, one at a time, each on record before the next question."""
+
+	@contextmanager
+	def askable(self):
+		"""The sandbox gateway answers a status query: its page's success for each charge. → the charges asked."""
+		from kamra.tex.payments.providers.simple import MockProvider, mock_signature
+
+		asked: list[str] = []
+
+		def status_params(provider_ref):
+			txn = str(provider_ref or "").split("MOCK-", 1)[-1]
+			asked.append(txn)
+			return [{"outcome": "success", "sig": mock_signature(pay._mock_secret(), txn, "success")}]
+
+		with mock.patch.object(MockProvider, "status_query", True), \
+				mock.patch.object(MockProvider, "status_params", staticmethod(status_params)):
+			yield asked
+
+	def tick(self) -> None:
+		"""The payment jobs of one 5-minute tick, in their order there (``_run``'s rollback would take the test's
+		data with it on an error)."""
+		from kamra.tex import scheduler
+
+		for job in scheduler.EVERY_5_MINUTES:
+			if job in ("kamra.tex.payments.service.reverify_pending", "kamra.tex.services.booking.expire_pending_bookings"):
+				frappe.get_attr(job)()
+
+	def test_a_payment_whose_guest_never_came_back_confirms_its_booking(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 26)                                   # hold and checkout over, no job ran yet
+		with self.askable() as asked:
+			self.tick()
+		self.assertEqual(asked, [payment["transaction"]])
+		self.assertEqual(txn_state(payment["transaction"]).status, "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking.expire", "reference_name": b["booking"]}))
+
+	def test_only_payments_that_may_still_be_paid_are_asked(self):
+		guests = [dict(GUEST, email=f"new2-{n}@example.com") for n in range(3)]
+		old, live, due = (self.book(guest=g) for g in guests)
+		payments = {k: self.start_payment(b)["transaction"] for k, b in (("old", old), ("live", live), ("due", due))}
+		passes(old["booking"], 26 + 180)                           # its deadline 3 hours ago
+		passes(live["booking"], 26)
+		passes(due["booking"], 26)
+		frappe.db.set_value("TEX Payment Transaction", payments["live"], "checkout_started_at", now_datetime(),
+		                    update_modified=False)                  # a start is asking the gateway right now
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [payments["due"]])
+
+	def test_a_disabled_account_is_not_asked(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 26)
+		frappe.db.set_value("TEX Payment Provider Account", self.account, "enabled", 0)
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [])
+		self.assertEqual(txn_state(payment["transaction"]).status, "Pending")
+
+	def test_a_gateway_error_is_logged_and_the_next_payment_is_still_asked(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		first, second = (self.book(guest=dict(GUEST, email=f"new2-err-{n}@example.com")) for n in range(2))
+		broken, fine = self.start_payment(first)["transaction"], self.start_payment(second)["transaction"]
+		passes(first["booking"], 26)                               # both are past their deadline: the later one
+		passes(second["booking"], 27)                              # is asked first (2E-2 fix 1), so the broken one
+		real = MockProvider.handle_callback
+
+		def handle_callback(provider, transaction, *args, **kw):
+			if transaction == broken:
+				raise RuntimeError("gateway unreachable")
+			return real(provider, transaction, *args, **kw)
+
+		with self.askable() as asked, mock.patch.object(MockProvider, "handle_callback", handle_callback):
+			pay.reverify_pending()
+		self.assertEqual(asked, [broken, fine])
+		self.assertEqual((txn_state(broken).status, txn_state(fine).status), ("Pending", "Succeeded"))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX payment re-verify {broken}"}))
+		self.assertEqual(frappe.db.get_value("TEX Booking", second["booking"], "status"), "Confirmed")
+
+	def test_money_the_job_finds_after_the_expiry_is_a_late_payment(self):
+		b = self.book()
+		payment = self.start_payment(b)
+		passes(b["booking"], 60)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [payment["transaction"]])
+		t = txn_state(payment["transaction"])
+		self.assertEqual((t.status, t.reconciliation), ("Succeeded", "Action Required"))    # ADR-062 b), rooms free
+		self.assertEqual(self.statuses(b)[0], "Cancelled")
+
+	def aged(self, txn: str, *, created_ago: int, expires_in: int | None) -> None:
+		"""A stored charge as it would be ``created_ago`` minutes after its start, its deadline ``expires_in``
+		minutes from now (negative: gone by; None: it holds no rooms)."""
+		expires = add_to_date(now_datetime(), minutes=expires_in) if expires_in is not None else None
+		frappe.db.sql("UPDATE `tabTEX Payment Transaction` SET creation = %s, expires_at = %s WHERE name = %s",
+		              (add_to_date(now_datetime(), minutes=-created_ago), expires, txn))
+
+	def test_a_payment_still_holding_rooms_is_asked_before_the_abandoned_ones(self):
+		"""NEW-2 (2E-2 fix 1): a tick asks 20 at most. Abandoned checkouts stay Pending (iyzico never says they
+		failed) for 2 hours past their deadline; asked first they would starve the payments that still hold
+		rooms and may yet be saved."""
+		guests = [dict(GUEST, email=f"new2-order-{n}@example.com") for n in range(3)]
+		gone_a, gone_b, holding = (self.book(guest=g) for g in guests)
+		txns = [self.start_payment(b)["transaction"] for b in (gone_a, gone_b, holding)]
+		self.aged(txns[0], created_ago=50, expires_in=-30)
+		self.aged(txns[1], created_ago=45, expires_in=-30)
+		self.aged(txns[2], created_ago=5, expires_in=10)
+		with self.askable() as asked, mock.patch.object(pay, "REVERIFY_BATCH", 2):
+			pay.reverify_pending()
+		self.assertEqual(asked[0], txns[2])
+		self.assertEqual(txn_state(txns[2]).status, "Succeeded")
+		self.assertEqual(self.statuses(holding), ("Confirmed", ["Confirmed"]))
+
+	def test_the_candidates_are_asked_by_urgency(self):
+		"""Still holding (the nearest deadline first), then holding none (the oldest first), then gone by (the
+		latest deadline first)."""
+		names = ("late_hold", "soon_hold", "new_free", "old_free", "gone_long", "gone_short")
+		made = {n: self.book(guest=dict(GUEST, email=f"new2-urgency-{n}@example.com")) for n in names}
+		txns = {n: self.start_payment(b)["transaction"] for n, b in made.items()}
+		self.aged(txns["late_hold"], created_ago=5, expires_in=10)
+		self.aged(txns["soon_hold"], created_ago=6, expires_in=2)
+		self.aged(txns["new_free"], created_ago=10, expires_in=None)
+		self.aged(txns["old_free"], created_ago=20, expires_in=None)
+		self.aged(txns["gone_long"], created_ago=70, expires_in=-50)
+		self.aged(txns["gone_short"], created_ago=45, expires_in=-30)
+		with self.askable() as asked:
+			pay.reverify_pending()
+		self.assertEqual(asked, [txns[n] for n in ("soon_hold", "late_hold", "old_free", "new_free",
+		                                          "gone_short", "gone_long")])
+
+	def test_a_charge_whose_only_question_failed_after_its_deadlock_does_not_end_the_tick(self):
+		"""P1-8 (2E-2 fix 2): ``complete_retrying`` rolls the whole transaction back on a deadlock, savepoints
+		included; the job's own rollback of the failed charge then finds none. The error is logged and the next
+		charge is still asked."""
+		from kamra.tex.payments.providers.base import ProviderError
+
+		first, second = (self.book(guest=dict(GUEST, email=f"new2-gone-{n}@example.com")) for n in range(2))
+		broken, fine = self.start_payment(first)["transaction"], self.start_payment(second)["transaction"]
+		passes(first["booking"], 26)                               # the later deadline: asked first
+		passes(second["booking"], 27)
+		real_complete, real_rollback, calls = pay.complete, frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def complete(transaction, **kw):
+			if transaction != broken:
+				return real_complete(transaction, **kw)
+			calls.append(1)
+			if len(calls) == 1:
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+			raise ProviderError("gateway said no")
+
+		def rollback(*args, **kw):                    # the test's own transaction stands for the job's
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		with self.askable() as asked, mock.patch.object(pay, "complete", side_effect=complete), \
+				mock.patch.object(frappe.db, "rollback", side_effect=rollback), mock.patch("time.sleep"):
+			done = pay.reverify_pending()
+		self.assertEqual(done, {"asked": 2, "errors": 1})
+		self.assertEqual(asked, [broken, fine])
+		self.assertEqual((txn_state(broken).status, txn_state(fine).status), ("Pending", "Succeeded"))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX payment re-verify {broken}"}))
+
+
+class TestAFailedTryLeavesNothing(HoldCase):
+	"""P1-8 (audit 2E-2, fix round 1): a charge of an old iyzico checkout with two tokens is asked once per
+	token. A try that failed half way (money recorded, its allocation refused) is undone before the next
+	token is asked: the job's step commit and the staff request's commit never put a half state on record."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.tests.integration.test_security_regressions import FakeIyzico
+
+		self.gw = FakeIyzico()
+		acc = frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "iyzico two tokens",
+		                      "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox", "enabled": 1,
+		                      "currencies": "EUR", "api_key": "ak-test", "secret_key": "sk-test"}).insert(
+			ignore_permissions=True)
+		frappe.db.set_value("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		                    "provider_account", acc.name)
+		patcher = self.gw.patch()
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def two_tokens(self) -> tuple[dict, str]:
+		"""A booked, started charge whose first token's checkout was paid and whose second is still open."""
+		b = self.book()
+		txn = self.start_payment(b)["transaction"]                       # tok-1
+		frappe.db.set_value("TEX Payment Transaction", txn, "provider_ref", "tok-1 tok-2", update_modified=False)
+		price = f"{D(frappe.db.get_value('TEX Payment Transaction', txn, 'amount')):.2f}"
+		self.gw.answers["tok-1"] = lambda t: self.gw.paid(t, "P1", price=price)
+		self.gw.answers["tok-2"] = {"status": "success", "paymentStatus": "WAITING"}
+		passes(b["booking"], 26)
+		return b, txn
+
+	def refused_once(self):
+		real, calls = pay.allocate, []
+
+		def allocate(*args, **kw):
+			calls.append(1)
+			if len(calls) == 1:
+				frappe.throw("The allocation was refused")
+			return real(*args, **kw)
+
+		return mock.patch.object(pay, "allocate", side_effect=allocate)
+
+	def test_the_job_undoes_a_token_whose_allocation_was_refused_before_it_asks_the_next(self):
+		b, txn = self.two_tokens()
+		with self.refused_once():
+			pay.reverify_pending()
+		self.assertEqual(txn_state(txn).status, "Pending")
+		self.assertEqual(pay.allocated_of(txn), 0)
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+
+	def test_staff_reverify_undoes_it_too(self):
+		from kamra.tex.api import payments as payments_api
+
+		_b, txn = self.two_tokens()
+		with self.refused_once():
+			payments_api.reverify(transaction=txn)
+		self.assertEqual(txn_state(txn).status, "Pending")
+		self.assertEqual(pay.allocated_of(txn), 0)
+
+
+class TestIyzicoFraudReview(HoldCase):
+	"""O-18 (audit 2E-2, D-8): iyzico holds a payment in its fraud review (fraudStatus 0; absent or unknown is
+	read so). The booking is not confirmed: it waits, its rooms held for the link hold once; iyzico's 1 then
+	confirms it (a callback, staff, the job); its -1 fails the payment, ends the review hold (the rooms
+	follow the booking's own hold) and tells the team."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.tests.integration.test_security_regressions import FakeIyzico
+
+		self.gw = FakeIyzico()
+		acc = frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "iyzico review",
+		                      "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox", "enabled": 1,
+		                      "currencies": "EUR", "api_key": "ak-test", "secret_key": "sk-test"}).insert(
+			ignore_permissions=True)
+		frappe.db.set_value("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		                    "provider_account", acc.name)
+		patcher = self.gw.patch()
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def answer(self, txn: str, fraud) -> None:
+		price = f"{D(frappe.db.get_value('TEX Payment Transaction', txn, 'amount')):.2f}"
+		self.gw.answers["tok-1"] = lambda t: {**self.gw.paid(t, "P1", price=price), "fraudStatus": fraud}
+
+	def reviewed(self) -> tuple[dict, str, object]:
+		b = self.book()
+		before = frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until")
+		txn = self.start_payment(b)["transaction"]
+		attempt = frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until")
+		self.assertNotEqual(attempt, before)
+		self.answer(txn, 0)
+		self.assertEqual(pay.complete_retrying(txn, params={"token": "tok-1"})["status"], "Pending")
+		return b, txn, attempt
+
+	def test_a_payment_in_fraud_review_holds_the_booking_until_iyzico_approves_it(self):
+		from kamra.tex.api import payments as payments_api
+
+		b, txn, attempt = self.reviewed()
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, ["status", "raw_status"]),
+		                 ("Pending", "FRAUD_REVIEW"))
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		until = get_datetime(frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until"))
+		self.assertGreater(until, add_to_date(now_datetime(), hours=23))        # the link hold: 24 hours
+		self.assertEqual(get_datetime(frappe.db.get_value("TEX Payment Transaction", txn, "expires_at")), until)
+		reviews = frappe.get_all("TEX Audit Event", filters={"action": "payment.under_review", "reference_name": txn},
+		                         pluck="old_value")
+		self.assertEqual(len(reviews), 1)
+		self.assertEqual(json.loads(reviews[0])["payment_attempt_until"], str(get_datetime(attempt)))
+		# asked again while the review goes on: nothing is extended or recorded again
+		pay.complete_retrying(txn, params={"token": "tok-1"})
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.under_review", "reference_name": txn}), 1)
+		self.assertEqual(get_datetime(frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until")), until)
+		passes(b["booking"], 60)                                    # the booking's own hold and the card's are over
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+		self.answer(txn, 1)
+		self.assertEqual(payments_api.reverify(transaction=txn)["status"], "Succeeded")
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+	def test_a_payment_iyzico_rejects_after_its_review_lets_the_rooms_go_and_tells_the_team(self):
+		from kamra.tex.services import notify
+
+		b, txn, attempt = self.reviewed()
+		frappe.db.set_value("Property", fx.PROPERTY, "email", "reservations.o18@example.com")
+		self.answer(txn, -1)
+		with mock.patch.object(notify, "_deliver", wraps=notify._deliver) as deliver:
+			self.assertEqual(pay.complete_retrying(txn, params={"token": "tok-1"})["status"], "Failed")
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "error_code"), "FRAUD_REJECTED")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.fraud_rejected", "reference_name": txn}))
+		# the team, not the guest: a new notice, never the reconciliation one (TEX holds no money of it)
+		self.assertEqual([(c.args[0], c.kwargs["template"], c.kwargs["booking"]) for c in deliver.call_args_list],
+		                 [("reservations.o18@example.com", "fraud_rejected_notice", b["booking"])])
+		self.assertFalse(txn_state(txn).reconciliation)
+		# the review hold is over: back to what the card attempt gave the booking
+		self.assertEqual(get_datetime(frappe.db.get_value("TEX Booking", b["booking"], "payment_attempt_until")),
+		                 get_datetime(attempt))
+		passes(b["booking"], 26)
+		run_expiry_jobs()
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+
+
+class TestRefusedAfterTheHold(HoldCase):
+	"""P1-9 (audit 2E-2): once a booking's hold is over with no attempt open, the refused retry lets its rooms
+	go at once (the expiry, committed before the refusal), not at the next 5-minute run; a recovery link is
+	still sent inside a card attempt's 3-D Secure margin; a transfer is never started past the hold."""
+
+	def test_a_retry_refused_after_the_hold_releases_the_rooms_at_once(self):
+		from kamra.tex.services import holds
+
+		b = self.book()
+		self.start_payment(b)
+		passes(b["booking"], 26)                                   # the hold and the card attempt are over
+		commits = []
+		with mock.patch.dict(frappe.flags, {"in_test": False}), \
+				mock.patch.object(frappe.db, "commit", side_effect=lambda *a, **kw: commits.append(self.statuses(b))):
+			with self.assertRaises(holds.HoldExpired):
+				self.start_payment(b)                              # no job ran in between
+		self.assertEqual(commits, [("Cancelled", ["Cancelled"])])  # on record before the refusal
+		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "booking.expire", "reference_name": b["booking"]}))
+
+	def test_a_recovery_link_is_sent_inside_the_3ds_margin(self):
+		b = self.book()
+		self.start_payment(b)
+		passes(b["booking"], 22)                                   # the hold is over, the card attempt still open
+		out = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                      expires_hours=72, booking=b["booking"])
+		self.assertTrue(out["rooms_held_until"])
+		self.assertGreater(held_until(b)[0], add_to_date(now_datetime(), hours=23))
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+
+	def test_a_transfer_is_not_started_once_the_hold_is_over(self):
+		from kamra.tex.services import holds
+
+		bank = fx.ensure("TEX Payment Provider Account", {"property": fx.PROPERTY, "provider": "Bank Transfer"},
+		                 {"label": "Bank transfer", "property": fx.PROPERTY, "provider": "Bank Transfer",
+		                  "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
+		fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Bank Transfer"},
+		          {"property": fx.PROPERTY, "method": "Bank Transfer", "provider_account": bank, "priority": 5})
+		b = self.book()
+		self.start_payment(b)
+		passes(b["booking"], 22)                                   # the card attempt still holds the rooms
+		with self.assertRaises(holds.HoldExpired):
+			public.pay_booking(token=b["manage_token"], payment_method="Bank Transfer")
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"booking": b["booking"],
+		                                                              "provider": "Bank Transfer"}))
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
 
 
 class TestReconciliationStates(HoldCase):

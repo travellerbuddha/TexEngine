@@ -81,7 +81,9 @@ def callback(txn: str | None = None, **_ignored):
 		log_exception(f"TEX payment callback error {row.name}")
 		status = "Pending"
 	# Sipay returns via GET, which Frappe does not auto-commit; the verified outcome must persist.
-	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- verified payment outcome must be durable before redirect
+	# GET is the gateway's / browser's return (Sipay and the guest's browser come back with a GET): the outcome is
+	# verified with the gateway (``complete``), never taken from the request, so a forged GET creates no payment
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit, whitelisted-side-effect-on-get -- GET is the gateway's / browser's return; the outcome is verified with the gateway, never taken from the request
 	_forward(row.return_url, payment=row.name, status=status.lower())
 
 
@@ -170,34 +172,17 @@ def transaction(name: str):
 @require_capability("payment.view", property_arg=None, doc_arg=("transaction", "TEX Payment Transaction"))
 @retry_on_deadlock
 def reverify(transaction: str):
-	"""Ask the gateway again for a Pending or Failed charge (iyzico / Sipay support a
-	status query): a charge the gateway did capture is recovered, never lost."""
-	from kamra.tex.payments.providers.turkey import iyzico_tokens
+	"""Ask the gateway again for a Pending or Failed charge (a gateway with a status query:
+	iyzico, Sipay): a charge the gateway did capture is recovered, never lost."""
+	from kamra.tex.payments.providers import REGISTRY
 
 	row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref", "status"],
 	                          as_dict=True)
-	if row.status not in pay.SETTLEABLE or row.provider not in ("iyzico", "Sipay"):
+	cls = REGISTRY.get(row.provider)
+	if row.status not in pay.SETTLEABLE or not (cls and cls.status_query):
 		frappe.throw(_("Only pending, failed or cancelled iyzico / Sipay payments can be re-verified."))
-	# iyzico: each checkout-form token stored for this charge, newest first
-	if row.provider == "iyzico":
-		attempts = [{"token": t} for t in iyzico_tokens(row.provider_ref)] or [{"token": ""}]
-	else:
-		attempts = [{}]
-	out, error = None, None
-	for params in attempts:
-		try:
-			res = pay.complete_retrying(transaction, params=params)
-		except ProviderError as e:
-			error = e                                  # this token is not verifiable: try the next
-			continue
-		except Exception as e:
-			# the gateway did not answer for this token: an older one may still hold the payment
-			log_exception(f"TEX payment re-verify error {transaction}")
-			error = e
-			continue
-		out = res
-		if res.get("status") == "Succeeded":
-			break
+	# iyzico: each checkout-form token stored for this charge, newest first; none: the gateway's own "no"
+	out, error = pay.reverify(transaction, attempts=cls.status_params(row.provider_ref) or [{"token": ""}])
 	if out is None:
 		frappe.throw(_("The gateway did not confirm this payment: {0}").format(str(error)[:200]))
 	return out
@@ -329,6 +314,7 @@ def create_link(property: str, amount, currency: str, description: str, expires_
 
 @frappe.whitelist(methods=["POST"])
 @require_capability("payment.link", property_arg=None, doc_arg=("name", "TEX Payment Link"))
+@retry_on_deadlock
 def reissue_link(name: str, send_email=0, language: str | None = None):
 	return pay.reissue_link(name, send_email=bool(as_int(send_email, 0)), language=text(language, 5) or "en")
 

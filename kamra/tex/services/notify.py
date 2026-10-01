@@ -227,6 +227,29 @@ def team_notice(txn, booking: str | None, state: str, note: str, amount) -> None
 		         log_title=f"TEX reconciliation notice {txn.name}")
 
 
+def payment_rejected(txn, booking: str | None) -> None:
+	"""The hotel's reservations team: the gateway's fraud check rejected a payment it held in review (O-18,
+	D-8). TEX holds none of it (the gateway returns any money itself); the booking waits for another
+	payment or expires with its own hold."""
+	try:
+		to = team_recipients(txn.property)
+		subject = f"TEX: payment {txn.name} for booking {booking or '-'} was rejected by the gateway's fraud check"
+		body = (f"The gateway's fraud check rejected the payment <b>{escape_html(txn.name)}</b> of "
+		        f"<b>{escape_html(to_str(from_db(txn.amount, txn.currency)))} {escape_html(txn.currency)}</b> for booking "
+		        f"<b>{escape_html(booking or '-')}</b> after its review. TEX recorded no money for it: the gateway "
+		        "returns what it took by itself.<br><br>The booking is no longer held for this payment: it waits for "
+		        "another payment until its own hold ends. Contact the guest if the booking should be kept.")
+	except Exception as e:
+		if transaction_lost(e):
+			raise
+		log_exception(f"TEX fraud rejection notice {txn.name}")
+		return
+	for address in to:
+		_deliver(address, subject, body, reference=("TEX Payment Transaction", txn.name), guest=None,
+		         property=txn.property, template="fraud_rejected_notice", booking=booking,
+		         log_title=f"TEX fraud rejection notice {txn.name}")
+
+
 def payment_after_expiry(booking: str, next_step: str, amount, currency: str) -> None:
 	"""The guest: their payment of ``amount`` came when the booking could no longer take it; ``next_step``
 	"refund" (refunded by itself) or "contact" (the hotel decides)."""

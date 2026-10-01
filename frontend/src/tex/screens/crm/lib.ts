@@ -1,6 +1,7 @@
 // Small helpers for the CRM screens. Nothing here computes money.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { idempotencyKey } from "../../lib/api"
+import { csvCell } from "../../lib/csv"
 import type { ConsentField } from "./types"
 
 /** Value that settles `ms` after the last change (search boxes). */
@@ -58,15 +59,8 @@ export function splitTags(s: string | null | undefined): string[] {
     .filter(Boolean)
 }
 
-/** Neutralise spreadsheet formula injection and quote a CSV cell. */
-function csvCell(v: unknown): string {
-  let s = v === null || v === undefined ? "" : String(v)
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
-  return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
-
 export function downloadCsv(filename: string, header: string[], rows: unknown[][]) {
-  const text = [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n")
+  const text = [header, ...rows].map((r) => r.map((v) => csvCell(v)).join(",")).join("\r\n")
   // BOM so spreadsheet apps read UTF-8 names (ğ, ş, ł …) correctly
   const blob = new Blob(["﻿", text], { type: "text/csv;charset=utf-8" })
   const url = URL.createObjectURL(blob)

@@ -9146,7 +9146,9 @@ main `1575c8b` is contained, so nothing was merged.
 - Money for a booking (user decision, B3): a) its rooms still held for it, however late: confirm
   at the locked price — its rooms, extra units and coupon uses are still held for it, so nothing is
   judged again; b) late money, rooms given back and still free: `Action Required`;
-  c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required`. In b)/c)
+  c) late money, rooms sold: `Refund Queued` when the gateway refunds via TEX, else `Action Required` — and
+  `Action Required` whenever the gateway states no capture time on a booking that ended by its expiry (D-7, P1-1: it
+  may have been paid in time; the hotel decides, never an automatic refund). In b)/c)
   the charge stays Succeeded, off the booking, with today's availability and price in its note; a
   booking that expires with money on it puts that money in `Action Required`, always (B2).
 - Late is by the gateway's clock (`captured_at`, p53; B4, D3): the virtual POS's `EXTRA.TRXDATE` (Istanbul
@@ -9160,6 +9162,14 @@ main `1575c8b` is contained, so nothing was merged.
 - A booking never confirmed owes no cancellation penalty (a room still carries the basket discount the
   others keep, E1) and nothing once it ends; money on its way is never kept as a fee (C6, user).
 - Seen (B5): status check `payments.reconciliation` with ages; e-mail to the hotel and the payer.
+- *Fraud review (D-8, O-18, Part 2E-2).* A payment the gateway holds in its fraud review (iyzico fraudStatus 0; absent or
+  unknown is read so, never approved on doubt) keeps its booking waiting: its rooms are held once for the link hold (never
+  past the arrival day, never shortened, not extended again), audited `payment.under_review`; a 1 then confirms it. A
+  rejection (-1) fails it, ends that hold (back to the deadline before it, or the booking's other open charges'), is
+  audited `payment.fraud_rejected` and tells the team; TEX holds none of its money, so nothing goes to reconciliation.
+- *Refused after the hold (P1-9, Part 2E-2).* A retry or a link refused because the hold is over, with no attempt open,
+  expires the booking and commits before the refusal (its rooms go at once); a link inside a card's 3-D Secure margin
+  is still sent; a transfer is never started past the hold.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
@@ -9223,6 +9233,21 @@ the versions the roll superseded the state their contract's later publishes woul
 - Commits (`_commit_step`) also end what the request did before (a booking just made); skipped in tests (one transaction).
 - Payment paths lock link → payment(s) → booking → rooms (→ nights → extras → promotions → Guest), series rows last, never
   across a gateway call (ADR-062 "Locks"); Part 2F (P1-4) adds the full order and the reversed orders it fixes.
+- *Addendum (Part 2E-2).* `complete_retrying` runs `complete` again on a deadlock or a lock wait timeout, after a full
+  rollback (a timeout undoes only its statement), 3 tries, then raises the error (`mock_pay`'s own wrapper: ≤ 3 × 3);
+  3 × `innodb_lock_wait_timeout` may outlast a web worker: the safety net is the re-verify job (P1-8).
+- The re-verify job (NEW-2) is first in the 5-minute group: a plain SELECT of askable Pending charges (enabled account,
+  no live lease), 20 per tick by urgency — still holding rooms first (nearest deadline first), then holding none
+  (`expires_at` NULL: oldest first), then past their deadline (latest first); an abandoned iyzico checkout stays Pending
+  for 2 hours and must not starve those that can still be saved — one charge per transaction, committed before the
+  next gateway question (and between two questions of one charge when the first changed it). A request that committed a step (`_commit_step` counts it) is never run
+  again on a deadlock: it rolls back and answers "very busy" (P1-8 e); a durable refund's or a guest change's commit,
+  replayed by its key, does not count.
+- Each question of a re-verify (`reverify`: the job and the staff endpoint) is asked under a savepoint: one that failed
+  half way (money recorded, its allocation refused) is undone before the next token is asked, so no step commit and no
+  request commit puts a half state on record. A deadlock or timeout in `complete_retrying` rolls the whole transaction
+  back and a step commit ends it: the savepoint is then gone, and the undo (`_undo_to`) rolls back whole instead — safe
+  there: every charge of the job is a transaction of its own and staff's request has no uncommitted work before it.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
@@ -9288,3 +9313,32 @@ the versions the roll superseded the state their contract's later publishes woul
   records provider "MANUAL", the row, its date and `bridged_from` (only when bridged: older records read as before); the status
   page says WARN `fx_bridged` (pairs, ages, hotels). VND (Cam Ranh) uses a MANUAL-mode policy, outside this part.
 - ENGINE_VERSION, schema and the parity corpus are unchanged.
+
+## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
+
+Written 2026-10-01 (Y-11, O-22, O-21). Before, the daily job took `min(lot, balance)` from every Available earning past its
+`expires_on`, whenever it ran: spent points were tied to no lot, so a spent lot's expiry took a later lot's points (Y-11:
+A = 100 spent, B = 80 matures later: B lost 80), or the points of a lot that expires years later (O-22), and a change to a
+spent stay topped the balance up and earned the whole new amount again (O-21).
+
+1. *Lot.* A lot is a matured earning (an Earn row that is Available, Used or Expired) or a positive Adjust. A use never
+   names a lot: each lot's remainder is derived from the ledger by one pure function (`kamra/tex/crm/lots.py`, no frappe,
+   like `pricing`) and is never stored. Pending, Reversed and any other non-final row is ignored.
+2. *Order.* Burns, negative Adjusts and Expire rows (the debits) are spent by the open lots, the one that expires first
+   first, then by availability date (none first), creation and name. A lot without an expiry is used last and never
+   expires (NULL: ADR-064); an Adjust lot never expires. With a fixed expiry period this is FIFO.
+3. *Closing.* On its date a lot closes once: an Expire row ("expiry of <lot>") takes what is left of it (no row when
+   nothing is), and the lot's status becomes Expired. A closed lot has absorbed exactly its own points, so later debits are
+   spent by the open lots only; a lot the old job marked ("expiry of <lot>" and still Available) is closed the same way.
+   Points that come back after their lot closed (`excess`) expire too, so they are not a free balance.
+4. *(Part 2H-2, D-16: the use of points that a cancellation gives back.)*
+5. *Reversal.* A reversed earning takes its lot and that lot's Expire rows with it. A stay that did not happen (cancelled,
+   no-show) never takes the balance below zero: the shortfall is topped up by an Adjust, as before.
+6. *Changed stays.* The new lot takes the old one's place in its state (a stay that had matured stays mature) with the dates
+   computed as for any earning. The change is exact (no floor): what was spent is the balance's, which may be below zero
+   until later earnings close the debt (`lots.plan` spends a debt first); a redemption and a negative adjustment still
+   refuse what the balance cannot cover. The tier is read from the lifetime points without the stay's own earnings.
+7. *Settling.* The daily job settles each guest and program under the guest's lock (Guest, then its ledger rows) in one
+   savepointed step, committed outside tests; a redemption and a negative adjustment settle first, so points past their
+   expiry are never spent before the job has run. p61 closes the lots that expired before this model (those the old job
+   marked, and those spent in full) and never takes a point; points the old job already took are not given back.

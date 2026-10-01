@@ -1,5 +1,6 @@
 // Reports helpers: date presets, group labels and client-side CSV export.
 // Amounts stay the server's decimal strings; nothing here recomputes money.
+import { csvCell } from "../../lib/csv"
 import { addDays, date, isoDay, nightsBetween } from "../../lib/format"
 import type { Bootstrap } from "../../lib/session"
 
@@ -167,13 +168,6 @@ export function groupLabel(
 }
 
 // ─── CSV ───────────────────────────────────────────────────────────────
-
-function csvCell(v: unknown, text: boolean): string {
-  let s = v === null || v === undefined ? "" : String(v)
-  // spreadsheet formula injection: neutralise text cells that start like a formula
-  if (text && /^[=+\-@\t\r]/.test(s)) s = `'${s}`
-  return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
 
 export interface CsvColumn<R> {
   header: string
