@@ -69,6 +69,7 @@ kamra.patches.tex.p56_open_ended_versions
 kamra.patches.tex.p59_policy_currency
 kamra.patches.tex.p60_promotion_code_key
 kamra.patches.tex.p61_loyalty_lots
+kamra.patches.tex.p62_expired_hold_flag
 kamra.patches.tex.p63_versioned_passwords
 kamra.patches.tex.p64_agent_log_read_only
 kamra.patches.tex.p65_agent_log_hotel

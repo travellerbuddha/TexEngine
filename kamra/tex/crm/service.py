@@ -206,7 +206,8 @@ def facts_for(rows: list[dict], props: set[str], today) -> dict[str, dict]:
 			for r in frappe.db.sql(
 				"""SELECT name, tex_booking, guest, status, check_in_date, check_out_date, children, tex_sale_at,
 				          creation, cancelled_on, tex_total_amount, amount_after_tax, tex_currency
-				   FROM `tabReservation` WHERE guest IN %(g)s AND property IN %(p)s""",
+				   FROM `tabReservation` WHERE guest IN %(g)s AND property IN %(p)s
+				     AND tex_hold_expired = 0""",     # a hold that ran out of time is no stay of the guest (O-24)
 					{"g": tuple(chunk), "p": tuple(props)}, as_dict=True):
 				if not (r.check_in_date and r.check_out_date):
 					continue
@@ -333,7 +334,7 @@ def _cancellations(guest: str, via: set[str]) -> dict:
 	fees: dict = {}
 	last = None
 	for r in frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via)),
-	                                                 "status": ("in", list(counts))},
+	                                                 "status": ("in", list(counts)), "tex_hold_expired": 0},
 	                        fields=["status", "property", "tex_currency", "cancellation_fee", "cancelled_on"]):
 		counts[r.status] += 1
 		if r.status == "Cancelled" and r.cancelled_on:

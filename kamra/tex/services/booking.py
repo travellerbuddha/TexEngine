@@ -18,6 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_to_date, get_datetime, getdate, now_datetime
 
+from kamra.reservation_state import EXPIRY_NOTE
 from kamra.tex.availability import extras_repository as xinv
 from kamra.tex.availability import repository as avail
 from kamra.tex.commercial import context as ctxmod
@@ -1120,6 +1121,9 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		res.cancellation_fee = penalty
 		res.cancelled_on = now_datetime()
 		res.flags.tex_modification = True
+		# the stay's own earning is reversed after the money below, once the points spent on its booking are
+		# given back: reversed first, a spent stay's reversal topped the balance up with points made out of nothing
+		res.flags.tex_loyalty_after_money = bool(res.tex_booking)
 		res.save(ignore_permissions=True)
 	finally:
 		frappe.flags.kamra_cancelling = False
@@ -1133,7 +1137,11 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 		audit("reservation.basket_clawback", reference_doctype="Reservation", reference_name=res.name,
 		      property=res.property, new=claw, reason=reason)
 	if res.tex_booking:
+		from kamra.tex.crm import loyalty
+
 		_refresh_booking_after_change(res.tex_booking)
+		# what its Loyalty charges hold beyond what it now costs goes back as points, never as money (O-20)
+		loyalty.return_points(res.tex_booking, reason=f"reservation {res.name} cancelled")
 		b = frappe.db.get_value("TEX Booking", res.tex_booking, ["status", "paid_amount", "currency"], as_dict=True)
 		if was in holds.HOLDING and b.status == "Cancelled" and from_db(b.paid_amount, b.currency) > ZERO:
 			# over before it was ever confirmed: it owes nothing and holds no money; what it held comes
@@ -1144,6 +1152,8 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 			                        guest_mail=False)
 		# never confirmed: what it owes now may be paid already (a first half came before this room left)
 		confirm_if_paid(res.tex_booking, reason=f"paid what it owes once {res.name} was cancelled")
+		res.flags.tex_loyalty_after_money = False
+		loyalty.on_reservation_change(res)              # the stay's own earning, after the points came back
 	# a guest's change still waiting for this room is void; a payment of it arriving later is
 	# refunded (G-45)
 	from kamra.tex.services import guest_changes
@@ -1308,7 +1318,8 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 		for name in holding:
 			res = frappe.get_doc("Reservation", name, for_update=True)
 			res.cancellation_reason = "Payment failed" if res.status == "Pending Payment" else "Other"
-			res.cancellation_note = "Hold / payment window expired"
+			res.cancellation_note = EXPIRY_NOTE
+			res.tex_hold_expired = 1             # the system cancelled it: no sale, no cancellation (O-24)
 			res.status = "Cancelled"
 			res.cancelled_on = now
 			res.hold_expires_on = None
@@ -1416,6 +1427,7 @@ def revive_expired(booking: str, *, reason: str) -> list[str]:
 			r.status = "Pending Payment"
 			r.hold_expires_on = now              # its payment confirms it now; nothing else keeps it
 			r.cancellation_reason = r.cancellation_note = r.cancelled_on = None
+			r.tex_hold_expired = 0               # it is a sale again, waiting for its payment (O-24)
 			r.flags.tex_modification = True
 			r.flags.tex_inventory_checked = True     # its nights were locked and recounted above
 			r.save(ignore_permissions=True)

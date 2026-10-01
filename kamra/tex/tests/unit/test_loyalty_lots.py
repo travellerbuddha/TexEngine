@@ -9,6 +9,7 @@ several runs.
 
 import unittest
 from datetime import date, datetime
+from decimal import Decimal as D
 
 from kamra.tex.crm import lots
 
@@ -141,6 +142,39 @@ class TestPlan(unittest.TestCase):
 	def test_dates_may_be_text(self):
 		rows = [row("A", "Earn", 100, expires_on="2026-01-01"), row("S", "Burn", -60, "Used", n=5)]
 		self.assertEqual(lots.plan(rows, "2026-01-02"), {"expire": [("A", 40)], "close": ["A"], "excess": 0})
+
+
+class TestPointsOf(unittest.TestCase):
+	"""Part 2H-2 (ADR-071 §4): the points that come back with a share of the money they paid, pro rata and
+	cumulative, half-up, so the shares of one payment add up to its points whatever they are."""
+
+	def slices(self, points, value, takes):
+		back, out = D(0), []
+		for take in map(D, takes):
+			out.append(lots.points_of(points, D(value), back, take))
+			back += take
+		return out
+
+	def test_the_shares_of_a_payment_add_up_to_its_points(self):
+		out = self.slices(300, "30.00", ("12.40", "0.01", "17.59"))
+		self.assertEqual(out, [124, 0, 176])
+		self.assertEqual(sum(out), 300)
+
+	def test_thirds_never_lose_or_make_a_point(self):
+		out = self.slices(100, "10.00", ("3.33", "3.33", "3.34"))
+		self.assertEqual((out, sum(out)), ([33, 34, 33], 100))
+
+	def test_half_a_point_rounds_up(self):
+		self.assertEqual(lots.points_of(5, D("1.00"), D(0), D("0.10")), 1)       # 0.5 of a point
+		self.assertEqual(lots.points_of(5, D("1.00"), D("0.10"), D("0.10")), 0)   # 1.0 in all: nothing more
+
+	def test_a_whole_payment_returns_all_its_points_and_never_more(self):
+		self.assertEqual(lots.points_of(300, D("30.00"), D(0), D("30.00")), 300)
+		self.assertEqual(lots.points_of(300, D("30.00"), D("20.00"), D("40.00")), 100)    # past its value: clamped
+		self.assertEqual(lots.points_of(300, D("30.00"), D("30.00"), D("5.00")), 0)
+
+	def test_a_payment_worth_nothing_returns_nothing(self):
+		self.assertEqual(lots.points_of(300, D(0), D(0), D("5.00")), 0)
 
 
 if __name__ == "__main__":

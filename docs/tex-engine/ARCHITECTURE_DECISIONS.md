@@ -3893,6 +3893,14 @@ the reports. Some claims above were stronger than the tests behind them. All are
   tests; upstream suites 76/76, 13/13, banquet 101; Playwright `reports`, `portfolio`, `booking`,
   `crs`, `manage-money` 16/16 (after `demo_seed.release_test_bookings` released 645 test-run stays
   that had sold the shared demo hotel out on the specs' random dates).
+- *Expired holds (audit Part 2H-2, O-24).* A booking whose hold or payment window ran out is cancelled by the system
+  (`expire_booking`, the PMS job `expire_holds`), not by anyone, and was never a sale: its reservations carry
+  `tex_hold_expired`. Production, margin, promotion and extras (with `include_cancelled`), the cancellation view's stays,
+  cancellations, nights, value, fees and lead time, the dashboard's cancellations and `reservations_created`, the portfolio and
+  the CRM leave it out; the cancellation view and the dashboard count it apart as `expired_holds`. The payment view still
+  reads every booking: money is money whatever became of its booking. A late payment that takes the booking back
+  (`revive_expired`) clears the mark. p62 flags the holds that expired before the mark: cancelled, with the expiry note, and
+  no Cancellation revision (a hold cancelled on purpose has one, whatever note staff typed).
 
 ## ADR-060 The entry screens say TEX Engine and offer the source; "/" leads to the admin app or sign-in; the navigation carries R-35's sub-sections
 *Amended by the review follow-up (end of this ADR): guests and Desk users are offered the source
@@ -9274,6 +9282,9 @@ the versions the roll superseded the state their contract's later publishes woul
   allocation insert; a CRM merge (both profiles, then their records); the recount (ADR-048); withdraw's quote scan
   (index order, ADR-069): name order ends caller-against-caller cycles, not create-against-withdraw.
 - Every write endpoint taking these locks is wrapped; a request that committed a step is not run again (P1-8 e).
+- *Points returned (Part 2H-2, ADR-071 §4).* A cancellation's or an expiry's return of points is money going out: booking →
+  rooms → the guests who may have spent → their Loyalty charges (name order) → burn and ledger rows. A cycle needs one
+  Loyalty payment shared by two bookings (a staff transfer): a clean rollback, run again by the wrappers or the job's next run.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
@@ -9342,7 +9353,7 @@ the versions the roll superseded the state their contract's later publishes woul
 
 ## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
 
-Written 2026-10-01 (Y-11, O-22, O-21). Before, the daily job took `min(lot, balance)` from every Available earning past its
+Written 2026-10-01 (Y-11, O-22, O-21; §4 and the job's lock order in §7: Part 2H-2, O-20). Before, the daily job took `min(lot, balance)` from every Available earning past its
 `expires_on`, whenever it ran: spent points were tied to no lot, so a spent lot's expiry took a later lot's points (Y-11:
 A = 100 spent, B = 80 matures later: B lost 80), or the points of a lot that expires years later (O-22), and a change to a
 spent stay topped the balance up and earned the whole new amount again (O-21).
@@ -9357,7 +9368,12 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
    nothing is), and the lot's status becomes Expired. A closed lot has absorbed exactly its own points, so later debits are
    spent by the open lots only; a lot the old job marked ("expiry of <lot>" and still Available) is closed the same way.
    Points that come back after their lot closed (`excess`) expire too, so they are not a free balance.
-4. *(Part 2H-2, D-16: the use of points that a cancellation gives back.)*
+4. *Returned uses (D-16, D-16a; Part 2H-2).* A cancellation or an expiry gives back as points, never as money, what the
+   booking's Loyalty charges hold beyond what it now costs (the points first, as O-19): that share comes off the booking as a
+   Loyalty refund ("POINTS RETURNED"; `refund` and `refund_outside` refuse a Loyalty charge) and the points come back pro rata
+   (half-up, cumulative) as a positive Reverse row, which only lowers the debits: they rejoin their lots with their dates. A lot
+   closed meanwhile is never reopened: its share is `excess` and expires at once (D-16a). The return comes before the stay's
+   own earning is reversed (§5 never tops up returned points); locks: booking → rooms → Guest → charge → ledger rows.
 5. *Reversal.* A reversed earning takes its lot and that lot's Expire rows with it. A stay that did not happen (cancelled,
    no-show) never takes the balance below zero: the shortfall is topped up by an Adjust, as before.
 6. *Changed stays.* The new lot takes the old one's place in its state (a stay that had matured stays mature) with the dates
@@ -9367,4 +9383,7 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
 7. *Settling.* The daily job settles each guest and program under the guest's lock (Guest, then its ledger rows) in one
    savepointed step, committed outside tests; a redemption and a negative adjustment settle first, so points past their
    expiry are never spent before the job has run. p61 closes the lots that expired before this model (those the old job
-   marked, and those spent in full) and never takes a point; points the old job already took are not given back.
+   marked, and those spent in full) and never takes a point; points the old job already took are not given back. The rows
+   the job matured are committed before it asks for the first guest (it held them while waiting for the guest, the reverse of
+   the order everywhere else: a deadlock with an adjustment or a redemption of the same guest), and a savepoint lost to a
+   deadlock (MariaDB 1305, nothing else) rolls the guest's step back whole, is logged, and the job goes on (Part 2H-2).

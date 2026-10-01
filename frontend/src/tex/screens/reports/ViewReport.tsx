@@ -103,6 +103,7 @@ function useSpecs(view: TableView, costVisible: boolean): Spec[] {
         { key: "stays", label: c("stays"), kind: "count", hide: "sm" },
         { key: "cancelled", label: c("cancelled"), kind: "count" },
         { key: "no_shows", label: c("no_shows"), kind: "count", hide: "md" },
+        { key: "expired_holds", label: c("expired_holds"), kind: "count", hide: "md" },
         { key: "cancelled_pct", label: c("cancelled_pct"), kind: "pct" },
         { key: "cancelled_nights", label: c("cancelled_nights"), kind: "count", hide: "md" },
         { key: "cancelled_value", label: c("cancelled_value"), kind: "money" },

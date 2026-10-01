@@ -72,6 +72,16 @@ class TestPortfolio(TexTestCase):
 		self.assertTrue(any(m["market"] == "DE" for m in out["markets"]))
 		self.assertTrue(all(isinstance(v, str) for v in out["totals"]["booking_value"].values()))   # never float
 
+	def test_an_expired_hold_is_no_cancellation(self):
+		"""O-24 (audit Part 2H-2): a hold that ran out of time is not a cancellation of the hotel."""
+		old = next(h for h in self.dash()["hotels"] if h["hotel"] == fx.PROPERTY)
+		hold = guest_books(session="o24-pf")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
+		self.assertTrue(booking.expire_booking(hold["booking"], force=True))
+		hotel = next(h for h in self.dash()["hotels"] if h["hotel"] == fx.PROPERTY)
+		self.assertEqual(hotel["cancellations"] - old["cancellations"], 0)
+		self.assertEqual(D(hotel["cancelled_value"].get("EUR", "0")) - D(old["cancelled_value"].get("EUR", "0")), D(0))
+
 	def test_only_the_viewers_hotels_whatever_the_scope(self):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a sale at another tenant's hotel
 		agent("g25-both@example.com", OTHER, "Revenue Manager")

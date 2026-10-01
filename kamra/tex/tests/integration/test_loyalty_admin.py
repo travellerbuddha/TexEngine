@@ -3,18 +3,23 @@ validated, by the hotels they belong to only; earnings are never rewritten by a 
 change; redemption honours its cap and blackouts; a guest's summary shows the viewer's
 programs only."""
 
+import threading
+import time
 from types import MappingProxyType
 from unittest import mock
 
 import frappe
-from frappe.utils import add_days, add_months, nowdate
+from frappe.tests import IntegrationTestCase
+from frappe.utils import add_days, add_months, add_to_date, now_datetime, nowdate
 
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import loyalty as loyalty_api
 from kamra.tex.api import public
 from kamra.tex.crm import loyalty
-from kamra.tex.money import D
+from kamra.tex.money import D, from_db
+from kamra.tex.payments import service as pay
 from kamra.tex.security import scope
+from kamra.tex.services import booking as booking_svc
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import guest_books, setup_site_and_payments
 from kamra.tex.tests.integration.test_critical_journey import TexTestCase
@@ -334,6 +339,159 @@ class TestExpiry(LoyaltyCase):
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
 		self.assertEqual((self.available(), self.expire_rows()), (20, [-100]))
 
+	def test_a_guest_whose_transaction_was_lost_is_logged_and_the_job_goes_on(self):
+		"""Part 2H-2 item 0: the victim of a deadlock has no savepoint left, rolling back to it fails (MariaDB
+		1305): the job rolls back whole (as the payments job does, 2E-2), logs it and settles the next guest."""
+		other = frappe.get_doc({"doctype": "Guest", "first_name": "Lots", "last_name": "Other",
+		                        "email": "h2-lots-other@example.com"}).insert(ignore_permissions=True).name
+		past = add_days(nowdate(), -30)
+		self.row("Earn", 100, expires_on=past, available_on=add_days(nowdate(), -60))
+		mine, self.guest = self.guest, other
+		self.row("Earn", 100, expires_on=past, available_on=add_days(nowdate(), -60))
+		first, second = sorted((mine, other))
+		real_settle, real_rollback, wholly = loyalty.settle, frappe.db.rollback, []
+		frappe.db.savepoint("h2")
+
+		def settle(guest, program, today=None):
+			if guest == first:
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+			return real_settle(guest, program, today)
+
+		def rollback(*args, **kw):                    # the test's own transaction stands for the job's
+			if kw.get("save_point") and kw["save_point"] != "h2":
+				raise frappe.db.OperationalError(1305, f"SAVEPOINT {kw['save_point']} does not exist")
+			wholly.append(1)
+			return real_rollback(save_point="h2")
+
+		with mock.patch.object(loyalty, "settle", side_effect=settle), \
+				mock.patch.object(frappe.db, "rollback", side_effect=rollback), \
+				mock.patch.object(frappe, "log_error") as log:
+			out = loyalty.mature_and_expire()
+		self.assertEqual(wholly, [1])
+		self.assertEqual(log.call_count, 1)
+		self.assertIn(first, log.call_args.kwargs["title"])
+		self.assertEqual(out["expired_points"], 100)
+		rows = {g: frappe.get_all("TEX Loyalty Ledger", filters={"guest": g, "entry_type": "Expire"}, pluck="points")
+		        for g in (first, second)}
+		self.assertEqual(rows, {first: [], second: [-100]})
+
+
+class TestExpiryLockOrder(IntegrationTestCase):
+	"""Part 2H-2 item 0 (ADR-071, ADR-066): the daily job locked the Pending rows it matured (an UPDATE, no
+	commit) and only then, in ``settle``, the guest: the reverse of the order everywhere else (the guest, then
+	its ledger rows). Against an adjustment or a redemption of the same guest it deadlocked. Two connections:
+	the committed fixtures are removed again in tearDownClass."""
+
+	@classmethod
+	def drop(cls):
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test cleanup
+		guests = frappe.get_all("Guest", filters={"email": ("like", "h2-lock-%")}, pluck="name")
+		if guests:
+			rows = frappe.get_all("TEX Loyalty Ledger", filters={"guest": ("in", guests)}, pluck="name")
+			if rows:
+				frappe.db.delete("TEX Audit Event", {"reference_name": ("in", rows)})
+			for g in guests:
+				frappe.db.delete("Error Log", {"method": ("like", f"Loyalty expiry failed: {g} /%")})
+			frappe.db.delete("TEX Loyalty Ledger", {"guest": ("in", guests)})
+			frappe.db.delete("Guest", {"name": ("in", guests)})
+		frappe.db.delete("TEX Loyalty Program", {"program_name": "H2 Lock Club"})
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test setup
+		fx.base_setup()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+		cls.drop()
+		cls.club = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "H2 Lock Club",
+		                           "property": fx.PROPERTY, "enabled": 1, "currency": "EUR", "point_value": "0.1",
+		                           "min_redeem_points": 1, "max_redeem_percent": 100, "pending_days": 0,
+		                           "expiry_months": 24}).insert(ignore_permissions=True).name
+		cls.held, cls.after = sorted(
+			frappe.get_doc({"doctype": "Guest", "first_name": "Lock", "last_name": n, "email": f"h2-lock-{n}@example.com"}
+			               ).insert(ignore_permissions=True).name for n in ("A", "B"))
+		past, today = add_days(nowdate(), -30), nowdate()
+		for guest, entry_type, points, status, expires_on, available_on in (
+				(cls.held, "Earn", 100, "Available", past, add_days(today, -60)),     # past its expiry
+				(cls.held, "Earn", 50, "Pending", add_days(today, 400), add_days(today, -1)),     # matures today
+				(cls.after, "Earn", 40, "Available", past, add_days(today, -60))):
+			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": cls.club, "guest": guest,
+			                "entry_type": entry_type, "points": points, "status": status, "property": fx.PROPERTY,
+			                "expires_on": expires_on, "available_on": available_on, "reason": "h2"}
+			               ).insert(ignore_permissions=True)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- threads need committed fixtures
+
+	@classmethod
+	def tearDownClass(cls):
+		cls.drop()
+		super().tearDownClass()
+
+	def test_the_job_holds_no_ledger_lock_while_it_waits_for_a_guest(self):
+		"""An adjustment holds the guest and waits for the ledger rows while the job, which matured one of
+		them, waits for the guest: now the job has committed that row before it asks for the guest."""
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		held, entered = threading.Event(), threading.Event()
+		out: dict[str, tuple] = {}
+		job_thread: list[threading.Thread] = []
+		real_settle = loyalty.settle
+
+		def settle(guest, program, today=None):
+			if guest == self.held and threading.current_thread() is job_thread[0]:
+				entered.set()                    # from here the job waits for the guest
+			return real_settle(guest, program, today)
+
+		def adjustment():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff adjustment
+				from kamra.tex.crm.service import require_live_guest
+
+				require_live_guest(self.held)
+				held.set()
+				entered.wait(timeout=30)
+				time.sleep(1)                    # the job is waiting: the ledger rows are asked for now
+				out["adjust"] = ("ok", loyalty.adjust(self.held, self.club, -10, "lock order", property=fx.PROPERTY))
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each side is its own request
+			except Exception as e:
+				frappe.db.rollback()
+				out["adjust"] = ("error", f"{type(e).__name__}: {e}")
+			finally:
+				held.set()
+				frappe.destroy()
+
+		def job():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the scheduler
+				held.wait(timeout=30)
+				frappe.flags.in_test = False         # the scheduler's batches commit (``loyalty._commit``)
+				out["job"] = ("ok", loyalty.mature_and_expire())
+			except Exception as e:
+				frappe.db.rollback()
+				out["job"] = ("error", f"{type(e).__name__}: {e}")
+			finally:
+				frappe.destroy()
+
+		threads = [threading.Thread(target=adjustment), threading.Thread(target=job)]
+		job_thread.append(threads[1])
+		with mock.patch.object(loyalty, "settle", side_effect=settle):
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join(timeout=90)
+		frappe.db.rollback()                         # a fresh snapshot of what the threads committed
+		self.assertEqual(frappe.get_all("Error Log", filters={"method": ("like", f"Loyalty expiry failed: {self.held} /%")},
+		                                pluck="name"), [], "the job lost a deadlock with the adjustment")
+		self.assertEqual({k: v[0] for k, v in out.items()}, {"adjust": "ok", "job": "ok"}, out)
+		self.assertEqual(out["job"][1]["matured"], 1)
+		self.assertEqual(loyalty.balances(self.held, self.club)["available"], 40)         # 100 expired, 50 less 10
+		self.assertEqual(loyalty.balances(self.after, self.club)["available"], 0)         # the next guest was settled
+		self.assertEqual(frappe.get_all("TEX Loyalty Ledger", filters={"guest": self.after, "entry_type": "Expire"},
+		                                pluck="points"), [-40])
+
 
 class TestModification(LoyaltyCase):
 	"""O-21 (audit Part 2H-1, ADR-071): changing a stay whose points were spent minted them again. The change
@@ -539,3 +697,146 @@ class TestEarnMatrix(LoyaltyCase):
 		self.create(program_name="TRY club", currency="TRY")
 		with self.assertRaisesRegex(frappe.ValidationError, "can only be redeemed on TRY bookings"):
 			loyalty.redeem(guest, b["booking"], 50, idempotency_key="g66-3")
+
+
+class TestPointsBack(LoyaltyCase):
+	"""O-20 (audit Part 2H-2, D-16, ADR-071 §4): a booking that is cancelled or expires gives back as points,
+	never as money, what its Loyalty charges hold beyond what it now costs. Before: nothing gave a burn back
+	(867 earned, 300 spent, the booking cancelled: 567), and the points' money stayed on the cancelled booking,
+	where staff with payment.refund could record it as "refunded in cash"."""
+
+	def setUp(self):
+		super().setUp()
+		self.club = self.create(pending_days=0)                                  # 50 %, a point is 0.10 EUR
+
+	def available(self, guest: str) -> int:
+		return loyalty.balances(guest, self.club)["available"]
+
+	def give(self, guest: str, points: int, *, entry_type="Adjust", **kw) -> str:
+		return frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": self.club, "guest": guest,
+		                       "entry_type": entry_type, "points": points, "status": "Available", "reason": "o20", **kw}
+		                      ).insert(ignore_permissions=True).name
+
+	def spend(self, session: str, points: int = 300, *, method: str = "Pay at Hotel", gift: int = 1000):
+		"""A booking of a guest who holds ``gift`` points, and ``points`` of them spent on it."""
+		booking = guest_books(session=session, method=method)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", booking["booking"], "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": booking["booking"], "entry_type": "Earn"})
+		if own:                                                  # the booking's own earning is not part of this scenario
+			frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		if gift:
+			self.give(guest, gift)
+		red = loyalty.redeem(guest, booking["booking"], points, idempotency_key=f"{session}-pts")
+		return booking, guest, red
+
+	def test_points_are_never_paid_back_as_money(self):
+		hotel, _guest, red = self.spend("o20-cash")
+		for call in (lambda: pay.refund_outside(red["transaction"], amount="10.00", reason="cash back", reference="R-1",
+		                                        idempotency_key="o20-cash-1", booking=hotel["booking"]),
+		             lambda: pay.refund(red["transaction"], amount="10.00", reason="back", idempotency_key="o20-cash-2",
+		                                booking=hotel["booking"]),
+		             lambda: pay.refund(red["transaction"], amount="10.00", reason="back", idempotency_key="o20-cash-3",
+		                                booking=hotel["booking"], _system=True)):
+			with self.assertRaisesRegex(frappe.ValidationError, "never as money"):
+				call()
+		self.assertEqual(frappe.db.count("TEX Payment Transaction", {"parent_transaction": red["transaction"]}), 0)
+
+	def refunds_of(self, charge: str) -> list[tuple]:
+		return [(from_db(r.amount, "EUR"), r.status, r.raw_status, r.provider) for r in frappe.get_all(
+			"TEX Payment Transaction", filters={"parent_transaction": charge, "txn_type": "Refund"},
+			fields=["amount", "status", "raw_status", "provider"], order_by="creation asc, name asc")]
+
+	def reverse_rows(self, guest: str) -> list[tuple]:
+		return [(r.points, r.status, r.booking) for r in frappe.get_all(
+			"TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Reverse"},
+			fields=["points", "status", "booking"], order_by="creation asc, name asc")]
+
+	def test_cancelling_gives_back_the_points_it_was_paid_with(self):
+		"""867 earned, 300 spent on another booking, that booking cancelled: 867 (it was 567)."""
+		_stay, guest = self.paid_stay("o20-a")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest), 867)
+		hotel, who, red = self.spend("o20-a-hotel", 300, gift=0)
+		self.assertEqual((who, self.available(guest)), (guest, 567))
+		booking_svc.cancel_reservation(hotel["rooms"][0]["reservation"], reason="o20", waive_penalty=True)
+		self.assertEqual(self.available(guest), 867)
+		paid, status = frappe.db.get_value("TEX Booking", hotel["booking"], ["paid_amount", "payment_status"])
+		self.assertEqual((from_db(paid, "EUR"), status), (D("0.00"), "Refunded"))
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", hotel["booking"])])
+		self.assertEqual(pay.booking_charges(hotel["booking"]), [])
+		self.assertEqual(loyalty.return_points(hotel["booking"], reason="again"), 0)           # by state: nothing more
+		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_loyalty_points"), 867)
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "loyalty.return", "reference_name": hotel["booking"]}))
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "payment.points_returned"}))
+
+	def test_points_spent_on_the_stays_own_booking_are_given_back_before_its_earning_is(self):
+		"""The stay earned 867 and 300 of them paid for it: the points go back first, so reversing the earning
+		takes 867 of 867 and never tops up (an Adjust of +300 made them out of nothing)."""
+		stay, guest = self.paid_stay("o20-b")
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		red = loyalty.redeem(guest, stay["booking"], 300, idempotency_key="o20-b-pts")
+		self.assertEqual(self.available(guest), 567)
+		booking_svc.cancel_reservation(stay["rooms"][0]["reservation"], reason="o20", waive_penalty=True)
+		self.assertEqual(self.available(guest), 0)
+		self.assertEqual(frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Adjust"}), [])
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", stay["booking"])])
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		paid = frappe.db.get_value("TEX Booking", stay["booking"], "paid_amount")
+		self.assertEqual(from_db(paid, "EUR"), D("252.75"))             # the card deposit stays: staff refund it
+
+	def test_a_hold_that_ends_gives_the_points_back_and_asks_staff_for_nothing(self):
+		held = guest_books(session="o20-d")                              # a card hold waiting for its payment
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", held["booking"], "booker_guest")
+		self.give(guest, 1000)
+		red = loyalty.redeem(guest, held["booking"], 500, idempotency_key="o20-d-pts")
+		self.assertEqual(self.available(guest), 500)
+		self.assertTrue(booking_svc.expire_booking(held["booking"], now=add_to_date(now_datetime(), hours=2)))
+		self.assertEqual(self.available(guest), 1000)
+		self.assertFalse(frappe.db.get_value("TEX Payment Transaction", red["transaction"], "reconciliation"))
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                      "reference_name": red["transaction"]}))
+		self.assertEqual(from_db(frappe.db.get_value("TEX Booking", held["booking"], "paid_amount"), "EUR"), D("0.00"))
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("50.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+
+	def test_points_that_come_back_after_their_lot_expired_expire_at_once(self):
+		"""D-16a: the lot the spent points came from has expired meanwhile: nothing reopens it."""
+		hotel = guest_books(session="o20-e", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", hotel["booking"], "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": hotel["booking"], "entry_type": "Earn"})
+		frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")        # not part of this scenario
+		lot = self.give(guest, 500, entry_type="Earn", expires_on=add_days(nowdate(), 5),
+		                available_on=add_days(nowdate(), -30))
+		loyalty.redeem(guest, hotel["booking"], 300, idempotency_key="o20-e-pts")      # 200 of the lot are left
+		frappe.db.set_value("TEX Loyalty Ledger", lot, "expires_on", add_days(nowdate(), -1))
+		loyalty.mature_and_expire()                                                    # 200 expire, the lot closes
+		self.assertEqual(self.available(guest), 0)
+		booking_svc.cancel_reservation(hotel["rooms"][0]["reservation"], reason="o20", waive_penalty=True)
+		rows = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": ("in", ["Reverse", "Expire"])},
+		                      fields=["entry_type", "points"], order_by="creation asc, name asc")
+		self.assertEqual([(r.entry_type, r.points) for r in rows], [("Expire", -200), ("Reverse", 300), ("Expire", -300)])
+		self.assertEqual(self.available(guest), 0)
+
+	def test_a_return_is_shared_pro_rata_by_the_newest_payment_first(self):
+		"""Two redemptions of one booking, the booking now costs less than it holds: the newest payment gives
+		back first, and only what the booking holds beyond its new cost."""
+		hotel, guest, first = self.spend("o20-f", 300)                                 # 30.00
+		second = loyalty.redeem(guest, hotel["booking"], 200, idempotency_key="o20-f-2")   # 20.00
+		self.assertEqual(self.available(guest), 500)
+		frappe.db.set_value("TEX Booking", hotel["booking"], "total_amount", D("50.00"))      # it costs what it holds
+		self.assertEqual(loyalty.return_points(hotel["booking"], reason="a fee kept"), 0)      # a fee keeps its points
+		frappe.db.set_value("TEX Booking", hotel["booking"], "total_amount", D("45.00"))      # 5.00 over
+		self.assertEqual(loyalty.return_points(hotel["booking"], reason="the price came down"), 50)
+		self.assertEqual(self.refunds_of(second["transaction"]), [(D("5.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		self.assertEqual(self.refunds_of(first["transaction"]), [])
+		self.assertEqual(self.available(guest), 550)
+
+	def test_the_points_of_a_return_are_read_by_their_indexes(self):
+		params = {"guests": ("G-O20-1", "G-O20-2"), "b": "BK-O20", "reasons": ("redeemed as TXN-O20-1",)}
+		for sql in (loyalty.BURNS_OF, loyalty.PENDING_REFUNDS_OF):
+			for row in frappe.db.sql("EXPLAIN " + sql, params, as_dict=True):
+				self.assertNotIn(row.type, ("ALL", "index"), (sql, row))
+				self.assertTrue(row.key, (sql, row))

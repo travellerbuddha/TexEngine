@@ -47,6 +47,7 @@
  "reports.col.currency": "Currency",
  "reports.col.details": "Guest details",
  "reports.col.discount": "Discount given",
+ "reports.col.expired_holds": "Expired holds",
  "reports.col.extra": "Extra",
  "reports.col.extras": "Extras",
  "reports.col.fees": "Fees kept",

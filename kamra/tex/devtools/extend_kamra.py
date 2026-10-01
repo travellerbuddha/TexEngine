@@ -50,6 +50,12 @@ EXT = {
 		F("tex_guest_change_note", "Small Text", "Guest change note"),
 		SB("Pricing snapshot", collapsible=1),
 		F("tex_pricing_snapshot", "Long Text", "Pricing snapshot (JSON)", read_only=1, permlevel=1),
+		# O-24 (Part 2H-2): the system cancelled it because its hold ran out of time (``expire_booking``): not a
+		# cancellation by the guest or staff, and never a sale. Reports, the dashboard and the CRM leave it out
+		SB("Hold"),
+		F("tex_hold_expired", "Check", "Hold expired", read_only=1, no_copy=1,
+		  description="Cancelled by the system because its hold or payment window ran out: not a cancellation, "
+		              "not a sale."),
 	],
 	"property": [
 		TAB("TEX"),

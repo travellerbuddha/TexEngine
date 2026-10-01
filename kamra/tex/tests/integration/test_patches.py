@@ -112,6 +112,7 @@ BEHAVIOUR = {
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p60_promotion_code_key": "test_patches.TestReportingPatches.test_p60_stores_codes_by_their_key_and_reports_a_clash_once",
 	"p61_loyalty_lots": "test_patches.TestSmallPatches.test_p61_closes_lots_that_expired_before_the_lot_model",
+	"p62_expired_hold_flag": "test_patches.TestSmallPatches.test_p62_flags_holds_that_expired_before_the_flag",
 	"p63_versioned_passwords": "test_patches.TestP63VersionedPasswords",
 	"p64_agent_log_read_only": "test_patches.TestP64AgentLogReadOnly",
 	"p65_agent_log_hotel": "test_patches.TestP65AgentLogHotel.test_p65_gives_rows_their_hotel_where_one_is_known",
@@ -1396,6 +1397,39 @@ class TestSmallPatches(PatchCase):
 		again = " ".join(str(x) for x in migrate("p61_loyalty_lots")["print"].call_args_list)
 		self.assertIn(f"p61: 0 lot(s) closed by the old expiry marked, 0 lot(s) that expired with nothing left closed; "
 		              f"{c} past-due lot(s) left to the daily expiry", again)
+
+	def test_p62_flags_holds_that_expired_before_the_flag(self):
+		"""O-24 (audit Part 2H-2, ADR-059): a cancelled reservation with the expiry note that nobody cancelled
+		(no Cancellation revision) is a hold that ran out of time: flagged. One staff cancelled (it has the
+		revision, whatever its note), one with another or no note, and a live one are not."""
+		import re
+
+		from kamra.reservation_state import EXPIRY_NOTE
+
+		key = ("SELECT COUNT(*) FROM `tabReservation` WHERE status = 'Cancelled' AND cancellation_note = %s "
+		       "AND tex_hold_expired = 0 AND name NOT IN (SELECT reservation FROM `tabTEX Reservation Revision` "
+		       "WHERE change_type = 'Cancellation' AND reservation IS NOT NULL)")
+		earlier = frappe.db.sql(key, EXPIRY_NOTE)[0][0]                    # holds the site had already (shared site)
+		hotel = kamra_hotel("P62 Hotel")
+		tex = kamra_stay(hotel, "Cancelled", 100, cancellation_note=EXPIRY_NOTE, tex_booking="P62-BOOKING")
+		legacy = kamra_stay(hotel, "Cancelled", 100, cancellation_note=EXPIRY_NOTE)             # the PMS job's
+		on_purpose = kamra_stay(hotel, "Cancelled", 100, cancellation_note=EXPIRY_NOTE, tex_booking="P62-BOOKING")
+		put("TEX Reservation Revision", reservation=on_purpose, change_type="Cancellation")    # staff typed the note
+		other_note = kamra_stay(hotel, "Cancelled", 100, cancellation_note="plans changed")
+		no_note = kamra_stay(hotel, "Cancelled", 100)                                         # NULL: never an expiry
+		live = kamra_stay(hotel, "Confirmed", 100, cancellation_note=EXPIRY_NOTE)
+		flag = lambda name: frappe.db.get_value("Reservation", name, "tex_hold_expired")  # noqa: E731
+		stamp = frappe.db.get_value("Reservation", tex, "modified")
+
+		seen = self.first_run("p62_expired_hold_flag")                      # (b): a second run changes nothing
+		self.assertEqual([flag(n) for n in (tex, legacy, on_purpose, other_note, no_note, live)], [1, 1, 0, 0, 0, 0])
+		self.assertEqual(frappe.db.get_value("Reservation", tex, "modified"), stamp)          # no modified touched
+		line = " ".join(str(c) for c in seen["print"].call_args_list)
+		n, m = (int(x) for x in re.search(r"p62: (\d+) expired hold\(s\) flagged \((\d+) of TEX bookings\)", line).groups())
+		self.assertEqual(n, earlier + 2)
+		self.assertGreaterEqual(m, 1)
+		again = " ".join(str(x) for x in migrate("p62_expired_hold_flag")["print"].call_args_list)
+		self.assertIn("p62: 0 expired hold(s) flagged (0 of TEX bookings)", again)
 
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")

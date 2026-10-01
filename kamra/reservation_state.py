@@ -9,6 +9,11 @@ Held and Pending Payment. Request-to-Book is stubbed via Property.booking_mode.
 
 from __future__ import annotations
 
+# The cancellation note a hold that ran out of time is given, by ``expire_holds`` and by TEX's
+# ``expire_booking``: with ``Reservation.tex_hold_expired`` it says the system cancelled it (O-24, Part 2H-2).
+# p62 reads the note of those that expired before the flag existed.
+EXPIRY_NOTE = "Hold / payment window expired"
+
 # Statuses that consume sellable inventory (must stay in sync with
 # kamra.siu.availability.LIVE_STATUSES).
 LIVE_STATUSES = ("Confirmed", "Checked In", "Held", "Pending Payment")
@@ -178,7 +183,9 @@ def expire_holds() -> dict:
 			doc = frappe.get_doc("Reservation", name)
 			# a Select value (the free text used to fail validation, so no hold ever expired)
 			doc.cancellation_reason = "Payment failed" if doc.status == "Pending Payment" else "Other"
-			doc.cancellation_note = "Hold / payment window expired"
+			doc.cancellation_note = EXPIRY_NOTE
+			if frappe.db.has_column("Reservation", "tex_hold_expired"):
+				doc.tex_hold_expired = 1                # the system cancelled it: no sale, no cancellation (O-24)
 			doc.status = "Cancelled"
 			doc.cancelled_on = now
 			doc.hold_expires_on = None

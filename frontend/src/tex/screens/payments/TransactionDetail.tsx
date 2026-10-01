@@ -185,7 +185,7 @@ export default function TransactionDetail() {
               {[d.error_code, d.error_message].filter(Boolean).join(" · ")}
             </Notice>
           )}
-          {charge && d.status === "Succeeded" && (d.provider === "Manual" || d.provider === "Loyalty") && finance && (
+          {charge && d.status === "Succeeded" && d.provider === "Manual" && finance && (
             <Notice tone="info">{t("payments.detail.manual_refund_note")}</Notice>
           )}
 
