@@ -89,6 +89,9 @@ class PaymentProvider(ABC):
 	# browser or a notification: staff re-verify such a charge, and so does the 5-minute job (NEW-2).
 	# A gateway without one leaves a charge Pending until its news arrives (P1-8: the status page fails)
 	status_query: bool = False
+	# its status query asks by a reference TEX stored for the charge (iyzico's checkout-form token): a charge
+	# without one has nothing to ask, and the job never gives it a place in its tick (LO-21)
+	status_by_ref: bool = False
 
 	def __init__(self, account):
 		self.account = account

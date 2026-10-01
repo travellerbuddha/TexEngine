@@ -2021,6 +2021,23 @@ class TestPaymentsVerifiedByTheJob(HoldCase):
 		self.assertEqual(asked, [txns[n] for n in ("soon_hold", "late_hold", "old_free", "new_free",
 		                                          "gone_short", "gone_long")])
 
+	def test_a_charge_with_nothing_to_ask_takes_no_place_in_the_tick(self):
+		"""LO-21 (audit 2K-1): a charge of a gateway asked by the reference TEX stored (iyzico's checkout token)
+		that stores none has nothing to ask: however urgent, it never takes one of the tick's places."""
+		from kamra.tex.payments.providers.simple import MockProvider
+
+		tokenless, waiting = (self.book(guest=dict(GUEST, email=f"lo21-{n}@example.com")) for n in range(2))
+		empty, askable = self.start_payment(tokenless)["transaction"], self.start_payment(waiting)["transaction"]
+		frappe.db.set_value("TEX Payment Transaction", empty, "provider_ref", None, update_modified=False)
+		self.aged(empty, created_ago=6, expires_in=2)                 # the more urgent
+		self.aged(askable, created_ago=5, expires_in=10)
+		with self.askable() as asked, mock.patch.object(pay, "REVERIFY_BATCH", 1), \
+				mock.patch.object(MockProvider, "status_by_ref", True, create=True):
+			pay.reverify_pending()
+		self.assertEqual(asked, [askable])
+		self.assertEqual(txn_state(askable).status, "Succeeded")
+		self.assertEqual(txn_state(empty).status, "Pending")
+
 	def test_a_charge_whose_only_question_failed_after_its_deadlock_does_not_end_the_tick(self):
 		"""P1-8 (2E-2 fix 2): ``complete_retrying`` rolls the whole transaction back on a deadlock, savepoints
 		included; the job's own rollback of the failed charge then finds none. The error is logged and the next
