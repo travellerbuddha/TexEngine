@@ -52,3 +52,30 @@ PYSEC-2026-3923 | sqlparse 0.5.5 | fix 0.6.0 outside Frappe's pin sqlparse~=0.5.
 # weasyprint: Frappe pins WeasyPrint==68.0 (fix 70.0; PYSEC-2026-3412 has none).
 PYSEC-2026-3412 | weasyprint 68.0 | no fixed release; Frappe pins WeasyPrint==68.0 (print to PDF) | review 2026-12-31
 PYSEC-2026-3940 | weasyprint 68.0 | fix 70.0 outside Frappe's pin WeasyPrint==68.0; comes with Frappe | review 2026-12-31
+# oauthlib: Frappe v16.25.0 pins oauthlib~=3.3.1 (fix 4.0.0; v16.36.1 still pins ~=3.3.1, only develop moves to ~=4.0.0).
+# Reviewed 2026-10-01: Frappe's own OAuth provider (frappe.integrations.oauth2; dynamic client registration is on by
+# default, so a guest can register a client) is the only user. TEX has no client of its own on it (its MCP login is
+# kamra/mcp_oauth.py, its own code); a client a guest registers knows its own PKCE verifier.
+CVE-2026-49265 | oauthlib 3.3.1 | PKCE timing in the authorization-code grant; fix 4.0.0 outside Frappe's pin oauthlib~=3.3.1; no TEX-owned client uses Frappe's provider, a guest-registered client knows its own verifier | review 2026-12-31
+# PyJWT: Frappe v16.25.0 pins PyJWT~=2.13.0 (fixes 2.14.0, 2.15.0; v16.36.1 still pins ~=2.13.0, only develop moves to ~=2.15.0).
+# Reviewed 2026-10-01: Frappe (frappe/oauth.py, frappe/utils/oauth.py) only encodes the id_token with HS256 and the
+# OAuth client's generated secret, decodes an id_token_hint with algorithms=["HS256"] inside `except Exception`, and decodes
+# the id_token of a configured social login provider unverified (none on a TEX site). Neither Frappe, payments nor TEX
+# uses PyJWKClient / PyJWKSet or mixes HMAC with asymmetric algorithms, and the HMAC key is never attacker-supplied.
+# JWK / JWKS API (not used):
+CVE-2026-102274 | PyJWT 2.13.0 | malformed RSA JWK aborts a PyJWKSet; PyJWKSet is not used by Frappe, payments or TEX; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-101917 | PyJWT 2.13.0 | PyJWKClient refetches the JWKS for unknown kid; PyJWKClient is not used; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102267 | PyJWT 2.13.0 | PyJWKClient follows redirects; PyJWKClient is not used; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102266 | PyJWT 2.13.0 | empty oct JWK accepted through PyJWK; PyJWK is not used (Frappe decodes with a client secret string); fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-101918 | PyJWT 2.13.0 | RecursionError from a nested payload in PyJWKClient.get_signing_key_from_jwt; PyJWKClient is not used; fix 2.15.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+# Algorithm confusion (needs HMAC and an asymmetric algorithm in one allow-list, or a public key as the HMAC secret;
+# Frappe verifies algorithms=["HS256"] with the OAuth client's generated secret only):
+CVE-2026-102273 | PyJWT 2.13.0 | public JWK(S) accepted as HMAC secret in a mixed HS/asymmetric allow-list; Frappe allows HS256 only; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102268 | PyJWT 2.13.0 | PEM-variant public key accepted as HMAC secret in a mixed allow-list; Frappe allows HS256 only; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102272 | PyJWT 2.13.0 | BOM-prefixed JWK accepted as HMAC secret (guard bypass); the key is Frappe's generated client secret, not a public key; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102271 | PyJWT 2.13.0 | DER public key accepted as HMAC secret; the key is Frappe's generated client secret, not a public key; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+# Parsing and misuse patterns Frappe's calls do not meet:
+CVE-2026-102269 | PyJWT 2.13.0 | compact JWS accepts non-Base64URL signature characters: matters only where the raw token text is a revocation key; neither Frappe nor TEX indexes tokens by their text; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102270 | PyJWT 2.13.0 | ReDoS in is_pem_format needs an attacker-supplied key; the HMAC key is the OAuth client's server-generated secret; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-102265 | PyJWT 2.13.0 | RecursionError from a nested header escapes PyJWTError; Frappe decodes id_token_hint inside `except Exception` (returns False) and only after a client and a session exist; fix 2.14.0 outside Frappe's pin PyJWT~=2.13.0 | review 2026-12-31
+CVE-2026-103001 | PyJWT 2.13.0 | decode() mutates a caller's reused options dict; Frappe passes a fresh literal per call; no fixed release; Frappe pins PyJWT~=2.13.0 | review 2026-12-31

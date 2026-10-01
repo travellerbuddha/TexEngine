@@ -81,7 +81,9 @@ def callback(txn: str | None = None, **_ignored):
 		log_exception(f"TEX payment callback error {row.name}")
 		status = "Pending"
 	# Sipay returns via GET, which Frappe does not auto-commit; the verified outcome must persist.
-	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- verified payment outcome must be durable before redirect
+	# GET is the gateway's / browser's return (Sipay and the guest's browser come back with a GET): the outcome is
+	# verified with the gateway (``complete``), never taken from the request, so a forged GET creates no payment
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit, whitelisted-side-effect-on-get -- GET is the gateway's / browser's return; the outcome is verified with the gateway, never taken from the request
 	_forward(row.return_url, payment=row.name, status=status.lower())
 
 
