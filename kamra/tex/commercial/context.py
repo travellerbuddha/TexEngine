@@ -172,11 +172,12 @@ def fx_policy(frm: str, to: str, property: str, at: datetime) -> fx_math.FxPolic
 	        if r.from_currency == frm and r.to_currency == to and (not r.property or r.property == property)]
 	if not rows:
 		return None
-	r = sorted(rows, key=lambda r: (0 if r.property else 1, r.name))[0]
-	return fx_math.FxPolicy(policy_id=r.name, from_currency=frm, to_currency=to, mode=FxMode(r.mode),
-	                        manual_rate=db_dec_or_none(r.manual_rate) if r.manual_rate else None,
-	                        provider=r.provider, rate_type=r.rate_type or "FOREX_SELLING",
-	                        adjustment=db_dec_or_none(r.adjustment), max_age_days=int(r.max_age_days or 4))
+	return fx_math.choose_policy([
+		fx_math.FxPolicy(policy_id=r.name, from_currency=frm, to_currency=to, mode=FxMode(r.mode),
+		                 manual_rate=db_dec_or_none(r.manual_rate) if r.manual_rate else None,
+		                 provider=r.provider, rate_type=r.rate_type or "FOREX_SELLING",
+		                 adjustment=db_dec_or_none(r.adjustment), max_age_days=int(r.max_age_days or 4),
+		                 property=r.property or None) for r in rows])
 
 
 def provider_rates(provider: str, at: datetime, days: int = 10) -> tuple[fx_math.ProviderRate, ...]:

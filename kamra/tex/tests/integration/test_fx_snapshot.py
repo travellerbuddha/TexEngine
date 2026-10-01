@@ -177,3 +177,60 @@ class TestCrossCurrencySnapshot(TexTestCase):
 		self.assertEqual((rates[("EUR", "TRY")]["sell_rate"], rates[("USD", "TRY")]["sell_rate"]),
 		                 ("51.000000", "40.000000"))
 		self.assertEqual(rates[("USD", "TRY")]["mode"], "RECORDED")
+
+
+class TestOnePolicyPerPair(TexTestCase):
+	"""O-11 (2D-2, ADR-069): one live or scheduled FX policy per scope (a hotel, or every hotel) and pair.
+	A second one used to activate and be ignored: the older name won, silently."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.delete("TEX FX Policy", {"from_currency": "EUR", "to_currency": "TRY"})
+		self.first = _live("TEX FX Policy", self.payload())
+
+	def payload(self, **kw) -> dict:
+		return {"property": fx.PROPERTY, "from_currency": "EUR", "to_currency": "TRY", "mode": "PROVIDER_PERCENT",
+		        "provider": "TCMB", "rate_type": "FOREX_SELLING", "adjustment": 0, "max_age_days": 4, **kw}
+
+	def draft(self, **kw) -> str:
+		return frappe.get_doc({"doctype": "TEX FX Policy", **self.payload(**kw)}).insert(ignore_permissions=True).name
+
+	def test_a_second_policy_for_the_pair_is_refused(self):
+		second = self.draft(adjustment=3)
+		with self.assertRaisesRegex(frappe.ValidationError, f"already has a live FX policy for EUR→TRY \\({self.first}\\)"):
+			revisions.activate("TEX FX Policy", second, at="2020-01-01 00:00:00", backdate=True)
+		self.assertEqual(frappe.db.get_value("TEX FX Policy", second, "tex_status"), "Draft")
+
+	def test_a_scheduled_policy_counts_both_ways(self):
+		with self.assertRaisesRegex(frappe.ValidationError, "already has a live FX policy"):
+			revisions.activate("TEX FX Policy", self.draft(adjustment=3), at=add_to_date(now_datetime(), days=10))
+		frappe.db.delete("TEX FX Policy", {"from_currency": "EUR", "to_currency": "TRY"})
+		later = self.draft()
+		revisions.activate("TEX FX Policy", later, at=add_to_date(now_datetime(), days=10))      # scheduled
+		with self.assertRaisesRegex(frappe.ValidationError, "already has a live FX policy"):
+			revisions.activate("TEX FX Policy", self.draft(adjustment=3), at="2020-01-01 00:00:00", backdate=True)
+
+	def test_a_revision_of_the_live_policy_activates(self):
+		draft = revisions.revise("TEX FX Policy", self.first)
+		frappe.db.set_value("TEX FX Policy", draft, "adjustment", 2)
+		revisions.activate("TEX FX Policy", draft)
+		self.assertEqual(frappe.db.get_value("TEX FX Policy", draft, "tex_status"), "Active")
+
+	def test_a_global_policy_lives_next_to_a_hotels_own_and_the_hotels_wins(self):
+		glob = _live("TEX FX Policy", self.payload(property=None, adjustment=5))
+		from kamra.tex.commercial import context
+
+		self.assertEqual(context.fx_policy("EUR", "TRY", fx.PROPERTY, now_datetime()).policy_id, self.first)
+		self.assertEqual(context.fx_policy("EUR", "TRY", "Another Hotel", now_datetime()).policy_id, glob)
+
+	def test_two_live_rows_are_never_ranked_by_name(self):
+		"""Forced in past the check (Desk, an import, an older site): the pair is unsellable."""
+		from kamra.tex.commercial import context
+		from kamra.tex.pricing.model import Unsellable
+
+		second = self.draft(adjustment=3)
+		frappe.db.set_value("TEX FX Policy", second, {"tex_status": "Active", "active_from": "2020-01-01 00:00:00"})
+		with self.assertRaises(Unsellable) as cm:
+			context.fx_snapshot("EUR", "TRY", fx.PROPERTY, now_datetime())
+		self.assertEqual(cm.exception.code, "FX_POLICY_AMBIGUOUS")
+		self.assertIn(self.first, str(cm.exception))

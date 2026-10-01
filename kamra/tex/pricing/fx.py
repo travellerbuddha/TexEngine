@@ -39,6 +39,22 @@ class FxPolicy:
 	rate_type: str = "FOREX_SELLING"
 	adjustment: Decimal | None = None
 	max_age_days: int = 4
+	property: str | None = None       # the hotel it is for; None: every hotel
+
+
+def choose_policy(policies: list[FxPolicy]) -> FxPolicy | None:
+	"""The policy that converts a pair (O-11, 2D-2): the hotel's own, else a global one. Two live in
+	the one scope that decides are never ranked by name (the older used to win silently): the pair
+	is unsellable (``FX_POLICY_AMBIGUOUS``) until one is archived."""
+	own = [p for p in policies if p.property]
+	pool = own or [p for p in policies if not p.property]
+	if len(pool) > 1:
+		ids = ", ".join(sorted(p.policy_id for p in pool))
+		pair = pool[0]
+		raise Unsellable("FX_POLICY_AMBIGUOUS", f"more than one FX policy is live for {pair.from_currency}→"
+		                 f"{pair.to_currency} in one scope ({ids})", from_currency=pair.from_currency,
+		                 to_currency=pair.to_currency)
+	return pool[0] if pool else None
 
 
 @dataclass(frozen=True, slots=True)
