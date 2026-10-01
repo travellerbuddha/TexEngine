@@ -204,8 +204,8 @@ def facts_for(rows: list[dict], props: set[str], today) -> dict[str, dict]:
 						{"g": tuple(chunk), "p": tuple(programs), "s": loyalty.FINAL}):
 					points[g] = int(pts or 0)
 			for r in frappe.db.sql(
-				"""SELECT guest, status, check_in_date, check_out_date, children, tex_sale_at, creation, cancelled_on,
-				          tex_total_amount, amount_after_tax, tex_currency
+				"""SELECT name, tex_booking, guest, status, check_in_date, check_out_date, children, tex_sale_at,
+				          creation, cancelled_on, tex_total_amount, amount_after_tax, tex_currency
 				   FROM `tabReservation` WHERE guest IN %(g)s AND property IN %(p)s""",
 					{"g": tuple(chunk), "p": tuple(props)}, as_dict=True):
 				if not (r.check_in_date and r.check_out_date):
@@ -214,7 +214,8 @@ def facts_for(rows: list[dict], props: set[str], today) -> dict[str, dict]:
 				stays[r.guest].append(seg.StayFact(
 					r.status, getdate(r.check_in_date), getdate(r.check_out_date), int(r.children or 0),
 					getdate(r.tex_sale_at or r.creation), getdate(r.cancelled_on) if r.cancelled_on else None,
-					from_db(r.tex_total_amount or r.amount_after_tax or 0, ccy or "EUR"), ccy))
+					from_db(r.tex_total_amount or r.amount_after_tax or 0, ccy or "EUR"), ccy,
+					r.tex_booking or r.name))                       # the rooms of one booking are one visit (O-23)
 			for a in frappe.get_all("TEX Abandoned Booking", filters={"guest": ("in", chunk),
 			                                                          "property": ("in", list(props))},
 			                        fields=["guest", "last_event_at"]):
@@ -459,8 +460,8 @@ def refresh_guest_stats(guest: str) -> None:
 	today = getdate(nowdate())
 	rows = [r for r in frappe.get_all("Reservation",
 	                                  filters={"guest": guest, "status": ("not in", sorted(seg.NOT_STAYED | seg.NOT_SOLD))},
-	                                  fields=["property", "check_out_date", "tex_total_amount", "amount_after_tax",
-	                                          "tex_currency"])
+	                                  fields=["name", "tex_booking", "property", "check_out_date", "tex_total_amount",
+	                                          "amount_after_tax", "tex_currency"])
 	        if r.check_out_date and getdate(r.check_out_date) <= today]
 	hotel_ccy: dict[str, str | None] = {}
 	by_ccy: dict[str, list] = {}
@@ -468,9 +469,14 @@ def refresh_guest_stats(guest: str) -> None:
 		if not r.tex_currency and r.property not in hotel_ccy:
 			hotel_ccy[r.property] = frappe.db.get_value("Property", r.property, "currency")
 		by_ccy.setdefault(r.tex_currency or hotel_ccy.get(r.property) or "EUR", []).append(r)
-	main = min(by_ccy, key=lambda c: (-len(by_ccy[c]), c)) if by_ccy else None
+
+	def visits(of: list) -> int:
+		"""A stay is a visit: the reservations (rooms) of one booking are one (O-23)."""
+		return len({r.tex_booking or r.name for r in of})
+
+	main = min(by_ccy, key=lambda c: (-visits(by_ccy[c]), c)) if by_ccy else None
 	value = sum((from_db(r.tex_total_amount or r.amount_after_tax or 0, main) for r in by_ccy.get(main, [])), ZERO)
-	frappe.db.set_value("Guest", guest, {"tex_stays": len(rows), "tex_lifetime_value": value,
+	frappe.db.set_value("Guest", guest, {"tex_stays": visits(rows), "tex_lifetime_value": value,
 	                                     "tex_lifetime_currency": main,
 	                                     "tex_last_stay": max(r.check_out_date for r in rows) if rows else None},
 	                    update_modified=False)

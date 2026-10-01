@@ -84,6 +84,26 @@ class TestNamedSegments(SegmentCase):
 			{"field": "lifetime_value", "op": "gte", "value": "2000", "currency": "EUR"}]}})["name"]
 		self.assertNotIn(guest, {r["name"] for r in crm_api.guests(segment=name)["rows"]})   # 5000 was elsewhere
 
+	def test_a_booking_of_several_rooms_is_one_stay(self):
+		"""O-23 (audit Part 2H-1): the CRM counted a reservation, which is a room: a two-room booking was two
+		stays and a repeat guest. A stay is a visit: the reservations of one booking."""
+		r1, guest = self.stay("g23-rooms-a")
+		r2, same = self.stay("g23-rooms-b")
+		self.assertEqual(guest, same)
+		frappe.db.set_value("Reservation", r2, "tex_booking", frappe.db.get_value("Reservation", r1, "tex_booking"))
+		frappe.set_user(self.here)  # nosemgrep: frappe-setuser -- tenant A
+		row = next(r for r in crm_api.guests(q="g23@example.com")["rows"] if r["name"] == guest)
+		self.assertEqual((row["tex_stays"], row["tex_lifetime_value"]), (1, "1600.00"))     # one visit, both rooms' value
+		self.assertNotIn(guest, self.members("REPEAT", self.here))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the stored statistics
+		crm.refresh_guest_stats(guest)
+		self.assertEqual(frappe.db.get_value("Guest", guest, ["tex_stays", "tex_lifetime_value"]), (1, 1600))
+		third, _g = self.stay("g23-rooms-c")                                                 # a booking of its own
+		self.assertIn(guest, self.members("REPEAT", self.here))
+		crm.refresh_guest_stats(guest)
+		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_stays"), 2)
+		self.assertTrue(third)
+
 	def test_families_last_minute_cancelled_abandoned_birthday(self):
 		res, guest = self.stay("g23-fam")                                   # guest_books has a child of 8
 		self.assertIn(guest, self.members("FAMILY", self.here))
