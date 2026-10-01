@@ -2113,6 +2113,41 @@ class TestAFailedTryLeavesNothing(HoldCase):
 		self.assertEqual(txn_state(txn).status, "Pending")
 		self.assertEqual(pay.allocated_of(txn), 0)
 
+	def test_staff_reverify_holds_no_lock_through_the_next_tokens_question(self):
+		"""LO-19 (audit 2K-1): a token's answer failed the charge; before staff re-verify asks the gateway about its
+		next token, what that try wrote is on record and every row lock it took released (``step_commit``, as the
+		job does; ADR-066). Sniffed: no ``FOR UPDATE`` since the last step commit when the next token is asked."""
+		from kamra.tex.api import payments as payments_api
+
+		_b, txn = self.two_tokens()
+		price = f"{D(frappe.db.get_value('TEX Payment Transaction', txn, 'amount')):.2f}"
+		events: list[str] = []
+
+		def asked(token, answer):
+			return lambda t: events.append(f"ask {token}") or answer(t)
+
+		self.gw.answers["tok-1"] = asked("tok-1", self.gw.failed)
+		self.gw.answers["tok-2"] = asked("tok-2", lambda t: self.gw.paid(t, "P2", price=price))
+		real_sql, real_step = frappe.db.sql, pay._commit_step
+
+		def sql(query, *args, **kw):
+			if "FOR UPDATE" in str(query).upper():
+				events.append("lock")
+			return real_sql(query, *args, **kw)
+
+		def step():
+			events.append("commit")
+			real_step()
+
+		with mock.patch.object(frappe.db, "sql", side_effect=sql), mock.patch.object(pay, "_commit_step", side_effect=step):
+			payments_api.reverify(transaction=txn)
+		self.assertEqual([e for e in events if e.startswith("ask")], ["ask tok-1", "ask tok-2"])
+		before = events[:events.index("ask tok-2")]
+		self.assertIn("lock", before[events.index("ask tok-1"):])                 # the first answer was recorded
+		since_commit = before[len(before) - before[::-1].index("commit"):] if "commit" in before else before
+		self.assertNotIn("lock", since_commit)
+		self.assertEqual(txn_state(txn).status, "Succeeded")
+
 
 class TestIyzicoFraudReview(HoldCase):
 	"""O-18 (audit 2E-2, D-8): iyzico holds a payment in its fraud review (fraudStatus 0; absent or unknown is
