@@ -747,25 +747,29 @@ def withdraw(name: str, reason: str) -> None:
 	quotes = frappe.db.sql_list("""SELECT name FROM `tabTEX Quote` WHERE contract_version=%(v)s AND status='Open'
 	                               AND (expires_at IS NULL OR expires_at > %(now)s) ORDER BY name FOR UPDATE""",
 	                            {"v": name, "now": now})
-	frappe.db.get_value("TEX Contract", contract, "name", for_update=True)
-	if frappe.db.get_value("TEX Contract Version", name, "status", for_update=True) != "Published":
+	# the plain reads above fixed the read view (ADR-063): from here on only locking reads, which see
+	# what is committed now (a quote committed while the scan waited, a publish or a roll)
+	held = frappe.db.get_value("TEX Contract", contract, ["name", "active_version"], as_dict=True, for_update=True)
+	version = frappe.get_doc("TEX Contract Version", name, for_update=True)
+	if version.status != "Published":
 		frappe.throw(_("Only published versions can be withdrawn."))
-	version = frappe.get_doc("TEX Contract Version", name)
-	start = get_datetime(version.effective_from)
-	scheduled = start > now
+	# effective_from NULL (a version published before p56): on sale, never scheduled
+	start = get_datetime(version.effective_from) if version.effective_from else None
+	scheduled = bool(start and start > now)
 	restored = []
 	if scheduled:
 		# the other published versions, compared in Python (no date filter): a version that was to end
 		# at this one's start sells again until the next published version starts, or open-ended
-		others = frappe.get_all("TEX Contract Version",
-		                        filters={"contract": contract, "status": "Published", "name": ("!=", name)},
-		                        fields=["name", "effective_from", "active_to"])
+		# (locked: get_all takes no lock). No date filter: a NULL date is read as open, in Python below
+		others = frappe.db.sql("""SELECT name, effective_from, active_to FROM `tabTEX Contract Version`
+		                          WHERE contract=%s AND status='Published' AND name!=%s FOR UPDATE""",
+		                       (contract, name), as_dict=True)
 		later = [get_datetime(o.effective_from) for o in others
 		         if o.effective_from and get_datetime(o.effective_from) > start]
 		new_to = min(later) if later else None
 		for o in others:
 			if o.active_to and get_datetime(o.active_to) == start:
-				ov = frappe.get_doc("TEX Contract Version", o.name)
+				ov = frappe.get_doc("TEX Contract Version", o.name, for_update=True)
 				ov.flags.tex_lifecycle = True
 				ov.active_to = new_to
 				ov.save(ignore_permissions=True)
@@ -778,12 +782,12 @@ def withdraw(name: str, reason: str) -> None:
 	version.active_to = start if scheduled else min(ended, now) if ended else now
 	version.save(ignore_permissions=True)
 	for q in quotes:
-		doc = frappe.get_doc("TEX Quote", q)
+		doc = frappe.get_doc("TEX Quote", q, for_update=True)     # the scan locked it; read it under that lock
 		doc.status = "Expired"
 		doc.save(ignore_permissions=True)
-	live = active_version_header(contract, now)
+	live = active_version_header(contract, now, locked=True)
 	live_name = live.version_id if live else None
-	if frappe.db.get_value("TEX Contract", contract, "active_version") != live_name:
+	if held["active_version"] != live_name:
 		_go_live(contract, live_name)
 	audit("contract.withdraw", reference_doctype="TEX Contract Version", reference_name=name, property=prop,
 	      new={"scheduled": scheduled, "restored": restored, "quotes_expired": len(quotes)}, reason=reason)
@@ -813,7 +817,7 @@ def _supersede(version: str) -> None:
 
 
 def _go_live(contract: str, version: str | None) -> None:
-	doc = frappe.get_doc("TEX Contract", contract)
+	doc = frappe.get_doc("TEX Contract", contract, for_update=True)
 	doc.active_version = version
 	selling = None
 	if version:
@@ -894,16 +898,23 @@ def load_terms(version_name: str, *, expected_hash: str | None = None) -> Contra
 	return terms
 
 
-def version_headers(contract: str) -> list[versions.VersionHeader]:
-	rows = frappe.get_all("TEX Contract Version", filters={"contract": contract},
-	                      fields=["name", "version_no", "status", "effective_from", "active_to"])
+def version_headers(contract: str, *, locked: bool = False) -> list[versions.VersionHeader]:
+	"""``locked``: read under ``LOCK IN SHARE MODE``, which sees what is committed now, not the read
+	view the transaction fixed earlier (a withdraw, 2D-2). No date filter: a NULL date is open."""
+	if locked:
+		rows = frappe.db.sql("""SELECT name, version_no, status, effective_from, active_to
+		                        FROM `tabTEX Contract Version` WHERE contract=%s LOCK IN SHARE MODE""",
+		                     contract, as_dict=True)
+	else:
+		rows = frappe.get_all("TEX Contract Version", filters={"contract": contract},
+		                      fields=["name", "version_no", "status", "effective_from", "active_to"])
 	return [versions.VersionHeader(r.name, int(r.version_no), r.status,
 	                               get_datetime(r.effective_from) if r.effective_from else None,
 	                               get_datetime(r.active_to) if r.active_to else None) for r in rows]
 
 
-def active_version_header(contract: str, at: datetime) -> versions.VersionHeader | None:
-	return versions.active_version(version_headers(contract), get_datetime(at))
+def active_version_header(contract: str, at: datetime, *, locked: bool = False) -> versions.VersionHeader | None:
+	return versions.active_version(version_headers(contract, locked=locked), get_datetime(at))
 
 
 STATUS_AUDIT = "contract.status"       # every status change, on every path (TEXContract.on_update)

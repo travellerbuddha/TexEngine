@@ -7,6 +7,7 @@ transaction) and removed again in tearDownClass.
 """
 
 import threading
+import time
 import traceback
 
 import frappe
@@ -285,7 +286,7 @@ def _cleanup_codes():
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture cleanup across connections
 
 
-class TestConcurrentWithdraw(IntegrationTestCase):
+class _WithdrawFixture(IntegrationTestCase):
 	"""O-13 (2D-1, ADR-069): a quote priced while its version is withdrawn is not kept. One connection
 	prices a quote and is held after pricing; another withdraws the version and commits; the first
 	then writes the quote and must be refused (its insert re-reads the version under a shared lock)."""
@@ -310,6 +311,10 @@ class TestConcurrentWithdraw(IntegrationTestCase):
 	def tearDownClass(cls):
 		_cleanup()
 		super().tearDownClass()
+
+
+class TestConcurrentWithdraw(_WithdrawFixture):
+	"""O-13: a quote priced while its version is withdrawn is refused."""
 
 	def test_a_quote_priced_while_its_version_is_withdrawn_is_refused(self):
 		from unittest import mock
@@ -368,6 +373,89 @@ class TestConcurrentWithdraw(IntegrationTestCase):
 		self.assertIn("no longer on sale", str(results.get("quote")), results)
 		frappe.db.rollback()
 		self.assertEqual(frappe.db.count("TEX Quote", {"contract_version": self.version, "status": "Open"}), 0)
+
+
+class TestConcurrentWithdrawLocks(_WithdrawFixture):
+	"""2D-2 0a: the withdraw reads under its locks."""
+
+	def test_a_quote_committed_while_the_withdraw_waits_is_expired_not_missed(self):
+		"""2D-2 0a: a quote inserted before the withdraw scanned, committed while the scan waits for
+		it, is locked by the scan; the withdraw must then read it under that lock (a plain read
+		keeps the read view taken before the locks and says "not found")."""
+		from unittest import mock
+
+		from kamra.tex.commercial import contracts
+
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		inserted = threading.Event()
+		results: dict[str, object] = {}
+		real_persist, real_to_str = quoting._persist, quoting.to_str
+		inside = threading.local()
+
+		def persist(*args, **kwargs):
+			inside.on = True
+			try:
+				return real_persist(*args, **kwargs)
+			finally:
+				inside.on = False
+
+		def waits() -> bool:
+			"""Whether a transaction waits for a lock now. A site user without the PROCESS privilege cannot
+			see it: then the withdraw (started when the insert is done) is given time to reach its scan."""
+			try:
+				return bool(frappe.db.sql("SELECT COUNT(*) FROM information_schema.INNODB_TRX "
+				                          "WHERE trx_state = 'LOCK WAIT'")[0][0])
+			except Exception:
+				time.sleep(2)
+				return True
+
+		def to_str(*args, **kwargs):
+			if getattr(inside, "on", False):	   # after the insert, before the commit
+				inserted.set()
+				for _ in range(200):			   # until the withdraw is waiting for this row
+					if waits():
+						break
+					time.sleep(0.1)
+			return real_to_str(*args, **kwargs)
+
+		def quote():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- guest quote path
+				results["quote"] = quoting.create_quote(self.offer_key)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each connection is its own request
+			except Exception:
+				frappe.db.rollback()
+				results["quote"] = traceback.format_exc()
+			finally:
+				frappe.destroy()
+
+		def withdraw():
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager withdraws
+				inserted.wait(timeout=30)
+				contracts.withdraw(self.version, reason="race")
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- each connection is its own request
+				results["withdraw"] = "done"
+			except Exception:
+				frappe.db.rollback()
+				results["withdraw"] = traceback.format_exc()
+			finally:
+				frappe.destroy()
+
+		with mock.patch.object(quoting, "_persist", persist), mock.patch.object(quoting, "to_str", to_str):
+			threads = [threading.Thread(target=quote), threading.Thread(target=withdraw)]
+			for t in threads:
+				t.start()
+			for t in threads:
+				t.join(timeout=90)
+		self.assertEqual(results.get("withdraw"), "done", results)
+		self.assertTrue(results["quote"]["ok"], results)	   # it was saved before the withdraw saw anything
+		frappe.db.rollback()
+		self.assertEqual(frappe.db.get_value("TEX Quote", results["quote"]["quote_id"], "status"), "Expired")
 
 
 class TestConcurrentCouponLimit(IntegrationTestCase):
