@@ -283,6 +283,22 @@ def settle(guest: str, program: str, today: date | None = None) -> dict:
 	return {"expired": sum(p for _lot, p in plan["expire"]) + plan["excess"], "closed": len(plan["close"])}
 
 
+_NO_SUCH_SAVEPOINT = 1305          # MariaDB: SAVEPOINT x does not exist
+
+
+def _undo_to(save_point: str) -> None:
+	"""Undo what one guest's settle wrote. The victim of a deadlock was rolled back whole by InnoDB, and a commit
+	ends the transaction: either way the savepoint is gone and rolling back to it fails (1305, as in
+	``payments.service._undo_to``). Then the whole transaction is rolled back: safe here, where every guest is a
+	transaction of its own (what came before was committed, ``mature_and_expire``)."""
+	try:
+		frappe.db.rollback(save_point=save_point)
+	except Exception as e:
+		if not e.args or e.args[0] != _NO_SUCH_SAVEPOINT:
+			raise
+		frappe.db.rollback()
+
+
 def mature_and_expire(today: date | None = None) -> dict:
 	"""Scheduler (daily): Pending → Available on ``available_on``; then each guest with a lot past its
 	``expires_on`` is settled (``settle``): the lot's unspent points expire, first to expire first used."""
@@ -294,6 +310,9 @@ def mature_and_expire(today: date | None = None) -> dict:
 	                           pluck="name"):
 		frappe.db.set_value("TEX Loyalty Ledger", name, "status", "Available")
 		matured += 1
+	# the rows just matured are locked until the commit: a guest is locked only after they are let go, never
+	# while holding ledger rows (everywhere else it is the guest first, then its rows; Part 2H-2)
+	_commit()
 	# a lot without an expiry date (NULL) never expires (NEW-1, ADR-064); one that has closed is Expired, so
 	# the day after it expires it is not looked at again
 	due = frappe.db.sql("""SELECT DISTINCT guest, program FROM `tabTEX Loyalty Ledger`
@@ -305,8 +324,9 @@ def mature_and_expire(today: date | None = None) -> dict:
 		try:
 			done = settle(guest, program, today)
 		except Exception:
-			frappe.db.rollback(save_point=savepoint)      # one guest's trouble (a profile merged away) is not the rest's
+			_undo_to(savepoint)      # one guest's trouble (a profile merged away) is not the rest's
 			frappe.log_error(title=f"Loyalty expiry failed: {guest} / {program}")
+			_commit()                  # the log is on record, the next guest starts from a clean transaction
 			continue
 		expired += done["expired"]
 		closed += done["closed"]
