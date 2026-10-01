@@ -443,17 +443,18 @@ def refund_queued(limit: int = 20, budget_seconds: int = 90) -> dict:
 	each under its lock and on record before the gateway is asked (``durable``). A refund the
 	gateway refuses, or does not answer, goes to staff (``Action Required``).
 
-	At most ``limit`` charges a run, oldest first, and none started once ``budget_seconds``
-	(``time.monotonic``) are used (LO-07, as ``outbox.deliver_pending``): a gateway that answers
-	slowly waits its timeout for every refund, and must never hold the 5-minute jobs past their time
-	limit. The charges not started are the next run's."""
+	Oldest first, at most ``limit`` refunds asked of the gateway a run, and none started once
+	``budget_seconds`` (``time.monotonic``) are used (LO-07, as ``outbox.deliver_pending``): a gateway
+	that answers slowly waits its timeout for every refund, and must never hold the 5-minute jobs past
+	their time limit. A charge with nothing to refund now (its money on its way back) asks the gateway
+	nothing and takes no place. The charges not started are the next run's."""
 	from kamra.tex.payments import service as pay
 
 	deadline = time.monotonic() + budget_seconds
-	done = 0
+	done = asked = 0
 	for name in frappe.get_all(TXN, filters={"reconciliation": "Refund Queued"}, order_by="creation asc, name asc",
-	                           limit=limit, pluck="name"):
-		if time.monotonic() >= deadline:
+	                           pluck="name"):
+		if asked >= limit or time.monotonic() >= deadline:
 			break
 		txn = frappe.get_doc(TXN, name, for_update=True)
 		if txn.reconciliation != "Refund Queued":
@@ -464,6 +465,7 @@ def refund_queued(limit: int = 20, budget_seconds: int = 90) -> dict:
 		if free <= ZERO:
 			settled(name)
 		else:
+			asked += 1
 			try:
 				out = pay.refund(name, amount=free, reason=REFUND_REASON, idempotency_key=f"late:{name}",
 				                 _system=True, _late=True, durable=True)

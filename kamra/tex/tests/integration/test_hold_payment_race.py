@@ -2648,6 +2648,22 @@ class TestReconciliationStates(HoldCase):
 		                                                             "txn_type": "Refund"}, pluck="status")
 		self.assertEqual(refunds, ["Succeeded"] * 3)                                         # each once
 
+	def test_a_queued_charge_whose_refund_is_on_its_way_takes_no_place_in_the_limit(self):
+		"""LO-07, review round 1: a queued charge whose money is all on its way back (a refund the gateway never
+		answered) has nothing to refund and stays queued; it never takes one of a run's places, so the newer queued
+		refunds behind it are made."""
+		from kamra.tex.services import late_payments
+
+		_b, stuck = self.parked()
+		self.refund_unanswered(stuck)                       # its whole amount is on its way: nothing to refund now
+		_b, queued = self.parked()
+		for minutes, txn in ((-30, stuck), (-10, queued)):
+			frappe.db.set_value("TEX Payment Transaction", txn, {"reconciliation": "Refund Queued",
+			                    "creation": add_to_date(now_datetime(), minutes=minutes)}, update_modified=False)
+		self.assertEqual(late_payments.refund_queued(limit=1)["refunded"], 1)
+		self.assertEqual((txn_state(stuck).reconciliation, txn_state(queued).reconciliation),
+		                 ("Refund Queued", "Refunded"))
+
 	def test_queued_refunds_run_last_in_their_5_minute_jobs(self):
 		"""LO-07: the expiry of payment links and the mail status never wait behind the gateway's refunds."""
 		from kamra.tex import scheduler
