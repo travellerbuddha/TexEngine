@@ -2449,6 +2449,50 @@ class TestReconciliationStates(HoldCase):
 		pay.correct_refund(refund, outcome="Failed", reason="the gateway never paid it back")
 		self.assertEqual(txn_state(txn).reconciliation, "Action Required")
 
+	def test_queued_refunds_are_made_oldest_first_within_a_limit_and_a_time_budget(self):
+		"""LO-07 (audit 2K-1): a gateway that answers slowly cannot hold the 5-minute jobs past their time limit:
+		a run makes at most ``limit`` queued refunds, oldest first, and starts none once its budget is used; the
+		next run goes on."""
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import late_payments
+
+		newest, middle, oldest = (self.parked()[1] for _ in range(3))
+		for minutes, txn in ((-10, newest), (-20, middle), (-30, oldest)):
+			frappe.db.set_value("TEX Payment Transaction", txn, {"reconciliation": "Refund Queued",
+			                    "creation": add_to_date(now_datetime(), minutes=minutes)}, update_modified=False)
+
+		class Clock:                                            # every refund takes 50 seconds
+			now = 1000.0
+
+			def monotonic(self):
+				return self.now
+
+		clock, real = Clock(), MockProvider.refund
+
+		def slow(provider, *args, **kw):
+			clock.now += 50
+			return real(provider, *args, **kw)
+
+		def states():
+			return [txn_state(t).reconciliation for t in (oldest, middle, newest)]
+
+		with mock.patch.object(late_payments, "time", clock), mock.patch.object(MockProvider, "refund", slow):
+			self.assertEqual(late_payments.refund_queued(limit=1)["refunded"], 1)
+			self.assertEqual(states(), ["Refunded", "Refund Queued", "Refund Queued"])
+			self.assertEqual(late_payments.refund_queued(budget_seconds=40)["refunded"], 1)
+			self.assertEqual(states(), ["Refunded", "Refunded", "Refund Queued"])
+			self.assertEqual(late_payments.refund_queued(budget_seconds=40)["refunded"], 1)     # a new run, a new budget
+		self.assertEqual(states(), ["Refunded", "Refunded", "Refunded"])
+		refunds = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": ("in", [oldest, middle, newest]),
+		                                                             "txn_type": "Refund"}, pluck="status")
+		self.assertEqual(refunds, ["Succeeded"] * 3)                                         # each once
+
+	def test_queued_refunds_run_last_in_their_5_minute_jobs(self):
+		"""LO-07: the expiry of payment links and the mail status never wait behind the gateway's refunds."""
+		from kamra.tex import scheduler
+
+		self.assertEqual(scheduler.EVERY_5_MINUTES[-1], "kamra.tex.services.late_payments.refund_queued")
+
 
 class TestMoneyShownRight(HoldCase):
 	"""C7 (audit 1c): the payment report, a payment link and a booking's payment status show where the

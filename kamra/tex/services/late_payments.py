@@ -24,6 +24,7 @@ charge's lock (then the booking's): the order a payment callback takes."""
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from datetime import datetime
 
@@ -430,14 +431,23 @@ def settled(transaction: str) -> None:
 	      reference_name=transaction, property=row.property, new={"state": state, "left": to_str(left)})
 
 
-def refund_queued() -> dict:
+def refund_queued(limit: int = 20, budget_seconds: int = 90) -> dict:
 	"""Scheduler: refund the charges queued for a refund, once each (idempotency key per charge),
 	each under its lock and on record before the gateway is asked (``durable``). A refund the
-	gateway refuses, or does not answer, goes to staff (``Action Required``)."""
+	gateway refuses, or does not answer, goes to staff (``Action Required``).
+
+	At most ``limit`` charges a run, oldest first, and none started once ``budget_seconds``
+	(``time.monotonic``) are used (LO-07, as ``outbox.deliver_pending``): a gateway that answers
+	slowly waits its timeout for every refund, and must never hold the 5-minute jobs past their time
+	limit. The charges not started are the next run's."""
 	from kamra.tex.payments import service as pay
 
+	deadline = time.monotonic() + budget_seconds
 	done = 0
-	for name in frappe.get_all(TXN, filters={"reconciliation": "Refund Queued"}, pluck="name"):
+	for name in frappe.get_all(TXN, filters={"reconciliation": "Refund Queued"}, order_by="creation asc, name asc",
+	                           limit=limit, pluck="name"):
+		if time.monotonic() >= deadline:
+			break
 		txn = frappe.get_doc(TXN, name, for_update=True)
 		if txn.reconciliation != "Refund Queued":
 			continue
