@@ -123,6 +123,7 @@ BEHAVIOUR = {
 	"p69_quote_version_index": "test_patches.TestP03Indexes.test_p69_creates_the_quote_version_index",
 	"p70_manual_fx_rate": "test_patches.TestCapabilityPatches",
 	"p71_market_integrity": "test_patches.TestSmallPatches.test_p71_makes_the_domestic_market_residents_only_once",
+	"p72_market_refused_funnel_event": "test_patches.TestSmallPatches.test_p11_p20_only_sync_their_doctypes",
 }
 
 
@@ -1212,9 +1213,13 @@ class TestSmallPatches(PatchCase):
 				("p53_payment_captured_at", [("tex_payments", "doctype", "tex_payment_transaction")],
 				 ("TEX Payment Transaction", "captured_at")),
 				("p68_payment_checkout_lease", [("tex_payments", "doctype", "tex_payment_transaction")],
-				 ("TEX Payment Transaction", "checkout_started_at"))):
+				 ("TEX Payment Transaction", "checkout_started_at")),
+				("p72_market_refused_funnel_event", [("tex_booking", "doctype", "tex_funnel_event")],
+				 ("TEX Funnel Event", "event"))):
 			self.assertEqual(self.first_run(patch)["reload_doc"], synced, patch)
 			self.assertTrue(frappe.db.has_column(*field), patch)            # synced on this site
+		# a Select option, not a column (G-55b): an event the meta does not list is refused and lost by _track
+		self.assertIn("market_refused", frappe.get_meta("TEX Funnel Event").get_field("event").options.split("\n"))
 
 	def test_p14_gives_extras_an_order_cutoff(self):
 		# the synced column is NOT NULL with 0 (existing extras: until the day they are used), so the

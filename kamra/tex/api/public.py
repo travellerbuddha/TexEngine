@@ -20,6 +20,7 @@ from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
 from kamra.tex.pricing import versions
 from kamra.tex.pricing.extras import guest_safe
+from kamra.tex.refusal_codes import MARKET_REFUSALS
 from kamra.tex.security.audit import log_exception
 from kamra.tex.security.capabilities import WEB_CHANNELS
 from kamra.tex.services import booking as booking_svc
@@ -696,7 +697,9 @@ FUNNEL_CONTACT_KEYS = frozenset({"email", "phone", "mobile", "first_name", "last
 # itself sells (second review): one of its hotels, a room type and a rate plan of that hotel, a board
 # code, the quotes of the visitor's own session. Anything else is dropped, never stored: a name, a
 # phone number or an address typed into a field is not a room type
-BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel")}
+BROWSER_EVENT_FIELDS = {"room_view": ("hotel", "room_type", "board", "rate_plan"), "abandoned": ("quotes", "hotel"),
+                        # a campaign link's market the search refused (G-55b): the refusal, the market, the country
+                        "market_refused": ("reason", "market", "country")}
 BROWSER_TEXT_MAX = 140
 BROWSER_QUOTES_MAX = 10
 BROWSER_QUOTE_ID_MAX = 64
@@ -728,6 +731,17 @@ def _browser_payload(site, session_id: str | None, event: str, payload) -> dict:
 		rp = _text(payload.get("rate_plan"))
 		if rp and frappe.db.exists("Rate Plan", {"name": rp, "property": out["hotel"]}):
 			out["rate_plan"] = rp
+	if "reason" in fields and payload.get("reason") in MARKET_REFUSALS:
+		out["reason"] = payload["reason"]
+	if "market" in fields:
+		# a market's code, never an unknown string (a link can carry anything)
+		code = _text(payload.get("market"))
+		if code and frappe.db.exists("TEX Market", code.strip().upper()):
+			out["market"] = code.strip().upper()
+	if "country" in fields:
+		cc = payload.get("country")
+		if isinstance(cc, str) and len(cc) == 2 and cc.isascii() and cc.isalpha():
+			out["country"] = cc.upper()
 	if "quotes" in fields and isinstance(payload.get("quotes"), list):
 		ids = [q for q in payload["quotes"] if isinstance(q, str) and 0 < len(q) <= BROWSER_QUOTE_ID_MAX]
 		ids = _own_quotes(site, ids[:BROWSER_QUOTES_MAX], session_id)

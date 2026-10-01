@@ -1038,7 +1038,8 @@ BOOKING_SPECS = [
 
 	dt("TEX Funnel Event", B, [
 		F("event", "Select", "Event", ["search", "room_view", "quote", "guest_details", "payment_started",
-		                               "abandoned", "booked"], reqd=1, in_list_view=1, in_standard_filter=1),
+		                               "abandoned", "booked", "market_refused"], reqd=1, in_list_view=1,
+		  in_standard_filter=1),
 		F("occurred_at", "Datetime", "At", in_list_view=1),
 		F("site", "Link", "Site", "TEX Booking Site"),
 		F("property", "Link", "Property", "Property", in_standard_filter=1),
@@ -1052,7 +1053,8 @@ BOOKING_SPECS = [
 		F("currency", "Link", "Currency", "Currency"),
 		F("payload", "Code", "Payload", "JSON", permlevel=1),
 	], perms=[*READONLY_AUDIT, INTERNALS], autoname="hash", track_changes=False,
-	   sort_field="creation", in_create=True),
+	   sort_field="creation", in_create=True,
+	   extra={"modified": "2026-10-04 00:00:01.000000"}),                # market_refused came later (G-55b)
 ]
 
 # ═══ TEX Payments ═════════════════════════════════════════════════════════

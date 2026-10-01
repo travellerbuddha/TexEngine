@@ -353,6 +353,26 @@ class TestMarketLinks(TexTestCase):
 		self.assertNotIsInstance(ctx.exception, MarketResolutionError)
 		self.assertIn("NOPE", str(ctx.exception))
 
+	def test_a_refused_link_is_a_funnel_event(self):
+		"""G-55b (audit 2G-2, ADR-056 / ADR-070): the booking app reports a market link the server refused, with the
+		refusal's code, an existing market's code and a two-letter country, nothing else (no contact data, no
+		unknown string)."""
+		def stored(session: str):
+			return [frappe.parse_json(r.payload) for r in frappe.get_all(
+				"TEX Funnel Event", filters={"site": SLUG, "session_id": session, "event": "market_refused"},
+				fields=["payload"], ignore_permissions=True)]
+
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the visitor's browser reports it
+		public.track(site=SLUG, session_id="mk-1", event="market_refused",
+		             payload={"reason": "MARKET_NOT_ALLOWED", "market": "TR", "country": "de", "email": "x@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was stored
+		self.assertEqual(stored("mk-1"), [{"reason": "MARKET_NOT_ALLOWED", "market": "TR", "country": "DE"}])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a browser sending anything
+		public.track(site=SLUG, session_id="mk-2", event="market_refused",
+		             payload={"reason": "<script>", "market": "NOPE", "country": "Deutschland", "phone": "+49 1"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what was stored
+		self.assertEqual(stored("mk-2"), [{}])
+
 	def test_public_limits_can_only_be_raised(self):
 		# independent of the bench's own site_config (E2E benches raise the limit)
 		saved = frappe.conf.pop("tex_public_write_limit", None)

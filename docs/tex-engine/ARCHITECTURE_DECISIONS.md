@@ -3226,6 +3226,10 @@ Medium, 3 Low; patch p48).**
   the tracking and mailing tests (a timeout raised) and p45 (the look-alike loses its consent) fail. E2E:
   `crm-profile`, `crm-merge`, `crm-admin` and `booking` pass twice in a row on a server running this
   tree.
+- *Addendum (Part 2G-2, G-55b): a refused market link is a browser event.* `public.track` also takes `market_refused`:
+  `reason` one of the five market refusal codes (`refusal_codes.MARKET_REFUSALS`), `market` only an existing market's
+  code, `country` two letters (upper-cased); nothing else is kept (p72 adds the Select option: an event without it
+  would fail validation and `_track` would drop it silently).
 
 ## ADR-057 Restrictions refuse a change as they refuse a sale, for what it newly takes; a minimum basket is the whole booking's
 **Context.** G-48 (R-16) and G-84 (R-20, R-29).
@@ -9439,9 +9443,15 @@ compared the guest's residence or nationality with the market.
   of them on a residents-only market. Staff booking on a booking site follow the site's rules (ADR-050) and cannot override.
   Channel bookings are the channel's; a staff modification into a residents-only market is not checked (its revision is the
   record).
+- *Refused links (G-55b).* Only a market refusal (by its code) sends the booking engine's search on without the link:
+  the results say why (the site does not sell that market, it is for residents of {countries}, or it could not be
+  applied), the browser sends the funnel event `market_refused` (refusal code, the link's market and country; ADR-056
+  allow-list) and the analytics event `market_link_refused`. Any other refusal of a linked search (bad dates, an unknown
+  hotel, the network) is the search's own error, never hidden by a fallback.
 - Refusals carry the market codes of ADR-013's addendum (`MARKET_UNKNOWN`, `MARKET_AMBIGUOUS`, `MARKET_REQUIRED`,
   `MARKET_NOT_ALLOWED`, `MARKET_RESIDENCY`; params: the market, its countries). p71 syncs TEX Market and TEX Booking Site and
-  makes TR residents-only once (`ran_before`: an administrator who switches it off is never overruled).
+  makes TR residents-only once (`ran_before`: an administrator who switches it off is never overruled); p72 adds the
+  funnel event option.
 
 ## ADR-071 Loyalty lots: first to expire, first used; expiry takes only what is left (audit Part 2H-1)
 

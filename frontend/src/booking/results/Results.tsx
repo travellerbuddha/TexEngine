@@ -12,6 +12,7 @@ import { partyText } from "../search/GuestsPicker"
 import { useSite } from "../site/SiteContext"
 import type { Offer, PropertyResult, Reason, RoomContent } from "../types"
 import { countryNames, regionDisplay, type Residency } from "../../lib/residency"
+import { marketNotice as noticeKey, type MarketRefusal } from "../lib/marketLink"
 import { Badge, Button } from "../ui/controls"
 import { Dialog } from "../ui/Dialog"
 import { Alert, EmptyState, Skeleton } from "../ui/feedback"
@@ -553,10 +554,17 @@ function ResidencyBanner({ residency }: { residency: Residency }) {
   )
 }
 
+/** The campaign link's market was refused: these are the standard prices, and why (G-55b). */
+function MarketNotice({ notice }: { notice: MarketRefusal }) {
+  const { t, locale } = useI18n()
+  const countries = notice.countries ? countryNames(notice.countries, regionDisplay(locale)) : ""
+  return <Alert tone="warn">{t(noticeKey(notice.reason), { countries })}</Alert>
+}
+
 export default function Results() {
   const { t, money } = useI18n()
   const { site } = useSite()
-  const { search, criteria, runSearch, flow, allSelected } = useBooking()
+  const { search, criteria, runSearch, flow, allSelected, marketNotice } = useBooking()
   const { error, errorView } = useContinue()
   const data = search.data
   const loading = search.status === "loading"
@@ -604,6 +612,7 @@ export default function Results() {
           {statusText}
         </p>
         {error && errorView}
+        {marketNotice && <MarketNotice notice={marketNotice} />}
         {data?.residency && <ResidencyBanner residency={data.residency} />}
         {loading && data && <p className="text-sm text-muted">{t("results.searching")}</p>}
         {body}
