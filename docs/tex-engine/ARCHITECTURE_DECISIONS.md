@@ -9282,6 +9282,9 @@ the versions the roll superseded the state their contract's later publishes woul
   allocation insert; a CRM merge (both profiles, then their records); the recount (ADR-048); withdraw's quote scan
   (index order, ADR-069): name order ends caller-against-caller cycles, not create-against-withdraw.
 - Every write endpoint taking these locks is wrapped; a request that committed a step is not run again (P1-8 e).
+- *Points returned (Part 2H-2, ADR-071 §4).* A cancellation's or an expiry's return of points is money going out: booking →
+  rooms → the guests who may have spent → their Loyalty charges (name order) → burn and ledger rows. A cycle needs one
+  Loyalty payment shared by two bookings (a staff transfer): a clean rollback, run again by the wrappers or the job's next run.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so
