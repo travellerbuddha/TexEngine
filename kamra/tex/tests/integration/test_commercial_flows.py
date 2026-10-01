@@ -12,7 +12,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
-from kamra.tex.api import public
+from kamra.tex.api import public, ui_crs
 from kamra.tex.commercial import context, contracts
 from kamra.tex.crm import loyalty
 from kamra.tex.crm import service as crm
@@ -80,6 +80,10 @@ def setup_site_and_payments(f: dict, **contract) -> dict:
 	                 "environment": "Sandbox", "enabled": 1, "currencies": "EUR"})
 	fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
 	          {"property": fx.PROPERTY, "method": "Card", "provider_account": acc, "priority": 10})
+	# the hotel sells pay at the hotel too (O-15: a hotel with a rule is bound by its rules; a method with no rule
+	# is not offered). No account: nothing is charged
+	fx.ensure("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Pay at Hotel"},
+	          {"property": fx.PROPERTY, "method": "Pay at Hotel", "priority": 5})
 	if not frappe.db.exists("TEX Booking Site", SLUG):
 		frappe.get_doc({"doctype": "TEX Booking Site", "site_name": "TEX Test Resort", "site_slug": SLUG,
 		                "enabled": 1, "property": fx.PROPERTY, "default_market": "DE", "default_currency": "EUR",
@@ -2018,3 +2022,79 @@ class TestMarkupTies(TexTestCase):
 		revision = policy_api.revise("TEX Markup Rule", first)["name"]
 		policy_api.activate("TEX Markup Rule", revision)
 		self.assertEqual(frappe.db.get_value("TEX Markup Rule", revision, "tex_status"), "Active")
+
+
+class TestPaymentMethodRules(TexTestCase):
+	"""O-15 (audit 2F-2, ADR-041): the hotel's payment method rules bind every booking, the guest's and staff's.
+	Where a rule matches the sale's market, currency and channel, the method must be one it offers; a hotel with
+	no rule for the sale behaves as before; an unknown method is never stored; "Payment Link" is a staff method
+	(K-2d) offered where a link can be paid (a card rule for the web)."""
+
+	def setUp(self):
+		super().setUp()
+		setup_site_and_payments(self.f)
+		self.rule = lambda method: frappe.db.get_value("TEX Payment Method Rule",
+		                                               {"property": fx.PROPERTY, "method": method})
+
+	def quote(self, channel: str = "DIRECT_WEB", user: str = "Administrator") -> str:
+		"""An open quote of the STD / FLEX offer, made as ``user``."""
+		frappe.set_user(user)  # nosemgrep: frappe-setuser -- the seller of the quote
+		res = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(6, 10), check_out=fx.d(6, 13),
+		                     rooms=[{"adults": 2}], market="DE", channel=channel, currency="EUR")
+		offer = pick(res["properties"][0])
+		return quoting.create_quote(offer["rooms"][0]["offer_key"])["quote_id"]
+
+	def assertOpen(self, quote_id: str) -> None:
+		self.assertEqual(frappe.db.get_value("TEX Quote", quote_id, "status"), "Open")
+
+	def test_a_disabled_pay_at_hotel_rule_refuses_the_guest_and_the_quote_stays_open(self):
+		frappe.db.set_value("TEX Payment Method Rule", self.rule("Pay at Hotel"), "disabled", 1)
+		qid = self.quote(user="Guest")
+		with self.assertRaisesRegex(frappe.ValidationError, "not available"):
+			public.book(site=SLUG, quote_ids=[qid], guest=GUEST, payment_method="Pay at Hotel", session_id="o15-a",
+			            idempotency_key="idem-o15-a")
+		self.assertOpen(qid)
+		self.assertFalse(frappe.db.exists("TEX Booking", {"booker_email": GUEST["email"]}))
+
+	def test_an_unknown_method_is_never_stored(self):
+		qid = self.quote()
+		with self.assertRaisesRegex(frappe.ValidationError, "not available"):
+			ui_crs.book(quote_ids=[qid], guest=GUEST, payment_method="X")
+		self.assertOpen(qid)
+		self.assertFalse(frappe.db.exists("TEX Booking", {"payment_method": "X"}))
+
+	def test_a_rule_for_another_channel_does_not_offer_pay_at_hotel_at_the_call_centre(self):
+		frappe.db.set_value("TEX Payment Method Rule", self.rule("Pay at Hotel"), "sales_channel", "DIRECT_WEB")
+		web, desk = self.quote("DIRECT_WEB"), self.quote("CALL_CENTER")
+		with self.assertRaisesRegex(frappe.ValidationError, "not available"):
+			booking.create_booking(quote_ids=[desk], guest=GUEST, payment_method="Pay at Hotel")
+		self.assertOpen(desk)
+		self.assertEqual(booking.create_booking(quote_ids=[web], guest=GUEST, payment_method="Pay at Hotel")["status"],
+		                 "Confirmed")
+
+	def test_payment_link_is_a_staff_method_offered_where_a_link_can_be_paid(self):
+		qid = self.quote()
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- a guest names a staff method
+		with self.assertRaisesRegex(frappe.ValidationError, "not available"):
+			booking.create_booking(quote_ids=[qid], guest=GUEST, payment_method="Payment Link")
+		self.assertOpen(qid)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		out = booking.create_booking(quote_ids=[qid], guest=GUEST, payment_method="Payment Link")
+		self.assertEqual(out["status"], "Pending Payment")
+		sale_at = frappe.db.get_value("TEX Booking", out["booking"], "sale_at")
+		until = frappe.get_all("Reservation", filters={"tex_booking": out["booking"]}, pluck="hold_expires_on")[0]
+		self.assertEqual(round((until - sale_at).total_seconds() / 60), 1440)       # K-2d: 24 hours
+		# a link is paid by card on the web: where that is not offered, staff may not name it either
+		frappe.db.set_value("TEX Payment Method Rule", self.rule("Card"), "disabled", 1)
+		again = self.quote()
+		with self.assertRaisesRegex(frappe.ValidationError, "not available"):
+			booking.create_booking(quote_ids=[again], guest=GUEST, payment_method="Payment Link")
+
+	def test_a_hotel_with_no_rule_behaves_as_before(self):
+		frappe.db.delete("TEX Payment Method Rule", {"property": fx.PROPERTY})
+		for method, status in (("Pay at Hotel", "Confirmed"), ("Bank Transfer", "Pending Payment"),
+		                       (None, "Pending Payment")):
+			with self.subTest(method=method):
+				out = booking.create_booking(quote_ids=[self.quote()], guest=GUEST, payment_method=method)
+				self.assertEqual(out["status"], status)
+

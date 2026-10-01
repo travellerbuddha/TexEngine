@@ -282,6 +282,26 @@ def payment_methods(property: str, *, market: str | None, currency: str | None, 
 	return out
 
 
+def method_offered(property: str, method: str, *, market: str | None, currency: str | None,
+                   channel: str | None) -> bool:
+	"""O-15: may a booking of ``property`` for this market, currency and channel be made with ``method``? A hotel
+	that defined a method for the sale (at least one open rule matches it, whatever the state of its account) is
+	bound by its rules: the method must be among ``payment_methods`` (which hides what cannot run). A hotel with no
+	rule for the sale is not restricted (as before). "Payment Link", a staff method, is offered where a link can
+	be paid: the card of the web (``public.pay_link``: any market, ``DIRECT_WEB``).
+
+	A rule's market, currency or channel left blank (NULL or empty) matches any value."""
+	if method == holds.LINK:
+		market, channel, method = None, "DIRECT_WEB", holds.CARD
+	rules = frappe.get_all("TEX Payment Method Rule", filters={"property": property, "disabled": 0},
+	                       fields=["market", "currency", "sales_channel"])
+	if not any((not r.market or r.market == market) and (not r.currency or r.currency == currency)
+	           and (not r.sales_channel or r.sales_channel == channel) for r in rules):
+		return True
+	return any(m["method"] == method for m in payment_methods(property, market=market, currency=currency,
+	                                                          channel=channel))
+
+
 # ─── transactions ────────────────────────────────────────────────────────
 
 

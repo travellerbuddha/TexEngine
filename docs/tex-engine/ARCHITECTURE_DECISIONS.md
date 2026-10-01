@@ -858,6 +858,21 @@ sandbox host, a live site runs no sandbox gateway, and iyzico keeps one checkout
 - A second start that waited on the link lock can still meet the first start's charge after its
   own read snapshot. It then gets a unique-key error instead of a second charge.
 - Bookings paid in Sandbox are not flagged yet: that needs a schema field.
+- *Addendum (Part 2F-2, O-15): the method rules bind the booking.* `payment_methods` was read only where money was due
+  (`_start_booking_payment`); `public.book`, `crs.book` and `ui_crs.book` passed any method on, and
+  `ui_crs.book(payment_method="X")` stored "X". `create_booking` now refuses in two steps:
+  - an unknown method, before any quote is locked: `None`, or one of `METHODS` (Card, Bank Transfer, Pay at Hotel);
+    staff may also name "Payment Link" (K-2d, a 24-hour hold), a guest never;
+  - a method the hotel does not offer, once the sale's market, currency and channel are known and staff's rights are
+    checked, before any contract, night or guest lock: where at least one open rule matches the sale (whatever the state
+    of its account), the method must be among `payment_methods` (`pay.method_offered`; it hides what cannot run). A hotel
+    with no rule matching the sale behaves as before. "Payment Link" is offered where a link can be paid: a card among
+    the methods of the web (any market, `DIRECT_WEB`, as `public.pay_link`). `None` (the staff API only; the screen
+    always names one) is not checked: a deposit is due and the rooms are held as a card's; confirming without payment
+    stays `confirm_without_payment`'s.
+  - One message for guest and staff ("This payment method is not available."); the request is given back, the locked
+    quotes stay Open. `TEX Booking.payment_method` stays free text (a channel booking writes "Channel" and does not use
+    `create_booking`). The checkout's fallback, when its basket cannot be read, offers the card only.
 
 ## ADR-042 Payments: new money and settled money are gated apart; one iyzico checkout per charge
 **Context.** The review of ADR-041 found that the go-live gates still had holes, and that some

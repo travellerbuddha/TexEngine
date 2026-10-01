@@ -566,6 +566,10 @@ def reservation_amounts(result: dict) -> dict:
 
 # ─── create ──────────────────────────────────────────────────────────────
 
+# the payment methods a booking is made with (O-15): what a guest may choose; staff may also name "Payment Link"
+# (K-2d: a link sent to the guest, 24 hours). TEX Booking.payment_method stays free text for the channels' "Channel"
+METHODS = (holds.CARD, holds.TRANSFER, "Pay at Hotel")
+
 
 def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = None, payment_method: str | None = None,
                    idempotency_key: str | None = None, notes: str | None = None, language: str | None = None,
@@ -583,6 +587,11 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		frappe.throw(_("Select at least one room."))
 	if len(quote_ids) > quoting.MAX_ROOMS:
 		frappe.throw(_("Too many rooms."))
+	# an unknown method is refused before any quote is locked, never stored as it came (O-15); none (staff API
+	# only: the screen always names one) keeps today's way: a deposit is due, held as a card is
+	payment_method = payment_method or None
+	if payment_method and payment_method not in (*METHODS, *((holds.LINK,) if staff else ())):
+		frappe.throw(_("This payment method is not available."))
 	guest = _clean_guest(guest)
 	now = now_datetime()
 
@@ -624,6 +633,14 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 		if not booking_site:
 			# staff book on the channels their profiles may book on (ADR-050)
 			scope.require_channel(channel, property, to="book")
+	# the hotel's payment method rules bind the booking where one matches its market, currency and channel
+	# (O-15): the method must be one it offers, whoever books. The quotes are locked (a refusal gives the request
+	# back and they stay Open); no contract, night or guest lock is taken yet
+	if payment_method:
+		from kamra.tex.payments import service as pay
+
+		if not pay.method_offered(property, payment_method, market=market, currency=currency, channel=channel):
+			frappe.throw(_("This payment method is not available."))
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
 	# row lock makes a suspend wait for bookings in flight, and every booking after it see it
 	for contract in sorted({r[2]["contract"]["contract"] for r in rows}):

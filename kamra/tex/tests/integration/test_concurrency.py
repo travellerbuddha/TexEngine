@@ -20,7 +20,10 @@ from kamra.tex.tests.integration import fixtures as fx
 
 PROPERTY_TABLES = ("TEX Booking", "Reservation", "TEX Quote", "TEX Reservation Revision", "TEX Contract",
                    "TEX Inventory Day", "TEX Promotion Redemption", "TEX Audit Event", "TEX Markup Rule",
-                   "TEX Extra Allocation", "TEX Extra Inventory Day")
+                   "TEX Extra Allocation", "TEX Extra Inventory Day",
+                   # the thread classes commit the hotel's payment method rules (O-15); they must not leak into
+                   # the modules that run after them on the same site
+                   "TEX Payment Method Rule")
 
 
 def _cleanup():
