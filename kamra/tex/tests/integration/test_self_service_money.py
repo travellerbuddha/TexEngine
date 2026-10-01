@@ -459,6 +459,19 @@ class TestGuards(GuestMoneyCase):
 		self.assertEqual(refunds(b["booking"])[-1], (later["payment"]["transaction"], D("80.25"), "Succeeded"))
 		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
 
+	def test_acknowledging_a_change_locks_the_booking_before_its_room(self):
+		"""2F-1 (P1-4): the order is booking, then room — as a guest's change takes it. The acknowledgment used to
+		write the room first and the booking after it, and read the note it appends to from a snapshot."""
+		b = self.deposit_paid("gcm-ack-order")
+		res = b["rooms"][0]["reservation"]
+		self.accept(b, self.propose(b, (6, 14)))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- reservations see the flag
+		locks = locks_during(lambda: crs_api.acknowledge_guest_change(reservation=res, note="seen"))
+		self.assertIn("tabTEX Booking", locks)
+		self.assertIn("tabReservation", locks)
+		self.assertLess(locks.index("tabTEX Booking"), locks.index("tabReservation"), locks)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "tex_guest_change_pending"), 0)
+
 
 class TestStaffDecide(GuestMoneyCase):
 	def setUp(self):

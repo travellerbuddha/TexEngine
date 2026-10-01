@@ -375,6 +375,15 @@ def retry_outbox(name: str):
 	scope.require("connect.admin", row.property)
 	if row.status not in ("Failed", "Dead"):
 		frappe.throw(_("Only failed deliveries can be retried."))
+	if row.kind == "Reservation" and frappe.db.sql(
+			"""SELECT name FROM `tabTEX Integration Outbox`
+			   WHERE kind='Reservation' AND connection=%(c)s AND reference_name=%(r)s
+			     AND (creation > %(t)s OR (creation = %(t)s AND name > %(n)s)) LIMIT 1""",
+			{"c": row.connection, "r": row.reference_name, "t": row.creation, "n": row.name}):
+		# messages go in order (NEW-7): an old one sent now would put the stay back as it was; the latest message
+		# carries the full state
+		frappe.throw(_("A newer message exists for this reservation: retry the latest one, it carries the full "
+		               "state."))
 	# a fresh start: a dead row gets its full number of attempts again
 	frappe.db.set_value("TEX Integration Outbox", name, {"status": "Pending", "attempts": 0, "claim_token": None,
 	                                                    "claimed_until": None,

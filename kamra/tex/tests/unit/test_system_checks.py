@@ -49,6 +49,19 @@ class TestVerdicts(unittest.TestCase):
 		missing = {k: v for k, v in fresh.items() if not k.endswith("fx_daily")}
 		self.assertEqual(c.jobs_check(missing, NOW, live=False)["issues"][0]["reason"], "job_missing")
 
+	def test_the_pms_outbox_job_is_watched_as_closely_as_the_5_minute_group(self):
+		"""NEW-7 (2F-1): the outbox runs from its own 5-minute entry; a stalled PMS is late there, not in the
+		group of the holds and payments."""
+		self.assertEqual([c.JOB_MAX_AGE_MINUTES[f"kamra.tex.scheduler.{job}"]
+		                  for job in ("every_5_minutes", "outbox_every_5_minutes")], [20, 20])
+		fresh = {m: {"last_execution": NOW - timedelta(minutes=1), "stopped": False} for m in c.JOB_MAX_AGE_MINUTES}
+		stalled = dict(fresh)
+		stalled["kamra.tex.scheduler.outbox_every_5_minutes"] = {"last_execution": NOW - timedelta(minutes=25),
+		                                                         "stopped": False}
+		out = c.jobs_check(stalled, NOW, live=True)
+		self.assertEqual((out["status"], out["issues"][0]["params"]),
+		                 (c.WARN, {"job": "outbox_every_5_minutes", "minutes": 25}))
+
 	def test_workers_and_redis(self):
 		self.assertEqual(c.workers_check(reachable=False, workers=0, backlog=0, live=True)["status"], c.FAIL)
 		self.assertEqual(c.workers_check(reachable=True, workers=0, backlog=0, live=False)["status"], c.WARN)

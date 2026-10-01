@@ -809,6 +809,21 @@ class TestBookingBasket(TexTestCase):
 			public.book(site=SLUG, quote_ids=[quotes[0]["quote_id"]], guest=GUEST, payment_method="Pay at Hotel",
 			            session_id="g84-part", idempotency_key="idem-g84-part")
 
+	def test_a_booking_locks_its_quotes_in_name_order(self):
+		"""2F-1 (P1-4): two bookings made of the same quotes, named in opposite orders by their callers, would each
+		hold one quote and wait for the other. The quotes are locked in name order whatever the caller's order; a
+		duplicated id is still refused (a set would have hidden it)."""
+		quotes, _offer = two_rooms_quoted_together("p14-quotes")
+		ids = sorted((q["quote_id"] for q in quotes), reverse=True)          # the caller's order is not the lock order
+		with mock.patch.object(quoting, "load_quote", wraps=quoting.load_quote) as load:
+			public.book(site=SLUG, quote_ids=ids, guest=GUEST, payment_method="Pay at Hotel", session_id="p14-quotes",
+			            idempotency_key="idem-p14-quotes")
+		self.assertEqual([c.args[0] for c in load.call_args_list if c.kwargs.get("for_update")], sorted(ids))
+		fresh, _offer = two_rooms_quoted_together("p14-dup")
+		with self.assertRaisesRegex(frappe.ValidationError, "one search"):
+			public.book(site=SLUG, quote_ids=[fresh[0]["quote_id"]] * 2, guest=GUEST, payment_method="Pay at Hotel",
+			            session_id="p14-dup", idempotency_key="idem-p14-dup")
+
 	def _booked(self, session: str) -> dict:
 		quotes, _offer = two_rooms_quoted_together(session, code="BIG")
 		return public.book(site=SLUG, quote_ids=[q["quote_id"] for q in quotes], guest=GUEST,

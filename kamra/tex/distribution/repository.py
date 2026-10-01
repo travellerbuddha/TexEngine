@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import date, timedelta
 
 import frappe
@@ -28,6 +29,7 @@ from kamra.tex.distribution.adapters import REGISTRY, AdapterError, ChannelAdapt
 from kamra.tex.distribution.model import AriDay, Mismatch
 from kamra.tex.money import D
 from kamra.tex.security.audit import audit, redact_text
+from kamra.tex.services.txn import undo_to
 
 CATEGORY = "Channel Manager"
 MAX_ATTEMPTS = 8
@@ -41,17 +43,31 @@ def _commit() -> None:
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background worker unit-of-work boundary
 
 
-def _each(names: list[str], work, on_fail) -> tuple[int, int]:
+def _each(names: list[str], work, on_fail, deadline: float | None = None, release=None) -> tuple[int, int]:
+	"""Run ``work`` on each claimed name as its own unit of work: committed when it succeeds, undone to its
+	savepoint and handed to ``on_fail`` when it raises (a deadlock that rolled the transaction back has ended the
+	savepoint: ``undo_to`` rolls back whole, safe as each item is a transaction of its own). A ``work`` that
+	returns ``False`` skipped the item (no longer this run's): neither done nor failed.
+
+	``deadline`` (a ``time.monotonic()`` value): no item is started past it; the names left are handed to
+	``release`` (their claims given back) and the loop ends (NEW-7: a run is bounded, whatever a slow endpoint
+	does). → (done, failed)."""
 	ok = bad = 0
-	for name in names:
+	for i, name in enumerate(names):
+		if deadline is not None and time.monotonic() >= deadline:
+			if release is not None:
+				release(names[i:])
+				_commit()
+			break
 		sp = "tex_dist_" + frappe.generate_hash(length=8)
 		frappe.db.savepoint(sp)
 		try:
-			work(name)
+			done = work(name)
 			_commit()
-			ok += 1
+			if done is not False:
+				ok += 1
 		except Exception as e:
-			frappe.db.rollback(save_point=sp)
+			undo_to(sp)
 			on_fail(name, e)
 			_commit()
 			bad += 1

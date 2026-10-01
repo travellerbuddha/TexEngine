@@ -32,6 +32,7 @@ RANK = {OK: 0, WARN: 1, FAIL: 2}
 JOB_MAX_AGE_MINUTES: dict[str, int] = {
 	"kamra.tex.scheduler.every_minute": 10,
 	"kamra.tex.scheduler.every_5_minutes": 20,
+	"kamra.tex.scheduler.outbox_every_5_minutes": 20,
 	"kamra.tex.scheduler.every_15_minutes": 45,
 	"kamra.tex.scheduler.fx_daily": 26 * 60,
 	"kamra.tex.scheduler.daily": 26 * 60,

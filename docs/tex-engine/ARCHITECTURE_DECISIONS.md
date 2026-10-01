@@ -144,6 +144,11 @@ Schedulers that are PMS-only keep running only when their module is enabled.
 **Decision.** Reservation create/modify/cancel writes `TEX Integration Outbox` rows in the same DB
 transaction; a scheduled worker delivers them through adapters with exponential backoff and
 dead-lettering. Core reservation code never calls vendors directly.
+- *Order and isolation (Part 2F-1, NEW-7).* At least once, in order per reservation and connection: a run sends a
+  reservation's due messages oldest first, one after another, within a 120 s budget; a failed one holds back its later
+  ones until it is sent or Dead (8 tries, ~4 h 15 min); a Dead one never blocks; staff retry only the latest. Each
+  carries its `Idempotency-Key` and the full state; the receiver upserts. The outbox is its own 5-minute job
+  (`scheduler.outbox_every_5_minutes`): holds, payments and links never wait behind a PMS.
 
 ## ADR-016 Payments: provider interface, no card data at rest
 **Decision.** `PaymentProvider` interface (`create_checkout`, `handle_callback`, `refund`,
@@ -9170,6 +9175,13 @@ main `1575c8b` is contained, so nothing was merged.
 - *Refused after the hold (P1-9, Part 2E-2).* A retry or a link refused because the hold is over, with no attempt open,
   expires the booking and commits before the refusal (its rooms go at once); a link inside a card's 3-D Secure margin
   is still sent; a transfer is never started past the hold.
+- *A restarted charge (Part 2F-1).* A Pending charge started again with its key (another tab, a replayed booking, a
+  link's guest back) is a new attempt: `open_attempt` decides it as for a new charge (refused after the hold, P1-9);
+  the charge's deadline moves to the new attempt's, never back.
+- *D4 c) identity (Part 2F-1, P1-2).* The guest has another live booking for the stay when another live booking at the
+  same hotel has a live room (not Cancelled or No Show) for nights of the stay whose guest is one of the expired
+  booking's guest profiles, or a profile with one of their e-mails (case-insensitive) or phones (trimmed) — the CRM's
+  possible-duplicate rule. The booker's (an agency's) e-mail never counts, nor a name alone.
 
 ## ADR-063 MariaDB snapshot isolation stays OFF
 **Context.** From 11.6.2 MariaDB turns `innodb_snapshot_isolation` ON (CI and the local package run 11.8). A locking
@@ -9248,6 +9260,20 @@ the versions the roll superseded the state their contract's later publishes woul
   request commit puts a half state on record. A deadlock or timeout in `complete_retrying` rolls the whole transaction
   back and a step commit ends it: the savepoint is then gone, and the undo (`_undo_to`) rolls back whole instead — safe
   there: every charge of the job is a transaction of its own and staff's request has no uncommitted work before it.
+- *Locks (Part 2F-1, P1-4).* One order, each kind in name order: quote(s) → contract → contract version → payment
+  link → charge(s) → booking(s) → reservations → nights ((pool, date)) → extra days → Guest → promotions →
+  allocation, ledger and redemption rows (locking reads). It replaces the order in the 2E-1 bullet above: the code
+  locks the Guest before the promotions (`resolve_guest`, then `_record_redemptions`), and series rows are taken as
+  documents are inserted and held to the commit — never across a gateway call.
+- Fixed: `reissue_link` locks its link first; `addons.apply` and `crs.acknowledge_guest_change` lock the booking, then
+  read the room under its lock; `create_booking` locks its quotes in name order; a revival reads the expired booking's
+  releases with a locking read.
+- Accepted, each a clean rollback run again by `retry_on_deadlock`, `complete_retrying` or the job's next run: every
+  expiry (the job, `reconcile`, a refused attempt or link, P1-9) and money going out lock booking → charges (ADR-062
+  "Locks") against money coming in (charge → booking); a revival's share lock on the booking's allocations against an
+  allocation insert; a CRM merge (both profiles, then their records); the recount (ADR-048); withdraw's quote scan
+  (index order, ADR-069): name order ends caller-against-caller cycles, not create-against-withdraw.
+- Every write endpoint taking these locks is wrapped; a request that committed a step is not run again (P1-8 e).
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so

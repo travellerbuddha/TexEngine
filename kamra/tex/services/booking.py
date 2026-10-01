@@ -586,7 +586,10 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 	now = now_datetime()
 
 	rows = []
-	for qid in quote_ids:
+	# the quotes are locked in name order, whatever the caller's: two bookings of the same quotes named in
+	# opposite orders would each hold one and wait for the other (ADR-066 Locks, P1-4). A list, not a set: a
+	# duplicated id is still refused below (``room_index``)
+	for qid in sorted(quote_ids):
 		row, req, result = quoting.load_quote(qid, for_update=True)
 		problem = quoting.quote_is_usable(row)
 		if problem:
@@ -1334,20 +1337,42 @@ LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
 
 
 def live_duplicate(booking: str) -> str | None:
-	"""D4 c): another live booking of the same guest (profile or e-mail) at the same hotel for nights
-	of this booking's stay — staff booked the guest again after it expired. → its name, or None."""
+	"""D4 c): another live booking at the same hotel with a live room for nights of this booking's stay whose guest
+	is the same person — staff booked the guest again after it expired. The guest, never the booker (P1-2): one of
+	this booking's guest profiles (the profiles of its rooms and its booker's profile), or another profile with the
+	e-mail (case-insensitive) or phone (trimmed) of one of them: the CRM's possible-duplicate rule. The booker's own
+	e-mail (an agency's desk) never counts, nor a name alone. → its name, or None.
+
+	NULL meaning (ADR-064): an empty e-mail or phone is dropped, never matched (a NULL equals nothing, and ``("",)``
+	would match every profile without one); a room's dates are required, so never NULL."""
 	b = frappe.get_doc("TEX Booking", booking)
-	who = [(f, v) for f, v in (("booker_guest", b.booker_guest), ("booker_email", b.booker_email)) if v]
-	if not who or not b.rooms:
+	if not b.rooms:
 		return None
 	ci, co = min(getdate(r.check_in) for r in b.rooms), max(getdate(r.check_out) for r in b.rooms)
+	mine = {g for g in frappe.get_all("Reservation", filters={"tex_booking": b.name}, pluck="guest") if g}
+	if b.booker_guest:
+		mine.add(b.booker_guest)
+	if not mine:
+		return None
+	profiles = frappe.get_all("Guest", filters={"name": ("in", sorted(mine))}, fields=["email", "phone"])
+	emails = sorted({p.email.strip().lower() for p in profiles if p.email and p.email.strip()})
+	phones = sorted({p.phone.strip() for p in profiles if p.phone and p.phone.strip()})
+	params = {"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, "mine": sorted(mine)}
+	same = ["g.name IN %(mine)s"]               # a condition only for a set that is not empty
+	if emails:
+		same.append("g.email IN %(emails)s")
+		params["emails"] = emails
+	if phones:
+		same.append("g.phone IN %(phones)s")
+		params["phones"] = phones
 	rows = frappe.db.sql(
-		f"""SELECT DISTINCT o.name FROM `tabTEX Booking` o JOIN `tabTEX Booking Room` r ON r.parent = o.name
-		    WHERE o.property=%(p)s AND o.name != %(b)s AND o.status IN %(live)s AND r.status != 'Cancelled'
-		      AND r.check_in < %(co)s AND r.check_out > %(ci)s
-		      AND ({" OR ".join(f"o.{f} = %({f})s" for f, _v in who)})
-		    ORDER BY o.name LIMIT 1""",  # nosemgrep -- the column names are constants
-		{"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, **dict(who)})
+		f"""SELECT r.tex_booking FROM `tabGuest` g
+		    JOIN `tabReservation` r ON r.guest = g.name AND r.property = %(p)s
+		    JOIN `tabTEX Booking` o ON o.name = r.tex_booking
+		    WHERE ({" OR ".join(same)}) AND r.tex_booking != %(b)s AND r.status NOT IN ('Cancelled', 'No Show')
+		      AND r.check_in_date < %(co)s AND r.check_out_date > %(ci)s AND o.status IN %(live)s
+		    ORDER BY r.tex_booking LIMIT 1""",  # nosemgrep -- the conditions are constants
+		params)
 	return rows[0][0] if rows else None
 
 
@@ -1413,13 +1438,33 @@ def revive_expired(booking: str, *, reason: str) -> list[str]:
 	return names
 
 
+def _due_for_expiry(now) -> list[str]:
+	"""The bookings ``expire_booking`` would expire at ``now``, by a plain read that locks nothing (NEW-7): waiting
+	for its payment, and either none of its rooms still holds, or its hold is over and no payment attempt is open.
+	Whatever this lets through is locked and judged again by ``expire_booking``; one a payment is saving this
+	moment is simply seen by the next run. The rule of ``expire_booking`` and of the status page's overdue holds:
+
+	* NULL ``payment_attempt_until`` = no attempt open (it counts as over, not as "unknown");
+	* the booking's hold deadline is the earliest ``hold_expires_on`` of its holding rooms; ``MIN`` ignores NULL
+	  deadlines, so a room held without a deadline never expires (never guessed), and a booking whose holding
+	  rooms all have none is not due."""
+	return [r[0] for r in frappe.db.sql(
+		"""SELECT b.name FROM `tabTEX Booking` b
+		   WHERE b.status IN %(holding)s
+		     AND (NOT EXISTS (SELECT 1 FROM `tabReservation` r WHERE r.tex_booking = b.name AND r.status IN %(holding)s)
+		          OR ((b.payment_attempt_until IS NULL OR b.payment_attempt_until <= %(now)s)
+		              AND (SELECT MIN(r.hold_expires_on) FROM `tabReservation` r
+		                   WHERE r.tex_booking = b.name AND r.status IN %(holding)s) <= %(now)s))
+		   ORDER BY b.name""", {"holding": tuple(holds.HOLDING), "now": now})]
+
+
 def expire_pending_bookings() -> dict:
 	"""Scheduler: bookings whose hold is over, with no payment attempt open, expire with all their
 	rooms (``expire_booking``), each in its own transaction so a payment callback waits for at
 	most one booking's expiry (tests keep one transaction)."""
 	now = now_datetime()
 	n = 0
-	for name in frappe.get_all("TEX Booking", filters={"status": ("in", list(holds.HOLDING))}, pluck="name"):
+	for name in _due_for_expiry(now):
 		frappe.db.savepoint("tex_expire_booking")
 		try:
 			n += expire_booking(name, now=now)
