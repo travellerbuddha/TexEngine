@@ -213,6 +213,10 @@ Per batch:
     reviewed ignores in `.github/supply-chain/pip-audit-ignore.txt` (one reason per advisory).
 - A check that is red on the base too is not your PR's: say so in the PR, fix it only if it is in scope or the owner
   agrees; never skip, disable or quarantine a test, never push an empty commit to re-run CI.
+- New advisories appear without any code change: on 2026-10-01, 16:38–16:44 UTC, eight pypdf advisories turned
+  pip-audit red for every PR; PR #17 reviewed them by the file's convention (a fix outside Frappe's pin, TEX code does
+  not import pypdf). Do the same for the next ones — one line per advisory with its reason and a review date — and
+  upgrade instead whenever the pin allows it.
 
 ## 6. Numbers
 
