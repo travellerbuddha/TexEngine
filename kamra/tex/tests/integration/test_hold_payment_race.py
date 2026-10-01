@@ -2151,6 +2151,34 @@ class TestIyzicoFraudReview(HoldCase):
 		self.assertEqual(payments_api.reverify(transaction=txn)["status"], "Succeeded")
 		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
 
+	def test_no_second_payment_starts_while_a_payment_is_in_review(self):
+		"""LO-05 (audit 2K-1): while iyzico reviews a payment, the guest cannot pay again: a new charge (a new key, a
+		payment link of the booking) is refused, and the reviewed charge is never superseded (an approved review and a
+		second capture would take the money twice)."""
+		from kamra.tex.services import refusals
+
+		b, txn, _attempt = self.reviewed()
+		with self.assertRaises(pay.PaymentBusy) as cm:
+			self.start_payment(b)                                       # pay_booking's next key: a new charge
+		self.assertEqual(refusals.code_of(cm.exception), "PAYMENT_UNDER_REVIEW")
+		row = frappe.db.get_value("TEX Payment Transaction", txn, ["amount", "currency", "provider_account", "return_url"],
+		                          as_dict=True)
+		with self.assertRaises(pay.PaymentBusy):                       # the same key: the reviewed charge itself
+			pay.start_payment(property=fx.PROPERTY, amount=row.amount, currency=row.currency,
+			                  provider_account=row.provider_account, booking=b["booking"], description="x", customer={},
+			                  return_url=row.return_url, idempotency_key=f"book:{b['booking']}:{b['due_now']}:1")
+		link = pay.create_link(property=fx.PROPERTY, amount=b["due_now"], currency="EUR", description="Deposit",
+		                       expires_hours=72, booking=b["booking"])
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest opens a payment link of the booking
+		with self.assertRaises(pay.PaymentBusy):
+			public.pay_link(token=link["token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		self.assertEqual(frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Charge", "booking": b["booking"]},
+		                                pluck="name"), [txn])
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"payment_link": link["link"]}))
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, ["status", "raw_status"]),
+		                 ("Pending", "FRAUD_REVIEW"))
+
 	def test_a_payment_iyzico_rejects_after_its_review_lets_the_rooms_go_and_tells_the_team(self):
 		from kamra.tex.services import notify
 

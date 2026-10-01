@@ -9247,6 +9247,13 @@ main `1575c8b` is contained, so nothing was merged.
   past the arrival day, never shortened, not extended again), audited `payment.under_review`; a 1 then confirms it. A
   rejection (-1) fails it, ends that hold (back to the deadline before it, or the booking's other open charges'), is
   audited `payment.fraud_rejected` and tells the team; TEX holds none of its money, so nothing goes to reconciliation.
+  *No second payment meanwhile (Part 2K-1, LO-05):* while a Pending charge of the booking (its own or one of its
+  links') or of the link is in review, `start_payment` starts no other payment of it — a new key, a link, a transfer —
+  and never supersedes the reviewed one: it answers `PaymentBusy` with `PAYMENT_UNDER_REVIEW` ("your bank is reviewing
+  your payment"). Checked before step (a): the candidates are read plainly, then each by name under a share lock, so a
+  review recorded after the request's snapshot counts (lock order link → charges → booking). A review recorded after
+  that check, while a new charge is being started, is not caught: an approved review then pays twice and is flagged
+  OVERPAID as before.
 - *Refused after the hold (P1-9, Part 2E-2).* A retry or a link refused because the hold is over, with no attempt open,
   expires the booking and commits before the refusal (its rooms go at once); a link inside a card's 3-D Secure margin
   is still sent; a transfer is never started past the hold.

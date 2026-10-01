@@ -329,6 +329,28 @@ def _busy() -> None:
 	frappe.throw(_("A payment is being started. Please wait a moment and try again."), PaymentBusy)
 
 
+def _refuse_in_review(booking: str | None, payment_link: str | None) -> None:
+	"""LO-05 (O-18, D-8): while the gateway reviews a Pending charge of this booking (its own, or one of its links') or
+	of this link, no other payment of it starts and the reviewed charge is never superseded: an approved review and a
+	second capture would take the money twice. The candidates are read plainly, then each is read as it is now (a
+	locking read in name order: a review recorded after this request's snapshot counts); the link, when there is one,
+	is already held (lock order: link → charges → booking, ADR-066)."""
+	if not (booking or payment_link):
+		return
+	names = frappe.db.sql(
+		"""SELECT t.name FROM `tabTEX Payment Transaction` t
+		LEFT JOIN `tabTEX Payment Link` l ON l.name = t.payment_link
+		WHERE t.txn_type='Charge' AND t.status='Pending'
+		AND (t.booking=%(booking)s OR l.booking=%(booking)s OR t.payment_link=%(link)s)""",
+		{"booking": booking or "", "link": payment_link or ""}, pluck=True)
+	for name in sorted(names):
+		now = frappe.db.sql("SELECT status, raw_status FROM `tabTEX Payment Transaction` WHERE name=%s LOCK IN SHARE MODE",
+		                    name, as_dict=True)
+		if now and now[0].status == "Pending" and now[0].raw_status in FRAUD_REVIEW:
+			frappe.throw(_("Your bank is reviewing your payment. Please wait for its answer before paying again."),
+			             refusal("PAYMENT_UNDER_REVIEW", base=PaymentBusy))
+
+
 def _end_lease(txn, stamp) -> None:
 	"""Clear the checkout lease of ``txn`` (locked) if it is still this start's; a later start that took
 	over a lapsed one keeps its own."""
@@ -384,6 +406,8 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 	# a booking waiting for its payment: the attempt is refused once its hold is over, else it
 	# keeps the rooms until its own deadline, never longer (K-2a)
 	held = booking or (frappe.db.get_value("TEX Payment Link", payment_link, "booking") if payment_link else None)
+	# a payment the gateway is reviewing: no second one starts, and it is never superseded below (LO-05)
+	_refuse_in_review(held, payment_link)
 	hold_method = holds.TRANSFER if provider.name == holds.TRANSFER else method
 	# ── (a) the charge on record, with its lease ──
 	# a second start of the same charge (another tab, a double click, a restart) reuses the
