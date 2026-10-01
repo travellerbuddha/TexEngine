@@ -9243,6 +9243,11 @@ the versions the roll superseded the state their contract's later publishes woul
   next gateway question (and between two questions of one charge when the first changed it). A request that committed a step (`_commit_step` counts it) is never run
   again on a deadlock: it rolls back and answers "very busy" (P1-8 e); a durable refund's or a guest change's commit,
   replayed by its key, does not count.
+- Each question of a re-verify (`reverify`: the job and the staff endpoint) is asked under a savepoint: one that failed
+  half way (money recorded, its allocation refused) is undone before the next token is asked, so no step commit and no
+  request commit puts a half state on record. A deadlock or timeout in `complete_retrying` rolls the whole transaction
+  back and a step commit ends it: the savepoint is then gone, and the undo (`_undo_to`) rolls back whole instead — safe
+  there: every charge of the job is a transaction of its own and staff's request has no uncommitted work before it.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so

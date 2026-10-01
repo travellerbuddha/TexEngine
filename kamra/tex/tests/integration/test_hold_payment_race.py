@@ -1789,6 +1789,98 @@ class TestPaymentsVerifiedByTheJob(HoldCase):
 		self.assertEqual(asked, [txns[n] for n in ("soon_hold", "late_hold", "old_free", "new_free",
 		                                          "gone_short", "gone_long")])
 
+	def test_a_charge_whose_only_question_failed_after_its_deadlock_does_not_end_the_tick(self):
+		"""P1-8 (2E-2 fix 2): ``complete_retrying`` rolls the whole transaction back on a deadlock, savepoints
+		included; the job's own rollback of the failed charge then finds none. The error is logged and the next
+		charge is still asked."""
+		from kamra.tex.payments.providers.base import ProviderError
+
+		first, second = (self.book(guest=dict(GUEST, email=f"new2-gone-{n}@example.com")) for n in range(2))
+		broken, fine = self.start_payment(first)["transaction"], self.start_payment(second)["transaction"]
+		passes(first["booking"], 26)                               # the later deadline: asked first
+		passes(second["booking"], 27)
+		real_complete, real_rollback, calls = pay.complete, frappe.db.rollback, []
+		frappe.db.savepoint("c3")
+
+		def complete(transaction, **kw):
+			if transaction != broken:
+				return real_complete(transaction, **kw)
+			calls.append(1)
+			if len(calls) == 1:
+				raise frappe.QueryDeadlockError("Deadlock found when trying to get lock")
+			raise ProviderError("gateway said no")
+
+		def rollback(*args, **kw):                    # the test's own transaction stands for the job's
+			return real_rollback(*args, **kw) if kw.get("save_point") else real_rollback(save_point="c3")
+
+		with self.askable() as asked, mock.patch.object(pay, "complete", side_effect=complete), \
+				mock.patch.object(frappe.db, "rollback", side_effect=rollback), mock.patch("time.sleep"):
+			done = pay.reverify_pending()
+		self.assertEqual(done, {"asked": 2, "errors": 1})
+		self.assertEqual(asked, [broken, fine])
+		self.assertEqual((txn_state(broken).status, txn_state(fine).status), ("Pending", "Succeeded"))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX payment re-verify {broken}"}))
+
+
+class TestAFailedTryLeavesNothing(HoldCase):
+	"""P1-8 (audit 2E-2, fix round 1): a charge of an old iyzico checkout with two tokens is asked once per
+	token. A try that failed half way (money recorded, its allocation refused) is undone before the next
+	token is asked: the job's step commit and the staff request's commit never put a half state on record."""
+
+	def setUp(self):
+		super().setUp()
+		from kamra.tex.tests.integration.test_security_regressions import FakeIyzico
+
+		self.gw = FakeIyzico()
+		acc = frappe.get_doc({"doctype": "TEX Payment Provider Account", "label": "iyzico two tokens",
+		                      "property": fx.PROPERTY, "provider": "iyzico", "environment": "Sandbox", "enabled": 1,
+		                      "currencies": "EUR", "api_key": "ak-test", "secret_key": "sk-test"}).insert(
+			ignore_permissions=True)
+		frappe.db.set_value("TEX Payment Method Rule", {"property": fx.PROPERTY, "method": "Card"},
+		                    "provider_account", acc.name)
+		patcher = self.gw.patch()
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def two_tokens(self) -> tuple[dict, str]:
+		"""A booked, started charge whose first token's checkout was paid and whose second is still open."""
+		b = self.book()
+		txn = self.start_payment(b)["transaction"]                       # tok-1
+		frappe.db.set_value("TEX Payment Transaction", txn, "provider_ref", "tok-1 tok-2", update_modified=False)
+		price = f"{D(frappe.db.get_value('TEX Payment Transaction', txn, 'amount')):.2f}"
+		self.gw.answers["tok-1"] = lambda t: self.gw.paid(t, "P1", price=price)
+		self.gw.answers["tok-2"] = {"status": "success", "paymentStatus": "WAITING"}
+		passes(b["booking"], 26)
+		return b, txn
+
+	def refused_once(self):
+		real, calls = pay.allocate, []
+
+		def allocate(*args, **kw):
+			calls.append(1)
+			if len(calls) == 1:
+				frappe.throw("The allocation was refused")
+			return real(*args, **kw)
+
+		return mock.patch.object(pay, "allocate", side_effect=allocate)
+
+	def test_the_job_undoes_a_token_whose_allocation_was_refused_before_it_asks_the_next(self):
+		b, txn = self.two_tokens()
+		with self.refused_once():
+			pay.reverify_pending()
+		self.assertEqual(txn_state(txn).status, "Pending")
+		self.assertEqual(pay.allocated_of(txn), 0)
+		self.assertEqual(self.statuses(b), ("Pending Payment", ["Pending Payment"]))
+
+	def test_staff_reverify_undoes_it_too(self):
+		from kamra.tex.api import payments as payments_api
+
+		_b, txn = self.two_tokens()
+		with self.refused_once():
+			payments_api.reverify(transaction=txn)
+		self.assertEqual(txn_state(txn).status, "Pending")
+		self.assertEqual(pay.allocated_of(txn), 0)
+
 
 class TestIyzicoFraudReview(HoldCase):
 	"""O-18 (audit 2E-2, D-8): iyzico holds a payment in its fraud review (fraudStatus 0; absent or unknown is

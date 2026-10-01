@@ -588,13 +588,31 @@ def complete_retrying(transaction: str, **kw) -> dict:
 	return None
 
 
+REVERIFY_TRY_SAVEPOINT = "tex_reverify_try"
+_NO_SUCH_SAVEPOINT = 1305          # MariaDB: SAVEPOINT x does not exist
+
+
+def _undo_to(save_point: str) -> None:
+	"""Undo what was written since ``save_point``. A deadlock or a lock wait timeout in ``complete_retrying`` rolls
+	the whole transaction back and a step commit ends it: either way the savepoint is gone and the rollback to it
+	fails with "SAVEPOINT does not exist". Then the transaction is rolled back whole: safe where this runs — the
+	job's every charge is a transaction of its own and staff's request has no uncommitted work before it."""
+	try:
+		frappe.db.rollback(save_point=save_point)
+	except Exception as e:
+		if not e.args or e.args[0] != _NO_SUCH_SAVEPOINT:
+			raise
+		frappe.db.rollback()
+
+
 def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool = True,
              step_commit: bool = False) -> tuple[dict | None, Exception | None]:
 	"""Ask the gateway again for a charge by itself (its provider's ``status_query``): each of its questions
 	(``attempts``, default ``status_params`` of its reference, newest first) until one confirms it. A try
 	that failed leaves no message behind (P1-8); ``log``: a try the gateway did not answer is logged.
 	``step_commit`` (the job): a try that changed the charge is on record before the next question, so no
-	lock is held through it (ADR-066). → (the last answer, the last error)."""
+	lock is held through it (ADR-066). A try that failed leaves nothing it wrote half way (money recorded, its
+	allocation refused): it is undone before the next question. → (the last answer, the last error)."""
 	if attempts is None:
 		row = frappe.db.get_value("TEX Payment Transaction", transaction, ["provider", "provider_ref"], as_dict=True)
 		cls = REGISTRY.get(row.provider) if row else None
@@ -607,16 +625,19 @@ def reverify(transaction: str, *, attempts: list[dict] | None = None, log: bool 
 				_commit_step()             # the last question changed the charge: on record before the next
 			state = now_state
 		mark = len(frappe.local.message_log)
+		frappe.db.savepoint(REVERIFY_TRY_SAVEPOINT)
 		try:
 			res = complete_retrying(transaction, params=params)
 		except ProviderError as e:
 			del frappe.local.message_log[mark:]
+			_undo_to(REVERIFY_TRY_SAVEPOINT)
 			error = e                                  # this question is not verifiable: ask the next
 			continue
 		except Exception as e:
 			del frappe.local.message_log[mark:]
 			if transaction_lost(e):
 				raise
+			_undo_to(REVERIFY_TRY_SAVEPOINT)
 			# the gateway did not answer this question: an older checkout may still hold the payment
 			if log:
 				log_exception(f"TEX payment re-verify error {transaction}")
@@ -685,7 +706,7 @@ def reverify_pending(now=None) -> dict:
 			if transaction_lost(e):
 				frappe.db.rollback()         # a deadlock victim's transaction is gone with its savepoint
 			else:
-				frappe.db.rollback(save_point=REVERIFY_SAVEPOINT)
+				_undo_to(REVERIFY_SAVEPOINT)       # gone after a step commit or a retried deadlock: whole
 			del frappe.local.message_log[mark:]
 			log_exception(f"TEX payment re-verify {name}")
 			done["errors"] += 1
