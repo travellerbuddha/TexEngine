@@ -27,13 +27,16 @@ def nights(check_in: date, check_out: date) -> list[date]:
 
 
 def pool_of(room_type: str) -> tuple[str, list[str]]:
-	"""(pool key, room types in the pool). The key is the pool's first room type."""
+	"""(pool key, room types in the pool). The key is the pool's first room type by name, a disabled one included
+	(Y-9, ADR-048): a room type that is no longer sold keeps its rooms, its configured inventory and its live stays in
+	the pool's count, and the key under which the pool's rows (closed nights, adjustments, oversell limits) are kept
+	never moves when a member is disabled. The list always holds ``room_type`` itself."""
 	# an unknown room type (a write that skipped link validation) is a pool of its own, with no rooms
 	prop, pool = frappe.db.get_value("Room Type", room_type, ["property", "tex_inventory_pool"]) or (None, None)
 	if not pool:
 		return room_type, [room_type]
-	members = sorted(frappe.get_all("Room Type", filters={"property": prop, "tex_inventory_pool": pool,
-	                                                      "disabled": 0}, pluck="name"))
+	members = sorted({*frappe.get_all("Room Type", filters={"property": prop, "tex_inventory_pool": pool},
+	                                  pluck="name"), room_type})
 	return members[0], members
 
 

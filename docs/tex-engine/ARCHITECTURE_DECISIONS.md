@@ -1827,6 +1827,20 @@ the inventory lock are migration imports and status moves into a live status.*
 - Writes that bypass validation (`db_set`, SQL, history imports with `ignore_validate`) also
   bypass this guard, as they bypass every other rule.
 - An allotment's cutoff is per contract. Allotments still have no channel dimension (G-41).
+- *Addendum (Part 2F-2, Y-9): a disabled room type stays in its pool.* `pool_of` read only the open members of a
+  pool and keyed it by the first of them: disabling a member dropped its rooms, its configured inventory and its
+  live stays from the count (an oversale), and disabling the key's member slid the key, so the nights closed under it
+  opened again; a pool of disabled types raised `IndexError` in the search. The members are now all of them
+  (`disabled` is not a filter), and the key is the first by name, disabled ones included: it never moves when a member
+  is disabled. A disabled type is not sold (`search_property` skips it) and keeps counting; disabling one of a TEX
+  hotel says how many live stays keep counting (`room_type_validate`). The key is not stored: `tex_inventory_pool` is
+  the pool's name, and `TEX Inventory Day.room_type` is a required Link.
+- *Patch p58* moves what the old rule left under the wrong key. Per hotel and pool whose first member is disabled and
+  another is open: the old key is the first open member, the new one the first of all. Where the old key has rows (the
+  ones in force today) the rows under the new key (the disabled first member's, which nobody reads today) are dropped
+  and the old key's rows move to it (`room_type` and the date-derived `name`); where it has none the disabled first
+  member's rows come back into force as they are (the hotel's last settings before it disabled the type; counted, not
+  touched). A pool of disabled members is left alone. Counts only; a second run moves nothing.
 
 ## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
 **Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day

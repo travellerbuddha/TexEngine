@@ -109,6 +109,8 @@ BEHAVIOUR = {
 	"p55_web_transfer_hold": "test_patches.TestSmallPatches.test_p55_gives_web_transfers_their_hold",
 	"p56_open_ended_versions": "test_patches.TestSmallPatches.test_p56_gives_versions_the_roll_superseded_their_state",
 	"p57_payment_link_unique_key": "test_patches.TestSmallPatches.test_p57_keeps_one_payment_link_per_key",
+	"p58_pool_key_with_disabled_members": "test_patches.TestSmallPatches."
+	                                      "test_p58_rekeys_pools_whose_first_member_is_disabled",
 	"p59_policy_currency": "test_patches.TestReportingPatches.test_p59_syncs_the_policies_and_reports_fixed_amounts_to_review",
 	"p60_promotion_code_key": "test_patches.TestReportingPatches.test_p60_stores_codes_by_their_key_and_reports_a_clash_once",
 	"p61_loyalty_lots": "test_patches.TestSmallPatches.test_p61_closes_lots_that_expired_before_the_lot_model",
@@ -1430,6 +1432,76 @@ class TestSmallPatches(PatchCase):
 		self.assertGreaterEqual(m, 1)
 		again = " ".join(str(x) for x in migrate("p62_expired_hold_flag")["print"].call_args_list)
 		self.assertIn("p62: 0 expired hold(s) flagged (0 of TEX bookings)", again)
+
+	def test_p58_rekeys_pools_whose_first_member_is_disabled(self):
+		"""Y-9 (audit 2F-2, ADR-048): a pool's key is its first member by name, disabled ones included. Where the
+		first member is disabled, the rows were kept under the first OPEN member: they move to the new key (the
+		rows already under it are shadowed: dropped, nobody saw them); where nothing was kept under the first open
+		member, the rows of the disabled first member come back as they are. A pool of disabled types, and one
+		whose first member is open, are not touched."""
+		import re
+
+		from kamra.tex_commercial.doctype.tex_inventory_day.tex_inventory_day import inventory_day_name
+
+		hotel = kamra_hotel("P58 Hotel")
+
+		def room_type(code, pool, disabled=0):
+			return put("Room Type", f"{hotel}-{code}", property=hotel, room_type_code=code, room_type_name=code,
+			           base_price=100, tex_inventory_pool=pool, disabled=disabled)
+
+		def day(key, offset, **values):
+			d = add_days(nowdate(), offset)
+			return put("TEX Inventory Day", inventory_day_name(key, d), property=hotel, room_type=key, inventory_date=d,
+			           base_inventory=values.pop("base_inventory", 0), **values)
+
+		def rows(key):
+			return sorted((str(d), closed, name) for name, d, closed in frappe.db.sql(
+				"SELECT name, inventory_date, closed FROM `tabTEX Inventory Day` WHERE room_type = %s", key))
+
+		# a1 (disabled) comes first by name; the rows were kept under b1, the first open member
+		a1, b1 = room_type("A1", "P1", disabled=1), room_type("B1", "P1")
+		day(b1, 10, closed=1)
+		day(b1, 11, closed=1)
+		day(b1, 12, oversell_limit=2)
+		day(a1, 10)                                                          # shadowed: nobody reads it today
+		day(a1, 20)
+		# a2 (disabled) first, nothing kept under b2: the rows of a2 are the hotel's last settings
+		a2 = room_type("A2", "P2", disabled=1)
+		room_type("B2", "P2")
+		day(a2, 10, closed=1)
+		# a3 is open: key and rows are right
+		a3 = room_type("A3", "P3")
+		room_type("B3", "P3", disabled=1)
+		day(a3, 10, closed=1)
+		# every member disabled: sold by nobody, left alone
+		a4, b4 = room_type("A4", "P4", disabled=1), room_type("B4", "P4", disabled=1)
+		day(b4, 10, closed=1)
+		# no pool at all
+		solo = room_type("A5", None)
+		day(solo, 10, closed=1)
+		moved = [(str(add_days(nowdate(), n)), c) for n, c in ((10, 1), (11, 1), (12, 0))]
+		stamp = frappe.db.get_value("TEX Inventory Day", inventory_day_name(b1, add_days(nowdate(), 10)), "modified")
+
+		seen = self.first_run("p58_pool_key_with_disabled_members")
+		self.assertEqual([(d, c) for d, c, _n in rows(a1)], moved)           # the moved rows, the shadowed ones gone
+		self.assertEqual([n for _d, _c, n in rows(a1)],
+		                 [inventory_day_name(a1, add_days(nowdate(), n)) for n in (10, 11, 12)])   # named for the new key
+		self.assertEqual(rows(b1), [])
+		self.assertEqual(frappe.db.get_value("TEX Inventory Day", inventory_day_name(a1, add_days(nowdate(), 10)),
+		                                     "modified"), stamp)             # modified untouched
+		self.assertEqual(frappe.db.get_value("TEX Inventory Day", inventory_day_name(a1, add_days(nowdate(), 12)),
+		                                     "oversell_limit"), 2)
+		self.assertEqual(len(rows(a2)), 1)                                   # kept as they are
+		self.assertEqual(len(rows(a3)), 1)
+		self.assertEqual((rows(a4), len(rows(b4))), ([], 1))
+		self.assertEqual(len(rows(solo)), 1)
+		line = " ".join(str(c) for c in seen["print"].call_args_list)
+		n, r, k = (int(x) for x in re.search(
+			r"p58: (\d+) pool\(s\) re-keyed \((\d+) row\(s\) moved\), (\d+) pool\(s\) keep the rows of their "
+			r"disabled first member", line).groups())
+		self.assertGreaterEqual((n, r, k), (1, 3, 1))                          # the site may hold other pools
+		again = " ".join(str(x) for x in migrate("p58_pool_key_with_disabled_members")["print"].call_args_list)
+		self.assertIn("p58: 0 pool(s) re-keyed (0 row(s) moved),", again)
 
 	def test_p34_dates_released_coupon_uses(self):
 		at = get_datetime("2026-03-01 10:00:00")

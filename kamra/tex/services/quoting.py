@@ -207,6 +207,8 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 	cells = avail.restriction_cells(property, check_in, check_out)
 	sale_date = sale_at.date()
 	seen_rooms: set[str] = set()
+	# a disabled room type is not sold (Y-9); it keeps counting in its pool (``avail.pool_of``). Read once per hotel
+	disabled_types = set(frappe.get_all("Room Type", filters={"property": property, "disabled": 1}, pluck="name"))
 	# why a room cannot be sold, from the first contract that tried: shown only when no
 	# later contract can price the room either (G-17)
 	fallback: dict[str, list[dict]] = {}
@@ -224,7 +226,7 @@ def search_property(property: str, *, check_in: date, check_out: date, parties: 
 		sell_ccy = (currency or contract_row.sell_currency or terms.currency).upper()
 		room_types = [room_type] if room_type else sorted(terms.rooms)
 		for rt in room_types:
-			if rt not in terms.rooms:
+			if rt not in terms.rooms or rt in disabled_types:
 				continue
 			# the first (market-specific, then highest-priority) contract selling a room wins
 			if rt in seen_rooms:
