@@ -5,7 +5,8 @@ call centre, CRM, payments, integrations) forked from Kamra PMS (AGPL-3.0).
 It is **not a PMS**. Full requirements: `docs/tex-engine/PRODUCT_SPEC.md`.
 
 ## Recover state from (in this order)
-`CLAUDE.md` → `docs/tex-engine/IMPLEMENTATION_STATUS.md` →
+`CLAUDE.md` → `docs/tex-engine/HANDOFF.md` (the work left and how to do it) →
+`docs/tex-engine/IMPLEMENTATION_STATUS.md` →
 `docs/tex-engine/TARGET_ARCHITECTURE.md` → `docs/tex-engine/ARCHITECTURE_DECISIONS.md`
 → `docs/tex-engine/PRODUCT_SPEC.md` → `git log`. Never ask the owner to restate requirements.
 
