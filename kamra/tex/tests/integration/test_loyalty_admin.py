@@ -3,6 +3,7 @@ validated, by the hotels they belong to only; earnings are never rewritten by a 
 change; redemption honours its cap and blackouts; a guest's summary shows the viewer's
 programs only."""
 
+from types import MappingProxyType
 from unittest import mock
 
 import frappe
@@ -332,3 +333,96 @@ class TestExpiry(LoyaltyCase):
 			loyalty.adjust(self.guest, self.club, -50, "correction", property=fx.PROPERTY)
 		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
 		self.assertEqual((self.available(), self.expire_rows()), (20, [-100]))
+
+
+class TestModification(LoyaltyCase):
+	"""O-21 (audit Part 2H-1, ADR-071): changing a stay whose points were spent minted them again. The change
+	reversed the earning and topped the balance up to zero with an Adjust (the points that were spent were
+	"not clawed back"), then earned the whole new amount: 842 spent, a +1 change: 843 points. The stay's own
+	points also counted for its tier. Now the change is exact: the old earning goes, the new one comes, the
+	difference is the balance's; and the tier is read without the stay's own points."""
+
+	CLUB_1 = MappingProxyType({"earn_rules": [{"basis": "MONEY", "rate": "1"}]})      # 842.50 earns 842
+
+	def available(self, guest: str, club: str) -> int:
+		return loyalty.balances(guest, club)["available"]
+
+	def set_total(self, res: str, amount) -> None:
+		"""The stay's total changes (its fingerprint), then the daily job runs, as it does the next night."""
+		frappe.db.set_value("Reservation", res, "tex_total_amount", D(amount))
+		doc = frappe.get_doc("Reservation", res)
+		doc.save(ignore_permissions=True)
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+
+	def spent_stay(self, club: str, session: str) -> tuple[dict, str, str, dict]:
+		"""A stay that earned 842 (matured), all of it spent on another booking of the guest (84.20 of 842.50)."""
+		b, guest = self.paid_stay(session)
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest, club), 842)
+		at_hotel = guest_books(session=f"{session}-hotel", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		# the booking the points are spent on earns points of its own: not part of this scenario
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": at_hotel["booking"], "entry_type": "Earn"})
+		frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		self.assertEqual(loyalty.redeem(guest, at_hotel["booking"], 842, idempotency_key=f"{session}-1")["value"], "84.20")
+		self.assertEqual(self.available(guest, club), 0)
+		return b, guest, res, at_hotel
+
+	def test_changing_a_spent_stay_does_not_mint_its_points_again(self):
+		club = self.create(**self.CLUB_1)
+		_b, guest, res, _hotel = self.spent_stay(club, "o21-a")
+		self.set_total(res, "843.50")                                             # +1
+		self.assertEqual(self.available(guest, club), 1)                          # 843 earned now, 842 were spent
+		self.assertFalse(frappe.db.exists("TEX Loyalty Ledger", {"guest": guest, "entry_type": "Adjust"}))
+		lot = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn",
+		                                                    "status": ("!=", "Reversed")}, fields=["points", "status"])
+		self.assertEqual([(r.points, r.status) for r in lot], [(843, "Available")])    # a matured stay's new lot is mature
+
+	def test_repeated_changes_never_add_up_to_more_than_the_stay_is_worth(self):
+		club = self.create(**self.CLUB_1)
+		_b, guest, res, hotel = self.spent_stay(club, "o21-b")
+		for total, left in (("843.50", 1), ("844.50", 2), ("845.50", 3), ("846.50", 4)):
+			self.set_total(res, total)
+			self.assertEqual(self.available(guest, club), left, total)
+		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):
+			loyalty.redeem(guest, hotel["booking"], 50, idempotency_key="o21-b-2")
+
+	def test_a_stay_changed_down_and_up_again_is_worth_what_it_is_now(self):
+		club = self.create(**self.CLUB_1)
+		_b, guest, res, _hotel = self.spent_stay(club, "o21-c")
+		self.set_total(res, "843.50")
+		self.assertEqual(self.available(guest, club), 1)
+		self.set_total(res, "800.00")                                             # 800 earned, 842 spent: a debt
+		self.assertEqual(self.available(guest, club), -42)
+		self.assertEqual(frappe.db.get_value("Guest", guest, "tex_loyalty_points"), -42)
+		self.set_total(res, "843.50")
+		self.assertEqual(self.available(guest, club), 1)
+
+	def test_a_stay_does_not_raise_its_own_tier(self):
+		club = self.create(earn_rules=[{"basis": "MONEY", "rate": "1"}],
+		                   tiers=[{"tier_name": "Silver", "min_points": 0, "earn_multiplier": "1"},
+		                          {"tier_name": "Gold", "min_points": 800, "earn_multiplier": "2"}])
+		b, guest = self.paid_stay("o21-d")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest, club), 842)                        # earned as Silver (0 before it)
+		self.set_total(res, "843.50")                                             # its own 842 made the guest Gold
+		self.assertEqual(self.available(guest, club), 843)                        # still Silver: 1687 as Gold
+
+	def test_changing_a_stay_whose_points_expired_takes_the_expiry_with_the_earning(self):
+		club = self.create(**self.CLUB_1)
+		b, guest = self.paid_stay("o21-e")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		earn = frappe.db.get_value("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn"})
+		frappe.db.set_value("TEX Loyalty Ledger", earn, "expires_on", add_days(nowdate(), -1))
+		loyalty.mature_and_expire()
+		self.assertEqual((self.available(guest, club), frappe.db.get_value("TEX Loyalty Ledger", earn, "status")),
+		                 (0, "Expired"))
+		self.set_total(res, "843.50")
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", earn, "status"), "Reversed")
+		expiry = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Expire"},
+		                        fields=["points", "status"])
+		self.assertEqual([(r.points, r.status) for r in expiry], [(-842, "Reversed")])    # taken away with its lot
+		self.assertEqual(self.available(guest, club), 843)

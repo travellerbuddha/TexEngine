@@ -182,17 +182,21 @@ def on_reservation_change(doc) -> None:
 	if existing and all(e.stay_fingerprint in (fingerprint, None, "") for e in existing):
 		return                  # the stay is unchanged (an earning made before G-24 is kept as it was)
 	prog = frappe.get_cached_doc("TEX Loyalty Program", program)
-	tier = tier_of(prog, balances(doc.guest, program, lock=True)["lifetime_earned"])
+	# the stay's own earnings are about to be replaced: they do not make the guest's tier (O-21, ADR-071 §6)
+	own = sum(int(e.points) for e in existing if e.status in FINAL)
+	tier = tier_of(prog, balances(doc.guest, program, lock=True)["lifetime_earned"] - own)
 	points, lines = points_for(prog, doc, tier.earn_multiplier if tier else 1)
+	# the new earning takes the old one's place, in its state: a stay that had matured stays mature
+	status = "Available" if any(e.status in FINAL for e in existing) else "Pending"
 	for e in existing:
-		_reverse(e, reason="reservation modified")
+		_reverse(e, reason="reservation modified", floor=False)       # exact: spent points are not topped up
 	if points <= 0:
 		_sync_guest(doc.guest)
 		return
 	avail_on = add_days(getdate(doc.check_out_date), int(prog.pending_days or 0))
 	frappe.get_doc({
 		"doctype": "TEX Loyalty Ledger", "program": program, "guest": doc.guest, "entry_type": "Earn",
-		"points": points, "status": "Pending", "available_on": avail_on,
+		"points": points, "status": status, "available_on": avail_on,
 		"expires_on": add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None,
 		"booking": doc.tex_booking, "reservation": doc.name, "property": doc.property,
 		"reason": f"stay {doc.check_in_date}→{doc.check_out_date}" + (f" · tier {tier.tier_name}" if tier else ""),
@@ -203,17 +207,26 @@ def on_reservation_change(doc) -> None:
 	_sync_guest(doc.guest)
 
 
-def _reverse(entry, *, reason: str) -> None:
-	"""Take an earning back. Points already spent are not clawed back below zero: the
-	balance after reversal is max(0, balance − points), topped up by an Adjust entry."""
+def _reverse(entry, *, reason: str, floor: bool = True) -> None:
+	"""Take an earning back, with the Expire rows that took points of it (ADR-071 §5). ``floor``: a stay that
+	did not happen (cancelled, no-show) never takes the balance below zero: points already spent are not
+	clawed back, and an Adjust entry tops the balance up. A stay that changed is exact (``floor=False``): its
+	new earning replaces this one, and what was spent is the balance's, which may be below zero until the
+	next earnings close it (``lots.plan`` spends such a debt first)."""
 	src = frappe.get_doc("TEX Loyalty Ledger", entry.name)
 	was_final = src.status in FINAL
-	before = balances(src.guest, src.program, lock=True)["available"] if was_final else 0
+	expiry = frappe.get_all("TEX Loyalty Ledger", filters={
+		"guest": src.guest, "program": src.program, "entry_type": "Expire", "status": ("in", list(FINAL)),
+		"reason": lots.marker(src.name)}, fields=["name", "points"]) if was_final else []
+	before = balances(src.guest, src.program, lock=True)["available"] if was_final and floor else 0
 	frappe.db.set_value("TEX Loyalty Ledger", src.name, {"status": "Reversed",
 	                                                    "reason": f"{src.reason or ''} · reversed: {reason}"[:500]})
-	if was_final and before - int(src.points) < 0:
+	for e in expiry:
+		frappe.db.set_value("TEX Loyalty Ledger", e.name, "status", "Reversed")
+	gone = int(src.points) + sum(int(e.points) for e in expiry)         # what leaves the balance: earned, less expired
+	if was_final and floor and before - gone < 0:
 		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": src.program, "guest": src.guest,
-		                "entry_type": "Adjust", "points": int(src.points) - before, "status": "Available",
+		                "entry_type": "Adjust", "points": gone - before, "status": "Available",
 		                "booking": src.booking, "reservation": src.reservation, "property": src.property,
 		                "reason": f"{reason}: reversal limited to unspent points",
 		                "actor": frappe.session.user}).insert(ignore_permissions=True)
