@@ -30,7 +30,8 @@ PYSEC-2026-3493 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0
 PYSEC-2026-3494 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
 PYSEC-2026-3495 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
 PYSEC-2026-3496 | pillow 12.2.0 | fix 12.3.0 outside Frappe's pin Pillow~=12.2.0; comes with Frappe | review 2026-12-31
-# pypdf: Frappe pins pypdf==6.13.3 (fixes 6.14.0 to 6.16.1).
+# pypdf: Frappe pins pypdf==6.13.3 (fixes 6.14.0 to 6.19.0). TEX code does not import pypdf; the 2026-10-01 batch
+# (PYSEC-2026-4153…4160) is long runtimes / large memory on crafted PDFs, fixed in 6.17.0 to 6.19.0.
 PYSEC-2026-3610 | pypdf 6.13.3 | fix 6.14.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
 PYSEC-2026-3611 | pypdf 6.13.3 | fix 6.14.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
 PYSEC-2026-3612 | pypdf 6.13.3 | fix 6.14.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
@@ -41,6 +42,14 @@ PYSEC-2026-3910 | pypdf 6.13.3 | fix 6.16.1 outside Frappe's pin pypdf==6.13.3; 
 PYSEC-2026-3911 | pypdf 6.13.3 | fix 6.16.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
 PYSEC-2026-3912 | pypdf 6.13.3 | fix 6.15.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
 PYSEC-2026-3913 | pypdf 6.13.3 | fix 6.16.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4153 | pypdf 6.13.3 | fix 6.18.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4154 | pypdf 6.13.3 | fix 6.18.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4155 | pypdf 6.13.3 | fix 6.18.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4156 | pypdf 6.13.3 | fix 6.18.1 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4157 | pypdf 6.13.3 | fix 6.19.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4158 | pypdf 6.13.3 | fix 6.17.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4159 | pypdf 6.13.3 | fix 6.19.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
+PYSEC-2026-4160 | pypdf 6.13.3 | fix 6.19.0 outside Frappe's pin pypdf==6.13.3; comes with Frappe | review 2026-12-31
 # setuptools: payments (develop) pins setuptools==80.9.0 (fix 83.0.0); used to build, not at run time.
 PYSEC-2026-3447 | setuptools 80.9.0 | fix 83.0.0 outside payments' pin setuptools==80.9.0; build tool, comes with payments | review 2026-12-31
 # sqlparse: Frappe pins sqlparse~=0.5.5 (fix 0.6.0).
