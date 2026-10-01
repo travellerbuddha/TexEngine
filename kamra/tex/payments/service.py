@@ -26,6 +26,7 @@ from kamra.tex.security import scope
 from kamra.tex.security.audit import audit, log_exception
 from kamra.tex.security.keys import site_secret
 from kamra.tex.services import holds
+from kamra.tex.services.refusals import refusal
 from kamra.tex.services.txn import DEADLOCK_ATTEMPTS, note_committed_step, transaction_lost, undo_to
 
 
@@ -462,6 +463,12 @@ def start_payment(*, property: str, amount, currency: str, provider_account: str
 		txn.save(ignore_permissions=True)
 	_end_lease(txn, stamp)
 	_commit_step()
+	if txn.status != "Pending":
+		# a callback settled the reused charge while the gateway made this checkout (an earlier checkout was paid,
+		# LO-04): the new checkout is never handed out. Paid, it would be a second capture that ``complete`` answers
+		# as a replay of the settled charge, and TEX would never record its money
+		frappe.throw(_("This payment was already processed ({0}).").format(txn.status),
+		             refusal("PAYMENT_ALREADY_PROCESSED", status=txn.status))
 	return {"transaction": txn.name, "kind": checkout.kind, "url": checkout.url, "fields": checkout.fields,
 	        "instructions": checkout.instructions, "sandbox": provider.sandbox}
 

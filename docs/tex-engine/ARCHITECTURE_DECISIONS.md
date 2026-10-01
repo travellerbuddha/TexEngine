@@ -9352,6 +9352,11 @@ the versions the roll superseded the state their contract's later publishes woul
 - *Points returned (Part 2H-2, ADR-071 §4).* A cancellation's or an expiry's return of points is money going out: booking →
   rooms → the guests who may have spent → their Loyalty charges (name order) → burn and ledger rows. A cycle needs one
   Loyalty payment shared by two bookings (a staff transfer): a clean rollback, run again by the wrappers or the job's next run.
+- *A charge settled during its checkout (Part 2K-1, LO-04).* Step (c) reads the charge under its lock after the gateway
+  answered; when a callback settled it meanwhile (an earlier checkout of a reused charge was paid), the new checkout's
+  reference is recorded and the lease ended as before, but the checkout is never handed out: the start answers "already
+  processed" (`PAYMENT_ALREADY_PROCESSED`). Paid, it would be a second capture that `complete` answers as a replay of
+  the settled charge.
 
 ## ADR-067 Policy money: fixed amounts' currency, non-refundable policies, infants (audit Part 2C-1)
 - *Refunds (Y-4).* A price is refundable only when its rate plan row and its cancellation policy both say so

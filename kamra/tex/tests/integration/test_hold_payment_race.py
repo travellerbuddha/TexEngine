@@ -2173,6 +2173,38 @@ class TestIyzicoFraudReview(HoldCase):
 		self.assertEqual(self.statuses(b), ("Cancelled", ["Cancelled"]))
 
 
+class TestAChargeSettledDuringItsCheckout(HoldCase):
+	"""LO-04 (audit 2K-1): a reused Pending charge that a callback settles while the gateway makes its new checkout
+	(the guest paid the first checkout meanwhile) hands out no new checkout: paid, it would be a second capture that
+	``complete`` answers as a replay and TEX never records. Refused as already processed, the lease ended."""
+
+	def test_a_charge_paid_meanwhile_gets_no_new_checkout(self):
+		from kamra.tex.payments.providers.simple import MockProvider
+		from kamra.tex.services import refusals
+
+		b = self.book()
+		first = self.start_payment(b)
+		row = frappe.db.get_value("TEX Payment Transaction", first["transaction"],
+		                          ["amount", "currency", "provider_account", "return_url"], as_dict=True)
+		real = MockProvider.create_checkout
+
+		def gateway(provider, intent):
+			out = real(provider, intent)
+			self.pays(first)                    # the first checkout's callback settles the charge meanwhile
+			return out
+
+		with mock.patch.object(MockProvider, "create_checkout", gateway), \
+				self.assertRaisesRegex(frappe.ValidationError, "already processed") as cm:
+			# the same start again (another tab): the Pending charge is reused and asked for a new checkout
+			pay.start_payment(property=fx.PROPERTY, amount=row.amount, currency=row.currency,
+			                  provider_account=row.provider_account, booking=b["booking"], description="x", customer={},
+			                  return_url=row.return_url, idempotency_key=f"book:{b['booking']}:{b['due_now']}:1")
+		self.assertEqual(refusals.code_of(cm.exception), "PAYMENT_ALREADY_PROCESSED")
+		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", first["transaction"],
+		                                     ["status", "checkout_started_at"]), ("Succeeded", None))
+		self.assertEqual(self.statuses(b), ("Confirmed", ["Confirmed"]))
+
+
 class TestRefusedAfterTheHold(HoldCase):
 	"""P1-9 (audit 2E-2): once a booking's hold is over with no attempt open, the refused retry lets its rooms
 	go at once (the expiry, committed before the refusal), not at the next 5-minute run; a recovery link is
