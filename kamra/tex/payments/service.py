@@ -1194,6 +1194,13 @@ def _taken_off(txn, refund_name: str) -> tuple[str | None, D]:
 	return (row.booking, from_db(row.amount, row.currency)) if row else (None, ZERO)
 
 
+def _refuse_cash_for_points(txn) -> None:
+	"""A charge paid with loyalty points is never refunded as money, by anyone, TEX included (O-20, D-16):
+	the points come back as points when the booking is cancelled or expires (``points_back``)."""
+	if txn.provider == "Loyalty":
+		frappe.throw(_("Points are given back as points when the booking is cancelled, never as money."))
+
+
 def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booking: str | None = None,
            _system: bool = False, durable: bool = False, on_record=None, relock=None, on_conflict=None,
            _late: bool = False) -> dict:
@@ -1238,6 +1245,7 @@ def refund(transaction: str, *, amount, reason: str, idempotency_key: str, booki
 			frappe.throw(_("A refund TEX makes by itself names the booking it comes from."))
 	else:
 		scope.require("payment.refund", txn.property)
+	_refuse_cash_for_points(txn)
 	if not (reason or "").strip():
 		frappe.throw(_("A refund reason is required."))
 	if booking and frappe.db.get_value("TEX Booking", booking, "property") != txn.property:
@@ -1441,6 +1449,7 @@ def refund_outside(transaction: str, *, amount, reason: str, reference: str, ide
 	txn = frappe.get_doc("TEX Payment Transaction", transaction, for_update=True)
 	if not _system:
 		scope.require("payment.refund", txn.property)
+	_refuse_cash_for_points(txn)
 	if not (reason or "").strip():
 		frappe.throw(_("A refund reason is required."))
 	if not (reference or "").strip():

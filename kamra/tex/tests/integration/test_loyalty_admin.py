@@ -17,6 +17,7 @@ from kamra.tex.api import loyalty as loyalty_api
 from kamra.tex.api import public
 from kamra.tex.crm import loyalty
 from kamra.tex.money import D
+from kamra.tex.payments import service as pay
 from kamra.tex.security import scope
 from kamra.tex.tests.integration import fixtures as fx
 from kamra.tex.tests.integration.test_commercial_flows import guest_books, setup_site_and_payments
@@ -695,3 +696,46 @@ class TestEarnMatrix(LoyaltyCase):
 		self.create(program_name="TRY club", currency="TRY")
 		with self.assertRaisesRegex(frappe.ValidationError, "can only be redeemed on TRY bookings"):
 			loyalty.redeem(guest, b["booking"], 50, idempotency_key="g66-3")
+
+
+class TestPointsBack(LoyaltyCase):
+	"""O-20 (audit Part 2H-2, D-16, ADR-071 §4): a booking that is cancelled or expires gives back as points,
+	never as money, what its Loyalty charges hold beyond what it now costs. Before: nothing gave a burn back
+	(867 earned, 300 spent, the booking cancelled: 567), and the points' money stayed on the cancelled booking,
+	where staff with payment.refund could record it as "refunded in cash"."""
+
+	def setUp(self):
+		super().setUp()
+		self.club = self.create(pending_days=0)                                  # 50 %, a point is 0.10 EUR
+
+	def available(self, guest: str) -> int:
+		return loyalty.balances(guest, self.club)["available"]
+
+	def give(self, guest: str, points: int, *, entry_type="Adjust", **kw) -> str:
+		return frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": self.club, "guest": guest,
+		                       "entry_type": entry_type, "points": points, "status": "Available", "reason": "o20", **kw}
+		                      ).insert(ignore_permissions=True).name
+
+	def spend(self, session: str, points: int = 300, *, method: str = "Pay at Hotel", gift: int = 1000):
+		"""A booking of a guest who holds ``gift`` points, and ``points`` of them spent on it."""
+		booking = guest_books(session=session, method=method)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", booking["booking"], "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": booking["booking"], "entry_type": "Earn"})
+		if own:                                                  # the booking's own earning is not part of this scenario
+			frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		self.give(guest, gift)
+		red = loyalty.redeem(guest, booking["booking"], points, idempotency_key=f"{session}-pts")
+		return booking, guest, red
+
+	def test_points_are_never_paid_back_as_money(self):
+		hotel, _guest, red = self.spend("o20-cash")
+		for call in (lambda: pay.refund_outside(red["transaction"], amount="10.00", reason="cash back", reference="R-1",
+		                                        idempotency_key="o20-cash-1", booking=hotel["booking"]),
+		             lambda: pay.refund(red["transaction"], amount="10.00", reason="back", idempotency_key="o20-cash-2",
+		                                booking=hotel["booking"]),
+		             lambda: pay.refund(red["transaction"], amount="10.00", reason="back", idempotency_key="o20-cash-3",
+		                                booking=hotel["booking"], _system=True)):
+			with self.assertRaisesRegex(frappe.ValidationError, "never as money"):
+				call()
+		self.assertEqual(frappe.db.count("TEX Payment Transaction", {"parent_transaction": red["transaction"]}), 0)
