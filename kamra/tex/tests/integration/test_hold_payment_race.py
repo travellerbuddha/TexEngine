@@ -857,7 +857,8 @@ class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
 		self.b, self.c = b["booking"], started["transaction"]
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection needs committed fixtures
 
-	def test_a_refunds_outcome_judges_the_booking_as_it_is_now(self):
+	def refund_while_it_expires(self, *, send_mail: bool = False) -> dict:
+		"""40 of C refunded (durable) while the expiry job, another connection, ends the booking. → the refund."""
 		import traceback
 
 		from kamra.tex.payments.providers.simple import MockProvider
@@ -872,7 +873,7 @@ class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
 			frappe.connect()
 			try:
 				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
-				booking.expire_booking(self.b, force=True, send_mail=False)
+				booking.expire_booking(self.b, force=True, send_mail=send_mail)
 				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the job's own transaction
 			except Exception:
 				frappe.db.rollback()
@@ -896,12 +897,34 @@ class TestRefundOutcomeOnABookingThatExpiredMeanwhile(IntegrationTestCase):
 		finally:
 			frappe.flags.in_test = True
 		self.assertEqual(errors, [])
+		return out
+
+	def test_a_refunds_outcome_judges_the_booking_as_it_is_now(self):
+		out = self.refund_while_it_expires()
 		self.assertEqual(out["status"], "Succeeded")
 		self.assertIsNone(frappe.db.get_value("TEX Payment Transaction", out["refund"], "booking"))  # off no booking
 		now = frappe.db.get_value("TEX Booking", self.b, ["status", "paid_amount"], as_dict=True, for_update=True)
 		self.assertEqual((now.status, D(now.paid_amount)), ("Cancelled", D(0)))
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", self.c, "reconciliation", for_update=True),
 		                 "Action Required")
+
+	def test_a_charge_the_expiry_flagged_meanwhile_is_flagged_once_with_both_causes(self):
+		"""LO-16 (audit 2K-1): the expiry put C in reconciliation while the refund's request still read the older
+		view; the refund's outcome reads C as it is now (a locking read): one ``payment.reconciliation_required``,
+		one notice to the team, and its cause added to C's note."""
+		told = []
+		with mock.patch("kamra.tex.services.notify.team_notice", lambda txn, *a, **kw: told.append(txn.name)), \
+				mock.patch("kamra.tex.services.notify.payment_after_expiry"):
+			self.assertEqual(self.refund_while_it_expires(send_mail=True)["status"], "Succeeded")
+		self.assertEqual(told, [self.c])
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- read what both connections committed
+		self.assertEqual(frappe.db.count("TEX Audit Event", {"action": "payment.reconciliation_required",
+		                                                     "reference_name": self.c}), 1)
+		row = frappe.db.get_value("TEX Payment Transaction", self.c, ["reconciliation", "reconciliation_note"],
+		                          as_dict=True)
+		self.assertEqual(row.reconciliation, "Action Required")
+		self.assertIn("whose hold ended", row.reconciliation_note)                       # the expiry's cause
+		self.assertIn("was on its way when the booking ended", row.reconciliation_note)  # and the refund's
 
 
 class TestHoldPolicy(HoldCase):
