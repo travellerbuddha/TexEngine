@@ -6,7 +6,7 @@ programs only."""
 from unittest import mock
 
 import frappe
-from frappe.utils import add_days
+from frappe.utils import add_days, nowdate
 
 from kamra.tex.api import crm as crm_api
 from kamra.tex.api import loyalty as loyalty_api
@@ -258,3 +258,77 @@ class TestExtraEarning(LoyaltyCase):
 		points, lines = loyalty.points_for(prog, res, 1)
 		self.assertEqual(points, 0)
 		self.assertIn("not a whole number", lines[0]["note"])
+
+
+class TestExpiry(LoyaltyCase):
+	"""Y-11 and O-22 (audit Part 2H-1, ADR-071): points are used first-to-expire first, and an expiry takes
+	only what is left of its lot. The job used to take ``min(lot, balance)`` whenever it ran: a spent lot
+	took a later lot's points, or the points of a lot that expires years later."""
+
+	def setUp(self):
+		super().setUp()
+		self.club = self.create()
+		self.guest = frappe.get_doc({"doctype": "Guest", "first_name": "Lots", "last_name": "Test",
+		                             "email": "h1-lots@example.com"}).insert(ignore_permissions=True).name
+
+	def row(self, entry_type, points, status="Available", expires_on=None, available_on=None, reason="h1") -> str:
+		return frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": self.club, "guest": self.guest,
+		                       "entry_type": entry_type, "points": points, "status": status, "property": fx.PROPERTY,
+		                       "expires_on": expires_on, "available_on": available_on, "reason": reason}
+		                      ).insert(ignore_permissions=True).name
+
+	def available(self) -> int:
+		return loyalty.balances(self.guest, self.club)["available"]
+
+	def expire_rows(self) -> list[int]:
+		return frappe.get_all("TEX Loyalty Ledger", filters={"guest": self.guest, "entry_type": "Expire"},
+		                      pluck="points", order_by="creation asc, name asc")
+
+	def test_y11_a_lot_spent_in_full_takes_nothing_from_a_later_lot(self):
+		past, later = add_days(nowdate(), -30), add_days(nowdate(), 400)
+		a = self.row("Earn", 100, expires_on=past, available_on=add_days(nowdate(), -60))
+		self.row("Burn", -100, "Used")
+		loyalty.mature_and_expire()                                       # A is spent: nothing to take
+		self.row("Earn", 80, "Pending", expires_on=later, available_on=add_days(nowdate(), -1))
+		loyalty.mature_and_expire()                                       # B matures
+		self.assertEqual(self.available(), 80)
+		self.assertEqual(self.expire_rows(), [])
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", a, "status"), "Expired")
+
+	def test_o22_spent_points_come_from_the_lot_that_expires_first(self):
+		self.row("Earn", 100, expires_on=add_days(nowdate(), -30), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 100, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		self.row("Burn", -100, "Used")
+		loyalty.mature_and_expire()
+		self.assertEqual(self.available(), 100)
+		self.assertEqual(self.expire_rows(), [])
+
+	def test_a_partly_spent_lot_expires_what_is_left_and_only_once(self):
+		a = self.row("Earn", 100, expires_on=add_days(nowdate(), -30), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 100, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		self.row("Burn", -60, "Used")
+		out = loyalty.mature_and_expire()
+		self.assertEqual((self.available(), self.expire_rows(), out["expired_points"]), (100, [-40], 40))
+		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", a, "status"), "Expired")
+		self.assertEqual(frappe.db.get_value("Guest", self.guest, "tex_loyalty_points"), 100)
+		again = loyalty.mature_and_expire()                               # a closed lot is not looked at again
+		self.assertEqual((self.available(), self.expire_rows(), again["expired_points"]), (100, [-40], 0))
+
+	def test_points_past_their_expiry_cannot_be_spent_before_the_daily_job_runs(self):
+		at_hotel = guest_books(session="h1-expired", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		self.guest = frappe.db.get_value("TEX Booking", at_hotel["booking"], "booker_guest")
+		self.row("Earn", 100, expires_on=add_days(nowdate(), -1), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 20, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):
+			loyalty.redeem(self.guest, at_hotel["booking"], 50, idempotency_key="h1-exp-1")
+		self.assertEqual((self.available(), self.expire_rows()), (20, [-100]))
+
+	def test_a_negative_adjustment_cannot_take_points_that_expired(self):
+		self.row("Earn", 100, expires_on=add_days(nowdate(), -1), available_on=add_days(nowdate(), -60))
+		self.row("Earn", 20, expires_on=add_days(nowdate(), 400), available_on=add_days(nowdate(), -50))
+		frappe.set_user(self.desk)  # nosemgrep: frappe-setuser -- an agent with crm.edit
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot go negative"):
+			loyalty.adjust(self.guest, self.club, -50, "correction", property=fx.PROPERTY)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- back
+		self.assertEqual((self.available(), self.expire_rows()), (20, [-100]))

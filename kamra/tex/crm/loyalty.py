@@ -18,6 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, add_months, getdate, now_datetime, nowdate
 
+from kamra.tex.crm import lots
 from kamra.tex.money import ZERO, D, db_dec, from_db, quantize, to_str
 from kamra.tex.security import scope
 from kamra.tex.security.audit import audit
@@ -227,33 +228,77 @@ def _sync_guest(guest: str) -> None:
 	frappe.db.set_value("Guest", guest, "tex_loyalty_points", total, update_modified=False)
 
 
-def mature_and_expire(today: date | None = None) -> dict:
-	"""Scheduler (daily): Pending → Available on ``available_on``; expire earnings past
-	``expires_on`` (never more than the remaining balance)."""
+def _commit() -> None:
+	"""A scheduler job's batch is its own unit of work in production; tests keep one transaction."""
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- scheduler job batch boundary
+
+
+# the rows ``lots.plan`` reads: a guest's final rows in one program, by ``tex_ledger_guest_program``; locked,
+# so what is planned is what is committed now
+LEDGER_ROWS = """SELECT name, entry_type, points, status, available_on, expires_on, creation, reason, booking, property
+	FROM `tabTEX Loyalty Ledger` WHERE guest=%s AND program=%s AND status IN ('Available', 'Used', 'Expired')
+	ORDER BY creation ASC, name ASC FOR UPDATE"""
+
+
+def settle(guest: str, program: str, today: date | None = None) -> dict:
+	"""Close the guest's lots that are due and take what is left of them (ADR-071), in one step under the
+	guest's lock: whoever writes the guest's ledger locks the guest first, then these rows. The daily job
+	settles every guest with a lot past its expiry; a redemption and a negative adjustment settle first, so
+	points past their expiry are never spent before the job has run."""
+	from kamra.tex.crm.service import require_live_guest
+
 	today = today or getdate(nowdate())
-	matured = expired = 0
+	require_live_guest(guest)
+	rows = frappe.db.sql(LEDGER_ROWS, (guest, program), as_dict=True)  # nosemgrep -- a constant statement
+	plan = lots.plan(rows, today)
+	by_name = {r.name: r for r in rows}
+
+	def expire(points: int, reason: str, like: dict | None = None) -> None:
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": program, "guest": guest, "entry_type": "Expire",
+		                "points": -points, "status": "Expired", "booking": like and like.booking,
+		                "property": like and like.property, "reason": reason}).insert(ignore_permissions=True)
+
+	for lot, points in plan["expire"]:
+		expire(points, lots.marker(lot), by_name[lot])
+	if plan["excess"]:
+		expire(plan["excess"], "points returned after their lot expired")
+	for lot in plan["close"]:
+		frappe.db.set_value("TEX Loyalty Ledger", lot, "status", "Expired", update_modified=False)
+	if plan["expire"] or plan["excess"] or plan["close"]:
+		_sync_guest(guest)
+	return {"expired": sum(p for _lot, p in plan["expire"]) + plan["excess"], "closed": len(plan["close"])}
+
+
+def mature_and_expire(today: date | None = None) -> dict:
+	"""Scheduler (daily): Pending → Available on ``available_on``; then each guest with a lot past its
+	``expires_on`` is settled (``settle``): the lot's unspent points expire, first to expire first used."""
+	today = today or getdate(nowdate())
+	matured = expired = closed = 0
 	# every earning TEX writes has its date; a Pending one without it (Desk) has nothing to wait for
 	for name in frappe.get_all("TEX Loyalty Ledger", filters={"status": "Pending", "entry_type": "Earn"},
 	                           or_filters=[["available_on", "is", "not set"], ["available_on", "<=", today]],
 	                           pluck="name"):
 		frappe.db.set_value("TEX Loyalty Ledger", name, "status", "Available")
 		matured += 1
-	# an earning without an expiry date never expires (NEW-1, ADR-064)
-	for e in frappe.get_all("TEX Loyalty Ledger", filters=[["status", "=", "Available"], ["entry_type", "=", "Earn"],
-	                                                       ["expires_on", "is", "set"], ["expires_on", "<", today]],
-	                        fields=["name", "guest", "program", "points", "booking", "property"]):
-		if frappe.db.exists("TEX Loyalty Ledger", {"entry_type": "Expire", "reason": f"expiry of {e.name}"}):
+	# a lot without an expiry date (NULL) never expires (NEW-1, ADR-064); one that has closed is Expired, so
+	# the day after it expires it is not looked at again
+	due = frappe.db.sql("""SELECT DISTINCT guest, program FROM `tabTEX Loyalty Ledger`
+		WHERE entry_type = 'Earn' AND status = 'Available' AND expires_on IS NOT NULL AND expires_on < %s
+		ORDER BY guest, program""", today)
+	for guest, program in due:
+		savepoint = "loyalty_settle"
+		frappe.db.savepoint(savepoint)
+		try:
+			done = settle(guest, program, today)
+		except Exception:
+			frappe.db.rollback(save_point=savepoint)      # one guest's trouble (a profile merged away) is not the rest's
+			frappe.log_error(title=f"Loyalty expiry failed: {guest} / {program}")
 			continue
-		bal = balances(e.guest, e.program, lock=True)["available"]
-		take = max(0, min(int(e.points), bal))
-		if take:
-			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": e.program, "guest": e.guest,
-			                "entry_type": "Expire", "points": -take, "status": "Expired", "booking": e.booking,
-			                "property": e.property,
-			                "reason": f"expiry of {e.name}"}).insert(ignore_permissions=True)
-			expired += take
-		_sync_guest(e.guest)
-	return {"matured": matured, "expired_points": expired}
+		expired += done["expired"]
+		closed += done["closed"]
+		_commit()
+	return {"matured": matured, "expired_points": expired, "closed": closed}
 
 
 def _entry_hotels(entries: list[dict]) -> dict[str, str]:
@@ -352,6 +397,8 @@ def adjust(guest: str, program: str, points: int, reason: str, property: str | N
 	from kamra.tex.crm.service import require_live_guest
 
 	require_live_guest(guest)
+	if points < 0:
+		settle(guest, program)                      # points past their expiry are not there to take (ADR-071)
 	if points < 0 and balances(guest, program, lock=True)["available"] + points < 0:
 		frappe.throw(_("The balance cannot go negative."))
 	doc = frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": program, "guest": guest,
@@ -441,6 +488,7 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	if not frappe.db.sql("SELECT name FROM `tabGuest` WHERE name=%s FOR UPDATE", guest):
 		frappe.throw(_("Guest {0} no longer exists: it was merged into another profile or removed.").format(guest),
 		             frappe.DoesNotExistError)
+	settle(guest, program)                          # points past their expiry cannot be spent (ADR-071)
 	if balances(guest, program, lock=True)["available"] < points:
 		frappe.throw(_("Not enough points."))
 	value = quantize(db_dec(prog.point_value) * points, b.currency)
