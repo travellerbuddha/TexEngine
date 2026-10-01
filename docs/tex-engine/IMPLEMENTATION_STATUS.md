@@ -1529,3 +1529,9 @@ FINAL_GAP_AUDIT. Critical means wrong money or a security hole.
 - G-97 **COMPLETE**: TEX Contract Version, Markup Rule and Pricing Policy are System Manager's in Desk / REST (spec `COST`, p66); cost audit events hidden from non-platform users in Desk / REST and, by capability, in the TEX audit log's hotel view · `TestCostRecordsInDesk`, `TestP66CostDocTypesSystemOnly`, `test_audit_trail`.
 - O-37 **COMPLETE**: p63 masks every Password field in the change history (changed, child row_changed) · `TestP63VersionedPasswords`.
 - NEW-5 **COMPLETE**: `supply-chain.yml` — gitleaks (self-tested), npm audit-ci, pip-audit with a reviewed ignore list · the workflow's three jobs.
+
+## 6D2. Audit Part 2D-2 (2026-10-01)
+
+- 2D-1 leftovers **COMPLETE**: withdraw reads only under its locks, a version without a start is on sale not scheduled, the quote endpoints retry a deadlock; the `channels.spec.ts:127` flake is a server-load network error, reproduced under CPU stress, not fixed (Kalanlar in PR) · `test_concurrency.TestConcurrentWithdrawLocks`, `test_null_dates`, `test_hold_payment_race.TestDeadlockRetries`.
+- O-11 **COMPLETE**: one live or scheduled FX policy per scope and pair (activation refused, `SERIAL_ACTIVATION`); `fx.choose_policy` raises `FX_POLICY_AMBIGUOUS` for two in one scope · `test_fx_snapshot.TestOnePolicyPerPair`, unit `TestChoosePolicy`.
+- O-12 **COMPLETE**: a dated manual rate bridges a stale or missing provider rate (policy margin on top), entered per hotel with `fx.manual_rate` (p70), audited, recorded as `bridged_from`, WARN `fx_bridged` · unit `TestManualBridge`/`TestFxBridged`, `test_fx_snapshot.TestManualBridge`, `test_system_status`, e2e `fx-manual-rate`.
