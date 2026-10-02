@@ -189,9 +189,9 @@
   "many": "{count} дней",
   "other": "{count} дня"
  },
- "inventory.nav.extras": "Доп. услуги",
- "inventory.nav.label": "Разделы инвентаря",
- "inventory.nav.rooms": "Номера",
+ "inventory.nav.extras": "Ограниченные доп. услуги",
+ "inventory.nav.label": "Разделы цен и наличия",
+ "inventory.nav.rooms": "Календарь",
  "inventory.next": {
   "one": "Следующий {count} день",
   "few": "Следующие {count} дня",
@@ -279,5 +279,6 @@
  "inventory.window.from": "в продаже с {d}",
  "inventory.window.max_advance": "не более чем за {n} дн.",
  "inventory.window.min_advance": "не менее чем за {n} дн.",
- "inventory.window.to": "в продаже до {d}"
+ "inventory.window.to": "в продаже до {d}",
+ "inventory.nav.restrictions": "Список ограничений"
 }

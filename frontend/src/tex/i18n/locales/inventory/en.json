@@ -177,9 +177,9 @@
   "one": "{count} day",
   "other": "{count} days"
  },
- "inventory.nav.extras": "Extras",
- "inventory.nav.label": "Inventory views",
- "inventory.nav.rooms": "Rooms",
+ "inventory.nav.extras": "Limited extras",
+ "inventory.nav.label": "Rates & availability views",
+ "inventory.nav.rooms": "Calendar",
  "inventory.next": {
   "one": "Next day",
   "other": "Next {count} days"
@@ -257,5 +257,6 @@
  "inventory.window.from": "sold from {d}",
  "inventory.window.max_advance": "at most {n} days ahead",
  "inventory.window.min_advance": "at least {n} days ahead",
- "inventory.window.to": "sold until {d}"
+ "inventory.window.to": "sold until {d}",
+ "inventory.nav.restrictions": "Restrictions list"
 }

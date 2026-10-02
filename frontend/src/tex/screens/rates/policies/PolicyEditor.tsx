@@ -291,7 +291,12 @@ export default function PolicyEditor() {
 
   const header = (
     <PageHeader
-      crumbs={[{ label: t("core.nav.rates"), to: "/tex/rates" }, { label: t(kind.title), to: listPath }, { label: isNew ? t("rates.policy.new_short") : title || name }]}
+      crumbs={[
+        // promotions are daily work with their own entry; the other kinds are selling rules
+        ...(kind.slug === "promotions" ? [] : [{ label: t("core.nav.selling_rules"), to: "/tex/rates/policies/markup" }]),
+        { label: t(kind.title), to: listPath },
+        { label: isNew ? t("rates.policy.new_short") : title || name },
+      ]}
       title={isNew ? t("rates.policy.new", { what: t(kind.singular) }) : title || <Skeleton className="h-7 w-48" />}
       subtitle={isNew ? t(kind.intro) : !isNew ? <span className="font-mono text-xs">{name}</span> : undefined}
       meta={

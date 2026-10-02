@@ -177,9 +177,9 @@
   "one": "{count} Tag",
   "other": "{count} Tage"
  },
- "inventory.nav.extras": "Extras",
- "inventory.nav.label": "Kontingent-Ansichten",
- "inventory.nav.rooms": "Zimmer",
+ "inventory.nav.extras": "Begrenzte Extras",
+ "inventory.nav.label": "Ansichten Preise & Verfügbarkeit",
+ "inventory.nav.rooms": "Kalender",
  "inventory.next": {
   "one": "Nächster Tag",
   "other": "Nächste {count} Tage"
@@ -257,5 +257,6 @@
  "inventory.window.from": "Verkauf ab {d}",
  "inventory.window.max_advance": "höchstens {n} Tage im Voraus",
  "inventory.window.min_advance": "mindestens {n} Tage im Voraus",
- "inventory.window.to": "Verkauf bis {d}"
+ "inventory.window.to": "Verkauf bis {d}",
+ "inventory.nav.restrictions": "Restriktionsliste"
 }

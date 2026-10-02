@@ -189,9 +189,9 @@
   "many": "{count} dni",
   "other": "{count} dnia"
  },
- "inventory.nav.extras": "Dodatki",
- "inventory.nav.label": "Widoki dostępności",
- "inventory.nav.rooms": "Pokoje",
+ "inventory.nav.extras": "Dodatki limitowane",
+ "inventory.nav.label": "Widoki cen i dostępności",
+ "inventory.nav.rooms": "Kalendarz",
  "inventory.next": {
   "one": "Następny dzień",
   "few": "Następne {count} dni",
@@ -279,5 +279,6 @@
  "inventory.window.from": "w sprzedaży od {d}",
  "inventory.window.max_advance": "najwyżej {n} dni wcześniej",
  "inventory.window.min_advance": "co najmniej {n} dni wcześniej",
- "inventory.window.to": "w sprzedaży do {d}"
+ "inventory.window.to": "w sprzedaży do {d}",
+ "inventory.nav.restrictions": "Lista ograniczeń"
 }

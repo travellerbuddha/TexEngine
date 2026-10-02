@@ -41,6 +41,21 @@
   font-feature-settings: "tnum" 1, "cv11" 1;
 }
 
+/* A control whose value just changed the whole screen's context (the hotel switcher): a short ring
+   that fades, no movement (UX revision 2026-10). */
+@keyframes tex-flash {
+  0%,
+  60% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-tex-500) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+.tex-root .tex-flash {
+  animation: tex-flash 1.6s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tex-root *,
   .tex-root *::before,

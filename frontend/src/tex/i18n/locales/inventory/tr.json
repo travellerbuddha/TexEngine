@@ -177,9 +177,9 @@
   "one": "{count} gün",
   "other": "{count} gün"
  },
- "inventory.nav.extras": "Ekstralar",
- "inventory.nav.label": "Envanter görünümleri",
- "inventory.nav.rooms": "Odalar",
+ "inventory.nav.extras": "Sınırlı ekstralar",
+ "inventory.nav.label": "Fiyat ve müsaitlik görünümleri",
+ "inventory.nav.rooms": "Takvim",
  "inventory.next": {
   "one": "Sonraki gün",
   "other": "Sonraki {count} gün"
@@ -257,5 +257,6 @@
  "inventory.window.from": "{d} tarihinden itibaren satışta",
  "inventory.window.max_advance": "en fazla {n} gün önceden",
  "inventory.window.min_advance": "en az {n} gün önceden",
- "inventory.window.to": "{d} tarihine kadar satışta"
+ "inventory.window.to": "{d} tarihine kadar satışta",
+ "inventory.nav.restrictions": "Kısıtlama listesi"
 }

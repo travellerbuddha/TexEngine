@@ -183,9 +183,9 @@
   "few": "{count} zile",
   "other": "{count} de zile"
  },
- "inventory.nav.extras": "Servicii extra",
- "inventory.nav.label": "Vizualizări inventar",
- "inventory.nav.rooms": "Camere",
+ "inventory.nav.extras": "Servicii extra limitate",
+ "inventory.nav.label": "Vizualizări tarife și disponibilitate",
+ "inventory.nav.rooms": "Calendar",
  "inventory.next": {
   "one": "Ziua următoare",
   "few": "Următoarele {count} zile",
@@ -268,5 +268,6 @@
  "inventory.window.from": "în vânzare de la {d}",
  "inventory.window.max_advance": "cu cel mult {n} zile înainte",
  "inventory.window.min_advance": "cu cel puțin {n} zile înainte",
- "inventory.window.to": "în vânzare până la {d}"
+ "inventory.window.to": "în vânzare până la {d}",
+ "inventory.nav.restrictions": "Lista restricțiilor"
 }

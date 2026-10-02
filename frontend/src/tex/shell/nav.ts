@@ -1,9 +1,11 @@
 import type { LucideIcon } from "lucide-react"
 import {
+  BadgePercent,
   BarChart3,
   BedDouble,
   CalendarRange,
   CreditCard,
+  FileText,
   Globe,
   Headphones,
   LayoutDashboard,
@@ -48,62 +50,95 @@ export interface NavItem {
   /** Extra entries for the command palette only. */
   keywords?: string
   children?: NavChild[]
+  /** The area's own page is `to` exactly (its deeper pages are other areas' or listed in `match`). */
+  end?: boolean
+  /** Other paths that are this area's own pages (e.g. a contract's page under Contracts). */
+  match?: string[]
 }
 
 const PRICE = ["price.view"]
 // contract cost: the periods and occupancy rules of versions (G-11, contracts.get_version)
 const COST = ["price.view_cost", "contract.edit"]
 
-/** R-35: Dashboard, CRS, Reservations, Rates & Contracts, Inventory, Booking Engine,
- * CRM, Payments, Reports, Connect, Settings. The Call Center is part of CRS. */
+/** The selling rules (policy kinds) a revenue manager sets once and rarely changes, in the order
+ * staff look for them; promotions are daily work and have their own entry. */
+export const RULE_SLUGS = ["markup", "cancellation", "payment", "pricing-policies", "taxes", "extras", "allotments", "fx-policies"] as const
+const RULE_LABELS: Record<(typeof RULE_SLUGS)[number], string> = {
+  markup: "rates.nav.markup",
+  cancellation: "rates.nav.cancellation",
+  payment: "rates.nav.payment",
+  "pricing-policies": "rates.nav.pricing",
+  taxes: "rates.nav.taxes",
+  extras: "rates.nav.extras",
+  allotments: "rates.nav.allotments",
+  "fx-policies": "rates.nav.fx",
+}
+
+/** R-35's areas, grouped by the work staff come to do (UX revision 2026-10): daily selling and
+ * price/availability work first; contract set-up and selling rules next; guests and money;
+ * reports; set-up and system last. Routes are unchanged: only the grouping and labels moved, so
+ * every deep link and bookmark keeps working. The Call Center is part of CRS. */
 export const NAV: NavItem[] = [
-  { id: "dashboard", to: "/tex", label: "core.nav.dashboard", icon: LayoutDashboard, anyOf: ["report.view", "reservation.view"], group: "sell" },
-  { id: "crs", to: "/tex/crs", label: "core.nav.crs", icon: Search, anyOf: ["reservation.create"], group: "sell", keywords: "book search availability" },
+  // ── daily work ──
+  { id: "dashboard", to: "/tex", label: "core.nav.dashboard", icon: LayoutDashboard, anyOf: ["report.view", "reservation.view"], group: "sell", end: true },
+  { id: "reservations", to: "/tex/reservations", label: "core.nav.reservations", icon: BedDouble, anyOf: ["reservation.view"], group: "sell", keywords: "find booking guest number ota" },
+  { id: "crs", to: "/tex/crs", label: "core.nav.crs", icon: Search, anyOf: ["reservation.create"], group: "sell", keywords: "crs book search availability new booking", end: true },
   { id: "call-center", to: "/tex/crs/call-center", label: "core.nav.call_center", icon: Headphones, anyOf: ["reservation.create"], group: "sell", keywords: "phone agent" },
-  { id: "reservations", to: "/tex/reservations", label: "core.nav.reservations", icon: BedDouble, anyOf: ["reservation.view"], group: "sell" },
+  {
+    id: "inventory",
+    to: "/tex/inventory",
+    label: "core.nav.inventory",
+    icon: CalendarRange,
+    anyOf: ["inventory.edit", "restriction.edit", "price.view"],
+    group: "sell",
+    keywords: "inventory grid availability stop sell close open rates prices calendar",
+    children: [
+      { id: "inv-calendar", to: "/tex/inventory", label: "core.nav.sub.calendar", anyOf: ["inventory.edit", "restriction.edit", "price.view"], keywords: "grid prices availability stop sell" },
+      // the restrictions list needs price.view, as the grid
+      { id: "rates-restrictions", to: "/tex/rates/restrictions", label: "core.nav.sub.restrictions", anyOf: PRICE, keywords: "stop sell min stay cta ctd" },
+      { id: "inv-extras", to: "/tex/inventory/extras", label: "core.nav.sub.extras", anyOf: PRICE, keywords: "spa capacity limited extras" },
+      // the bulk editor of the grid: the grid needs price.view, the editor an edit right (a rate
+      // change also needs a contract chosen in the grid)
+      { id: "rates-bulk", to: "/tex/inventory?bulk=1", label: "core.nav.sub.bulk", anyOf: ["restriction.edit", "inventory.edit"], allOf: PRICE, keywords: "grid mass update" },
+    ],
+  },
+  { id: "promotions", to: "/tex/rates/policies/promotions", label: "core.nav.promotions", icon: BadgePercent, anyOf: PRICE, group: "sell", keywords: "promotions discounts campaigns coupons early booking offers" },
+  // ── contracts and pricing set-up ──
   {
     id: "rates",
     to: "/tex/rates",
     label: "core.nav.rates",
-    icon: Tags,
+    icon: FileText,
     anyOf: ["price.view", "contract.edit"],
     group: "commercial",
-    keywords: "contracts prices markup promotions",
-    // R-35: Contracts, Contract Versions, Price Periods, Occupancy Rules, Rate Plans, Markets,
-    // Promotions, Restrictions, Currency, Bulk Editor
+    keywords: "contracts seasons prices children occupancy",
+    end: true,
+    match: ["/tex/rates/contracts"],
+    // R-35: Contracts, Contract Versions, Price Periods, Occupancy Rules, Rate Plans
     children: [
       { id: "rates-contracts", to: "/tex/rates", label: "core.nav.sub.contracts", anyOf: PRICE, match: ["/tex/rates/contracts"] },
       { id: "rates-versions", to: "/tex/rates/versions", label: "core.nav.sub.versions", anyOf: PRICE, keywords: "published draft superseded" },
       { id: "rates-periods", to: "/tex/rates/periods", label: "core.nav.sub.periods", anyOf: COST, allOf: PRICE, keywords: "seasons dates" },
       { id: "rates-occupancy", to: "/tex/rates/occupancy", label: "core.nav.sub.occupancy", anyOf: COST, allOf: PRICE, keywords: "child adult extra bed" },
       { id: "rates-plans", to: "/tex/rates/rate-plans", label: "core.nav.sub.rate_plans", anyOf: PRICE, keywords: "refundable non-refundable" },
-      { id: "rates-markets", to: "/tex/settings/markets", label: "core.nav.sub.markets", anyOf: PRICE, keywords: "countries" },
-      { id: "rates-promotions", to: "/tex/rates/policies/promotions", label: "core.nav.sub.promotions", anyOf: PRICE, keywords: "coupons discounts" },
-      { id: "rates-restrictions", to: "/tex/rates/restrictions", label: "core.nav.sub.restrictions", anyOf: PRICE, keywords: "stop sell min stay cta ctd" },
-      { id: "rates-currency", to: "/tex/rates/fx-rates", label: "core.nav.sub.currency", anyOf: PRICE, keywords: "fx exchange rates" },
-      // the bulk editor of the rates & availability grid: the grid needs price.view, the editor
-      // an edit right (a rate change also needs a contract chosen in the grid)
-      { id: "rates-bulk", to: "/tex/inventory?bulk=1", label: "core.nav.sub.bulk", anyOf: ["restriction.edit", "inventory.edit"], allOf: PRICE, keywords: "grid mass update" },
     ],
   },
-  { id: "inventory", to: "/tex/inventory", label: "core.nav.inventory", icon: CalendarRange, anyOf: ["inventory.edit", "restriction.edit", "price.view"], group: "commercial", keywords: "grid availability stop sell" },
   {
-    id: "booking-engine",
-    to: "/tex/booking-engine",
-    label: "core.nav.booking_engine",
-    icon: Globe,
-    anyOf: ["booking_site.edit"],
+    id: "rules",
+    to: "/tex/rates/policies/markup",
+    label: "core.nav.selling_rules",
+    icon: Tags,
+    anyOf: PRICE,
     group: "commercial",
-    keywords: "website widget domain",
-    // R-35: Configuration, Rooms, Content, Branding, Widgets, Domains, Policies, Analytics
-    // (a site's branding, widgets, domains and policies are tabs of the site)
+    keywords: "policies markup cancellation payment taxes currency",
+    // R-35: Markets, Currency and the selling policies
     children: [
-      { id: "be-sites", to: "/tex/booking-engine", label: "core.nav.sub.sites", anyOf: ["booking_site.edit"], allOf: PRICE, match: ["/tex/booking-engine/sites", "/tex/booking-engine/new"], keywords: "configuration branding widgets domains policies" },
-      { id: "be-rooms", to: "/tex/booking-engine/rooms", label: "core.nav.sub.rooms", anyOf: ["booking_site.edit"], keywords: "room types photos" },
-      { id: "be-content", to: "/tex/booking-engine/content", label: "core.nav.sub.content", anyOf: ["booking_site.edit"], keywords: "translations languages" },
-      { id: "be-analytics", to: "/tex/booking-engine/analytics", label: "core.nav.sub.analytics", anyOf: ["report.view"], allOf: ["booking_site.edit"], keywords: "funnel conversion" },
+      ...RULE_SLUGS.map((s) => ({ id: `rules-${s}`, to: `/tex/rates/policies/${s}`, label: RULE_LABELS[s], anyOf: PRICE })),
+      { id: "rates-currency", to: "/tex/rates/fx-rates", label: "core.nav.sub.currency", anyOf: PRICE, keywords: "fx exchange rates" },
+      { id: "rates-markets", to: "/tex/settings/markets", label: "core.nav.sub.markets", anyOf: PRICE, keywords: "countries" },
     ],
   },
+  // ── guests and money ──
   {
     id: "crm",
     to: "/tex/crm",
@@ -123,11 +158,32 @@ export const NAV: NavItem[] = [
     ],
   },
   { id: "payments", to: "/tex/payments", label: "core.nav.payments", icon: CreditCard, anyOf: ["payment.view"], group: "guests", keywords: "links refunds transactions" },
+  // ── reports ──
   { id: "reports", to: "/tex/reports", label: "core.nav.reports", icon: BarChart3, anyOf: ["report.view"], group: "insights", keywords: "production pace" },
+  // ── set-up and system ──
+  {
+    id: "booking-engine",
+    to: "/tex/booking-engine",
+    label: "core.nav.booking_engine",
+    icon: Globe,
+    anyOf: ["booking_site.edit"],
+    group: "system",
+    keywords: "website widget domain",
+    // R-35: Configuration, Rooms, Content, Branding, Widgets, Domains, Policies, Analytics
+    // (a site's branding, widgets, domains and policies are tabs of the site)
+    children: [
+      { id: "be-sites", to: "/tex/booking-engine", label: "core.nav.sub.sites", anyOf: ["booking_site.edit"], allOf: PRICE, match: ["/tex/booking-engine/sites", "/tex/booking-engine/new"], keywords: "configuration branding widgets domains policies" },
+      { id: "be-rooms", to: "/tex/booking-engine/rooms", label: "core.nav.sub.rooms", anyOf: ["booking_site.edit"], keywords: "room types photos" },
+      { id: "be-content", to: "/tex/booking-engine/content", label: "core.nav.sub.content", anyOf: ["booking_site.edit"], keywords: "translations languages" },
+      { id: "be-analytics", to: "/tex/booking-engine/analytics", label: "core.nav.sub.analytics", anyOf: ["report.view"], allOf: ["booking_site.edit"], keywords: "funnel conversion" },
+    ],
+  },
   { id: "connect", to: "/tex/connect", label: "core.nav.connect", icon: PlugZap, anyOf: ["connect.admin", "channel.view"], group: "system", keywords: "integrations pms channel manager distribution ari ota" },
   { id: "settings", to: "/tex/settings", label: "core.nav.settings", icon: Settings, anyOf: ["settings.admin", "user.admin", "system.monitor"], group: "system", keywords: "users access audit system status monitoring" },
 ]
 
+/** Group headings, in the sidebar's order (labels: daily work, contracts and pricing, guests and
+ * money, reports, set-up and system). */
 export const NAV_GROUPS: { id: NavItem["group"]; label: string }[] = [
   { id: "sell", label: "core.navgroup.sell" },
   { id: "commercial", label: "core.navgroup.commercial" },
@@ -158,9 +214,17 @@ export function childActive(c: NavChild, parent: NavItem, pathname: string): boo
   return under(pathname, path)
 }
 
+/** Whether `pathname` is one of the area's own pages: its route (exactly, for an `end` area) or a
+ * path it `match`es. Drives the area link's current state. */
+export function areaHome(n: NavItem, pathname: string): boolean {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname
+  if (n.end ? path === n.to : under(path, n.to)) return true
+  return (n.match ?? []).some((m) => under(path, m))
+}
+
 /** Whether `pathname` belongs to this area: its own pages, or one of its sub-sections that
- * lives elsewhere (Rates & Contracts › Markets is a Settings page). */
+ * lives elsewhere (Fiyat ve müsaitlik › Kısıtlama listesi is a Rates page). */
 export function inArea(n: NavItem, children: NavChild[], pathname: string): boolean {
   if (n.to === "/tex" || !children.length) return false
-  return under(pathname, n.to) || children.some((c) => childActive(c, n, pathname))
+  return areaHome(n, pathname) || children.some((c) => childActive(c, n, pathname))
 }
