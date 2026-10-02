@@ -7,6 +7,7 @@ import { CsvPicker } from "../components/pickers"
 import { BASIS, enumLabel, enumOptions } from "../lib/options"
 import type { ContractBundle, ContractDoc, ContractStatusAction } from "../lib/types"
 import { invalidateLookups, joinCsv, splitCsv } from "../lib/util"
+import { shiftIsoYears } from "../workspace/periods.ts"
 
 interface HeaderForm {
   contract_code: string
@@ -245,7 +246,24 @@ export function ContractStatusDialog({
   )
 }
 
-/** Duplicate a contract with its latest version as a new draft (R-55). */
+/** What a duplicate opens next: the new contract, or (a new season) its draft with the dates moved. */
+export function duplicateTarget(b: ContractBundle, opts?: { shiftYears?: number }): string {
+  const draft = b.versions.find((v) => v.status === "Draft")
+  const base = `/tex/rates/contracts/${encodeURIComponent(b.contract.name)}`
+  return opts?.shiftYears && draft ? `${base}/versions/${encodeURIComponent(draft.name)}?shift_years=${opts.shiftYears}#pricing` : base
+}
+
+/** "DE-2026" → "DE-2027": the first year in a code or name, a year on (none: unchanged). */
+export function nextSeasonText(s: string): string | null {
+  const m = /(20\d\d)/.exec(s)
+  return m ? s.replace(m[1], String(Number(m[1]) + 1)) : null
+}
+
+type Windows = { sale_from: string; sale_to: string; stay_from: string; stay_to: string }
+
+/** Duplicate a contract with its latest version as a new draft (R-55). "A new season" (UX revision
+ * 2026-10) also moves the contract's sale and stay windows a year on (shown, editable) and opens
+ * the copy's draft with every period and offer a year on, as an unsaved edit listed for checking. */
 export function DuplicateDialog({
   open,
   onClose,
@@ -254,8 +272,8 @@ export function DuplicateDialog({
 }: {
   open: boolean
   onClose: () => void
-  contract: ContractDoc | { name: string; contract_code: string; contract_name: string; market: string; property: string }
-  onDone: (b: ContractBundle) => void
+  contract: (ContractDoc | { name: string; contract_code: string; contract_name: string; market: string; property: string }) & Partial<Record<keyof Windows, string | null>>
+  onDone: (b: ContractBundle, opts?: { shiftYears?: number }) => void
 }) {
   const { t } = useTexT()
   const { boot } = useSession()
@@ -267,27 +285,63 @@ export function DuplicateDialog({
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
   const [market, setMarket] = useState("")
+  const [season, setSeason] = useState(false)
+  const [win, setWin] = useState<Windows>({ sale_from: "", sale_to: "", stay_from: "", stay_to: "" })
+  const [err, setErr] = useState<Error | null>(null)
+  const [busy, setBusy] = useState(false)
+  const copyCode = `${contract.contract_code}-COPY`.slice(0, 40)
+  const copyName = t("rates.contract.copy_name", { name: contract.contract_name })
   useEffect(() => {
     if (open) {
-      setCode(`${contract.contract_code}-COPY`.slice(0, 40))
-      setName(t("rates.contract.copy_name", { name: contract.contract_name }))
+      setCode(copyCode)
+      setName(copyName)
       setMarket(contract.market)
+      setSeason(false)
+      setErr(null)
       dup.clearError()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+  const toggleSeason = (on: boolean) => {
+    setSeason(on)
+    const year = (v?: string | null, edge: "start" | "end" = "start") => (v ? shiftIsoYears(v, 1, edge) : "")
+    if (on) {
+      setWin({ sale_from: year(contract.sale_from), sale_to: year(contract.sale_to, "end"), stay_from: year(contract.stay_from), stay_to: year(contract.stay_to, "end") })
+      // a code or name that names the season's year names the next one; otherwise left as it is
+      if (code === copyCode) setCode((nextSeasonText(contract.contract_code) ?? copyCode).toUpperCase().slice(0, 40))
+      if (name === copyName) setName(nextSeasonText(contract.contract_name) ?? copyName)
+    } else {
+      if (code === (nextSeasonText(contract.contract_code) ?? "").toUpperCase()) setCode(copyCode)
+      if (name === nextSeasonText(contract.contract_name)) setName(copyName)
+    }
+  }
+  const windowBad = (a: string, b: string) => Boolean(a && b && b < a)
+  const bad = season && (windowBad(win.sale_from, win.sale_to) || windowBad(win.stay_from, win.stay_to))
   const submit = async () => {
-    if (!code.trim()) return
+    if (!code.trim() || bad) return
+    setBusy(true)
+    setErr(null)
     try {
       const b = await dup.run({ name: contract.name, contract_code: code.trim().toUpperCase(), contract_name: name.trim(), market })
       invalidateLookups(b.contract.property)
+      if (season) {
+        // the copy is not published yet: its sale and stay windows are the contract's (save_contract)
+        await tex("contracts", "save_contract", { data: { name: b.contract.name, ...win } }, { post: true })
+      }
       toast.success(t("rates.contract.duplicated", { code: b.contract.contract_code }))
-      onDone(b)
+      onDone(b, season ? { shiftYears: 1 } : undefined)
       onClose()
-    } catch {
-      /* inline */
+    } catch (e) {
+      setErr(e as Error)
+    } finally {
+      setBusy(false)
     }
   }
+  const dateField = (k: keyof Windows, label: string) => (
+    <Field label={label}>
+      <Input type="date" value={win[k]} onChange={(e) => setWin({ ...win, [k]: e.target.value })} />
+    </Field>
+  )
   return (
     <Dialog
       open={open}
@@ -296,11 +350,11 @@ export function DuplicateDialog({
       description={t("rates.contract.duplicate_desc")}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={dup.pending}>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
             {t("core.action.cancel")}
           </Button>
-          <Button onClick={submit} loading={dup.pending} disabled={!code.trim()}>
-            {t("rates.contract.duplicate")}
+          <Button onClick={submit} loading={busy} disabled={!code.trim() || bad}>
+            {season ? t("rates.contract.duplicate_season") : t("rates.contract.duplicate")}
           </Button>
         </>
       }
@@ -312,6 +366,23 @@ export function DuplicateDialog({
           void submit()
         }}
       >
+        <Checkbox
+          label={<span className="font-medium">{t("rates.contract.season_label")}</span>}
+          checked={season}
+          onChange={(e) => toggleSeason(e.target.checked)}
+        />
+        {season && (
+          <div className="space-y-3 rounded-lg border border-tex-200 bg-tex-50/40 p-3">
+            <p className="text-xs text-zinc-700">{t("rates.contract.season_hint")}</p>
+            <FormGrid cols={2}>
+              {dateField("stay_from", t("rates.f.stay_from"))}
+              {dateField("stay_to", t("rates.f.stay_to"))}
+              {dateField("sale_from", t("rates.f.sale_from"))}
+              {dateField("sale_to", t("rates.f.sale_to"))}
+            </FormGrid>
+            {bad && <p className="text-xs font-medium text-rose-700">{t("rates.v.range")}</p>}
+          </div>
+        )}
         <Field label={t("rates.f.contract_code")} required hint={t("rates.h.contract_code")}>
           <Input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} data-autofocus />
         </Field>
@@ -321,7 +392,7 @@ export function DuplicateDialog({
         <Field label={t("rates.f.market")} hint={t("rates.h.duplicate_market")}>
           <Select value={market} onChange={(e) => setMarket(e.target.value)} options={boot.markets.map((m) => ({ value: m.name, label: `${m.name} · ${m.market_name}` }))} />
         </Field>
-        <InlineError error={dup.error} />
+        <InlineError error={err ?? dup.error} />
         <button type="submit" hidden />
       </form>
     </Dialog>

@@ -1994,5 +1994,45 @@
  "rates.version.none_on_sale": "Nicio versiune a acestui contract nu este încă în vânzare",
  "rates.version.discard_title": "Renunțați la modificările nesalvate?",
  "rates.version.discard_body": "Ciorna revine la ultima stare salvată. Toate modificările de la ultima salvare se pierd și nu pot fi anulate.",
- "rates.version.discard_confirm": "Renunțați la modificări"
+ "rates.version.discard_confirm": "Renunțați la modificări",
+ "rates.ws.period.copy_from": "Copiază prețurile din altă perioadă…",
+ "rates.ws.period.copy_from_title": "{period}: copiază prețurile din",
+ "rates.ws.period.copy_from_source": "Copiază din",
+ "rates.ws.period.copy_from_counts": "Cele {mine} reguli ale {period} (prețuri camere, reguli persoane și copii, mese) sunt înlocuite cu copii ale celor {theirs} reguli din {from}. Ctrl+Z anulează; nimic nu se salvează până la Salvare.",
+ "rates.ws.period.copy_from_apply": "Copiază",
+ "rates.ws.h.copy_from": "Copiază prețurile din {from} în {period}",
+ "rates.ws.h.shift_later": "Toate datele cu {years} an mai târziu",
+ "rates.ws.h.shift_earlier": "Toate datele cu {years} an mai devreme",
+ "rates.ws.season.shift": "Mută datele…",
+ "rates.ws.season.plus_year": "Toate perioadele și ofertele cu un an mai târziu (sezon nou)",
+ "rates.ws.season.minus_year": "Toate perioadele și ofertele cu un an mai devreme",
+ "rates.ws.season.title": "Date mutate — încă nesalvate",
+ "rates.ws.season.title_new": "Sezon nou: datele au fost mutate cu un an — verificați, apoi salvați",
+ "rates.ws.season.done_later": {
+  "one": "{count} perioadă mutată cu {years} an mai târziu:",
+  "few": "{count} perioade mutate cu {years} an mai târziu:",
+  "other": "{count} de perioade mutate cu {years} an mai târziu:"
+ },
+ "rates.ws.season.done_earlier": {
+  "one": "{count} perioadă mutată cu {years} an mai devreme:",
+  "few": "{count} perioade mutate cu {years} an mai devreme:",
+  "other": "{count} de perioade mutate cu {years} an mai devreme:"
+ },
+ "rates.ws.season.more": {
+  "one": "și încă {count}",
+  "few": "și încă {count}",
+  "other": "și încă {count}"
+ },
+ "rates.ws.season.offers": {
+  "one": "Datele de vânzare și de sejur ale {count} oferte au fost mutate și ele.",
+  "few": "Datele de vânzare și de sejur ale {count} oferte au fost mutate și ele.",
+  "other": "Datele de vânzare și de sejur ale celor {count} de oferte au fost mutate și ele."
+ },
+ "rates.ws.season.check": "Prețurile, regulile pentru persoane și copii și mesele au rămas la fel. Verificați datele (și ferestrele de vânzare și sejur din antet), apoi Salvați; Ctrl+Z anulează mutarea.",
+ "rates.contract.duplicate_season": "Creează sezonul nou",
+ "rates.contract.season_label": "Sezon nou: mută toate datele cu un an înainte",
+ "rates.contract.season_hint": "Prețurile, perioadele și regulile sunt copiate. Ferestrele de mai jos sunt propuse cu un an înainte (modificați-le dacă e nevoie); ciorna nouă se deschide cu perioadele și ofertele mutate un an, nesalvate și listate pentru verificare.",
+ "rates.occ.read.free": "{cell} rămâne gratuit",
+ "rates.occ.read.pct_off": "{cell} plătește {unit} cu {pct} % reducere",
+ "rates.occ.read.pct_more": "{cell} plătește {unit} plus {pct} %"
 }

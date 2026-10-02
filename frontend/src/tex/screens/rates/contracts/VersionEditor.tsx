@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { FilePlus2 } from "lucide-react"
 import { useTexQuery, useTexMutation } from "../../../lib/api"
 import { useSession } from "../../../lib/session"
@@ -19,6 +19,8 @@ import { ContextHeader } from "../workspace/ContextHeader"
 import { keptInput, UNCOMMITTED_INPUT, type KeptStore } from "../workspace/keptState.ts"
 import { anchorIssues, issueMessage, issuePlace } from "../workspace/issues.ts"
 import { PricingSection } from "../workspace/PricingSection"
+import { SeasonShiftSummary } from "../workspace/PeriodHeader"
+import { shiftSeasonYears, type SeasonShift } from "../workspace/periods.ts"
 import type { ShowRequest, ShowTarget } from "../workspace/priceTest.ts"
 import { SECTIONS, DEFAULT_RULE_TABLE, type EditorPlace, type PricingRegion, type RuleTableId, type SectionId } from "../workspace/sections.ts"
 import { useBandLabels } from "../workspace/useBandLabels"
@@ -119,6 +121,10 @@ export default function VersionEditor() {
     [],
   )
   const history = useWorkspaceHistory(state, setTable, writers)
+  // a new season from a duplicate (?shift_years=1, UX revision 2026-10): once the draft is loaded,
+  // every period and offer date moves a year as ONE undoable, unsaved edit, listed for checking
+  const [params, setParams] = useSearchParams()
+  const [seasonShift, setSeasonShift] = useState<{ shift: SeasonShift; years: number } | null>(null)
   const clearHistory = history.clear
   // the sections' table writes (the Advanced rule tables, Offers) go through the history too, so an
   // undo in the matrix never puts back a table older than an edit made there (S10)
@@ -142,6 +148,26 @@ export default function VersionEditor() {
   useEffect(() => {
     if (q.data) load(q.data)
   }, [q.data, load])
+  const shiftYears = Number(params.get("shift_years") ?? 0)
+  const historyApply = history.apply
+  useEffect(() => {
+    if (!shiftYears || !doc || !state || !doc.editable || epoch === 0) return
+    let res: SeasonShift | null = null
+    historyApply(t(shiftYears > 0 ? "rates.ws.h.shift_later" : "rates.ws.h.shift_earlier", { years: Math.abs(shiftYears) }), (tb) => {
+      res = shiftSeasonYears(tb, shiftYears)
+      return res.tables
+    })
+    if (res) setSeasonShift({ shift: res, years: shiftYears })
+    setParams(
+      (p) => {
+        p.delete("shift_years")
+        return p
+      },
+      { replace: true },
+    )
+    // once per load of the draft
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftYears, epoch])
   /** A save came back: the saved version becomes the base, and what Discard returns to. What the
    * user changed while the save was in flight (a setting, a table, the selling terms) stays on top
    * of it: replacing the editor with the saved copy would drop those edits, and a later save would
@@ -398,6 +424,16 @@ export default function VersionEditor() {
               }}
             >
               {t("rates.version.reload")}
+            </Button>
+          </Notice>
+        </div>
+      )}
+      {seasonShift && state && (
+        <div className="mb-4">
+          <Notice tone="info" title={t("rates.ws.season.title_new")}>
+            <SeasonShiftSummary shift={seasonShift.shift} years={seasonShift.years} tables={state.tables} />
+            <Button size="sm" variant="ghost" className="mt-1" onClick={() => setSeasonShift(null)}>
+              {t("core.action.close")}
             </Button>
           </Notice>
         </div>

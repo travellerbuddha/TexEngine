@@ -1923,5 +1923,41 @@
  "rates.version.none_on_sale": "Noch keine Version dieses Vertrags im Verkauf",
  "rates.version.discard_title": "Nicht gespeicherte Änderungen verwerfen?",
  "rates.version.discard_body": "Der Entwurf kehrt zum zuletzt gespeicherten Stand zurück. Alle Änderungen seit dem letzten Speichern gehen verloren und lassen sich nicht rückgängig machen.",
- "rates.version.discard_confirm": "Änderungen verwerfen"
+ "rates.version.discard_confirm": "Änderungen verwerfen",
+ "rates.ws.period.copy_from": "Preise aus anderem Zeitraum kopieren…",
+ "rates.ws.period.copy_from_title": "{period}: Preise kopieren aus",
+ "rates.ws.period.copy_from_source": "Kopieren aus",
+ "rates.ws.period.copy_from_counts": "Die {mine} Regeln von {period} (Zimmerpreise, Personen- und Kinderregeln, Verpflegung) werden durch Kopien der {theirs} Regeln von {from} ersetzt. Strg+Z macht es rückgängig; gespeichert wird erst mit Speichern.",
+ "rates.ws.period.copy_from_apply": "Kopieren",
+ "rates.ws.h.copy_from": "Preise von {from} nach {period} kopieren",
+ "rates.ws.h.shift_later": "Alle Daten {years} Jahr später",
+ "rates.ws.h.shift_earlier": "Alle Daten {years} Jahr früher",
+ "rates.ws.season.shift": "Daten verschieben…",
+ "rates.ws.season.plus_year": "Alle Zeiträume und Angebote ein Jahr später (neue Saison)",
+ "rates.ws.season.minus_year": "Alle Zeiträume und Angebote ein Jahr früher",
+ "rates.ws.season.title": "Daten verschoben — noch nicht gespeichert",
+ "rates.ws.season.title_new": "Neue Saison: Daten ein Jahr später — prüfen, dann speichern",
+ "rates.ws.season.done_later": {
+  "one": "{count} Zeitraum {years} Jahr später:",
+  "other": "{count} Zeiträume {years} Jahr später:"
+ },
+ "rates.ws.season.done_earlier": {
+  "one": "{count} Zeitraum {years} Jahr früher:",
+  "other": "{count} Zeiträume {years} Jahr früher:"
+ },
+ "rates.ws.season.more": {
+  "one": "und {count} weiterer",
+  "other": "und {count} weitere"
+ },
+ "rates.ws.season.offers": {
+  "one": "Die Verkaufs- und Aufenthaltsdaten von {count} Angebot wurden mitverschoben.",
+  "other": "Die Verkaufs- und Aufenthaltsdaten von {count} Angeboten wurden mitverschoben."
+ },
+ "rates.ws.season.check": "Preise, Personen- und Kinderregeln und Verpflegung blieben unverändert. Daten (und die Verkaufs- und Aufenthaltsfenster im Kopf) prüfen, dann Speichern; Strg+Z macht die Verschiebung rückgängig.",
+ "rates.contract.duplicate_season": "Neue Saison anlegen",
+ "rates.contract.season_label": "Neue Saison: alle Daten ein Jahr später",
+ "rates.contract.season_hint": "Preise, Zeiträume und Regeln werden kopiert. Die Fenster unten werden ein Jahr später vorgeschlagen (bei Bedarf ändern); der neue Entwurf öffnet mit Zeiträumen und Angeboten ein Jahr später, ungespeichert und zur Prüfung aufgelistet.",
+ "rates.occ.read.free": "{cell} bleibt kostenlos",
+ "rates.occ.read.pct_off": "{cell} zahlt den {unit} abzüglich {pct} %",
+ "rates.occ.read.pct_more": "{cell} zahlt den {unit} zuzüglich {pct} %"
 }

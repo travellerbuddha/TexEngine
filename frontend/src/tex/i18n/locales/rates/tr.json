@@ -1923,5 +1923,41 @@
  "rates.version.none_on_sale": "Bu kontratın satışta olan bir versiyonu henüz yok",
  "rates.version.discard_title": "Kaydedilmemiş değişiklikler atılsın mı?",
  "rates.version.discard_body": "Taslak son kaydedilen haline döner. Son kayıttan sonraki tüm değişiklikler kaybolur ve geri alınamaz.",
- "rates.version.discard_confirm": "Değişiklikleri at"
+ "rates.version.discard_confirm": "Değişiklikleri at",
+ "rates.ws.period.copy_from": "Fiyatları başka dönemden kopyala…",
+ "rates.ws.period.copy_from_title": "{period}: fiyatları şuradan kopyala",
+ "rates.ws.period.copy_from_source": "Kaynak dönem",
+ "rates.ws.period.copy_from_counts": "{period} dönemindeki {mine} kural (oda fiyatları, kişi ve çocuk kuralları, pansiyonlar), {from} dönemindeki {theirs} kuralın kopyasıyla değiştirilir. Ctrl+Z geri alır; Kaydet'e basana kadar hiçbir şey kaydedilmez.",
+ "rates.ws.period.copy_from_apply": "Kopyala",
+ "rates.ws.h.copy_from": "{from} fiyatlarını {period} dönemine kopyala",
+ "rates.ws.h.shift_later": "Tüm tarihler {years} yıl ileri",
+ "rates.ws.h.shift_earlier": "Tüm tarihler {years} yıl geri",
+ "rates.ws.season.shift": "Tarihleri kaydır…",
+ "rates.ws.season.plus_year": "Tüm dönem ve teklifler 1 yıl ileri (yeni sezon)",
+ "rates.ws.season.minus_year": "Tüm dönem ve teklifler 1 yıl geri",
+ "rates.ws.season.title": "Tarihler kaydırıldı — henüz kaydedilmedi",
+ "rates.ws.season.title_new": "Yeni sezon: tarihler 1 yıl ileri alındı — kontrol edip kaydedin",
+ "rates.ws.season.done_later": {
+  "one": "{count} dönem {years} yıl ileri alındı:",
+  "other": "{count} dönem {years} yıl ileri alındı:"
+ },
+ "rates.ws.season.done_earlier": {
+  "one": "{count} dönem {years} yıl geri alındı:",
+  "other": "{count} dönem {years} yıl geri alındı:"
+ },
+ "rates.ws.season.more": {
+  "one": "ve {count} dönem daha",
+  "other": "ve {count} dönem daha"
+ },
+ "rates.ws.season.offers": {
+  "one": "{count} teklifin satış ve konaklama tarihleri de kaydırıldı.",
+  "other": "{count} teklifin satış ve konaklama tarihleri de kaydırıldı."
+ },
+ "rates.ws.season.check": "Fiyatlar, kişi ve çocuk kuralları ve pansiyonlar aynen korundu. Tarihleri (ve başlıktaki satış ve konaklama pencerelerini) kontrol edip Kaydet'e basın; Ctrl+Z kaydırmayı geri alır.",
+ "rates.contract.duplicate_season": "Yeni sezonu oluştur",
+ "rates.contract.season_label": "Yeni sezon: tüm tarihleri 1 yıl ileri al",
+ "rates.contract.season_hint": "Fiyatlar, dönemler ve kurallar kopyalanır. Aşağıdaki pencereler 1 yıl ileri önerilir (gerekirse değiştirin); yeni taslak, dönem ve teklif tarihleri 1 yıl ileri alınmış olarak, kaydedilmemiş ve kontrol listesiyle açılır.",
+ "rates.occ.read.free": "{cell} ücretsiz kalır",
+ "rates.occ.read.pct_off": "{cell}, {unit} üzerinden %{pct} indirimli öder",
+ "rates.occ.read.pct_more": "{cell}, {unit} üzerinden %{pct} fazlasını öder"
 }

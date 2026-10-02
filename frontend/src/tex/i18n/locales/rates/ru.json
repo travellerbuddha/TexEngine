@@ -2059,5 +2059,49 @@
  "rates.version.none_on_sale": "Ни одна версия этого контракта ещё не продаётся",
  "rates.version.discard_title": "Отменить несохранённые изменения?",
  "rates.version.discard_body": "Черновик вернётся к последнему сохранённому состоянию. Все изменения после последнего сохранения будут потеряны без возможности отмены.",
- "rates.version.discard_confirm": "Отменить изменения"
+ "rates.version.discard_confirm": "Отменить изменения",
+ "rates.ws.period.copy_from": "Копировать цены из другого периода…",
+ "rates.ws.period.copy_from_title": "{period}: копировать цены из",
+ "rates.ws.period.copy_from_source": "Копировать из",
+ "rates.ws.period.copy_from_counts": "{mine} правил периода {period} (цены номеров, правила для взрослых и детей, питание) заменяются копиями {theirs} правил периода {from}. Ctrl+Z отменяет; ничего не сохраняется до нажатия «Сохранить».",
+ "rates.ws.period.copy_from_apply": "Копировать",
+ "rates.ws.h.copy_from": "Копировать цены {from} в {period}",
+ "rates.ws.h.shift_later": "Все даты на {years} год позже",
+ "rates.ws.h.shift_earlier": "Все даты на {years} год раньше",
+ "rates.ws.season.shift": "Сдвинуть даты…",
+ "rates.ws.season.plus_year": "Все периоды и предложения на год позже (новый сезон)",
+ "rates.ws.season.minus_year": "Все периоды и предложения на год раньше",
+ "rates.ws.season.title": "Даты сдвинуты — ещё не сохранено",
+ "rates.ws.season.title_new": "Новый сезон: даты сдвинуты на год — проверьте и сохраните",
+ "rates.ws.season.done_later": {
+  "one": "{count} период сдвинут на {years} год позже:",
+  "few": "{count} периода сдвинуты на {years} год позже:",
+  "many": "{count} периодов сдвинуты на {years} год позже:",
+  "other": "{count} периода сдвинуты на {years} год позже:"
+ },
+ "rates.ws.season.done_earlier": {
+  "one": "{count} период сдвинут на {years} год раньше:",
+  "few": "{count} периода сдвинуты на {years} год раньше:",
+  "many": "{count} периодов сдвинуты на {years} год раньше:",
+  "other": "{count} периода сдвинуты на {years} год раньше:"
+ },
+ "rates.ws.season.more": {
+  "one": "и ещё {count}",
+  "few": "и ещё {count}",
+  "many": "и ещё {count}",
+  "other": "и ещё {count}"
+ },
+ "rates.ws.season.offers": {
+  "one": "Даты продажи и проживания {count} предложения тоже сдвинуты.",
+  "few": "Даты продажи и проживания {count} предложений тоже сдвинуты.",
+  "many": "Даты продажи и проживания {count} предложений тоже сдвинуты.",
+  "other": "Даты продажи и проживания {count} предложения тоже сдвинуты."
+ },
+ "rates.ws.season.check": "Цены, правила для взрослых и детей и питание сохранены. Проверьте даты (и окна продаж и проживания в заголовке) и нажмите «Сохранить»; Ctrl+Z отменяет сдвиг.",
+ "rates.contract.duplicate_season": "Создать новый сезон",
+ "rates.contract.season_label": "Новый сезон: сдвинуть все даты на год вперёд",
+ "rates.contract.season_hint": "Цены, периоды и правила копируются. Окна ниже предложены на год вперёд (при необходимости измените); новый черновик откроется с периодами и предложениями на год вперёд, несохранёнными и в списке для проверки.",
+ "rates.occ.read.free": "{cell} — бесплатно",
+ "rates.occ.read.pct_off": "{cell} платит {unit} со скидкой {pct} %",
+ "rates.occ.read.pct_more": "{cell} платит {unit} плюс {pct} %"
 }

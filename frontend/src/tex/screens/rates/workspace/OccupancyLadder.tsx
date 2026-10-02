@@ -118,6 +118,16 @@ export function occRuleText(op: string, value: string, minorUnits: number): stri
   }
 }
 
+/** A rule that makes the slot free of charge: ×0, 0 %, a fixed 0 or −100 % (compared as decimal
+ * text, never computed). */
+export function isFreeRule(op: string, value: string): boolean {
+  const v = value.trim()
+  const zero = /^[+-]?0*(?:[.,]0*)?$/.test(v) && /0/.test(v)
+  if (["MULTIPLY", "PERCENT_OF", "ABSOLUTE", "FIXED"].includes(op)) return zero
+  if (op === "ADJUST_PERCENT") return /^-0*100(?:[.,]0*)?$/.test(v)
+  return false
+}
+
 export interface OccupancyLadderProps {
   doc: VersionDoc
   tables: Tables
@@ -226,6 +236,13 @@ export function OccupancyLadder(p: OccupancyLadderProps) {
   /** The reading sentence of a rule in this row (§3.4.1, §3.11): no arithmetic. */
   const ruleReading = (row: LadderRow, op: string, value: string, cell: string) => {
     const single = row.kind === "single" && row.identity?.target === "COMBINATION"
+    // in the words a contract is written in (UX revision 2026-10): "free", "30 % off", "30 % more"
+    // (string checks only, no arithmetic)
+    if (!single && isFreeRule(op, value)) return t("rates.occ.read.free", { cell })
+    if (!single && op === "ADJUST_PERCENT" && decText(value, 0) !== "—") {
+      const down = value.trim().startsWith("-")
+      return t(down ? "rates.occ.read.pct_off" : "rates.occ.read.pct_more", { cell, pct: decText(value.trim().replace(/^[-+]/, ""), 0), unit: unitWord(row) })
+    }
     return t(`rates.occ.read.${single ? "single." : ""}${op}`, { cell, rule: op === "INHERIT" ? "" : ruleShort(op, value), unit: unitWord(row) })
   }
   const errorText = (code: string) => t(`rates.sh.err.${code}`)

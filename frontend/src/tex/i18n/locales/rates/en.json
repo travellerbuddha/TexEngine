@@ -1932,5 +1932,41 @@
  "rates.version.none_on_sale": "No version of this contract is on sale yet",
  "rates.version.discard_title": "Discard the unsaved changes?",
  "rates.version.discard_body": "The draft goes back to its last saved state. Every change since the last save is lost and cannot be undone.",
- "rates.version.discard_confirm": "Discard changes"
+ "rates.version.discard_confirm": "Discard changes",
+ "rates.ws.period.copy_from": "Copy prices from another period…",
+ "rates.ws.period.copy_from_title": "{period}: copy prices from",
+ "rates.ws.period.copy_from_source": "Copy from",
+ "rates.ws.period.copy_from_counts": "{period}'s {mine} rules (room prices, person and child rules, boards) are replaced by copies of {from}'s {theirs}. Ctrl+Z undoes it; nothing is saved until Save.",
+ "rates.ws.period.copy_from_apply": "Copy",
+ "rates.ws.h.copy_from": "Copy {from}'s prices into {period}",
+ "rates.ws.h.shift_later": "Every date {years} year later",
+ "rates.ws.h.shift_earlier": "Every date {years} year earlier",
+ "rates.ws.season.shift": "Shift dates…",
+ "rates.ws.season.plus_year": "Every period and offer a year later (new season)",
+ "rates.ws.season.minus_year": "Every period and offer a year earlier",
+ "rates.ws.season.title": "Dates moved — not saved yet",
+ "rates.ws.season.title_new": "New season: the dates moved a year on — check them, then save",
+ "rates.ws.season.done_later": {
+  "one": "{count} period moved {years} year later:",
+  "other": "{count} periods moved {years} year later:"
+ },
+ "rates.ws.season.done_earlier": {
+  "one": "{count} period moved {years} year earlier:",
+  "other": "{count} periods moved {years} year earlier:"
+ },
+ "rates.ws.season.more": {
+  "one": "and {count} more",
+  "other": "and {count} more"
+ },
+ "rates.ws.season.offers": {
+  "one": "The sale and stay dates of {count} offer moved too.",
+  "other": "The sale and stay dates of {count} offers moved too."
+ },
+ "rates.ws.season.check": "Prices, person and child rules and boards were kept as they were. Check the dates (and the sale and stay windows in the header), then Save; Ctrl+Z undoes the move.",
+ "rates.contract.duplicate_season": "Create the new season",
+ "rates.contract.season_label": "A new season: move every date a year on",
+ "rates.contract.season_hint": "Prices, periods and rules are copied. The windows below are proposed a year on (change them if needed); the new draft opens with its periods and offers a year on, unsaved and listed for you to check.",
+ "rates.occ.read.free": "{cell} stays free of charge",
+ "rates.occ.read.pct_off": "{cell} pays the {unit} less {pct} %",
+ "rates.occ.read.pct_more": "{cell} pays the {unit} plus {pct} %"
 }

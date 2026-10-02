@@ -2059,5 +2059,49 @@
  "rates.version.none_on_sale": "Żadna wersja tej umowy nie jest jeszcze w sprzedaży",
  "rates.version.discard_title": "Odrzucić niezapisane zmiany?",
  "rates.version.discard_body": "Wersja robocza wróci do ostatnio zapisanego stanu. Wszystkie zmiany od ostatniego zapisu zostaną utracone bez możliwości cofnięcia.",
- "rates.version.discard_confirm": "Odrzuć zmiany"
+ "rates.version.discard_confirm": "Odrzuć zmiany",
+ "rates.ws.period.copy_from": "Kopiuj ceny z innego okresu…",
+ "rates.ws.period.copy_from_title": "{period}: kopiuj ceny z",
+ "rates.ws.period.copy_from_source": "Kopiuj z",
+ "rates.ws.period.copy_from_counts": "{mine} reguł okresu {period} (ceny pokoi, reguły osób i dzieci, wyżywienie) zostaje zastąpionych kopiami {theirs} reguł okresu {from}. Ctrl+Z cofa; nic nie zostanie zapisane przed Zapisz.",
+ "rates.ws.period.copy_from_apply": "Kopiuj",
+ "rates.ws.h.copy_from": "Kopiuj ceny {from} do {period}",
+ "rates.ws.h.shift_later": "Wszystkie daty {years} rok później",
+ "rates.ws.h.shift_earlier": "Wszystkie daty {years} rok wcześniej",
+ "rates.ws.season.shift": "Przesuń daty…",
+ "rates.ws.season.plus_year": "Wszystkie okresy i oferty rok później (nowy sezon)",
+ "rates.ws.season.minus_year": "Wszystkie okresy i oferty rok wcześniej",
+ "rates.ws.season.title": "Daty przesunięte — jeszcze niezapisane",
+ "rates.ws.season.title_new": "Nowy sezon: daty przesunięte o rok — sprawdź i zapisz",
+ "rates.ws.season.done_later": {
+  "one": "{count} okres przesunięty o {years} rok później:",
+  "few": "{count} okresy przesunięte o {years} rok później:",
+  "many": "{count} okresów przesuniętych o {years} rok później:",
+  "other": "{count} okresu przesunięte o {years} rok później:"
+ },
+ "rates.ws.season.done_earlier": {
+  "one": "{count} okres przesunięty o {years} rok wcześniej:",
+  "few": "{count} okresy przesunięte o {years} rok wcześniej:",
+  "many": "{count} okresów przesuniętych o {years} rok wcześniej:",
+  "other": "{count} okresu przesunięte o {years} rok wcześniej:"
+ },
+ "rates.ws.season.more": {
+  "one": "i jeszcze {count}",
+  "few": "i jeszcze {count}",
+  "many": "i jeszcze {count}",
+  "other": "i jeszcze {count}"
+ },
+ "rates.ws.season.offers": {
+  "one": "Daty sprzedaży i pobytu {count} oferty też przesunięto.",
+  "few": "Daty sprzedaży i pobytu {count} ofert też przesunięto.",
+  "many": "Daty sprzedaży i pobytu {count} ofert też przesunięto.",
+  "other": "Daty sprzedaży i pobytu {count} oferty też przesunięto."
+ },
+ "rates.ws.season.check": "Ceny, reguły osób i dzieci oraz wyżywienie pozostały bez zmian. Sprawdź daty (i okna sprzedaży i pobytu w nagłówku), potem Zapisz; Ctrl+Z cofa przesunięcie.",
+ "rates.contract.duplicate_season": "Utwórz nowy sezon",
+ "rates.contract.season_label": "Nowy sezon: przesuń wszystkie daty o rok",
+ "rates.contract.season_hint": "Ceny, okresy i reguły są kopiowane. Okna poniżej proponowane są rok później (w razie potrzeby zmień); nowa wersja robocza otworzy się z okresami i ofertami przesuniętymi o rok, niezapisanymi i wypisanymi do sprawdzenia.",
+ "rates.occ.read.free": "{cell} jest bezpłatnie",
+ "rates.occ.read.pct_off": "{cell} płaci {unit} z rabatem {pct} %",
+ "rates.occ.read.pct_more": "{cell} płaci {unit} plus {pct} %"
 }
