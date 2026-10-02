@@ -94,6 +94,8 @@ test("the kinds G-70b adds: another payment method, the same step again, the tim
   assert.equal(parseError(body({ exc_type: "PaymentBusy", tex_code: "PAYMENT_BUSY" }, "A payment is being started."), 417).kind, "retry")
   assert.equal(parseError(body({ tex_code: "BUSY" }, "The hotel is very busy right now."), 417).kind, "retry")
   assert.equal(parseError(body({ exc_type: "HoldExpired", tex_code: "HOLD_EXPIRED" }, ""), 417).kind, "hold_expired")
+  // the bank is reviewing the payment: never "try again" (review round 1)
+  assert.notEqual(parseError(body({ exc_type: "PaymentBusy", tex_code: "PAYMENT_UNDER_REVIEW" }, ""), 417).kind, "retry")
   assert.equal(parseError(body({ tex_code: "PROPOSAL_EXPIRED" }, "This offer has expired."), 417).kind, "expired")
   assert.equal(parseError(body({ tex_code: "LINK_INVALID", exc_type: "DoesNotExistError" }, ""), 404).kind, "not_found")
 })

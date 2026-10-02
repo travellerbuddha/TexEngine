@@ -154,6 +154,9 @@ export function FlowErrorAlert() {
     // the hotel or a payment is busy (G-70b): the same step again in a moment
     title = t("errors.retryTitle")
     body = e.code ? refusalMessage(i18n, e) : t("errors.retryBody")
+  } else if (e.code === "HOLD_EXPIRED_TRANSFER") {
+    // too late for a bank transfer, the rooms still held: the guest may pay by card (its own text says so)
+    title = t("errors.holdExpiredTitle")
   } else if (e.kind === "hold_expired") {
     // the time to pay is over and the rooms were given back: search again
     title = t("errors.holdExpiredTitle")

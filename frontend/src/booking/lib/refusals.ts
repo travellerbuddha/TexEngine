@@ -22,8 +22,8 @@ export const KIND_BY_CODE: Readonly<Record<string, ErrorKind>> = {
   // the guest chooses another way to pay
   ...kinds("payment_method", ["PAYMENT_METHOD_UNAVAILABLE", "PAY_AT_HOTEL_NOT_ALLOWED", "WEB_TRANSFER_ROOMS",
     "PAYMENT_START_FAILED"]),
-  // the same step again in a moment
-  ...kinds("retry", ["BUSY", "PAYMENT_BUSY", "PAYMENT_UNDER_REVIEW", "CHARGE_SUPERSEDED"]),
+  // the same step again in a moment (a payment the bank is reviewing waits for its answer instead: its own text)
+  ...kinds("retry", ["BUSY", "PAYMENT_BUSY", "CHARGE_SUPERSEDED"]),
   // the time to pay is over: the rooms are given back
   ...kinds("hold_expired", ["HOLD_EXPIRED", "HOLD_EXPIRED_TRANSFER"]),
   ...kinds("not_found", ["SITE_NOT_FOUND", "NOT_FOUND", "LINK_INVALID", "PAYMENT_UNKNOWN"]),
