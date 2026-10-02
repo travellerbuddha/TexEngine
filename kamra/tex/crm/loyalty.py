@@ -200,7 +200,7 @@ def _earn(doc, program: str) -> None:
 	"""``on_reservation_change``'s work, under its savepoint."""
 	existing = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": doc.name, "entry_type": "Earn",
 	                                                         "status": ("!=", "Reversed")},
-	                          fields=["name", "points", "status", "stay_fingerprint", "expires_on"])
+	                          fields=["name", "guest", "points", "status", "stay_fingerprint", "expires_on"])
 	if doc.status in ("Cancelled", "No Show"):
 		for e in existing:
 			_reverse(e, reason=f"reservation {doc.status.lower()}")
@@ -219,9 +219,10 @@ def _earn(doc, program: str) -> None:
 	# the new earning takes the old one's place, in its state: a stay that had matured stays mature
 	status = "Available" if any(e.status in FINAL for e in existing) else "Pending"
 	# an earning whose points had expired keeps its expiry: a change of the stay never brings expired points back
-	# with a fresh one (LO-26, ADR-071 §5). Read before the reversal takes its Expire rows back
+	# with a fresh one (LO-26, ADR-071 §5). Read before the reversal takes its Expire rows back, on the earning's own
+	# guest (the room's guest may have been replaced since)
 	kept = [getdate(e.expires_on) for e in existing if e.status in FINAL and e.expires_on and frappe.db.exists(
-		"TEX Loyalty Ledger", {"guest": doc.guest, "program": program, "entry_type": "Expire",
+		"TEX Loyalty Ledger", {"guest": e.guest, "program": program, "entry_type": "Expire",
 		                       "status": ("in", list(FINAL)), "reason": lots.marker(e.name)})]
 	for e in existing:
 		_reverse(e, reason="reservation modified", floor=False)       # exact: spent points are not topped up

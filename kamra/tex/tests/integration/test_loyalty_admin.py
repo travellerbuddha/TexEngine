@@ -565,6 +565,26 @@ class TestModification(LoyaltyCase):
 		                                                    "status": ("!=", "Reversed")}, pluck="expires_on")
 		self.assertEqual([str(d) for d in lot], [str(add_months(fx.d(6, 13), 1))])
 
+	def test_a_stay_whose_expired_points_moved_to_another_guest_never_brings_them_back(self):
+		"""LO-26 (review round 1): the expiry is read from the earning's own guest, so a room whose guest was replaced
+		after its points expired earns again with that expiry too (before: looked up on the new guest, the 842 came
+		back to them valid for a new month)."""
+		club = self.create(**self.CLUB_1, expiry_months=1)
+		b, guest = self.paid_stay("lo26-guest")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		loyalty.mature_and_expire(today=fx.d(8, 1))                               # a month after: expired
+		self.assertEqual(self.available(guest, club), 0)
+		newcomer = frappe.get_doc({"doctype": "Guest", "first_name": "Nina", "last_name": "New",
+		                           "email": "nina.lo26@example.com"}).insert(ignore_permissions=True).name
+		frappe.db.set_value("Reservation", res, {"guest": newcomer, "check_out_date": fx.d(7, 20)})
+		frappe.get_doc("Reservation", res).save(ignore_permissions=True)          # the stay is changed afterwards
+		loyalty.mature_and_expire(today=fx.d(8, 1))
+		self.assertEqual((self.available(guest, club), self.available(newcomer, club)), (0, 0))
+		lot = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn",
+		                                                    "status": ("!=", "Reversed")}, fields=["guest", "expires_on"])
+		self.assertEqual([(r.guest, str(r.expires_on)) for r in lot], [(newcomer, str(add_months(fx.d(6, 13), 1)))])
+
 	def test_a_stay_changed_down_and_up_again_is_worth_what_it_is_now(self):
 		club = self.create(**self.CLUB_1)
 		_b, guest, res, _hotel = self.spent_stay(club, "o21-c")
