@@ -1,7 +1,8 @@
 import { Link, useLocation } from "react-router-dom"
 import { cn } from "../../../../lib/utils"
 import { useTexT } from "../../../i18n"
-import { RULE_SLUGS } from "../../../shell/nav"
+import { useSession } from "../../../lib/session"
+import { RULE_SLUGS, ruleVisible } from "../../../shell/nav"
 import { InventoryNav } from "../../inventory/InventoryNav"
 import { POLICY_KINDS } from "../policies/config"
 
@@ -13,10 +14,12 @@ import { POLICY_KINDS } from "../policies/config"
 export function RatesNav() {
   const { t } = useTexT()
   const { pathname } = useLocation()
+  const { can } = useSession()
   const path = pathname.replace(/\/+$/, "")
   if (path.includes("/tex/rates/restrictions")) return <InventoryNav />
   const rules = [
-    ...RULE_SLUGS.map((slug) => {
+    // the rules this user may read (markups and contract formulas are cost)
+    ...RULE_SLUGS.filter((slug) => ruleVisible(slug, (cap) => can(cap))).map((slug) => {
       const kind = POLICY_KINDS.find((k) => k.slug === slug)
       const to = `/tex/rates/policies/${slug}`
       return { to, label: t(kind?.navLabel ?? slug), active: path === to || path.startsWith(`${to}/`) }
