@@ -282,7 +282,15 @@ def backfill(property: str, codes=None) -> int:
 		have = set(frappe.get_all("TEX Extra Allocation", filters={"reservation": r.name}, pluck="extra_code"))
 		todo = codes - have
 		snap = json.loads(r.tex_pricing_snapshot or "{}")
-		need = {k: u for k, u in demand([snap], codes=todo).items() if k[1] >= today} if todo else {}
+		try:
+			need = {k: u for k, u in demand([snap], codes=todo).items() if k[1] >= today} if todo else {}
+		except ValueError:
+			# a quantity that is not a whole number of units (LO-48): this stay is left to staff, never cut to a
+			# whole number; the others still hold their units (the limit is saved, the daily job goes on)
+			from kamra.tex.security.audit import log_exception
+
+			log_exception(f"TEX job extras backfill {r.name}")
+			continue
 		if not need:
 			continue
 		lock_days(property, need)

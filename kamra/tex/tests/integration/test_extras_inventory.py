@@ -316,3 +316,38 @@ class TestExtrasAdministration(ExtrasCase):
 		self.assertFalse(late["ok"])
 		self.assertEqual(D(xinv.availability(fx.PROPERTY, ["MASSAGE"], fx.d(6, 10),
 		                                     fx.d(6, 10))["MASSAGE"][fx.d(6, 10)].remaining), 0)
+
+	def test_a_stay_whose_old_snapshot_has_no_whole_quantity_is_left_out_of_the_backfill(self):
+		"""LO-48 (2K-4): a snapshot from before G-19 carries no ``usage``: its units are its quantity, read as a whole
+		number, never cut to one. A stay whose quantity is not whole is left out of the backfill and logged; the other
+		stays still hold their units and the extra is still limited."""
+		import json
+
+		from kamra.tex.commercial import revisions
+
+		fx.ensure_live("TEX Extra", {"property": fx.PROPERTY, "extra_code": "MASSAGE"}, {
+			"property": fx.PROPERTY, "extra_code": "MASSAGE", "extra_name": "Massage", "category": "Service",
+			"pricing_mode": "UNIT", "currency": "EUR", "amount": 50, "bookable_online": 1})
+		odd, fine = (self.book(f"lo48-{n}", self.quotes(f"lo48-{n}", [{"code": "MASSAGE"}]))["rooms"][0]["reservation"]
+		             for n in ("odd", "fine"))
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- revenue manager limits it
+		for res, quantity in ((odd, "2.5"), (fine, "1.000000")):              # as stored before G-19
+			snap = json.loads(frappe.db.get_value("Reservation", res, "tex_pricing_snapshot"))
+			for e in snap["extras"]:
+				if e["code"] == "MASSAGE":
+					e.pop("usage", None)
+					e["quantity"] = quantity
+			frappe.db.set_value("Reservation", res, "tex_pricing_snapshot", json.dumps(snap), update_modified=False)
+		before = set(frappe.get_all("Error Log", pluck="name"))
+		live = frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "MASSAGE",
+		                                         "tex_status": "Active"})
+		draft = frappe.get_doc("TEX Extra", revisions.revise("TEX Extra", live))
+		draft.inventory_tracked, draft.daily_capacity = 1, 5
+		draft.save(ignore_permissions=True)
+		revisions.activate("TEX Extra", draft.name)
+		self.assertEqual(self.allocations(fine), [("MASSAGE", str(fx.d(6, 10)), 1, "Confirmed")])
+		self.assertEqual(self.allocations(odd), [])
+		logged = frappe.get_all("Error Log", filters={"name": ("not in", list(before) or ["-"])}, pluck="method")
+		self.assertIn(f"TEX job extras backfill {odd}", logged)
+		self.assertTrue(frappe.db.get_value("TEX Extra", {"property": fx.PROPERTY, "extra_code": "MASSAGE",
+		                                                  "tex_status": "Active"}, "inventory_tracked"))
