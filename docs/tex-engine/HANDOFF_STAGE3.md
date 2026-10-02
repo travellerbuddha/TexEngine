@@ -14,7 +14,10 @@ Legend: **verified** = read in the code / run here; **assumed** = not checkable 
 (IMPLEMENTATION_STATUS §6G3). Where 2G-3 departed from these cards: the market codes keep G-55b's kinds (no "market"
 kind); the booking app's text helper is `refusalMessage` (`lib/extras.ts` already has a `refusalText`); a channel's
 booking is `CHANNEL_BOOKING` with `params.sold_by` (its label, since LO-13 the text names it); LO-12's view key is
-`sold_by`; a forged sandbox signature is a `ProviderError` that is also a coded 417.
+`sold_by`; a forged sandbox signature is a `ProviderError` that is also a coded 417; the basket's `problem_code`
+(§5b) was not added (the booking app does not read `rooms[].problem`); two frontend unit assertions that pinned
+G-70a's interim wording classification (`tests/unit/refusal-codes.test.ts`, "until G-70b") were changed, as §5c's
+own test requires.
 
 ---
 

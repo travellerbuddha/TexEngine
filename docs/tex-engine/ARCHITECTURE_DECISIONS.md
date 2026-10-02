@@ -104,8 +104,9 @@ checked by.)
 `Reservation`s (one per room). Each reservation stores the pricing snapshot, contract version,
 payload hash, FX snapshot, sale timestamp; confirmation sets `tex_price_locked`.
 **Consequences.** Cheap searches, authoritative quotes, clear parent/child booking structure.
-- *Note (Part 2G-3, G-71): the offer key is signed, not encrypted.* Its body (base64 JSON) names the contract
-  (CTR-…), the version id and the market; a guest who decodes it learns them. Accepted residual: changing it touches
+- *Note (Part 2G-3, G-71): the offer key and the change proposal token are signed, not encrypted.* An offer key's
+  body (base64 JSON) names the contract (CTR-…), the version id and the market; a guest's change proposal token
+  (`manage_propose`) names the version; a guest who decodes them learns them. Accepted residual: changing them touches
   `verify` on every path and the CRS. Every other guest answer leaves them out (ADR-026's G-71 addendum).
 
 ## ADR-010 Modification = proposal + revision; legacy auto-price neutralised for TEX
@@ -160,8 +161,10 @@ guest-facing strings use Frappe `_()`. Legacy Kamra screens keep the existing en
   (`ExtraSoldOut` with the extra and its ISO day, `HoldExpired` as `HOLD_EXPIRED_TRANSFER`, `PayloadMismatch` as
   `CHANGE_NOT_ONLINE` for a guest), a class with a registered `code`, or a helper's coded answer
   (`quoting.quote_refusal`, `payments.link_refusal`: a `Refusal`, raised as `frappe.throw(str(why), why)`). The English
-  texts are unchanged for staff and logs; the three that named internals say less to a guest (the market in
-  `modification._resolve`, the version id in `contracts.load_terms`). One English text may carry two codes (O-16's
+  texts are unchanged for staff and logs; those that named internals say less to a guest: the market in
+  `modification._resolve`, the version id in `contracts.load_terms` (`PayloadMismatch.detail` keeps the staff text,
+  which the audit records), and the engine's reasons of a change that cannot be sold (its warnings are still told;
+  the codes of both are `params.reasons`, review round 1). One English text may carry two codes (O-16's
   arrival-day cancellation is `CANCEL_TOO_LATE`, a change refused `CHANGE_REFUSED`); a room cancelled meanwhile is
   `ROOM_NOT_ACTIVE` before O-16's day check; a forged sandbox signature is a coded 417, no longer a 500. A guest's
   channel booking is `CHANNEL_BOOKING` with `params.sold_by` (the connection's label, LO-13). The booking app keeps
@@ -305,7 +308,11 @@ Promotion names (group-level) are not yet translatable.
   and "charged once per booking" stay). The search's top-level `market`/`channel`, `book`'s and `booking_status`'s `market`/`channel`
   (popped after the payment was started with them) and `site`'s `default_market` are gone. Staff answers
   (`crs.*`, `ui_crs.*`), the stored `TEX Quote.result_json` and reservation snapshots keep everything
-  (`quoting.strip_internal` and `RoomQuote.to_dict` unchanged). Residual: the signed offer key (ADR-009 note).
+  (`quoting.strip_internal` and `RoomQuote.to_dict` unchanged). Residual: the signed offer key and change proposal token (ADR-009 note).
+  Review round 1: a guest's error body carries no market or channel either (`refusals.GUEST_HIDDEN`; the exception
+  keeps them for staff), a link country two markets share is refused without naming them, and `extras.guest_reason`
+  says "not available" for an extra limited to other markets, channels or room types in every guest answer that goes
+  through `guest_safe` (a change's warnings and extras added after booking too).
   Test: `test_public_booking.TestPublicBooking.test_guest_answers_name_no_contract` (a recursive scan of every guest
   answer for those keys and for any contract docname, version id or payload hash).
 
