@@ -1686,3 +1686,46 @@ No owner decision was needed. LO-30 (optional here) is left to batch 7 (2K-5), a
 - Review round 1 (one reviewer): a guest's change that cannot be sold no longer tells the engine's reasons (S1); a guest's error body names no market and an extra's refusal never its market, channel or room type (S2); the audit of a refusal a guest met keeps the staff detail (S2); a transfer too late says pay by card, a reviewed payment is not "try again" · `TestSelfService.test_a_change_the_engine_refuses_never_tells_the_guest_its_reasons`, `TestMarketIntegrity.test_a_guest_error_body_names_no_market`, `TestRefusalReview.test_a_refusal_a_guest_met_keeps_the_staff_detail_in_its_audit`, unit `TestGuestReason`.
 - LO-12 **COMPLETE**: the manage view of a channel's booking answers `can_change` and `can_cancel` false and `sold_by {label}` (the channel's label, never its id; not `channel`, which G-71 keeps out); the page offers no change, cancel or extras and says where to change it · `TestSelfService.test_the_manage_view_of_a_channels_booking_offers_no_change_or_cancel`, node `manage-actions`.
 - **Not done:** the basket's `problem_code` (§5b; the app does not read `rooms[].problem`); the room and extra names in SOLD_OUT / EXTRA_SOLD_OUT params are the hotel's own, not localised; a misconfigured extra (tax policy, ambiguous price) is an uncoded 500 on the add-extras dialog; a paid guest change that fails when applied keeps the guest's text in its request's error (staff see the engine's reasons by proposing it again); `channel_of` names a connection without a label by its id (the label is required: only a direct database write leaves it blank); the market codes keep the kinds G-55b gave them (no separate "market" kind: the search and checkout act on the code); an extra's own refusal reasons in a quote stay text (`lib/extras.ts` parses capacity reasons; an engine `reason_code` is a later pricing change); a malformed rooms JSON or a non-numeric child age in a search is still a 500, not a refusal; the manage page may still offer to pay a channel's booking's balance online (`can_pay_online` follows the hotel's card rules: an owner question, not LO-12's); LO-30 (batch 7).
+
+## 6K4. Audit Part 2K-4 (2026-10-02)
+
+D-13 answered no: the UTC+7 hotels (Cam Ranh, Phuket) are not in wave 1. O-6 is not opened and LO-37 is deferred with
+C-05 (a documented limitation).
+
+- LO-08 **COMPLETE**: the 5-minute cron entry `outbox_every_5_minutes` only queues `scheduler.deliver_outbox` on the RQ
+  `long` queue (job id `tex_pms_outbox`, deduplicated: one still queued or running is not queued again; 300 s limit), so a
+  worker of the default queue never runs a slow PMS ahead of the holds, payments and links; `deploy/tex-local` runs a
+  worker for `short,default` and one for `long` (Procfile, `setup-local.sh`; frappe_docker has `queue-long`); System status
+  names a TEX queue no running worker listens on (`queue_unserved`, six staff catalogs) (ADR-015 addendum) · unit
+  `test_scheduler_queues` (three), `test_system_checks`, `test_scheduler_smoke` (the long worker stubbed: setup only),
+  `test_system_status`.
+- LO-10 **COMPLETE**: a claim reads only the first undelivered message of each reservation and connection that is due and
+  free, oldest first, at most the round's cap (`NOT EXISTS` an earlier Pending or Failed one, index
+  `tex_outbox_ref_order`, p74); order and the conditional claim are unchanged (ADR-015 addendum) ·
+  `TestPmsDelivery.test_a_round_reads_at_most_its_cap_however_many_wait_in_back_off` (2,000 in back-off, a SQL sniff),
+  the order tests, `test_patches` p74.
+- LO-28 **COMPLETE**: the hotel view of the audit log leaves out, in its query, the events of every record whose own trail
+  refuses the viewer: payments without `payment.view`, stays and bookings without `reservation.view`, a commercial policy
+  without what its API reads it with, and cost as before (`admin._trail_caps`, one rule with `_require_trail`) ·
+  `TestTrailByReference.test_a_hotels_trail_leaves_out_payments_stays_and_policies_its_viewer_may_not_read` (`limit=1`
+  still pages).
+- LO-39 **COMPLETE**: `fx_rates` names who entered a manual rate only to holders of `fx.manual_rate` or `settings.admin` at
+  its hotel (a rate of every hotel: at one of theirs) and to platform administrators; the audit trail keeps it ·
+  `TestManualBridge.test_who_entered_a_manual_rate_is_shown_only_to_who_manages_rates`.
+- LO-37 **DEFERRED** (D-13 = no): a MANUAL-mode pair (VND) still shows WARN `fx_bridged`; it returns with O-6.
+- LO-22 **COMPLETE**: `TEX Payment Transaction.last_reverified_at` (p75, sync only) is written for each charge the job
+  asks, whatever the answer; within an urgency the least recently asked goes first, one never asked before any (ADR-066
+  addendum) · `TestPaymentsVerifiedByTheJob.test_more_candidates_than_a_tick_asks_are_each_asked_within_two_ticks`, the
+  urgency tests, `test_patches` p75.
+- LO-20 **COMPLETE** (verified first: the card was not re-verified): a gated account's `settled_while_gated` audit is
+  written once per charge and site day (ADR-042 addendum) ·
+  `TestGoLivePaymentsReview.test_a_gated_accounts_charge_the_job_keeps_asking_is_on_record_once_a_day`.
+- LO-48 **COMPLETE**: stored counts are read as Decimal whole numbers (`money.whole_number`, as `loyalty.extra_units`): an
+  old snapshot's extra quantity that is not whole is refused by name, never cut; the backfill leaves such a stay out and
+  logs it ("TEX job extras backfill …"), the others still hold their units; the localised quote keeps a line's own text
+  when its nights are not whole · unit `test_whole_units` (five),
+  `TestExtrasAdministration.test_a_stay_whose_old_snapshot_has_no_whole_quantity_is_left_out_of_the_backfill`.
+- **Not done:** the delivery job's own runs are not watched apart (the cron entry's runs, the queues' workers and the late
+  PMS messages are); other `long` jobs (Frappe backups, imports) can still delay the outbox on a one-`long`-worker deploy;
+  a settle call without a charge is audited each time; staff re-verification does not write `last_reverified_at`; the
+  GO_LIVE_READINESS worker setup is 2Z's docs refresh.

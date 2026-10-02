@@ -1,4 +1,4 @@
-"""LO-22 (audit Part 2K-4, ADR-064 addendum): the re-verification job asks every Pending card charge in turn.
+"""LO-22 (audit Part 2K-4, ADR-066 addendum): the re-verification job asks every Pending card charge in turn.
 
 By urgency alone, a tick that has more candidates than it asks (``REVERIFY_BATCH``) asked the same most urgent
 charges again and again while the others waited. The job now writes when it last asked a charge
