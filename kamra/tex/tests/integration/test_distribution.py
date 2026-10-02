@@ -4,7 +4,7 @@ once, in order, as the channel's sale (new / modified / cancelled, overbooking a
 with a warning); reconciliation finds drift; everything stays inside its hotel."""
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest import mock
 
 import frappe
@@ -871,6 +871,52 @@ class TestPmsDelivery(TexTestCase):
 		self.assertEqual(outbox.deliver_pending()["sent"], len(rows) - 1)
 		self.assertEqual(adapters.LogOnlyPMS.delivered, [(r.event.split(".")[1], res) for r in rows[1:]])
 		self.assertEqual(self.rows(conn, res)[0].status, "Dead")
+
+	def test_a_round_reads_at_most_its_cap_however_many_wait_in_back_off(self):
+		"""LO-10 (2K-4): a long PMS outage leaves thousands of messages in back-off, and a round read every
+		undelivered message (all connections) to find each reservation's first. It now reads only the first messages
+		that are due and free, at most the round's cap, oldest first; a later message of a reservation whose first
+		waits in back-off is still never claimed."""
+		from kamra.tex.connect import outbox
+
+		conn = self.pms()
+		now, start = now_datetime(), datetime(2000, 1, 1)
+		later, earlier = add_to_date(now, minutes=30), add_to_date(now, minutes=-1)
+		fields = ["name", "creation", "modified", "owner", "modified_by", "docstatus", "kind", "connection", "property",
+		          "event", "status", "attempts", "next_attempt_at", "reference_doctype", "reference_name",
+		          "idempotency_key", "payload"]
+
+		def row(name, n, status, due_at, reservation):
+			at = start + timedelta(seconds=n)
+			return (name, at, at, "Administrator", "Administrator", 0, "Reservation", conn.name, fx.PROPERTY,
+			        "reservation.modified", status, 1 if status == "Failed" else 0, due_at, "Reservation", reservation,
+			        f"lo10-{name}", "{}")
+
+		# 1,000 reservations whose first message waits in back-off and whose second is due (held back by the first)
+		values = []
+		for i in range(1000):
+			values.append(row(f"lo10-wait-{i}", 2 * i, "Failed", later, f"LO10-RES-{i}"))
+			values.append(row(f"lo10-held-{i}", 2 * i + 1, "Pending", earlier, f"LO10-RES-{i}"))
+		# three reservations whose only message is due, written after them
+		due = [f"lo10-due-{i}" for i in range(3)]
+		values += [row(name, 5000 + i, "Pending", earlier, f"LO10-DUE-{i}") for i, name in enumerate(due)]
+		frappe.db.bulk_insert("TEX Integration Outbox", fields, values)
+
+		reads, real_sql = [], frappe.db.sql
+
+		def sniff(query, *a, **kw):
+			out = real_sql(query, *a, **kw)
+			if query.lstrip().upper().startswith("SELECT") and "tabTEX Integration Outbox" in query:
+				reads.append(len(out))
+			return out
+
+		with mock.patch.object(frappe.db, "sql", sniff):
+			claimed = outbox._claim(2, "lo10-round")
+		self.assertEqual(claimed, due[:2])                      # FIFO: the two oldest that may go
+		self.assertTrue(reads)
+		self.assertLessEqual(max(reads), 2, reads)              # never the 2,000 in back-off
+		with mock.patch.object(frappe.db, "sql", sniff):
+			self.assertEqual(outbox._claim(50, "lo10-next"), due[2:])   # the held-back ones stay unclaimed
 
 	def test_a_message_another_worker_reclaimed_is_not_sent(self):
 		"""Each message is read again just before it is sent: one that is no longer this run's (its claim lapsed
