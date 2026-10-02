@@ -19,6 +19,7 @@ from frappe.utils import get_datetime, getdate, now_datetime
 
 from kamra.tex.api._util import parse, text
 from kamra.tex.money import D, from_db, to_str
+from kamra.tex.payments.providers.base import ProviderError
 from kamra.tex.pricing import versions
 from kamra.tex.pricing.extras import guest_safe
 from kamra.tex.refusal_codes import MARKET_REFUSALS
@@ -652,6 +653,11 @@ def pay_booking(token: str, payment_method: str = "Card", provider_account: str 
 # ─── payment callbacks & links ───────────────────────────────────────────
 
 
+class SignatureRefused(ProviderError, frappe.ValidationError):
+	"""A sandbox payment page's answer without a valid signature (G-10): a coded 417 (G-70b), and still the
+	``ProviderError`` it always was for whoever catches one."""
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=30, seconds=60)
 @refusals.coded
@@ -668,7 +674,7 @@ def mock_pay(transaction: str, outcome: str, sig: str):
 	# the signature first: a replay of a finished payment tells nothing to whoever cannot sign it (G-10)
 	if outcome not in ("success", "fail") or not hmac.compare_digest(
 			mock_signature(pay._mock_secret(), transaction, outcome), str(sig or "")):
-		frappe.throw(_("Invalid payment signature."), refusal("PAYMENT_SIGNATURE_INVALID"))
+		frappe.throw(_("Invalid payment signature."), refusal("PAYMENT_SIGNATURE_INVALID", SignatureRefused))
 	from kamra.tex.security.audit import audit_source
 
 	# the sandbox payment page stands in for a gateway's page: its answer is a gateway return (G-74)

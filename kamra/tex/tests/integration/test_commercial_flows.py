@@ -126,10 +126,11 @@ class TestGuestPayment(TexTestCase):
 		self.assertTrue(pmt["sandbox"])
 		txn = pmt["transaction"]
 
-		# a forged signature is rejected and changes nothing (a coded refusal since G-70b, not a server error)
-		with self.assertRaises(frappe.ValidationError) as cm:
+		# a forged signature is rejected and changes nothing
+		with self.assertRaises(ProviderError) as cm:
 			public.mock_pay(transaction=txn, outcome="success", sig="0" * 64)
-		self.assertEqual(cm.exception.code, "PAYMENT_SIGNATURE_INVALID")
+		# ... a coded 417 since G-70b, never a server error
+		self.assertEqual((cm.exception.code, cm.exception.http_status_code), ("PAYMENT_SIGNATURE_INVALID", 417))
 		self.assertEqual(frappe.db.get_value("TEX Payment Transaction", txn, "status"), "Pending")
 
 		out = public.mock_pay(transaction=txn, outcome="success", sig=pmt["fields"]["success_sig"])
