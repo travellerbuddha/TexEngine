@@ -64,3 +64,11 @@ test("an id is stripped of exactly what the server strips (LO-49: Python str.str
   assert.equal(analyticsId("ga4", "\x1fG-ABCD1234"), "G-ABCD1234") // unit separator: the same
   assert.equal(analyticsId("ga4", "﻿G-ABCD1234"), null) // a byte-order mark: String.trim strips it, the server refuses it
 })
+
+test("the admin form finds an id blank as the server does (2K-5 review: its strip, not String.trim)", () => {
+  // only a NEL: the server strips it to nothing and stores no id, so the form lets it be
+  assert.equal(validateSite(adminSite({ ga4_measurement_id: "\x85" })).ga4_measurement_id, undefined)
+  // only a byte-order mark: the server keeps it and refuses it, so the form does too
+  assert.equal(validateSite(adminSite({ gtm_container_id: "﻿" })).gtm_container_id, "be.err.gtm")
+  assert.equal(validateSite(adminSite({ meta_pixel_id: " \t" })).meta_pixel_id, undefined)
+})
