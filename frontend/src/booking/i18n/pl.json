@@ -277,6 +277,8 @@
   "payment.checkingOptions": "Sprawdzamy metody płatności…",
   "payment.noMethodsTitle": "Brak płatności online dla tej rezerwacji",
   "payment.noMethodsBody": "Skontaktuj się z hotelem, aby dokończyć rezerwację.",
+  "payment.optionsFailedTitle": "Nie udało się wczytać opcji płatności",
+  "payment.optionsFailedBody": "Sprawdź połączenie i spróbuj ponownie. Nic nie zostało jeszcze zarezerwowane ani pobrane.",
   "payment.nothingNow": "Teraz nic nie płacisz",
   "payment.dueNowAmount": "Zapłać teraz {amount}",
   "payment.laterAmount": "{amount} później",

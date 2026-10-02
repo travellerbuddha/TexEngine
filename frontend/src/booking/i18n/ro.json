@@ -277,6 +277,8 @@
   "payment.checkingOptions": "Verificăm opțiunile de plată…",
   "payment.noMethodsTitle": "Nu există plată online pentru această rezervare",
   "payment.noMethodsBody": "Contactați hotelul pentru a finaliza rezervarea.",
+  "payment.optionsFailedTitle": "Opțiunile de plată nu au putut fi încărcate",
+  "payment.optionsFailedBody": "Verificați conexiunea și încercați din nou. Încă nu s-a rezervat și nu s-a încasat nimic.",
   "payment.nothingNow": "Nu plătiți nimic acum",
   "payment.dueNowAmount": "Plătiți acum {amount}",
   "payment.laterAmount": "{amount} mai târziu",

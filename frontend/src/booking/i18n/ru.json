@@ -277,6 +277,8 @@
   "payment.checkingOptions": "Проверяем способы оплаты…",
   "payment.noMethodsTitle": "Для этого бронирования нет онлайн-оплаты",
   "payment.noMethodsBody": "Чтобы завершить бронирование, свяжитесь с отелем.",
+  "payment.optionsFailedTitle": "Не удалось загрузить способы оплаты",
+  "payment.optionsFailedBody": "Проверьте подключение и попробуйте ещё раз. Бронирование ещё не создано, оплата не списана.",
   "payment.nothingNow": "Сейчас ничего платить не нужно",
   "payment.dueNowAmount": "Оплатить сейчас {amount}",
   "payment.laterAmount": "{amount} позже",

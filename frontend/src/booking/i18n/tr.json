@@ -277,6 +277,8 @@
   "payment.checkingOptions": "Ödeme seçenekleri kontrol ediliyor…",
   "payment.noMethodsTitle": "Bu rezervasyon için online ödeme seçeneği yok",
   "payment.noMethodsBody": "Rezervasyonu tamamlamak için lütfen otelle iletişime geçin.",
+  "payment.optionsFailedTitle": "Ödeme seçenekleri yüklenemedi",
+  "payment.optionsFailedBody": "Bağlantınızı kontrol edip tekrar deneyin. Henüz rezervasyon yapılmadı, ödeme alınmadı.",
   "payment.nothingNow": "Şimdi ödeme yok",
   "payment.dueNowAmount": "Şimdi {amount} ödeyin",
   "payment.laterAmount": "{amount} daha sonra",

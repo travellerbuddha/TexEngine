@@ -277,6 +277,8 @@
   "payment.checkingOptions": "Zahlungsmöglichkeiten werden geprüft …",
   "payment.noMethodsTitle": "Für diese Buchung ist keine Online-Zahlung möglich",
   "payment.noMethodsBody": "Bitte wenden Sie sich an das Hotel, um die Buchung abzuschließen.",
+  "payment.optionsFailedTitle": "Die Zahlungsoptionen konnten nicht geladen werden",
+  "payment.optionsFailedBody": "Prüfen Sie Ihre Verbindung und versuchen Sie es erneut. Es wurde noch nichts gebucht oder belastet.",
   "payment.nothingNow": "Jetzt nichts zu zahlen",
   "payment.dueNowAmount": "Jetzt {amount} zahlen",
   "payment.laterAmount": "{amount} später",

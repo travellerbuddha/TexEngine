@@ -277,6 +277,8 @@
   "payment.checkingOptions": "Checking payment options…",
   "payment.noMethodsTitle": "No online payment option for this booking",
   "payment.noMethodsBody": "Please contact the hotel to complete this booking.",
+  "payment.optionsFailedTitle": "The payment options could not be loaded",
+  "payment.optionsFailedBody": "Check your connection and try again. Nothing has been booked or charged yet.",
   "payment.nothingNow": "Nothing to pay now",
   "payment.dueNowAmount": "Pay {amount} now",
   "payment.laterAmount": "{amount} later",
