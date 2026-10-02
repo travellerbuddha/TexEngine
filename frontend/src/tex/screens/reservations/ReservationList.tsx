@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Lock, Plus, Search, X } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { date, num } from "../../lib/format"
@@ -17,11 +17,17 @@ export default function ReservationList() {
   const { t } = useTexT()
   const L = useLabels()
   const navigate = useNavigate()
-  const { boot, can, canAnywhere } = useSession()
+  const { boot, can, canAnywhere, property: current } = useSession()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const q = params.get("q") ?? ""
   const status = params.get("status") ?? ""
-  const property = params.get("property") ?? ""
+  const hotels = boot.properties.filter((p) => p.capabilities.includes("reservation.view"))
+  // the hotel the screen works on, unless "all hotels" is chosen (UX revision 2026-10): every
+  // hotel is an explicit choice (?property=all), never the silent default
+  const wanted = params.get("property") ?? ""
+  const all = hotels.length > 1 && wanted === "all"
+  const property = all ? "" : wanted && wanted !== "all" ? wanted : hotels.length > 1 && current && hotels.some((h) => h.name === current.name) ? current.name : ""
   const from = params.get("from") ?? ""
   const to = params.get("to") ?? ""
   const pending = params.get("guest_changes") === "1"
@@ -29,7 +35,6 @@ export default function ReservationList() {
   const [draft, setDraft] = useState(q)
   useEffect(() => setDraft(q), [q])
 
-  const hotels = boot.properties.filter((p) => p.capabilities.includes("reservation.view"))
   const update = (patch: Record<string, string | null>, keepPage = false) => {
     const next = new URLSearchParams(params)
     for (const [k, v] of Object.entries(patch)) {
@@ -64,7 +69,10 @@ export default function ReservationList() {
   const list = useTexQuery<ReservationRow[]>("crs", "reservations", args, [JSON.stringify(args)], canAnywhere("reservation.view"))
   const rows = list.data?.slice(0, PAGE)
   const hasNext = (list.data?.length ?? 0) > PAGE
-  const filtered = Boolean(q || status || property || from || to || pending)
+  const filtered = Boolean(q || status || (wanted && wanted !== "all" && wanted !== current?.name) || from || to || pending)
+  // nothing found in one hotel for a number or a name: the other hotels are one click away
+  const elsewhere = Boolean(q && !all && hotels.length > 1 && rows && rows.length === 0 && !list.loading)
+  const open = (name: string) => navigate(`/tex/reservations/${encodeURIComponent(name)}`, { state: { back: location.search } })
 
   if (!canAnywhere("reservation.view"))
     return (
@@ -124,9 +132,9 @@ export default function ReservationList() {
             <Field label={t("core.shell.hotel")} className="w-full sm:w-52">
               <Select
                 id="res-hotel"
-                value={property}
-                onChange={(e) => update({ property: e.target.value || null })}
-                options={[{ value: "", label: t("res.list.all_hotels") }, ...hotels.map((h) => ({ value: h.name, label: h.property_name }))]}
+                value={all ? "all" : property}
+                onChange={(e) => update({ property: e.target.value === current?.name ? null : e.target.value })}
+                options={[...hotels.map((h) => ({ value: h.name, label: h.property_name })), { value: "all", label: t("res.list.all_hotels_n", { count: hotels.length }) }]}
               />
             </Field>
           )}
@@ -163,18 +171,32 @@ export default function ReservationList() {
         ) : (
           <>
             {/* phones: one card per reservation; wider screens: the sortable table */}
-            <MobileList rows={rows} loading={list.loading} hotels={hotels} canPrice={(p) => can("price.view", p)} empty={pending ? t("res.list.no_changes") : filtered ? t("res.list.none_filtered") : t("res.list.none")} />
+            <MobileList rows={rows} loading={list.loading} hotels={hotels} canPrice={(p) => can("price.view", p)} empty={pending ? t("res.list.no_changes") : filtered ? t("res.list.none_filtered") : t("res.list.none")} back={location.search} />
+            {elsewhere && (
+              <div className="px-4 pb-4 sm:hidden">
+                <Button size="sm" onClick={() => update({ property: "all" })}>
+                  {t("res.list.search_all")}
+                </Button>
+              </div>
+            )}
             <div className="hidden sm:block">
             <DataTable<ReservationRow>
               caption={t("res.list.caption")}
               rows={rows}
               loading={list.loading}
               rowKey={(r) => r.name}
-              onRowClick={(r) => navigate(`/tex/reservations/${encodeURIComponent(r.name)}`)}
+              onRowClick={(r) => open(r.name)}
               empty={
                 <EmptyState
                   title={pending ? t("res.list.no_changes") : filtered ? t("res.list.none_filtered") : t("res.list.none")}
-                  description={filtered ? t("res.list.none_hint") : undefined}
+                  description={elsewhere ? t("res.list.none_here", { hotel: hotelName(hotels, property) }) : filtered ? t("res.list.none_hint") : undefined}
+                  action={
+                    elsewhere ? (
+                      <Button size="sm" onClick={() => update({ property: "all" })}>
+                        {t("res.list.search_all")}
+                      </Button>
+                    ) : undefined
+                  }
                 />
               }
               columns={[
@@ -186,6 +208,11 @@ export default function ReservationList() {
                     <span className="block whitespace-nowrap">
                       <span className="font-medium text-zinc-900">{r.name}</span>
                       {r.tex_booking && <span className="block text-xs text-zinc-500">{r.tex_booking}</span>}
+                      {r.channel_ref && (
+                        <span className="block text-xs text-zinc-600" title={t("res.list.channel_ref")}>
+                          {t("res.list.channel_ref_short", { ref: r.channel_ref })}
+                        </span>
+                      )}
                     </span>
                   ),
                 },
@@ -285,12 +312,14 @@ function MobileList({
   hotels,
   canPrice,
   empty,
+  back,
 }: {
   rows: ReservationRow[] | undefined
   loading: boolean
   hotels: { name: string; property_name: string }[]
   canPrice: (property: string) => boolean
   empty: string
+  back: string
 }) {
   const { t } = useTexT()
   const L = useLabels()
@@ -307,12 +336,13 @@ function MobileList({
     <ul className="divide-y divide-zinc-100 sm:hidden" aria-label={t("res.list.caption")}>
       {rows.map((r) => (
         <li key={r.name}>
-          <Link to={`/tex/reservations/${encodeURIComponent(r.name)}`} className="block px-4 py-3 hover:bg-zinc-50 focus-visible:bg-tex-50">
+          <Link to={`/tex/reservations/${encodeURIComponent(r.name)}`} state={{ back }} className="block px-4 py-3 hover:bg-zinc-50 focus-visible:bg-tex-50">
             <span className="flex items-start justify-between gap-2">
               <span className="min-w-0">
                 <span className="block font-medium text-zinc-900">{r.guest_name || "—"}</span>
                 <span className="block text-xs text-zinc-500">
                   {r.name} · {hotelName(hotels, r.property)}
+                  {r.channel_ref ? ` · ${r.channel_ref}` : ""}
                 </span>
               </span>
               <span className="shrink-0 text-right">

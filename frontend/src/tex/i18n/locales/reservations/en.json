@@ -234,9 +234,9 @@
  "res.list.none_hint": "Try other filters or clear them.",
  "res.list.paging": "Pages",
  "res.list.prev": "Previous",
- "res.list.search_placeholder": "Number, guest, email or phone",
+ "res.list.search_placeholder": "Number, guest, e-mail, phone or channel reference",
  "res.list.showing": "Showing {from}–{to}",
- "res.list.subtitle": "Every reservation in your hotels, newest first.",
+ "res.list.subtitle": "Reservations of the hotel you work on, newest first. Choose “All my hotels” to search every hotel.",
  "res.mod.applied": "Reservation updated — {rev}",
  "res.mod.apply": "Apply change",
  "res.mod.apply_drops": "Applying this change removes: {extras}.",
@@ -340,5 +340,10 @@
  "res.imported.currency": "Currency",
  "res.imported.reason": "Reason",
  "res.imported.confirm": "Correct amount",
- "res.imported.done": "Amount corrected to {amount}"
+ "res.imported.done": "Amount corrected to {amount}",
+ "res.list.all_hotels_n": "All my hotels ({count})",
+ "res.list.none_here": "Nothing matches at {hotel}. It may be a reservation of another hotel.",
+ "res.list.search_all": "Search all my hotels",
+ "res.list.channel_ref": "The channel's own booking number",
+ "res.list.channel_ref_short": "Channel ref. {ref}"
 }

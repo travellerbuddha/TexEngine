@@ -162,16 +162,19 @@ def reservations(property: str | None = None, q: str | None = None, status: str 
 	if int(pending_only or 0):
 		cond.append("r.tex_guest_change_pending = 1")
 	if q:
+		# the channel's own reference too (an OTA's booking number, UX revision 2026-10): staff are
+		# often given only that one
 		cond.append("(r.name LIKE %(q)s OR r.guest_name LIKE %(q)s OR r.tex_booking LIKE %(q)s "
-		            "OR g.email LIKE %(q)s OR g.phone LIKE %(q)s)")
+		            "OR g.email LIKE %(q)s OR g.phone LIKE %(q)s OR b.external_ref LIKE %(q)s)")
 		vals["q"] = f"%{q.strip()[:60]}%"
 	rows = frappe.db.sql(f"""
 		SELECT r.name, r.property, r.status, r.guest, r.guest_name, r.room_type, rt.room_type_name, r.room,
 		       r.check_in_date, r.check_out_date, r.nights, r.adults, r.children, r.tex_booking, r.tex_market,
 		       r.tex_sales_channel, r.tex_board, r.tex_currency, r.tex_total_amount, r.amount_after_tax,
-		       r.tex_guest_change_pending, r.tex_revision_no, r.creation
+		       r.tex_guest_change_pending, r.tex_revision_no, r.creation, b.external_ref AS channel_ref
 		FROM `tabReservation` r
 		LEFT JOIN `tabGuest` g ON g.name = r.guest
+		LEFT JOIN `tabTEX Booking` b ON b.name = r.tex_booking
 		LEFT JOIN `tabRoom Type` rt ON rt.name = r.room_type
 		WHERE {' AND '.join(cond)}
 		ORDER BY r.creation DESC LIMIT %(start)s, %(limit)s""", vals, as_dict=True)  # nosemgrep -- static conditions, values bound

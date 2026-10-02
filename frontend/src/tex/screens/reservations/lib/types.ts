@@ -37,6 +37,8 @@ export interface ReservationRow {
   tex_revision_no: number | null
   creation: string
   total: string
+  /** the channel's own booking number (an OTA's reference), when there is one */
+  channel_ref?: string | null
 }
 
 export interface Revision {

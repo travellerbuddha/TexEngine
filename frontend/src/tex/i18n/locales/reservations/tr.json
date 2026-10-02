@@ -234,9 +234,9 @@
  "res.list.none_hint": "Başka filtreler deneyin veya temizleyin.",
  "res.list.paging": "Sayfalar",
  "res.list.prev": "Önceki",
- "res.list.search_placeholder": "Numara, misafir, e-posta veya telefon",
+ "res.list.search_placeholder": "Numara, misafir, e-posta, telefon veya kanal referansı",
  "res.list.showing": "{from}–{to} arası gösteriliyor",
- "res.list.subtitle": "Otellerinizdeki tüm rezervasyonlar, en yeni önce.",
+ "res.list.subtitle": "Çalıştığınız otelin rezervasyonları, en yeni önce. Tüm otelleri aramak için “Tüm otellerim”i seçin.",
  "res.mod.applied": "Rezervasyon güncellendi — {rev}",
  "res.mod.apply": "Değişikliği uygula",
  "res.mod.apply_drops": "Bu değişiklik uygulanınca şunlar kaldırılır: {extras}.",
@@ -340,5 +340,10 @@
  "res.imported.currency": "Para birimi",
  "res.imported.reason": "Gerekçe",
  "res.imported.confirm": "Tutarı düzelt",
- "res.imported.done": "Tutar {amount} olarak düzeltildi"
+ "res.imported.done": "Tutar {amount} olarak düzeltildi",
+ "res.list.all_hotels_n": "Tüm otellerim ({count})",
+ "res.list.none_here": "{hotel} içinde eşleşen yok. Başka bir otelin rezervasyonu olabilir.",
+ "res.list.search_all": "Tüm otellerimde ara",
+ "res.list.channel_ref": "Kanalın kendi rezervasyon numarası",
+ "res.list.channel_ref_short": "Kanal ref. {ref}"
 }
