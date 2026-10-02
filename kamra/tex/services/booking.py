@@ -1489,9 +1489,6 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 	return True
 
 
-LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
-
-
 # one guest's stays at a hotel, as they are now (LO-09): a locking read of Reservation alone, by its (guest, property)
 # index (forced: on few rows the optimizer may take (property, check_in), which would lock the hotel's stays), the
 # dates judged after it; never a join (it would share-lock the other bookings' rows after their rooms: bookings first)
@@ -1519,8 +1516,9 @@ def live_duplicate(booking: str) -> str | None:
 
 	Called under the booking's lock (a late payment's reconciliation or revival), it reads the guest's stays as they
 	are now (LO-09, ADR-062 D4 c): the profiles are a plain read, their stays at the hotel a locking read of
-	Reservation alone (``GUEST_STAYS``, by ``Reservation(guest, property)``), and the bookings of the stays found a
-	plain read, one missing from this request's read view being new, so live. A booking committed after the
+	Reservation alone (``GUEST_STAYS``, by ``Reservation(guest, property)``). A stay live now (not Cancelled or No Show)
+	is its booking's: a booking the read view shows Cancelled was revived since, one missing from it is new; only a
+	Draft booking is not yet a sale (review round 2). A booking committed after the
 	callback's read view began is found, or one being made waits for this request (a deadlock with it is retried by
 	the caller). A duplicate made on a profile created meanwhile (another e-mail on the same phone) is not found:
 	the CRM shows it as a possible duplicate."""
@@ -1551,7 +1549,7 @@ def live_duplicate(booking: str) -> str | None:
 		return None
 	seen = dict(frappe.get_all("TEX Booking", filters={"name": ("in", others)}, fields=["name", "status"],
 	                           as_list=True))
-	return next((o for o in others if o not in seen or seen[o] in LIVE_BOOKINGS), None)
+	return next((o for o in others if seen.get(o) != "Draft"), None)
 
 
 def revive_expired(booking: str, *, reason: str) -> list[str]:

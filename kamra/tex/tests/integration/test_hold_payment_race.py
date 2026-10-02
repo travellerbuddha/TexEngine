@@ -746,6 +746,43 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(booking.live_duplicate(mine), made[0])     # found under the lock all the same
 		frappe.db.rollback()
 
+	def test_a_booking_revived_meanwhile_counts_as_live(self):
+		"""LO-09 review round 2: a booking of the guest that was cancelled in this request's read view, but whose stay the
+		locking read finds live again (another late payment revived it and committed), is a duplicate: its liveness is
+		its stay's as it is now (before: the read view's "Cancelled" hid it, and both bookings went live)."""
+		lia = {"first_name": "Lia", "last_name": "Again", "email": "lia.lo09b@example.com"}
+
+		def book_lia():
+			prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+			                      rooms=[{"adults": 2}], market="DE", channel="CALL_CENTER",
+			                      currency="EUR")["properties"][0]
+			q = quoting.create_quote(pick(prop, room_code="STD")["rooms"][0]["offer_key"])["quote_id"]
+			return booking.create_booking(quote_ids=[q], guest=lia, payment_method="Pay at Hotel",
+			                              confirm_without_payment=True)
+		mine, other = book_lia()["booking"], book_lia()
+		booking.cancel_reservation(other["rooms"][0]["reservation"], reason="lo09b", waive_penalty=True)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection revives it
+		self.assertEqual(frappe.db.get_value("TEX Booking", other["booking"], "status"), "Cancelled")   # the read view
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+
+		def another_late_payment_revives_it():                        # another request, its own connection
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.db.set_value("Reservation", other["rooms"][0]["reservation"], "status", "Pending Payment",
+				                    update_modified=False)
+				frappe.db.set_value("TEX Booking", other["booking"], "status", "Pending Payment", update_modified=False)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its own request
+			finally:
+				frappe.destroy()
+
+		t = threading.Thread(target=another_late_payment_revives_it)
+		t.start()
+		t.join(timeout=60)
+		self.assertEqual(frappe.db.get_value("TEX Booking", other["booking"], "status"), "Cancelled")   # still the view
+		self.assertEqual(booking.live_duplicate(mine), other["booking"])
+		frappe.db.rollback()
+
 	def test_the_guests_stays_are_locked_by_their_own_index(self):
 		"""LO-09 review: the duplicate check's locking read goes by ``Reservation(guest, property)``, so its shared
 		locks hold the guest's stays at the hotel only, never the hotel's stays of those dates."""
