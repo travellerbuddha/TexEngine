@@ -465,6 +465,9 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	"""Burn points as a payment on a booking (min points, max % of the booking, currency)."""
 	b = frappe.get_doc("TEX Booking", booking)
 	scope.require("payment.link", b.property)
+	if b.get("channel_connection"):
+		# an OTA booking's price and payment are the channel's (D-11, LO-02), as for its extras and changes
+		frappe.throw(_("Points cannot be redeemed on a channel's booking: its price and payment are the channel's."))
 	guests = {b.booker_guest} | set(frappe.get_all("Reservation", filters={"tex_booking": booking}, pluck="guest"))
 	if guest not in guests:
 		frappe.throw(_("The booking belongs to another guest."))
