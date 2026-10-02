@@ -158,6 +158,77 @@ test("a new price found when the quotes are made again stops the booking; the ne
   noErrors()
 })
 
+test("a price the guest accepted is not announced again when the quotes are made again at that price (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  await page.clock.install()
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const booked: string[][] = []
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book") booked.push((r.postDataJSON() as { quote_ids: string[] }).quote_ids)
+  })
+  // the next quotes the page makes: the server's, the stay 10.00 dearer than the search said
+  const dearer = () =>
+    page.route(
+      (url) => isQuoteRooms(url.href),
+      async (route) => {
+        const response = await route.fetch()
+        const body = (await response.json()) as { message: { rooms: { quote?: { totals: Record<string, string> } }[] } }
+        for (const q of body.message.rooms) {
+          if (!q.quote) continue
+          for (const k of ["accommodation", "total"]) {
+            const c = cents(q.quote.totals[k]) + 1000n
+            q.quote.totals[k] = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+          }
+        }
+        await route.fulfill({ response, json: body })
+      },
+      { times: 1 },
+    )
+  const { checkIn, checkOut } = stay(210, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted, { message: "the stay was quoted" }).toBeGreaterThan(0)
+  const bookButton = page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first()
+  const notice = page.getByText("The price has changed")
+  await expect(notice).toHaveCount(0)
+  const terms = page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ })
+  // the guest lingers 26 minutes, then chooses (the page quotes again after 25), as in the O-30 tests
+  const linger = async () => {
+    await page.clock.fastForward("26:00")
+    await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+    await terms.uncheck()
+    await terms.check()
+  }
+
+  // the quotes are made again at submit and the stay costs 10.00 more: the guest sees it and accepts it
+  await dearer()
+  await linger()
+  const before = quoted
+  await bookButton.click()
+  await expect(notice.first()).toBeVisible()
+  expect(quoted).toBeGreaterThan(before)
+  expect(booked, "no booking before the guest has seen the new price").toEqual([])
+  await page.getByRole("button", { name: "OK, continue" }).first().click()
+  await expect(notice).toHaveCount(0)
+
+  // they linger again: the quotes made at the next submit cost what they accepted, so nothing is announced
+  await dearer()
+  await linger()
+  await bookButton.click()
+  await expect.poll(() => booked.length, { message: "booked at the price the guest accepted" }).toBe(1)
+  await expect(notice).toHaveCount(0)
+  await completeSandbox(page, "success")
+  expect((await readConfirmation(page)).status).toBe("Confirmed")
+  noErrors()
+})
+
 test("a declined card keeps the booking awaiting payment until the retry succeeds", async ({ page }, testInfo) => {
   const noErrors = trackErrors(page)
   const { checkIn, checkOut } = stay(160, 2, testInfo.project.name)

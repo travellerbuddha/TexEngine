@@ -464,8 +464,11 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         const code = q.reasons?.[0]?.code
         return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: "", room: i })
       }
-      const before = (base[i] ?? sels[i])!.quote.totals.accommodation
-      const after = q.quote.totals.accommodation
+      // against the last quote the guest saw of this room, extras included (a price they accepted is not announced
+      // again, a change of the extras alone or back to the search's price is: LO-32), else the search's offer
+      const shown = flow.quotes[i]?.ok ? flow.quotes[i]?.quote : null
+      const before = shown ? shown.totals.total : (base[i] ?? sels[i])!.quote.totals.accommodation
+      const after = shown ? q.quote.totals.total : q.quote.totals.accommodation
       if (q.price_changed || (before && after && before !== after))
         changes.push({ room: i, from: q.price_changed && q.previous_total ? q.previous_total : before, to: q.price_changed ? q.quote.totals.total : after, currency: q.quote.currency })
       quotes.push(q)
@@ -473,7 +476,7 @@ export function BookingProvider({ children }: { children: ReactNode }) {
     setFlow((f) => ({ ...f, quotes, quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
     return { error: null, rejected: findRejected(quotes, flow.extras), quotes, changes }
-  }, [flow.selections, flow.extras, site.slug])
+  }, [flow.selections, flow.extras, flow.quotes, site.slug])
 
   const rejectedExtras = useMemo(() => findRejected(flow.quotes, flow.extras), [flow.quotes, flow.extras])
 
