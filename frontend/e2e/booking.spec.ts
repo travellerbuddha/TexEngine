@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test"
-import { addExtra, completeSandbox, fillGuest, guestSearch, payWithSandbox, pickRoom, readConfirmation, visiblePrices } from "./flows/booking"
+import { expect, test, type Page, type TestInfo } from "@playwright/test"
+import { addExtra, completeSandbox, fillGuest, guestSearch, nextStep, payWithSandbox, pickRoom, readConfirmation, visiblePrices } from "./flows/booking"
 import { stayDates, trackErrors } from "./helpers"
 
 // Guest booking engine (R-58): search → room → extras → guest details → sandbox card
@@ -158,9 +158,11 @@ test("a new price found when the quotes are made again stops the booking; the ne
   noErrors()
 })
 
-test("a price the guest accepted is not announced again when the quotes are made again at that price (LO-32)", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
-  const noErrors = trackErrors(page)
+/** LO-32: the stay chosen, quoted on the payment step, then quoted again at submit 10.00 dearer; the guest accepts that
+ * price. `dearer()` makes the next quotes the server's with the stay 10.00 dearer than the search said, marked as the
+ * server marks them: changed against the search's total (it knows nothing of what the guest accepted), but not when
+ * extras were asked for (it does not compare those). */
+async function acceptDearerStay(page: Page, testInfo: TestInfo, offsetDays: number) {
   await page.clock.install()
   const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
   let quoted = 0
@@ -171,25 +173,27 @@ test("a price the guest accepted is not announced again when the quotes are made
   page.on("request", (r) => {
     if (new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book") booked.push((r.postDataJSON() as { quote_ids: string[] }).quote_ids)
   })
-  // the next quotes the page makes: the server's, the stay 10.00 dearer than the search said
   const dearer = () =>
     page.route(
       (url) => isQuoteRooms(url.href),
       async (route) => {
+        const asked = (route.request().postDataJSON() as { rooms: { extras?: unknown[] }[] }).rooms
         const response = await route.fetch()
-        const body = (await response.json()) as { message: { rooms: { quote?: { totals: Record<string, string> } }[] } }
-        for (const q of body.message.rooms) {
-          if (!q.quote) continue
+        const body = (await response.json()) as { message: { rooms: { price_changed?: boolean; previous_total?: string; quote?: { totals: Record<string, string> } }[] } }
+        body.message.rooms.forEach((q, i) => {
+          if (!q.quote) return
+          q.previous_total = q.quote.totals.total
+          q.price_changed = !asked[i]?.extras?.length
           for (const k of ["accommodation", "total"]) {
             const c = cents(q.quote.totals[k]) + 1000n
             q.quote.totals[k] = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
           }
-        }
+        })
         await route.fulfill({ response, json: body })
       },
       { times: 1 },
     )
-  const { checkIn, checkOut } = stay(210, 2, testInfo.project.name)
+  const { checkIn, checkOut } = stay(offsetDays, 2, testInfo.project.name)
   const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
   const rate = found.rates[0]
   await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
@@ -217,6 +221,13 @@ test("a price the guest accepted is not announced again when the quotes are made
   expect(booked, "no booking before the guest has seen the new price").toEqual([])
   await page.getByRole("button", { name: "OK, continue" }).first().click()
   await expect(notice).toHaveCount(0)
+  return { booked, bookButton, notice, dearer, linger, quoted: () => quoted }
+}
+
+test("a price the guest accepted is not announced again when the quotes are made again at that price (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  const { booked, bookButton, notice, dearer, linger } = await acceptDearerStay(page, testInfo, 210)
 
   // they linger again: the quotes made at the next submit cost what they accepted, so nothing is announced
   await dearer()
@@ -224,6 +235,32 @@ test("a price the guest accepted is not announced again when the quotes are made
   await bookButton.click()
   await expect.poll(() => booked.length, { message: "booked at the price the guest accepted" }).toBe(1)
   await expect(notice).toHaveCount(0)
+  await completeSandbox(page, "success")
+  expect((await readConfirmation(page)).status).toBe("Confirmed")
+  noErrors()
+})
+
+test("a price the guest accepted is not announced again when they add an extra afterwards (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  const { booked, notice, dearer, quoted } = await acceptDearerStay(page, testInfo, 220)
+
+  // back to the extras: one more makes the page quote again (the room still at the price they accepted); the extra
+  // is the guest's own choice, the room's price is what they accepted, so nothing is announced
+  await page.getByRole("navigation", { name: "Booking steps" }).getByRole("button", { name: /^Extras/ }).click()
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Make your stay special")
+  await addExtra(page, { name: "Airport transfer", quantity: 1 })
+  await dearer()
+  const before = quoted()
+  await nextStep(page)
+  await expect.poll(quoted, { message: "the stay was quoted again with the extra" }).toBeGreaterThan(before)
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your details")
+  await expect(notice).toHaveCount(0)
+  await fillGuest(page, GUEST)
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  await page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first().click()
+  await expect.poll(() => booked.length, { message: "booked with the extra" }).toBe(1)
   await completeSandbox(page, "success")
   expect((await readConfirmation(page)).status).toBe("Confirmed")
   noErrors()

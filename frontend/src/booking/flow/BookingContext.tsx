@@ -12,6 +12,7 @@ import { siteUrl } from "../lib/mount"
 import { getJSON, manageToken, newKey, rememberPayment, removeItem, saveInstructions, saveManageToken, sessionId, setJSON } from "../lib/storage"
 import { armAbandon, disarmAbandon, trackMarketRefused } from "../lib/track"
 import { marketRefusal, refusedLinkPayload, type MarketRefusal } from "../lib/marketLink"
+import { priceChange, type PriceChange } from "../lib/priceChange"
 import type { Residency } from "../../lib/residency"
 import { useSite } from "../site/SiteContext"
 import type { Basket, BookResponse, Offer, PaymentMethod, PaymentStart, QuoteResponse, RatePlanInfo, RoomQuote, SearchResult } from "../types"
@@ -51,13 +52,6 @@ export interface Guest {
   consent_whatsapp: boolean
 }
 
-export interface PriceChange {
-  room: number
-  from: string
-  to: string
-  currency: string
-}
-
 /** An extra the guest asked for that the quote did not add (and does not charge). */
 export interface RejectedExtra {
   room: number
@@ -86,6 +80,9 @@ interface FlowState {
   quotes: (QuoteResponse | null)[]
   quotedAt: number | null
   priceChanges: PriceChange[]
+  /** per room, the last quote the guest was shown: what the next one is compared with (LO-32). Kept when the extras
+   * change (they clear the quotes), gone with the room chosen; absent in a flow saved before it was kept */
+  seen?: (RoomQuote | null)[]
   guest: Guest
   method: PaymentMethod | null
   /** gateway chosen when several accounts offer the same method (e.g. two card gateways) */
@@ -415,7 +412,9 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         const selections = Array.from({ length: criteria.rooms.length }, (_, i) => (i === roomIndex ? sel : f.selections[i] ?? null))
         const next = selections.findIndex((s) => !s)
         if (next >= 0) setActiveRoom(next)
-        return { ...f, selections, quotes: [], quotedAt: null, priceChanges: [], bookKey: null }
+        // a room chosen again is compared with the search's price of it again
+        const seen = (f.seen ?? []).map((q, i) => (i === roomIndex ? null : q))
+        return { ...f, selections, quotes: [], seen, quotedAt: null, priceChanges: [], bookKey: null }
       })
     },
     [criteria.rooms.length],
@@ -464,19 +463,15 @@ export function BookingProvider({ children }: { children: ReactNode }) {
         const code = q.reasons?.[0]?.code
         return failed({ kind: code === "SOLD_OUT" ? "sold_out" : "unavailable", message: "", room: i })
       }
-      // against the last quote the guest saw of this room, extras included (a price they accepted is not announced
-      // again, a change of the extras alone or back to the search's price is: LO-32), else the search's offer
-      const shown = flow.quotes[i]?.ok ? flow.quotes[i]?.quote : null
-      const before = shown ? shown.totals.total : (base[i] ?? sels[i])!.quote.totals.accommodation
-      const after = shown ? q.quote.totals.total : q.quote.totals.accommodation
-      if (q.price_changed || (before && after && before !== after))
-        changes.push({ room: i, from: q.price_changed && q.previous_total ? q.previous_total : before, to: q.price_changed ? q.quote.totals.total : after, currency: q.quote.currency })
+      // against the last quote the guest saw of this room, else the search's offer (LO-32)
+      const change = priceChange(i, q, flow.seen?.[i] ?? null, (base[i] ?? sels[i])!.quote)
+      if (change) changes.push(change)
       quotes.push(q)
     }
-    setFlow((f) => ({ ...f, quotes, quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
+    setFlow((f) => ({ ...f, quotes, seen: quotes.map((r) => r.quote ?? null), quotedAt: Date.now(), priceChanges: changes, bookKey: null }))
     armAbandon(site.slug, { quotes: quotes.map((q) => q.quote_id), hotel: sels[0]!.hotel })
     return { error: null, rejected: findRejected(quotes, flow.extras), quotes, changes }
-  }, [flow.selections, flow.extras, flow.quotes, site.slug])
+  }, [flow.selections, flow.extras, flow.seen, site.slug])
 
   const rejectedExtras = useMemo(() => findRejected(flow.quotes, flow.extras), [flow.quotes, flow.extras])
 
