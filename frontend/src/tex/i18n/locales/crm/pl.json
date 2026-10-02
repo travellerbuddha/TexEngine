@@ -648,6 +648,7 @@
  "crm.seg.warn_currency_short": "Brak waluty: nikt nie pasuje",
  "crm.stay.dates": "Daty",
  "crm.stay.fee": "Opłata {amount}",
+ "crm.stay.hold_expired": "Blokada wygasła",
  "crm.stay.pax": "Dorośli: {adults} · dzieci: {children}",
  "crm.stay.reservation": "Rezerwacja",
  "crm.stay.room": "Pokój · wyżywienie",

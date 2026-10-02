@@ -631,6 +631,7 @@
  "crm.seg.warn_currency_short": "Keine Währung: trifft auf niemanden zu",
  "crm.stay.dates": "Daten",
  "crm.stay.fee": "Gebühr {amount}",
+ "crm.stay.hold_expired": "Option abgelaufen",
  "crm.stay.pax": "{adults} Erwachsene · {children} Kinder",
  "crm.stay.reservation": "Reservierung",
  "crm.stay.room": "Zimmer · Verpflegung",

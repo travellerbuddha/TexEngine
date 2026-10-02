@@ -88,6 +88,8 @@ export interface Stay {
   tex_market: string | null
   /** the fee charged for a cancelled stay or a no-show (decimal string); null otherwise */
   cancellation_fee?: string | null
+  /** a hold that ran out of time: no cancellation, never a sale (O-24) */
+  hold_expired?: boolean
 }
 
 /** An extra on one of the guest's stays at the viewer's hotels (from its price-locked snapshot). */

@@ -648,6 +648,7 @@
  "crm.seg.warn_currency_short": "Нет валюты: никто не попадает",
  "crm.stay.dates": "Даты",
  "crm.stay.fee": "Сбор {amount}",
+ "crm.stay.hold_expired": "Блокировка истекла",
  "crm.stay.pax": "Взрослых: {adults} · детей: {children}",
  "crm.stay.reservation": "Бронь",
  "crm.stay.room": "Номер · питание",

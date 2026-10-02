@@ -631,6 +631,7 @@
  "crm.seg.warn_currency_short": "No currency: matches nobody",
  "crm.stay.dates": "Dates",
  "crm.stay.fee": "Fee {amount}",
+ "crm.stay.hold_expired": "Hold expired",
  "crm.stay.pax": "{adults} adults · {children} children",
  "crm.stay.reservation": "Reservation",
  "crm.stay.room": "Room · board",

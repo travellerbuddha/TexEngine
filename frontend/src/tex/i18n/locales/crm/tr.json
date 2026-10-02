@@ -631,6 +631,7 @@
  "crm.seg.warn_currency_short": "Para birimi yok: kimse girmez",
  "crm.stay.dates": "Tarihler",
  "crm.stay.fee": "Ücret {amount}",
+ "crm.stay.hold_expired": "Tutma süresi doldu",
  "crm.stay.pax": "{adults} yetişkin · {children} çocuk",
  "crm.stay.reservation": "Rezervasyon",
  "crm.stay.room": "Oda · pansiyon",

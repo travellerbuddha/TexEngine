@@ -246,10 +246,13 @@ def profile(guest: str) -> dict:
 	stays = frappe.get_all("Reservation", filters={"guest": guest, "property": ("in", list(via))},
 	                       fields=["name", "property", "status", "check_in_date", "check_out_date", "room_type",
 	                               "tex_board", "adults", "children", "tex_total_amount", "tex_currency",
-	                               "tex_booking", "tex_sales_channel", "tex_market", "cancellation_fee"],
+	                               "tex_booking", "tex_sales_channel", "tex_market", "cancellation_fee",
+	                               "tex_hold_expired"],
 	                       order_by="check_in_date desc", limit=200)
 	for s in stays:
 		s["check_in_date"], s["check_out_date"] = str(s["check_in_date"]), str(s["check_out_date"])
+		# a hold that ran out of time is no cancellation and was never a sale (O-24, LO-24)
+		s["hold_expired"] = bool(s.pop("tex_hold_expired"))
 		s["tex_total_amount"] = to_str(from_db(s["tex_total_amount"], s["tex_currency"] or "EUR"))
 		# the fee charged for a cancellation or no-show; none on a stay that is not closed
 		fee = from_db(s.pop("cancellation_fee") or 0, s["tex_currency"] or "EUR")

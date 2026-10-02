@@ -639,6 +639,7 @@
  "crm.seg.warn_currency_short": "Fără monedă: nu include pe nimeni",
  "crm.stay.dates": "Date",
  "crm.stay.fee": "Taxă {amount}",
+ "crm.stay.hold_expired": "Blocare expirată",
  "crm.stay.pax": "{adults} adulți · {children} copii",
  "crm.stay.reservation": "Rezervare",
  "crm.stay.room": "Cameră · masă",
