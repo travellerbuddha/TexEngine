@@ -124,7 +124,8 @@ def build_days(mapping, start: date, end: date) -> list[AriDay]:
 	days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
 	if not days:
 		return []
-	if not m.enabled:
+	if not m.enabled or frappe.db.get_value("Room Type", m.room_type, "disabled"):
+		# a disabled mapping, or a room type no longer sold (LO-03, ADR-048): its close-out
 		return [closed_day(m, d) for d in days]
 	now = now_datetime()
 	contract, version = _contract_version(m, now)
@@ -157,7 +158,7 @@ def build_days(mapping, start: date, end: date) -> list[AriDay]:
 
 
 def closed_day(m, day: date) -> AriDay:
-	"""What a disabled mapping sends: nothing left to sell (the close-out, G-69)."""
+	"""What a disabled mapping, or one of a disabled room type, sends: nothing left to sell (the close-out, G-69)."""
 	return AriDay(day, 0, True, currency=m.sell_currency)
 
 

@@ -727,6 +727,13 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 
 		if not pay.method_offered(property, payment_method, market=market, currency=currency, channel=channel):
 			frappe.throw(_("This payment method is not available."))
+	# a quote of a room type disabled since it was made no longer books (LO-03, ADR-048)
+	for rt in sorted({r[1]["room_type"] for r in rows}):
+		if frappe.db.get_value("Room Type", rt, "disabled"):
+			from kamra.tex.services.refusals import refusal
+
+			frappe.throw(_("{0} is no longer sold — please search again.").format(
+				frappe.db.get_value("Room Type", rt, "room_type_name") or rt), refusal("ROOM_NOT_SOLD"))
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
 	# row lock makes a suspend wait for bookings in flight, and every booking after it see it
 	for contract in sorted({r[2]["contract"]["contract"] for r in rows}):

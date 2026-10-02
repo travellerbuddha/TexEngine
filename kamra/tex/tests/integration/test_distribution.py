@@ -88,6 +88,28 @@ class TestAri(DistributionCase):
 		                "room_type": self.std, "stop_sell": "STOP"}).insert(ignore_permissions=True)
 		self.assertTrue(dist.build_days(self.mapping, a, a)[0].closed)
 
+	def test_a_disabled_room_type_is_sent_closed_and_disabling_it_queues_a_sync(self):
+		"""LO-03 (audit 2K-3, ADR-039): a disabled room type is no longer sold, so its enabled mapping sends every day
+		closed with nothing available (before: open, with the pool's availability and rates), and disabling or
+		enabling it queues its mappings' sync (before: nothing queued, the channel kept selling it)."""
+		a, b = fx.d(6, 10), fx.d(6, 12)
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		doc = frappe.get_doc("Room Type", self.std)
+		doc.disabled = 1
+		doc.save(ignore_permissions=True)
+		self.assertEqual(len(self.jobs()), 1)
+		self.assertEqual({(d.closed, d.available, d.rates) for d in dist.build_days(self.mapping, a, b)},
+		                 {(True, 0, ())})
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		doc.reload()
+		doc.room_type_name = doc.room_type_name + " (renamed)"                          # no change of sale: no sync
+		doc.save(ignore_permissions=True)
+		self.assertEqual(self.jobs(), [])
+		doc.disabled = 0
+		doc.save(ignore_permissions=True)
+		self.assertEqual(len(self.jobs()), 1)
+		self.assertFalse(dist.build_days(self.mapping, a, a)[0].closed)
+
 	def test_the_preview_starts_on_the_sites_day(self):
 		# the push horizon starts on the site's day, so the preview does too: a browser in an earlier
 		# time zone just after the site's midnight must not show yesterday as a day never sent
