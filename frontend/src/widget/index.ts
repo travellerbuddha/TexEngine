@@ -396,6 +396,8 @@ export class TexBookingWidget extends HTMLElement {
       e.preventDefault()
       this.close()
     })
+    // closed any other way (a close request the page could not cancel, a script): the host page scrolls again (LO-49)
+    dlg.addEventListener("close", () => this.unlock())
   }
 
   private opener: HTMLElement | null = null

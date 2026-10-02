@@ -132,3 +132,17 @@ test("when its site changes, the modal names no hotel until the new site's theme
   await expect.poll(title).toBe("Other Resort")
   noErrors()
 })
+
+test("a modal closed by the browser itself gives the host page its scrolling back (LO-49)", async ({ page }) => {
+  const noErrors = trackErrors(page)
+  await page.route(HOST_PAGE, (route) => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: HOST_HTML }))
+  await page.goto(HOST_PAGE)
+  const { checkIn, checkOut } = stayDates(305, 2)
+  await search(page, checkIn, checkOut)
+  expect(await overflow(page)).toBe("hidden")
+  // closed without the widget's own close button or Escape (a close request the page could not cancel, a script)
+  await page.evaluate(() => document.querySelector("tex-booking-widget")!.shadowRoot!.querySelector("dialog")!.close())
+  await expect(page.locator("tex-booking-widget dialog")).toBeHidden()
+  await expect.poll(() => overflow(page)).toBe("")
+  noErrors()
+})
