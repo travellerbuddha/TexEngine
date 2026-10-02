@@ -219,6 +219,21 @@ class TestRefusalReview(SnapshotCase):
 		                   self.c["version"])                                  # staff keep the detail
 		self.assertTrue(all(r["recorded_hash"] and r["found_hash"] for r in refusals(self.res)))
 
+	def test_a_refusal_a_guest_met_keeps_the_staff_detail_in_its_audit(self):
+		"""2G-3 review round 1 (S2): a guest is told less (G-70b: never the version), the audit keeps the detail: the
+		version and what failed, as for a refusal staff meet."""
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest proposes on the manage page
+		change_payload(self.c["version"])
+		with self.assertRaisesRegex(frappe.ValidationError, "contact the hotel"):
+			modification.propose(self.res, {"check_out": fx.d(6, 13)}, basis="CURRENT", _check_permission=False)
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read the audit
+		reasons = frappe.get_all("TEX Audit Event", filters={"action": REFUSED, "reference_name": self.res},
+		                         pluck="reason")
+		self.assertTrue(reasons)
+		for reason in reasons:
+			self.assertIn(self.c["version"], reason)
+			self.assertIn("not the terms it was sold on", reason)
+
 	def test_a_queue_that_is_down_never_replaces_the_refusal(self):
 		"""L4: the audit job cannot be queued (Redis down): the refusal is still the answer, and the
 		failure to audit is logged without the stay's details."""

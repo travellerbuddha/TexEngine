@@ -67,12 +67,12 @@ def refuse(res, snap: dict, error: Exception, *, use: str, basis: str | None = N
 	audit_refusal(REFUSED, reference_doctype="Reservation", reference_name=res.name, property=res.property,
 	              new={"use": use, "basis": basis, "version": version, "sold_version": sold_version(snap),
 	                   "recorded_hash": recorded_hash(res, snap), "found_hash": found},
-	              reason=str(error)[:500], once_per=ONCE_PER)
+	              reason=(getattr(error, "detail", None) or str(error))[:500], once_per=ONCE_PER)
 	if guest:
 		msg = _("This booking cannot be changed online right now. Please contact the hotel.")
 	else:
 		msg = _("Reservation {0} cannot be priced: {1} Its price stays as sold. Ask an administrator to check "
-		        "the contract version before re-pricing it.").format(res.name, str(error))
+		        "the contract version before re-pricing it.").format(res.name, getattr(error, "detail", None) or str(error))
 	# a guest is told it cannot be changed online; staff get the class's RATE_UNAVAILABLE (G-70b)
 	frappe.throw(msg, with_code(contracts.PayloadMismatch(version=version, found_hash=found),
 	                            "CHANGE_NOT_ONLINE" if guest else None))
