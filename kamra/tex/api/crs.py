@@ -221,6 +221,8 @@ def booking(name: str):
 	b = frappe.get_doc("TEX Booking", name)
 	scope.require("reservation.view", b.property)
 	out = booking_svc.booking_summary(name)
+	# sold by a channel manager: {connection, label, ref}; staff only (the guest's summary never names it)
+	out["channel_booking"] = booking_svc.channel_of(name)
 	if scope.has_capability("payment.view", b.property):
 		out["transactions"] = frappe.get_all(
 			"TEX Payment Transaction", filters={"booking": name},

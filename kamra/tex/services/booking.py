@@ -1394,6 +1394,12 @@ def resend_confirmation(booking: str) -> dict:
 
 	b = frappe.get_doc("TEX Booking", booking)
 	scope.require("reservation.modify", b.property)
+	sold_by = channel_of(b.name)
+	if sold_by:
+		# the channel confirms its booking, and TEX never e-mails one (its price is the channel's): no manage link is
+		# minted, whose page would offer what the server refuses (LO-11, D-11)
+		frappe.throw(_("{0} sends this booking's confirmation: TEX does not e-mail a channel's booking.").format(
+			sold_by["label"]))
 	if b.status == "Cancelled":
 		frappe.throw(_("This booking is cancelled."))
 	if not b.booker_email:

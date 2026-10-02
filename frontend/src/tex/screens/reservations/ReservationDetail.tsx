@@ -123,7 +123,8 @@ function DetailView({
   const canSimulate = caps.has("price.view") && texPriced
   const canCost = caps.has("price.view_cost")
   // new manage link by e-mail: booking-level, not once everything is cancelled
-  const canResend = Boolean(d.booking) && caps.has("reservation.modify") && d.status !== "Cancelled"
+  // a channel's booking is confirmed by the channel: TEX never e-mails it (LO-11)
+  const canResend = Boolean(d.booking) && caps.has("reservation.modify") && d.status !== "Cancelled" && !d.channel_booking
   // an imported stay is locked at the amount its file carried: corrected with price.override (ADR-052 review)
   const imported = d.pricing_source === "Imported"
   const canCorrect = imported && caps.has("price.override")

@@ -461,6 +461,20 @@ class TestChannelBookings(DistributionCase):
 		self.conn.db_set("label", "")                                                  # no label: its name
 		self.assertEqual(crs_api.cancellation_preview(reservation=res)["channel"]["label"], self.conn.name)
 
+	def test_the_booking_e_mail_of_a_channels_booking_is_never_sent_again(self):
+		"""LO-11 (audit 2K-3, D-11): the channel sends its booking's confirmation, and TEX never e-mails it (its price
+		is the channel's): staff's "resend" is refused and no manage link is minted (before: a new manage token and
+		an e-mail whose page offered Cancel and Change, which the server then refuses)."""
+		from kamra.tex.api import crs as crs_api
+
+		booking_name, _rooms = self.booked("L1")
+		before = frappe.db.get_value("TEX Booking", booking_name, "manage_token_hash")
+		with self.assertRaisesRegex(frappe.ValidationError, "Sandbox CM sends"):
+			crs_api.resend_confirmation(booking_name)
+		self.assertEqual(frappe.db.get_value("TEX Booking", booking_name, "manage_token_hash"), before)
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking.confirmation_resent",
+		                                                      "reference_name": booking_name}))
+
 	def test_a_guest_booking_has_no_channel(self):
 		"""Only an OTA booking is the channel's: the preview of a TEX booking names none."""
 		from kamra.tex.api import crs as crs_api
