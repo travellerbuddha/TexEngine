@@ -571,6 +571,7 @@
   "errors.refreshPrices": "Refresh prices",
   "errors.priceChangedTitle": "The price has changed",
   "errors.priceChangedLine": "Room price was {from}, now {to}.",
+  "errors.priceChangedTotal": "The total was {from}, now {to}.",
   "errors.acceptPrice": "OK, continue",
   "errors.chooseAgain": "Choose another room",
   "errors.siteNotFound": "Booking page not found",

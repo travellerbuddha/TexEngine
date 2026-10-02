@@ -571,6 +571,7 @@
   "errors.refreshPrices": "Odśwież ceny",
   "errors.priceChangedTitle": "Cena się zmieniła",
   "errors.priceChangedLine": "Cena pokoju wynosiła {from}, teraz {to}.",
+  "errors.priceChangedTotal": "Łącznie było {from}, teraz {to}.",
   "errors.acceptPrice": "OK, dalej",
   "errors.chooseAgain": "Wybierz inny pokój",
   "errors.siteNotFound": "Nie znaleziono strony rezerwacji",

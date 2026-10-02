@@ -571,6 +571,7 @@
   "errors.refreshPrices": "Actualizează prețurile",
   "errors.priceChangedTitle": "Prețul s-a schimbat",
   "errors.priceChangedLine": "Prețul camerei era {from}, acum este {to}.",
+  "errors.priceChangedTotal": "Totalul era {from}, acum este {to}.",
   "errors.acceptPrice": "OK, continuă",
   "errors.chooseAgain": "Alege altă cameră",
   "errors.siteNotFound": "Pagina de rezervări nu a fost găsită",

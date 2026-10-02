@@ -7,6 +7,8 @@ export interface PriceChange {
   from: string
   to: string
   currency: string
+  /** which price changed: the room's own, or the total (extras and taxes in); the notice names it */
+  basis: "room" | "total"
 }
 
 /** The extras a quote adds (code, quantity and days), as one comparable string. */
@@ -36,11 +38,13 @@ export function priceChange(room: number, res: QuoteResponse, shown: RoomQuote |
     const k = added(shown) === added(q) ? "total" : "accommodation"
     const from = shown.totals[k]
     const to = q.totals[k]
-    return from && to && from !== to ? { room, from, to, currency: q.currency } : null
+    return from && to && from !== to ? { room, from, to, currency: q.currency, basis: k === "total" ? "total" : "room" } : null
   }
   const before = offer.totals.accommodation
   const after = q.totals.accommodation
   if (res.price_changed || (before && after && before !== after))
-    return { room, from: res.price_changed && res.previous_total ? res.previous_total : before, to: res.price_changed ? q.totals.total : after, currency: q.currency }
+    return res.price_changed
+      ? { room, from: res.previous_total || before, to: q.totals.total, currency: q.currency, basis: res.previous_total ? "total" : "room" }
+      : { room, from: before, to: after, currency: q.currency, basis: "room" }
   return null
 }

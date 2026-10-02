@@ -571,6 +571,7 @@
   "errors.refreshPrices": "Fiyatları yenile",
   "errors.priceChangedTitle": "Fiyat değişti",
   "errors.priceChangedLine": "Oda fiyatı {from} idi, şimdi {to}.",
+  "errors.priceChangedTotal": "Toplam {from} idi, şimdi {to}.",
   "errors.acceptPrice": "Tamam, devam et",
   "errors.chooseAgain": "Başka oda seç",
   "errors.siteNotFound": "Rezervasyon sayfası bulunamadı",

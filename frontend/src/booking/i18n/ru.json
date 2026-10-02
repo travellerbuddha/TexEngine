@@ -571,6 +571,7 @@
   "errors.refreshPrices": "Обновить цены",
   "errors.priceChangedTitle": "Цена изменилась",
   "errors.priceChangedLine": "Цена номера была {from}, теперь {to}.",
+  "errors.priceChangedTotal": "Итого было {from}, теперь {to}.",
   "errors.acceptPrice": "Хорошо, продолжить",
   "errors.chooseAgain": "Выбрать другой номер",
   "errors.siteNotFound": "Страница бронирования не найдена",

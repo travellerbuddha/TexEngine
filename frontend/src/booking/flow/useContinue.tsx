@@ -216,7 +216,7 @@ export function PriceChangeNotice() {
         {changes.map((c) => (
           <li key={c.room}>
             {multi ? `${t("guests.room", { n: c.room + 1 })}: ` : ""}
-            {t("errors.priceChangedLine", { from: money(c.from, c.currency), to: money(c.to, c.currency) })}
+            {t(c.basis === "total" ? "errors.priceChangedTotal" : "errors.priceChangedLine", { from: money(c.from, c.currency), to: money(c.to, c.currency) })}
           </li>
         ))}
       </ul>

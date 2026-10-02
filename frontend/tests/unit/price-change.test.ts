@@ -30,7 +30,7 @@ test("the price the guest accepted is not announced again, though the server mar
 test("a new price after an accepted one is announced from the price the guest saw", () => {
   const shown = quote("210.00", "210.00")
   const change = priceChange(0, made(quote("220.00", "220.00"), { price_changed: true, previous_total: "200.00" }), shown, offer)
-  assert.deepEqual(change, { room: 0, from: "210.00", to: "220.00", currency: "EUR" })
+  assert.deepEqual(change, { room: 0, from: "210.00", to: "220.00", currency: "EUR", basis: "total" })
 })
 
 test("an extra the new quote cannot add is not a price change: it has its own notice and is not charged", () => {
@@ -38,29 +38,40 @@ test("an extra the new quote cannot add is not a price change: it has its own no
   assert.equal(priceChange(0, made(quote("200.00", "200.00", [extra("TRANSFER", "30.00", false)])), shown, offer), null)
   // the room's own price is still compared then
   const dearer = priceChange(0, made(quote("210.00", "210.00", [extra("TRANSFER", "30.00", false)])), shown, offer)
-  assert.deepEqual(dearer, { room: 0, from: "200.00", to: "210.00", currency: "EUR" })
+  assert.deepEqual(dearer, { room: 0, from: "200.00", to: "210.00", currency: "EUR", basis: "room" })
 })
 
 test("an extra the guest added since is their own choice, not a price change; the room's price is still compared", () => {
   const shown = quote("210.00", "210.00")
   assert.equal(priceChange(0, made(quote("210.00", "240.00", [extra("TRANSFER", "30.00")])), shown, offer), null)
   const dearer = priceChange(0, made(quote("220.00", "250.00", [extra("TRANSFER", "30.00")])), shown, offer)
-  assert.deepEqual(dearer, { room: 0, from: "210.00", to: "220.00", currency: "EUR" })
+  assert.deepEqual(dearer, { room: 0, from: "210.00", to: "220.00", currency: "EUR", basis: "room" })
 })
 
 test("the same extras at a new price are announced, extras included", () => {
   const shown = quote("200.00", "230.00", [extra("TRANSFER", "30.00")])
   const change = priceChange(0, made(quote("200.00", "240.00", [extra("TRANSFER", "40.00")])), shown, offer)
-  assert.deepEqual(change, { room: 0, from: "230.00", to: "240.00", currency: "EUR" })
+  assert.deepEqual(change, { room: 0, from: "230.00", to: "240.00", currency: "EUR", basis: "total" })
 })
 
 test("before the guest saw a quote, the search's offer and the server's flag decide, as before", () => {
   assert.equal(priceChange(1, made(quote("200.00", "200.00")), null, offer), null)
-  assert.deepEqual(priceChange(1, made(quote("210.00", "210.00")), null, offer), { room: 1, from: "200.00", to: "210.00", currency: "EUR" })
+  assert.deepEqual(priceChange(1, made(quote("210.00", "210.00")), null, offer), { room: 1, from: "200.00", to: "210.00", currency: "EUR", basis: "room" })
   assert.deepEqual(priceChange(1, made(quote("200.00", "204.00"), { price_changed: true, previous_total: "200.00" }), null, offer), {
     room: 1,
     from: "200.00",
     to: "204.00",
     currency: "EUR",
+    basis: "total",
   })
+})
+
+// 2K-5 review round 2: the notice says which price changed. "Room price was …" read wrong for totals (a new price of
+// an extra, or the server's total against the search's)
+test("each change says whether it is the room's price or the total", () => {
+  const withTransfer = quote("200.00", "230.00", [extra("TRANSFER", "30.00")])
+  assert.equal(priceChange(0, made(quote("200.00", "240.00", [extra("TRANSFER", "40.00")])), withTransfer, offer)?.basis, "total")
+  assert.equal(priceChange(0, made(quote("210.00", "240.00", [extra("TRANSFER", "30.00")])), quote("200.00", "200.00"), offer)?.basis, "room")
+  assert.equal(priceChange(0, made(quote("210.00", "210.00")), null, offer)?.basis, "room")
+  assert.equal(priceChange(0, made(quote("200.00", "204.00"), { price_changed: true, previous_total: "200.00" }), null, offer)?.basis, "total")
 })
