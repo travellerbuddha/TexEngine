@@ -493,5 +493,6 @@
  "inventory.sell.not_sold_short": "nie w sprzedaży",
  "inventory.sell.not_sold": "nie w sprzedaży: {reason}",
  "inventory.sell.with_promos": "{amount}, z {names}",
- "inventory.sell.loading": "obliczanie ceny sprzedaży…"
+ "inventory.sell.loading": "obliczanie ceny sprzedaży…",
+ "inventory.sell.out_of_range": "nie wyceniono w tym widoku: pokaż mniej dni"
 }

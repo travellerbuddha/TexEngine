@@ -493,5 +493,6 @@
  "inventory.sell.not_sold_short": "не продаётся",
  "inventory.sell.not_sold": "не продаётся: {reason}",
  "inventory.sell.with_promos": "{amount}, с учётом {names}",
- "inventory.sell.loading": "рассчитывается цена продажи…"
+ "inventory.sell.loading": "рассчитывается цена продажи…",
+ "inventory.sell.out_of_range": "не рассчитано в этом виде: покажите меньше дней"
 }

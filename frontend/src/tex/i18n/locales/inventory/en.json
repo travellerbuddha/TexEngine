@@ -433,5 +433,6 @@
  "inventory.sell.not_sold_short": "not sold",
  "inventory.sell.not_sold": "not sold: {reason}",
  "inventory.sell.with_promos": "{amount}, with {names}",
- "inventory.sell.loading": "working out the sell price…"
+ "inventory.sell.loading": "working out the sell price…",
+ "inventory.sell.out_of_range": "not priced in this view: show fewer days to see it"
 }

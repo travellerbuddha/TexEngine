@@ -883,8 +883,8 @@ function GridTable({
                         onMouseEnter={() => {
                           if (dragging.current) sel.click(ri, ci, { shift: true })
                         }}
-                        aria-label={cellLabel(t, metric, cell, rowName, metric === "sell" ? (sell?.currency ?? "") : ccy, p, p ? newPrice.get(key) : undefined, sellAt.get(key))}
-                        title={metric === "sell" ? sellTitle(t, sellAt.get(key), sell?.currency) : undefined}
+                        aria-label={cellLabel(t, metric, cell, rowName, metric === "sell" ? (sell?.currency ?? "") : ccy, p, p ? newPrice.get(key) : undefined, sellAt.get(key), sellLoading)}
+                        title={metric === "sell" ? sellTitle(t, sellAt.get(key), sell?.currency, sellLoading) : undefined}
                         className={cn(
                           "relative h-9 cursor-default px-1 text-center align-middle tabular-nums outline-none focus-visible:z-[3] focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
                           mi === shown.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
@@ -1094,12 +1094,12 @@ function shortDay(iso: string | null) {
   return new Intl.DateTimeFormat(intlLocale(getTexLang()), { day: "numeric", month: "short" }).format(new Date(`${iso}T12:00:00`))
 }
 
-function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string, pending?: PendingRate, next?: string, sell?: SellCell): string {
+function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string, pending?: PendingRate, next?: string, sell?: SellCell, sellLoading = false): string {
   const day = `${weekdayName(isoWeekday(c.date), "long")} ${fmtDate(c.date)}`
   let v: string
   switch (metric) {
     case "sell":
-      v = sellTitle(t, sell, ccy)
+      v = sellTitle(t, sell, ccy, sellLoading)
       break
     case "rate":
       v = c.rate ? `${decText(c.rate)} ${ccy}` : t("inventory.aria.no_rate")
@@ -1132,8 +1132,9 @@ function cellLabel(t: (k: string, p?: Record<string, string | number>) => string
 
 
 /** A sell price in words: the amount and the promotions in it, or why the night is not sold. */
-function sellTitle(t: (k: string, p?: Record<string, string | number>) => string, c: SellCell | undefined, ccy: string | undefined): string {
-  if (!c) return t("inventory.sell.loading")
+function sellTitle(t: (k: string, p?: Record<string, string | number>) => string, c: SellCell | undefined, ccy: string | undefined, loading = false): string {
+  // a night past the cells priced in one call (rooms × nights over 400): fewer days show it
+  if (!c) return t(loading ? "inventory.sell.loading" : "inventory.sell.out_of_range")
   if (!c.total) return t("inventory.sell.not_sold", { reason: c.message || c.reason || "—" })
   const amount = `${decText(c.total)} ${ccy ?? ""}`.trim()
   return c.promotions && c.promotions.length ? t("inventory.sell.with_promos", { amount, names: c.promotions.join(", ") }) : amount

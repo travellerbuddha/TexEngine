@@ -433,5 +433,6 @@
  "inventory.sell.not_sold_short": "satılmaz",
  "inventory.sell.not_sold": "satılmaz: {reason}",
  "inventory.sell.with_promos": "{amount}, {names} dahil",
- "inventory.sell.loading": "satış fiyatı hesaplanıyor…"
+ "inventory.sell.loading": "satış fiyatı hesaplanıyor…",
+ "inventory.sell.out_of_range": "bu görünümde fiyatlanmadı: görmek için daha az gün gösterin"
 }

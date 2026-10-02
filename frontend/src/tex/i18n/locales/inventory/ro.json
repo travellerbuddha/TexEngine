@@ -463,5 +463,6 @@
  "inventory.sell.not_sold_short": "nevândut",
  "inventory.sell.not_sold": "nevândut: {reason}",
  "inventory.sell.with_promos": "{amount}, cu {names}",
- "inventory.sell.loading": "se calculează prețul de vânzare…"
+ "inventory.sell.loading": "se calculează prețul de vânzare…",
+ "inventory.sell.out_of_range": "necalculat în această vizualizare: afișați mai puține zile"
 }

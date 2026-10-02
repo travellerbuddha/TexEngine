@@ -433,5 +433,6 @@
  "inventory.sell.not_sold_short": "nicht verkauft",
  "inventory.sell.not_sold": "nicht verkauft: {reason}",
  "inventory.sell.with_promos": "{amount}, mit {names}",
- "inventory.sell.loading": "Verkaufspreis wird ermittelt…"
+ "inventory.sell.loading": "Verkaufspreis wird ermittelt…",
+ "inventory.sell.out_of_range": "in dieser Ansicht nicht berechnet: weniger Tage anzeigen"
 }
