@@ -546,6 +546,25 @@ class TestModification(LoyaltyCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):
 			loyalty.redeem(guest, hotel["booking"], 50, idempotency_key="o21-b-2")
 
+	def test_changing_a_stay_whose_points_expired_never_brings_them_back(self):
+		"""LO-26 (audit 2K-2, ADR-071 §5): a stay whose points expired, changed afterwards (its dates moved: TEX is
+		not the PMS, a stay that ended may still read Confirmed), earns again with the old lot's expiry, never a
+		fresh one: the points that had expired expire again (before: 842 came back, valid for a new month)."""
+		club = self.create(**self.CLUB_1, expiry_months=1)
+		b, guest = self.paid_stay("lo26")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest, club), 842)
+		loyalty.mature_and_expire(today=fx.d(8, 1))                               # a month after: expired
+		self.assertEqual(self.available(guest, club), 0)
+		frappe.db.set_value("Reservation", res, "check_out_date", fx.d(7, 20))      # the stay is changed afterwards
+		frappe.get_doc("Reservation", res).save(ignore_permissions=True)
+		loyalty.mature_and_expire(today=fx.d(8, 1))
+		self.assertEqual(self.available(guest, club), 0)
+		lot = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn",
+		                                                    "status": ("!=", "Reversed")}, pluck="expires_on")
+		self.assertEqual([str(d) for d in lot], [str(add_months(fx.d(6, 13), 1))])
+
 	def test_a_stay_changed_down_and_up_again_is_worth_what_it_is_now(self):
 		club = self.create(**self.CLUB_1)
 		_b, guest, res, _hotel = self.spent_stay(club, "o21-c")
@@ -582,8 +601,10 @@ class TestModification(LoyaltyCase):
 		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", earn, "status"), "Reversed")
 		expiry = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Expire"},
 		                        fields=["points", "status"])
-		self.assertEqual([(r.points, r.status) for r in expiry], [(-842, "Reversed")])    # taken away with its lot
-		self.assertEqual(self.available(guest, club), 843)
+		# taken away with its lot; the new lot keeps the expiry, so its points expire again at once (LO-26: before,
+		# 843 came back with a fresh expiry)
+		self.assertEqual(sorted((r.points, r.status) for r in expiry), [(-843, "Expired"), (-842, "Reversed")])
+		self.assertEqual(self.available(guest, club), 0)
 
 
 class TestEarnMatrix(LoyaltyCase):

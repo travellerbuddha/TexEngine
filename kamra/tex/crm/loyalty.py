@@ -173,7 +173,7 @@ def on_reservation_change(doc) -> None:
 		return
 	existing = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": doc.name, "entry_type": "Earn",
 	                                                         "status": ("!=", "Reversed")},
-	                          fields=["name", "points", "status", "stay_fingerprint"])
+	                          fields=["name", "points", "status", "stay_fingerprint", "expires_on"])
 	if doc.status in ("Cancelled", "No Show"):
 		for e in existing:
 			_reverse(e, reason=f"reservation {doc.status.lower()}")
@@ -191,22 +191,31 @@ def on_reservation_change(doc) -> None:
 	points, lines = points_for(prog, doc, tier.earn_multiplier if tier else 1)
 	# the new earning takes the old one's place, in its state: a stay that had matured stays mature
 	status = "Available" if any(e.status in FINAL for e in existing) else "Pending"
+	# an earning whose points had expired keeps its expiry: a change of the stay never brings expired points back
+	# with a fresh one (LO-26, ADR-071 §5). Read before the reversal takes its Expire rows back
+	kept = [getdate(e.expires_on) for e in existing if e.status in FINAL and e.expires_on and frappe.db.exists(
+		"TEX Loyalty Ledger", {"guest": doc.guest, "program": program, "entry_type": "Expire",
+		                       "status": ("in", list(FINAL)), "reason": lots.marker(e.name)})]
 	for e in existing:
 		_reverse(e, reason="reservation modified", floor=False)       # exact: spent points are not topped up
 	if points <= 0:
 		_sync_guest(doc.guest)
 		return
 	avail_on = add_days(getdate(doc.check_out_date), int(prog.pending_days or 0))
+	expires_on = add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None
+	if kept:
+		expires_on = min([*kept, *([getdate(expires_on)] if expires_on else [])])
 	frappe.get_doc({
 		"doctype": "TEX Loyalty Ledger", "program": program, "guest": doc.guest, "entry_type": "Earn",
-		"points": points, "status": status, "available_on": avail_on,
-		"expires_on": add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None,
+		"points": points, "status": status, "available_on": avail_on, "expires_on": expires_on,
 		"booking": doc.tex_booking, "reservation": doc.name, "property": doc.property,
 		"reason": f"stay {doc.check_in_date}→{doc.check_out_date}" + (f" · tier {tier.tier_name}" if tier else ""),
 		"stay_fingerprint": fingerprint,
 		"explanation": json.dumps({"lines": lines, "tier": tier.tier_name if tier else None,
 		                           "multiplier": str(db_dec(tier.earn_multiplier)) if tier else "1"}, default=str),
 		"actor": frappe.session.user}).insert(ignore_permissions=True)
+	if kept:
+		settle(doc.guest, program)                 # past that expiry: its points expire at once, as the job would
 	_sync_guest(doc.guest)
 
 

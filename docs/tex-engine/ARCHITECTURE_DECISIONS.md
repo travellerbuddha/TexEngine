@@ -9515,6 +9515,10 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
    computed as for any earning. The change is exact (no floor): what was spent is the balance's, which may be below zero
    until later earnings close the debt (`lots.plan` spends a debt first); a redemption and a negative adjustment still
    refuse what the balance cannot cover. The tier is read from the lifetime points without the stay's own earnings.
+   *Amendment (Part 2K-2, LO-26):* an earning whose points had expired (its lot closed by an Expire row) passes its
+   expiry on: the new lot expires at the earlier of its own date and the old one, and is settled at once, so a change of
+   the stay never brings expired points back with a fresh expiry. Reachable: TEX is not the PMS, so a stay that ended
+   may still read Confirmed, and staff or a channel may change it.
 7. *Settling.* The daily job settles each guest and program under the guest's lock (Guest, then its ledger rows) in one
    savepointed step, committed outside tests; a redemption and a negative adjustment settle first, so points past their
    expiry are never spent before the job has run. p61 closes the lots that expired before this model (those the old job
