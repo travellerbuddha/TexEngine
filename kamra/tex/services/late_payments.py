@@ -116,9 +116,10 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 		else "Action Required"
 	again = booking_svc.live_duplicate(booking) if in_time else None
 	# points that paid part of it came back as points when it ended (O-20) and are never burned again: the card
-	# money alone may no longer pay what it owes (LO-23)
-	points_back = in_time and bool(frappe.db.exists(TXN, {"booking": booking, "txn_type": "Refund", "provider": "Loyalty",
-	                                                      "raw_status": "POINTS RETURNED"}))
+	# money alone may no longer pay what it owes (LO-23). Said only when that is why it is not taken back (its rooms
+	# free, no other booking for the stay): asking for the rest then would mislead (review round 1)
+	points_back = in_time and free and not again and bool(frappe.db.exists(
+		TXN, {"booking": booking, "txn_type": "Refund", "provider": "Loyalty", "raw_status": "POINTS RETURNED"}))
 	ccy = txn.currency
 	cause = CAUSES.get(why, why)
 	note = (f"{to_str(from_db(txn.amount, ccy))} {ccy} arrived at {now:%Y-%m-%d %H:%M} for booking {booking} after "

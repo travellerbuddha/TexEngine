@@ -996,6 +996,25 @@ class TestPointsBack(LoyaltyCase):
 		self.assertEqual((row.status, row.reconciliation), ("Succeeded", "Action Required"))
 		self.assertIn("points that paid part of it were given back", row.reconciliation_note)
 
+	def test_a_revival_stopped_by_another_booking_never_asks_for_the_points_rest(self):
+		"""LO-23 (review round 1): the points sentence is said only when money is why the booking is not taken back
+		(its rooms free, no other booking for the stay). The guest booked the stay again meanwhile: the note names
+		that booking, and never asks the guest to pay the rest or redeem points again (before: it did)."""
+		held = guest_books(session="lo23-again")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", held["booking"], "booker_guest")
+		self.give(guest, 1000)
+		loyalty.redeem(guest, held["booking"], 500, idempotency_key="lo23-again-pts")
+		rest = public.pay_booking(token=held["manage_token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
+		self.assertTrue(booking_svc.expire_booking(held["booking"], now=add_to_date(now_datetime(), hours=2)))
+		again = guest_books(session="lo23-again-2", method="Pay at Hotel")       # the guest books the stay again
+		public.mock_pay(transaction=rest["transaction"], outcome="success", sig=rest["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what is on record
+		note = frappe.db.get_value("TEX Payment Transaction", rest["transaction"], "reconciliation_note")
+		self.assertIn(f"the guest has booking {again['booking']} for the same stay", note)
+		self.assertNotIn("points that paid part of it", note)
+
 	def test_a_balance_below_zero_is_shown_as_points_owed(self):
 		"""LO-25 (audit 2K-2): points spent before a stay changed and earned less leave a balance below zero; the
 		profile's summary says how many points are owed (``debt``) and puts no negative money value on them."""
