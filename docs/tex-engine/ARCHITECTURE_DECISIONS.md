@@ -9514,9 +9514,11 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
      (`loyalty.give_back(limit=…)`, the same Reverse rows and POINTS RETURNED refunds, named in the request's refunds),
      then refunds the rest to cards. Under "refund automatically" the settlement itself carries the points' share
      (`points_back`, at most what the Loyalty charges hold), given back when the change applies (no gateway), before the
-     card's share; only what neither a card nor points take back is the hotel's, and the guest is told each part. Staff's
-     "Refunded outside TEX" is refused for money points hold (never closed with nothing recorded, the booking left
-     over): kept on the booking, the guest's points are corrected in the CRM (review round 1).
+     card's share; only what neither a card nor points take back is the hotel's, and the guest is told each part. A
+     points' share that does not come back by itself (its burn not found, an Error Log) waits for staff, never told as
+     a card refund. Staff's "Refunded outside TEX" never records points as money given back: money that is all points
+     is refused (never closed with nothing recorded, the booking left over); beside cash, the cash is recorded and the
+     points' share kept on the booking, said so; the guest's points are corrected in the CRM (review rounds 1, 2).
    - *Channels (LO-02, D-11, D-16).* Points never pay a channel's booking: `redeem` and `allocate` (so `transfer`)
      refuse it. A channel's cancellation, or a room it removes, gives the points spent on the booking before that rule
      back after the booking is refreshed, then reverses the stays' own earning, as at the desk.
