@@ -389,6 +389,37 @@ def refundable_now(booking: str, amount, *, except_request: str | None = None,
 	return st.plan_refunds(max(ZERO, D(amount)), charges)
 
 
+def points_held(booking: str, *, except_request: str | None = None) -> D:
+	"""What the booking's Loyalty charges hold of its money (other requests' money left out): the share of an
+	overpayment that comes back as points first (O-19, O-19b)."""
+	from kamra.tex.payments import service as pay
+
+	reserved = _reserved(booking, except_request)
+	return sum((c["available"] for c in pay.booking_charges(booking)
+	            if c["points"] and c["transaction"] not in reserved), ZERO)
+
+
+def _points_first(req, limit) -> D:
+	"""O-19b (LO-01): the points' share of a lower price comes back as points before any cash, at most ``limit``
+	(``loyalty.give_back``: Reverse rows, POINTS RETURNED refunds); its refunds are the request's, counted as it
+	refunded. No gateway is asked. → what came back."""
+	from kamra.tex.crm import loyalty
+
+	back = loyalty.give_back(req.booking, reason=f"the guest's change {req.name} lowered the price", limit=limit)
+	if back:
+		req.refund_rows = "\n".join([*_refunds_made(req), *(s["refund"] for s in back)])
+		_count_refunds(req)
+	return sum((D(s["amount"]) for s in back), ZERO)
+
+
+def _points_given(req) -> D:
+	"""What the request gave back as points (its succeeded Loyalty refunds)."""
+	made = _refunds_made(req)
+	return sum((from_db(r.amount, r.currency) for r in frappe.get_all(
+		TXN, filters={"name": ("in", made), "txn_type": "Refund", "status": "Succeeded", "provider": "Loyalty"},
+		fields=["amount", "currency"])), ZERO) if made else ZERO
+
+
 # ─── preview ─────────────────────────────────────────────────────────────
 
 
@@ -416,13 +447,16 @@ def _preview(b, res, prop: dict) -> tuple[st.Settlement | None, bool]:
 	fee = (lower or later) and penalty_applies(res)
 	auto = None
 	over = max(ZERO, paid - new_total)
+	points = None
 	if lower and policy == st.LOWER_REFUND and over > 0 and not fee:
-		# only what a card can take back is promised as a card refund; the rest the hotel refunds
+		# only what a card can take back is promised as a card refund; the points' share comes back as points by
+		# itself (O-19b, LO-01); the rest the hotel refunds
 		_plan, rest = refundable_now(b.name, over)
 		auto = over - rest
+		points = points_held(b.name)
 	s = st.settle(old_total, new_total, paid, required, pay_at_hotel=b.payment_method == "Pay at Hotel",
 	              lower_policy=policy, card_available=bool(card_account(b)), penalty_applies=lower and fee,
-	              auto_refundable=auto, terms_review=later and fee)
+	              auto_refundable=auto, terms_review=later and fee, points_back=points)
 	return s, fee
 
 
@@ -431,7 +465,8 @@ def settlement_dict(s: st.Settlement | None, ccy: str) -> dict | None:
 	if s is None:
 		return None
 	return {"kind": s.kind, "amount": _money(s.amount, ccy), "collect": _money(s.collect, ccy),
-	        "refund": _money(s.refund, ccy), "hotel_refund": _money(s.hotel_refund, ccy),
+	        "refund": _money(s.refund, ccy), "points_back": _money(s.points_back, ccy),
+	        "hotel_refund": _money(s.hotel_refund, ccy),
 	        "credit": _money(s.credit, ccy), "balance_after": _money(s.balance_after, ccy), "currency": ccy}
 
 
@@ -571,6 +606,8 @@ def _apply_now(req, proposal_token: str, s: st.Settlement, note: str | None) -> 
 	_after_apply(req, s)
 	if s.kind == st.REFUND:
 		ccy = req.currency
+		if s.points_back > 0:
+			_points_first(req, s.points_back)         # no gateway: at once, before the card's share (LO-01)
 		if s.refund > 0:
 			req.settle_pending = 1
 		if s.hotel_refund > 0:
@@ -595,6 +632,7 @@ def _after_apply(req, s: st.Settlement | None) -> None:
 	ccy = req.currency
 	what = {st.CREDIT: f"{_money(s.credit, ccy)} {ccy} kept as credit on the booking",
 	        st.REFUND: f"{_money(s.refund, ccy)} {ccy} being refunded to the card"
+	                   + (f", {_money(s.points_back, ccy)} {ccy} back as loyalty points" if s.points_back else "")
 	                   + (f", {_money(s.hotel_refund, ccy)} {ccy} for the hotel to refund" if s.hotel_refund else ""),
 	        st.PAY_NOW: f"{_money(s.collect, ccy)} {ccy} paid online",
 	        st.PAY_AT_HOTEL: f"{_money(s.amount, ccy)} {ccy} more to pay at the hotel"}.get(s.kind, "") if s else ""
@@ -664,11 +702,13 @@ def _settlement_view(req) -> dict:
 	kind = KIND.get(req.settlement or "", st.BALANCE)
 	staff = max(ZERO, from_db(req.staff_amount, ccy) - _to_verify(req)) if kind == st.REFUND else ZERO
 	amount = from_db(req.settlement_amount, ccy)
-	card = max(ZERO, amount - staff) if kind == st.REFUND else ZERO
+	# what came back as loyalty points is never told as a card refund (O-19b, LO-01)
+	points = _points_given(req) if kind == st.REFUND else ZERO
+	card = max(ZERO, amount - staff - points) if kind == st.REFUND else ZERO
 	refunded = from_db(req.refunded_amount, ccy)
-	return {"kind": kind, "amount": to_str(amount), "refund": _money(card, ccy), "hotel_refund": _money(staff, ccy),
-	        "refunded": to_str(refunded), "refund_done": bool(card > 0 and refunded >= card and not req.settle_pending),
-	        "currency": ccy}
+	return {"kind": kind, "amount": to_str(amount), "refund": _money(card, ccy), "points_back": _money(points, ccy),
+	        "hotel_refund": _money(staff, ccy), "refunded": to_str(refunded),
+	        "refund_done": bool(card > 0 and refunded - points >= card and not req.settle_pending), "currency": ccy}
 
 
 def _applied(req, *, replay: bool) -> dict:
@@ -996,7 +1036,6 @@ def settle(request: str) -> dict:
 	was recorded for the refund, and saying something else, stops the refunds of the request for
 	good: staff reconcile it (third review). What no charge can refund waits for staff ("Refund
 	by staff")."""
-	from kamra.tex.crm import loyalty
 	from kamra.tex.payments import service as pay
 
 	req = _lock(request)
@@ -1035,10 +1074,9 @@ def settle(request: str) -> dict:
 				break
 			# the points' share comes back as points, before any cash (O-19b, LO-01): never planned as money nor
 			# left to staff; their refunds are the request's, counted as it refunded
-			back = loyalty.give_back(req.booking, reason=f"the guest's change {req.name} lowered the price", limit=left)
-			if back:
-				req.refund_rows = "\n".join([*_refunds_made(req), *(s["refund"] for s in back)])
-				refunded += sum((D(s["amount"]) for s in back), ZERO)
+			got = _points_first(req, left)
+			if got > 0:
+				refunded += got
 				continue
 			plan, rest = refundable_now(req.booking, left, except_request=req.name, failed=failed)
 			if not plan:
@@ -1598,10 +1636,17 @@ def _record_outside(req, amount: D, reason: str) -> D:
 		cap = max(ZERO, from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy)
 		          - earmarked(req.booking, except_request=req.name))
 		reserved = _reserved(req.booking, req.name)
-		# points are never recorded as money given back (O-19b, LO-01): cash at most what is over less the points
 		sources = [st.Charge(c["transaction"], min(c["available"], pay.booking_nets(c["transaction"]).get(
 			req.booking, ZERO) - pay.in_flight_from(c["transaction"], req.booking)), True, c["at"], points=c["points"])
 			for c in pay.booking_charges(req.booking) if c["transaction"] not in reserved]
+		# points are never recorded as money given back (O-19b, LO-01): what the points hold of it is refused,
+		# never closed as if it were refunded (the booking would stay over, its points come back again later)
+		points = sum((c.available for c in sources if c.points and c.available > 0), ZERO)
+		asked = min(amount, cap)
+		if points > 0 and asked > 0:
+			frappe.throw(_("{0} {1} of this money was paid with loyalty points: points come back as points, never as "
+			               "money given back outside TEX. Keep it on the booking, and correct the guest's points in "
+			               "the CRM.").format(_money(min(points, asked), ccy), ccy))
 	else:
 		sources = [st.Charge(txn, held, True, at) for txn, held, at in _left_to_staff(req)]
 		cap = sum((c.available for c in sources), ZERO)

@@ -12,9 +12,9 @@ D = Decimal
 
 
 def settle(old, new, paid, required, *, pay_at_hotel=False, policy=st.LOWER_STAFF, card=True, penalty=False,
-           auto=None):
+           auto=None, **kw):
 	return st.settle(D(old), D(new), D(paid), D(required), pay_at_hotel=pay_at_hotel, lower_policy=policy,
-	                 card_available=card, penalty_applies=penalty, auto_refundable=auto)
+	                 card_available=card, penalty_applies=penalty, auto_refundable=auto, **kw)
 
 
 class TestHigherPrice(unittest.TestCase):
@@ -106,6 +106,27 @@ class TestLowerPrice(unittest.TestCase):
 	def test_only_the_true_overpayment_is_refunded(self):
 		s = settle("842.50", "575.00", "600.00", "172.50", policy=st.LOWER_REFUND)
 		self.assertEqual((s.kind, s.refund), (st.REFUND, D("25.00")))
+
+
+class TestPointsOfALowerPrice(unittest.TestCase):
+	"""LO-01 (O-19b, audit 2K-2 review round 1): under "refund automatically" the points' share of an overpayment comes
+	back as points by itself; only what neither a card nor points take back is the hotel's."""
+
+	def test_the_points_share_comes_back_as_points_the_rest_to_the_card(self):
+		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("167.50"),
+		           points_back=D("100.00"))
+		self.assertEqual((s.kind, s.refund, s.points_back, s.hotel_refund, s.amount),
+		                 (st.REFUND, D("167.50"), D("100.00"), D("0"), D("267.50")))
+
+	def test_points_holding_more_than_the_overpayment_give_back_only_it(self):
+		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("0"), points_back=D("300"))
+		self.assertEqual((s.refund, s.points_back, s.hotel_refund, s.amount), (D("0"), D("267.50"), D("0"),
+		                                                                        D("267.50")))
+
+	def test_what_neither_a_card_nor_points_take_back_is_the_hotels(self):
+		s = settle("842.50", "575.00", "842.50", "575.00", policy=st.LOWER_REFUND, auto=D("100.00"),
+		           points_back=D("50.00"))
+		self.assertEqual((s.refund, s.points_back, s.hotel_refund), (D("100.00"), D("50.00"), D("117.50")))
 
 
 class TestPlanRefunds(unittest.TestCase):

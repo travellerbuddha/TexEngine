@@ -925,19 +925,25 @@ class TestPointsBack(LoyaltyCase):
 
 	def test_points_left_to_staff_are_never_recorded_as_money_given_back(self):
 		"""LO-01: points that could not come back by themselves (no burn row found) are left to staff; their
-		"Refunded outside TEX" records no cash for them off the card (before: 267.50 recorded off the card paid last)."""
+		"Refunded outside TEX" is refused with the reason, never closed as if refunded (before: 267.50 recorded off the
+		card paid last; then, review round 1: closed silently with nothing recorded, so the booking stayed over and its
+		points could come back again later). Kept on the booking, it closes and records no money given back."""
 		from kamra.tex.api import crs as crs_api
 
 		case = self.lowered("lo01-staff", points_last=False)
 		frappe.db.set_value("TEX Loyalty Ledger", {"reason": f"redeemed as {case['points']}"}, "reason", "unknown burn")
 		self.assertEqual(case["approve"]()["refunded_amount"], "0.00")
 		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", case["request"], "staff_open"), 1)
-		crs_api.resolve_guest_change(request=case["request"], action="close", reason="given back by hand",
-		                             staff_money="Refunded outside TEX")
+		with self.assertRaisesRegex(frappe.ValidationError, "267.50 EUR of this money was paid with loyalty points"):
+			crs_api.resolve_guest_change(request=case["request"], action="close", reason="given back by hand",
+			                             staff_money="Refunded outside TEX")
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", case["request"], "staff_open"), 1)
+		crs_api.resolve_guest_change(request=case["request"], action="close", reason="kept, points corrected in the CRM",
+		                             staff_money="Kept on the booking")
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", case["request"], "staff_open"), 0)
 		cash = frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Refund", "booking": case["booking"]},
 		                      pluck="name")
 		self.assertEqual(cash, [])
-		self.assertIn("was not recorded", frappe.db.get_value("TEX Guest Change Request", case["request"], "error"))
 
 	# LO-06 (audit 2K-2): the burn row of a Loyalty charge is found by the charge, wherever the charge or its burner
 	# is now. Before: only among the booking's current guests and on this booking, so a charge staff moved to

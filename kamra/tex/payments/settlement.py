@@ -56,6 +56,7 @@ class Settlement:
 	refund: Decimal = ZERO                 # refunded after the change applied
 	credit: Decimal = ZERO                 # kept on the booking as credit
 	hotel_refund: Decimal = ZERO           # of the overpayment: refunded by the hotel, not to a card by TEX
+	points_back: Decimal = ZERO            # of the overpayment: given back as loyalty points by TEX (O-19b)
 	difference: Decimal = ZERO             # new total − old total
 	balance_after: Decimal = ZERO          # new total − money held once settled (< 0: credit)
 	due_later: Decimal = ZERO              # how much more the open balance grows (+) or shrinks (−)
@@ -66,7 +67,7 @@ class Settlement:
 		if self.kind in (PAY_NOW, STAFF) and self.collect:
 			return self.collect
 		if self.kind == REFUND:
-			return self.refund + self.hotel_refund
+			return self.refund + self.points_back + self.hotel_refund
 		if self.kind == CREDIT:
 			return self.credit
 		if self.kind in (PAY_AT_HOTEL, BALANCE):
@@ -86,13 +87,14 @@ def _open(total: Decimal, held: Decimal) -> Decimal:
 
 def settle(old_total, new_total, paid, required_now_new, *, pay_at_hotel: bool, lower_policy: str | None,
            card_available: bool, penalty_applies: bool = False, auto_refundable=None,
-           terms_review: bool = False) -> Settlement:
+           terms_review: bool = False, points_back=None) -> Settlement:
 	"""One change of a booking. Totals are the booking's (all rooms), before and after the
 	change; ``paid`` is what the booking holds now and may use (money set aside for a refund
 	is not counted); ``required_now_new`` what its payment terms require to be paid by now with
 	the new price (deposit rules, 0 for pay at hotel). ``penalty_applies``: the room's rate is
 	non-refundable or cancelling it now costs a penalty. ``auto_refundable``: how much of an
-	overpayment the charges holding it can refund to the card (None: all of it).
+	overpayment the charges holding it can refund to the card (None: all of it). ``points_back``: how much of it
+	loyalty points paid, which comes back as points first (O-19b, LO-01), never to a card.
 	``terms_review``: the change moves the arrival later inside the penalty window."""
 	old_total, new_total, paid, required = (Decimal(old_total), Decimal(new_total), Decimal(paid),
 	                                         Decimal(required_now_new))
@@ -120,8 +122,10 @@ def settle(old_total, new_total, paid, required_now_new, *, pay_at_hotel: bool, 
 	if over == 0:
 		return Settlement(BALANCE, difference=diff, balance_after=new_total - paid, due_later=due_later)
 	if lower_policy == LOWER_REFUND:
-		auto = over if auto_refundable is None else min(over, max(ZERO, Decimal(auto_refundable)))
-		return Settlement(REFUND, refund=auto, hotel_refund=over - auto, difference=diff,
+		points = min(over, max(ZERO, Decimal(points_back or 0)))
+		cash = over - points
+		auto = cash if auto_refundable is None else min(cash, max(ZERO, Decimal(auto_refundable)))
+		return Settlement(REFUND, refund=auto, points_back=points, hotel_refund=cash - auto, difference=diff,
 		                  balance_after=new_total - (paid - over), due_later=due_later)
 	return Settlement(CREDIT, credit=over, difference=diff, balance_after=new_total - paid, due_later=due_later)
 

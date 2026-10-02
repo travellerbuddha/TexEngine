@@ -305,6 +305,8 @@ export interface Settlement {
   collect?: Money
   /** of a refund: what goes back to the card automatically */
   refund?: Money
+  /** of a refund: what goes back to the guest's loyalty points (the share points paid) */
+  points_back?: Money
   /** of a refund: what the hotel refunds (paid in cash, by transfer, …) */
   hotel_refund?: Money
   /** of a refund: what went back to the card so far */
