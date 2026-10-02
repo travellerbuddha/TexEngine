@@ -80,10 +80,25 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual(c.workers_check(reachable=True, workers=2, backlog=0, live=False, unserved=["long"])["status"],
 		                 c.WARN)
 		self.assertEqual(c.describe(out["issues"][0]),
-		                 "No background worker listens on the long queue: its jobs (the PMS delivery queue) never run.")
+		                 "No background worker listens on the long queue: the jobs queued there never run.")
 		# no worker at all is said once
 		none = c.workers_check(reachable=True, workers=0, backlog=0, live=True, unserved=["default", "long"])
 		self.assertEqual([i["reason"] for i in none["issues"]], ["no_workers"])
+
+	def test_a_queued_job_no_worker_takes_is_late(self):
+		"""2K-4 review round 1 (LO-08): the cron entry only queues the PMS delivery, so its own runs prove the queuing.
+		A delivery still waiting in its queue (no worker for it, or one busy with a long job) is late as the job
+		would be: WARN past its limit, FAIL past three times."""
+		fresh = {m: {"last_execution": NOW - timedelta(minutes=1), "stopped": False} for m in c.JOB_MAX_AGE_MINUTES}
+		job = "kamra.tex.scheduler.outbox_every_5_minutes"
+		self.assertEqual(c.jobs_check(fresh, NOW, live=True, waiting={job: 5})["status"], c.OK)
+		out = c.jobs_check(fresh, NOW, live=True, waiting={job: 25})
+		self.assertEqual((out["status"], out["issues"]),
+		                 (c.WARN, [{"reason": "job_waiting", "status": c.WARN,
+		                            "params": {"job": "outbox_every_5_minutes", "minutes": 25}}]))
+		self.assertEqual(c.jobs_check(fresh, NOW, live=True, waiting={job: 61})["status"], c.FAIL)
+		self.assertEqual(c.describe(out["issues"][0]),
+		                 "The TEX job outbox_every_5_minutes has waited 25 minutes for a background worker.")
 
 	def test_snapshot_isolation_on_fails_globally_or_for_the_connection(self):
 		"""ADR-063: ON turns a waiting booking's "sold out" into error 1020."""

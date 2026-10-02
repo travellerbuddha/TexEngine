@@ -23,8 +23,11 @@ from kamra.tex.ops import checks as C
 from kamra.tex.security.audit import log_exception
 
 TEX_JOBS = tuple(C.JOB_MAX_AGE_MINUTES)
-# the RQ queues TEX's jobs run on: Frappe queues the cron entries on default, the PMS outbox runs on its own (LO-08)
-TEX_QUEUES = ("default", scheduler.OUTBOX_QUEUE)
+# the RQ queues TEX's jobs run on: guest changes and refusal audits on short, the cron entries on default (Frappe),
+# the PMS outbox on its own (LO-08)
+TEX_QUEUES = ("short", "default", scheduler.OUTBOX_QUEUE)
+# the work a cron entry only queues, by the RQ job id it is queued under: watched while it waits for a worker
+QUEUED_WORK = {"kamra.tex.scheduler.outbox_every_5_minutes": scheduler.OUTBOX_JOB_ID}
 FX_LOOKBACK_DAYS = 60
 
 
@@ -80,8 +83,30 @@ def last_runs() -> dict[str, dict]:
 	return jobs
 
 
+def waiting_jobs() -> dict[str, int]:
+	"""{cron entry: minutes} of the work it queued that still waits in its queue (``QUEUED_WORK``; LO-08): no
+	worker for that queue, or one busy with a long job. A job that started, finished or failed is not waiting.
+	Never raises: an unreachable Redis is the workers check's finding."""
+	from datetime import UTC, datetime
+
+	out = {}
+	try:
+		from frappe.utils.background_jobs import get_job
+		from rq.job import JobStatus
+
+		for method, job_id in QUEUED_WORK.items():
+			job = get_job(job_id)
+			if job is None or job.get_status(refresh=False) != JobStatus.QUEUED or not job.enqueued_at:
+				continue
+			at = job.enqueued_at if job.enqueued_at.tzinfo else job.enqueued_at.replace(tzinfo=UTC)
+			out[method] = int((datetime.now(UTC) - at).total_seconds() // 60)
+	except Exception:
+		return {}
+	return out
+
+
 def _jobs(now) -> dict:
-	return C.jobs_check(last_runs(), now, live=live())
+	return C.jobs_check(last_runs(), now, live=live(), waiting=waiting_jobs())
 
 
 def _job_errors(now) -> dict:

@@ -63,5 +63,69 @@ class TestPmsOutboxQueue(unittest.TestCase):
 					self.assertEqual(queues, {"short", "default"}, name)
 
 
+class _Worker:
+	def __init__(self, *queues):
+		self.queues = [f"bench:{q}" for q in queues]
+
+	def queue_names(self):
+		return self.queues
+
+
+class TestQueueProbe(unittest.TestCase):
+	"""2K-4 review round 1 (LO-08): the status page's probe of the RQ queues, Redis stubbed."""
+
+	def probe(self, *workers):
+		from kamra.tex.ops import status
+
+		class Conn:
+			def ping(self):
+				return True
+
+		def get_redis_conn():
+			return Conn()
+
+		class Queue:
+			def __init__(self, name, connection):
+				self.count = 0
+
+		with mock.patch("frappe.utils.background_jobs.get_redis_conn", get_redis_conn), \
+				mock.patch("frappe.utils.background_jobs.get_queue_list", return_value=["default", "short", "long"]), \
+				mock.patch("frappe.utils.background_jobs.generate_qname", lambda q: f"bench:{q}"), \
+				mock.patch("rq.Queue", Queue), mock.patch("rq.Worker.all", return_value=list(workers)):
+			return status.queue_probe()
+
+	def test_each_queue_tex_queues_jobs_on_is_named_when_no_worker_listens_on_it(self):
+		from kamra.tex.ops import status
+
+		# guest changes and refusal audits are queued on short, the cron entries on default, the PMS outbox on long
+		self.assertEqual(status.TEX_QUEUES, ("short", "default", "long"))
+		self.assertEqual(self.probe(_Worker("short", "default"), _Worker("long"))["unserved"], [])
+		self.assertEqual(self.probe(_Worker("short", "default", "long"))["unserved"], [])
+		self.assertEqual(self.probe(_Worker("long"))["unserved"], ["short", "default"])
+		self.assertEqual(self.probe(_Worker("short", "default")),
+		                 {"reachable": True, "workers": 1, "backlog": 0, "unserved": ["long"]})
+
+	def test_a_delivery_waiting_in_its_queue_is_counted_in_minutes(self):
+		from datetime import UTC, datetime, timedelta
+
+		from rq.job import JobStatus
+
+		from kamra.tex.ops import status
+
+		def job(state, minutes):
+			j = mock.Mock(enqueued_at=datetime.now(UTC) - timedelta(minutes=minutes, seconds=30))
+			j.get_status.return_value = state
+			return j
+
+		key = "kamra.tex.scheduler.outbox_every_5_minutes"
+		for found, waiting in ((job(JobStatus.QUEUED, 25), {key: 25}), (job(JobStatus.STARTED, 25), {}),
+		                       (job(JobStatus.FINISHED, 25), {}), (None, {})):
+			with mock.patch("frappe.utils.background_jobs.get_job", return_value=found) as get:
+				self.assertEqual(status.waiting_jobs(), waiting)
+			get.assert_called_once_with("tex_pms_outbox")
+		with mock.patch("frappe.utils.background_jobs.get_job", side_effect=ConnectionError("no redis")):
+			self.assertEqual(status.waiting_jobs(), {})                  # never raises: the workers check says it
+
+
 if __name__ == "__main__":
 	unittest.main()
