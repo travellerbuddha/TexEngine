@@ -266,6 +266,65 @@ test("a price the guest accepted is not announced again when they add an extra a
   noErrors()
 })
 
+test("an extra the quotes made again cannot add is told as such, not as a price change (LO-32)", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "the page's clock, not the viewport, is under test")
+  const noErrors = trackErrors(page)
+  await page.clock.install()
+  const isQuoteRooms = (url: string) => new URL(url).pathname === "/api/method/kamra.tex.api.public.quote_rooms"
+  let quoted = 0
+  page.on("response", (r) => {
+    if (isQuoteRooms(r.url()) && r.ok()) quoted += 1
+  })
+  const booked: string[][] = []
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/method/kamra.tex.api.public.book") booked.push((r.postDataJSON() as { quote_ids: string[] }).quote_ids)
+  })
+  const { checkIn, checkOut } = stay(230, 2, testInfo.project.name)
+  const found = await guestSearch(page, { slug: SLUG, checkIn, checkOut, rooms: [{ adults: 2 }], hotel: HOTEL })
+  const rate = found.rates[0]
+  await pickRoom(page, { roomName: rate.room, ratePlan: rate.ratePlan, board: rate.board })
+  await addExtra(page, { name: "Airport transfer", quantity: 1 })
+  await fillGuest(page, GUEST)
+  await expect.poll(() => quoted, { message: "the stay was quoted" }).toBeGreaterThan(0)
+
+  // the transfer sells out while the guest lingers: the quotes made at submit cannot add it, and leave it (and its
+  // price) out of the total, as the server does; the room costs what it did
+  await page.route(
+    (url) => isQuoteRooms(url.href),
+    async (route) => {
+      const response = await route.fetch()
+      const body = (await response.json()) as { message: { rooms: { quote?: { totals: Record<string, string>; extras: { name: string; ok: boolean; amount: string; reason?: string }[] } }[] } }
+      for (const q of body.message.rooms) {
+        for (const e of q.quote?.extras ?? []) {
+          if (!e.ok || e.name !== "Airport transfer") continue
+          const c = cents(q.quote!.totals.total) - cents(e.amount)
+          q.quote!.totals.total = `${c / 100n}.${String(c % 100n).padStart(2, "0")}`
+          Object.assign(e, { ok: false, amount: "0.00", reason: `sold out on ${checkIn}` })
+        }
+      }
+      await route.fulfill({ response, json: body })
+    },
+    { times: 1 },
+  )
+  await page.clock.fastForward("26:00")
+  await page.getByRole("radio", { name: /^Credit or debit card/ }).first().check()
+  await page.getByRole("checkbox", { name: /^I have read the cancellation and payment conditions/ }).check()
+  const before = quoted
+  await page.getByRole("button", { name: /^Book and pay/ }).filter({ visible: true }).first().click()
+  const rejected = page.getByRole("status").filter({ hasText: "Could not be added to your stay" })
+  await expect(rejected).toBeVisible()
+  await expect(rejected).toContainText("Airport transfer")
+  expect(quoted).toBeGreaterThan(before)
+  expect(booked, "no booking before the guest has seen what could not be added").toEqual([])
+  const notice = page.getByText("The price has changed")
+  await expect(notice).toHaveCount(0)
+  // they go on without it: still no price change, for the room's price did not change
+  await rejected.getByRole("button", { name: "Continue anyway" }).click()
+  await expect(rejected).toHaveCount(0)
+  await expect(notice).toHaveCount(0)
+  noErrors()
+})
+
 test("on a phone the price-change notice is focused and scrolled into view (LO-33)", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "the phone's viewport is under test")
   const noErrors = trackErrors(page)
