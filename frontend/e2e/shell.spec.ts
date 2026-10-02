@@ -7,7 +7,9 @@ test("TEX shell: spec navigation, PMS hidden, hotel scope, language switch", asy
   await page.goto(texPath("/"))
   await expect(page).toHaveURL(/\/tex$/)
   const nav = page.getByRole("navigation", { name: "Main navigation" })
-  for (const item of ["Dashboard", "CRS", "Reservations", "Rates & Contracts", "Inventory", "Booking Engine", "CRM", "Reports"])
+  // grouped by the work staff come to do (UX revision 2026-10): daily work, contracts & pricing,
+  // guests & money, reports, set-up & system
+  for (const item of ["Dashboard", "New booking", "Reservations", "Rates & availability", "Promotions & discounts", "Contracts", "Selling rules", "Booking Engine", "CRM", "Reports"])
     await expect(nav.getByRole("link", { name: item, exact: true })).toBeVisible()
   // PMS-only modules never appear in TEX navigation
   for (const pms of ["Housekeeping", "Laundry", "POS", "Night audit", "Maintenance"])

@@ -1607,6 +1607,57 @@ D-12: loyalty is live at go-live (the default). LO-47: the owner's choice (a).
 - LO-47 **COMPLETE** (option a): a failing earning or reversal is undone alone under its savepoint, logged, and `loyalty.earnings` warns ("earn or take back"); the reservation's save is kept · `TestAnEarningNeverUndoesTheStay` (two tests), unit `test_system_checks`.
 - **Not done:** the CRM "Redeem" button still shows on a channel's booking (the server refuses it); No Show still gives no points back (C-01); the points of a stay changed into the future stay Available (O-21's state rule).
 
+## 6UX. Admin UX revision (2026-10-02)
+
+The owner's brief: make the admin panel easier for the daily commercial work without a rewrite; the guest booking engine,
+the pricing engine, the data model, permissions, audit and the draft → publish lifecycle are unchanged (ADR-072).
+
+- Navigation by the work **COMPLETE**: Daily work (dashboard, reservations, new booking, call centre, Rates & availability,
+  promotions) / Contracts & pricing (contracts, selling rules) / Guests & money / Reports / Setup & system; every route kept;
+  in-page tabs show only the area's own pages (`shell/nav.ts`, `RULE_SLUGS`) · e2e `shell`, `entry-branding`.
+- Hotel scope and unsaved work **COMPLETE**: the header names the hotel worked on, a switch is confirmed (toast, highlight)
+  and an open record of the old hotel gives way to its list; unsaved edits are protected on in-app links, the hotel switch, the command
+  palette and reload (`lib/unsaved.tsx`); the contract editor and the grid use it; Discard asks first · e2e
+  `rates-availability`, `editor-edits`.
+- Rates & availability **COMPLETE**: daily view (price, rooms left, sale), the scope in words (hotel, contract, market,
+  currency, basis, On sale / Draft), select rooms × nights (drag, Shift, row and day headers), type a price or `+10%`, paste
+  from a spreadsheet, Ctrl+C/Z/Y, the server's preview (each room's price before → after), one save to the draft or
+  save & publish; close/open sale with its contract scope chosen in the confirmation, applied at once, Undo
+  (`crs.ari_rate_changes`) · `test_grid_rate_changes` (6), unit `inventory-edits`, e2e `rates-availability` (3).
+- Contracts **COMPLETE**: "Saved to the draft · not on sale until published" / what is on sale now; a new season from the
+  contract on sale (Duplicate → "A new season", windows and every period and offer date a year on as one unsaved, listed,
+  undoable edit); a period's prices, rules and boards copied from any period; occupancy and child rules read as sentences
+  (free, % off, % more); the Price test keeps its party · unit `season-copy`, `shorthand`, e2e `contract-season` (3).
+- Promotions **COMPLETE**: one workspace: what it gives, when it is booked and stayed, where it applies (warns while it
+  applies to everything), advanced fields folded, back-to-front dates refused; "Check the price" prices one stay with and
+  without the draft before it is activated (`policies.promotion_check`); "Create similar" makes a new draft (never a
+  revision); the list says what each gives, covers and where it stands · `test_promotion_check` (5), unit `promotions`,
+  e2e `promotion-workspace`.
+- Finding a reservation **COMPLETE**: the list searches the header's hotel, "All my hotels (n)" is an explicit choice and
+  is offered in one click when nothing is found; the channel's own booking number is searched and shown; the breadcrumb
+  returns to the list as it was left; the palette finds a reservation in every hotel · `test_reservation_search`, e2e
+  `reservation-find`.
+- Shorthand reads the Turkish percentage form (`%30`, `+%10`, `-%30`) · unit `shorthand`.
+
+Measured (one-off spec run on the base build and on this branch, same fixtures; `e2e/flows/budget.ts` counts pointer
+presses, a `<select>` as 2, a field filled without focus as 1, modal dialogs; values typed counted by the spec). Task time
+was not measured.
+
+| Task | Before: clicks / dialogs / values typed | After |
+|---|---|---|
+| 1. +10 % for two rooms on five nights, saved to the draft | 6 / 1 / 3 (no per-room preview) | 5 / 0 / 1 (server preview) |
+| 2. July takes May's room prices and child rules, then Standard → 85 | 7 / 0 / 6 | 7 / 0 / 1 |
+| 3a. 15 % for DE, July stays, booked until 31 May | 17 / 3 / 5 | 17 / 3 / 5 |
+| 3b. The same for the UK | 18 / 3 / 5 (made again) | 7 / 1 / 1 ("Create similar") |
+| 4. Next season's contract from the one on sale | 25 / 2 / 12 | 4 / 1 / 0 |
+| 5. Change the 3rd adult and a child rule, sample price after each | 12 / 0 / 4 | 10 / 0 / 3 |
+
+Task 2's typed values grow with the rooms and rules of a period before, and stay one after. A reservation of another hotel
+takes one click more than before by design (the list no longer searches every hotel silently; the palette does).
+
+- **Not done:** the grid shows the contract's price (not the final sell price after markup and promotions); the browser's
+  Back button is not guarded (only in-app links, the hotel switch, the palette and reload); bundles not rebuilt (2Z).
+
 ## 6K3. Audit Part 2K-3 (2026-10-02)
 
 No owner decision was needed. LO-11: refused (TEX never e-mails a channel's booking), the card's first option.

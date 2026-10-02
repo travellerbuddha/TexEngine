@@ -58,6 +58,10 @@ export interface Grid {
   draft: string | null
   basis: "PERSON" | "ROOM" | null
   currency: string | null
+  /** decimals of the currency (a typed "1.500" is read by it) */
+  minor_units?: number
+  /** the viewer may not see cost: no rate is sent */
+  rates_hidden?: boolean
   rows: GridRow[]
 }
 

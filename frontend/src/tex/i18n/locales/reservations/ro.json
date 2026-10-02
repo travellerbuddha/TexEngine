@@ -230,9 +230,9 @@
  "res.list.none_hint": "Încercați alte filtre sau ștergeți-le.",
  "res.list.paging": "Pagini",
  "res.list.prev": "Anterior",
- "res.list.search_placeholder": "Număr, oaspete, e-mail sau telefon",
+ "res.list.search_placeholder": "Număr, oaspete, e-mail, telefon sau referință canal",
  "res.list.showing": "Se afișează {from}–{to}",
- "res.list.subtitle": "Toate rezervările din hotelurile dvs., cele mai noi primele.",
+ "res.list.subtitle": "Rezervările hotelului pe care lucrați, cele mai noi primele. Alegeți „Toate hotelurile mele” pentru toate.",
  "res.mod.applied": "Rezervare actualizată — {rev}",
  "res.mod.apply": "Aplică modificarea",
  "res.mod.apply_drops": "Aplicarea modificării elimină: {extras}.",
@@ -351,5 +351,10 @@
  "res.imported.currency": "Monedă",
  "res.imported.reason": "Motiv",
  "res.imported.confirm": "Corectează suma",
- "res.imported.done": "Suma a fost corectată la {amount}"
+ "res.imported.done": "Suma a fost corectată la {amount}",
+ "res.list.all_hotels_n": "Toate hotelurile mele ({count})",
+ "res.list.none_here": "Nimic nu se potrivește la {hotel}. Poate fi o rezervare a altui hotel.",
+ "res.list.search_all": "Caută în toate hotelurile mele",
+ "res.list.channel_ref": "Numărul de rezervare al canalului",
+ "res.list.channel_ref_short": "Ref. canal {ref}"
 }

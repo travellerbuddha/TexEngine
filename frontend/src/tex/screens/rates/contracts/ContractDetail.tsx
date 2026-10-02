@@ -12,7 +12,7 @@ import { RatesNav } from "../components/RatesNav"
 import { enumLabel } from "../lib/options"
 import type { ContractBundle, ContractStatusAction, VersionRow } from "../lib/types"
 import { versionLabel } from "../lib/util"
-import { ContractFormDialog, ContractStatusDialog, DuplicateDialog } from "./ContractDialogs"
+import { ContractFormDialog, ContractStatusDialog, DuplicateDialog, duplicateTarget } from "./ContractDialogs"
 import { NewDraftDialog, PublishDialog, WithdrawDialog } from "./VersionActions"
 
 // explicit, audited status actions (G-50); the header form never changes the status
@@ -254,7 +254,7 @@ export default function ContractDetail() {
               }}
             />
           )}
-          <DuplicateDialog open={duplicating} onClose={() => setDuplicating(false)} contract={c} onDone={(nb) => navigate(`/tex/rates/contracts/${encodeURIComponent(nb.contract.name)}`)} />
+          <DuplicateDialog open={duplicating} onClose={() => setDuplicating(false)} contract={c} onDone={(nb, opts) => navigate(duplicateTarget(nb, opts))} />
           <NewDraftDialog
             open={draftFrom !== null}
             onClose={() => setDraftFrom(null)}

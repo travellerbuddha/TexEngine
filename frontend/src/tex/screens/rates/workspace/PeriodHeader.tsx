@@ -5,7 +5,7 @@
 // (no pricing effect), Delete… (inline confirmation with the dependent rows). Every change is one
 // workspace history entry; a rename rewrites the period's rules in the three tables.
 import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
-import { AlertOctagon, AlertTriangle, ArrowLeft, ArrowRight, CalendarRange, Copy, CopyPlus, MoreHorizontal, Pencil, Percent, Plus, SquareDashedMousePointer, Trash2 } from "lucide-react"
+import { AlertOctagon, AlertTriangle, ArrowLeft, ArrowRight, CalendarClock, CalendarRange, ClipboardCopy, Copy, CopyPlus, MoreHorizontal, Pencil, Percent, Plus, SquareDashedMousePointer, Trash2 } from "lucide-react"
 import { cn } from "../../../../lib/utils"
 import { date as fmtDate } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -16,7 +16,7 @@ import type { Tables } from "../lib/tables"
 import { splitCsv, WEEKDAY_CODES, weekdayName } from "../lib/util"
 import type { MatrixPeriod } from "./model.ts"
 import { parsePeriodAdjust, periodAdjustEditText, setPeriodAdjustment, setPeriodFields } from "./matrixView.ts"
-import { addPeriod, copyPreviousPeriod, deletePeriod, duplicatePeriod, isoDay, isoOfDay, movePeriod, periodDependents, renamePeriod } from "./periods.ts"
+import { addPeriod, copyPeriodFrom, copyPreviousPeriod, deletePeriod, duplicatePeriod, isoDay, isoOfDay, movePeriod, periodDependents, renamePeriod, shiftSeasonYears, type SeasonShift } from "./periods.ts"
 import { periodHeaderId } from "./issues.ts"
 import { str } from "./rows.ts"
 import { headerPick, type Edit } from "./RoomRowHeader"
@@ -56,7 +56,7 @@ export interface PeriodHeaderProps {
   onRenameOpened?: () => void
 }
 
-type Open = "rename" | "dates" | "adjust" | "delete" | null
+type Open = "rename" | "dates" | "adjust" | "delete" | "copyfrom" | null | "copyfrom"
 
 const dayMonths = new Map<string, Intl.DateTimeFormat>()
 function dayMonth(locale: string): Intl.DateTimeFormat {
@@ -220,6 +220,10 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
               >
                 {t("rates.ws.period.copy_previous")}
               </MenuItem>
+              {/* any season's prices, not only the left neighbour's (UX revision 2026-10) */}
+              <MenuItem icon={<ClipboardCopy className="size-4" />} disabled={p.count < 2} onSelect={() => setOpen("copyfrom")}>
+                {t("rates.ws.period.copy_from")}
+              </MenuItem>
               <MenuSeparator />
               <MenuItem icon={<ArrowLeft className="size-4" />} disabled={p.index === 0} onSelect={() => p.edit(t("rates.ws.h.move_period", { period: code }), (tb) => movePeriod(tb, code, -1))}>
                 {t("rates.ws.period.move_left")}
@@ -251,6 +255,7 @@ function PeriodHeaderImpl(p: PeriodHeaderProps) {
       {open === "dates" && <DatesPopover {...p} anchor={anchor} onClose={close} />}
       {open === "adjust" && <AdjustPopover {...p} anchor={anchor} onClose={close} />}
       {open === "delete" && <DeletePopover {...p} anchor={anchor} onClose={close} />}
+      {open === "copyfrom" && <CopyFromPopover {...p} anchor={anchor} onClose={close} />}
       {tip.tooltip}
     </div>
   )
@@ -391,6 +396,62 @@ function RenamePopover(p: PopProps & { nameFirst?: boolean }) {
   )
 }
 
+/** "Copy prices from…": this period's room prices, occupancy and child rules and boards become a
+ * copy of another period's (one undoable edit; the rows are listed by count first). */
+function CopyFromPopover(p: PopProps) {
+  const { t, locale } = useTexT()
+  const others = p.tables.periods.filter((x) => str(x.period_code) !== p.period.code)
+  const idx = p.tables.periods.findIndex((x) => str(x.period_code) === p.period.code)
+  const left = idx > 0 ? str(p.tables.periods[idx - 1].period_code) : ""
+  const [from, setFrom] = useState(left || str(others[0]?.period_code))
+  const mine = periodDependents(p.tables, p.period.code)
+  const theirs = periodDependents(p.tables, from)
+  const label = (x: (typeof others)[number]) => {
+    const range = compactRange(str(x.start_date), str(x.end_date), locale)
+    return [str(x.period_code), str(x.period_name), range].filter(Boolean).join(" · ")
+  }
+  return (
+    <Popover open onClose={p.onClose} anchorRef={p.anchor} label={t("rates.ws.period.copy_from_title", { period: p.period.code })} width="md">
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!from) return
+          p.edit(t("rates.ws.h.copy_from", { period: p.period.code, from }), (tb) => {
+            const r = copyPeriodFrom(tb, from, p.period.code)
+            return "error" in r ? tb : r.tables
+          })
+          p.onClose()
+        }}
+      >
+        <Field label={t("rates.ws.period.copy_from_source")}>
+          <select
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            data-autofocus
+            className="h-9 w-full rounded-lg border border-zinc-300 bg-white px-2 text-sm text-zinc-900 focus:border-tex-500 focus:ring-2 focus:ring-tex-500/30 focus:outline-none"
+          >
+            {others.map((x) => (
+              <option key={str(x.period_code)} value={str(x.period_code)}>
+                {label(x)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <p className="text-xs text-zinc-600">
+          {t("rates.ws.period.copy_from_counts", {
+            period: p.period.code,
+            from,
+            mine: mine.prices + mine.occupancy + mine.boards,
+            theirs: theirs.prices + theirs.occupancy + theirs.boards,
+          })}
+        </p>
+        <PopActions onCancel={p.onClose} label={t("rates.ws.period.copy_from_apply")} />
+      </form>
+    </Popover>
+  )
+}
+
 function DatesPopover(p: PopProps) {
   const { t } = useTexT()
   const row = p.tables.periods.find((x) => str(x.period_code) === p.period.code)
@@ -511,7 +572,7 @@ function DeletePopover(p: PopProps) {
   )
 }
 
-function PopActions({ onCancel, disabled }: { onCancel: () => void; disabled?: boolean }) {
+function PopActions({ onCancel, disabled, label }: { onCancel: () => void; disabled?: boolean; label?: string }) {
   const { t } = useTexT()
   return (
     <div className="flex justify-end gap-2 pt-1">
@@ -519,7 +580,7 @@ function PopActions({ onCancel, disabled }: { onCancel: () => void; disabled?: b
         {t("core.action.cancel")}
       </Button>
       <Button size="sm" type="submit" disabled={disabled}>
-        {t("core.action.apply")}
+        {label ?? t("core.action.apply")}
       </Button>
     </div>
   )
@@ -611,5 +672,64 @@ export function PeriodStrip({ tables, stayFrom, stayTo }: { tables: Tables; stay
         <span>{fmtDate(isoOfDay(to), "short")}</span>
       </figcaption>
     </figure>
+  )
+}
+
+/** What a season shift moved, for the user to check before saving (UX revision 2026-10): every
+ * period's old and new dates (the first eight, then a count), the offers, and that prices and
+ * rules were kept. */
+export function SeasonShiftSummary({ shift, years, tables }: { shift: SeasonShift; years: number; tables: Tables }) {
+  const { t } = useTexT()
+  const name = (code: string) => str(tables.periods.find((x) => str(x.period_code) === code)?.period_name)
+  const range = (r: [string, string]) => (r[0] && r[1] ? `${fmtDate(r[0], "short")} – ${fmtDate(r[1], "short")}` : "—")
+  return (
+    <div className="space-y-1.5">
+      <p>{t(years > 0 ? "rates.ws.season.done_later" : "rates.ws.season.done_earlier", { count: shift.periods.length, years: Math.abs(years) })}</p>
+      {shift.periods.length > 0 && (
+        <ul className="space-y-0.5 text-xs tabular-nums">
+          {shift.periods.slice(0, 8).map((x) => (
+            <li key={x.code}>
+              <span className="font-mono font-semibold">{x.code}</span> {name(x.code)}: {range(x.from)} → <span className="font-semibold">{range(x.to)}</span>
+            </li>
+          ))}
+          {shift.periods.length > 8 && <li>{t("rates.ws.season.more", { count: shift.periods.length - 8 })}</li>}
+        </ul>
+      )}
+      {shift.offers > 0 && <p className="text-xs">{t("rates.ws.season.offers", { count: shift.offers })}</p>}
+      <p className="text-xs">{t("rates.ws.season.check")}</p>
+    </div>
+  )
+}
+
+/** "Shift dates…" beside the period strip: every period and offer a year later (a new season from
+ * the last one) or earlier, as one undoable edit, with what moved shown until the next shift. */
+export function SeasonShiftControl({ tables, edit, readOnly }: { tables: Tables; edit: Edit; readOnly: boolean }) {
+  const { t } = useTexT()
+  const [done, setDone] = useState<{ shift: SeasonShift; years: number } | null>(null)
+  if (readOnly || !tables.periods.some((x) => str(x.start_date))) return null
+  const run = (years: number) => {
+    let res: SeasonShift | null = null
+    edit(t(years > 0 ? "rates.ws.h.shift_later" : "rates.ws.h.shift_earlier", { years: Math.abs(years) }), (tb) => {
+      res = shiftSeasonYears(tb, years)
+      return res.tables
+    })
+    if (res) setDone({ shift: res, years })
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <Menu label={t("rates.ws.season.shift")} text={t("rates.ws.season.shift")} icon={<CalendarClock className="size-4" aria-hidden />} variant="ghost" size="sm" placement="bottom-end">
+          <MenuItem onSelect={() => run(1)}>{t("rates.ws.season.plus_year")}</MenuItem>
+          <MenuItem onSelect={() => run(-1)}>{t("rates.ws.season.minus_year")}</MenuItem>
+        </Menu>
+      </div>
+      {done && (
+        <div>
+          <Notice tone="info" title={t("rates.ws.season.title")}>
+            <SeasonShiftSummary shift={done.shift} years={done.years} tables={tables} />
+          </Notice>
+        </div>
+      )}
+    </div>
   )
 }

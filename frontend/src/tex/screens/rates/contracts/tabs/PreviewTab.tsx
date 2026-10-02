@@ -99,6 +99,12 @@ interface Form {
 
 const CHILD_MODES: ChildMode[] = ["years", "months", "dob"]
 
+/** The party, board, plan and selling context last tested on a version (UX revision 2026-10): the
+ * Price test drawer closes ("Show in grid", Escape) and is opened again after a rule change, and the
+ * test must not start over at 2 adults with no children. The stay (room, dates) still comes from the
+ * cell it is opened from. Kept for the page's lifetime only. */
+const lastTest = new Map<string, Partial<Form>>()
+
 function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, showInGrid }: TabProps & { layout?: "page" | "drawer"; prefill?: PriceTestPrefill | null }) {
   const { t } = useTexT()
   const { boot, can } = useSession()
@@ -135,8 +141,13 @@ function PriceTestForm({ doc, state, dirty, preview, layout = "page", prefill, s
       currency: doc.contract_doc.contract_currency,
       sale_at: "",
       promo: "",
+      ...lastTest.get(doc.name),
     }
   })
+  useEffect(() => {
+    const { adults, children, board, rate_plan, market, channel, currency, sale_at, promo } = f
+    lastTest.set(doc.name, { adults, children, board, rate_plan, market, channel, currency, sale_at, promo })
+  }, [f, doc.name])
   // another "Test this price" while the drawer is open: its room and dates
   const applied = useRef(prefill?.n ?? 0)
   useEffect(() => {

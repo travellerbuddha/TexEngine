@@ -142,7 +142,7 @@ test("limited extra: close a day in Inventory → Extras, guests and quotes see 
 
     await test.step("Inventory → Extras shows the massage for the hotel; the grid moves to the chosen day", async () => {
       await page.getByRole("banner").getByRole("combobox", { name: "Hotel" }).selectOption(HOTEL)
-      await page.getByRole("navigation", { name: "Inventory views" }).getByRole("link", { name: "Extras" }).click()
+      await page.getByRole("navigation", { name: "Rates & availability views" }).getByRole("link", { name: "Extras" }).click()
       await expect(page).toHaveURL(/\/tex\/inventory\/extras$/)
       const row = page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: new RegExp(`^${esc(EXTRA.name)}`) }) })
       await expect(row).toBeVisible()

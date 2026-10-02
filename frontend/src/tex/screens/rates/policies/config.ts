@@ -66,6 +66,9 @@ export interface PolicyField {
   suffix?: (d: Doc) => string | null
   readOnly?: boolean
   wide?: boolean
+  /** an expert option: kept under "Advanced options" of its section, opened on demand (UX revision
+   * 2026-10); shown open when it holds a value or an error */
+  advanced?: boolean
   /** table fields: child columns */
   columns?: TableColumn[]
 }
@@ -95,7 +98,7 @@ export interface PolicySection {
 export interface ListCol {
   key: string
   label: string
-  render: "text" | "code" | "enum" | "op" | "status" | "rev" | "datetime" | "date" | "check" | "pair" | "decimal" | "room" | "contract"
+  render: "text" | "code" | "enum" | "op" | "status" | "rev" | "datetime" | "date" | "check" | "pair" | "decimal" | "room" | "contract" | "promo_value" | "promo_cover" | "promo_stay" | "promo_sale" | "promo_status"
   group?: string
   hideBelow?: "sm" | "md" | "lg"
 }
@@ -114,6 +117,8 @@ export interface PolicyKind {
   sections: PolicySection[]
   list: ListCol[]
   newDoc: () => Doc
+  /** date pairs whose end may not be before their start (checked before a save) */
+  ranges?: [string, string][]
 }
 
 const pct = (op: unknown) => op === "ADJUST_PERCENT" || op === "PERCENT_OF" || op === "PERCENT"
@@ -190,13 +195,20 @@ export const POLICY_KINDS: PolicyKind[] = [
     titleField: "promotion_name",
     propertyRequired: false,
     newDoc: () => ({ kind: "SPECIAL_OFFER", trigger: "Automatic", value_type: "PERCENT", value: "", stage: "SELL", applies_to: "ACCOMMODATION", stay_match: "ANY_NIGHT", stackable: 1, exclusive: 0, priority: 0 }),
+    // what each promotion gives and covers, at a glance (UX revision 2026-10)
     list: [
       { key: "promotion_name", label: "rates.f.promotion_name", render: "text" },
-      { key: "kind", label: "rates.f.kind", render: "enum", group: "promo_kind", hideBelow: "sm" },
-      { key: "code", label: "rates.f.code", render: "code" },
-      { key: "tex_status", label: "rates.f.status", render: "status" },
-      { key: "revision_no", label: "rates.f.revision", render: "rev", hideBelow: "md" },
-      { key: "active_from", label: "rates.f.active_from", render: "datetime", hideBelow: "lg" },
+      { key: "value", label: "rates.promo.col.gives", render: "promo_value" },
+      { key: "markets", label: "rates.promo.col.covers", render: "promo_cover", hideBelow: "md" },
+      { key: "stay_from", label: "rates.promo.col.stay", render: "promo_stay", hideBelow: "sm" },
+      { key: "sale_from", label: "rates.promo.col.sale", render: "promo_sale", hideBelow: "lg" },
+      { key: "code", label: "rates.f.code", render: "code", hideBelow: "lg" },
+      { key: "tex_status", label: "rates.f.status", render: "promo_status" },
+      { key: "revision_no", label: "rates.f.revision", render: "rev", hideBelow: "lg" },
+    ],
+    ranges: [
+      ["sale_from", "sale_to"],
+      ["stay_from", "stay_to"],
     ],
     sections: [
       {
@@ -219,24 +231,25 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "free_nights_stay", kind: "int", label: "rates.f.free_nights_stay", help: "rates.h.free_nights", showIf: (d) => d.value_type === "FREE_NIGHTS" },
           { key: "free_nights_pay", kind: "int", label: "rates.f.free_nights_pay", showIf: (d) => d.value_type === "FREE_NIGHTS" },
           { key: "value_added", kind: "text", label: "rates.f.value_added", help: "rates.h.value_added", showIf: (d) => d.value_type === "VALUE_ADDED" },
-          { key: "stage", kind: "select", label: "rates.f.stage", options: PROMO_STAGE, group: "stage", helpByValue: "rates.stage_help" },
-          { key: "applies_to", kind: "select", label: "rates.f.applies_to", options: APPLIES_TO, optionsFor: promoAppliesTo, group: "applies_to" },
           { key: "property", kind: "property", label: "rates.f.hotel" },
+          { key: "stage", kind: "select", label: "rates.f.stage", options: PROMO_STAGE, group: "stage", helpByValue: "rates.stage_help", advanced: true },
+          { key: "applies_to", kind: "select", label: "rates.f.applies_to", options: APPLIES_TO, optionsFor: promoAppliesTo, group: "applies_to", advanced: true },
         ],
       },
       {
         title: "rates.policy.section.dates",
         help: "rates.h.sale_vs_stay",
         fields: [
-          { key: "sale_from", kind: "date", label: "rates.f.sale_from" },
-          { key: "sale_to", kind: "date", label: "rates.f.sale_to" },
+          // the two windows side by side: when it is booked, when it is stayed (UX revision 2026-10)
+          { key: "sale_from", kind: "date", label: "rates.f.promo_sale_from" },
+          { key: "sale_to", kind: "date", label: "rates.f.promo_sale_to" },
           { key: "min_lead_days", kind: "int", label: "rates.f.min_lead_days", help: "rates.h.min_lead_days" },
-          { key: "max_lead_days", kind: "int", label: "rates.f.max_lead_days", help: "rates.h.max_lead_days" },
-          { key: "stay_from", kind: "date", label: "rates.f.stay_from" },
-          { key: "stay_to", kind: "date", label: "rates.f.stay_to" },
+          { key: "stay_from", kind: "date", label: "rates.f.promo_stay_from" },
+          { key: "stay_to", kind: "date", label: "rates.f.promo_stay_to" },
           { key: "stay_match", kind: "select", label: "rates.f.stay_match", options: STAY_MATCH, group: "stay_match", helpByValue: "rates.stay_match_help" },
+          { key: "max_lead_days", kind: "int", label: "rates.f.max_lead_days", help: "rates.h.max_lead_days", advanced: true },
           { key: "min_nights", kind: "int", label: "rates.f.min_nights", help: "rates.h.zero_no_limit" },
-          { key: "max_nights", kind: "int", label: "rates.f.max_nights", help: "rates.h.zero_no_limit" },
+          { key: "max_nights", kind: "int", label: "rates.f.max_nights", help: "rates.h.zero_no_limit", advanced: true },
         ],
       },
       {
@@ -246,11 +259,11 @@ export const POLICY_KINDS: PolicyKind[] = [
           { key: "markets", kind: "csv", source: "market", label: "rates.f.markets", blank: "rates.common.all_markets" },
           { key: "channels", kind: "csv", source: "channel", label: "rates.f.channels", blank: "rates.common.all_channels" },
           { key: "room_types", kind: "csv", source: "room_type", label: "rates.f.room_types", blank: "rates.common.all_rooms" },
-          { key: "boards", kind: "csv", source: "board", label: "rates.f.boards", blank: "rates.common.all_boards" },
-          { key: "rate_plans", kind: "csv", source: "rate_plan", label: "rates.f.rate_plans", blank: "rates.common.all_rate_plans" },
-          { key: "contracts", kind: "csv", source: "contract", label: "rates.f.contracts", blank: "rates.common.all_contracts" },
-          { key: "requires_extras", kind: "text", label: "rates.f.requires_extras", help: "rates.h.requires_extras" },
-          { key: "min_basket", kind: "decimal", label: "rates.f.min_basket", help: "rates.h.min_basket", suffix: (d) => String(d.currency || "") || null },
+          { key: "boards", kind: "csv", source: "board", label: "rates.f.boards", blank: "rates.common.all_boards", advanced: true },
+          { key: "rate_plans", kind: "csv", source: "rate_plan", label: "rates.f.rate_plans", blank: "rates.common.all_rate_plans", advanced: true },
+          { key: "contracts", kind: "csv", source: "contract", label: "rates.f.contracts", blank: "rates.common.all_contracts", advanced: true },
+          { key: "requires_extras", kind: "text", label: "rates.f.requires_extras", help: "rates.h.requires_extras", advanced: true },
+          { key: "min_basket", kind: "decimal", label: "rates.f.min_basket", help: "rates.h.min_basket", suffix: (d) => String(d.currency || "") || null, advanced: true },
           // G-57: no sale identifies a member yet (the save refuses it): shown only to clear an old one
           { key: "member_only", kind: "check", label: "rates.f.member_only", help: "rates.h.member_only", showIf: (d) => Boolean(d.member_only) },
         ],
@@ -261,11 +274,11 @@ export const POLICY_KINDS: PolicyKind[] = [
         fields: [
           { key: "stackable", kind: "check", label: "rates.f.stackable", help: "rates.h.stackable" },
           { key: "exclusive", kind: "check", label: "rates.f.exclusive", help: "rates.h.exclusive" },
-          { key: "priority", kind: "int", label: "rates.f.priority", help: "rates.h.promo_priority" },
-          { key: "promo_group", kind: "text", label: "rates.f.offer_group", help: "rates.h.promo_group" },
-          { key: "usage_limit", kind: "int", label: "rates.f.usage_limit", help: "rates.h.usage_limit" },
-          { key: "per_guest_limit", kind: "int", label: "rates.f.per_guest_limit", help: "rates.h.per_guest_limit" },
-          { key: "times_redeemed", kind: "int", label: "rates.f.times_redeemed", readOnly: true },
+          { key: "priority", kind: "int", label: "rates.f.priority", help: "rates.h.promo_priority", advanced: true },
+          { key: "promo_group", kind: "text", label: "rates.f.offer_group", help: "rates.h.promo_group", advanced: true },
+          { key: "usage_limit", kind: "int", label: "rates.f.usage_limit", help: "rates.h.usage_limit", advanced: true },
+          { key: "per_guest_limit", kind: "int", label: "rates.f.per_guest_limit", help: "rates.h.per_guest_limit", advanced: true },
+          { key: "times_redeemed", kind: "int", label: "rates.f.times_redeemed", readOnly: true, advanced: true },
         ],
       },
     ],

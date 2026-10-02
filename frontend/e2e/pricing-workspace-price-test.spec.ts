@@ -198,23 +198,23 @@ test.describe.serial("price test drawer", () => {
     await list.getByRole("button", { name: new RegExp(`^Show in grid: ${HOTEL}-FAM @P4`) }).first().click()
     await expect(dr).toBeHidden()
     await expect(cell(m, `${SUPN} · P4`).first()).toBeFocused()
-    // and on the 2A+2C child rule: the combination card
+    // and on the 2A+2C child rule: the combination card. Opened again, the test keeps its party
+    // (UX revision 2026-10): the two children are still there
     await page.getByRole("button", { name: "Price test", exact: true }).click()
     dr = drawer(page)
-    for (const age of ["8", "4"]) {
-      await dr.getByRole("button", { name: "Add child", exact: true }).click()
-      await dr.getByLabel(`Age of child ${age === "8" ? 1 : 2}`, { exact: true }).fill(age)
-    }
+    await expect(dr.getByLabel("Age of child 1", { exact: true })).toHaveValue("8")
+    await expect(dr.getByLabel("Age of child 2", { exact: true })).toHaveValue("4")
     await priced(page, () => dr.getByRole("button", { name: /^Calculate/ }).click())
     await why(dr).getByRole("button", { name: /^Show in grid: Child 1 \[Child 7–11\.99\] @2A\+2C/ }).first().click()
     await expect(dr).toBeHidden()
     const card = page.locator('[data-combination="2+2"]')
     await expect(card).toBeFocused()
-    // a ladder rule: Child [Child 7–11.99] (all positions) from a 2A+1C test
+    // a ladder rule: Child [Child 7–11.99] (all positions) from a 2A+1C test: the second child removed
     await page.getByRole("button", { name: "Price test", exact: true }).click()
     dr = drawer(page)
-    await dr.getByRole("button", { name: "Add child", exact: true }).click()
-    await dr.getByLabel("Age of child 1", { exact: true }).fill("8")
+    await dr.getByRole("button", { name: "Remove child 2", exact: true }).click()
+    await expect(dr.getByLabel("Age of child 1", { exact: true })).toHaveValue("8")
+    await expect(dr.getByLabel("Age of child 2", { exact: true })).toHaveCount(0)
     await priced(page, () => dr.getByRole("button", { name: /^Calculate/ }).click())
     await why(dr).getByRole("button", { name: /^Show in grid: Child \[Child 7–11\.99\]/ }).first().click()
     await expect(page.getByRole("grid", { name: "Occupancy and child pricing by period" }).getByRole("gridcell", { name: /^Child 7–11\.99 · All periods/ })).toBeFocused()

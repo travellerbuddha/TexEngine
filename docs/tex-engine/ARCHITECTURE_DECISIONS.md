@@ -9583,3 +9583,33 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
    the job matured are committed before it asks for the first guest (it held them while waiting for the guest, the reverse of
    the order everywhere else: a deadlock with an adjustment or a redemption of the same guest), and a savepoint lost to a
    deadlock (MariaDB 1305, nothing else) rolls the guest's step back whole, is logged, and the job goes on (Part 2H-2).
+
+## ADR-072 Admin UX revision: work-based navigation, grid rate edits, promotion check (2026-10-02)
+- *Scope.* The admin panel only. The guest booking engine, the pricing engine (`kamra/tex/pricing`, ENGINE_VERSION), the
+  DocTypes and patches, the capabilities and the draft → publish lifecycle are unchanged. Three small read/write additions
+  below, each guarded by the existing capabilities at the record's hotel.
+- *Navigation.* Grouped by the work (Daily work, Contracts & pricing, Guests & money, Reports, Setup & system); every route
+  is kept, so links, bookmarks and the e2e paths still work. A menu item may own several routes (`match`, `end`).
+- *Hotel scope.* The header's hotel is every screen's default; "all my hotels" is an explicit choice (`?property=all` on the
+  reservation list), never the silent default. A hotel switch is confirmed and moves an open record of the old hotel to its
+  list.
+- *Unsaved work.* `BrowserRouter` has no blockers, so `lib/unsaved.tsx` catches in-app link clicks in the capture phase
+  (before React Router), plus `beforeunload`; the hotel switch and the command palette ask too. The browser's Back button
+  is not guarded (accepted; it needs a data router).
+- *Grid rate edits (`crs.ari_rate_changes`).* `{room_types, start, end, op, value}` changes, at most 400, each night of a
+  room once. Each change is planned on the original terms (`ratesplit.plan`) and written as ABSOLUTE, so a derived room is
+  never raised twice. Preview (no `apply`) writes nothing and returns each room's price before → after, the periods the
+  draft would gain and the errors that would refuse it. Apply makes the draft when there is none, writes every change in
+  one save under a savepoint, validates once (an added ERROR rolls back all of it) and audits `grid.rate_changes` once.
+  `contract.edit` at the hotel for both. The browser never computes a price: it shows the server's preview.
+- *Restrictions from the grid.* Unchanged endpoints; the confirmation names the scope (this contract, or every contract of
+  the hotel) instead of assuming it. Undo restores only values it recorded at the same scope.
+- *Promotion check (`policies.promotion_check`, read-only).* Prices one stay on the contract's live version without the
+  promotion and with it (its draft or revision replacing its root's revisions in memory; `PricingContext` is frozen, so
+  `dataclasses.replace`). Promotion read at its hotel and `price.view_cost` at the contract's; the same hotel; nothing
+  written, no quote made. The list reads extra promotion fields (`LIST_EXTRA`) to say what each gives and covers.
+- *A new season.* Duplicate keeps its server behaviour; "a new season" sends the windows a year on and opens the new draft
+  with every period and offer date shifted a year as one unsaved, listed, undoable edit (`shiftSeasonYears`, pure): staff
+  check it and save it through `save_version`. Nothing is re-dated on the server.
+- *Reservation search.* `crs.reservations` also matches the TEX Booking's `external_ref` (a channel's booking number) and
+  returns it as `channel_ref`.

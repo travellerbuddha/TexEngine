@@ -71,6 +71,8 @@ export interface SiteClock {
   dayAfter: (ms: number) => string
   /** Milliseconds until the site's next midnight (at least one second). */
   msToNextDay: () => number
+  /** The site's wall time now, "YYYY-MM-DD HH:MM:SS" (as the API's naive datetimes read). */
+  now: () => string
 }
 
 /** The site clock for a bootstrap's `server` block, received at browser time `receivedAt`. */
@@ -102,6 +104,13 @@ export function siteClock(server: Bootstrap["server"], receivedAt: number): Site
     dayAfter: (ms) => {
       const w = wall()
       return w === null ? notBeforeFloor(isoDay(new Date(Date.now() + ms))) : notBeforeFloor(dayOf(w + ms))
+    },
+    now: () => {
+      const w = wall()
+      if (w !== null) return new Date(w).toISOString().slice(0, 19).replace("T", " ")
+      const d = new Date()
+      const p = (n: number) => String(n).padStart(2, "0")
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
     },
     msToNextDay: () => {
       const w = wall()

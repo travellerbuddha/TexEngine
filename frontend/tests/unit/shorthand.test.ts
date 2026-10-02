@@ -507,3 +507,14 @@ test("editText never turns a stored rule into a different calculation", () => {
     assertError(r, "SYNTAX", undefined, `${op} ${value}`)
   }
 })
+
+test("the Turkish percentage form: %30, +%10, -%30 read as 30%, +10%, -30% (UX revision 2026-10)", () => {
+  assert.deepEqual(parseShorthand("+%10", "room"), parseShorthand("+10%", "room"))
+  assert.deepEqual(parseShorthand("-%30", "occupancy"), { ok: true, kind: "rule", op: "ADJUST_PERCENT", value: "-30" })
+  assert.deepEqual(parseShorthand("- % 7,5", "occupancy"), { ok: true, kind: "rule", op: "ADJUST_PERCENT", value: "-7.5" })
+  // a bare share stays a share, never an adjustment
+  assert.deepEqual(parseShorthand("%50", "occupancy"), { ok: true, kind: "rule", op: "PERCENT_OF", value: "50" })
+  assert.deepEqual(parseShorthand("%50", "board"), parseShorthand("50%", "board"))
+  // nothing else is read differently
+  for (const bad of ["%", "%%10", "10%%", "%10%", "+%", "%-10", "x%10"]) assert.equal(parseShorthand(bad, "room").ok, false, bad)
+})

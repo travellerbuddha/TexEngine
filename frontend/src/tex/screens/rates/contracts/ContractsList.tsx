@@ -10,7 +10,7 @@ import { RatesNav } from "../components/RatesNav"
 import { CONTRACT_STATUS, enumLabel, enumOptions } from "../lib/options"
 import type { ContractRow } from "../lib/types"
 import { versionLabel } from "../lib/util"
-import { ContractFormDialog, DuplicateDialog } from "./ContractDialogs"
+import { ContractFormDialog, DuplicateDialog, duplicateTarget } from "./ContractDialogs"
 import { ContractViews } from "../lists/ContractViews"
 
 /** Contracts of the selected hotel with status / market filters (R-04). */
@@ -195,7 +195,7 @@ export default function ContractsList() {
           open
           onClose={() => setDupOf(null)}
           contract={dupOf}
-          onDone={(b) => navigate(`/tex/rates/contracts/${encodeURIComponent(b.contract.name)}`)}
+          onDone={(b, opts) => navigate(duplicateTarget(b, opts))}
         />
       )}
     </>

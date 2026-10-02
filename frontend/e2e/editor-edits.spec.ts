@@ -60,6 +60,10 @@ test("contract version: Discard returns to the last save, and the next save keep
   const discard = page.getByRole("button", { name: "Discard", exact: true })
   await expect(discard).toBeEnabled()
   await discard.click()
+  // it asks first: what is lost is said (UX revision 2026-10)
+  const confirm = page.getByRole("dialog", { name: "Discard the unsaved changes?" })
+  await expect(confirm).toContainText("Every change since the last save is lost")
+  await confirm.getByRole("button", { name: "Discard changes" }).click()
 
   // back to the saved version: the room saved a moment ago is there, the unsaved board is not
   await expect(page.getByRole("button", { name: /^Save/ })).toBeDisabled()

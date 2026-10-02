@@ -162,7 +162,7 @@ test.describe("pricing workspace, final follow-up", () => {
     const before = await page.evaluate(() => window.scrollY)
     expect(before).toBeGreaterThan(300)
     expect(await cellOf(page, N.STD, "P5").evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThan(0)
-    await page.getByRole("navigation", { name: "Main navigation" }).getByText("Commercial", { exact: true }).click()
+    await page.getByRole("navigation", { name: "Main navigation" }).getByText("Contracts & pricing", { exact: true }).click()
     await expect(page.getByRole("button", { name: "Period actions: P5" })).toBeVisible()
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
     expect(await priceMatrix(page).evaluate((g) => g.contains(document.activeElement))).toBe(false)

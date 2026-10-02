@@ -146,25 +146,95 @@ export function duplicatePeriod(tables: Tables, code: string): { tables: Tables;
   return { tables: out, code: next, counts: periodDependents(tables, c) }
 }
 
-/** "Copy previous period's prices": replaces this column's rows in the three tables with copies
- * of the rows of the period to its left (table order). */
+/** "Copy prices from…" (UX revision 2026-10): replaces this column's rows in the three tables
+ * (room prices, occupancy and child rules, boards) with copies of the rows of period `from`. */
+export function copyPeriodFrom(tables: Tables, from: string, code: string): { tables: Tables; counts: { removed: number; copied: number } } | { error: PeriodError } {
+  const c = str(code)
+  const src = str(from)
+  if (!tables.periods.some((p) => codeOf(p) === c) || !tables.periods.some((p) => codeOf(p) === src)) return { error: "UNKNOWN_PERIOD" }
+  if (src === c) return { error: "NO_PREVIOUS_PERIOD" }
+  const out: Tables = { ...tables }
+  let removed = 0
+  let copied = 0
+  for (const t of PERIOD_TABLES) {
+    const rest = tables[t].filter((r) => codeOf(r) !== c)
+    const copies = tables[t].filter((r) => codeOf(r) === src).map((r) => copyRow(r, { period_code: c }))
+    removed += tables[t].length - rest.length
+    copied += copies.length
+    if (rest.length !== tables[t].length || copies.length) out[t] = [...rest, ...copies]
+  }
+  return { tables: out, counts: { removed, copied } }
+}
+
+/** "Copy previous period's prices": `copyPeriodFrom` the period to its left (table order). */
 export function copyPreviousPeriod(tables: Tables, code: string): { tables: Tables; counts: { removed: number; copied: number } } | { error: PeriodError } {
   const c = str(code)
   const idx = tables.periods.findIndex((p) => codeOf(p) === c)
   if (idx < 0) return { error: "UNKNOWN_PERIOD" }
   const prev = idx > 0 ? codeOf(tables.periods[idx - 1]) : ""
   if (!prev || prev === c) return { error: "NO_PREVIOUS_PERIOD" }
-  const out: Tables = { ...tables }
-  let removed = 0
-  let copied = 0
-  for (const t of PERIOD_TABLES) {
-    const rest = tables[t].filter((r) => codeOf(r) !== c)
-    const copies = tables[t].filter((r) => codeOf(r) === prev).map((r) => copyRow(r, { period_code: c }))
-    removed += tables[t].length - rest.length
-    copied += copies.length
-    if (rest.length !== tables[t].length || copies.length) out[t] = [...rest, ...copies]
+  return copyPeriodFrom(tables, prev, c)
+}
+
+// ─── a new season: every date a year later ───────────────────────────────
+
+const lastOfFebruary = (y: number) => (isoDay(`${pad(y, 4)}-02-29`) === null ? 28 : 29)
+
+/**
+ * The same calendar day `years` years later (negative: earlier), or "" when `iso` is not a date.
+ * February is kept seamless for back-to-back periods: an end on the last day of February stays the
+ * last day of February (28 ↔ 29), and a 29 February that the target year lacks becomes 1 March for
+ * a start (28 February for an end).
+ */
+export function shiftIsoYears(iso: unknown, years: number, edge: "start" | "end"): string {
+  if (isoDay(iso) === null) return ""
+  const [y0, m, d] = str(iso).split("-").map((x) => parseInt(x, 10))
+  const y = y0 + years
+  if (m === 2 && d >= 28) {
+    if (edge === "end" && d === lastOfFebruary(y0)) return `${pad(y, 4)}-02-${lastOfFebruary(y)}`
+    if (d === 29 && lastOfFebruary(y) === 28) return edge === "start" ? `${pad(y, 4)}-03-01` : `${pad(y, 4)}-02-28`
   }
-  return { tables: out, counts: { removed, copied } }
+  return `${pad(y, 4)}-${pad(m, 2)}-${pad(d, 2)}`
+}
+
+export interface SeasonShift {
+  tables: Tables
+  /** each period moved: code, old and new dates */
+  periods: { code: string; from: [string, string]; to: [string, string] }[]
+  /** offers whose sale or stay dates moved */
+  offers: number
+}
+
+/** Every date of the version's periods and offers moved by `years` years (a new season from the
+ * last one: prices and rules stay as they are, attached to the same period codes). Blank dates
+ * stay blank. */
+export function shiftSeasonYears(tables: Tables, years: number): SeasonShift {
+  const moved: SeasonShift["periods"] = []
+  const periods = tables.periods.map((p) => {
+    const a = str(p.start_date)
+    const b = str(p.end_date)
+    const na = a ? shiftIsoYears(a, years, "start") || a : a
+    const nb = b ? shiftIsoYears(b, years, "end") || b : b
+    if (na === a && nb === b) return p
+    moved.push({ code: codeOf(p), from: [a, b], to: [na, nb] })
+    return { ...p, start_date: na, end_date: nb }
+  })
+  let offers = 0
+  const offerRows = tables.offers.map((o) => {
+    const next = { ...o }
+    let changed = false
+    for (const [k, edge] of [["sale_from", "start"], ["sale_to", "end"], ["stay_from", "start"], ["stay_to", "end"]] as const) {
+      const v = str(o[k])
+      const nv = v ? shiftIsoYears(v, years, edge) || v : v
+      if (nv !== v) {
+        next[k] = nv
+        changed = true
+      }
+    }
+    if (changed) offers++
+    return changed ? next : o
+  })
+  return { tables: { ...tables, periods, offers: offerRows }, periods: moved, offers }
 }
 
 /** Moves a period one column left (-1) or right (+1). Column order has no pricing effect
