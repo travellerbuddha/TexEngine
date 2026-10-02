@@ -12,7 +12,7 @@ import hmac
 from unittest import mock
 
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, add_to_date, now_datetime, nowdate
 
 from kamra.tex.api import payments as pay_api
 from kamra.tex.api import policies as policy_api
@@ -1313,6 +1313,26 @@ class TestGoLivePaymentsReview(TexTestCase):
 		acc.reload()
 		acc.enabled = 0
 		acc.save()                                                         # ...but it can be switched off
+
+	def test_a_gated_accounts_charge_the_job_keeps_asking_is_on_record_once_a_day(self):
+		"""LO-20 (2K-4): each question about a charge of a gated account wrote a ``settled_while_gated`` audit, and
+		the re-verification job asks a Pending charge every 5 minutes for up to 2 hours past its deadline: one
+		charge filled the trail. It is on record once per charge and day; another charge has its own."""
+		gw = FakeIyzico()
+		acc = self.iyzico()
+		with gw.patch():
+			first = self.charge(acc.name, "lo20-a")["transaction"]
+			second = self.charge(acc.name, "lo20-b")["transaction"]
+			acc.db_set("environment", "Production")                        # gated: uncertified (G-67)
+			for token in gw.issued:
+				gw.answers[token] = {"status": "success", "paymentStatus": "WAITING"}   # the guest has not paid
+			later = add_to_date(now_datetime(), minutes=5)
+			for tick in range(3):
+				pay.reverify_pending(now=add_to_date(later, minutes=5 * tick))
+		audited = [a["transaction"] for a in self.audits("payment_account.settled_while_gated", acc.name)]
+		self.assertEqual(sorted(audited), sorted([first, second]))
+		self.assertEqual({frappe.db.get_value("TEX Payment Transaction", t, "status") for t in (first, second)},
+		                 {"Pending"})
 
 	def test_g67_a_capture_tex_refused_is_on_record_and_refundable(self):
 		gw = FakeIyzico()

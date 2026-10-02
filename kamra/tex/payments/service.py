@@ -220,7 +220,8 @@ def provider_for(account_name: str, *, purpose: str = "new", transaction: str | 
 	if not acc.enabled:
 		_refuse(acc, _("Payment provider {0} is disabled.").format(acc.label))
 	check_account(acc, purpose=purpose)
-	if purpose == "settle" and (gated := account_rule(acc, "new")):
+	if purpose == "settle" and (gated := account_rule(acc, "new")) and not _gated_settle_on_record(acc.name,
+	                                                                                               transaction):
 		# an account that could not take this money today still settles it, on the record (ADR-041)
 		audit("payment_account.settled_while_gated", reference_doctype="TEX Payment Provider Account",
 		      reference_name=acc.name, property=acc.property,
@@ -228,6 +229,19 @@ def provider_for(account_name: str, *, purpose: str = "new", transaction: str | 
 		           "environment": acc.environment})
 	cls = REGISTRY[acc.provider]
 	return cls(acc, _mock_secret()) if cls is simple.MockProvider else cls(acc)
+
+
+def _gated_settle_on_record(account: str, transaction: str | None) -> bool:
+	"""A ``settled_while_gated`` audit of this charge is on record today (LO-20): the re-verification job asks a
+	Pending charge every 5 minutes, and each question used to write one. Once per charge and day (the site's);
+	a call without a charge is audited every time."""
+	if not transaction:
+		return False
+	return bool(frappe.db.sql("""SELECT 1 FROM `tabTEX Audit Event`
+	                             WHERE action = 'payment_account.settled_while_gated' AND event_time >= %(day)s
+	                               AND reference_doctype = 'TEX Payment Provider Account' AND reference_name = %(acc)s
+	                               AND JSON_VALUE(new_value, '$.transaction') = %(txn)s LIMIT 1""",
+	                          {"day": get_datetime(getdate(now_datetime())), "acc": account, "txn": transaction}))
 
 
 def gated_accounts(property: str | None = None) -> list[dict]:
