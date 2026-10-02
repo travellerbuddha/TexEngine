@@ -546,6 +546,45 @@ class TestModification(LoyaltyCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "Not enough points"):
 			loyalty.redeem(guest, hotel["booking"], 50, idempotency_key="o21-b-2")
 
+	def test_changing_a_stay_whose_points_expired_never_brings_them_back(self):
+		"""LO-26 (audit 2K-2, ADR-071 §5): a stay whose points expired, changed afterwards (its dates moved: TEX is
+		not the PMS, a stay that ended may still read Confirmed), earns again with the old lot's expiry, never a
+		fresh one: the points that had expired expire again (before: 842 came back, valid for a new month)."""
+		club = self.create(**self.CLUB_1, expiry_months=1)
+		b, guest = self.paid_stay("lo26")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		self.assertEqual(self.available(guest, club), 842)
+		loyalty.mature_and_expire(today=fx.d(8, 1))                               # a month after: expired
+		self.assertEqual(self.available(guest, club), 0)
+		frappe.db.set_value("Reservation", res, "check_out_date", fx.d(7, 20))      # the stay is changed afterwards
+		frappe.get_doc("Reservation", res).save(ignore_permissions=True)
+		loyalty.mature_and_expire(today=fx.d(8, 1))
+		self.assertEqual(self.available(guest, club), 0)
+		lot = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn",
+		                                                    "status": ("!=", "Reversed")}, pluck="expires_on")
+		self.assertEqual([str(d) for d in lot], [str(add_months(fx.d(6, 13), 1))])
+
+	def test_a_stay_whose_expired_points_moved_to_another_guest_never_brings_them_back(self):
+		"""LO-26 (review round 1): the expiry is read from the earning's own guest, so a room whose guest was replaced
+		after its points expired earns again with that expiry too (before: looked up on the new guest, the 842 came
+		back to them valid for a new month)."""
+		club = self.create(**self.CLUB_1, expiry_months=1)
+		b, guest = self.paid_stay("lo26-guest")
+		res = b["rooms"][0]["reservation"]
+		loyalty.mature_and_expire(today=fx.d(6, 13))
+		loyalty.mature_and_expire(today=fx.d(8, 1))                               # a month after: expired
+		self.assertEqual(self.available(guest, club), 0)
+		newcomer = frappe.get_doc({"doctype": "Guest", "first_name": "Nina", "last_name": "New",
+		                           "email": "nina.lo26@example.com"}).insert(ignore_permissions=True).name
+		frappe.db.set_value("Reservation", res, {"guest": newcomer, "check_out_date": fx.d(7, 20)})
+		frappe.get_doc("Reservation", res).save(ignore_permissions=True)          # the stay is changed afterwards
+		loyalty.mature_and_expire(today=fx.d(8, 1))
+		self.assertEqual((self.available(guest, club), self.available(newcomer, club)), (0, 0))
+		lot = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": res, "entry_type": "Earn",
+		                                                    "status": ("!=", "Reversed")}, fields=["guest", "expires_on"])
+		self.assertEqual([(r.guest, str(r.expires_on)) for r in lot], [(newcomer, str(add_months(fx.d(6, 13), 1)))])
+
 	def test_a_stay_changed_down_and_up_again_is_worth_what_it_is_now(self):
 		club = self.create(**self.CLUB_1)
 		_b, guest, res, _hotel = self.spent_stay(club, "o21-c")
@@ -582,8 +621,10 @@ class TestModification(LoyaltyCase):
 		self.assertEqual(frappe.db.get_value("TEX Loyalty Ledger", earn, "status"), "Reversed")
 		expiry = frappe.get_all("TEX Loyalty Ledger", filters={"guest": guest, "entry_type": "Expire"},
 		                        fields=["points", "status"])
-		self.assertEqual([(r.points, r.status) for r in expiry], [(-842, "Reversed")])    # taken away with its lot
-		self.assertEqual(self.available(guest, club), 843)
+		# taken away with its lot; the new lot keeps the expiry, so its points expire again at once (LO-26: before,
+		# 843 came back with a fresh expiry)
+		self.assertEqual(sorted((r.points, r.status) for r in expiry), [(-843, "Expired"), (-842, "Reversed")])
+		self.assertEqual(self.available(guest, club), 0)
 
 
 class TestEarnMatrix(LoyaltyCase):
@@ -835,8 +876,264 @@ class TestPointsBack(LoyaltyCase):
 		self.assertEqual(self.available(guest), 550)
 
 	def test_the_points_of_a_return_are_read_by_their_indexes(self):
-		params = {"guests": ("G-O20-1", "G-O20-2"), "b": "BK-O20", "reasons": ("redeemed as TXN-O20-1",)}
-		for sql in (loyalty.BURNS_OF, loyalty.PENDING_REFUNDS_OF):
+		params = {"guests": ("G-O20-1", "G-O20-2"), "b": "BK-O20", "bookings": ("BK-O20", "BK-O20-2"),
+		          "reasons": ("redeemed as TXN-O20-1",)}
+		for sql in (loyalty.BURNS_OF, loyalty.BURNERS_OF, loyalty.PENDING_REFUNDS_OF):
 			for row in frappe.db.sql("EXPLAIN " + sql, params, as_dict=True):
 				self.assertNotIn(row.type, ("ALL", "index"), (sql, row))
 				self.assertTrue(row.key, (sql, row))
+
+	# LO-01 (O-19b, audit 2K-1): a lower price of a booking paid partly with points gives the points' share back as
+	# points, before any cash, and asks staff for nothing; points are never recorded as money given back outside TEX.
+	# Before: the points' share went to staff, whose "Refunded outside TEX" refused (the Loyalty charge newest) or
+	# recorded it as cash off the card.
+
+	def lowered(self, session: str, *, points_last: bool) -> dict:
+		"""842.50 paid as 300.00 of points (3000) and card or desk money; the guest shortens the stay (575.00, 267.50
+		less) and finance approves it as a refund. → what the test reads."""
+		from kamra.tex.api import crs as crs_api
+
+		b = guest_books(session=session, method="Card")
+		p = b["payment"]
+		public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])   # 252.75
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		booking = b["booking"]
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": booking, "entry_type": "Earn"})
+		if own:                                                  # the booking's own earning is not part of this scenario
+			frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		self.give(guest, 5000)
+		if points_last:
+			pay.record_manual(booking=booking, amount="289.75", method="Cash", reference="desk",
+			                  idempotency_key=f"{session}-cash")
+			red = loyalty.redeem(guest, booking, 3000, idempotency_key=f"{session}-pts")
+		else:
+			red = loyalty.redeem(guest, booking, 3000, idempotency_key=f"{session}-pts")
+			rest = public.pay_booking(token=b["manage_token"])
+			public.mock_pay(transaction=rest["transaction"], outcome="success", sig=rest["fields"]["success_sig"])
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		self.assertEqual(from_db(frappe.db.get_value("TEX Booking", booking, "paid_amount"), "EUR"), D("842.50"))
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest shortens the stay on the manage page
+		down = public.manage_propose(token=b["manage_token"], reservation=b["rooms"][0]["reservation"],
+		                             changes={"check_out": str(fx.d(6, 12))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=down["proposal_token"])
+		self.assertEqual(out["status"], "requested")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance approves it as a refund
+		return {"booking": booking, "guest": guest, "points": red["transaction"], "request": out["request"],
+		        "approve": lambda: crs_api.resolve_guest_change(request=out["request"], action="approve", reason="shorter",
+		                                                        settlement="Refund")}
+
+	def assert_points_came_back(self, case: dict, done: dict) -> None:
+		req = frappe.get_doc("TEX Guest Change Request", case["request"])
+		self.assertEqual((done["status"], done["refunded_amount"], req.staff_open, D(req.staff_amount or 0)),
+		                 ("Approved", "267.50", 0, D(0)))
+		self.assertEqual(self.refunds_of(case["points"]), [(D("267.50"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+		self.assertEqual(self.reverse_rows(case["guest"]), [(2675, "Available", case["booking"])])
+		cash = frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Refund", "booking": case["booking"],
+		                                                          "provider": ("!=", "Loyalty")}, pluck="name")
+		self.assertEqual(cash, [])                               # nothing went back as money
+		total, paid = frappe.db.get_value("TEX Booking", case["booking"], ["total_amount", "paid_amount"])
+		self.assertEqual((from_db(total, "EUR"), from_db(paid, "EUR")), (D("575.00"), D("575.00")))
+
+	def test_the_points_paid_last_come_back_as_points(self):
+		case = self.lowered("lo01-points-last", points_last=True)
+		self.assert_points_came_back(case, case["approve"]())
+
+	def test_the_points_come_back_first_even_when_the_card_paid_last(self):
+		case = self.lowered("lo01-card-last", points_last=False)
+		self.assert_points_came_back(case, case["approve"]())
+
+	def test_points_left_to_staff_are_never_recorded_as_money_given_back(self):
+		"""LO-01: points that could not come back by themselves (no burn row found) are left to staff; their
+		"Refunded outside TEX" is refused with the reason, never closed as if refunded (before: 267.50 recorded off the
+		card paid last; then, review round 1: closed silently with nothing recorded, so the booking stayed over and its
+		points could come back again later). Kept on the booking, it closes and records no money given back."""
+		from kamra.tex.api import crs as crs_api
+
+		case = self.lowered("lo01-staff", points_last=False)
+		frappe.db.set_value("TEX Loyalty Ledger", {"reason": f"redeemed as {case['points']}"}, "reason", "unknown burn")
+		self.assertEqual(case["approve"]()["refunded_amount"], "0.00")
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", case["request"], "staff_open"), 1)
+		with self.assertRaisesRegex(frappe.ValidationError, "267.50 EUR of this money was paid with loyalty points"):
+			crs_api.resolve_guest_change(request=case["request"], action="close", reason="given back by hand",
+			                             staff_money="Refunded outside TEX")
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", case["request"], "staff_open"), 1)
+		crs_api.resolve_guest_change(request=case["request"], action="close", reason="kept, points corrected in the CRM",
+		                             staff_money="Kept on the booking")
+		self.assertEqual(frappe.db.get_value("TEX Guest Change Request", case["request"], "staff_open"), 0)
+		cash = frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Refund", "booking": case["booking"]},
+		                      pluck="name")
+		self.assertEqual(cash, [])
+
+	def test_the_cash_left_to_staff_beside_points_is_recorded_the_points_kept(self):
+		"""LO-01 (review round 2): money left to staff that is part cash, part points that could not come back (no
+		burn row found): "Refunded outside TEX" records the cash off the cash payment and keeps the points' share on
+		the booking, saying so (before: the whole close was refused, so the cash really refunded could not be
+		recorded and a later cancellation would refund it again)."""
+		from kamra.tex.api import crs as crs_api
+
+		b = guest_books(session="lo01-mixed", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		booking = b["booking"]
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": booking, "entry_type": "Earn"})
+		if own:                                                  # the booking's own earning is not part of this scenario
+			frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		self.give(guest, 5000)
+		cash = pay.record_manual(booking=booking, amount="742.50", method="Cash", reference="desk",
+		                         idempotency_key="lo01-mixed-cash")
+		red = loyalty.redeem(guest, booking, 1000, idempotency_key="lo01-mixed-pts")          # 100.00
+		frappe.db.set_value("TEX Loyalty Ledger", {"reason": f"redeemed as {red['transaction']}"}, "reason",
+		                    "unknown burn")
+		self.assertEqual(from_db(frappe.db.get_value("TEX Booking", booking, "paid_amount"), "EUR"), D("842.50"))
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest shortens the stay on the manage page
+		down = public.manage_propose(token=b["manage_token"], reservation=b["rooms"][0]["reservation"],
+		                             changes={"check_out": str(fx.d(6, 12))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=down["proposal_token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance approves it as a refund
+		crs_api.resolve_guest_change(request=out["request"], action="approve", reason="shorter", settlement="Refund")
+		req = frappe.get_doc("TEX Guest Change Request", out["request"])
+		self.assertEqual((req.staff_open, D(req.staff_amount)), (1, D("267.50")))      # 100.00 points, 167.50 cash
+		crs_api.resolve_guest_change(request=out["request"], action="close", reason="cash given back at the desk",
+		                             staff_money="Refunded outside TEX")
+		req.reload()
+		self.assertEqual(req.staff_open, 0)
+		made = frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Refund", "booking": booking},
+		                      fields=["parent_transaction", "amount", "provider"])
+		self.assertEqual([(r.parent_transaction, D(r.amount)) for r in made], [(cash["transaction"], D("167.50"))])
+		self.assertIn("100.00 EUR of it was paid with loyalty points", req.error)
+		self.assertNotIn("was not recorded", req.error)
+
+	# LO-06 (audit 2K-2): the burn row of a Loyalty charge is found by the charge, wherever the charge or its burner
+	# is now. Before: only among the booking's current guests and on this booking, so a charge staff moved to
+	# another booking, or a burner no longer on the room, gave no points back (an Error Log, the money left to staff).
+
+	def test_points_moved_to_another_booking_come_back_when_it_is_cancelled(self):
+		hotel, guest, red = self.spend("lo06-moved", 300)
+		other = guest_books(session="lo06-other", method="Pay at Hotel",
+		                    guest={"first_name": "Otto", "last_name": "Other", "email": "otto.lo06@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff move the points' money
+		pay.transfer(red["transaction"], from_booking=hotel["booking"], to_booking=other["booking"], amount="30.00",
+		             reason="the guest asked to pay the other stay")
+		self.assertEqual(self.available(guest), 700)
+		since = now_datetime()
+		booking_svc.cancel_reservation(other["rooms"][0]["reservation"], reason="lo06", waive_penalty=True)
+		self.assertEqual(self.available(guest), 1000)
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", other["booking"])])
+		self.assertFalse(frappe.db.exists("Error Log", {"method": f"Loyalty points not returned: {red['transaction']}",
+		                                                "creation": (">=", since)}))
+
+	def test_points_come_back_to_their_burner_after_the_guest_changed(self):
+		hotel, guest, red = self.spend("lo06-burner", 300)
+		newcomer = frappe.get_doc({"doctype": "Guest", "first_name": "Nina", "last_name": "New",
+		                           "email": "nina.lo06@example.com"}).insert(ignore_permissions=True).name
+		res = hotel["rooms"][0]["reservation"]
+		frappe.db.set_value("Reservation", res, "guest", newcomer, update_modified=False)
+		frappe.db.set_value("TEX Booking", hotel["booking"], "booker_guest", newcomer, update_modified=False)
+		booking_svc.cancel_reservation(res, reason="lo06", waive_penalty=True)
+		self.assertEqual(self.available(guest), 1000)
+		self.assertEqual(self.reverse_rows(guest), [(300, "Available", hotel["booking"])])
+		self.assertEqual(self.refunds_of(red["transaction"]), [(D("30.00"), "Succeeded", "POINTS RETURNED", "Loyalty")])
+
+	def test_a_revival_short_of_the_points_given_back_says_so_to_staff(self):
+		"""LO-23 (audit 2K-2): a hold paid partly with points expires (the points come back), then its card money,
+		paid in time, comes late: the card alone no longer pays what it owes, so it is not taken back (points are
+		never burned again, 2H-2). The note for staff says the points were given back (before: a generic note)."""
+		held = guest_books(session="lo23")                                   # a card hold waiting for its payment
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", held["booking"], "booker_guest")
+		self.give(guest, 1000)
+		loyalty.redeem(guest, held["booking"], 500, idempotency_key="lo23-pts")
+		rest = public.pay_booking(token=held["manage_token"])                # the rest of the deposit, by card
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
+		self.assertTrue(booking_svc.expire_booking(held["booking"], now=add_to_date(now_datetime(), hours=2)))
+		self.assertEqual(self.available(guest), 1000)
+		public.mock_pay(transaction=rest["transaction"], outcome="success", sig=rest["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what is on record
+		row = frappe.db.get_value("TEX Payment Transaction", rest["transaction"],
+		                          ["status", "reconciliation", "reconciliation_note"], as_dict=True)
+		self.assertEqual((row.status, row.reconciliation), ("Succeeded", "Action Required"))
+		self.assertIn("points that paid part of it were given back", row.reconciliation_note)
+
+	def test_a_revival_stopped_by_another_booking_never_asks_for_the_points_rest(self):
+		"""LO-23 (review round 1): the points sentence is said only when money is why the booking is not taken back
+		(its rooms free, no other booking for the stay). The guest booked the stay again meanwhile: the note names
+		that booking, and never asks the guest to pay the rest or redeem points again (before: it did)."""
+		held = guest_books(session="lo23-again")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff redeem
+		guest = frappe.db.get_value("TEX Booking", held["booking"], "booker_guest")
+		self.give(guest, 1000)
+		loyalty.redeem(guest, held["booking"], 500, idempotency_key="lo23-again-pts")
+		rest = public.pay_booking(token=held["manage_token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job
+		self.assertTrue(booking_svc.expire_booking(held["booking"], now=add_to_date(now_datetime(), hours=2)))
+		again = guest_books(session="lo23-again-2", method="Pay at Hotel")       # the guest books the stay again
+		public.mock_pay(transaction=rest["transaction"], outcome="success", sig=rest["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what is on record
+		note = frappe.db.get_value("TEX Payment Transaction", rest["transaction"], "reconciliation_note")
+		self.assertIn(f"the guest has booking {again['booking']} for the same stay", note)
+		self.assertNotIn("points that paid part of it", note)
+
+	def test_a_balance_below_zero_is_shown_as_points_owed(self):
+		"""LO-25 (audit 2K-2): points spent before a stay changed and earned less leave a balance below zero; the
+		profile's summary says how many points are owed (``debt``) and puts no negative money value on them."""
+		b = guest_books(session="lo25", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read the profile
+		guest = frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+		frappe.db.set_value("TEX Loyalty Ledger", {"guest": guest, "program": self.club}, "status", "Reversed")
+		self.give(guest, 100)
+		self.give(guest, -300, entry_type="Reverse")                  # a changed stay took back more than was left
+		[account] = loyalty.summary(guest, {self.club})
+		self.assertEqual((account["available"], account["debt"], account["value"]), (-200, 200, "0.00"))
+		self.give(guest, 500)
+		[account] = loyalty.summary(guest, {self.club})
+		self.assertEqual((account["available"], account["debt"], account["value"]), (300, 0, "30.00"))
+
+
+class TestAnEarningNeverUndoesTheStay(LoyaltyCase):
+	"""LO-47 (audit 2K-2, owner's choice a): the loyalty earning runs in the reservation's save. A rule that fails
+	must never roll back what the save does (a confirmation, a payment's callback, a cancellation): the earning is
+	undone alone, logged, and the system status warns that a stay's points are missing."""
+
+	def test_a_failing_earning_leaves_the_confirmation_and_is_reported(self):
+		from kamra.tex.ops import status as ops_status
+
+		self.create()
+		b = guest_books(session="lo47")
+		p = b["payment"]
+		with mock.patch.object(loyalty, "points_for", side_effect=RuntimeError("a broken rule")):
+			public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff read what is on record
+		res = b["rooms"][0]["reservation"]
+		self.assertEqual(frappe.db.get_value("TEX Booking", b["booking"], "status"), "Confirmed")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Confirmed")
+		self.assertFalse(frappe.db.exists("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn"}))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX loyalty earning {res}"}))
+		check = next(c for c in ops_status.collect(properties=[fx.PROPERTY]) if c["key"] == "loyalty.earnings")
+		self.assertEqual(check["status"], "warn")
+		self.assertEqual(check["issues"][0]["reason"], "loyalty_earning_failed")
+		self.assertIn(fx.PROPERTY, check["properties"])
+
+	def test_a_failing_reversal_leaves_the_cancellation_and_is_reported(self):
+		"""The cancellation's reversal of the stay's points runs under the same guard: the cancellation is kept,
+		the earned points stay for staff to correct, and the same check reports it (review round 1)."""
+		from kamra.tex.ops import status as ops_status
+
+		self.create()
+		b = guest_books(session="lo47-rev")
+		p = b["payment"]
+		public.mock_pay(transaction=p["transaction"], outcome="success", sig=p["fields"]["success_sig"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff cancel
+		res = b["rooms"][0]["reservation"]
+		self.assertTrue(frappe.db.exists("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn",
+		                                                        "status": ("!=", "Reversed")}))
+		since = now_datetime()
+		with mock.patch.object(loyalty, "_reverse", side_effect=RuntimeError("a broken reversal")):
+			booking_svc.cancel_reservation(res, reason="lo47", waive_penalty=True)
+		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
+		self.assertTrue(frappe.db.exists("TEX Loyalty Ledger", {"reservation": res, "entry_type": "Earn",
+		                                                        "status": ("!=", "Reversed")}))
+		self.assertTrue(frappe.db.exists("Error Log", {"method": f"TEX loyalty earning {res}",
+		                                               "creation": (">=", since)}))
+		check = next(c for c in ops_status.collect(properties=[fx.PROPERTY]) if c["key"] == "loyalty.earnings")
+		self.assertEqual((check["status"], check["issues"][0]["reason"]), ("warn", "loyalty_earning_failed"))

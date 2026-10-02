@@ -278,11 +278,76 @@ class TestLowerPrice(GuestMoneyCase):
 		                       "max_redeem_percent": 50, "pending_days": 0}).insert(ignore_permissions=True)
 		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": club.name, "guest": guest, "entry_type": "Adjust",
 		                "points": 10000, "status": "Available", "reason": "welcome"}).insert(ignore_permissions=True)
-		loyalty.redeem(guest, b["booking"], 4212, idempotency_key="gcm-points-1")    # 421.20: the 50 % limit
+		spent = loyalty.redeem(guest, b["booking"], 4212, idempotency_key="gcm-points-1")    # 421.20: the 50 % limit
 		self.assertEqual(money(b["booking"])[1], D("673.95"))
 		self.accept(b, self.propose(b, (6, 12)))                           # 575.00: 98.95 over
-		card = sum((amount for _charge, amount, status in refunds(b["booking"]) if status == "Succeeded"), D(0))
+		card = sum((amount for charge, amount, status in refunds(b["booking"])
+		            if status == "Succeeded" and charge != spent["transaction"]), D(0))
 		self.assertLessEqual(card, max(D(0), D("252.75") - D("575.00")))
+		# LO-01 (review round 1): the 98.95 comes back as points, by itself
+		self.assertEqual([(amount, status) for charge, amount, status in refunds(b["booking"])
+		                  if charge == spent["transaction"]], [(D("98.95"), "Succeeded")])
+
+	def test_the_points_share_of_a_lower_price_comes_back_as_points_by_itself(self):
+		"""LO-01 (O-19b, audit 2K-2 review round 1): under "refund automatically" the points' share of the overpayment
+		comes back as points at once and the card's share to the card; nothing is left to staff, and the guest is
+		told which is which (before: the points' share went to staff, and the card's share came back as points)."""
+		from kamra.tex.crm import loyalty
+
+		lower_price_policy("Refund automatically")
+		b = self.deposit_paid("lo01-auto")                                 # 252.75 by card
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel's club, staff redeem
+		guest = frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+		club = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "LO01 Club", "property": fx.PROPERTY,
+		                       "enabled": 1, "currency": "EUR", "point_value": 0.1, "min_redeem_points": 50,
+		                       "max_redeem_percent": 50, "pending_days": 0}).insert(ignore_permissions=True)
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": club.name, "guest": guest, "entry_type": "Adjust",
+		                "points": 5000, "status": "Available", "reason": "welcome"}).insert(ignore_permissions=True)
+		spent = loyalty.redeem(guest, b["booking"], 1000, idempotency_key="lo01-auto-1")      # 100.00
+		paid(public.pay_booking(token=b["manage_token"]))                  # the rest by card: 842.50 paid
+		self.assertEqual(money(b["booking"])[1], D("842.50"))
+		down = self.propose(b, (6, 12))                                    # 575.00: 267.50 over
+		self.assertEqual({k: down["settlement"][k] for k in ("kind", "refund", "points_back", "hotel_refund")},
+		                 {"kind": "refund", "refund": "167.50", "points_back": "100.00", "hotel_refund": "0.00"})
+		out = self.accept(b, down)
+		self.assertEqual({k: out["settlement"][k] for k in ("refund", "points_back", "hotel_refund")},
+		                 {"refund": "167.50", "points_back": "100.00", "hotel_refund": "0.00"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual((req.staff_open, D(req.refunded_amount)), (0, D("267.50")))
+		back = frappe.get_all(TXN, filters={"parent_transaction": spent["transaction"], "txn_type": "Refund"},
+		                      fields=["amount", "raw_status"])
+		self.assertEqual([(D(r.amount), r.raw_status) for r in back], [(D("100.00"), "POINTS RETURNED")])
+		card = sum((amount for charge, amount, status in refunds(b["booking"])
+		            if status == "Succeeded" and charge != spent["transaction"]), D(0))
+		self.assertEqual(card, D("167.50"))
+		self.assertEqual(money(b["booking"])[:2], (D("575.00"), D("575.00")))
+
+	def test_points_that_cannot_come_back_by_themselves_go_to_staff_never_told_as_a_card_refund(self):
+		"""LO-01 (review round 2): the points' share of a lower price whose burn cannot be found (no points come back,
+		an Error Log) waits for staff; the guest is never told it goes back to the card (before: Applied as a refund
+		of 98.95 with nothing refunded, nothing for staff, and the page said a card refund had started)."""
+		from kamra.tex.crm import loyalty
+
+		lower_price_policy("Refund automatically")
+		b = self.deposit_paid("lo01-noburn")                               # 252.75 by card
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel's club, staff redeem
+		guest = frappe.db.get_value("TEX Booking", b["booking"], "booker_guest")
+		club = frappe.get_doc({"doctype": "TEX Loyalty Program", "program_name": "LO01b Club", "property": fx.PROPERTY,
+		                       "enabled": 1, "currency": "EUR", "point_value": 0.1, "min_redeem_points": 50,
+		                       "max_redeem_percent": 50, "pending_days": 0}).insert(ignore_permissions=True)
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": club.name, "guest": guest, "entry_type": "Adjust",
+		                "points": 10000, "status": "Available", "reason": "welcome"}).insert(ignore_permissions=True)
+		spent = loyalty.redeem(guest, b["booking"], 4212, idempotency_key="lo01-noburn-1")   # 421.20
+		frappe.db.set_value("TEX Loyalty Ledger", {"reason": f"redeemed as {spent['transaction']}"}, "reason",
+		                    "unknown burn")
+		out = self.accept(b, self.propose(b, (6, 12)))                     # 575.00: 98.95 over, all points
+		self.assertEqual({k: out["settlement"][k] for k in ("refund", "points_back", "hotel_refund")},
+		                 {"refund": "0.00", "points_back": "0.00", "hotel_refund": "98.95"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- read what is on record
+		req = frappe.get_doc(DT, out["request"])
+		self.assertEqual((req.staff_open, D(req.staff_amount), req.settle_pending), (1, D("98.95"), 0))
+		self.assertEqual(refunds(b["booking"]), [])
 
 	def test_a_refund_job_that_did_not_run_is_retried(self):
 		lower_price_policy("Refund automatically")

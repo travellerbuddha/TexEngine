@@ -100,9 +100,11 @@ function settlementText(i18n: I18nT, s: Settlement, difference: string | null): 
       if (isZero(s.amount)) return { tone: "info", body: t("manage.settle.covered") }
       return { tone: "info", body: isNegative(difference) ? t("manage.settle.balanceDown", { amount }) : t("manage.settle.balanceUp", { amount }) }
     case "refund": {
-      // only what a card can take back is promised as a card refund; the rest the hotel refunds (server-decided)
+      // only what a card can take back is promised as a card refund; the points' share goes back as points; the rest
+      // the hotel refunds (server-decided)
       const parts = []
       if (s.refund && isPositive(s.refund)) parts.push(t("manage.settle.refund", { amount: money(s.refund, s.currency) }))
+      if (s.points_back && isPositive(s.points_back)) parts.push(t("manage.settle.points", { amount: money(s.points_back, s.currency) }))
       if (s.hotel_refund && isPositive(s.hotel_refund)) parts.push(t("manage.settle.hotelRefund", { amount: money(s.hotel_refund, s.currency) }))
       return { tone: "info", body: parts.join(" ") || t("manage.settle.refund", { amount }) }
     }
@@ -135,12 +137,13 @@ function resultNotice(i18n: I18nT, r: ChangeResult, currency: string): Notice {
     case "pay_at_hotel":
       return { tone: "ok", title, body: t("manage.done.atHotel", { amount }) }
     case "refund": {
-      // what went back to the card already, what is on its way, what the hotel refunds
+      // what went back to the card already, what is on its way, what went back as points, what the hotel refunds
       const card = s.refund ?? s.amount
       const hotel = s.hotel_refund && isPositive(s.hotel_refund) ? s.hotel_refund : null
       const parts = []
       if (isPositive(card)) parts.push(s.refund_done ? t("manage.done.refunded", { amount: money(card, s.currency) }) : t("manage.done.refund", { amount: money(card, s.currency) }))
-      if (hotel) parts.push(isPositive(card) ? t("manage.settle.hotelRefund", { amount: money(hotel, s.currency) }) : t("manage.done.refundByHotel", { amount: money(hotel, s.currency) }))
+      if (s.points_back && isPositive(s.points_back)) parts.push(t("manage.done.points", { amount: money(s.points_back, s.currency) }))
+      if (hotel) parts.push(parts.length ? t("manage.settle.hotelRefund", { amount: money(hotel, s.currency) }) : t("manage.done.refundByHotel", { amount: money(hotel, s.currency) }))
       return { tone: "ok", title, body: parts.join(" ") || t("manage.appliedBody") }
     }
     case "staff":

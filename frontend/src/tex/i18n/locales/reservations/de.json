@@ -167,6 +167,7 @@
  "res.gcr.approve_title": "Änderung des Gastes genehmigen",
  "res.gcr.choose_credit": "Als Guthaben behalten",
  "res.gcr.choose_refund": "Auf die Karte erstatten",
+ "res.gcr.refund_points_first": "Ein mit Treuepunkten bezahlter Anteil kommt zuerst als Punkte zurück; nur der Rest geht auf die Karte zurück.",
  "res.gcr.close": "Als abgerechnet markieren",
  "res.gcr.close_body": "Verwenden Sie dies, sobald der dem Hotel überlassene Betrag erstattet oder außerhalb von TEX abgerechnet wurde.",
  "res.gcr.close_title": "Betrag als abgerechnet markieren",

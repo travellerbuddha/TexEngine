@@ -160,10 +160,22 @@ def points_for(program_doc, res, multiplier) -> tuple[int, list[dict]]:
 	return int(total.to_integral_value(rounding=ROUND_FLOOR)), lines
 
 
+EARN_SAVEPOINT = "tex_loyalty_earn"
+
+
 def on_reservation_change(doc) -> None:
 	"""doc_event (Reservation.on_update): earn when confirmed, reverse when cancelled, and
 	earn again only when the stay itself changed (its fingerprint). Editing the program's
-	rules, tiers or points never rewrites earnings already made (G-24)."""
+	rules, tiers or points never rewrites earnings already made (G-24).
+
+	It runs inside the reservation's save (a confirmation, a payment's callback, a cancellation): an earning
+	or a reversal that fails never rolls that back (LO-47, owner's choice). It is undone alone to its savepoint, its message
+	dropped, logged ("TEX loyalty earning <reservation>"), and ``loyalty.earnings`` warns that a stay's points
+	are missing. A deadlock or a lost transaction is raised as it is (its savepoint is gone with it). The points
+	return of a cancellation (O-20) is never under this: it is money and fails its request."""
+	from kamra.tex.security.audit import log_exception
+	from kamra.tex.services.txn import transaction_lost
+
 	if not doc.get("tex_booking") or not doc.guest:
 		return
 	if doc.flags.get("tex_loyalty_after_money"):
@@ -171,9 +183,24 @@ def on_reservation_change(doc) -> None:
 	program = program_for(doc.property)
 	if not program:
 		return
+	frappe.db.savepoint(EARN_SAVEPOINT)
+	messages = frappe.local.message_log
+	mark = len(messages)
+	try:
+		_earn(doc, program)
+	except Exception as e:
+		if transaction_lost(e):
+			raise
+		frappe.db.rollback(save_point=EARN_SAVEPOINT)
+		del messages[mark:]                   # the earning's refusal is a note for staff, never the save's answer
+		log_exception(f"TEX loyalty earning {doc.name}")
+
+
+def _earn(doc, program: str) -> None:
+	"""``on_reservation_change``'s work, under its savepoint."""
 	existing = frappe.get_all("TEX Loyalty Ledger", filters={"reservation": doc.name, "entry_type": "Earn",
 	                                                         "status": ("!=", "Reversed")},
-	                          fields=["name", "points", "status", "stay_fingerprint"])
+	                          fields=["name", "guest", "points", "status", "stay_fingerprint", "expires_on"])
 	if doc.status in ("Cancelled", "No Show"):
 		for e in existing:
 			_reverse(e, reason=f"reservation {doc.status.lower()}")
@@ -191,22 +218,32 @@ def on_reservation_change(doc) -> None:
 	points, lines = points_for(prog, doc, tier.earn_multiplier if tier else 1)
 	# the new earning takes the old one's place, in its state: a stay that had matured stays mature
 	status = "Available" if any(e.status in FINAL for e in existing) else "Pending"
+	# an earning whose points had expired keeps its expiry: a change of the stay never brings expired points back
+	# with a fresh one (LO-26, ADR-071 §5). Read before the reversal takes its Expire rows back, on the earning's own
+	# guest (the room's guest may have been replaced since)
+	kept = [getdate(e.expires_on) for e in existing if e.status in FINAL and e.expires_on and frappe.db.exists(
+		"TEX Loyalty Ledger", {"guest": e.guest, "program": program, "entry_type": "Expire",
+		                       "status": ("in", list(FINAL)), "reason": lots.marker(e.name)})]
 	for e in existing:
 		_reverse(e, reason="reservation modified", floor=False)       # exact: spent points are not topped up
 	if points <= 0:
 		_sync_guest(doc.guest)
 		return
 	avail_on = add_days(getdate(doc.check_out_date), int(prog.pending_days or 0))
+	expires_on = add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None
+	if kept:
+		expires_on = min([*kept, *([getdate(expires_on)] if expires_on else [])])
 	frappe.get_doc({
 		"doctype": "TEX Loyalty Ledger", "program": program, "guest": doc.guest, "entry_type": "Earn",
-		"points": points, "status": status, "available_on": avail_on,
-		"expires_on": add_months(avail_on, int(prog.expiry_months)) if prog.expiry_months else None,
+		"points": points, "status": status, "available_on": avail_on, "expires_on": expires_on,
 		"booking": doc.tex_booking, "reservation": doc.name, "property": doc.property,
 		"reason": f"stay {doc.check_in_date}→{doc.check_out_date}" + (f" · tier {tier.tier_name}" if tier else ""),
 		"stay_fingerprint": fingerprint,
 		"explanation": json.dumps({"lines": lines, "tier": tier.tier_name if tier else None,
 		                           "multiplier": str(db_dec(tier.earn_multiplier)) if tier else "1"}, default=str),
 		"actor": frappe.session.user}).insert(ignore_permissions=True)
+	if kept:
+		settle(doc.guest, program)                 # past that expiry: its points expire at once, as the job would
 	_sync_guest(doc.guest)
 
 
@@ -387,8 +424,11 @@ def summary(guest: str, programs: set[str], hotels: set[str] | None = None) -> l
 				mask_other_hotel(e)
 			e.pop("reservation", None)
 			e.pop("property", None)
+		# below zero: points spent before a stay changed and earned less (O-21); owed, paid off by the next ones
+		# earned, never money (LO-25)
 		out.append({"program": p, "program_name": prog.program_name, "currency": prog.currency, **b,
-		            "value": to_str(quantize(db_dec(prog.point_value) * b["available"], prog.currency or "EUR")),
+		            "debt": max(0, -b["available"]),
+		            "value": to_str(quantize(db_dec(prog.point_value) * max(0, b["available"]), prog.currency or "EUR")),
 		            "tier": tier.tier_name if tier else None, "entries": entries})
 	return out
 
@@ -465,6 +505,9 @@ def redeem(guest: str, booking: str, points: int, *, idempotency_key: str) -> di
 	"""Burn points as a payment on a booking (min points, max % of the booking, currency)."""
 	b = frappe.get_doc("TEX Booking", booking)
 	scope.require("payment.link", b.property)
+	if b.get("channel_connection"):
+		# an OTA booking's price and payment are the channel's (D-11, LO-02), as for its extras and changes
+		frappe.throw(_("Points cannot be redeemed on a channel's booking: its price and payment are the channel's."))
 	guests = {b.booker_guest} | set(frappe.get_all("Reservation", filters={"tex_booking": booking}, pluck="guest"))
 	if guest not in guests:
 		frappe.throw(_("The booking belongs to another guest."))
@@ -543,8 +586,12 @@ PENDING_REFUNDS_OF = """SELECT amount, currency FROM `tabTEX Payment Transaction
 # the booking and by the charge each was redeemed as. A NULL booking or reason matches nothing: a burn that names no
 # booking or charge is not one of these. Locked, after the guests and the charges (ADR-071 §4)
 BURNS_OF = """SELECT name, guest, program, points, property, reason FROM `tabTEX Loyalty Ledger`
-              WHERE guest IN %(guests)s AND entry_type='Burn' AND booking=%(b)s AND reason IN %(reasons)s
+              WHERE guest IN %(guests)s AND entry_type='Burn' AND booking IN %(bookings)s AND reason IN %(reasons)s
               FOR UPDATE"""
+# who spent the points of these charges, wherever they are now (LO-06): a plain read by the bookings they were
+# redeemed for (indexed), so their profiles are locked before the charges
+BURNERS_OF = """SELECT DISTINCT guest FROM `tabTEX Loyalty Ledger`
+                WHERE booking IN %(bookings)s AND entry_type='Burn' AND reason IN %(reasons)s"""
 
 
 def return_points(booking: str, *, reason: str) -> int:
@@ -557,22 +604,35 @@ def return_points(booking: str, *, reason: str) -> int:
 
 	The caller holds the booking's lock (and its rooms'). Locks taken here: the guests who may have spent
 	points on it, the Loyalty charges (name order), then their burn rows. → the points given back."""
+	return sum((s["points"] for s in give_back(booking, reason=reason)), 0)
+
+
+def give_back(booking: str, *, reason: str, limit=None) -> list[dict]:
+	"""``return_points``, at most ``limit`` of money (a lower price's refund, LO-01: the points' share of it comes
+	back as points before any cash). → each share given back: {"transaction", "refund", "amount", "points"}."""
 	from kamra.tex.crm.service import lock_guest
 	from kamra.tex.payments import service as pay
 
 	b = frappe.db.get_value("TEX Booking", booking, ["property", "currency", "booker_guest", "paid_amount",
 	                                                  "total_amount"], as_dict=True, for_update=True)
 	if not b:
-		return 0
+		return []
 	ccy = b.currency
 	waiting = sum((from_db(r.amount, r.currency) for r in frappe.db.sql(PENDING_REFUNDS_OF, {"b": booking}, as_dict=True)),
 	              ZERO)
 	over = from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy) - waiting
+	if limit is not None:
+		over = min(over, D(limit))
 	charges = loyalty_charges_on(booking) if over > 0 else []
 	if not charges:
-		return 0
-	guests = sorted({b.booker_guest, *frappe.get_all("Reservation", filters={"tex_booking": booking},
-	                                                  pluck="guest")} - {None})
+		return []
+	# a charge's burn row is on the booking it was redeemed for (this one, or one staff moved it from) and is the
+	# burner's, on the booking or not any more (LO-06)
+	homes = tuple(sorted({booking, *(h for h in frappe.get_all("TEX Payment Transaction", filters={
+		"name": ("in", charges)}, pluck="booking") if h)}))
+	reasons = tuple(f"redeemed as {c}" for c in charges)
+	guests = sorted({b.booker_guest, *frappe.get_all("Reservation", filters={"tex_booking": booking}, pluck="guest"),
+	                 *frappe.db.sql_list(BURNERS_OF, {"bookings": homes, "reasons": reasons})} - {None})
 	for g in guests:
 		lock_guest(g)                                  # a profile merged away holds no points here
 	rows = []
@@ -584,7 +644,7 @@ def return_points(booking: str, *, reason: str) -> int:
 			rows.append((t, held))
 	burns = {}
 	if rows and guests:
-		for r in frappe.db.sql(BURNS_OF, {"guests": tuple(guests), "b": booking,
+		for r in frappe.db.sql(BURNS_OF, {"guests": tuple(guests), "bookings": homes,
 		                                  "reasons": tuple(f"redeemed as {t.name}" for t, _h in rows)}, as_dict=True):
 			burns[r.reason] = r
 	left, points, shares, settle_for = over, 0, [], {}
@@ -598,7 +658,7 @@ def return_points(booking: str, *, reason: str) -> int:
 			continue
 		take = min(held, left)
 		pts = lots.points_of(-int(burn.points), from_db(t.amount, t.currency), pay.refunded_of(t.name, lock=True), take)
-		pay.points_back(t.name, booking=booking, amount=take, points=pts, reason=reason)
+		refund = pay.points_back(t.name, booking=booking, amount=take, points=pts, reason=reason)
 		if pts:
 			frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": burn.program, "guest": burn.guest,
 			                "entry_type": "Reverse", "points": pts, "status": "Available", "booking": booking,
@@ -607,11 +667,12 @@ def return_points(booking: str, *, reason: str) -> int:
 		settle_for[(burn.guest, burn.program)] = None
 		left -= take
 		points += pts
-		shares.append({"transaction": t.name, "amount": to_str(take), "points": pts})
+		shares.append({"transaction": t.name, "refund": refund, "amount": to_str(take), "points": pts})
 	for guest, program in settle_for:
 		settle(guest, program)                         # a lot closed meanwhile: the points that came back expire at once
 		_sync_guest(guest)
 	if shares:
 		audit("loyalty.return", reference_doctype="TEX Booking", reference_name=booking, property=b.property,
-		      new={"points": points, "value": to_str(over - left), "currency": ccy, "charges": shares}, reason=reason)
-	return points
+		      new={"points": points, "value": to_str(over - left), "currency": ccy,
+		           "charges": [{k: v for k, v in s.items() if k != "refund"} for s in shares]}, reason=reason)
+	return shares

@@ -304,22 +304,25 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			guest_changes.close_open(res.name, f"the channel changed the room ({ref})")
 		if w:
 			warnings.append(w)
+	removed = []
 	for line, name in lines.items():
 		if line not in seen and frappe.db.get_value("Reservation", name, "status") in LIVE:
-			_cancel_one(name, b.name, f"room removed by the channel ({ref})")
+			removed.append(_cancel_one(name, b.name, f"room removed by the channel ({ref})"))
 	if reactivated and b.status in ("Cancelled", "Partially Cancelled"):
 		b.status = "Confirmed"          # a room is live again; the refresh below says "Partially Cancelled" if one is not
 	b.save(ignore_permissions=True)
 	booking_svc._refresh_booking_after_change(b.name)
+	_points_back(b.name, removed, f"room removed by the channel ({ref})")
 	_warn(prop, b.name, ref, warnings)
 	audit("channel.booking_modified", reference_doctype="TEX Booking", reference_name=b.name, property=prop,
 	      new={"ref": ref, "rooms": len(mapped), "inbound": inbound, "reactivated": reactivated}, source="Webhook")
 	return {"status": "Applied", "booking": b.name, "warning": "; ".join(warnings) or None}
 
 
-def _cancel_one(reservation: str, booking: str, reason: str) -> None:
+def _cancel_one(reservation: str, booking: str, reason: str):
 	"""The channel's cancellation: no TEX penalty (the channel's own terms apply). The caller
-	holds the booking's lock."""
+	holds the booking's lock and, once the booking is refreshed, gives its points back
+	(``_points_back``). → the reservation."""
 	from kamra.tex.services import guest_changes
 
 	res = frappe.get_doc("Reservation", reservation, for_update=True)
@@ -333,6 +336,8 @@ def _cancel_one(reservation: str, booking: str, reason: str) -> None:
 		res.cancellation_fee = 0
 		res.cancelled_on = now_datetime()
 		res.flags.tex_modification = True
+		# the stay's own earning is reversed after the points spent on its booking came back (as at the desk)
+		res.flags.tex_loyalty_after_money = True
 		res.save(ignore_permissions=True)
 	finally:
 		frappe.flags.kamra_cancelling = False
@@ -340,16 +345,34 @@ def _cancel_one(reservation: str, booking: str, reason: str) -> None:
 	booking_svc._record_revision(res.name, booking, change_type="Cancellation", old_amount=old, new_amount=0,
 	                             currency=res.tex_currency, basis="EXTERNAL", reason=reason, source="Channel")
 	guest_changes.close_open(res.name, f"the room was cancelled ({reason})")
+	return res
+
+
+def _points_back(booking: str, cancelled: list, reason: str) -> None:
+	"""D-16 (LO-02): after the channel's cancellation (the booking refreshed), what the booking's Loyalty charges
+	hold beyond what it now costs goes back as points, never as money; then the cancelled stays' own earnings are
+	reversed, as ``booking.cancel_reservation`` does. Points were spent on it before redemptions on channel
+	bookings were refused."""
+	from kamra.tex.crm import loyalty
+
+	if not cancelled:
+		return
+	loyalty.return_points(booking, reason=reason)
+	for res in cancelled:
+		res.flags.tex_loyalty_after_money = False
+		loyalty.on_reservation_change(res)
 
 
 def _cancel_all(booking: str, ref: str, inbound: str) -> dict:
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)          # the booking first
 	n = 0
+	cancelled = []
 	for row in b.rooms:
 		if frappe.db.get_value("Reservation", row.reservation, "status") in LIVE:
-			_cancel_one(row.reservation, b.name, f"cancelled by the channel ({ref})")
+			cancelled.append(_cancel_one(row.reservation, b.name, f"cancelled by the channel ({ref})"))
 			n += 1
 	booking_svc._refresh_booking_after_change(b.name)
+	_points_back(b.name, cancelled, f"cancelled by the channel ({ref})")
 	audit("channel.booking_cancelled", reference_doctype="TEX Booking", reference_name=b.name, property=b.property,
 	      new={"ref": ref, "rooms": n, "inbound": inbound}, source="Webhook")
 	return {"status": "Applied", "booking": b.name, "warning": None if n else "already cancelled"}

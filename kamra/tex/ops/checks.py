@@ -59,6 +59,8 @@ PAYMENT_PENDING_WINDOW_HOURS = 48
 PAYMENT_UNVERIFIED_FAIL_MINUTES = 10
 # rejected or failed gateway callbacks (Error Log) counted over this window
 CALLBACK_ERROR_WINDOW_HOURS = 24
+# a stay whose loyalty earning (or its reversal) failed is shown this long: its points wait for staff (LO-47)
+LOYALTY_EARNING_WINDOW_DAYS = 7
 # captures TEX refused to count / links paid twice (audit trail) counted over this window
 PAYMENT_AUDIT_WINDOW_DAYS = 7
 # money kept off every booking (reconciliation, B5): staff act on it within this many hours, and a
@@ -109,6 +111,7 @@ TITLES: dict[str, str] = {
 	"mail.delivery": "Guest e-mail delivery",
 	"mail.queue": "E-mail queue",
 	"contracts.live": "Contracts on sale",
+	"loyalty.earnings": "Loyalty earnings",
 }
 
 OK_DETAIL = "No problems found."
@@ -151,6 +154,9 @@ REASONS: dict[str, str] = {
 	                         "payment); the oldest has waited {hours} hours.",
 	"reconciliation_refund": "{count} payment(s) are queued for an automatic refund; the oldest has waited {hours} "
 	                         "hours.",
+	"loyalty_earning_failed": "{count} stay(s) could not earn or take back their loyalty points in the last {days} "
+	                          "days (see the Error Log): the stay was kept; correct the guest's points by hand once "
+	                          "the cause is fixed.",
 	"bookings_overpaid": "{count} booking(s) hold more money than they cost ({cancelled} of them cancelled): refund "
 	                     "the excess, or move it to the booking it was meant for (Payments). A refund still on its "
 	                     "way counts as paid until the gateway answers it.",
@@ -385,6 +391,13 @@ def reconciliation_check(*, action: int, action_since: datetime | None, refund: 
 			                    hours=round(age / 60, 1) if age is not None else None))
 	oldest = min((t for t in (action_since, refund_since) if t), default=None)
 	return make("payments.reconciliation", issues, scope="hotel", since=oldest, properties=properties)
+
+
+def loyalty_earnings_check(count: int, properties: Iterable[str] = ()) -> dict:
+	"""LO-47: stays whose loyalty earning or reversal failed (and was undone alone, the stay kept) in the last
+	days."""
+	issues = [issue("loyalty_earning_failed", WARN, count=count, days=LOYALTY_EARNING_WINDOW_DAYS)] if count else []
+	return make("loyalty.earnings", issues, scope="hotel", properties=properties)
 
 
 def overpaid_bookings_check(count: int, cancelled: int, oldest: datetime | None,

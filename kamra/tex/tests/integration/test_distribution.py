@@ -448,6 +448,91 @@ class TestChannelBookings(DistributionCase):
 		frappe.db.set_value("TEX Channel Inbound", newer, "status", "Failed", update_modified=False)
 		self.assertEqual(dist_api.retry_inbound(newer), {"ok": True})            # the latest one may be retried
 
+	def club(self) -> str:
+		from kamra.tex.api import loyalty as loyalty_api
+		from kamra.tex.tests.integration.test_loyalty_admin import CLUB
+
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the hotel's loyalty program
+		return loyalty_api.save_program({**CLUB, "property": fx.PROPERTY})["name"]
+
+	def holding(self, guest: str, program: str, points: int = 1000) -> None:
+		frappe.get_doc({"doctype": "TEX Loyalty Ledger", "program": program, "guest": guest, "entry_type": "Adjust",
+		                "points": points, "status": "Available", "reason": "lo02"}).insert(ignore_permissions=True)
+
+	def test_points_never_pay_a_channel_booking(self):
+		"""LO-02 (audit 2K-2, D-11): an OTA booking's price and payment are the channel's: points are never redeemed
+		on it, and a payment made with points is never moved onto it."""
+		from kamra.tex.crm import loyalty
+		from kamra.tex.payments import service as pay
+
+		program = self.club()
+		booking, _rooms = self.booked("L1")
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		self.holding(guest, program)
+		with self.assertRaisesRegex(frappe.ValidationError, "channel"):
+			loyalty.redeem(guest, booking, 300, idempotency_key="lo02-redeem")
+		self.assertFalse(frappe.db.exists("TEX Payment Transaction", {"booking": booking, "provider": "Loyalty"}))
+		self.assertEqual(loyalty.balances(guest, program)["available"], 1000)
+		points = pay._new_txn(property=fx.PROPERTY, txn_type="Charge", method="Manual", amount=30, currency="EUR",
+		                      provider="Loyalty", idempotency_key="lo02-points")
+		frappe.db.set_value("TEX Payment Transaction", points.name, "status", "Succeeded", update_modified=False)
+		with self.assertRaisesRegex(frappe.ValidationError, "channel"):
+			pay.allocate(points.name, booking=booking, amount="30", reason="move the points")
+		self.assertFalse(frappe.db.exists("TEX Payment Allocation", {"transaction": points.name}))
+
+	def test_a_channel_cancellation_gives_the_points_back(self):
+		"""LO-02 (D-16): points spent on a booking a channel later cancels come back as points (before: lost, their
+		money left on the cancelled booking). Spent before the guard (an older booking)."""
+		from kamra.tex.crm import loyalty
+		from kamra.tex.money import from_db
+
+		program = self.club()
+		booking, _rooms = self.booked("L1")
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		self.holding(guest, program)
+		conn = frappe.db.get_value("TEX Booking", booking, "channel_connection")
+		frappe.db.set_value("TEX Booking", booking, "channel_connection", None, update_modified=False)
+		spent = loyalty.redeem(guest, booking, 300, idempotency_key="lo02-old")
+		frappe.db.set_value("TEX Booking", booking, "channel_connection", conn, update_modified=False)
+		self.assertEqual(loyalty.balances(guest, program)["available"], 700)
+		self.send(message(status="cancelled"))
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		self.assertEqual(frappe.db.get_value("TEX Booking", booking, "status"), "Cancelled")
+		self.assertEqual(loyalty.balances(guest, program)["available"], 1000)
+		self.assertEqual(from_db(frappe.db.get_value("TEX Booking", booking, "paid_amount"), "EUR"), D("0.00"))
+		back = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": spent["transaction"]},
+		                      fields=["amount", "raw_status"])
+		self.assertEqual([(D(r.amount), r.raw_status) for r in back], [(D("30.00"), "POINTS RETURNED")])
+		self.assertEqual(frappe.db.count("TEX Loyalty Ledger", {"guest": guest, "entry_type": "Adjust"}), 1)
+
+	def test_a_room_the_channel_removes_gives_the_points_over_back(self):
+		"""LO-02 (D-16, review round 1): the channel takes one of two rooms off: what the booking now holds over its
+		price comes back as points first (20.00 of the 30.00 points), the cash paid stays, the stay kept."""
+		from kamra.tex.crm import loyalty
+		from kamra.tex.money import from_db
+		from kamra.tex.payments import service as pay
+
+		program = self.club()
+		booking, rooms = self.booked("L1", "L2")                                       # 900.00
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		self.holding(guest, program)
+		conn = frappe.db.get_value("TEX Booking", booking, "channel_connection")
+		frappe.db.set_value("TEX Booking", booking, "channel_connection", None, update_modified=False)
+		spent = loyalty.redeem(guest, booking, 300, idempotency_key="lo02-two")      # 30.00, spent before the guard
+		frappe.db.set_value("TEX Booking", booking, "channel_connection", conn, update_modified=False)
+		pay.record_manual(booking=booking, amount="440.00", method="Cash", reference="desk",
+		                  idempotency_key="lo02-two-cash")                            # 470.00 paid
+		self.send(message(status="modified", rooms=[self.line("L1")]))                  # the channel removes L2: 450.00
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		self.assertEqual((frappe.db.get_value("Reservation", rooms["L1"], "status"),
+		                  frappe.db.get_value("Reservation", rooms["L2"], "status")), ("Confirmed", "Cancelled"))
+		self.assertEqual(loyalty.balances(guest, program)["available"], 900)
+		back = frappe.get_all("TEX Payment Transaction", filters={"parent_transaction": spent["transaction"]},
+		                      fields=["amount", "raw_status"])
+		self.assertEqual([(D(r.amount), r.raw_status) for r in back], [(D("20.00"), "POINTS RETURNED")])
+		total, paid = frappe.db.get_value("TEX Booking", booking, ["total_amount", "paid_amount"])
+		self.assertEqual((from_db(total, "EUR"), from_db(paid, "EUR")), (D("450.00"), D("450.00")))
+
 
 class TestReconcileAndTenancy(DistributionCase):
 	def test_reconciliation_finds_drift_and_differences(self):

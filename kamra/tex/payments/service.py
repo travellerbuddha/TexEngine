@@ -992,6 +992,9 @@ def allocate(transaction: str, *, booking: str, amount, reason: str, _system: bo
 	b = frappe.get_doc("TEX Booking", booking, for_update=True)
 	if b.property != txn.property:
 		frappe.throw(_("A payment can only be allocated to a booking of the same hotel."))
+	if txn.provider == "Loyalty" and b.get("channel_connection"):
+		# an OTA booking's price and payment are the channel's: points never pay it, moved onto it either (LO-02)
+		frappe.throw(_("Points cannot pay a channel's booking: its price and payment are the channel's."))
 	if b.currency != txn.currency:
 		if not _system:
 			frappe.throw(_("Currency mismatch between payment and booking."))

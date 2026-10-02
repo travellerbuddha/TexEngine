@@ -158,6 +158,20 @@ class TestVerdicts(unittest.TestCase):
 		self.assertIn("payments.overpaid", c.TITLES)
 		self.assertIn("3", c.describe(out["issues"][0]))
 
+	def test_stays_whose_earning_failed_warn(self):
+		"""LO-47 (audit 2K-2): a stay whose loyalty earning failed was kept; staff add its points by hand."""
+		ok = c.loyalty_earnings_check(0)
+		self.assertEqual((ok["key"], ok["status"], ok["scope"]), ("loyalty.earnings", c.OK, "hotel"))
+		out = c.loyalty_earnings_check(2, properties=["H1"])
+		self.assertEqual((out["status"], out["count"], out["properties"]), (c.WARN, 2, ["H1"]))
+		self.assertEqual([(i["reason"], i["params"]) for i in out["issues"]],
+		                 [("loyalty_earning_failed", {"count": 2, "days": c.LOYALTY_EARNING_WINDOW_DAYS})])
+		self.assertIn("loyalty.earnings", c.TITLES)
+		self.assertIn("2 stay(s)", c.describe(out["issues"][0]))
+		# a cancellation's reversal is guarded too: the text never says only "earn" (review round 1)
+		self.assertIn("earn or take back", c.describe(out["issues"][0]))
+		self.assertIn("correct the guest's points by hand", c.describe(out["issues"][0]))
+
 	def test_money_in_reconciliation_is_shown_with_its_age(self):
 		"""B5: payments kept off every booking wait for staff (or a queued refund): each kind with its
 		count and the age of its oldest item; staff have a day, a queued refund an hour."""

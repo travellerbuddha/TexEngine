@@ -167,6 +167,7 @@
  "res.gcr.approve_title": "Misafirin değişikliğini onayla",
  "res.gcr.choose_credit": "Kredi olarak tut",
  "res.gcr.choose_refund": "Karta iade et",
+ "res.gcr.refund_points_first": "Sadakat puanıyla ödenen pay önce puan olarak geri döner; karta yalnızca kalanı iade edilir.",
  "res.gcr.close": "Kapatıldı olarak işaretle",
  "res.gcr.close_body": "Otele bırakılan tutar iade edildikten veya TEX dışında kapatıldıktan sonra kullanın.",
  "res.gcr.close_title": "Ödemeyi kapatıldı olarak işaretle",

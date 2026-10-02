@@ -115,6 +115,11 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	state = "Refund Queued" if not free and not in_time and not untimed and pay.auto_refundable(txn) \
 		else "Action Required"
 	again = booking_svc.live_duplicate(booking) if in_time else None
+	# points that paid part of it came back as points when it ended (O-20) and are never burned again: the card
+	# money alone may no longer pay what it owes (LO-23). Said only when that is why it is not taken back (its rooms
+	# free, no other booking for the stay): asking for the rest then would mislead (review round 1)
+	points_back = in_time and free and not again and bool(frappe.db.exists(
+		TXN, {"booking": booking, "txn_type": "Refund", "provider": "Loyalty", "raw_status": "POINTS RETURNED"}))
 	ccy = txn.currency
 	cause = CAUSES.get(why, why)
 	note = (f"{to_str(from_db(txn.amount, ccy))} {ccy} arrived at {now:%Y-%m-%d %H:%M} for booking {booking} after "
@@ -123,6 +128,8 @@ def reconcile(txn, booking: str, why: str, *, now: datetime | None = None) -> No
 	           f"until {holds.attempt_deadline(txn):%Y-%m-%d %H:%M}), but the booking could not take its rooms back"
 	           + (f": the guest has booking {again} for the same stay. " if again else ". ")
 	           if in_time else "")
+	        + ("The points that paid part of it were given back when it ended, so this payment alone no longer pays "
+	           "what it owes: ask the guest to pay the rest, or to redeem points again. " if points_back else "")
 	        + f"Not confirmed: {detail}. "
 	        + ("The gateway states no payment time: it may have been paid in time; the hotel decides. "
 	           if untimed else "")

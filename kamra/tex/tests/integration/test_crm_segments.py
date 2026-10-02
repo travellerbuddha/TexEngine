@@ -223,3 +223,18 @@ class TestSegmentMigration(SegmentCase):
 		self.assertTrue(frappe.db.exists("TEX Guest Segment", {"system_key": "BIRTHDAY"}))
 		self.assertEqual(json.loads(frappe.db.get_value("TEX Guest Segment", {"system_key": "FAMILY"},
 		                                                "rules_json"))["conditions"][0]["field"], "has_children")
+
+
+class TestProfileStays(SegmentCase):
+	def test_an_expired_hold_is_marked_on_the_guests_stays(self):
+		"""LO-24 (audit 2K-2): the profile's stays tab tells a hold that ran out of time (never a sale, O-24) from a
+		cancellation (before: both just "Cancelled")."""
+		gone = guest_books(session="lo24-gone", guest={**GUEST, "email": "lo24@example.com"})
+		cut = guest_books(session="lo24-cut", guest={**GUEST, "email": "lo24@example.com"})
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- the expiry job, then staff
+		self.assertTrue(booking.expire_booking(gone["booking"], force=True))
+		booking.cancel_reservation(cut["rooms"][0]["reservation"], reason="plans changed", waive_penalty=True)
+		guest = frappe.db.get_value("TEX Booking", gone["booking"], "booker_guest")
+		stays = {s["name"]: (s["status"], s["hold_expired"]) for s in crm.profile(guest)["stays"]}
+		self.assertEqual(stays[gone["rooms"][0]["reservation"]], ("Cancelled", True))
+		self.assertEqual(stays[cut["rooms"][0]["reservation"]], ("Cancelled", False))

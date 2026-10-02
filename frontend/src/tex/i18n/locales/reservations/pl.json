@@ -183,6 +183,7 @@
  "res.gcr.approve_title": "Zatwierdź zmianę gościa",
  "res.gcr.choose_credit": "Zachowaj jako środki",
  "res.gcr.choose_refund": "Zwróć na kartę",
+ "res.gcr.refund_points_first": "Część opłacona punktami lojalnościowymi wraca najpierw jako punkty; na kartę wraca tylko reszta.",
  "res.gcr.close": "Oznacz jako rozliczone",
  "res.gcr.close_body": "Użyj tego, gdy kwota pozostawiona hotelowi została zwrócona lub rozliczona poza TEX.",
  "res.gcr.close_title": "Oznacz kwotę jako rozliczoną",

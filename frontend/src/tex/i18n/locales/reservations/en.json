@@ -167,6 +167,7 @@
  "res.gcr.approve_title": "Approve the guest's change",
  "res.gcr.choose_credit": "Keep as credit",
  "res.gcr.choose_refund": "Refund to the card",
+ "res.gcr.refund_points_first": "A share paid with loyalty points comes back as points first; only the rest goes back to the card.",
  "res.gcr.close": "Mark as settled",
  "res.gcr.close_body": "Use this once the money left to the hotel was refunded or settled outside TEX.",
  "res.gcr.close_title": "Mark the money as settled",

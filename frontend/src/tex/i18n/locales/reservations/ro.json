@@ -175,6 +175,7 @@
  "res.gcr.approve_title": "Aprobă modificarea oaspetelui",
  "res.gcr.choose_credit": "Păstrează drept credit",
  "res.gcr.choose_refund": "Rambursează pe card",
+ "res.gcr.refund_points_first": "Partea plătită cu puncte de fidelitate revine mai întâi ca puncte; doar restul se returnează pe card.",
  "res.gcr.close": "Marchează ca decontat",
  "res.gcr.close_body": "Folosiți aceasta după ce suma lăsată hotelului a fost rambursată sau decontată în afara TEX.",
  "res.gcr.close_title": "Marchează suma ca decontată",

@@ -56,6 +56,13 @@ export default function GuestProfile() {
   const d = q.data
   const g = d?.guest
   const canEdit = Boolean(d?.hotels.some((h) => can("crm.edit", h)))
+  // a hold that ran out of time is no cancellation (O-24, LO-24)
+  const stayBadge = (s: Stay) =>
+    s.hold_expired ? (
+      <Badge tone="neutral">{t("crm.stay.hold_expired")}</Badge>
+    ) : (
+      <Badge tone={statusTone(s.status)}>{t(`crm.stay.status.${s.status.toLowerCase().replace(/\s+/g, "_")}`)}</Badge>
+    )
 
   const crumbs = [
     { label: t("core.nav.crm"), to: "/tex/crm" },
@@ -193,7 +200,7 @@ export default function GuestProfile() {
                                 {date(s.check_in_date, "short")} → {date(s.check_out_date, "short")}
                               </p>
                               <span className="mt-1 inline-block sm:hidden">
-                                <Badge tone={statusTone(s.status)}>{t(`crm.stay.status.${s.status.toLowerCase().replace(/\s+/g, "_")}`)}</Badge>
+                                {stayBadge(s)}
                               </span>
                             </div>
                           ),
@@ -232,7 +239,7 @@ export default function GuestProfile() {
                           hideBelow: "sm",
                           cell: (s) => (
                             <div className="text-xs">
-                              <Badge tone={statusTone(s.status)}>{t(`crm.stay.status.${s.status.toLowerCase().replace(/\s+/g, "_")}`)}</Badge>
+                              {stayBadge(s)}
                               {s.cancellation_fee && <p className="mt-1 whitespace-nowrap text-zinc-600">{t("crm.stay.fee", { amount: money(s.cancellation_fee, s.tex_currency) })}</p>}
                             </div>
                           ),

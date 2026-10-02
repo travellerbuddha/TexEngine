@@ -105,6 +105,7 @@ export function LoyaltyPanel({
                   </dd>
                 </div>
               </dl>
+              {!!a.debt && a.debt > 0 && <Notice tone="warning">{t("crm.loyalty.debt", { points: num(a.debt) })}</Notice>}
               <div className="rounded-lg border border-zinc-200">
                 <DataTable<LoyaltyEntry>
                   dense
