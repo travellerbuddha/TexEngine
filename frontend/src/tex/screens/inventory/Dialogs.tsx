@@ -227,11 +227,20 @@ export function CellDialog({
   )
 }
 
+/** Where the bulk editor starts: the grid's selection (its first and last night, its rooms). */
+export interface BulkInitial {
+  from: string
+  to: string
+  rooms: string[]
+  hotelLevel?: boolean
+}
+
 /** Bulk update: dates × weekdays × room types → restrictions / inventory / rate. */
 export function BulkDialog({
   grid,
   scope,
   scopeLabel,
+  initial,
   onClose,
   onApplied,
   onPublish,
@@ -239,6 +248,7 @@ export function BulkDialog({
   grid: Grid
   scope: Scope
   scopeLabel: string
+  initial?: BulkInitial
   onClose: () => void
   onApplied: () => void
   onPublish: (draft: string) => void
@@ -246,13 +256,13 @@ export function BulkDialog({
   const { t } = useTexT()
   const toast = useToast()
   const perms = usePerms()
-  const [from, setFrom] = useState(grid.dates[0])
-  const [to, setTo] = useState(grid.dates[grid.dates.length - 1])
+  const [from, setFrom] = useState(initial?.from ?? grid.dates[0])
+  const [to, setTo] = useState(initial?.to ?? grid.dates[grid.dates.length - 1])
   const [wd, setWd] = useState<number[]>([0, 1, 2, 3, 4, 5, 6])
   const roomRows = grid.rows.filter((r) => r.level !== "hotel")
-  const [rooms, setRooms] = useState<string[]>(roomRows.map((r) => r.room_type!))
+  const [rooms, setRooms] = useState<string[]>(initial?.rooms.length ? initial.rooms : roomRows.map((r) => r.room_type!))
   // one hotel-level cell per date instead of one per room type: restrictions only (G-48)
-  const [hotelLevel, setHotelLevel] = useState(false)
+  const [hotelLevel, setHotelLevel] = useState(Boolean(initial?.hotelLevel && perms.canRestrict))
   const [c, setC] = useState<Changes>(emptyChanges)
   const [step, setStep] = useState<"edit" | "review">("edit")
   const [busy, setBusy] = useState(false)

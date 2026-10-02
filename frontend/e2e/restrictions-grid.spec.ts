@@ -123,7 +123,9 @@ test("restrictions: a hotel-level booking window for the Booking Engine + Call C
       await page.getByRole("banner").getByRole("combobox", { name: "Hotel" }).selectOption(HOTEL)
       await byLabel(page, "Start date").fill(night)
       await byLabel(page, "Sales channel").selectOption({ label: SCOPE })
-      await expect(page.getByText(`Scope: all contracts · all markets · sold through ${SCOPE} · all rate plans`)).toBeVisible()
+      // the daily view shows price, rooms left and sale; the booking window is under "All restrictions"
+      await page.getByRole("radiogroup", { name: "View" }).getByRole("radio", { name: "All restrictions" }).click()
+      await expect(page.getByText(`all contracts · all markets · sold through ${SCOPE} · all rate plans`)).toBeVisible()
       await expect(page.getByRole("rowheader", { name: /^All room types/ }).first()).toContainText("hotel / market level")
       await expect(hotelCell).toHaveAccessibleName(/: No rule$/)
     })

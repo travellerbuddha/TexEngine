@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Link, NavLink, useHref, useLocation, useNavigate } from "react-router-dom"
+import { Link, useHref, useLocation, useNavigate } from "react-router-dom"
 import { Building2, ChevronDown, ExternalLink, LogOut, Menu, Moon, Rocket, Search, Sun, X } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useAuth } from "../../lib/auth"
 import { getTheme, setTheme } from "../../lib/theme"
 import { toFullPath } from "../../lib/routing"
-import { childActive, childPath, childVisible, inArea, NAV, NAV_GROUPS, type NavChild, type NavItem } from "./nav"
+import { areaHome, childActive, childPath, childVisible, inArea, NAV, NAV_GROUPS, type NavChild, type NavItem } from "./nav"
 import { SourceNotice } from "./SourceNotice"
 import { tex, type TexApiError } from "../lib/api"
+import { UnsavedChangesProvider, useConfirmLeave } from "../lib/unsaved"
+import { date as fmtDate } from "../lib/format"
 import { useSession } from "../lib/session"
 import { setTexLang, TEX_LANGS, useTexT, type TexLang } from "../i18n"
 import { Badge, Button, Dialog, Field, IconButton, InlineError, Kbd, Notice, Textarea, useToast } from "../ui"
@@ -29,9 +31,26 @@ function useVisibleNav(): VisibleNavItem[] {
   )
 }
 
+/** Pages that show one record of the selected hotel: switching hotel goes back to their list,
+ * so the header never names one hotel while the page shows another's contract or rule. */
+const HOTEL_RECORDS: [RegExp, string][] = [
+  [/^\/tex\/rates\/contracts\/.+/, "/tex/rates"],
+  [/^\/tex\/rates\/policies\/([^/]+)\/(?!new$)[^/]+$/, "/tex/rates/policies/$1"],
+]
+
 function HotelSwitcher() {
   const { boot, property, setProperty } = useSession()
   const { t } = useTexT()
+  const toast = useToast()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const confirmLeave = useConfirmLeave()
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (!flash) return
+    const h = window.setTimeout(() => setFlash(false), 1600)
+    return () => window.clearTimeout(h)
+  }, [flash])
   if (boot.properties.length <= 1)
     return (
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-zinc-800">
@@ -39,14 +58,28 @@ function HotelSwitcher() {
         <span className="truncate">{property?.property_name ?? t("core.shell.no_hotel")}</span>
       </div>
     )
+  const change = (name: string) => {
+    // a hotel switch leaves the screen's unsaved edits behind: ask first (the select stays as it was)
+    if (!confirmLeave()) return
+    const next = boot.properties.find((p) => p.name === name)
+    setProperty(name)
+    setFlash(true)
+    toast.info(t("core.shell.hotel_switched", { hotel: next?.property_name ?? name }))
+    for (const [re, to] of HOTEL_RECORDS) if (re.test(pathname)) navigate(pathname.replace(re, to))
+  }
   return (
     <label className="flex min-w-0 flex-1 items-center gap-2">
       <Building2 className="size-4 shrink-0 text-zinc-500" aria-hidden />
-      <span className="sr-only">{t("core.shell.hotel")}</span>
+      {/* the hotel the whole screen works on, named in words (not only by the select's value) */}
+      <span className="hidden text-xs font-medium tracking-wide text-zinc-500 uppercase sm:inline">{t("core.shell.hotel")}</span>
+      <span className="sr-only sm:hidden">{t("core.shell.hotel")}</span>
       <select
         value={property?.name ?? ""}
-        onChange={(e) => setProperty(e.target.value)}
-        className="h-9 w-full max-w-[16rem] min-w-0 truncate rounded-lg border border-zinc-300 bg-white pr-8 pl-2 text-sm font-medium text-zinc-900 focus:border-tex-500 focus:ring-2 focus:ring-tex-500/30 focus:outline-none"
+        onChange={(e) => change(e.target.value)}
+        className={cn(
+          "h-9 w-full max-w-[18rem] min-w-0 truncate rounded-lg border border-zinc-300 bg-white pr-8 pl-2 text-sm font-semibold text-zinc-900 focus:border-tex-500 focus:ring-2 focus:ring-tex-500/30 focus:outline-none",
+          flash && "tex-flash",
+        )}
       >
         {boot.properties.map((p) => (
           <option key={p.name} value={p.name}>
@@ -151,6 +184,20 @@ const navLinkCls = (active: boolean) =>
     active ? "bg-tex-50 text-tex-800" : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950",
   )
 
+/** An area's own link: current on the area's own pages (`areaHome`), so Contracts is not current
+ * on a promotion's page although both live under /tex/rates. */
+function AreaLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
+  const { t } = useTexT()
+  const { pathname } = useLocation()
+  const current = areaHome(item, pathname)
+  return (
+    <Link to={item.to} onClick={onNavigate} aria-current={current ? "page" : undefined} className={navLinkCls(current)}>
+      <item.icon className="size-4 shrink-0" aria-hidden />
+      <span className="truncate">{t(item.label)}</span>
+    </Link>
+  )
+}
+
 /** An area with its sub-sections: open while the user is in the area, or when toggled. */
 function NavArea({ item, open, onToggle, onNavigate }: { item: VisibleNavItem; open: boolean; onToggle: () => void; onNavigate?: () => void }) {
   const { t } = useTexT()
@@ -159,10 +206,7 @@ function NavArea({ item, open, onToggle, onNavigate }: { item: VisibleNavItem; o
   return (
     <li>
       <div className="flex items-center gap-0.5">
-        <NavLink to={item.to} end={item.to === "/tex" || item.id === "crs"} onClick={onNavigate} className={({ isActive }) => navLinkCls(isActive)}>
-          <item.icon className="size-4 shrink-0" aria-hidden />
-          <span className="truncate">{t(item.label)}</span>
-        </NavLink>
+        <AreaLink item={item} onNavigate={onNavigate} />
         <button
           type="button"
           onClick={onToggle}
@@ -260,10 +304,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                       />
                     ) : (
                       <li key={n.id}>
-                        <NavLink to={n.to} end={n.to === "/tex" || n.id === "crs"} onClick={onNavigate} className={({ isActive }) => navLinkCls(isActive)}>
-                          <n.icon className="size-4 shrink-0" aria-hidden />
-                          <span className="truncate">{t(n.label)}</span>
-                        </NavLink>
+                        <AreaLink item={n} onNavigate={onNavigate} />
                       </li>
                     ),
                   )}
@@ -298,10 +339,40 @@ interface Command {
   run: () => void
 }
 
+interface FoundReservation {
+  name: string
+  property: string
+  guest_name: string | null
+  check_in_date: string
+}
+
+/** Reservations matching the palette's text (number, guest, e-mail, phone, channel reference), in
+ * every hotel the user may see; debounced, at most six. */
+function useReservationLookup(term: string): FoundReservation[] | undefined {
+  const [found, setFound] = useState<{ q: string; rows: FoundReservation[] }>()
+  const q = term.trim()
+  useEffect(() => {
+    if (q.length < 2) return
+    let alive = true
+    const h = window.setTimeout(() => {
+      tex<FoundReservation[]>("crs", "reservations", { q, limit: 6 })
+        .then((rows) => alive && setFound({ q, rows }))
+        .catch(() => alive && setFound({ q, rows: [] }))
+    }, 250)
+    return () => {
+      alive = false
+      window.clearTimeout(h)
+    }
+  }, [q])
+  return q.length >= 2 && found?.q === q ? found.rows : undefined
+}
+
 function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTexT()
   const navigate = useNavigate()
   const items = useVisibleNav()
+  const { canAnywhere, boot } = useSession()
+  const confirmLeave = useConfirmLeave()
   const [q, setQ] = useState("")
   const [active, setActive] = useState(0)
   const input = useRef<HTMLInputElement>(null)
@@ -321,10 +392,23 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
       base.push({
         id: "find",
         label: t("core.cmd.find_reservation", { q: term }),
-        run: () => navigate(`/tex/reservations?q=${encodeURIComponent(term)}`),
+        // a number or a name is looked up in every hotel the user may see (the list names the hotel)
+        run: () => navigate(`/tex/reservations?q=${encodeURIComponent(term)}&property=all`),
       })
     return base
   }, [items, q, t, navigate])
+  const found = useReservationLookup(open && canAnywhere("reservation.view") ? q : "")
+  const hotelOf = useMemo(() => new Map(boot.properties.map((p) => [p.name, p.property_name])), [boot.properties])
+  const matches = useMemo<Command[]>(
+    () =>
+      (found ?? []).map((r) => ({
+        id: `res-${r.name}`,
+        label: `${r.guest_name || "—"} · ${r.name}`,
+        area: `${fmtDate(r.check_in_date, "short")} · ${hotelOf.get(r.property) ?? r.property}`,
+        run: () => navigate(`/tex/reservations/${encodeURIComponent(r.name)}`),
+      })),
+    [found, hotelOf, navigate],
+  )
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase()
@@ -337,12 +421,17 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
       if (label.includes(term)) return 1
       return (c.hint ?? "").toLowerCase().includes(term) ? 2 : -1
     }
-    return commands
+    const nav = commands
       .map((c) => ({ c, r: rank(c) }))
       .filter((x) => x.r >= 0)
       .sort((a, b) => a.r - b.r)
       .map((x) => x.c)
-  }, [commands, q])
+    // reservations found by number, name, e-mail, phone or channel reference: first when the term
+    // looks like a number, an e-mail or a phone (never a page name), else after the pages
+    const find = nav.filter((c) => c.id === "find")
+    const pages = nav.filter((c) => c.id !== "find")
+    return /[\d@]/.test(term) ? [...matches, ...pages, ...find] : [...pages, ...matches, ...find]
+  }, [commands, q, matches])
 
   useEffect(() => {
     if (open) {
@@ -356,6 +445,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   if (!open) return null
   const run = (c?: Command) => {
     if (!c) return
+    if (!confirmLeave()) return
     onClose()
     c.run()
   }
@@ -496,6 +586,7 @@ export function TexShell({ children }: { children: ReactNode }) {
   }, [])
 
   return (
+    <UnsavedChangesProvider message={t("core.unsaved.leave")}>
     <div className="tex-root min-h-screen bg-zinc-50 text-zinc-900">
       <a
         href="#tex-main"
@@ -549,5 +640,6 @@ export function TexShell({ children }: { children: ReactNode }) {
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
     </div>
+    </UnsavedChangesProvider>
   )
 }

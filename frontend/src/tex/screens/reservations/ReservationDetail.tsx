@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useLocation, useParams } from "react-router-dom"
 import { Ban, Copy, History, Lock, MailCheck, PackagePlus, PencilLine, Star } from "lucide-react"
 import { useTexQuery } from "../../lib/api"
 import { date } from "../../lib/format"
@@ -90,6 +90,8 @@ function DetailView({
 }) {
   const { t } = useTexT()
   const { boot } = useSession()
+  const location = useLocation()
+  const back = typeof (location.state as { back?: unknown } | null)?.back === "string" ? (location.state as { back: string }).back : ""
   const L = useLabels()
   const toast = useToast()
   const partyText = usePartyText()
@@ -137,14 +139,15 @@ function DetailView({
   return (
     <>
       <PageHeader
-        crumbs={[{ label: t("core.nav.reservations"), to: "/tex/reservations" }, { label: d.name }]}
+        // back to the list as it was left: its search and filters (UX revision 2026-10)
+        crumbs={[{ label: t("core.nav.reservations"), to: `/tex/reservations${back}` }, { label: d.name }]}
         title={
           <span className="flex flex-wrap items-center gap-2">
             {d.name}
             {d.guest?.vip ? <Star className="size-5 fill-amber-600 text-amber-600" aria-label={t("crs.guest.vip")} /> : null}
           </span>
         }
-        subtitle={[d.guest?.full_name, d.property].filter(Boolean).join(" · ")}
+        subtitle={[d.guest?.full_name, boot.properties.find((p) => p.name === d.property)?.property_name ?? d.property, d.channel_booking?.ref ? t("res.list.channel_ref_short", { ref: d.channel_booking.ref }) : null].filter(Boolean).join(" · ")}
         meta={
           <>
             <Badge tone={statusTone(d.status)}>{L.status(d.status)}</Badge>

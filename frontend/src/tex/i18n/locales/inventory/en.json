@@ -177,9 +177,9 @@
   "one": "{count} day",
   "other": "{count} days"
  },
- "inventory.nav.extras": "Extras",
- "inventory.nav.label": "Inventory views",
- "inventory.nav.rooms": "Rooms",
+ "inventory.nav.extras": "Limited extras",
+ "inventory.nav.label": "Rates & availability views",
+ "inventory.nav.rooms": "Calendar",
  "inventory.next": {
   "one": "Next day",
   "other": "Next {count} days"
@@ -239,7 +239,7 @@
  "inventory.short.stop": "STOP",
  "inventory.show_rows": "Show rows",
  "inventory.start": "Start date",
- "inventory.subtitle": "Availability, restrictions and contract rates by day. Click a cell or press Enter to edit it.",
+ "inventory.subtitle": "Select rooms and nights, then type a price or close sale.",
  "inventory.today": "Today",
  "inventory.v.closed": "Closed",
  "inventory.v.closed_sale": "Closed for sale",
@@ -257,5 +257,167 @@
  "inventory.window.from": "sold from {d}",
  "inventory.window.max_advance": "at most {n} days ahead",
  "inventory.window.min_advance": "at least {n} days ahead",
- "inventory.window.to": "sold until {d}"
+ "inventory.window.to": "sold until {d}",
+ "inventory.nav.restrictions": "Restrictions list",
+ "inventory.view.label": "View",
+ "inventory.view.daily": "Daily: price, rooms left, sale",
+ "inventory.view.all": "All restrictions",
+ "inventory.view.custom": "Custom",
+ "inventory.scope.price_source": "Price source (contract)",
+ "inventory.scope.prices": "Prices",
+ "inventory.scope.prices_from": "contract {c} · market {m} · {ccy} · {basis}",
+ "inventory.scope.on_sale": "On sale: {v}",
+ "inventory.scope.none_on_sale": "No version on sale",
+ "inventory.scope.draft": "Draft {v} not published",
+ "inventory.scope.restrictions_now": "closing sale and restrictions apply at once",
+ "inventory.draft_cells": {
+  "one": "{count} price in view is changed in draft {v} and not on sale yet; guests still book {live}.",
+  "other": "{count} prices in view are changed in draft {v} and not on sale yet; guests still book {live}."
+ },
+ "inventory.hotel_level": "All room types",
+ "inventory.select_day": "{day}: select every room",
+ "inventory.select_room": "{room}: select every night in view",
+ "inventory.unit.PERSON": "per person",
+ "inventory.unit.ROOM": "per room",
+ "inventory.entry.cell": "{room}, {day}: price",
+ "inventory.entry.invalid": "“{text}” cannot be read",
+ "inventory.entry.err.SYNTAX": "type a price (120), a change by a percentage (+10%, -5%) or an amount (+20, -20)",
+ "inventory.entry.err.PLACES": "too many decimals",
+ "inventory.entry.err.DIGITS": "too many digits",
+ "inventory.entry.err.RANGE": "the number is too large",
+ "inventory.entry.err.AMBIGUOUS": "type 1500 for one thousand five hundred, or 1.5 for one and a half",
+ "inventory.entry.err.OP_NOT_ALLOWED": "a formula belongs to the contract: type a price or a change",
+ "inventory.entry.err.NOT_A_RATE": "a formula belongs to the contract: type a price or a change",
+ "inventory.entry.err.PERCENT_SHARE": "raise or lower? type +10% or -10%",
+ "inventory.entry.err.OUTSIDE": "outside the grid",
+ "inventory.entry.read.ABSOLUTE": "Set to {v} {ccy}",
+ "inventory.entry.read.PCT_UP": "Raise by {v} %",
+ "inventory.entry.read.PCT_DOWN": "Lower by {v} %",
+ "inventory.entry.read.ADD": "Raise by {v} {ccy}",
+ "inventory.entry.read.SUBTRACT": "Lower by {v} {ccy}",
+ "inventory.short.unsaved": "not saved",
+ "inventory.aria.unsaved": "unsaved change {entry}",
+ "inventory.actions.label": "Selection and changes",
+ "inventory.sel.count": {
+  "one": "{count} cell selected",
+  "other": "{count} cells selected"
+ },
+ "inventory.sel.rooms": {
+  "one": "{count} room",
+  "other": "{count} rooms"
+ },
+ "inventory.sel.nights": {
+  "one": "{count} night",
+  "other": "{count} nights"
+ },
+ "inventory.sel.details": "Cell details…",
+ "inventory.sel.clear": "Clear selection",
+ "inventory.rates.title": "Price",
+ "inventory.rates.entry_label": {
+  "one": "New price or change for {count} cell",
+  "other": "New price or change for {count} cells"
+ },
+ "inventory.rates.entry_ph": "120 · +10% · -5% · +20",
+ "inventory.rates.entry_hint": "A price, a % change or an amount; also typed straight into a price cell",
+ "inventory.rates.entry_cells": {
+  "one": "{count} price cell",
+  "other": "{count} price cells"
+ },
+ "inventory.rates.entry_apply": "Enter for selection",
+ "inventory.rates.needs_contract": "Choose a contract above (price source) to see and change prices.",
+ "inventory.rates.needs_rooms": "Prices are set per room type: select room cells.",
+ "inventory.rates.no_rights": "Your role can see these prices but not change them.",
+ "inventory.rates.saved": {
+  "one": "{count} price saved to draft {v} — publish to sell at it",
+  "other": "{count} prices saved to draft {v} — publish to sell at them"
+ },
+ "inventory.rates.new_draft": "a new draft",
+ "inventory.rates.unsaved_badge": "Not saved",
+ "inventory.rates.unsaved": {
+  "one": "{count} price change not saved yet",
+  "other": "{count} price changes not saved yet"
+ },
+ "inventory.rates.target": "→ contract {c}, {v} (not on sale until published)",
+ "inventory.rates.undo": "Undo",
+ "inventory.rates.discard": "Discard all",
+ "inventory.rates.preview": "Preview new prices",
+ "inventory.rates.save": "Save to draft",
+ "inventory.rates.save_publish": "Save and publish…",
+ "inventory.rates.preview_hint": "Preview shows each room's price now and after, worked out by the server, before anything is saved.",
+ "inventory.rates.refused_title": "These changes would be refused",
+ "inventory.rates.preview_caption": "New prices by room and nights",
+ "inventory.rates.col_room": "Room",
+ "inventory.rates.col_nights": "Nights",
+ "inventory.rates.col_now_live": "Now (on sale)",
+ "inventory.rates.col_now_draft": "Now (draft)",
+ "inventory.rates.col_new": "New",
+ "inventory.rates.basis.PERSON": "base price per person",
+ "inventory.rates.basis.ROOM": "price per room",
+ "inventory.rates.new_periods": {
+  "one": "the draft gains {count} period for these nights",
+  "other": "the draft gains {count} periods for these nights"
+ },
+ "inventory.rates.no_new_periods": "existing periods are edited",
+ "inventory.rates.not_live": "Guests see the new prices only after the draft is published.",
+ "inventory.rates.open_contract": "Open the contract",
+ "inventory.rates.entered": {
+  "one": "Entered for {count} cell — preview, then save",
+  "other": "Entered for {count} cells — preview, then save"
+ },
+ "inventory.rates.copied": {
+  "one": "{count} cell copied",
+  "other": "{count} cells copied"
+ },
+ "inventory.rates.pasted": {
+  "one": "{count} price pasted — preview, then save",
+  "other": "{count} prices pasted — preview, then save"
+ },
+ "inventory.rates.paste_on_price": "Paste prices on a price row (the block fills rooms down and nights across).",
+ "inventory.rates.paste_outside": "The block ({rows} × {cols}) does not fit from this cell: nothing was pasted.",
+ "inventory.rates.paste_bad": "“{text}”: {error}. Nothing was pasted.",
+ "inventory.sale.title": "Sale",
+ "inventory.sale.close": "Close sale",
+ "inventory.sale.open": "Open sale",
+ "inventory.sale.more": "Min. stay and other restrictions…",
+ "inventory.sale.nothing": "Nothing to change: the selected nights are already like that.",
+ "inventory.sale.done_close": {
+  "one": "Sale closed for {count} cell",
+  "other": "Sale closed for {count} cells"
+ },
+ "inventory.sale.done_open": {
+  "one": "Sale opened for {count} cell",
+  "other": "Sale opened for {count} cells"
+ },
+ "inventory.sale.undone": "Undone: the previous values are back",
+ "inventory.sale.confirm_close": "Close sale",
+ "inventory.sale.confirm_open": "Open sale",
+ "inventory.sale.confirm_close_n": {
+  "one": "Close sale for {count} cell?",
+  "other": "Close sale for {count} cells?"
+ },
+ "inventory.sale.confirm_open_n": {
+  "one": "Open sale for {count} cell?",
+  "other": "Open sale for {count} cells?"
+ },
+ "inventory.sale.where": "For which contracts",
+ "inventory.sale.only_contract": "Only contract {c}",
+ "inventory.sale.all_contracts": "Every contract of the hotel",
+ "inventory.sale.also": "Also limited to: {scope} (the filters above).",
+ "inventory.sale.already_closed": {
+  "one": "{count} of them is already closed.",
+  "other": "{count} of them are already closed."
+ },
+ "inventory.sale.inherited": {
+  "one": "{count} cell is closed at a wider scope (e.g. the whole hotel): clearing here does not open it.",
+  "other": "{count} cells are closed at a wider scope (e.g. the whole hotel): clearing here does not open them."
+ },
+ "inventory.sale.override": "Open them here anyway (an exception to the wider closing)",
+ "inventory.sale.immediate": "Applies at once to new searches and bookings. Existing bookings are not changed.",
+ "inventory.sale.undo": "Undo",
+ "inventory.scope.restrictions_label": "Sale & restrictions",
+ "inventory.legend.unsaved": "Price change not saved yet",
+ "inventory.legend.select": "select (also click, Shift+click, drag, a room's name or a day)",
+ "inventory.legend.type": "type in a price cell: a price or a change",
+ "inventory.legend.clipboard": "copy and paste prices with a spreadsheet",
+ "inventory.legend.details": "every setting of a cell"
 }

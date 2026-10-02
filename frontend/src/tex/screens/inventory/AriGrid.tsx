@@ -1,21 +1,49 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { ArrowDownToLine, ArrowUpFromLine, Ban, CalendarClock, ChevronLeft, ChevronRight, Layers, Lock, PencilLine, Tag } from "lucide-react"
+import { ArrowDownToLine, ArrowUpFromLine, Ban, CalendarClock, ChevronLeft, ChevronRight, Layers, Lock, PencilLine, Rows3, Tag } from "lucide-react"
 import { cn } from "../../../lib/utils"
 import { useTexQuery } from "../../lib/api"
 import { useProperty, useSession } from "../../lib/session"
+import { useConfirmLeave, useUnsavedChanges } from "../../lib/unsaved"
 import { addDays, date as fmtDate } from "../../lib/format"
 import { useSiteToday } from "../../lib/siteDay"
 import { getTexLang, intlLocale, useTexT } from "../../i18n"
-import { Button, Card, Checkbox, EmptyState, ErrorState, Field, Input, Notice, PageHeader, Segmented, Select, Skeleton, Toolbar } from "../../ui"
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  ErrorState,
+  Field,
+  Input,
+  Notice,
+  PageHeader,
+  Popover,
+  Segmented,
+  Select,
+  Skeleton,
+  Toolbar,
+  useGridNavigation,
+  useGridSelection,
+  useToast,
+  type GridSelectionApi,
+} from "../../ui"
 import { decText, isoWeekday, useLookups, versionLabel, weekdayName } from "../rates/lib/util"
 import { PublishDialog } from "../rates/contracts/VersionActions"
-import { BulkDialog, CellDialog, channelScopeLabel, scopeText, windowText } from "./Dialogs"
+import { decodeTSV, encodeTSV, copyBlock } from "../rates/workspace/clipboard.ts"
+import { BulkDialog, CellDialog, channelScopeLabel, scopeText, windowText, type BulkInitial } from "./Dialogs"
+import { GridActions, type RateChangesAnswer } from "./GridActions"
 import { InventoryNav } from "./InventoryNav"
 import { Legend } from "./Legend"
+import { cellKey, parseRateEntry, planRatePaste, rateEditText, type GridTarget, type PendingRate, type RateEdit } from "./rateEdits.ts"
 import { CHANNEL_SCOPES, channelArgs, HOTEL_METRICS, METRICS, SCOPE_PREFIX, type Grid, type GridCell, type GridRow, type Metric, type Scope } from "./types"
 
 const PREF = "tex-inv-grid"
+/** The daily work view: price, rooms left, open or closed (UX revision 2026-10). The other rows
+ * (stay length, arrival/departure, release, booking window) are one click away. */
+export const DAILY: Metric[] = ["rate", "avail", "stop"]
+const DAY_OPTIONS = [7, 14, 31, 60]
 
 interface Prefs {
   days: number
@@ -24,30 +52,52 @@ interface Prefs {
 }
 
 function loadPrefs(property: string | undefined): Prefs {
-  const fallback: Prefs = { days: 14, scope: { contract: "", market: "", channel: "", rate_plan: "" }, metrics: METRICS }
+  const fallback: Prefs = { days: 14, scope: { contract: "", market: "", channel: "", rate_plan: "" }, metrics: DAILY }
   try {
     const raw = localStorage.getItem(`${PREF}:${property}`)
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<Prefs>
     const metrics = (p.metrics ?? []).filter((m) => METRICS.includes(m))
-    return { days: [7, 14, 28].includes(p.days ?? 0) ? p.days! : 14, scope: { ...fallback.scope, ...(p.scope ?? {}) }, metrics: metrics.length ? metrics : METRICS }
+    return { days: [...DAY_OPTIONS, 28].includes(p.days ?? 0) ? p.days! : 14, scope: { ...fallback.scope, ...(p.scope ?? {}) }, metrics: metrics.length ? metrics : DAILY }
   } catch {
     return fallback
   }
 }
 
-/** Rates & availability grid (R-36): dates × room types with restrictions,
- * inventory and the contract rate; keyboard navigable; bulk editor. */
+const sameSet = (a: Metric[], b: Metric[]) => a.length === b.length && a.every((m) => b.includes(m))
+
+interface FlatRow {
+  row: GridRow
+  metric: Metric
+}
+
+interface Editing {
+  r: number
+  c: number
+  text: string
+  /** started by typing a character (the caret goes after it), not by Enter / F2 / a double click */
+  typed?: boolean
+  error?: string
+}
+
+/** Rates & availability (R-36; UX revision 2026-10): dates × room types with the price, the rooms
+ * left and whether the night is on sale. Select cells (click, Shift+click, drag, a room's or a
+ * day's header, Ctrl+A), then type a price or a change (+10 %), paste a block from a spreadsheet,
+ * or close / open sale for the selection. Price edits stay unsaved until previewed and saved to
+ * the contract's draft; nothing sells at them until the draft is published. Enter or a double
+ * click opens a cell's full editor, and the bulk editor stays for every other field. */
 export default function AriGrid() {
   const { t } = useTexT()
+  const toast = useToast()
   const property = useProperty()
-  const { boot, can } = useSession()
+  const { boot, can, property: hotel } = useSession()
+  const confirmLeave = useConfirmLeave()
   const lookups = useLookups(property)
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(property))
   // start null = the site's today (G-91): the grid follows the site's midnight until moved
   const today = useSiteToday()
-  // deep links (G-64): ?start=YYYY-MM-DD opens that day (Rates & Contracts › Restrictions);
-  // ?bulk=1 opens the bulk editor (Rates & Contracts › Bulk editor)
+  // deep links (G-64): ?start=YYYY-MM-DD opens that day (Rates & availability › Restrictions);
+  // ?bulk=1 opens the bulk editor (the side navigation's Bulk editor)
   const [params, setParams] = useSearchParams()
   const startParam = /^\d{4}-\d{2}-\d{2}$/.test(params.get("start") ?? "") ? params.get("start") : null
   const [picked, setStart] = useState<string | null>(startParam)
@@ -56,9 +106,39 @@ export default function AriGrid() {
   }, [startParam])
   const start = picked ?? today
   const [cellEdit, setCellEdit] = useState<{ row: GridRow; cell: GridCell } | null>(null)
-  const [bulk, setBulk] = useState(false)
+  const [bulk, setBulk] = useState<BulkInitial | true | null>(null)
   const [publishDraft, setPublishDraft] = useState<string | null>(null)
-  useEffect(() => setPrefs(loadPrefs(property)), [property])
+  const [rowsOpen, setRowsOpen] = useState(false)
+  const rowsBtn = useRef<HTMLButtonElement>(null)
+
+  // the price edits not saved yet (cell → entry), and the states before each change (Undo)
+  const [pending, setPending] = useState<Map<string, PendingRate>>(() => new Map())
+  const [history, setHistory] = useState<Map<string, PendingRate>[]>([])
+  const [preview, setPreview] = useState<RateChangesAnswer | null>(null)
+  useUnsavedChanges(() => pending.size > 0)
+  const changePending = useCallback((f: (m: Map<string, PendingRate>) => Map<string, PendingRate>) => {
+    setPending((cur) => {
+      const next = f(cur)
+      if (next !== cur) setHistory((h) => [...h.slice(-49), cur])
+      return next
+    })
+  }, [])
+  const undo = useCallback(() => {
+    setHistory((h) => {
+      if (!h.length) return h
+      setPending(h[h.length - 1])
+      return h.slice(0, -1)
+    })
+  }, [])
+  const dropPending = useCallback(() => {
+    setPending(new Map())
+    setHistory([])
+  }, [])
+
+  useEffect(() => {
+    setPrefs(loadPrefs(property))
+    dropPending()
+  }, [property, dropPending])
   useEffect(() => {
     try {
       localStorage.setItem(`${PREF}:${property}`, JSON.stringify(prefs))
@@ -68,7 +148,14 @@ export default function AriGrid() {
   }, [prefs, property])
 
   const { days, scope } = prefs
-  const setScope = (k: keyof Scope, v: string) => setPrefs((p) => ({ ...p, scope: { ...p.scope, [k]: v } }))
+  const setScope = (k: keyof Scope, v: string) => {
+    // the unsaved prices belong to the contract they were typed for
+    if (k === "contract" && pending.size) {
+      if (!confirmLeave()) return
+      dropPending()
+    }
+    setPrefs((p) => ({ ...p, scope: { ...p.scope, [k]: v } }))
+  }
   const ch = channelArgs(scope)
   const q = useTexQuery<Grid>(
     "crs",
@@ -83,7 +170,10 @@ export default function AriGrid() {
   const channel = boot.channels.find((c) => c.name === scope.channel)
   const scopeLabel = scopeText(t, scope, contract ? `${contract.contract_code}` : undefined, ratePlan?.rate_plan_name, channel?.channel_name)
   const metrics = prefs.metrics.filter((m) => m !== "rate" || Boolean(grid?.contract))
-  const canEditAny = can("restriction.edit") || can("inventory.edit") || (can("contract.edit") && Boolean(scope.contract))
+  const canRestrict = can("restriction.edit")
+  // rates are cost (G-11): the grid hides them from who may not see cost, and they cannot be changed there
+  const canRate = can("contract.edit") && Boolean(scope.contract) && Boolean(grid && !grid.rates_hidden)
+  const canEditAny = canRestrict || can("inventory.edit") || canRate
   const wantsBulk = params.get("bulk") === "1"
   useEffect(() => {
     if (!wantsBulk || !grid) return
@@ -97,6 +187,184 @@ export default function AriGrid() {
     )
   }, [wantsBulk, grid, canEditAny, setParams])
 
+  // ── the rendered rows, the selection and the keyboard ──
+  const rowMetrics = useCallback((row: GridRow) => (row.level === "hotel" ? metrics.filter((m) => HOTEL_METRICS.includes(m)) : metrics), [metrics])
+  const flat = useMemo<FlatRow[]>(() => (grid ? grid.rows.flatMap((row) => rowMetrics(row).map((metric) => ({ row, metric }))) : []), [grid, rowMetrics])
+  const dates = useMemo(() => grid?.dates ?? [], [grid])
+  const isEditable = useCallback(() => canEditAny, [canEditAny])
+  const sel = useGridSelection({ rows: flat.length, cols: dates.length, isEditable })
+  const [editing, setEditing] = useState<Editing | null>(null)
+  const rateRoom = (r: number) => (flat[r]?.metric === "rate" && flat[r].row.room_type ? flat[r].row.room_type : null)
+  const priceable = (r: number, c: number) => canRate && rateRoom(r) !== null && flat[r].row.cells[c]?.rate !== undefined
+  const minorUnits = grid?.minor_units ?? 2
+  const nav = useGridNavigation({
+    rows: flat.length,
+    cols: dates.length,
+    selection: sel,
+    onEdit: (cell, req) => {
+      if (priceable(cell.r, cell.c)) {
+        const p = pending.get(cellKey(rateRoom(cell.r)!, dates[cell.c]))
+        setEditing({ r: cell.r, c: cell.c, text: req.text ?? (p ? rateEditText(p) : ""), typed: req.text !== undefined })
+        return
+      }
+      if (req.text === undefined && canEditAny && flat[cell.r]) setCellEdit({ row: flat[cell.r].row, cell: flat[cell.r].row.cells[cell.c] })
+    },
+    onKey: (e, cell) => {
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && !e.altKey && e.key.toLowerCase() === "z") {
+        e.preventDefault()
+        undo()
+        return true
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && !mod) {
+        // clears the unsaved edits of the selected price cells (never a saved price)
+        const keys = sel.selected.filter(({ r, c }) => priceable(r, c)).map(({ r, c }) => cellKey(rateRoom(r)!, dates[c]))
+        const all = keys.length ? keys : priceable(cell.r, cell.c) ? [cellKey(rateRoom(cell.r)!, dates[cell.c])] : []
+        if (all.some((k) => pending.has(k))) {
+          e.preventDefault()
+          changePending((m) => {
+            const next = new Map(m)
+            for (const k of all) next.delete(k)
+            return next
+          })
+          return true
+        }
+      }
+    },
+  })
+
+  // the selection as cells (room type or the hotel row × night)
+  const targets = useMemo<GridTarget[]>(() => {
+    const seen = new Set<string>()
+    const out: GridTarget[] = []
+    for (const { r, c } of sel.selected) {
+      const f = flat[r]
+      const date = dates[c]
+      if (!f || !date) continue
+      const k = `${f.row.room_type ?? "*"}|${date}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push({ room: f.row.room_type, date })
+    }
+    return out
+  }, [sel.selected, flat, dates])
+  // a single click is a selection of one cell: the bar shows it only once more than that is chosen
+  // or a key started it, so a look at a cell does not open anything
+  const [touched, setTouched] = useState(false)
+  const shownTargets = touched || sel.multiple ? targets : []
+  const roomName = useCallback((rt: string | null) => (rt === null ? t("inventory.hotel_level") : (grid?.rows.find((r) => r.room_type === rt)?.name ?? rt)), [grid, t])
+  const cellAt = useCallback(
+    (room: string | null, date: string) => {
+      const row = grid?.rows.find((r) => r.room_type === room)
+      return row?.cells.find((c) => c.date === date)
+    },
+    [grid],
+  )
+
+  // ── entries: typed in a cell, applied to the selection, pasted ──
+  const setEntries = (cells: { room: string; date: string }[], edit: RateEdit | null) =>
+    changePending((m) => {
+      const next = new Map(m)
+      for (const x of cells) {
+        if (edit) next.set(cellKey(x.room, x.date), { room: x.room, date: x.date, ...edit })
+        else next.delete(cellKey(x.room, x.date))
+      }
+      return next
+    })
+  const commitEditing = (move: 1 | -1 | 0, refocus = true) => {
+    if (!editing) return
+    const room = rateRoom(editing.r)
+    const date = dates[editing.c]
+    if (!room || !date) return setEditing(null)
+    const r = parseRateEntry(editing.text, minorUnits)
+    if (!r.ok) return setEditing({ ...editing, error: t(`inventory.entry.err.${r.code}`) })
+    setEntries([{ room, date }], "edit" in r ? r.edit : null)
+    setEditing(null)
+    if (!refocus) return
+    const c = Math.min(Math.max(editing.c + move, 0), dates.length - 1)
+    nav.focusCell(editing.r, c)
+  }
+  const priceSelection = (edit: RateEdit) => {
+    const cells = targets.filter((x): x is { room: string; date: string } => x.room !== null && cellAt(x.room, x.date)?.rate !== undefined)
+    setEntries(cells, edit)
+    toast.info(t("inventory.rates.entered", { count: cells.length }))
+  }
+
+  // copy / paste: the price rows only (a block pastes rooms down, nights across)
+  const gridEl = useRef<HTMLTableElement | null>(null)
+  const rateRooms = useMemo(() => flat.filter((f) => f.metric === "rate" && f.row.room_type).map((f) => f.row.room_type!), [flat])
+  const copyText = (r: number, c: number) => {
+    const room = rateRoom(r)
+    if (!room) return ""
+    const p = pending.get(cellKey(room, dates[c]))
+    if (p) return rateEditText(p)
+    const cell = flat[r].row.cells[c]
+    return cell.draft_rate ?? cell.rate ?? ""
+  }
+  const clip = useRef({ copy: (_e: ClipboardEvent) => undefined as void, paste: (_e: ClipboardEvent) => undefined as void })
+  clip.current = {
+    copy: (e) => {
+      const block = copyBlock(sel.state.ranges, copyText, (r) => rateRoom(r) !== null)
+      if (!block.length || !e.clipboardData || !block.some((row) => row.some(Boolean))) return
+      e.clipboardData.setData("text/plain", encodeTSV(block))
+      e.preventDefault()
+      toast.info(t("inventory.rates.copied", { count: block.reduce((n, row) => n + row.length, 0) }))
+    },
+    paste: (e) => {
+      if (!canRate || !e.clipboardData) return
+      const at = sel.state.active
+      const room = rateRoom(at.r)
+      if (!room) return void toast.error(t("inventory.rates.paste_on_price"))
+      e.preventDefault()
+      const block = decodeTSV(e.clipboardData.getData("text/plain"))
+      if (!block.length) return
+      const res = planRatePaste(block, rateRooms, dates, { row: rateRooms.indexOf(room), col: at.c }, minorUnits)
+      if (!res.ok) {
+        const f = res.failures[0]
+        return void toast.error(
+          f.code === "OUTSIDE" ? t("inventory.rates.paste_outside", { rows: block.length, cols: Math.max(...block.map((x) => x.length)) }) : t("inventory.rates.paste_bad", { text: f.text, error: t(`inventory.entry.err.${f.code}`) }),
+        )
+      }
+      const usable = res.edits.filter((x) => cellAt(x.room, x.date)?.rate !== undefined)
+      changePending((m) => {
+        const next = new Map(m)
+        for (const x of res.clears) next.delete(cellKey(x.room, x.date))
+        for (const x of usable) next.set(cellKey(x.room, x.date), x)
+        return next
+      })
+      toast.info(t("inventory.rates.pasted", { count: usable.length }))
+    },
+  }
+  useEffect(() => {
+    const mine = () => {
+      const a = document.activeElement
+      return a instanceof HTMLElement && a.getAttribute("role") === "gridcell" && Boolean(gridEl.current?.contains(a))
+    }
+    const copy = (e: ClipboardEvent) => mine() && clip.current.copy(e)
+    const paste = (e: ClipboardEvent) => mine() && clip.current.paste(e)
+    document.addEventListener("copy", copy)
+    document.addEventListener("paste", paste)
+    return () => {
+      document.removeEventListener("copy", copy)
+      document.removeEventListener("paste", paste)
+    }
+  }, [])
+
+  const newPrice = useMemo(() => {
+    const out = new Map<string, string>()
+    for (const c of preview?.cells ?? []) for (let d = c.start; d <= c.end; d = addDays(d, 1)) out.set(cellKey(c.room_type, d), c.new)
+    return out
+  }, [preview])
+
+  // the draft's unpublished prices in view
+  const draftCells = grid?.draft ? grid.rows.reduce((n, r) => n + r.cells.filter((c) => c.draft_rate && c.draft_rate !== c.rate).length, 0) : 0
+  const bulkFromSelection = (): BulkInitial => {
+    const ds = targets.map((x) => x.date).sort()
+    const rooms = [...new Set(targets.map((x) => x.room).filter((r): r is string => r !== null))]
+    return { from: ds[0], to: ds[ds.length - 1], rooms, hotelLevel: rooms.length === 0 }
+  }
+
+  const view = sameSet(prefs.metrics, DAILY) ? "daily" : sameSet(prefs.metrics, METRICS) ? "all" : "custom"
   return (
     <>
       <PageHeader
@@ -105,7 +373,7 @@ export default function AriGrid() {
         actions={
           canEditAny &&
           grid && (
-            <Button icon={<Layers className="size-4" aria-hidden />} onClick={() => setBulk(true)}>
+            <Button variant="secondary" icon={<Layers className="size-4" aria-hidden />} onClick={() => setBulk(true)}>
               {t("inventory.bulk.open")}
             </Button>
           )
@@ -127,11 +395,40 @@ export default function AriGrid() {
           label={t("inventory.days")}
           value={String(days)}
           onChange={(v) => setPrefs((p) => ({ ...p, days: Number(v) }))}
-          options={[7, 14, 28].map((d) => ({ value: String(d), label: t("inventory.n_days", { count: d }) }))}
+          options={DAY_OPTIONS.map((d) => ({ value: String(d), label: t("inventory.n_days", { count: d }) }))}
         />
+        <div className="flex items-end gap-1">
+          <Segmented<string>
+            label={t("inventory.view.label")}
+            value={view}
+            onChange={(v) => v !== "custom" && setPrefs((p) => ({ ...p, metrics: v === "daily" ? DAILY : METRICS }))}
+            options={[
+              { value: "daily", label: t("inventory.view.daily") },
+              { value: "all", label: t("inventory.view.all") },
+              ...(view === "custom" ? [{ value: "custom", label: t("inventory.view.custom") }] : []),
+            ]}
+          />
+          <Button ref={rowsBtn} variant="ghost" size="md" icon={<Rows3 className="size-4" aria-hidden />} aria-expanded={rowsOpen} onClick={() => setRowsOpen((o) => !o)}>
+            {t("inventory.show_rows")}
+          </Button>
+          <Popover open={rowsOpen} onClose={() => setRowsOpen(false)} anchorRef={rowsBtn} label={t("inventory.show_rows")} width="sm">
+            <fieldset className="space-y-1.5">
+              <legend className="sr-only">{t("inventory.show_rows")}</legend>
+              {METRICS.map((m) => (
+                <Checkbox
+                  key={m}
+                  label={t(`inventory.metric.${m}`)}
+                  checked={prefs.metrics.includes(m)}
+                  disabled={m === "rate" && !scope.contract}
+                  onChange={(e) => setPrefs((p) => ({ ...p, metrics: e.target.checked ? METRICS.filter((x) => x === m || p.metrics.includes(x)) : p.metrics.filter((x) => x !== m) }))}
+                />
+              ))}
+            </fieldset>
+          </Popover>
+        </div>
       </Toolbar>
       <Toolbar>
-        <Field label={t("rates.f.contract")} className="w-full sm:w-64">
+        <Field label={t("inventory.scope.price_source")} className="w-full sm:w-64">
           <Select value={scope.contract} onChange={(e) => setScope("contract", e.target.value)} options={(lookups.data?.contracts ?? []).map((c) => ({ value: c.name, label: `${c.contract_code} · ${c.market}` }))} placeholder={t("inventory.scope.hotel_wide")} />
         </Field>
         <Field label={t("rates.f.market")} className="w-[calc(50%-0.375rem)] sm:w-40">
@@ -152,35 +449,44 @@ export default function AriGrid() {
           <Select value={scope.rate_plan} onChange={(e) => setScope("rate_plan", e.target.value)} options={(lookups.data?.rate_plans ?? []).map((r) => ({ value: r.name, label: r.rate_plan_name }))} placeholder={t("core.label.all")} />
         </Field>
       </Toolbar>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-zinc-600">
-          <span className="font-medium text-zinc-800">{t("inventory.scope.label")}:</span> {scopeLabel}
-        </p>
-        <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <legend className="sr-only">{t("inventory.show_rows")}</legend>
-          <span className="text-xs font-medium text-zinc-600" aria-hidden>
-            {t("inventory.show_rows")}:
-          </span>
-          {METRICS.map((m) => (
-            <Checkbox
-              key={m}
-              className="text-xs"
-              label={t(`inventory.metric.${m}`)}
-              checked={prefs.metrics.includes(m)}
-              disabled={m === "rate" && !scope.contract}
-              onChange={(e) => setPrefs((p) => ({ ...p, metrics: e.target.checked ? METRICS.filter((x) => x === m || p.metrics.includes(x)) : p.metrics.filter((x) => x !== m) }))}
-            />
-          ))}
-        </fieldset>
-      </div>
-      {!scope.contract && <p className="mb-3 text-xs text-zinc-500">{t("inventory.choose_contract_hint")}</p>}
-      {grid?.draft && (
+
+      {/* what this screen works on, in words: the hotel, where the prices come from and what a
+          restriction set here applies to (never only by the selects' values) */}
+      <dl className="mb-3 grid gap-x-6 gap-y-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs sm:grid-cols-[auto_1fr]">
+        <dt className="font-semibold text-zinc-600">{t("core.shell.hotel")}</dt>
+        <dd className="font-medium text-zinc-900">{hotel?.property_name}</dd>
+        <dt className="font-semibold text-zinc-600">{t("inventory.scope.prices")}</dt>
+        <dd className="text-zinc-800">
+          {contract && grid?.contract ? (
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>{t("inventory.scope.prices_from", { c: contract.contract_code, m: contract.market, ccy: grid.currency ?? contract.contract_currency, basis: t(`inventory.rates.basis.${grid.basis ?? contract.pricing_basis}`) })}</span>
+              {grid.version ? <Badge tone="success">{t("inventory.scope.on_sale", { v: versionLabel(grid.version) })}</Badge> : <Badge tone="neutral">{t("inventory.scope.none_on_sale")}</Badge>}
+              {grid.draft && <Badge tone="warning">{t("inventory.scope.draft", { v: versionLabel(grid.draft) })}</Badge>}
+            </span>
+          ) : (
+            <span className="text-zinc-600">{t("inventory.choose_contract_hint")}</span>
+          )}
+        </dd>
+        <dt className="font-semibold text-zinc-600">{t("inventory.scope.restrictions_label")}</dt>
+        <dd className="text-zinc-800">
+          {scopeLabel} <span className="text-zinc-500">· {t("inventory.scope.restrictions_now")}</span>
+        </dd>
+      </dl>
+
+      {grid?.draft && draftCells > 0 && (
         <div className="mb-3">
           <Notice tone="warning">
-            <span>{t("inventory.draft_notice", { v: versionLabel(grid.draft) })} </span>
-            <Link to={`/tex/rates/contracts/${encodeURIComponent(grid.contract ?? "")}/versions/${encodeURIComponent(grid.draft)}`} className="font-medium underline">
-              {t("inventory.result.open_draft")}
-            </Link>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>{t("inventory.draft_cells", { count: draftCells, v: versionLabel(grid.draft), live: grid.version ? versionLabel(grid.version) : "—" })}</span>
+              <Link to={`/tex/rates/contracts/${encodeURIComponent(grid.contract ?? "")}/versions/${encodeURIComponent(grid.draft)}`} className="font-medium underline">
+                {t("inventory.result.open_draft")}
+              </Link>
+              {can("contract.publish") && (
+                <Button size="sm" variant="secondary" onClick={() => setPublishDraft(grid.draft)}>
+                  {t("rates.version.publish")}
+                </Button>
+              )}
+            </span>
           </Notice>
         </div>
       )}
@@ -201,10 +507,87 @@ export default function AriGrid() {
         ) : grid.rows.every((r) => r.level === "hotel") ? (
           <EmptyState title={t("inventory.no_rooms")} />
         ) : (
-          <GridTable grid={grid} metrics={metrics} today={today} loading={q.loading} editable={canEditAny} onOpen={(row, cell) => setCellEdit({ row, cell })} />
+          <GridTable
+            grid={grid}
+            flat={flat}
+            today={today}
+            loading={q.loading}
+            editable={canEditAny}
+            sel={sel}
+            cellProps={nav.cellProps}
+            gridRef={(el) => {
+              nav.gridRef(el)
+              gridEl.current = el as HTMLTableElement | null
+            }}
+            showSelection={touched || sel.multiple}
+            pending={pending}
+            newPrice={newPrice}
+            editing={editing}
+            onEditingText={(text) => setEditing((e) => (e ? { ...e, text, error: undefined } : e))}
+            onTouched={() => setTouched(true)}
+            onEditingKey={(e) => {
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault()
+                commitEditing(e.shiftKey ? -1 : 1)
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                const at = editing
+                setEditing(null)
+                if (at) nav.focusCell(at.r, at.c)
+              }
+            }}
+            onEditingBlur={() => editing && !editing.error && commitEditing(0, false)}
+          />
         )}
       </Card>
+      {editing?.error && (
+        <p role="alert" className="mt-2 text-sm font-medium text-rose-700">
+          {t("inventory.entry.invalid", { text: editing.text })}: {editing.error}
+        </p>
+      )}
       <Legend />
+      {grid && (
+        <GridActions
+          grid={grid}
+          scope={scope}
+          scopeLabel={scopeLabel}
+          contractCode={contract?.contract_code}
+          targets={shownTargets}
+          roomName={roomName}
+          cellAt={cellAt}
+          canRate={canRate}
+          canRestrict={canRestrict}
+          canPublish={can("contract.publish")}
+          minorUnits={minorUnits}
+          pending={[...pending.values()]}
+          canUndo={history.length > 0}
+          onUndo={undo}
+          onDiscardPending={dropPending}
+          onPriceEntry={priceSelection}
+          onPreview={setPreview}
+          onSaved={() => {
+            dropPending()
+            q.reload()
+          }}
+          onPublish={setPublishDraft}
+          onRestrictionsApplied={q.reload}
+          onMore={() => setBulk(bulkFromSelection())}
+          onDetails={
+            shownTargets.length === 1 && canEditAny
+              ? () => {
+                  const x = shownTargets[0]
+                  const row = grid.rows.find((r) => r.room_type === x.room)
+                  const cell = row?.cells.find((c) => c.date === x.date)
+                  if (row && cell) setCellEdit({ row, cell })
+                }
+              : undefined
+          }
+          onClearSelection={() => {
+            sel.clear()
+            setTouched(false)
+          }}
+        />
+      )}
       {grid && cellEdit && (
         <CellDialog
           grid={grid}
@@ -225,10 +608,11 @@ export default function AriGrid() {
           grid={grid}
           scope={scope}
           scopeLabel={scopeLabel}
-          onClose={() => setBulk(false)}
+          initial={bulk === true ? undefined : bulk}
+          onClose={() => setBulk(null)}
           onApplied={q.reload}
           onPublish={(d) => {
-            setBulk(false)
+            setBulk(null)
             setPublishDraft(d)
           }}
         />
@@ -240,104 +624,78 @@ export default function AriGrid() {
   )
 }
 
-interface FlatRow {
-  row: GridRow
-  metric: Metric
-}
-
 function GridTable({
   grid,
-  metrics,
+  flat,
   today,
   loading,
   editable,
-  onOpen,
+  sel,
+  cellProps,
+  gridRef,
+  showSelection,
+  pending,
+  newPrice,
+  editing,
+  onEditingText,
+  onEditingKey,
+  onEditingBlur,
+  onTouched,
 }: {
   grid: Grid
-  metrics: Metric[]
+  flat: FlatRow[]
   today: string
   loading: boolean
   editable: boolean
-  onOpen: (row: GridRow, cell: GridCell) => void
+  sel: GridSelectionApi
+  cellProps: ReturnType<typeof useGridNavigation>["cellProps"]
+  gridRef: (el: HTMLElement | null) => void
+  /** draw the selection (not before the user acted on the grid: the first cell is selected from the start) */
+  showSelection: boolean
+  pending: Map<string, PendingRate>
+  newPrice: Map<string, string>
+  editing: Editing | null
+  onEditingText: (text: string) => void
+  onEditingKey: (e: KeyboardEvent<HTMLInputElement>) => void
+  onEditingBlur: () => void
+  /** the user acted on the grid (a click, a key): the action bar shows the selection from then on */
+  onTouched: () => void
 }) {
   const { t } = useTexT()
-  const table = useRef<HTMLTableElement>(null)
-  // the hotel-level row holds restrictions only (G-48)
-  const rowMetrics = useCallback((row: GridRow) => (row.level === "hotel" ? metrics.filter((m) => HOTEL_METRICS.includes(m)) : metrics), [metrics])
-  const flat = useMemo<FlatRow[]>(() => grid.rows.flatMap((row) => rowMetrics(row).map((metric) => ({ row, metric }))), [grid.rows, rowMetrics])
-  const [pos, setPos] = useState({ r: 0, c: 0 })
-  const r = Math.min(pos.r, Math.max(0, flat.length - 1))
-  const c = Math.min(pos.c, grid.dates.length - 1)
-
-  const focusCell = useCallback((nr: number, nc: number) => {
-    setPos({ r: nr, c: nc })
-    requestAnimationFrame(() => table.current?.querySelector<HTMLElement>(`[data-cell="${nr}:${nc}"]`)?.focus())
-  }, [])
-
-  // PageDown / PageUp: the same metric of the next / previous room row (the hotel row shows fewer)
-  const jumpRow = (ri: number, dir: 1 | -1) => {
-    const from = flat[ri]
-    const at = grid.rows.indexOf(from.row) + dir
-    if (at < 0 || at >= grid.rows.length) return ri
-    const target = grid.rows[at]
-    const same = flat.findIndex((f) => f.row === target && f.metric === from.metric)
-    return same >= 0 ? same : flat.findIndex((f) => f.row === target)
-  }
-
-  const onKey = (e: KeyboardEvent<HTMLTableCellElement>, ri: number, ci: number) => {
-    const last = { r: flat.length - 1, c: grid.dates.length - 1 }
-    let nr = ri
-    let nc = ci
-    switch (e.key) {
-      case "ArrowRight":
-        nc = Math.min(last.c, ci + 1)
-        break
-      case "ArrowLeft":
-        nc = Math.max(0, ci - 1)
-        break
-      case "ArrowDown":
-        nr = Math.min(last.r, ri + 1)
-        break
-      case "ArrowUp":
-        nr = Math.max(0, ri - 1)
-        break
-      case "Home":
-        nc = 0
-        if (e.ctrlKey) nr = 0
-        break
-      case "End":
-        nc = last.c
-        if (e.ctrlKey) nr = last.r
-        break
-      case "PageDown":
-        nr = jumpRow(ri, 1)
-        break
-      case "PageUp":
-        nr = jumpRow(ri, -1)
-        break
-      case "Enter":
-      case " ":
-        e.preventDefault()
-        if (editable) onOpen(flat[ri].row, flat[ri].row.cells[ci])
-        return
-      default:
-        return
+  // drag to select: the button held down over cells extends the range from where it started
+  const dragging = useRef(false)
+  useEffect(() => {
+    const up = () => {
+      dragging.current = false
     }
-    e.preventDefault()
-    focusCell(nr, nc)
+    window.addEventListener("mouseup", up)
+    return () => window.removeEventListener("mouseup", up)
+  }, [])
+  const rowsOf = (row: GridRow) => flat.map((f, i) => (f.row === row ? i : -1)).filter((i) => i >= 0)
+  const selectRoom = (row: GridRow, add: boolean) => {
+    const rs = rowsOf(row)
+    rs.forEach((r, i) => sel.selectRow(r, { add: add || i > 0 }))
   }
 
   const ccy = grid.currency ?? ""
   return (
-    <div className={cn("max-h-[70vh] overflow-auto", loading && "opacity-60")} aria-busy={loading || undefined}>
-      <table ref={table} role="grid" aria-rowcount={flat.length + 1} aria-colcount={grid.dates.length + 1} aria-readonly={!editable || undefined} className="min-w-full border-separate border-spacing-0 text-xs">
+    <div className={cn("max-h-[70vh] overflow-auto", loading && "opacity-60")} aria-busy={loading || undefined} onMouseDownCapture={onTouched} onKeyDownCapture={onTouched}>
+      <table
+        ref={gridRef}
+        role="grid"
+        aria-multiselectable={editable || undefined}
+        aria-rowcount={flat.length + 1}
+        aria-colcount={grid.dates.length + 1}
+        aria-readonly={!editable || undefined}
+        className="min-w-full border-separate border-spacing-0 text-xs select-none"
+      >
         <caption className="sr-only">{t("inventory.caption", { from: fmtDate(grid.dates[0]), to: fmtDate(grid.dates[grid.dates.length - 1]) })}</caption>
         <thead>
           <tr role="row">
             <th role="columnheader" scope="col" className="sticky top-0 left-0 z-[4] w-28 min-w-28 border-r border-b border-zinc-200 bg-zinc-50 px-2 py-2 text-left font-semibold text-zinc-600 sm:w-44 sm:min-w-44">
               {t("inventory.room_date")}
             </th>
-            {grid.dates.map((d) => {
+            {grid.dates.map((d, ci) => {
               const wd = isoWeekday(d)
               const weekend = wd >= 5
               return (
@@ -346,14 +704,24 @@ function GridTable({
                   role="columnheader"
                   scope="col"
                   className={cn(
-                    "sticky top-0 z-[2] min-w-16 border-b border-zinc-200 px-1 py-1.5 text-center font-medium",
+                    "sticky top-0 z-[2] min-w-16 border-b border-zinc-200 p-0 text-center font-medium",
                     weekend ? "bg-zinc-100 text-zinc-800" : "bg-zinc-50 text-zinc-700",
                     d === today && "shadow-[inset_0_-2px_0_var(--color-tex-600)]",
                   )}
                 >
-                  <span className="block text-[10px] tracking-wide text-zinc-500 uppercase">{weekdayName(wd)}</span>
-                  <span className="block text-sm font-semibold tabular-nums">{d.slice(8, 10)}</span>
-                  <span className="block text-[10px] text-zinc-500">{fmtMonth(d)}</span>
+                  {/* a day's header selects that day for every room (Shift / Ctrl add to the selection) */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    disabled={!editable}
+                    onClick={(e) => sel.selectCol(ci, { add: e.metaKey || e.ctrlKey, extend: e.shiftKey })}
+                    aria-label={t("inventory.select_day", { day: fmtDate(d) })}
+                    className="block w-full px-1 py-1.5 hover:bg-tex-50 disabled:cursor-default disabled:hover:bg-transparent"
+                  >
+                    <span className="block text-[10px] tracking-wide text-zinc-500 uppercase">{weekdayName(wd)}</span>
+                    <span className="block text-sm font-semibold tabular-nums">{d.slice(8, 10)}</span>
+                    <span className="block text-[10px] text-zinc-500">{fmtMonth(d)}</span>
+                  </button>
                   {d === today && <span className="sr-only">{t("inventory.today")}</span>}
                 </th>
               )
@@ -362,9 +730,12 @@ function GridTable({
         </thead>
         <tbody>
           {grid.rows.map((row) => {
-            const shown = rowMetrics(row)
-            return shown.map((metric, mi) => {
-              const ri = flat.findIndex((f) => f.row === row && f.metric === metric)
+            const shown = flat.filter((f) => f.row === row)
+            // the hotel-level row's name comes from the server in English: shown in the user's language
+            const rowName = row.level === "hotel" ? t("inventory.hotel_level") : row.name
+            return shown.map((f, mi) => {
+              const ri = flat.indexOf(f)
+              const metric = f.metric
               return (
                 <tr key={`${row.room_type ?? "*"}-${metric}`} role="row" data-level={row.level}>
                   <th
@@ -376,39 +747,91 @@ function GridTable({
                       mi === shown.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
                     )}
                   >
-                    {mi === 0 && <span className="block max-w-24 truncate text-[13px] font-semibold text-zinc-900 sm:max-w-40" title={row.name}>{row.name}</span>}
+                    {mi === 0 &&
+                      (editable ? (
+                        // a room's name selects all its nights in view
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onClick={(e) => selectRoom(row, e.metaKey || e.ctrlKey)}
+                          className="block max-w-24 truncate text-left text-[13px] font-semibold text-zinc-900 hover:text-tex-700 hover:underline sm:max-w-40"
+                          title={t("inventory.select_room", { room: rowName })}
+                        >
+                          {rowName}
+                        </button>
+                      ) : (
+                        <span className="block max-w-24 truncate text-[13px] font-semibold text-zinc-900 sm:max-w-40" title={rowName}>
+                          {rowName}
+                        </span>
+                      ))}
                     {mi === 0 && row.level === "hotel" && <span className="block text-[10px] text-zinc-500">{t("inventory.hotel_row_hint")}</span>}
                     <span className="block text-[11px] text-zinc-500">
                       {t(`inventory.metric.${metric}`)}
-                      {metric === "rate" && ccy && <span className="text-zinc-400"> · {ccy}</span>}
-                      <span className="sr-only"> · {row.name}</span>
+                      {metric === "rate" && ccy && (
+                        <span className="text-zinc-400">
+                          {" "}
+                          · {ccy} · {t(`inventory.unit.${grid.basis ?? "PERSON"}`)}
+                        </span>
+                      )}
+                      <span className="sr-only"> · {rowName}</span>
                     </span>
                   </th>
                   {row.cells.map((cell, ci) => {
                     const weekend = isoWeekday(cell.date) >= 5
-                    const active = ri === r && ci === c
+                    const selected = showSelection && sel.isSelected(ri, ci)
+                    const key = row.room_type ? cellKey(row.room_type, cell.date) : ""
+                    const p = metric === "rate" ? pending.get(key) : undefined
+                    const isEditing = editing?.r === ri && editing.c === ci
+                    const props = cellProps(ri, ci)
                     return (
                       <td
                         key={cell.date}
                         role="gridcell"
-                        data-cell={`${ri}:${ci}`}
-                        tabIndex={active ? 0 : -1}
-                        onKeyDown={(e) => onKey(e, ri, ci)}
-                        onClick={() => {
-                          setPos({ r: ri, c: ci })
-                          if (editable) onOpen(row, cell)
+                        {...props}
+                        onMouseDown={(e) => {
+                          if (isEditing) return
+                          props.onMouseDown?.(e)
+                          if (e.button === 0 && !e.shiftKey && !e.metaKey && !e.ctrlKey) dragging.current = true
                         }}
-                        onFocus={() => (ri !== r || ci !== c) && setPos({ r: ri, c: ci })}
-                        aria-label={cellLabel(t, metric, cell, row.name, ccy)}
+                        onMouseEnter={() => {
+                          if (dragging.current) sel.click(ri, ci, { shift: true })
+                        }}
+                        aria-label={cellLabel(t, metric, cell, rowName, ccy, p, p ? newPrice.get(key) : undefined)}
                         className={cn(
                           "relative h-9 cursor-default px-1 text-center align-middle tabular-nums outline-none focus-visible:z-[3] focus-visible:ring-2 focus-visible:ring-tex-500 focus-visible:ring-inset",
                           mi === shown.length - 1 ? "border-b border-b-zinc-300" : "border-b border-b-zinc-100",
                           weekend && "bg-zinc-50/80",
-                          editable && "cursor-pointer hover:bg-tex-50",
+                          editable && "cursor-cell hover:bg-tex-50",
                           cellTone(metric, cell),
+                          p && "bg-amber-50 text-amber-950",
+                          selected && "bg-tex-100/80 shadow-[inset_0_0_0_1px_var(--color-tex-400)]",
                         )}
                       >
-                        <CellContent metric={metric} cell={cell} />
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            aria-label={t("inventory.entry.cell", { room: rowName, day: fmtDate(cell.date) })}
+                            aria-invalid={Boolean(editing.error) || undefined}
+                            value={editing.text}
+                            onChange={(e) => onEditingText(e.target.value)}
+                            onKeyDown={(e) => {
+                              e.stopPropagation()
+                              onEditingKey(e)
+                            }}
+                            onBlur={onEditingBlur}
+                            onFocus={(e) => {
+                              const el = e.currentTarget
+                              if (editing.typed) el.setSelectionRange(el.value.length, el.value.length)
+                              else el.select()
+                            }}
+                            className={cn(
+                              "absolute inset-0.5 w-[calc(100%-4px)] rounded border bg-white px-1 text-center text-xs tabular-nums outline-none",
+                              editing.error ? "border-rose-500 ring-2 ring-rose-300" : "border-tex-500 ring-2 ring-tex-200",
+                            )}
+                          />
+                        ) : (
+                          <CellContent metric={metric} cell={cell} pending={p} next={p ? newPrice.get(key) : undefined} />
+                        )}
                         {isOwn(metric, cell) && <span aria-hidden className="absolute top-0 right-0 size-0 border-t-[6px] border-l-[6px] border-t-tex-600 border-l-transparent" />}
                       </td>
                     )
@@ -458,10 +881,21 @@ function cellTone(metric: Metric, c: GridCell): string | false {
   return false
 }
 
-function CellContent({ metric, cell }: { metric: Metric; cell: GridCell }) {
+function CellContent({ metric, cell, pending, next }: { metric: Metric; cell: GridCell; pending?: PendingRate; next?: string }) {
   const { t } = useTexT()
   switch (metric) {
     case "rate": {
+      if (pending)
+        // an unsaved entry: as typed, and the server's new price once previewed
+        return (
+          <span className="inline-flex flex-col items-center leading-tight">
+            <span className="font-semibold">{next ? decText(next) : rateEditText(pending)}</span>
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-800">
+              <span aria-hidden>●</span>
+              {next ? rateEditText(pending) : t("inventory.short.unsaved")}
+            </span>
+          </span>
+        )
       const draft = cell.draft_rate && cell.draft_rate !== cell.rate
       return (
         <span className="inline-flex flex-col items-center leading-tight">
@@ -500,7 +934,9 @@ function CellContent({ metric, cell }: { metric: Metric; cell: GridCell }) {
       ) : cell.own?.stop_sell === "OPEN" ? (
         <span className="text-emerald-800">{t("inventory.short.open")}</span>
       ) : (
-        <span className="text-zinc-300">·</span>
+        <span className="text-zinc-400" aria-hidden>
+          ✓
+        </span>
       )
     case "los":
       return cell.min_los || cell.max_los ? (
@@ -560,7 +996,7 @@ function shortDay(iso: string | null) {
   return new Intl.DateTimeFormat(intlLocale(getTexLang()), { day: "numeric", month: "short" }).format(new Date(`${iso}T12:00:00`))
 }
 
-function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string): string {
+function cellLabel(t: (k: string, p?: Record<string, string | number>) => string, metric: Metric, c: GridCell, room: string, ccy: string, pending?: PendingRate, next?: string): string {
   const day = `${weekdayName(isoWeekday(c.date), "long")} ${fmtDate(c.date)}`
   let v: string
   switch (metric) {
@@ -568,6 +1004,7 @@ function cellLabel(t: (k: string, p?: Record<string, string | number>) => string
       v = c.rate ? `${decText(c.rate)} ${ccy}` : t("inventory.aria.no_rate")
       if (c.draft_rate && c.draft_rate !== c.rate) v += `, ${t("inventory.legend.draft")} ${decText(c.draft_rate)}`
       if (c.promo) v += `, ${t("inventory.legend.promo")}`
+      if (pending) v += `, ${t("inventory.aria.unsaved", { entry: rateEditText(pending) })}${next ? ` ${decText(next)} ${ccy}` : ""}`
       break
     case "avail":
       v = c.closed ? t("inventory.v.closed_sale") : t("inventory.aria.avail", { a: c.available ?? 0, cap: c.capacity ?? 0, sold: c.sold ?? 0 })
@@ -591,3 +1028,4 @@ function cellLabel(t: (k: string, p?: Record<string, string | number>) => string
   const own = isOwn(metric, c) ? `, ${t("inventory.legend.own")}` : ""
   return `${room}, ${t(`inventory.metric.${metric}`)}, ${day}: ${v}${own}`
 }
+

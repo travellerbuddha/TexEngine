@@ -246,7 +246,7 @@ test("navigation: every new sub-section opens its screen for a user who holds it
   const heading = (name: string) => page.getByRole("heading", { level: 1, name })
   const rows = page.locator("main table tbody tr")
 
-  await test.step("Rates & Contracts: versions, periods, occupancy rules, rate plans", async () => {
+  await test.step("Contracts: versions, periods, occupancy rules, rate plans", async () => {
     // while a list loads, its table shows placeholder rows (no data, nothing to open): the rows
     // counted and opened are those of the list's answer, each a link to its version
     const loaded = page.locator("main table tbody tr[tabindex='0']")
@@ -260,7 +260,7 @@ test("navigation: every new sub-section opens its screen for a user who holds it
         const url = new URL(r.url())
         return url.pathname.endsWith(`/api/method/kamra.tex.api.lists.${method}`) && url.searchParams.get("section") === section
       })
-      const nav = await openArea(page, "Rates & Contracts")
+      const nav = await openArea(page, "Contracts")
       await nav.getByRole("link", { name: entry, exact: true }).click()
       await expect(page).toHaveURL(new RegExp(`${path}$`))
       await expect(heading(entry)).toBeVisible()
@@ -279,7 +279,7 @@ test("navigation: every new sub-section opens its screen for a user who holds it
     await expect(page.getByRole("tablist", { name: "Rule tables", exact: true }).getByRole("tab", { name: /^Rate plans/, selected: true })).toBeVisible()
   })
 
-  await test.step("Rates & Contracts: restrictions across contracts, as ranges", async () => {
+  await test.step("Rates & availability: restrictions across contracts, as ranges", async () => {
     const lookups = await pageApi<{ room_types: { name: string; room_type_name: string }[] }>(page, "kamra.tex.api.ui_rates.lookups", { property: HOTEL })
     const room = lookups.message.room_types[0]
     const first = isoDate(250 + Math.floor(Math.random() * 60))
@@ -287,7 +287,7 @@ test("navigation: every new sub-section opens its screen for a user who holds it
     const set = await pageApi(page, "kamra.tex.api.crs.ari_bulk_update", { property: HOTEL, start: first, end: last, room_types: [room.name], restrictions: { min_los: 4 } })
     expect(set.ok, JSON.stringify(set.body).slice(0, 300)).toBeTruthy()
     try {
-      const nav = await openArea(page, "Rates & Contracts")
+      const nav = await openArea(page, "Rates & availability")
       await nav.getByRole("link", { name: "Restrictions", exact: true }).click()
       await expect(page).toHaveURL(/\/tex\/rates\/restrictions$/)
       await expect(heading("Restrictions")).toBeVisible()
@@ -306,8 +306,8 @@ test("navigation: every new sub-section opens its screen for a user who holds it
     }
   })
 
-  await test.step("Rates & Contracts: the bulk editor of the grid", async () => {
-    const nav = await openArea(page, "Rates & Contracts")
+  await test.step("Rates & availability: the bulk editor of the grid", async () => {
+    const nav = await openArea(page, "Rates & availability")
     await nav.getByRole("link", { name: "Bulk editor", exact: true }).click()
     await expect(page.getByRole("dialog", { name: "Bulk update" })).toBeVisible()
     await expect(page).toHaveURL(/\/tex\/inventory$/)
@@ -371,11 +371,14 @@ test("navigation: a restricted user sees only what their capabilities open, and 
   await login(page, "agent@demo.tex") // Reservations Agent: prices without cost, no booking sites, no reports
   await page.goto(texPath("/tex"))
   await pickHotel(page)
-  const nav = await openArea(page, "Rates & Contracts")
-  for (const shown of ["Contracts", "Contract versions", "Rate plans", "Restrictions"])
+  const nav = await openArea(page, "Contracts")
+  for (const shown of ["Contract list", "Contract versions", "Rate plans"])
     await expect(nav.getByRole("link", { name: shown, exact: true })).toBeVisible()
-  for (const hidden of ["Price periods", "Occupancy rules", "Bulk editor"])
+  for (const hidden of ["Price periods", "Occupancy rules"])
     await expect(nav.getByRole("link", { name: hidden, exact: true })).toHaveCount(0)
+  await openArea(page, "Rates & availability")
+  await expect(nav.getByRole("link", { name: "Restrictions", exact: true })).toBeVisible()
+  await expect(nav.getByRole("link", { name: "Bulk editor", exact: true })).toHaveCount(0)
   await expect(nav.getByRole("link", { name: "Booking Engine", exact: true })).toHaveCount(0)
   // hiding is not the control: the lists refuse
   for (const [method, args] of [
@@ -422,7 +425,7 @@ test("375 px: the sign-in page and the new screens do not scroll sideways; the d
   }
 
   await page.getByRole("button", { name: "Open navigation" }).click()
-  const nav = await openArea(page, "Rates & Contracts")
+  const nav = await openArea(page, "Contracts")
   expect(await noHorizontalScroll(page)).toBe(true)
   await nav.getByRole("link", { name: "Price periods", exact: true }).click()
   await expect(page).toHaveURL(/\/tex\/rates\/periods$/)

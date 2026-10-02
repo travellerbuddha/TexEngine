@@ -1,32 +1,33 @@
 import { Link, useLocation } from "react-router-dom"
 import { cn } from "../../../../lib/utils"
-import { useSession } from "../../../lib/session"
 import { useTexT } from "../../../i18n"
+import { RULE_SLUGS } from "../../../shell/nav"
+import { InventoryNav } from "../../inventory/InventoryNav"
 import { POLICY_KINDS } from "../policies/config"
 
-/** Sub-navigation of the Rates & Contracts area (R-35): contracts (and their versions and
- * tables, G-64), restrictions, selling policies. */
+/** In-page navigation of the pages under /tex/rates, by the area each page belongs to in the side
+ * navigation (UX revision 2026-10): the selling rules show their sibling rules as tabs; the
+ * restrictions list shows the rates & availability views; contracts (with their own view pills)
+ * and promotions show none. One strip of twelve tabs that mixed daily work with set-up is gone;
+ * every page is still reachable from the side navigation and the command palette. */
 export function RatesNav() {
   const { t } = useTexT()
-  const { can } = useSession()
   const { pathname } = useLocation()
   const path = pathname.replace(/\/+$/, "")
-  // contracts, their versions and the tables of versions are one section (ContractViews)
-  const contractViews = ["/tex/rates/contracts", "/tex/rates/versions", "/tex/rates/periods", "/tex/rates/occupancy", "/tex/rates/rate-plans"]
-  const items = [
-    { to: "/tex/rates", label: t("rates.nav.contracts"), active: path.endsWith("/tex/rates") || contractViews.some((v) => path.includes(v)) },
-    // the restrictions list needs price.view, as the grid (the navigation's rule, nav.ts)
-    ...(can("price.view") ? [{ to: "/tex/rates/restrictions", label: t("core.nav.sub.restrictions"), active: path.includes("/tex/rates/restrictions") }] : []),
-    ...POLICY_KINDS.map((k) => {
-      const to = `/tex/rates/policies/${k.slug}`
-      return { to, label: t(k.navLabel), active: path.includes(to) }
+  if (path.includes("/tex/rates/restrictions")) return <InventoryNav />
+  const rules = [
+    ...RULE_SLUGS.map((slug) => {
+      const kind = POLICY_KINDS.find((k) => k.slug === slug)
+      const to = `/tex/rates/policies/${slug}`
+      return { to, label: t(kind?.navLabel ?? slug), active: path === to || path.startsWith(`${to}/`) }
     }),
     { to: "/tex/rates/fx-rates", label: t("rates.nav.fx_rates"), active: path.includes("/tex/rates/fx-rates") },
   ]
+  if (!rules.some((r) => r.active)) return null
   return (
     <nav aria-label={t("rates.nav.label")} className="mb-4 overflow-x-auto border-b border-zinc-200">
       <ul className="flex min-w-max gap-1">
-        {items.map((it) => (
+        {rules.map((it) => (
           <li key={it.to}>
             <Link
               to={it.to}

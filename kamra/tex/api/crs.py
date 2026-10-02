@@ -162,16 +162,19 @@ def reservations(property: str | None = None, q: str | None = None, status: str 
 	if int(pending_only or 0):
 		cond.append("r.tex_guest_change_pending = 1")
 	if q:
+		# the channel's own reference too (an OTA's booking number, UX revision 2026-10): staff are
+		# often given only that one
 		cond.append("(r.name LIKE %(q)s OR r.guest_name LIKE %(q)s OR r.tex_booking LIKE %(q)s "
-		            "OR g.email LIKE %(q)s OR g.phone LIKE %(q)s)")
+		            "OR g.email LIKE %(q)s OR g.phone LIKE %(q)s OR b.external_ref LIKE %(q)s)")
 		vals["q"] = f"%{q.strip()[:60]}%"
 	rows = frappe.db.sql(f"""
 		SELECT r.name, r.property, r.status, r.guest, r.guest_name, r.room_type, rt.room_type_name, r.room,
 		       r.check_in_date, r.check_out_date, r.nights, r.adults, r.children, r.tex_booking, r.tex_market,
 		       r.tex_sales_channel, r.tex_board, r.tex_currency, r.tex_total_amount, r.amount_after_tax,
-		       r.tex_guest_change_pending, r.tex_revision_no, r.creation
+		       r.tex_guest_change_pending, r.tex_revision_no, r.creation, b.external_ref AS channel_ref
 		FROM `tabReservation` r
 		LEFT JOIN `tabGuest` g ON g.name = r.guest
+		LEFT JOIN `tabTEX Booking` b ON b.name = r.tex_booking
 		LEFT JOIN `tabRoom Type` rt ON rt.name = r.room_type
 		WHERE {' AND '.join(cond)}
 		ORDER BY r.creation DESC LIMIT %(start)s, %(limit)s""", vals, as_dict=True)  # nosemgrep -- static conditions, values bound
@@ -394,6 +397,17 @@ def ari_bulk_update(property: str, start: str, end: str, room_types=None, weekda
 	                            restrictions=parse(restrictions, None), inventory=parse(inventory, None),
 	                            rate=parse(rate, None), channel_scope=channel_scope or None,
 	                            hotel_level=bool(as_int(hotel_level, 0)))
+
+
+@frappe.whitelist(methods=["POST"])
+def ari_rate_changes(property: str, contract: str, changes, apply: int = 0):
+	"""Several rate edits of the rates & availability grid as one edit of the contract's draft
+	(UX revision 2026-10): ``changes`` = [{room_types, start, end, op, value}], each night once.
+	Without ``apply``: what they would do (each room's price now and after, the periods the draft
+	would gain, the errors that would refuse it); nothing is written. With ``apply``: written to the
+	draft in one transaction, all or nothing, and audited. Needs ``contract.edit`` at the hotel."""
+	scope.assert_property(property)
+	return grid_svc.rate_changes(property, contract, parse(changes, None), apply=bool(as_int(apply, 0)))
 
 
 # ─── limited extras (G-19) ───────────────────────────────────────────────

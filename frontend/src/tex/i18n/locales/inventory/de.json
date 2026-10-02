@@ -177,9 +177,9 @@
   "one": "{count} Tag",
   "other": "{count} Tage"
  },
- "inventory.nav.extras": "Extras",
- "inventory.nav.label": "Kontingent-Ansichten",
- "inventory.nav.rooms": "Zimmer",
+ "inventory.nav.extras": "Begrenzte Extras",
+ "inventory.nav.label": "Ansichten Preise & Verfügbarkeit",
+ "inventory.nav.rooms": "Kalender",
  "inventory.next": {
   "one": "Nächster Tag",
   "other": "Nächste {count} Tage"
@@ -239,7 +239,7 @@
  "inventory.short.stop": "STOP",
  "inventory.show_rows": "Zeilen anzeigen",
  "inventory.start": "Startdatum",
- "inventory.subtitle": "Verfügbarkeit, Restriktionen und Vertragspreise pro Tag. Zum Bearbeiten eine Zelle anklicken oder Enter drücken.",
+ "inventory.subtitle": "Zimmer und Nächte auswählen, dann einen Preis eingeben oder den Verkauf schließen.",
  "inventory.today": "Heute",
  "inventory.v.closed": "Gesperrt",
  "inventory.v.closed_sale": "Für den Verkauf geschlossen",
@@ -257,5 +257,167 @@
  "inventory.window.from": "Verkauf ab {d}",
  "inventory.window.max_advance": "höchstens {n} Tage im Voraus",
  "inventory.window.min_advance": "mindestens {n} Tage im Voraus",
- "inventory.window.to": "Verkauf bis {d}"
+ "inventory.window.to": "Verkauf bis {d}",
+ "inventory.nav.restrictions": "Restriktionsliste",
+ "inventory.view.label": "Ansicht",
+ "inventory.view.daily": "Täglich: Preis, freie Zimmer, Verkauf",
+ "inventory.view.all": "Alle Restriktionen",
+ "inventory.view.custom": "Benutzerdefiniert",
+ "inventory.scope.price_source": "Preisquelle (Vertrag)",
+ "inventory.scope.prices": "Preise",
+ "inventory.scope.prices_from": "Vertrag {c} · Markt {m} · {ccy} · {basis}",
+ "inventory.scope.on_sale": "Im Verkauf: {v}",
+ "inventory.scope.none_on_sale": "Keine Version im Verkauf",
+ "inventory.scope.draft": "Entwurf {v} nicht veröffentlicht",
+ "inventory.scope.restrictions_now": "Schließen und Restriktionen gelten sofort",
+ "inventory.draft_cells": {
+  "one": "{count} sichtbarer Preis ist im Entwurf {v} geändert und noch nicht im Verkauf; Gäste buchen weiter {live}.",
+  "other": "{count} sichtbare Preise sind im Entwurf {v} geändert und noch nicht im Verkauf; Gäste buchen weiter {live}."
+ },
+ "inventory.hotel_level": "Alle Zimmertypen",
+ "inventory.select_day": "{day}: alle Zimmer auswählen",
+ "inventory.select_room": "{room}: alle sichtbaren Nächte auswählen",
+ "inventory.unit.PERSON": "pro Person",
+ "inventory.unit.ROOM": "pro Zimmer",
+ "inventory.entry.cell": "{room}, {day}: Preis",
+ "inventory.entry.invalid": "„{text}“ ist nicht lesbar",
+ "inventory.entry.err.SYNTAX": "einen Preis (120), eine Änderung in Prozent (+10%, -5%) oder einen Betrag (+20, -20) eingeben",
+ "inventory.entry.err.PLACES": "zu viele Nachkommastellen",
+ "inventory.entry.err.DIGITS": "zu viele Ziffern",
+ "inventory.entry.err.RANGE": "die Zahl ist zu groß",
+ "inventory.entry.err.AMBIGUOUS": "1500 für eintausendfünfhundert oder 1.5 für eineinhalb eingeben",
+ "inventory.entry.err.OP_NOT_ALLOWED": "eine Formel gehört in den Vertrag: Preis oder Änderung eingeben",
+ "inventory.entry.err.NOT_A_RATE": "eine Formel gehört in den Vertrag: Preis oder Änderung eingeben",
+ "inventory.entry.err.PERCENT_SHARE": "erhöhen oder senken? +10% oder -10% eingeben",
+ "inventory.entry.err.OUTSIDE": "außerhalb des Rasters",
+ "inventory.entry.read.ABSOLUTE": "Auf {v} {ccy} setzen",
+ "inventory.entry.read.PCT_UP": "Um {v} % erhöhen",
+ "inventory.entry.read.PCT_DOWN": "Um {v} % senken",
+ "inventory.entry.read.ADD": "Um {v} {ccy} erhöhen",
+ "inventory.entry.read.SUBTRACT": "Um {v} {ccy} senken",
+ "inventory.short.unsaved": "nicht gespeichert",
+ "inventory.aria.unsaved": "nicht gespeicherte Änderung {entry}",
+ "inventory.actions.label": "Auswahl und Änderungen",
+ "inventory.sel.count": {
+  "one": "{count} Zelle ausgewählt",
+  "other": "{count} Zellen ausgewählt"
+ },
+ "inventory.sel.rooms": {
+  "one": "{count} Zimmer",
+  "other": "{count} Zimmer"
+ },
+ "inventory.sel.nights": {
+  "one": "{count} Nacht",
+  "other": "{count} Nächte"
+ },
+ "inventory.sel.details": "Zelldetails…",
+ "inventory.sel.clear": "Auswahl aufheben",
+ "inventory.rates.title": "Preis",
+ "inventory.rates.entry_label": {
+  "one": "Neuer Preis oder Änderung für {count} Zelle",
+  "other": "Neuer Preis oder Änderung für {count} Zellen"
+ },
+ "inventory.rates.entry_ph": "120 · +10% · -5% · +20",
+ "inventory.rates.entry_hint": "Preis, %-Änderung oder Betrag; auch direkt in eine Preiszelle",
+ "inventory.rates.entry_cells": {
+  "one": "{count} Preiszelle",
+  "other": "{count} Preiszellen"
+ },
+ "inventory.rates.entry_apply": "Für Auswahl eintragen",
+ "inventory.rates.needs_contract": "Oben einen Vertrag (Preisquelle) wählen, um Preise zu sehen und zu ändern.",
+ "inventory.rates.needs_rooms": "Preise gelten pro Zimmertyp: Zimmerzellen auswählen.",
+ "inventory.rates.no_rights": "Ihre Rolle kann diese Preise sehen, aber nicht ändern.",
+ "inventory.rates.saved": {
+  "one": "{count} Preis im Entwurf {v} gespeichert — zum Verkauf veröffentlichen",
+  "other": "{count} Preise im Entwurf {v} gespeichert — zum Verkauf veröffentlichen"
+ },
+ "inventory.rates.new_draft": "einen neuen Entwurf",
+ "inventory.rates.unsaved_badge": "Nicht gespeichert",
+ "inventory.rates.unsaved": {
+  "one": "{count} Preisänderung noch nicht gespeichert",
+  "other": "{count} Preisänderungen noch nicht gespeichert"
+ },
+ "inventory.rates.target": "→ Vertrag {c}, {v} (erst nach Veröffentlichung im Verkauf)",
+ "inventory.rates.undo": "Rückgängig",
+ "inventory.rates.discard": "Alle verwerfen",
+ "inventory.rates.preview": "Neue Preise ansehen",
+ "inventory.rates.save": "Im Entwurf speichern",
+ "inventory.rates.save_publish": "Speichern und veröffentlichen…",
+ "inventory.rates.preview_hint": "Die Vorschau zeigt vor dem Speichern den aktuellen und den neuen Preis jedes Zimmers, vom Server berechnet.",
+ "inventory.rates.refused_title": "Diese Änderungen würden abgelehnt",
+ "inventory.rates.preview_caption": "Neue Preise nach Zimmer und Nächten",
+ "inventory.rates.col_room": "Zimmer",
+ "inventory.rates.col_nights": "Nächte",
+ "inventory.rates.col_now_live": "Jetzt (im Verkauf)",
+ "inventory.rates.col_now_draft": "Jetzt (Entwurf)",
+ "inventory.rates.col_new": "Neu",
+ "inventory.rates.basis.PERSON": "Grundpreis pro Person",
+ "inventory.rates.basis.ROOM": "Preis pro Zimmer",
+ "inventory.rates.new_periods": {
+  "one": "der Entwurf erhält {count} Zeitraum für diese Nächte",
+  "other": "der Entwurf erhält {count} Zeiträume für diese Nächte"
+ },
+ "inventory.rates.no_new_periods": "bestehende Zeiträume werden geändert",
+ "inventory.rates.not_live": "Gäste sehen die neuen Preise erst nach der Veröffentlichung des Entwurfs.",
+ "inventory.rates.open_contract": "Vertrag öffnen",
+ "inventory.rates.entered": {
+  "one": "Für {count} Zelle eingetragen — ansehen, dann speichern",
+  "other": "Für {count} Zellen eingetragen — ansehen, dann speichern"
+ },
+ "inventory.rates.copied": {
+  "one": "{count} Zelle kopiert",
+  "other": "{count} Zellen kopiert"
+ },
+ "inventory.rates.pasted": {
+  "one": "{count} Preis eingefügt — ansehen, dann speichern",
+  "other": "{count} Preise eingefügt — ansehen, dann speichern"
+ },
+ "inventory.rates.paste_on_price": "Preise in eine Preiszeile einfügen (der Block füllt Zimmer nach unten, Nächte nach rechts).",
+ "inventory.rates.paste_outside": "Der Block ({rows} × {cols}) passt ab dieser Zelle nicht: nichts eingefügt.",
+ "inventory.rates.paste_bad": "„{text}“: {error}. Nichts eingefügt.",
+ "inventory.sale.title": "Verkauf",
+ "inventory.sale.close": "Verkauf schließen",
+ "inventory.sale.open": "Verkauf öffnen",
+ "inventory.sale.more": "Mindestaufenthalt und weitere Restriktionen…",
+ "inventory.sale.nothing": "Nichts zu ändern: Die gewählten Nächte sind bereits so.",
+ "inventory.sale.done_close": {
+  "one": "Verkauf für {count} Zelle geschlossen",
+  "other": "Verkauf für {count} Zellen geschlossen"
+ },
+ "inventory.sale.done_open": {
+  "one": "Verkauf für {count} Zelle geöffnet",
+  "other": "Verkauf für {count} Zellen geöffnet"
+ },
+ "inventory.sale.undone": "Rückgängig gemacht: die vorherigen Werte gelten wieder",
+ "inventory.sale.confirm_close": "Verkauf schließen",
+ "inventory.sale.confirm_open": "Verkauf öffnen",
+ "inventory.sale.confirm_close_n": {
+  "one": "Verkauf für {count} Zelle schließen?",
+  "other": "Verkauf für {count} Zellen schließen?"
+ },
+ "inventory.sale.confirm_open_n": {
+  "one": "Verkauf für {count} Zelle öffnen?",
+  "other": "Verkauf für {count} Zellen öffnen?"
+ },
+ "inventory.sale.where": "Für welche Verträge",
+ "inventory.sale.only_contract": "Nur Vertrag {c}",
+ "inventory.sale.all_contracts": "Alle Verträge des Hotels",
+ "inventory.sale.also": "Außerdem beschränkt auf: {scope} (Filter oben).",
+ "inventory.sale.already_closed": {
+  "one": "{count} davon ist bereits geschlossen.",
+  "other": "{count} davon sind bereits geschlossen."
+ },
+ "inventory.sale.inherited": {
+  "one": "{count} Zelle ist auf einer weiteren Ebene geschlossen (z. B. ganzes Hotel): hier aufheben öffnet sie nicht.",
+  "other": "{count} Zellen sind auf einer weiteren Ebene geschlossen (z. B. ganzes Hotel): hier aufheben öffnet sie nicht."
+ },
+ "inventory.sale.override": "Hier trotzdem öffnen (Ausnahme von der weiteren Schließung)",
+ "inventory.sale.immediate": "Gilt sofort für neue Suchen und Buchungen. Bestehende Buchungen bleiben unverändert.",
+ "inventory.sale.undo": "Rückgängig",
+ "inventory.scope.restrictions_label": "Verkauf & Restriktionen",
+ "inventory.legend.unsaved": "Preisänderung noch nicht gespeichert",
+ "inventory.legend.select": "auswählen (auch Klick, Umschalt+Klick, Ziehen, Zimmername oder Tag)",
+ "inventory.legend.type": "in eine Preiszelle tippen: Preis oder Änderung",
+ "inventory.legend.clipboard": "Preise mit einer Tabelle kopieren und einfügen",
+ "inventory.legend.details": "alle Einstellungen einer Zelle"
 }

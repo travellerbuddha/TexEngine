@@ -234,9 +234,9 @@
  "res.list.none_hint": "Andere Filter versuchen oder zurücksetzen.",
  "res.list.paging": "Seiten",
  "res.list.prev": "Zurück",
- "res.list.search_placeholder": "Nummer, Gast, E-Mail oder Telefon",
+ "res.list.search_placeholder": "Nummer, Gast, E-Mail, Telefon oder Kanalreferenz",
  "res.list.showing": "{from}–{to} angezeigt",
- "res.list.subtitle": "Alle Reservierungen Ihrer Hotels, neueste zuerst.",
+ "res.list.subtitle": "Reservierungen des gewählten Hotels, neueste zuerst. „Alle meine Hotels“ durchsucht alle.",
  "res.mod.applied": "Reservierung aktualisiert — {rev}",
  "res.mod.apply": "Änderung übernehmen",
  "res.mod.apply_drops": "Mit dieser Änderung entfällt: {extras}.",
@@ -340,5 +340,10 @@
  "res.imported.currency": "Währung",
  "res.imported.reason": "Grund",
  "res.imported.confirm": "Betrag korrigieren",
- "res.imported.done": "Betrag auf {amount} korrigiert"
+ "res.imported.done": "Betrag auf {amount} korrigiert",
+ "res.list.all_hotels_n": "Alle meine Hotels ({count})",
+ "res.list.none_here": "In {hotel} passt nichts. Es könnte eine Reservierung eines anderen Hotels sein.",
+ "res.list.search_all": "In allen meinen Hotels suchen",
+ "res.list.channel_ref": "Die eigene Buchungsnummer des Kanals",
+ "res.list.channel_ref_short": "Kanal-Ref. {ref}"
 }

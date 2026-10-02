@@ -78,7 +78,7 @@ import {
   type Reading,
 } from "./matrixView.ts"
 import { matrixCellId, periodHeaderId } from "./issues.ts"
-import { AddPeriodHeader, PeriodHeader, PeriodStrip } from "./PeriodHeader"
+import { AddPeriodHeader, PeriodHeader, PeriodStrip, SeasonShiftControl } from "./PeriodHeader"
 import { headerPick, RoomRowHeader } from "./RoomRowHeader"
 import { RuleEditorPopover } from "./RuleEditorPopover"
 import { int, str } from "./rows.ts"
@@ -1159,6 +1159,7 @@ export function PriceMatrix({
       {orphans > 0 && <Notice tone="warning">{t("rates.ws.orphans", { count: orphans })}</Notice>}
       {model.rooms.length === 0 && <Notice tone="info">{canEdit ? t("rates.ws.room.none") : t("rates.rooms.empty")}</Notice>}
 
+      <SeasonShiftControl tables={tables} edit={edit} readOnly={readOnly} />
       <PeriodStrip tables={tables} stayFrom={stay?.stay_from} stayTo={stay?.stay_to} />
       <div ref={syncScroll} data-scroll-sync className="max-h-[70vh] overflow-auto rounded-lg border border-zinc-200 bg-white pb-12">
         <div

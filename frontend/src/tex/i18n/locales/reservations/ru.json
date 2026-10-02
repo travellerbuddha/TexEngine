@@ -238,9 +238,9 @@
  "res.list.none_hint": "Попробуйте другие фильтры или сбросьте их.",
  "res.list.paging": "Страницы",
  "res.list.prev": "Назад",
- "res.list.search_placeholder": "Номер, гость, e-mail или телефон",
+ "res.list.search_placeholder": "Номер, гость, e-mail, телефон или номер канала",
  "res.list.showing": "Показаны {from}–{to}",
- "res.list.subtitle": "Все бронирования ваших отелей, сначала новые.",
+ "res.list.subtitle": "Брони выбранного отеля, сначала новые. «Все мои отели» — поиск по всем.",
  "res.mod.applied": "Бронирование обновлено — {rev}",
  "res.mod.apply": "Применить изменение",
  "res.mod.apply_drops": "При применении изменения будут удалены: {extras}.",
@@ -362,5 +362,10 @@
  "res.imported.currency": "Валюта",
  "res.imported.reason": "Причина",
  "res.imported.confirm": "Исправить сумму",
- "res.imported.done": "Сумма исправлена на {amount}"
+ "res.imported.done": "Сумма исправлена на {amount}",
+ "res.list.all_hotels_n": "Все мои отели ({count})",
+ "res.list.none_here": "В {hotel} ничего не найдено. Возможно, это бронь другого отеля.",
+ "res.list.search_all": "Искать во всех моих отелях",
+ "res.list.channel_ref": "Собственный номер брони канала",
+ "res.list.channel_ref_short": "Номер канала {ref}"
 }

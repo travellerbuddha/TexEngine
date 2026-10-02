@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 
 import frappe
 from frappe import _
@@ -24,7 +25,7 @@ from kamra.tex.availability import restrictions as rs
 from kamra.tex.availability.restrictions import FIELDS, RestrictionScope, effective
 from kamra.tex.commercial import contracts
 from kamra.tex.commercial.revisions import as_of
-from kamra.tex.money import quantize, to_str
+from kamra.tex.money import minor_units, quantize, to_str
 from kamra.tex.pricing import ratesplit, validate
 from kamra.tex.pricing import rooms as room_math
 from kamra.tex.pricing.enums import Op
@@ -40,6 +41,8 @@ RESTRICTION_EDIT = {"stop_sell", "stop_sell_mode", "min_los", "max_los", "cta", 
 RESTRICTION_TEXT = {"stop_sell", "stop_sell_mode", "cta", "ctd"}      # blank = "", dates None, the others 0
 RESTRICTION_DATES = {"book_from", "book_to"}
 INVENTORY_EDIT = {"closed", "manual_adjustment", "oversell_limit"}
+RATE_OPS = ("ABSOLUTE", "ADJUST_PERCENT", "ADD", "SUBTRACT")
+MAX_RATE_CHANGES = 400      # groups of nights in one grid edit (a 31-day month of 12 rooms, each night its own)
 
 
 def _days(start: date, end: date, weekdays: list[int] | None) -> list[date]:
@@ -168,7 +171,10 @@ def grid(property: str, start, days: int = 14, contract: str | None = None, mark
 	        "contract": contract, "channel_scope": channel_scope, "version": version, "draft": draft,
 	        "rates_hidden": not show_cost,
 	        "basis": (terms or draft_terms).basis.value if (terms or draft_terms) else None,
-	        "currency": (terms or draft_terms).currency if (terms or draft_terms) else None, "rows": out_rows}
+	        "currency": (terms or draft_terms).currency if (terms or draft_terms) else None,
+	        # how many decimals a typed price has in that currency (the grid reads "1.500" by it)
+	        "minor_units": minor_units((terms or draft_terms).currency) if (terms or draft_terms) else 2,
+	        "rows": out_rows}
 
 
 # ─── write: restrictions & inventory ─────────────────────────────────────
@@ -332,38 +338,20 @@ def _set_unit(v, room_type: str, code: str, unit) -> None:
 		v.append("period_rates", {"room_type": room_type, "period_code": code, "op": "ABSOLUTE", "value": unit})
 
 
-def apply_rate_change(contract: str, room_types: list[str], start: date, end: date, weekdays: list[int] | None,
-                      op: str, value) -> dict:
-	"""The draft's rates changed as ``ratesplit.plan`` says (O-9, G-47, ADR-069): a period that
-	prices edited nights only is edited in place, any other gets one clone per part. The draft is
-	validated before and after: a change that adds an ERROR is refused and nothing is saved."""
-	prop = frappe.db.get_value("TEX Contract", contract, "property")
-	scope.require("contract.edit", prop)
-	if op not in ("ABSOLUTE", "ADJUST_PERCENT", "ADD", "SUBTRACT"):
-		frappe.throw(_("Rate change must be absolute, a percentage or an amount."))
-	draft, _active = _editable_version(contract)
-	if not draft:
-		draft = contracts.new_draft(contract)
-	v = frappe.get_doc("TEX Contract Version", draft)
-	terms = contracts.build_terms(v)
-	try:
-		steps = ratesplit.plan(terms, getdate(start), getdate(end), weekdays, room_types, Op(op), value)
-	except ratesplit.RateSplitError as e:
-		if e.code == "NO_PERIOD":
-			frappe.throw(_("No stay period covers {0}; add one first.").format(e.ref["night"]))
-		if e.code == "NO_NIGHTS":
-			frappe.throw(_("No night of this range is on the chosen weekdays."))
-		frappe.throw(_("A rate cannot be negative."))
-	before = validate.validate_terms(terms)
-
-	taken = {(p.period_code or "").strip() for p in v.periods}
-	edited, cells, alias = [], [], {}
+def _write_plan(v, steps, taken: set[str], alias: dict[str, str]) -> tuple[list[str], list[str]]:
+	"""Write a ``ratesplit.plan`` into the draft document ``v`` (in memory): a period that prices
+	edited nights only is edited in place, any other gets its clone (with the source's rules), and
+	the selected rooms their new ABSOLUTE unit. ``taken`` (period codes) and ``alias`` (clone →
+	the period it was cut from, through earlier clones) are updated. → (edited period codes, the
+	clones' codes in step order: what ``ratesplit.apply`` names them in the terms)."""
+	edited, clones = [], []
 	for idx, s in enumerate(steps):
 		code = s.source.code
 		if s.clone:
 			code = ratesplit.clone_code(s, idx, taken)
 			taken.add(code)
-			alias[code] = s.source.code
+			clones.append(code)
+			alias[code] = alias.get(s.source.code, s.source.code)
 			v.append("periods", {"period_code": code, "period_name": ratesplit.clone_name(s),
 			                     "start_date": s.start, "end_date": s.end,
 			                     "weekdays": ",".join(WD[i] for i in sorted(s.weekdays)) if s.weekdays else None,
@@ -372,10 +360,44 @@ def apply_rate_change(contract: str, room_types: list[str], start: date, end: da
 			_copy_rules(v, s.source.code, code, {u.room_type for u in s.units})
 		for u in s.units:
 			_set_unit(v, u.room_type, code, u.new)
-			# the draft's unit before and after, per room and part (the audit's cells)
-			cells += [(f"{u.room_type}{SEP}{a}/{b}", {"unit": to_str(u.current)}, {"unit": to_str(u.new)})
-			          for a, b in s.parts]
 		edited.append(code)
+	return edited, clones
+
+
+def _plan_or_throw(terms, start, end, weekdays, room_types, op, value):
+	try:
+		return ratesplit.plan(terms, getdate(start), getdate(end), weekdays, room_types, Op(op), value)
+	except ratesplit.RateSplitError as e:
+		if e.code == "NO_PERIOD":
+			frappe.throw(_("No stay period covers {0}; add one first.").format(e.ref["night"]))
+		if e.code == "NO_NIGHTS":
+			frappe.throw(_("No night of this range is on the chosen weekdays."))
+		frappe.throw(_("A rate cannot be negative."))
+
+
+def apply_rate_change(contract: str, room_types: list[str], start: date, end: date, weekdays: list[int] | None,
+                      op: str, value) -> dict:
+	"""The draft's rates changed as ``ratesplit.plan`` says (O-9, G-47, ADR-069): a period that
+	prices edited nights only is edited in place, any other gets one clone per part. The draft is
+	validated before and after: a change that adds an ERROR is refused and nothing is saved."""
+	prop = frappe.db.get_value("TEX Contract", contract, "property")
+	scope.require("contract.edit", prop)
+	if op not in RATE_OPS:
+		frappe.throw(_("Rate change must be absolute, a percentage or an amount."))
+	draft, _active = _editable_version(contract)
+	if not draft:
+		draft = contracts.new_draft(contract)
+	v = frappe.get_doc("TEX Contract Version", draft)
+	terms = contracts.build_terms(v)
+	steps = _plan_or_throw(terms, start, end, weekdays, room_types, op, value)
+	before = validate.validate_terms(terms)
+
+	taken = {(p.period_code or "").strip() for p in v.periods}
+	alias: dict[str, str] = {}
+	edited, _clones = _write_plan(v, steps, taken, alias)
+	# the draft's unit before and after, per room and part (the audit's cells)
+	cells = [(f"{u.room_type}{SEP}{a}/{b}", {"unit": to_str(u.current)}, {"unit": to_str(u.new)})
+	         for s in steps for u in s.units for a, b in s.parts]
 
 	frappe.db.savepoint("tex_grid_rate")
 	v.flags.tex_audit_reason = "ARI grid rate change"
@@ -388,3 +410,134 @@ def apply_rate_change(contract: str, room_types: list[str], start: date, end: da
 	# ``_cells`` is for the caller's audit only, never part of the response
 	return {"draft": draft, "periods": edited, "note": _("Saved to the draft — publish to sell at the new rates."),
 	        "_cells": cells}
+
+
+# ─── write: several rate edits as one (UX revision 2026-10) ──────────────
+
+
+def _rate_cells(terms, changes) -> list[dict]:
+	"""Each change planned on ``terms`` (the draft as it is, or the version a new draft copies) and
+	read as the absolute units it sets, per room and run of nights. A relative change (+10 %) is
+	worked out from the price every night has before ANY of the changes: a derived room selected
+	with its base is changed once, whatever the order of the changes. A night changed twice is
+	refused (the grid sends each changed cell once)."""
+	if not isinstance(changes, list) or not changes:
+		frappe.throw(_("Choose the prices to change."))
+	if len(changes) > MAX_RATE_CHANGES:
+		frappe.throw(_("Change at most {0} groups of prices at once.").format(MAX_RATE_CHANGES))
+	out, seen = [], set()
+	for ch in changes:
+		if not isinstance(ch, dict):
+			frappe.throw(_("Choose the prices to change."))
+		op, value = ch.get("op"), ch.get("value")
+		if op not in RATE_OPS:
+			frappe.throw(_("Rate change must be absolute, a percentage or an amount."))
+		try:
+			amount = Decimal(str(value).strip())
+		except (InvalidOperation, ValueError):
+			amount = None
+		if amount is None or not amount.is_finite() or value is None or str(value).strip() == "":
+			frappe.throw(_("Rate change: a number is required."))
+		rts = ch.get("room_types")
+		if not isinstance(rts, list) or not rts or not all(isinstance(r, str) for r in rts):
+			frappe.throw(_("Choose room types of this contract."))
+		for rt in rts:
+			if rt not in terms.rooms:
+				frappe.throw(_("{0} is not a room of this contract.").format(rt))
+		# never getdate(None): it is today
+		if not ch.get("start") or not ch.get("end"):
+			frappe.throw(_("Choose the dates to change."))
+		try:
+			start, end = getdate(ch.get("start")), getdate(ch.get("end"))
+		except Exception:
+			frappe.throw(_("Choose the dates to change."))
+		if not start or not end or end < start or (end - start).days > 400:
+			frappe.throw(_("Choose a date range of at most 400 days."))
+		for s in _plan_or_throw(terms, start, end, None, rts, op, amount):
+			for u in s.units:
+				for a, b in s.parts:
+					d = a
+					while d <= b:
+						if (u.room_type, d) in seen:
+							frappe.throw(_("{0} on {1} is changed twice: change each night once.").format(
+								u.room_type, d.isoformat()))
+						seen.add((u.room_type, d))
+						d += timedelta(days=1)
+					out.append({"room_type": u.room_type, "start": a, "end": b, "current": u.current, "new": u.new})
+	return out
+
+
+def _groups(cells: list[dict]) -> list[tuple[date, date, Decimal, list[str]]]:
+	"""The cells as absolute edits: one per run of nights and new unit, with every room it sets."""
+	groups: dict[tuple, list[str]] = {}
+	for c in cells:
+		groups.setdefault((c["start"], c["end"], c["new"]), []).append(c["room_type"])
+	return [(a, b, new, rts) for (a, b, new), rts in groups.items()]
+
+
+def rate_changes(property: str, contract: str, changes, *, apply: bool = False) -> dict:
+	"""Several rate edits of the grid (typed cells, a pasted block, "+10 %" on a selection) as ONE
+	edit of the contract's draft (UX revision 2026-10): every changed night is priced from the
+	prices before any edit, then written as absolute units through the same period plan as
+	``apply_rate_change`` (in place, or one clone per part). Without ``apply`` nothing is written:
+	the answer says what each room's price is now and would be, how many periods the draft would
+	gain and which errors it would get (an edit that adds an ERROR is refused on apply). With
+	``apply`` the draft (made from the latest version when there is none) is saved once, checked
+	once and audited once: all of it or nothing. Nothing is sold at the new prices until the draft
+	is published."""
+	if frappe.db.get_value("TEX Contract", contract, "property") != property:
+		frappe.throw(_("The contract belongs to another hotel."))
+	scope.require("contract.edit", property)
+	draft, _active = _editable_version(contract)
+	creates = not draft
+	if apply and creates:
+		draft = contracts.new_draft(contract)
+	source = draft or frappe.db.get_value("TEX Contract Version", {"contract": contract}, "name",
+	                                      order_by="version_no desc")
+	if not source:
+		frappe.throw(_("This contract has no version yet: add its rooms and periods first."))
+	v = frappe.get_doc("TEX Contract Version", source)
+	terms0 = contracts.build_terms(v)
+	cells = _rate_cells(terms0, changes)
+	before = validate.validate_terms(terms0)
+
+	# the same plan, written into the terms (and, on apply, into the draft) group by group
+	terms, alias, taken, new_periods, edited = terms0, {}, {(p.period_code or "").strip() for p in v.periods}, 0, []
+	for a, b, new, rts in _groups(cells):
+		steps = _plan_or_throw(terms, a, b, None, rts, "ABSOLUTE", new)
+		new_periods += sum(1 for s in steps if s.clone)
+		if apply:
+			codes, clones = _write_plan(v, steps, taken, alias)
+			edited += codes
+			terms, _al = ratesplit.apply(terms, steps, clones)
+		else:
+			terms, al = ratesplit.apply(terms, steps)
+			for k, src in al.items():
+				alias[k] = alias.get(src, src)
+	answer = {
+		"contract": contract, "draft": draft, "creates_draft": creates, "based_on": source,
+		"currency": terms0.currency, "basis": terms0.basis.value, "new_periods": new_periods,
+		"cells": [{"room_type": c["room_type"], "start": c["start"].isoformat(), "end": c["end"].isoformat(),
+		           "current": to_str(c["current"]), "new": to_str(c["new"])} for c in cells],
+	}
+	if not apply:
+		added = ratesplit.added_errors(before, validate.validate_terms(terms), alias)
+		return {**answer, "errors": [i.message for i in added[:10]], "applied": False}
+
+	frappe.db.savepoint("tex_grid_rates")
+	v.flags.tex_audit_reason = "ARI grid rate change"
+	v.save(ignore_permissions=True)
+	added = ratesplit.added_errors(before, validate.validate_terms(contracts.build_terms(v)), alias)
+	if added:
+		frappe.db.rollback(save_point="tex_grid_rates")
+		frappe.throw(_("This rate change would give the draft errors: {0}").format(
+			"; ".join(i.message for i in added[:5])), title=_("Rate change refused"))
+	audit("grid.rate_changes", property=property, reference_doctype="TEX Contract Version", reference_name=draft,
+	      new={"contract": contract, "draft": draft, "created_draft": creates, "periods": edited,
+	           "changes": len(changes), "nights": sum((c["end"] - c["start"]).days + 1 for c in cells),
+	           "collections": {"rates": cells_diff([(f"{c['room_type']}{SEP}{c['start']}/{c['end']}",
+	                                                  {"unit": to_str(c["current"])}, {"unit": to_str(c["new"])})
+	                                                 for c in cells])}})
+	return {**answer, "periods": edited, "errors": [], "applied": True}
+
+

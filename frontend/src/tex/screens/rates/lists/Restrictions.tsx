@@ -9,7 +9,7 @@ import { useSiteToday } from "../../../lib/siteDay"
 import { useTexT } from "../../../i18n"
 import { Badge, Button, Card, DataTable, EmptyState, ErrorState, Field, Input, Notice, PageHeader, Select, Toolbar } from "../../../ui"
 import { DateRange } from "../components/common"
-import { RatesNav } from "../components/RatesNav"
+import { InventoryNav } from "../../inventory/InventoryNav"
 import { useLookups } from "../lib/util"
 import type { RestrictionList, RestrictionRange } from "./types"
 
@@ -86,11 +86,10 @@ export default function Restrictions() {
 
   return (
     <>
-      <RatesNav />
       <PageHeader
         title={t("core.nav.sub.restrictions")}
         subtitle={t("rates.lists.restrictions.subtitle")}
-        crumbs={[{ label: t("core.nav.rates"), to: "/tex/rates" }, { label: t("core.nav.sub.restrictions") }]}
+        crumbs={[{ label: t("core.nav.inventory"), to: "/tex/inventory" }, { label: t("core.nav.sub.restrictions") }]}
         actions={
           can("restriction.edit") && (
             <Button variant="secondary" icon={<CalendarRange className="size-4" aria-hidden />} onClick={() => navigate("/tex/inventory")}>
@@ -99,6 +98,7 @@ export default function Restrictions() {
           )
         }
       />
+      <InventoryNav />
       <Toolbar>
         <Field label={t("core.label.from")} className="w-[calc(50%-0.375rem)] sm:w-40" error={rangeError ?? undefined}>
           <Input type="date" value={a} onChange={(e) => e.target.value && setFrom(e.target.value)} />
