@@ -96,6 +96,7 @@ class TestVerdicts(unittest.TestCase):
 		self.assertEqual((out["status"], out["issues"]),
 		                 (c.WARN, [{"reason": "job_waiting", "status": c.WARN,
 		                            "params": {"job": "outbox_every_5_minutes", "minutes": 25}}]))
+		self.assertEqual(out["since"], c._stamp(NOW - timedelta(minutes=25)))   # queued then (round 2)
 		self.assertEqual(c.jobs_check(fresh, NOW, live=True, waiting={job: 61})["status"], c.FAIL)
 		self.assertEqual(c.describe(out["issues"][0]),
 		                 "The TEX job outbox_every_5_minutes has waited 25 minutes for a background worker.")

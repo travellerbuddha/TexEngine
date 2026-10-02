@@ -117,14 +117,21 @@ class TestQueueProbe(unittest.TestCase):
 			j.get_status.return_value = state
 			return j
 
+		from rq.exceptions import NoSuchJobError
+
 		key = "kamra.tex.scheduler.outbox_every_5_minutes"
+		conn = mock.Mock()
 		for found, waiting in ((job(JobStatus.QUEUED, 25), {key: 25}), (job(JobStatus.STARTED, 25), {}),
-		                       (job(JobStatus.FINISHED, 25), {}), (None, {})):
-			with mock.patch("frappe.utils.background_jobs.get_job", return_value=found) as get:
+		                       (job(JobStatus.FINISHED, 25), {}), (NoSuchJobError("gone"), {})):
+			fetch = {"side_effect": found} if isinstance(found, Exception) else {"return_value": found}
+			with mock.patch.object(status, "_redis_once", return_value=conn), \
+					mock.patch("frappe.utils.background_jobs.create_job_id", lambda j: f"site||{j}"), \
+					mock.patch("rq.job.Job.fetch", **fetch) as get:
 				self.assertEqual(status.waiting_jobs(), waiting)
-			get.assert_called_once_with("tex_pms_outbox")
-		with mock.patch("frappe.utils.background_jobs.get_job", side_effect=ConnectionError("no redis")):
-			self.assertEqual(status.waiting_jobs(), {})                  # never raises: the workers check says it
+			get.assert_called_once_with("site||tex_pms_outbox", connection=conn)
+		# Redis unreachable: one attempt (never Frappe's five), never raises: the workers check says it
+		with mock.patch.object(status, "_redis_once", side_effect=ConnectionError("no redis")):
+			self.assertEqual(status.waiting_jobs(), {})
 
 
 if __name__ == "__main__":

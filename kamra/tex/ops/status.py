@@ -91,12 +91,18 @@ def waiting_jobs() -> dict[str, int]:
 
 	out = {}
 	try:
-		from frappe.utils.background_jobs import get_job
-		from rq.job import JobStatus
+		from frappe.utils.background_jobs import create_job_id
+		from rq.exceptions import NoSuchJobError
+		from rq.job import Job, JobStatus
 
+		conn = _redis_once()
+		conn.ping()
 		for method, job_id in QUEUED_WORK.items():
-			job = get_job(job_id)
-			if job is None or job.get_status(refresh=False) != JobStatus.QUEUED or not job.enqueued_at:
+			try:
+				job = Job.fetch(create_job_id(job_id), connection=conn)
+			except NoSuchJobError:
+				continue
+			if job.get_status(refresh=False) != JobStatus.QUEUED or not job.enqueued_at:
 				continue
 			at = job.enqueued_at if job.enqueued_at.tzinfo else job.enqueued_at.replace(tzinfo=UTC)
 			out[method] = int((datetime.now(UTC) - at).total_seconds() // 60)
@@ -118,21 +124,28 @@ def _job_errors(now) -> dict:
 	return C.job_errors_check(int(row.n or 0), since=row.since)
 
 
+def _redis_once():
+	"""This bench's Redis queue connection, one attempt (Frappe's own retries five times, a second apart): a probe
+	of an unreachable Redis never holds the status page."""
+	from frappe.utils.background_jobs import get_redis_conn
+
+	connect = getattr(get_redis_conn, "retry_with", None)
+	if connect:
+		from tenacity import stop_after_attempt
+
+		return connect(stop=stop_after_attempt(1))()
+	return get_redis_conn()
+
+
 def queue_probe() -> dict:
 	"""{reachable, workers, backlog, unserved} of this bench's RQ queues (``unserved``: the TEX queues no worker
 	listens on). Never raises: an unreachable Redis is a finding, not an error. One connection attempt (Frappe
 	retries five times)."""
 	try:
-		from frappe.utils.background_jobs import generate_qname, get_queue_list, get_redis_conn
+		from frappe.utils.background_jobs import generate_qname, get_queue_list
 		from rq import Queue, Worker
 
-		connect = getattr(get_redis_conn, "retry_with", None)
-		if connect:
-			from tenacity import stop_after_attempt
-
-			conn = connect(stop=stop_after_attempt(1))()
-		else:
-			conn = get_redis_conn()
+		conn = _redis_once()
 		conn.ping()
 		names = {generate_qname(q) for q in get_queue_list()}
 		backlog = sum(Queue(n, connection=conn).count for n in names)

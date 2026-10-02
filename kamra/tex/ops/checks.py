@@ -287,6 +287,8 @@ def jobs_check(jobs: dict[str, dict], now: datetime, *, live: bool, waiting: dic
 		if waited is not None and waited > limit:
 			issues.append(issue("job_waiting", FAIL if waited > limit * JOB_LATE_FAIL_FACTOR else WARN, job=job,
 			                    minutes=waited))
+			queued_at = now - timedelta(minutes=waited)
+			since = min(since, queued_at) if since else queued_at
 	return make("scheduler.jobs", issues, scope="platform", since=since, count=len(issues))
 
 
