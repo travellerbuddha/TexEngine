@@ -635,6 +635,43 @@ class TestTrailByReference(AuditCase):
 		# the filter is in the query: the newest page of a viewer without them is not emptied by it
 		self.assertEqual(seen(viewers["settings"], limit=1), {"grant"})
 
+	def test_a_hotels_trail_leaves_out_guest_records_without_crm_view(self):
+		"""2K-4 review round 1 (LO-28): a guest's profile changes (personal data, consent, merges), loyalty points and
+		abandoned bookings are read with ``crm.view``; the hotel view showed them to ``settings.admin`` alone."""
+		from kamra.tex.security.audit import audit
+		from kamra.tex.tests.integration.test_channel_binding import grant as bind
+		from kamra.tex.tests.integration.test_channel_binding import profile
+
+		viewers = {}
+		for key, caps in (("settings", ["settings.admin"]), ("crm", ["settings.admin", "crm.view"])):
+			viewers[key] = fx.ensure_user(f"lo28-r1-{key}@example.com", ["Call Center Agent"])
+			bind(viewers[key], fx.PROPERTY, profile(f"LO-28 r1 hotel trail, {key}", caps))
+		as_user("Administrator")
+		guest = frappe.db.get_value("Reservation", self.res, "guest")
+		grant = frappe.db.get_value("TEX Access Grant", {"user": self.agent, "property": fx.PROPERTY})
+		made = {"grant": audit("grant.update", reference_doctype="TEX Access Grant", reference_name=grant,
+		                       property=fx.PROPERTY, new={"permission_profile": "Reservations Agent"})}
+		made |= {
+			"guest": audit("guest.update", reference_doctype="Guest", reference_name=guest, property=fx.PROPERTY,
+			               old={"phone": "+90 555 000 00 00"}, new={"phone": "+90 555 111 11 11"}),
+			"points": audit("loyalty.redeem", reference_doctype="TEX Loyalty Ledger", reference_name="LYL-R1",
+			                property=fx.PROPERTY, new={"points": 100}),
+			"abandoned": audit("abandoned.status", reference_doctype="TEX Abandoned Booking", reference_name="AB-R1",
+			                   property=fx.PROPERTY, new={"status": "Contacted"}),
+		}
+
+		def seen(user: str, limit: int = 500) -> set[str]:
+			as_user(user)
+			try:
+				names = {r["name"] for r in admin.audit_log(property=fx.PROPERTY, limit=limit)}
+			finally:
+				as_user("Administrator")
+			return {k for k, name in made.items() if name in names}
+
+		self.assertEqual(seen(viewers["settings"]), {"grant"})
+		self.assertEqual(seen(viewers["crm"]), set(made))
+		self.assertEqual(seen(viewers["settings"], limit=1), {"grant"})
+
 	def test_payment_events_need_payment_view(self):
 		with self.assertRaises(frappe.PermissionError):
 			self.trail(self.viewer, "TEX Payment Transaction", self.txn)

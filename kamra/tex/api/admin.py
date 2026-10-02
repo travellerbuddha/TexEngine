@@ -444,7 +444,10 @@ def adapters():
 TRAIL_COST = perm.CONTRACT_COST_DOCTYPES     # one list with Desk / REST's cost (G-97)
 TRAIL_CAPABILITY = {"TEX Payment Transaction": "payment.view", "TEX Payment Link": "payment.view",
                     "TEX Payment Allocation": "payment.view", "Reservation": "reservation.view",
-                    "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view"}
+                    "TEX Booking": "reservation.view", "TEX Reservation Revision": "reservation.view",
+                    # a guest's profile (personal data, consent, merges), points and abandoned bookings: the CRM's
+                    # (2K-4 review round 1, LO-28)
+                    "Guest": "crm.view", "TEX Loyalty Ledger": "crm.view", "TEX Abandoned Booking": "crm.view"}
 VERSION_TABLES = TRAIL_COST - {"TEX Contract", "TEX Contract Version"}
 
 
@@ -467,9 +470,9 @@ def _trail_property(doctype: str, name: str) -> str | None:
 
 def _trail_caps(doctype: str) -> tuple[str, ...]:
 	"""What reads a record's trail, any one of these capabilities: contract cost ``price.view_cost`` or
-	``contract.edit`` (G-11); payments ``payment.view``; a stay ``reservation.view``; a commercial policy what the
-	policies API reads it with (markups and pricing policies: ``price.view_cost``); anything else
-	``settings.admin``."""
+	``contract.edit`` (G-11); payments ``payment.view``; a stay ``reservation.view``; a guest's profile, points and
+	abandoned bookings ``crm.view``; a commercial policy what the policies API reads it with (markups and pricing
+	policies: ``price.view_cost``); anything else ``settings.admin``."""
 	from kamra.tex.api import policies
 
 	if doctype in TRAIL_COST:
@@ -492,8 +495,8 @@ def _require_trail(doctype: str, prop: str) -> None:
 def _trail_hidden(prop: str) -> list[str]:
 	"""The records whose events a hotel's trail leaves out for this viewer, by each record's own trail rule
 	(``_trail_caps``): cost without ``price.view_cost`` (contracts: or ``contract.edit``), payments without
-	``payment.view``, stays and bookings without ``reservation.view``, a policy without what its own API reads it
-	with (LO-28). Anything else needs ``settings.admin``, which the hotel view needs itself. None for platform
+	``payment.view``, stays and bookings without ``reservation.view``, guest records without ``crm.view``, a policy
+	without what its own API reads it with (LO-28). Anything else needs ``settings.admin``, which the hotel view needs itself. None for platform
 	administrators."""
 	from kamra.tex.api import policies
 
