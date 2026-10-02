@@ -1763,13 +1763,16 @@ No owner decision was needed. LO-30 (left to this batch by Part 2G-3) is done he
   that nothing is booked or charged), and offers "Try again" (`methods.checkoutChoices`, `basketFailureText`; while it
   is not read yet the card stays as before) · node `checkout-fallback` (three new; the existing two unchanged), e2e
   `booking` (desktop: the alert and Try again).
-- LO-32 **COMPLETE**: a re-quote (O-30) is compared with the last quote the guest saw of each room (kept per room in
-  the flow, through an extras change; dropped when the room is chosen again), else with the search's offer and the
-  server's flag (`lib/priceChange.ts`). With a quote shown the server's `price_changed`/`previous_total` are not used
+- LO-32 **COMPLETE**: a re-quote (O-30) is compared with the last quote the guest has seen the price of, per room
+  (kept in the flow through an extras change, dropped when the room is chosen again; a quote whose price is a change
+  not yet accepted does not replace it, "OK, continue" does: review round 2), else with the search's offer and the
+  server's flag (`lib/priceChange.ts`). With a quote seen the server's `price_changed`/`previous_total` are not used
   (they compare with the search: review BLOCKER); the totals are compared, extras included, so an accepted change is
   not announced again and a new price of an extra or one back to the search's is; where the two quotes add other
-  extras (the guest changed them, or the new quote refuses one, which has its own notice) the room's own price is ·
-  node `price-change` (six), e2e `booking` (desktop: the server's flag, an extra added after, a refused extra).
+  extras (the guest changed them, or the new quote refuses one, which has its own notice) the room's own price is.
+  The notice says which ("Room price was …" or "The total was …", one key in six booking catalogs) and focuses
+  again when quotes made again find a change still not accepted · node `price-change` (seven), e2e `booking`
+  (desktop: the server's flag, an extra added after, a refused extra, a change found on the extras step).
 - LO-33 **COMPLETE**: the price-change notice focuses itself and scrolls into view when it appears · e2e `booking`
   (mobile).
 - LO-31 **COMPLETE** (verified first): a widget whose site changes drops the old site's name with its theme; the modal
@@ -1792,4 +1795,5 @@ No owner decision was needed. LO-30 (left to this batch by Part 2G-3) is done he
   room, which "taken with room 1" does not say); Turkish-F letters other than ı/İ are no letter shortcut at all (the
   page's buttons and the other keys stay); on a Mac Turkish-F, ⌥+letter is the physical key's, as before LO-49 (the
   Option layer names no letter); a basket refused as expired offers Try again, not the expired flow's "Refresh
-  prices".
+  prices"; a guest who leaves the price notice unaccepted for 25 minutes and books is stopped once more by the same
+  notice (focused again), and the next submit books.
