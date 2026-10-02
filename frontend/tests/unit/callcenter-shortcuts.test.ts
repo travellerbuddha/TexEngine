@@ -72,3 +72,19 @@ test("the platform comes from navigator.platform", () => {
   assert.equal(shortcutPlatform("Linux x86_64"), "linux")
   assert.equal(shortcutPlatform(""), "linux")
 })
+
+test("? opens the help with Ctrl or AltGr too, never with ⌘, never in a field (LO-49)", () => {
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Slash", ctrlKey: true }), "linux"), "help")
+  // Windows reports AltGr as Ctrl+Alt: a layout that types ? with it
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Minus", ctrlKey: true, altKey: true, altGraph: true }), "windows"), "help")
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Slash", metaKey: true }), "mac"), null) // the Mac's own Help
+  assert.equal(callCenterShortcut(ev({ key: "?", code: "Slash", ctrlKey: true, editable: true }), "linux"), null)
+})
+
+test("Turkish-F (LO-49): Alt with the key printed ı or ü runs no other letter's shortcut", () => {
+  // ı sits where QWERTY has R (results), ü where it has G (guest)
+  assert.equal(callCenterShortcut(ev({ key: "ı", code: "KeyR", altKey: true }), "windows"), null)
+  assert.equal(callCenterShortcut(ev({ key: "ü", code: "KeyG", altKey: true }), "windows"), null)
+  // the key printed R is still Alt+R
+  assert.equal(callCenterShortcut(ev({ key: "r", code: "KeyU", altKey: true }), "windows"), "results")
+})

@@ -64,6 +64,8 @@ function typesCharacter(ev: ShortcutEvent): boolean {
 /** The Call Center action a keydown asks for, or null (the key is left to the page / field). */
 export function callCenterShortcut(ev: ShortcutEvent, platform: ShortcutPlatform): CallCenterAction | null {
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key === "Enter") return "book"
+  // "?" is the help outside a field, also typed with Ctrl or AltGr (Windows: Ctrl+Alt); ⌘? is the Mac's own Help
+  if (ev.key === "?") return !ev.editable && !ev.metaKey ? "help" : null
   if (ev.altKey) {
     const action = LETTER_ACTIONS[shortcutLetter(ev) ?? ""] ?? null
     if (!action) return null
@@ -74,6 +76,5 @@ export function callCenterShortcut(ev: ShortcutEvent, platform: ShortcutPlatform
     }
     return ev.ctrlKey || ev.metaKey || ev.altGraph ? null : action
   }
-  if (ev.key === "?" && !ev.editable && !ev.ctrlKey && !ev.metaKey) return "help"
   return null
 }
