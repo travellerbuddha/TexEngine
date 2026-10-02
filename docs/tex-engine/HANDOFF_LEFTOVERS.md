@@ -134,7 +134,8 @@ Add-ons from this list:
 New or changed refusal texts that G-70 must give codes to, from batches A–C:
 - "payment under review" (LO-05);
 - "already processed" on a settled restart (LO-04; existing text);
-- "room type no longer sold" on a quote (LO-03);
+- "room type no longer sold" (LO-03): coded ROOM_NOT_SOLD in Part 2K-3 (quote, booking, modification); G-70b gives it
+  the catalogs' text;
 - channel-booking refusals (LO-12, LO-13).
 
 The Part 2 plan says G-70 "rewrites throw sites in `public.py`, `guest_changes.py` and `payments/service.py`, so it comes after all money-path edits". **Batches A, B and C must therefore merge before G-70b starts.** (HANDOFF.md §2 splits G-70: the small coded-refusal transport G-70a comes first, in batch 3A, and every new refusal written in A–C uses it; G-70b codes everything left.)

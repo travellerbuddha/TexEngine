@@ -38,8 +38,8 @@ Legend: **verified** = read in the code / run here; **assumed** = not checkable 
    guest_details, payment_started, abandoned, booked`); a new event value fails validation and `_track`
    swallows the error (`log_exception`) — the event would be silently lost. Needs the option + patch p72 +
    a browser-event allow-list entry.
-5. **Y-8 guest refusal leaks an internal id.** `cancel_reservation` (`services/booking.py:1127`) answers
-   the guest manage page with `Sold by CON-0001: cancel it on the channel.` (connection docname).
+5. **Y-8 guest refusal leaks an internal id** — *fixed in Part 2K-3 (LO-13)*: `cancel_reservation` now names the
+   connection's label (`Sold by Sandbox CM: …`), never its docname. It still has no code (row 101).
 6. **i18n check gap.** `npm run i18n:tex` is meant to check the booking catalogs but its root
    `src/booking/i18n/locales` does not exist, so it silently skips them (verified by running it). The
    booking catalogs are only checked by `src/booking/i18n/check.ts` (same keys, plural forms) — **not
@@ -771,7 +771,7 @@ MCP=manage_change_pay. "VE" = ValidationError (417). "(unreach.)" = guarded earl
 | 98 | MC | api/public.py:854 | VE | Please contact the hotel to cancel. | SELF_SERVICE_OFF |
 | 99 | MPr MX MXP MXA MA MCP | api/public.py:877, 913, 934, 950, 975, 992 | VE | Please contact the hotel to change your booking. | SELF_SERVICE_OFF |
 | 100 | MC | api/public.py:858 (O-16) | ChangeRefused | This room can no longer be changed online. Please contact the hotel. | CANCEL_TOO_LATE |
-| 101 | MC | services/booking.py:1127 `cancel_reservation` (Y-8; names CON-####) | VE | Sold by {0}: cancel it on the channel. | CHANNEL_BOOKING (guest text without the id) |
+| 101 | MC | services/booking.py `cancel_reservation` (Y-8; names the connection's label since 2K-3, LO-13) | VE | Sold by {0}: cancel it on the channel. | CHANNEL_BOOKING (guest text without the label) |
 | 102 | MC | services/booking.py:1130 | VE | Reservation {0} is already {1}. | ROOM_NOT_ACTIVE (status) |
 | 103 | MC | services/booking.py:1123, 1132 (unreach.: no waive, default reason) | Permission / VE | Guests cannot waive… / A cancellation reason is required. | INVALID_REQUEST |
 | 104 | MPr MA | services/guest_changes.py:200 `guard` | PaymentPending | Please complete the payment of your booking before changing it. | PAYMENT_PENDING |
@@ -803,6 +803,10 @@ MCP=manage_change_pay. "VE" = ValidationError (417). "(unreach.)" = guarded earl
 | 130 | MXA | services/addons.py:181 (`q.reasons` already carry ADDON_* codes) | VE | "<reasons joined>" | EXTRAS_REFUSED (reasons: [ADDON_* codes]) |
 | 131 | MXA | services/addons.py:183 | VE | The price moved since these extras were priced — please check them again. | PRICE_MOVED |
 
+Already coded (Part 2K-3, LO-03): ROOM_NOT_SOLD, a room type disabled since the search — the quote's reason
+(`quoting._stay_refusal`), `create_booking` and `modification.propose` (a change into it); the booking app reads it as
+"expired" (`KIND_BY_CODE`). G-70b only gives it the catalogs' text.
+
 Not refusals (already coded answers, unchanged): `quote`/`quote_rooms` `{ok: False, reasons:[{code}]}`
 (`quoting.py:543-560`, engine codes), `manage_propose` `warnings` (`modification.py:392-418`, CURRENCY_CHANGED
 public.py:894), `manage_extras_propose` `reasons` (ADDON_*), `booking_status.changes_blocked`.
@@ -814,7 +818,7 @@ NOT_PERMITTED, HOTEL_NOT_FOUND, CURRENCY_NOT_OFFERED, MARKET_UNKNOWN, MARKET_AMB
 MARKET_NOT_ALLOWED, MARKET_RESIDENCY, DATES_INVALID, STAY_TOO_LONG, CHECKIN_PAST, ROOMS_COUNT, PARTY_INVALID,
 CHILD_AGE_REQUIRED, CHILD_AGE_INVALID, CHILD_DOB_INVALID, CHILD_DOB_FUTURE, CHILD_TOO_OLD, OFFER_INVALID,
 OFFER_EXPIRED, EXTRA_NOT_ONLINE, EXTRAS_INVALID, SEARCH_AGAIN, QUOTE_INVALID, QUOTE_EXPIRED, QUOTE_USED,
-NOT_ON_SALE, CONTRACT_NOT_ON_SALE, CONTRACT_SUSPENDED, RATE_UNAVAILABLE, BASKET_NOT_TOGETHER, SOLD_OUT,
+NOT_ON_SALE, CONTRACT_NOT_ON_SALE, CONTRACT_SUSPENDED, RATE_UNAVAILABLE, ROOM_NOT_SOLD, BASKET_NOT_TOGETHER, SOLD_OUT,
 STAY_RESTRICTED, EXTRA_SOLD_OUT, WEB_TRANSFER_ROOMS, PAY_AT_HOTEL_NOT_ALLOWED, GUEST_FIRST_NAME_REQUIRED,
 GUEST_LAST_NAME_REQUIRED, GUEST_CONTACT_REQUIRED, GUEST_EMAIL_INVALID, GUEST_NAME_TOO_LONG, PROMO_EXHAUSTED,
 PROMO_NEEDS_CONTACT, PROMO_ALREADY_USED, PAYMENT_METHOD_UNAVAILABLE, PAYMENT_BUSY, NOTHING_DUE,

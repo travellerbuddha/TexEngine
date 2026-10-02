@@ -809,7 +809,9 @@ enterprise or group view (G-25).
 - *Addendum (Part 2K-3, LO-03, LO-13, LO-11): what channels sell and how a channel is named.*
   - A disabled room type sends the close-out of a disabled mapping (`build_days`: every day closed, nothing
     available), and a Room Type `on_update` hook queues its mappings' sync whenever `disabled` changes, so a channel
-    stops selling a type TEX no longer sells, and sells it again once enabled (ADR-048's Part 2K-3 addendum).
+    stops selling a type TEX no longer sells, and sells it again once enabled (ADR-048's Part 2K-3 addendum). A stay the
+    channel sold in such a type meanwhile (before the close-out reached it, or while its connection is off), or a change
+    moving a room into one, is accepted like an overbooking, with a warning (`channel.overbooking`).
   - People are told the channel by its connection's label, never its id: `channel_of` returns `{connection, label,
     ref}` (label falls back to the name); the "Sold by …" refusal, the cancel dialog and the reservation use the
     label; the audit keeps the id.
@@ -1888,8 +1890,11 @@ the inventory lock are migration imports and status moves into a live status.*
 - *Addendum (Part 2K-3, LO-03): a disabled room type is not sold anywhere.* Search skipped it, but an offer key or a
   quote made before it was disabled still sold it, and so did a modification into it. The quote (`_stay_refusal`)
   and `create_booking` now refuse a disabled type, and `modification.propose` refuses a change into one; the guest
-  code is `ROOM_NOT_SOLD`. A stay already in a disabled type still changes (its dates, its party), and the type keeps
-  counting in its pool, as above. Channels: ADR-039's Part 2K-3 addendum.
+  code is `ROOM_NOT_SOLD`, and the modify drawer offers only the types still sold. A stay already in a disabled type
+  still changes (its dates, its party), and the type keeps counting in its pool, as above. A revival (ADR-062 B4)
+  takes back an expired stay of a type disabled since: it is the same sale, paid in time, not a new one. The check is
+  a plain read of the room type: a booking already past it while the type is disabled still books that stay (as a
+  search shown just before). Channels: ADR-039's Part 2K-3 addendum.
 
 ## ADR-049 The staff app's "today" is the site's day, from the server; the browser's clock only measures
 **Context.** G-91 (R-50): staff date pickers and default ranges started on the browser's day
