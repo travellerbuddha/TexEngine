@@ -1,18 +1,23 @@
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Plus, Search, SlidersHorizontal } from "lucide-react"
+import { CopyPlus, Plus, Search, SlidersHorizontal } from "lucide-react"
 import { useTexQuery } from "../../../lib/api"
 import { useProperty, useSession } from "../../../lib/session"
 import { date as fmtDate, dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
-import { Badge, Button, Card, Checkbox, DataTable, EmptyState, ErrorState, Field, Input, PageHeader, Select, Toolbar, type Column } from "../../../ui"
+import { Badge, Button, Card, Checkbox, DataTable, EmptyState, ErrorState, Field, IconButton, Input, PageHeader, Select, Toolbar, type Column, type Tone } from "../../../ui"
 import { StatusBadge } from "../components/common"
 import { RatesNav } from "../components/RatesNav"
 import { enumLabel, opText } from "../lib/options"
 import { decText, roomLabel, useLookups } from "../lib/util"
 import { policyKind, type Doc, type ListCol } from "./config"
+import { promoValueText } from "./PromotionPanels"
+import { csv, promoState, type PromoState } from "./promotions"
+import { useSiteClock, useSiteToday } from "../../../lib/siteDay"
 
 const REV_STATUSES = ["Draft", "Active", "Superseded", "Archived"]
+/** A promotion's state for a booking today, as text and tone (never colour alone). */
+const PROMO_TONE: Record<PromoState, Tone> = { draft: "warning", scheduled: "info", live: "success", ended: "neutral", superseded: "neutral", archived: "neutral" }
 
 /** List of one selling-policy DocType (markup, promotions, FX, …) for the selected hotel. */
 export default function PolicyList() {
@@ -23,6 +28,8 @@ export default function PolicyList() {
   const property = useProperty()
   const { can } = useSession()
   const lookups = useLookups(property)
+  const today = useSiteToday()
+  const clock = useSiteClock()
   const [q, setQ] = useState("")
   const [archived, setArchived] = useState(false)
   const [status, setStatus] = useState("")
@@ -54,9 +61,32 @@ export default function PolicyList() {
     )
 
   const canEdit = can(kind.cap)
+  const span = (a: unknown, b: unknown) =>
+    !a && !b ? <span className="text-zinc-500">{t("rates.promo.sum.any_date")}</span> : <span className="whitespace-nowrap">{a ? fmtDate(String(a), "short") : "…"} – {b ? fmtDate(String(b), "short") : "…"}</span>
   const render = (c: ListCol, r: Doc) => {
     const v = r[c.key]
     switch (c.render) {
+      case "promo_value":
+        return <span className="font-medium whitespace-nowrap">{promoValueText(t, r)}</span>
+      case "promo_cover": {
+        const all = (k: string, label: string) => (csv(r[k]).length ? csv(r[k]).join(", ") : t(label))
+        return (
+          <span className="block max-w-56 text-xs leading-snug">
+            <span className="block truncate">{all("markets", "rates.common.all_markets")}</span>
+            <span className="block truncate text-zinc-500">
+              {all("channels", "rates.common.all_channels")} · {csv(r.room_types).length ? csv(r.room_types).map((x) => roomLabel(lookups.data?.room_types, x)).join(", ") : t("rates.common.all_rooms")}
+            </span>
+          </span>
+        )
+      }
+      case "promo_stay":
+        return span(r.stay_from, r.stay_to)
+      case "promo_sale":
+        return span(r.sale_from, r.sale_to)
+      case "promo_status": {
+        const st = promoState(r, today, clock.now())
+        return <Badge tone={PROMO_TONE[st]}>{t(`rates.promo.state.${st}`)}</Badge>
+      }
       case "status":
         return <StatusBadge status={String(v || "")} group="rev_status" />
       case "rev":
@@ -100,6 +130,24 @@ export default function PolicyList() {
   }))
   if (list.data?.some((r) => r.property && r.property !== property) || list.data?.some((r) => !r.property))
     columns.push({ key: "property", header: t("rates.f.hotel"), hideBelow: "lg", cell: (r) => (r.property ? String(r.property) : <Badge tone="info">{t("rates.common.global")}</Badge>) })
+  if (canEdit)
+    columns.push({
+      key: "similar",
+      header: <span className="sr-only">{t("rates.common.row_actions")}</span>,
+      align: "right",
+      cell: (r) => (
+        <IconButton
+          size="sm"
+          label={t("rates.policy.similar_label", { name: String(r[typeof kind.titleField === "string" ? kind.titleField : "name"] ?? r.name) })}
+          icon={<CopyPlus className="size-4" />}
+          onClick={(e) => {
+            e.stopPropagation()
+            navigate(`/tex/rates/policies/${kind.slug}/new?copy=${encodeURIComponent(String(r.name))}`)
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+        />
+      ),
+    })
 
   return (
     <>

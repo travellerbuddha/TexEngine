@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
-import { Archive, CirclePlay, GitBranch, History, Lock, Save, Trash2 } from "lucide-react"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { Archive, CirclePlay, CopyPlus, GitBranch, History, Lock, Save, Trash2 } from "lucide-react"
 import { tex, TexApiError, useTexQuery, useTexMutation } from "../../../lib/api"
 import { useProperty, useSession } from "../../../lib/session"
+import { useUnsavedChanges } from "../../../lib/unsaved"
 import { overSaved } from "../../../lib/edits"
 import { dateTime } from "../../../lib/format"
 import { useTexT } from "../../../i18n"
@@ -41,6 +42,8 @@ import { BOARDS, enumOptions, PERCENT_OPS } from "../lib/options"
 import type { Lookups, Row } from "../lib/types"
 import { decStr, fromRow, intVal, invalidateLookups, strVal, toRow, UI_RATES, useLookups, type FieldKind } from "../lib/util"
 import { fieldKinds, isRequired, policyKind, type Doc, type PolicyField, type PolicyKind, type TableColumn } from "./config"
+import { PromotionCheck, PromotionSummary } from "./PromotionPanels"
+import { backToFront, copyOf } from "./promotions"
 
 type T = (k: string, p?: Record<string, string | number>) => string
 
@@ -52,6 +55,12 @@ interface HistoryRow {
   active_to: string | null
   modified_by: string
   modified: string
+}
+
+/** A field set to something other than its empty value (0, blank, an empty list). */
+function hasValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === "" || v === 0 || v === "0") return false
+  return !(Array.isArray(v) && !v.length)
 }
 
 function tableKinds(cols: TableColumn[]): Record<string, FieldKind> {
@@ -160,6 +169,10 @@ export default function PolicyEditor() {
   const property = useProperty()
   const { boot, can } = useSession()
   const q = useTexQuery<Doc>("policies", "get_record", { doctype: kind?.doctype, name }, [kind?.doctype, name], Boolean(kind && !isNew))
+  // "Create similar" (UX revision 2026-10): a new record from another one's terms (?copy=<name>)
+  const [params] = useSearchParams()
+  const copyFrom = isNew ? params.get("copy") : null
+  const source = useTexQuery<Doc>("policies", "get_record", { doctype: kind?.doctype, name: copyFrom }, [kind?.doctype, copyFrom], Boolean(kind && copyFrom))
   const save = useTexMutation<{ doctype: string; data: Doc }, Doc>("policies", "save_record")
   const [doc, setDoc] = useState<Doc>()
   const [base, setBase] = useState("")
@@ -177,9 +190,13 @@ export default function PolicyEditor() {
   useEffect(() => {
     if (!kind) return
     if (isNew) {
-      const d = normalise(kind, { ...kind.newDoc(), property: property ?? "" })
+      const fresh = normalise(kind, { ...kind.newDoc(), property: property ?? "" })
+      if (copyFrom && !source.data) return
+      const titleKey = typeof kind.titleField === "string" ? kind.titleField : ""
+      const d = copyFrom && source.data ? normalise(kind, copyOf(source.data, titleKey, (title) => t("rates.policy.copy_title", { title }))) : fresh
       setDoc(d)
-      setBase(JSON.stringify(payload(kind, d)))
+      // a copy is unsaved from the start: its base is the empty record
+      setBase(JSON.stringify(payload(kind, fresh)))
       setTouched(false)
     } else if (q.data && String(q.data.name) === name) {
       // (until the record at this address arrives, the query still holds the one shown before)
@@ -191,7 +208,8 @@ export default function PolicyEditor() {
       setBase(JSON.stringify(payload(kind, d)))
       setTouched(false)
     }
-  }, [kind, isNew, name, q.data, property])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, isNew, name, q.data, property, copyFrom, source.data])
 
   const status = String(doc?.tex_status || "")
   const recProp = String(doc?.property || "") || undefined
@@ -199,6 +217,8 @@ export default function PolicyEditor() {
   const editable = Boolean(kind && doc && canCap && (!kind.revisioned || !status || status === "Draft"))
   const dirty = Boolean(kind && doc && JSON.stringify(payload(kind, doc)) !== base)
   const set = useCallback((k: string, v: unknown) => setDoc((d) => (d ? { ...d, [k]: v } : d)), [])
+  // the shell asks before a link or a hotel switch drops what is typed here
+  useUnsavedChanges(() => dirty && !save.pending)
 
   const missing = useMemo(() => {
     if (!kind || !doc) return []
@@ -218,6 +238,8 @@ export default function PolicyEditor() {
       .filter((f) => f.optionsFor && (!f.showIf || f.showIf(doc)) && doc[f.key] && !f.optionsFor(doc).includes(String(doc[f.key])))
       .map((f) => f.key)
   }, [kind, doc])
+  // a date window that ends before it starts (UX revision 2026-10): named on its end field
+  const reversed = useMemo(() => (kind?.ranges && doc ? backToFront(doc, kind.ranges) : []), [kind, doc])
 
   if (!kind)
     return (
@@ -243,7 +265,7 @@ export default function PolicyEditor() {
     // one save at a time (Enter in a field submits the form)
     if (!doc || save.pending) return
     setTouched(true)
-    if (missing.length || invalid.length) {
+    if (missing.length || invalid.length || reversed.length) {
       toast.error(t("rates.v.fix_required"))
       return
     }
@@ -335,8 +357,15 @@ export default function PolicyEditor() {
                 {t("rates.policy.archive")}
               </Button>
             )}
+            {canCap && !isNew && (
+              // a separate record from these terms (another market, next season): never a revision
+              // that would replace this one when activated
+              <Button variant="secondary" icon={<CopyPlus className="size-4" aria-hidden />} onClick={() => navigate(`${listPath}/new?copy=${encodeURIComponent(name)}`)} title={t("rates.policy.similar_hint")}>
+                {t("rates.policy.similar")}
+              </Button>
+            )}
             {canCap && kind.revisioned && (status === "Active" || status === "Superseded") && (
-              <Button icon={<GitBranch className="size-4" aria-hidden />} loading={busy} onClick={() => void revise()}>
+              <Button icon={<GitBranch className="size-4" aria-hidden />} loading={busy} onClick={() => void revise()} title={t("rates.policy.revise_hint")}>
                 {t("rates.policy.revise")}
               </Button>
             )}
@@ -384,6 +413,14 @@ export default function PolicyEditor() {
         </div>
       )}
       {doc && !canCap && <div className="mb-4"><Notice tone="info">{t("rates.policy.no_permission")}</Notice></div>}
+      {doc && copyFrom && (
+        <div className="mb-4">
+          <Notice tone="info" title={t("rates.policy.copied_title", { from: String(source.data?.[typeof kind.titleField === "string" ? kind.titleField : "name"] ?? copyFrom) })}>
+            {t("rates.policy.copied_body")}
+          </Notice>
+        </div>
+      )}
+      {doc && kind.slug === "promotions" && <PromotionSummary doc={doc} lookups={lookups.data} />}
       <InlineError error={save.error ?? actionErr} />
       {!doc ? (
         <Card>
@@ -410,11 +447,38 @@ export default function PolicyEditor() {
                   {table ? (
                     <TableField f={visible[0]} doc={doc} readOnly={!editable} lookups={lookups.data} inheritedBands={inheritedBands.data} onChange={(rows) => set(visible[0].key, rows)} />
                   ) : (
-                    <FormGrid cols={3}>
-                      {visible.map((f) => (
-                        <FieldControl key={f.key} f={f} kind={kind} doc={doc} readOnly={!editable || Boolean(f.readOnly)} lookups={lookups.data} error={touched && missing.includes(f.key) ? t("rates.v.required") : invalid.includes(f.key) ? t("rates.v.not_allowed") : undefined} onChange={(v) => set(f.key, v)} />
-                      ))}
-                    </FormGrid>
+                    (() => {
+                      const errorOf = (f: PolicyField) =>
+                        touched && missing.includes(f.key) ? t("rates.v.required") : invalid.includes(f.key) ? t("rates.v.not_allowed") : reversed.includes(f.key) ? t("rates.v.range") : undefined
+                      const control = (f: PolicyField) => (
+                        <FieldControl key={f.key} f={f} kind={kind} doc={doc} readOnly={!editable || Boolean(f.readOnly)} lookups={lookups.data} error={errorOf(f)} onChange={(v) => set(f.key, v)} />
+                      )
+                      const main = visible.filter((f) => !f.advanced)
+                      const expert = visible.filter((f) => f.advanced)
+                      // an expert option set away from the record's default (or with an error) is counted,
+                      // and an error opens its group
+                      const defaults = kind.newDoc()
+                      const used = expert.filter((f) => errorOf(f) || (hasValue(doc[f.key]) && String(doc[f.key]) !== String(defaults[f.key] ?? "")))
+                      return (
+                        <>
+                          <FormGrid cols={3}>{main.map(control)}</FormGrid>
+                          {expert.length > 0 && (
+                            <details className="group mt-4 rounded-lg border border-zinc-200" open={used.some((f) => errorOf(f)) || undefined}>
+                              <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-zinc-700 select-none hover:bg-zinc-50">
+                                <span className="mr-1 inline-block transition-transform group-open:rotate-90" aria-hidden>
+                                  ▸
+                                </span>
+                                {t("rates.policy.advanced", { count: expert.length })}
+                                {used.length > 0 && <span className="ml-2 text-xs font-normal text-zinc-500">{t("rates.policy.advanced_set", { count: used.length })}</span>}
+                              </summary>
+                              <div className="border-t border-zinc-100 p-3">
+                                <FormGrid cols={3}>{expert.map(control)}</FormGrid>
+                              </div>
+                            </details>
+                          )}
+                        </>
+                      )
+                    })()
                   )}
                 </CardBody>
               </Card>
@@ -422,6 +486,11 @@ export default function PolicyEditor() {
           })}
           <button type="submit" hidden />
         </form>
+      )}
+      {doc && kind.slug === "promotions" && (
+        <div className="mt-5">
+          <PromotionCheck doc={doc} name={isNew ? null : name} dirty={dirty} lookups={lookups.data} />
+        </div>
       )}
 
       {doc && dialog === "activate" && (
