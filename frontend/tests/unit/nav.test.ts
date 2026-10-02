@@ -3,7 +3,7 @@
 // not current on a promotion's page although both live under /tex/rates. Run with `npm run test:unit`.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { areaHome, childActive, inArea, NAV, NAV_GROUPS } from "../../src/tex/shell/nav.ts"
+import { areaEntry, areaHome, childActive, childVisible, inArea, NAV, NAV_GROUPS, ruleVisible } from "../../src/tex/shell/nav.ts"
 
 const area = (id: string) => {
   const n = NAV.find((x) => x.id === id)
@@ -37,6 +37,28 @@ test("the selling rules open on every rule kind, the currency rates and the mark
     assert.equal(inArea(rules, kids, p), true, p)
   assert.equal(inArea(rules, kids, "/tex/rates/policies/promotions"), false)
   assert.equal(kids.some((c) => c.to.endsWith("/promotions")), false)
+})
+
+test("markups and contract formulas are cost: without price.view_cost the selling rules open on the first rule one may read", () => {
+  const rules = area("rules")
+  const kids = rules.children ?? []
+  const agent = (cap: string) => cap === "price.view"
+  const revenue = (cap: string) => cap === "price.view" || cap === "price.view_cost"
+  const shown = (can: (cap: string) => boolean) => kids.filter((c) => childVisible(c, can))
+  assert.deepEqual(
+    shown(agent).filter((c) => c.to.startsWith("/tex/rates/policies/")).map((c) => c.to.split("/").pop()),
+    ["cancellation", "payment", "taxes", "extras", "allotments", "fx-policies"],
+  )
+  assert.equal(ruleVisible("markup", agent), false)
+  assert.equal(ruleVisible("pricing-policies", agent), false)
+  assert.equal(ruleVisible("cancellation", agent), true)
+  assert.equal(areaEntry(rules, shown(agent)), "/tex/rates/policies/cancellation")
+  // with the cost right nothing changes: every rule, and the area opens on the markups
+  assert.equal(shown(revenue).length, kids.length)
+  assert.equal(ruleVisible("markup", revenue), true)
+  assert.equal(areaEntry(rules, shown(revenue)), "/tex/rates/policies/markup")
+  // an area whose own page is not a sub-section keeps its link
+  assert.equal(areaEntry(area("promotions"), []), "/tex/rates/policies/promotions")
 })
 
 test("Rates & availability holds the calendar, the restrictions list and the limited extras", () => {

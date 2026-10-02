@@ -1665,6 +1665,16 @@ takes one click more than before by design (the list no longer searches every ho
     (`crs.reservations(arriving, departing)`, one status definition) · `test_dashboard_links`, e2e `dashboard-links`.
 - **Not done:** bundles not rebuilt (2Z). The sell price row assumes no coupon code and no children; a mandatory
   limited extra sold out still shows a price there (the search refuses the night).
+- Local testing fixes (2026-10-02) **COMPLETE**:
+  - Windows and macOS: every Contracts & pricing page broke in `npm run dev` ("does not provide an export named
+    'ExplainLadderView'"): `ExplainLadder.tsx` and `explainLadder.ts` share a name on disks that ignore case, so the
+    import without an extension loaded the pure module. The view is now `ExplainLadderView.tsx` · unit `file-names`
+    (fails when two modules in a folder differ only in case or extension); reproduced on Linux with a case alias:
+    17 of the revenue manager's 55 menu pages (every page under /tex/rates) broke before, none after;
+  - a role without `price.view_cost` (call centre) was offered the markups and contract formulas, which the server
+    refuses to it (403): the side navigation and the rules' tabs hide them, and Selling rules opens on the first rule
+    the role may read (`ruleVisible`, `areaEntry`; server unchanged) · unit `nav`; every menu page opened as the five
+    demo roles: no broken screen, no failed call.
 
 ## 6K3. Audit Part 2K-3 (2026-10-02)
 

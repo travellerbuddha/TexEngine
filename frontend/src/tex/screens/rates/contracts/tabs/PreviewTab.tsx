@@ -35,7 +35,7 @@ import type { ExplainStep, Issue, NightLine, PreviewChild, PreviewResult, Versio
 import { decText, splitCsv, toFrappeDatetime, versionLabel } from "../../lib/util"
 import { bandCode, effectiveBands } from "../../workspace/bands.ts"
 import { MATRIX_DEBOUNCE_MS, WORKSPACE } from "../../workspace/draftPreview.ts"
-import { ExplainLadderView, useStepText } from "../../workspace/ExplainLadder"
+import { ExplainLadderView, useStepText } from "../../workspace/ExplainLadderView"
 import { childPayload, prefillOf, showTargetOf, withChildMode, type ChildEntry, type ChildMode, type ShowTarget } from "../../workspace/priceTest.ts"
 import { useBandLabels } from "../../workspace/useBandLabels"
 import type { DraftPreview } from "../../workspace/useDraftPreview"

@@ -7092,7 +7092,7 @@ screens) and `7669bd8` (`contract-admin.spec.ts`).
   or the saved draft and `doc.modified`), debounced 300 ms (`MATRIX_DEBOUNCE_MS`); a newer call
   aborts the older one. A result for older inputs is dimmed with "The stay or the contract changed
   since this price. Calculate again to update it." ("Updating the price…" with Live).
-- *The Explain ladder* (pure `explainLadder(quote)`, `ExplainLadder.tsx`): the final price, then
+- *The Explain ladder* (pure `explainLadder(quote)`, `ExplainLadderView.tsx`): the final price, then
   one table per block of nights and one for the whole stay, each named by its caption ("Nights 1–3 ·
   P2", "Whole stay"), with a row header per stage, "Before" and "After" columns, the explanation
   steps as detail lines under their stage (with their own served before/after), and the caption
@@ -9627,3 +9627,12 @@ spent stay topped the balance up and earned the whole new amount again (O-21).
   - *Dashboard → list.* `reports.service.ARRIVING_STATUSES` / `DEPARTING_STATUSES` are the one definition the
     dashboard counts with and `crs.reservations(arriving=, departing=)` filters by; the dashboard returns the day it
     counted (`today.date`) and links to that day.
+- *Local testing fixes (2026-10-02).*
+  - *Module names distinct on every disk.* Two modules in one folder must not differ only in letter case or
+    extension: Windows and macOS disks ignore case, and an import without an extension then loads whichever the
+    resolver tries first (`.ts` before `.tsx`). `ExplainLadder.tsx` became `ExplainLadderView.tsx`; the unit test
+    `file-names` keeps it so.
+  - *The menu offers only what the role may read.* Markups and pricing policies are read with `price.view_cost`
+    (`policies.READ_CAP`, G-11); the navigation's rule entries and the rules' tabs carry the same requirement
+    (`nav.ts` `ruleVisible`), and an area whose own page the role may not open links to its first visible
+    sub-section (`areaEntry`). Hiding is a convenience only: the server's checks are unchanged.
