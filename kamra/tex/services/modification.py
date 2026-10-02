@@ -61,6 +61,19 @@ EDITABLE = ("check_in", "check_out", "room_type", "adults", "children", "board",
 PRODUCT_FIELDS = ("room_type", "rate_plan", "board", "market")
 
 
+def guest_unsellable(result: dict) -> None:
+	"""Refuse a guest's change that cannot be sold. Its warnings (no room left, a restriction, a limited extra) are
+	told as they are, made guest-safe; the engine's reasons never: they may name the contract, its dates, the market
+	or the channel (G-71; G-70b review round 1). The codes of both go in the refusal's params; staff are told the
+	reasons themselves."""
+	warnings = result.get("warnings") or []
+	rows = [*warnings, *((result.get("proposed") or {}).get("reasons") or [])]
+	why = guest_reason("; ".join(w["message"] for w in warnings if w.get("message")))
+	frappe.throw(_("The modified stay cannot be sold: {0}").format(why) if why else
+	             _("The modified stay cannot be sold. Please choose other dates or contact the hotel."),
+	             refusal("CHANGE_NOT_SELLABLE", reasons=[r["code"] for r in rows if isinstance(r, dict) and r.get("code")]))
+
+
 def _snapshot(res) -> dict:
 	if not res.tex_pricing_snapshot:
 		frappe.throw(_("Reservation {0} was not priced by TEX; it cannot be re-priced here.").format(res.name),
@@ -613,9 +626,10 @@ def apply(proposal_token: str | None, *, reason: str, override_amount=None, sour
 	overridden_restrictions = result["restrictions"] if override_restrictions and \
 		result["sellable_ignoring_restrictions"] else []
 	if not result["sellable"] and not overridden_restrictions:
+		if _guest_authorized:
+			guest_unsellable(result)
 		why = "; ".join(w["message"] for w in result["warnings"]) or result["proposed"].get("reasons")
-		frappe.throw(_("The modified stay cannot be sold: {0}").format(
-			guest_reason(str(why)) if _guest_authorized else why), refusal("CHANGE_NOT_SELLABLE"))
+		frappe.throw(_("The modified stay cannot be sold: {0}").format(why), refusal("CHANGE_NOT_SELLABLE"))
 	new = result["proposed"]
 	if _proposal is not None and not _from_payment:
 		# staff approving a guest's request (ADR-044), maybe days later: at the price the guest

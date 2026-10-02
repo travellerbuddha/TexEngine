@@ -463,6 +463,23 @@ class TestSelfService(TexTestCase):
 			penalty, basis = booking.cancellation_penalty(res, today=fx.d(6, 1))
 			self.assertEqual((to_str(penalty), basis["rule"]), ("0.00", rule))
 
+	def test_a_change_the_engine_refuses_never_tells_the_guest_its_reasons(self):
+		"""2G-3 review round 1 (S1): a change past the contract's last stay day is refused with CHANGE_NOT_SELLABLE and
+		the engine's codes, never the engine's text (it names the contract's dates, its code, the market)."""
+		b = guest_books(session="r1-s1", method="Pay at Hotel")
+		token, res = b["manage_token"], b["rooms"][0]["reservation"]
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest on the manage page
+		late = {"check_in": str(fx.d(10, 29)), "check_out": str(fx.d(11, 2))}       # past the contract's stays
+		up = public.manage_propose(token=token, reservation=res, changes=late)
+		self.assertFalse(up["sellable"])
+		with self.assertRaisesRegex(frappe.ValidationError, "cannot be sold") as cm:
+			public.manage_apply(token=token, proposal_token=up["proposal_token"])
+		for internal in ("contract", str(fx.STAY_TO), "'code'"):
+			self.assertNotIn(internal, str(cm.exception))
+		self.assertEqual(cm.exception.code, "CHANGE_NOT_SELLABLE")
+		self.assertIn("STAY_WINDOW", cm.exception.params["reasons"])
+		self.assertEqual(frappe.db.get_value("Reservation", res, "check_in_date"), fx.d(6, 10))
+
 	def test_the_manage_view_of_a_channels_booking_offers_no_change_or_cancel(self):
 		"""LO-12 (PR #16 Kalanlar, audit 2K-3): a channel's booking is changed and cancelled on the channel (D-11, Y-8):
 		the guest's page offers neither (before: ``can_change`` and ``can_cancel`` were true and the server refused

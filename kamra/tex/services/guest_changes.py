@@ -543,9 +543,8 @@ def _derive(res, p: dict) -> dict:
 	prop = modification.propose(res.name, p["changes"], basis=p["basis"], basis_sale_at=p.get("basis_sale_at"),
 	                            _check_permission=False, internal=True)
 	if not prop["sellable"]:
-		why = "; ".join(w["message"] for w in prop["warnings"]) or prop["proposed"].get("reasons")
-		frappe.throw(_("The modified stay cannot be sold: {0}").format(guest_reason(str(why))),
-		             refusal("CHANGE_NOT_SELLABLE"))
+		# a guest's change: told the codes, never the engine's text (G-70b review round 1)
+		modification.guest_unsellable(prop)
 	if prop["proposed"]["totals"]["total"] != p["new_total"]:
 		frappe.throw(_("The price moved since this proposal was made — review it again."), refusal("PRICE_MOVED"))
 	return prop

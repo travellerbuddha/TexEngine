@@ -33,7 +33,7 @@ GUEST_PATHS: dict[str, set[str]] = {
 	"services/guest_changes.py": {"guard", "guard_room", "submit", "_derive", "_not_made", "pay_again",
 	                              "_start_payment"},
 	"services/modification.py": {"_snapshot", "build_changed_request", "_resolve", "propose", "require_proposer",
-	                             "apply"},
+	                             "apply", "guest_unsellable"},
 	"services/sold_terms.py": {"refuse"},
 	"services/addons.py": {"_snapshot", "_open", "_requests", "apply"},
 }
