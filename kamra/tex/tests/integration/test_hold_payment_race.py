@@ -705,6 +705,92 @@ class TestLastRoomRace(IntegrationTestCase):
 		self.assertEqual(late_payments.lock_expiry_money(a, but="no-such-charge"), [cash])
 		frappe.db.rollback()
 
+	def test_a_booking_made_again_while_the_payment_ran_stops_the_revival(self):
+		"""LO-09 (audit 2K-3): the revival's duplicate check (D4 c) reads the guest's other stays as they are now,
+		under a lock. Staff booked the guest again and committed after the callback's read view began (during the
+		gateway call): the check still finds that booking, so the expired one is never revived beside it (before: a
+		plain read of the old view found none, both went live and the guest was charged twice)."""
+		lia = {"first_name": "Lia", "last_name": "Late", "email": "lia.lo09@example.com"}
+
+		def book_lia():
+			prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+			                      rooms=[{"adults": 2}], market="DE", channel="CALL_CENTER",
+			                      currency="EUR")["properties"][0]
+			q = quoting.create_quote(pick(prop, room_code="STD")["rooms"][0]["offer_key"])["quote_id"]
+			return booking.create_booking(quote_ids=[q], guest=lia, payment_method="Pay at Hotel",
+			                              confirm_without_payment=True)["booking"]
+
+		mine = book_lia()                                            # the booking whose late payment comes
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection books beside it
+		guest = frappe.db.get_value("TEX Booking", mine, "booker_guest")
+		others = lambda: frappe.get_all("Reservation", filters={"guest": guest, "tex_booking": ("!=", mine)})  # noqa: E731
+		self.assertEqual(others(), [])                               # the callback's read view opens: no other stay
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+		made = []
+
+		def staff_book_the_guest_again():                            # another request, its own connection
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- a call-centre booking
+				made.append(book_lia())
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its own request
+			finally:
+				frappe.destroy()
+
+		other = threading.Thread(target=staff_book_the_guest_again)
+		other.start()
+		other.join(timeout=60)
+		self.assertEqual(len(made), 1)
+		self.assertEqual(others(), [])                               # the read view is still the old one
+		self.assertEqual(booking.live_duplicate(mine), made[0])     # found under the lock all the same
+		frappe.db.rollback()
+
+	def test_a_booking_revived_meanwhile_counts_as_live(self):
+		"""LO-09 review round 2: a booking of the guest that was cancelled in this request's read view, but whose stay the
+		locking read finds live again (another late payment revived it and committed), is a duplicate: its liveness is
+		its stay's as it is now (before: the read view's "Cancelled" hid it, and both bookings went live)."""
+		lia = {"first_name": "Lia", "last_name": "Again", "email": "lia.lo09b@example.com"}
+
+		def book_lia():
+			prop = quoting.search(properties=[fx.PROPERTY], check_in=fx.d(8, 20), check_out=fx.d(8, 22),
+			                      rooms=[{"adults": 2}], market="DE", channel="CALL_CENTER",
+			                      currency="EUR")["properties"][0]
+			q = quoting.create_quote(pick(prop, room_code="STD")["rooms"][0]["offer_key"])["quote_id"]
+			return booking.create_booking(quote_ids=[q], guest=lia, payment_method="Pay at Hotel",
+			                              confirm_without_payment=True)
+		mine, other = book_lia()["booking"], book_lia()
+		booking.cancel_reservation(other["rooms"][0]["reservation"], reason="lo09b", waive_penalty=True)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- the other connection revives it
+		self.assertEqual(frappe.db.get_value("TEX Booking", other["booking"], "status"), "Cancelled")   # the read view
+		site, sites_path = frappe.local.site, frappe.local.sites_path
+
+		def another_late_payment_revives_it():                        # another request, its own connection
+			frappe.init(site=site, sites_path=sites_path)
+			frappe.connect()
+			try:
+				frappe.db.set_value("Reservation", other["rooms"][0]["reservation"], "status", "Pending Payment",
+				                    update_modified=False)
+				frappe.db.set_value("TEX Booking", other["booking"], "status", "Pending Payment", update_modified=False)
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit -- its own request
+			finally:
+				frappe.destroy()
+
+		t = threading.Thread(target=another_late_payment_revives_it)
+		t.start()
+		t.join(timeout=60)
+		self.assertEqual(frappe.db.get_value("TEX Booking", other["booking"], "status"), "Cancelled")   # still the view
+		self.assertEqual(booking.live_duplicate(mine), other["booking"])
+		frappe.db.rollback()
+
+	def test_the_guests_stays_are_locked_by_their_own_index(self):
+		"""LO-09 review: the duplicate check's locking read goes by ``Reservation(guest, property)``, so its shared
+		locks hold the guest's stays at the hotel only, never the hotel's stays of those dates."""
+		guest = frappe.db.get_value("TEX Booking", self.a["booking"], "booker_guest")
+		rows = frappe.db.sql("EXPLAIN " + booking.guest_stays_sql().replace(" LOCK IN SHARE MODE", ""),
+		                     {"g": guest, "p": fx.PROPERTY}, as_dict=True)
+		self.assertEqual([(r.table, r.key) for r in rows], [("r", "tex_res_guest_prop")])
+
 	def test_the_expiry_job_a_late_payment_and_a_new_guest_race_for_the_last_room(self):
 		with mock.patch("kamra.tex.services.notify.booking_confirmed") as mailed:
 			results = self._race(("expiry", self.expiry, "Administrator"), ("a_pays", self.late_payment, "Guest"),

@@ -35,6 +35,8 @@ test("a code decides the kind, whatever the language of the message", () => {
   assert.equal(parseError(body({ tex_code: "SOLD_OUT" }, "Üzgünüz — oda az önce tükendi."), 417).kind, "sold_out")
   assert.equal(parseError(body({ tex_code: "EXTRA_SOLD_OUT" }, "Spa: tükendi."), 417).kind, "extra_sold_out")
   assert.equal(parseError(body({ tex_code: "CONTRACT_SUSPENDED" }, "Bu fiyat artık satışta değil."), 417).kind, "expired")
+  // a room type disabled since the search (LO-03): searched again, whatever the wording
+  assert.equal(parseError(body({ tex_code: "ROOM_NOT_SOLD" }, "Bu oda artık satılmıyor."), 417).kind, "expired")
   assert.equal(parseError(body({ tex_code: "NOT_FOUND" }, ""), 404).kind, "not_found")
   assert.equal(parseError(body({ tex_code: "RATE_LIMITED" }, ""), 429).kind, "rate_limit")
 })

@@ -47,7 +47,8 @@ export default function BookingDetail() {
       </>
     )
   const showMoney = can("price.view", b.property)
-  const canResend = can("reservation.modify", b.property) && b.status !== "Cancelled"
+  // a channel's booking is confirmed by the channel: TEX never e-mails it (LO-11)
+  const canResend = can("reservation.modify", b.property) && b.status !== "Cancelled" && !b.channel_booking
   return (
     <>
       <PageHeader

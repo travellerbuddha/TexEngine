@@ -348,6 +348,14 @@ def propose(reservation: str, changes: dict | None = None, *, basis: str = "CURR
 		# its price and its stay are the channel's: changes arrive from the channel (G-69)
 		frappe.throw(_("This booking came from a channel: change it in the channel, and the change arrives here."))
 	changes = {k: v for k, v in (changes or {}).items() if v is not None}
+	moved_to = changes.get("room_type")
+	if moved_to and moved_to != res.room_type and frappe.db.get_value("Room Type", moved_to, "disabled"):
+		# a room type no longer sold is never sold by a change either; a stay already in it keeps changing (LO-03,
+		# ADR-048)
+		from kamra.tex.services.refusals import refusal
+
+		frappe.throw(_("{0} is no longer sold: choose another room type.").format(
+			frappe.db.get_value("Room Type", moved_to, "room_type_name") or moved_to), refusal("ROOM_NOT_SOLD"))
 	if "sale_at" in changes:
 		frappe.throw(_("A change has no sale time of its own: to price it as if sold at another time, "
 		               "choose the historical sale date basis and its date."))

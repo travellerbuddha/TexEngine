@@ -97,6 +97,14 @@ def _restriction_warning(property: str, m, ci, co, now, before=None, product_cha
 	        + "; ".join(v.message for v in found))
 
 
+def _room_type_warning(m) -> str | None:
+	"""A stay the channel sold in a room type TEX no longer sells (before its closed ARI reached the channel, or while
+	its connection is off) is accepted like an overbooking: the guest holds the channel's confirmation (LO-03)."""
+	if frappe.db.get_value("Room Type", m.room_type, "disabled"):
+		return f"{m.room_type}: accepted from the channel although its room type is no longer sold in TEX"
+	return None
+
+
 def _contract_warning(m, now) -> str | None:
 	"""A stay the channel sold on a contract TEX no longer sells (suspended, archived, or closed for
 	this market and channel before the closed ARI reached the channel) is accepted like an
@@ -185,6 +193,9 @@ def _create(prop: str, mapped: list, data: dict, conn: str, ref: str, ccy: str, 
 		w = _lock_and_check(prop, m.room_type, ci, co, [])
 		if w:
 			warnings.append(w)
+		w = _room_type_warning(m)
+		if w:
+			warnings.append(w)
 		w = _contract_warning(m, now)
 		if w:
 			warnings.append(w)
@@ -238,6 +249,9 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 		values = _reservation_values(room, m, conn, ref, ccy)
 		if name is None:
 			w = _lock_and_check(prop, m.room_type, ci, co, [])
+			disabled = _room_type_warning(m)
+			if disabled:
+				warnings.append(disabled)
 			stopped = _contract_warning(m, now)
 			if stopped:
 				warnings.append(stopped)
@@ -265,6 +279,11 @@ def _update(booking: str, mapped: list, data: dict, conn: str, ref: str, ccy: st
 			w = _lock_and_check(prop, m.room_type, ci, co, [res.name])
 			# the nights, arrival and departure the line already had are its own (ADR-057)
 			same = (res.room_type, res.rate_plan or None, res.tex_market) == (m.room_type, m.rate_plan or None, m.market)
+			# moved into a room type no longer sold, or brought back into one (a new sale, as for the restrictions); a
+			# stay already in it is the hotel's to keep (ADR-048)
+			disabled = _room_type_warning(m) if res.room_type != m.room_type or res.status not in LIVE else None
+			if disabled:
+				warnings.append(disabled)
 			restricted = _restriction_warning(prop, m, ci, co, now, before=(
 				getdate(res.check_in_date), getdate(res.check_out_date)) if res.status in LIVE else None,
 				product_changed=not same)

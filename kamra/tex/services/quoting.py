@@ -549,7 +549,11 @@ def _on_sale(offer: dict, now, *, refuse: bool = True) -> tuple[object | None, d
 
 
 def _stay_refusal(offer: dict, req: StayRequest, now) -> dict | None:
-	"""Why the stay cannot be sold now: no room left, or a restriction of its scope."""
+	"""Why the stay cannot be sold now: its room type no longer sold, no room left, or a restriction of its scope."""
+	if frappe.db.get_value("Room Type", req.room_type, "disabled"):
+		# disabled after the offer was made (LO-03, ADR-048): search no longer shows it, its old offers sell nothing
+		return {"ok": False, "reasons": [{"code": "ROOM_NOT_SOLD",
+		                                  "message": _("This room is no longer sold — please search again.")}]}
 	avail_count, _days = avail.stay_availability(req.property, req.room_type, offer["contract"], req.check_in,
 	                                            req.check_out, now.date())
 	if avail_count < 1:

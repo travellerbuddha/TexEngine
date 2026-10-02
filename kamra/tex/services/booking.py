@@ -727,6 +727,13 @@ def create_booking(*, quote_ids: list[str], guest: dict, booker: dict | None = N
 
 		if not pay.method_offered(property, payment_method, market=market, currency=currency, channel=channel):
 			frappe.throw(_("This payment method is not available."))
+	# a quote of a room type disabled since it was made no longer books (LO-03, ADR-048)
+	for rt in sorted({r[1]["room_type"] for r in rows}):
+		if frappe.db.get_value("Room Type", rt, "disabled"):
+			from kamra.tex.services.refusals import refusal
+
+			frappe.throw(_("{0} is no longer sold — please search again.").format(
+				frappe.db.get_value("Room Type", rt, "room_type_name") or rt), refusal("ROOM_NOT_SOLD"))
 	# a quote of a contract suspended since it was made no longer books (ADR-045); the shared
 	# row lock makes a suspend wait for bookings in flight, and every booking after it see it
 	for contract in sorted({r[2]["contract"]["contract"] for r in rows}):
@@ -1184,10 +1191,14 @@ def _policy_penalty(reservation, today=None) -> tuple[D, dict]:
 
 def channel_of(booking: str | None) -> dict | None:
 	"""A booking a channel manager sold (``channel_connection`` and ``external_ref`` are written when it is
-	created and never change): → {"connection", "ref"}; None for any other. A plain read."""
+	created and never change): → {"connection", "label", "ref"}; None for any other. A plain read. ``label`` is what
+	people are told (the connection's label, else its name: LO-13); ``connection`` is for the audit."""
 	row = frappe.db.get_value("TEX Booking", booking, ["channel_connection", "external_ref"], as_dict=True) \
 		if booking else None
-	return {"connection": row.channel_connection, "ref": row.external_ref} if row and row.channel_connection else None
+	if not (row and row.channel_connection):
+		return None
+	label = frappe.db.get_value("TEX Integration Connection", row.channel_connection, "label")
+	return {"connection": row.channel_connection, "label": label or row.channel_connection, "ref": row.external_ref}
 
 
 def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = False,
@@ -1214,7 +1225,7 @@ def cancel_reservation(reservation: str, *, reason: str, waive_penalty: bool = F
 	sold_by = channel_of(res.tex_booking) if source != "Channel" else None
 	if sold_by:
 		if not channel_override:
-			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["connection"]))
+			frappe.throw(_("Sold by {0}: cancel it on the channel.").format(sold_by["label"]))
 		scope.require("channel.manage", res.property)
 	if res.status in ("Cancelled", "No Show", "Checked Out"):
 		frappe.throw(_("Reservation {0} is already {1}.").format(reservation, res.status))
@@ -1383,6 +1394,12 @@ def resend_confirmation(booking: str) -> dict:
 
 	b = frappe.get_doc("TEX Booking", booking)
 	scope.require("reservation.modify", b.property)
+	sold_by = channel_of(b.name)
+	if sold_by:
+		# the channel confirms its booking, and TEX never e-mails one (its price is the channel's): no manage link is
+		# minted, whose page would offer what the server refuses (LO-11, D-11)
+		frappe.throw(_("{0} sends this booking's confirmation: TEX does not e-mail a channel's booking.").format(
+			sold_by["label"]))
 	if b.status == "Cancelled":
 		frappe.throw(_("This booking is cancelled."))
 	if not b.booker_email:
@@ -1472,7 +1489,19 @@ def expire_booking(booking: str, *, now: datetime | None = None, force: bool = F
 	return True
 
 
-LIVE_BOOKINGS = ("Confirmed", "Partially Cancelled", "Pending Payment", "Held")
+# one guest's stays at a hotel, as they are now (LO-09): a locking read of Reservation alone, by its (guest, property)
+# index (forced: on few rows the optimizer may take (property, check_in), which would lock the hotel's stays), the
+# dates judged after it; never a join (it would share-lock the other bookings' rows after their rooms: bookings first)
+GUEST_STAYS_INDEX = "tex_res_guest_prop"
+GUEST_STAYS = """SELECT r.name, r.tex_booking, r.status, r.check_in_date, r.check_out_date FROM `tabReservation` r {hint}
+                 WHERE r.guest = %(g)s AND r.property = %(p)s LOCK IN SHARE MODE"""
+
+
+def guest_stays_sql() -> str:
+	"""``GUEST_STAYS`` with its index forced when the site has it (a site whose index could not be made still reads
+	the stays, its locks wider)."""
+	has = frappe.db.has_index("tabReservation", GUEST_STAYS_INDEX)
+	return GUEST_STAYS.format(hint=f"FORCE INDEX ({GUEST_STAYS_INDEX})" if has else "")  # nosemgrep -- a constant
 
 
 def live_duplicate(booking: str) -> str | None:
@@ -1483,7 +1512,16 @@ def live_duplicate(booking: str) -> str | None:
 	e-mail (an agency's desk) never counts, nor a name alone. → its name, or None.
 
 	NULL meaning (ADR-064): an empty e-mail or phone is dropped, never matched (a NULL equals nothing, and ``("",)``
-	would match every profile without one); a room's dates are required, so never NULL."""
+	would match every profile without one); a room's dates are required, so never NULL.
+
+	Called under the booking's lock (a late payment's reconciliation or revival), it reads the guest's stays as they
+	are now (LO-09, ADR-062 D4 c): the profiles are a plain read, their stays at the hotel a locking read of
+	Reservation alone (``GUEST_STAYS``, by ``Reservation(guest, property)``). A stay live now (not Cancelled or No Show)
+	is its booking's: a booking the read view shows Cancelled was revived since, one missing from it is new; only a
+	Draft booking is not yet a sale (review round 2). A booking committed after the
+	callback's read view began is found, or one being made waits for this request (a deadlock with it is retried by
+	the caller). A duplicate made on a profile created meanwhile (another e-mail on the same phone) is not found:
+	the CRM shows it as a possible duplicate."""
 	b = frappe.get_doc("TEX Booking", booking)
 	if not b.rooms:
 		return None
@@ -1496,23 +1534,22 @@ def live_duplicate(booking: str) -> str | None:
 	profiles = frappe.get_all("Guest", filters={"name": ("in", sorted(mine))}, fields=["email", "phone"])
 	emails = sorted({p.email.strip().lower() for p in profiles if p.email and p.email.strip()})
 	phones = sorted({p.phone.strip() for p in profiles if p.phone and p.phone.strip()})
-	params = {"p": b.property, "b": b.name, "live": LIVE_BOOKINGS, "ci": ci, "co": co, "mine": sorted(mine)}
-	same = ["g.name IN %(mine)s"]               # a condition only for a set that is not empty
+	guests = set(mine)
 	if emails:
-		same.append("g.email IN %(emails)s")
-		params["emails"] = emails
+		guests.update(frappe.get_all("Guest", filters={"email": ("in", emails)}, pluck="name"))
 	if phones:
-		same.append("g.phone IN %(phones)s")
-		params["phones"] = phones
-	rows = frappe.db.sql(
-		f"""SELECT r.tex_booking FROM `tabGuest` g
-		    JOIN `tabReservation` r ON r.guest = g.name AND r.property = %(p)s
-		    JOIN `tabTEX Booking` o ON o.name = r.tex_booking
-		    WHERE ({" OR ".join(same)}) AND r.tex_booking != %(b)s AND r.status NOT IN ('Cancelled', 'No Show')
-		      AND r.check_in_date < %(co)s AND r.check_out_date > %(ci)s AND o.status IN %(live)s
-		    ORDER BY r.tex_booking LIMIT 1""",  # nosemgrep -- the conditions are constants
-		params)
-	return rows[0][0] if rows else None
+		guests.update(frappe.get_all("Guest", filters={"phone": ("in", phones)}, pluck="name"))
+	sql = guest_stays_sql()
+	stays = [s for g in sorted(guests)
+	         for s in frappe.db.sql(sql, {"g": g, "p": b.property}, as_dict=True)]  # nosemgrep -- constant SQL, values bound
+	others = sorted({s.tex_booking for s in stays if s.tex_booking and s.tex_booking != b.name
+	                 and s.status not in ("Cancelled", "No Show")
+	                 and getdate(s.check_in_date) < co and getdate(s.check_out_date) > ci})
+	if not others:
+		return None
+	seen = dict(frappe.get_all("TEX Booking", filters={"name": ("in", others)}, fields=["name", "status"],
+	                           as_list=True))
+	return next((o for o in others if seen.get(o) != "Draft"), None)
 
 
 def revive_expired(booking: str, *, reason: str) -> list[str]:

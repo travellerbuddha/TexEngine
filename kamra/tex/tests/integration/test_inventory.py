@@ -744,3 +744,47 @@ class TestPoolKeyWithDisabledMembers(InventoryCase):
 		doc.save(ignore_permissions=True)
 		self.assertEqual([m for m in frappe.local.message_log if "no longer sold" in str(m)], [])
 
+
+class TestADisabledRoomTypeIsNotSold(InventoryCase):
+	"""LO-03 (audit 2K-3, ADR-048): a disabled room type is no longer sold anywhere — search already skipped it, but
+	an offer key or a quote made before it was disabled, and a staff change into it, still sold it. It keeps counting
+	in its pool (Y-9)."""
+
+	def test_an_offer_minted_before_it_was_disabled_is_not_quoted(self):
+		e = self.entry("DLX")
+		frappe.db.set_value("Room Type", self.dlx, "disabled", 1)
+		q = quoting.create_quote(e["rooms"][0]["offer_key"])
+		self.assertFalse(q["ok"], q)
+		self.assertEqual([r["code"] for r in q["reasons"]], ["ROOM_NOT_SOLD"])
+
+	def test_a_quote_made_before_it_was_disabled_does_not_book(self):
+		from kamra.tex.services.refusals import code_of
+
+		q = self.quote("DLX")
+		frappe.db.set_value("Room Type", self.dlx, "disabled", 1)
+		with self.assertRaisesRegex(frappe.ValidationError, "no longer sold") as caught:
+			self.tex_book("DLX", "late", quote_id=q)
+		self.assertEqual(code_of(caught.exception), "ROOM_NOT_SOLD")
+		self.assertEqual(self.live("DLX"), 0)
+
+	def test_a_staff_change_into_it_is_refused_and_its_own_stays_still_change(self):
+		from kamra.tex.services.refusals import code_of
+
+		res = self.tex_book("STD", "mover")
+		kept = self.tex_book("DLX", "stayer")
+		frappe.db.set_value("Room Type", self.dlx, "disabled", 1)
+		with self.assertRaisesRegex(frappe.ValidationError, "no longer sold") as caught:
+			modification.propose(res, {"room_type": self.dlx})
+		self.assertEqual(code_of(caught.exception), "ROOM_NOT_SOLD")
+		# a stay already in it is the hotel's to keep: its dates still change (ADR-048: it stops the sale, not the stay)
+		self.assertIn("proposal_token", modification.propose(kept, {"check_out": add_days(self.ci, 1)}))
+
+	def test_a_change_proposed_before_it_was_disabled_is_not_applied_after(self):
+		"""Review round 1: applying a proposal prices it again (``apply`` → ``propose``): a change into the type
+		proposed while it was sold is refused once the type is disabled, and the stay stays as it was."""
+		res = self.tex_book("STD", "early")
+		proposal = modification.propose(res, {"room_type": self.dlx})
+		frappe.db.set_value("Room Type", self.dlx, "disabled", 1)
+		with self.assertRaisesRegex(frappe.ValidationError, "no longer sold"):
+			modification.apply(proposal["proposal_token"], reason="moved before the room type was disabled")
+		self.assertEqual(frappe.db.get_value("Reservation", res, "room_type"), self.std)

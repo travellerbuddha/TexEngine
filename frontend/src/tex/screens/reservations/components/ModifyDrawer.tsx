@@ -200,7 +200,9 @@ export function ModifyDrawer({
   const v = version.data
   const roomOptions = useMemo(() => {
     const names = new Map((v?.room_types ?? []).map((r) => [r.name, r.room_type_name]))
-    const ids = v ? [...new Set(v.rooms.map((r) => r.room_type))] : []
+    // the hotel's room types still sold (the version's list leaves disabled ones out): a change into a disabled type
+    // is refused (LO-03); the stay's own type stays offered
+    const ids = v ? [...new Set(v.rooms.map((r) => r.room_type))].filter((id) => names.has(id)) : []
     if (!ids.includes(initial.room_type)) ids.unshift(initial.room_type)
     return ids.map((id) => ({ value: id, label: names.get(id) ?? (id === res.room_type ? res.room_type_name ?? id : shortCode(id, res.property)) }))
   }, [v, initial.room_type, res.room_type, res.room_type_name, res.property])

@@ -88,6 +88,28 @@ class TestAri(DistributionCase):
 		                "room_type": self.std, "stop_sell": "STOP"}).insert(ignore_permissions=True)
 		self.assertTrue(dist.build_days(self.mapping, a, a)[0].closed)
 
+	def test_a_disabled_room_type_is_sent_closed_and_disabling_it_queues_a_sync(self):
+		"""LO-03 (audit 2K-3, ADR-039): a disabled room type is no longer sold, so its enabled mapping sends every day
+		closed with nothing available (before: open, with the pool's availability and rates), and disabling or
+		enabling it queues its mappings' sync (before: nothing queued, the channel kept selling it)."""
+		a, b = fx.d(6, 10), fx.d(6, 12)
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		doc = frappe.get_doc("Room Type", self.std)
+		doc.disabled = 1
+		doc.save(ignore_permissions=True)
+		self.assertEqual(len(self.jobs()), 1)
+		self.assertEqual({(d.closed, d.available, d.rates) for d in dist.build_days(self.mapping, a, b)},
+		                 {(True, 0, ())})
+		frappe.db.delete("TEX Integration Outbox", {"connection": self.conn.name})
+		doc.reload()
+		doc.room_type_name = doc.room_type_name + " (renamed)"                          # no change of sale: no sync
+		doc.save(ignore_permissions=True)
+		self.assertEqual(self.jobs(), [])
+		doc.disabled = 0
+		doc.save(ignore_permissions=True)
+		self.assertEqual(len(self.jobs()), 1)
+		self.assertFalse(dist.build_days(self.mapping, a, a)[0].closed)
+
 	def test_the_preview_starts_on_the_sites_day(self):
 		# the push horizon starts on the site's day, so the preview does too: a browser in an earlier
 		# time zone just after the site's midnight must not show yesterday as a day never sent
@@ -240,6 +262,30 @@ class TestInbound(DistributionCase):
 		self.assertIn("suspended", (out[0]["warning"] or "").lower())
 		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
 		                                                     "reference_name": out[0]["booking"]}))
+
+	def test_a_booking_for_a_disabled_room_type_is_accepted_with_a_warning(self):
+		"""LO-03 (review round 1): a channel that sold a room type TEX no longer sells (before the closed ARI reached
+		it, or while its connection is off) is accepted like an overbooking, with a warning and an audit event; so is a
+		change moving a room into it (before: accepted silently)."""
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		self.send(message(ref="OTA-320"))
+		out = self.apply_all()
+		self.assertTrue(out[0]["booking"])
+		self.assertIn("room type is no longer sold", out[0]["warning"] or "")
+		self.assertTrue(frappe.db.exists("TEX Audit Event", {"action": "channel.overbooking",
+		                                                     "reference_name": out[0]["booking"]}))
+		frappe.db.set_value("Room Type", self.std, "disabled", 0)
+		dlx = frappe.db.get_value("Room Type", {"property": fx.PROPERTY, "room_type_code": "DLX"})
+		frappe.get_doc({"doctype": "TEX Channel Mapping", "connection": self.conn.name, "room_type": dlx,
+		                "external_room_code": "DLXC", "external_rate_code": "BAR", "board": "AI", "market": "DE",
+		                "sales_channel": "OTA", "sell_currency": "EUR", "rate_plan": self.flex, "occupancies": "1,2",
+		                "horizon_days": 365}).insert(ignore_permissions=True)
+		self.send(message(ref="OTA-321"))
+		self.assertTrue(self.apply_all()[0]["booking"])
+		frappe.db.set_value("Room Type", dlx, "disabled", 1)
+		self.send(message(ref="OTA-321", status="modified", room="DLXC"))   # the channel moves the room into it
+		moved = self.apply_all()
+		self.assertIn("room type is no longer sold", moved[0]["warning"] or "")
 
 	def test_a_channel_change_locks_the_booking_first_and_voids_a_waiting_guest_change(self):
 		"""G-45 re-review F8: the channel's modification and cancellation take the booking, then the
@@ -398,6 +444,18 @@ class TestChannelBookings(DistributionCase):
 		                          order_by="creation desc")
 		self.assertEqual(json.loads(revision[0])["status"], ["Cancelled", "Confirmed"])
 
+	def test_a_room_the_channel_brings_back_into_a_disabled_type_is_warned(self):
+		"""LO-03 review round 2: a room the channel had taken off and brings back is a new sale: in a type disabled
+		meanwhile it is accepted with the warning (before: only a change of room type warned)."""
+		self.booked("L1", "L2")
+		self.send(message(status="modified", rooms=[self.line("L1")]))                  # the channel removes L2
+		self.assertEqual(self.process(), {"applied": 1, "failed": 0})
+		frappe.db.set_value("Room Type", self.std, "disabled", 1)
+		self.send(message(status="modified", rooms=[self.line("L1"), self.line("L2")]))  # ... and brings it back
+		back = self.apply_all()
+		self.assertIn("room type is no longer sold", back[0]["warning"] or "")
+		self.assertEqual(back[0]["warning"].count("room type is no longer sold"), 1)   # L1 was never off: no warning
+
 	def test_an_ota_booking_is_cancelled_at_the_desk_only_by_someone_who_manages_the_channel(self):
 		from kamra.tex.api import crs as crs_api
 
@@ -414,13 +472,44 @@ class TestChannelBookings(DistributionCase):
 		admin = self.staff("y8-admin@example.com", "Hotel Admin", "Hotel Admin")
 		frappe.set_user(admin)  # nosemgrep: frappe-setuser -- the hotel's administrator
 		preview = crs_api.cancellation_preview(reservation=res)
-		self.assertEqual(preview["channel"], {"connection": self.conn.name, "ref": "OTA-100"})
+		self.assertEqual(preview["channel"], {"connection": self.conn.name, "label": "Sandbox CM", "ref": "OTA-100"})
 		crs_api.cancel(reservation=res, reason="the guest phoned the hotel", channel_override=1)
 		self.assertEqual(frappe.db.get_value("Reservation", res, "status"), "Cancelled")
 		warned = frappe.get_all("TEX Audit Event", filters={"action": "reservation.channel_cancel_override",
 		                                                    "reference_name": res}, pluck="new_value")
 		self.assertEqual(len(warned), 1)
 		self.assertIn("OTA-100", warned[0])
+
+	def test_the_channel_is_named_by_its_label_never_its_id(self):
+		"""LO-13 (audit 2K-3): a refusal, the cancel dialog and the reservation name the channel connection by its
+		label (before: "Sold by CON-0001", also on the guest's manage page); the audit keeps its id."""
+		from kamra.tex.api import crs as crs_api
+
+		_booking, rooms = self.booked("L1")
+		res = rooms["L1"]
+		with self.assertRaises(frappe.ValidationError) as caught:
+			crs_api.cancel(reservation=res, reason="the guest phoned")
+		self.assertIn("Sold by Sandbox CM", str(caught.exception))
+		self.assertNotIn(self.conn.name, str(caught.exception))
+		named = {"connection": self.conn.name, "label": "Sandbox CM", "ref": "OTA-100"}
+		self.assertEqual(crs_api.cancellation_preview(reservation=res)["channel"], named)
+		self.assertEqual(crs_api.reservation(res)["channel_booking"], named)
+		self.conn.db_set("label", "")                                                  # no label: its name
+		self.assertEqual(crs_api.cancellation_preview(reservation=res)["channel"]["label"], self.conn.name)
+
+	def test_the_booking_e_mail_of_a_channels_booking_is_never_sent_again(self):
+		"""LO-11 (audit 2K-3, D-11): the channel sends its booking's confirmation, and TEX never e-mails it (its price
+		is the channel's): staff's "resend" is refused and no manage link is minted (before: a new manage token and
+		an e-mail whose page offered Cancel and Change, which the server then refuses)."""
+		from kamra.tex.api import crs as crs_api
+
+		booking_name, _rooms = self.booked("L1")
+		before = frappe.db.get_value("TEX Booking", booking_name, "manage_token_hash")
+		with self.assertRaisesRegex(frappe.ValidationError, "Sandbox CM sends"):
+			crs_api.resend_confirmation(booking_name)
+		self.assertEqual(frappe.db.get_value("TEX Booking", booking_name, "manage_token_hash"), before)
+		self.assertFalse(frappe.db.exists("TEX Audit Event", {"action": "booking.confirmation_resent",
+		                                                      "reference_name": booking_name}))
 
 	def test_a_guest_booking_has_no_channel(self):
 		"""Only an OTA booking is the channel's: the preview of a TEX booking names none."""

@@ -212,7 +212,7 @@ def reservation(name: str):
 		"revision_no": res.tex_revision_no, "guest_change_pending": bool(res.tex_guest_change_pending),
 		"guest_change_note": res.tex_guest_change_note, "special_requests": res.special_requests,
 		"guest": guest, "pricing": snap,
-		# sold by a channel manager: {connection, ref}; None otherwise (cancelled on the channel, D-11)
+		# sold by a channel manager: {connection, label, ref}; None otherwise (cancelled on the channel, D-11)
 		"channel_booking": booking_svc.channel_of(res.tex_booking),
 		"revisions": modification.revisions(res.name),
 		"capabilities": sorted(scope.capabilities(res.property)),
@@ -224,6 +224,8 @@ def booking(name: str):
 	b = frappe.get_doc("TEX Booking", name)
 	scope.require("reservation.view", b.property)
 	out = booking_svc.booking_summary(name)
+	# sold by a channel manager: {connection, label, ref}; staff only (the guest's summary never names it)
+	out["channel_booking"] = booking_svc.channel_of(name)
 	if scope.has_capability("payment.view", b.property):
 		out["transactions"] = frappe.get_all(
 			"TEX Payment Transaction", filters={"booking": name},

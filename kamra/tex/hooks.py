@@ -190,6 +190,18 @@ def mapping_changed(doc, method=None):
 	dist.queue_mapping(doc)
 
 
+def room_type_changed(doc, method=None):
+	"""A room type was disabled or enabled again: its mappings' horizon is compared again, so a channel stops selling
+	a type TEX no longer sells, or sells it again (LO-03, ADR-039)."""
+	before = None if doc.flags.get("in_insert") else doc.get_doc_before_save()
+	if not before or bool(before.get("disabled")) == bool(doc.get("disabled")):
+		return
+	from kamra.tex.distribution import repository as dist
+
+	for name in frappe.get_all("TEX Channel Mapping", filters={"room_type": doc.name}, pluck="name", order_by="name"):
+		dist.queue_mapping(frappe.get_doc("TEX Channel Mapping", name), reason="room type")
+
+
 def contract_version_changed(doc, method=None):
 	"""A version was published, withdrawn or went live: prices may have changed (G-69)."""
 	before = None if doc.flags.get("in_insert") else doc.get_doc_before_save()

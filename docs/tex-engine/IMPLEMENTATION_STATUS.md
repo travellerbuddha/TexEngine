@@ -1657,3 +1657,14 @@ takes one click more than before by design (the list no longer searches every ho
 
 - **Not done:** the grid shows the contract's price (not the final sell price after markup and promotions); the browser's
   Back button is not guarded (only in-app links, the hotel switch, the palette and reload); bundles not rebuilt (2Z).
+
+## 6K3. Audit Part 2K-3 (2026-10-02)
+
+No owner decision was needed. LO-11: refused (TEX never e-mails a channel's booking), the card's first option.
+
+- LO-03 **COMPLETE**: a disabled room type is not sold anywhere: ARI sends its days closed and disabling or enabling it queues its mappings' sync (a Room Type `on_update` hook); a quote of an offer key made before, a booking of a quote made before, and a staff change into it are refused (`ROOM_NOT_SOLD`, read as "search again" by the booking app); its own stays still change, and it keeps counting in its pool (ADR-048 and ADR-039 addenda). Review round 1: a channel's booking of a disabled type (or a room moved or brought back into one, round 2) is accepted with a warning; the modify drawer offers only the types still sold · `TestADisabledRoomTypeIsNotSold` (four tests), `TestAri`, `TestChannelBookings`, node `refusal-codes`.
+- LO-13 **COMPLETE**: the channel is named by its connection's label (`channel_of` → `label`) in the "Sold by …" refusal, the cancel dialog and the reservation; the audit keeps the id · `TestChannelBookings`.
+- LO-11 **COMPLETE**: `resend_confirmation` refuses a channel's booking before any manage token is minted; the staff booking view carries `channel_booking` and both detail screens hide the resend button · `TestChannelBookings`.
+- LO-09 **COMPLETE**: the revival's duplicate check reads the guest's stays at the hotel with a locking read of Reservation alone, by `Reservation(guest, property)` (forced when present), under the booking's lock; a stay live now is its booking's (a booking revived meanwhile counts, round 2); a booking being made for the guest meanwhile waits or deadlocks and is retried (ADR-062 D4 c, ADR-066) · `TestLastRoomRace` (two two-connection tests; the plan's index).
+- LO-15 **COMPLETE**: the p58 and p61 tests assert each count against its own floor · `test_patches`.
+- **Not done:** the guest's manage view still says a channel's booking can be cancelled and changed, which the server refuses (LO-12, Stage 3); the "Sold by …" refusal has no guest code yet (G-70b codes it, `CHANNEL_BOOKING`); a channel mapping of a disabled type can still be saved enabled (it sends closed days); LO-09 does not find a duplicate made on a profile created after the read view began (another e-mail on the same phone: the CRM shows it as a possible duplicate).

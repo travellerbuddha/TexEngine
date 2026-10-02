@@ -376,6 +376,8 @@ export interface BookingSummary {
   guest_change_pending: boolean
   rooms: BookingRoom[]
   idempotent_replay: boolean
+  /** staff's booking view only: sold by a channel manager (the channel confirms it; LO-11) */
+  channel_booking?: { connection: string; label: string; ref: string } | null
   transactions?: PaymentTxn[]
   payment_links?: PaymentLinkRow[]
 }
