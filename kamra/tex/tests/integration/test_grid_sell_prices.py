@@ -87,8 +87,8 @@ class TestGridSellPrices(InventoryCase):
 		self.assertEqual(frappe.db.get_value("TEX Contract", draft["contract"], "modified"), modified)
 
 	def test_an_outsider_is_refused(self):
-		frappe.set_user("Guest")
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- test: an outsider
 		try:
 			self.assertRaises(frappe.PermissionError, self.sell)
 		finally:
-			frappe.set_user("Administrator")
+			frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- test: back to the test user
