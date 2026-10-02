@@ -607,7 +607,13 @@ def _apply_now(req, proposal_token: str, s: st.Settlement, note: str | None) -> 
 	if s.kind == st.REFUND:
 		ccy = req.currency
 		if s.points_back > 0:
-			_points_first(req, s.points_back)         # no gateway: at once, before the card's share (LO-01)
+			got = _points_first(req, s.points_back)   # no gateway: at once, before the card's share (LO-01)
+			if got < s.points_back:
+				# a burn that cannot be found (its Error Log): that share waits for staff, never told as a card
+				# refund nor left to no one (review round 2)
+				_give_to_staff(req, s.points_back - got, REFUND_BY_STAFF,
+				               f"{_money(s.points_back - got, ccy)} {ccy} paid with loyalty points could not come "
+				               f"back as points by itself (see the Error Log)")
 		if s.refund > 0:
 			req.settle_pending = 1
 		if s.hotel_refund > 0:
@@ -1631,6 +1637,7 @@ def _record_outside(req, amount: D, reason: str) -> D:
 	from kamra.tex.payments import service as pay
 
 	ccy = req.currency
+	kept = ZERO
 	if req.status in DONE and req.settlement == "Refund":
 		b = frappe.db.get_value("TEX Booking", req.booking, ["paid_amount", "total_amount"], as_dict=True)
 		cap = max(ZERO, from_db(b.paid_amount, ccy) - from_db(b.total_amount, ccy)
@@ -1639,14 +1646,17 @@ def _record_outside(req, amount: D, reason: str) -> D:
 		sources = [st.Charge(c["transaction"], min(c["available"], pay.booking_nets(c["transaction"]).get(
 			req.booking, ZERO) - pay.in_flight_from(c["transaction"], req.booking)), True, c["at"], points=c["points"])
 			for c in pay.booking_charges(req.booking) if c["transaction"] not in reserved]
-		# points are never recorded as money given back (O-19b, LO-01): what the points hold of it is refused,
-		# never closed as if it were refunded (the booking would stay over, its points come back again later)
+		# points are never recorded as money given back (O-19b, LO-01): the share the points hold (the first of
+		# it, points first) stays on the booking, said so; all of it points is refused, never closed as if it were
+		# refunded (the booking would stay over, its points come back again later). Cash beside it is recorded
+		# (review round 2): refused too, a later cancellation would refund it again
 		points = sum((c.available for c in sources if c.points and c.available > 0), ZERO)
 		asked = min(amount, cap)
-		if points > 0 and asked > 0:
+		kept = min(points, asked)
+		if kept > 0 and kept >= asked:
 			frappe.throw(_("{0} {1} of this money was paid with loyalty points: points come back as points, never as "
 			               "money given back outside TEX. Keep it on the booking, and correct the guest's points in "
-			               "the CRM.").format(_money(min(points, asked), ccy), ccy))
+			               "the CRM.").format(_money(kept, ccy), ccy))
 	else:
 		sources = [st.Charge(txn, held, True, at) for txn, held, at in _left_to_staff(req)]
 		cap = sum((c.available for c in sources), ZERO)
@@ -1659,9 +1669,12 @@ def _record_outside(req, amount: D, reason: str) -> D:
 		                         idempotency_key=f"change:{req.name}:outside:{txn}:{step}", booking=req.booking,
 		                         _system=True)
 		done += D(out["from_booking"])                   # what came off this booking, nothing else
-	if done < amount:
-		req.error = (f"{to_str(quantize(amount - done, ccy))} {ccy} refunded outside TEX was not recorded: the "
-		             f"booking no longer holds it. {req.error or ''}")[:500]
+	if done < amount - kept:
+		req.error = (f"{to_str(quantize(amount - kept - done, ccy))} {ccy} refunded outside TEX was not recorded: "
+		             f"the booking no longer holds it. {req.error or ''}")[:500]
+	if kept > 0:
+		req.error = (f"{_money(kept, ccy)} {ccy} of it was paid with loyalty points: kept on the booking, never "
+		             f"recorded as money given back; correct the guest's points in the CRM. {req.error or ''}")[:500]
 	return done
 
 

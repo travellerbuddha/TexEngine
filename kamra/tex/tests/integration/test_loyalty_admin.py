@@ -965,6 +965,45 @@ class TestPointsBack(LoyaltyCase):
 		                      pluck="name")
 		self.assertEqual(cash, [])
 
+	def test_the_cash_left_to_staff_beside_points_is_recorded_the_points_kept(self):
+		"""LO-01 (review round 2): money left to staff that is part cash, part points that could not come back (no
+		burn row found): "Refunded outside TEX" records the cash off the cash payment and keeps the points' share on
+		the booking, saying so (before: the whole close was refused, so the cash really refunded could not be
+		recorded and a later cancellation would refund it again)."""
+		from kamra.tex.api import crs as crs_api
+
+		b = guest_books(session="lo01-mixed", method="Pay at Hotel")
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- staff
+		booking = b["booking"]
+		guest = frappe.db.get_value("TEX Booking", booking, "booker_guest")
+		own = frappe.db.get_value("TEX Loyalty Ledger", {"booking": booking, "entry_type": "Earn"})
+		if own:                                                  # the booking's own earning is not part of this scenario
+			frappe.db.set_value("TEX Loyalty Ledger", own, "status", "Reversed")
+		self.give(guest, 5000)
+		cash = pay.record_manual(booking=booking, amount="742.50", method="Cash", reference="desk",
+		                         idempotency_key="lo01-mixed-cash")
+		red = loyalty.redeem(guest, booking, 1000, idempotency_key="lo01-mixed-pts")          # 100.00
+		frappe.db.set_value("TEX Loyalty Ledger", {"reason": f"redeemed as {red['transaction']}"}, "reason",
+		                    "unknown burn")
+		self.assertEqual(from_db(frappe.db.get_value("TEX Booking", booking, "paid_amount"), "EUR"), D("842.50"))
+		frappe.set_user("Guest")  # nosemgrep: frappe-setuser -- the guest shortens the stay on the manage page
+		down = public.manage_propose(token=b["manage_token"], reservation=b["rooms"][0]["reservation"],
+		                             changes={"check_out": str(fx.d(6, 12))})
+		out = public.manage_apply(token=b["manage_token"], proposal_token=down["proposal_token"])
+		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser -- finance approves it as a refund
+		crs_api.resolve_guest_change(request=out["request"], action="approve", reason="shorter", settlement="Refund")
+		req = frappe.get_doc("TEX Guest Change Request", out["request"])
+		self.assertEqual((req.staff_open, D(req.staff_amount)), (1, D("267.50")))      # 100.00 points, 167.50 cash
+		crs_api.resolve_guest_change(request=out["request"], action="close", reason="cash given back at the desk",
+		                             staff_money="Refunded outside TEX")
+		req.reload()
+		self.assertEqual(req.staff_open, 0)
+		made = frappe.get_all("TEX Payment Transaction", filters={"txn_type": "Refund", "booking": booking},
+		                      fields=["parent_transaction", "amount", "provider"])
+		self.assertEqual([(r.parent_transaction, D(r.amount)) for r in made], [(cash["transaction"], D("167.50"))])
+		self.assertIn("100.00 EUR of it was paid with loyalty points", req.error)
+		self.assertNotIn("was not recorded", req.error)
+
 	# LO-06 (audit 2K-2): the burn row of a Loyalty charge is found by the charge, wherever the charge or its burner
 	# is now. Before: only among the booking's current guests and on this booking, so a charge staff moved to
 	# another booking, or a burner no longer on the room, gave no points back (an Error Log, the money left to staff).
