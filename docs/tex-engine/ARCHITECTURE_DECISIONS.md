@@ -1676,6 +1676,10 @@ sends:
 - *O-27.* The confirmation page links to `/<site>/manage` without the token; the click stores this
   booking's token as the tab's site token, which the manage page reads (the fragment first, as for
   the e-mailed magic link). No address, href or tracker request carries a manage token.
+- *Payment link return (Part 2K-5, LO-30).* A payment started from a link keeps the link's token in the tab for that
+  charge (sessionStorage, keyed by the transaction); the gateway's return brings the guest back to `/pay` with no
+  fragment, and the page reads the token by the returned payment. The e-mailed link alone carries it (fragment, taken
+  out of the address bar on load): no later address or history entry does.
 - *Operations (remaining risk).* A tracker already loaded in another tab of the platform's origin
   (a guest page before sign-in) keeps running and could act with a session opened later in that
   browser. A site with trackers should be served on its own verified host (ADR-035), never on the
@@ -9487,7 +9491,9 @@ the versions the roll superseded the state their contract's later publishes woul
   sold; a fixed penalty's basis names the conversion (`fx`). A fixed deposit is taken once per booking and payment policy
   (rooms of different FIXED policies each take their own), at its first room's rate, room by room in room order (room
   index, ADR-029), each room at most its own stored price: min(deposit, those rooms' total) (`deposit_shares`). p59 syncs
-  the policies and reports what to review; no backfill.
+  the policies and reports what to review; no backfill. The booking engine says so (Part 2K-5, LO-35): at checkout the
+  first room of a FIXED policy names the deposit for the whole booking, the others that it is taken with that room;
+  a search of several rooms says "for the whole booking".
 - *No backfill (Y-3 B).* Every computation after the release takes the deposit per booking and policy; a pending booking's
   stored `amount_due_now` is not rewritten: only multi-room bookings with a fixed deposit differ, and theirs drops at the
   first refresh.

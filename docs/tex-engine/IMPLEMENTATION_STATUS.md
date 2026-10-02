@@ -1748,3 +1748,36 @@ C-05 (a documented limitation).
   backfill until its check-out;
   a settle call without a charge is audited each time; staff re-verification does not write `last_reverified_at`; the
   GO_LIVE_READINESS worker setup is 2Z's docs refresh.
+
+## 6K5. Audit Part 2K-5 (2026-10-02)
+
+No owner decision was needed. LO-30 (left to this batch by Part 2G-3) is done here.
+
+- LO-35 **COMPLETE**: a fixed deposit is named once per booking and policy, as the server takes it (`deposit_shares`):
+  at checkout the first room of a FIXED policy says "for the whole booking", its other rooms that it is taken with that
+  room (`policy.bookingPaymentTerms`); a search of several rooms says "for the whole booking"; two keys in six booking
+  catalogs (ADR-067 note) · node `booking-deposit` (three).
+- LO-14 **COMPLETE**: a basket that could not be read offers no guessed method: the payment step says the options could
+  not be loaded, that nothing is booked or charged, and offers "Try again" (`methods.checkoutChoices`; while it is not
+  read yet the card stays as before) · node `checkout-fallback` (two new; the existing two unchanged).
+- LO-32 **COMPLETE**: a re-quote (O-30) is compared with the last quote the guest saw of each room, extras included,
+  else with the search's offer: an accepted change is not announced again, a change of the extras alone or back to the
+  search's price is · e2e `booking` (desktop).
+- LO-33 **COMPLETE**: the price-change notice focuses itself and scrolls into view when it appears · e2e `booking`
+  (mobile).
+- LO-31 **COMPLETE** (verified first): a widget whose site changes drops the old site's name with its theme; the modal
+  says "Booking" until the new name arrives · e2e `widget`.
+- LO-49 **COMPLETE** (each nit verified in code first; no review text beyond the card's line exists):
+  - an analytics id is stripped exactly as the server strips it (Python's whitespace set) · node `analytics-ids`;
+  - "?" opens the Call Center help with Ctrl or AltGr too, never with ⌘ · node `callcenter-shortcuts`;
+  - Turkish-F: ı and İ are the I key on both Turkish layouts; a letter with a diacritic is its base letter only on that
+    letter's key (Mac ⌥C types ç on C), else none, so Alt+ı and Alt+ü run no other letter's shortcut · node `keys`,
+    `callcenter-shortcuts`;
+  - the widget unlocks the host page on its dialog's own close event · e2e `widget`;
+  - on a Mac the shortcuts help says that ⌃⌥ is VoiceOver's key and ⌥+letter outside a field still works (no logic
+    change); six staff catalogs · e2e `crs` (Mac and Windows).
+- LO-30 **COMPLETE**: back from the gateway the payment-link page shows no address with its token: the tab keeps it for
+  the charge, the return is `/pay` with no fragment (ADR-046 addendum) · e2e `pay-link`.
+- **Not done:** bundles not rebuilt (2Z); the checkout's deposit text names no per-room share (the server's
+  `due_now` per method gives the amount); Turkish-F letters other than ı/İ are no letter shortcut at all (the page's
+  buttons and the other keys stay).

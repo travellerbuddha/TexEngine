@@ -63,8 +63,8 @@ spot-checked) — re-verify each card before you change code (§3).
 | 3 | **K-A points always come back as points** → "2K-2" — **merged (PR #20)** | LO-01 (O-19b), LO-02, LO-06, LO-23, LO-24, LO-25, LO-26 (verify first), LO-47 (decide first) | MED | D-12 (default: loyalty is live) |
 | 4 | **K-C channels and disabled room types** → "2K-3" — **merged (PR #21)** | LO-03, LO-13, LO-11, LO-09, LO-15 | MED | — |
 | 5 | **3B guest payloads and codes** → "2G-3" — **merged (PR #24)** | G-71 → G-70b (+ LO-12; LO-30 optional: left to batch 7) | MED | — |
-| 6 | **K-D operations** → "2K-4" — **done (2K-4 PR, §6K4)** | LO-08, LO-10, LO-28, LO-39, LO-22, LO-20, LO-48; LO-37 deferred (D-13 = no) | LOW | D-13 answered: no |
-| 7 | **K-E guest booking frontend** → "2K-5" | LO-35, LO-14, LO-32, LO-33, LO-31, LO-49 (+ LO-30 if 3B left it) | LOW | after 3B |
+| 6 | **K-D operations** → "2K-4" — **merged (PR #26)** | LO-08, LO-10, LO-28, LO-39, LO-22, LO-20, LO-48; LO-37 deferred (D-13 = no) | LOW | D-13 answered: no |
+| 7 | **K-E guest booking frontend** → "2K-5" — **done (2K-5 PR, §6K5)** | LO-35, LO-14, LO-32, LO-33, LO-31, LO-49, LO-30 | LOW | — |
 | 8 | **K-F staff frontend + K-G tests and tooling** → "2K-6" (or two PRs) | LO-34, LO-38, LO-40, LO-45, LO-42a, LO-27; LO-46, LO-36, LO-44, LO-29, LO-41, LO-42b, LO-43 | LOW | — |
 | 9 | **2Z release hygiene** → "2Z" | §2.3 | MED | **last** |
 | — | Conditional | O-6 hotel-local time (D-13), the pre-upgrade migration package (D-14), G-69r PMS adapters (D-15), the no-show points policy (C-01) and C-02 … C-16 | — | the owner |
